@@ -99,9 +99,8 @@ treat item price × quantity as the order amount. Both prompt defects are fixed;
 the regression and its fix are recorded rather than hidden by the final number.
 
 Headroom now comes from the external benchmark below. No SOTA claim is made
-there either: a 66.5% single-sample score on 200 of 500 questions, produced by
-one model with no fine-tuning and no self-consistency voting, is a baseline to
-beat, not a record.
+there either: 59.0% on 239 of 500 questions, one model, one sample per case, no
+fine-tuning, is a baseline to beat, not a record.
 
 ## External benchmark: BIRD Mini-Dev
 
@@ -110,45 +109,79 @@ BIRD Mini-Dev does not: its schemas, questions, gold SQL and SQLite databases
 were written by someone else.
 
 ```bash
-node eval/bird/fetch.mjs   # ~800 MB archive, cached; extracts 6 databases
-pnpm bench:bird:dry        # gold execution, schema fidelity, controls; no model
-pnpm bench:bird:port       # DuckDB portability census
-pnpm bench:bird            # four arms, paired ablations, live model
+node eval/bird/fetch.mjs        # ~800 MB archive, extracts the databases that are missing
+pnpm bench:bird:dry             # gold execution, schema fidelity, prompt coverage; no model
+pnpm bench:bird:port            # DuckDB portability census
+pnpm bench:bird                 # five arms, paired ablations, live model
+pnpm bench:bird:stability       # 60 cases x 3 repeats: the noise floor
 ```
 
-Scope of the published run: **6 of the 11 databases, 200 of the 500 questions**
-(stratified by difficulty), `deepseek-chat`, temperature 0, one sample per case.
-Artifacts: `eval/out/bird-eval.json`, `eval/out/duckdb-portability.json`.
+Scope: **all 11 databases, 239 of 500 questions** (stratified by difficulty, one
+gold statement excluded because it exceeds the 30 s budget), `deepseek-chat`,
+temperature 0, one sample per case. Artifacts: `eval/out/bird-eval.json`,
+`eval/out/bird-stability.json`, `eval/out/duckdb-portability.json`.
 
 ### Controls (these fail the run, not just the table)
 
 | Control | Result |
 | --- | --- |
-| Gold statements executed before any model call | **200 / 200** (100%) |
-| Gold executed twice and compared to itself | **200 / 200** identical |
+| Gold statements executed before any model call | **239 / 240** (99.6%) |
+| Gold executed twice and compared to itself | **239 / 239** identical |
 | Negative control: empty result vs non-empty gold | **0** false matches |
-| Schema fidelity: advertised columns exist in the database | **264 / 264** |
-| Duplicate-collapse check | see "duplicate credit" below |
+| Schema fidelity: advertised columns exist in the database | **798 / 798** |
+| Prompt coverage: tables that reach the schema card | **75 / 75** (no truncation) |
 
-### Accuracy (same 200 cases in every arm)
+### Accuracy (same 239 cases in every arm, one change per arm)
 
 | Arm | Execution accuracy | 95% Wilson | Strict multiset | Duplicate credit | simple / moderate / challenging |
 | --- | --- | --- | --- | --- | --- |
-| names only | 41.0% (82/200) | [34.4, 47.9] | 77 | 5 | 38/69 · 29/71 · 15/60 |
-| + metadata (labels, descriptions, joins) | **54.0%** (108/200) | [47.1, 60.8] | 103 | 5 | 43/69 · 42/71 · 23/60 |
-| + evidence | **61.5%** (123/200) | [54.6, 68.0] | 117 | 6 | 51/69 · 42/71 · 30/60 |
-| + metadata + evidence + repair loop | **66.5%** (133/200) | [59.7, 72.7] | 130 | 3 | 53/69 · 45/71 · 35/60 |
+| names only | 32.2% (77/239) | [26.6, 38.4] | 71 | 6 | 41/80 · 15/80 · 21/79 |
+| + metadata (labels, descriptions, joins) | **44.4%** (106/239) | [38.2, 50.7] | 102 | 4 | 47/80 · 33/80 · 26/79 |
+| + evidence | **56.9%** (136/239) | [50.6, 63.0] | 127 | 9 | 55/80 · 39/80 · 42/79 |
+| metadata + evidence, **no schema linker** | 56.1% (134/239) | [49.7, 62.2] | 126 | 8 | 57/80 · 37/80 · 40/79 |
+| metadata + evidence **+ repair loop** | **59.0%** (141/239) | [52.7, 65.0] | 132 | 9 | 56/80 · 41/80 · 44/79 |
 
 ### Paired ablations (McNemar exact, same cases)
 
-| Change | Δ | only before / only after | p |
-| --- | --- | --- | --- |
-| names → +metadata | **+13.0pp** | 5 / 31 | < 0.0001 |
-| names → +evidence | **+20.5pp** | 7 / 48 | < 0.0001 |
-| names → +metadata +evidence +repair | **+25.5pp** | 5 / 56 | < 0.0001 |
+| Change | Δ | only before / only after | p | verdict |
+| --- | --- | --- | --- | --- |
+| names → +metadata | **+12.1pp** | 9 / 38 | 0.00002 | real |
+| metadata → +evidence | **+12.6pp** | 8 / 38 | 0.00001 | real |
+| +evidence → **remove our schema linker** | **−0.8pp** | 11 / 9 | 0.82 | **no measurable effect** |
+| +evidence → +repair loop | **+2.1pp** | 2 / 8 | 0.11 | **no measurable effect** |
 
-Metadata is worth more than evidence on this slice, and the two together are
-worth more than either alone: the wins are complementary, not overlapping.
+Two negative results, published as results:
+
+1. **The schema linker does not move execution accuracy on BIRD.** Its
+   recall@3 gain (20%→56%→84% on the unit benchmark) does not survive contact
+   with end-to-end accuracy: removing the hint costs 0.8pp, which is well inside
+   the noise floor. The module stays in the pipeline, because the measured harm
+   is indistinguishable from zero, but no benefit is claimed.
+2. **The repair loop has nothing to repair here.** With the oracle timing bug
+   fixed, the model's SQL executes in 239/239 cases; its errors are semantic, not
+   syntactic, so a loop that reacts to execution errors cannot help. The +2.1pp
+   is not significant (2 vs 8 discordant cases, p = 0.11).
+3. **A previous run reported 66.5% and +25.5pp for "metadata + evidence +
+   repair".** That number was inflated by two harness defects: the execution
+   oracle counted queue time against a 30 s budget (156 spurious timeouts, which
+   the repair loop then "fixed"), and the schema card listed names the databases
+   do not contain. Both are fixed; the table above supersedes it.
+
+### Noise floor (why one sample per case is stated, not assumed)
+
+60 stratified cases, three repeats each, arm `metadata+evidence`:
+
+| Metric | Result |
+| --- | --- |
+| Cases that disagreed with themselves | **5 / 60 (8.3%)** |
+| Majority accuracy | 46.7% |
+| Single-run accuracy | 46.7% |
+| Difference | **0.0pp** |
+
+Single sampling does not bias the aggregate, but it does move individual cases:
+any delta below roughly 8% of the sample cannot be separated from sampling noise
+by this design. That is why the two "no measurable effect" verdicts above are
+stated as such instead of as small wins.
 
 ### DuckDB portability of the same gold statements
 
@@ -158,19 +191,17 @@ worth more than either alone: the wins are complementary, not overlapping.
 | backticks rewritten to quotes | 217/250 (86.8%) | Binder 21, Catalog 10, Parser 2 |
 | + `iif` macro | **227/250 (90.8%)** | Binder 21, Parser 2 |
 
-The remaining 23 are dialect strictness, not bugs: arithmetic on text dates,
-bare columns in `GROUP BY` (SQLite picks a row, DuckDB refuses), and `BETWEEN`
-over mixed types. A generator that emits them would produce SQL that runs on
-one engine and fails on another; the compiler's job is to avoid them.
+The census covers the six smallest databases; the remaining 23 failures are
+dialect strictness, not bugs: arithmetic on text dates, bare columns in
+`GROUP BY` (SQLite picks a row, DuckDB refuses), and `BETWEEN` over mixed types.
 
 ### Judges: official and strict
 
 BIRD's judge is `set(predicted) == set(gold)` over tuples
 (`evaluation/evaluation_ex.py`), which ignores row order and **collapses
-duplicate rows**. A four-row answer with one duplicate therefore equals a
-three-row gold. The strict column compares multisets. On this slice the official
-rule credits 3–6 extra cases per arm; both numbers are published so the choice is
-visible instead of implied.
+duplicate rows**. The strict column compares multisets; the official rule credits
+4–9 extra cases per arm on this slice. Both numbers are published so the choice
+is visible instead of implied.
 
 ## What these numbers are not
 

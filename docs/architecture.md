@@ -172,6 +172,11 @@ Three harnesses, each with a control that must fail if the harness is wrong:
 A third artifact, `eval/out/duckdb-portability.json`, executes the same gold
 statements on DuckDB and reports what survives. It is a census, not a gate.
 
+`bench:bird:stability` measures the noise floor: 60 cases asked three times, and
+the share that disagree with themselves (8.3% on the current slice). Without that
+number a 2pp delta is a story, not a measurement — which is why the schema linker
+and the repair loop are reported as "no measurable effect" rather than as wins.
+
 ## Value model
 
 Rows are `Record<string, CanonicalValue>`. Before a row leaves the runtime:

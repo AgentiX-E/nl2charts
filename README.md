@@ -7,7 +7,7 @@ Two rules shape the whole design:
 1. **The runtime does not need a model.** `core` executes SQL and returns rows. Natural language lives in a separate package (`ai`) that you install only if you want it.
 2. **Every statement passes a lexical guard.** The guard refuses what it cannot classify instead of rewriting it. Read-only is enforced before the engine sees the query.
 
-> **Status: 0.4.0, external benchmark milestone.** The eight packages, the four-stage metric compiler, two engines (DuckDB and SQLite), and the quality gates exist and run in CI. Accuracy is measured on **BIRD Mini-Dev**, not only on our own fixtures: **66.5% execution accuracy** over 200 questions, with +13.0pp from metadata, +20.5pp from evidence and +25.5pp from the full stack, all paired with McNemar p < 0.0001. See [docs/benchmarks.md](docs/benchmarks.md) for exactly what those numbers do and do not mean.
+> **Status: 0.4.0, external benchmark milestone.** The eight packages, the four-stage metric compiler, two engines (DuckDB and SQLite), and the quality gates exist and run in CI. Accuracy is measured on **BIRD Mini-Dev**, not only on our own fixtures: **59.0% execution accuracy** over 239 questions across all 11 databases, with **+12.1pp from column metadata** and **+12.6pp from evidence** (McNemar p < 0.0001), while the schema linker and the repair loop show **no measurable effect** on this benchmark (p = 0.82 and 0.11). See [docs/benchmarks.md](docs/benchmarks.md) for exactly what those numbers do and do not mean.
 
 ## What works today
 
