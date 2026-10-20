@@ -354,6 +354,9 @@ async function main() {
         [...definitions.values()].reduce((total, text) => total + text.length, 0) / Math.max(1, definitions.size),
       ),
       synthesizedDefinitionDatabases: [...synthesizedDefinitions.values()].filter((text) => text.length > 0).length,
+      // The text itself, so a claim about what the model wrote can be checked
+      // from the artifact instead of trusted.
+      synthesizedDefinitions: Object.fromEntries(synthesizedDefinitions),
       synthesizedDefinitionMeanChars: Math.round(
         [...synthesizedDefinitions.values()].reduce((total, text) => total + text.length, 0) /
           Math.max(1, synthesizedDefinitions.size),

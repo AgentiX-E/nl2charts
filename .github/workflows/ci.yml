@@ -189,6 +189,7 @@ jobs:
         uses: actions/upload-artifact@v5
         with:
           name: bird-eval
+          include-hidden-files: true
           path: |
             eval/out/bird-eval.json
             eval/out/duckdb-portability.json
