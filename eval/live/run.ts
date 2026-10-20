@@ -20,6 +20,7 @@ interface CaseRun {
 
 const DRY = process.argv.includes('--dry-run');
 const concurrency = Number(process.env.LIVE_CONCURRENCY ?? 6);
+const repeats = Number(process.env.LIVE_REPEATS ?? 3);
 
 async function pool<T, R>(items: readonly T[], limit: number, worker: (item: T) => Promise<R>): Promise<R[]> {
   const results = new Array<R>(items.length);
@@ -99,22 +100,32 @@ async function runArm(spec: ArmSpec): Promise<ArmResult> {
       await runner.sql(sql);
     },
   });
-  const runs = await pool(cases, concurrency, async (testCase: LiveCase): Promise<CaseRun> => {
-    try {
-      const { sql } = await pipeline.ask({ question: testCase.question, schema: liveSchema as never });
-      const predicted = await rowsOf(sql);
-      const gold = goldRows.get(testCase.id) as ResultSet;
-      return { id: testCase.id, intent: testCase.intent, question: testCase.question, passed: sameResult(predicted, gold), predicted: sql };
-    } catch (error) {
-      return {
-        id: testCase.id,
-        intent: testCase.intent,
-        question: testCase.question,
-        passed: false,
-        predicted: '',
-        error: error instanceof Error ? error.message : String(error),
-      };
+  const runs = await pool(cases, concurrency, async (testCase: LiveCase): Promise<CaseRun & { passes: boolean[] }> => {
+    const passes: boolean[] = [];
+    let lastSql = '';
+    let lastError: string | undefined;
+    for (let attempt = 0; attempt < repeats; attempt += 1) {
+      try {
+        const { sql } = await pipeline.ask({ question: testCase.question, schema: liveSchema as never });
+        lastSql = sql;
+        const predicted = await rowsOf(sql);
+        const gold = goldRows.get(testCase.id) as ResultSet;
+        passes.push(sameResult(predicted, gold));
+      } catch (error) {
+        passes.push(false);
+        lastError = error instanceof Error ? error.message : String(error);
+      }
     }
+    const passed = passes.filter(Boolean).length > repeats / 2;
+    return {
+      id: testCase.id,
+      intent: testCase.intent,
+      question: testCase.question,
+      passed,
+      predicted: lastSql,
+      ...(lastError === undefined ? {} : { error: lastError }),
+      passes,
+    };
   });
   const result = summarise(spec.name, runs.map((run) => ({ id: run.id, passed: run.passed })));
   const interval = wilsonInterval(result.passed, result.total);
@@ -131,7 +142,9 @@ async function runArm(spec: ArmSpec): Promise<ArmResult> {
   for (const [intent, bucket] of [...byIntent.entries()].sort()) {
     if (bucket.passed < bucket.total) console.log(`  ${intent.padEnd(32)} ${bucket.passed}/${bucket.total}`);
   }
-  return { ...result, cases: runs } as ArmResult & { cases: CaseRun[] };
+  const flips = runs.filter((run) => new Set(run.passes).size > 1).length;
+  console.log(`  repeats per case: ${repeats}; cases with a different outcome across repeats: ${flips}`);
+  return { ...result, cases: runs, flips } as ArmResult & { cases: (CaseRun & { passes: boolean[] })[]; flips: number };
 }
 
 // Harness controls: the gold query must match itself, the empty query nothing.
@@ -160,6 +173,8 @@ const report = {
     total: result.total,
     accuracy: result.accuracy,
     wilson: wilsonInterval(result.passed, result.total),
+    repeats,
+    flips: (result as { flips?: number }).flips ?? 0,
   })),
   ablations: {
     valueProfiling: { ...valueEffect, p: mcnemarExact(valueEffect.onlyFirst, valueEffect.onlySecond) },

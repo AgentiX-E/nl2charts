@@ -376,7 +376,6 @@ export const liveSchema = [
     columns: [
       { name: 'customer_id', type: 'BIGINT', comment: 'customer identifier' },
       { name: 'segment', type: 'VARCHAR', samples: ['smb', 'enterprise', 'consumer'], comment: 'customer segment' },
-      { name: 'region', type: 'VARCHAR', samples: ['north', 'south', 'east', 'west'], comment: 'customer region' },
     ],
   },
   {

@@ -15,14 +15,14 @@ try {
 const lines = [
   '## Live NL to SQL evaluation',
   '',
-  `Model: \`${report.model}\` · cases: ${report.cases} · dataset: \`${report.dataset}\``,
+  `Model: \`${report.model}\` · cases: ${report.cases} · repeats: ${report.arms[0]?.repeats ?? 1} · dataset: \`${report.dataset}\``,
   '',
-  '| arm | exact | 95% Wilson | passed/total |',
-  '| --- | --- | --- | --- |',
+  '| arm | exact | 95% Wilson | passed/total | repeat flips |',
+  '| --- | --- | --- | --- | --- |',
 ];
 for (const arm of report.arms) {
   lines.push(
-    `| ${arm.arm} | ${(arm.accuracy * 100).toFixed(1)}% | [${(arm.wilson.low * 100).toFixed(1)}, ${(arm.wilson.high * 100).toFixed(1)}] | ${arm.passed}/${arm.total} |`,
+    `| ${arm.arm} | ${(arm.accuracy * 100).toFixed(1)}% | [${(arm.wilson.low * 100).toFixed(1)}, ${(arm.wilson.high * 100).toFixed(1)}] | ${arm.passed}/${arm.total} | ${arm.flips ?? 0} |`,
   );
 }
 lines.push('', '### Paired ablations', '', '| change | delta | discordant (only before / only after) | McNemar exact p |', '| --- | --- | --- | --- |');
