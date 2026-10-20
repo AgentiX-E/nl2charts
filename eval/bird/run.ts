@@ -30,6 +30,7 @@ import type { BirdQuestion } from './data.js';
 import { createOracle } from './oracle.js';
 import type { OracleResult } from './oracle.js';
 import { profileDatabase } from './profile.js';
+import { synthesizeDefinitions } from './synthesize.js';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
 const DATA = process.env.BIRD_DATA ?? join(ROOT, 'eval/.cache/bird/minidev/MINIDEV');
@@ -62,8 +63,12 @@ export interface Arm {
   readonly linking: boolean;
   /** 'adaptive' lets the question shape choose the schema card and notes. */
   readonly profile?: 'adaptive';
-  /** Structural semantics: grain, keys, join direction, column roles. */
-  readonly definitions?: boolean;
+  /**
+   * Where the definition block comes from. Structural claims are derived from
+   * the schema; synthesized ones are written once per database by the model.
+   * Modelled as one lever for the same reason as the evidence source.
+   */
+  readonly definitions?: 'structural' | 'synthesized';
   /** Order synthesized evidence by the columns the question names. */
   readonly focus?: boolean;
 }
@@ -82,8 +87,10 @@ export interface Arm {
  */
 export const ARMS: readonly Arm[] = [
   { name: 'names', notes: false, repairs: 0, linking: true },
-  { name: 'definitions', notes: false, repairs: 0, linking: true, definitions: true },
-  { name: 'definitions+evidence', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: true },
+  { name: 'definitions', notes: false, repairs: 0, linking: true, definitions: 'structural' },
+  { name: 'synth-definitions', notes: false, repairs: 0, linking: true, definitions: 'synthesized' },
+  { name: 'definitions+evidence', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'structural' },
+  { name: 'synth-definitions+evidence', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'synthesized' },
   { name: 'metadata', notes: true, repairs: 0, linking: true },
   { name: 'synthetic', notes: true, evidence: 'synthetic', repairs: 0, linking: true },
   { name: 'synthetic+focus', notes: true, evidence: 'synthetic', repairs: 0, linking: true, focus: true },
@@ -98,7 +105,9 @@ export const ARMS: readonly Arm[] = [
 
 export const PAIRS: readonly (readonly [string, string])[] = [
   ['names', 'definitions'],
+  ['definitions', 'synth-definitions'],
   ['definitions', 'definitions+evidence'],
+  ['synth-definitions', 'synth-definitions+evidence'],
   ['names', 'metadata'],
   ['metadata', 'synthetic'],
   ['synthetic', 'synthetic+focus'],
@@ -124,9 +133,9 @@ function settings() {
       .split(',')
       .map((name) => name.trim())
       .filter(Boolean),
-    // Default chain: the baseline, the new lever, the new lever plus the old
-    // one, and the best arm from the previous round as a ceiling reference.
-    arms: (process.env.BIRD_ARMS ?? ['names', 'definitions', 'definitions+evidence', 'metadata+evidence'].join(','))
+    // Default chain: baseline, the two definition sources, the synthesized one
+    // with the dataset hint, and last round's best arm as the ceiling reference.
+    arms: (process.env.BIRD_ARMS ?? ['names', 'definitions', 'synth-definitions', 'synth-definitions+evidence', 'metadata+evidence'].join(','))
       .split(',')
       .map((name) => name.trim()),
     out: process.env.BIRD_OUT ?? join(ROOT, 'eval/out/bird-eval.json'),
@@ -162,7 +171,7 @@ export function promptFor(arm: Arm, question: BirdQuestion, synthesized?: string
     samples: false,
     schemaLines: 400,
     ...(profile === undefined ? {} : { notes: profile.notes }),
-    ...(arm.definitions === true && definitions !== undefined && definitions.length > 0 ? { definitions } : {}),
+    ...(arm.definitions !== undefined && definitions !== undefined && definitions.length > 0 ? { definitions } : {}),
     ...(evidence === undefined || evidence.length === 0 ? {} : { evidence }),
   };
 }
@@ -225,6 +234,10 @@ async function main() {
    * the question's words, so the two arms differ only in line order — not in
    * which columns were profiled and not in the character budget.
    */
+  /** The definition block this arm uses, if any. */
+  const definitionsFor = (arm: Arm, db: string): string | undefined =>
+    arm.definitions === 'synthesized' ? synthesizedDefinitions.get(db) : definitions.get(db);
+
   const evidenceFor = (arm: Arm, question: BirdQuestion): string | undefined => {
     if (arm.evidence !== 'synthetic') return undefined;
     const profile = profiles.get(question.db_id);
@@ -236,6 +249,33 @@ async function main() {
   // one block says what a column means, the other says what it contains.
   const definitions = new Map<string, string>();
   for (const [db, schema] of schemas) definitions.set(db, renderDefinitions(schema));
+
+  // Written once per database, cached on disk. The model that writes them is the
+  // same one under test, but it sees only schema, values and a couple of rows —
+  // never a question, never a gold statement.
+  const synthesizedDefinitions = new Map<string, string>();
+  const needsSynthesis = config.arms.some((name) => ARMS.find((arm) => arm.name === name)?.definitions === 'synthesized');
+  const provider = createHttpProvider({ baseUrl: config.baseUrl, apiKey: config.apiKey, model: config.model });
+  if (!config.dryRun && needsSynthesis) {
+    for (const [db, schema] of schemas) {
+      try {
+        synthesizedDefinitions.set(
+          db,
+          await synthesizeDefinitions({
+            oracle,
+            db,
+            schema,
+            ...(profiles.get(db) === undefined ? {} : { profile: profiles.get(db) as NonNullable<ReturnType<typeof profiles.get>> }),
+            provider,
+            model: config.model,
+            force: process.env.BIRD_DEFINITIONS_FORCE === '1',
+          }),
+        );
+      } catch {
+        synthesizedDefinitions.set(db, '');
+      }
+    }
+  }
 
   const gold = new Map<number, OracleResult>();
   const unrunnable: { id: number; db: string; error: string }[] = [];
@@ -313,6 +353,11 @@ async function main() {
       semanticsMeanChars: Math.round(
         [...definitions.values()].reduce((total, text) => total + text.length, 0) / Math.max(1, definitions.size),
       ),
+      synthesizedDefinitionDatabases: [...synthesizedDefinitions.values()].filter((text) => text.length > 0).length,
+      synthesizedDefinitionMeanChars: Math.round(
+        [...synthesizedDefinitions.values()].reduce((total, text) => total + text.length, 0) /
+          Math.max(1, synthesizedDefinitions.size),
+      ),
     },
   };
 
@@ -331,7 +376,7 @@ async function main() {
             definitionsPrompt: buildSqlPrompt(
               question.question,
               schemas.get(question.db_id) as SchemaTable[],
-              promptFor(ARMS[1] as Arm, question, undefined, definitions.get(question.db_id)),
+              promptFor(ARMS[1] as Arm, question, undefined, definitionsFor(ARMS[1] as Arm, question.db_id)),
             ),
           }),
     }));
@@ -343,7 +388,6 @@ async function main() {
   }
 
   // 5. Arms.
-  const provider = createHttpProvider({ baseUrl: config.baseUrl, apiKey: config.apiKey, model: config.model });
   const armReports: unknown[] = [];
   const outcomes = new Map<string, CaseOutcome[]>();
   for (const name of config.arms) {
@@ -426,7 +470,7 @@ async function main() {
         buildSqlPrompt(
           question.question,
           schemas.get(question.db_id) as SchemaTable[],
-          promptFor(arm, question, evidenceFor(arm, question), definitions.get(question.db_id)),
+          promptFor(arm, question, evidenceFor(arm, question), definitionsFor(arm, question.db_id)),
         ).length,
     );
     const kindOf = (run: CaseRun): string | undefined => run.errorKind ?? (run.error === undefined ? undefined : 'other');

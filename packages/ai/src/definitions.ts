@@ -19,6 +19,7 @@
  * column out of the prompt is a net loss.
  */
 
+import type { DatabaseProfile } from './evidence.js';
 import { words } from './text.js';
 
 export type ColumnRole =
@@ -256,5 +257,93 @@ export function renderDefinitions(schema: readonly { table: string; columns: rea
     used += line.length + 1;
   }
   if (kept.length === 0) return '';
+  return kept.join('\n');
+}
+
+export interface DefinitionSample {
+  readonly table: string;
+  readonly rows: readonly (readonly unknown[])[];
+}
+
+export interface DefinitionRequest {
+  /** The same schema the question prompt uses, so the answer is about it. */
+  readonly schema: readonly {
+    table: string;
+    columns: readonly { name: string; type: string; comment?: string }[];
+    foreignKeys?: readonly string[];
+  }[];
+  /** Optional profile; values and ranges ground the definitions in this database. */
+  readonly profile?: DatabaseProfile;
+  readonly samples?: readonly DefinitionSample[];
+  /** Character budget the reply should respect. */
+  readonly maxChars?: number;
+}
+
+const DEFINITION_INSTRUCTION = [
+  'You write a data dictionary for one database. You will see its schema, and optionally observed values and sample rows.',
+  'Write one line per definition, each starting with "- ".',
+  'Define what a column means in business terms: how a measure is computed, what a status value excludes, which date a question means.',
+  'A definition does not restate the column type, and does not describe a column the schema already names unambiguously.',
+  'Use only the facts shown. If the database does not support a definition, omit it.',
+  'No preamble, no headings, no code fences.',
+].join('\n');
+
+function quote(name: string): string {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? name : `"${name.replace(/"/g, '""')}"`;
+}
+
+/**
+ * One request per database, built from facts only. The model never sees the
+ * questions or their gold SQL: a definition that came from the test set would be
+ * leakage wearing the name of a capability.
+ */
+export function buildDefinitionPrompt(request: DefinitionRequest): string {
+  const maxChars = request.maxChars ?? 1200;
+  const lines: string[] = [DEFINITION_INSTRUCTION, `Keep the whole reply under at most ${maxChars} characters.`, '', 'Schema:'];
+  for (const table of request.schema) {
+    const columns = table.columns.map((column) => `${quote(column.name)} ${column.type}`).join(', ');
+    lines.push(`${quote(table.table)}(${columns})`);
+    for (const hint of table.foreignKeys ?? []) lines.push(`  join: ${hint}`);
+  }
+  const profileColumns = request.profile?.columns ?? [];
+  if (profileColumns.length > 0) {
+    lines.push('', 'Observed values:');
+    for (const column of profileColumns) {
+      const head = `- ${column.table}.${column.column}`;
+      if (column.values !== undefined && column.values.length > 0) lines.push(`${head}: ${column.values.slice(0, 8).join(', ')}`);
+      else if (column.min !== undefined && column.max !== undefined) lines.push(`${head}: ${String(column.min)} to ${String(column.max)}`);
+      else if (column.distinct !== undefined) lines.push(`${head}: ${column.distinct} distinct values`);
+    }
+  }
+  if (request.samples !== undefined && request.samples.length > 0) {
+    lines.push('', 'Sample rows:');
+    for (const sample of request.samples) {
+      const cells = sample.rows.map((row) => row.map((value) => (value === null ? 'NULL' : String(value))).join(' | '));
+      lines.push(`- ${sample.table}: ${cells.join(' || ')}`);
+    }
+  }
+  return lines.join('\n');
+}
+
+/**
+ * Reduce a reply to the lines a prompt can carry. Models add preambles, headings
+ * and fences even when told not to; a parser that assumes otherwise turns a good
+ * reply into a broken prompt.
+ */
+export function parseDefinitions(reply: string, maxChars = 1200): string {
+  const inside = /```[a-z]*\s*([\s\S]*?)```/i.exec(reply)?.[1] ?? reply;
+  const kept: string[] = [];
+  let used = 0;
+  for (const raw of inside.split('\n')) {
+    const line = raw.trim().replace(/^[*•]\s+/, '- ').replace(/^\+\s+/, '- ');
+    if (!line.startsWith('- ')) continue;
+    const body = line.slice(2).trim();
+    if (body.length === 0) continue;
+    if (body.toLowerCase() === 'semantics:') continue;
+    const rendered = `- ${body}`;
+    if (used + rendered.length + 1 > maxChars) break;
+    kept.push(rendered);
+    used += rendered.length + 1;
+  }
   return kept.join('\n');
 }

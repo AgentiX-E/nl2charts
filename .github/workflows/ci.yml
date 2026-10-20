@@ -159,8 +159,14 @@ jobs:
       - name: Cache the external dataset
         uses: actions/cache@v4
         with:
-          path: eval/.cache/bird
+          path: eval/.cache/bird/minidev
           key: bird-minidev-v2-${{ runner.os }}
+      - name: Cache synthesized definitions
+        uses: actions/cache@v4
+        with:
+          path: eval/.cache/bird/definitions
+          key: bird-definitions-${{ runner.os }}-${{ hashFiles('eval/bird/synthesize.ts', 'packages/ai/src/definitions.ts') }}
+          restore-keys: bird-definitions-${{ runner.os }}-
       - name: Fetch Mini-Dev (no-op when the cache is warm)
         run: node eval/bird/fetch.mjs
       - name: Gold queries, prompts and controls without a model
@@ -188,5 +194,6 @@ jobs:
             eval/out/duckdb-portability.json
             eval/out/bird-stability.json
             eval/out/adversarial.json
+            eval/.cache/bird/definitions/
           if-no-files-found: warn
           retention-days: 30

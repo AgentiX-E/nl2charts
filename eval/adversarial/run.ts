@@ -38,7 +38,7 @@ function declaredWidth(question: string): number | undefined {
 
 const ARMS: readonly Arm[] = [
   { name: 'names', notes: false, repairs: 0, linking: true },
-  { name: 'definitions', notes: false, repairs: 0, linking: true, definitions: true },
+  { name: 'definitions', notes: false, repairs: 0, linking: true, definitions: 'structural' },
   { name: 'metadata', notes: true, repairs: 0, linking: true },
   { name: 'synthetic', notes: true, evidence: 'synthetic', repairs: 0, linking: true },
   { name: 'adaptive', notes: true, repairs: 0, linking: true, profile: 'adaptive' },
@@ -54,7 +54,7 @@ function promptFor(arm: Arm, question: string, synthesized?: string, definitions
     samples: false,
     schemaLines: 2000,
     ...(profile === undefined ? {} : { notes: profile.notes }),
-    ...(arm.definitions === true && definitions !== undefined && definitions.length > 0 ? { definitions } : {}),
+    ...(arm.definitions !== undefined && definitions !== undefined && definitions.length > 0 ? { definitions } : {}),
     ...(evidence === undefined || evidence.length === 0 ? {} : { evidence }),
   };
 }
