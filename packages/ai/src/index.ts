@@ -1,5 +1,7 @@
 export { createHttpProvider } from './provider.js';
+export { renderEvidence } from './evidence.js';
 export type { HttpProviderOptions, LlmMessage, LlmProvider, LlmRequest, LlmResponse, LlmUsage, Role } from './provider.js';
+export type { ColumnProfile, DatabaseProfile, EvidenceOptions, ProfileKind } from './evidence.js';
 export { createReplayProvider, recordProvider } from './replay.js';
 export type { RecordedCall, ReplayFixture } from './replay.js';
 export { linkSchema, renderName, renderSchemaCard, tokenizeQuestion } from './linking.js';

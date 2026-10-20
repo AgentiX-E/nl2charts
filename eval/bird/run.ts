@@ -22,13 +22,14 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHttpProvider } from '@agentix-e/nl2charts-ai';
 import type { PromptOptions, SchemaTable } from '@agentix-e/nl2charts-ai';
-import { buildSqlPrompt, choosePromptProfile, createPipeline, renderSchemaCard } from '@agentix-e/nl2charts-ai';
+import { buildSqlPrompt, choosePromptProfile, createPipeline, renderEvidence, renderSchemaCard } from '@agentix-e/nl2charts-ai';
 import { compareArms, judgeOfficial, judgeStrict, mcnemarExact, summarise, wilsonInterval } from '@agentix-e/nl2charts-devkit';
 import type { CaseOutcome, MatchReason } from '@agentix-e/nl2charts-devkit';
 import { buildSchema, loadDescriptions, loadQuestions, loadTables, stratifiedSample } from './data.js';
 import type { BirdQuestion } from './data.js';
 import { createOracle } from './oracle.js';
 import type { OracleResult } from './oracle.js';
+import { profileDatabase } from './profile.js';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
 const DATA = process.env.BIRD_DATA ?? join(ROOT, 'eval/.cache/bird/minidev/MINIDEV');
@@ -56,6 +57,8 @@ export interface Arm {
   readonly linking: boolean;
   /** 'adaptive' lets the question shape choose the schema card and notes. */
   readonly profile?: 'adaptive';
+  /** Use evidence synthesized from the data instead of the dataset's hint. */
+  readonly synthetic?: boolean;
 }
 
 /**
@@ -73,6 +76,7 @@ export interface Arm {
 export const ARMS: readonly Arm[] = [
   { name: 'names', notes: false, evidence: false, repairs: 0, linking: true },
   { name: 'metadata', notes: true, evidence: false, repairs: 0, linking: true },
+  { name: 'synthetic', notes: true, evidence: false, repairs: 0, linking: true, synthetic: true },
   { name: 'metadata+evidence', notes: true, evidence: true, repairs: 0, linking: true },
   { name: 'adaptive', notes: true, evidence: true, repairs: 0, linking: true, profile: 'adaptive' },
   // Available on demand (BIRD_ARMS=...,no-linking,repair). Both measured null in
@@ -84,8 +88,8 @@ export const ARMS: readonly Arm[] = [
 
 const PAIRS: readonly (readonly [string, string])[] = [
   ['names', 'metadata'],
-  ['metadata', 'metadata+evidence'],
-  ['metadata+evidence', 'adaptive'],
+  ['metadata', 'synthetic'],
+  ['synthetic', 'metadata+evidence'],
 ];
 
 interface CaseRun extends CaseOutcome {
@@ -132,8 +136,9 @@ export async function pool<T, R>(items: readonly T[], limit: number, worker: (it
   return results;
 }
 
-export function promptFor(arm: Arm, question: BirdQuestion): PromptOptions {
+export function promptFor(arm: Arm, question: BirdQuestion, synthesized?: string): PromptOptions {
   const profile = arm.profile === 'adaptive' ? choosePromptProfile(question.question) : undefined;
+  const evidence = arm.evidence ? question.evidence : arm.synthetic ? synthesized : undefined;
   return {
     dialect: 'SQLite',
     descriptions: profile?.descriptions ?? arm.notes,
@@ -141,7 +146,7 @@ export function promptFor(arm: Arm, question: BirdQuestion): PromptOptions {
     samples: false,
     schemaLines: 400,
     ...(profile === undefined ? {} : { notes: profile.notes }),
-    ...(arm.evidence ? { evidence: question.evidence } : {}),
+    ...(evidence === undefined || evidence.length === 0 ? {} : { evidence }),
   };
 }
 
@@ -183,6 +188,18 @@ async function main() {
   }
 
   // 2. Gold pre-execution. A case is scored only if its gold statement runs.
+  // Synthesized evidence: a data profile per database, cached on disk after the
+  // first run. The arm exists to answer one question — can a product without a
+  // curated evidence column still get the gain that BIRD's evidence buys?
+  const synthesized = new Map<string, string>();
+  for (const db of config.dbs) {
+    try {
+      synthesized.set(db, renderEvidence(await profileDatabase(oracle, db)));
+    } catch {
+      synthesized.set(db, '');
+    }
+  }
+
   const gold = new Map<number, OracleResult>();
   const unrunnable: { id: number; db: string; error: string }[] = [];
   for (const question of selected) {
@@ -285,7 +302,7 @@ async function main() {
         provider,
         maxRepairs: arm.repairs,
         linking: arm.linking,
-        prompt: promptFor(arm, question),
+        prompt: promptFor(arm, question, synthesized.get(question.db_id)),
         ...(arm.repairs === 0
           ? {}
           : {
