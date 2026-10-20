@@ -11,7 +11,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { choosePromptProfile, createHttpProvider, createPipeline, renderEvidence } from '@agentix-e/nl2charts-ai';
+import { choosePromptProfile, createHttpProvider, createPipeline, renderDefinitions, renderEvidence } from '@agentix-e/nl2charts-ai';
 import type { PromptOptions, SchemaTable } from '@agentix-e/nl2charts-ai';
 import { compareArms, judgeOfficial, judgeStrict, mcnemarExact, summarise, wilsonInterval } from '@agentix-e/nl2charts-devkit';
 import { buildSchema, loadDescriptions, loadTables } from '../bird/data.js';
@@ -37,15 +37,16 @@ function declaredWidth(question: string): number | undefined {
 }
 
 const ARMS: readonly Arm[] = [
-  { name: 'names', notes: false, evidence: false, repairs: 0, linking: true },
-  { name: 'metadata', notes: true, evidence: false, repairs: 0, linking: true },
-  { name: 'synthetic', notes: true, evidence: false, repairs: 0, linking: true, synthetic: true },
-  { name: 'adaptive', notes: true, evidence: false, repairs: 0, linking: true, profile: 'adaptive' },
+  { name: 'names', notes: false, repairs: 0, linking: true },
+  { name: 'definitions', notes: false, repairs: 0, linking: true, definitions: true },
+  { name: 'metadata', notes: true, repairs: 0, linking: true },
+  { name: 'synthetic', notes: true, evidence: 'synthetic', repairs: 0, linking: true },
+  { name: 'adaptive', notes: true, repairs: 0, linking: true, profile: 'adaptive' },
 ];
 
-function promptFor(arm: Arm, question: string, synthesized?: string): PromptOptions {
+function promptFor(arm: Arm, question: string, synthesized?: string, definitions?: string): PromptOptions {
   const profile = arm.profile === 'adaptive' ? choosePromptProfile(question) : undefined;
-  const evidence = arm.synthetic ? synthesized : undefined;
+  const evidence = arm.evidence === 'synthetic' ? synthesized : undefined;
   return {
     dialect: 'SQLite',
     descriptions: profile?.descriptions ?? arm.notes,
@@ -53,6 +54,7 @@ function promptFor(arm: Arm, question: string, synthesized?: string): PromptOpti
     samples: false,
     schemaLines: 2000,
     ...(profile === undefined ? {} : { notes: profile.notes }),
+    ...(arm.definitions === true && definitions !== undefined && definitions.length > 0 ? { definitions } : {}),
     ...(evidence === undefined || evidence.length === 0 ? {} : { evidence }),
   };
 }
@@ -73,6 +75,8 @@ async function main() {
   }
 
   const oracle = createOracle(join(ROOT, 'eval/bird/oracle.py'), DATABASES);
+  const definitions = new Map<string, string>();
+  for (const [db, schema] of schemas) definitions.set(db, renderDefinitions(schema));
   const synthesized = new Map<string, string>();
   for (const db of dbs) synthesized.set(db, renderEvidence(await profileDatabase(oracle, db)));
 
@@ -131,7 +135,7 @@ async function main() {
         provider,
         maxRepairs: arm.repairs,
         linking: arm.linking,
-        prompt: promptFor(arm, testCase.question, synthesized.get(testCase.db)),
+        prompt: promptFor(arm, testCase.question, synthesized.get(testCase.db), definitions.get(testCase.db)),
       });
       try {
         const asked = await pipeline.ask({ question: testCase.question, schema });

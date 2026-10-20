@@ -32,10 +32,11 @@ if (report === null) {
     '',
     `Gold queries executed before any model call: **${gold.runnable}/${gold.executed}** runnable (${(gold.runnableRate * 100).toFixed(1)}%).`,
     `Controls: self-consistency **${(controls.selfConsistency * 100).toFixed(1)}%**, negative false matches **${controls.negativeFalseMatches}**, empty-gold cases excluded from the negative control: ${controls.emptyGoldExcluded}.`,
+    `Structural semantics: **${controls.semanticsDatabases}/${controls.semanticsDatabaseTotal}** databases and **${controls.semanticsCases}/${report.selection.scored}** cases yield a claim; mean block ${controls.semanticsMeanChars} characters.`,
     '',
   );
   if (Array.isArray(report.arms) && report.arms.length > 0) {
-    lines.push('| arm | execution accuracy | 95% Wilson | strict (multiset) | duplicate credit | repaired | simple / moderate / challenging |', '| --- | --- | --- | --- | --- | --- | --- |');
+    lines.push('| arm | execution accuracy | 95% Wilson | strict (multiset) | duplicate credit | repaired | prompt chars | simple / moderate / challenging |', '| --- | --- | --- | --- | --- | --- | --- | --- |');
     for (const arm of report.arms) {
       const byDifficulty = ['simple', 'moderate', 'challenging']
         .map((key) => {
@@ -44,7 +45,7 @@ if (report === null) {
         })
         .join(' / ');
       lines.push(
-        `| ${arm.arm} | **${(arm.accuracy * 100).toFixed(1)}%** | [${(arm.wilson.low * 100).toFixed(1)}, ${(arm.wilson.high * 100).toFixed(1)}] | ${arm.strictPassed}/${arm.total} | ${arm.duplicateCredit} | ${arm.repaired} | ${byDifficulty} |`,
+        `| ${arm.arm} | **${(arm.accuracy * 100).toFixed(1)}%** | [${(arm.wilson.low * 100).toFixed(1)}, ${(arm.wilson.high * 100).toFixed(1)}] | ${arm.strictPassed}/${arm.total} | ${arm.duplicateCredit} | ${arm.repaired} | ${arm.promptChars?.mean ?? '–'} | ${byDifficulty} |`,
       );
     }
     lines.push('', '### Paired ablations', '', '| change | delta | only before / only after | McNemar exact p |', '| --- | --- | --- | --- |');
@@ -82,8 +83,12 @@ if (adversarial !== null) {
       `| ${arm.arm} | ${(arm.accuracy * 100).toFixed(1)}% (${arm.passed}/${arm.total}) | ${cell('window')} | ${cell('ratio')} | ${cell('multi-hop')} | ${cell('tie')} |`,
     );
   }
-  const effect = adversarial.ablations['names -> metadata'];
-  lines.push('', `names → metadata: ${effect.delta >= 0 ? '+' : ''}${(effect.delta * 100).toFixed(1)}pp (only before ${effect.onlyFirst}, only after ${effect.onlySecond}, p=${effect.p.toFixed(3)}). Each category has 8 cases, so a category cell moves in steps of 12.5pp.`, '');
+  for (const key of ['names -> definitions', 'names -> metadata']) {
+    const effect = adversarial.ablations[key];
+    if (effect === undefined) continue;
+    lines.push('', `${key.replace(' -> ', ' → ')}: ${effect.delta >= 0 ? '+' : ''}${(effect.delta * 100).toFixed(1)}pp (only before ${effect.onlyFirst}, only after ${effect.onlySecond}, p=${effect.p.toFixed(3)}).`);
+  }
+  lines.push('', 'Each category has 8 cases, so a category cell moves in steps of 12.5pp.', '');
 }
 
 if (portability !== null) {

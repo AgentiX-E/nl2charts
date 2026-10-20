@@ -12,7 +12,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { createHttpProvider, createPipeline } from '@agentix-e/nl2charts-ai';
+import { createHttpProvider, createPipeline, renderDefinitions } from '@agentix-e/nl2charts-ai';
 import type { SchemaTable } from '@agentix-e/nl2charts-ai';
 import { judgeOfficial } from '@agentix-e/nl2charts-devkit';
 import { buildSchema, loadDescriptions, loadQuestions, loadTables, stratifiedSample } from './data.js';
@@ -47,6 +47,9 @@ async function main() {
     );
   }
 
+  const definitions = new Map<string, string>();
+  for (const [db, schema] of schemas) definitions.set(db, renderDefinitions(schema));
+
   const oracle = createOracle(join(ROOT, 'eval/bird/oracle.py'), DATABASES);
   const gold = new Map<number, readonly (readonly unknown[])[]>();
   for (const question of questions) {
@@ -63,7 +66,7 @@ async function main() {
 
   const runs = await pool(cases, CONCURRENCY, async (question) => {
     const schema = schemas.get(question.db_id) as SchemaTable[];
-    const pipeline = createPipeline({ provider, maxRepairs: ARM.repairs, linking: ARM.linking, prompt: promptFor(ARM, question) });
+    const pipeline = createPipeline({ provider, maxRepairs: ARM.repairs, linking: ARM.linking, prompt: promptFor(ARM, question, undefined, definitions.get(question.db_id)) });
     const passes: boolean[] = [];
     for (let attempt = 0; attempt < REPEATS; attempt += 1) {
       try {

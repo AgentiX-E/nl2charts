@@ -22,7 +22,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHttpProvider } from '@agentix-e/nl2charts-ai';
 import type { PromptOptions, SchemaTable } from '@agentix-e/nl2charts-ai';
-import { buildSqlPrompt, choosePromptProfile, createPipeline, renderEvidence, renderSchemaCard } from '@agentix-e/nl2charts-ai';
+import { buildSqlPrompt, choosePromptProfile, createPipeline, renderDefinitions, renderEvidence, renderSchemaCard } from '@agentix-e/nl2charts-ai';
 import { compareArms, judgeOfficial, judgeStrict, mcnemarExact, summarise, wilsonInterval } from '@agentix-e/nl2charts-devkit';
 import type { CaseOutcome, MatchReason } from '@agentix-e/nl2charts-devkit';
 import { buildSchema, loadDescriptions, loadQuestions, loadTables, stratifiedSample } from './data.js';
@@ -52,13 +52,20 @@ function databasesFromManifest(): string[] {
 export interface Arm {
   readonly name: string;
   readonly notes: boolean;
-  readonly evidence: boolean;
+  /**
+   * Where the hint comes from. Modelled as one lever rather than a boolean pair:
+   * "dataset hint" and "synthesized hint" are alternatives, not independent
+   * switches, and an arm that flipped both would be a two-variable comparison.
+   */
+  readonly evidence?: 'dataset' | 'synthetic';
   readonly repairs: number;
   readonly linking: boolean;
   /** 'adaptive' lets the question shape choose the schema card and notes. */
   readonly profile?: 'adaptive';
-  /** Use evidence synthesized from the data instead of the dataset's hint. */
-  readonly synthetic?: boolean;
+  /** Structural semantics: grain, keys, join direction, column roles. */
+  readonly definitions?: boolean;
+  /** Order synthesized evidence by the columns the question names. */
+  readonly focus?: boolean;
 }
 
 /**
@@ -74,21 +81,27 @@ export interface Arm {
  * `names`, which could not separate repair from the prompt changes.
  */
 export const ARMS: readonly Arm[] = [
-  { name: 'names', notes: false, evidence: false, repairs: 0, linking: true },
-  { name: 'metadata', notes: true, evidence: false, repairs: 0, linking: true },
-  { name: 'synthetic', notes: true, evidence: false, repairs: 0, linking: true, synthetic: true },
-  { name: 'metadata+evidence', notes: true, evidence: true, repairs: 0, linking: true },
-  { name: 'adaptive', notes: true, evidence: true, repairs: 0, linking: true, profile: 'adaptive' },
+  { name: 'names', notes: false, repairs: 0, linking: true },
+  { name: 'definitions', notes: false, repairs: 0, linking: true, definitions: true },
+  { name: 'definitions+evidence', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: true },
+  { name: 'metadata', notes: true, repairs: 0, linking: true },
+  { name: 'synthetic', notes: true, evidence: 'synthetic', repairs: 0, linking: true },
+  { name: 'synthetic+focus', notes: true, evidence: 'synthetic', repairs: 0, linking: true, focus: true },
+  { name: 'metadata+evidence', notes: true, evidence: 'dataset', repairs: 0, linking: true },
+  { name: 'adaptive', notes: true, evidence: 'dataset', repairs: 0, linking: true, profile: 'adaptive' },
   // Available on demand (BIRD_ARMS=...,no-linking,repair). Both measured null in
   // the previous round and are kept instead of deleted, so a change that should
   // revive them can be tested without rewriting the harness.
-  { name: 'no-linking', notes: true, evidence: true, repairs: 0, linking: false },
-  { name: 'repair', notes: true, evidence: true, repairs: 2, linking: true },
+  { name: 'no-linking', notes: true, evidence: 'dataset', repairs: 0, linking: false },
+  { name: 'repair', notes: true, evidence: 'dataset', repairs: 2, linking: true },
 ];
 
-const PAIRS: readonly (readonly [string, string])[] = [
+export const PAIRS: readonly (readonly [string, string])[] = [
+  ['names', 'definitions'],
+  ['definitions', 'definitions+evidence'],
   ['names', 'metadata'],
   ['metadata', 'synthetic'],
+  ['synthetic', 'synthetic+focus'],
   ['synthetic', 'metadata+evidence'],
 ];
 
@@ -111,7 +124,9 @@ function settings() {
       .split(',')
       .map((name) => name.trim())
       .filter(Boolean),
-    arms: (process.env.BIRD_ARMS ?? ARMS.slice(0, 4).map((arm) => arm.name).join(','))
+    // Default chain: the baseline, the new lever, the new lever plus the old
+    // one, and the best arm from the previous round as a ceiling reference.
+    arms: (process.env.BIRD_ARMS ?? ['names', 'definitions', 'definitions+evidence', 'metadata+evidence'].join(','))
       .split(',')
       .map((name) => name.trim()),
     out: process.env.BIRD_OUT ?? join(ROOT, 'eval/out/bird-eval.json'),
@@ -136,9 +151,10 @@ export async function pool<T, R>(items: readonly T[], limit: number, worker: (it
   return results;
 }
 
-export function promptFor(arm: Arm, question: BirdQuestion, synthesized?: string): PromptOptions {
+export function promptFor(arm: Arm, question: BirdQuestion, synthesized?: string, definitions?: string): PromptOptions {
   const profile = arm.profile === 'adaptive' ? choosePromptProfile(question.question) : undefined;
-  const evidence = arm.evidence ? question.evidence : arm.synthetic ? synthesized : undefined;
+  const evidence =
+    arm.evidence === 'dataset' ? question.evidence : arm.evidence === 'synthetic' ? synthesized : undefined;
   return {
     dialect: 'SQLite',
     descriptions: profile?.descriptions ?? arm.notes,
@@ -146,6 +162,7 @@ export function promptFor(arm: Arm, question: BirdQuestion, synthesized?: string
     samples: false,
     schemaLines: 400,
     ...(profile === undefined ? {} : { notes: profile.notes }),
+    ...(arm.definitions === true && definitions !== undefined && definitions.length > 0 ? { definitions } : {}),
     ...(evidence === undefined || evidence.length === 0 ? {} : { evidence }),
   };
 }
@@ -192,13 +209,33 @@ async function main() {
   // first run. The arm exists to answer one question — can a product without a
   // curated evidence column still get the gain that BIRD's evidence buys?
   const synthesized = new Map<string, string>();
+  const profiles = new Map<string, Awaited<ReturnType<typeof profileDatabase>>>();
   for (const db of config.dbs) {
     try {
-      synthesized.set(db, renderEvidence(await profileDatabase(oracle, db)));
+      const profile = await profileDatabase(oracle, db);
+      profiles.set(db, profile);
+      synthesized.set(db, renderEvidence(profile));
     } catch {
       synthesized.set(db, '');
     }
   }
+
+  /**
+   * Evidence text for one case. The focused arm re-renders the same profile with
+   * the question's words, so the two arms differ only in line order — not in
+   * which columns were profiled and not in the character budget.
+   */
+  const evidenceFor = (arm: Arm, question: BirdQuestion): string | undefined => {
+    if (arm.evidence !== 'synthetic') return undefined;
+    const profile = profiles.get(question.db_id);
+    if (profile === undefined) return undefined;
+    return arm.focus === true ? renderEvidence(profile, { focus: question.question }) : synthesized.get(question.db_id);
+  };
+
+  // Structural semantics per database. Kept separate from the value profile:
+  // one block says what a column means, the other says what it contains.
+  const definitions = new Map<string, string>();
+  for (const [db, schema] of schemas) definitions.set(db, renderDefinitions(schema));
 
   const gold = new Map<number, OracleResult>();
   const unrunnable: { id: number; db: string; error: string }[] = [];
@@ -267,10 +304,20 @@ async function main() {
       tablesInPrompts,
       tablesTotal,
       truncatedPrompts: truncated,
+      // How much of the schema yields a structural claim at all. A database of
+      // free-text columns produces nothing, and that is a fact about the method
+      // worth reporting next to its accuracy.
+      semanticsDatabases: [...definitions.values()].filter((text) => text.length > 0).length,
+      semanticsDatabaseTotal: definitions.size,
+      semanticsCases: cases.filter((question) => (definitions.get(question.db_id) ?? '').length > 0).length,
+      semanticsMeanChars: Math.round(
+        [...definitions.values()].reduce((total, text) => total + text.length, 0) / Math.max(1, definitions.size),
+      ),
     },
   };
 
   if (config.dryRun) {
+    const withSemantics = cases.find((question) => (definitions.get(question.db_id) ?? '').length > 0);
     const prompts = cases.slice(0, 3).map((question) => ({
       id: question.question_id,
       prompt: buildSqlPrompt(
@@ -278,6 +325,15 @@ async function main() {
         schemas.get(question.db_id) as SchemaTable[],
         promptFor(ARMS[0] as Arm, question),
       ),
+      ...(withSemantics === undefined || withSemantics.question_id !== question.question_id
+        ? {}
+        : {
+            definitionsPrompt: buildSqlPrompt(
+              question.question,
+              schemas.get(question.db_id) as SchemaTable[],
+              promptFor(ARMS[1] as Arm, question, undefined, definitions.get(question.db_id)),
+            ),
+          }),
     }));
     report.prompts = prompts;
     report.arms = [];
@@ -302,7 +358,7 @@ async function main() {
         provider,
         maxRepairs: arm.repairs,
         linking: arm.linking,
-        prompt: promptFor(arm, question, synthesized.get(question.db_id)),
+        prompt: promptFor(arm, question, evidenceFor(arm, question), definitions.get(question.db_id)),
         ...(arm.repairs === 0
           ? {}
           : {
@@ -365,6 +421,14 @@ async function main() {
       bucket.total += 1;
       if (run.passed) bucket.passed += 1;
     }
+    const promptSizes = cases.map(
+      (question) =>
+        buildSqlPrompt(
+          question.question,
+          schemas.get(question.db_id) as SchemaTable[],
+          promptFor(arm, question, evidenceFor(arm, question), definitions.get(question.db_id)),
+        ).length,
+    );
     const kindOf = (run: CaseRun): string | undefined => run.errorKind ?? (run.error === undefined ? undefined : 'other');
     const errors = {
       execution: runs.filter((run) => kindOf(run) === 'execution').length,
@@ -390,6 +454,10 @@ async function main() {
       duplicateCredit: summary.passed - strictPassed,
       exactMatchRate: runs.filter((run) => run.strict).length / summary.total,
       repaired: runs.filter((run) => run.attempts > 1).length,
+      promptChars: {
+        mean: Math.round(promptSizes.reduce((total, size) => total + size, 0) / Math.max(1, promptSizes.length)),
+        max: Math.max(0, ...promptSizes),
+      },
       byDifficulty,
       errors,
       topErrors: [...messages.entries()].sort((left, right) => right[1] - left[1]).slice(0, 5),
