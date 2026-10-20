@@ -171,6 +171,8 @@ jobs:
         run: pnpm bench:bird
       - name: Noise floor (same cases, three repeats)
         run: pnpm bench:bird:stability
+      - name: Adversarial shapes (window, ratio, multi-hop, tie)
+        run: pnpm bench:adversarial
       - name: Publish summary
         if: always()
         run: node tools/bird-summary.mjs >> "$GITHUB_STEP_SUMMARY"
@@ -183,5 +185,6 @@ jobs:
             eval/out/bird-eval.json
             eval/out/duckdb-portability.json
             eval/out/bird-stability.json
+            eval/out/adversarial.json
           if-no-files-found: warn
           retention-days: 30

@@ -30,7 +30,8 @@
     "bench:bird:dry": "tsx eval/bird/run.ts --dry-run",
     "bench:bird:fetch": "node eval/bird/fetch.mjs",
     "bench:bird:port": "node eval/bird/portability.mjs",
-    "bench:bird:stability": "tsx eval/bird/stability.ts"
+    "bench:bird:stability": "tsx eval/bird/stability.ts",
+    "bench:adversarial": "tsx eval/adversarial/run.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

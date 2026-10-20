@@ -19,6 +19,7 @@ function read(name) {
 const report = read('bird-eval.json');
 const portability = read('duckdb-portability.json');
 const stability = read('bird-stability.json');
+const adversarial = read('adversarial.json');
 const lines = ['## BIRD Mini-Dev (external benchmark)', ''];
 
 if (report === null) {
@@ -67,6 +68,22 @@ if (stability !== null) {
     `Same ${stability.cases} cases asked ${stability.repeats} times on arm \`${stability.arm}\`: **${stability.flips}** cases disagreed with themselves (${(stability.flipRate * 100).toFixed(1)}%); majority ${(stability.majorityAccuracy * 100).toFixed(1)}% vs single run ${(stability.firstRunAccuracy * 100).toFixed(1)}%.`,
     '',
   );
+}
+
+if (adversarial !== null) {
+  lines.push('### Adversarial shapes (hand-written, separate from BIRD)', '');
+  lines.push('| arm | accuracy | window | ratio | multi-hop | tie |', '| --- | --- | --- | --- | --- | --- |');
+  for (const arm of adversarial.arms) {
+    const cell = (name) => {
+      const bucket = arm.byCategory[name];
+      return bucket === undefined ? '–' : `${bucket.passed}/${bucket.total}`;
+    };
+    lines.push(
+      `| ${arm.arm} | ${(arm.accuracy * 100).toFixed(1)}% (${arm.passed}/${arm.total}) | ${cell('window')} | ${cell('ratio')} | ${cell('multi-hop')} | ${cell('tie')} |`,
+    );
+  }
+  const effect = adversarial.ablations['names -> metadata'];
+  lines.push('', `names → metadata: ${effect.delta >= 0 ? '+' : ''}${(effect.delta * 100).toFixed(1)}pp (only before ${effect.onlyFirst}, only after ${effect.onlySecond}, p=${effect.p.toFixed(3)}). Each category has 8 cases, so a category cell moves in steps of 12.5pp.`, '');
 }
 
 if (portability !== null) {
