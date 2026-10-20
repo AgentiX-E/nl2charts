@@ -70,3 +70,20 @@ export function sameRows(
       .join('\n');
   return left.length === right.length && key(left) === key(right);
 }
+
+export interface ResultSet {
+  readonly columns: readonly string[];
+  readonly rows: readonly Readonly<Record<string, unknown>>[];
+}
+
+/**
+ * Execution accuracy for two SQL results: same column count, same values in the
+ * same column order. Aliases are ignored (they are presentation), column order
+ * is not (it is part of the result shape).
+ */
+export function sameResult(left: ResultSet, right: ResultSet): boolean {
+  if (left.columns.length !== right.columns.length || left.rows.length !== right.rows.length) return false;
+  const key = (result: ResultSet): string =>
+    result.rows.map((row) => JSON.stringify(result.columns.map((column) => row[column] ?? null))).sort().join('\n');
+  return key(left) === key(right);
+}

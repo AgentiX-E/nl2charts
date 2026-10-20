@@ -75,3 +75,13 @@ describe('execution accuracy', () => {
     expect(sameRows([{ a: 1 }], [{ a: 1 }, { a: 1 }])).toBe(false);
   });
 });
+
+describe('result-set comparison by shape', () => {
+  it('ignores aliases but not column order or values', async () => {
+    const { sameResult } = await import('../src/index.js');
+    expect(sameResult({ columns: ['a'], rows: [{ a: 1 }] }, { columns: ['b'], rows: [{ b: 1 }] })).toBe(true);
+    expect(sameResult({ columns: ['a', 'b'], rows: [{ a: 1, b: 2 }] }, { columns: ['b', 'a'], rows: [{ a: 1, b: 2 }] })).toBe(false);
+    expect(sameResult({ columns: ['a'], rows: [{ a: 1 }] }, { columns: ['a'], rows: [{ a: 2 }] })).toBe(false);
+    expect(sameResult({ columns: ['a'], rows: [] }, { columns: ['a', 'b'], rows: [] })).toBe(false);
+  });
+});

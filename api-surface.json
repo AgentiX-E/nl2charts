@@ -247,6 +247,7 @@
     "mcnemarExact",
     "recordCase",
     "runContractSuite",
+    "sameResult",
     "sameRows",
     "summarise",
     "type ArmResult",
@@ -256,6 +257,7 @@
     "type ContractExpectation",
     "type Interval",
     "type PairedComparison",
+    "type ResultSet",
     "wilsonInterval"
   ]
 }

@@ -1,8 +1,8 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createRunner } from '@agentix-e/nl2charts-core';
-import { compareArms, mcnemarExact, sameRows, summarise, wilsonInterval } from '@agentix-e/nl2charts-devkit';
-import type { ArmResult } from '@agentix-e/nl2charts-devkit';
+import { compareArms, mcnemarExact, sameResult, summarise, wilsonInterval } from '@agentix-e/nl2charts-devkit';
+import type { ArmResult, ResultSet } from '@agentix-e/nl2charts-devkit';
 import { createHttpProvider, createPipeline } from '@agentix-e/nl2charts-ai';
 import { createDuckDbEngine } from '@agentix-e/nl2charts-node';
 import { ROOT } from '../run.js';
@@ -44,16 +44,18 @@ for (const statement of fixture.split(';').map((part) => part.trim()).filter((pa
 const runner = createRunner({ engine, maxRows: 10_000 });
 const cases = liveCases();
 
-const rowsOf = async (sql: string): Promise<readonly Readonly<Record<string, unknown>>[]> =>
-  (await runner.sql(sql, { limit: 10_000 })).rows;
+const rowsOf = async (sql: string): Promise<ResultSet> => {
+  const result = await runner.sql(sql, { limit: 10_000 });
+  return { columns: result.columns, rows: result.rows };
+};
 
 // Every gold query must run before a model is called. A broken case would look
 // like a model failure and poison the accuracy number.
-const goldRows = new Map<string, readonly Readonly<Record<string, unknown>>[]>();
+const goldRows = new Map<string, ResultSet>();
 for (const testCase of cases) {
   try {
     const rows = await rowsOf(testCase.goldSql);
-    if (rows.length === 0) throw new Error('gold query returned no rows');
+    if (rows.rows.length === 0) throw new Error('gold query returned no rows');
     goldRows.set(testCase.id, rows);
   } catch (error) {
     throw new Error(`case ${testCase.id} has a broken gold query: ${error instanceof Error ? error.message : String(error)}`);
@@ -101,8 +103,8 @@ async function runArm(spec: ArmSpec): Promise<ArmResult> {
     try {
       const { sql } = await pipeline.ask({ question: testCase.question, schema: liveSchema as never });
       const predicted = await rowsOf(sql);
-      const gold = goldRows.get(testCase.id) ?? [];
-      return { id: testCase.id, intent: testCase.intent, question: testCase.question, passed: sameRows(predicted, gold), predicted: sql };
+      const gold = goldRows.get(testCase.id) as ResultSet;
+      return { id: testCase.id, intent: testCase.intent, question: testCase.question, passed: sameResult(predicted, gold), predicted: sql };
     } catch (error) {
       return {
         id: testCase.id,
@@ -134,7 +136,7 @@ async function runArm(spec: ArmSpec): Promise<ArmResult> {
 
 // Harness controls: the gold query must match itself, the empty query nothing.
 const oracleRows = await rowsOf('select 1 as x where false');
-const emptyControl = sameRows(oracleRows, goldRows.get(cases[0]?.id ?? '') ?? []);
+const emptyControl = sameResult(oracleRows, goldRows.get(cases[0]?.id as string) as ResultSet);
 if (emptyControl) throw new Error('negative control failed: an empty result matched a gold result');
 
 const results: (ArmResult & { cases?: CaseRun[] })[] = [];
