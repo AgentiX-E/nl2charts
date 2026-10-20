@@ -11,6 +11,11 @@ import { join, resolve } from 'node:path';
 const ROOT = resolve(new URL('..', import.meta.url).pathname);
 const SNAPSHOT = join(ROOT, 'api-surface.json');
 const PACKAGES = ['spec', 'core', 'ai', 'node', 'chart', 'mcp', 'studio', 'devkit'];
+const SUBPATHS = {
+  core: { guard: 'guard.d.ts', normalize: 'normalize.d.ts', negotiate: 'negotiate.d.ts', semantic: 'semantic/index.d.ts' },
+  ai: { linking: 'linking.d.ts', llm: 'provider.d.ts' },
+  node: { duckdb: 'duckdb.d.ts', cache: 'cache.d.ts' },
+};
 
 export function extractExports(dts) {
   const names = new Set();
@@ -32,8 +37,10 @@ function main() {
   const update = process.argv.includes('--update');
   const current = {};
   for (const name of PACKAGES) {
-    const dts = readFileSync(join(ROOT, 'packages', name, 'dist', 'index.d.ts'), 'utf8');
-    current[name] = extractExports(dts);
+    current[name] = extractExports(readFileSync(join(ROOT, 'packages', name, 'dist', 'index.d.ts'), 'utf8'));
+    for (const [subpath, file] of Object.entries(SUBPATHS[name] ?? {})) {
+      current[`${name}/${subpath}`] = extractExports(readFileSync(join(ROOT, 'packages', name, 'dist', file), 'utf8'));
+    }
   }
 
   if (update) {
@@ -44,7 +51,7 @@ function main() {
 
   const before = JSON.parse(readFileSync(SNAPSHOT, 'utf8'));
   const diffs = [];
-  for (const name of PACKAGES) {
+  for (const name of Object.keys(current)) {
     const expected = new Set(before[name] ?? []);
     const actual = new Set(current[name] ?? []);
     for (const symbol of expected) {

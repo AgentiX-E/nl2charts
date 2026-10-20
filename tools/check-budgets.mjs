@@ -17,14 +17,24 @@ function gzipSize(path) {
   return gzipSync(readFileSync(path), { level: 9 }).length;
 }
 
+function distJavaScript(dir) {
+  const files = [];
+  const walk = (current) => {
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      const path = join(current, entry.name);
+      if (entry.isDirectory()) walk(path);
+      else if (entry.name.endsWith('.js') || entry.name.endsWith('.cjs')) files.push(path);
+    }
+  };
+  walk(dir);
+  return files;
+}
+
 let failed = false;
 for (const name of PACKAGES) {
   const dir = join(ROOT, 'packages', name, 'dist');
   let total = 0;
-  for (const file of readdirSync(dir)) {
-    if (!file.endsWith('.js') && !file.endsWith('.cjs')) continue;
-    total += gzipSize(join(dir, file));
-  }
+  for (const file of distJavaScript(dir)) total += gzipSize(file);
   const budget = BUDGET_BYTES[name];
   const ok = total <= budget;
   console.log(`${ok ? 'PASS' : 'FAIL'} ${name.padEnd(8)} ${String(total).padStart(6)} B gzip / budget ${budget} B`);

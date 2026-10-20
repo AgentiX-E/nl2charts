@@ -12,6 +12,12 @@ const read = (name) => JSON.parse(readFileSync(join(ROOT, 'eval/out', name), 'ut
 const results = read('results.json');
 const linking = read('linking-ablation.json');
 const ablation = read('ablation.json');
+let semantic = null;
+try {
+  semantic = read('semantic-ablation.json');
+} catch {
+  semantic = null;
+}
 
 const lines = ['## Benchmark', '', 'Dataset: `eval/golden.jsonl` (20 questions, deterministic fixture, DuckDB).', ''];
 lines.push('| predictor | exact match | unordered match | passed/total |');
@@ -26,6 +32,20 @@ lines.push('### Schema linking ablation (recall@3)', '', '| arm | recall@3 |', '
 for (const arm of linking.arms) {
   lines.push(`| ${arm.arm} | ${(arm.recallAt3 * 100).toFixed(1)}% (${arm.hits}/${arm.total}) |`);
 }
+if (semantic) {
+  lines.push(
+    '',
+    '### Semantic compiler ablation',
+    '',
+    `Optimizer equivalence: ${semantic.equivalence.passed}/${semantic.equivalence.total} identical result sets. CTEs per query ${semantic.optimizer.averageCtesUnoptimized.toFixed(2)} -> ${semantic.optimizer.averageCtesOptimized.toFixed(2)} (${(semantic.optimizer.reduction * 100).toFixed(1)}% fewer).`,
+    '',
+    '| segment | naive join | compiled | inflation |',
+    '| --- | --- | --- | --- |',
+    ...semantic.fanout.cases.map((entry) => `| ${entry.query} | ${entry.naive.toFixed(2)} | ${entry.compiled.toFixed(2)} | ${entry.ratio.toFixed(2)}x |`),
+    '',
+  );
+}
+
 lines.push(
   '',
   `### Question normalization (paired)`,

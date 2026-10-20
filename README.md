@@ -7,7 +7,7 @@ Two rules shape the whole design:
 1. **The runtime does not need a model.** `core` executes SQL and returns rows. Natural language lives in a separate package (`ai`) that you install only if you want it.
 2. **Every statement passes a lexical guard.** The guard refuses what it cannot classify instead of rewriting it. Read-only is enforced before the engine sees the query.
 
-> **Status: 0.1.0, foundation milestone.** The eight packages, their boundaries, the test and benchmark harness, and the quality gates exist and run in CI. The semantic-layer compiler, connectors and live-LLM benchmark are not implemented yet. See [docs/benchmarks.md](docs/benchmarks.md) for exactly what the numbers do and do not mean.
+> **Status: 0.2.0, semantic compiler milestone.** The eight packages, the four-stage metric compiler, the test and benchmark harness and the quality gates exist and run in CI. Connectors and the live-LLM benchmark are not implemented yet. See [docs/benchmarks.md](docs/benchmarks.md) for exactly what the numbers do and do not mean.
 
 ## What works today
 
@@ -18,6 +18,7 @@ Two rules shape the whole design:
 | Native DuckDB, file cache | `@agentix-e/nl2charts-node` | `createDuckDbEngine()` |
 | Profiling, lint, ECharts option | `@agentix-e/nl2charts-chart` | `compileToECharts(ir)` |
 | Prompting, schema linking, repair loop | `@agentix-e/nl2charts-ai` | `createPipeline({ provider }).ask(...)` |
+| Metric compiler (Plan→Optimize→Lower→Render) | `@agentix-e/nl2charts-core/semantic` | `compileQuery({ metrics: ['revenue'] }, model)` |
 | Model validation | `@agentix-e/nl2charts-studio` | `validateModel(doc)` |
 | MCP tools over stdio | `@agentix-e/nl2charts-mcp` | `attachStreams(server, input, write)` |
 | Contract tests and golden cases | `@agentix-e/nl2charts-devkit` | `runContractSuite(runner, cases)` |
@@ -91,6 +92,21 @@ const { sql, linked } = await pipeline.ask({
 
 The pipeline validates every candidate with the same guard the runner uses, so a model cannot "repair" a query by dropping a table.
 
+## Quick start: metrics to SQL
+
+```ts
+import { compileQuery } from '@agentix-e/nl2charts-core/semantic';
+
+const compiled = compileQuery({ metrics: ['aov'], dimensions: ['region'] }, model);
+const result = await runner.sql(compiled.sql);
+// aov is sum(revenue) / count(orders), not avg(unit price)
+```
+
+The compiler plans a DAG, optimizes it, lowers it to CTEs and renders SQL. Metrics
+declare their native grain, so a measure is aggregated **before** any join: in the
+benchmark fixture a hand-written join inflates revenue **3.00x**, while the
+compiled query matches the gold result on 144/144 generated queries.
+
 ## Build from source
 
 ```bash
@@ -122,7 +138,8 @@ Every push runs the same gates locally and in CI:
 - [Your first chart](docs/guide/03-first-chart.md)
 - [Your first query](docs/guide/04-first-query.md)
 - [Natural language](docs/guide/05-natural-language.md)
-- [Semantic layer](docs/guide/06-semantic-layer.md)
+- [Semantic layer validation](docs/guide/06-semantic-layer.md)
+- [Compiling metrics to SQL](docs/guide/08-semantic-compiler.md)
 - [Production checklist](docs/guide/07-production.md)
 - [Architecture](docs/architecture.md)
 - [Glossary](docs/glossary.md)

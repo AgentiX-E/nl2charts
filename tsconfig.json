@@ -7,6 +7,7 @@
       "@agentix-e/nl2charts-core": ["packages/core/src/index.ts"],
       "@agentix-e/nl2charts-core/guard": ["packages/core/src/guard.ts"],
       "@agentix-e/nl2charts-core/negotiate": ["packages/core/src/negotiate.ts"],
+      "@agentix-e/nl2charts-core/semantic": ["packages/core/src/semantic/index.ts"],
       "@agentix-e/nl2charts-core/normalize": ["packages/core/src/normalize.ts"],
       "@agentix-e/nl2charts-ai": ["packages/ai/src/index.ts"],
       "@agentix-e/nl2charts-ai/linking": ["packages/ai/src/linking.ts"],

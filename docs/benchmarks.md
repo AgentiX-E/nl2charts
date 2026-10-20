@@ -58,6 +58,23 @@ kept because it is harmless and the sample is small, but the documentation does
 not claim a benefit. With 0 discordant pairs the test has no power; the next
 iteration expands the set to ≥100 questions before drawing a conclusion.
 
+## Semantic compiler ablation
+
+`pnpm bench:semantic` runs 144 generated metric queries (8 metric sets × 6
+dimension sets × 3 filter sets) against the deterministic fixture, compiling each
+one twice: with the optimizer and without it.
+
+| Measurement | Result |
+| --- | --- |
+| Identical result sets (optimized vs plain) | **144 / 144** |
+| CTEs per query | 7.71 → 5.02 (**34.9% fewer**) |
+| Naive join vs grain-first, per segment | **3.00x** inflation |
+
+The optimizer is allowed to change SQL, never rows. If one pair diverges the run
+fails. The fan-out number is produced by executing a hand-written join and the
+compiled query against the same data; the fixture uses `DECIMAL` money columns so
+the comparison is exact, not floating-point tolerant.
+
 ## What these numbers are not
 
 - **Not a SOTA claim.** The dataset is a local fixture, not BIRD, Spider 2.0 or

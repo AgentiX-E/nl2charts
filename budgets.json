@@ -2,7 +2,7 @@
   "$comment": "gzip byte ceilings for dist javascript. Ratchet down as the skeleton matures; raising a budget requires review.",
   "packages": {
     "spec": 5000,
-    "core": 20000,
+    "core": 36000,
     "ai": 14000,
     "node": 9500,
     "chart": 9500,

@@ -1,6 +1,6 @@
 {
   "name": "@agentix-e/nl2charts-devkit",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Contract tests and benchmark helpers. Never a production dependency.",
   "license": "Apache-2.0",
   "type": "module",

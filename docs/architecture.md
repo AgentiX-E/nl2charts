@@ -47,6 +47,7 @@ subpaths and a zero-IO root entry:
 @agentix-e/nl2charts-core/guard            the lexical guard
 @agentix-e/nl2charts-core/normalize        canonical values and row hashing
 @agentix-e/nl2charts-core/negotiate        local / remote / reject routing
+@agentix-e/nl2charts-core/semantic         four-stage metric compiler
 
 @agentix-e/nl2charts-node                  Node bindings
 @agentix-e/nl2charts-node/duckdb           native DuckDB
@@ -73,6 +74,38 @@ PLT1/PLT2/PLT7 are decided from an esbuild **metafile**, not by searching the
 output text: a tree-shaken import never reaches the output, so string matching
 would silently pass a broken package. The checker is itself mutation-tested —
 seven deliberate violations must each turn the corresponding check red.
+
+## Semantic compilation
+
+```
+MetricQuery
+   │ Plan       resolve names, joins, grain; refuse ambiguity
+   ▼
+DataflowPlan   read / aggregate / join / compute / window / project / sort / limit
+   │ Optimize   deduplicate reads, collapse projections, merge limits
+   ▼
+DataflowPlan'
+   │ Lower      one CTE per node
+   ▼
+SqlPlan
+   │ Render     quoted SQL
+   ▼
+SQL
+```
+
+Two invariants are enforced by construction rather than by review:
+
+1. **Grain first.** A measure is aggregated at its declared grain before any
+   dimension table is joined, so a one-to-many join cannot inflate it. The
+   benchmark reproduces a 3.00x inflation for a hand-written join and 0x for the
+   compiler.
+2. **Filters cannot be swallowed.** A query filter on a dimension table turns the
+   dimension join into an inner join, and a filter on a table the query never
+   reads is a compile error (`UNUSED_FILTER`).
+
+The optimizer is measured, not asserted: 144 generated queries are executed with
+and without it, and every pair must produce identical result sets. It currently
+removes 34.9% of the CTEs on that set.
 
 ## Request flow
 
@@ -152,7 +185,7 @@ test/              cross-package public-surface snapshot
 | `pnpm gate:layering` | a forbidden dependency edge |
 | `check-platform` | a runtime boundary was crossed |
 | `check-platform --self-test` | the checker stopped detecting a known mutation |
-| `pnpm gate:exports` | the public surface drifted without review |
+| `pnpm gate:exports` | the public surface (including subpaths) drifted without review |
 | `pnpm gate:budgets` | a package exceeded its gzip ceiling |
 | `pnpm bench` | a control broke (oracle ≠ 100% or empty ≠ 0%) |
 

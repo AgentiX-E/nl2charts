@@ -109,3 +109,32 @@ fetching `limit + 1` rows, not by a second count query.
 
 **Value profiler** — The recaller that matches sample values from a column
 (`north` → `region`). Worth 28pp of recall@3 on the benchmark fixture.
+
+**DataflowPlan** — The semantic graph the compiler builds before SQL exists:
+read, aggregate, join, compute, window, project, sort, limit. It is what
+`explainQuery()` returns and what the optimizer rewrites.
+
+**Fan-out** — Row multiplication caused by joining a one-to-many table before
+aggregating. A hand-written join inflates revenue 3.00x on the benchmark fixture;
+aggregating at the metric grain first prevents it.
+
+**Grain** — The column(s) that make a row unique for a measure (`order_id` for an
+order-level amount). Declared per metric and used as the aggregation key before
+joins.
+
+**Inner join on a filtered dimension** — When a query filters a dimension table,
+the compiler joins it with `INNER JOIN` instead of `LEFT JOIN`, so filtered-out
+rows do not survive as a `NULL` group.
+
+**Masked column** — A column the compiler may not read at all. Referencing it in a
+metric, dimension or filter fails with `MASKED_COLUMN` rather than returning null.
+
+**Ratio metric** — A metric compiled as `sum(numerator) / sum(denominator)`, never
+`avg(numerator/denominator)`; the two differ whenever group sizes differ.
+
+**Row-level security (RLS)** — A predicate attached to a table and injected into
+every read of that table, including reads generated for joins. A contradictory
+query filter yields zero rows rather than escaping it.
+
+**SqlPlan** — The lowered, dialect-neutral form: one CTE per dataflow node. A new
+SQL dialect is a renderer over this plan, not a new compiler.

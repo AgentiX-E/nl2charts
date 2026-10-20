@@ -1,6 +1,6 @@
 {
   "name": "@agentix-e/nl2charts-core",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "SQL-first runtime: guard, normalization, routing and execution. No model calls.",
   "license": "Apache-2.0",
   "type": "module",
@@ -27,6 +27,11 @@
       "types": "./dist/negotiate.d.ts",
       "import": "./dist/negotiate.js",
       "require": "./dist/negotiate.cjs"
+    },
+    "./semantic": {
+      "types": "./dist/semantic/index.d.ts",
+      "import": "./dist/semantic/index.js",
+      "require": "./dist/semantic/index.cjs"
     }
   },
   "files": [
@@ -34,7 +39,7 @@
   ],
   "sideEffects": false,
   "scripts": {
-    "build": "tsup src/index.ts src/guard.ts src/normalize.ts src/negotiate.ts --format esm,cjs --dts --clean"
+    "build": "tsup src/index.ts src/guard.ts src/normalize.ts src/negotiate.ts src/semantic/index.ts --format esm,cjs --dts --clean"
   },
   "dependencies": {
     "@agentix-e/nl2charts-spec": "workspace:*"

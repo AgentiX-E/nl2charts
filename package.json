@@ -21,8 +21,9 @@
     "gate:all": "pnpm gate:layering && node tools/check-platform.mjs && node tools/check-platform.mjs --self-test && pnpm gate:exports && pnpm gate:budgets",
     "bench": "tsx eval/run.ts",
     "bench:ablate": "tsx eval/ablate.ts",
-    "verify": "pnpm typecheck && pnpm build && pnpm test:coverage && pnpm gate:coverage && pnpm gate:all && pnpm bench && pnpm bench:linking",
-    "bench:linking": "tsx eval/linking-ablation.ts"
+    "verify": "pnpm typecheck && pnpm build && pnpm test:coverage && pnpm gate:coverage && pnpm gate:all && pnpm bench && pnpm bench:linking && pnpm bench:semantic",
+    "bench:linking": "tsx eval/linking-ablation.ts",
+    "bench:semantic": "tsx eval/semantic-ablation.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

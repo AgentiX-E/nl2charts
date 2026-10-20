@@ -78,6 +78,8 @@ jobs:
         run: pnpm bench:linking
       - name: Normalization paired ablation
         run: pnpm bench:ablate
+      - name: Semantic compiler ablation
+        run: pnpm bench:semantic
       - name: Publish summary
         run: node tools/bench-summary.mjs >> "$GITHUB_STEP_SUMMARY"
       - name: Upload benchmark artifacts
