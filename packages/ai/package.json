@@ -1,6 +1,6 @@
 {
   "name": "@agentix-e/nl2charts-ai",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Natural language layer: schema linking, prompts and provider-agnostic LLM calls.",
   "license": "Apache-2.0",
   "type": "module",

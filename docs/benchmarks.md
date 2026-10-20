@@ -75,6 +75,31 @@ fails. The fan-out number is produced by executing a hand-written join and the
 compiled query against the same data; the fixture uses `DECIMAL` money columns so
 the comparison is exact, not floating-point tolerant.
 
+## Live NL to SQL evaluation
+
+`pnpm bench:live` runs 210 generated questions over the semantic fixture through
+a real model (`deepseek-chat`), three times per case, majority-scored. Every gold
+query is executed before the model is called.
+
+Latest run (GitHub Actions, commit `f9c8e6e`):
+
+| Arm | Execution accuracy | 95% Wilson | Cases that disagreed with themselves |
+| --- | --- | --- | --- |
+| schema names | **100%** (210/210) | [98.2, 100] | 0 |
+| + enum samples | **100%** (210/210) | [98.2, 100] | 0 |
+| + repair loop (2 turns) | **100%** (210/210) | [98.2, 100] | 0 |
+
+**This is a ceiling, not a capability claim.** Twenty intents with paraphrases
+are saturated by the current model, so the paired ablations show no difference
+and cannot measure a module's contribution. Two earlier runs did:
+enum samples induced an unstated `status = 'completed'` filter on 31 cases
+(97.1% → 82.4%, McNemar p < 1e-9), and missing column comments made the model
+treat item price × quantity as the order amount. Both prompt defects are fixed;
+the regression and its fix are recorded rather than hidden by the final number.
+
+The next benchmark must create headroom: BIRD Mini-Dev (external schema and
+questions) plus adversarial cases. Until then, no SOTA claim is made.
+
 ## What these numbers are not
 
 - **Not a SOTA claim.** The dataset is a local fixture, not BIRD, Spider 2.0 or

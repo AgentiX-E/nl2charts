@@ -117,6 +117,16 @@ const recording = recordProvider(liveProvider, calls);
 CI runs the replay provider, so tests are deterministic and cost nothing. Live
 numbers are produced only by the benchmark workflow with a real key.
 
+## Schema cards: comments yes, samples carefully
+
+A schema card is not only names and types. One line of business meaning per
+column (`amount DECIMAL -- total amount charged for the order`) measurably
+prevents wrong joins. Enum sample values are different: they can make a model
+invent a filter the question never asked for. Measured: with samples but without
+an explicit rule, accuracy dropped 14.8pp because the model added
+`status = 'completed'` to 31 questions. The prompt now states that sample values
+are examples and only stated filters may be used; samples are off by default.
+
 ## Prompt size and cost
 
 - `renderSchemaCard(schema)` prints one line per table; pass a limit to cap it.

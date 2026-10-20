@@ -138,3 +138,17 @@ query filter yields zero rows rather than escaping it.
 
 **SqlPlan** — The lowered, dialect-neutral form: one CTE per dataflow node. A new
 SQL dialect is a renderer over this plan, not a new compiler.
+
+**Execution accuracy** — Whether a predicted query's result set equals the gold
+result: same column count, same column order, same values; aliases are ignored.
+
+**Repeat / majority** — Every live case is asked several times (default three)
+and scored by majority. `temperature: 0` alone is not deterministic; the
+artifact reports how many cases disagreed with themselves.
+
+**Saturation** — A benchmark on which every arm scores near 100%, so it cannot
+measure a module's contribution. The 210-question synthetic set is saturated for
+`deepseek-chat`; external sets are required for headroom.
+
+**Self-flip** — A case whose outcome differs across repeated identical calls. A
+non-zero flip count invalidates single-run ablation claims.

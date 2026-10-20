@@ -7,7 +7,7 @@ Two rules shape the whole design:
 1. **The runtime does not need a model.** `core` executes SQL and returns rows. Natural language lives in a separate package (`ai`) that you install only if you want it.
 2. **Every statement passes a lexical guard.** The guard refuses what it cannot classify instead of rewriting it. Read-only is enforced before the engine sees the query.
 
-> **Status: 0.2.0, semantic compiler milestone.** The eight packages, the four-stage metric compiler, the test and benchmark harness and the quality gates exist and run in CI. Connectors and the live-LLM benchmark are not implemented yet. See [docs/benchmarks.md](docs/benchmarks.md) for exactly what the numbers do and do not mean.
+> **Status: 0.3.0, live evaluation milestone.** The eight packages, the four-stage metric compiler, the live NL→SQL harness with paired ablations, and the quality gates exist and run in CI. Connectors and external benchmarks (BIRD, Spider) are not implemented yet. See [docs/benchmarks.md](docs/benchmarks.md) for exactly what the numbers do and do not mean.
 
 ## What works today
 
