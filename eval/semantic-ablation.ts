@@ -35,22 +35,35 @@ const metricSets: readonly (readonly string[])[] = [
   ['avg_order'],
   ['tax'],
   ['revenue', 'orders'],
+  ['ytd_revenue'],
 ];
-const dimensionSets: readonly (readonly string[])[] = [[], ['region'], ['channel'], ['month'], ['segment'], ['region', 'channel']];
+const dimensionSets: readonly (readonly string[])[] = [
+  [],
+  ['region'],
+  ['channel'],
+  ['month'],
+  ['segment'],
+  ['region', 'channel'],
+  ['month', 'region'],
+  ['status', 'region'],
+];
 const filterSets: readonly (readonly { column: string; op: '=' | 'in'; value: string | readonly string[] }[])[] = [
   [],
   [{ column: 'orders.status', op: '=', value: 'completed' }],
   [{ column: 'orders.region', op: 'in', value: ['north', 'east'] }],
+  [{ column: 'orders.channel', op: '=', value: 'web' }],
 ];
 
 const queries: MetricQuery[] = [];
 for (const metrics of metricSets) {
   for (const dimensions of dimensionSets) {
     for (const filters of filterSets) {
-      queries.push({ metrics, dimensions, filters: filters as never });
+      if (metrics.includes('ytd_revenue') && !dimensions.includes('month')) continue;
+      if (queries.length < 200) queries.push({ metrics, dimensions, filters: filters as never });
     }
   }
 }
+if (queries.length !== 200) throw new Error(`expected 200 queries, generated ${queries.length}`);
 
 const rowsOf = async (sql: string): Promise<readonly Readonly<Record<string, unknown>>[]> =>
   (await runner.sql(sql, { limit: 10_000 })).rows;

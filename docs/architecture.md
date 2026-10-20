@@ -103,9 +103,9 @@ Two invariants are enforced by construction rather than by review:
    dimension join into an inner join, and a filter on a table the query never
    reads is a compile error (`UNUSED_FILTER`).
 
-The optimizer is measured, not asserted: 144 generated queries are executed with
+The optimizer is measured, not asserted: 200 generated queries are executed with
 and without it, and every pair must produce identical result sets. It currently
-removes 34.9% of the CTEs on that set.
+removes 34.1% of the CTEs on that set.
 
 ## Request flow
 

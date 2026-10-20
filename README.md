@@ -105,7 +105,7 @@ const result = await runner.sql(compiled.sql);
 The compiler plans a DAG, optimizes it, lowers it to CTEs and renders SQL. Metrics
 declare their native grain, so a measure is aggregated **before** any join: in the
 benchmark fixture a hand-written join inflates revenue **3.00x**, while the
-compiled query matches the gold result on 144/144 generated queries.
+compiled query matches the gold result on 200/200 generated queries.
 
 ## Build from source
 
