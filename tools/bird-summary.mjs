@@ -18,6 +18,7 @@ function read(name) {
 
 const report = read('bird-eval.json');
 const portability = read('duckdb-portability.json');
+const stability = read('bird-stability.json');
 const lines = ['## BIRD Mini-Dev (external benchmark)', ''];
 
 if (report === null) {
@@ -55,6 +56,15 @@ if (report === null) {
   }
   lines.push(
     '> Execution accuracy is BIRD\u2019s official judge: `set(predicted) == set(gold)` over tuples, so row order is ignored and duplicate rows collapse. The strict column repeats the comparison as a multiset; the difference is the number of cases the official rule credits because of duplicates.',
+    '',
+  );
+}
+
+if (stability !== null) {
+  lines.push(
+    '### Noise floor',
+    '',
+    `Same ${stability.cases} cases asked ${stability.repeats} times on arm \`${stability.arm}\`: **${stability.flips}** cases disagreed with themselves (${(stability.flipRate * 100).toFixed(1)}%); majority ${(stability.majorityAccuracy * 100).toFixed(1)}% vs single run ${(stability.firstRunAccuracy * 100).toFixed(1)}%.`,
     '',
   );
 }

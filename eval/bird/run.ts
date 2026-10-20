@@ -17,12 +17,12 @@
  *   pnpm bench:bird --dry-run     # gold execution, prompts, controls; no model
  *   pnpm bench:bird               # full run against the configured provider
  */
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHttpProvider } from '@agentix-e/nl2charts-ai';
 import type { PromptOptions, SchemaTable } from '@agentix-e/nl2charts-ai';
-import { buildSqlPrompt, createPipeline } from '@agentix-e/nl2charts-ai';
+import { buildSqlPrompt, createPipeline, renderSchemaCard } from '@agentix-e/nl2charts-ai';
 import { compareArms, judgeOfficial, judgeStrict, mcnemarExact, summarise, wilsonInterval } from '@agentix-e/nl2charts-devkit';
 import type { CaseOutcome, MatchReason } from '@agentix-e/nl2charts-devkit';
 import { buildSchema, loadDescriptions, loadQuestions, loadTables, stratifiedSample } from './data.js';
@@ -33,27 +33,54 @@ import type { OracleResult } from './oracle.js';
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
 const DATA = process.env.BIRD_DATA ?? join(ROOT, 'eval/.cache/bird/minidev/MINIDEV');
 const DATABASES = process.env.BIRD_DATABASES ?? join(DATA, 'dev_databases');
-const DEFAULT_DBS = [
-  'superhero',
-  'california_schools',
-  'student_club',
-  'thrombosis_prediction',
-  'toxicology',
-  'debit_card_specializing',
-];
+/**
+ * Which databases a run covers comes from the fetch manifest, so widening the
+ * dataset is one command (`fetch.mjs`) rather than two edits that can drift.
+ */
+function databasesFromManifest(): string[] {
+  try {
+    const manifest = JSON.parse(readFileSync(join(DATA, 'manifest.json'), 'utf8')) as {
+      databases?: { db: string }[];
+    };
+    return (manifest.databases ?? []).map((entry) => entry.db);
+  } catch {
+    return [];
+  }
+}
 
 export interface Arm {
   readonly name: string;
   readonly notes: boolean;
   readonly evidence: boolean;
   readonly repairs: number;
+  readonly linking: boolean;
 }
 
+/**
+ * Each arm differs from its parent by exactly one thing, so a delta belongs to
+ * one module:
+ *
+ *   names  ->  metadata          column labels, descriptions, join hints
+ *   metadata  ->  metadata+evidence     the dataset's evidence hint
+ *   metadata+evidence  ->  no-linking   our three-recaller schema linker
+ *   metadata+evidence  ->  repair       the execution-feedback repair loop
+ *
+ * The previous round compared `full` (metadata + evidence + repair) against
+ * `names`, which could not separate repair from the prompt changes.
+ */
 export const ARMS: readonly Arm[] = [
-  { name: 'names', notes: false, evidence: false, repairs: 0 },
-  { name: 'metadata', notes: true, evidence: false, repairs: 0 },
-  { name: 'evidence', notes: false, evidence: true, repairs: 0 },
-  { name: 'full', notes: true, evidence: true, repairs: 2 },
+  { name: 'names', notes: false, evidence: false, repairs: 0, linking: true },
+  { name: 'metadata', notes: true, evidence: false, repairs: 0, linking: true },
+  { name: 'metadata+evidence', notes: true, evidence: true, repairs: 0, linking: true },
+  { name: 'no-linking', notes: true, evidence: true, repairs: 0, linking: false },
+  { name: 'repair', notes: true, evidence: true, repairs: 2, linking: true },
+];
+
+const PAIRS: readonly (readonly [string, string])[] = [
+  ['names', 'metadata'],
+  ['metadata', 'metadata+evidence'],
+  ['metadata+evidence', 'no-linking'],
+  ['metadata+evidence', 'repair'],
 ];
 
 interface CaseRun extends CaseOutcome {
@@ -69,9 +96,12 @@ function settings() {
   const argv = process.argv.slice(2);
   return {
     dryRun: argv.includes('--dry-run'),
-    limit: Number(process.env.BIRD_LIMIT ?? 200),
-    concurrency: Number(process.env.BIRD_CONCURRENCY ?? 6),
-    dbs: (process.env.BIRD_DBS ?? DEFAULT_DBS.join(',')).split(',').map((name) => name.trim()).filter(Boolean),
+    limit: Number(process.env.BIRD_LIMIT ?? 240),
+    concurrency: Number(process.env.BIRD_CONCURRENCY ?? 8),
+    dbs: (process.env.BIRD_DBS !== undefined ? process.env.BIRD_DBS : databasesFromManifest().join(','))
+      .split(',')
+      .map((name) => name.trim())
+      .filter(Boolean),
     arms: (process.env.BIRD_ARMS ?? ARMS.map((arm) => arm.name).join(',')).split(',').map((name) => name.trim()),
     out: process.env.BIRD_OUT ?? join(ROOT, 'eval/out/bird-eval.json'),
     model: process.env.LLM_MODEL ?? 'deepseek-chat',
@@ -80,7 +110,7 @@ function settings() {
   };
 }
 
-async function pool<T, R>(items: readonly T[], limit: number, worker: (item: T, index: number) => Promise<R>): Promise<R[]> {
+export async function pool<T, R>(items: readonly T[], limit: number, worker: (item: T, index: number) => Promise<R>): Promise<R[]> {
   const results = new Array<R>(items.length);
   let cursor = 0;
   const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
@@ -95,7 +125,7 @@ async function pool<T, R>(items: readonly T[], limit: number, worker: (item: T, 
   return results;
 }
 
-function promptFor(arm: Arm, question: BirdQuestion): PromptOptions {
+export function promptFor(arm: Arm, question: BirdQuestion): PromptOptions {
   return {
     dialect: 'SQLite',
     descriptions: arm.notes,
@@ -153,7 +183,20 @@ async function main() {
   }
   const cases = selected.filter((question) => gold.has(question.question_id));
 
-  // 3. Controls. Both must hold before any accuracy number is meaningful.
+  // 3. Prompt coverage: a truncated schema card silently drops tables, and a
+  // model cannot query what it was never shown.
+  let tablesInPrompts = 0;
+  let tablesTotal = 0;
+  const truncated: { db: string; shown: number; total: number }[] = [];
+  for (const [db, schema] of schemas) {
+    const card = renderSchemaCard(schema, 2000, { descriptions: true, foreignKeys: true, samples: false });
+    const shown = card.split('\n').filter((line) => !line.startsWith('  ')).length;
+    tablesInPrompts += shown;
+    tablesTotal += schema.length;
+    if (shown !== schema.length) truncated.push({ db, shown, total: schema.length });
+  }
+
+  // 4. Controls. Both must hold before any accuracy number is meaningful.
   let selfConsistent = 0;
   let negativeChecked = 0;
   let negativeFalseMatches = 0;
@@ -195,6 +238,9 @@ async function main() {
       schemaChecked: checkedColumns,
       schemaMissing: missingColumns.slice(0, 10),
       schemaMissingTotal: missingColumns.length,
+      tablesInPrompts,
+      tablesTotal,
+      truncatedPrompts: truncated,
     },
   };
 
@@ -214,7 +260,7 @@ async function main() {
     return;
   }
 
-  // 4. Arms.
+  // 5. Arms.
   const provider = createHttpProvider({ baseUrl: config.baseUrl, apiKey: config.apiKey, model: config.model });
   const armReports: unknown[] = [];
   const outcomes = new Map<string, CaseOutcome[]>();
@@ -229,6 +275,7 @@ async function main() {
       const pipeline = createPipeline({
         provider,
         maxRepairs: arm.repairs,
+        linking: arm.linking,
         prompt: promptFor(arm, question),
         ...(arm.repairs === 0
           ? {}
@@ -326,13 +373,13 @@ async function main() {
     );
   }
 
-  const baseline = outcomes.get(config.arms[0] as string);
   const ablations: Record<string, unknown> = {};
-  for (const name of config.arms.slice(1)) {
-    const current = outcomes.get(name);
-    if (baseline === undefined || current === undefined) continue;
-    const comparison = compareArms(summarise(config.arms[0] as string, baseline), summarise(name, current));
-    ablations[`${config.arms[0]} -> ${name}`] = {
+  for (const [from, to] of PAIRS) {
+    const first = outcomes.get(from);
+    const second = outcomes.get(to);
+    if (first === undefined || second === undefined) continue;
+    const comparison = compareArms(summarise(from, first), summarise(to, second));
+    ablations[`${from} -> ${to}`] = {
       delta: comparison.delta,
       onlyFirst: comparison.onlyFirst,
       onlySecond: comparison.onlySecond,
@@ -393,6 +440,10 @@ function gate(report: Record<string, unknown>): void {
   if (controls.negativeFalseMatches !== 0) problems.push(`${controls.negativeFalseMatches} negative control(s) matched a gold result`);
   if (controls.schemaMissingTotal !== 0) {
     problems.push(`${controls.schemaMissingTotal} of ${controls.schemaChecked} advertised columns do not exist in the database`);
+  }
+  const truncated = (report.controls as { truncatedPrompts: { db: string; shown: number; total: number }[] }).truncatedPrompts;
+  if (truncated.length > 0) {
+    problems.push(`schema card truncated for ${truncated.map((entry) => `${entry.db} (${entry.shown}/${entry.total})`).join(', ')}`);
   }
   const best = arms.reduce((top, arm) => Math.max(top, arm.accuracy), 0);
   if (best < 0.05) problems.push(`best arm accuracy ${(best * 100).toFixed(1)}% is not above 5%: the harness sees no signal`);

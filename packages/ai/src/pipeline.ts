@@ -21,6 +21,8 @@ export interface PipelineOptions {
   readonly samples?: boolean;
   /** Dialect, evidence and metadata switches for the system prompt. */
   readonly prompt?: PromptOptions;
+  /** Ask the three-recaller linker for a column hint. Defaults to true. */
+  readonly linking?: boolean;
   /** When provided, a candidate is executed before it is accepted; failures
    *  become repair turns (syntax and binding errors, not wrong answers). */
   readonly execute?: (sql: string) => Promise<unknown>;
@@ -85,11 +87,13 @@ export function createPipeline(options: PipelineOptions): {
 
   return {
     async ask(request) {
-      const linked = linkSchema(request.question, request.schema, topK);
+      const linked = options.linking === false ? [] : linkSchema(request.question, request.schema, topK);
       const schemaHint =
-        linked.length > 0
-          ? `Likely columns: ${linked.map((column) => `${column.table}.${column.column}`).join(', ')}`
-          : 'No column matched; use the schema above.';
+        options.linking === false
+          ? 'Use the schema above.'
+          : linked.length > 0
+            ? `Likely columns: ${linked.map((column) => `${column.table}.${column.column}`).join(', ')}`
+            : 'No column matched; use the schema above.';
       const messages: LlmMessage[] = [
         {
           role: 'system',

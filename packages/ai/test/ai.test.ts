@@ -296,3 +296,25 @@ describe('pipeline error mapping', () => {
     );
   });
 });
+
+describe('schema-linking switch', () => {
+  it('can be turned off, which also removes the hint from the user turn', async () => {
+    const seen: string[] = [];
+    const provider: LlmProvider = {
+      id: 'capture',
+      model: 'capture',
+      complete: async (request) => {
+        seen.push(request.messages.map((message) => message.content).join('\n---\n'));
+        return { text: 'SELECT 1', model: 'capture' };
+      },
+    };
+    const withLinking = createPipeline({ provider });
+    await withLinking.ask({ question: 'revenue by region', schema });
+    const withoutLinking = createPipeline({ provider, linking: false });
+    const result = await withoutLinking.ask({ question: 'revenue by region', schema });
+    expect(result.linked).toEqual([]);
+    expect(seen[1]).not.toContain('Likely columns');
+    expect(seen[1]).toContain('Use the schema above.');
+    expect(seen[0]).toContain('Likely columns');
+  });
+});

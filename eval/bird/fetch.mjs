@@ -20,6 +20,19 @@ const ROOT = resolve(new URL('../..', import.meta.url).pathname);
 const SOURCE = process.env.BIRD_ARCHIVE_URL ?? 'https://bird-bench.oss-cn-beijing.aliyuncs.com/minidev.zip';
 const CACHE = process.env.BIRD_CACHE ?? join(ROOT, 'eval/.cache/bird');
 const ARCHIVE = join(CACHE, 'minidev.zip');
+const DEFAULT_DATABASES = [
+  'superhero',
+  'california_schools',
+  'student_club',
+  'thrombosis_prediction',
+  'toxicology',
+  'debit_card_specializing',
+  'financial',
+  'formula_1',
+  'card_games',
+  'european_football_2',
+  'codebase_community',
+];
 
 function parseArgs(argv) {
   const args = { dbs: [], offline: false, force: false };
@@ -62,22 +75,19 @@ function requireFile(path) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  const dbs = args.dbs.length > 0 ? args.dbs : ['superhero', 'california_schools', 'student_club', 'thrombosis_prediction', 'toxicology', 'debit_card_specializing'];
+  const fromEnv = (process.env.BIRD_DBS ?? '').split(',').map((name) => name.trim()).filter(Boolean);
+  const dbs = args.dbs.length > 0 ? args.dbs : fromEnv.length > 0 ? fromEnv : DEFAULT_DATABASES;
   const dataDir = join(CACHE, 'minidev/MINIDEV');
   const manifestPath = join(dataDir, 'manifest.json');
 
-  if (!existsSync(manifestPath)) {
-    if (args.offline) throw new Error(`cold cache and --offline: ${manifestPath} is missing`);
-    await download(ARCHIVE);
-    extract([
-      'minidev/MINIDEV/mini_dev_sqlite.json',
-      'minidev/MINIDEV/dev_tables.json',
-      ...dbs.map((db) => `minidev/MINIDEV/dev_databases/${db}/*`),
-    ]);
-  } else if (args.force) {
-    await download(ARCHIVE);
-    extract(['minidev/MINIDEV/mini_dev_sqlite.json', 'minidev/MINIDEV/dev_tables.json', ...dbs.map((db) => `minidev/MINIDEV/dev_databases/${db}/*`)]);
-  }
+  await download(ARCHIVE);
+
+  // Extract what is missing, not "everything or nothing": a run that widens the
+  // database list must not need --force, and must not re-extract 1.4 GB.
+  const entries = ['minidev/MINIDEV/mini_dev_sqlite.json', 'minidev/MINIDEV/dev_tables.json'];
+  const missing = dbs.filter((db) => !existsSync(join(dataDir, 'dev_databases', db, `${db}.sqlite`)));
+  for (const db of missing) entries.push(`minidev/MINIDEV/dev_databases/${db}/*`);
+  if (missing.length > 0 || !existsSync(join(dataDir, 'mini_dev_sqlite.json'))) extract(entries);
 
   const questions = requireFile(join(dataDir, 'mini_dev_sqlite.json'));
   const tables = requireFile(join(dataDir, 'dev_tables.json'));
