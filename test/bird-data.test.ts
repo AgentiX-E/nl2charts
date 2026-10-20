@@ -59,8 +59,14 @@ describe('dataset readers', () => {
       JSON.stringify([
         {
           db_id: 'db',
-          table_names: ['a', 'b'],
+          table_names: ['a readable', 'b readable'],
+          table_names_original: ['a', 'b'],
           column_names: [
+            [-1, '*'],
+            [0, 'id'],
+            [1, 'a id'],
+          ],
+          column_names_original: [
             [-1, '*'],
             [0, 'id'],
             [1, 'a_id'],
@@ -72,7 +78,21 @@ describe('dataset readers', () => {
     );
     const table = loadTables(file).get('db') as BirdTable;
     expect(table.tableNames).toEqual(['a', 'b']);
+    expect(table.columnNames[2]?.[1]).toBe('a_id');
+    expect(table.columnNamesReadable[2]?.[1]).toBe('a id');
     expect(table.foreignKeys).toEqual([[2, 1]]);
+  });
+
+  it('falls back to the readable names when originals are absent', () => {
+    const file = write(
+      't2.json',
+      JSON.stringify([
+        { db_id: 'db2', table_names: ['t'], column_names: [[-1, '*'], [0, 'c']], column_types: ['text'], foreign_keys: [] },
+      ]),
+    );
+    const table = loadTables(file).get('db2') as BirdTable;
+    expect(table.tableNames).toEqual(['t']);
+    expect(table.columnNames[1]?.[1]).toBe('c');
   });
 
   it('merges a column description and its value legend into one comment', () => {
@@ -95,7 +115,15 @@ describe('schema construction', () => {
   const table: BirdTable = {
     db_id: 'db',
     tableNames: ['orders', 'customers'],
+    tableNamesReadable: ['orders', 'customers'],
     columnNames: [
+      [-1, '*'],
+      [0, 'id'],
+      [0, 'CustomerID'],
+      [1, 'id'],
+      [1, 'Segment'],
+    ],
+    columnNamesReadable: [
       [-1, '*'],
       [0, 'id'],
       [0, 'customer id'],
@@ -111,29 +139,38 @@ describe('schema construction', () => {
       'orders',
       new Map([
         ['id', { description: 'order identifier' }],
-        ['customer id', { description: 'who ordered' }],
+        ['CustomerID', { description: 'who ordered' }],
       ]),
     ],
-    ['customers', new Map([['segment', { description: 'segment', values: 'smb: small' }]])],
+    ['customers', new Map([['Segment', { description: 'segment', values: 'smb: small' }]])],
   ]);
 
-  it('drops the star column and maps native types', () => {
+  it('uses the identifiers the database actually has', () => {
     const schema = buildSchema(table, notes, { withNotes: false });
-    expect(schema[0]?.columns.map((column) => column.name)).toEqual(['id', 'customer id']);
+    expect(schema[0]?.columns.map((column) => column.name)).toEqual(['id', 'CustomerID']);
     expect(schema[0]?.columns[0]?.type).toBe('BIGINT');
     expect(schema[0]?.columns[0]?.comment).toBeUndefined();
     expect(schema[1]?.foreignKeys).toBeUndefined();
   });
 
-  it('attaches comments and join hints only when asked', () => {
+  it('attaches the readable label and the description only when asked', () => {
     const schema = buildSchema(table, notes, { withNotes: true });
-    expect(schema[0]?.columns[1]?.comment).toBe('who ordered');
-    expect(schema[1]?.columns[1]?.comment).toBe('segment (smb: small)');
-    expect(schema[0]?.foreignKeys).toEqual(['orders.customer id = customers.id']);
+    expect(schema[0]?.columns[1]?.name).toBe('CustomerID');
+    expect(schema[0]?.columns[1]?.comment).toBe('customer id - who ordered');
+    expect(schema[1]?.columns[1]?.comment).toBe('segment - segment (smb: small)');
+    expect(schema[0]?.foreignKeys).toEqual(['orders.CustomerID = customers.id']);
   });
 
   it('omits a table with no columns left', () => {
-    const empty: BirdTable = { db_id: 'db', tableNames: ['void'], columnNames: [[-1, '*']], columnTypes: ['text'], foreignKeys: [] };
+    const empty: BirdTable = {
+      db_id: 'db',
+      tableNames: ['void'],
+      tableNamesReadable: ['void'],
+      columnNames: [[-1, '*']],
+      columnNamesReadable: [[-1, '*']],
+      columnTypes: ['text'],
+      foreignKeys: [],
+    };
     expect(buildSchema(empty, new Map(), { withNotes: true })).toEqual([{ table: 'void', columns: [] }]);
   });
 });

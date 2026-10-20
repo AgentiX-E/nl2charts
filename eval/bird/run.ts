@@ -126,7 +126,24 @@ async function main() {
     );
   }
 
-  // 1. Gold pre-execution. A case is scored only if its gold statement runs.
+  // 1. Schema fidelity. A prompt that advertises a column the database does not
+  // have is a guaranteed failure, and it looks like a model error. The first
+  // external run advertised BIRD's humanised names instead of the original ones
+  // and 155 of 200 cases died on "no such column".
+  const missingColumns: { db: string; table: string; column: string }[] = [];
+  let checkedColumns = 0;
+  for (const [db, schema] of schemas) {
+    for (const table of schema) {
+      const info = await oracle.run(db, `SELECT name FROM pragma_table_info('${table.table.replace(/'/g, "''")}')`);
+      const present = new Set(info.rows.map((row) => String(row[0])));
+      for (const column of table.columns) {
+        checkedColumns += 1;
+        if (!present.has(column.name)) missingColumns.push({ db, table: table.table, column: column.name });
+      }
+    }
+  }
+
+  // 2. Gold pre-execution. A case is scored only if its gold statement runs.
   const gold = new Map<number, OracleResult>();
   const unrunnable: { id: number; db: string; error: string }[] = [];
   for (const question of selected) {
@@ -136,7 +153,7 @@ async function main() {
   }
   const cases = selected.filter((question) => gold.has(question.question_id));
 
-  // 2. Controls. Both must hold before any accuracy number is meaningful.
+  // 3. Controls. Both must hold before any accuracy number is meaningful.
   let selfConsistent = 0;
   let negativeChecked = 0;
   let negativeFalseMatches = 0;
@@ -175,6 +192,9 @@ async function main() {
       negativeChecked,
       negativeFalseMatches,
       emptyGoldExcluded: emptyGold,
+      schemaChecked: checkedColumns,
+      schemaMissing: missingColumns.slice(0, 10),
+      schemaMissingTotal: missingColumns.length,
     },
   };
 
@@ -194,7 +214,7 @@ async function main() {
     return;
   }
 
-  // 3. Arms.
+  // 4. Arms.
   const provider = createHttpProvider({ baseUrl: config.baseUrl, apiKey: config.apiKey, model: config.model });
   const armReports: unknown[] = [];
   const outcomes = new Map<string, CaseOutcome[]>();
@@ -348,8 +368,11 @@ function finish(config: ReturnType<typeof settings>, report: Record<string, unkn
   writeFileSync(config.out, `${JSON.stringify(report, null, 2)}\n`);
   console.log(`artifact: ${config.out}`);
   if (config.dryRun) {
+    const controls = report.controls as { selfConsistency: number; negativeFalseMatches: number; schemaChecked: number; schemaMissingTotal: number };
     console.log(
-      `dry run: gold runnable ${String((report.gold as { runnable: number }).runnable)}/${String((report.gold as { executed: number }).executed)}; self-consistency ${((report.controls as { selfConsistency: number }).selfConsistency * 100).toFixed(1)}%; negative false matches ${String((report.controls as { negativeFalseMatches: number }).negativeFalseMatches)}`,
+      `dry run: gold runnable ${String((report.gold as { runnable: number }).runnable)}/${String((report.gold as { executed: number }).executed)}; ` +
+        `self-consistency ${(controls.selfConsistency * 100).toFixed(1)}%; negative false matches ${String(controls.negativeFalseMatches)}; ` +
+        `schema columns checked ${String(controls.schemaChecked)}, missing ${String(controls.schemaMissingTotal)}`,
     );
   }
 }
@@ -357,12 +380,20 @@ function finish(config: ReturnType<typeof settings>, report: Record<string, unkn
 /** Thresholds, not decoration: a run that trips one of these must fail CI. */
 function gate(report: Record<string, unknown>): void {
   const goldRate = (report.gold as { runnableRate: number }).runnableRate;
-  const controls = report.controls as { selfConsistency: number; negativeFalseMatches: number };
+  const controls = report.controls as {
+    selfConsistency: number;
+    negativeFalseMatches: number;
+    schemaMissingTotal: number;
+    schemaChecked: number;
+  };
   const arms = report.arms as { arm: string; accuracy: number }[];
   const problems: string[] = [];
   if (goldRate < 0.98) problems.push(`gold runnable rate ${(goldRate * 100).toFixed(1)}% is below 98%`);
   if (controls.selfConsistency < 1) problems.push(`self-consistency ${(controls.selfConsistency * 100).toFixed(1)}% is not 100%`);
   if (controls.negativeFalseMatches !== 0) problems.push(`${controls.negativeFalseMatches} negative control(s) matched a gold result`);
+  if (controls.schemaMissingTotal !== 0) {
+    problems.push(`${controls.schemaMissingTotal} of ${controls.schemaChecked} advertised columns do not exist in the database`);
+  }
   const best = arms.reduce((top, arm) => Math.max(top, arm.accuracy), 0);
   if (best < 0.05) problems.push(`best arm accuracy ${(best * 100).toFixed(1)}% is not above 5%: the harness sees no signal`);
   const first = arms[0];

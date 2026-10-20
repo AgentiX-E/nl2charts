@@ -20,11 +20,22 @@ export interface BirdQuestion {
   readonly difficulty: Difficulty;
 }
 
-/** `dev_tables.json` entry, trimmed to what a prompt can use. */
+/**
+ * `dev_tables.json` entry, trimmed to what a prompt can use.
+ *
+ * `columnNames` holds the **original** identifiers, the ones the SQLite file
+ * actually has. `columnNamesReadable` holds BIRD's humanised labels
+ * (`client segment` for `Segment`). Using the humanised list as the schema card
+ * is a measured defect: the first external run advertised 155 of 200 cases with
+ * column names the database does not contain, and the model dutifully copied
+ * them into `no such column` errors.
+ */
 export interface BirdTable {
   readonly db_id: string;
   readonly tableNames: readonly string[];
+  readonly tableNamesReadable: readonly string[];
   readonly columnNames: readonly (readonly [number, string])[];
+  readonly columnNamesReadable: readonly (readonly [number, string])[];
   readonly columnTypes: readonly string[];
   readonly foreignKeys: readonly (readonly [number, number])[];
 }
@@ -80,7 +91,9 @@ export function loadTables(file: string): Map<string, BirdTable> {
   const raw = JSON.parse(readFileSync(file, 'utf8')) as {
     db_id: string;
     table_names: string[];
+    table_names_original?: string[];
     column_names: [number, string][];
+    column_names_original?: [number, string][];
     column_types: string[];
     foreign_keys: [number, number][];
   }[];
@@ -89,8 +102,10 @@ export function loadTables(file: string): Map<string, BirdTable> {
       entry.db_id,
       {
         db_id: entry.db_id,
-        tableNames: entry.table_names,
-        columnNames: entry.column_names,
+        tableNames: entry.table_names_original ?? entry.table_names,
+        tableNamesReadable: entry.table_names,
+        columnNames: entry.column_names_original ?? entry.column_names,
+        columnNamesReadable: entry.column_names,
         columnTypes: entry.column_types,
         foreignKeys: entry.foreign_keys,
       },
@@ -159,17 +174,28 @@ export function buildSchema(
   notes: Map<string, Map<string, ColumnNote>>,
   options: { readonly withNotes: boolean },
 ): SchemaTable[] {
+  const readableName = (columnIndex: number): string | undefined => {
+    const entry = table.columnNamesReadable[columnIndex];
+    const candidate = entry?.[1];
+    const original = table.columnNames[columnIndex]?.[1];
+    return candidate === undefined || candidate === original ? undefined : candidate;
+  };
+
   const columnsOf = (tableIndex: number): SchemaColumn[] => {
     const columns: SchemaColumn[] = [];
     table.columnNames.forEach((entry, columnIndex) => {
       const [owner, name] = entry;
       if (owner !== tableIndex || name === '*') return;
       const note = notes.get(table.tableNames[tableIndex] as string)?.get(name);
-      const comment = options.withNotes && note !== undefined ? commentOf(note) : undefined;
+      const label = readableName(columnIndex);
+      const parts = [
+        ...(options.withNotes && label !== undefined ? [label] : []),
+        ...(options.withNotes && note !== undefined ? [commentOf(note) as string] : []),
+      ];
       columns.push({
         name,
         type: sqlType(table.columnTypes[columnIndex] ?? 'text'),
-        ...(comment === undefined ? {} : { comment }),
+        ...(parts.length === 0 ? {} : { comment: parts.join(' - ') }),
       });
     });
     return columns;
