@@ -150,6 +150,7 @@
     "LlmUsage",
     "Recaller",
     "Role",
+    "SchemaCardOptions",
     "SchemaColumn",
     "SchemaTable",
     "buildSqlPrompt",
@@ -159,20 +160,24 @@
     "extractSql",
     "linkSchema",
     "recordProvider",
+    "renderName",
     "renderSchemaCard",
     "tokenizeQuestion",
     "type AskRequest",
     "type AskResult",
     "type PipelineOptions",
+    "type PromptOptions",
     "type RecordedCall",
     "type ReplayFixture"
   ],
   "ai/linking": [
     "linkSchema",
+    "renderName",
     "renderSchemaCard",
     "tokenizeQuestion",
     "type LinkedColumn",
     "type Recaller",
+    "type SchemaCardOptions",
     "type SchemaColumn",
     "type SchemaTable"
   ],
@@ -190,8 +195,10 @@
     "DuckDbOptions",
     "FileCache",
     "FileCacheOptions",
+    "SqliteOptions",
     "createDuckDbEngine",
-    "createFileCache"
+    "createFileCache",
+    "createSqliteEngine"
   ],
   "node/duckdb": [
     "createDuckDbEngine",
@@ -244,20 +251,28 @@
   "devkit": [
     "compareArms",
     "formatReport",
+    "judgeOfficial",
+    "judgeOfficialResult",
+    "judgeStrict",
+    "judgeStrictResult",
     "mcnemarExact",
     "recordCase",
     "runContractSuite",
     "sameResult",
     "sameRows",
     "summarise",
+    "toTuples",
     "type ArmResult",
     "type CaseOutcome",
     "type CaseResult",
     "type ContractCase",
     "type ContractExpectation",
     "type Interval",
+    "type MatchReason",
     "type PairedComparison",
     "type ResultSet",
+    "type SqlResultSet",
+    "type Tuple",
     "wilsonInterval"
   ]
 }

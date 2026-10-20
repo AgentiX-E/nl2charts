@@ -25,7 +25,11 @@
     "bench:linking": "tsx eval/linking-ablation.ts",
     "bench:semantic": "tsx eval/semantic-ablation.ts",
     "bench:live": "tsx eval/live/run.ts",
-    "bench:live:dry": "tsx eval/live/run.ts --dry-run"
+    "bench:live:dry": "tsx eval/live/run.ts --dry-run",
+    "bench:bird": "tsx eval/bird/run.ts",
+    "bench:bird:dry": "tsx eval/bird/run.ts --dry-run",
+    "bench:bird:fetch": "node eval/bird/fetch.mjs",
+    "bench:bird:port": "node eval/bird/portability.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
@@ -46,7 +50,8 @@
     "@agentix-e/nl2charts-chart": "workspace:*",
     "@agentix-e/nl2charts-mcp": "workspace:*",
     "@agentix-e/nl2charts-studio": "workspace:*",
-    "@agentix-e/nl2charts-devkit": "workspace:*"
+    "@agentix-e/nl2charts-devkit": "workspace:*",
+    "@duckdb/node-api": "1.5.6-r.1"
   },
   "type": "module"
 }

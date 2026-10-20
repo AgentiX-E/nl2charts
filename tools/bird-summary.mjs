@@ -1,0 +1,71 @@
+#!/usr/bin/env node
+/**
+ * Render the BIRD evaluation artifacts as Markdown for the job summary.
+ * Reads only; every number comes from a run, never from this file.
+ */
+import { readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+
+const ROOT = resolve(new URL('..', import.meta.url).pathname);
+
+function read(name) {
+  try {
+    return JSON.parse(readFileSync(join(ROOT, 'eval/out', name), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+const report = read('bird-eval.json');
+const portability = read('duckdb-portability.json');
+const lines = ['## BIRD Mini-Dev (external benchmark)', ''];
+
+if (report === null) {
+  lines.push('No evaluation artifact was produced; see the job log.', '');
+} else {
+  const gold = report.gold;
+  const controls = report.controls;
+  lines.push(
+    `Model: \`${report.model ?? 'none (dry run)'}\` · dialect: ${report.dialect} · databases: ${report.selection.databases.length} · scored: ${report.selection.scored}/${report.selection.available}`,
+    '',
+    `Gold queries executed before any model call: **${gold.runnable}/${gold.executed}** runnable (${(gold.runnableRate * 100).toFixed(1)}%).`,
+    `Controls: self-consistency **${(controls.selfConsistency * 100).toFixed(1)}%**, negative false matches **${controls.negativeFalseMatches}**, empty-gold cases excluded from the negative control: ${controls.emptyGoldExcluded}.`,
+    '',
+  );
+  if (Array.isArray(report.arms) && report.arms.length > 0) {
+    lines.push('| arm | execution accuracy | 95% Wilson | strict (multiset) | duplicate credit | repaired | simple / moderate / challenging |', '| --- | --- | --- | --- | --- | --- | --- |');
+    for (const arm of report.arms) {
+      const byDifficulty = ['simple', 'moderate', 'challenging']
+        .map((key) => {
+          const bucket = arm.byDifficulty[key];
+          return bucket === undefined ? '–' : `${bucket.passed}/${bucket.total}`;
+        })
+        .join(' / ');
+      lines.push(
+        `| ${arm.arm} | **${(arm.accuracy * 100).toFixed(1)}%** | [${(arm.wilson.low * 100).toFixed(1)}, ${(arm.wilson.high * 100).toFixed(1)}] | ${arm.strictPassed}/${arm.total} | ${arm.duplicateCredit} | ${arm.repaired} | ${byDifficulty} |`,
+      );
+    }
+    lines.push('', '### Paired ablations', '', '| change | delta | only before / only after | McNemar exact p |', '| --- | --- | --- | --- |');
+    for (const [name, effect] of Object.entries(report.ablations ?? {})) {
+      lines.push(
+        `| ${name} | ${effect.delta >= 0 ? '+' : ''}${(effect.delta * 100).toFixed(1)}pp | ${effect.onlyFirst} / ${effect.onlySecond} | ${effect.p.toFixed(4)} |`,
+      );
+    }
+    lines.push('');
+  }
+  lines.push(
+    '> Execution accuracy is BIRD\u2019s official judge: `set(predicted) == set(gold)` over tuples, so row order is ignored and duplicate rows collapse. The strict column repeats the comparison as a multiset; the difference is the number of cases the official rule credits because of duplicates.',
+    '',
+  );
+}
+
+if (portability !== null) {
+  lines.push('### DuckDB portability of the same statements', '', '| stage | runnable | taxonomy of failures |', '| --- | --- | --- |');
+  for (const [stage, value] of Object.entries(portability.stages)) {
+    const taxonomy = value.taxonomy.map((entry) => `${entry.kind} ${entry.count}`).join(', ') || '–';
+    lines.push(`| ${stage} | ${value.runnable}/${portability.statements} (${(value.rate * 100).toFixed(1)}%) | ${taxonomy} |`);
+  }
+  lines.push('', '> The dataset is SQLite and the product\u2019s default engine is DuckDB. This table is the measured gap, not an opinion: two documented rewrites (backtick quoting, an `iif` macro) recover most of it, and the rest is dialect strictness that a compiler must avoid emitting.', '');
+}
+
+console.log(lines.join('\n'));

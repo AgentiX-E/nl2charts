@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { isNl2ChartsError } from '@agentix-e/nl2charts-spec';
-import { createPipeline, extractSql } from '../src/pipeline.js';
-import { linkSchema, renderSchemaCard, tokenizeQuestion } from '../src/linking.js';
+import { buildSqlPrompt, createPipeline, extractSql } from '../src/pipeline.js';
+import { linkSchema, renderName, renderSchemaCard, tokenizeQuestion } from '../src/linking.js';
 import type { SchemaTable } from '../src/linking.js';
 import { createReplayProvider, recordProvider } from '../src/replay.js';
 import type { LlmProvider } from '../src/provider.js';
@@ -209,5 +209,90 @@ describe('question to guarded sql', () => {
     expect(seen[0]).toContain('SELECT only');
     expect(seen[0]).toContain('orders(order_id BIGINT');
     expect(seen[0]).toContain('No column matched');
+  });
+});
+
+describe('prompt composition', () => {
+  const schema = [
+    {
+      table: 'orders',
+      columns: [
+        { name: 'region', type: 'VARCHAR', samples: ['north', 'south'] },
+        { name: 'percent (%) eligible', type: 'DOUBLE' },
+      ],
+      foreignKeys: ['orders.id = lines.order_id'],
+    },
+  ];
+
+  it('keeps the boolean third argument working (A2 compatibility)', () => {
+    expect(buildSqlPrompt('q', schema, true)).toContain('[north|south]');
+    expect(buildSqlPrompt('q', schema, false)).not.toContain('[north|south]');
+  });
+
+  it('states the dialect when one is given', () => {
+    expect(buildSqlPrompt('q', schema, { dialect: 'SQLite' })).toContain('Write SQLite SQL.');
+  });
+
+  it('adds evidence only when it is not blank', () => {
+    expect(buildSqlPrompt('q', schema, { evidence: '  revenue excludes tax  ' })).toContain('Evidence: revenue excludes tax');
+    expect(buildSqlPrompt('q', schema, { evidence: '   ' })).not.toContain('Evidence:');
+    expect(buildSqlPrompt('q', schema, {})).not.toContain('Evidence:');
+  });
+
+  it('renders join hints and quoted identifiers when asked', () => {
+    const prompt = buildSqlPrompt('q', schema, { foreignKeys: true, descriptions: false });
+    expect(prompt).toContain('join: orders.id = lines.order_id');
+    expect(prompt).toContain('"percent (%) eligible" DOUBLE');
+  });
+
+  it('drops comments when descriptions are off', () => {
+    const withComment = [{ table: 't', columns: [{ name: 'a', type: 'BIGINT', comment: 'meaning' }] }];
+    expect(buildSqlPrompt('q', withComment, {})).toContain('-- meaning');
+    expect(buildSqlPrompt('q', withComment, { descriptions: false })).not.toContain('-- meaning');
+  });
+
+  it('honours a schema line budget', () => {
+    const many = [
+      { table: 'a', columns: [{ name: 'x', type: 'BIGINT' }], foreignKeys: ['a.x = b.x'] },
+      { table: 'b', columns: [{ name: 'x', type: 'BIGINT' }] },
+    ];
+    expect(buildSqlPrompt('q', many, { foreignKeys: true, schemaLines: 1 })).not.toContain('b(x BIGINT)');
+  });
+});
+
+describe('schema card quoting', () => {
+  it('leaves a plain identifier alone and quotes everything else', () => {
+    expect(renderName('amount')).toBe('amount');
+    expect(renderName('total amount')).toBe('"total amount"');
+    expect(renderName('say "hi"')).toBe('"say ""hi"""');
+    expect(renderName('1col')).toBe('"1col"');
+  });
+
+  it('breaks a score tie by table name so the order is stable', () => {
+    // Two candidates, each recalled once at rank 1 by a different recaller, so
+    // their fused scores are equal: only the tie-break decides the order.
+    const tied = linkSchema('revenue', [
+      { table: 'z', columns: [{ name: 'revenue', type: 'DOUBLE' }] },
+      { table: 'a', columns: [{ name: 'other', type: 'DOUBLE', aliases: ['revenue'] }] },
+    ]);
+    expect(tied.map((column) => `${column.table}.${column.column}`)).toEqual(['a.other', 'z.revenue']);
+    expect(tied[0]?.score).toBeCloseTo(tied[1]?.score ?? 0, 12);
+  });
+});
+
+describe('pipeline error mapping', () => {
+  it('stringifies a non-Error thrown by the execute hook', async () => {
+    const provider = createReplayProvider([{ match: 'revenue by region', response: 'SELECT * FROM orders' }]);
+    const pipeline = createPipeline({
+      provider,
+      maxRepairs: 0,
+      execute: async () => {
+        throw 'Binder Error: unknown table';
+      },
+    });
+    await expect(pipeline.ask({ question: 'revenue by region', schema })).rejects.toSatisfy(
+      (error: unknown) =>
+        isNl2ChartsError(error) && error.code === 'NL2C_E_ENGINE_FAILED' && String(error.details.lastError).includes('Binder Error'),
+    );
   });
 });

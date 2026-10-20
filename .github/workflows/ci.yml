@@ -130,3 +130,55 @@ jobs:
           path: eval/out/live-eval.json
           if-no-files-found: warn
           retention-days: 30
+
+  bird-eval:
+    name: BIRD Mini-Dev external evaluation
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/master')
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    concurrency:
+      group: bird-eval
+      cancel-in-progress: false
+    env:
+      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+      LLM_BASE_URL: https://api.deepseek.com/v1
+      LLM_MODEL: deepseek-chat
+      BIRD_LIMIT: '200'
+      BIRD_CONCURRENCY: '6'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Cache the external dataset
+        uses: actions/cache@v4
+        with:
+          path: eval/.cache/bird
+          key: bird-minidev-v1-${{ runner.os }}
+      - name: Fetch Mini-Dev (no-op when the cache is warm)
+        run: node eval/bird/fetch.mjs
+      - name: Gold queries, prompts and controls without a model
+        run: pnpm bench:bird:dry
+      - name: DuckDB portability census
+        run: pnpm bench:bird:port
+      - name: Four-arm evaluation with paired ablations
+        run: pnpm bench:bird
+      - name: Publish summary
+        if: always()
+        run: node tools/bird-summary.mjs >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload BIRD evaluation
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bird-eval
+          path: |
+            eval/out/bird-eval.json
+            eval/out/duckdb-portability.json
+          if-no-files-found: warn
+          retention-days: 30

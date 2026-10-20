@@ -2,7 +2,16 @@ import { inspectSql } from '@agentix-e/nl2charts-core';
 import { toNl2ChartsError } from '@agentix-e/nl2charts-spec';
 import type { LlmMessage, LlmProvider } from './provider.js';
 import { linkSchema, renderSchemaCard } from './linking.js';
-import type { LinkedColumn, SchemaTable } from './linking.js';
+import type { LinkedColumn, SchemaCardOptions, SchemaTable } from './linking.js';
+
+export interface PromptOptions extends SchemaCardOptions {
+  /** Dialect the statement must be written in, e.g. 'SQLite'. */
+  readonly dialect?: string;
+  /** Dataset hint that explains business terms (BIRD calls this "evidence"). */
+  readonly evidence?: string;
+  /** Maximum schema-card lines. Large schemas need more than the default 40. */
+  readonly schemaLines?: number;
+}
 
 export interface PipelineOptions {
   readonly provider: LlmProvider;
@@ -10,6 +19,8 @@ export interface PipelineOptions {
   readonly topK?: number;
   /** Include enum sample values in the schema card. */
   readonly samples?: boolean;
+  /** Dialect, evidence and metadata switches for the system prompt. */
+  readonly prompt?: PromptOptions;
   /** When provided, a candidate is executed before it is accepted; failures
    *  become repair turns (syntax and binding errors, not wrong answers). */
   readonly execute?: (sql: string) => Promise<unknown>;
@@ -35,13 +46,29 @@ export function extractSql(text: string): string {
   return withoutPrefix.trim();
 }
 
-export function buildSqlPrompt(question: string, schema: readonly SchemaTable[], samples = false): string {
-  return [
+export function buildSqlPrompt(
+  question: string,
+  schema: readonly SchemaTable[],
+  options: boolean | PromptOptions = false,
+): string {
+  const resolved: PromptOptions = typeof options === 'boolean' ? { samples: options } : options;
+  const rules = [
     'You translate questions into one read-only SQL statement.',
     'Rules: SELECT only, no DDL or DML, one statement, no comments.',
     'Use only the filters the question states. Sample values are examples, not defaults.',
+  ];
+  if (resolved.dialect !== undefined) {
+    rules.push(`Write ${resolved.dialect} SQL. Use only functions and syntax that ${resolved.dialect} supports.`);
+  }
+  const context: string[] = [];
+  if (resolved.evidence !== undefined && resolved.evidence.trim().length > 0) {
+    context.push(`Evidence: ${resolved.evidence.trim()}`);
+  }
+  return [
+    ...rules,
     'Schema:',
-    renderSchemaCard(schema, 40, { samples }),
+    renderSchemaCard(schema, resolved.schemaLines ?? 40, resolved),
+    ...context,
     `Question: ${question}`,
   ].join('\n');
 }
@@ -64,7 +91,13 @@ export function createPipeline(options: PipelineOptions): {
           ? `Likely columns: ${linked.map((column) => `${column.table}.${column.column}`).join(', ')}`
           : 'No column matched; use the schema above.';
       const messages: LlmMessage[] = [
-        { role: 'system', content: buildSqlPrompt(request.question, request.schema, options.samples === true) },
+        {
+          role: 'system',
+          content: buildSqlPrompt(request.question, request.schema, {
+            samples: options.samples === true,
+            ...options.prompt,
+          }),
+        },
         { role: 'user', content: `${schemaHint}\n${request.question}` },
       ];
 

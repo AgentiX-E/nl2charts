@@ -10,6 +10,8 @@ export interface SchemaColumn {
 export interface SchemaTable {
   readonly table: string;
   readonly columns: readonly SchemaColumn[];
+  /** Join hints, rendered one per line under the table when enabled. */
+  readonly foreignKeys?: readonly string[];
 }
 
 export interface LinkedColumn {
@@ -143,22 +145,44 @@ export function linkSchema(
     .slice(0, topK);
 }
 
+export interface SchemaCardOptions {
+  /** Include enum sample values. Off by default: samples invite invented filters. */
+  readonly samples?: boolean;
+  /** Include column comments. Off means names and types only. */
+  readonly descriptions?: boolean;
+  /** Include the table's join hints. */
+  readonly foreignKeys?: boolean;
+}
+
+/**
+ * Quote an identifier only when SQLite would need it. Datasets such as BIRD use
+ * names like `Percent (%) Eligible Free (K-12)`; showing them bare invites the
+ * model to read part of the name as an expression.
+ */
+export function renderName(name: string): string {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? name : `"${name.replace(/"/g, '""')}"`;
+}
+
 export function renderSchemaCard(
   schema: readonly SchemaTable[],
   limit = 40,
-  options: { readonly samples?: boolean } = {},
+  options: SchemaCardOptions = { descriptions: true },
 ): string {
+  const withDescriptions = options.descriptions !== false;
   const lines: string[] = [];
   for (const table of schema) {
     const columns = table.columns.map((column) => {
-      const base = `${column.name} ${column.type}`;
+      const base = `${renderName(column.name)} ${column.type}`;
       const withSamples =
         options.samples === true && column.samples !== undefined && column.samples.length > 0
           ? `${base} [${column.samples.join('|')}]`
           : base;
-      return column.comment === undefined ? withSamples : `${withSamples} -- ${column.comment}`;
+      return withDescriptions && column.comment !== undefined ? `${withSamples} -- ${column.comment}` : withSamples;
     });
     lines.push(`${table.table}(${columns.join(', ')})`);
+    if (options.foreignKeys === true && table.foreignKeys !== undefined) {
+      for (const hint of table.foreignKeys) lines.push(`  join: ${hint}`);
+    }
     if (lines.length >= limit) break;
   }
   return lines.join('\n');
