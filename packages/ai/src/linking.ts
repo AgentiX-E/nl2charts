@@ -1,3 +1,5 @@
+import { words } from './text.js';
+
 export interface SchemaColumn {
   readonly name: string;
   readonly type: string;
@@ -46,10 +48,7 @@ const STOPWORDS = new Set([
 ]);
 
 export function tokenizeQuestion(question: string): string[] {
-  return question
-    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-    .toLowerCase()
-    .split(/[^a-z0-9\u4e00-\u9fff]+/u)
+  return words(question)
     .flatMap((token) => token.split('_'))
     .filter((token) => token.length > 1 && !STOPWORDS.has(token));
 }

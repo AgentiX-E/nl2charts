@@ -9,6 +9,8 @@ export interface PromptOptions extends SchemaCardOptions {
   readonly dialect?: string;
   /** Dataset hint that explains business terms (BIRD calls this "evidence"). */
   readonly evidence?: string;
+  /** Structural semantics: grain, keys, join direction, column roles. */
+  readonly definitions?: string;
   /** Maximum schema-card lines. Large schemas need more than the default 40. */
   readonly schemaLines?: number;
   /** Extra rule lines for a question shape, appended after the base rules. */
@@ -107,6 +109,11 @@ export function buildSqlPrompt(
   }
   for (const note of resolved.notes ?? []) rules.push(note);
   const context: string[] = [];
+  if (resolved.definitions !== undefined && resolved.definitions.trim().length > 0) {
+    // The block arrives without its heading so that a caller cannot add a
+    // heading for an empty block; the prompt owns the heading.
+    context.push(['Semantics:', resolved.definitions.trim()].join('\n'));
+  }
   if (resolved.evidence !== undefined && resolved.evidence.trim().length > 0) {
     context.push(`Evidence: ${resolved.evidence.trim()}`);
   }

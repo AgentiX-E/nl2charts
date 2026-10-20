@@ -12,6 +12,8 @@
  * (`eval/bird/profile.ts`) because they need a database.
  */
 
+import { words } from './text.js';
+
 export type ProfileKind = 'categorical' | 'date' | 'numeric' | 'other';
 
 export interface ColumnProfile {
@@ -35,6 +37,12 @@ export interface EvidenceOptions {
   readonly maxChars?: number;
   /** Values shown per categorical column. */
   readonly maxValues?: number;
+  /**
+   * Question text. Columns whose names it mentions are rendered first, so a
+   * tight budget is spent on the columns the question is actually about. Order
+   * only: nothing is dropped that would otherwise fit.
+   */
+  readonly focus?: string;
 }
 
 const KIND_LABEL: Record<ProfileKind, string> = {
@@ -68,6 +76,18 @@ function lineOf(column: ColumnProfile, maxValues: number): string | undefined {
 }
 
 /**
+ * Stable reorder by how many of the question's words appear in the column name.
+ * A stable sort keeps the kind-based order for the columns the question does not
+ * mention, so the only change is that relevant lines move to the front.
+ */
+function prioritize(columns: readonly ColumnProfile[], focus: string): ColumnProfile[] {
+  const asked = new Set(words(focus));
+  const hits = (column: ColumnProfile): number =>
+    [...new Set(words(column.column))].filter((word) => asked.has(word)).length;
+  return [...columns].sort((left, right) => hits(right) - hits(left));
+}
+
+/**
  * Render a compact data dictionary. Columns that carry no usable signal (a
  * primary key, a free-text field, a column with thousands of distinct values) are
  * dropped by the profiler and never reach this function.
@@ -83,7 +103,8 @@ export function renderEvidence(profile: DatabaseProfile, options: EvidenceOption
       left.table.localeCompare(right.table) ||
       left.column.localeCompare(right.column),
   );
-  for (const column of ordered) {
+  const focused = options.focus === undefined ? ordered : prioritize(ordered, options.focus);
+  for (const column of focused) {
     const line = lineOf(column, maxValues);
     if (line === undefined) continue;
     if (used + line.length + 3 > maxChars) break;

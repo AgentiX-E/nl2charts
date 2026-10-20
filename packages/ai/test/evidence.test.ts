@@ -65,4 +65,41 @@ describe('rendered evidence', () => {
     const sparse = { db: 'x', columns: [{ table: 't', column: 'c', kind: 'categorical' as const, distinct: 3 }] };
     expect(renderEvidence(sparse)).toBe('');
   });
+
+  it('puts the columns the question names first when a focus is given', () => {
+    const focusable = {
+      db: 'x',
+      columns: [
+        { table: 'orders', column: 'status', kind: 'categorical' as const, values: ['open', 'closed'], distinct: 2 },
+        { table: 'orders', column: 'channel', kind: 'categorical' as const, values: ['web', 'store'], distinct: 2 },
+        { table: 'orders', column: 'order_date', kind: 'date' as const, min: '2024-01-01', max: '2024-12-31' },
+      ],
+    };
+    // A date line normally sorts after every dictionary; the question mentions
+    // both halves of its name, so it moves ahead of one.
+    const text = renderEvidence(focusable, { focus: 'revenue by order date' });
+    expect(text.split('\n')[1]).toContain('orders.order_date');
+    expect(text.split('\n')[2]).toContain('orders.channel');
+  });
+
+  it('spends a tight budget on the focused column instead of dropping it', () => {
+    const focusable = {
+      db: 'x',
+      columns: [
+        { table: 'a', column: 'status', kind: 'categorical' as const, values: ['one', 'two'], distinct: 2 },
+        { table: 'a', column: 'channel', kind: 'categorical' as const, values: ['web', 'store'], distinct: 2 },
+      ],
+    };
+    const text = renderEvidence(focusable, { focus: 'channel totals', maxChars: 70 });
+    expect(text).toContain('a.channel');
+    expect(text).not.toContain('a.status');
+  });
+
+  it('keeps the default order when the focus matches nothing', () => {
+    const plain = {
+      db: 'x',
+      columns: [{ table: 't', column: 'c', kind: 'categorical' as const, values: ['a', 'b'], distinct: 2 }],
+    };
+    expect(renderEvidence(plain, { focus: 'unrelated words' })).toBe(renderEvidence(plain));
+  });
 });

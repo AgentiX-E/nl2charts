@@ -258,6 +258,19 @@ describe('prompt composition', () => {
     ];
     expect(buildSqlPrompt('q', many, { foreignKeys: true, schemaLines: 1 })).not.toContain('b(x BIGINT)');
   });
+
+  it('places semantics before evidence so the meaning is read before the values', () => {
+    const prompt = buildSqlPrompt('q', schema, { definitions: '- orders: one row per order.', evidence: 'Data profile:' });
+    expect(prompt).toContain('Semantics:\n- orders: one row per order.');
+    expect(prompt.indexOf('Semantics:')).toBeGreaterThan(prompt.indexOf('Schema:'));
+    expect(prompt.indexOf('Semantics:')).toBeLessThan(prompt.indexOf('Evidence:'));
+    expect(prompt.indexOf('Evidence:')).toBeLessThan(prompt.indexOf('Question: q'));
+  });
+
+  it('adds semantics only when it is not blank', () => {
+    expect(buildSqlPrompt('q', schema, { definitions: '   ' })).not.toContain('Semantics:');
+    expect(buildSqlPrompt('q', schema, {})).not.toContain('Semantics:');
+  });
 });
 
 describe('schema card quoting', () => {
