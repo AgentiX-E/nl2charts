@@ -74,23 +74,27 @@ Two deliberate refusals are worth knowing, because they came from real output:
 
 ## What it is worth, measured
 
-On BIRD Mini-Dev, n=239, same model, same schema card:
+On BIRD Mini-Dev, n=239, two independent runs, same model, same schema card:
 
-| Arm | Accuracy | Prompt |
+| Arm | Accuracy (run E / run F) | Prompt |
 | --- | --- | --- |
-| names only | 32.2% | 1,818 chars |
-| + structural semantics | **33.5%** | 2,630 chars |
-| + metadata + dataset hint | 58.6% | 7,605 chars |
-| + structural semantics + dataset hint | 55.2% | 2,764 chars |
+| names only | 32.6% / 33.5% | 1,818 chars |
+| + structural semantics | 33.9% / 33.5% | 2,630 chars |
+| + definitions written by the model (once per database) | 34.3% / 32.2% | 2,819 chars |
+| + definitions + dataset hint | 52.7% / 53.1% | 2,953 chars |
+| + metadata + dataset hint | 57.7% / 56.1% | 7,605 chars |
 
-The gain over a bare schema is **+1.3pp** (p=0.63) — inside the noise of this
-sample. So this block is not a substitute for written definitions, and it is not
-free accuracy. Its interesting property is cost: it reaches within 3.4pp of a
-7,605-character card using 2,764 characters, which is inside the measured noise
-threshold and therefore not a result — it is a hypothesis with a next test.
+Structural semantics gain **+0.0 to +1.3pp** over a bare schema; letting the model
+write the dictionary instead gains **−1.3 to +1.7pp**. Both are inside the noise of
+this sample, and the model-written text was competent — it produced lines like
+`"Charter School (Y/N)" is 1 if the school is a charter school, 0 otherwise.` and
+still moved nothing.
 
-Use it when you cannot write definitions, or when the schema is too large for
-per-column descriptions. Do not use it instead of them.
+That is the finding worth carrying: knowing the database is not the bottleneck.
+The 12.1pp comes from a sentence that resolves *this question's* ambiguity, which
+no per-database block can anticipate. Use this block for the cost, not for the
+accuracy: 2,953 characters get within 3 to 5pp of a 7,605-character card, which is
+not yet a result but is close enough to be worth testing.
 
 ## Cost and budget
 

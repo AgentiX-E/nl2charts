@@ -131,49 +131,72 @@ temperature 0, one sample per case. Artifacts: `eval/out/bird-eval.json`,
 | Schema fidelity: advertised columns exist in the database | **798 / 798** |
 | Prompt coverage: tables that reach the schema card | **75 / 75** (no truncation) |
 
-### Accuracy (run D, same 239 cases in every arm)
+### Accuracy (run F, same 239 cases in every arm)
 
 | Arm | Execution accuracy | 95% Wilson | Strict multiset | prompt chars (mean) |
 | --- | --- | --- | --- | --- |
-| names only | 32.2% (77/239) | [26.6, 38.5] | 71 | 1818 |
-| + **structural semantics** | 33.5% (80/239) | [27.8, 39.8] | 74 | 2630 |
-| + structural semantics + dataset evidence | 55.2% (132/239) | [48.8, 61.4] | 126 | 2764 |
-| + metadata + dataset evidence | **58.6%** (140/239) | [52.2, 64.8] | 130 | 7605 |
+| names only | 33.5% (80/239) | [27.8, 39.8] | 74 | 1,818 |
+| + structural semantics | 33.5% (80/239) | [27.8, 39.8] | 73 | 2,630 |
+| + model-written definitions | 32.2% (77/239) | [26.6, 38.5] | 71 | 2,819 |
+| + model-written definitions + dataset evidence | 53.1% (127/239) | [46.7, 59.4] | 121 | 2,953 |
+| + metadata + dataset evidence | **56.1%** (134/239) | [49.7, 62.3] | 125 | 7,605 |
 
 | Change | Δ | only before / only after | p | verdict |
 | --- | --- | --- | --- | --- |
-| names → +structural semantics | +1.3pp | 7 / 10 | 0.63 | **no measurable effect** |
-| +structural semantics → +dataset evidence | **+21.8pp** | 6 / 58 | 9e-12 | real |
+| names → structural semantics | 0.0pp | 10 / 10 | 1.0 | no measurable effect |
+| structural semantics → model-written definitions | −1.3pp | 5 / 1 | 0.22 | no measurable effect |
+| model-written definitions → + dataset evidence | **+20.9pp** | 8 / 58 | 2e-10 | real |
 
-### The evidence gap is semantic, not statistical
+### Two runs, same arms: the deltas do not move
 
-Two rounds tried to manufacture the missing sentence without a human. The first
-built a dictionary from the data (`renderEvidence()`, `synthetic` arm): **+1.7pp**
-against **+12.1pp** for the sentence BIRD ships with each question. The second
-built what a schema can actually support — grain, keys, join direction, column
-roles (`renderDefinitions()`, `definitions` arm): **+1.3pp**, p=0.63.
+| Arm | run E (`115b28d`) | run F (`98a0eec`) | range |
+| --- | --- | --- | --- |
+| names | 32.6% | 33.5% | 0.9pp |
+| structural semantics | 33.9% | 33.5% | 0.4pp |
+| model-written definitions | 34.3% | 32.2% | 2.1pp |
+| definitions + dataset evidence | 52.7% | 53.1% | 0.4pp |
+| metadata + dataset evidence | 57.7% | 56.1% | 1.6pp |
 
-Neither closes the gap. The reason is visible in the text they produce:
+Both runs agree on the sign and the size of every delta. The three text blocks
+that can be produced without a human — structural semantics, a data profile, and
+definitions written by the model — sit within 2pp of each other and of the bare
+schema. The one block that moves the number is the sentence BIRD ships with each
+*question*.
 
-- a dictionary says which values exist: `orders.status: 2 values (completed, refunded)`;
-- structural semantics say how the tables fit: `orders.customer_id: foreign key to
-  customers.customer_id; many orders per customer`;
-- BIRD's evidence says what a term means: `ratio of customers who pay in EUR =
-  count(Currency='EUR') / count(Currency='CZK')`.
+### The evidence gap is a question-level gap, not a documentation gap
 
-The last one is a business decision. No amount of schema introspection recovers
-it, and this benchmark now measures that boundary instead of assuming a clever
-renderer would cross it.
+Three attempts, same 239 cases, one lever each:
+
+| What was added | Δ over names | Cost |
+| --- | --- | --- |
+| a dictionary of observed values (`renderEvidence`) | +1.7pp | one query per column |
+| structural semantics (`renderDefinitions`) | +0.0 to +1.3pp | zero model calls |
+| definitions written by the model, once per database | −1.3 to +1.7pp | 11 calls for 11 databases |
+
+The model-written block is not low quality. From the artifact, for the California
+schools database:
+
+```
+- "Free Meal Count (K-12)" is the number of K-12 students eligible for free meals.
+- "Charter School (Y/N)" is 1 if the school is a charter school, 0 otherwise.
+- "Academic Year" is the school year the FRPM counts describe.
+```
+
+That is a competent data dictionary, and it buys nothing measurable. The
+conclusion is uncomfortable and useful: **the 12.1pp was never about knowing the
+database.** It is about knowing which meaning of a term *this question* intends —
+"the ratio of ..." in BIRD's evidence names the exact numerator and denominator
+for that question. A per-database block cannot know which ambiguity a question
+will hit, and every attempt to write one lands at the same place.
 
 ### A shorter prompt reaches the same place (not yet a claim)
 
-`definitions+evidence` scores 55.2% with a **2,764-character** prompt;
-`metadata+evidence` scores 58.6% with **7,605 characters**. The 3.4pp difference is
-inside the 4pp noise threshold (ADR-166), so the honest reading is "these two are
-not distinguishable at n=239", not "semantics replace metadata" and not "metadata
-is 3.4pp better". If it holds at a larger n, it matters: a warehouse with 2,000
-columns cannot afford per-column descriptions, but it can afford a grain/join
-block. The next run increases n rather than repeating this one.
+`synth-definitions+evidence` scores 53.1% with a **2,953-character** prompt;
+`metadata+evidence` scores 56.1% with **7,605 characters**. Two runs put the gap
+at 3.0 and 5.0pp, so it straddles the 4pp threshold: the honest reading is "not
+established either way", not "semantics replace metadata". The next experiment
+tests placement rather than content — the same definitions rendered inline as
+column comments, where the metadata block gets its effect.
 
 ### Noise floor (why one sample per case is stated, not assumed)
 
@@ -181,13 +204,13 @@ block. The next run increases n rather than repeating this one.
 
 | Metric | Result |
 | --- | --- |
-| Cases that disagreed with themselves | **2 / 60 (3.3%)** |
+| Cases that disagreed with themselves | **1 / 60 (1.7%)** |
 | Majority accuracy | 45.0% |
 | Single-run accuracy | 45.0% |
 | Difference | **0.0pp** |
 
 Single sampling does not bias the aggregate, but it does move individual cases.
-The flip rate fell from 8.3% to 3.3% between runs while the single-run and
+The flip rate fell from 8.3% to 1.7% across three runs while the single-run and
 majority scores stayed identical, which is itself evidence that a single run's
 aggregate is stable and a single case's answer is not. Deltas below 4pp are
 reported as "no measurable effect" (ADR-166).
@@ -201,16 +224,16 @@ every correct answer.
 
 | Shape | names | definitions | metadata | adaptive |
 | --- | --- | --- | --- | --- |
-| window | 5/8 | 5/8 | 3/8 | 5/8 |
+| window | 5/8 | 5/8 | 3/8 | 4/8 |
 | ratio | 6/8 | 6/8 | 5/8 | 5/8 |
-| multi-hop | **8/8** | 7/8 | **8/8** | **8/8** |
+| multi-hop | **8/8** | **8/8** | **8/8** | **8/8** |
 | tie | 7/8 | 7/8 | 7/8 | 7/8 |
-| **total** | **81.2%** (26/32) | 78.1% (25/32) | 71.9% (23/32) | 78.1% (25/32) |
+| **total** | **81.2%** (26/32) | **81.2%** (26/32) | 71.9% (23/32) | 75.0% (24/32) |
 
-`names → definitions`: −3.1pp (1 case before, 0 after, p=1.0). With 32 cases a
-single case is 3.1pp, so this face cannot rank the two arms; what it does say is
-that structural semantics do not hurt the hard shapes the way full column
-metadata does (three consecutive runs of −6.2, −9.4 and −3.1pp for metadata).
+`names → definitions`: 0.0pp (0 before, 0 after, p=1.0). The previous run showed
+−3.1pp, which one case explains: at n=32 a single case is 3.1pp. What survives is
+the direction of the larger effect — full column metadata costs 3 to 9pp on these
+shapes across three runs, while a grain/join block costs nothing.
 
 The two faces disagree in a way worth remembering: metadata is worth +11.3pp on
 BIRD and −3.1pp here. A component's effect is a property of a question shape, not
