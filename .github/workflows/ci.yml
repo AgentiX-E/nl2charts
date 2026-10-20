@@ -51,7 +51,7 @@ jobs:
         run: pnpm gate:budgets
       - name: Upload coverage
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: coverage
           path: coverage/
@@ -84,7 +84,7 @@ jobs:
         run: node tools/bench-summary.mjs >> "$GITHUB_STEP_SUMMARY"
       - name: Upload benchmark artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: benchmark
           path: eval/out/
@@ -124,7 +124,7 @@ jobs:
         run: node tools/live-summary.mjs >> "$GITHUB_STEP_SUMMARY"
       - name: Upload live evaluation
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: live-eval
           path: eval/out/live-eval.json
@@ -180,7 +180,7 @@ jobs:
         run: node tools/bird-summary.mjs >> "$GITHUB_STEP_SUMMARY"
       - name: Upload BIRD evaluation
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: bird-eval
           path: |
