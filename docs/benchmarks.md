@@ -99,7 +99,7 @@ treat item price × quantity as the order amount. Both prompt defects are fixed;
 the regression and its fix are recorded rather than hidden by the final number.
 
 Headroom now comes from the external benchmark below. No SOTA claim is made
-there either: 59.0% on 239 of 500 questions, one model, one sample per case, no
+there either: 58.6% on 239 of 500 questions, one model, one sample per case, no
 fine-tuning, is a baseline to beat, not a record.
 
 ## External benchmark: BIRD Mini-Dev
@@ -131,36 +131,49 @@ temperature 0, one sample per case. Artifacts: `eval/out/bird-eval.json`,
 | Schema fidelity: advertised columns exist in the database | **798 / 798** |
 | Prompt coverage: tables that reach the schema card | **75 / 75** (no truncation) |
 
-### Accuracy (same 239 cases in every arm)
+### Accuracy (run D, same 239 cases in every arm)
 
-| Arm | Execution accuracy | 95% Wilson | Strict multiset | Duplicate credit | simple / moderate / challenging |
-| --- | --- | --- | --- | --- | --- |
-| names only | 33.1% (79/239) | [27.4, 39.2] | 74 | 5 | 42/80 · 16/80 · 21/79 |
-| + metadata (labels, descriptions, joins) | **44.4%** (106/239) | [38.2, 50.7] | 100 | 6 | 47/80 · 33/80 · 26/79 |
-| + **synthesized evidence** (data profile) | 46.0% (110/239) | [39.8, 52.4] | 104 | 6 | 48/80 · 35/80 · 27/79 |
-| + **dataset evidence** (BIRD's own hint) | **58.2%** (139/239) | [51.8, 64.2] | 129 | 10 | 55/80 · 41/80 · 43/79 |
+| Arm | Execution accuracy | 95% Wilson | Strict multiset | prompt chars (mean) |
+| --- | --- | --- | --- | --- |
+| names only | 32.2% (77/239) | [26.6, 38.5] | 71 | 1818 |
+| + **structural semantics** | 33.5% (80/239) | [27.8, 39.8] | 74 | 2630 |
+| + structural semantics + dataset evidence | 55.2% (132/239) | [48.8, 61.4] | 126 | 2764 |
+| + metadata + dataset evidence | **58.6%** (140/239) | [52.2, 64.8] | 130 | 7605 |
 
 | Change | Δ | only before / only after | p | verdict |
 | --- | --- | --- | --- | --- |
-| names → +metadata | **+11.3pp** | 8 / 35 | 0.00004 | real |
-| metadata → **+synthesized evidence** | **+1.7pp** | 6 / 10 | 0.45 | **no measurable effect** |
-| synthesized → **+dataset evidence** | **+12.1pp** | 9 / 39 | 0.00002 | real |
+| names → +structural semantics | +1.3pp | 7 / 10 | 0.63 | **no measurable effect** |
+| +structural semantics → +dataset evidence | **+21.8pp** | 6 / 58 | 9e-12 | real |
 
 ### The evidence gap is semantic, not statistical
 
-`synthetic` builds the hint from the data itself: one line per informative column,
-dictionaries before ranges, produced by `renderEvidence()` from a cached profile
-(`eval/bird/profile.ts`). It is what a product can do without a curated label —
-and it buys **1.7pp**, against **12.1pp** for the sentence BIRD ships with each
-question.
+Two rounds tried to manufacture the missing sentence without a human. The first
+built a dictionary from the data (`renderEvidence()`, `synthetic` arm): **+1.7pp**
+against **+12.1pp** for the sentence BIRD ships with each question. The second
+built what a schema can actually support — grain, keys, join direction, column
+roles (`renderDefinitions()`, `definitions` arm): **+1.3pp**, p=0.63.
 
-That is the most useful number in this document. A dictionary says which values
-exist (`status: values (completed, refunded)`); BIRD's evidence says what a term
-means (`ratio of customers who pay in EUR = count(Currency='EUR') /
-count(Currency='CZK')`). The first is a profiler; the second is a definition. A
-product that wants the second has to write definitions, not enumerate values, and
-this benchmark now measures that gap directly instead of assuming a dictionary
-would close it.
+Neither closes the gap. The reason is visible in the text they produce:
+
+- a dictionary says which values exist: `orders.status: 2 values (completed, refunded)`;
+- structural semantics say how the tables fit: `orders.customer_id: foreign key to
+  customers.customer_id; many orders per customer`;
+- BIRD's evidence says what a term means: `ratio of customers who pay in EUR =
+  count(Currency='EUR') / count(Currency='CZK')`.
+
+The last one is a business decision. No amount of schema introspection recovers
+it, and this benchmark now measures that boundary instead of assuming a clever
+renderer would cross it.
+
+### A shorter prompt reaches the same place (not yet a claim)
+
+`definitions+evidence` scores 55.2% with a **2,764-character** prompt;
+`metadata+evidence` scores 58.6% with **7,605 characters**. The 3.4pp difference is
+inside the 4pp noise threshold (ADR-166), so the honest reading is "these two are
+not distinguishable at n=239", not "semantics replace metadata" and not "metadata
+is 3.4pp better". If it holds at a larger n, it matters: a warehouse with 2,000
+columns cannot afford per-column descriptions, but it can afford a grain/join
+block. The next run increases n rather than repeating this one.
 
 ### Noise floor (why one sample per case is stated, not assumed)
 
@@ -168,15 +181,40 @@ would close it.
 
 | Metric | Result |
 | --- | --- |
-| Cases that disagreed with themselves | **5 / 60 (8.3%)** |
-| Majority accuracy | 46.7% |
-| Single-run accuracy | 46.7% |
+| Cases that disagreed with themselves | **2 / 60 (3.3%)** |
+| Majority accuracy | 45.0% |
+| Single-run accuracy | 45.0% |
 | Difference | **0.0pp** |
 
-Single sampling does not bias the aggregate, but it does move individual cases:
-any delta below roughly 8% of the sample cannot be separated from sampling noise
-by this design. That is why the two "no measurable effect" verdicts above are
-stated as such instead of as small wins.
+Single sampling does not bias the aggregate, but it does move individual cases.
+The flip rate fell from 8.3% to 3.3% between runs while the single-run and
+majority scores stayed identical, which is itself evidence that a single run's
+aggregate is stable and a single case's answer is not. Deltas below 4pp are
+reported as "no measurable effect" (ADR-166).
+
+### Adversarial shapes (32 hand-written cases, reported separately)
+
+An aggregate hides the shapes it is bad at. These 32 cases cover windows, ratios,
+multi-hop joins and ties, each with a declared output width that the gold must
+match — a question promising two columns and a gold returning three would fail
+every correct answer.
+
+| Shape | names | definitions | metadata | adaptive |
+| --- | --- | --- | --- | --- |
+| window | 5/8 | 5/8 | 3/8 | 5/8 |
+| ratio | 6/8 | 6/8 | 5/8 | 5/8 |
+| multi-hop | **8/8** | 7/8 | **8/8** | **8/8** |
+| tie | 7/8 | 7/8 | 7/8 | 7/8 |
+| **total** | **81.2%** (26/32) | 78.1% (25/32) | 71.9% (23/32) | 78.1% (25/32) |
+
+`names → definitions`: −3.1pp (1 case before, 0 after, p=1.0). With 32 cases a
+single case is 3.1pp, so this face cannot rank the two arms; what it does say is
+that structural semantics do not hurt the hard shapes the way full column
+metadata does (three consecutive runs of −6.2, −9.4 and −3.1pp for metadata).
+
+The two faces disagree in a way worth remembering: metadata is worth +11.3pp on
+BIRD and −3.1pp here. A component's effect is a property of a question shape, not
+of the component.
 
 ### DuckDB portability of the same gold statements
 

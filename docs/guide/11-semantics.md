@@ -72,9 +72,29 @@ Two deliberate refusals are worth knowing, because they came from real output:
   `number` is not a count stem. A wrong gloss costs a line that a real measure
   needed.
 
+## What it is worth, measured
+
+On BIRD Mini-Dev, n=239, same model, same schema card:
+
+| Arm | Accuracy | Prompt |
+| --- | --- | --- |
+| names only | 32.2% | 1,818 chars |
+| + structural semantics | **33.5%** | 2,630 chars |
+| + metadata + dataset hint | 58.6% | 7,605 chars |
+| + structural semantics + dataset hint | 55.2% | 2,764 chars |
+
+The gain over a bare schema is **+1.3pp** (p=0.63) — inside the noise of this
+sample. So this block is not a substitute for written definitions, and it is not
+free accuracy. Its interesting property is cost: it reaches within 3.4pp of a
+7,605-character card using 2,764 characters, which is inside the measured noise
+threshold and therefore not a result — it is a hypothesis with a next test.
+
+Use it when you cannot write definitions, or when the schema is too large for
+per-column descriptions. Do not use it instead of them.
+
 ## Cost and budget
 
-The block is bounded by `maxChars` (default 900, mean 784 across the eleven BIRD
+The block is bounded by `maxChars` (default 900, mean 778 across the eleven BIRD
 databases when every case got one). It is not free: it competes with the schema
 card for the same context. Two rules keep it cheap:
 
