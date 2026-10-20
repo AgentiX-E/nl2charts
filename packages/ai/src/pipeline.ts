@@ -11,6 +11,49 @@ export interface PromptOptions extends SchemaCardOptions {
   readonly evidence?: string;
   /** Maximum schema-card lines. Large schemas need more than the default 40. */
   readonly schemaLines?: number;
+  /** Extra rule lines for a question shape, appended after the base rules. */
+  readonly notes?: readonly string[];
+}
+
+export interface PromptProfile extends SchemaCardOptions {
+  readonly notes: readonly string[];
+}
+
+/**
+ * The two prompt components that help on one question shape and hurt on another.
+ *
+ * Measured on BIRD Mini-Dev (239 cases) and on 32 hand-written cases: column
+ * descriptions are worth +12.6pp on filter-and-aggregate questions, but -9.4pp on
+ * window and ratio questions, where the longer card invites hallucinated columns
+ * and expensive correlated subqueries. A per-shape profile is the only way to
+ * keep both, so the choice is explicit and testable rather than always-on.
+ */
+export function choosePromptProfile(question: string): PromptProfile {
+  const text = question.toLowerCase();
+  const windowShape = /\b(rank|ranking|ranked|dense_rank|row_number|running total|cumulative|previous|next|lag|lead|top \w+ per|per (each|group))\b/.test(text);
+  const ratioShape = /\b(ratio|fraction|proportion|share|percentage|percent of)\b/.test(text);
+  if (windowShape) {
+    return {
+      descriptions: false,
+      foreignKeys: false,
+      notes: [
+        'This question needs a window function. Rank with RANK when ties share a rank, and DENSE_RANK when they do not consume a position.',
+        'A previous/next comparison leaves the first or last row empty; do not invent a value for it.',
+        'Order the window explicitly; an unordered window is not reproducible.',
+      ],
+    };
+  }
+  if (ratioShape) {
+    return {
+      descriptions: false,
+      foreignKeys: false,
+      notes: [
+        'A ratio divides two aggregates. Guard the denominator with NULLIF instead of relying on the engine to return null.',
+        'Count rows where the question counts rows, and count a column where it counts values; NULLs make the two differ.',
+      ],
+    };
+  }
+  return { descriptions: true, foreignKeys: true, notes: [] };
 }
 
 export interface PipelineOptions {
@@ -62,6 +105,7 @@ export function buildSqlPrompt(
   if (resolved.dialect !== undefined) {
     rules.push(`Write ${resolved.dialect} SQL. Use only functions and syntax that ${resolved.dialect} supports.`);
   }
+  for (const note of resolved.notes ?? []) rules.push(note);
   const context: string[] = [];
   if (resolved.evidence !== undefined && resolved.evidence.trim().length > 0) {
     context.push(`Evidence: ${resolved.evidence.trim()}`);

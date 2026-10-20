@@ -11,7 +11,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { createHttpProvider, createPipeline } from '@agentix-e/nl2charts-ai';
+import { choosePromptProfile, createHttpProvider, createPipeline } from '@agentix-e/nl2charts-ai';
 import type { PromptOptions, SchemaTable } from '@agentix-e/nl2charts-ai';
 import { compareArms, judgeOfficial, judgeStrict, mcnemarExact, summarise, wilsonInterval } from '@agentix-e/nl2charts-devkit';
 import { buildSchema, loadDescriptions, loadTables } from '../bird/data.js';
@@ -38,15 +38,18 @@ function declaredWidth(question: string): number | undefined {
 const ARMS: readonly Arm[] = [
   { name: 'names', notes: false, evidence: false, repairs: 0, linking: true },
   { name: 'metadata', notes: true, evidence: false, repairs: 0, linking: true },
+  { name: 'adaptive', notes: true, evidence: false, repairs: 0, linking: true, profile: 'adaptive' },
 ];
 
-function promptFor(arm: Arm): PromptOptions {
+function promptFor(arm: Arm, question: string): PromptOptions {
+  const profile = arm.profile === 'adaptive' ? choosePromptProfile(question) : undefined;
   return {
     dialect: 'SQLite',
-    descriptions: arm.notes,
-    foreignKeys: arm.notes,
+    descriptions: profile?.descriptions ?? arm.notes,
+    foreignKeys: profile?.foreignKeys ?? arm.notes,
     samples: false,
     schemaLines: 2000,
+    ...(profile === undefined ? {} : { notes: profile.notes }),
   };
 }
 
@@ -118,7 +121,7 @@ async function main() {
   for (const arm of ARMS) {
     const runs = await pool(CASES, CONCURRENCY, async (testCase) => {
       const schema = schemas.get(testCase.db) as SchemaTable[];
-      const pipeline = createPipeline({ provider, maxRepairs: arm.repairs, linking: arm.linking, prompt: promptFor(arm) });
+      const pipeline = createPipeline({ provider, maxRepairs: arm.repairs, linking: arm.linking, prompt: promptFor(arm, testCase.question) });
       try {
         const asked = await pipeline.ask({ question: testCase.question, schema });
         const predicted = await oracle.run(testCase.db, asked.sql);
@@ -162,7 +165,9 @@ async function main() {
 
   const first = outcomes.get(ARMS[0]?.name as string) as { id: string; passed: boolean }[];
   const second = outcomes.get(ARMS[1]?.name as string) as { id: string; passed: boolean }[];
+  const third = outcomes.get('adaptive') as { id: string; passed: boolean }[];
   const comparison = compareArms(summarise('names', first), summarise('metadata', second));
+  const adaptiveVsMetadata = compareArms(summarise('metadata', second), summarise('adaptive', third));
   const categories: Category[] = ['window', 'ratio', 'multi-hop', 'tie'];
   const perCategory: Record<string, unknown> = {};
   for (const category of categories) {
@@ -186,6 +191,12 @@ async function main() {
         onlyFirst: comparison.onlyFirst,
         onlySecond: comparison.onlySecond,
         p: mcnemarExact(comparison.onlyFirst, comparison.onlySecond),
+      },
+      'metadata -> adaptive': {
+        delta: adaptiveVsMetadata.delta,
+        onlyFirst: adaptiveVsMetadata.onlyFirst,
+        onlySecond: adaptiveVsMetadata.onlySecond,
+        p: mcnemarExact(adaptiveVsMetadata.onlyFirst, adaptiveVsMetadata.onlySecond),
       },
     },
     perCategory,

@@ -22,7 +22,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHttpProvider } from '@agentix-e/nl2charts-ai';
 import type { PromptOptions, SchemaTable } from '@agentix-e/nl2charts-ai';
-import { buildSqlPrompt, createPipeline, renderSchemaCard } from '@agentix-e/nl2charts-ai';
+import { buildSqlPrompt, choosePromptProfile, createPipeline, renderSchemaCard } from '@agentix-e/nl2charts-ai';
 import { compareArms, judgeOfficial, judgeStrict, mcnemarExact, summarise, wilsonInterval } from '@agentix-e/nl2charts-devkit';
 import type { CaseOutcome, MatchReason } from '@agentix-e/nl2charts-devkit';
 import { buildSchema, loadDescriptions, loadQuestions, loadTables, stratifiedSample } from './data.js';
@@ -54,6 +54,8 @@ export interface Arm {
   readonly evidence: boolean;
   readonly repairs: number;
   readonly linking: boolean;
+  /** 'adaptive' lets the question shape choose the schema card and notes. */
+  readonly profile?: 'adaptive';
 }
 
 /**
@@ -72,6 +74,10 @@ export const ARMS: readonly Arm[] = [
   { name: 'names', notes: false, evidence: false, repairs: 0, linking: true },
   { name: 'metadata', notes: true, evidence: false, repairs: 0, linking: true },
   { name: 'metadata+evidence', notes: true, evidence: true, repairs: 0, linking: true },
+  { name: 'adaptive', notes: true, evidence: true, repairs: 0, linking: true, profile: 'adaptive' },
+  // Available on demand (BIRD_ARMS=...,no-linking,repair). Both measured null in
+  // the previous round and are kept instead of deleted, so a change that should
+  // revive them can be tested without rewriting the harness.
   { name: 'no-linking', notes: true, evidence: true, repairs: 0, linking: false },
   { name: 'repair', notes: true, evidence: true, repairs: 2, linking: true },
 ];
@@ -79,8 +85,7 @@ export const ARMS: readonly Arm[] = [
 const PAIRS: readonly (readonly [string, string])[] = [
   ['names', 'metadata'],
   ['metadata', 'metadata+evidence'],
-  ['metadata+evidence', 'no-linking'],
-  ['metadata+evidence', 'repair'],
+  ['metadata+evidence', 'adaptive'],
 ];
 
 interface CaseRun extends CaseOutcome {
@@ -102,7 +107,9 @@ function settings() {
       .split(',')
       .map((name) => name.trim())
       .filter(Boolean),
-    arms: (process.env.BIRD_ARMS ?? ARMS.map((arm) => arm.name).join(',')).split(',').map((name) => name.trim()),
+    arms: (process.env.BIRD_ARMS ?? ARMS.slice(0, 4).map((arm) => arm.name).join(','))
+      .split(',')
+      .map((name) => name.trim()),
     out: process.env.BIRD_OUT ?? join(ROOT, 'eval/out/bird-eval.json'),
     model: process.env.LLM_MODEL ?? 'deepseek-chat',
     baseUrl: process.env.LLM_BASE_URL ?? 'https://api.deepseek.com/v1',
@@ -126,12 +133,14 @@ export async function pool<T, R>(items: readonly T[], limit: number, worker: (it
 }
 
 export function promptFor(arm: Arm, question: BirdQuestion): PromptOptions {
+  const profile = arm.profile === 'adaptive' ? choosePromptProfile(question.question) : undefined;
   return {
     dialect: 'SQLite',
-    descriptions: arm.notes,
-    foreignKeys: arm.notes,
+    descriptions: profile?.descriptions ?? arm.notes,
+    foreignKeys: profile?.foreignKeys ?? arm.notes,
     samples: false,
     schemaLines: 400,
+    ...(profile === undefined ? {} : { notes: profile.notes }),
     ...(arm.evidence ? { evidence: question.evidence } : {}),
   };
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { isNl2ChartsError } from '@agentix-e/nl2charts-spec';
-import { buildSqlPrompt, createPipeline, extractSql } from '../src/pipeline.js';
+import { buildSqlPrompt, choosePromptProfile, createPipeline, extractSql } from '../src/pipeline.js';
 import { linkSchema, renderName, renderSchemaCard, tokenizeQuestion } from '../src/linking.js';
 import type { SchemaTable } from '../src/linking.js';
 import { createReplayProvider, recordProvider } from '../src/replay.js';
@@ -316,5 +316,43 @@ describe('schema-linking switch', () => {
     expect(seen[1]).not.toContain('Likely columns');
     expect(seen[1]).toContain('Use the schema above.');
     expect(seen[0]).toContain('Likely columns');
+  });
+});
+
+describe('prompt profiles', () => {
+  it('drops descriptions for a window question and adds window rules', () => {
+    const profile = choosePromptProfile('Rank the drivers by points; ties share a rank.');
+    expect(profile.descriptions).toBe(false);
+    expect(profile.foreignKeys).toBe(false);
+    expect(profile.notes.join(' ')).toContain('RANK');
+  });
+
+  it('drops descriptions for a ratio question and adds denominator rules', () => {
+    const profile = choosePromptProfile('What fraction of heroes are taller than 180 cm?');
+    expect(profile.descriptions).toBe(false);
+    expect(profile.notes.join(' ')).toContain('NULLIF');
+  });
+
+  it('keeps metadata for a filter-and-aggregate question', () => {
+    const profile = choosePromptProfile('How many orders were placed in the north region in 2024?');
+    expect(profile.descriptions).toBe(true);
+    expect(profile.foreignKeys).toBe(true);
+    expect(profile.notes).toEqual([]);
+  });
+
+  it('is case insensitive and matches whole words only', () => {
+    expect(choosePromptProfile('RANKING of drivers').descriptions).toBe(false);
+    expect(choosePromptProfile('the shareholder name').descriptions).toBe(true);
+    expect(choosePromptProfile('the ranking_notes column').descriptions).toBe(true);
+  });
+
+  it('renders profile notes as rules and keeps the schema compact', () => {
+    const profile = choosePromptProfile('Rank publishers by hero count');
+    const prompt = buildSqlPrompt('Rank publishers by hero count', [{ table: 'p', columns: [{ name: 'n', type: 'BIGINT', comment: 'meaning' }] }], {
+      dialect: 'SQLite',
+      ...profile,
+    });
+    expect(prompt).toContain('RANK');
+    expect(prompt).not.toContain('-- meaning');
   });
 });
