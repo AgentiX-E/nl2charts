@@ -41,3 +41,11 @@ describe('adversarial case set', () => {
     expect(databases.size).toBeGreaterThanOrEqual(4);
   });
 });
+
+describe('output contract', () => {
+  it('states the output width in every question', () => {
+    for (const testCase of CASES) {
+      expect(testCase.question.toLowerCase()).toContain('exactly');
+    }
+  });
+});

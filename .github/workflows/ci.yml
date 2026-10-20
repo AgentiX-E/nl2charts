@@ -171,6 +171,8 @@ jobs:
         run: pnpm bench:bird
       - name: Noise floor (same cases, three repeats)
         run: pnpm bench:bird:stability
+      - name: Adversarial gold, widths and controls without a model
+        run: pnpm bench:adversarial:dry
       - name: Adversarial shapes (window, ratio, multi-hop, tie)
         run: pnpm bench:adversarial
       - name: Publish summary

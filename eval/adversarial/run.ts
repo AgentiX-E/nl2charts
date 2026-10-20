@@ -25,6 +25,15 @@ const ROOT = resolve(new URL('../..', import.meta.url).pathname);
 const DATA = process.env.BIRD_DATA ?? join(ROOT, 'eval/.cache/bird/minidev/MINIDEV');
 const DATABASES = process.env.BIRD_DATABASES ?? join(DATA, 'dev_databases');
 const CONCURRENCY = Number(process.env.BIRD_CONCURRENCY ?? 6);
+const DRY_RUN = process.argv.includes('--dry-run');
+
+const WIDTH_WORDS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4 };
+
+/** The question states its output width; the gold must agree, or the case is wrong. */
+function declaredWidth(question: string): number | undefined {
+  const match = /exactly (\w+) columns?/i.exec(question);
+  return match === null ? undefined : WIDTH_WORDS[match[1]?.toLowerCase() ?? ''];
+}
 
 const ARMS: readonly Arm[] = [
   { name: 'names', notes: false, evidence: false, repairs: 0, linking: true },
@@ -69,9 +78,31 @@ async function main() {
     else if (result.rows.length === 0) broken.push({ id: testCase.id, error: 'gold returned no rows' });
     else gold.set(testCase.id, result.rows);
   }
+  // A question that promises two columns and a gold that returns three makes
+  // every otherwise-correct answer fail. Checked before any model call.
+  for (const testCase of CASES) {
+    const rows = gold.get(testCase.id);
+    if (rows === undefined) continue;
+    const declared = declaredWidth(testCase.question);
+    const actual = (rows[0] as readonly unknown[]).length;
+    if (declared !== undefined && declared !== actual) {
+      broken.push({ id: testCase.id, error: `question promises ${declared} columns, gold returns ${actual}` });
+    }
+  }
   if (broken.length > 0) {
     console.error(`gold problems: ${broken.map((entry) => `${entry.id} (${entry.error})`).join(', ')}`);
     process.exitCode = 1;
+    await oracle.close();
+    return;
+  }
+
+  if (DRY_RUN) {
+    mkdirSync(join(ROOT, 'eval/out'), { recursive: true });
+    writeFileSync(
+      join(ROOT, 'eval/out/adversarial-dry.json'),
+      `${JSON.stringify({ cases: CASES.length, gold: gold.size, broken, generatedAt: new Date().toISOString() }, null, 2)}\n`,
+    );
+    console.log(`dry run: ${gold.size}/${CASES.length} gold statements run, all widths agree with the questions`);
     await oracle.close();
     return;
   }

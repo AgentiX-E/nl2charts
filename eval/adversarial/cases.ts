@@ -43,7 +43,7 @@ export const CASES: readonly AdversarialCase[] = [
     probes: 'RANK over a grouped sum, ties share a rank',
     db: formula,
     question:
-      'For the 2009 season, list every driver who scored points together with their rank by total points, highest first. Drivers on equal points share a rank.',
+      'For the 2009 season, report exactly two columns: the driver surname and their rank by total points, highest first. Drivers on equal points share a rank.',
     sql: `select d.surname, rank() over (order by sum(r.points) desc) as rnk
 from results r
 join races ra on r.raceId = ra.raceId
@@ -59,7 +59,7 @@ order by rnk, d.surname`,
     probes: 'LAG over a ranked list; the first row has a NULL delta',
     db: formula,
     question:
-      'Rank drivers by career points (highest first) and, for each driver, show the gap to the driver directly above them. The top driver shows an empty gap.',
+      'Rank drivers by career points, highest first. Report exactly three columns: surname, career points and the gap to the driver directly above in that ranking; the top driver has an empty gap. Report only the first 25 drivers.',
     sql: `with career as (
   select d.driverId, d.surname, sum(r.points) as pts
   from results r join drivers d on r.driverId = d.driverId
@@ -76,7 +76,7 @@ limit 25`,
     probes: 'RANK on an aggregate count, ties are common here',
     db: superhero,
     question:
-      'Rank publishers by how many heroes they have, most first. Publishers with the same number of heroes share a rank.',
+      'Rank publishers that have at least one hero by their hero count, most first. Report exactly three columns: publisher name, hero count and rank; publishers with the same count share a rank.',
     sql: `select p.publisher_name, count(s.id) as heroes,
        rank() over (order by count(s.id) desc) as rnk
 from publisher p
@@ -90,7 +90,7 @@ order by rnk, p.publisher_name`,
     probes: 'per-group maximum with ties (rank = 1 inside a partition)',
     db: superhero,
     question:
-      'For each publisher, name its heaviest hero or heroes; list every hero that shares the maximum weight within that publisher.',
+      'For each publisher that has heroes with a recorded weight, list the heaviest hero or heroes with exactly three columns: publisher name, hero name and weight. Every hero that shares the maximum weight within its publisher must appear.',
     sql: `with ranked as (
   select p.publisher_name, s.superhero_name, s.weight_kg,
          rank() over (partition by p.id order by s.weight_kg desc) as rnk
@@ -107,7 +107,7 @@ order by publisher_name, superhero_name`,
     probes: 'window function over text dates (YYYYMM) inside a partition',
     db: debit,
     question:
-      'For each customer, list the month with their highest total consumption and that total. If several months share the maximum, list each of them.',
+      'For each customer, report exactly three columns: customer id, the month with their highest total consumption, and that total. If several months share the maximum, report each of them. Report at most 40 rows.',
     sql: `with monthly as (
   select CustomerID, Date as month, sum(Consumption) as total
   from yearmonth
@@ -127,7 +127,7 @@ limit 40`,
     probes: 'aggregate joined to a per-group count, then ranked',
     db: student,
     question:
-      'List each event with the number of members who attended it, ranked by attendance (most first). Events with equal attendance share a rank.',
+      'List events that had at least one attendee, with exactly three columns: event name, attendee count and rank by attendance, most first. Events with equal attendance share a rank.',
     sql: `select e.event_name, count(a.link_to_member) as attendees,
        rank() over (order by count(a.link_to_member) desc) as rnk
 from event e
@@ -141,7 +141,7 @@ order by rnk, e.event_name`,
     probes: 'running total over a grouped count',
     db: tox,
     question:
-      'Count the atoms of each element, then show a running total of those counts from the most common element downwards.',
+      'Count the atoms of each element, then report exactly three columns: element, atom count and a running total of those counts from the most common element downwards.',
     sql: `with counts as (
   select element, count(*) as atoms from atom group by element
 )
@@ -155,7 +155,7 @@ order by atoms desc, element`,
     probes: 'date arithmetic between consecutive rows of the same patient',
     db: throm,
     question:
-      'For each patient, list their examination dates and the number of days until their next examination; the last examination shows an empty gap. Limit to patients with at least two examinations.',
+      'For each patient with at least two examinations, report exactly three columns: patient id, examination date and the number of days until their next examination; the last examination has an empty gap. Report at most 40 rows.',
     sql: `with visits as (
   select ID, "Examination Date" as seen,
          lead("Examination Date") over (partition by ID order by "Examination Date") as next_seen,
@@ -175,7 +175,7 @@ limit 40`,
     category: 'ratio',
     probes: 'ratio of a filtered count to a total, cast to REAL',
     db: superhero,
-    question: 'What fraction of heroes are taller than 180 cm? Report the ratio as a single number.',
+    question: 'What fraction of heroes are taller than 180 cm? Report exactly one column: the ratio.',
     sql: `select cast(sum(case when height_cm > 180 then 1 else 0 end) as real) / count(*) as ratio
 from superhero where height_cm is not null`,
   },
@@ -185,7 +185,7 @@ from superhero where height_cm is not null`,
     probes: 'division guarded by NULLIF; a zero denominator must not crash',
     db: superhero,
     question:
-      'For each publisher, report the ratio of male heroes to female heroes. Publishers with no female hero should report an empty ratio.',
+      'For each publisher, report exactly two columns: publisher name and the ratio of male heroes to female heroes. A publisher with no female hero has an empty ratio.',
     sql: `select p.publisher_name,
        cast(sum(case when g.gender = 'Male' then 1 else 0 end) as real)
          / nullif(sum(case when g.gender = 'Female' then 1 else 0 end), 0) as male_to_female
@@ -201,7 +201,7 @@ order by p.publisher_name`,
     probes: 'conditional proportion across two tables',
     db: throm,
     question:
-      'Among patients whose ANA value is greater than 0, what proportion was diagnosed with thrombosis? Report a single ratio.',
+      'Among patients whose ANA value is greater than 0, what proportion has a thrombosis flag of 1 or more? Report exactly one column: the proportion.',
     sql: `select cast(sum(case when e.Thrombosis = 1 then 1 else 0 end) as real) / count(distinct e.ID) as ratio
 from Examination e
 where e.ANA > 0`,
@@ -211,7 +211,7 @@ where e.ANA > 0`,
     category: 'ratio',
     probes: 'ratio of a sum to a sum, joined per event',
     db: student,
-    question: 'For each event, what fraction of its budget amount was spent? Report the event name and the fraction.',
+    question: 'For each event with a budget, report exactly two columns: event name and the fraction of the budget amount that was spent.',
     sql: `select e.event_name, b.spent / cast(b.amount as real) as spent_fraction
 from budget b join event e on b.link_to_event = e.event_id
 where b.amount > 0
@@ -223,7 +223,7 @@ order by e.event_name`,
     probes: 'ratio between two filtered counts in the same table',
     db: debit,
     question:
-      "Among customers whose currency is CZK, what is the ratio of transactions paid in CZK to transactions paid in EUR? Report a single ratio.",
+      "Among customers whose currency is CZK, what is the ratio of transactions paid in CZK to transactions paid in EUR? Report exactly one column: the ratio.",
     sql: `select cast(sum(case when c.Currency = 'CZK' then 1 else 0 end) as real)
          / nullif(sum(case when c.Currency = 'EUR' then 1 else 0 end), 0) as ratio
 from transactions_1k t
@@ -236,7 +236,7 @@ where c.Currency = 'CZK'`,
     probes: 'share of a set that satisfies a condition across a join',
     db: formula,
     question:
-      'What share of the 2009 races had at least one retirement, that is, at least one result whose status is not Finished? Report a single ratio.',
+      'What share of the 2009 races had at least one retirement, that is, at least one result whose status is not Finished? Report exactly one column: the share.',
     sql: `select cast(sum(case when retired > 0 then 1 else 0 end) as real) / count(*) as share
 from (
   select ra.raceId,
@@ -253,7 +253,7 @@ from (
     category: 'ratio',
     probes: 'proportion over a two-value label',
     db: tox,
-    question: 'What fraction of molecules are labelled active, that is, labelled +? Report a single ratio.',
+    question: 'What fraction of molecules are labelled active, that is, labelled +? Report exactly one column: the fraction.',
     sql: `select cast(sum(case when label = '+' then 1 else 0 end) as real) / count(*) as ratio from molecule`,
   },
   {
@@ -262,7 +262,7 @@ from (
     probes: 'per-group share with a guard against an empty denominator',
     db: student,
     question:
-      'For each major, report the share of its members who hold an executive position, that is, a position containing Executive. Majors with no members may be omitted.',
+      'For each major that has members, report exactly two columns: major name and the share of its members whose position contains Executive.',
     sql: `select m.major_name,
        cast(sum(case when mb.position like '%Executive%' then 1 else 0 end) as real) / count(*) as share
 from major m
@@ -277,7 +277,7 @@ order by m.major_name`,
     category: 'multi-hop',
     probes: 'three joins through a many-to-many table',
     db: superhero,
-    question: "Which publishers have heroes with the power named 'Super Strength'? List the publisher and the number of such heroes.",
+    question: "Which publishers have heroes with the power named 'Super Strength'? Report exactly two columns: publisher name and the number of such heroes.",
     sql: `select p.publisher_name, count(distinct s.id) as heroes
 from publisher p
 join superhero s on s.publisher_id = p.id
@@ -292,7 +292,7 @@ order by heroes desc, p.publisher_name`,
     category: 'multi-hop',
     probes: 'four tables; the join key carries the question (nationality)',
     db: formula,
-    question: 'List the circuits that hosted at least one race won by a British driver. Report each circuit name once.',
+    question: 'List the circuits that hosted at least one race won by a British driver. Report exactly one column, the circuit name, with each circuit once.',
     sql: `select distinct c.name
 from results r
 join drivers d on r.driverId = d.driverId
@@ -307,7 +307,7 @@ order by c.name`,
     probes: 'four hops ending in a status filter',
     db: student,
     question:
-      'List the members who have an expense charged to an event that is still open. Report each member once, as first name and last name.',
+      'List the members who have an expense charged to an event that is still open. Report exactly two columns, first name and last name, with each member once.',
     sql: `select distinct mb.first_name, mb.last_name
 from member mb
 join expense ex on ex.link_to_member = mb.member_id
@@ -322,7 +322,7 @@ order by mb.last_name, mb.first_name`,
     probes: 'two tables, a window-free earliest row and a having clause',
     db: throm,
     question:
-      'For each patient, count the laboratory tests recorded before their first examination. Report the patients with more than twenty such tests, ordered by the count descending.',
+      'For each patient, count the laboratory tests recorded before their first examination. Report exactly two columns, patient id and that count, for patients with more than twenty such tests, ordered by the count descending.',
     sql: `with first_exam as (
   select ID, min("Examination Date") as exam_date from Examination group by ID
 )
@@ -340,7 +340,7 @@ order by tests_before desc, l.ID`,
     probes: 'three tables where the grouping key is two hops away',
     db: debit,
     question:
-      "For each gas station chain, count the transactions made by customers in the segment 'KAM'. Report the chain and the count.",
+      "For each gas station chain that has transactions from customers in the segment 'KAM', report exactly two columns: chain id and the number of such transactions.",
     sql: `select g.ChainID, count(*) as transactions
 from transactions_1k t
 join gasstations g on t.GasStationID = g.GasStationID
@@ -354,7 +354,7 @@ order by g.ChainID`,
     category: 'multi-hop',
     probes: 'self-join through a link table',
     db: tox,
-    question: 'How many bonds connect two atoms of the same element? Report a single count.',
+    question: 'How many bonds connect two atoms of the same element? Report exactly one column: the count.',
     sql: `select count(*) as bonds
 from connected c
 join atom a1 on a1.atom_id = c.atom_id
@@ -366,7 +366,7 @@ where a1.element = a2.element`,
     category: 'multi-hop',
     probes: 'intersection of two many-to-many sets',
     db: superhero,
-    question: "List the heroes who have both the power 'Super Strength' and the power 'Flight'. Report each hero once.",
+    question: "List the heroes who have both the power 'Super Strength' and the power 'Flight'. Report exactly one column, the hero name, with each hero once.",
     sql: `select s.superhero_name
 from superhero s
 where exists (
@@ -384,7 +384,7 @@ order by s.superhero_name`,
     probes: 'three hops with a having clause on a count',
     db: student,
     question:
-      'Which majors have members who attended more than five events? Report each major once with the number of such members.',
+      'Which majors have members who attended more than five events? Report exactly two columns: major name and the number of such members, one row per major.',
     sql: `select m.major_name, count(*) as members
 from major m
 join member mb on mb.link_to_major = m.major_id
@@ -402,7 +402,7 @@ order by m.major_name`,
     category: 'tie',
     probes: 'maximum with ties; LIMIT 1 would be wrong',
     db: formula,
-    question: 'Which driver won the most races in 2008? Report every driver with that number of wins.',
+    question: 'Which driver won the most races in 2008? Report exactly two columns: driver surname and win count, for every driver tied for the most wins.',
     sql: `with wins as (
   select d.surname, count(*) as wins
   from results r
@@ -418,7 +418,7 @@ select surname, wins from wins where wins = (select max(wins) from wins)`,
     category: 'tie',
     probes: 'maximum on a text month filter; ties must all appear',
     db: debit,
-    question: 'Which gas station had the highest total consumption in 2012? Report every station tied for the maximum.',
+    question: 'Which gas station had the highest total consumption in 2012? Report exactly two columns: station id and total consumption, for every station tied for the maximum.',
     sql: `with totals as (
   select g.GasStationID, sum(y.Consumption) as total
   from yearmonth y
@@ -433,7 +433,7 @@ select GasStationID, total from totals where total = (select max(total) from tot
     category: 'tie',
     probes: 'maximum of a count with a shared top',
     db: superhero,
-    question: 'Which publisher has the most heroes? Report every publisher tied for the most, with the count.',
+    question: 'Which publisher has the most heroes? Report exactly two columns: publisher name and hero count, for every publisher tied for the most.',
     sql: `with counts as (
   select p.publisher_name, count(s.id) as heroes
   from publisher p join superhero s on s.publisher_id = p.id
@@ -446,7 +446,7 @@ select publisher_name, heroes from counts where heroes = (select max(heroes) fro
     category: 'tie',
     probes: 'maximum attendance, several events can tie',
     db: student,
-    question: 'Which event had the most attendees? Report every event tied for the most, with the number of attendees.',
+    question: 'Which event had the most attendees? Report exactly two columns: event name and attendee count, for every event tied for the most.',
     sql: `with counts as (
   select e.event_name, count(a.link_to_member) as attendees
   from event e join attendance a on a.link_to_event = e.event_id
@@ -460,7 +460,7 @@ order by event_name`,
     category: 'tie',
     probes: 'mode of a categorical column with a tie',
     db: throm,
-    question: 'Which diagnosis is the most common? Report every diagnosis tied for the most patients, with the count.',
+    question: 'Which diagnosis is the most common? Report exactly two columns: diagnosis and patient count, for every diagnosis tied for the most.',
     sql: `with counts as (
   select Diagnosis, count(distinct ID) as patients
   from Examination where Diagnosis is not null
@@ -474,7 +474,7 @@ order by Diagnosis`,
     category: 'tie',
     probes: 'maximum of a grouped count over a secondary table',
     db: tox,
-    question: 'Which molecule has the most atoms? Report every molecule tied for the most, with the count.',
+    question: 'Which molecule has the most atoms? Report exactly two columns: molecule id and atom count, for every molecule tied for the most.',
     sql: `with counts as (
   select molecule_id, count(*) as atoms from atom group by molecule_id
 )
@@ -487,7 +487,7 @@ order by molecule_id`,
     probes: 'maximum restricted by a filter, ties included',
     db: superhero,
     question:
-      'Among heroes weighing more than 100 kg, which race has the most heroes? Report every race tied for the most, with the count.',
+      'Among heroes weighing more than 100 kg, which race has the most heroes? Report exactly two columns: race name and hero count, for every race tied for the most.',
     sql: `with counts as (
   select r.race, count(*) as heroes
   from superhero s join race r on s.race_id = r.id
@@ -502,7 +502,7 @@ order by race`,
     category: 'tie',
     probes: 'most frequent item in a transaction log, ties included',
     db: debit,
-    question: 'Which product was bought most often in 2012? Report every product tied for the most, with the number of transactions.',
+    question: 'Which product was bought most often in 2012? Report exactly two columns: product description and transaction count, for every product tied for the most.',
     sql: `with counts as (
   select p.Description, count(*) as purchases
   from transactions_1k t
