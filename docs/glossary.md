@@ -173,6 +173,11 @@ it as a model error would understate every arm equally and hide the real problem
 a question uses, for example how a ratio is computed. An arm either includes it
 or does not; that is the ablation.
 
+**Structural semantics** — Grain, keys, join direction and column roles inferred
+from names, declared types and foreign keys, with no human-written dictionary.
+Rendered by `renderDefinitions()` and passed to the prompt as `definitions`. It
+states what the schema licenses, not what a business owner meant.
+
 **Portability census** — The share of a dataset's statements that also run on a
 second engine, with the failure taxonomy. Not an accuracy number: it answers
 "will this SQL run on my engine", which is the first question a deployment asks.

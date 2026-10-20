@@ -143,6 +143,7 @@ Every push runs the same gates locally and in CI:
 - [Compiling metrics to SQL](docs/guide/08-semantic-compiler.md)
 - [Query a SQLite database](docs/guide/09-sqlite.md)
 - [Give the model definitions, not just schema](docs/guide/10-evidence.md)
+- [Infer semantics from the schema](docs/guide/11-semantics.md)
 - [Production checklist](docs/guide/07-production.md)
 - [Architecture](docs/architecture.md)
 - [Glossary](docs/glossary.md)

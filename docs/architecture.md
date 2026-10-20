@@ -114,6 +114,8 @@ question
    │
    ├─ linkSchema(question, schema)            3 recallers, RRF fusion
    ├─ buildSqlPrompt                           rules + schema card
+   │                                            + structural semantics
+   │                                            + evidence hint
    ├─ provider.complete()                      OpenAI-compatible, pluggable
    ├─ extractSql()                             fenced or plain
    ├─ inspectSql()                             lexical guard
