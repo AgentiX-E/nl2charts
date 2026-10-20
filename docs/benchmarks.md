@@ -131,85 +131,55 @@ temperature 0, one sample per case. Artifacts: `eval/out/bird-eval.json`,
 | Schema fidelity: advertised columns exist in the database | **798 / 798** |
 | Prompt coverage: tables that reach the schema card | **75 / 75** (no truncation) |
 
-### Accuracy (same 239 cases in every arm, one change per arm)
+### Accuracy (same 239 cases in every arm)
 
 | Arm | Execution accuracy | 95% Wilson | Strict multiset | Duplicate credit | simple / moderate / challenging |
 | --- | --- | --- | --- | --- | --- |
-| names only | 32.2% (77/239) | [26.6, 38.4] | 71 | 6 | 41/80 · 15/80 · 21/79 |
-| + metadata (labels, descriptions, joins) | **44.4%** (106/239) | [38.2, 50.7] | 102 | 4 | 47/80 · 33/80 · 26/79 |
-| + evidence | **56.9%** (136/239) | [50.6, 63.0] | 127 | 9 | 55/80 · 39/80 · 42/79 |
-| metadata + evidence, **no schema linker** | 56.1% (134/239) | [49.7, 62.2] | 126 | 8 | 57/80 · 37/80 · 40/79 |
-| metadata + evidence **+ repair loop** | **59.0%** (141/239) | [52.7, 65.0] | 132 | 9 | 56/80 · 41/80 · 44/79 |
-
-### Paired ablations (McNemar exact, same cases)
+| names only | 32.6% (78/239) | [27.0, 38.8] | 72 | 6 | 41/80 · 16/80 · 21/79 |
+| + metadata (labels, descriptions, joins) | **45.2%** (108/239) | [39.0, 51.5] | 104 | 4 | 48/80 · 34/80 · 26/79 |
+| + evidence | **60.3%** (144/239) | [53.9, 66.2] | 134 | 10 | 58/80 · 42/80 · 44/79 |
+| + **adaptive card** (shape-chosen) | 57.7% (138/239) | [51.4, 63.8] | 129 | 9 | 56/80 · 41/80 · 41/79 |
 
 | Change | Δ | only before / only after | p | verdict |
 | --- | --- | --- | --- | --- |
-| names → +metadata | **+12.1pp** | 9 / 38 | 0.00002 | real |
-| metadata → +evidence | **+12.6pp** | 8 / 38 | 0.00001 | real |
-| +evidence → **remove our schema linker** | **−0.8pp** | 11 / 9 | 0.82 | **no measurable effect** |
-| +evidence → +repair loop | **+2.1pp** | 2 / 8 | 0.11 | **no measurable effect** |
+| names → +metadata | **+12.6pp** | 7 / 37 | 0.00001 | real |
+| metadata → +evidence | **+15.1pp** | 7 / 43 | < 0.00001 | real |
+| +evidence → **adaptive card** | **−2.5pp** | 8 / 2 | 0.11 | **no measurable effect** |
 
-Two negative results, published as results:
+The adaptive arm replaces the full schema card with a compact one on questions
+whose wording names a window or ratio shape, and adds shape-specific rules
+(`RANK` vs `DENSE_RANK`, an empty first row for `LAG`, `NULLIF` on a denominator,
+count rows versus values). It triggers on 44 of 240 BIRD questions, mostly ratio
+wording. It does **not** dominate either fixed strategy: −2.5pp here, +6.2pp on
+the adversarial set below, neither significant. The product default stays "always
+include metadata", because the measured cost of the switch is on the face that is
+eight times larger.
 
-1. **The schema linker does not move execution accuracy on BIRD.** Its
-   recall@3 gain (20%→56%→84% on the unit benchmark) does not survive contact
-   with end-to-end accuracy: removing the hint costs 0.8pp, which is well inside
-   the noise floor. The module stays in the pipeline, because the measured harm
-   is indistinguishable from zero, but no benefit is claimed.
-2. **The repair loop has nothing to repair here.** With the oracle timing bug
-   fixed, the model's SQL executes in 239/239 cases; its errors are semantic, not
-   syntactic, so a loop that reacts to execution errors cannot help. The +2.1pp
-   is not significant (2 vs 8 discordant cases, p = 0.11).
-3. **A previous run reported 66.5% and +25.5pp for "metadata + evidence +
-   repair".** That number was inflated by two harness defects: the execution
-   oracle counted queue time against a 30 s budget (156 spurious timeouts, which
-   the repair loop then "fixed"), and the schema card listed names the databases
-   do not contain. Both are fixed; the table above supersedes it.
+### Run-to-run variation (why a 2.5pp delta is not a result)
 
-### Adversarial shapes (hand-written, reported apart)
+Two runs of the identical harness, same 239 cases, same prompts, same model:
 
-BIRD's questions are mostly filter-and-aggregate. Four shapes decide whether a
-system is usable for analysis, and an aggregate score over 239 questions hides
-all four, so they get their own table.
-
-```bash
-pnpm bench:adversarial:dry   # gold executes, and each question's stated width matches the gold
-pnpm bench:adversarial
-```
-
-32 cases over six Mini-Dev databases, eight per shape, every question stating its
-exact output width. Gold returns a non-empty result for all 32 before a model is
-called; a question that promises two columns and a gold returning three stops the
-run instead of scoring zero.
-
-| Shape | What it catches | names | metadata |
+| Arm | Run A (`39404927976`) | Run B (`39418176669`) | Δ |
 | --- | --- | --- | --- |
-| window | `RANK`/`LAG`/running totals, ties inside a partition | 5/8 | 3/8 |
-| ratio | division with a defensible zero case, `COUNT(*)` vs `COUNT(column)` | 6/8 | 5/8 |
-| multi-hop | three or more joins, the join key is the question | **8/8** | **8/8** |
-| tie | "the most" when several rows share the maximum | 7/8 | 7/8 |
-| **total** | | **81.2%** (26/32) | 71.9% (23/32) |
+| names | 32.2% | 32.6% | +0.4pp |
+| metadata | 44.4% | 45.2% | +0.8pp |
+| metadata+evidence | 56.9% | **60.3%** | **+3.4pp** |
 
-`names → metadata`: **−9.4pp**, 3 cases only names passed, 0 cases only metadata
-passed, McNemar p = 0.25. Two earlier runs of this set, before the questions were
-disambiguated, gave −6.2pp and −12.5pp with the same one-sided direction. No run
-is individually significant at n = 32, but the direction is consistent and
-opposite to BIRD, where metadata is worth +12.6pp.
+The arm with the longest prompt moves 3.4pp (8 cases) between runs, while the
+short-prompt arms move under 1pp. That is the scale against which every delta in
+this document must be read: **below roughly 4pp at n = 239, a difference is not
+separable from run-to-run variance**, and the adaptive −2.5pp above is well inside
+it. It is also why the noise-floor probe (below) is not enough on its own: it
+measures repeats inside one run, not the variation between runs.
 
-The failures are specific, which is the point of the set:
+### Earlier arms: two null results
 
-| Case | What the model wrote | What it should have written |
-| --- | --- | --- |
-| tallest-share ratio | `COUNT(*)` as the denominator | `COUNT(height_cm)`: null heights are not heroes |
-| thrombosis proportion | `COUNT(*)` over examinations | one row per patient; examinations repeat |
-| 2009 points ranking | no `HAVING SUM(points) > 0` | drivers with zero points are not scorers |
-| top hero per publisher (metadata arm) | a correlated subquery over 383k rows | window function; the query was interrupted at 30 s |
-| CZK/EUR ratio (metadata arm) | `t.Currency` on the transactions table | the column lives on `customers` |
-
-Two execution errors appear only in the metadata arm, and both are instructive:
-a query slow enough to hit the 30 s budget is wrong for a user even if it would
-return the right rows, and a longer prompt did not prevent a hallucinated column.
+The previous run of this benchmark also measured our own two modules, and both
+came back indistinguishable from zero: removing the three-recaller schema linker
+cost 0.8pp (11/9 discordant, p = 0.82), and the execution-feedback repair loop
+gained 2.1pp (2/8, p = 0.11). Both remain available as arms
+(`BIRD_ARMS=names,metadata,metadata+evidence,no-linking,repair`) so a change that
+should revive them can be tested without rewriting the harness.
 
 ### Noise floor (why one sample per case is stated, not assumed)
 
