@@ -135,51 +135,32 @@ temperature 0, one sample per case. Artifacts: `eval/out/bird-eval.json`,
 
 | Arm | Execution accuracy | 95% Wilson | Strict multiset | Duplicate credit | simple / moderate / challenging |
 | --- | --- | --- | --- | --- | --- |
-| names only | 32.6% (78/239) | [27.0, 38.8] | 72 | 6 | 41/80 · 16/80 · 21/79 |
-| + metadata (labels, descriptions, joins) | **45.2%** (108/239) | [39.0, 51.5] | 104 | 4 | 48/80 · 34/80 · 26/79 |
-| + evidence | **60.3%** (144/239) | [53.9, 66.2] | 134 | 10 | 58/80 · 42/80 · 44/79 |
-| + **adaptive card** (shape-chosen) | 57.7% (138/239) | [51.4, 63.8] | 129 | 9 | 56/80 · 41/80 · 41/79 |
+| names only | 33.1% (79/239) | [27.4, 39.2] | 74 | 5 | 42/80 · 16/80 · 21/79 |
+| + metadata (labels, descriptions, joins) | **44.4%** (106/239) | [38.2, 50.7] | 100 | 6 | 47/80 · 33/80 · 26/79 |
+| + **synthesized evidence** (data profile) | 46.0% (110/239) | [39.8, 52.4] | 104 | 6 | 48/80 · 35/80 · 27/79 |
+| + **dataset evidence** (BIRD's own hint) | **58.2%** (139/239) | [51.8, 64.2] | 129 | 10 | 55/80 · 41/80 · 43/79 |
 
 | Change | Δ | only before / only after | p | verdict |
 | --- | --- | --- | --- | --- |
-| names → +metadata | **+12.6pp** | 7 / 37 | 0.00001 | real |
-| metadata → +evidence | **+15.1pp** | 7 / 43 | < 0.00001 | real |
-| +evidence → **adaptive card** | **−2.5pp** | 8 / 2 | 0.11 | **no measurable effect** |
+| names → +metadata | **+11.3pp** | 8 / 35 | 0.00004 | real |
+| metadata → **+synthesized evidence** | **+1.7pp** | 6 / 10 | 0.45 | **no measurable effect** |
+| synthesized → **+dataset evidence** | **+12.1pp** | 9 / 39 | 0.00002 | real |
 
-The adaptive arm replaces the full schema card with a compact one on questions
-whose wording names a window or ratio shape, and adds shape-specific rules
-(`RANK` vs `DENSE_RANK`, an empty first row for `LAG`, `NULLIF` on a denominator,
-count rows versus values). It triggers on 44 of 240 BIRD questions, mostly ratio
-wording. It does **not** dominate either fixed strategy: −2.5pp here, +6.2pp on
-the adversarial set below, neither significant. The product default stays "always
-include metadata", because the measured cost of the switch is on the face that is
-eight times larger.
+### The evidence gap is semantic, not statistical
 
-### Run-to-run variation (why a 2.5pp delta is not a result)
+`synthetic` builds the hint from the data itself: one line per informative column,
+dictionaries before ranges, produced by `renderEvidence()` from a cached profile
+(`eval/bird/profile.ts`). It is what a product can do without a curated label —
+and it buys **1.7pp**, against **12.1pp** for the sentence BIRD ships with each
+question.
 
-Two runs of the identical harness, same 239 cases, same prompts, same model:
-
-| Arm | Run A (`39404927976`) | Run B (`39418176669`) | Δ |
-| --- | --- | --- | --- |
-| names | 32.2% | 32.6% | +0.4pp |
-| metadata | 44.4% | 45.2% | +0.8pp |
-| metadata+evidence | 56.9% | **60.3%** | **+3.4pp** |
-
-The arm with the longest prompt moves 3.4pp (8 cases) between runs, while the
-short-prompt arms move under 1pp. That is the scale against which every delta in
-this document must be read: **below roughly 4pp at n = 239, a difference is not
-separable from run-to-run variance**, and the adaptive −2.5pp above is well inside
-it. It is also why the noise-floor probe (below) is not enough on its own: it
-measures repeats inside one run, not the variation between runs.
-
-### Earlier arms: two null results
-
-The previous run of this benchmark also measured our own two modules, and both
-came back indistinguishable from zero: removing the three-recaller schema linker
-cost 0.8pp (11/9 discordant, p = 0.82), and the execution-feedback repair loop
-gained 2.1pp (2/8, p = 0.11). Both remain available as arms
-(`BIRD_ARMS=names,metadata,metadata+evidence,no-linking,repair`) so a change that
-should revive them can be tested without rewriting the harness.
+That is the most useful number in this document. A dictionary says which values
+exist (`status: values (completed, refunded)`); BIRD's evidence says what a term
+means (`ratio of customers who pay in EUR = count(Currency='EUR') /
+count(Currency='CZK')`). The first is a profiler; the second is a definition. A
+product that wants the second has to write definitions, not enumerate values, and
+this benchmark now measures that gap directly instead of assuming a dictionary
+would close it.
 
 ### Noise floor (why one sample per case is stated, not assumed)
 

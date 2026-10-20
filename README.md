@@ -7,7 +7,7 @@ Two rules shape the whole design:
 1. **The runtime does not need a model.** `core` executes SQL and returns rows. Natural language lives in a separate package (`ai`) that you install only if you want it.
 2. **Every statement passes a lexical guard.** The guard refuses what it cannot classify instead of rewriting it. Read-only is enforced before the engine sees the query.
 
-> **Status: 0.4.0, external benchmark milestone.** The eight packages, the four-stage metric compiler, two engines (DuckDB and SQLite), and the quality gates exist and run in CI. Accuracy is measured on **BIRD Mini-Dev**, not only on our own fixtures: **60.3% execution accuracy** over 239 questions across all 11 databases, with **+12.1pp from column metadata** and **+12.6pp from evidence** (McNemar p < 0.0001), while the schema linker and the repair loop show **no measurable effect** on this benchmark (p = 0.82 and 0.11). A separate 32-case adversarial set (window functions, guarded ratios, multi-hop joins, tie-broken maxima) scores **81.2%** and shows the metadata gain does **not** transfer to those shapes (−9.4pp, p = 0.25); a shape-chosen card recovers two of those cases (78.1%) at a 2.5pp cost on BIRD, so it is available but not the default. Two runs of the same harness differ by up to **3.4pp** on the longest-prompt arm, which is why every delta below roughly 4pp is reported as noise. See [docs/benchmarks.md](docs/benchmarks.md) for exactly what those numbers do and do not mean.
+> **Status: 0.4.0, external benchmark milestone.** The eight packages, the four-stage metric compiler, two engines (DuckDB and SQLite), and the quality gates exist and run in CI. Accuracy is measured on **BIRD Mini-Dev**, not only on our own fixtures: **58.2% execution accuracy** over 239 questions across all 11 databases (56.9–60.3% across three runs of the same harness), with **+11.3pp from column metadata** and **+12.1pp more from a curated evidence sentence** (McNemar p < 0.0001), while evidence **synthesized from the data** — value dictionaries and ranges — buys only **+1.7pp** (p = 0.45), while the schema linker and the repair loop show **no measurable effect** on this benchmark (p = 0.82 and 0.11). A separate 32-case adversarial set (window functions, guarded ratios, multi-hop joins, tie-broken maxima) scores **81.2%** and shows the metadata gain does **not** transfer to those shapes (−9.4pp, p = 0.25); a shape-chosen card recovers two of those cases (78.1%) at a 2.5pp cost on BIRD, so it is available but not the default. Two runs of the same harness differ by up to **3.4pp** on the longest-prompt arm, which is why every delta below roughly 4pp is reported as noise. See [docs/benchmarks.md](docs/benchmarks.md) for exactly what those numbers do and do not mean.
 
 ## What works today
 
@@ -142,6 +142,7 @@ Every push runs the same gates locally and in CI:
 - [Semantic layer validation](docs/guide/06-semantic-layer.md)
 - [Compiling metrics to SQL](docs/guide/08-semantic-compiler.md)
 - [Query a SQLite database](docs/guide/09-sqlite.md)
+- [Give the model definitions, not just schema](docs/guide/10-evidence.md)
 - [Production checklist](docs/guide/07-production.md)
 - [Architecture](docs/architecture.md)
 - [Glossary](docs/glossary.md)
