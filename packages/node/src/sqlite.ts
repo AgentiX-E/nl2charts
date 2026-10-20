@@ -80,11 +80,11 @@ export async function createSqliteEngine(options: SqliteOptions): Promise<Engine
 }
 
 /**
- * `node:sqlite` returns BLOBs as `Uint8Array`. They become base64 strings so a
- * row survives JSON, which is what every downstream consumer (cache, artifact,
- * MCP) assumes.
+ * `node:sqlite` returns BLOBs as `Uint8Array`. They become `0x<hex>`, the same
+ * encoding the DuckDB adapter uses, so a row means the same thing whichever
+ * engine produced it (see the value model in docs/architecture.md).
  */
 function normalise(value: unknown): unknown {
-  if (value instanceof Uint8Array) return Buffer.from(value).toString('base64');
+  if (value instanceof Uint8Array) return `0x${Buffer.from(value).toString('hex')}`;
   return value ?? null;
 }

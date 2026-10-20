@@ -152,3 +152,31 @@ measure a module's contribution. The 210-question synthetic set is saturated for
 
 **Self-flip** — A case whose outcome differs across repeated identical calls. A
 non-zero flip count invalidates single-run ablation claims.
+
+**BIRD Mini-Dev** — An external text-to-SQL benchmark: 500 questions over 11
+SQLite databases, with evidence hints and gold SQL written by its authors. Used
+here so accuracy is not a property of our own fixtures.
+
+**Duplicate credit** — Cases the official BIRD judge passes because it compares
+`set()` and therefore collapses duplicate rows. Reported next to the strict
+multiset score so the gap is visible.
+
+**Execution accuracy** — A predicted query is correct when its result set equals
+the gold result set: same column count, same column order, same values; row order
+and aliases do not matter.
+
+**Gold runnability** — The share of dataset gold statements that execute on the
+engine under test. A gold statement that fails is excluded and counted; treating
+it as a model error would understate every arm equally and hide the real problem.
+
+**Evidence (BIRD)** — A dataset-provided sentence that defines the business terms
+a question uses, for example how a ratio is computed. An arm either includes it
+or does not; that is the ablation.
+
+**Portability census** — The share of a dataset's statements that also run on a
+second engine, with the failure taxonomy. Not an accuracy number: it answers
+"will this SQL run on my engine", which is the first question a deployment asks.
+
+**Reference driver** — The engine implementation the benchmark's own judge uses
+(Python `sqlite3` for BIRD). Benchmarks execute through it so the judge compares
+tuples, including duplicate column names and duplicate rows.

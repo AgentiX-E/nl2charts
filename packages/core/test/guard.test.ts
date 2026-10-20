@@ -136,3 +136,24 @@ describe('row limit injection', () => {
     expect(withRowLimit('SELECT 1', -4)).toBe('SELECT 1 LIMIT 0');
   });
 });
+
+describe('backtick identifiers', () => {
+  it('accepts a backtick-quoted identifier, as SQLite and MySQL do', () => {
+    expect(inspectSql('select `Order Total` from orders')).toMatchObject({ ok: true });
+    expect(inspectSql('select `a``b` from t')).toMatchObject({ ok: true });
+    expect(inspectSql('select 1 from `t`')).toMatchObject({ ok: true });
+  });
+
+  it('rejects an unterminated backtick', () => {
+    expect(inspectSql('select `open from t')).toMatchObject({ ok: false, reason: 'unterminated-identifier' });
+  });
+
+  it('does not treat a semicolon inside backticks as a statement separator', () => {
+    expect(inspectSql('select `a;b` from t')).toMatchObject({ ok: true });
+    expect(inspectSql('select 1; select 2')).toMatchObject({ ok: false });
+  });
+
+  it('still refuses a write hidden behind a backtick', () => {
+    expect(inspectSql('delete from `orders`')).toMatchObject({ ok: false, reason: 'unclassified-statement' });
+  });
+});

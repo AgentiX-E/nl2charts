@@ -67,9 +67,9 @@ describe('SQLite engine', () => {
     expect(await rows('select 1 as a, 2 as a')).toEqual([{ a: 2 }]);
   });
 
-  it('maps blobs to base64 so a row survives JSON', async () => {
+  it('maps blobs to the same 0x-hex encoding the DuckDB adapter uses', async () => {
     const [row] = await rows('select note from orders where id = 1');
-    expect(row?.note).toBe(Buffer.from([0x00, 0xff]).toString('base64'));
+    expect(row?.note).toBe('0x00ff');
   });
 
   it('refuses writes on a read-only file', async () => {

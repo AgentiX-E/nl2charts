@@ -87,3 +87,16 @@ describe('judge value normalisation', () => {
     expect(judgeStrict(t([1, 2]), t(['x', 'y']))).toBe('values');
   });
 });
+
+describe('blob comparison', () => {
+  it('distinguishes two different blobs from the Python oracle', () => {
+    // The oracle sends {"$b64": "..."}: without decoding, every blob would
+    // stringify to "[object Object]" and compare equal.
+    expect(judgeOfficial(t([{ $b64: 'Cgs=' }]), t([{ $b64: 'Cgs=' }]))).toBe('match');
+    expect(judgeOfficial(t([{ $b64: 'Cgs=' }]), t([{ $b64: 'DAw=' }]))).toBe('values');
+  });
+
+  it('treats a hex string from the DuckDB adapter as text, not as bytes', () => {
+    expect(judgeOfficial(t(['0x00ff']), t([new Uint8Array([0, 255])]))).toBe('values');
+  });
+});

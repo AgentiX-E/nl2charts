@@ -37,7 +37,11 @@ function normalise(value: unknown): string {
     return `n:${Object.is(value, -0) ? 0 : value}`;
   }
   if (typeof value === 'boolean') return `b:${value}`;
-  if (value instanceof Uint8Array) return `x:${Buffer.from(value).toString('base64')}`;
+  if (value instanceof Uint8Array) return `x:${Buffer.from(value).toString('hex')}`;
+  // The Python oracle encodes blobs as {"$b64": "..."} because JSON has no bytes.
+  if (typeof value === 'object' && value !== null && typeof (value as { $b64?: unknown }).$b64 === 'string') {
+    return `x:${(value as { $b64: string }).$b64}`;
+  }
   return `s:${String(value)}`;
 }
 

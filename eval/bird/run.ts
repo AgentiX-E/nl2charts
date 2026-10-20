@@ -61,6 +61,7 @@ interface CaseRun extends CaseOutcome {
   readonly reason: MatchReason;
   readonly strict: boolean;
   readonly error?: string;
+  readonly errorKind?: 'execution' | 'guard' | 'llm' | 'other';
   readonly attempts: number;
 }
 
@@ -202,14 +203,21 @@ async function main() {
     if (arm === undefined) throw new Error(`unknown arm ${name}`);
     const runs = await pool(cases, config.concurrency, async (question): Promise<CaseRun> => {
       const schema = schemas.get(question.db_id) as SchemaTable[];
+      // The execute hook exists for repairs only. Without repairs it would turn
+      // an execution failure into a thrown pipeline error and hide the statement
+      // that failed, which is the one thing a diagnosis needs.
       const pipeline = createPipeline({
         provider,
         maxRepairs: arm.repairs,
         prompt: promptFor(arm, question),
-        execute: async (sql) => {
-          const result = await oracle.run(question.db_id, sql);
-          if (!result.ok) throw new Error(result.error ?? 'execution failed');
-        },
+        ...(arm.repairs === 0
+          ? {}
+          : {
+              execute: async (sql: string) => {
+                const result = await oracle.run(question.db_id, sql);
+                if (!result.ok) throw new Error(result.error ?? 'execution failed');
+              },
+            }),
       });
       const expected = gold.get(question.question_id) as OracleResult;
       try {
@@ -236,14 +244,21 @@ async function main() {
           attempts: asked.attempts,
         };
       } catch (error) {
+        // A repair arm reports the statement it gave up on, so a failure is
+        // diagnosable from the artifact alone.
+        const details = (error as { details?: Record<string, unknown> }).details ?? {};
+        const lastError = typeof details.lastError === 'string' ? details.lastError : undefined;
+        const message = error instanceof Error ? error.message : String(error);
+        const code = (error as { code?: string }).code ?? '';
         return {
           id: String(question.question_id),
           passed: false,
-          predicted: '',
+          predicted: typeof details.lastSql === 'string' ? details.lastSql : '',
           reason: 'values',
           strict: false,
           attempts: arm.repairs + 1,
-          error: error instanceof Error ? error.message : String(error),
+          error: lastError === undefined ? message : `${message}: ${lastError}`,
+          errorKind: code === 'NL2C_E_GUARD_REJECTED' ? 'guard' : code === 'NL2C_E_ENGINE_FAILED' ? 'execution' : code.startsWith('NL2C_E_LLM') ? 'llm' : 'other',
         };
       }
     });
@@ -257,12 +272,21 @@ async function main() {
       bucket.total += 1;
       if (run.passed) bucket.passed += 1;
     }
+    const kindOf = (run: CaseRun): string | undefined => run.errorKind ?? (run.error === undefined ? undefined : 'other');
     const errors = {
-      execution: runs.filter((run) => run.error?.startsWith('execution') === true).length,
-      contract: runs.filter((run) => run.error !== undefined && !run.error.startsWith('execution')).length,
+      execution: runs.filter((run) => kindOf(run) === 'execution').length,
+      guard: runs.filter((run) => kindOf(run) === 'guard').length,
+      llm: runs.filter((run) => kindOf(run) === 'llm').length,
+      other: runs.filter((run) => kindOf(run) === 'other').length,
       columnCount: runs.filter((run) => run.reason === 'column-count').length,
       values: runs.filter((run) => run.reason === 'values' && run.error === undefined).length,
     };
+    const messages = new Map<string, number>();
+    for (const run of runs) {
+      if (run.error === undefined) continue;
+      const key = run.error.replace(/\d+/g, 'N').slice(0, 120);
+      messages.set(key, (messages.get(key) ?? 0) + 1);
+    }
     armReports.push({
       arm: arm.name,
       passed: summary.passed,
@@ -275,6 +299,7 @@ async function main() {
       repaired: runs.filter((run) => run.attempts > 1).length,
       byDifficulty,
       errors,
+      topErrors: [...messages.entries()].sort((left, right) => right[1] - left[1]).slice(0, 5),
     });
     console.log(
       `${arm.name.padEnd(9)} ${summary.passed}/${summary.total}  ${(summary.accuracy * 100).toFixed(1)}%  strict ${strictPassed}  repaired ${runs.filter((run) => run.attempts > 1).length}`,

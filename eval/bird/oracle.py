@@ -74,8 +74,12 @@ class Oracle:
         started = time.monotonic()
         try:
             connection = self.connect(db_id)
-            # 30 s per statement, refreshed for every call.
-            self.deadline[0] = started + 30.0
+            # The clock starts when the statement starts, not when the request was
+            # read: requests queue behind each other in one process, and counting
+            # queue time against a 30 s budget made later statements look like
+            # timeouts. Measured on the first BIRD run, which failed 156 of 200
+            # cases with "interrupted" and reported 5.5% accuracy.
+            self.deadline[0] = time.monotonic() + 30.0
             cursor = connection.execute(sql)
             raw = cursor.fetchall()
             columns = [description[0] for description in cursor.description or []]

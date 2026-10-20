@@ -127,6 +127,7 @@ export function createPipeline(options: PipelineOptions): {
           throw toNl2ChartsError(code, lastKind === 'guard' ? 'model could not produce a safe statement' : 'model could not produce an executable statement', undefined, {
             attempts,
             lastError,
+            lastSql: sql,
           });
         }
         messages.push({ role: 'assistant', content: response.text });

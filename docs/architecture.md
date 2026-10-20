@@ -130,6 +130,48 @@ The guard runs twice on purpose. The pipeline's check explains a rejection to
 the model; the runner's check is the one that protects the engine, including SQL
 that came from somewhere else.
 
+## Engines
+
+Two engines ship, both in `@agentix-e/nl2charts-node`:
+
+| Engine | Backing | Notes |
+| --- | --- | --- |
+| `duckdb-native` | `@duckdb/node-api` | the default; columnar, reads Parquet/CSV, and can attach SQLite through its extension |
+| `sqlite` | `node:sqlite` (lazy import) | single file, opened read-only by default |
+
+Everything above them sees `Engine` (`id`, `dialect`, `run`, `close`). The
+semantic compiler renders dialect-neutral SQL and a per-dialect renderer is a
+plan visitor, not a second compiler.
+
+The SQLite adapter documents a runtime limitation instead of hiding it: until
+`node:sqlite` exposes `setReturnArrays()`, duplicate output column names collapse
+and an empty result cannot report its columns. That is why the external benchmark
+executes statements through the reference driver (Python's `sqlite3`) rather than
+through this adapter — the judge must compare tuples, and a judge that silently
+loses a column would be measuring its own bug.
+
+## Evaluation
+
+Three harnesses, each with a control that must fail if the harness is wrong:
+
+| Harness | Data | Control |
+| --- | --- | --- |
+| `pnpm bench` | 20 fixtures, template baseline | oracle 100%, empty 0% |
+| `pnpm bench:live` | 210 generated questions, live model | gold pre-execution, 3 repeats, self-flip count |
+| `pnpm bench:bird` | BIRD Mini-Dev subset, live model | gold pre-execution, self-consistency, negative control |
+
+`bench:bird` adds two properties the others do not have:
+
+1. **Gold runnability is a metric.** A gold statement that does not execute is
+   reported and excluded, never scored as a model failure.
+2. **Two judges.** The official BIRD rule is `set(predicted) == set(gold)` over
+   tuples (`evaluation/evaluation_ex.py`), which collapses duplicate rows. A
+   strict multiset judge runs beside it, and the difference is published as
+   "duplicate credit" rather than argued about.
+
+A third artifact, `eval/out/duckdb-portability.json`, executes the same gold
+statements on DuckDB and reports what survives. It is a census, not a gate.
+
 ## Value model
 
 Rows are `Record<string, CanonicalValue>`. Before a row leaves the runtime:
