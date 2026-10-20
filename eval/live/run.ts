@@ -87,7 +87,7 @@ interface ArmSpec {
 const arms: readonly ArmSpec[] = [
   { name: 'names', samples: false, repairs: 0 },
   { name: 'samples', samples: true, repairs: 0 },
-  { name: 'repair', samples: true, repairs: 2 },
+  { name: 'repair', samples: false, repairs: 2 },
 ];
 
 async function runArm(spec: ArmSpec): Promise<ArmResult> {
@@ -146,7 +146,7 @@ const names = results.find((result) => result.arm === 'names') as ArmResult;
 const samples = results.find((result) => result.arm === 'samples') as ArmResult;
 const repair = results.find((result) => result.arm === 'repair') as ArmResult;
 const valueEffect = compareArms(names, samples);
-const repairEffect = compareArms(samples, repair);
+const repairEffect = compareArms(names, repair);
 
 const report = {
   generatedAt: new Date().toISOString(),
@@ -180,12 +180,12 @@ console.log(
   `\nvalue profiling: ${(valueEffect.delta * 100).toFixed(1)}pp (only names ${valueEffect.onlyFirst}, only samples ${valueEffect.onlySecond}, p=${mcnemarExact(valueEffect.onlyFirst, valueEffect.onlySecond).toFixed(4)})`,
 );
 console.log(
-  `repair loop:     ${(repairEffect.delta * 100).toFixed(1)}pp (only samples ${repairEffect.onlyFirst}, only repair ${repairEffect.onlySecond}, p=${mcnemarExact(repairEffect.onlyFirst, repairEffect.onlySecond).toFixed(4)})`,
+  `repair loop:     ${(repairEffect.delta * 100).toFixed(1)}pp (only names ${repairEffect.onlyFirst}, only repair ${repairEffect.onlySecond}, p=${mcnemarExact(repairEffect.onlyFirst, repairEffect.onlySecond).toFixed(4)})`,
 );
 console.log('wrote eval/out/live-eval.json');
 
 if (samples.accuracy < 0.5) throw new Error(`live accuracy ${(samples.accuracy * 100).toFixed(1)}% is below the 50% floor`);
 if (samples.accuracy < names.accuracy - 0.05) throw new Error('schema samples regressed accuracy by more than 5pp');
-if (repair.accuracy < samples.accuracy - 0.05) throw new Error('the repair loop regressed accuracy by more than 5pp');
+if (repair.accuracy < names.accuracy - 0.05) throw new Error('the repair loop regressed accuracy by more than 5pp');
 
 await runner.close();

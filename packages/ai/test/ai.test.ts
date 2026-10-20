@@ -71,6 +71,12 @@ describe('schema linking', () => {
     expect(renderSchemaCard(schema, 1).split('\n')).toHaveLength(1);
   });
 
+  it('renders column comments and keeps samples optional', () => {
+    const annotated = [{ table: 'orders', columns: [{ name: 'amount', type: 'DECIMAL', comment: 'order total', samples: ['1.00'] }] }];
+    expect(renderSchemaCard(annotated)).toBe('orders(amount DECIMAL -- order total)');
+    expect(renderSchemaCard(annotated, 40, { samples: true })).toBe('orders(amount DECIMAL [1.00] -- order total)');
+  });
+
   it('adds enum samples only when asked', () => {
     const plain = renderSchemaCard(schema);
     const sampled = renderSchemaCard(schema, 40, { samples: true });

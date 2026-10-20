@@ -39,6 +39,7 @@ export function buildSqlPrompt(question: string, schema: readonly SchemaTable[],
   return [
     'You translate questions into one read-only SQL statement.',
     'Rules: SELECT only, no DDL or DML, one statement, no comments.',
+    'Use only the filters the question states. Sample values are examples, not defaults.',
     'Schema:',
     renderSchemaCard(schema, 40, { samples }),
     `Question: ${question}`,

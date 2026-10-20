@@ -1,6 +1,8 @@
 export interface SchemaColumn {
   readonly name: string;
   readonly type: string;
+  /** One-line business meaning, shown in the schema card. */
+  readonly comment?: string;
   readonly samples?: readonly string[];
   readonly aliases?: readonly string[];
 }
@@ -150,8 +152,11 @@ export function renderSchemaCard(
   for (const table of schema) {
     const columns = table.columns.map((column) => {
       const base = `${column.name} ${column.type}`;
-      if (options.samples !== true || column.samples === undefined || column.samples.length === 0) return base;
-      return `${base} [${column.samples.join('|')}]`;
+      const withSamples =
+        options.samples === true && column.samples !== undefined && column.samples.length > 0
+          ? `${base} [${column.samples.join('|')}]`
+          : base;
+      return column.comment === undefined ? withSamples : `${withSamples} -- ${column.comment}`;
     });
     lines.push(`${table.table}(${columns.join(', ')})`);
     if (lines.length >= limit) break;
