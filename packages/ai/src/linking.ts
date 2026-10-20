@@ -141,10 +141,19 @@ export function linkSchema(
     .slice(0, topK);
 }
 
-export function renderSchemaCard(schema: readonly SchemaTable[], limit = 40): string {
+export function renderSchemaCard(
+  schema: readonly SchemaTable[],
+  limit = 40,
+  options: { readonly samples?: boolean } = {},
+): string {
   const lines: string[] = [];
   for (const table of schema) {
-    lines.push(`${table.table}(${table.columns.map((column) => `${column.name} ${column.type}`).join(', ')})`);
+    const columns = table.columns.map((column) => {
+      const base = `${column.name} ${column.type}`;
+      if (options.samples !== true || column.samples === undefined || column.samples.length === 0) return base;
+      return `${base} [${column.samples.join('|')}]`;
+    });
+    lines.push(`${table.table}(${columns.join(', ')})`);
     if (lines.length >= limit) break;
   }
   return lines.join('\n');

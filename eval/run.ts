@@ -1,4 +1,5 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRunner } from '@agentix-e/nl2charts-core';
@@ -143,6 +144,6 @@ async function main(): Promise<void> {
   console.log('\nharness: controls hold (oracle 100%, empty 0%); wrote eval/out/results.json');
 }
 
-if (process.argv[1]?.endsWith('run.ts') || process.argv[1]?.endsWith('run.js')) {
+if (process.argv[1] !== undefined && pathToFileURL(process.argv[1]).href === import.meta.url) {
   await main();
 }

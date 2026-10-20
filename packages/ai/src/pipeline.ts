@@ -8,6 +8,11 @@ export interface PipelineOptions {
   readonly provider: LlmProvider;
   readonly maxRepairs?: number;
   readonly topK?: number;
+  /** Include enum sample values in the schema card. */
+  readonly samples?: boolean;
+  /** When provided, a candidate is executed before it is accepted; failures
+   *  become repair turns (syntax and binding errors, not wrong answers). */
+  readonly execute?: (sql: string) => Promise<unknown>;
 }
 
 export interface AskRequest {
@@ -30,12 +35,12 @@ export function extractSql(text: string): string {
   return withoutPrefix.trim();
 }
 
-export function buildSqlPrompt(question: string, schema: readonly SchemaTable[]): string {
+export function buildSqlPrompt(question: string, schema: readonly SchemaTable[], samples = false): string {
   return [
     'You translate questions into one read-only SQL statement.',
     'Rules: SELECT only, no DDL or DML, one statement, no comments.',
     'Schema:',
-    renderSchemaCard(schema),
+    renderSchemaCard(schema, 40, { samples }),
     `Question: ${question}`,
   ].join('\n');
 }
@@ -58,21 +63,34 @@ export function createPipeline(options: PipelineOptions): {
           ? `Likely columns: ${linked.map((column) => `${column.table}.${column.column}`).join(', ')}`
           : 'No column matched; use the schema above.';
       const messages: LlmMessage[] = [
-        { role: 'system', content: buildSqlPrompt(request.question, request.schema) },
+        { role: 'system', content: buildSqlPrompt(request.question, request.schema, options.samples === true) },
         { role: 'user', content: `${schemaHint}\n${request.question}` },
       ];
 
       let attempts = 0;
       let lastError = '';
+      let lastKind: 'guard' | 'execution' = 'guard';
       for (;;) {
         attempts += 1;
         const response = await options.provider.complete({ messages, temperature: 0 });
         const sql = extractSql(response.text);
         const verdict = inspectSql(sql);
-        if (verdict.ok) return { sql, attempts, linked };
-        lastError = `${verdict.reason}: ${verdict.detail}`;
+        if (verdict.ok) {
+          if (!options.execute) return { sql, attempts, linked };
+          try {
+            await options.execute(sql);
+            return { sql, attempts, linked };
+          } catch (error) {
+            lastKind = 'execution';
+            lastError = error instanceof Error ? error.message : String(error);
+          }
+        } else {
+          lastKind = 'guard';
+          lastError = `${verdict.reason}: ${verdict.detail}`;
+        }
         if (attempts > maxRepairs) {
-          throw toNl2ChartsError('NL2C_E_GUARD_REJECTED', 'model could not produce a safe statement', undefined, {
+          const code = lastKind === 'guard' ? 'NL2C_E_GUARD_REJECTED' : 'NL2C_E_ENGINE_FAILED';
+          throw toNl2ChartsError(code, lastKind === 'guard' ? 'model could not produce a safe statement' : 'model could not produce an executable statement', undefined, {
             attempts,
             lastError,
           });
@@ -80,7 +98,7 @@ export function createPipeline(options: PipelineOptions): {
         messages.push({ role: 'assistant', content: response.text });
         messages.push({
           role: 'user',
-          content: `That statement was rejected (${lastError}). Return one SELECT statement only.`,
+          content: `That statement failed (${lastError}). Return one SELECT statement only.`,
         });
       }
     },

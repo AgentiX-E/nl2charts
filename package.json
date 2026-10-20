@@ -23,7 +23,9 @@
     "bench:ablate": "tsx eval/ablate.ts",
     "verify": "pnpm typecheck && pnpm build && pnpm test:coverage && pnpm gate:coverage && pnpm gate:all && pnpm bench && pnpm bench:linking && pnpm bench:semantic",
     "bench:linking": "tsx eval/linking-ablation.ts",
-    "bench:semantic": "tsx eval/semantic-ablation.ts"
+    "bench:semantic": "tsx eval/semantic-ablation.ts",
+    "bench:live": "tsx eval/live/run.ts",
+    "bench:live:dry": "tsx eval/live/run.ts --dry-run"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

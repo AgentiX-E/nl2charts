@@ -242,11 +242,20 @@
     "validateModel"
   ],
   "devkit": [
+    "compareArms",
     "formatReport",
+    "mcnemarExact",
     "recordCase",
     "runContractSuite",
+    "sameRows",
+    "summarise",
+    "type ArmResult",
+    "type CaseOutcome",
     "type CaseResult",
     "type ContractCase",
-    "type ContractExpectation"
+    "type ContractExpectation",
+    "type Interval",
+    "type PairedComparison",
+    "wilsonInterval"
   ]
 }

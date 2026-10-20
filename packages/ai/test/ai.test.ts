@@ -70,6 +70,14 @@ describe('schema linking', () => {
     expect(card).toContain('orders(order_id BIGINT');
     expect(renderSchemaCard(schema, 1).split('\n')).toHaveLength(1);
   });
+
+  it('adds enum samples only when asked', () => {
+    const plain = renderSchemaCard(schema);
+    const sampled = renderSchemaCard(schema, 40, { samples: true });
+    expect(plain).not.toContain('[north|south]');
+    expect(sampled).toContain('[north|south]');
+    expect(sampled).toContain('order_id BIGINT');
+  });
 });
 
 describe('sql extraction', () => {
@@ -122,7 +130,7 @@ describe('question to guarded sql', () => {
 
   it('repairs a rejected candidate instead of returning it', async () => {
     const provider = createReplayProvider([
-      { match: 'That statement was rejected', response: 'SELECT region FROM orders' },
+      { match: 'That statement failed', response: 'SELECT region FROM orders' },
       { match: 'revenue by region', response: 'DROP TABLE orders' },
     ]);
     const pipeline = createPipeline({ provider });
@@ -144,6 +152,40 @@ describe('question to guarded sql', () => {
         error.code === 'NL2C_E_GUARD_REJECTED' &&
         error.details.attempts === 2 &&
         typeof error.details.lastError === 'string',
+    );
+  });
+
+  it('repairs an execution failure and returns the working statement', async () => {
+    let calls = 0;
+    const provider = createReplayProvider([
+      { match: 'That statement failed', response: 'SELECT region FROM orders' },
+      { match: 'revenue by region', response: 'SELECT region FROM missing_table' },
+    ]);
+    const pipeline = createPipeline({
+      provider,
+      execute: async (sql) => {
+        calls += 1;
+        if (sql.includes('missing_table')) throw new Error('Binder Error: table missing_table does not exist');
+      },
+    });
+    const result = await pipeline.ask({ question: 'revenue by region', schema });
+    expect(result.attempts).toBe(2);
+    expect(result.sql).toBe('SELECT region FROM orders');
+    expect(calls).toBe(2);
+  });
+
+  it('reports an execution failure as an engine error when the budget runs out', async () => {
+    const provider = createReplayProvider([{ match: 'revenue by region', response: 'SELECT * FROM missing' }]);
+    const pipeline = createPipeline({
+      provider,
+      maxRepairs: 0,
+      execute: async () => {
+        throw new Error('Binder Error');
+      },
+    });
+    await expect(pipeline.ask({ question: 'revenue by region', schema })).rejects.toSatisfy(
+      (error: unknown) =>
+        isNl2ChartsError(error) && error.code === 'NL2C_E_ENGINE_FAILED' && error.details.attempts === 1,
     );
   });
 

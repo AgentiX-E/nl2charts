@@ -39,10 +39,10 @@ describe('file cache', () => {
   });
 
   it('expires entries once the ttl has passed', async () => {
-    const cache = createFileCache({ dir, ttlMs: 20 });
+    const cache = createFileCache({ dir, ttlMs: 1_000 });
     const path = await cache.set('k', new Uint8Array([1, 2, 3]));
     expect(await cache.has('k')).toBe(true);
-    await new Promise((resolve) => setTimeout(resolve, 40));
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
     expect(await cache.get('k')).toBeNull();
     expect(await readdir(join(path, '..'))).toHaveLength(1);
   });
