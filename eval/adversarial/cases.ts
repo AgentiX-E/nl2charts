@@ -416,17 +416,18 @@ select surname, wins from wins where wins = (select max(wins) from wins)`,
   {
     id: 't2',
     category: 'tie',
-    probes: 'maximum on a text month filter; ties must all appear',
+    probes: 'most frequent entity in a log, ties must all appear',
     db: debit,
-    question: 'Which gas station had the highest total consumption in 2012? Report exactly two columns: station id and total consumption, for every station tied for the maximum.',
-    sql: `with totals as (
-  select g.GasStationID, sum(y.Consumption) as total
-  from yearmonth y
-  join gasstations g on y.CustomerID = g.GasStationID
-  where y.Date like '2012%'
-  group by g.GasStationID
+    question:
+      'Which gas station chain appears most often in the transactions table? Report exactly two columns: chain id and transaction count, for every chain tied for the most.',
+    sql: `with counts as (
+  select g.ChainID, count(*) as transactions
+  from transactions_1k t
+  join gasstations g on t.GasStationID = g.GasStationID
+  group by g.ChainID
 )
-select GasStationID, total from totals where total = (select max(total) from totals)`,
+select ChainID, transactions from counts where transactions = (select max(transactions) from counts)
+order by ChainID`,
   },
   {
     id: 't3',
