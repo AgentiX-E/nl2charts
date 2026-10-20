@@ -347,3 +347,81 @@ export function parseDefinitions(reply: string, maxChars = 1200): string {
   }
   return kept.join('\n');
 }
+
+export interface AttachResult {
+  readonly schema: readonly {
+    table: string;
+    columns: readonly { name: string; type: string; comment?: string }[];
+    foreignKeys?: readonly string[];
+  }[];
+  /** Lines that found a column. */
+  readonly attached: number;
+  /** Lines that named no column in this schema, kept for the report. */
+  readonly unplaced: readonly string[];
+}
+
+/**
+ * Move a definition block onto the columns it describes.
+ *
+ * Two reply shapes are accepted: `table.column: text` and `"column" is text`.
+ * A line that matches no column is returned as unplaced rather than guessed at —
+ * a definition attached to the wrong column is worse than one left out, because
+ * the model reads the wrong one with full confidence.
+ */
+export function attachDefinitions(
+  schema: readonly {
+    table: string;
+    columns: readonly { name: string; type: string; comment?: string }[];
+    foreignKeys?: readonly string[];
+  }[],
+  block: string,
+): AttachResult {
+  const unplaced: string[] = [];
+  let attached = 0;
+  const lookup = new Map<string, { table: string; column: string }>();
+  for (const table of schema) {
+    for (const column of table.columns) {
+      lookup.set(`${table.table.toLowerCase()}.${column.name.toLowerCase()}`, { table: table.table, column: column.name });
+    }
+  }
+  const additions = new Map<string, string[]>();
+  for (const raw of block.split('\n')) {
+    const line = raw.trim().replace(/^[-*•]\s*/, '');
+    if (line.length === 0) continue;
+    const dotted = /^([^.:=]+)\.([^:=]+)\s*[:=]\s*(.+)$/.exec(line);
+    const quoted = /^"([^"]+)"\s+(?:is|are)\s+(.+)$/.exec(line);
+    let key: string | undefined;
+    let text: string | undefined;
+    if (dotted !== null) {
+      key = `${dotted[1]?.trim().toLowerCase()}.${dotted[2]?.trim().toLowerCase()}`;
+      text = dotted[3]?.trim();
+    } else if (quoted !== null) {
+      const name = quoted[1]?.trim().toLowerCase() as string;
+      const candidates = [...lookup.entries()].filter(([candidate]) => candidate.endsWith(`.${name}`));
+      if (candidates.length === 1) key = candidates[0]?.[0];
+      text = quoted[2]?.trim();
+    }
+    const target = key === undefined ? undefined : lookup.get(key);
+    if (target === undefined || text === undefined || text.length === 0) {
+      unplaced.push(line);
+      continue;
+    }
+    const slot = `${target.table}\u0000${target.column}`;
+    additions.set(slot, [...(additions.get(slot) ?? []), text]);
+    attached += 1;
+  }
+  if (attached === 0) return { schema, attached, unplaced };
+  return {
+    schema: schema.map((table) => ({
+      ...table,
+      columns: table.columns.map((column) => {
+        const extra = additions.get(`${table.table}\u0000${column.name}`);
+        if (extra === undefined) return column;
+        const merged = [column.comment, ...extra].filter((part): part is string => part !== undefined && part.length > 0).join('; ');
+        return { ...column, comment: merged };
+      }),
+    })),
+    attached,
+    unplaced,
+  };
+}

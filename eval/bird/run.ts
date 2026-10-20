@@ -22,7 +22,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHttpProvider } from '@agentix-e/nl2charts-ai';
 import type { PromptOptions, SchemaTable } from '@agentix-e/nl2charts-ai';
-import { buildSqlPrompt, choosePromptProfile, createPipeline, renderDefinitions, renderEvidence, renderSchemaCard } from '@agentix-e/nl2charts-ai';
+import { attachDefinitions, buildSqlPrompt, choosePromptProfile, createPipeline, renderDefinitions, renderEvidence, renderSchemaCard } from '@agentix-e/nl2charts-ai';
 import { compareArms, judgeOfficial, judgeStrict, mcnemarExact, summarise, wilsonInterval } from '@agentix-e/nl2charts-devkit';
 import type { CaseOutcome, MatchReason } from '@agentix-e/nl2charts-devkit';
 import { buildSchema, loadDescriptions, loadQuestions, loadTables, stratifiedSample } from './data.js';
@@ -68,7 +68,7 @@ export interface Arm {
    * the schema; synthesized ones are written once per database by the model.
    * Modelled as one lever for the same reason as the evidence source.
    */
-  readonly definitions?: 'structural' | 'synthesized';
+  readonly definitions?: 'structural' | 'synthesized' | 'inline';
   /** Order synthesized evidence by the columns the question names. */
   readonly focus?: boolean;
 }
@@ -89,6 +89,7 @@ export const ARMS: readonly Arm[] = [
   { name: 'names', notes: false, repairs: 0, linking: true },
   { name: 'definitions', notes: false, repairs: 0, linking: true, definitions: 'structural' },
   { name: 'synth-definitions', notes: false, repairs: 0, linking: true, definitions: 'synthesized' },
+  { name: 'inline-definitions', notes: false, repairs: 0, linking: true, definitions: 'inline' },
   { name: 'definitions+evidence', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'structural' },
   { name: 'synth-definitions+evidence', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'synthesized' },
   { name: 'metadata', notes: true, repairs: 0, linking: true },
@@ -106,6 +107,7 @@ export const ARMS: readonly Arm[] = [
 export const PAIRS: readonly (readonly [string, string])[] = [
   ['names', 'definitions'],
   ['definitions', 'synth-definitions'],
+  ['synth-definitions', 'inline-definitions'],
   ['definitions', 'definitions+evidence'],
   ['synth-definitions', 'synth-definitions+evidence'],
   ['names', 'metadata'],
@@ -135,7 +137,10 @@ function settings() {
       .filter(Boolean),
     // Default chain: baseline, the two definition sources, the synthesized one
     // with the dataset hint, and last round's best arm as the ceiling reference.
-    arms: (process.env.BIRD_ARMS ?? ['names', 'definitions', 'synth-definitions', 'synth-definitions+evidence', 'metadata+evidence'].join(','))
+    arms: (
+      process.env.BIRD_ARMS ??
+      ['names', 'definitions', 'synth-definitions', 'inline-definitions', 'synth-definitions+evidence', 'metadata+evidence'].join(',')
+    )
       .split(',')
       .map((name) => name.trim()),
     out: process.env.BIRD_OUT ?? join(ROOT, 'eval/out/bird-eval.json'),
@@ -166,7 +171,10 @@ export function promptFor(arm: Arm, question: BirdQuestion, synthesized?: string
     arm.evidence === 'dataset' ? question.evidence : arm.evidence === 'synthetic' ? synthesized : undefined;
   return {
     dialect: 'SQLite',
-    descriptions: profile?.descriptions ?? arm.notes,
+    // The inline arm is a placement experiment: the same sentences, attached to
+    // the column line the metadata block uses. Descriptions on is part of that
+    // placement, not a second lever.
+    descriptions: arm.definitions === 'inline' ? true : (profile?.descriptions ?? arm.notes),
     foreignKeys: profile?.foreignKeys ?? arm.notes,
     samples: false,
     schemaLines: 400,
@@ -234,10 +242,6 @@ async function main() {
    * the question's words, so the two arms differ only in line order — not in
    * which columns were profiled and not in the character budget.
    */
-  /** The definition block this arm uses, if any. */
-  const definitionsFor = (arm: Arm, db: string): string | undefined =>
-    arm.definitions === 'synthesized' ? synthesizedDefinitions.get(db) : definitions.get(db);
-
   const evidenceFor = (arm: Arm, question: BirdQuestion): string | undefined => {
     if (arm.evidence !== 'synthetic') return undefined;
     const profile = profiles.get(question.db_id);
@@ -254,7 +258,10 @@ async function main() {
   // same one under test, but it sees only schema, values and a couple of rows —
   // never a question, never a gold statement.
   const synthesizedDefinitions = new Map<string, string>();
-  const needsSynthesis = config.arms.some((name) => ARMS.find((arm) => arm.name === name)?.definitions === 'synthesized');
+  const needsSynthesis = config.arms.some((name) => {
+    const source = ARMS.find((arm) => arm.name === name)?.definitions;
+    return source === 'synthesized' || source === 'inline';
+  });
   const provider = createHttpProvider({ baseUrl: config.baseUrl, apiKey: config.apiKey, model: config.model });
   if (!config.dryRun && needsSynthesis) {
     for (const [db, schema] of schemas) {
@@ -276,6 +283,30 @@ async function main() {
       }
     }
   }
+
+  /**
+   * The same sentences, attached to the column lines. Placement is the variable:
+   * content, cache and budget are identical to the synthesized block.
+   */
+  const inlineSchemas = new Map<string, SchemaTable[]>();
+  let inlineAttached = 0;
+  let inlineUnplaced = 0;
+  for (const [db, schema] of schemas) {
+    const placed = attachDefinitions(schema, synthesizedDefinitions.get(db) ?? '');
+    inlineSchemas.set(db, placed.schema as SchemaTable[]);
+    inlineAttached += placed.attached;
+    inlineUnplaced += placed.unplaced.length;
+  }
+
+  /** The definition block this arm uses, if any (inline arms carry it per column). */
+  const definitionsFor = (arm: Arm, db: string): string | undefined => {
+    if (arm.definitions === 'inline') return undefined;
+    return arm.definitions === 'synthesized' ? synthesizedDefinitions.get(db) : definitions.get(db);
+  };
+
+  const schemaFor = (arm: Arm, db: string): SchemaTable[] =>
+    arm.definitions === 'inline' ? (inlineSchemas.get(db) as SchemaTable[]) : (schemas.get(db) as SchemaTable[]);
+
 
   const gold = new Map<number, OracleResult>();
   const unrunnable: { id: number; db: string; error: string }[] = [];
@@ -357,6 +388,8 @@ async function main() {
       // The text itself, so a claim about what the model wrote can be checked
       // from the artifact instead of trusted.
       synthesizedDefinitions: Object.fromEntries(synthesizedDefinitions),
+      inlineAttached,
+      inlineUnplaced,
       synthesizedDefinitionMeanChars: Math.round(
         [...synthesizedDefinitions.values()].reduce((total, text) => total + text.length, 0) /
           Math.max(1, synthesizedDefinitions.size),
@@ -472,7 +505,7 @@ async function main() {
       (question) =>
         buildSqlPrompt(
           question.question,
-          schemas.get(question.db_id) as SchemaTable[],
+          schemaFor(arm, question.db_id),
           promptFor(arm, question, evidenceFor(arm, question), definitionsFor(arm, question.db_id)),
         ).length,
     );
