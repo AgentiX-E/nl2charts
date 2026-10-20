@@ -1,0 +1,27 @@
+{
+  "name": "@agentix-e/nl2charts-studio",
+  "version": "0.1.0",
+  "description": "Model validation core for the semantic layer editor. Deliberately UI-free.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts --clean"
+  },
+  "dependencies": {
+    "@agentix-e/nl2charts-spec": "workspace:*"
+  }
+}

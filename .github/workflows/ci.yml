@@ -1,0 +1,89 @@
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: quality gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Build
+        run: pnpm build
+      - name: Unit and integration tests with coverage
+        run: pnpm test:coverage
+      - name: Coverage gate (per package, all four dimensions)
+        run: pnpm gate:coverage
+      - name: Dependency layering
+        run: pnpm gate:layering
+      - name: Layering checker self-test
+        run: node tools/check-layering.mjs --self-test
+      - name: Platform boundary (PLT1-PLT7)
+        run: node tools/check-platform.mjs
+      - name: Platform checker mutations (7/7 must be detected)
+        run: node tools/check-platform.mjs --self-test
+      - name: Public API snapshot
+        run: pnpm gate:exports
+      - name: Bundle budgets
+        run: pnpm gate:budgets
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage/
+          retention-days: 14
+
+  benchmark:
+    name: benchmark and ablation
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Execution accuracy with positive and negative controls
+        run: pnpm bench
+      - name: Schema linking recall ablation
+        run: pnpm bench:linking
+      - name: Normalization paired ablation
+        run: pnpm bench:ablate
+      - name: Publish summary
+        run: node tools/bench-summary.mjs >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark
+          path: eval/out/
+          retention-days: 30

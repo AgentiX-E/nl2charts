@@ -1,0 +1,20 @@
+{"id":"q01","question":"total revenue by region","goldSql":"select region, sum(amount) as total from orders group by region order by region","tags":["group","measure"]}
+{"id":"q02","question":"how many orders by region","goldSql":"select region, count(*) as orders from orders group by region order by region","tags":["group","count"]}
+{"id":"q03","question":"average order value by channel","goldSql":"select channel, avg(amount) as aov from orders group by channel order by channel","tags":["group","average"]}
+{"id":"q04","question":"total quantity by product","goldSql":"select product, sum(quantity) as units from orders group by product order by product","tags":["group","measure"]}
+{"id":"q05","question":"monthly revenue","goldSql":"select date_trunc('month', order_date) as month, sum(amount) as total from orders group by 1 order by 1","tags":["time"]}
+{"id":"q06","question":"top 3 products by revenue","goldSql":"select product, sum(amount) as total from orders group by product order by total desc limit 3","tags":["topn"]}
+{"id":"q07","question":"max order amount by region","goldSql":"select region, max(amount) as max_amount from orders group by region order by region","tags":["group","max"]}
+{"id":"q08","question":"min order amount by channel","goldSql":"select channel, min(amount) as min_amount from orders group by channel order by channel","tags":["group","min"]}
+{"id":"q09","question":"number of orders in north","goldSql":"select count(*) as orders from orders where region = 'north'","tags":["filter"]}
+{"id":"q10","question":"total revenue for web","goldSql":"select sum(amount) as total from orders where channel = 'web'","tags":["filter"]}
+{"id":"q11","question":"how many distinct products","goldSql":"select count(distinct product) as products from orders","tags":["distinct"]}
+{"id":"q12","question":"orders per month","goldSql":"select date_trunc('month', order_date) as month, count(*) as orders from orders group by 1 order by 1","tags":["time","count"]}
+{"id":"q13","question":"average quantity by product","goldSql":"select product, avg(quantity) as avg_quantity from orders group by product order by product","tags":["group","average"]}
+{"id":"q14","question":"total revenue by region and channel","goldSql":"select region, channel, sum(amount) as total from orders group by region, channel order by region, channel","tags":["group","two-dims"]}
+{"id":"q15","question":"number of orders with amount over 40","goldSql":"select count(*) as orders from orders where amount > 40","tags":["filter"]}
+{"id":"q16","question":"customers per segment","goldSql":"select segment, count(*) as customers from customers group by segment order by segment","tags":["group","count"]}
+{"id":"q17","question":"total revenue by segment","goldSql":"select c.segment, sum(o.amount) as total from orders o join customers c on o.order_id = c.customer_id group by c.segment order by c.segment","tags":["join"]}
+{"id":"q18","question":"revenue by region ranked","goldSql":"select region, sum(amount) as total, rank() over (order by sum(amount) desc) as rnk from orders group by region order by rnk","tags":["window"]}
+{"id":"q19","question":"median order amount by region","goldSql":"select region, median(amount) as med from orders group by region order by region","tags":["median"]}
+{"id":"q20","question":"running revenue by month","goldSql":"select date_trunc('month', order_date) as month, sum(sum(amount)) over (order by date_trunc('month', order_date)) as running from orders group by 1 order by 1","tags":["window"]}

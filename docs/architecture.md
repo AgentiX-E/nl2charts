@@ -1,0 +1,167 @@
+# Architecture
+
+## Layers
+
+```
+T0  contract     spec
+T1  runtime      core      ai        node      chart
+T2  access       mcp       studio
+T3  development  devkit
+```
+
+`spec` holds types and schemas and depends on nothing. `core` holds execution
+and depends only on `spec`. `ai` holds the model layer and depends on `core`.
+`node` holds native bindings and depends on `core`. `chart` is a pure function
+library over `spec`. `mcp` and `studio` are entry points. `devkit` is the only
+package that may be used exclusively by tests.
+
+## Dependency rules (enforced)
+
+```
+spec ─┬─ core ─┬─ ai ─── mcp
+      │        ├─ node
+      │        └─ devkit
+      └─ chart
+studio ──HTTP──► host
+```
+
+Forbidden, and checked in CI by `tools/check-layering.mjs`:
+
+| Edge | Why |
+| --- | --- |
+| `core → node` | would force a native binary on every browser user |
+| `core → ai` | would force an LLM SDK on every SQL-only user |
+| `core → chart` | would force ECharts on every SQL-only user |
+| `chart → core` | the chart path must work without a database |
+| `spec → anything` | the contract must be the bottom of the graph |
+| production → `devkit` | test utilities must not ship |
+| `studio → core` | the admin UI must talk over HTTP, not import a runtime |
+
+## The browser/Node split
+
+`core` is the only package with a dual runtime, and it achieves that with
+subpaths and a zero-IO root entry:
+
+```
+@agentix-e/nl2charts-core                  pure logic: guard, normalize, runner contract
+@agentix-e/nl2charts-core/guard            the lexical guard
+@agentix-e/nl2charts-core/normalize        canonical values and row hashing
+@agentix-e/nl2charts-core/negotiate        local / remote / reject routing
+
+@agentix-e/nl2charts-node                  Node bindings
+@agentix-e/nl2charts-node/duckdb           native DuckDB
+@agentix-e/nl2charts-node/cache            content-addressed file cache
+
+@agentix-e/nl2charts-ai                    model layer
+@agentix-e/nl2charts-ai/linking            schema linking
+@agentix-e/nl2charts-ai/llm                provider factory
+```
+
+This is enforced by five checks, not by convention:
+
+1. **PLT1** — the browser bundle of `core`'s root entry must not reference
+   `node:` builtins.
+2. **PLT2** — its import graph must not contain `pg`, `mysql2`, `better-sqlite3`
+   or `@duckdb/*`.
+3. **PLT3** — its published declarations must not import driver or `node:` types
+   (a type leak makes consumers fail with TS2307 even though the runtime works).
+4. **PLT7** — its graph must not contain `ai` or an LLM SDK.
+5. **PLT4/PLT5/PLT6** — dependency direction, no orchestration in the binding
+   package, and cross-copy identity through `Symbol.for`.
+
+PLT1/PLT2/PLT7 are decided from an esbuild **metafile**, not by searching the
+output text: a tree-shaken import never reaches the output, so string matching
+would silently pass a broken package. The checker is itself mutation-tested —
+seven deliberate violations must each turn the corresponding check red.
+
+## Request flow
+
+```
+question
+   │
+   ├─ linkSchema(question, schema)            3 recallers, RRF fusion
+   ├─ buildSqlPrompt                           rules + schema card
+   ├─ provider.complete()                      OpenAI-compatible, pluggable
+   ├─ extractSql()                             fenced or plain
+   ├─ inspectSql()                             lexical guard
+   │     └─ rejected → repair prompt → retry (bounded)
+   └─ runner.sql(sql)
+         ├─ inspectSql()                       again: the guard is not optional
+         ├─ withRowLimit()                     cap + 1 for truncation detection
+         ├─ engine.run()                       native or WASM
+         ├─ canonicalRow()                     cross-runtime equality
+         └─ onSpan()                           observability, failure isolated
+```
+
+The guard runs twice on purpose. The pipeline's check explains a rejection to
+the model; the runner's check is the one that protects the engine, including SQL
+that came from somewhere else.
+
+## Value model
+
+Rows are `Record<string, CanonicalValue>`. Before a row leaves the runtime:
+
+- `bigint` becomes a number when safe, otherwise an exact string;
+- DuckDB `DECIMAL` becomes an exact string with its scale;
+- `DATE` becomes `YYYY-MM-DD`, timestamps become ISO strings, `TIME` becomes
+  `HH:MM:SS.mmm`;
+- `NaN` and infinities become tagged strings so JSON stays valid;
+- byte arrays become hex; lists become arrays; structs become objects.
+
+`hashRows` is FNV-1a over the canonical JSON with sorted keys, so column order
+does not change identity but row order does.
+
+## Error model
+
+One class, closed code list, data payload:
+
+| Code | Raised by |
+| --- | --- |
+| `NL2C_E_GUARD_REJECTED` | guard (runner and pipeline) |
+| `NL2C_E_ENGINE_UNAVAILABLE` | closed engine |
+| `NL2C_E_ENGINE_FAILED` | driver error |
+| `NL2C_E_TIMEOUT` | runner timeout or caller abort |
+| `NL2C_E_INVALID_IR` | contract parse |
+| `NL2C_E_INVALID_INPUT` | bad arguments |
+| `NL2C_E_LLM_UNAVAILABLE` | provider network/timeout/non-2xx |
+| `NL2C_E_LLM_INVALID_RESPONSE` | provider body |
+| `NL2C_E_CONTRACT_VIOLATION` | consumer misuse |
+| `NL2C_E_NOT_SUPPORTED` | capability negotiation |
+
+Identity is `Symbol.for('@agentix-e/nl2charts/error')`, so a duplicated install
+still recognizes the error. `instanceof` is forbidden across package boundaries.
+
+## Repository layout
+
+```
+packages/          8 packages, one responsibility each
+  spec/ core/ ai/ node/ chart/ mcp/ studio/ devkit/
+eval/              golden set, deterministic fixture, baseline, ablations
+tools/             gates: layering, platform, exports, budgets, coverage, summary
+test/              cross-package public-surface snapshot
+.github/workflows/ ci.yml (quality + benchmark)
+```
+
+## Quality gates
+
+| Gate | Failure means |
+| --- | --- |
+| `pnpm typecheck` | strict TypeScript violation |
+| `pnpm test:coverage` | a test failed, or a global threshold is missed |
+| `pnpm gate:coverage` | a **single package** is below 95% on any dimension |
+| `pnpm gate:layering` | a forbidden dependency edge |
+| `check-platform` | a runtime boundary was crossed |
+| `check-platform --self-test` | the checker stopped detecting a known mutation |
+| `pnpm gate:exports` | the public surface drifted without review |
+| `pnpm gate:budgets` | a package exceeded its gzip ceiling |
+| `pnpm bench` | a control broke (oracle ≠ 100% or empty ≠ 0%) |
+
+## Design decisions worth knowing
+
+- **No UI framework adapter.** The library exposes promises and async iterables;
+  a React binding would triple the compatibility matrix for little value.
+- **No OpenTelemetry dependency.** A span hook is enough; the host maps it.
+- **Replay is a provider, not a mock.** CI exercises the real pipeline with
+  recorded responses, so the code path is identical to production.
+- **Benchmarks have controls.** A number without a positive and a negative
+  control is not a measurement.

@@ -1,0 +1,39 @@
+{
+  "name": "@agentix-e/nl2charts-node",
+  "version": "0.1.0",
+  "description": "Node-only bindings: native DuckDB, PostgreSQL, MySQL, files and the file cache.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./duckdb": {
+      "types": "./dist/duckdb.d.ts",
+      "import": "./dist/duckdb.js",
+      "require": "./dist/duckdb.cjs"
+    },
+    "./cache": {
+      "types": "./dist/cache.d.ts",
+      "import": "./dist/cache.js",
+      "require": "./dist/cache.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup src/index.ts src/duckdb.ts src/cache.ts --format esm,cjs --dts --clean"
+  },
+  "dependencies": {
+    "@agentix-e/nl2charts-core": "workspace:*",
+    "@agentix-e/nl2charts-spec": "workspace:*",
+    "@duckdb/node-api": "1.5.6-r.1"
+  }
+}

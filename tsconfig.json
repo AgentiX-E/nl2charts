@@ -1,0 +1,24 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@agentix-e/nl2charts-spec": ["packages/spec/src/index.ts"],
+      "@agentix-e/nl2charts-core": ["packages/core/src/index.ts"],
+      "@agentix-e/nl2charts-core/guard": ["packages/core/src/guard.ts"],
+      "@agentix-e/nl2charts-core/negotiate": ["packages/core/src/negotiate.ts"],
+      "@agentix-e/nl2charts-core/normalize": ["packages/core/src/normalize.ts"],
+      "@agentix-e/nl2charts-ai": ["packages/ai/src/index.ts"],
+      "@agentix-e/nl2charts-ai/linking": ["packages/ai/src/linking.ts"],
+      "@agentix-e/nl2charts-ai/llm": ["packages/ai/src/provider.ts"],
+      "@agentix-e/nl2charts-node": ["packages/node/src/index.ts"],
+      "@agentix-e/nl2charts-node/duckdb": ["packages/node/src/duckdb.ts"],
+      "@agentix-e/nl2charts-node/cache": ["packages/node/src/cache.ts"],
+      "@agentix-e/nl2charts-chart": ["packages/chart/src/index.ts"],
+      "@agentix-e/nl2charts-mcp": ["packages/mcp/src/index.ts"],
+      "@agentix-e/nl2charts-studio": ["packages/studio/src/index.ts"],
+      "@agentix-e/nl2charts-devkit": ["packages/devkit/src/index.ts"]
+    }
+  },
+  "include": ["packages/*/src/**/*.ts", "packages/*/test/**/*.ts", "test/**/*.ts", "eval/**/*.ts", "vitest.config.ts"]
+}

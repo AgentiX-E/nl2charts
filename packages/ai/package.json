@@ -1,0 +1,38 @@
+{
+  "name": "@agentix-e/nl2charts-ai",
+  "version": "0.1.0",
+  "description": "Natural language layer: schema linking, prompts and provider-agnostic LLM calls.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./linking": {
+      "types": "./dist/linking.d.ts",
+      "import": "./dist/linking.js",
+      "require": "./dist/linking.cjs"
+    },
+    "./llm": {
+      "types": "./dist/provider.d.ts",
+      "import": "./dist/provider.js",
+      "require": "./dist/provider.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup src/index.ts src/linking.ts src/provider.ts --format esm,cjs --dts --clean"
+  },
+  "dependencies": {
+    "@agentix-e/nl2charts-core": "workspace:*",
+    "@agentix-e/nl2charts-spec": "workspace:*"
+  }
+}

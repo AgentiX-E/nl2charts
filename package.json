@@ -1,0 +1,49 @@
+{
+  "name": "nl2charts",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Natural language to charts and SQL, with a semantic layer and a deterministic SQL guard.",
+  "license": "Apache-2.0",
+  "packageManager": "pnpm@10.28.2",
+  "engines": {
+    "node": ">=20.19"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "gate:coverage": "node tools/coverage-gate.mjs",
+    "gate:layering": "node tools/check-layering.mjs",
+    "gate:platform": "node tools/check-platform.mjs && node tools/check-platform.mjs --self-test",
+    "gate:exports": "node tools/check-exports.mjs",
+    "gate:budgets": "node tools/check-budgets.mjs",
+    "gate:all": "pnpm gate:layering && node tools/check-platform.mjs && node tools/check-platform.mjs --self-test && pnpm gate:exports && pnpm gate:budgets",
+    "bench": "tsx eval/run.ts",
+    "bench:ablate": "tsx eval/ablate.ts",
+    "verify": "pnpm typecheck && pnpm build && pnpm test:coverage && pnpm gate:coverage && pnpm gate:all && pnpm bench && pnpm bench:linking",
+    "bench:linking": "tsx eval/linking-ablation.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@vitest/coverage-v8": "^3.0.5",
+    "esbuild": "^0.24.2",
+    "tsup": "^8.3.5",
+    "tsx": "^4.19.2",
+    "turbo": "^2.10.7",
+    "typescript": "^5.7.3",
+    "vite-tsconfig-paths": "^5.1.4",
+    "vitest": "^3.0.5",
+    "ajv": "^8.17.1",
+    "echarts": "^5.6.0",
+    "@agentix-e/nl2charts-spec": "workspace:*",
+    "@agentix-e/nl2charts-core": "workspace:*",
+    "@agentix-e/nl2charts-ai": "workspace:*",
+    "@agentix-e/nl2charts-node": "workspace:*",
+    "@agentix-e/nl2charts-chart": "workspace:*",
+    "@agentix-e/nl2charts-mcp": "workspace:*",
+    "@agentix-e/nl2charts-studio": "workspace:*",
+    "@agentix-e/nl2charts-devkit": "workspace:*"
+  },
+  "type": "module"
+}
