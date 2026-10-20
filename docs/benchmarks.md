@@ -9,6 +9,7 @@ customers, DuckDB, no randomness). It compares result sets, not SQL strings.
 pnpm bench          # execution accuracy with controls
 pnpm bench:linking  # schema-linking recall@3 ablation
 pnpm bench:ablate   # paired question-normalization ablation
+pnpm bench:bird     # external benchmark, see below
 ```
 
 All artifacts land in `eval/out/` and are uploaded by the CI `benchmark` job.
@@ -97,8 +98,79 @@ enum samples induced an unstated `status = 'completed'` filter on 31 cases
 treat item price × quantity as the order amount. Both prompt defects are fixed;
 the regression and its fix are recorded rather than hidden by the final number.
 
-The next benchmark must create headroom: BIRD Mini-Dev (external schema and
-questions) plus adversarial cases. Until then, no SOTA claim is made.
+Headroom now comes from the external benchmark below. No SOTA claim is made
+there either: a 66.5% single-sample score on 200 of 500 questions, produced by
+one model with no fine-tuning and no self-consistency voting, is a baseline to
+beat, not a record.
+
+## External benchmark: BIRD Mini-Dev
+
+The synthetic set saturates: every arm scores 100%, so it cannot rank modules.
+BIRD Mini-Dev does not: its schemas, questions, gold SQL and SQLite databases
+were written by someone else.
+
+```bash
+node eval/bird/fetch.mjs   # ~800 MB archive, cached; extracts 6 databases
+pnpm bench:bird:dry        # gold execution, schema fidelity, controls; no model
+pnpm bench:bird:port       # DuckDB portability census
+pnpm bench:bird            # four arms, paired ablations, live model
+```
+
+Scope of the published run: **6 of the 11 databases, 200 of the 500 questions**
+(stratified by difficulty), `deepseek-chat`, temperature 0, one sample per case.
+Artifacts: `eval/out/bird-eval.json`, `eval/out/duckdb-portability.json`.
+
+### Controls (these fail the run, not just the table)
+
+| Control | Result |
+| --- | --- |
+| Gold statements executed before any model call | **200 / 200** (100%) |
+| Gold executed twice and compared to itself | **200 / 200** identical |
+| Negative control: empty result vs non-empty gold | **0** false matches |
+| Schema fidelity: advertised columns exist in the database | **264 / 264** |
+| Duplicate-collapse check | see "duplicate credit" below |
+
+### Accuracy (same 200 cases in every arm)
+
+| Arm | Execution accuracy | 95% Wilson | Strict multiset | Duplicate credit | simple / moderate / challenging |
+| --- | --- | --- | --- | --- | --- |
+| names only | 41.0% (82/200) | [34.4, 47.9] | 77 | 5 | 38/69 · 29/71 · 15/60 |
+| + metadata (labels, descriptions, joins) | **54.0%** (108/200) | [47.1, 60.8] | 103 | 5 | 43/69 · 42/71 · 23/60 |
+| + evidence | **61.5%** (123/200) | [54.6, 68.0] | 117 | 6 | 51/69 · 42/71 · 30/60 |
+| + metadata + evidence + repair loop | **66.5%** (133/200) | [59.7, 72.7] | 130 | 3 | 53/69 · 45/71 · 35/60 |
+
+### Paired ablations (McNemar exact, same cases)
+
+| Change | Δ | only before / only after | p |
+| --- | --- | --- | --- |
+| names → +metadata | **+13.0pp** | 5 / 31 | < 0.0001 |
+| names → +evidence | **+20.5pp** | 7 / 48 | < 0.0001 |
+| names → +metadata +evidence +repair | **+25.5pp** | 5 / 56 | < 0.0001 |
+
+Metadata is worth more than evidence on this slice, and the two together are
+worth more than either alone: the wins are complementary, not overlapping.
+
+### DuckDB portability of the same gold statements
+
+| Stage | Runnable | Taxonomy of the rest |
+| --- | --- | --- |
+| as written | 199/250 (79.6%) | Parser 27 (backtick quoting), Binder 14, Catalog 10 (`iif`) |
+| backticks rewritten to quotes | 217/250 (86.8%) | Binder 21, Catalog 10, Parser 2 |
+| + `iif` macro | **227/250 (90.8%)** | Binder 21, Parser 2 |
+
+The remaining 23 are dialect strictness, not bugs: arithmetic on text dates,
+bare columns in `GROUP BY` (SQLite picks a row, DuckDB refuses), and `BETWEEN`
+over mixed types. A generator that emits them would produce SQL that runs on
+one engine and fails on another; the compiler's job is to avoid them.
+
+### Judges: official and strict
+
+BIRD's judge is `set(predicted) == set(gold)` over tuples
+(`evaluation/evaluation_ex.py`), which ignores row order and **collapses
+duplicate rows**. A four-row answer with one duplicate therefore equals a
+three-row gold. The strict column compares multisets. On this slice the official
+rule credits 3–6 extra cases per arm; both numbers are published so the choice is
+visible instead of implied.
 
 ## What these numbers are not
 

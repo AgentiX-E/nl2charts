@@ -1,6 +1,6 @@
 {
   "name": "@agentix-e/nl2charts-mcp",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Model Context Protocol server exposing guarded SQL execution as tools.",
   "license": "Apache-2.0",
   "type": "module",

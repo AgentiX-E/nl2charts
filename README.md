@@ -7,7 +7,7 @@ Two rules shape the whole design:
 1. **The runtime does not need a model.** `core` executes SQL and returns rows. Natural language lives in a separate package (`ai`) that you install only if you want it.
 2. **Every statement passes a lexical guard.** The guard refuses what it cannot classify instead of rewriting it. Read-only is enforced before the engine sees the query.
 
-> **Status: 0.3.0, live evaluation milestone.** The eight packages, the four-stage metric compiler, the live NL→SQL harness with paired ablations, and the quality gates exist and run in CI. Connectors and external benchmarks (BIRD, Spider) are not implemented yet. See [docs/benchmarks.md](docs/benchmarks.md) for exactly what the numbers do and do not mean.
+> **Status: 0.4.0, external benchmark milestone.** The eight packages, the four-stage metric compiler, two engines (DuckDB and SQLite), and the quality gates exist and run in CI. Accuracy is measured on **BIRD Mini-Dev**, not only on our own fixtures: **66.5% execution accuracy** over 200 questions, with +13.0pp from metadata, +20.5pp from evidence and +25.5pp from the full stack, all paired with McNemar p < 0.0001. See [docs/benchmarks.md](docs/benchmarks.md) for exactly what those numbers do and do not mean.
 
 ## What works today
 
@@ -19,6 +19,7 @@ Two rules shape the whole design:
 | Profiling, lint, ECharts option | `@agentix-e/nl2charts-chart` | `compileToECharts(ir)` |
 | Prompting, schema linking, repair loop | `@agentix-e/nl2charts-ai` | `createPipeline({ provider }).ask(...)` |
 | Metric compiler (Plan→Optimize→Lower→Render) | `@agentix-e/nl2charts-core/semantic` | `compileQuery({ metrics: ['revenue'] }, model)` |
+| Query a SQLite file | `@agentix-e/nl2charts-node` | `createSqliteEngine({ path })` |
 | Model validation | `@agentix-e/nl2charts-studio` | `validateModel(doc)` |
 | MCP tools over stdio | `@agentix-e/nl2charts-mcp` | `attachStreams(server, input, write)` |
 | Contract tests and golden cases | `@agentix-e/nl2charts-devkit` | `runContractSuite(runner, cases)` |
@@ -140,6 +141,7 @@ Every push runs the same gates locally and in CI:
 - [Natural language](docs/guide/05-natural-language.md)
 - [Semantic layer validation](docs/guide/06-semantic-layer.md)
 - [Compiling metrics to SQL](docs/guide/08-semantic-compiler.md)
+- [Query a SQLite database](docs/guide/09-sqlite.md)
 - [Production checklist](docs/guide/07-production.md)
 - [Architecture](docs/architecture.md)
 - [Glossary](docs/glossary.md)
