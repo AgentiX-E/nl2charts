@@ -167,6 +167,50 @@ Two negative results, published as results:
    the repair loop then "fixed"), and the schema card listed names the databases
    do not contain. Both are fixed; the table above supersedes it.
 
+### Adversarial shapes (hand-written, reported apart)
+
+BIRD's questions are mostly filter-and-aggregate. Four shapes decide whether a
+system is usable for analysis, and an aggregate score over 239 questions hides
+all four, so they get their own table.
+
+```bash
+pnpm bench:adversarial:dry   # gold executes, and each question's stated width matches the gold
+pnpm bench:adversarial
+```
+
+32 cases over six Mini-Dev databases, eight per shape, every question stating its
+exact output width. Gold returns a non-empty result for all 32 before a model is
+called; a question that promises two columns and a gold returning three stops the
+run instead of scoring zero.
+
+| Shape | What it catches | names | metadata |
+| --- | --- | --- | --- |
+| window | `RANK`/`LAG`/running totals, ties inside a partition | 5/8 | 3/8 |
+| ratio | division with a defensible zero case, `COUNT(*)` vs `COUNT(column)` | 6/8 | 5/8 |
+| multi-hop | three or more joins, the join key is the question | **8/8** | **8/8** |
+| tie | "the most" when several rows share the maximum | 7/8 | 7/8 |
+| **total** | | **81.2%** (26/32) | 71.9% (23/32) |
+
+`names → metadata`: **−9.4pp**, 3 cases only names passed, 0 cases only metadata
+passed, McNemar p = 0.25. Two earlier runs of this set, before the questions were
+disambiguated, gave −6.2pp and −12.5pp with the same one-sided direction. No run
+is individually significant at n = 32, but the direction is consistent and
+opposite to BIRD, where metadata is worth +12.6pp.
+
+The failures are specific, which is the point of the set:
+
+| Case | What the model wrote | What it should have written |
+| --- | --- | --- |
+| tallest-share ratio | `COUNT(*)` as the denominator | `COUNT(height_cm)`: null heights are not heroes |
+| thrombosis proportion | `COUNT(*)` over examinations | one row per patient; examinations repeat |
+| 2009 points ranking | no `HAVING SUM(points) > 0` | drivers with zero points are not scorers |
+| top hero per publisher (metadata arm) | a correlated subquery over 383k rows | window function; the query was interrupted at 30 s |
+| CZK/EUR ratio (metadata arm) | `t.Currency` on the transactions table | the column lives on `customers` |
+
+Two execution errors appear only in the metadata arm, and both are instructive:
+a query slow enough to hit the 30 s budget is wrong for a user even if it would
+return the right rows, and a longer prompt did not prevent a hallucinated column.
+
 ### Noise floor (why one sample per case is stated, not assumed)
 
 60 stratified cases, three repeats each, arm `metadata+evidence`:
