@@ -288,10 +288,25 @@ async function main() {
    * The same sentences, attached to the column lines. Placement is the variable:
    * content, cache and budget are identical to the synthesized block.
    */
+  // Bare schemas: no dataset labels, no dataset descriptions. The inline arm must
+  // carry our definitions and nothing else, or it re-measures the metadata lever
+  // that was already measured in an earlier round.
+  const bareSchemas = new Map<string, SchemaTable[]>();
+  for (const db of config.dbs) {
+    const table = tables.get(db);
+    if (table === undefined) continue;
+    bareSchemas.set(
+      db,
+      buildSchema(table, loadDescriptions(join(DATA, 'dev_databases', db, 'database_description'), table.tableNames), {
+        withNotes: false,
+      }),
+    );
+  }
+
   const inlineSchemas = new Map<string, SchemaTable[]>();
   let inlineAttached = 0;
   let inlineUnplaced = 0;
-  for (const [db, schema] of schemas) {
+  for (const [db, schema] of bareSchemas) {
     const placed = attachDefinitions(schema, synthesizedDefinitions.get(db) ?? '');
     inlineSchemas.set(db, placed.schema as SchemaTable[]);
     inlineAttached += placed.attached;
@@ -390,6 +405,14 @@ async function main() {
       synthesizedDefinitions: Object.fromEntries(synthesizedDefinitions),
       inlineAttached,
       inlineUnplaced,
+      // How many columns in the inline schema carry any comment at all. If this
+      // ever approaches the 798 dataset columns, the arm is measuring the
+      // metadata lever again instead of placement.
+      inlineSchemaComments: [...inlineSchemas.values()].reduce(
+        (total, schema) =>
+          total + schema.reduce((count, table) => count + table.columns.filter((column) => column.comment !== undefined).length, 0),
+        0,
+      ),
       synthesizedDefinitionMeanChars: Math.round(
         [...synthesizedDefinitions.values()].reduce((total, text) => total + text.length, 0) /
           Math.max(1, synthesizedDefinitions.size),
