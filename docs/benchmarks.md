@@ -131,72 +131,58 @@ temperature 0, one sample per case. Artifacts: `eval/out/bird-eval.json`,
 | Schema fidelity: advertised columns exist in the database | **798 / 798** |
 | Prompt coverage: tables that reach the schema card | **75 / 75** (no truncation) |
 
-### Accuracy (run F, same 239 cases in every arm)
+### Accuracy (run G, same 239 cases in every arm)
 
 | Arm | Execution accuracy | 95% Wilson | Strict multiset | prompt chars (mean) |
 | --- | --- | --- | --- | --- |
 | names only | 33.5% (80/239) | [27.8, 39.8] | 74 | 1,818 |
-| + structural semantics | 33.5% (80/239) | [27.8, 39.8] | 73 | 2,630 |
-| + model-written definitions | 32.2% (77/239) | [26.6, 38.5] | 71 | 2,819 |
-| + model-written definitions + dataset evidence | 53.1% (127/239) | [46.7, 59.4] | 121 | 2,953 |
-| + metadata + dataset evidence | **56.1%** (134/239) | [49.7, 62.3] | 125 | 7,605 |
+| + structural semantics (block) | 34.3% (82/239) | [28.5, 40.6] | 77 | 2,630 |
+| + model-written definitions (block) | 33.9% (81/239) | [28.1, 40.2] | 75 | 2,819 |
+| + **the same definitions on the column line** | **42.3%** (101/239) | [36.3, 48.6] | 94 | **2,166** |
+| + model-written definitions + dataset evidence | 52.3% (125/239) | [46.0, 58.6] | 119 | 2,953 |
+| + metadata + dataset evidence | **59.4%** (142/239) | [53.0, 65.5] | 130 | 7,605 |
 
 | Change | Δ | only before / only after | p | verdict |
 | --- | --- | --- | --- | --- |
-| names → structural semantics | 0.0pp | 10 / 10 | 1.0 | no measurable effect |
-| structural semantics → model-written definitions | −1.3pp | 5 / 1 | 0.22 | no measurable effect |
-| model-written definitions → + dataset evidence | **+20.9pp** | 8 / 58 | 2e-10 | real |
+| names → structural semantics | +0.8pp | 6 / 9 | 0.61 | no measurable effect |
+| structural → model-written definitions | −0.4pp | 2 / 1 | 1.0 | no measurable effect |
+| block → **same text on the column line** | **+8.4pp** | 12 / 32 | 0.0037 | **real** |
+| definitions → + dataset evidence | **+18.4pp** | 10 / 54 | 2e-08 | real |
 
-### Two runs, same arms: the deltas do not move
+### Placement, not content: two runs of the same sentences
 
-| Arm | run E (`115b28d`) | run F (`98a0eec`) | range |
-| --- | --- | --- | --- |
-| names | 32.6% | 33.5% | 0.9pp |
-| structural semantics | 33.9% | 33.5% | 0.4pp |
-| model-written definitions | 34.3% | 32.2% | 2.1pp |
-| definitions + dataset evidence | 52.7% | 53.1% | 0.4pp |
-| metadata + dataset evidence | 57.7% | 56.1% | 1.6pp |
+| Run | block | inline | Δ | prompt (block → inline) |
+| --- | --- | --- | --- | --- |
+| G1 (`9120c2b`) | 33.1% | **43.5%** | **+10.5pp** (9/34, p=1.7e-4) | 2,819 → 2,166 |
+| G2 (`148a621`) | 33.9% | **42.3%** | **+8.4pp** (12/32, p=0.0037) | 2,819 → 2,166 |
 
-Both runs agree on the sign and the size of every delta. The three text blocks
-that can be produced without a human — structural semantics, a data profile, and
-definitions written by the model — sit within 2pp of each other and of the bare
-schema. The one block that moves the number is the sentence BIRD ships with each
-*question*.
+Same cached sentences, same model, same cases. The only change is where they sit:
+attached to the column they describe instead of appended after the schema card.
+Both runs clear the 6pp bar that the previous two attempts missed.
 
-### The evidence gap is a question-level gap, not a documentation gap
+Two controls make this credible:
 
-Three attempts, same 239 cases, one lever each:
+- **No dataset metadata leaked in.** The inline arm runs on a bare schema built
+  with `withNotes: false`, so the only comments are the ones attached. The
+  artifact records `inlineSchemaComments = 57` against 798 dataset columns. The
+  first attempt at this arm did not do that, scored +9.2pp, and was thrown away:
+  its prompt had grown from 2,819 to 7,395 characters, which was the tell that it
+  had quietly re-enabled the metadata lever.
+- **Only addressable lines survive.** 57 of 155 generated lines name a column and
+  were attached; 98 were table-level or unplaceable and were dropped. The arm
+  that scores +8.4pp is *shorter* than the block it replaces, so the gain cannot
+  be a length effect.
 
-| What was added | Δ over names | Cost |
-| --- | --- | --- |
-| a dictionary of observed values (`renderEvidence`) | +1.7pp | one query per column |
-| structural semantics (`renderDefinitions`) | +0.0 to +1.3pp | zero model calls |
-| definitions written by the model, once per database | −1.3 to +1.7pp | 11 calls for 11 databases |
+On the adversarial face the inline arm scores **84.4% (27/32), equal to `names`**
+and 12.5pp above full column metadata (71.9%). A per-column definition does not
+cost what a full description card costs on window and ratio questions.
 
-The model-written block is not low quality. From the artifact, for the California
-schools database:
+### What is still missing
 
-```
-- "Free Meal Count (K-12)" is the number of K-12 students eligible for free meals.
-- "Charter School (Y/N)" is 1 if the school is a charter school, 0 otherwise.
-- "Academic Year" is the school year the FRPM counts describe.
-```
-
-That is a competent data dictionary, and it buys nothing measurable. The
-conclusion is uncomfortable and useful: **the 12.1pp was never about knowing the
-database.** It is about knowing which meaning of a term *this question* intends —
-"the ratio of ..." in BIRD's evidence names the exact numerator and denominator
-for that question. A per-database block cannot know which ambiguity a question
-will hit, and every attempt to write one lands at the same place.
-
-### A shorter prompt reaches the same place (not yet a claim)
-
-`synth-definitions+evidence` scores 53.1% with a **2,953-character** prompt;
-`metadata+evidence` scores 56.1% with **7,605 characters**. Two runs put the gap
-at 3.0 and 5.0pp, so it straddles the 4pp threshold: the honest reading is "not
-established either way", not "semantics replace metadata". The next experiment
-tests placement rather than content — the same definitions rendered inline as
-column comments, where the metadata block gets its effect.
+The best arm remains `metadata+evidence` at 59.4%, and the dataset's own evidence
+is still worth +18 to +21pp on top of any definition block. Placement explains
+part of the metadata effect, not all of it: BIRD's descriptions carry 798 curated
+column notes, and this arm carries 57 generated ones.
 
 ### Noise floor (why one sample per case is stated, not assumed)
 
@@ -204,16 +190,17 @@ column comments, where the metadata block gets its effect.
 
 | Metric | Result |
 | --- | --- |
-| Cases that disagreed with themselves | **1 / 60 (1.7%)** |
+| Cases that disagreed with themselves | **4 / 60 (6.7%)** |
 | Majority accuracy | 45.0% |
 | Single-run accuracy | 45.0% |
 | Difference | **0.0pp** |
 
 Single sampling does not bias the aggregate, but it does move individual cases.
-The flip rate fell from 8.3% to 1.7% across three runs while the single-run and
-majority scores stayed identical, which is itself evidence that a single run's
-aggregate is stable and a single case's answer is not. Deltas below 4pp are
-reported as "no measurable effect" (ADR-166).
+The flip rate across runs is 8.3%, 3.3%, 1.7%, 6.7% — it moves, while the
+single-run and majority scores never do. A single run's aggregate is stable; a
+single case's answer is not. Deltas below 4pp are reported as "no measurable
+effect" (ADR-166), and the +8.4pp above is reported with its pair counts so it can
+be checked.
 
 ### Adversarial shapes (32 hand-written cases, reported separately)
 
@@ -222,13 +209,13 @@ multi-hop joins and ties, each with a declared output width that the gold must
 match — a question promising two columns and a gold returning three would fail
 every correct answer.
 
-| Shape | names | definitions | metadata | adaptive |
-| --- | --- | --- | --- | --- |
-| window | 5/8 | 5/8 | 3/8 | 4/8 |
-| ratio | 6/8 | 6/8 | 5/8 | 5/8 |
-| multi-hop | **8/8** | **8/8** | **8/8** | **8/8** |
-| tie | 7/8 | 7/8 | 7/8 | 7/8 |
-| **total** | **81.2%** (26/32) | **81.2%** (26/32) | 71.9% (23/32) | 75.0% (24/32) |
+| Shape | names | structural | **inline** | metadata | adaptive |
+| --- | --- | --- | --- | --- | --- |
+| window | 6/8 | 5/8 | **6/8** | 3/8 | 5/8 |
+| ratio | 6/8 | 6/8 | **6/8** | 5/8 | 5/8 |
+| multi-hop | **8/8** | 7/8 | **8/8** | **8/8** | **8/8** |
+| tie | 7/8 | 7/8 | 7/8 | 7/8 | 7/8 |
+| **total** | **84.4%** (27/32) | 78.1% (25/32) | **84.4%** (27/32) | 71.9% (23/32) | 78.1% (25/32) |
 
 `names → definitions`: 0.0pp (0 before, 0 after, p=1.0). The previous run showed
 −3.1pp, which one case explains: at n=32 a single case is 3.1pp. What survives is

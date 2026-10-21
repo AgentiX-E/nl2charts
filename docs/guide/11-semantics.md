@@ -11,7 +11,12 @@ keys the schema already declares. It is the semantics a new analyst picks up in
 their first hour, and it turns out to be exactly what a model is missing when it
 invents a `DISTINCT`, joins the wrong way, or sums a percentage.
 
-## The block
+## The two forms
+
+There are two places a definition can live: appended after the schema card as one
+block, or attached to the column it describes. The measurements below say the
+column line is the one that works; the block is still what you use for facts that
+belong to a table (grain, join direction).
 
 ```ts
 import { renderDefinitions } from '@agentix-e/nl2charts-ai';
@@ -74,38 +79,54 @@ Two deliberate refusals are worth knowing, because they came from real output:
 
 ## What it is worth, measured
 
-On BIRD Mini-Dev, n=239, two independent runs, same model, same schema card:
+On BIRD Mini-Dev, n=239, three runs, same model, same cases:
 
-| Arm | Accuracy (run E / run F) | Prompt |
+| Arm | Accuracy | Prompt |
 | --- | --- | --- |
-| names only | 32.6% / 33.5% | 1,818 chars |
-| + structural semantics | 33.9% / 33.5% | 2,630 chars |
-| + definitions written by the model (once per database) | 34.3% / 32.2% | 2,819 chars |
-| + definitions + dataset hint | 52.7% / 53.1% | 2,953 chars |
-| + metadata + dataset hint | 57.7% / 56.1% | 7,605 chars |
+| names only | 32 to 34% | 1,818 chars |
+| structural semantics, as a block | 33 to 34% | 2,630 chars |
+| model-written definitions, as a block | 32 to 34% | 2,819 chars |
+| **the same definitions attached to their columns** | **42.3 to 43.5%** | **2,166 chars** |
+| definitions + a per-question hint | 52 to 54% | 2,953 chars |
+| full column metadata + a per-question hint | 56 to 59% | 7,605 chars |
 
-Structural semantics gain **+0.0 to +1.3pp** over a bare schema; letting the model
-write the dictionary instead gains **−1.3 to +1.7pp**. Both are inside the noise of
-this sample, and the model-written text was competent — it produced lines like
-`"Charter School (Y/N)" is 1 if the school is a charter school, 0 otherwise.` and
-still moved nothing.
+The content was never the problem. The same sentences that did nothing as a block
+are worth **+8.4 to +10.5pp** when they sit on the column line: two runs, 12/32 and
+9/34 discordant pairs, p=0.0037 and p=1.7e-4. On the adversarial shapes the same
+arm equals the bare schema (84.4%) instead of losing to it, which full metadata
+does (71.9%).
 
-That is the finding worth carrying: knowing the database is not the bottleneck.
-The 12.1pp comes from a sentence that resolves *this question's* ambiguity, which
-no per-database block can anticipate. Use this block for the cost, not for the
-accuracy: 2,953 characters get within 3 to 5pp of a 7,605-character card, which is
-not yet a result but is close enough to be worth testing.
+So use the inline form. The block form is kept for one case only: a definition
+that belongs to a table rather than a column has nowhere to sit.
+
+```ts
+import { attachDefinitions } from '@agentix-e/nl2charts-ai';
+
+// `written` is whatever a person or a model produced, one line per definition:
+//   - orders.status = completed means paid and shipped.
+//   - "total_amount" is the charged amount, tax included.
+const placed = attachDefinitions(schema, written);
+// placed.attached   -> how many lines found a column
+// placed.unplaced   -> the rest, kept so you can see what was dropped
+const schemaWithDefinitions = placed.schema;
+```
+
+Two rules came out of the runs above:
+
+- **Drop what cannot be addressed.** In the measured arm, 57 of 155 lines named a
+  column; the other 98 were dropped, and the arm still gained. A table-level
+  sentence appended at the end was the part that never paid for itself.
+- **Never guess a column.** `attachDefinitions` returns unplaced lines instead of
+  matching loosely. A definition on the wrong column is read with full confidence
+  and is worse than a missing one.
 
 ## Cost and budget
 
-The block is bounded by `maxChars` (default 900, mean 778 across the eleven BIRD
-databases when every case got one). It is not free: it competes with the schema
-card for the same context. Two rules keep it cheap:
-
-- Only informative roles are printed. Text and plain numbers are silent.
-- Every claim is one line, in a stable order: table grain, keys, join direction,
-  roles, then name reuse. A stable order also makes the block cacheable and
-  diffable.
+A definition costs whatever its line costs. The measured inline arm averaged
+**2,166 characters** of schema card — less than the block it replaced — because
+only the addressable lines survived. The structural renderer is bounded by
+`maxChars` (default 900, mean 778 across the eleven BIRD databases), and it stays
+useful for grain and join direction, which have no column to attach to.
 
 ## Measuring it on your own database
 
