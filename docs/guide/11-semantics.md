@@ -89,17 +89,23 @@ On BIRD Mini-Dev, n=239, three runs, same model, same cases:
 | **the same definitions attached to their columns** | **41.8 to 43.5%** | **2,166 to 2,496 chars** |
 | the dataset's curated notes, same columns | 43.1% | 2,860 chars |
 | **attached definitions + a per-question hint** | **56.1%** | **2,624 chars** |
-| full column metadata (798 curated notes) + the same hint | 56.9% | 7,605 chars |
+| full column metadata (798 curated notes) + the same hint | 56.9 to 58.2% | 7,605 chars |
+| attached definitions + hint, three executed samples (modal) | 55.6% (no gain) | 2,633 chars, 3 calls |
 
 Neither the content nor the author turns out to matter. The same sentences that
-did nothing as a block are worth **+6.7 to +10.5pp** on the column line (four
-runs, p=0.0015 to 1.7e-4), and the dataset's own curated notes on the same columns
+did nothing as a block are worth **+6.7 to +10.5pp** on the column line (five
+runs, p=0.0003 to 1.7e-4), and the dataset's own curated notes on the same columns
 score +1.3pp over generated ones (p=0.375, one case each way).
 
+Resampling does not help either: three executed samples at temperature 0.7, keeping
+the modal result, scored 55.6% against 56.9% for one sample, and the samples agreed
+90% of the time. When the model lacks the knowledge, it lacks it consistently.
+
 The practical consequence: **attached definitions plus a per-question hint reach
-56.1%, against 56.9% for 798 curated notes plus the same hint — a two-case
+56.9%, against 58.2% for 798 curated notes plus the same hint — a three-case
 difference at a third of the prompt.** A database with no documentation can be
-brought to the accuracy of one that has it.
+brought to within a few cases of one that has it, and the remaining gap is the
+per-question knowledge nobody can generate from a schema.
 
 What does not work is asking the model to think first. A stage that restates the
 question — measure, rows, numerator, denominator — before writing SQL changed

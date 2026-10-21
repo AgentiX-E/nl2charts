@@ -131,22 +131,34 @@ temperature 0, one sample per case. Artifacts: `eval/out/bird-eval.json`,
 | Schema fidelity: advertised columns exist in the database | **798 / 798** |
 | Prompt coverage: tables that reach the schema card | **75 / 75** (no truncation) |
 
-### Accuracy (run I, same 239 cases in every arm)
+### Accuracy (run J, same 239 cases in every arm)
 
 | Arm | Execution accuracy | 95% Wilson | prompt chars (mean) |
 | --- | --- | --- | --- |
 | names only | 32.6% (78/239) | [27.0, 38.8] | 1,818 |
-| model-written definitions, as a block | 33.5% (80/239) | [27.8, 39.8] | 2,817 |
-| the same text on the column line | 42.3% (101/239) | [36.3, 48.6] | 2,490 |
-| + the dataset's per-question hint | **56.1%** (134/239) | [49.7, 62.3] | 2,624 |
-| + a per-question reading written by the model | 42.3% (101/239) | [36.3, 48.6] | 2,490 (+1 call) |
-| metadata + the dataset's per-question hint | **56.9%** (136/239) | [50.5, 63.1] | 7,605 |
+| model-written definitions, as a block | 33.1% (79/239) | [27.5, 39.4] | 2,820 |
+| the same text on the column line | 42.7% (102/239) | [36.6, 49.0] | 2,499 |
+| + the dataset's per-question hint | **56.9%** (136/239) | [50.5, 63.1] | 2,633 |
+| + **three executed samples, modal result** | 55.6% (133/239) | [49.2, 61.8] | 2,633 (3 calls) |
+| metadata + the dataset's per-question hint | **58.2%** (139/239) | [51.8, 64.3] | 7,605 |
 
 | Change | Δ | only before / only after | p | verdict |
 | --- | --- | --- | --- | --- |
-| block → column line (same text) | **+8.8pp** | 10 / 31 | 0.0015 | real |
-| inline definitions → + the dataset's question hint | **+13.8pp** | 7 / 41 | 6e-07 | real |
-| inline definitions → + a model-written reading | 0.0pp | 17 / 17 | 1.0 | **no measurable effect** |
+| block → column line (same text) | **+9.6pp** | 8 / 31 | 2.9e-4 | real |
+| inline definitions → + the dataset's question hint | **+14.2pp** | 7 / 42 | 3.6e-07 | real |
+| single sample → **three samples, modal result** | −1.3pp | 6 / 3 | 0.51 | **no measurable effect** |
+
+### Voting cannot recover knowledge the model never had
+
+Three samples per question at temperature 0.7, executed, and the modal result set
+kept: **55.6% against 56.9%** for a single sample. The samples agreed with each
+other **90% of the time**.
+
+That agreement is the explanation. Voting helps when errors are random — it picks
+the majority of draws around the right answer. Here the errors are systematic:
+when the model does not know what "paid in EUR" means, all three samples make the
+same wrong choice, and the majority is wrong three times instead of once. The
+remaining gap is knowledge, and no amount of resampling creates it.
 
 ### The generated stack matches the curated one at a third of the prompt
 
@@ -233,7 +245,7 @@ to sit on the column. What is left is the per-question sentence.
 
 | Metric | Result |
 | --- | --- |
-| Cases that disagreed with themselves | **1 / 60 (1.7%)** |
+| Cases that disagreed with themselves | **2 / 60 (3.3%)** |
 | Majority accuracy | 45.0% |
 | Single-run accuracy | 45.0% |
 | Difference | **0.0pp** |
@@ -254,16 +266,18 @@ every correct answer.
 
 | Shape | names | structural | **inline** | metadata | adaptive |
 | --- | --- | --- | --- | --- | --- |
-| window | 5/8 | 5/8 | **5/8** | 3/8 | 5/8 |
-| ratio | 6/8 | 6/8 | **6/8** | 5/8 | 5/8 |
-| multi-hop | **8/8** | **8/8** | **8/8** | **8/8** | **8/8** |
+| window | 6/8 | 5/8 | 4/8 | 3/8 | 5/8 |
+| ratio | 6/8 | 6/8 | 6/8 | 5/8 | 5/8 |
+| multi-hop | **8/8** | 7/8 | **8/8** | **8/8** | **8/8** |
 | tie | 7/8 | 7/8 | 7/8 | 7/8 | 7/8 |
-| **total** | **81.2%** (26/32) | **81.2%** (26/32) | **81.2%** (26/32) | 71.9% (23/32) | 78.1% (25/32) |
+| **total** | **81.2%** (26/32) | 78.1% (25/32) | 75.0% (24/32) | 71.9% (23/32) | 75.0% (24/32) |
 
-The inline arm lands on `names` in three of four runs (81.2% / 84.4% / 81.2%) and
-one case behind in the fourth (78.1% vs 81.2%, which at n=32 is one case).
-Definitions attached to columns do not cost what full column metadata costs on
-these shapes (71.9% in every run).
+On these shapes the inline arm never gains: across four paired runs it equals
+`names` twice (84.4% / 81.2%) and trails by one and two cases twice (78.1% /
+75.0% vs 81.2%). At n=32 a case is 3.1pp, so none of these is significant, but the
+direction is consistently non-positive — a column's definition helps a filter and
+adds nothing to a window. What is clear is the comparison with full metadata:
+71.9% in every run, 6 to 9 points below the bare schema.
 
 The two faces disagree in a way worth remembering: metadata is worth +11.3pp on
 BIRD and −9pp here. A component's effect is a property of a question shape, not
