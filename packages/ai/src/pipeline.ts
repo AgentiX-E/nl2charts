@@ -1,6 +1,7 @@
 import { inspectSql } from '@agentix-e/nl2charts-core';
 import { toNl2ChartsError } from '@agentix-e/nl2charts-spec';
 import type { LlmMessage, LlmProvider } from './provider.js';
+import { buildInterpretationPrompt, parseInterpretation } from './interpret.js';
 import { linkSchema, renderSchemaCard } from './linking.js';
 import type { LinkedColumn, SchemaCardOptions, SchemaTable } from './linking.js';
 
@@ -11,6 +12,8 @@ export interface PromptOptions extends SchemaCardOptions {
   readonly evidence?: string;
   /** Structural semantics: grain, keys, join direction, column roles. */
   readonly definitions?: string;
+  /** A reading of this question, produced before the SQL attempt. */
+  readonly interpretation?: string;
   /** Maximum schema-card lines. Large schemas need more than the default 40. */
   readonly schemaLines?: number;
   /** Extra rule lines for a question shape, appended after the base rules. */
@@ -68,6 +71,8 @@ export interface PipelineOptions {
   readonly prompt?: PromptOptions;
   /** Ask the three-recaller linker for a column hint. Defaults to true. */
   readonly linking?: boolean;
+  /** Ask for a one-sentence reading of the question before writing SQL. */
+  readonly interpret?: boolean;
   /** When provided, a candidate is executed before it is accepted; failures
    *  become repair turns (syntax and binding errors, not wrong answers). */
   readonly execute?: (sql: string) => Promise<unknown>;
@@ -117,6 +122,9 @@ export function buildSqlPrompt(
   if (resolved.evidence !== undefined && resolved.evidence.trim().length > 0) {
     context.push(`Evidence: ${resolved.evidence.trim()}`);
   }
+  if (resolved.interpretation !== undefined && resolved.interpretation.trim().length > 0) {
+    context.push(`Interpretation: ${resolved.interpretation.trim()}`);
+  }
   return [
     ...rules,
     'Schema:',
@@ -145,12 +153,27 @@ export function createPipeline(options: PipelineOptions): {
           : linked.length > 0
             ? `Likely columns: ${linked.map((column) => `${column.table}.${column.column}`).join(', ')}`
             : 'No column matched; use the schema above.';
+      // One extra call, only when asked: a reading of the question, written with
+      // the column semantics in view, then carried into the SQL prompt.
+      let interpretation: string | undefined;
+      if (options.interpret === true) {
+        const reading = await options.provider.complete({
+          messages: [
+            { role: 'system', content: buildInterpretationPrompt(request.question, request.schema) },
+            { role: 'user', content: request.question },
+          ],
+          temperature: 0,
+        });
+        const parsed = parseInterpretation(reading.text);
+        if (parsed.length > 0) interpretation = parsed;
+      }
       const messages: LlmMessage[] = [
         {
           role: 'system',
           content: buildSqlPrompt(request.question, request.schema, {
             samples: options.samples === true,
             ...options.prompt,
+            ...(interpretation === undefined ? {} : { interpretation }),
           }),
         },
         { role: 'user', content: `${schemaHint}\n${request.question}` },

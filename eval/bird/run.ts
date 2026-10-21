@@ -71,6 +71,8 @@ export interface Arm {
   readonly definitions?: 'structural' | 'synthesized' | 'inline' | 'dataset-subset';
   /** Order synthesized evidence by the columns the question names. */
   readonly focus?: boolean;
+  /** Ask for a reading of the question before writing SQL (one extra call). */
+  readonly interpret?: boolean;
 }
 
 /**
@@ -94,6 +96,9 @@ export const ARMS: readonly Arm[] = [
   // reached. Same placement, same columns, different author: the only way to
   // tell coverage apart from source quality.
   { name: 'dataset-subset', notes: false, repairs: 0, linking: true, definitions: 'dataset-subset' },
+  { name: 'inline+evidence', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline' },
+  // The only text that has measured is written per question; this arm writes it.
+  { name: 'interpret', notes: false, repairs: 0, linking: true, definitions: 'inline', interpret: true },
   { name: 'definitions+evidence', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'structural' },
   { name: 'synth-definitions+evidence', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'synthesized' },
   { name: 'metadata', notes: true, repairs: 0, linking: true },
@@ -113,6 +118,8 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   ['definitions', 'synth-definitions'],
   ['synth-definitions', 'inline-definitions'],
   ['inline-definitions', 'dataset-subset'],
+  ['inline-definitions', 'inline+evidence'],
+  ['inline-definitions', 'interpret'],
   ['definitions', 'definitions+evidence'],
   ['synth-definitions', 'synth-definitions+evidence'],
   ['names', 'metadata'],
@@ -144,7 +151,7 @@ function settings() {
     // with the dataset hint, and last round's best arm as the ceiling reference.
     arms: (
       process.env.BIRD_ARMS ??
-      ['names', 'synth-definitions', 'inline-definitions', 'dataset-subset', 'synth-definitions+evidence', 'metadata+evidence'].join(',')
+      ['names', 'synth-definitions', 'inline-definitions', 'inline+evidence', 'interpret', 'metadata+evidence'].join(',')
     )
       .split(',')
       .map((name) => name.trim()),
@@ -497,6 +504,7 @@ async function main() {
         provider,
         maxRepairs: arm.repairs,
         linking: arm.linking,
+        interpret: arm.interpret === true,
         prompt: promptFor(arm, question, evidenceFor(arm, question), definitions.get(question.db_id)),
         ...(arm.repairs === 0
           ? {}
