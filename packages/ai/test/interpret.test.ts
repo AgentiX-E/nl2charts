@@ -100,6 +100,23 @@ describe('pipeline with interpretation', () => {
     expect(result.sql).toBe('SELECT 1');
   });
 
+  it('passes the sampling temperature through, so a caller can sample', async () => {
+    const temperatures: (number | undefined)[] = [];
+    const provider: LlmProvider = {
+      id: 'thermometer',
+      model: 'fixture',
+      async complete(request) {
+        temperatures.push(request.temperature);
+        return { text: 'SELECT 1', model: 'fixture', usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 } };
+      },
+    };
+    await createPipeline({ provider, temperature: 0.7 }).ask({ question: 'q', schema });
+    expect(temperatures).toEqual([0.7]);
+    temperatures.length = 0;
+    await createPipeline({ provider }).ask({ question: 'q', schema });
+    expect(temperatures).toEqual([0]);
+  });
+
   it('costs one call and no interpretation line when the stage is off', async () => {
     let calls = 0;
     const provider: LlmProvider = {

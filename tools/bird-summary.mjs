@@ -50,6 +50,10 @@ if (report === null) {
         `| ${arm.arm} | **${(arm.accuracy * 100).toFixed(1)}%** | [${(arm.wilson.low * 100).toFixed(1)}, ${(arm.wilson.high * 100).toFixed(1)}] | ${arm.strictPassed}/${arm.total} | ${arm.duplicateCredit} | ${arm.repaired} | ${arm.promptChars?.mean ?? '–'} | ${byDifficulty} |`,
       );
     }
+    const voted = report.arms.find((arm) => typeof arm.vote === 'number');
+    if (voted !== undefined) {
+      lines.push('', `Vote arm \`${voted.arm}\`: ${voted.vote} samples per question, mean agreement **${(voted.agreement * 100).toFixed(1)}%**, ${voted.passed}/${voted.total} correct.`);
+    }
     lines.push('', '### Paired ablations', '', '| change | delta | only before / only after | McNemar exact p |', '| --- | --- | --- | --- |');
     for (const [name, effect] of Object.entries(report.ablations ?? {})) {
       lines.push(

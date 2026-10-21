@@ -6,3 +6,5 @@ export { mcnemarExact, wilsonInterval } from './stats.js';
 export type { Interval } from './stats.js';
 export { judgeOfficial, judgeOfficialResult, judgeStrict, judgeStrictResult, toTuples } from './judge.js';
 export type { MatchReason, SqlResultSet, Tuple } from './judge.js';
+export { majorityResult } from './vote.js';
+export type { Majority } from './vote.js';

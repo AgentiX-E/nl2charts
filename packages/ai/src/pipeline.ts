@@ -73,6 +73,8 @@ export interface PipelineOptions {
   readonly linking?: boolean;
   /** Ask for a one-sentence reading of the question before writing SQL. */
   readonly interpret?: boolean;
+  /** Sampling temperature for the SQL call. Above zero enables self-consistency. */
+  readonly temperature?: number;
   /** When provided, a candidate is executed before it is accepted; failures
    *  become repair turns (syntax and binding errors, not wrong answers). */
   readonly execute?: (sql: string) => Promise<unknown>;
@@ -184,7 +186,7 @@ export function createPipeline(options: PipelineOptions): {
       let lastKind: 'guard' | 'execution' = 'guard';
       for (;;) {
         attempts += 1;
-        const response = await options.provider.complete({ messages, temperature: 0 });
+        const response = await options.provider.complete({ messages, temperature: options.temperature ?? 0 });
         const sql = extractSql(response.text);
         const verdict = inspectSql(sql);
         if (verdict.ok) {

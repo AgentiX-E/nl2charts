@@ -23,7 +23,7 @@ import { pathToFileURL } from 'node:url';
 import { createHttpProvider } from '@agentix-e/nl2charts-ai';
 import type { PromptOptions, SchemaTable } from '@agentix-e/nl2charts-ai';
 import { attachDefinitions, buildSqlPrompt, choosePromptProfile, createPipeline, renderDefinitions, renderEvidence, renderSchemaCard } from '@agentix-e/nl2charts-ai';
-import { compareArms, judgeOfficial, judgeStrict, mcnemarExact, summarise, wilsonInterval } from '@agentix-e/nl2charts-devkit';
+import { compareArms, judgeOfficial, judgeStrict, majorityResult, mcnemarExact, summarise, wilsonInterval } from '@agentix-e/nl2charts-devkit';
 import type { CaseOutcome, MatchReason } from '@agentix-e/nl2charts-devkit';
 import { buildSchema, loadDescriptions, loadQuestions, loadTables, stratifiedSample } from './data.js';
 import type { BirdQuestion } from './data.js';
@@ -73,6 +73,8 @@ export interface Arm {
   readonly focus?: boolean;
   /** Ask for a reading of the question before writing SQL (one extra call). */
   readonly interpret?: boolean;
+  /** Samples per question; the modal executed result wins. */
+  readonly vote?: number;
 }
 
 /**
@@ -99,6 +101,9 @@ export const ARMS: readonly Arm[] = [
   { name: 'inline+evidence', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline' },
   // The only text that has measured is written per question; this arm writes it.
   { name: 'interpret', notes: false, repairs: 0, linking: true, definitions: 'inline', interpret: true },
+  // Self-consistency over executed answers: no external knowledge, pure variance
+  // reduction. Three samples at temperature 0.7, modal result set wins.
+  { name: 'vote', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3 },
   { name: 'definitions+evidence', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'structural' },
   { name: 'synth-definitions+evidence', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'synthesized' },
   { name: 'metadata', notes: true, repairs: 0, linking: true },
@@ -120,6 +125,7 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   ['inline-definitions', 'dataset-subset'],
   ['inline-definitions', 'inline+evidence'],
   ['inline-definitions', 'interpret'],
+  ['inline+evidence', 'vote'],
   ['definitions', 'definitions+evidence'],
   ['synth-definitions', 'synth-definitions+evidence'],
   ['names', 'metadata'],
@@ -132,6 +138,8 @@ interface CaseRun extends CaseOutcome {
   readonly predicted: string;
   readonly reason: MatchReason;
   readonly strict: boolean;
+  /** Share of samples that agreed with the answer the arm returned. */
+  readonly agreement?: number;
   readonly error?: string;
   readonly errorKind?: 'execution' | 'guard' | 'llm' | 'other';
   readonly attempts: number;
@@ -151,7 +159,7 @@ function settings() {
     // with the dataset hint, and last round's best arm as the ceiling reference.
     arms: (
       process.env.BIRD_ARMS ??
-      ['names', 'synth-definitions', 'inline-definitions', 'inline+evidence', 'interpret', 'metadata+evidence'].join(',')
+      ['names', 'synth-definitions', 'inline-definitions', 'inline+evidence', 'vote', 'metadata+evidence'].join(',')
     )
       .split(',')
       .map((name) => name.trim()),
@@ -505,6 +513,7 @@ async function main() {
         maxRepairs: arm.repairs,
         linking: arm.linking,
         interpret: arm.interpret === true,
+        temperature: arm.vote === undefined ? 0 : 0.7,
         prompt: promptFor(arm, question, evidenceFor(arm, question), definitions.get(question.db_id)),
         ...(arm.repairs === 0
           ? {}
@@ -516,6 +525,42 @@ async function main() {
             }),
       });
       const expected = gold.get(question.question_id) as OracleResult;
+      if (arm.vote !== undefined && arm.vote > 1) {
+        const candidates: { sql: string; rows: readonly (readonly unknown[])[] }[] = [];
+        for (let sample = 0; sample < arm.vote; sample += 1) {
+          try {
+            const askedSample = await pipeline.ask({ question: question.question, schema });
+            const executed = await oracle.run(question.db_id, askedSample.sql);
+            if (executed.ok) candidates.push({ sql: askedSample.sql, rows: executed.rows });
+          } catch {
+            // A sample that fails the guard or the engine casts no vote; the
+            // other samples still produce one.
+          }
+        }
+        if (candidates.length === 0) {
+          return {
+            id: String(question.question_id),
+            passed: false,
+            predicted: '',
+            reason: 'values',
+            strict: false,
+            attempts: arm.vote,
+            error: 'no sample survived guard and execution',
+          };
+        }
+        const majority = majorityResult(candidates, (left, right) => judgeOfficial(left.rows, right.rows) === 'match');
+        const winner = majority.winner as { sql: string; rows: readonly (readonly unknown[])[] };
+        const reason = judgeOfficial(expected.rows, winner.rows);
+        return {
+          id: String(question.question_id),
+          passed: reason === 'match',
+          predicted: winner.sql,
+          reason,
+          strict: judgeStrict(expected.rows, winner.rows) === 'match',
+          attempts: candidates.length,
+          agreement: majority.agreement,
+        };
+      }
       try {
         const asked = await pipeline.ask({ question: question.question, schema });
         const predicted = await oracle.run(question.db_id, asked.sql);
@@ -601,6 +646,12 @@ async function main() {
       duplicateCredit: summary.passed - strictPassed,
       exactMatchRate: runs.filter((run) => run.strict).length / summary.total,
       repaired: runs.filter((run) => run.attempts > 1).length,
+      ...(arm.vote === undefined
+        ? {}
+        : {
+            vote: arm.vote,
+            agreement: runs.reduce((total, run) => total + (run.agreement ?? 0), 0) / Math.max(1, runs.filter((run) => run.agreement !== undefined).length),
+          }),
       promptChars: {
         mean: Math.round(promptSizes.reduce((total, size) => total + size, 0) / Math.max(1, promptSizes.length)),
         max: Math.max(0, ...promptSizes),
