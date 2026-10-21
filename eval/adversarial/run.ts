@@ -11,12 +11,13 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { choosePromptProfile, createHttpProvider, createPipeline, renderDefinitions, renderEvidence } from '@agentix-e/nl2charts-ai';
+import { attachDefinitions, choosePromptProfile, createHttpProvider, createPipeline, renderDefinitions, renderEvidence } from '@agentix-e/nl2charts-ai';
 import type { PromptOptions, SchemaTable } from '@agentix-e/nl2charts-ai';
 import { compareArms, judgeOfficial, judgeStrict, mcnemarExact, summarise, wilsonInterval } from '@agentix-e/nl2charts-devkit';
 import { buildSchema, loadDescriptions, loadTables } from '../bird/data.js';
 import { createOracle } from '../bird/oracle.js';
 import { profileDatabase } from '../bird/profile.js';
+import { synthesizeDefinitions } from '../bird/synthesize.js';
 import { pool } from '../bird/run.js';
 import type { Arm } from '../bird/run.js';
 import { CASES } from './cases.js';
@@ -39,6 +40,7 @@ function declaredWidth(question: string): number | undefined {
 const ARMS: readonly Arm[] = [
   { name: 'names', notes: false, repairs: 0, linking: true },
   { name: 'definitions', notes: false, repairs: 0, linking: true, definitions: 'structural' },
+  { name: 'inline-definitions', notes: false, repairs: 0, linking: true, definitions: 'inline' },
   { name: 'metadata', notes: true, repairs: 0, linking: true },
   { name: 'synthetic', notes: true, evidence: 'synthetic', repairs: 0, linking: true },
   { name: 'adaptive', notes: true, repairs: 0, linking: true, profile: 'adaptive' },
@@ -49,7 +51,7 @@ function promptFor(arm: Arm, question: string, synthesized?: string, definitions
   const evidence = arm.evidence === 'synthetic' ? synthesized : undefined;
   return {
     dialect: 'SQLite',
-    descriptions: profile?.descriptions ?? arm.notes,
+    descriptions: arm.definitions === 'inline' ? true : (profile?.descriptions ?? arm.notes),
     foreignKeys: profile?.foreignKeys ?? arm.notes,
     samples: false,
     schemaLines: 2000,
@@ -77,6 +79,33 @@ async function main() {
   const oracle = createOracle(join(ROOT, 'eval/bird/oracle.py'), DATABASES);
   const definitions = new Map<string, string>();
   for (const [db, schema] of schemas) definitions.set(db, renderDefinitions(schema));
+
+  // The inline arm needs the same definitions the BIRD run used, and a schema
+  // that carries nothing else. Both are built before any model call so a broken
+  // template fails the run, not an arm.
+  const provider = createHttpProvider({
+    baseUrl: process.env.LLM_BASE_URL ?? 'https://api.deepseek.com/v1',
+    apiKey: process.env.DEEPSEEK_API_KEY ?? process.env.LLM_API_KEY ?? '',
+    model: process.env.LLM_MODEL ?? 'deepseek-chat',
+  });
+  const inlineSchemas = new Map<string, SchemaTable[]>();
+  if (ARMS.some((arm) => arm.definitions === 'inline')) {
+    for (const db of dbs) {
+      const table = tables.get(db);
+      if (table === undefined) continue;
+      const bare = buildSchema(table, loadDescriptions(join(DATA, 'dev_databases', db, 'database_description'), table.tableNames), {
+        withNotes: false,
+      });
+      const written = await synthesizeDefinitions({
+        oracle,
+        db,
+        schema: schemas.get(db) as SchemaTable[],
+        provider,
+        model: process.env.LLM_MODEL ?? 'deepseek-chat',
+      });
+      inlineSchemas.set(db, attachDefinitions(bare, written).schema as SchemaTable[]);
+    }
+  }
   const synthesized = new Map<string, string>();
   for (const db of dbs) synthesized.set(db, renderEvidence(await profileDatabase(oracle, db)));
 
@@ -120,22 +149,24 @@ async function main() {
     return;
   }
 
-  const provider = createHttpProvider({
-    baseUrl: process.env.LLM_BASE_URL ?? 'https://api.deepseek.com/v1',
-    apiKey: process.env.DEEPSEEK_API_KEY ?? process.env.LLM_API_KEY ?? '',
-    model: process.env.LLM_MODEL ?? 'deepseek-chat',
-  });
-
   const outcomes = new Map<string, { id: string; passed: boolean }[]>();
   const armReports: unknown[] = [];
   for (const arm of ARMS) {
     const runs = await pool(CASES, CONCURRENCY, async (testCase) => {
-      const schema = schemas.get(testCase.db) as SchemaTable[];
+      const schema =
+        arm.definitions === 'inline'
+          ? ((inlineSchemas.get(testCase.db) ?? schemas.get(testCase.db)) as SchemaTable[])
+          : (schemas.get(testCase.db) as SchemaTable[]);
       const pipeline = createPipeline({
         provider,
         maxRepairs: arm.repairs,
         linking: arm.linking,
-        prompt: promptFor(arm, testCase.question, synthesized.get(testCase.db), definitions.get(testCase.db)),
+        prompt: promptFor(
+          arm,
+          testCase.question,
+          synthesized.get(testCase.db),
+          arm.definitions === 'inline' ? undefined : definitions.get(testCase.db),
+        ),
       });
       try {
         const asked = await pipeline.ask({ question: testCase.question, schema });
