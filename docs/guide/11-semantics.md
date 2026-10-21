@@ -88,15 +88,24 @@ On BIRD Mini-Dev, n=239, three runs, same model, same cases:
 | model-written definitions, as a block | 32 to 35% | 2,819 chars |
 | **the same definitions attached to their columns** | **41.8 to 43.5%** | **2,166 to 2,496 chars** |
 | the dataset's curated notes, same columns | 43.1% | 2,860 chars |
-| definitions + a per-question hint | 52 to 54% | 2,953 chars |
-| full column metadata + a per-question hint | 56 to 59% | 7,605 chars |
+| **attached definitions + a per-question hint** | **56.1%** | **2,624 chars** |
+| full column metadata (798 curated notes) + the same hint | 56.9% | 7,605 chars |
 
 Neither the content nor the author turns out to matter. The same sentences that
-did nothing as a block are worth **+6.7 to +10.5pp** on the column line (three
-runs, p=0.014 to 1.7e-4), and the dataset's own curated notes on the same columns
-score +1.3pp over generated ones (p=0.375, one case each way). On the adversarial
-shapes the arm equals the bare schema in all three runs, while full metadata loses
-6 to 9 points.
+did nothing as a block are worth **+6.7 to +10.5pp** on the column line (four
+runs, p=0.0015 to 1.7e-4), and the dataset's own curated notes on the same columns
+score +1.3pp over generated ones (p=0.375, one case each way).
+
+The practical consequence: **attached definitions plus a per-question hint reach
+56.1%, against 56.9% for 798 curated notes plus the same hint — a two-case
+difference at a third of the prompt.** A database with no documentation can be
+brought to the accuracy of one that has it.
+
+What does not work is asking the model to think first. A stage that restates the
+question — measure, rows, numerator, denominator — before writing SQL changed
+exactly zero cases (17 fixed, 17 broken, p=1.0) and costs an extra call per
+question. The gap is external knowledge, not reasoning order, so `interpret` stays
+off by default.
 
 So use the inline form. The block form is kept for one case only: a definition
 that belongs to a table rather than a column has nowhere to sit.

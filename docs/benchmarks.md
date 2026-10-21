@@ -131,22 +131,45 @@ temperature 0, one sample per case. Artifacts: `eval/out/bird-eval.json`,
 | Schema fidelity: advertised columns exist in the database | **798 / 798** |
 | Prompt coverage: tables that reach the schema card | **75 / 75** (no truncation) |
 
-### Accuracy (run H, same 239 cases in every arm)
+### Accuracy (run I, same 239 cases in every arm)
 
-| Arm | Execution accuracy | 95% Wilson | prompt chars (mean) | columns carrying text |
-| --- | --- | --- | --- | --- |
-| names only | 32.2% (77/239) | [26.6, 38.5] | 1,818 | 0 |
-| model-written definitions, as a block | 35.1% (84/239) | [29.3, 41.5] | 2,819 | 0 |
-| the same text on the column line | 41.8% (100/239) | [35.8, 48.1] | 2,496 | 143 |
-| **the dataset's own notes on the same columns** | **43.1%** (103/239) | [37.1, 49.4] | 2,860 | 128 |
-| model-written definitions + dataset evidence | 52.7% (126/239) | [46.4, 59.0] | 2,953 | 143 |
-| metadata + dataset evidence | **58.6%** (140/239) | [52.3, 64.7] | 7,605 | 798 |
+| Arm | Execution accuracy | 95% Wilson | prompt chars (mean) |
+| --- | --- | --- | --- |
+| names only | 32.6% (78/239) | [27.0, 38.8] | 1,818 |
+| model-written definitions, as a block | 33.5% (80/239) | [27.8, 39.8] | 2,817 |
+| the same text on the column line | 42.3% (101/239) | [36.3, 48.6] | 2,490 |
+| + the dataset's per-question hint | **56.1%** (134/239) | [49.7, 62.3] | 2,624 |
+| + a per-question reading written by the model | 42.3% (101/239) | [36.3, 48.6] | 2,490 (+1 call) |
+| metadata + the dataset's per-question hint | **56.9%** (136/239) | [50.5, 63.1] | 7,605 |
 
 | Change | Δ | only before / only after | p | verdict |
 | --- | --- | --- | --- | --- |
-| block → column line (same text) | **+6.7pp** | 11 / 27 | 0.014 | real |
-| our text → the dataset's text, same columns | +1.3pp | 1 / 4 | 0.375 | no measurable effect |
-| inline definitions → + dataset evidence | **+17.6pp** | 12 / 54 | 2e-07 | real |
+| block → column line (same text) | **+8.8pp** | 10 / 31 | 0.0015 | real |
+| inline definitions → + the dataset's question hint | **+13.8pp** | 7 / 41 | 6e-07 | real |
+| inline definitions → + a model-written reading | 0.0pp | 17 / 17 | 1.0 | **no measurable effect** |
+
+### The generated stack matches the curated one at a third of the prompt
+
+`inline+evidence` reaches **56.1%** with a 2,624-character prompt.
+`metadata+evidence` — 798 curated column notes plus the same hint — reaches
+**56.9%** with 7,605 characters. The difference is two cases.
+
+That is the product claim this whole line of work was looking for: a database
+without documentation can be brought to the accuracy of a database with it, by
+generating definitions once per database and attaching them to the columns. What
+it cannot do is replace the per-question hint: that is still worth +13.8pp.
+
+### A model-written reading of the question buys nothing
+
+Asking the model to restate what the question computes — measure, rows counted,
+numerator and denominator — before writing SQL changed **exactly zero** cases:
+17 fixed, 17 broken, p=1.0, and one extra call per question.
+
+The reading is not wrong; it is redundant. The information it restates was already
+in the prompt. What BIRD's hint supplies is knowledge the prompt does not contain —
+which currency counts as "paying in EUR" — and restating a question cannot invent
+it. This closes the "ask the model to think first" branch: the gap is knowledge,
+not reasoning order.
 
 ### Who wrote the text does not matter; where it sits does
 
@@ -170,6 +193,7 @@ might touch; the tail of rarely mentioned columns adds text, not accuracy.
 | G1 (`9120c2b`) | 33.1% | **43.5%** | **+10.5pp** (9/34, p=1.7e-4) | 2,819 → 2,166 |
 | G2 (`148a621`) | 33.9% | **42.3%** | **+8.4pp** (12/32, p=0.0037) | 2,819 → 2,166 |
 | H (`d5927b0`) | 35.1% | 41.8% | **+6.7pp** (11/27, p=0.014) | 2,819 → 2,496 |
+| I (`700529b`) | 33.5% | **42.3%** | **+8.8pp** (10/31, p=0.0015) | 2,817 → 2,490 |
 
 Same cached sentences, same model, same cases. The only change is where they sit:
 attached to the column they describe instead of appended after the schema card.
@@ -236,10 +260,10 @@ every correct answer.
 | tie | 7/8 | 7/8 | 7/8 | 7/8 | 7/8 |
 | **total** | **81.2%** (26/32) | **81.2%** (26/32) | **81.2%** (26/32) | 71.9% (23/32) | 78.1% (25/32) |
 
-The inline arm lands exactly on `names` (26/32, 0 discordant pairs) in three
-separate runs: 81.2%, 84.4%, 81.2%. Definitions attached to columns do not cost
-what full column metadata costs on these shapes (71.9%, three consecutive runs of
-−6 to −9pp).
+The inline arm lands on `names` in three of four runs (81.2% / 84.4% / 81.2%) and
+one case behind in the fourth (78.1% vs 81.2%, which at n=32 is one case).
+Definitions attached to columns do not cost what full column metadata costs on
+these shapes (71.9% in every run).
 
 The two faces disagree in a way worth remembering: metadata is worth +11.3pp on
 BIRD and −9pp here. A component's effect is a property of a question shape, not
