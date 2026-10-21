@@ -388,8 +388,11 @@ export function attachDefinitions(
   for (const raw of block.split('\n')) {
     const line = raw.trim().replace(/^[-*•]\s*/, '');
     if (line.length === 0) continue;
-    const dotted = /^([^.:=]+)\.([^:=]+)\s*[:=]\s*(.+)$/.exec(line);
-    const quoted = /^"([^"]+)"\s+(?:is|are)\s+(.+)$/.exec(line);
+    // Three shapes appear in practice: `table.column: text`, `table.column is text`
+    // (no separator at all), and `"Column Label" verb text`. The first two differ
+    // only by punctuation, so one pattern handles both.
+    const dotted = /^([^.:=]+)\.([^\s:=]+)\s*[:=]?\s+(.+)$/.exec(line);
+    const quoted = /^"([^"]+)"\s+(.+)$/.exec(line);
     let key: string | undefined;
     let text: string | undefined;
     if (dotted !== null) {
@@ -402,12 +405,15 @@ export function attachDefinitions(
       text = quoted[2]?.trim();
     }
     const target = key === undefined ? undefined : lookup.get(key);
-    if (target === undefined || text === undefined || text.length === 0) {
+    // A copula carries no information in a column comment; other verbs do
+    // ("identifies the district" is a better note than "the district").
+    const body = text?.replace(/^(?:is|are|was|were|means|denotes)\b\s*/i, '').trim();
+    if (target === undefined || body === undefined || body.length === 0) {
       unplaced.push(line);
       continue;
     }
     const slot = `${target.table}\u0000${target.column}`;
-    additions.set(slot, [...(additions.get(slot) ?? []), text]);
+    additions.set(slot, [...(additions.get(slot) ?? []), body]);
     attached += 1;
   }
   if (attached === 0) return { schema, attached, unplaced };

@@ -68,7 +68,7 @@ export interface Arm {
    * the schema; synthesized ones are written once per database by the model.
    * Modelled as one lever for the same reason as the evidence source.
    */
-  readonly definitions?: 'structural' | 'synthesized' | 'inline';
+  readonly definitions?: 'structural' | 'synthesized' | 'inline' | 'dataset-subset';
   /** Order synthesized evidence by the columns the question names. */
   readonly focus?: boolean;
 }
@@ -90,6 +90,10 @@ export const ARMS: readonly Arm[] = [
   { name: 'definitions', notes: false, repairs: 0, linking: true, definitions: 'structural' },
   { name: 'synth-definitions', notes: false, repairs: 0, linking: true, definitions: 'synthesized' },
   { name: 'inline-definitions', notes: false, repairs: 0, linking: true, definitions: 'inline' },
+  // The dataset's own descriptions, truncated to the columns the inline arm
+  // reached. Same placement, same columns, different author: the only way to
+  // tell coverage apart from source quality.
+  { name: 'dataset-subset', notes: false, repairs: 0, linking: true, definitions: 'dataset-subset' },
   { name: 'definitions+evidence', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'structural' },
   { name: 'synth-definitions+evidence', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'synthesized' },
   { name: 'metadata', notes: true, repairs: 0, linking: true },
@@ -108,6 +112,7 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   ['names', 'definitions'],
   ['definitions', 'synth-definitions'],
   ['synth-definitions', 'inline-definitions'],
+  ['inline-definitions', 'dataset-subset'],
   ['definitions', 'definitions+evidence'],
   ['synth-definitions', 'synth-definitions+evidence'],
   ['names', 'metadata'],
@@ -139,7 +144,7 @@ function settings() {
     // with the dataset hint, and last round's best arm as the ceiling reference.
     arms: (
       process.env.BIRD_ARMS ??
-      ['names', 'definitions', 'synth-definitions', 'inline-definitions', 'synth-definitions+evidence', 'metadata+evidence'].join(',')
+      ['names', 'synth-definitions', 'inline-definitions', 'dataset-subset', 'synth-definitions+evidence', 'metadata+evidence'].join(',')
     )
       .split(',')
       .map((name) => name.trim()),
@@ -174,7 +179,8 @@ export function promptFor(arm: Arm, question: BirdQuestion, synthesized?: string
     // The inline arm is a placement experiment: the same sentences, attached to
     // the column line the metadata block uses. Descriptions on is part of that
     // placement, not a second lever.
-    descriptions: arm.definitions === 'inline' ? true : (profile?.descriptions ?? arm.notes),
+    descriptions:
+      arm.definitions === 'inline' || arm.definitions === 'dataset-subset' ? true : (profile?.descriptions ?? arm.notes),
     foreignKeys: profile?.foreignKeys ?? arm.notes,
     samples: false,
     schemaLines: 400,
@@ -315,12 +321,37 @@ async function main() {
 
   /** The definition block this arm uses, if any (inline arms carry it per column). */
   const definitionsFor = (arm: Arm, db: string): string | undefined => {
-    if (arm.definitions === 'inline') return undefined;
+    if (arm.definitions === 'inline' || arm.definitions === 'dataset-subset') return undefined;
     return arm.definitions === 'synthesized' ? synthesizedDefinitions.get(db) : definitions.get(db);
   };
 
-  const schemaFor = (arm: Arm, db: string): SchemaTable[] =>
-    arm.definitions === 'inline' ? (inlineSchemas.get(db) as SchemaTable[]) : (schemas.get(db) as SchemaTable[]);
+  // The dataset's descriptions, cut down to the columns the inline arm reached.
+  // Anything the inline arm could not address is removed here too, so the two
+  // arms differ in the author of the text and nothing else.
+  const subsetSchemas = new Map<string, SchemaTable[]>();
+  for (const [db, schema] of schemas) {
+    const reached = new Set<string>();
+    for (const table of (inlineSchemas.get(db) ?? []) as SchemaTable[]) {
+      for (const column of table.columns) {
+        if (column.comment !== undefined) reached.add(`${table.table}\u0000${column.name}`);
+      }
+    }
+    subsetSchemas.set(
+      db,
+      schema.map((table) => ({
+        ...table,
+        columns: table.columns.map((column) =>
+          reached.has(`${table.table}\u0000${column.name}`) ? column : { name: column.name, type: column.type },
+        ),
+      })),
+    );
+  }
+
+  const schemaFor = (arm: Arm, db: string): SchemaTable[] => {
+    if (arm.definitions === 'inline') return inlineSchemas.get(db) as SchemaTable[];
+    if (arm.definitions === 'dataset-subset') return subsetSchemas.get(db) as SchemaTable[];
+    return schemas.get(db) as SchemaTable[];
+  };
 
 
   const gold = new Map<number, OracleResult>();
@@ -405,6 +436,11 @@ async function main() {
       synthesizedDefinitions: Object.fromEntries(synthesizedDefinitions),
       inlineAttached,
       inlineUnplaced,
+      subsetComments: [...subsetSchemas.values()].reduce(
+        (total, schema) =>
+          total + schema.reduce((count, table) => count + table.columns.filter((column) => column.comment !== undefined).length, 0),
+        0,
+      ),
       // How many columns in the inline schema carry any comment at all. If this
       // ever approaches the 798 dataset columns, the arm is measuring the
       // metadata lever again instead of placement.

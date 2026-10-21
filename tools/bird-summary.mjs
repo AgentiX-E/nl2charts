@@ -34,7 +34,7 @@ if (report === null) {
     `Controls: self-consistency **${(controls.selfConsistency * 100).toFixed(1)}%**, negative false matches **${controls.negativeFalseMatches}**, empty-gold cases excluded from the negative control: ${controls.emptyGoldExcluded}.`,
     `Structural semantics: **${controls.semanticsDatabases}/${controls.semanticsDatabaseTotal}** databases and **${controls.semanticsCases}/${report.selection.scored}** cases yield a claim; mean block ${controls.semanticsMeanChars} characters.`,
     `Synthesized definitions (written once per database, cached): **${controls.synthesizedDefinitionDatabases ?? 0}/${controls.semanticsDatabaseTotal}** databases, mean block ${controls.synthesizedDefinitionMeanChars ?? 0} characters.`,
-    `Inline placement: **${controls.inlineAttached ?? 0}** lines attached to a column, ${controls.inlineUnplaced ?? 0} left unplaced.`,
+    `Inline placement: **${controls.inlineAttached ?? 0}** lines attached to a column, ${controls.inlineUnplaced ?? 0} left unplaced (addressability ${((controls.inlineAttached ?? 0) / Math.max(1, (controls.inlineAttached ?? 0) + (controls.inlineUnplaced ?? 0)) * 100).toFixed(1)}%); dataset subset covers ${controls.subsetComments ?? 0} columns.`,
     '',
   );
   if (Array.isArray(report.arms) && report.arms.length > 0) {

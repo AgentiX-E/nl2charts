@@ -48,6 +48,18 @@ describe('attaching definitions to columns', () => {
     expect(result.schema).toBe(schema);
   });
 
+  it('accepts a dotted line with no separator, which is what the model writes', () => {
+    const result = attachDefinitions(schema, '- orders.status is the state of the order.');
+    expect(result.attached).toBe(1);
+    expect(result.schema[0]?.columns[1]?.comment).toBe('the state of the order.');
+  });
+
+  it('accepts a quoted label followed by any verb, not just is/are', () => {
+    const result = attachDefinitions(schema, '- "total_amount" identifies the charged amount.');
+    expect(result.attached).toBe(1);
+    expect(result.schema[0]?.columns[2]?.comment).toBe('existing; identifies the charged amount.');
+  });
+
   it('is case insensitive about the table and column', () => {
     const result = attachDefinitions(schema, '- ORDERS.Status = paid means shipped.');
     expect(result.attached).toBe(1);
