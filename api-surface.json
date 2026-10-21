@@ -212,13 +212,20 @@
     "type Role"
   ],
   "node": [
+    "CONNECTORS",
     "DuckDbOptions",
     "FileCache",
     "FileCacheOptions",
     "SqliteOptions",
+    "connectorFor",
     "createDuckDbEngine",
     "createFileCache",
-    "createSqliteEngine"
+    "createSqliteEngine",
+    "describeConnector",
+    "redactConnection",
+    "requiresWrite",
+    "type Connector",
+    "type ConnectorKind"
   ],
   "node/duckdb": [
     "createDuckDbEngine",

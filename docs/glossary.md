@@ -178,6 +178,11 @@ from names, declared types and foreign keys, with no human-written dictionary.
 Rendered by `renderDefinitions()` and passed to the prompt as `definitions`. It
 states what the schema licenses, not what a business owner meant.
 
+**Connector** — The set of promises the library makes about an engine before a
+query reaches it: quoting, row cap, whether `ATTACH` is available, and read-only.
+Distinct from a driver, which needs a server; the promises are testable without
+one.
+
 **Portability census** — The share of a dataset's statements that also run on a
 second engine, with the failure taxonomy. Not an accuracy number: it answers
 "will this SQL run on my engine", which is the first question a deployment asks.

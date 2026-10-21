@@ -4,3 +4,5 @@ export { createSqliteEngine } from './sqlite.js';
 export type { SqliteOptions } from './sqlite.js';
 export { createFileCache } from './cache.js';
 export type { FileCache, FileCacheOptions } from './cache.js';
+export { CONNECTORS, connectorFor, describeConnector, redactConnection, requiresWrite } from './connectors.js';
+export type { Connector, ConnectorKind } from './connectors.js';

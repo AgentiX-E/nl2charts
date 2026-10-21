@@ -144,6 +144,7 @@ Every push runs the same gates locally and in CI:
 - [Query a SQLite database](docs/guide/09-sqlite.md)
 - [Give the model definitions, not just schema](docs/guide/10-evidence.md)
 - [Infer semantics from the schema](docs/guide/11-semantics.md)
+- [Connectors: what is promised per engine](docs/guide/12-connectors.md)
 - [Production checklist](docs/guide/07-production.md)
 - [Architecture](docs/architecture.md)
 - [Glossary](docs/glossary.md)
