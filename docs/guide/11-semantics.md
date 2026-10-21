@@ -85,16 +85,18 @@ On BIRD Mini-Dev, n=239, three runs, same model, same cases:
 | --- | --- | --- |
 | names only | 32 to 34% | 1,818 chars |
 | structural semantics, as a block | 33 to 34% | 2,630 chars |
-| model-written definitions, as a block | 32 to 34% | 2,819 chars |
-| **the same definitions attached to their columns** | **42.3 to 43.5%** | **2,166 chars** |
+| model-written definitions, as a block | 32 to 35% | 2,819 chars |
+| **the same definitions attached to their columns** | **41.8 to 43.5%** | **2,166 to 2,496 chars** |
+| the dataset's curated notes, same columns | 43.1% | 2,860 chars |
 | definitions + a per-question hint | 52 to 54% | 2,953 chars |
 | full column metadata + a per-question hint | 56 to 59% | 7,605 chars |
 
-The content was never the problem. The same sentences that did nothing as a block
-are worth **+8.4 to +10.5pp** when they sit on the column line: two runs, 12/32 and
-9/34 discordant pairs, p=0.0037 and p=1.7e-4. On the adversarial shapes the same
-arm equals the bare schema (84.4%) instead of losing to it, which full metadata
-does (71.9%).
+Neither the content nor the author turns out to matter. The same sentences that
+did nothing as a block are worth **+6.7 to +10.5pp** on the column line (three
+runs, p=0.014 to 1.7e-4), and the dataset's own curated notes on the same columns
+score +1.3pp over generated ones (p=0.375, one case each way). On the adversarial
+shapes the arm equals the bare schema in all three runs, while full metadata loses
+6 to 9 points.
 
 So use the inline form. The block form is kept for one case only: a definition
 that belongs to a table rather than a column has nowhere to sit.
@@ -113,9 +115,9 @@ const schemaWithDefinitions = placed.schema;
 
 Two rules came out of the runs above:
 
-- **Drop what cannot be addressed.** In the measured arm, 57 of 155 lines named a
-  column; the other 98 were dropped, and the arm still gained. A table-level
-  sentence appended at the end was the part that never paid for itself.
+- **Only addressable lines matter.** Going from 57 to 143 attached lines (37% to
+  92%) changed nothing: 42.3% to 41.8% while the prompt grew. Most of the effect
+  comes from the columns a question is likely to touch; the tail adds text.
 - **Never guess a column.** `attachDefinitions` returns unplaced lines instead of
   matching loosely. A definition on the wrong column is read with full confidence
   and is worse than a missing one.
