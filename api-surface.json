@@ -220,12 +220,15 @@
     "connectorFor",
     "createDuckDbEngine",
     "createFileCache",
+    "createPostgresEngine",
     "createSqliteEngine",
     "describeConnector",
+    "fromPostgresValue",
     "redactConnection",
     "requiresWrite",
     "type Connector",
-    "type ConnectorKind"
+    "type ConnectorKind",
+    "type PostgresOptions"
   ],
   "node/duckdb": [
     "createDuckDbEngine",

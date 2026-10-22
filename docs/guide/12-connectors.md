@@ -60,9 +60,43 @@ path. `redactConnection` removes a password from the authority part and from the
 common query parameters, and `describeConnector` is the only string this library
 writes about a connection. Do not build your own message from the raw DSN.
 
+## PostgreSQL: a real driver, two layers of read-only
+
+```ts
+import { createPostgresEngine } from '@agentix-e/nl2charts-node';
+
+const engine = await createPostgresEngine({
+  connectionString: process.env.DATABASE_URL as string,
+  readOnly: true,          // default
+  statementTimeoutMs: 30_000,
+});
+
+const result = await engine.run('select region, sum(total) from orders group by 1');
+await engine.close();
+```
+
+Read-only is enforced twice, and both layers are covered by tests that run against
+a real server:
+
+1. **before sending**: `requiresWrite` rejects `insert`, `update`, `delete`,
+   `create`, `alter`, `drop`, `truncate`, `merge`, `grant`, `revoke`, `copy`,
+   `call`, `vacuum` — and also `select ... for update`, because it takes row locks;
+2. **at the session level**: `default_transaction_read_only=on`, so a statement
+   the lexical check cannot see is refused by the server. The test uses
+   `select nextval('probe_seq')`, which contains no write keyword and still fails
+   with *read-only transaction*.
+
+Values are normalised to the same vocabulary as SQLite — dates as ISO text,
+`boolean` as 1/0, `bytea` as `0x<hex>`, `int8`/`numeric` as numbers when they
+survive the round trip and as strings when they would lose precision. Without that
+the same logical row hashes differently per engine.
+
+The integration suite is skipped unless `PG_TEST_URL` is set, so a laptop without
+a database still runs the contract tests.
+
 ## What is not here yet
 
-Live PostgreSQL and MySQL integration tests need servers, so the contract is
-tested and the drivers are not shipped. Until they are, the honest statement is:
-*the promises are verified, the wire protocol is not.* `duckdb` and `sqlite` are
-the two engines with real, tested drivers.
+MySQL, Snowflake and BigQuery have contracts but no drivers: shipping a driver
+without a server to test it against would be a promise nobody checked. The honest
+statement today is: `duckdb`, `sqlite` and `postgres` have real drivers and
+integration tests; the other three have tested promises only.
