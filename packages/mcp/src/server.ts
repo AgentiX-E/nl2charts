@@ -2,6 +2,8 @@ import type { Runner } from '@agentix-e/nl2charts-core';
 import { isNl2ChartsError } from '@agentix-e/nl2charts-spec';
 import type { JsonRpcRequest, JsonRpcResponse } from './jsonrpc.js';
 import { encodeMessage } from './jsonrpc.js';
+import { SEMANTIC_TOOLS, explainMetric, runQueryMetric } from './semantic.js';
+import type { ToolFailure } from './semantic.js';
 
 export interface ToolDefinition {
   readonly name: string;
@@ -31,7 +33,19 @@ const TOOLS: readonly ToolDefinition[] = [
     description: 'Return the engine id, dialect and row cap.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   },
+  ...SEMANTIC_TOOLS,
 ];
+
+/** A tool error becomes a JSON-RPC error, never a thrown exception. */
+function failureResponse(id: JsonRpcResponse['id'], failed: ToolFailure): JsonRpcResponse {
+  return failed.data === undefined
+    ? errorResponse(id, failed.code, failed.message)
+    : errorResponse(id, failed.code, failed.message, failed.data);
+}
+
+function isFailure(value: unknown): value is ToolFailure {
+  return typeof value === 'object' && value !== null && 'code' in value && 'message' in value;
+}
 
 function errorResponse(id: JsonRpcResponse['id'], code: number, message: string, data?: unknown): JsonRpcResponse {
   return data === undefined
@@ -54,6 +68,16 @@ export function createMcpServer(options: McpServerOptions): {
         id,
         result: { content: [{ type: 'text', text: JSON.stringify(options.runner.capabilities) }] },
       };
+    }
+    if (toolName === 'query_metric') {
+      const payload = await runQueryMetric({ runner: options.runner }, args);
+      if (isFailure(payload)) return failureResponse(id, payload);
+      return { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: JSON.stringify(payload) }], isError: false } };
+    }
+    if (toolName === 'explain_metric') {
+      const payload = explainMetric(args);
+      if (isFailure(payload)) return failureResponse(id, payload);
+      return { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: JSON.stringify(payload) }], isError: false } };
     }
     if (toolName !== 'run_sql') return errorResponse(id, -32602, `unknown tool: ${toolName}`);
     const sql = args.sql;

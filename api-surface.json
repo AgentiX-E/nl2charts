@@ -263,15 +263,20 @@
     "type Severity"
   ],
   "mcp": [
+    "SEMANTIC_TOOLS",
     "attachStreams",
     "createDecoder",
     "createMcpServer",
     "encodeMessage",
+    "explainMetric",
+    "runQueryMetric",
     "type JsonRpcError",
     "type JsonRpcRequest",
     "type JsonRpcResponse",
     "type McpServerOptions",
-    "type ToolDefinition"
+    "type SemanticContext",
+    "type ToolDefinition",
+    "type ToolFailure"
   ],
   "studio": [
     "hasErrors",

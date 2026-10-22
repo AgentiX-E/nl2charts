@@ -66,9 +66,41 @@ const server = createMcpServer({ runner, name: 'warehouse', version: '1.0.0' });
 await attachStreams(server, process.stdin, (chunk) => process.stdout.write(chunk));
 ```
 
-Tools exposed: `run_sql` (guarded) and `engine_info`. A guard rejection is a tool
-error (`-32000`) with the contract code in the message; it is not a transport
-crash.
+Four tools are exposed:
+
+| Tool | Input | Returns |
+| --- | --- | --- |
+| `run_sql` | `{ sql }` | rows, or a guard rejection |
+| `engine_info` | `{}` | engine id, dialect, row cap |
+| `query_metric` | `{ model, query }` | compiled SQL and rows |
+| `explain_metric` | `{ model, query, optimize? }` | SQL before and after optimization, both plans |
+
+`query_metric` is the one to give an agent. `run_sql` asks the caller to write the
+statement, and a caller that does not know what `revenue` means writes the wrong
+one — the failure this project exists to measure. `query_metric` takes a semantic
+model once and then only names metrics and dimensions:
+
+```json
+{
+  "name": "query_metric",
+  "arguments": {
+    "model": { "name": "shop", "tables": [], "metrics": [] },
+    "query": { "metrics": ["revenue"], "dimensions": ["region"] }
+  }
+}
+```
+
+`explain_metric` compiles the same query and returns the plan without executing
+it, so an agent can inspect what it is about to ask for. `stages` names the four
+pipeline steps — plan, optimize, lower, render — and `plan` / `optimizedPlan` are
+returned side by side so the rewrite is visible rather than asserted.
+
+A client's `limit` is a request, not a permission: it is clamped to the runner's
+row cap, so a server configured for 1,000 rows cannot be asked for 5,000.
+
+A guard rejection or a semantic error is a tool error (`-32000`) with the contract
+code in the message — `NL2C_E_UNKNOWN_METRIC` can be branched on, prose cannot.
+Neither is a transport crash.
 
 ## Upgrading
 

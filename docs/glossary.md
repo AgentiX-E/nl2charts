@@ -183,6 +183,10 @@ skeleton and the count of drawn shapes, not the coordinates. It fails when a cha
 stops drawing or changes shape and stays quiet when a label moves, because a
 baseline that fails on float noise is one people regenerate without reading.
 
+**Semantic tool** — An MCP tool that takes a semantic model and a metric query
+instead of SQL. It exists because `run_sql` moves the definition of a metric into
+the caller's head, which is exactly where it gets forgotten.
+
 **Mark contract** — What a chart type needs before it can be drawn: which
 encoding channels it reads, how many numbers one row supplies, and whether it
 needs geometry or a render function that a result set cannot contain.

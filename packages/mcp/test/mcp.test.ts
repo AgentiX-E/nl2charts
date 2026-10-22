@@ -54,7 +54,9 @@ describe('mcp server', () => {
   it('lists the guarded tools', async () => {
     const response = await server.handle({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
     const tools = (response?.result as { tools: { name: string }[] }).tools;
-    expect(tools.map((tool) => tool.name).sort()).toEqual(['engine_info', 'run_sql']);
+    // `query_metric` and `explain_metric` let a client name a metric instead of
+    // writing SQL, which is the point of the semantic layer.
+    expect(tools.map((tool) => tool.name).sort()).toEqual(['engine_info', 'explain_metric', 'query_metric', 'run_sql']);
   });
 
   it('runs a query through the guard and returns rows', async () => {
