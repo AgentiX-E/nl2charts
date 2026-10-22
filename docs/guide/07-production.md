@@ -102,6 +102,42 @@ A guard rejection or a semantic error is a tool error (`-32000`) with the contra
 code in the message — `NL2C_E_UNKNOWN_METRIC` can be branched on, prose cannot.
 Neither is a transport crash.
 
+## Reading a trace
+
+A trace is the story of one query: which stage ran, for how long, what came out.
+It is also the artefact people cite when they argue about a number, so the library
+lets you seal one and check it later.
+
+```ts
+import { sealTrace, verifyTrace, replayTrace } from '@agentix-e/nl2charts-studio';
+
+const sealed = sealTrace([
+  { name: 'guard', startMs: 0, endMs: 2 },
+  { name: 'compile', startMs: 2, endMs: 9 },
+  { name: 'execute', startMs: 9, endMs: 41, attrs: { 'nl2charts.rows': 239 } },
+]);
+
+verifyTrace(sealed);      // { ok: true, count: 3 }
+replayTrace(sealed);      // { ok: true, durationMs: 41, slowest: { name: 'execute', … }, errors: [] }
+```
+
+Each event is hashed together with the previous event's hash, and replay refuses a
+chain that does not reach its head:
+
+| Edit | Verdict |
+| --- | --- |
+| change one `endMs` | `{ ok: false, brokenAt: 1, reason: 'hash' }` |
+| drop an event | `{ ok: false, reason: 'head' }` |
+| point `prev` elsewhere | `{ ok: false, brokenAt: 1, reason: 'link' }` |
+
+Hashing uses canonical JSON — keys sorted, `undefined` dropped — so an event that
+went through `JSON.stringify` and back still verifies. It is FNV-1a, not a
+cryptographic hash: this detects an edit, it does not stop a determined forger, and
+the guide says FNV-1a rather than "hash" because the difference matters.
+
+`replayTrace` reads no clock. The same sealed trace replays to the same summary,
+which is what makes it quotable.
+
 ## Upgrading
 
 The public surface is snapshotted in `api-surface.json`. The compatibility rules:

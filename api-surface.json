@@ -279,15 +279,30 @@
     "type ToolFailure"
   ],
   "studio": [
+    "buildIssueList",
+    "canonicalJson",
     "hasErrors",
+    "hashEvent",
     "inferAdditivity",
+    "replayTrace",
+    "sealTrace",
     "type Additivity",
     "type Diagnostic",
     "type DiagnosticCode",
+    "type Issue",
+    "type IssueList",
     "type MdlMetric",
     "type MdlModel",
     "type MdlRelationship",
-    "validateModel"
+    "type Replay",
+    "type ReplayStage",
+    "type SealedEvent",
+    "type SealedTrace",
+    "type TraceEvent",
+    "type TraceStatus",
+    "type VerifyVerdict",
+    "validateModel",
+    "verifyTrace"
   ],
   "devkit": [
     "compareArms",
