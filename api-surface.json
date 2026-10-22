@@ -284,6 +284,8 @@
     "hasErrors",
     "hashEvent",
     "inferAdditivity",
+    "renderIssueListText",
+    "renderTraceSvg",
     "replayTrace",
     "sealTrace",
     "type Additivity",
@@ -301,6 +303,7 @@
     "type SealedTrace",
     "type TraceEvent",
     "type TraceStatus",
+    "type TraceViewOptions",
     "type VerifyVerdict",
     "validateModel",
     "verifyTrace"

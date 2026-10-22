@@ -22,6 +22,8 @@ cannot be argued with.
   `run_sql` and `engine_info`.
 - **Trace sealing**: hash-chained events, three distinct failure verdicts, replay
   without reading a clock, and an injectable signer for callers who need an HMAC.
+- **Two Studio views**: a trace timeline rendered to SVG and an issue list as text,
+  both pure string functions with geometry asserted in tests.
 - **Six runbooks** with drills, and a runtime leak audit driven by a canary
   password.
 - **Gates**: coverage (95% on four dimensions per package), layering, public API

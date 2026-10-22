@@ -138,6 +138,20 @@ the guide says FNV-1a rather than "hash" because the difference matters.
 `replayTrace` reads no clock. The same sealed trace replays to the same summary,
 which is what makes it quotable.
 
+Two views render that summary without a DOM — paste them into an incident review:
+
+```ts
+import { renderTraceSvg, renderIssueListText } from '@agentix-e/nl2charts-studio';
+
+const svg = renderTraceSvg(replay);          // one bar per stage, width ∝ duration
+const text = renderIssueListText(issues);    // errors first, summary last
+```
+
+The timeline marks a failed stage with `data-status="error"` and prints its code, so
+"where did the time go" and "what broke" answer the same glance. A trace that does
+not verify renders as that sentence rather than as an empty axis — an empty
+timeline would be a claim, and the claim is exactly what failed.
+
 ## Gates you inherit
 
 These run in CI on every commit, and the same commands run locally:
