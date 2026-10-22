@@ -32,7 +32,7 @@ import type { OracleResult } from './oracle.js';
 import { profileDatabase } from './profile.js';
 import { buildIndex, renderDemonstrations, renderRetrieved, retrieve } from './retrieval.js';
 import { buildValueIndex, findValues, renderValues } from './values.js';
-import { synthesizeDefinitions } from './synthesize.js';
+import { synthesizeRecord } from './synthesize.js';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
 /**
@@ -260,6 +260,18 @@ interface CaseRun extends CaseOutcome {
  * `Number('')` is 0 — which would score nothing and report an accuracy over an
  * empty sample.
  */
+/**
+ * Resolve an arm name to its definition.
+ *
+ * An A/A pair is the same arm twice, named `<arm>#2`: the suffix is stripped here so
+ * the duplicate runs the identical configuration. Two arms that differ in anything
+ * would measure that difference instead of the harness's noise.
+ */
+export function resolveArm(name: string): Arm | undefined {
+  const base = name.includes('#') ? name.slice(0, name.indexOf('#')) : name;
+  return ARMS.find((arm) => arm.name === base);
+}
+
 export function parseLimit(raw: string | undefined, split: 'minidev' | 'dev'): number {
   const fallback = split === 'dev' ? 1534 : 500;
   if (raw === undefined || raw.trim() === '') return fallback;
@@ -284,9 +296,14 @@ function settings() {
       .filter(Boolean),
     // Default chain: baseline, the two definition sources, the synthesized one
     // with the dataset hint, and last round's best arm as the ceiling reference.
-    arms: (process.env.BIRD_ARMS ?? DEFAULT_ARMS.join(','))
-      .split(',')
-      .map((name) => name.trim()),
+    arms: (() => {
+      const requested = (process.env.BIRD_ARMS ?? DEFAULT_ARMS.join(',')).split(',').map((name) => name.trim());
+      // `BIRD_AA=<arm>` appends the same arm a second time under a `#2` name. The
+      // delta between the pair is the harness's own noise at this sample size, which
+      // no amount of within-run pairing between *different* arms can reveal.
+      const aa = process.env.BIRD_AA?.trim();
+      return aa === undefined || aa === '' ? requested : [...requested, `${aa}#2`];
+    })(),
     out: process.env.BIRD_OUT ?? join(ROOT, 'eval/out/bird-eval.json'),
     model: process.env.LLM_MODEL ?? 'deepseek-chat',
     baseUrl: process.env.LLM_BASE_URL ?? 'https://api.deepseek.com/v1',
@@ -378,7 +395,7 @@ async function main() {
     retrievalIndex = undefined;
   }
   const needsRetrieval = config.arms.some((name) => {
-    const arm = ARMS.find((entry) => entry.name === name);
+    const arm = resolveArm(name);
     return arm?.evidence === 'retrieved' || arm?.demonstrations === true;
   });
   if (needsRetrieval && retrievalIndex === undefined) {
@@ -500,26 +517,27 @@ async function main() {
   // same one under test, but it sees only schema, values and a couple of rows —
   // never a question, never a gold statement.
   const synthesizedDefinitions = new Map<string, string>();
+  /** Provenance per database: the prompt hash and whether the model was called. */
+  const definitionsProvenance: Record<string, { hash: string; cached: boolean }> = {};
   const needsSynthesis = config.arms.some((name) => {
-    const source = ARMS.find((arm) => arm.name === name)?.definitions;
+    const source = resolveArm(name)?.definitions;
     return source === 'synthesized' || source === 'inline';
   });
   const provider = createHttpProvider({ baseUrl: config.baseUrl, apiKey: config.apiKey, model: config.model });
   if (!config.dryRun && needsSynthesis) {
     for (const [db, schema] of schemas) {
       try {
-        synthesizedDefinitions.set(
+        const outcome = await synthesizeRecord({
+          oracle,
           db,
-          await synthesizeDefinitions({
-            oracle,
-            db,
-            schema,
-            ...(profiles.get(db) === undefined ? {} : { profile: profiles.get(db) as NonNullable<ReturnType<typeof profiles.get>> }),
-            provider,
-            model: config.model,
-            force: process.env.BIRD_DEFINITIONS_FORCE === '1',
-          }),
-        );
+          schema,
+          ...(profiles.get(db) === undefined ? {} : { profile: profiles.get(db) as NonNullable<ReturnType<typeof profiles.get>> }),
+          provider,
+          model: config.model,
+          force: process.env.BIRD_DEFINITIONS_FORCE === '1',
+        });
+        synthesizedDefinitions.set(db, outcome.definitions);
+        definitionsProvenance[db] = { hash: outcome.hash, cached: outcome.cached };
       } catch {
         synthesizedDefinitions.set(db, '');
       }
@@ -674,6 +692,10 @@ async function main() {
         [...definitions.values()].reduce((total, text) => total + text.length, 0) / Math.max(1, definitions.size),
       ),
       synthesizedDefinitionDatabases: [...synthesizedDefinitions.values()].filter((text) => text.length > 0).length,
+      // Which databases were written in this run and which came from cache, with the
+      // prompt hash: the difference between "the input changed" and "the model
+      // answered differently" is otherwise a guess.
+      definitionsProvenance,
       // The text itself, so a claim about what the model wrote can be checked
       // from the artifact instead of trusted.
       synthesizedDefinitions: Object.fromEntries(synthesizedDefinitions),
@@ -729,7 +751,7 @@ async function main() {
   const armReports: unknown[] = [];
   const outcomes = new Map<string, CaseOutcome[]>();
   for (const name of config.arms) {
-    const arm = ARMS.find((entry) => entry.name === name);
+    const arm = resolveArm(name);
     if (arm === undefined) throw new Error(`unknown arm ${name}`);
     const runs = await pool(cases, config.concurrency, async (question): Promise<CaseRun> => {
       const schema = schemas.get(question.db_id) as SchemaTable[];
@@ -922,6 +944,32 @@ async function main() {
     });
     console.log(
       `${arm.name.padEnd(9)} ${summary.passed}/${summary.total}  ${(summary.accuracy * 100).toFixed(1)}%  strict ${strictPassed}  repaired ${runs.filter((run) => run.attempts > 1).length}`,
+    );
+  }
+
+  // The A/A pair, when one ran: same arm, same data, same prompt — twice.
+  const aaPair = config.arms.find((name) => name.endsWith('#2'));
+  const aa =
+    aaPair === undefined
+      ? undefined
+      : (() => {
+          const base = aaPair.slice(0, -2);
+          const first = outcomes.get(base);
+          const second = outcomes.get(aaPair);
+          if (first === undefined || second === undefined) return undefined;
+          const comparison = compareArms(summarise(base, first), summarise(aaPair, second));
+          return {
+            arm: base,
+            delta: comparison.delta,
+            onlyFirst: comparison.onlyFirst,
+            onlySecond: comparison.onlySecond,
+            p: mcnemarExact(comparison.onlyFirst, comparison.onlySecond),
+          };
+        })();
+  if (aa !== undefined) {
+    report.aa = aa;
+    console.log(
+      `A/A ${aa.arm}: ${(aa.delta * 100).toFixed(1)}pp (${String(aa.onlyFirst)}/${String(aa.onlySecond)}, p=${aa.p.toFixed(3)}) — the harness's own noise`,
     );
   }
 

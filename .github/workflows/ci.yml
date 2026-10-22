@@ -184,6 +184,9 @@ jobs:
       # command line when a sample is wanted, not here where it silently became the
       # denominator of every published number.
       BIRD_CONCURRENCY: '8'
+      # The same arm twice, so the harness measures its own noise at the sample size
+      # it publishes. Without it, a 1pp delta between two arms has no scale.
+      BIRD_AA: inline+evidence
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -220,7 +223,7 @@ jobs:
         run: pnpm bench:bird:dry
       - name: DuckDB portability census
         run: pnpm bench:bird:port
-      - name: Seven-arm evaluation with paired ablations
+      - name: Ten-arm evaluation with paired ablations and an A/A control
         run: pnpm bench:bird
       - name: Accuracy floor (a regression fails the build)
         run: pnpm gate:bird

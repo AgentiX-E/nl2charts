@@ -35,7 +35,11 @@ cannot be argued with.
   test — CHASE-SQL's value retrieval without an embedding index, one lever from
   `inline+evidence`.
 - **`select`**: three samples chosen by the model instead of counted, one lever from
-  `vote`.
+  `vote`. Measured −0.6pp against counting (p=0.72) with the selector answering in
+  495 of 496 cases: selection cannot recover an answer no candidate contains.
+- **An A/A control**: `BIRD_AA` runs one arm twice in the same job, so every delta has
+  a measured scale. Serialised into the artifact as `aa`, and the gate fails when the
+  pair disagrees by more than the tolerance used to judge regressions.
 - **A gate that notices a declared arm never running**: the baseline now lists the
   arms it expects, so an arm that is wired but missing from the run fails the build.
   `inline+retrieval` was such an arm for one release.
@@ -56,8 +60,8 @@ cannot be argued with.
   our own 240-question cap until this release; CI now scores the whole 500-question
   split (498 scorable — two gold statements exceed the step budget, and the artifact
   names them), and a `bird-dev` workflow scores the 1,534-question public split that
-  leaderboards report. Full-split numbers: 35.9% / 37.3% / 44.2% / 57.4% / 58.0% /
-  58.8%, measured in run `39776718012`.
+  leaderboards report. Full-split numbers, run `39804736066`: names 36.7%,
+  inline definitions 44.8%, plus the dataset hint 58.8%, curated metadata 58.0%.
 - Placement is worth +6.7 to +10.5pp across four runs; content, authorship,
   coverage, question-restating and three-sample voting each moved nothing beyond
   noise.

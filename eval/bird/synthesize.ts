@@ -78,7 +78,23 @@ async function sampleRows(oracle: Oracle, db: string, table: string, limit: numb
  * model declines — an empty body costs the prompt nothing, which is the honest
  * outcome of "this schema does not support a definition".
  */
-export async function synthesizeDefinitions(request: SynthesisRequest): Promise<string> {
+export interface SynthesisOutcome {
+  readonly definitions: string;
+  /** Hash of the prompt and model; the cache key. */
+  readonly hash: string;
+  /** True when this run reused a stored record instead of calling the model. */
+  readonly cached: boolean;
+}
+
+/**
+ * Synthesis with its provenance attached.
+ *
+ * `cached` is the fact that turns "the arm moved 5pp between runs" into a question
+ * with an answer: if the definitions came from cache, the prompt was identical and
+ * the movement is the model's; if they did not, the prompt changed and the movement
+ * is the input's. Reporting only the text made those two indistinguishable.
+ */
+export async function synthesizeRecord(request: SynthesisRequest): Promise<SynthesisOutcome> {
   const maxChars = request.maxChars ?? 1200;
   const sampleTables = request.sampleTables ?? 6;
   const sampleRowsPerTable = request.sampleRows ?? 2;
@@ -102,7 +118,7 @@ export async function synthesizeDefinitions(request: SynthesisRequest): Promise<
   if (request.force !== true && existsSync(cacheFile)) {
     try {
       const cached = JSON.parse(readFileSync(cacheFile, 'utf8')) as SynthesisRecord;
-      if (cached.hash === hash) return cached.definitions;
+      if (cached.hash === hash) return { definitions: cached.definitions, hash, cached: true };
     } catch {
       // A corrupt cache entry is a cache miss, not a reason to fail a run.
     }
@@ -120,5 +136,10 @@ export async function synthesizeDefinitions(request: SynthesisRequest): Promise<
     definitions,
   };
   writeFileSync(cacheFile, `${JSON.stringify(record, null, 2)}\n`);
-  return definitions;
+  return { definitions, hash, cached: false };
+}
+
+/** The text alone, for callers that do not need the provenance. */
+export async function synthesizeDefinitions(request: SynthesisRequest): Promise<string> {
+  return (await synthesizeRecord(request)).definitions;
 }

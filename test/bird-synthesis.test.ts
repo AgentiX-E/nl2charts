@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { pickSampleTables, synthesisHash, synthesizeDefinitions } from '../eval/bird/synthesize.js';
+import { pickSampleTables, synthesisHash, synthesizeDefinitions, synthesizeRecord } from '../eval/bird/synthesize.js';
 import type { LlmRequest, LlmResponse, SchemaTable } from '@agentix-e/nl2charts-ai';
 
 /**
@@ -86,6 +86,52 @@ describe('synthesis run', () => {
     expect(cached.model).toBe('test-model');
   });
 
+  it('says whether the text was written in this run or reused', async () => {
+    // Without this flag, "the arm moved 5pp between runs" cannot be split into
+    // "the prompt changed" and "the model answered differently".
+    const cacheDir = mkdtempSync(join(tmpdir(), 'nl2charts-synth-'));
+    directories.push(cacheDir);
+    const { provider, calls } = counter('- a = b.');
+    const request = {
+      oracle: oracleFixture as never,
+      db: 'shop',
+      schema,
+      provider: provider as never,
+      model: 'test-model',
+      sampleTables: 1,
+      sampleRows: 1,
+      cacheDir,
+    };
+    const first = await synthesizeRecord(request);
+    const second = await synthesizeRecord(request);
+    expect(first.cached).toBe(false);
+    expect(second.cached).toBe(true);
+    expect(second.hash).toBe(first.hash);
+    expect(second.definitions).toBe(first.definitions);
+    expect(calls()).toBe(1);
+  });
+
+  it('changes the hash exactly when the input changes', async () => {
+    const cacheDir = mkdtempSync(join(tmpdir(), 'nl2charts-synth-'));
+    directories.push(cacheDir);
+    const { provider, calls } = counter('- a = b.');
+    const base = {
+      oracle: oracleFixture as never,
+      db: 'shop',
+      schema,
+      provider: provider as never,
+      model: 'test-model',
+      sampleTables: 1,
+      sampleRows: 1,
+      cacheDir,
+    };
+    const same = await synthesizeRecord(base);
+    const otherModel = await synthesizeRecord({ ...base, model: 'other-model' });
+    expect(otherModel.hash).not.toBe(same.hash);
+    expect(otherModel.cached).toBe(false);
+    expect(calls()).toBe(2);
+  });
+
   it('re-asks when the model or the schema changes instead of reusing the cache', async () => {
     const cacheDir = mkdtempSync(join(tmpdir(), 'nl2charts-synth-'));
     directories.push(cacheDir);
@@ -137,3 +183,4 @@ describe('synthesis run', () => {
     expect(text).toBe('');
   });
 });
+

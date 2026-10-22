@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { buildSqlPrompt } from '@agentix-e/nl2charts-ai';
-import { ARMS, DEFAULT_ARMS, ON_DEMAND_ARMS, PAIRS, parseLimit, promptFor } from '../eval/bird/run.js';
+import { ARMS, DEFAULT_ARMS, ON_DEMAND_ARMS, PAIRS, parseLimit, promptFor, resolveArm } from '../eval/bird/run.js';
 import type { Arm } from '../eval/bird/run.js';
 import type { BirdQuestion } from '../eval/bird/data.js';
 
@@ -147,6 +147,19 @@ describe('the chain that actually runs', () => {
     for (const floors of Object.values(baseline.floors)) {
       for (const name of Object.keys(floors)) expect(baseline.expectedArms, name).toContain(name);
     }
+  });
+});
+
+describe('A/A pairs', () => {
+  it('resolves a duplicated name to the arm it duplicates', () => {
+    // The A/A pair has to run the *same* configuration, or the delta it reports is
+    // the difference between two arms rather than the harness's noise.
+    expect(resolveArm('inline+evidence#2')).toEqual(ARMS.find((arm) => arm.name === 'inline+evidence'));
+    expect(resolveArm('inline+evidence')).toEqual(ARMS.find((arm) => arm.name === 'inline+evidence'));
+  });
+
+  it('returns undefined for a name that is not an arm', () => {
+    expect(resolveArm('not-an-arm#2')).toBeUndefined();
   });
 });
 

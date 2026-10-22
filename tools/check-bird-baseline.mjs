@@ -62,6 +62,15 @@ export function compare(report, baseline) {
     issues.push('BIRD1: values ran with no matched value; the profile is missing, so the arm is its parent renamed');
   }
 
+  // An A/A pair that disagrees with itself by more than the tolerance used to judge
+  // regressions means the tolerance is not a threshold, it is a wish.
+  const aa = report.aa;
+  if (aa !== undefined && Math.abs(aa.delta) * 100 > baseline.tolerancePp) {
+    issues.push(
+      `BIRD1: the same arm twice differs by ${(Math.abs(aa.delta) * 100).toFixed(1)}pp, more than the ${String(baseline.tolerancePp)}pp the gate treats as noise`,
+    );
+  }
+
   const floors = baseline.floors?.[split];
   if (floors === undefined) {
     notes.push(`BIRD1: no floors recorded for split ${split}; this run is a measurement, not a gate`);
@@ -105,6 +114,9 @@ function selfTest() {
   fail(compare(report([arm('names', 42), arm('inline', 51)], 60), baseline), 1, 'BIRD1 does not notice the sample shrinking');
 
   const empty = compare({ arms: [] }, baseline);
+
+  const unstable = compare({ selection: { scored: 100, split: 'minidev' }, aa: { delta: 0.085 }, arms: [arm('names', 42), arm('inline', 51)] }, baseline);
+  if (unstable.issues.length !== 1) issues.push('BIRD1 does not notice an A/A pair that disagrees beyond the tolerance');
 
   // The lever-with-no-input case: the arms are present, the blocks are not.
   const dryLever = compare(

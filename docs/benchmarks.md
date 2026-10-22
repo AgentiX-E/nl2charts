@@ -131,26 +131,52 @@ temperature 0, one sample per case. Artifacts: `eval/out/bird-eval.json`,
 | Schema fidelity: advertised columns exist in the database | **798 / 798** |
 | Prompt coverage: tables that reach the schema card | **75 / 75** (no truncation) |
 
-### Accuracy (run `39776718012`, all 498 scorable Mini-Dev questions per arm)
+### Accuracy (run `39804736066`, all 498 scorable Mini-Dev questions per arm)
 
-Every arm is scored on the identical case set. The previous table was quoted at
-n=239, which was our own cap rather than the dataset's size; the numbers below are
-the same arms on the whole split, and they moved by 1–3pp, as a wider sample does.
+Every arm is scored on the identical case set, and every block an arm advertises is
+in the prompt it actually received (the character counts below are what makes that
+checkable).
 
 | Arm | Execution accuracy | 95% Wilson | prompt chars (mean) |
 | --- | --- | --- | --- |
-| names only | 35.9% (179/498) | [31.9, 40.3] | 1,862 |
-| model-written definitions, as a block | 37.3% (186/498) | [33.2, 41.7] | 2,882 |
-| the same text on the column line | 44.2% (220/498) | [39.9, 48.6] | 2,483 |
-| + the dataset's per-question hint | **57.4%** (286/498) | [53.0, 61.7] | 2,618 |
-| + **three executed samples, modal result** | 58.0% (289/498) | [53.7, 62.3] | 2,618 (3 calls) |
-| metadata + the dataset's per-question hint | **58.8%** (293/498) | [54.5, 63.1] | 6,967 |
+| names only | 36.7% (183/498) | [32.6, 41.1] | 1,862 |
+| model-written definitions, as a block | 41.6% (207/498) | [37.3, 45.9] | 2,882 |
+| the same text on the column line | 44.8% (223/498) | [40.5, 49.2] | 2,483 |
+| **+ the dataset's per-question hint** | **58.8%** (293/498) | [54.5, 63.1] | 2,617 |
+| + retrieved neighbours from the training split | 44.6% (222/498) | [40.3, 49.0] | 3,038 |
+| + those neighbours as worked examples (statements) | 46.2% (230/498) | [41.9, 50.6] | 4,542 |
+| + three samples, modal result | 58.0% (289/498) | [53.7, 62.3] | 2,617 (3 calls) |
+| + three samples, chosen by the model | 57.4% (286/498) | [53.0, 61.7] | 2,617 (4 calls) |
+| + values this database stores for words in the question | 57.4% (286/498) | [53.0, 61.7] | 2,634 |
+| metadata + the dataset's per-question hint (curated) | 58.0% (289/498) | [53.7, 62.3] | 6,967 |
 
 | Change | Δ | only before / only after | p | verdict |
 | --- | --- | --- | --- | --- |
-| block → column line (same text) | **+6.8pp** | 19 / 53 | 1e-4 | real |
-| inline definitions → + the dataset's question hint | **+13.3pp** | 14 / 80 | <1e-4 | real |
-| single sample → **three samples, modal result** | +0.6pp | 9 / 12 | 0.66 | **no measurable effect** |
+| block → column line (same text) | +3.2pp | 30 / 46 | 0.085 | suggestive, not separable |
+| inline definitions → + the dataset's question hint | **+14.1pp** | 14 / 84 | <1e-4 | **real** |
+| inline definitions → + retrieved neighbours | −0.2pp | 23 / 22 | 1.00 | **no effect** |
+| retrieved text → the same neighbours as statements | +1.6pp | 26 / 34 | 0.37 | **no effect** |
+| + hint → three samples, modal result | −0.8pp | 16 / 13 | 0.71 | **no effect** |
+| modal result → chosen by the model | −0.6pp | 17 / 14 | 0.72 | **no effect** |
+| + hint → values this database stores | −1.4pp | 17 / 10 | 0.25 | **no effect** |
+
+### Three things copied from the state of the art that bought nothing
+
+The competitor work was not skimmed for vocabulary; three mechanisms were
+implemented and priced, each one lever away from its parent:
+
+| Mechanism | Where it comes from | Measured | Why it failed here |
+| --- | --- | --- | --- |
+| Retrieval from the training split (9,428 labelled questions, 69 databases, none under test) | DAIL-SQL's demonstration selection | **−0.2pp** | the neighbours share phrasing, not *this* schema; the block names no column that exists in the database being queried |
+| The same neighbours as worked examples, statements included | DAIL-SQL, CHASE-SQL | +1.6pp over the text form, p=0.37 | a statement written for another schema contributes identifiers that do not exist; the block's warning is not enough to make it a pure shape |
+| Selection over three executed candidates | CHASE-SQL's selection agent | **−0.6pp**, selector answered in 495 of 496 cases | the three samples agree 90% of the time and are wrong together; a selector cannot recover an answer no candidate contains |
+| Values the question names, resolved in this database | CHASE-SQL's value retrieval | **−1.4pp**, but matched only 90 of 498 questions | coverage is the constraint: the profile holds up to 30 distinct values per categorical column, so most literals a question names are absent from the index |
+
+The last row is the informative one. It is the only mechanism aimed at *instance*
+knowledge, and it is the only one whose failure has an obvious instrument problem:
+18% coverage cannot move a 58.8% baseline. That makes it a candidate for a wider
+index (all cells via LSH, as CHASE-SQL does), not a refuted idea. The other three
+have no such excuse: their coverage was complete and their effect was zero.
 
 ### Two gold statements cannot be scored, and the reason is measured
 
@@ -174,8 +200,11 @@ instead of hardware-dependent.
 ### Voting cannot recover knowledge the model never had
 
 Three samples per question at temperature 0.7, executed, and the modal result set
-kept: **58.0% against 57.4%** for a single sample — +0.6pp, nine cases gained and
-twelve lost, p=0.66. The samples agreed with each other **90.4% of the time**.
+kept: **58.0% against 58.8%** for a single sample — −0.8pp, sixteen cases gained and
+thirteen lost, p=0.71. The samples agreed with each other **91.1% of the time**.
+Handing the same three samples to the model to choose between did no better
+(−0.6pp, p=0.72) even though the selector returned a usable answer in 495 of 496
+cases: a selector can only pick among the candidates it is given.
 
 That agreement is the explanation. Voting helps when errors are random — it picks
 the majority of draws around the right answer. Here the errors are systematic:
@@ -185,16 +214,16 @@ remaining gap is knowledge, and no amount of resampling creates it.
 
 ### The generated stack matches the curated one at a third of the prompt
 
-`inline+evidence` reaches **57.4%** with a 2,618-character prompt.
+`inline+evidence` reaches **58.8%** with a 2,617-character prompt.
 `metadata+evidence` — 798 curated column notes plus the same hint — reaches
-**58.8%** with 6,967 characters. The difference is 1.4pp, seven cases, inside the
-4pp noise threshold: the two are not separable, which is a weaker and more honest
-claim than "identical".
+**58.0%** with 6,967 characters. The difference is −0.8pp, four cases, inside the
+noise: the two are not separable, and this run puts the generated stack marginally
+ahead, which is a different sentence from "the curated one is better".
 
 That is the product claim this whole line of work was looking for: a database
 without documentation can be brought to the accuracy of a database with it, by
 generating definitions once per database and attaching them to the columns. What
-it cannot do is replace the per-question hint: that is still worth +13.8pp.
+it cannot do is replace the per-question hint: that is still worth +14.1pp.
 
 ### A model-written reading of the question buys nothing
 
@@ -263,6 +292,21 @@ once per *database* has moved the number.
 
 Two things are settled: the text can be generated instead of curated, and it has
 to sit on the column. What is left is the per-question sentence.
+
+### Noise floor: the same arm, twice, in the same job
+
+Between-session drift is not hypothetical here. `synth-definitions` scored 36.5% in
+run `39790152728` and 41.6% in `39804736066` with the same code, the same data and a
+cache keyed on the prompt — and the artifact's stored definitions differ for 6 of 11
+databases, which means the prompt changed. Until that is explained, a 1–2pp delta
+carries no meaning.
+
+So every job now runs one arm twice (`BIRD_AA=inline+evidence`), reports the pair's
+delta as `aa`, and the gate fails when the pair disagrees by more than the tolerance
+it uses to judge regressions. The artifact also records, per database, the synthesis
+prompt hash and whether the text came from cache (`controls.definitionsProvenance`):
+that is the difference between "the input changed" and "the model answered
+differently", and it was previously unobservable.
 
 ### Noise floor (why one sample per case is stated, not assumed)
 

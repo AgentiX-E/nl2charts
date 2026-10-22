@@ -60,6 +60,14 @@ if (report === null) {
     if (voted !== undefined) {
       lines.push('', `Vote arm \`${voted.arm}\`: ${voted.vote} samples per question, mean agreement **${(voted.agreement * 100).toFixed(1)}%**, ${voted.passed}/${voted.total} correct.`);
     }
+    if (report.aa !== undefined) {
+      lines.push(
+        '',
+        `### The same arm twice (A/A)`,
+        '',
+        `\`${report.aa.arm}\` run twice in this job: **${(report.aa.delta * 100).toFixed(1)}pp** apart (${report.aa.onlyFirst} / ${report.aa.onlySecond}, McNemar p=${report.aa.p.toFixed(3)}). This is the scale every other delta should be read against.`,
+      );
+    }
     lines.push('', '### Paired ablations', '', '| change | delta | only before / only after | McNemar exact p |', '| --- | --- | --- | --- |');
     for (const [name, effect] of Object.entries(report.ablations ?? {})) {
       lines.push(
