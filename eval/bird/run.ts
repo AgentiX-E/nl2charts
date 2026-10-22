@@ -146,6 +146,46 @@ export const ARMS: readonly Arm[] = [
   { name: 'repair', notes: true, evidence: 'dataset', repairs: 2, linking: true },
 ];
 
+/**
+ * The chain `pnpm bench:bird` runs when `BIRD_ARMS` is unset.
+ *
+ * This is a separate list from `ARMS` on purpose: the default chain is a budget
+ * decision (seven arms x 500 questions), while `ARMS` is the catalogue. The cost of
+ * that split showed up as a real bug — `inline+retrieval` was written, wired, paired
+ * and never executed, because the chain is a second list that nothing forces you to
+ * update. `test/bird-arms.test.ts` now demands a partition: every arm is either in
+ * the chain or in `ON_DEMAND_ARMS` with a stated reason.
+ */
+export const DEFAULT_ARMS: readonly string[] = [
+  'names',
+  'synth-definitions',
+  'inline-definitions',
+  'inline+evidence',
+  // Knowledge retrieved from BIRD's training split: the arm that tests whether the
+  // 14pp from the per-question hint is knowledge or the dataset's own wording.
+  'inline+retrieval',
+  'vote',
+  'metadata+evidence',
+];
+
+/**
+ * Arms that exist for on-demand runs, each with the reason it is not in the chain.
+ * An arm that is neither here nor in `DEFAULT_ARMS` fails the suite.
+ */
+export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
+  definitions: 'structural semantics built from keys: superseded by inline placement, kept as the parent of definitions+evidence',
+  'dataset-subset': 'isolates coverage from author, run when a definition arm moves',
+  'definitions+evidence': 'second lever of the semantics chain, not a candidate for the chain itself',
+  'synth-definitions+evidence': 'combines two levers already measured separately',
+  interpret: 'one extra call per question; measured null, kept for re-testing',
+  metadata: 'no definitions at all: parent of metadata+evidence, run only to re-derive the parent',
+  synthetic: 'profiles as evidence: measured null',
+  'synthetic+focus': 'profile plus a focus instruction: measured null',
+  adaptive: 'per-database prompt profile: measured null',
+  'no-linking': 'removes the schema linker: the arm that prices linking, run when linking changes',
+  repair: 'execution-feedback repair: measured null, run when the repair path changes',
+};
+
 export const PAIRS: readonly (readonly [string, string])[] = [
   ['names', 'definitions'],
   ['definitions', 'synth-definitions'],
@@ -174,13 +214,29 @@ interface CaseRun extends CaseOutcome {
   readonly attempts: number;
 }
 
+/**
+ * How many questions to score.
+ *
+ * The default is the whole split: a cap is a sample, and the previous hard-coded
+ * 240 was read as the dataset's size for two releases. An unset, empty or
+ * unparseable value means "the whole split" rather than zero, because
+ * `workflow_dispatch` passes an empty string when the input is left blank and
+ * `Number('')` is 0 — which would score nothing and report an accuracy over an
+ * empty sample.
+ */
+export function parseLimit(raw: string | undefined, split: 'minidev' | 'dev'): number {
+  const fallback = split === 'dev' ? 1534 : 500;
+  if (raw === undefined || raw.trim() === '') return fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) return fallback;
+  return Math.floor(value);
+}
+
 function settings() {
   const argv = process.argv.slice(2);
   return {
     dryRun: argv.includes('--dry-run'),
-    // The cap used to be 240, which is where "239 of 500" came from: our own
-    // sample size, mistaken for the dataset's. Default is the whole split.
-    limit: Number(process.env.BIRD_LIMIT ?? (SPLIT === 'dev' ? 1534 : 500)),
+    limit: parseLimit(process.env.BIRD_LIMIT, SPLIT),
     concurrency: Number(process.env.BIRD_CONCURRENCY ?? 8),
     dbs: (
       process.env.BIRD_DBS !== undefined
@@ -192,10 +248,7 @@ function settings() {
       .filter(Boolean),
     // Default chain: baseline, the two definition sources, the synthesized one
     // with the dataset hint, and last round's best arm as the ceiling reference.
-    arms: (
-      process.env.BIRD_ARMS ??
-      ['names', 'synth-definitions', 'inline-definitions', 'inline+evidence', 'vote', 'metadata+evidence'].join(',')
-    )
+    arms: (process.env.BIRD_ARMS ?? DEFAULT_ARMS.join(','))
       .split(',')
       .map((name) => name.trim()),
     out: process.env.BIRD_OUT ?? join(ROOT, 'eval/out/bird-eval.json'),

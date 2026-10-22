@@ -99,8 +99,8 @@ treat item price × quantity as the order amount. Both prompt defects are fixed;
 the regression and its fix are recorded rather than hidden by the final number.
 
 Headroom now comes from the external benchmark below. No SOTA claim is made
-there either: 58.6% on 239 of 500 questions, one model, one sample per case, no
-fine-tuning, is a baseline to beat, not a record.
+there either: 58.8% on 498 of the 500 Mini-Dev questions, one model, one sample per
+case, no fine-tuning, is a baseline to beat, not a record.
 
 ## External benchmark: BIRD Mini-Dev
 
@@ -112,12 +112,12 @@ were written by someone else.
 node eval/bird/fetch.mjs        # ~800 MB archive, extracts the databases that are missing
 pnpm bench:bird:dry             # gold execution, schema fidelity, prompt coverage; no model
 pnpm bench:bird:port            # DuckDB portability census
-pnpm bench:bird                 # five arms, paired ablations, live model
+pnpm bench:bird                 # seven arms, paired ablations, live model
 pnpm bench:bird:stability       # 60 cases x 3 repeats: the noise floor
 ```
 
-Scope: **all 11 databases, 239 of 500 questions** (stratified by difficulty, one
-gold statement excluded because it exceeds the 30 s budget), `deepseek-chat`,
+Scope: **all 11 databases, all 500 Mini-Dev questions** (498 scorable: two gold
+statements exceed the harness's step budget and are named below), `deepseek-chat`,
 temperature 0, one sample per case. Artifacts: `eval/out/bird-eval.json`,
 `eval/out/bird-stability.json`, `eval/out/duckdb-portability.json`.
 
@@ -125,34 +125,57 @@ temperature 0, one sample per case. Artifacts: `eval/out/bird-eval.json`,
 
 | Control | Result |
 | --- | --- |
-| Gold statements executed before any model call | **239 / 240** (99.6%) |
-| Gold executed twice and compared to itself | **239 / 239** identical |
+| Gold statements executed before any model call | **498 / 500** (99.6%) — two exceed the step budget, named below |
+| Gold executed twice and compared to itself | **498 / 498** identical |
 | Negative control: empty result vs non-empty gold | **0** false matches |
 | Schema fidelity: advertised columns exist in the database | **798 / 798** |
 | Prompt coverage: tables that reach the schema card | **75 / 75** (no truncation) |
 
-### Accuracy (run J, same 239 cases in every arm)
+### Accuracy (run `39776718012`, all 498 scorable Mini-Dev questions per arm)
+
+Every arm is scored on the identical case set. The previous table was quoted at
+n=239, which was our own cap rather than the dataset's size; the numbers below are
+the same arms on the whole split, and they moved by 1–3pp, as a wider sample does.
 
 | Arm | Execution accuracy | 95% Wilson | prompt chars (mean) |
 | --- | --- | --- | --- |
-| names only | 32.6% (78/239) | [27.0, 38.8] | 1,818 |
-| model-written definitions, as a block | 33.1% (79/239) | [27.5, 39.4] | 2,820 |
-| the same text on the column line | 42.7% (102/239) | [36.6, 49.0] | 2,499 |
-| + the dataset's per-question hint | **56.9%** (136/239) | [50.5, 63.1] | 2,633 |
-| + **three executed samples, modal result** | 55.6% (133/239) | [49.2, 61.8] | 2,633 (3 calls) |
-| metadata + the dataset's per-question hint | **58.2%** (139/239) | [51.8, 64.3] | 7,605 |
+| names only | 35.9% (179/498) | [31.9, 40.3] | 1,862 |
+| model-written definitions, as a block | 37.3% (186/498) | [33.2, 41.7] | 2,882 |
+| the same text on the column line | 44.2% (220/498) | [39.9, 48.6] | 2,483 |
+| + the dataset's per-question hint | **57.4%** (286/498) | [53.0, 61.7] | 2,618 |
+| + **three executed samples, modal result** | 58.0% (289/498) | [53.7, 62.3] | 2,618 (3 calls) |
+| metadata + the dataset's per-question hint | **58.8%** (293/498) | [54.5, 63.1] | 6,967 |
 
 | Change | Δ | only before / only after | p | verdict |
 | --- | --- | --- | --- | --- |
-| block → column line (same text) | **+9.6pp** | 8 / 31 | 2.9e-4 | real |
-| inline definitions → + the dataset's question hint | **+14.2pp** | 7 / 42 | 3.6e-07 | real |
-| single sample → **three samples, modal result** | −1.3pp | 6 / 3 | 0.51 | **no measurable effect** |
+| block → column line (same text) | **+6.8pp** | 19 / 53 | 1e-4 | real |
+| inline definitions → + the dataset's question hint | **+13.3pp** | 14 / 80 | <1e-4 | real |
+| single sample → **three samples, modal result** | +0.6pp | 9 / 12 | 0.66 | **no measurable effect** |
+
+### Two gold statements cannot be scored, and the reason is measured
+
+The denominator is 498, not 500. Two Mini-Dev gold statements exceed the
+harness's deterministic step budget (400M SQLite VM steps):
+
+| Question | Database | Measured | Why |
+| --- | --- | --- | --- |
+| 701 | `codebase_community` | 227 s, 14.6B steps | join on `MAX(Reputation)` scans `posts` once per matching user |
+| 518 | `card_games` | 39.7 s, 3.0B steps | joins the whole `legalities` table to `cards` before filtering on the top banned format |
+
+Both are properties of the gold statement, not of the harness: they were measured
+directly with Python's `sqlite3` and no oracle in the way. Scoring them as wrong
+answers would be measuring the budget, and raising the budget to cover them would
+add four minutes to every arm of every run for two cases. The artifact records the
+exclusion (`gold.unrunnable`) and the summary prints it, so the sample is quotable
+rather than quietly 498. BIRD's reference harness applies a 30-second wall clock,
+which would exclude both as well — we differ in making the limit deterministic
+instead of hardware-dependent.
 
 ### Voting cannot recover knowledge the model never had
 
 Three samples per question at temperature 0.7, executed, and the modal result set
-kept: **55.6% against 56.9%** for a single sample. The samples agreed with each
-other **90% of the time**.
+kept: **58.0% against 57.4%** for a single sample — +0.6pp, nine cases gained and
+twelve lost, p=0.66. The samples agreed with each other **90.4% of the time**.
 
 That agreement is the explanation. Voting helps when errors are random — it picks
 the majority of draws around the right answer. Here the errors are systematic:
@@ -162,9 +185,11 @@ remaining gap is knowledge, and no amount of resampling creates it.
 
 ### The generated stack matches the curated one at a third of the prompt
 
-`inline+evidence` reaches **56.1%** with a 2,624-character prompt.
+`inline+evidence` reaches **57.4%** with a 2,618-character prompt.
 `metadata+evidence` — 798 curated column notes plus the same hint — reaches
-**56.9%** with 7,605 characters. The difference is two cases.
+**58.8%** with 6,967 characters. The difference is 1.4pp, seven cases, inside the
+4pp noise threshold: the two are not separable, which is a weaker and more honest
+claim than "identical".
 
 That is the product claim this whole line of work was looking for: a database
 without documentation can be brought to the accuracy of a database with it, by
@@ -300,13 +325,15 @@ dialect strictness, not bugs: arithmetic on text dates, bare columns in
 BIRD's judge is `set(predicted) == set(gold)` over tuples
 (`evaluation/evaluation_ex.py`), which ignores row order and **collapses
 duplicate rows**. The strict column compares multisets; the official rule credits
-4–9 extra cases per arm on this slice. Both numbers are published so the choice
+11–21 extra cases per arm on all 498 cases. Both numbers are published so the choice
 is visible instead of implied.
 
 ## Which split, and how many questions
 
 The sample size was ours, not the dataset's: the runner defaulted to a 240-question
-cap, which is where "239 of 500" came from. That cap is gone.
+cap, which is where "239 of 500" came from. That cap is gone, and CI now scores the
+whole split. Of the 500, **498 are scorable** — the two that are not, and why, are in
+the section above rather than folded into a percentage.
 
 | Split | Questions | Databases | Where it runs |
 | --- | --- | --- | --- |

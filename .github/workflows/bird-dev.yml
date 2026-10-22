@@ -53,6 +53,8 @@ jobs:
       - name: Four-arm evaluation on the public split
         run: pnpm bench:bird
         env:
+          # Blank means the whole split; the runner parses it, because an empty
+          # environment variable is a string and `Number('')` is zero.
           BIRD_LIMIT: ${{ inputs.limit }}
       - name: Accuracy floor
         run: pnpm gate:bird

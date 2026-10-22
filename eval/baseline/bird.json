@@ -1,14 +1,25 @@
 {
-  "note": "Floor per arm, in execution accuracy percent, taken as the minimum observed across the recent runs on 239 questions, and applied to the full 500-question Mini-Dev split from this release on. The floors were not re-derived at n=500 yet: they are kept as a safety net with the 4pp tolerance from ADR-166, and ratcheted after the first full-split run. A run scored on fewer than 95% of 500 questions fails as a changed sample rather than as a regression.",
+  "note": "Floors are per split, in execution accuracy percent, taken as the minimum observed across the recent runs on Mini-Dev (G 9120c2b, H d5927b0, I 700529b, J 4ad0181, and 1.0.0 run 39762058351), applied to the full 500-question split since run 39776718012. A rerun may land below a floor by tolerancePp before the gate fails, because ADR-166 measured that anything inside 4pp cannot be separated from sampling noise at n=239. `inline+retrieval` was added to the chain after those runs and has no floor yet: the gate records its first measurement and says so rather than inventing a threshold. A run scored on fewer than 95% of the baseline sample fails as a changed sample rather than as a regression.",
   "dataset": "BIRD Mini-Dev",
   "scored": 500,
   "tolerancePp": 4,
-  "arms": {
-    "names": 31.8,
-    "synth-definitions": 33.1,
-    "inline-definitions": 41.8,
-    "inline+evidence": 52.3,
-    "metadata+evidence": 56.1,
-    "vote": 55.6
+  "expectedArms": [
+    "names",
+    "synth-definitions",
+    "inline-definitions",
+    "inline+evidence",
+    "inline+retrieval",
+    "vote",
+    "metadata+evidence"
+  ],
+  "floors": {
+    "minidev": {
+      "names": 31.8,
+      "synth-definitions": 33.1,
+      "inline-definitions": 41.8,
+      "inline+evidence": 52.3,
+      "metadata+evidence": 56.1,
+      "vote": 55.6
+    }
   }
 }

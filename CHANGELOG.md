@@ -22,6 +22,9 @@ cannot be argued with.
   `run_sql` and `engine_info`.
 - **Trace sealing**: hash-chained events, three distinct failure verdicts, replay
   without reading a clock, and an injectable signer for callers who need an HMAC.
+- **A gate that notices a declared arm never running**: the baseline now lists the
+  arms it expects, so an arm that is wired but missing from the run fails the build.
+  `inline+retrieval` was such an arm for one release.
 - **Retrieval over BIRD's training split**: BM25 over 9,428 labelled questions from
   69 databases, none of which appears in the split under test.
 - **Two Studio views**: a trace timeline rendered to SVG and an issue list as text,
@@ -37,8 +40,10 @@ cannot be argued with.
   55.2–56.9% (plus the dataset's per-question hint); 58.2% for curated metadata plus
   the same hint. The floors are enforced in CI (`pnpm gate:bird`). The sample was
   our own 240-question cap until this release; CI now scores the whole 500-question
-  split, and a `bird-dev` workflow scores the 1,534-question public split that
-  leaderboards report.
+  split (498 scorable — two gold statements exceed the step budget, and the artifact
+  names them), and a `bird-dev` workflow scores the 1,534-question public split that
+  leaderboards report. Full-split numbers: 35.9% / 37.3% / 44.2% / 57.4% / 58.0% /
+  58.8%, measured in run `39776718012`.
 - Placement is worth +6.7 to +10.5pp across four runs; content, authorship,
   coverage, question-restating and three-sample voting each moved nothing beyond
   noise.
@@ -46,7 +51,7 @@ cannot be argued with.
 
 ### Not claimed
 
-- No SOTA claim: one model, one sample per case, 239 of 500 questions.
+- No SOTA claim: one model, one sample per case, 498 of 500 questions.
 - 22 of the 37 designed chart configurations; the rest need GL or extension
   modules that cannot be rendered head-lessly.
 - Studio ships a view model, not a UI.

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { ARMS, PAIRS, promptFor } from '../eval/bird/run.js';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { ARMS, DEFAULT_ARMS, ON_DEMAND_ARMS, PAIRS, parseLimit, promptFor } from '../eval/bird/run.js';
 import type { Arm } from '../eval/bird/run.js';
 import type { BirdQuestion } from '../eval/bird/data.js';
 
@@ -80,5 +82,68 @@ describe('ablation arms', () => {
     const prompt = promptFor(arm, question, undefined, '- orders: one row per order.');
     expect(prompt.definitions).toBe('- orders: one row per order.');
     expect(prompt.evidence).toBe(question.evidence);
+  });
+});
+
+describe('the chain that actually runs', () => {
+  it('files every arm as default or on demand, with no arm falling between', () => {
+    // The bug this prevents: `inline+retrieval` was written, wired into the prompt,
+    // paired for ablation — and never executed, because the default chain is a
+    // second list that nothing compared against the catalogue.
+    const filed = [...DEFAULT_ARMS, ...Object.keys(ON_DEMAND_ARMS)].sort();
+    const declared = ARMS.map((arm) => arm.name).sort();
+    expect(filed).toEqual(declared);
+  });
+
+  it('puts the retrieval arm in the default chain', () => {
+    expect(DEFAULT_ARMS).toContain('inline+retrieval');
+  });
+
+  it('keeps the chain free of duplicates and of arms that do not exist', () => {
+    expect(new Set(DEFAULT_ARMS).size).toBe(DEFAULT_ARMS.length);
+    for (const name of DEFAULT_ARMS) expect(ARMS.map((arm) => arm.name), name).toContain(name);
+  });
+
+  it('states a reason for every arm it defers', () => {
+    for (const [name, reason] of Object.entries(ON_DEMAND_ARMS)) {
+      expect(reason.length, name).toBeGreaterThan(20);
+    }
+  });
+
+  it('keeps the baseline expecting exactly the arms the chain runs', () => {
+    // The gate can only notice an arm that vanished if the baseline knows the arm
+    // should be there. These two lists drifting apart is how an arm becomes
+    // invisible again.
+    const baseline = JSON.parse(readFileSync(resolve(process.cwd(), 'eval/baseline/bird.json'), 'utf8')) as {
+      expectedArms: string[];
+      floors: Record<string, Record<string, number>>;
+    };
+    expect([...baseline.expectedArms].sort()).toEqual([...DEFAULT_ARMS].sort());
+    for (const floors of Object.values(baseline.floors)) {
+      for (const name of Object.keys(floors)) expect(baseline.expectedArms, name).toContain(name);
+    }
+  });
+});
+
+describe('sample size', () => {
+  it('scores the whole split when nothing is asked for', () => {
+    // `workflow_dispatch` passes an empty string for a blank input, and Number('')
+    // is 0: the dev workflow would have scored nothing and divided by it.
+    expect(parseLimit(undefined, 'minidev')).toBe(500);
+    expect(parseLimit('', 'minidev')).toBe(500);
+    expect(parseLimit('   ', 'minidev')).toBe(500);
+    expect(parseLimit(undefined, 'dev')).toBe(1534);
+    expect(parseLimit('', 'dev')).toBe(1534);
+  });
+
+  it('treats a nonsensical cap as no cap instead of as zero questions', () => {
+    expect(parseLimit('0', 'minidev')).toBe(500);
+    expect(parseLimit('-5', 'minidev')).toBe(500);
+    expect(parseLimit('abc', 'dev')).toBe(1534);
+  });
+
+  it('honours a real cap', () => {
+    expect(parseLimit('120', 'minidev')).toBe(120);
+    expect(parseLimit('12.9', 'dev')).toBe(12);
   });
 });

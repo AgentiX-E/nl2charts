@@ -28,9 +28,14 @@ if (report === null) {
   const gold = report.gold;
   const controls = report.controls;
   lines.push(
-    `Model: \`${report.model ?? 'none (dry run)'}\` · dialect: ${report.dialect} · databases: ${report.selection.databases.length} · scored: ${report.selection.scored}/${report.selection.available}`,
+    `Model: \`${report.model ?? 'none (dry run)'}\` · split: ${report.selection.split ?? 'minidev'} · dialect: ${report.dialect} · databases: ${report.selection.databases.length} · scored: ${report.selection.scored}/${report.selection.available}`,
     '',
-    `Gold queries executed before any model call: **${gold.runnable}/${gold.executed}** runnable (${(gold.runnableRate * 100).toFixed(1)}%).`,
+    `Gold queries executed before any model call: **${gold.runnable}/${gold.executed}** runnable (${(gold.runnableRate * 100).toFixed(1)}%).` +
+      (gold.executed > gold.runnable
+        ? ` Excluded, with the reason recorded in the artifact: ${(gold.unrunnable ?? [])
+            .map((entry) => `\`${entry.id}\` (${entry.db}, ${entry.error})`)
+            .join(', ')} — a gold statement that cannot be executed in the harness's step budget cannot be scored, and a run that scored it as a wrong answer would be measuring the budget.`
+        : ''),
     `Controls: self-consistency **${(controls.selfConsistency * 100).toFixed(1)}%**, negative false matches **${controls.negativeFalseMatches}**, empty-gold cases excluded from the negative control: ${controls.emptyGoldExcluded}.`,
     `Structural semantics: **${controls.semanticsDatabases}/${controls.semanticsDatabaseTotal}** databases and **${controls.semanticsCases}/${report.selection.scored}** cases yield a claim; mean block ${controls.semanticsMeanChars} characters.`,
     `Synthesized definitions (written once per database, cached): **${controls.synthesizedDefinitionDatabases ?? 0}/${controls.semanticsDatabaseTotal}** databases, mean block ${controls.synthesizedDefinitionMeanChars ?? 0} characters.`,
