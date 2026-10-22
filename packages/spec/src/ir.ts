@@ -89,6 +89,12 @@ export const ChartIRSchema = z
   .object({
     version: z.literal(CONTRACT_VERSION),
     mark: z.enum(SERIES_TYPES),
+    /**
+     * Name of a geo map the caller registered with `echarts.registerMap`. Only a
+     * `map` series reads it; without it the series draws nothing rather than
+     * borrowing geometry the caller never supplied.
+     */
+    map: z.string().min(1).optional(),
     encoding: EncodingSchema,
     data: z.array(z.record(z.unknown())).max(50_000),
     title: z.string().optional(),

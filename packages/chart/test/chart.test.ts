@@ -259,10 +259,13 @@ describe('ECharts compilation', () => {
     ]);
   });
 
-  it('carries theme, size and a custom fallback', () => {
+  it('carries theme and size, and refuses to emit a custom series it cannot render', () => {
     const option = compileToECharts(ir({ mark: 'custom', theme: 'print', width: 640, height: 480 }));
     expect(option).toMatchObject({ theme: 'print', width: 640, height: 480 });
-    expect(option.series).toEqual([{ type: 'custom', encode: { '0': 'month', '1': 'revenue' } }]);
+    // A custom series without renderItem throws "series.render is required", and a
+    // function cannot travel in a strict IR. The compiler says so by carrying no
+    // series; the caller adds one to the option it receives.
+    expect(option.series).toEqual([]);
   });
 
   it('renders an empty title rather than omitting it', () => {

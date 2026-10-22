@@ -178,6 +178,11 @@ from names, declared types and foreign keys, with no human-written dictionary.
 Rendered by `renderDefinitions()` and passed to the prompt as `definitions`. It
 states what the schema licenses, not what a business owner meant.
 
+**Mark contract** — What a chart type needs before it can be drawn: which
+encoding channels it reads, how many numbers one row supplies, and whether it
+needs geometry or a render function that a result set cannot contain.
+`describeMark()` answers; `compileToECharts()` refuses rather than guesses.
+
 **Connector** — The set of promises the library makes about an engine before a
 query reaches it: quoting, row cap, whether `ATTACH` is available, and read-only.
 Distinct from a driver, which needs a server; the promises are testable without

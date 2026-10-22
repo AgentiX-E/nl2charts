@@ -244,7 +244,9 @@
   ],
   "chart": [
     "LINT_RULES",
+    "MARKS",
     "compileToECharts",
+    "describeMark",
     "distinctValues",
     "enumerateCandidates",
     "inferType",
@@ -257,6 +259,7 @@
     "type FieldProfile",
     "type LintIssue",
     "type LintRule",
+    "type MarkSpec",
     "type Severity"
   ],
   "mcp": [

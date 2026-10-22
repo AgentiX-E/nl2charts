@@ -1,10 +1,12 @@
 import type { ChartIR, FieldRef } from '@agentix-e/nl2charts-spec';
+import { describeMark } from './marks.js';
+import { distinctValues } from './profile.js';
 
 export interface EChartsOption {
   readonly [key: string]: unknown;
 }
 
-const CARTESIAN = new Set(['bar', 'line', 'scatter', 'effectScatter', 'pictorialBar', 'candlestick', 'boxplot']);
+const CARTESIAN = new Set(['bar', 'line', 'scatter', 'effectScatter', 'pictorialBar']);
 const RADIAL = new Set(['pie', 'funnel', 'gauge']);
 const HIERARCHICAL = new Set(['treemap', 'sunburst', 'tree']);
 const NETWORK = new Set(['graph', 'sankey']);
@@ -20,12 +22,10 @@ function list(value: Ref | Ref[] | undefined): Ref[] {
   return Array.isArray(value) ? value : [value];
 }
 
-function encodeOf(refs: readonly (Ref | undefined)[]): Record<string, string> {
-  const encode: Record<string, string> = {};
-  refs.forEach((ref, index) => {
-    if (ref) encode[String(index)] = ref.field;
-  });
-  return encode;
+/** A finite number or nothing; a cell that cannot be measured is null, not zero. */
+function toNumber(value: unknown): number | null {
+  const numeric = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
 }
 
 function axis(ref: Ref | undefined): Record<string, unknown> {
@@ -112,6 +112,166 @@ export function compileToECharts(ir: ChartIR): EChartsOption {
     }
   }
 
+  // A river reads three values per row too, but from three channels rather than
+  // three columns of y, so it is handled before the tuple branch.
+  if (ir.mark === 'themeRiver') {
+    const timeRef = x;
+    const valueRef = yRefs[0];
+    const nameRef = series ?? color;
+    if (timeRef && valueRef && nameRef) {
+      // A river reads a three-value cell, not a row keyed by column name, so the
+      // dataset block is dropped here rather than left to confuse the encoder.
+      delete option.dataset;
+      option.singleAxis = { type: 'time', name: timeRef.field };
+      option.series = [
+        {
+          type: 'themeRiver',
+          data: ir.data.map((row) => [row[timeRef.field], toNumber(row[valueRef.field]), String(row[nameRef.field])]),
+        },
+      ];
+      return option;
+    }
+    // Without a category there is nothing to stack, and ECharts needs a
+    // singleAxis to size the river; an empty option is the honest answer.
+    option.series = [];
+    return option;
+  }
+
+  // Tuple marks: they read several columns per row, and the bar branch below
+  // would silently draw only the first one.
+  const tuple = describeMark(ir.mark).tuple;
+  if (tuple !== undefined) {
+    const cells = yRefs.slice(0, tuple);
+    option.xAxis = axis(x);
+    option.yAxis = { type: 'value' };
+    option.series = [
+      {
+        type: ir.mark,
+        name: ir.title ?? ir.mark,
+        data: ir.data.map((row) => cells.map((ref) => toNumber(row[ref.field]))),
+      },
+    ];
+    return option;
+  }
+
+  if (ir.mark === 'radar') {
+    const nameRef = theta ?? x;
+    const valueRef = yRefs[0];
+    if (nameRef && valueRef) {
+      const indicatorNames = distinctValues(ir, nameRef.field);
+      const seriesField = series?.field;
+      const groups = seriesField === undefined ? [undefined] : distinctValues(ir, seriesField);
+      option.radar = {
+        indicator: indicatorNames.map((name) => ({
+          name,
+          // ECharts needs a maximum per axis; the observed maximum is the honest
+          // one, and a unit floor keeps an all-zero metric from dividing by zero.
+          max: Math.max(
+            1,
+            ...ir.data
+              .filter((row) => String(row[nameRef.field]) === name)
+              .map((row) => toNumber(row[valueRef.field]) ?? 0),
+          ),
+        })),
+      };
+      option.series = groups.map((group) => ({
+        type: 'radar',
+        ...(group === undefined ? {} : { name: group }),
+        data: [
+          {
+            name: group ?? ir.title ?? 'value',
+            value: indicatorNames.map((name) => {
+              const row = ir.data.find(
+                (candidate) =>
+                  String(candidate[nameRef.field]) === name &&
+                  (seriesField === undefined || String(candidate[seriesField]) === group),
+              );
+              return row === undefined ? null : toNumber(row[valueRef.field]);
+            }),
+          },
+        ],
+      }));
+      return option;
+    }
+    option.series = [];
+    return option;
+  }
+
+  if (ir.mark === 'parallel') {
+    const axes: Record<string, unknown>[] = [];
+    if (x !== undefined) {
+      axes.push({ dim: 0, name: x.field, type: 'category', data: distinctValues(ir, x.field) });
+    }
+    for (const ref of yRefs) axes.push({ dim: axes.length, name: ref.field, type: 'value' });
+    if (axes.length >= 2) {
+      option.parallelAxis = axes;
+      option.series = [
+        {
+          type: 'parallel',
+          name: ir.title ?? 'parallel',
+          data: ir.data.map((row) => [
+            ...(x === undefined ? [] : [row[x.field]]),
+            ...yRefs.map((ref) => toNumber(row[ref.field])),
+          ]),
+        },
+      ];
+      return option;
+    }
+    option.series = [];
+    return option;
+  }
+
+  if (ir.mark === 'lines') {
+    const groupField = series?.field ?? color?.field;
+    const valueRef = yRefs[0];
+    if (x && valueRef) {
+      option.xAxis = axis(x);
+      option.yAxis = axis(valueRef);
+      const groups = groupField === undefined ? [undefined] : distinctValues(ir, groupField);
+      option.series = groups.map((group) => {
+        const rows =
+          groupField === undefined ? ir.data : ir.data.filter((row) => String(row[groupField]) === group);
+        return {
+          type: 'lines',
+          coordinateSystem: 'cartesian2d',
+          ...(group === undefined ? {} : { name: group }),
+          data: [{ coords: rows.map((row) => [row[x.field], toNumber(row[valueRef.field])]) }],
+        };
+      });
+      return option;
+    }
+    option.series = [];
+    return option;
+  }
+
+  if (ir.mark === 'map') {
+    const nameRef = x ?? theta;
+    const valueRef = yRefs[0];
+    if (ir.map === undefined) {
+      // ECharts throws on an unregistered name, and there is no honest geometry
+      // to invent, so the option says so by carrying no series at all.
+      option.series = [];
+      return option;
+    }
+    // No geometry is invented here: without registerMap this draws nothing, and
+    // that is the truthful outcome for a result set that carries no shapes.
+    option.series = [
+      {
+        type: 'map',
+        map: ir.map,
+        name: ir.title ?? 'map',
+        data:
+          nameRef === undefined
+            ? []
+            : ir.data.map((row) => ({
+                name: String(row[nameRef.field]),
+                ...(valueRef === undefined ? {} : { value: toNumber(row[valueRef.field]) }),
+              })),
+      },
+    ];
+    return option;
+  }
+
   if (CARTESIAN.has(ir.mark)) {
     option.xAxis = axis(x);
     option.yAxis = axis(yRefs[0] ?? theta);
@@ -164,7 +324,14 @@ export function compileToECharts(ir: ChartIR): EChartsOption {
     return option;
   }
 
-  // custom and anything the contract adds later still produces a valid payload.
-  option.series = [{ type: ir.mark, encode: encodeOf([x, ...yRefs]) }];
+  // A custom series without `renderItem` throws "series.render is required". The
+  // function cannot travel in a strict IR, so the compiler emits no series and the
+  // caller adds one to the option it receives.
+  //
+  // This is also the end of the line: `mark` is a closed union and every member
+  // has a branch above, so a new series type fails to reach a renderer until it is
+  // handled here. Emitting `{type: mark}` as a fallback would produce an option
+  // that throws inside ECharts instead of a compile-time omission.
+  option.series = [];
   return option;
 }

@@ -122,11 +122,49 @@ const printable = { ...ir, theme: 'print', width: 800, height: 600 };
 `theme: 'print'` adds a lint warning when colour is the only thing separating
 series, because the printed page will lose it.
 
+## All 22 series types, and the two that need help
+
+The contract offers 22 series types, and every one of them is rendered to SVG by
+the test suite. They are not interchangeable, so the library publishes what each
+one needs:
+
+```ts
+import { describeMark } from '@agentix-e/nl2charts-chart';
+
+describeMark('boxplot');
+// { mark: 'boxplot',
+//   summary: 'Show a distribution as min, quartiles and max.',
+//   channels: ['x', 'y'],
+//   tuple: 5,
+//   requiresGeo: false,
+//   requiresRenderItem: false }
+```
+
+`tuple` is the number of numbers one row must supply: a boxplot reads five
+(min/q1/median/q3/max), a candlestick four (open/close/low/high), a theme river
+three but from three different channels. A cell that is not a finite number
+becomes `null` rather than `0` — a zero in a quartile is a claim about the data.
+
+Two marks cannot be satisfied from a result set alone, and the compiler says so
+instead of emitting a series that throws inside the renderer:
+
+| Mark | What it needs | What happens without it |
+| --- | --- | --- |
+| `map` | `registerMap` plus `ir.map` naming the registered geometry | the option carries no series |
+| `custom` | a `renderItem` function, which cannot travel in a strict IR | the option carries no series |
+
+```ts
+const ir = { mark: 'map', map: 'world', encoding: { x: { field: 'country', type: 'nominal' }, y: { field: 'revenue', type: 'quantitative' } }, data, version: '3.0' };
+echarts.registerMap('world', geojson);   // your geometry, your licence
+chart.setOption(compileToECharts(ir));
+```
+
 ## What this does not do yet
 
-- Candlestick and boxplot compile to a valid option but need typed array data;
-  the SSR test suite covers 14 of the 22 series types.
 - There is no automatic axis formatting, annotation or annotation layer. The IR
   is deliberately small; formatting belongs to the host theme.
+- The design target is 37 chart configurations; 22 of them exist today, and the
+  remaining 15 need ECharts extensions (GL, liquid-fill, word cloud) that cannot
+  be rendered head-lessly, so they are not claimed.
 
 Next: [your first query](04-first-query.md).
