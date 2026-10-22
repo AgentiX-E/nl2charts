@@ -1,4 +1,5 @@
 import type { ChartIR } from '@agentix-e/nl2charts-spec';
+import { describeMark } from './marks.js';
 import { distinctValues } from './profile.js';
 
 export type Severity = 'error' | 'warn';
@@ -22,6 +23,8 @@ export const LINT_RULES = [
   'scatter-axis-not-quantitative',
   'measure-without-aggregate',
   'print-relies-on-color',
+  'tuple-columns-missing',
+  'tuple-not-numeric',
 ] as const;
 
 export type LintRule = (typeof LINT_RULES)[number];
@@ -77,6 +80,35 @@ export function lint(ir: ChartIR): LintIssue[] {
   }
   if (new Set(allFields).size !== allFields.length) {
     issues.push({ rule: 'duplicate-encoding', severity: 'warn', message: 'the same field is encoded twice' });
+  }
+  // A shape that reads several numbers per row has two failure modes the generic
+  // rules cannot see: too few columns, and columns that hold text.
+  const tuple = describeMark(ir.mark).tuple;
+  if (tuple !== undefined) {
+    const cells = asArray(ir.encoding.y).slice(0, tuple);
+    if (cells.length < tuple) {
+      issues.push({
+        rule: 'tuple-columns-missing',
+        severity: 'warn',
+        message: `${ir.mark} reads ${tuple} numbers per row and was given ${cells.length}`,
+      });
+    }
+    const present = ir.data.flatMap((row) => cells.map((ref) => row[ref.field]));
+    const measurable = present.filter((value) => value !== null && value !== undefined);
+    const text = measurable.filter(
+      (value) =>
+        !(typeof value === 'number' || (typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value)))),
+    );
+    // Nulls are missing measurements and are excluded; text is a wrong column.
+    // A third is the threshold: below it a legitimate outlier column can pass,
+    // above it the encoding is more likely a name match than a meaning match.
+    if (text.length * 3 > measurable.length) {
+      issues.push({
+        rule: 'tuple-not-numeric',
+        severity: 'warn',
+        message: `${text.length} of ${measurable.length} cells are text`,
+      });
+    }
   }
   if (ir.mark === 'scatter' && (x === undefined || y === undefined || x.type !== 'quantitative' || y.type !== 'quantitative')) {
     issues.push({

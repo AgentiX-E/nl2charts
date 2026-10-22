@@ -316,7 +316,10 @@ export function compileToECharts(ir: ChartIR): EChartsOption {
     option.series = [
       {
         type: ir.mark,
-        ...(ir.mark === 'graph' ? { layout: 'force', roam: false } : {}),
+        // Circular, not force: a force layout starts from random positions, so
+        // the same input renders a different picture on every build and the SVG
+        // cannot be diffed, cached or regression-tested.
+        ...(ir.mark === 'graph' ? { layout: 'circular', roam: false } : {}),
         data: [...names].map((name) => ({ name })),
         links,
       },

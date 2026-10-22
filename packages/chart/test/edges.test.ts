@@ -73,7 +73,7 @@ describe('compilation edges', () => {
 
   it('emits an empty graph when the endpoints are not encoded', () => {
     const option = compileToECharts(chart('graph', {}));
-    expect(option.series).toEqual([{ type: 'graph', layout: 'force', roam: false, data: [], links: [] }]);
+    expect(option.series).toEqual([{ type: 'graph', layout: 'circular', roam: false, data: [], links: [] }]);
   });
 
   it('omits the aria description when there is no alt text and keeps a subtitle', () => {

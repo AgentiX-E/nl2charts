@@ -107,7 +107,7 @@ describe('lint', () => {
     expect(isRenderable(lint(clean))).toBe(true);
   });
 
-  it('reports each of the twelve rules', () => {
+  it('reports each of the fourteen rules', () => {
     const issues = new Set<string>();
     const collect = (chart: ChartIR): void => {
       for (const issue of lint(chart)) issues.add(issue.rule);
@@ -158,6 +158,32 @@ describe('lint', () => {
         encoding: { x: { field: 'region', type: 'nominal' }, y: { field: 'revenue', type: 'quantitative', aggregate: 'sum' }, color: { field: 'region', type: 'nominal' } },
       }),
     );
+    collect(
+      ir({
+        mark: 'boxplot',
+        encoding: {
+          x: { field: 'region', type: 'nominal' },
+          y: [
+            { field: 'revenue', type: 'quantitative' },
+            { field: 'orders', type: 'quantitative' },
+          ],
+        },
+      }),
+    );
+    collect(
+      ir({
+        mark: 'candlestick',
+        encoding: {
+          x: { field: 'region', type: 'nominal' },
+          y: [
+            { field: 'month', type: 'quantitative' },
+            { field: 'region', type: 'quantitative' },
+            { field: 'month', type: 'quantitative' },
+            { field: 'region', type: 'quantitative' },
+          ],
+        },
+      }),
+    );
     expect([...issues].sort()).toEqual(
       [
         'bar-category-overflow',
@@ -172,6 +198,8 @@ describe('lint', () => {
         'print-relies-on-color',
         'scatter-axis-not-quantitative',
         'series-overflow',
+        'tuple-columns-missing',
+        'tuple-not-numeric',
       ].sort(),
     );
   });
@@ -247,7 +275,7 @@ describe('ECharts compilation', () => {
     ).toEqual([
       {
         type: 'graph',
-        layout: 'force',
+        layout: 'circular',
         roam: false,
         data: [{ name: 'north' }, { name: '2026-01-01' }, { name: '2026-02-01' }, { name: 'south' }, { name: '2026-03-01' }],
         links: [
@@ -271,5 +299,65 @@ describe('ECharts compilation', () => {
   it('renders an empty title rather than omitting it', () => {
     const option = compileToECharts(ir({ mark: 'bar', title: undefined }));
     expect(option.title).toEqual({ text: '', subtext: '' });
+  });
+});
+
+describe('lint against the mark contract', () => {
+  const box = [
+    { region: 'n', lo: 1, q1: 2, mid: 3, q3: 4, hi: 5 },
+    { region: 's', lo: 2, q1: 3, mid: 4, q3: 5, hi: 6 },
+  ];
+  const q = (field: string) => ({ field, type: 'quantitative' as const });
+
+  it('warns when a tuple mark is handed fewer columns than its shape needs', () => {
+    // A candlestick needs four numbers; two of them draw a shape that is not a
+    // candlestick, and nothing else in the pipeline would notice.
+    const partial = ir({
+      mark: 'candlestick',
+      encoding: { x: { field: 'region', type: 'nominal' }, y: [q('lo'), q('q1')] },
+      data: box,
+    });
+    expect(lint(partial).map((issue) => issue.rule)).toContain('tuple-columns-missing');
+  });
+
+  it('accepts a tuple mark with exactly its width', () => {
+    const complete = ir({
+      mark: 'boxplot',
+      encoding: { x: { field: 'region', type: 'nominal' }, y: [q('lo'), q('q1'), q('mid'), q('q3'), q('hi')] },
+      data: box,
+    });
+    expect(lint(complete).map((issue) => issue.rule)).not.toContain('tuple-columns-missing');
+  });
+
+  it('warns when the cells a shape reads are mostly not numbers', () => {
+    // Strings in a quartile mean the columns were picked by name, not by meaning.
+    const texty = ir({
+      mark: 'boxplot',
+      encoding: { x: { field: 'region', type: 'nominal' }, y: [q('lo'), q('q1'), q('mid'), q('q3'), q('hi')] },
+      data: [
+        { region: 'n', lo: 'a', q1: 'b', mid: 'c', q3: 4, hi: 5 },
+        { region: 's', lo: 'd', q1: 'e', mid: 4, q3: 5, hi: 6 },
+      ],
+    });
+    expect(lint(texty).map((issue) => issue.rule)).toContain('tuple-not-numeric');
+  });
+
+  it('stays quiet for a few nulls, which are missing values rather than a mis-encoding', () => {
+    const sparse = ir({
+      mark: 'boxplot',
+      encoding: { x: { field: 'region', type: 'nominal' }, y: [q('lo'), q('q1'), q('mid'), q('q3'), q('hi')] },
+      data: [
+        { region: 'n', lo: 1, q1: 2, mid: 3, q3: 4, hi: 5 },
+        { region: 's', lo: 2, q1: 3, mid: 4, q3: null, hi: 6 },
+      ],
+    });
+    expect(lint(sparse).map((issue) => issue.rule)).not.toContain('tuple-not-numeric');
+  });
+
+  it('does not apply the tuple rules to marks without a tuple width', () => {
+    const bar = ir({ mark: 'bar', encoding: { x: { field: 'region', type: 'nominal' }, y: q('lo') }, data: box });
+    const rules = lint(bar).map((issue) => issue.rule);
+    expect(rules).not.toContain('tuple-columns-missing');
+    expect(rules).not.toContain('tuple-not-numeric');
   });
 });

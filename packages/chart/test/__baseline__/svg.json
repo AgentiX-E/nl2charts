@@ -1,0 +1,116 @@
+{
+  "version": 1,
+  "note": "Regenerate with UPDATE_VISUAL=1; review the diff before committing.",
+  "marks": {
+    "bar": {
+      "shape": "158e9bc6",
+      "geometry": 17,
+      "bytes": 4518
+    },
+    "line": {
+      "shape": "3ddba36a",
+      "geometry": 29,
+      "bytes": 7946
+    },
+    "pie": {
+      "shape": "0b4b9de9",
+      "geometry": 10,
+      "bytes": 3035
+    },
+    "scatter": {
+      "shape": "53bb78f2",
+      "geometry": 27,
+      "bytes": 7577
+    },
+    "effectScatter": {
+      "shape": "d16dee59",
+      "geometry": 39,
+      "bytes": 12588
+    },
+    "radar": {
+      "shape": "821c8d75",
+      "geometry": 10,
+      "bytes": 2589
+    },
+    "tree": {
+      "shape": "6c09b487",
+      "geometry": 3,
+      "bytes": 1147
+    },
+    "treemap": {
+      "shape": "a904717b",
+      "geometry": 12,
+      "bytes": 3516
+    },
+    "sunburst": {
+      "shape": "f2e3590c",
+      "geometry": 6,
+      "bytes": 2385
+    },
+    "boxplot": {
+      "shape": "3ddb1c95",
+      "geometry": 14,
+      "bytes": 3784
+    },
+    "candlestick": {
+      "shape": "3f357a47",
+      "geometry": 11,
+      "bytes": 3169
+    },
+    "heatmap": {
+      "shape": "472dba19",
+      "geometry": 20,
+      "bytes": 16843
+    },
+    "map": {
+      "shape": "77992f64",
+      "geometry": 3,
+      "bytes": 929
+    },
+    "parallel": {
+      "shape": "ecf7472e",
+      "geometry": 26,
+      "bytes": 6898
+    },
+    "lines": {
+      "shape": "9ea5c971",
+      "geometry": 7,
+      "bytes": 1972
+    },
+    "graph": {
+      "shape": "63d57038",
+      "geometry": 12,
+      "bytes": 2755
+    },
+    "sankey": {
+      "shape": "9811020b",
+      "geometry": 12,
+      "bytes": 4730
+    },
+    "funnel": {
+      "shape": "39efae59",
+      "geometry": 10,
+      "bytes": 3108
+    },
+    "gauge": {
+      "shape": "606c3892",
+      "geometry": 82,
+      "bytes": 13555
+    },
+    "pictorialBar": {
+      "shape": "bec1b33a",
+      "geometry": 31,
+      "bytes": 8543
+    },
+    "themeRiver": {
+      "shape": "f1e4154f",
+      "geometry": 20,
+      "bytes": 6628
+    },
+    "custom": {
+      "shape": "f83227c9",
+      "geometry": 2,
+      "bytes": 676
+    }
+  }
+}

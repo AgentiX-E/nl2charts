@@ -178,6 +178,11 @@ from names, declared types and foreign keys, with no human-written dictionary.
 Rendered by `renderDefinitions()` and passed to the prompt as `definitions`. It
 states what the schema licenses, not what a business owner meant.
 
+**Visual baseline** — A committed fingerprint per series type: the element
+skeleton and the count of drawn shapes, not the coordinates. It fails when a chart
+stops drawing or changes shape and stays quiet when a label moves, because a
+baseline that fails on float noise is one people regenerate without reading.
+
 **Mark contract** — What a chart type needs before it can be drawn: which
 encoding channels it reads, how many numbers one row supplies, and whether it
 needs geometry or a render function that a result set cannot contain.

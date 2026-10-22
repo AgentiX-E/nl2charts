@@ -159,6 +159,26 @@ echarts.registerMap('world', geojson);   // your geometry, your licence
 chart.setOption(compileToECharts(ir));
 ```
 
+## The same input draws the same picture
+
+Rendering is deterministic: the same IR produces the same SVG on every call and
+every machine, which is what makes the output cacheable and diffable. One mark had
+to change to earn that sentence — `graph` used a force simulation, which starts
+from random positions, so the same graph drew a different picture each time. It
+now uses a circular layout.
+
+Every series type also has a committed structural baseline
+(`packages/chart/test/__baseline__/svg.json`): the element skeleton and the number
+of drawn shapes per mark. A change that stops a series drawing, or swaps one shape
+for another, fails the suite; a label moving half a pixel does not, because a
+baseline that cries wolf gets regenerated without being read. Regenerate it with:
+
+```bash
+UPDATE_VISUAL=1 pnpm --filter @agentix-e/nl2charts-chart test
+```
+
+and review the diff before committing it — the file's own note says the same.
+
 ## What this does not do yet
 
 - There is no automatic axis formatting, annotation or annotation layer. The IR
