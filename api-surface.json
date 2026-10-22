@@ -220,14 +220,17 @@
     "connectorFor",
     "createDuckDbEngine",
     "createFileCache",
+    "createMysqlEngine",
     "createPostgresEngine",
     "createSqliteEngine",
     "describeConnector",
+    "fromMysqlValue",
     "fromPostgresValue",
     "redactConnection",
     "requiresWrite",
     "type Connector",
     "type ConnectorKind",
+    "type MysqlOptions",
     "type PostgresOptions"
   ],
   "node/duckdb": [

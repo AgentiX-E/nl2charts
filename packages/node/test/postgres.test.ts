@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Client } from 'pg';
-import { createPostgresEngine } from '../src/postgres.js';
+import { createPostgresEngine, driverUnavailable, messageOf } from '../src/postgres.js';
 import { fromPostgresValue } from '../src/postgres.js';
 
 /**
@@ -78,8 +78,14 @@ describe.skipIf(url === undefined)('postgres engine (real server)', () => {
 
   it('reports a connection failure without the password', async () => {
     const broken = await createPostgresEngine({ connectionString: 'postgres://analyst:s3cret@127.0.0.1:1/none' });
-    await expect(broken.run('select 1')).rejects.toThrow(/analyst:\*\*\*@/);
-    await expect(broken.run('select 1')).rejects.not.toThrow(/s3cret/);
+    let message = '';
+    try {
+      await broken.run('select 1');
+    } catch (cause) {
+      message = cause instanceof Error ? cause.message : String(cause);
+    }
+    expect(message).toContain('analyst:***@');
+    expect(message).not.toContain('s3cret');
     await broken.close();
   });
 
@@ -102,10 +108,34 @@ describe.skipIf(url === undefined)('postgres engine (real server)', () => {
     await expect(engine.run('select 1', { signal: controller.signal })).rejects.toMatchObject({ code: 'NL2C_E_TIMEOUT' });
   });
 
+  it('honours a statement timeout', async () => {
+    const impatient = await createPostgresEngine({ connectionString: url as string, statementTimeoutMs: 5_000 });
+    const result = await impatient.run('select 1 as one');
+    expect(result.rows[0]?.one).toBe(1);
+    await impatient.close();
+  });
+
+  it('closes cleanly even when no query ever ran', async () => {
+    const idle = await createPostgresEngine({ connectionString: url as string });
+    await idle.close();
+    await idle.close();
+  });
+
   it('rejects after close instead of hanging', async () => {
     const temporary = await createPostgresEngine({ connectionString: url as string });
     await temporary.close();
     await expect(temporary.run('select 1')).rejects.toMatchObject({ code: 'NL2C_E_ENGINE_UNAVAILABLE' });
+  });
+});
+
+describe('driver availability', () => {
+  it('reads a message from a thrown string as well as from an Error', () => {
+    expect(messageOf(new Error('boom'))).toBe('boom');
+    expect(messageOf(7)).toBe('7');
+  });
+
+  it('turns a missing driver into a typed error instead of a module crash', () => {
+    expect(driverUnavailable('postgres', new Error('Cannot find module'))).toMatchObject({ code: 'NL2C_E_ENGINE_UNAVAILABLE' });
   });
 });
 

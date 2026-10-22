@@ -94,9 +94,35 @@ the same logical row hashes differently per engine.
 The integration suite is skipped unless `PG_TEST_URL` is set, so a laptop without
 a database still runs the contract tests.
 
+## MySQL and MariaDB: same two layers, one connection
+
+```ts
+import { createMysqlEngine } from '@agentix-e/nl2charts-node';
+
+const engine = await createMysqlEngine({
+  connectionString: process.env.DATABASE_URL as string,
+  readOnly: true,
+});
+const result = await engine.run('select region, sum(total) from orders group by 1');
+await engine.close();
+```
+
+The shape is the same as PostgreSQL — lexical guard before sending, then
+`SET SESSION TRANSACTION READ ONLY` — with one implementation difference worth
+knowing. The engine holds **one connection**, not a pool: a pool applies the
+read-only setting to whichever physical connection served the call, so three of
+four pooled sessions could stay writable. One connection makes the promise
+unconditional; concurrent queries queue on it.
+
+Two driver shapes are handled explicitly: `DECIMAL`/`BIGINT` arrive as strings
+(the adapter converts them only when no precision is lost), and a write returns an
+`OkPacket` rather than an array — the engine answers with an empty result set
+instead of failing on a shape mismatch.
+
 ## What is not here yet
 
-MySQL, Snowflake and BigQuery have contracts but no drivers: shipping a driver
-without a server to test it against would be a promise nobody checked. The honest
-statement today is: `duckdb`, `sqlite` and `postgres` have real drivers and
-integration tests; the other three have tested promises only.
+Snowflake and BigQuery have contracts but no drivers: shipping a driver without a
+server to test it against would be a promise nobody checked. The honest statement
+today is: `duckdb`, `sqlite`, `postgres` and `mysql` have real drivers and
+integration tests (PostgreSQL 16 and MySQL 8 in CI services, MariaDB 10.11 in the
+sandbox); the other two have tested promises only.

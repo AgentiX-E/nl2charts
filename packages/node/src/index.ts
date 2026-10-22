@@ -1,5 +1,7 @@
 export { createDuckDbEngine } from './duckdb.js';
 export type { DuckDbOptions } from './duckdb.js';
+export { createMysqlEngine, fromMysqlValue } from './mysql.js';
+export type { MysqlOptions } from './mysql.js';
 export { createPostgresEngine, fromPostgresValue } from './postgres.js';
 export type { PostgresOptions } from './postgres.js';
 export { createSqliteEngine } from './sqlite.js';

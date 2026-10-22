@@ -2,6 +2,16 @@ import { toNl2ChartsError } from '@agentix-e/nl2charts-spec';
 import type { Engine, EngineResult } from '@agentix-e/nl2charts-core';
 import { describeConnector, requiresWrite } from './connectors.js';
 
+/** Message of anything thrown; drivers throw strings in a few edge cases. */
+export function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** One error shape for "the optional driver is not installed", testable directly. */
+export function driverUnavailable(engine: string, cause: unknown): Error {
+  return toNl2ChartsError('NL2C_E_ENGINE_UNAVAILABLE', `the ${engine} driver is not installed`, cause, { engine });
+}
+
 export interface PostgresOptions {
   /** Connection string. Never logged; see `describeConnector`. */
   readonly connectionString: string;
@@ -50,7 +60,7 @@ export async function createPostgresEngine(options: PostgresOptions): Promise<En
       ...(options.readOnly === false ? {} : { options: '-c default_transaction_read_only=on' }),
     });
   } catch (error) {
-    throw toNl2ChartsError('NL2C_E_ENGINE_UNAVAILABLE', 'the pg driver is not installed', error, { engine: 'postgres' });
+    throw driverUnavailable('postgres', error);
   }
 
   // Keep dates as text: the driver's Date objects are local-time and would make
@@ -79,7 +89,7 @@ export async function createPostgresEngine(options: PostgresOptions): Promise<En
       try {
         client = await pool.connect();
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const message = messageOf(error);
         throw toNl2ChartsError('NL2C_E_ENGINE_FAILED', `${describeConnector('postgres', options.connectionString)}: ${message}`, error, {
           engine: 'postgres',
         });
@@ -96,7 +106,7 @@ export async function createPostgresEngine(options: PostgresOptions): Promise<En
           }),
         };
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const message = messageOf(error);
         // The connection string never appears in a pg error, but a caller-supplied
         // one might; describeConnector is the only string this library emits.
         throw toNl2ChartsError('NL2C_E_ENGINE_FAILED', `${describeConnector('postgres', options.connectionString)}: ${message}`, error, {

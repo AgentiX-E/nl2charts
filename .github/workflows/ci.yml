@@ -32,8 +32,23 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: nl2charts_test
+          MYSQL_USER: analyst
+          MYSQL_PASSWORD: s3cret
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uanalyst -ps3cret"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
     env:
       PG_TEST_URL: postgres://postgres:postgres@localhost:5432/nl2charts_test
+      MYSQL_TEST_URL: mysql://analyst:s3cret@127.0.0.1:3306/nl2charts_test
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

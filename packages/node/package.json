@@ -40,6 +40,7 @@
     "@agentix-e/nl2charts-core": "workspace:*",
     "@agentix-e/nl2charts-spec": "workspace:*",
     "@duckdb/node-api": "1.5.6-r.1",
+    "mysql2": "3.11.5",
     "pg": "8.13.1"
   },
   "devDependencies": {
