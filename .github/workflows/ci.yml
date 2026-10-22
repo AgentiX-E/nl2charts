@@ -172,7 +172,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/master')
     needs: quality
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     concurrency:
       group: bird-eval
       cancel-in-progress: false
@@ -180,7 +180,9 @@ jobs:
       DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
       LLM_BASE_URL: https://api.deepseek.com/v1
       LLM_MODEL: deepseek-chat
-      BIRD_LIMIT: '240'
+      # The whole Mini-Dev split. The previous value was 240, which is where
+      # "239 of 500" came from — our own cap, not the dataset's size.
+      BIRD_LIMIT: '500'
       BIRD_CONCURRENCY: '8'
     steps:
       - uses: actions/checkout@v4
@@ -196,7 +198,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: eval/.cache/bird/minidev
-          key: bird-minidev-v2-${{ runner.os }}
+          key: bird-minidev-v3-${{ runner.os }}
       - name: Cache synthesized definitions
         uses: actions/cache@v4
         with:

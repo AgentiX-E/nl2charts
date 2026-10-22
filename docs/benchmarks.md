@@ -303,6 +303,41 @@ duplicate rows**. The strict column compares multisets; the official rule credit
 4–9 extra cases per arm on this slice. Both numbers are published so the choice
 is visible instead of implied.
 
+## Which split, and how many questions
+
+The sample size was ours, not the dataset's: the runner defaulted to a 240-question
+cap, which is where "239 of 500" came from. That cap is gone.
+
+| Split | Questions | Databases | Where it runs |
+| --- | --- | --- | --- |
+| Mini-Dev | **500** | 11 | every push (CI) |
+| Dev | **1,534** | 11 | on demand (`bird-dev` workflow) |
+
+Both archives are public (`bird-bench.oss-cn-beijing.aliyuncs.com`), both use the same
+11 databases, and the dev split is the one published leaderboards report — so a
+comparison with another system is a matter of running the workflow, not of arguing
+about samples. What is still not comparable is the model and the prompting budget;
+those are stated with every number instead of being implied away.
+
+## Retrieved knowledge from the training split
+
+The per-question hint in BIRD's dev split is worth 14pp and cannot be regenerated from
+a schema. The training split is a legitimate substitute for *part* of it: 9,428
+labelled questions across 69 databases, **none of which appears in the eleven
+databases under test**, so nothing it contains can leak a gold statement.
+
+`inline+retrieval` retrieves the three nearest training questions with BM25
+(document-length normalised, because plain cosine ranked a four-word question above
+the longer one that actually shared the construction) and injects their evidence
+sentences — never their SQL, because a statement written for another schema is copied
+verbatim into a "no such column" error.
+
+One curation rule is measured rather than stylistic: evidence that states a
+*definition* (`rate = count(meal = "free") / count(student)`) is preferred over
+evidence that only maps a word to a literal (`free refers to lowest_price = 0`). The
+second kind, retrieved for a question about free school meals, teaches a false
+equivalence — it was visible in the first retrieved block we inspected.
+
 ## What these numbers are not
 
 - **Not a SOTA claim.** The dataset is a local fixture, not BIRD, Spider 2.0 or

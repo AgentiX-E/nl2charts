@@ -20,7 +20,11 @@ import { createOracle } from './oracle.js';
 import { ARMS, pool, promptFor } from './run.js';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
-const DATA = process.env.BIRD_DATA ?? join(ROOT, 'eval/.cache/bird/minidev/MINIDEV');
+const SPLIT = process.env.BIRD_SPLIT ?? 'minidev';
+const DATA =
+  process.env.BIRD_DATA ??
+  (SPLIT === 'dev' ? join(ROOT, 'eval/.cache/bird/dev/dev_20240627') : join(ROOT, 'eval/.cache/bird/minidev/MINIDEV'));
+const QUESTIONS_FILE = SPLIT === 'dev' ? 'dev.json' : 'mini_dev_sqlite.json';
 const DATABASES = process.env.BIRD_DATABASES ?? join(DATA, 'dev_databases');
 const LIMIT = Number(process.env.BIRD_STABILITY_LIMIT ?? 60);
 const REPEATS = Number(process.env.BIRD_STABILITY_REPEATS ?? 3);
@@ -32,7 +36,7 @@ async function main() {
   const dbs = manifest.databases.map((entry) => entry.db);
   const tables = loadTables(join(DATA, 'dev_tables.json'));
   const questions = stratifiedSample(
-    loadQuestions(join(DATA, 'mini_dev_sqlite.json')).filter((question) => dbs.includes(question.db_id)),
+    loadQuestions(join(DATA, QUESTIONS_FILE)).filter((question) => dbs.includes(question.db_id)),
     LIMIT,
   );
   const schemas = new Map<string, SchemaTable[]>();

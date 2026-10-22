@@ -17,9 +17,22 @@ import { pipeline } from 'node:stream/promises';
 import { execFileSync } from 'node:child_process';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
-const SOURCE = process.env.BIRD_ARCHIVE_URL ?? 'https://bird-bench.oss-cn-beijing.aliyuncs.com/minidev.zip';
+/**
+ * Two splits ship as separate archives in the same bucket. `minidev` is the 500
+ * questions CI runs on every commit; `dev` is the 1,534-question split the published
+ * leaderboards report. The layout inside differs only in the directory name and the
+ * questions file, so one script fetches both.
+ */
+const SPLIT = process.env.BIRD_SPLIT ?? 'minidev';
+const SPLIT_SHAPE = {
+  minidev: { archive: 'minidev.zip', dir: 'minidev/MINIDEV', questions: 'mini_dev_sqlite.json' },
+  dev: { archive: 'dev.zip', dir: 'dev/dev_20240627', questions: 'dev.json' },
+};
+if (SPLIT_SHAPE[SPLIT] === undefined) throw new Error(`unknown BIRD_SPLIT: ${SPLIT}`);
+const SHAPE = SPLIT_SHAPE[SPLIT];
+const SOURCE = process.env.BIRD_ARCHIVE_URL ?? `https://bird-bench.oss-cn-beijing.aliyuncs.com/${SHAPE.archive}`;
 const CACHE = process.env.BIRD_CACHE ?? join(ROOT, 'eval/.cache/bird');
-const ARCHIVE = join(CACHE, 'minidev.zip');
+const ARCHIVE = join(CACHE, SHAPE.archive);
 const DEFAULT_DATABASES = [
   'superhero',
   'california_schools',
@@ -77,19 +90,22 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const fromEnv = (process.env.BIRD_DBS ?? '').split(',').map((name) => name.trim()).filter(Boolean);
   const dbs = args.dbs.length > 0 ? args.dbs : fromEnv.length > 0 ? fromEnv : DEFAULT_DATABASES;
-  const dataDir = join(CACHE, 'minidev/MINIDEV');
+  const dataDir = join(CACHE, SHAPE.dir);
   const manifestPath = join(dataDir, 'manifest.json');
 
   await download(ARCHIVE);
 
   // Extract what is missing, not "everything or nothing": a run that widens the
   // database list must not need --force, and must not re-extract 1.4 GB.
-  const entries = ['minidev/MINIDEV/mini_dev_sqlite.json', 'minidev/MINIDEV/dev_tables.json'];
+  const entries = [`${SHAPE.dir}/${SHAPE.questions}`, `${SHAPE.dir}/dev_tables.json`];
   const missing = dbs.filter((db) => !existsSync(join(dataDir, 'dev_databases', db, `${db}.sqlite`)));
-  for (const db of missing) entries.push(`minidev/MINIDEV/dev_databases/${db}/*`);
-  if (missing.length > 0 || !existsSync(join(dataDir, 'mini_dev_sqlite.json'))) extract(entries);
+  for (const db of missing) entries.push(`${SHAPE.dir}/dev_databases/${db}/*`);
+  // `dev.zip` hides its databases in a nested archive; extracting the outer one
+  // first is what makes the per-database entries resolvable.
+  if (SPLIT === 'dev' && missing.length > 0) extract([`${SHAPE.dir}/dev_databases.zip`]);
+  if (missing.length > 0 || !existsSync(join(dataDir, SHAPE.questions))) extract(entries);
 
-  const questions = requireFile(join(dataDir, 'mini_dev_sqlite.json'));
+  const questions = requireFile(join(dataDir, SHAPE.questions));
   const tables = requireFile(join(dataDir, 'dev_tables.json'));
   const databases = dbs.map((db) => ({
     db,

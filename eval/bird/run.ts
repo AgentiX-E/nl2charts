@@ -30,10 +30,23 @@ import type { BirdQuestion } from './data.js';
 import { createOracle } from './oracle.js';
 import type { OracleResult } from './oracle.js';
 import { profileDatabase } from './profile.js';
+import { buildIndex, renderRetrieved, retrieve } from './retrieval.js';
 import { synthesizeDefinitions } from './synthesize.js';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
-const DATA = process.env.BIRD_DATA ?? join(ROOT, 'eval/.cache/bird/minidev/MINIDEV');
+/**
+ * Which split is being measured.
+ *
+ * `minidev` is the 500-question subset CI runs on every commit. `dev` is the
+ * 1,534-question split the published leaderboards report, kept for on-demand runs
+ * because a full sweep costs a model call per question per arm.
+ */
+const SPLIT = (process.env.BIRD_SPLIT ?? 'minidev') as 'minidev' | 'dev';
+const DATA =
+  process.env.BIRD_DATA ??
+  (SPLIT === 'dev' ? join(ROOT, 'eval/.cache/bird/dev/dev_20240627') : join(ROOT, 'eval/.cache/bird/minidev/MINIDEV'));
+/** The file name differs per split; everything else in the layout is identical. */
+const QUESTIONS_FILE = SPLIT === 'dev' ? 'dev.json' : 'mini_dev_sqlite.json';
 const DATABASES = process.env.BIRD_DATABASES ?? join(DATA, 'dev_databases');
 /**
  * Which databases a run covers comes from the fetch manifest, so widening the
@@ -50,6 +63,16 @@ function databasesFromManifest(): string[] {
   }
 }
 
+/** The splits that ship a manifest are the derived ones; `dev` does not. */
+function databasesFromQuestions(): string[] {
+  try {
+    const questions = loadQuestions(join(DATA, QUESTIONS_FILE));
+    return [...new Set(questions.map((question) => question.db_id))].sort();
+  } catch {
+    return [];
+  }
+}
+
 export interface Arm {
   readonly name: string;
   readonly notes: boolean;
@@ -58,7 +81,7 @@ export interface Arm {
    * "dataset hint" and "synthesized hint" are alternatives, not independent
    * switches, and an arm that flipped both would be a two-variable comparison.
    */
-  readonly evidence?: 'dataset' | 'synthetic';
+  readonly evidence?: 'dataset' | 'synthetic' | 'retrieved';
   readonly repairs: number;
   readonly linking: boolean;
   /** 'adaptive' lets the question shape choose the schema card and notes. */
@@ -99,6 +122,11 @@ export const ARMS: readonly Arm[] = [
   // tell coverage apart from source quality.
   { name: 'dataset-subset', notes: false, repairs: 0, linking: true, definitions: 'dataset-subset' },
   { name: 'inline+evidence', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline' },
+  // Retrieved knowledge instead of the dataset's per-question hint: the nearest
+  // labelled questions from BIRD's train split, which shares no database with the
+  // split under test. The arm exists to test whether the 13.8pp is knowledge or
+  // the dataset's own wording.
+  { name: 'inline+retrieval', notes: false, evidence: 'retrieved', repairs: 0, linking: true, definitions: 'inline' },
   // The only text that has measured is written per question; this arm writes it.
   { name: 'interpret', notes: false, repairs: 0, linking: true, definitions: 'inline', interpret: true },
   // Self-consistency over executed answers: no external knowledge, pure variance
@@ -124,6 +152,7 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   ['synth-definitions', 'inline-definitions'],
   ['inline-definitions', 'dataset-subset'],
   ['inline-definitions', 'inline+evidence'],
+  ['inline-definitions', 'inline+retrieval'],
   ['inline-definitions', 'interpret'],
   ['inline+evidence', 'vote'],
   ['definitions', 'definitions+evidence'],
@@ -149,9 +178,15 @@ function settings() {
   const argv = process.argv.slice(2);
   return {
     dryRun: argv.includes('--dry-run'),
-    limit: Number(process.env.BIRD_LIMIT ?? 240),
+    // The cap used to be 240, which is where "239 of 500" came from: our own
+    // sample size, mistaken for the dataset's. Default is the whole split.
+    limit: Number(process.env.BIRD_LIMIT ?? (SPLIT === 'dev' ? 1534 : 500)),
     concurrency: Number(process.env.BIRD_CONCURRENCY ?? 8),
-    dbs: (process.env.BIRD_DBS !== undefined ? process.env.BIRD_DBS : databasesFromManifest().join(','))
+    dbs: (
+      process.env.BIRD_DBS !== undefined
+        ? process.env.BIRD_DBS
+        : (databasesFromManifest().length > 0 ? databasesFromManifest() : databasesFromQuestions()).join(',')
+    )
       .split(',')
       .map((name) => name.trim())
       .filter(Boolean),
@@ -185,10 +220,22 @@ export async function pool<T, R>(items: readonly T[], limit: number, worker: (it
   return results;
 }
 
-export function promptFor(arm: Arm, question: BirdQuestion, synthesized?: string, definitions?: string): PromptOptions {
+export function promptFor(
+  arm: Arm,
+  question: BirdQuestion,
+  synthesized?: string,
+  definitions?: string,
+  retrieved?: string,
+): PromptOptions {
   const profile = arm.profile === 'adaptive' ? choosePromptProfile(question.question) : undefined;
   const evidence =
-    arm.evidence === 'dataset' ? question.evidence : arm.evidence === 'synthetic' ? synthesized : undefined;
+    arm.evidence === 'dataset'
+      ? question.evidence
+      : arm.evidence === 'synthetic'
+        ? synthesized
+        : arm.evidence === 'retrieved'
+          ? retrieved
+          : undefined;
   return {
     dialect: 'SQLite',
     // The inline arm is a placement experiment: the same sentences, attached to
@@ -207,10 +254,24 @@ export function promptFor(arm: Arm, question: BirdQuestion, synthesized?: string
 
 async function main() {
   const config = settings();
-  const questions = loadQuestions(join(DATA, 'mini_dev_sqlite.json')).filter((question) => config.dbs.includes(question.db_id));
+  const questions = loadQuestions(join(DATA, QUESTIONS_FILE)).filter((question) => config.dbs.includes(question.db_id));
   if (questions.length === 0) throw new Error(`no questions for ${config.dbs.join(',')}; run node eval/bird/fetch.mjs first`);
   const tables = loadTables(join(DATA, 'dev_tables.json'));
   const selected = stratifiedSample(questions, config.limit);
+  // The training split is external knowledge, not a held-out answer: it shares no
+  // database with the split under test, which is asserted in the run controls.
+  const trainPath = join(ROOT, 'eval/.cache/bird/train/train.json');
+  let retrievalIndex: ReturnType<typeof buildIndex> | undefined;
+  try {
+    retrievalIndex = buildIndex(JSON.parse(readFileSync(trainPath, 'utf8')) as { db_id: string; question: string; evidence?: string }[]);
+  } catch {
+    retrievalIndex = undefined;
+  }
+  const retrievedFor = (question: BirdQuestion): string | undefined => {
+    if (retrievalIndex === undefined) return undefined;
+    return renderRetrieved(retrieve(retrievalIndex, question.question, { k: 3 }));
+  };
+
   const oracle = createOracle(join(ROOT, 'eval/bird/oracle.py'), DATABASES);
 
   const schemas = new Map<string, SchemaTable[]>();
@@ -416,6 +477,8 @@ async function main() {
       databases: config.dbs,
       available: questions.length,
       requested: config.limit,
+      split: SPLIT,
+      retrievalCorpus: retrievalIndex === undefined ? 0 : retrievalIndex.rows.length,
       scored: cases.length,
       strategy: 'stratified by difficulty, then question id',
     },
@@ -618,7 +681,7 @@ async function main() {
         buildSqlPrompt(
           question.question,
           schemaFor(arm, question.db_id),
-          promptFor(arm, question, evidenceFor(arm, question), definitionsFor(arm, question.db_id)),
+          promptFor(arm, question, evidenceFor(arm, question), definitionsFor(arm, question.db_id), retrievedFor(question)),
         ).length,
     );
     const kindOf = (run: CaseRun): string | undefined => run.errorKind ?? (run.error === undefined ? undefined : 'other');

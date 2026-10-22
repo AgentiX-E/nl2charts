@@ -22,6 +22,8 @@ cannot be argued with.
   `run_sql` and `engine_info`.
 - **Trace sealing**: hash-chained events, three distinct failure verdicts, replay
   without reading a clock, and an injectable signer for callers who need an HMAC.
+- **Retrieval over BIRD's training split**: BM25 over 9,428 labelled questions from
+  69 databases, none of which appears in the split under test.
 - **Two Studio views**: a trace timeline rendered to SVG and an issue list as text,
   both pure string functions with geometry asserted in tests.
 - **Six runbooks** with drills, and a runtime leak audit driven by a canary
@@ -31,9 +33,12 @@ cannot be argued with.
 
 ### Measured
 
-- BIRD Mini-Dev, n=239: 32.6% (names) → 42.7% (definitions attached to columns) →
+- BIRD Mini-Dev: 32.6% (names) → 42.7% (definitions attached to columns) →
   55.2–56.9% (plus the dataset's per-question hint); 58.2% for curated metadata plus
-  the same hint. The floors are enforced in CI (`pnpm gate:bird`).
+  the same hint. The floors are enforced in CI (`pnpm gate:bird`). The sample was
+  our own 240-question cap until this release; CI now scores the whole 500-question
+  split, and a `bird-dev` workflow scores the 1,534-question public split that
+  leaderboards report.
 - Placement is worth +6.7 to +10.5pp across four runs; content, authorship,
   coverage, question-restating and three-sample voting each moved nothing beyond
   noise.
