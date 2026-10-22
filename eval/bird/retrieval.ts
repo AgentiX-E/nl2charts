@@ -7,21 +7,31 @@
  * denominator. That is the kind of knowledge the per-database block experiments
  * could not produce, and it comes from an external corpus rather than the test set.
  *
- * The block deliberately excludes SQL. A model that copies a statement written for
- * another schema produces a confident query against columns that do not exist, which
- * is the failure mode we already measured at 155 of 200 cases.
+ * There are two blocks, and the difference between them is the experiment:
+ *
+ * - `renderRetrieved` injects questions and their evidence, never SQL. A model that
+ *   copies a statement written for another schema produces a confident query against
+ *   columns that do not exist.
+ * - `renderDemonstrations` injects whole (question, evidence, SQL) triples, which is
+ *   what DAIL-SQL and CHASE-SQL do and what their ablations credit for much of their
+ *   lead. The caution above is a hypothesis, not a finding: cross-schema statements
+ *   may teach a shape that transfers, or may teach identifiers that do not exist.
+ *   It is measured as `inline+icl` against `inline+retrieval`, one lever apart.
  */
 
 export interface TrainingRow {
   readonly db_id: string;
   readonly question: string;
   readonly evidence?: string;
+  readonly SQL?: string;
 }
 
 export interface Hit {
   readonly question: string;
   readonly evidence: string;
   readonly score: number;
+  /** The labelled statement, when the caller asked for statements. */
+  readonly sql: string;
 }
 
 const STOPWORDS = new Set([
@@ -112,6 +122,12 @@ export interface RetrieveOptions {
    * free school meals teaches the model a false equivalence.
    */
   readonly preferDefinitions?: boolean;
+  /**
+   * What a neighbour has to carry to be usable. Evidence is the default because the
+   * rendered block is textual; a demonstration needs a statement instead, and a row
+   * without one would render as an empty example.
+   */
+  readonly requires?: 'evidence' | 'sql';
 }
 
 /** Evidence that explains how a quantity is computed, rather than naming a value. */
@@ -126,6 +142,7 @@ export function retrieve(index: Index, question: string, options: RetrieveOption
   const minScore = options.minScore ?? 0;
   const perDatabase = options.perDatabase ?? 1;
   const preferDefinitions = options.preferDefinitions ?? true;
+  const requires = options.requires ?? 'evidence';
   const query = [...new Set(tokenize(question))].filter((word) => index.idf.has(word));
   if (query.length === 0) return [];
   const scored = index.rows.map((row, position) => ({ row, score: score(index, position, query) }));
@@ -136,11 +153,12 @@ export function retrieve(index: Index, question: string, options: RetrieveOption
   for (const entry of scored) {
     if (entry.score < minScore) break;
     const evidence = (entry.row.evidence ?? '').trim();
-    if (evidence.length === 0) continue;
+    const sql = (entry.row.SQL ?? '').trim();
+    if (requires === 'sql' ? sql.length === 0 : evidence.length === 0) continue;
     const used = seen.get(entry.row.db_id) ?? 0;
     if (used >= perDatabase) continue;
     seen.set(entry.row.db_id, used + 1);
-    const hit = { question: entry.row.question, evidence, score: entry.score };
+    const hit = { question: entry.row.question, evidence, score: entry.score, sql };
     // A definition is what transfers; a value mapping from another schema is a trap.
     if (!preferDefinitions || isDefinition(evidence)) hits.push(hit);
     else deferred.push(hit);
@@ -155,13 +173,7 @@ export function retrieve(index: Index, question: string, options: RetrieveOption
   return hits;
 }
 
-/**
- * Render the retrieved neighbours for a prompt.
- *
- * Only questions and their evidence, never SQL, and only the definition half of the
- * evidence (the part after `=` is a formula over another schema's columns and would
- * be copied verbatim).
- */
+/** Render the retrieved neighbours as text, without their statements. */
 export function renderRetrieved(hits: readonly Hit[], maxChars = 700): string {
   const lines: string[] = [];
   let used = 0;
@@ -173,4 +185,29 @@ export function renderRetrieved(hits: readonly Hit[], maxChars = 700): string {
     used += line.length + 1;
   }
   return lines.join('\n');
+}
+
+/**
+ * Render retrieved neighbours as worked examples, statements included.
+ *
+ * The heading says out loud that the tables are not the ones above: a demonstration
+ * from another schema is useful as a shape (which aggregate, which join direction,
+ * how a ratio is guarded) and harmful as an identifier source. Whether saying so is
+ * enough is exactly what the `inline+icl` arm measures — DAIL-SQL masks
+ * schema-specific tokens instead, which is a candidate lever once this one is known.
+ */
+export function renderDemonstrations(hits: readonly Hit[], maxChars = 2200): string {
+  const blocks: string[] = [];
+  let used = 0;
+  for (const hit of hits) {
+    if (hit.sql.length === 0) continue;
+    const lines = [`Question: ${hit.question.trim()}`];
+    if (hit.evidence.length > 0) lines.push(`Evidence: ${hit.evidence}`);
+    lines.push(`SQL: ${hit.sql}`);
+    const block = lines.join('\n');
+    if (used + block.length + 2 > maxChars) break;
+    blocks.push(block);
+    used += block.length + 2;
+  }
+  return blocks.join('\n\n');
 }

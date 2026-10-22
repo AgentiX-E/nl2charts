@@ -48,6 +48,17 @@ export function compare(report, baseline) {
     }
   }
 
+  // A lever with no input scores like its parent and reads like a finding. The
+  // retrieval arm did exactly that once (44.4% vs 43.6%, corpus size 0), so the gate
+  // checks that the blocks an arm depends on were actually built.
+  const controls = report.controls ?? {};
+  if (baseline.expectedArms.includes('inline+retrieval') && (controls.retrievedBlocks ?? 0) === 0) {
+    issues.push('BIRD1: inline+retrieval ran with no retrieved block; the corpus is missing, so the arm is its parent renamed');
+  }
+  if (baseline.expectedArms.includes('inline+icl') && (controls.demonstrationBlocks ?? 0) === 0) {
+    issues.push('BIRD1: inline+icl ran with no demonstration block; the corpus is missing, so the arm is its parent renamed');
+  }
+
   const floors = baseline.floors?.[split];
   if (floors === undefined) {
     notes.push(`BIRD1: no floors recorded for split ${split}; this run is a measurement, not a gate`);
@@ -91,6 +102,15 @@ function selfTest() {
   fail(compare(report([arm('names', 42), arm('inline', 51)], 60), baseline), 1, 'BIRD1 does not notice the sample shrinking');
 
   const empty = compare({ arms: [] }, baseline);
+
+  // The lever-with-no-input case: the arms are present, the blocks are not.
+  const dryLever = compare(
+    { selection: { scored: 100, split: 'minidev' }, controls: { retrievedBlocks: 0, demonstrationBlocks: 0 }, arms: [arm('names', 42), arm('inline', 51)] },
+    { ...baseline, expectedArms: ['names', 'inline', 'inline+retrieval', 'inline+icl'] },
+  );
+  if (dryLever.issues.filter((issue) => issue.includes('corpus is missing')).length !== 2) {
+    issues.push('BIRD1 does not notice an arm whose retrieved block was never built');
+  }
   fail(empty, 1, 'BIRD1 does not reject a report with no sample size');
 
   // A different split is a different measurement: floors do not transfer, and the
@@ -112,7 +132,7 @@ if (process.argv[2] === '--self-test') {
   const issues = selfTest();
   for (const issue of issues) console.error(issue);
   if (issues.length > 0) process.exit(1);
-  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, other split and unfloored arm all behave');
+  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, other split, unfloored arm and empty lever all behave');
 } else {
   const reportPath = resolve(ROOT, 'eval/out/bird-eval.json');
   const baseline = JSON.parse(readFileSync(resolve(ROOT, 'eval/baseline/bird.json'), 'utf8'));

@@ -22,6 +22,12 @@ cannot be argued with.
   `run_sql` and `engine_info`.
 - **Trace sealing**: hash-chained events, three distinct failure verdicts, replay
   without reading a clock, and an injectable signer for callers who need an HMAC.
+- **A gate that notices a lever with no input**: `inline+retrieval` scored 44.4% with
+  `retrievalCorpus` at 0 — it was its parent arm renamed, not a null result. The
+  runner now throws when a block's input is missing, the gate fails on an empty
+  block, and CI fetches the 4.2 MB training corpus it had never downloaded.
+- **`inline+icl`**: the same retrieved neighbours as worked examples, statements
+  included, one lever from `inline+retrieval`.
 - **A gate that notices a declared arm never running**: the baseline now lists the
   arms it expects, so an arm that is wired but missing from the run fails the build.
   `inline+retrieval` was such an arm for one release.

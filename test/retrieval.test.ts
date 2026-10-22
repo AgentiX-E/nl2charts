@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildIndex, renderRetrieved, retrieve, tokenize } from '../eval/bird/retrieval.js';
+import { buildIndex, renderDemonstrations, renderRetrieved, retrieve, tokenize } from '../eval/bird/retrieval.js';
 import type { TrainingRow } from '../eval/bird/retrieval.js';
 
 const corpus: TrainingRow[] = [
@@ -121,5 +121,70 @@ describe('definition preference', () => {
   it('can be turned off, and then ranking is pure BM25', () => {
     const hits = retrieve(mixed, 'What is the free rate for students?', { k: 1, preferDefinitions: false });
     expect(hits).toHaveLength(1);
+  });
+});
+
+describe('statements as demonstrations', () => {
+  const rows = [
+    {
+      db_id: 'a',
+      question: 'What is the ratio of orders paid in USD to orders paid in EUR?',
+      evidence: 'ratio = count(currency = "USD") / count(currency = "EUR")',
+      SQL: 'SELECT 1.0 * SUM(currency = "USD") / SUM(currency = "EUR") FROM orders',
+    },
+    {
+      db_id: 'b',
+      question: 'How many customers pay in EUR?',
+      evidence: 'EUR is a currency code',
+      SQL: 'SELECT COUNT(*) FROM customers WHERE currency = "EUR"',
+    },
+    // A row with no statement: it can answer a text query and must not become an
+    // empty demonstration.
+    { db_id: 'c', question: 'How many orders are there?', evidence: '' },
+  ];
+  const index = buildIndex(rows);
+
+  it('skips neighbours that carry no statement when statements are required', () => {
+    const hits = retrieve(index, 'ratio of orders paid in USD to EUR', { k: 3, requires: 'sql' });
+    expect(hits.every((hit) => hit.sql.length > 0)).toBe(true);
+  });
+
+  it('renders a block a model can read as a worked example', () => {
+    const hits = retrieve(index, 'ratio of orders paid in USD to EUR', { k: 2, requires: 'sql' });
+    const text = renderDemonstrations(hits);
+    expect(text).toContain('Question:');
+    expect(text).toContain('SQL: SELECT');
+    expect(text.split('SQL:').length - 1).toBe(hits.length);
+  });
+
+  it('leaves out the evidence line when a neighbour has none', () => {
+    const hits = retrieve(index, 'ratio of orders paid in USD to EUR', { k: 1, requires: 'sql' });
+    const withoutEvidence = renderDemonstrations(hits.map((hit) => ({ ...hit, evidence: '' })));
+    expect(withoutEvidence).not.toContain('Evidence:');
+    expect(withoutEvidence).toContain('SQL:');
+  });
+
+  it('drops a whole example rather than truncating a statement', () => {
+    const hits = retrieve(index, 'ratio of orders paid in USD to EUR', { k: 2, requires: 'sql' });
+    const full = renderDemonstrations(hits);
+    const firstBlock = full.split('\n\n')[0] as string;
+    // A budget that fits the first block plus its separator, and nothing after:
+    // the second example is dropped, not cut.
+    const trimmed = renderDemonstrations(hits, firstBlock.length + 2);
+    expect(trimmed).toBe(firstBlock);
+    expect(trimmed).not.toContain('...');
+  });
+
+  it('keeps the textual block free of statements', () => {
+    // The separation is the experiment: if `renderRetrieved` ever carried SQL, the
+    // difference between the two arms would stop being one lever.
+    const hits = retrieve(index, 'ratio of orders paid in USD to EUR', { k: 2 });
+    expect(renderRetrieved(hits)).not.toContain('SELECT');
+  });
+
+  it('is deterministic', () => {
+    const first = renderDemonstrations(retrieve(index, 'ratio of orders paid in USD to EUR', { k: 3, requires: 'sql' }));
+    const second = renderDemonstrations(retrieve(index, 'ratio of orders paid in USD to EUR', { k: 3, requires: 'sql' }));
+    expect(first).toBe(second);
   });
 });

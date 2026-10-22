@@ -11,7 +11,7 @@ import type { BirdQuestion } from '../eval/bird/data.js';
  * delta cannot be attributed to anything else. A future edit that adds a second
  * change to a pair turns this red before it turns the benchmark unreadable.
  */
-const LEVERS = ['notes', 'evidence', 'repairs', 'linking', 'profile', 'definitions', 'focus', 'interpret', 'vote'] as const;
+const LEVERS = ['notes', 'evidence', 'repairs', 'linking', 'profile', 'definitions', 'focus', 'interpret', 'vote', 'demonstrations'] as const;
 
 function changedLevers(left: Arm, right: Arm): string[] {
   return LEVERS.filter((lever) => left[lever] !== right[lever]);
@@ -102,6 +102,16 @@ describe('the chain that actually runs', () => {
   it('keeps the chain free of duplicates and of arms that do not exist', () => {
     expect(new Set(DEFAULT_ARMS).size).toBe(DEFAULT_ARMS.length);
     for (const name of DEFAULT_ARMS) expect(ARMS.map((arm) => arm.name), name).toContain(name);
+  });
+
+  it('gives the demonstration arm statements and the textual arm only text', () => {
+    // One lever apart: if the textual arm also carried examples, the delta would
+    // price two things at once.
+    const demonstrations = 'Question: How many rows?\nSQL: SELECT COUNT(*) FROM t';
+    const viaIcl = ARMS.find((arm) => arm.name === 'inline+icl') as Arm;
+    const viaText = ARMS.find((arm) => arm.name === 'inline+retrieval') as Arm;
+    expect(promptFor(viaIcl, question, undefined, undefined, 'hint', demonstrations).demonstrations).toBe(demonstrations);
+    expect(promptFor(viaText, question, undefined, undefined, 'hint', demonstrations).demonstrations).toBeUndefined();
   });
 
   it('states a reason for every arm it defers', () => {

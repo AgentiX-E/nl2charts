@@ -199,6 +199,13 @@ jobs:
         with:
           path: eval/.cache/bird/minidev
           key: bird-minidev-v3-${{ runner.os }}
+      - name: Cache the training corpus
+        uses: actions/cache@v4
+        with:
+          # 4.2 MB of labelled questions, not the 8.5 GB archive they arrive in: the
+          # training databases are never executed here.
+          path: eval/.cache/bird/train
+          key: bird-train-v1-${{ runner.os }}
       - name: Cache synthesized definitions
         uses: actions/cache@v4
         with:
@@ -207,11 +214,13 @@ jobs:
           restore-keys: bird-definitions-${{ runner.os }}-
       - name: Fetch Mini-Dev (no-op when the cache is warm)
         run: node eval/bird/fetch.mjs
+      - name: Fetch the training corpus (no-op when the cache is warm)
+        run: pnpm bench:bird:fetch:train
       - name: Gold queries, prompts and controls without a model
         run: pnpm bench:bird:dry
       - name: DuckDB portability census
         run: pnpm bench:bird:port
-      - name: Five-arm evaluation with paired ablations
+      - name: Seven-arm evaluation with paired ablations
         run: pnpm bench:bird
       - name: Accuracy floor (a regression fails the build)
         run: pnpm gate:bird

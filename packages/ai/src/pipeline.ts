@@ -14,6 +14,14 @@ export interface PromptOptions extends SchemaCardOptions {
   readonly definitions?: string;
   /** A reading of this question, produced before the SQL attempt. */
   readonly interpretation?: string;
+  /**
+   * Worked examples retrieved from another database, statements included.
+   *
+   * The heading states that the tables are not the ones above, because a statement
+   * written for another schema is a shape to imitate and an identifier to avoid —
+   * and which of the two a model takes is a measured question, not an assumption.
+   */
+  readonly demonstrations?: string;
   /** Maximum schema-card lines. Large schemas need more than the default 40. */
   readonly schemaLines?: number;
   /** Extra rule lines for a question shape, appended after the base rules. */
@@ -126,6 +134,14 @@ export function buildSqlPrompt(
   }
   if (resolved.interpretation !== undefined && resolved.interpretation.trim().length > 0) {
     context.push(`Interpretation: ${resolved.interpretation.trim()}`);
+  }
+  if (resolved.demonstrations !== undefined && resolved.demonstrations.trim().length > 0) {
+    context.push(
+      [
+        'Examples from other databases (their tables and columns are not the ones above; imitate the shape, not the identifiers):',
+        resolved.demonstrations.trim(),
+      ].join('\n'),
+    );
   }
   return [
     ...rules,

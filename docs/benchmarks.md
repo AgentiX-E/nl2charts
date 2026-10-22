@@ -365,6 +365,45 @@ evidence that only maps a word to a literal (`free refers to lowest_price = 0`).
 second kind, retrieved for a question about free school meals, teaches a false
 equivalence — it was visible in the first retrieved block we inspected.
 
+The same neighbours are used twice, one lever apart:
+
+| Arm | Block | Question it answers |
+| --- | --- | --- |
+| `inline+retrieval` | questions and evidence, **no SQL** | does the *phrasing* transfer? |
+| `inline+icl` | the same three neighbours, each with its statement | does a *worked example* transfer? DAIL-SQL and CHASE-SQL are built on this |
+
+`inline+icl` is paired with `inline+retrieval`; the delta prices the statements and
+nothing else. The opening warning in that block says the tables are not the ones
+above — a demonstration from another schema is a shape to imitate and an identifier
+to avoid, and which one a model takes is the measurement. DAIL-SQL masks
+schema-specific tokens instead; masking is a candidate lever once this one is known.
+
+### A lever with no input is not a result
+
+Run `39784843750` added `inline+retrieval` to the chain and printed **44.4%**
+against its parent's 43.6%: +0.8pp, one case gained and five lost, p=0.22. The
+tempting reading is "retrieval from the training split does not transfer". It is
+wrong, and the artifact says so:
+
+| Evidence | Value |
+| --- | --- |
+| `selection.retrievalCorpus` | **0** rows |
+| prompt characters, `inline+retrieval` | 2,471 |
+| prompt characters, `inline-definitions` | 2,471 |
+
+The corpus was never downloaded in CI, so the arm's block was empty and it scored
+as its parent under a different name. The near-equality was the absence of a
+lever, not a measurement of one.
+
+Three changes, so this cannot recur silently:
+
+1. `pnpm bench:bird:fetch:train` downloads `train.zip` once, extracts the 4.2 MB
+   `train.json` and deletes the 8.5 GB archive; CI caches the extracted file.
+2. The runner **throws** when an arm needs a block whose input is missing, instead
+   of running the parent's prompt under the child's name.
+3. The gate fails when `inline+retrieval` or `inline+icl` report an empty block, so
+   an arm that did not get its input fails the build rather than entering a table.
+
 ## What these numbers are not
 
 - **Not a SOTA claim.** The dataset is a local fixture, not BIRD, Spider 2.0 or

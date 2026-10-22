@@ -369,3 +369,26 @@ describe('prompt profiles', () => {
     expect(prompt).not.toContain('-- meaning');
   });
 });
+
+describe('demonstrations from another schema', () => {
+  const tiny: SchemaTable[] = [{ table: 'orders', columns: [{ name: 'id', type: 'INTEGER' }] }];
+
+  it('renders the block above the question, under a heading that names the risk', () => {
+    const prompt = buildSqlPrompt('How many orders?', tiny, {
+      demonstrations: 'Question: How many rows?\nSQL: SELECT COUNT(*) FROM t',
+    });
+    expect(prompt).toContain('Examples from other databases');
+    expect(prompt).toContain('SELECT COUNT(*) FROM t');
+    expect(prompt.indexOf('Examples from other databases')).toBeLessThan(prompt.indexOf('Question: How many orders?'));
+  });
+
+  it('leaves no heading behind for an empty block', () => {
+    // A heading over nothing invites the model to fill the gap.
+    expect(buildSqlPrompt('q', tiny, { demonstrations: '   ' })).not.toContain('Examples from other databases');
+  });
+
+  it('keeps the examples below the schema, so the schema is read first', () => {
+    const prompt = buildSqlPrompt('q', tiny, { demonstrations: 'Question: x\nSQL: SELECT 1' });
+    expect(prompt.indexOf('Schema:')).toBeLessThan(prompt.indexOf('Examples from other databases'));
+  });
+});

@@ -10,7 +10,7 @@
  *   node eval/bird/fetch.mjs --dbs superhero,california_schools
  *   node eval/bird/fetch.mjs --offline        # fail if the cache is cold
  */
-import { createWriteStream, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { createWriteStream, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -18,15 +18,20 @@ import { execFileSync } from 'node:child_process';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
 /**
- * Two splits ship as separate archives in the same bucket. `minidev` is the 500
- * questions CI runs on every commit; `dev` is the 1,534-question split the published
- * leaderboards report. The layout inside differs only in the directory name and the
- * questions file, so one script fetches both.
+ * Three archives live in the same bucket. `minidev` is the 500 questions CI runs on
+ * every commit; `dev` is the 1,534-question split the published leaderboards report;
+ * `train` is 9,428 labelled questions over 69 databases and shares no database with
+ * either, so it is knowledge rather than answers for the split under test.
+ *
+ * `train.zip` is 8.5 GB because it carries the training databases, which this harness
+ * never executes: only `train.json` is extracted, and the archive is deleted straight
+ * after, so the cache holds 4.2 MB rather than a second copy of the corpus.
  */
 const SPLIT = process.env.BIRD_SPLIT ?? 'minidev';
 const SPLIT_SHAPE = {
   minidev: { archive: 'minidev.zip', dir: 'minidev/MINIDEV', questions: 'mini_dev_sqlite.json' },
   dev: { archive: 'dev.zip', dir: 'dev/dev_20240627', questions: 'dev.json' },
+  train: { archive: 'train.zip', dir: 'train', questions: 'train.json', jsonOnly: true },
 };
 if (SPLIT_SHAPE[SPLIT] === undefined) throw new Error(`unknown BIRD_SPLIT: ${SPLIT}`);
 const SHAPE = SPLIT_SHAPE[SPLIT];
@@ -93,10 +98,27 @@ async function main() {
   const dataDir = join(CACHE, SHAPE.dir);
   const manifestPath = join(dataDir, 'manifest.json');
 
+  if (SHAPE.jsonOnly === true && existsSync(join(dataDir, SHAPE.questions))) {
+    // The corpus is cached: the 8.5 GB archive is not downloaded at all.
+    const bytes = requireFile(join(dataDir, SHAPE.questions));
+    console.log(`ready: ${SHAPE.dir} corpus ${(bytes / 1048576).toFixed(1)} MB (no download)`);
+    return;
+  }
+
   await download(ARCHIVE);
 
   // Extract what is missing, not "everything or nothing": a run that widens the
   // database list must not need --force, and must not re-extract 1.4 GB.
+  if (SHAPE.jsonOnly === true) {
+    extract([`${SHAPE.dir}/${SHAPE.questions}`]);
+    const bytes = requireFile(join(dataDir, SHAPE.questions));
+    // The archive exists only to deliver this file; keeping it costs 8.5 GB on a
+    // runner whose cache is 4.2 MB of the same data.
+    if (process.env.BIRD_KEEP_ARCHIVE !== '1') rmSync(ARCHIVE, { force: true });
+    console.log(`ready: ${SHAPE.dir} corpus ${(bytes / 1048576).toFixed(1)} MB (archive removed)`);
+    return;
+  }
+
   const entries = [`${SHAPE.dir}/${SHAPE.questions}`, `${SHAPE.dir}/dev_tables.json`];
   const missing = dbs.filter((db) => !existsSync(join(dataDir, 'dev_databases', db, `${db}.sqlite`)));
   for (const db of missing) entries.push(`${SHAPE.dir}/dev_databases/${db}/*`);

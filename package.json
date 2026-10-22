@@ -36,7 +36,8 @@
     "gate:secrets": "node tools/check-secrets.mjs && node tools/check-secrets.mjs --self-test",
     "gate:bird": "node tools/check-bird-baseline.mjs",
     "bench:bird:dev": "BIRD_SPLIT=dev tsx eval/bird/run.ts",
-    "bench:bird:fetch:dev": "BIRD_SPLIT=dev node eval/bird/fetch.mjs"
+    "bench:bird:fetch:dev": "BIRD_SPLIT=dev node eval/bird/fetch.mjs",
+    "bench:bird:fetch:train": "BIRD_SPLIT=train node eval/bird/fetch.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

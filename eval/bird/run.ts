@@ -30,7 +30,7 @@ import type { BirdQuestion } from './data.js';
 import { createOracle } from './oracle.js';
 import type { OracleResult } from './oracle.js';
 import { profileDatabase } from './profile.js';
-import { buildIndex, renderRetrieved, retrieve } from './retrieval.js';
+import { buildIndex, renderDemonstrations, renderRetrieved, retrieve } from './retrieval.js';
 import { synthesizeDefinitions } from './synthesize.js';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
@@ -98,6 +98,12 @@ export interface Arm {
   readonly interpret?: boolean;
   /** Samples per question; the modal executed result wins. */
   readonly vote?: number;
+  /**
+   * Retrieved (question, evidence, SQL) triples from the training split, rendered as
+   * worked examples. This is the lever DAIL-SQL and CHASE-SQL build on; here it is one
+   * switch away from `inline+retrieval`, which supplies the same neighbours as text.
+   */
+  readonly demonstrations?: boolean;
 }
 
 /**
@@ -127,6 +133,9 @@ export const ARMS: readonly Arm[] = [
   // split under test. The arm exists to test whether the 13.8pp is knowledge or
   // the dataset's own wording.
   { name: 'inline+retrieval', notes: false, evidence: 'retrieved', repairs: 0, linking: true, definitions: 'inline' },
+  // The same retrieved neighbours, but as worked examples with their statements.
+  // Paired with `inline+retrieval`: one lever, so the delta prices the statements.
+  { name: 'inline+icl', notes: false, evidence: 'retrieved', repairs: 0, linking: true, definitions: 'inline', demonstrations: true },
   // The only text that has measured is written per question; this arm writes it.
   { name: 'interpret', notes: false, repairs: 0, linking: true, definitions: 'inline', interpret: true },
   // Self-consistency over executed answers: no external knowledge, pure variance
@@ -164,6 +173,7 @@ export const DEFAULT_ARMS: readonly string[] = [
   // Knowledge retrieved from BIRD's training split: the arm that tests whether the
   // 14pp from the per-question hint is knowledge or the dataset's own wording.
   'inline+retrieval',
+  'inline+icl',
   'vote',
   'metadata+evidence',
 ];
@@ -193,6 +203,7 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   ['inline-definitions', 'dataset-subset'],
   ['inline-definitions', 'inline+evidence'],
   ['inline-definitions', 'inline+retrieval'],
+  ['inline+retrieval', 'inline+icl'],
   ['inline-definitions', 'interpret'],
   ['inline+evidence', 'vote'],
   ['definitions', 'definitions+evidence'],
@@ -279,6 +290,7 @@ export function promptFor(
   synthesized?: string,
   definitions?: string,
   retrieved?: string,
+  demonstrations?: string,
 ): PromptOptions {
   const profile = arm.profile === 'adaptive' ? choosePromptProfile(question.question) : undefined;
   const evidence =
@@ -302,6 +314,9 @@ export function promptFor(
     ...(profile === undefined ? {} : { notes: profile.notes }),
     ...(arm.definitions !== undefined && definitions !== undefined && definitions.length > 0 ? { definitions } : {}),
     ...(evidence === undefined || evidence.length === 0 ? {} : { evidence }),
+    ...(arm.demonstrations === true && demonstrations !== undefined && demonstrations.length > 0
+      ? { demonstrations }
+      : {}),
   };
 }
 
@@ -320,10 +335,36 @@ async function main() {
   } catch {
     retrievalIndex = undefined;
   }
-  const retrievedFor = (question: BirdQuestion): string | undefined => {
-    if (retrievalIndex === undefined) return undefined;
-    return renderRetrieved(retrieve(retrievalIndex, question.question, { k: 3 }));
-  };
+  const needsRetrieval = config.arms.some((name) => {
+    const arm = ARMS.find((entry) => entry.name === name);
+    return arm?.evidence === 'retrieved' || arm?.demonstrations === true;
+  });
+  if (needsRetrieval && retrievalIndex === undefined) {
+    // An arm whose lever has no input is the parent arm with a different name: it ran
+    // once, scored 44.4% against its parent's 43.6%, and the near-equality was read as
+    // "retrieval does not help" when the truth was that nothing was retrieved.
+    throw new Error(
+      `arm(s) ${config.arms.join(',')} need the BIRD training split; ` +
+        'run BIRD_SPLIT=train node eval/bird/fetch.mjs first (or drop the arms with BIRD_ARMS)',
+    );
+  }
+  // Built once per selected question rather than once per arm: the blocks are inputs,
+  // and recomputing them per arm made an empty result indistinguishable from a slow one.
+  const retrievedByQuestion = new Map<number, string>();
+  const demonstrationsByQuestion = new Map<number, string>();
+  for (const question of selected) {
+    if (retrievalIndex === undefined) break;
+    const textHits = retrieve(retrievalIndex, question.question, { k: 3 });
+    const text = renderRetrieved(textHits);
+    if (text.length > 0) retrievedByQuestion.set(question.question_id, text);
+    // Same corpus, same ranking, same k: the only difference from the evidence block
+    // is that each neighbour arrives with its statement.
+    const worked = renderDemonstrations(retrieve(retrievalIndex, question.question, { k: 3, requires: 'sql' }));
+    if (worked.length > 0) demonstrationsByQuestion.set(question.question_id, worked);
+  }
+  const retrievedFor = (question: BirdQuestion): string | undefined => retrievedByQuestion.get(question.question_id);
+  const demonstrationsFor = (question: BirdQuestion): string | undefined =>
+    demonstrationsByQuestion.get(question.question_id);
 
   const oracle = createOracle(join(ROOT, 'eval/bird/oracle.py'), DATABASES);
 
@@ -532,6 +573,8 @@ async function main() {
       requested: config.limit,
       split: SPLIT,
       retrievalCorpus: retrievalIndex === undefined ? 0 : retrievalIndex.rows.length,
+      retrievedBlocks: retrievedByQuestion.size,
+      demonstrationBlocks: demonstrationsByQuestion.size,
       scored: cases.length,
       strategy: 'stratified by difficulty, then question id',
     },
@@ -734,7 +777,14 @@ async function main() {
         buildSqlPrompt(
           question.question,
           schemaFor(arm, question.db_id),
-          promptFor(arm, question, evidenceFor(arm, question), definitionsFor(arm, question.db_id), retrievedFor(question)),
+          promptFor(
+            arm,
+            question,
+            evidenceFor(arm, question),
+            definitionsFor(arm, question.db_id),
+            retrievedFor(question),
+            demonstrationsFor(question),
+          ),
         ).length,
     );
     const kindOf = (run: CaseRun): string | undefined => run.errorKind ?? (run.error === undefined ? undefined : 'other');
