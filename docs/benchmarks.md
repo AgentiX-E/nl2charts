@@ -326,6 +326,29 @@ is visible instead of implied.
 5. Absolute targets are frozen until a ≥200-question set exists; before that,
    relative improvement is the only honest signal.
 
+## The floor is enforced, not remembered
+
+A benchmark that only produces a report gets read once. The BIRD arms have a
+committed floor (`eval/baseline/bird.json`) taken from the minimum of the last four
+runs, and the workflow fails when an arm lands more than 4pp below it — the same
+4pp that ADR-166 measured as the noise threshold at n=239:
+
+```bash
+pnpm gate:bird
+# BIRD floor: <n> questions, <arm> <accuracy>, …
+```
+
+Three details make the gate mean something:
+
+- **the arm set is part of the check**: an arm in the baseline that vanishes from
+  the report fails, because "we stopped measuring it" is not an improvement;
+- **the sample size is checked first**: a report scored on fewer than 95% of the
+  baseline questions is a different measurement, and comparing across it would
+  attribute a dataset change to the pipeline;
+- **the gate has a self-test** (`node tools/check-bird-baseline.mjs --self-test`)
+  that plants a passing run, a noisy run, a 10pp regression, a missing arm and a
+  shrunken sample. A gate nobody has seen fail is a gate nobody should trust.
+
 ## Reproducing
 
 ```bash

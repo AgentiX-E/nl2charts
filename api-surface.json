@@ -296,6 +296,7 @@
     "type MdlRelationship",
     "type Replay",
     "type ReplayStage",
+    "type SealOptions",
     "type SealedEvent",
     "type SealedTrace",
     "type TraceEvent",

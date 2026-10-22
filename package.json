@@ -18,7 +18,7 @@
     "gate:platform": "node tools/check-platform.mjs && node tools/check-platform.mjs --self-test",
     "gate:exports": "node tools/check-exports.mjs",
     "gate:budgets": "node tools/check-budgets.mjs",
-    "gate:all": "pnpm gate:layering && node tools/check-platform.mjs && node tools/check-platform.mjs --self-test && pnpm gate:exports && pnpm gate:budgets",
+    "gate:all": "pnpm gate:layering && node tools/check-platform.mjs && node tools/check-platform.mjs --self-test && pnpm gate:exports && pnpm gate:budgets && pnpm gate:secrets",
     "bench": "tsx eval/run.ts",
     "bench:ablate": "tsx eval/ablate.ts",
     "verify": "pnpm typecheck && pnpm build && pnpm test:coverage && pnpm gate:coverage && pnpm gate:all && pnpm bench && pnpm bench:linking && pnpm bench:semantic",
@@ -32,7 +32,9 @@
     "bench:bird:port": "node eval/bird/portability.mjs",
     "bench:bird:stability": "tsx eval/bird/stability.ts",
     "bench:adversarial": "tsx eval/adversarial/run.ts",
-    "bench:adversarial:dry": "tsx eval/adversarial/run.ts --dry-run"
+    "bench:adversarial:dry": "tsx eval/adversarial/run.ts --dry-run",
+    "gate:secrets": "node tools/check-secrets.mjs && node tools/check-secrets.mjs --self-test",
+    "gate:bird": "node tools/check-bird-baseline.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

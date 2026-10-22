@@ -138,6 +138,24 @@ the guide says FNV-1a rather than "hash" because the difference matters.
 `replayTrace` reads no clock. The same sealed trace replays to the same summary,
 which is what makes it quotable.
 
+## Gates you inherit
+
+These run in CI on every commit, and the same commands run locally:
+
+| Gate | Fails when |
+| --- | --- |
+| `gate:coverage` | any package is below 95% on statements, branches, functions or lines |
+| `gate:layering` | a package imports one that breaks its runtime |
+| `gate:exports` | the public API drifted from `api-surface.json` |
+| `gate:budgets` | a package's gzipped output exceeds its ceiling |
+| `gate:secrets` | a credential-shaped string is tracked |
+| `gate:bird` | an external-benchmark arm falls more than 4pp below its floor |
+
+The secret scan prints the file and the rule, never the matched text — echoing a
+token into a CI log is the same leak to a different audience. It has a self-test
+that plants a token, a clean environment reference and a key in a dotfile, so the
+scanner is known to catch the first and third and to ignore the second.
+
 ## Upgrading
 
 The public surface is snapshotted in `api-surface.json`. The compatibility rules:

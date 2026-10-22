@@ -78,23 +78,43 @@ export function hashEvent(previous: string, event: TraceEvent): string {
   return digest(`${previous}\u0000${payload(event)}`);
 }
 
-export function sealTrace(events: readonly TraceEvent[]): SealedTrace {
+export interface SealOptions {
+  /**
+   * How one link is computed. The default is FNV-1a: it detects an edit, and a
+   * forger who recomputes the chain defeats it. Pass an HMAC verifier when the
+   * trace has to resist that — the contract is small on purpose, so the library
+   * does not have to choose a crypto primitive for its callers.
+   */
+  readonly sign?: (payload: string) => string;
+}
+
+function signerOf(options: SealOptions | undefined): (payload: string) => string {
+  return options?.sign ?? digest;
+}
+
+function linkHash(previous: string, event: TraceEvent, sign: (payload: string) => string): string {
+  return sign(`${previous}\u0000${payload(event)}`);
+}
+
+export function sealTrace(events: readonly TraceEvent[], options?: SealOptions): SealedTrace {
+  const sign = signerOf(options);
   const sealed: SealedEvent[] = [];
   let previous = 'genesis';
   for (const event of events) {
-    const hash = hashEvent(previous, event);
+    const hash = linkHash(previous, event, sign);
     sealed.push({ ...event, prev: previous, hash });
     previous = hash;
   }
   return { events: sealed, head: previous };
 }
 
-export function verifyTrace(trace: SealedTrace): VerifyVerdict {
+export function verifyTrace(trace: SealedTrace, options?: SealOptions): VerifyVerdict {
+  const sign = signerOf(options);
   let previous = 'genesis';
   for (let index = 0; index < trace.events.length; index += 1) {
     const event = trace.events[index] as SealedEvent;
     if (event.prev !== previous) return { ok: false, brokenAt: index, reason: 'link' };
-    if (hashEvent(previous, event) !== event.hash) return { ok: false, brokenAt: index, reason: 'hash' };
+    if (linkHash(previous, event, sign) !== event.hash) return { ok: false, brokenAt: index, reason: 'hash' };
     previous = event.hash;
   }
   return previous === trace.head ? { ok: true, count: trace.events.length } : { ok: false, reason: 'head' };
@@ -119,8 +139,8 @@ export interface Replay {
  * Re-derive the timeline from the trace. No clock is read: the same sealed trace
  * replays to the same summary, which is what makes it evidence.
  */
-export function replayTrace(trace: SealedTrace): Replay {
-  const verdict = verifyTrace(trace);
+export function replayTrace(trace: SealedTrace, options?: SealOptions): Replay {
+  const verdict = verifyTrace(trace, options);
   if (!verdict.ok) {
     return { ok: false, durationMs: 0, stages: [], errors: [`trace does not verify: ${verdict.reason}`] };
   }

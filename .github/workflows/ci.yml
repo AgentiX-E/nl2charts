@@ -79,6 +79,12 @@ jobs:
         run: pnpm gate:exports
       - name: Bundle budgets
         run: pnpm gate:budgets
+      - name: Secret scan (tracked files, no values printed)
+        run: pnpm gate:secrets
+      - name: Secret scan self-test
+        run: node tools/check-secrets.mjs --self-test
+      - name: Benchmark floor self-test
+        run: node tools/check-bird-baseline.mjs --self-test
       - name: Upload coverage
         if: always()
         uses: actions/upload-artifact@v5
@@ -205,6 +211,8 @@ jobs:
         run: pnpm bench:bird:port
       - name: Five-arm evaluation with paired ablations
         run: pnpm bench:bird
+      - name: Accuracy floor (a regression fails the build)
+        run: pnpm gate:bird
       - name: Noise floor (same cases, three repeats)
         run: pnpm bench:bird:stability
       - name: Adversarial gold, widths and controls without a model
