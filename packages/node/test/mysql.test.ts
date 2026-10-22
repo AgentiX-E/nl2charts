@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createConnection } from 'mysql2/promise';
-import { createMysqlEngine, driverUnavailable, fromMysqlValue, messageOf } from '../src/mysql.js';
+import { createMysqlEngine, driverUnavailable, firstSupported, fromMysqlValue, messageOf } from '../src/mysql.js';
 
 /**
  * Integration tests against a real MySQL-compatible server (MariaDB 10.11 in the
@@ -38,8 +38,11 @@ describe.skipIf(url === undefined)('mysql engine (real server)', () => {
   });
 
   it('opens the session read-only, which the server reports itself', async () => {
-    const result = await engine.run('select @@tx_read_only as ro');
-    expect(Number(result.rows[0]?.ro)).toBe(1);
+    await engine.run('select 1');
+    const session = engine.readOnlySession;
+    expect(session?.active).toBe(true);
+    // MySQL 8 renamed the variable MariaDB still uses; the engine probes.
+    expect(['transaction_read_only', 'tx_read_only']).toContain(session?.variable);
   });
 
   it('refuses a write before it reaches the server', async () => {
@@ -103,6 +106,30 @@ describe.skipIf(url === undefined)('mysql engine (real server)', () => {
     const temporary = await createMysqlEngine({ connectionString: url as string });
     await temporary.close();
     await expect(temporary.run('select 1')).rejects.toMatchObject({ code: 'NL2C_E_ENGINE_UNAVAILABLE' });
+  });
+});
+
+describe('server variable fallback', () => {
+  it('takes the first name the server accepts', async () => {
+    const seen: string[] = [];
+    const found = await firstSupported(['a', 'b'], async (name) => {
+      seen.push(name);
+      if (name === 'a') throw new Error('unknown variable');
+      return 1;
+    });
+    expect(found).toEqual({ name: 'b', value: 1 });
+    expect(seen).toEqual(['a', 'b']);
+  });
+
+  it('returns nothing when no name is accepted', async () => {
+    expect(await firstSupported(['a', 'b'], async () => { throw new Error('nope'); })).toBeUndefined();
+  });
+
+  it('stops at the first success', async () => {
+    let calls = 0;
+    const found = await firstSupported(['a', 'b'], async () => { calls += 1; return 0; });
+    expect(found?.name).toBe('a');
+    expect(calls).toBe(1);
   });
 });
 

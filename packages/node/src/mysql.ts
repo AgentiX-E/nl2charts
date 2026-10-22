@@ -2,6 +2,24 @@ import { toNl2ChartsError } from '@agentix-e/nl2charts-spec';
 import type { Engine, EngineResult } from '@agentix-e/nl2charts-core';
 import { describeConnector, requiresWrite } from './connectors.js';
 
+/**
+ * The first candidate name the server accepts. Version differences are a fact of
+ * life; this keeps the fallback out of the engine body and testable in isolation.
+ */
+export async function firstSupported<T>(
+  candidates: readonly string[],
+  probe: (name: string) => Promise<T>,
+): Promise<{ name: string; value: T } | undefined> {
+  for (const name of candidates) {
+    try {
+      return { name, value: await probe(name) };
+    } catch {
+      // An unknown name is a version fact, not a failure.
+    }
+  }
+  return undefined;
+}
+
 /** Message of anything thrown; drivers throw strings in a few edge cases. */
 export function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -42,7 +60,17 @@ interface MysqlConnection {
  * becomes a number only when no precision is lost, `TINYINT(1)` arrives as 1/0
  * already, and binary columns become `0x<hex>`.
  */
-export async function createMysqlEngine(options: MysqlOptions): Promise<Engine> {
+export interface MysqlEngine extends Engine {
+  /**
+   * Which server variable reports the session's read-only state, and what it
+   * said after the engine set it. MySQL 8 renamed the variable that MariaDB still
+   * uses, so the engine probes instead of assuming, and exposes the answer as
+   * evidence rather than hiding it in a log line.
+   */
+  readonly readOnlySession?: { readonly variable: string; readonly active: boolean };
+}
+
+export async function createMysqlEngine(options: MysqlOptions): Promise<MysqlEngine> {
   let mysql: { createConnection: (config: Record<string, unknown>) => Promise<MysqlConnection> };
   try {
     mysql = (await import('mysql2/promise')) as unknown as typeof mysql;
@@ -54,6 +82,16 @@ export async function createMysqlEngine(options: MysqlOptions): Promise<Engine> 
   let connection: MysqlConnection | undefined;
   let setupError: Error | undefined;
   let closed = false;
+  let readOnlySession: { variable: string; active: boolean } | undefined;
+
+  /** MySQL 8 has `transaction_read_only`; MariaDB 10.x still has `tx_read_only`. */
+  const probeReadOnly = async (client: MysqlConnection): Promise<void> => {
+    const found = await firstSupported(['transaction_read_only', 'tx_read_only'], async (variable) => {
+      const [rows] = await client.query(`select @@${variable} as ro`);
+      return Number((rows[0] as { ro: unknown }).ro);
+    });
+    if (found !== undefined) readOnlySession = { variable: found.name, active: found.value === 1 };
+  };
 
   /**
    * One connection, opened on first use. A pool would apply the read-only
@@ -73,7 +111,10 @@ export async function createMysqlEngine(options: MysqlOptions): Promise<Engine> 
         bigNumberStrings: true,
         multipleStatements: false,
       });
-      if (readOnly) await opened.query('SET SESSION TRANSACTION READ ONLY');
+      if (readOnly) {
+        await opened.query('SET SESSION TRANSACTION READ ONLY');
+        await probeReadOnly(opened);
+      }
       connection = opened;
       return opened;
     } catch (error) {
@@ -92,6 +133,9 @@ export async function createMysqlEngine(options: MysqlOptions): Promise<Engine> 
     id: 'mysql',
     dialect: 'mysql',
     streaming: false,
+    get readOnlySession() {
+      return readOnlySession;
+    },
     async run(sql: string, runOptions?: { signal?: AbortSignal }): Promise<EngineResult> {
       if (closed) throw toNl2ChartsError('NL2C_E_ENGINE_UNAVAILABLE', 'engine is closed');
       if (runOptions?.signal?.aborted) throw toNl2ChartsError('NL2C_E_TIMEOUT', 'query aborted before execution');
