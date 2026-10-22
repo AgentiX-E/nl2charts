@@ -30,8 +30,8 @@ cannot be argued with.
 ### Measured
 
 - BIRD Mini-Dev, n=239: 32.6% (names) → 42.7% (definitions attached to columns) →
-  56.9% (plus the dataset's per-question hint); 58.2% for curated metadata plus the
-  same hint.
+  55.2–56.9% (plus the dataset's per-question hint); 58.2% for curated metadata plus
+  the same hint. The floors are enforced in CI (`pnpm gate:bird`).
 - Placement is worth +6.7 to +10.5pp across four runs; content, authorship,
   coverage, question-restating and three-sample voting each moved nothing beyond
   noise.

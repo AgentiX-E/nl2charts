@@ -1,5 +1,5 @@
 {
-  "note": "Floor per arm, in execution accuracy percent, taken as the minimum observed across the last four runs (G 9120c2b, H d5927b0, I 700529b, J 4ad0181). A rerun may land below it by tolerancePp before the gate fails, because ADR-166 measured that anything inside 4pp cannot be separated from sampling noise at n=239.",
+  "note": "Floor per arm, in execution accuracy percent, taken as the minimum observed across the recent runs (G 9120c2b, H d5927b0, I 700529b, J 4ad0181, and the 1.0.0 run 39762058351). A rerun may land below it by tolerancePp before the gate fails, because ADR-166 measured that anything inside 4pp cannot be separated from sampling noise at n=239. `vote` was added after it appeared in the default arm set and was measured twice.",
   "dataset": "BIRD Mini-Dev",
   "scored": 239,
   "tolerancePp": 4,
@@ -8,6 +8,7 @@
     "synth-definitions": 33.1,
     "inline-definitions": 41.8,
     "inline+evidence": 52.3,
-    "metadata+evidence": 56.1
+    "metadata+evidence": 56.1,
+    "vote": 55.6
   }
 }
