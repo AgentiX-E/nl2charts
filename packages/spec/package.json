@@ -1,6 +1,6 @@
 {
   "name": "@agentix-e/nl2charts-spec",
-  "version": "0.4.0",
+  "version": "1.0.0",
   "description": "Contract types and schemas shared by every nl2charts package.",
   "license": "Apache-2.0",
   "type": "module",

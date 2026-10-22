@@ -70,7 +70,9 @@ function selfTest() {
   try {
     writeFileSync(planted, `const token = '${['github', 'pat', '11AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'].join('_')}';\n`);
     writeFileSync(clean, "const key = process.env.DEEPSEEK_API_KEY;\nconst doc = 'sk- is the prefix';\n");
-    writeFileSync(config, 'DEEPSEEK_API_KEY="abcdef1234567890"\n');
+    // Assembled, not written literally: this file is tracked, and a scanner that
+    // cannot scan its own source is a scanner nobody runs.
+    writeFileSync(config, `${['DEEPSEEK', 'API_KEY'].join('_')}="abcdef1234567890"\n`);
 
     if (scanFiles([planted]).length !== 1) issues.push('SEC1 has no self-test: a planted token was not caught');
     if (scanFiles([clean]).length !== 0) issues.push('SEC1 rejects an environment reference, which is the correct way to pass a key');

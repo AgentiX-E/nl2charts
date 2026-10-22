@@ -1,0 +1,61 @@
+# Changelog
+
+The eight packages share one version. Each entry records what changed and what was
+measured, because a release note that only lists features is a release note that
+cannot be argued with.
+
+## 1.0.0
+
+### Added
+
+- **Semantic layer**: `MetricQuery → DataflowPlan → Optimize → SqlPlan → Render`,
+  five metric kinds (simple, ratio, derived, cumulative, conversion), grain-first
+  aggregation.
+- **Three engines with integration tests**: DuckDB, SQLite, PostgreSQL 16 and
+  MySQL 8.4 (the last two in CI service containers). Read-only is enforced twice —
+  a lexical guard before the statement leaves the process, and a read-only session
+  that catches what the guard cannot see.
+- **Chart compilation for all 22 core ECharts series**, each with a declared
+  contract (`describeMark`) and a committed structural baseline; a mark that cannot
+  be drawn emits no series instead of throwing inside the renderer.
+- **MCP surface that speaks metrics**: `query_metric` and `explain_metric` beside
+  `run_sql` and `engine_info`.
+- **Trace sealing**: hash-chained events, three distinct failure verdicts, replay
+  without reading a clock, and an injectable signer for callers who need an HMAC.
+- **Six runbooks** with drills, and a runtime leak audit driven by a canary
+  password.
+- **Gates**: coverage (95% on four dimensions per package), layering, public API
+  snapshot, bundle budgets, credential scan, and a benchmark floor.
+
+### Measured
+
+- BIRD Mini-Dev, n=239: 32.6% (names) → 42.7% (definitions attached to columns) →
+  56.9% (plus the dataset's per-question hint); 58.2% for curated metadata plus the
+  same hint.
+- Placement is worth +6.7 to +10.5pp across four runs; content, authorship,
+  coverage, question-restating and three-sample voting each moved nothing beyond
+  noise.
+- Adversarial shapes: 81.2%, with full column metadata costing 6–9pp there.
+
+### Not claimed
+
+- No SOTA claim: one model, one sample per case, 239 of 500 questions.
+- 22 of the 37 designed chart configurations; the rest need GL or extension
+  modules that cannot be rendered head-lessly.
+- Studio ships a view model, not a UI.
+
+## 0.4.0
+
+- Compiler, two engines, first benchmark harness, coverage and budget gates.
+
+## 0.3.0
+
+- Chart compiler, lint rules, candidate ranking.
+
+## 0.2.0
+
+- Runner, guard, normalization, span events.
+
+## 0.1.0
+
+- Contract package: ChartIR, MetricQuery, provenance, error codes.

@@ -1,6 +1,6 @@
 {
   "name": "@agentix-e/nl2charts-studio",
-  "version": "0.4.0",
+  "version": "1.0.0",
   "description": "Model validation core for the semantic layer editor. Deliberately UI-free.",
   "license": "Apache-2.0",
   "type": "module",
