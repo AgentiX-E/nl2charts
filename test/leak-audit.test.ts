@@ -98,8 +98,12 @@ describe('connection strings never reach a message', () => {
       .then(() => undefined)
       .catch((cause: unknown) => cause as Error & { code?: string });
     expect(failure?.code).toBe('NL2C_E_ENGINE_FAILED');
+    // The password has to be checked in its URL position (`:pw@`), not as a bare
+    // substring: CI's own password is `postgres`, which also names the engine, so
+    // a substring check would pass or fail for the wrong reason.
     const password = /:\/\/([^:]+):([^@]+)@/.exec(POSTGRES as string)?.[2];
-    if (password !== undefined) expect(failure?.message).not.toContain(password);
+    if (password !== undefined) expect(failure?.message).not.toContain(`:${password}@`);
+    expect(failure?.message).not.toContain(POSTGRES as string);
     await engine.close();
   });
 
@@ -111,7 +115,21 @@ describe('connection strings never reach a message', () => {
       .catch((cause: unknown) => cause as Error & { code?: string });
     expect(failure?.code).toBe('NL2C_E_ENGINE_FAILED');
     const password = /:\/\/([^:]+):([^@]+)@/.exec(MYSQL as string)?.[2];
-    if (password !== undefined) expect(failure?.message).not.toContain(password);
+    if (password !== undefined) expect(failure?.message).not.toContain(`:${password}@`);
+    expect(failure?.message).not.toContain(MYSQL as string);
+    await engine.close();
+  });
+
+  it('redacts a password that also happens to be the engine name', async () => {
+    // CI caught this: `postgres://postgres:postgres@…` makes a substring check
+    // meaningless, so the assertion is about the URL position instead.
+    const engine = await createPostgresEngine({ connectionString: 'postgres://postgres:postgres@127.0.0.1:1/none' });
+    const failure = await engine
+      .run('select 1')
+      .then(() => undefined)
+      .catch((cause: unknown) => cause as Error);
+    expect(failure?.message).toContain('***@');
+    expect(failure?.message).not.toContain(':postgres@');
     await engine.close();
   });
 
