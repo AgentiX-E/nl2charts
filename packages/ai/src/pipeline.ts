@@ -22,6 +22,13 @@ export interface PromptOptions extends SchemaCardOptions {
    * and which of the two a model takes is a measured question, not an assumption.
    */
   readonly demonstrations?: string;
+  /**
+   * Column values this question names, resolved against the database under test.
+   *
+   * Distinct from `evidence`, which is the dataset's hint: this block is derived from
+   * the data, so it is available on a database nobody documented.
+   */
+  readonly values?: string;
   /** Maximum schema-card lines. Large schemas need more than the default 40. */
   readonly schemaLines?: number;
   /** Extra rule lines for a question shape, appended after the base rules. */
@@ -134,6 +141,9 @@ export function buildSqlPrompt(
   }
   if (resolved.interpretation !== undefined && resolved.interpretation.trim().length > 0) {
     context.push(`Interpretation: ${resolved.interpretation.trim()}`);
+  }
+  if (resolved.values !== undefined && resolved.values.trim().length > 0) {
+    context.push(['Values in this database named by the question:', resolved.values.trim()].join('\n'));
   }
   if (resolved.demonstrations !== undefined && resolved.demonstrations.trim().length > 0) {
     context.push(

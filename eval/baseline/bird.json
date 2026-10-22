@@ -11,6 +11,8 @@
     "inline+retrieval",
     "inline+icl",
     "vote",
+    "select",
+    "values",
     "metadata+evidence"
   ],
   "floors": {

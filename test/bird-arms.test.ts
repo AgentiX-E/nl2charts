@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { buildSqlPrompt } from '@agentix-e/nl2charts-ai';
 import { ARMS, DEFAULT_ARMS, ON_DEMAND_ARMS, PAIRS, parseLimit, promptFor } from '../eval/bird/run.js';
 import type { Arm } from '../eval/bird/run.js';
 import type { BirdQuestion } from '../eval/bird/data.js';
@@ -11,7 +12,7 @@ import type { BirdQuestion } from '../eval/bird/data.js';
  * delta cannot be attributed to anything else. A future edit that adds a second
  * change to a pair turns this red before it turns the benchmark unreadable.
  */
-const LEVERS = ['notes', 'evidence', 'repairs', 'linking', 'profile', 'definitions', 'focus', 'interpret', 'vote', 'demonstrations'] as const;
+const LEVERS = ['notes', 'evidence', 'repairs', 'linking', 'profile', 'definitions', 'focus', 'interpret', 'vote', 'demonstrations', 'select', 'values'] as const;
 
 function changedLevers(left: Arm, right: Arm): string[] {
   return LEVERS.filter((lever) => left[lever] !== right[lever]);
@@ -51,16 +52,16 @@ describe('ablation arms', () => {
 
   it('shows semantics only to the arms that carry them', () => {
     const definitions = '- orders.customer_id: foreign key to customers.customer_id.';
-    const withSemantics = promptFor(ARMS.find((arm) => arm.name === 'definitions') as Arm, question, undefined, definitions);
-    const without = promptFor(ARMS.find((arm) => arm.name === 'names') as Arm, question, undefined, definitions);
+    const withSemantics = promptFor(ARMS.find((arm) => arm.name === 'definitions') as Arm, question, { definitions });
+    const without = promptFor(ARMS.find((arm) => arm.name === 'names') as Arm, question, { definitions });
     expect(withSemantics.definitions).toBe(definitions);
     expect(without.definitions).toBeUndefined();
   });
 
   it('keeps the dataset hint out of a synthesized arm', () => {
-    const synthetic = promptFor(ARMS.find((arm) => arm.name === 'synthetic') as Arm, question, 'Data profile: 3 values');
+    const synthetic = promptFor(ARMS.find((arm) => arm.name === 'synthetic') as Arm, question, { synthesized: 'Data profile: 3 values' });
     expect(synthetic.evidence).toBe('Data profile: 3 values');
-    expect(promptFor(ARMS.find((arm) => arm.name === 'names') as Arm, question, 'Data profile: 3 values').evidence).toBeUndefined();
+    expect(promptFor(ARMS.find((arm) => arm.name === 'names') as Arm, question, { synthesized: 'Data profile: 3 values' }).evidence).toBeUndefined();
   });
 
   it('treats the two hint sources as alternatives on one lever', () => {
@@ -73,13 +74,13 @@ describe('ablation arms', () => {
 
   it('drops an empty semantics block instead of leaving a heading', () => {
     const arm = ARMS.find((entry) => entry.name === 'definitions') as Arm;
-    expect(promptFor(arm, question, undefined, '').definitions).toBeUndefined();
-    expect(promptFor(arm, question, undefined, undefined).definitions).toBeUndefined();
+    expect(promptFor(arm, question, { definitions: '' }).definitions).toBeUndefined();
+    expect(promptFor(arm, question, {}).definitions).toBeUndefined();
   });
 
   it('carries the dataset hint on the evidence arm even with semantics present', () => {
     const arm = ARMS.find((entry) => entry.name === 'definitions+evidence') as Arm;
-    const prompt = promptFor(arm, question, undefined, '- orders: one row per order.');
+    const prompt = promptFor(arm, question, { definitions: '- orders: one row per order.' });
     expect(prompt.definitions).toBe('- orders: one row per order.');
     expect(prompt.evidence).toBe(question.evidence);
   });
@@ -110,8 +111,22 @@ describe('the chain that actually runs', () => {
     const demonstrations = 'Question: How many rows?\nSQL: SELECT COUNT(*) FROM t';
     const viaIcl = ARMS.find((arm) => arm.name === 'inline+icl') as Arm;
     const viaText = ARMS.find((arm) => arm.name === 'inline+retrieval') as Arm;
-    expect(promptFor(viaIcl, question, undefined, undefined, 'hint', demonstrations).demonstrations).toBe(demonstrations);
-    expect(promptFor(viaText, question, undefined, undefined, 'hint', demonstrations).demonstrations).toBeUndefined();
+    expect(promptFor(viaIcl, question, { retrieved: 'hint', demonstrations }).demonstrations).toBe(demonstrations);
+    expect(promptFor(viaText, question, { retrieved: 'hint', demonstrations }).demonstrations).toBeUndefined();
+  });
+
+  it('sends the block it measures, through the same builder', () => {
+    // The bug this prevents: the prompt *size* was computed with the retrieved block
+    // and the request was built without it, so an arm that never saw its input was
+    // published as evidence that the input does not help.
+    const retrieval = ARMS.find((arm) => arm.name === 'inline+retrieval') as Arm;
+    const options = promptFor(retrieval, question, { retrieved: 'a retrieved neighbour' });
+    expect(buildSqlPrompt(question.question, [], options)).toContain('Evidence: a retrieved neighbour');
+
+    const values = ARMS.find((arm) => arm.name === 'values') as Arm;
+    expect(buildSqlPrompt(question.question, [], promptFor(values, question, { values: '- t.c stores \'x\'' }))).toContain(
+      'Values in this database named by the question:',
+    );
   });
 
   it('states a reason for every arm it defers', () => {

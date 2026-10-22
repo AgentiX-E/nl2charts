@@ -378,31 +378,32 @@ above — a demonstration from another schema is a shape to imitate and an ident
 to avoid, and which one a model takes is the measurement. DAIL-SQL masks
 schema-specific tokens instead; masking is a candidate lever once this one is known.
 
-### A lever with no input is not a result
+### Two ways an arm can be empty, and neither looks like a bug
 
-Run `39784843750` added `inline+retrieval` to the chain and printed **44.4%**
-against its parent's 43.6%: +0.8pp, one case gained and five lost, p=0.22. The
-tempting reading is "retrieval from the training split does not transfer". It is
-wrong, and the artifact says so:
+The retrieval arms have now been measured three times and have not yet been
+measured once. The failures are worth recording, because each produced a number
+that read like a finding.
 
-| Evidence | Value |
-| --- | --- |
-| `selection.retrievalCorpus` | **0** rows |
-| prompt characters, `inline+retrieval` | 2,471 |
-| prompt characters, `inline-definitions` | 2,471 |
+| Run | What was wrong | What the table showed |
+| --- | --- | --- |
+| `39784843750` | the training corpus was never downloaded (`retrievalCorpus: 0`) | `inline+retrieval` 44.4% vs parent 43.6% |
+| `39790152728` | corpus present, but the **live prompt** was built by a different call site than the **measured prompt**, so the block reached the size metric and not the request | 44.0% vs 43.6%, and `inline+icl` −0.6pp against it |
+| this run | one builder feeds both call sites; the arm chooses which blocks it uses | — |
 
-The corpus was never downloaded in CI, so the arm's block was empty and it scored
-as its parent under a different name. The near-equality was the absence of a
-lever, not a measurement of one.
+The second one is the subtle one: `promptFor` took six optional positional
+arguments, the size measurement passed all of them and the request passed two. A
+prompt whose measured length and delivered content disagree is indistinguishable
+from a model that ignored the block. The fix is structural rather than a sixth
+argument: `promptFor(arm, question, blocks)` receives everything available and the
+arm decides, so there is no call site that can forget a lever, and a test asserts
+that the block the arm is supposed to use appears in the prompt that would be sent.
 
-Three changes, so this cannot recur silently:
+Three guards now exist, each at a different level:
 
-1. `pnpm bench:bird:fetch:train` downloads `train.zip` once, extracts the 4.2 MB
-   `train.json` and deletes the 8.5 GB archive; CI caches the extracted file.
-2. The runner **throws** when an arm needs a block whose input is missing, instead
-   of running the parent's prompt under the child's name.
-3. The gate fails when `inline+retrieval` or `inline+icl` report an empty block, so
-   an arm that did not get its input fails the build rather than entering a table.
+1. the runner **throws** when an arm needs a block whose input is missing;
+2. the artifact records `retrievedBlocks`, `demonstrationBlocks` and `valueMatches`,
+   so an empty lever is visible in the numbers, not only in the log;
+3. the gate fails when one of those is zero for an arm the baseline expects.
 
 ## What these numbers are not
 

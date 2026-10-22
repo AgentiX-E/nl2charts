@@ -70,7 +70,7 @@ async function main() {
 
   const runs = await pool(cases, CONCURRENCY, async (question) => {
     const schema = schemas.get(question.db_id) as SchemaTable[];
-    const pipeline = createPipeline({ provider, maxRepairs: ARM.repairs, linking: ARM.linking, prompt: promptFor(ARM, question, undefined, definitions.get(question.db_id)) });
+    const pipeline = createPipeline({ provider, maxRepairs: ARM.repairs, linking: ARM.linking, prompt: promptFor(ARM, question, { ...(definitions.get(question.db_id) === undefined ? {} : { definitions: definitions.get(question.db_id) }) }) });
     const passes: boolean[] = [];
     for (let attempt = 0; attempt < REPEATS; attempt += 1) {
       try {

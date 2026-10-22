@@ -22,7 +22,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHttpProvider } from '@agentix-e/nl2charts-ai';
 import type { PromptOptions, SchemaTable } from '@agentix-e/nl2charts-ai';
-import { attachDefinitions, buildSqlPrompt, choosePromptProfile, createPipeline, renderDefinitions, renderEvidence, renderSchemaCard } from '@agentix-e/nl2charts-ai';
+import { applySelection, attachDefinitions, buildSelectionPrompt, buildSqlPrompt, choosePromptProfile, createPipeline, renderDefinitions, renderEvidence, renderSchemaCard } from '@agentix-e/nl2charts-ai';
 import { compareArms, judgeOfficial, judgeStrict, majorityResult, mcnemarExact, summarise, wilsonInterval } from '@agentix-e/nl2charts-devkit';
 import type { CaseOutcome, MatchReason } from '@agentix-e/nl2charts-devkit';
 import { buildSchema, loadDescriptions, loadQuestions, loadTables, stratifiedSample } from './data.js';
@@ -31,6 +31,7 @@ import { createOracle } from './oracle.js';
 import type { OracleResult } from './oracle.js';
 import { profileDatabase } from './profile.js';
 import { buildIndex, renderDemonstrations, renderRetrieved, retrieve } from './retrieval.js';
+import { buildValueIndex, findValues, renderValues } from './values.js';
 import { synthesizeDefinitions } from './synthesize.js';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
@@ -104,6 +105,16 @@ export interface Arm {
    * switch away from `inline+retrieval`, which supplies the same neighbours as text.
    */
   readonly demonstrations?: boolean;
+  /**
+   * Who chooses among the samples: the modal executed result (default) or the model
+   * reading the candidates. Same samples, same count — one lever.
+   */
+  readonly select?: boolean;
+  /**
+   * Column values the question names, resolved against the database under test.
+   * The instance-specific counterpart to retrieved knowledge, which is generic.
+   */
+  readonly values?: boolean;
 }
 
 /**
@@ -141,6 +152,14 @@ export const ARMS: readonly Arm[] = [
   // Self-consistency over executed answers: no external knowledge, pure variance
   // reduction. Three samples at temperature 0.7, modal result set wins.
   { name: 'vote', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3 },
+  // The same three samples, chosen by the model instead of counted: CHASE-SQL's
+  // selection agent, without its fine-tuned weights, so the comparison prices the
+  // idea rather than their training run.
+  { name: 'select', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true },
+  // The same inline arm plus the literals the question names, resolved against this
+  // database. CHASE-SQL's first pipeline stage; here it is one lever from
+  // `inline+evidence`, so the delta prices value grounding, not the hint.
+  { name: 'values', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', values: true },
   { name: 'definitions+evidence', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'structural' },
   { name: 'synth-definitions+evidence', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'synthesized' },
   { name: 'metadata', notes: true, repairs: 0, linking: true },
@@ -175,6 +194,8 @@ export const DEFAULT_ARMS: readonly string[] = [
   'inline+retrieval',
   'inline+icl',
   'vote',
+  'select',
+  'values',
   'metadata+evidence',
 ];
 
@@ -206,6 +227,8 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   ['inline+retrieval', 'inline+icl'],
   ['inline-definitions', 'interpret'],
   ['inline+evidence', 'vote'],
+  ['vote', 'select'],
+  ['inline+evidence', 'values'],
   ['definitions', 'definitions+evidence'],
   ['synth-definitions', 'synth-definitions+evidence'],
   ['names', 'metadata'],
@@ -220,6 +243,8 @@ interface CaseRun extends CaseOutcome {
   readonly strict: boolean;
   /** Share of samples that agreed with the answer the arm returned. */
   readonly agreement?: number;
+  /** True when the selector returned a usable index; absent for the modal arm. */
+  readonly selectedByModel?: boolean;
   readonly error?: string;
   readonly errorKind?: 'execution' | 'guard' | 'llm' | 'other';
   readonly attempts: number;
@@ -284,14 +309,30 @@ export async function pool<T, R>(items: readonly T[], limit: number, worker: (it
   return results;
 }
 
-export function promptFor(
-  arm: Arm,
-  question: BirdQuestion,
-  synthesized?: string,
-  definitions?: string,
-  retrieved?: string,
-  demonstrations?: string,
-): PromptOptions {
+/** Every block an arm could use. Callers supply what they have; the arm decides. */
+export interface PromptBlocks {
+  /** Synthesized hint (data profile rendered as text). */
+  readonly synthesized?: string;
+  readonly definitions?: string;
+  /** Retrieved neighbours as text, without statements. */
+  readonly retrieved?: string;
+  /** Retrieved neighbours as worked examples, statements included. */
+  readonly demonstrations?: string;
+  /** Values from this database that the question names. */
+  readonly values?: string;
+}
+
+/**
+ * Render an arm's prompt options.
+ *
+ * The arm chooses which blocks it uses, and the caller only says what is available.
+ * That shape exists because the previous one — six optional positional arguments —
+ * let the live prompt and the prompt-size measurement diverge: the size was computed
+ * with the retrieved block, the request was sent without it, and the arm's accuracy
+ * was then read as evidence that retrieval does not help.
+ */
+export function promptFor(arm: Arm, question: BirdQuestion, blocks: PromptBlocks = {}): PromptOptions {
+  const { synthesized, definitions, retrieved, demonstrations, values } = blocks;
   const profile = arm.profile === 'adaptive' ? choosePromptProfile(question.question) : undefined;
   const evidence =
     arm.evidence === 'dataset'
@@ -317,6 +358,7 @@ export function promptFor(
     ...(arm.demonstrations === true && demonstrations !== undefined && demonstrations.length > 0
       ? { demonstrations }
       : {}),
+    ...(arm.values === true && values !== undefined && values.length > 0 ? { values } : {}),
   };
 }
 
@@ -413,6 +455,18 @@ async function main() {
     }
   }
 
+  // Value grounding: the literals the question names, looked up in this database.
+  const valueIndexes = new Map<string, ReturnType<typeof buildValueIndex>>();
+  for (const [db, profile] of profiles) valueIndexes.set(db, buildValueIndex(profile));
+  const valuesByQuestion = new Map<number, string>();
+  for (const question of selected) {
+    const index = valueIndexes.get(question.db_id);
+    if (index === undefined) continue;
+    const text = renderValues(findValues(index, question.question));
+    if (text.length > 0) valuesByQuestion.set(question.question_id, text);
+  }
+  const valuesFor = (question: BirdQuestion): string | undefined => valuesByQuestion.get(question.question_id);
+
   /**
    * Evidence text for one case. The focused arm re-renders the same profile with
    * the question's words, so the two arms differ only in line order — not in
@@ -424,6 +478,18 @@ async function main() {
     if (profile === undefined) return undefined;
     return arm.focus === true ? renderEvidence(profile, { focus: question.question }) : synthesized.get(question.db_id);
   };
+
+  /**
+   * What this arm's prompt may use. One builder for every call site, so the prompt
+   * that is measured and the prompt that is sent cannot disagree.
+   */
+  const blocksFor = (arm: Arm, question: BirdQuestion): PromptBlocks => ({
+    ...(evidenceFor(arm, question) === undefined ? {} : { synthesized: evidenceFor(arm, question) }),
+    ...(definitionsFor(arm, question.db_id) === undefined ? {} : { definitions: definitionsFor(arm, question.db_id) }),
+    ...(retrievedFor(question) === undefined ? {} : { retrieved: retrievedFor(question) }),
+    ...(demonstrationsFor(question) === undefined ? {} : { demonstrations: demonstrationsFor(question) }),
+    ...(valuesFor(question) === undefined ? {} : { values: valuesFor(question) }),
+  });
 
   // Structural semantics per database. Kept separate from the value profile:
   // one block says what a column means, the other says what it contains.
@@ -572,9 +638,6 @@ async function main() {
       available: questions.length,
       requested: config.limit,
       split: SPLIT,
-      retrievalCorpus: retrievalIndex === undefined ? 0 : retrievalIndex.rows.length,
-      retrievedBlocks: retrievedByQuestion.size,
-      demonstrationBlocks: demonstrationsByQuestion.size,
       scored: cases.length,
       strategy: 'stratified by difficulty, then question id',
     },
@@ -586,6 +649,12 @@ async function main() {
     },
     controls: {
       selfConsistency: selfConsistent / cases.length,
+      // Corpus and block counts live here, not under `selection`: they are inputs to
+      // an arm, and the gate reads them to tell a null result from an empty lever.
+      retrievalCorpus: retrievalIndex === undefined ? 0 : retrievalIndex.rows.length,
+      retrievedBlocks: retrievedByQuestion.size,
+      demonstrationBlocks: demonstrationsByQuestion.size,
+      valueMatches: valuesByQuestion.size,
       negativeChecked,
       negativeFalseMatches,
       emptyGoldExcluded: emptyGold,
@@ -645,7 +714,7 @@ async function main() {
             definitionsPrompt: buildSqlPrompt(
               question.question,
               schemas.get(question.db_id) as SchemaTable[],
-              promptFor(ARMS[1] as Arm, question, undefined, definitionsFor(ARMS[1] as Arm, question.db_id)),
+              promptFor(ARMS[1] as Arm, question, blocksFor(ARMS[1] as Arm, question)),
             ),
           }),
     }));
@@ -673,7 +742,7 @@ async function main() {
         linking: arm.linking,
         interpret: arm.interpret === true,
         temperature: arm.vote === undefined ? 0 : 0.7,
-        prompt: promptFor(arm, question, evidenceFor(arm, question), definitions.get(question.db_id)),
+        prompt: promptFor(arm, question, blocksFor(arm, question)),
         ...(arm.repairs === 0
           ? {}
           : {
@@ -708,7 +777,29 @@ async function main() {
           };
         }
         const majority = majorityResult(candidates, (left, right) => judgeOfficial(left.rows, right.rows) === 'match');
-        const winner = majority.winner as { sql: string; rows: readonly (readonly unknown[])[] };
+        let winner = majority.winner as { sql: string; rows: readonly (readonly unknown[])[] };
+        let selectedByModel: boolean | undefined;
+        if (arm.select === true) {
+          // The model sees what the vote cannot: the shape of each result. A statement
+          // that answers a "how many" with 500 rows is wrong for a reason no majority
+          // of identical mistakes will reveal.
+          const offered = candidates.map((candidate) => ({
+            sql: candidate.sql,
+            rows: candidate.rows.length,
+            columns: candidate.rows[0]?.length ?? 0,
+            preview: JSON.stringify(candidate.rows.slice(0, 3)).slice(0, 300),
+          }));
+          const reply = await provider.complete({
+            messages: [
+              { role: 'system', content: buildSelectionPrompt(question.question, offered) },
+              { role: 'user', content: question.question },
+            ],
+            temperature: 0,
+          });
+          const decision = applySelection(reply.text, offered);
+          winner = candidates[decision.index] as typeof winner;
+          selectedByModel = decision.decided;
+        }
         const reason = judgeOfficial(expected.rows, winner.rows);
         return {
           id: String(question.question_id),
@@ -718,6 +809,7 @@ async function main() {
           strict: judgeStrict(expected.rows, winner.rows) === 'match',
           attempts: candidates.length,
           agreement: majority.agreement,
+          ...(selectedByModel === undefined ? {} : { selectedByModel }),
         };
       }
       try {
@@ -777,14 +869,7 @@ async function main() {
         buildSqlPrompt(
           question.question,
           schemaFor(arm, question.db_id),
-          promptFor(
-            arm,
-            question,
-            evidenceFor(arm, question),
-            definitionsFor(arm, question.db_id),
-            retrievedFor(question),
-            demonstrationsFor(question),
-          ),
+          promptFor(arm, question, blocksFor(arm, question)),
         ).length,
     );
     const kindOf = (run: CaseRun): string | undefined => run.errorKind ?? (run.error === undefined ? undefined : 'other');
@@ -817,6 +902,15 @@ async function main() {
         : {
             vote: arm.vote,
             agreement: runs.reduce((total, run) => total + (run.agreement ?? 0), 0) / Math.max(1, runs.filter((run) => run.agreement !== undefined).length),
+            selector: arm.select === true ? 'model' : 'majority',
+            // How often the selector produced a usable index. A selector that fails to
+            // answer half the time is not a null result; it is a broken prompt.
+            ...(arm.select === true
+              ? {
+                  selectorDecided: runs.filter((run) => run.selectedByModel === true).length,
+                  selectorTotal: runs.filter((run) => run.selectedByModel !== undefined).length,
+                }
+              : {}),
           }),
       promptChars: {
         mean: Math.round(promptSizes.reduce((total, size) => total + size, 0) / Math.max(1, promptSizes.length)),

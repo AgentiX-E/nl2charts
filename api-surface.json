@@ -153,9 +153,11 @@
     "SchemaCardOptions",
     "SchemaColumn",
     "SchemaTable",
+    "applySelection",
     "attachDefinitions",
     "buildDefinitionPrompt",
     "buildInterpretationPrompt",
+    "buildSelectionPrompt",
     "buildSqlPrompt",
     "choosePromptProfile",
     "classifyColumn",
@@ -166,6 +168,7 @@
     "linkSchema",
     "parseDefinitions",
     "parseInterpretation",
+    "parseSelection",
     "recordProvider",
     "renderDefinitions",
     "renderEvidence",
@@ -176,6 +179,7 @@
     "type AskRequest",
     "type AskResult",
     "type AttachResult",
+    "type Candidate",
     "type ColumnProfile",
     "type ColumnRole",
     "type DatabaseProfile",
@@ -188,7 +192,8 @@
     "type PromptOptions",
     "type PromptProfile",
     "type RecordedCall",
-    "type ReplayFixture"
+    "type ReplayFixture",
+    "type SelectionDecision"
   ],
   "ai/linking": [
     "linkSchema",

@@ -25,9 +25,17 @@ cannot be argued with.
 - **A gate that notices a lever with no input**: `inline+retrieval` scored 44.4% with
   `retrievalCorpus` at 0 — it was its parent arm renamed, not a null result. The
   runner now throws when a block's input is missing, the gate fails on an empty
-  block, and CI fetches the 4.2 MB training corpus it had never downloaded.
+  block, and CI fetches the 4.2 MB training corpus it had never downloaded. A second
+  path had the same symptom: `promptFor`'s positional arguments let the measured
+  prompt and the sent prompt diverge, so the block reached the size metric only.
+  Prompts are now built through one function that the arm drives.
 - **`inline+icl`**: the same retrieved neighbours as worked examples, statements
   included, one lever from `inline+retrieval`.
+- **`values`**: the literals a question names, resolved against the database under
+  test — CHASE-SQL's value retrieval without an embedding index, one lever from
+  `inline+evidence`.
+- **`select`**: three samples chosen by the model instead of counted, one lever from
+  `vote`.
 - **A gate that notices a declared arm never running**: the baseline now lists the
   arms it expects, so an arm that is wired but missing from the run fails the build.
   `inline+retrieval` was such an arm for one release.

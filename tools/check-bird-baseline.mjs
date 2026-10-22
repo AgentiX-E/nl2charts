@@ -58,6 +58,9 @@ export function compare(report, baseline) {
   if (baseline.expectedArms.includes('inline+icl') && (controls.demonstrationBlocks ?? 0) === 0) {
     issues.push('BIRD1: inline+icl ran with no demonstration block; the corpus is missing, so the arm is its parent renamed');
   }
+  if (baseline.expectedArms.includes('values') && (controls.valueMatches ?? 0) === 0) {
+    issues.push('BIRD1: values ran with no matched value; the profile is missing, so the arm is its parent renamed');
+  }
 
   const floors = baseline.floors?.[split];
   if (floors === undefined) {

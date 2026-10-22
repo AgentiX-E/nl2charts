@@ -10,4 +10,6 @@ export { linkSchema, renderName, renderSchemaCard, tokenizeQuestion } from './li
 export type { LinkedColumn, Recaller, SchemaCardOptions, SchemaColumn, SchemaTable } from './linking.js';
 export { buildSqlPrompt, choosePromptProfile, createPipeline, extractSql } from './pipeline.js';
 export { buildInterpretationPrompt, parseInterpretation } from './interpret.js';
+export { applySelection, buildSelectionPrompt, parseSelection } from './select.js';
+export type { Candidate, SelectionDecision } from './select.js';
 export type { AskRequest, AskResult, PipelineOptions, PromptOptions, PromptProfile } from './pipeline.js';
