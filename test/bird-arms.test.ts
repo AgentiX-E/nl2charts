@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { buildSqlPrompt } from '@agentix-e/nl2charts-ai';
-import { ARMS, DEFAULT_ARMS, ON_DEMAND_ARMS, PAIRS, parseArms, parseLimit, promptFor, resolveArm } from '../eval/bird/run.js';
+import { ARMS, DEFAULT_ARMS, ON_DEMAND_ARMS, PAIRS, assertUniqueArmLabels, parseArms, parseLimit, promptFor, resolveArm } from '../eval/bird/run.js';
 import type { Arm } from '../eval/bird/run.js';
 import type { BirdQuestion } from '../eval/bird/data.js';
 
@@ -151,6 +151,11 @@ describe('the chain that actually runs', () => {
 });
 
 describe('A/A pairs', () => {
+  it('refuses a report where two arms share a label', () => {
+    expect(() => assertUniqueArmLabels(['names', 'inline+evidence', 'inline+evidence'])).toThrow(/#2 name/);
+    expect(() => assertUniqueArmLabels(['names', 'inline+evidence', 'inline+evidence#2'])).not.toThrow();
+  });
+
   it('appends the duplicate under a distinct name', () => {
     const arms = parseArms(undefined, 'inline+evidence', DEFAULT_ARMS);
     expect(arms).toEqual([...DEFAULT_ARMS, 'inline+evidence#2']);

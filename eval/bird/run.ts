@@ -280,6 +280,21 @@ export function resolveArm(name: string): Arm | undefined {
  * mode: a duplicate that resolves to the same label as its original cannot be told
  * apart in the report.
  */
+/**
+ * Every arm must keep its own row in the report.
+ *
+ * An A/A duplicate resolves to the same Arm; if the report labelled rows by the
+ * resolved name, the duplicate would sit in the table under the label of the arm it
+ * duplicates, and a reader would see two identical arms and one missing control.
+ */
+export function assertUniqueArmLabels(labels: readonly string[]): void {
+  const seen = new Set<string>();
+  for (const label of labels) {
+    if (seen.has(label)) throw new Error(`arm labels are not unique (${labels.join(', ')}); an A/A duplicate must keep its #2 name`);
+    seen.add(label);
+  }
+}
+
 export function parseArms(requested: string | undefined, aa: string | undefined, defaults: readonly string[]): string[] {
   const names = (requested ?? defaults.join(',')).split(',').map((name) => name.trim()).filter(Boolean);
   const trimmed = aa?.trim() ?? '';
@@ -987,10 +1002,8 @@ async function main() {
 
   // Every arm must keep its own row: two rows with the same label would let a
   // duplicate stand in for the arm it duplicates.
-  const labels = (report.arms as { arm: string }[]).map((entry) => entry.arm);
-  if (new Set(labels).size !== labels.length) {
-    throw new Error(`arm labels are not unique (${labels.join(', ')}); an A/A duplicate must keep its #2 name`);
-  }
+  // `report.arms` is assigned further down, so the guard reads the list it is about.
+  assertUniqueArmLabels((armReports as { arm: string }[]).map((entry) => entry.arm));
 
   // The A/A pair, when one ran: same arm, same data, same prompt — twice.
   const aaPair = config.arms.find((name) => name.endsWith('#2'));
