@@ -36,10 +36,13 @@ cannot be argued with.
   `inline+evidence`. The index scans each column's distinct values (45,444 keys,
   34.6% of questions matched) instead of the profile's thirty-per-column, which had
   matched 18% and measured the index rather than the idea.
-- **`select`**: three samples chosen by the model instead of counted, one lever from
-  `vote`. Measured **+2.6pp** against counting (p=0.015) and +1.4pp against a single
-  sample: the only borrowed mechanism that moved, and it changes how the samples are
-  combined rather than what they contain.
+- **`select` / `select5`**: three or five samples chosen by the model instead of
+  counted. Measured +2.6pp against voting (p=0.015) and then **+0.6pp when repeated**
+  (p=0.85); five candidates did not beat three (+1.0pp, p=0.57). The first result was
+  the outlier, and the docs say so.
+- **`chooseCandidate`** in `@agentix-e/nl2charts-ai`: the selector as a library
+  function, with `decided: false` reported rather than absorbed. It has a measured
+  cost (three extra calls) and no replicated gain.
 - **An A/A control**: `BIRD_AA` runs one arm twice in the same job, so every delta has
   a measured scale. Serialised into the artifact as `aa`, and the gate fails when the
   pair disagrees by more than the tolerance used to judge regressions.

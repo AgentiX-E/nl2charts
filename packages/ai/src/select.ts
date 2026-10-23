@@ -1,3 +1,5 @@
+import type { LlmProvider } from './provider.js';
+
 /** A candidate statement together with the shape of what it returned. */
 export interface Candidate {
   readonly sql: string;
@@ -88,4 +90,48 @@ export function applySelection(
 ): SelectionDecision {
   const index = parseSelection(text, candidates.length);
   return { index: index === -1 ? 0 : index, decided: index !== -1 };
+}
+
+/** A candidate statement with the rows it produced. */
+export interface ExecutedCandidate {
+  readonly sql: string;
+  readonly rows: readonly (readonly unknown[])[];
+}
+
+/** Collapse a result into the shape a selector can read without a table dump. */
+export function toCandidate(executed: ExecutedCandidate, previewRows = 3, maxChars = 300): Candidate {
+  return {
+    sql: executed.sql,
+    rows: executed.rows.length,
+    columns: executed.rows[0]?.length ?? 0,
+    preview: JSON.stringify(executed.rows.slice(0, previewRows)).slice(0, maxChars),
+  };
+}
+
+/**
+ * Ask the model which candidate answers the question.
+ *
+ * This is the benchmark's `select` arm as a library function: it takes candidates
+ * that have already been executed and returns the one the model chose, with `decided`
+ * false when the reply carried no usable index. Callers decide what an undecided
+ * answer means — the pipeline's own default is to keep the first candidate, which is
+ * what a single-sample run would have returned anyway.
+ */
+export async function chooseCandidate(
+  provider: LlmProvider,
+  question: string,
+  executed: readonly ExecutedCandidate[],
+): Promise<SelectionDecision & { readonly sql: string }> {
+  if (executed.length === 0) throw new Error('chooseCandidate needs at least one executed candidate');
+  if (executed.length === 1) return { index: 0, decided: true, sql: (executed[0] as ExecutedCandidate).sql };
+  const offered = executed.map((candidate) => toCandidate(candidate));
+  const reply = await provider.complete({
+    messages: [
+      { role: 'system', content: buildSelectionPrompt(question, offered) },
+      { role: 'user', content: question },
+    ],
+    temperature: 0,
+  });
+  const decision = applySelection(reply.text, offered);
+  return { ...decision, sql: (offered[decision.index] as Candidate).sql };
 }

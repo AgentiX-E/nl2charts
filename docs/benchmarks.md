@@ -131,54 +131,68 @@ temperature 0, one sample per case. Artifacts: `eval/out/bird-eval.json`,
 | Schema fidelity: advertised columns exist in the database | **798 / 798** |
 | Prompt coverage: tables that reach the schema card | **75 / 75** (no truncation) |
 
-### Accuracy (run `39945679683`, all 498 scorable Mini-Dev questions per arm)
+### Accuracy (run `39950408855`, all 498 scorable Mini-Dev questions per arm)
 
 Every arm is scored on the identical case set, every block an arm advertises is in the
 prompt it received, and one arm is run twice so the table carries its own scale.
 
 | Arm | Execution accuracy | 95% Wilson | prompt chars |
 | --- | --- | --- | --- |
-| names only | 36.3% (181/498) | [32.2, 40.7] | 1,862 |
-| model-written definitions, as a block | 40.2% (200/498) | [35.9, 44.5] | 2,877 |
-| the same text on the column line | 45.0% (224/498) | [40.7, 49.4] | 2,472 |
-| **+ the dataset's per-question hint** | **57.6%** (287/498) | [53.2, 61.9] | 2,606 |
-| + retrieved neighbours from the training split | 46.2% (230/498) | [41.9, 50.6] | 3,027 |
-| + those neighbours as worked examples | 46.0% (229/498) | [41.7, 50.4] | 4,531 |
-| + three samples, modal result | 56.4% (281/498) | [52.0, 60.7] | 2,606 (3 calls) |
-| + three samples, chosen by the model | **59.0%** (294/498) | [54.7, 63.3] | 2,606 (4 calls) |
-| + values this database stores for words in the question | 58.4% (291/498) | [54.1, 62.7] | 2,637 |
-| metadata + the hint (798 curated notes) | 58.8% (293/498) | [54.5, 63.1] | 6,967 |
-| **the same arm twice (A/A)** | 57.0% (284/498) | [52.6, 61.3] | identical |
+| names only | 35.9% (179/498) | [31.9, 40.3] | 1,862 |
+| model-written definitions, as a block | 40.8% (203/498) | [36.5, 45.1] | 2,908 |
+| the same text on the column line | 45.6% (227/498) | [41.3, 50.0] | 2,515 |
+| **+ the dataset's per-question hint** | **58.0%** (289/498) | [53.7, 62.3] | 2,650 |
+| + retrieved neighbours from the training split | 46.0% (229/498) | [41.7, 50.4] | 3,071 |
+| + those neighbours as worked examples | 45.8% (228/498) | [41.5, 50.2] | 4,575 |
+| + three samples, modal result | 57.2% (285/498) | [52.8, 61.5] | 2,650 (3 calls) |
+| + three samples, chosen by the model | 57.8% (288/498) | [53.5, 62.1] | 2,650 (4 calls) |
+| + five samples, chosen by the model | 58.8% (293/498) | [54.5, 63.1] | 2,650 (6 calls) |
+| + values this database stores for words in the question | 59.0% (294/498) | [54.7, 63.3] | 2,681 |
+| metadata + the hint (798 curated notes) | 58.6% (292/498) | [54.3, 62.9] | 6,967 |
+| **the same arm twice (A/A)** | 57.8% (288/498) | [53.5, 62.1] | identical |
 
 | Change (one lever) | Δ | only before / only after | p | verdict |
 | --- | --- | --- | --- | --- |
-| block → column line | +4.8pp | 21 / 45 | 0.004 | **real** |
-| inline → + the dataset's hint | **+12.7pp** | 18 / 81 | <1e-4 | **real** |
-| inline → + retrieved neighbours | +1.2pp | 20 / 26 | 0.46 | no effect |
-| retrieved text → the same neighbours as statements | −0.2pp | 29 / 28 | 1.00 | no effect |
-| + hint → three samples, modal result | −1.2pp | 16 / 10 | 0.33 | no effect |
-| modal result → chosen by the model | **+2.6pp** | 6 / 19 | 0.015 | **real against voting** |
-| + hint → values this database stores | +0.8pp | 8 / 12 | 0.50 | no effect |
-| **the same arm twice (A/A)** | **−0.6pp** | 5 / 2 | 0.45 | the scale |
+| block → column line | +4.8pp | 22 / 46 | 0.005 | **real** |
+| inline → + the dataset's hint | **+12.4pp** | 18 / 80 | <1e-4 | **real** |
+| inline → + retrieved neighbours | +0.4pp | 21 / 23 | 0.88 | no effect |
+| retrieved text → the same neighbours as statements | −0.2pp | 31 / 30 | 1.00 | no effect |
+| + hint → three samples, modal result | −0.8pp | 13 / 10 | 0.68 | no effect |
+| modal result → chosen by the model | +0.6pp | 13 / 15 | 0.85 | no effect |
+| three candidates → five, same selector | +1.0pp | 12 / 16 | 0.57 | no effect |
+| + hint → values this database stores | +1.0pp | 8 / 13 | 0.38 | no effect |
+| **the same arm twice (A/A)** | **−0.2pp** | 6 / 5 | 1.00 | the scale |
 
-Rows marked "real" are read against the A/A pair, not against the 4pp tolerance: this
-run's identical pair differed by 0.6pp, the previous one by 1.2pp, so a 1pp delta is
-indistinguishable from repetition and a 2.6pp delta with 19 cases on one side is not.
+Four runs of the identical pair now bracket the noise: **0.2, 0.6, 1.2 and 0.2pp**.
+Nothing in this table clears it except placement (+4.8pp) and the dataset's hint
+(+12.4pp), which are the two things the product already does.
 
-### Selection is the one borrowed mechanism that paid
+### Selection looked real once, and did not replicate
 
-`select` runs the same three samples as `vote` and asks the model which one answers
-the question, with each candidate's row count and first rows in view. It gains
-**+2.6pp over voting** (6 cases won, 19 lost the other way, p=0.015) and +1.4pp over a
-single sample.
+Run `39945679683` made selection look like the one borrowed mechanism that worked:
++2.6pp over voting, 6 cases won and 19 lost the other way, p=0.015. Run
+`39950408855` repeated the comparison and got **+0.6pp** (13/15, p=0.85). The
+identical A/A pair in that second run differed by 0.2pp, so the replication is not
+noise — the first result was.
 
-The honest reading is narrower than "CHASE-SQL's selector works": voting itself lost
-1.2pp to a single sample this run, so part of the apparent gain is voting's bad draw.
-What the pair does establish is that *how* three samples are combined matters more than
-*whether* three are taken, which is exactly what the attention mechanism in CHASE-SQL
-buys them. A cross-level comparison (`inline+evidence → select`, four calls instead of
-one) is recorded separately in the artifact as `comparisons`, because a two-lever
-difference must not borrow the authority of a one-lever experiment.
+| Run | select | vote | Δ | only before / only after | p | A/A in the same job |
+| --- | --- | --- | --- | --- | --- | --- |
+| `39945679683` | 59.0% | 56.4% | +2.6pp | 6 / 19 | 0.015 | 0.6pp |
+| `39950408855` | 57.8% | 57.2% | +0.6pp | 13 / 15 | 0.85 | 0.2pp |
+
+More samples did not rescue it either: `select5` (five candidates, six calls) reached
+58.8% against 57.8% for three, +1.0pp at p=0.57. If the gain came from reading
+candidates, two more of them would have helped.
+
+The conclusion this project has to live with is the boring one: **on this harness, at
+this sample size, nothing borrowed from the state of the art beat the dataset's
+per-question hint.** The library still exposes `chooseCandidate` — it is a capability
+with a measured cost (three extra calls) and no measured gain — and the policy below
+now requires a second run before anything is called an improvement.
+
+A mechanism is adopted only when it reaches p<0.01 in **two consecutive runs**, which
+is stricter than the one-lever table needs and stricter than a single p=0.015
+deserves. The alternative is a README that changes its mind every week.
 
 ### Two gold statements cannot be scored, and the reason is measured
 

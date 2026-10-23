@@ -152,6 +152,42 @@ The timeline marks a failed stage with `data-status="error"` and prints its code
 not verify renders as that sentence rather than as an empty axis — an empty
 timeline would be a claim, and the claim is exactly what failed.
 
+## Choosing among candidates
+
+One sample per question is the default. Three samples plus a model that picks between
+them measured **+2.6pp over majority voting** in one BIRD Mini-Dev run and **+0.6pp
+when repeated**, with five candidates doing no better than three — so treat this as a
+capability to try on your data, not as a known improvement. The recipe is four steps
+and no new dependency:
+
+```ts
+import { chooseCandidate, createPipeline, createHttpProvider } from '@agentix-e/nl2charts-ai';
+
+const provider = createHttpProvider({ baseUrl, apiKey, model });
+const pipeline = createPipeline({ provider, temperature: 0.7 });
+
+const candidates = [];
+for (let sample = 0; sample < 3; sample += 1) {
+  const { sql } = await pipeline.ask({ question, schema });
+  const result = await run(sql);              // your engine, read-only
+  if (result.ok) candidates.push({ sql, rows: result.rows });
+}
+
+const { sql, decided } = await chooseCandidate(provider, question, candidates);
+```
+
+Three things worth knowing before you turn it on:
+
+- **It costs three extra calls**, and on a schema the model already understands the
+  gain is inside the noise: the two runs that measured it disagree (+2.6pp, then
+  +0.6pp). Measure it on your own questions before paying for it.
+- **`decided: false` is not an error.** It means the reply carried no usable index;
+  the chosen candidate is then the first one, which is what a single call would have
+  returned. Log the rate — a selector that stops answering is a prompt regression,
+  not a model regression.
+- **Only executed candidates are offered.** A statement that failed to run is not a
+  candidate, and a selector shown one would have to guess whether it was broken.
+
 ## Gates you inherit
 
 These run in CI on every commit, and the same commands run locally:

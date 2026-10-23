@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { applySelection, buildSelectionPrompt, parseSelection } from '../src/select.js';
+import { applySelection, buildSelectionPrompt, chooseCandidate, parseSelection, toCandidate } from '../src/select.js';
+import type { LlmProvider } from '../src/provider.js';
 import type { Candidate } from '../src/select.js';
 
 /**
@@ -76,5 +77,59 @@ describe('reading the answer', () => {
 
   it('is deterministic for the same reply', () => {
     expect(applySelection('2', candidates)).toEqual(applySelection('2', candidates));
+  });
+});
+
+describe('choosing among executed candidates', () => {
+  const executed = [
+    { sql: 'SELECT COUNT(*) FROM orders', rows: [[500]] },
+    { sql: 'SELECT COUNT(*) FROM orders WHERE status = "completed"', rows: [[120]] },
+  ];
+  const provider = (reply: string): LlmProvider => ({
+    id: 'test',
+    model: 'test-model',
+    async complete() {
+      return { text: reply, usage: { promptTokens: 1, completionTokens: 1 } } as never;
+    },
+  });
+
+  it('returns the statement the model chose', async () => {
+    const decision = await chooseCandidate(provider('2'), 'How many completed orders?', executed);
+    expect(decision).toEqual({ index: 1, decided: true, sql: executed[1]?.sql });
+  });
+
+  it('reports an unreadable reply instead of pretending it chose', async () => {
+    const decision = await chooseCandidate(provider('I would need the schema'), 'q', executed);
+    expect(decision.index).toBe(0);
+    expect(decision.decided).toBe(false);
+  });
+
+  it('skips the extra call when there is nothing to choose between', async () => {
+    // A single candidate is what a one-sample run returns anyway; spending a call to
+    // confirm it would make the option cost something and change nothing.
+    let calls = 0;
+    const counting: LlmProvider = {
+      id: 'test',
+      model: 'test-model',
+      async complete() {
+        calls += 1;
+        return { text: '1', usage: { promptTokens: 1, completionTokens: 1 } } as never;
+      },
+    };
+    const decision = await chooseCandidate(counting, 'q', [executed[0] as (typeof executed)[number]]);
+    expect(decision).toEqual({ index: 0, decided: true, sql: executed[0]?.sql });
+    expect(calls).toBe(0);
+  });
+
+  it('refuses an empty candidate list rather than inventing an answer', async () => {
+    await expect(chooseCandidate(provider('1'), 'q', [])).rejects.toThrow(/at least one/);
+  });
+
+  it('describes a result by shape, not by dumping it', () => {
+    const wide = { sql: 'SELECT * FROM t', rows: Array.from({ length: 1000 }, () => [1, 'a']) };
+    const candidate = toCandidate(wide);
+    expect(candidate.rows).toBe(1000);
+    expect(candidate.columns).toBe(2);
+    expect(candidate.preview.length).toBeLessThanOrEqual(300);
   });
 });
