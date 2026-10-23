@@ -56,6 +56,14 @@ if (report === null) {
         `| ${arm.arm} | **${(arm.accuracy * 100).toFixed(1)}%** | [${(arm.wilson.low * 100).toFixed(1)}, ${(arm.wilson.high * 100).toFixed(1)}] | ${arm.strictPassed}/${arm.total} | ${arm.duplicateCredit} | ${arm.repaired} | ${arm.promptChars?.mean ?? '–'} | ${byDifficulty} |`,
       );
     }
+    const broken = report.arms.filter((arm) => typeof arm.firstError === 'string');
+    if (broken.length > 0) {
+      lines.push(
+        '',
+        '> **A run failed before it reached the database.** First error per arm:',
+        ...broken.map((arm) => `> - \`${arm.arm}\`: ${arm.firstError}`),
+      );
+    }
     const voted = report.arms.find((arm) => typeof arm.vote === 'number');
     if (voted !== undefined) {
       lines.push('', `Vote arm \`${voted.arm}\`: ${voted.vote} samples per question, mean agreement **${(voted.agreement * 100).toFixed(1)}%**, ${voted.passed}/${voted.total} correct.`);

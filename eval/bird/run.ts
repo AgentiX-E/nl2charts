@@ -287,6 +287,25 @@ export function resolveArm(name: string): Arm | undefined {
  * resolved name, the duplicate would sit in the table under the label of the arm it
  * duplicates, and a reader would see two identical arms and one missing control.
  */
+/**
+ * An arm whose every call failed did not measure anything.
+ *
+ * A dead key, an exhausted balance and a rate limit all arrive as "the model returned
+ * nothing", which the harness scores as a wrong answer. That turns a provider outage
+ * into 0% — a number that looks like a result, and that a floor gate can only report
+ * as a regression. This refuses to run the table instead.
+ */
+export function assertArmProducedResults(armName: string, runs: readonly { errorKind?: string; error?: string }[]): void {
+  if (runs.length === 0) return;
+  const allFailed = runs.every((run) => run.errorKind === 'llm');
+  if (!allFailed) return;
+  const first = runs.find((run) => run.error !== undefined)?.error ?? 'no error text';
+  throw new Error(
+    `arm ${armName}: every case failed before reaching the database — the model provider refused all ${String(runs.length)} calls ` +
+      `(first error: ${first}). This is not an accuracy of zero; it is a run that did not happen.`,
+  );
+}
+
 export function assertUniqueArmLabels(labels: readonly string[]): void {
   const seen = new Set<string>();
   for (const label of labels) {
@@ -930,7 +949,10 @@ async function main() {
     // the same Arm, and keying by that overwrote the first run with the second, which
     // silently made the pair compare an arm with itself and report `aa: undefined`.
     outcomes.set(name, runs);
-    const summary = summarise(arm.name, runs);
+    // Before any number is printed: an arm that never reached the database has no
+    // accuracy, and publishing 0% would hide the provider's message behind a score.
+    assertArmProducedResults(name, runs);
+    const summary = summarise(name, runs);
     const strictPassed = runs.filter((run) => run.strict).length;
     const byDifficulty: Record<string, { passed: number; total: number }> = {};
     for (const run of runs) {
@@ -994,6 +1016,12 @@ async function main() {
       byDifficulty,
       errors,
       topErrors: [...messages.entries()].sort((left, right) => right[1] - left[1]).slice(0, 5),
+      // The ungrouped first failure. `topErrors` replaces digits to group messages,
+      // which is right for counting and wrong for diagnosis: "llm returned N" hides
+      // the status code that says whether the key is dead or the balance is empty.
+      ...(runs.find((run) => run.error !== undefined) === undefined
+        ? {}
+        : { firstError: (runs.find((run) => run.error !== undefined) as CaseRun).error?.slice(0, 200) }),
     });
     console.log(
       `${name.padEnd(9)} ${summary.passed}/${summary.total}  ${(summary.accuracy * 100).toFixed(1)}%  strict ${strictPassed}  repaired ${runs.filter((run) => run.attempts > 1).length}`,

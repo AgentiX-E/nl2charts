@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { buildSqlPrompt } from '@agentix-e/nl2charts-ai';
-import { ARMS, DEFAULT_ARMS, ON_DEMAND_ARMS, PAIRS, assertUniqueArmLabels, parseArms, parseLimit, promptFor, resolveArm } from '../eval/bird/run.js';
+import { ARMS, DEFAULT_ARMS, ON_DEMAND_ARMS, PAIRS, assertArmProducedResults, assertUniqueArmLabels, parseArms, parseLimit, promptFor, resolveArm } from '../eval/bird/run.js';
 import type { Arm } from '../eval/bird/run.js';
 import type { BirdQuestion } from '../eval/bird/data.js';
 
@@ -151,6 +151,15 @@ describe('the chain that actually runs', () => {
 });
 
 describe('A/A pairs', () => {
+  it('refuses a table where every call was rejected by the provider', () => {
+    // A dead key or an empty balance arrives as "nothing came back", which scores as
+    // a wrong answer: 0% is then a number that hides an outage.
+    expect(() => assertArmProducedResults('names', [{ errorKind: 'llm', error: 'llm returned 402' }])).toThrow(/run that did not happen/);
+    expect(() => assertArmProducedResults('names', [{ errorKind: 'llm' }, { errorKind: 'execution' }])).not.toThrow();
+    expect(() => assertArmProducedResults('names', [{}])).not.toThrow();
+    expect(() => assertArmProducedResults('names', [])).not.toThrow();
+  });
+
   it('refuses a report where two arms share a label', () => {
     expect(() => assertUniqueArmLabels(['names', 'inline+evidence', 'inline+evidence'])).toThrow(/#2 name/);
     expect(() => assertUniqueArmLabels(['names', 'inline+evidence', 'inline+evidence#2'])).not.toThrow();
