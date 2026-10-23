@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { buildSqlPrompt } from '@agentix-e/nl2charts-ai';
-import { ARMS, DEFAULT_ARMS, ON_DEMAND_ARMS, PAIRS, assertArmProducedResults, assertUniqueArmLabels, parseArms, parseLimit, promptFor, resolveArm } from '../eval/bird/run.js';
+import { ARMS, COMPARISONS, DEFAULT_ARMS, ON_DEMAND_ARMS, PAIRS, assertArmProducedResults, assertUniqueArmLabels, parseArms, parseLimit, promptFor, resolveArm } from '../eval/bird/run.js';
 import type { Arm } from '../eval/bird/run.js';
 import type { BirdQuestion } from '../eval/bird/data.js';
 
@@ -32,6 +32,16 @@ describe('ablation arms', () => {
     for (const [left, right] of PAIRS) {
       expect(ARMS.find((arm) => arm.name === left), left).toBeDefined();
       expect(ARMS.find((arm) => arm.name === right), right).toBeDefined();
+    }
+  });
+
+  it('states a decision question for every cross-level comparison', () => {
+    // These are not one-lever pairs, so they live in their own list with the question
+    // they answer; an entry without one would be a delta with no claim attached.
+    for (const [left, right, question] of COMPARISONS) {
+      expect(ARMS.map((arm) => arm.name), left).toContain(left);
+      expect(ARMS.map((arm) => arm.name), right).toContain(right);
+      expect(question.length, `${left} -> ${right}`).toBeGreaterThan(20);
     }
   });
 

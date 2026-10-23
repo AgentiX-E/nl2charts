@@ -37,8 +37,9 @@ cannot be argued with.
   34.6% of questions matched) instead of the profile's thirty-per-column, which had
   matched 18% and measured the index rather than the idea.
 - **`select`**: three samples chosen by the model instead of counted, one lever from
-  `vote`. Measured −0.6pp against counting (p=0.72) with the selector answering in
-  495 of 496 cases: selection cannot recover an answer no candidate contains.
+  `vote`. Measured **+2.6pp** against counting (p=0.015) and +1.4pp against a single
+  sample: the only borrowed mechanism that moved, and it changes how the samples are
+  combined rather than what they contain.
 - **An A/A control**: `BIRD_AA` runs one arm twice in the same job, so every delta has
   a measured scale. Serialised into the artifact as `aa`, and the gate fails when the
   pair disagrees by more than the tolerance used to judge regressions.
@@ -62,8 +63,9 @@ cannot be argued with.
   our own 240-question cap until this release; CI now scores the whole 500-question
   split (498 scorable — two gold statements exceed the step budget, and the artifact
   names them), and a `bird-dev` workflow scores the 1,534-question public split that
-  leaderboards report. Full-split numbers, run `39804736066`: names 36.7%,
-  inline definitions 44.8%, plus the dataset hint 58.8%, curated metadata 58.0%.
+  leaderboards report. Full-split numbers, run `39945679683`: names 36.3%, inline
+  definitions 45.0%, plus the dataset hint 57.6%, curated metadata 58.8%, model
+  selection over three samples 59.0%.
 - Placement is worth +6.7 to +10.5pp across four runs; content, authorship,
   coverage, question-restating and three-sample voting each moved nothing beyond
   noise.

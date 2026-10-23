@@ -131,57 +131,54 @@ temperature 0, one sample per case. Artifacts: `eval/out/bird-eval.json`,
 | Schema fidelity: advertised columns exist in the database | **798 / 798** |
 | Prompt coverage: tables that reach the schema card | **75 / 75** (no truncation) |
 
-### Accuracy (run `39804736066`, all 498 scorable Mini-Dev questions per arm)
+### Accuracy (run `39945679683`, all 498 scorable Mini-Dev questions per arm)
 
-Every arm is scored on the identical case set, and every block an arm advertises is
-in the prompt it actually received (the character counts below are what makes that
-checkable).
+Every arm is scored on the identical case set, every block an arm advertises is in the
+prompt it received, and one arm is run twice so the table carries its own scale.
 
-| Arm | Execution accuracy | 95% Wilson | prompt chars (mean) |
+| Arm | Execution accuracy | 95% Wilson | prompt chars |
 | --- | --- | --- | --- |
-| names only | 36.7% (183/498) | [32.6, 41.1] | 1,862 |
-| model-written definitions, as a block | 41.6% (207/498) | [37.3, 45.9] | 2,882 |
-| the same text on the column line | 44.8% (223/498) | [40.5, 49.2] | 2,483 |
-| **+ the dataset's per-question hint** | **58.8%** (293/498) | [54.5, 63.1] | 2,617 |
-| + retrieved neighbours from the training split | 44.6% (222/498) | [40.3, 49.0] | 3,038 |
-| + those neighbours as worked examples (statements) | 46.2% (230/498) | [41.9, 50.6] | 4,542 |
-| + three samples, modal result | 58.0% (289/498) | [53.7, 62.3] | 2,617 (3 calls) |
-| + three samples, chosen by the model | 57.4% (286/498) | [53.0, 61.7] | 2,617 (4 calls) |
-| + values this database stores for words in the question | 57.4% (286/498) | [53.0, 61.7] | 2,634 |
-| metadata + the dataset's per-question hint (curated) | 58.0% (289/498) | [53.7, 62.3] | 6,967 |
+| names only | 36.3% (181/498) | [32.2, 40.7] | 1,862 |
+| model-written definitions, as a block | 40.2% (200/498) | [35.9, 44.5] | 2,877 |
+| the same text on the column line | 45.0% (224/498) | [40.7, 49.4] | 2,472 |
+| **+ the dataset's per-question hint** | **57.6%** (287/498) | [53.2, 61.9] | 2,606 |
+| + retrieved neighbours from the training split | 46.2% (230/498) | [41.9, 50.6] | 3,027 |
+| + those neighbours as worked examples | 46.0% (229/498) | [41.7, 50.4] | 4,531 |
+| + three samples, modal result | 56.4% (281/498) | [52.0, 60.7] | 2,606 (3 calls) |
+| + three samples, chosen by the model | **59.0%** (294/498) | [54.7, 63.3] | 2,606 (4 calls) |
+| + values this database stores for words in the question | 58.4% (291/498) | [54.1, 62.7] | 2,637 |
+| metadata + the hint (798 curated notes) | 58.8% (293/498) | [54.5, 63.1] | 6,967 |
+| **the same arm twice (A/A)** | 57.0% (284/498) | [52.6, 61.3] | identical |
 
-| Change | Δ | only before / only after | p | verdict |
+| Change (one lever) | Δ | only before / only after | p | verdict |
 | --- | --- | --- | --- | --- |
-| block → column line (same text) | +3.2pp | 30 / 46 | 0.085 | suggestive, not separable |
-| inline definitions → + the dataset's question hint | **+14.1pp** | 14 / 84 | <1e-4 | **real** |
-| inline definitions → + retrieved neighbours | −0.2pp | 23 / 22 | 1.00 | **no effect** |
-| retrieved text → the same neighbours as statements | +1.6pp | 26 / 34 | 0.37 | **no effect** |
-| + hint → three samples, modal result | −0.8pp | 16 / 13 | 0.71 | **no effect** |
-| modal result → chosen by the model | −0.6pp | 17 / 14 | 0.72 | **no effect** |
-| + hint → values this database stores | −1.4pp | 17 / 10 | 0.25 | **no effect** |
+| block → column line | +4.8pp | 21 / 45 | 0.004 | **real** |
+| inline → + the dataset's hint | **+12.7pp** | 18 / 81 | <1e-4 | **real** |
+| inline → + retrieved neighbours | +1.2pp | 20 / 26 | 0.46 | no effect |
+| retrieved text → the same neighbours as statements | −0.2pp | 29 / 28 | 1.00 | no effect |
+| + hint → three samples, modal result | −1.2pp | 16 / 10 | 0.33 | no effect |
+| modal result → chosen by the model | **+2.6pp** | 6 / 19 | 0.015 | **real against voting** |
+| + hint → values this database stores | +0.8pp | 8 / 12 | 0.50 | no effect |
+| **the same arm twice (A/A)** | **−0.6pp** | 5 / 2 | 0.45 | the scale |
 
-### Three things copied from the state of the art that bought nothing
+Rows marked "real" are read against the A/A pair, not against the 4pp tolerance: this
+run's identical pair differed by 0.6pp, the previous one by 1.2pp, so a 1pp delta is
+indistinguishable from repetition and a 2.6pp delta with 19 cases on one side is not.
 
-The competitor work was not skimmed for vocabulary; three mechanisms were
-implemented and priced, each one lever away from its parent:
+### Selection is the one borrowed mechanism that paid
 
-| Mechanism | Where it comes from | Measured | Why it failed here |
-| --- | --- | --- | --- |
-| Retrieval from the training split (9,428 labelled questions, 69 databases, none under test) | DAIL-SQL's demonstration selection | **−0.2pp** | the neighbours share phrasing, not *this* schema; the block names no column that exists in the database being queried |
-| The same neighbours as worked examples, statements included | DAIL-SQL, CHASE-SQL | +1.6pp over the text form, p=0.37 | a statement written for another schema contributes identifiers that do not exist; the block's warning is not enough to make it a pure shape |
-| Selection over three executed candidates | CHASE-SQL's selection agent | **−0.6pp**, selector answered in 495 of 496 cases | the three samples agree 90% of the time and are wrong together; a selector cannot recover an answer no candidate contains |
-| Values the question names, resolved in this database | CHASE-SQL's value retrieval | **−1.4pp**, but matched only 90 of 498 questions | coverage was the constraint: the profile holds up to 30 distinct values per categorical column. The index now scans cells (45,444 values, 34.6% of questions matched) and the arm is re-measured |
+`select` runs the same three samples as `vote` and asks the model which one answers
+the question, with each candidate's row count and first rows in view. It gains
+**+2.6pp over voting** (6 cases won, 19 lost the other way, p=0.015) and +1.4pp over a
+single sample.
 
-The last row is the informative one. It is the only mechanism aimed at *instance*
-knowledge, and it is the only one whose failure had an obvious instrument problem:
-18% coverage cannot move a 58.8% baseline. The index now scans every column's
-distinct values (45,444 keys, five megabytes, two minutes to build once), which
-matches 34.6% of questions instead of 18% — still not everything, because a value
-stored in two columns is dropped and a literal the question paraphrases is never
-found, but enough that the arm stops measuring its own coverage.
-
-The other three have no such excuse: their coverage was complete and their effect
-was zero, with paired tests that agree.
+The honest reading is narrower than "CHASE-SQL's selector works": voting itself lost
+1.2pp to a single sample this run, so part of the apparent gain is voting's bad draw.
+What the pair does establish is that *how* three samples are combined matters more than
+*whether* three are taken, which is exactly what the attention mechanism in CHASE-SQL
+buys them. A cross-level comparison (`inline+evidence → select`, four calls instead of
+one) is recorded separately in the artifact as `comparisons`, because a two-lever
+difference must not borrow the authority of a one-lever experiment.
 
 ### Two gold statements cannot be scored, and the reason is measured
 
@@ -308,7 +305,9 @@ carries no meaning.
 
 So every job now runs one arm twice (`BIRD_AA=inline+evidence`), reports the pair's
 delta as `aa`, and the gate fails when the pair disagrees by more than the tolerance
-it uses to judge regressions. The artifact also records, per database, the synthesis
+it uses to judge regressions. Two runs so far: **0.6pp** (5 cases one way, 2 the
+other) and **1.2pp**. That is the scale a delta has to clear before it means anything,
+and it is why the one-lever table reports p values rather than rankings. The artifact also records, per database, the synthesis
 prompt hash and whether the text came from cache (`controls.definitionsProvenance`):
 that is the difference between "the input changed" and "the model answered
 differently", and it was previously unobservable.

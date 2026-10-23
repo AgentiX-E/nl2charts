@@ -157,6 +157,10 @@ export const ARMS: readonly Arm[] = [
   // selection agent, without its fine-tuned weights, so the comparison prices the
   // idea rather than their training run.
   { name: 'select', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true },
+  // The same selector with two more samples to choose from. If selection works by
+  // reading candidates, more of them should help; if it works by picking the first
+  // plausible one, it will not.
+  { name: 'select5', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 5, select: true },
   // The same inline arm plus the literals the question names, resolved against this
   // database. CHASE-SQL's first pipeline stage; here it is one lever from
   // `inline+evidence`, so the delta prices value grounding, not the hint.
@@ -196,6 +200,7 @@ export const DEFAULT_ARMS: readonly string[] = [
   'inline+icl',
   'vote',
   'select',
+  'select5',
   'values',
   'metadata+evidence',
 ];
@@ -218,6 +223,23 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   repair: 'execution-feedback repair: measured null, run when the repair path changes',
 };
 
+/**
+ * Comparisons that answer a decision rather than price a module.
+ *
+ * `PAIRS` compares arms one lever apart, which is how a delta gets attributed. Some
+ * questions are not about a lever: "is selection worth four calls instead of one?" and
+ * "does the generated stack match the curated one?" compare across levels. They are
+ * reported separately, with their own paired test, because mixing them into the
+ * one-lever table would let a two-lever difference borrow the authority of a one-lever
+ * experiment.
+ */
+export const COMPARISONS: readonly (readonly [string, string, string])[] = [
+  ['inline+evidence', 'select', 'selection over three samples versus a single sample: four calls instead of one'],
+  ['inline+evidence', 'select5', 'selection over five samples versus a single sample: six calls instead of one'],
+  ['inline+evidence', 'values', 'value grounding on top of the hint: does instance knowledge add anything the hint lacks'],
+  ['inline+evidence', 'metadata+evidence', 'generated definitions on the column line versus 798 curated notes'],
+];
+
 export const PAIRS: readonly (readonly [string, string])[] = [
   ['names', 'definitions'],
   ['definitions', 'synth-definitions'],
@@ -229,6 +251,7 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   ['inline-definitions', 'interpret'],
   ['inline+evidence', 'vote'],
   ['vote', 'select'],
+  ['select', 'select5'],
   ['inline+evidence', 'values'],
   ['definitions', 'definitions+evidence'],
   ['synth-definitions', 'synth-definitions+evidence'],
@@ -1058,6 +1081,22 @@ async function main() {
       `A/A ${aa.arm}: ${(aa.delta * 100).toFixed(1)}pp (${String(aa.onlyFirst)}/${String(aa.onlySecond)}, p=${aa.p.toFixed(3)}) — the harness's own noise`,
     );
   }
+
+  const comparisons: Record<string, unknown> = {};
+  for (const [from, to, question] of COMPARISONS) {
+    const first = outcomes.get(from);
+    const second = outcomes.get(to);
+    if (first === undefined || second === undefined) continue;
+    const comparison = compareArms(summarise(from, first), summarise(to, second));
+    comparisons[`${from} -> ${to}`] = {
+      question,
+      delta: comparison.delta,
+      onlyFirst: comparison.onlyFirst,
+      onlySecond: comparison.onlySecond,
+      p: mcnemarExact(comparison.onlyFirst, comparison.onlySecond),
+    };
+  }
+  report.comparisons = comparisons;
 
   const ablations: Record<string, unknown> = {};
   for (const [from, to] of PAIRS) {
