@@ -116,6 +116,11 @@ export interface Arm {
    * The instance-specific counterpart to retrieved knowledge, which is generic.
    */
   readonly values?: boolean;
+  /**
+   * Ask for a query plan (scan, filter, join, group, answer) before the statement.
+   * CHASE-SQL's second generator; one lever from `inline+evidence`.
+   */
+  readonly plan?: boolean;
 }
 
 /**
@@ -165,6 +170,9 @@ export const ARMS: readonly Arm[] = [
   // database. CHASE-SQL's first pipeline stage; here it is one lever from
   // `inline+evidence`, so the delta prices value grounding, not the hint.
   { name: 'values', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', values: true },
+  // A plan before the statement: the ordering decisions (scan, filter, join, group,
+  // answer) are made explicitly once instead of being encoded in one draft.
+  { name: 'plan', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', plan: true },
   { name: 'definitions+evidence', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'structural' },
   { name: 'synth-definitions+evidence', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'synthesized' },
   { name: 'metadata', notes: true, repairs: 0, linking: true },
@@ -202,6 +210,7 @@ export const DEFAULT_ARMS: readonly string[] = [
   'select',
   'select5',
   'values',
+  'plan',
   'metadata+evidence',
 ];
 
@@ -253,6 +262,7 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   ['vote', 'select'],
   ['select', 'select5'],
   ['inline+evidence', 'values'],
+  ['inline+evidence', 'plan'],
   ['definitions', 'definitions+evidence'],
   ['synth-definitions', 'synth-definitions+evidence'],
   ['names', 'metadata'],
@@ -884,6 +894,7 @@ async function main() {
         maxRepairs: arm.repairs,
         linking: arm.linking,
         interpret: arm.interpret === true,
+        plan: arm.plan === true,
         temperature: arm.vote === undefined ? 0 : 0.7,
         prompt: promptFor(arm, question, blocksFor(arm, question)),
         ...(arm.repairs === 0

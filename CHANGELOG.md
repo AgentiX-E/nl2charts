@@ -36,6 +36,8 @@ cannot be argued with.
   `inline+evidence`. The index scans each column's distinct values (45,444 keys,
   34.6% of questions matched) instead of the profile's thirty-per-column, which had
   matched 18% and measured the index rather than the idea.
+- **`plan`**: a query plan (scan, filter, join, group, answer) written before the
+  statement, one lever from `inline+evidence` — CHASE-SQL's second generator.
 - **`select` / `select5`**: three or five samples chosen by the model instead of
   counted. Measured +2.6pp against voting (p=0.015) and then **+0.6pp when repeated**
   (p=0.85); five candidates did not beat three (+1.0pp, p=0.57). The first result was

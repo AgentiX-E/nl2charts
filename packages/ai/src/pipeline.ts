@@ -2,6 +2,7 @@ import { inspectSql } from '@agentix-e/nl2charts-core';
 import { toNl2ChartsError } from '@agentix-e/nl2charts-spec';
 import type { LlmMessage, LlmProvider } from './provider.js';
 import { buildInterpretationPrompt, parseInterpretation } from './interpret.js';
+import { buildPlanPrompt, parsePlan } from './plan.js';
 import { linkSchema, renderSchemaCard } from './linking.js';
 import type { LinkedColumn, SchemaCardOptions, SchemaTable } from './linking.js';
 
@@ -29,6 +30,12 @@ export interface PromptOptions extends SchemaCardOptions {
    * the data, so it is available on a database nobody documented.
    */
   readonly values?: string;
+  /**
+   * A query plan written before the statement: scan, filter, join, group, answer.
+   * Distinct from `interpretation`, which says what the question means rather than how
+   * the engine would answer it.
+   */
+  readonly plan?: string;
   /** Maximum schema-card lines. Large schemas need more than the default 40. */
   readonly schemaLines?: number;
   /** Extra rule lines for a question shape, appended after the base rules. */
@@ -88,6 +95,8 @@ export interface PipelineOptions {
   readonly linking?: boolean;
   /** Ask for a one-sentence reading of the question before writing SQL. */
   readonly interpret?: boolean;
+  /** Ask for a query plan (scan, filter, join, group, answer) before writing SQL. */
+  readonly plan?: boolean;
   /** Sampling temperature for the SQL call. Above zero enables self-consistency. */
   readonly temperature?: number;
   /** When provided, a candidate is executed before it is accepted; failures
@@ -142,6 +151,9 @@ export function buildSqlPrompt(
   if (resolved.interpretation !== undefined && resolved.interpretation.trim().length > 0) {
     context.push(`Interpretation: ${resolved.interpretation.trim()}`);
   }
+  if (resolved.plan !== undefined && resolved.plan.trim().length > 0) {
+    context.push(['Plan:', resolved.plan.trim()].join('\n'));
+  }
   if (resolved.values !== undefined && resolved.values.trim().length > 0) {
     context.push(['Values in this database named by the question:', resolved.values.trim()].join('\n'));
   }
@@ -195,6 +207,17 @@ export function createPipeline(options: PipelineOptions): {
         const parsed = parseInterpretation(reading.text);
         if (parsed.length > 0) interpretation = parsed;
       }
+      // One extra call, only when asked: the plan is written with the schema in view
+      // and then carried into the SQL prompt as its own block.
+      let plan: string | undefined;
+      if (options.plan === true) {
+        const planned = await options.provider.complete({
+          messages: [{ role: 'user', content: buildPlanPrompt(request.question, request.schema) }],
+          temperature: 0,
+        });
+        const parsed = parsePlan(planned.text);
+        if (parsed.length > 0) plan = parsed;
+      }
       const messages: LlmMessage[] = [
         {
           role: 'system',
@@ -202,6 +225,7 @@ export function createPipeline(options: PipelineOptions): {
             samples: options.samples === true,
             ...options.prompt,
             ...(interpretation === undefined ? {} : { interpretation }),
+            ...(plan === undefined ? {} : { plan }),
           }),
         },
         { role: 'user', content: `${schemaHint}\n${request.question}` },
