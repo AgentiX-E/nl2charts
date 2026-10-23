@@ -33,7 +33,9 @@ cannot be argued with.
   included, one lever from `inline+retrieval`.
 - **`values`**: the literals a question names, resolved against the database under
   test — CHASE-SQL's value retrieval without an embedding index, one lever from
-  `inline+evidence`.
+  `inline+evidence`. The index scans each column's distinct values (45,444 keys,
+  34.6% of questions matched) instead of the profile's thirty-per-column, which had
+  matched 18% and measured the index rather than the idea.
 - **`select`**: three samples chosen by the model instead of counted, one lever from
   `vote`. Measured −0.6pp against counting (p=0.72) with the selector answering in
   495 of 496 cases: selection cannot recover an answer no candidate contains.

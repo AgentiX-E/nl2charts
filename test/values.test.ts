@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildValueIndex, findValues, normalizeValue, renderValues } from '../eval/bird/values.js';
+import { buildValueIndex, deserializeIndex, findValues, indexCells, normalizeValue, renderValues, serializeIndex } from '../eval/bird/values.js';
 import type { DatabaseProfile } from '@agentix-e/nl2charts-ai';
 
 const profile: DatabaseProfile = {
@@ -119,5 +119,67 @@ describe('rendering', () => {
   it('is deterministic', () => {
     const question = 'Which cards are Restricted in the core set?';
     expect(renderValues(findValues(index, question))).toBe(renderValues(findValues(index, question)));
+  });
+});
+
+describe('scanning cells instead of the profile', () => {
+  const columns = [
+    { table: 'legalities', column: 'status' },
+    { table: 'cards', column: 'name' },
+    { table: 'cards', column: 'id' },
+  ];
+
+  it('indexes what the profile truncated: values beyond its thirty', async () => {
+    const query = async (sql: string) => {
+      if (sql.includes('"status"')) return [['Banned'], ['Legal'], ['Restricted']];
+      if (sql.includes('"name"')) return Array.from({ length: 50 }, (_, index) => [`Card ${String(index)}`]);
+      return [];
+    };
+    const index = await indexCells(columns, query);
+    expect(index.get('banned')?.[0]).toEqual({ table: 'legalities', column: 'status', value: 'Banned' });
+    // The profile would have kept the top eight; the scan keeps all fifty.
+    expect(index.get('card 49')).toHaveLength(1);
+  });
+
+  it('skips values that are identifiers or prose, by the bounds it states', async () => {
+    const query = async () => [['12'], ['a'], ['x'.repeat(80)], ['Banned']];
+    const index = await indexCells([{ table: 't', column: 'c' }], query);
+    expect([...index.keys()]).toEqual(['banned']);
+  });
+
+  it('keeps a column that cannot be scanned from failing the whole index', async () => {
+    const query = async (sql: string) => {
+      if (sql.includes('"id"')) throw new Error('no such column');
+      return sql.includes('"status"') ? [['Banned']] : [];
+    };
+    const index = await indexCells(columns, query);
+    expect(index.get('banned')).toHaveLength(1);
+  });
+
+  it('does not let a duplicate row make an unambiguous value ambiguous', async () => {
+    const index = await indexCells([{ table: 't', column: 'c' }], async () => [['Banned'], ['Banned']]);
+    expect(findValues(index, 'Which Banned cards exist?')).toHaveLength(1);
+  });
+
+  it('caps how many values one column contributes', async () => {
+    const many = Array.from({ length: 30 }, (_, index) => [`value${String(index)}`]);
+    const index = await indexCells([{ table: 't', column: 'c' }], async () => many, { maxValuesPerColumn: 5 });
+    expect(index.size).toBe(5);
+  });
+});
+
+describe('cache round trip', () => {
+  it('restores exactly what it stored', async () => {
+    const index = await indexCells(
+      [{ table: 'legalities', column: 'status' }, { table: 'cards', column: 'name' }],
+      async (sql: string) => (sql.includes('"status"') ? [['Banned'], ['Legal']] : [['Abundance']]),
+    );
+    const restored = deserializeIndex(serializeIndex(index));
+    expect(findValues(restored, 'Which Banned cards are named Abundance?')).toEqual(findValues(index, 'Which Banned cards are named Abundance?'));
+  });
+
+  it('writes keys in a stable order, so the file diffs cleanly', async () => {
+    const index = await indexCells([{ table: 't', column: 'c' }], async () => [['Zulu'], ['Alpha']]);
+    expect(serializeIndex(index)).toBe(serializeIndex(deserializeIndex(serializeIndex(index))));
   });
 });

@@ -17,7 +17,7 @@
  *   pnpm bench:bird --dry-run     # gold execution, prompts, controls; no model
  *   pnpm bench:bird               # full run against the configured provider
  */
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHttpProvider } from '@agentix-e/nl2charts-ai';
@@ -31,7 +31,8 @@ import { createOracle } from './oracle.js';
 import type { OracleResult } from './oracle.js';
 import { profileDatabase } from './profile.js';
 import { buildIndex, renderDemonstrations, renderRetrieved, retrieve } from './retrieval.js';
-import { buildValueIndex, findValues, renderValues } from './values.js';
+import { deserializeIndex, findValues, indexCells, renderValues, serializeIndex } from './values.js';
+import type { ValueIndex } from './values.js';
 import { synthesizeRecord } from './synthesize.js';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
@@ -272,6 +273,19 @@ export function resolveArm(name: string): Arm | undefined {
   return ARMS.find((arm) => arm.name === base);
 }
 
+/**
+ * Turn `BIRD_ARMS` and `BIRD_AA` into the list of names to run.
+ *
+ * Pure and exported because the A/A suffix is a naming convention with a failure
+ * mode: a duplicate that resolves to the same label as its original cannot be told
+ * apart in the report.
+ */
+export function parseArms(requested: string | undefined, aa: string | undefined, defaults: readonly string[]): string[] {
+  const names = (requested ?? defaults.join(',')).split(',').map((name) => name.trim()).filter(Boolean);
+  const trimmed = aa?.trim() ?? '';
+  return trimmed === '' ? names : [...names, `${trimmed}#2`];
+}
+
 export function parseLimit(raw: string | undefined, split: 'minidev' | 'dev'): number {
   const fallback = split === 'dev' ? 1534 : 500;
   if (raw === undefined || raw.trim() === '') return fallback;
@@ -296,14 +310,10 @@ function settings() {
       .filter(Boolean),
     // Default chain: baseline, the two definition sources, the synthesized one
     // with the dataset hint, and last round's best arm as the ceiling reference.
-    arms: (() => {
-      const requested = (process.env.BIRD_ARMS ?? DEFAULT_ARMS.join(',')).split(',').map((name) => name.trim());
-      // `BIRD_AA=<arm>` appends the same arm a second time under a `#2` name. The
-      // delta between the pair is the harness's own noise at this sample size, which
-      // no amount of within-run pairing between *different* arms can reveal.
-      const aa = process.env.BIRD_AA?.trim();
-      return aa === undefined || aa === '' ? requested : [...requested, `${aa}#2`];
-    })(),
+    // `BIRD_AA=<arm>` appends the same arm a second time under a `#2` name. The delta
+    // between the pair is the harness's own noise at this sample size, which no
+    // amount of within-run pairing between *different* arms can reveal.
+    arms: parseArms(process.env.BIRD_ARMS, process.env.BIRD_AA, DEFAULT_ARMS),
     out: process.env.BIRD_OUT ?? join(ROOT, 'eval/out/bird-eval.json'),
     model: process.env.LLM_MODEL ?? 'deepseek-chat',
     baseUrl: process.env.LLM_BASE_URL ?? 'https://api.deepseek.com/v1',
@@ -473,8 +483,33 @@ async function main() {
   }
 
   // Value grounding: the literals the question names, looked up in this database.
-  const valueIndexes = new Map<string, ReturnType<typeof buildValueIndex>>();
-  for (const [db, profile] of profiles) valueIndexes.set(db, buildValueIndex(profile));
+  //
+  // Scanned from the cells, not from the profile's top values: the profile keeps at
+  // most thirty distinct values per categorical column and matched 90 of 498
+  // questions, which measured the index rather than the idea. The scan is cached per
+  // database because it costs one query per column.
+  const valueIndexes = new Map<string, ValueIndex>();
+  const valueCache = join(ROOT, 'eval/.cache/bird/values');
+  mkdirSync(valueCache, { recursive: true });
+  for (const [db, schema] of schemas) {
+    const cacheFile = join(valueCache, `${db}.json`);
+    if (existsSync(cacheFile) && process.env.BIRD_VALUES_FORCE !== '1') {
+      try {
+        valueIndexes.set(db, deserializeIndex(readFileSync(cacheFile, 'utf8')));
+        continue;
+      } catch {
+        // A corrupt cache is a miss, not a reason to fail the run.
+      }
+    }
+    const columns = schema.flatMap((table) => table.columns.map((column) => ({ table: table.table, column: column.name })));
+    const index = await indexCells(columns, async (sql) => {
+      const result = await oracle.run(db, sql);
+      if (!result.ok) throw new Error(result.error ?? 'value scan failed');
+      return result.rows;
+    });
+    valueIndexes.set(db, index);
+    writeFileSync(cacheFile, serializeIndex(index));
+  }
   const valuesByQuestion = new Map<number, string>();
   for (const question of selected) {
     const index = valueIndexes.get(question.db_id);
@@ -876,7 +911,10 @@ async function main() {
         };
       }
     });
-    outcomes.set(arm.name, runs);
+    // Keyed by the requested name, not the resolved one: an A/A duplicate resolves to
+    // the same Arm, and keying by that overwrote the first run with the second, which
+    // silently made the pair compare an arm with itself and report `aa: undefined`.
+    outcomes.set(name, runs);
     const summary = summarise(arm.name, runs);
     const strictPassed = runs.filter((run) => run.strict).length;
     const byDifficulty: Record<string, { passed: number; total: number }> = {};
@@ -910,7 +948,7 @@ async function main() {
       messages.set(key, (messages.get(key) ?? 0) + 1);
     }
     armReports.push({
-      arm: arm.name,
+      arm: name,
       passed: summary.passed,
       total: summary.total,
       accuracy: summary.accuracy,
@@ -943,8 +981,15 @@ async function main() {
       topErrors: [...messages.entries()].sort((left, right) => right[1] - left[1]).slice(0, 5),
     });
     console.log(
-      `${arm.name.padEnd(9)} ${summary.passed}/${summary.total}  ${(summary.accuracy * 100).toFixed(1)}%  strict ${strictPassed}  repaired ${runs.filter((run) => run.attempts > 1).length}`,
+      `${name.padEnd(9)} ${summary.passed}/${summary.total}  ${(summary.accuracy * 100).toFixed(1)}%  strict ${strictPassed}  repaired ${runs.filter((run) => run.attempts > 1).length}`,
     );
+  }
+
+  // Every arm must keep its own row: two rows with the same label would let a
+  // duplicate stand in for the arm it duplicates.
+  const labels = (report.arms as { arm: string }[]).map((entry) => entry.arm);
+  if (new Set(labels).size !== labels.length) {
+    throw new Error(`arm labels are not unique (${labels.join(', ')}); an A/A duplicate must keep its #2 name`);
   }
 
   // The A/A pair, when one ran: same arm, same data, same prompt — twice.

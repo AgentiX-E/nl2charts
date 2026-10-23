@@ -209,6 +209,13 @@ jobs:
           # training databases are never executed here.
           path: eval/.cache/bird/train
           key: bird-train-v1-${{ runner.os }}
+      - name: Cache the value index
+        uses: actions/cache@v4
+        with:
+          # 45k distinct cell values across eleven databases, five megabytes: one query
+          # per column to build, so it is worth keeping between runs.
+          path: eval/.cache/bird/values
+          key: bird-values-v1-${{ runner.os }}
       - name: Cache synthesized definitions
         uses: actions/cache@v4
         with:

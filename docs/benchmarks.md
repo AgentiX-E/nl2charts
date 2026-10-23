@@ -170,13 +170,18 @@ implemented and priced, each one lever away from its parent:
 | Retrieval from the training split (9,428 labelled questions, 69 databases, none under test) | DAIL-SQL's demonstration selection | **−0.2pp** | the neighbours share phrasing, not *this* schema; the block names no column that exists in the database being queried |
 | The same neighbours as worked examples, statements included | DAIL-SQL, CHASE-SQL | +1.6pp over the text form, p=0.37 | a statement written for another schema contributes identifiers that do not exist; the block's warning is not enough to make it a pure shape |
 | Selection over three executed candidates | CHASE-SQL's selection agent | **−0.6pp**, selector answered in 495 of 496 cases | the three samples agree 90% of the time and are wrong together; a selector cannot recover an answer no candidate contains |
-| Values the question names, resolved in this database | CHASE-SQL's value retrieval | **−1.4pp**, but matched only 90 of 498 questions | coverage is the constraint: the profile holds up to 30 distinct values per categorical column, so most literals a question names are absent from the index |
+| Values the question names, resolved in this database | CHASE-SQL's value retrieval | **−1.4pp**, but matched only 90 of 498 questions | coverage was the constraint: the profile holds up to 30 distinct values per categorical column. The index now scans cells (45,444 values, 34.6% of questions matched) and the arm is re-measured |
 
 The last row is the informative one. It is the only mechanism aimed at *instance*
-knowledge, and it is the only one whose failure has an obvious instrument problem:
-18% coverage cannot move a 58.8% baseline. That makes it a candidate for a wider
-index (all cells via LSH, as CHASE-SQL does), not a refuted idea. The other three
-have no such excuse: their coverage was complete and their effect was zero.
+knowledge, and it is the only one whose failure had an obvious instrument problem:
+18% coverage cannot move a 58.8% baseline. The index now scans every column's
+distinct values (45,444 keys, five megabytes, two minutes to build once), which
+matches 34.6% of questions instead of 18% — still not everything, because a value
+stored in two columns is dropped and a literal the question paraphrases is never
+found, but enough that the arm stops measuring its own coverage.
+
+The other three have no such excuse: their coverage was complete and their effect
+was zero, with paired tests that agree.
 
 ### Two gold statements cannot be scored, and the reason is measured
 

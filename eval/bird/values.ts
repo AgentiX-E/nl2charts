@@ -27,6 +27,12 @@ export interface ValueMatch {
   readonly value: string;
 }
 
+/** A column to scan, as returned by introspection. */
+export interface ColumnRef {
+  readonly table: string;
+  readonly column: string;
+}
+
 /** One entry per (column, value) pair, keyed by the value a question would name. */
 export type ValueIndex = ReadonlyMap<string, readonly ValueMatch[]>;
 
@@ -109,4 +115,79 @@ export function findValues(index: ValueIndex, question: string, max = 8): ValueM
  */
 export function renderValues(matches: readonly ValueMatch[]): string {
   return matches.map((match) => `- ${match.table}.${match.column} stores '${match.value}'`).join('\n');
+}
+
+/**
+ * Build the index by scanning the cells themselves, not the profile's top values.
+ *
+ * The profile keeps at most 30 distinct values per categorical column, which matched
+ * only 90 of 498 questions. That is not a test of value grounding; it is a test of a
+ * narrow index. This scans each column's distinct values within bounds, which costs
+ * one query per column — 798 queries across eleven databases, measured in seconds
+ * and cached on disk.
+ *
+ * Bounds are deliberate: values shorter than three characters collide with ordinary
+ * words, values longer than forty are prose rather than a literal, and a column with
+ * more than `maxValuesPerColumn` distinct values is an identifier or a free-text
+ * field whose values a question does not name.
+ */
+export async function indexCells(
+  columns: readonly ColumnRef[],
+  query: (sql: string) => Promise<readonly (readonly unknown[])[]>,
+  options: { readonly maxValuesPerColumn?: number; readonly maxValueLength?: number } = {},
+): Promise<ValueIndex> {
+  const maxValues = options.maxValuesPerColumn ?? 200;
+  const maxLength = options.maxValueLength ?? 40;
+  const index = new Map<string, ValueMatch[]>();
+  for (const { table, column } of columns) {
+    const quotedTable = `"${table.replace(/"/g, '""')}"`;
+    const quotedColumn = `"${column.replace(/"/g, '""')}"`;
+    let rows: readonly (readonly unknown[])[];
+    try {
+      rows = await query(
+        `select distinct ${quotedColumn} as v from ${quotedTable} ` +
+          `where ${quotedColumn} is not null and length(${quotedColumn}) between ${String(MIN_VALUE_LENGTH)} and ${String(maxLength)} ` +
+          `limit ${String(maxValues)}`,
+      );
+    } catch {
+      // A column that cannot be scanned contributes nothing; refusing the whole index
+      // because one table is odd would lose the columns that do work.
+      continue;
+    }
+    let accepted = 0;
+    for (const row of rows) {
+      // The SQL carries a limit, but the limit is a promise made by a string; the
+      // index keeps its own count so the bound holds whoever wrote the query.
+      if (accepted >= maxValues) break;
+      const raw = row[0];
+      if (typeof raw !== 'string' && typeof raw !== 'number') continue;
+      const key = normalizeValue(String(raw));
+      // The bounds are enforced here as well as in the SQL: the query is the caller's,
+      // and a bound that only exists in a string some caller writes is not a bound.
+      if (key.length < MIN_VALUE_LENGTH || key.length > maxLength || STOPWORDS.has(key)) continue;
+      const matches = index.get(key) ?? [];
+      // The same value in the same column twice (a scan that returned duplicates)
+      // must not turn an unambiguous match into an ambiguous one.
+      if (matches.some((match) => match.table === table && match.column === column)) continue;
+      matches.push({ table, column, value: String(raw) });
+      index.set(key, matches);
+      accepted += 1;
+    }
+  }
+  return index;
+}
+
+/**
+ * Serialize an index so a job does not rescan 798 columns every run.
+ *
+ * The format is the pairs themselves rather than JSON of a Map: a cache that has to
+ * be decoded by code that knows its shape is a second implementation of the index.
+ */
+export function serializeIndex(index: ValueIndex): string {
+  return JSON.stringify([...index.entries()].sort((left, right) => left[0].localeCompare(right[0])));
+}
+
+export function deserializeIndex(text: string): ValueIndex {
+  const entries = JSON.parse(text) as [string, ValueMatch[]][];
+  return new Map(entries);
 }

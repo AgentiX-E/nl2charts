@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { buildSqlPrompt } from '@agentix-e/nl2charts-ai';
-import { ARMS, DEFAULT_ARMS, ON_DEMAND_ARMS, PAIRS, parseLimit, promptFor, resolveArm } from '../eval/bird/run.js';
+import { ARMS, DEFAULT_ARMS, ON_DEMAND_ARMS, PAIRS, parseArms, parseLimit, promptFor, resolveArm } from '../eval/bird/run.js';
 import type { Arm } from '../eval/bird/run.js';
 import type { BirdQuestion } from '../eval/bird/data.js';
 
@@ -151,6 +151,21 @@ describe('the chain that actually runs', () => {
 });
 
 describe('A/A pairs', () => {
+  it('appends the duplicate under a distinct name', () => {
+    const arms = parseArms(undefined, 'inline+evidence', DEFAULT_ARMS);
+    expect(arms).toEqual([...DEFAULT_ARMS, 'inline+evidence#2']);
+    expect(new Set(arms).size).toBe(arms.length);
+  });
+
+  it('adds nothing when no A/A arm is asked for', () => {
+    expect(parseArms(undefined, undefined, DEFAULT_ARMS)).toEqual([...DEFAULT_ARMS]);
+    expect(parseArms(undefined, '  ', DEFAULT_ARMS)).toEqual([...DEFAULT_ARMS]);
+  });
+
+  it('respects an explicit arm list', () => {
+    expect(parseArms('names, vote', 'names', DEFAULT_ARMS)).toEqual(['names', 'vote', 'names#2']);
+  });
+
   it('resolves a duplicated name to the arm it duplicates', () => {
     // The A/A pair has to run the *same* configuration, or the delta it reports is
     // the difference between two arms rather than the harness's noise.
