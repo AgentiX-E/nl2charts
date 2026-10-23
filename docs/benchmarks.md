@@ -131,43 +131,57 @@ temperature 0, one sample per case. Artifacts: `eval/out/bird-eval.json`,
 | Schema fidelity: advertised columns exist in the database | **798 / 798** |
 | Prompt coverage: tables that reach the schema card | **75 / 75** (no truncation) |
 
-### Accuracy (run `39972340789`, all 498 scorable Mini-Dev questions per arm)
+### Accuracy (run `39979457431`, all 498 scorable Mini-Dev questions per arm)
 
-First run with **every input pinned**: definitions come from
-`eval/baseline/definitions.minidev.json` (`source: pinned` in the artifact), the
-retrieval corpus is a fixed file, and one arm is run twice.
+Every arm is scored on the identical case set, with pinned inputs (definitions,
+retrieval corpus) and one arm run twice.
 
 | Arm | Execution accuracy | 95% Wilson | prompt chars |
 | --- | --- | --- | --- |
-| names only | 35.9% (179/498) | [31.9, 40.3] | 1,862 |
+| names only | 36.1% (180/498) | [32.0, 40.5] | 1,862 |
 | model-written definitions, as a block | 41.2% (205/498) | [36.9, 45.5] | 2,903 |
-| the same text on the column line | 45.0% (224/498) | [40.7, 49.4] | 2,504 |
-| **+ the dataset's per-question hint** | **57.4%** (286/498) | [53.0, 61.7] | 2,639 |
-| + retrieved neighbours from the training split | 46.0% (229/498) | [41.7, 50.4] | 3,060 |
-| + those neighbours as worked examples | 45.6% (227/498) | [41.3, 50.0] | 4,564 |
-| + three samples, modal result | 58.8% (293/498) | [54.5, 63.1] | 2,639 (3 calls) |
-| + three samples, chosen by the model | 58.6% (292/498) | [54.3, 62.9] | 2,639 (4 calls) |
-| + five samples, chosen by the model | 57.6% (287/498) | [53.2, 61.9] | 2,639 (6 calls) |
-| + values this database stores for words in the question | 58.6% (292/498) | [54.3, 62.9] | 2,670 |
-| metadata + the hint (798 curated notes) | 59.0% (294/498) | [54.7, 63.3] | 6,967 |
-| **the same arm twice (A/A)** | 58.2% (290/498) | [53.9, 62.5] | identical |
+| the same text on the column line | 45.4% (226/498) | [41.1, 49.8] | 2,504 |
+| **+ the dataset's per-question hint** | **57.6%** (287/498) | [53.2, 61.9] | 2,639 |
+| + retrieved neighbours from the training split | 45.4% (226/498) | [41.1, 49.8] | 3,060 |
+| + those neighbours as worked examples | 45.8% (228/498) | [41.5, 50.2] | 4,564 |
+| + three samples, modal result | 58.6% (292/498) | [54.3, 62.9] | 2,639 (3 calls) |
+| + three samples, chosen by the model | 57.8% (288/498) | [53.5, 62.1] | 2,639 (4 calls) |
+| + five samples, chosen by the model | 59.4% (296/498) | [55.1, 63.7] | 2,639 (6 calls) |
+| + values this database stores for words in the question | 59.0% (294/498) | [54.7, 63.3] | 2,670 |
+| metadata + the hint (798 curated notes) | 58.4% (291/498) | [54.1, 62.7] | 6,967 |
+| **a plan written before the statement** | **50.4%** (251/498) | [46.0, 54.8] | 2,639 + plan |
+| **the same arm twice (A/A)** | 57.4% (286/498) | [53.0, 61.7] | identical |
 
 | Change (one lever) | Δ | only before / only after | p | verdict |
 | --- | --- | --- | --- | --- |
-| block → column line | +3.8pp | 25 / 44 | 0.030 | **real** |
-| inline → + the dataset's hint | **+12.4pp** | 17 / 79 | <1e-4 | **real** |
-| inline → + retrieved neighbours | +1.0pp | 19 / 24 | 0.54 | no effect |
-| retrieved text → the same neighbours as statements | −0.4pp | 31 / 29 | 0.90 | no effect |
-| + hint → three samples, modal result | +1.4pp | 8 / 16 | 0.15 | no effect |
-| modal result → chosen by the model | −0.2pp | 18 / 17 | 1.00 | no effect |
-| three candidates → five, same selector | −1.0pp | 21 / 17 | 0.63 | no effect |
-| + hint → values this database stores | +1.2pp | 8 / 14 | 0.29 | no effect |
-| **the same arm twice (A/A)** | **+0.8pp** | 0 / 4 | 0.13 | the scale |
+| block → column line | +4.2pp | 23 / 44 | 0.014 | **real** |
+| inline → + the dataset's hint | **+12.2pp** | 16 / 77 | <1e-4 | **real** |
+| inline → + retrieved neighbours | 0.0pp | 22 / 22 | 1.00 | no effect |
+| retrieved text → the same neighbours as statements | +0.4pp | 27 / 29 | 0.89 | no effect |
+| + hint → three samples, modal result | +1.0pp | 9 / 15 | 0.31 | no effect |
+| modal result → chosen by the model | −0.8pp | 14 / 10 | 0.54 | no effect |
+| three candidates → five, same selector | +1.6pp | 13 / 20 | 0.30 | no effect |
+| + hint → values this database stores | +1.4pp | 6 / 12 | 0.24 | no effect |
+| + hint → a plan before the statement | **−7.2pp** | 63 / 27 | 0.0002 | **harmful** |
+| **the same arm twice (A/A)** | −0.2pp | 7 / 7 | 1.00 | the scale |
 
-The A/A pair is the instructive row: **the duplicate won four cases and lost none**,
-on identical prompts and identical pinned inputs. Across five runs the identical pair
-has differed by 0.2, 0.6, 1.2, 0.2 and 0.8pp, which is why no 1pp delta in this table
-is called anything.
+### Writing the plan first makes it worse
+
+A plan written before the statement — scan, filter, join, group, answer — loses
+**7.2pp** against the same arm without it: 63 cases broken, 27 fixed, p=0.0002. This
+is the largest and clearest effect in the table after the two that help, and it points
+the opposite way from the intuition (and from CHASE-SQL's second generator, which is
+where the idea came from).
+
+Two mechanisms are plausible and this experiment does not separate them: a plan commits
+to a join or a filter before the column choice is constrained by evidence, so the SQL
+inherits the plan's mistake instead of being free to be right; and the block adds ~40%
+more prompt for a schema that was already fully described. The first would be visible
+as "the plan is wrong on the cases it breaks" — that is the next measurement, not a
+conclusion.
+
+The arm is out of the default chain and stays in the catalogue with its result written
+next to it, the same way a rejected hypothesis is kept.
 
 ### Selection looked real once, and did not replicate
 

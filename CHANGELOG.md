@@ -37,7 +37,9 @@ cannot be argued with.
   34.6% of questions matched) instead of the profile's thirty-per-column, which had
   matched 18% and measured the index rather than the idea.
 - **`plan`**: a query plan (scan, filter, join, group, answer) written before the
-  statement, one lever from `inline+evidence` — CHASE-SQL's second generator.
+  statement — CHASE-SQL's second generator. Measured **−7.2pp** against its parent
+  (63/27, p=0.0002) and moved out of the default chain: it anchors the statement to a
+  join chosen before the columns are constrained.
 - **`select` / `select5`**: three or five samples chosen by the model instead of
   counted. Measured +2.6pp against voting (p=0.015) and then **+0.6pp when repeated**
   (p=0.85); five candidates did not beat three (+1.0pp, p=0.57). The first result was

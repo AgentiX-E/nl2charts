@@ -210,7 +210,6 @@ export const DEFAULT_ARMS: readonly string[] = [
   'select',
   'select5',
   'values',
-  'plan',
   'metadata+evidence',
 ];
 
@@ -230,6 +229,7 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   adaptive: 'per-database prompt profile: measured null',
   'no-linking': 'removes the schema linker: the arm that prices linking, run when linking changes',
   repair: 'execution-feedback repair: measured null, run when the repair path changes',
+  plan: 'query plan before the statement: 50.4% against 57.6% for its parent (-7.2pp, 63/27, p=0.0002) — anchoring, not helping; kept so the finding can be re-tested',
 };
 
 /**
@@ -1075,6 +1075,10 @@ async function main() {
       promptChars: {
         mean: Math.round(promptSizes.reduce((total, size) => total + size, 0) / Math.max(1, promptSizes.length)),
         max: Math.max(0, ...promptSizes),
+        // Blocks written at call time (a plan, a reading of the question) are not in
+        // the static prompt this counts, so an arm that uses one must say so: a size
+        // that silently excludes the block it added would read as "this arm is cheap".
+        ...(arm.plan === true || arm.interpret === true ? { excludes: ['plan/interpretation written at call time'] } : {}),
       },
       byDifficulty,
       errors,

@@ -122,6 +122,14 @@ describe('the chain that actually runs', () => {
     expect(filed).toEqual(declared);
   });
 
+  it('keeps a mechanism that measured harmful out of the default chain', () => {
+    // A plan before the statement lost 7.2pp against its parent (63/27, p=0.0002).
+    // Keeping it in the chain would spend two minutes of every run to make the table
+    // worse; the catalogue keeps it so the finding can be re-tested.
+    expect(DEFAULT_ARMS).not.toContain('plan');
+    expect(ON_DEMAND_ARMS.plan).toMatch(/-7\.2pp/);
+  });
+
   it('puts the retrieval arm in the default chain', () => {
     expect(DEFAULT_ARMS).toContain('inline+retrieval');
   });
