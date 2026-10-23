@@ -2,7 +2,23 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { buildSqlPrompt } from '@agentix-e/nl2charts-ai';
-import { ARMS, COMPARISONS, DEFAULT_ARMS, ON_DEMAND_ARMS, PAIRS, assertArmProducedResults, assertUniqueArmLabels, parseArms, parseLimit, promptFor, resolveArm } from '../eval/bird/run.js';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import {
+  ARMS,
+  COMPARISONS,
+  DEFAULT_ARMS,
+  ON_DEMAND_ARMS,
+  PAIRS,
+  assertArmProducedResults,
+  assertUniqueArmLabels,
+  parseArms,
+  parseLimit,
+  promptFor,
+  readPinnedDefinitions,
+  resolveArm,
+} from '../eval/bird/run.js';
 import type { Arm } from '../eval/bird/run.js';
 import type { BirdQuestion } from '../eval/bird/data.js';
 
@@ -222,5 +238,35 @@ describe('sample size', () => {
   it('honours a real cap', () => {
     expect(parseLimit('120', 'minidev')).toBe(120);
     expect(parseLimit('12.9', 'dev')).toBe(12);
+  });
+});
+
+describe('pinned definitions', () => {
+  const dirs: string[] = [];
+  const write = (body: string): string => {
+    const dir = mkdtempSync(join(tmpdir(), 'nl2charts-pin-'));
+    dirs.push(dir);
+    const path = join(dir, 'definitions.json');
+    writeFileSync(path, body);
+    return path;
+  };
+
+  it('reads the committed pin, one entry per database', () => {
+    const pinned = readPinnedDefinitions(join(process.cwd(), 'eval/baseline/definitions.minidev.json'));
+    expect(pinned).toBeDefined();
+    // The eleven databases under test. A pin that covers only some of them would
+    // throw at run time, which is the point — but it is cheaper to fail here.
+    expect(pinned?.size).toBe(11);
+    for (const [db, text] of pinned ?? []) expect(text.length, db).toBeGreaterThan(0);
+  });
+
+  it('returns nothing when there is no pin', () => {
+    expect(readPinnedDefinitions(join(tmpdir(), 'no-such-pin.json'))).toBeUndefined();
+  });
+
+  it('refuses an empty pin instead of falling back to generating', () => {
+    // A silent fallback restores the drift the pin exists to remove.
+    expect(() => readPinnedDefinitions(write(JSON.stringify({ definitions: {} })))).toThrow(/regenerate/);
+    expect(() => readPinnedDefinitions(write(JSON.stringify({ model: 'x' })))).toThrow(/regenerate/);
   });
 });

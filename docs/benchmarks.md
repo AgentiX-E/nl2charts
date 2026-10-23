@@ -311,11 +311,19 @@ to sit on the column. What is left is the per-question sentence.
 
 ### Noise floor: the same arm, twice, in the same job
 
-Between-session drift is not hypothetical here. `synth-definitions` scored 36.5% in
-run `39790152728` and 41.6% in `39804736066` with the same code, the same data and a
-cache keyed on the prompt — and the artifact's stored definitions differ for 6 of 11
-databases, which means the prompt changed. Until that is explained, a 1–2pp delta
-carries no meaning.
+Between-session drift is not hypothetical here, and it is now explained.
+`synth-definitions` scored 36.5% in run `39790152728` and 41.6% in `39804736066`; the
+artifact showed the stored definitions differing for 6 of 11 databases. The
+provenance fields then said something more precise: across two later runs every
+prompt hash was **identical**, and the same 6 databases were still `cached: false`.
+The prompt never changed — the cache never hit, so the model rewrote those six
+databases every run and returned different text at temperature 0.
+
+The fix is not a better cache. Definitions are an **input** to every
+definition-dependent arm, so they are frozen in `eval/baseline/definitions.minidev.json`
+(11 databases, 11 KB) and read from there; `BIRD_DEFINITIONS_FORCE=1` regenerates and
+prints what to commit. An arm whose input is regenerated on each run measures the
+prompt and the input together, and no amount of pairing can separate them.
 
 So every job now runs one arm twice (`BIRD_AA=inline+evidence`), reports the pair's
 delta as `aa`, and the gate fails when the pair disagrees by more than the tolerance

@@ -291,6 +291,23 @@ interface CaseRun extends CaseOutcome {
  * the duplicate runs the identical configuration. Two arms that differ in anything
  * would measure that difference instead of the harness's noise.
  */
+/**
+ * Read the frozen definitions, or undefined when there is no pin.
+ *
+ * A malformed pin is an error rather than a silent fallback to generation: falling
+ * back would restore exactly the drift the pin exists to remove, and would do it
+ * quietly.
+ */
+export function readPinnedDefinitions(path: string): Map<string, string> | undefined {
+  if (!existsSync(path)) return undefined;
+  const parsed = JSON.parse(readFileSync(path, 'utf8')) as { definitions?: Record<string, string> };
+  const definitions = parsed.definitions;
+  if (definitions === undefined || Object.keys(definitions).length === 0) {
+    throw new Error(`${path} has no definitions; regenerate with BIRD_DEFINITIONS_FORCE=1`);
+  }
+  return new Map(Object.entries(definitions));
+}
+
 export function resolveArm(name: string): Arm | undefined {
   const base = name.includes('#') ? name.slice(0, name.indexOf('#')) : name;
   return ARMS.find((arm) => arm.name === base);
@@ -610,13 +627,25 @@ async function main() {
   // never a question, never a gold statement.
   const synthesizedDefinitions = new Map<string, string>();
   /** Provenance per database: the prompt hash and whether the model was called. */
-  const definitionsProvenance: Record<string, { hash: string; cached: boolean }> = {};
+  const definitionsProvenance: Record<string, { hash: string; cached: boolean; source: string }> = {};
   const needsSynthesis = config.arms.some((name) => {
     const source = resolveArm(name)?.definitions;
     return source === 'synthesized' || source === 'inline';
   });
   const provider = createHttpProvider({ baseUrl: config.baseUrl, apiKey: config.apiKey, model: config.model });
-  if (!config.dryRun && needsSynthesis) {
+  // Definitions are an *input* to the definition-dependent arms, so they are pinned in
+  // the repository rather than regenerated: two runs with identical prompts produced
+  // different text for 6 of 11 databases, which moved `synth-definitions` by 5.1pp and
+  // made every delta on that arm a joint measurement of prompt and text.
+  const pinned = readPinnedDefinitions(join(ROOT, 'eval/baseline/definitions.minidev.json'));
+  if (!config.dryRun && needsSynthesis && pinned !== undefined && process.env.BIRD_DEFINITIONS_FORCE !== '1') {
+    for (const [db] of schemas) {
+      const text = pinned.get(db);
+      if (text === undefined || text.length === 0) throw new Error(`pinned definitions have no entry for ${db}; regenerate with BIRD_DEFINITIONS_FORCE=1`);
+      synthesizedDefinitions.set(db, text);
+      definitionsProvenance[db] = { hash: 'pinned', cached: true, source: 'pinned' };
+    }
+  } else if (!config.dryRun && needsSynthesis) {
     for (const [db, schema] of schemas) {
       try {
         const outcome = await synthesizeRecord({
@@ -629,7 +658,7 @@ async function main() {
           force: process.env.BIRD_DEFINITIONS_FORCE === '1',
         });
         synthesizedDefinitions.set(db, outcome.definitions);
-        definitionsProvenance[db] = { hash: outcome.hash, cached: outcome.cached };
+        definitionsProvenance[db] = { hash: outcome.hash, cached: outcome.cached, source: 'generated' };
       } catch {
         synthesizedDefinitions.set(db, '');
       }

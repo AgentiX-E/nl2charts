@@ -46,6 +46,9 @@ cannot be argued with.
 - **An A/A control**: `BIRD_AA` runs one arm twice in the same job, so every delta has
   a measured scale. Serialised into the artifact as `aa`, and the gate fails when the
   pair disagrees by more than the tolerance used to judge regressions.
+- **Definitions are pinned**, not regenerated: `eval/baseline/definitions.minidev.json`
+  holds the 11 database blocks, because the cache never hit and the model rewrote six
+  of them per run, moving `synth-definitions` by 5.1pp between sessions.
 - **A gate that notices a declared arm never running**: the baseline now lists the
   arms it expects, so an arm that is wired but missing from the run fails the build.
   `inline+retrieval` was such an arm for one release.
