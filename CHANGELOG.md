@@ -50,6 +50,9 @@ cannot be argued with.
 - **An A/A control**: `BIRD_AA` runs one arm twice in the same job, so every delta has
   a measured scale. Serialised into the artifact as `aa`, and the gate fails when the
   pair disagrees by more than the tolerance used to judge regressions.
+- **A model-ablation workflow** (`bird-model.yml`): the same harness and pinned inputs
+  against another OpenAI-compatible endpoint, with the key passed as `LLM_API_KEY` and
+  no DeepSeek floors applied.
 - **Definitions are pinned**, not regenerated: `eval/baseline/definitions.minidev.json`
   holds the 11 database blocks, because the cache never hit and the model rewrote six
   of them per run, moving `synth-definitions` by 5.1pp between sessions.

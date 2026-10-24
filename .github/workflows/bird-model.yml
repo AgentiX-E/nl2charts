@@ -1,0 +1,102 @@
+name: bird-model
+
+# The same harness, a different model.
+#
+# Every prompt-layer mechanism this project tried landed inside the noise, and two
+# were actively unhelpful. What is left between 58% and the published 70-73% is the
+# model and the fine-tuning around it, so the model is measured as a variable rather
+# than argued about: identical questions, identical pinned inputs, identical arms.
+#
+# No accuracy floor runs here. The floors in `eval/baseline/bird.json` were derived
+# from DeepSeek runs; applying them to another model would report a floor miss that
+# says nothing about either.
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: Model name at the endpoint
+        required: true
+        default: 'glm-4.5'
+      base_url:
+        description: OpenAI-compatible base URL
+        required: true
+        default: 'https://open.bigmodel.cn/api/paas/v4'
+      secret_name:
+        description: Which org secret holds the key
+        required: true
+        default: 'ZHIPU_API_KEY'
+      arms:
+        description: Comma-separated arms (keep it short; each costs a full split)
+        required: false
+        default: 'names,inline+evidence,values'
+      limit:
+        description: Questions to score (blank = the whole split)
+        required: false
+        default: ''
+
+jobs:
+  model:
+    name: BIRD Mini-Dev with ${{ inputs.model }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    concurrency:
+      group: bird-model
+      cancel-in-progress: false
+    env:
+      # Deliberately not DEEPSEEK_API_KEY: this job must fail loudly if the other
+      # provider's key is the one that happens to be present.
+      LLM_API_KEY: ${{ secrets[inputs.secret_name] }}
+      LLM_BASE_URL: ${{ inputs.base_url }}
+      LLM_MODEL: ${{ inputs.model }}
+      BIRD_ARMS: ${{ inputs.arms }}
+      BIRD_AA: inline+evidence
+      BIRD_CONCURRENCY: '4'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Cache the dataset
+        uses: actions/cache@v4
+        with:
+          path: eval/.cache/bird/minidev
+          key: bird-minidev-v3-${{ runner.os }}
+      - name: Cache the training corpus
+        uses: actions/cache@v4
+        with:
+          path: eval/.cache/bird/train
+          key: bird-train-v1-${{ runner.os }}
+      - name: Cache the value index
+        uses: actions/cache@v4
+        with:
+          path: eval/.cache/bird/values
+          key: bird-values-v1-${{ runner.os }}
+      - name: Fetch Mini-Dev
+        run: node eval/bird/fetch.mjs
+      - name: Fetch the training corpus
+        run: pnpm bench:bird:fetch:train
+      - name: Gold queries and controls without a model
+        run: pnpm bench:bird:dry
+      - name: Evaluate with the requested model
+        run: pnpm bench:bird
+        env:
+          BIRD_LIMIT: ${{ inputs.limit }}
+      - name: Publish summary
+        if: always()
+        run: node tools/bird-summary.mjs >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload the run
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: bird-eval-model
+          path: |
+            eval/out/bird-eval.json
+            eval/out/bird-summary.md
+          if-no-files-found: warn
+          retention-days: 30

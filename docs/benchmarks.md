@@ -491,6 +491,33 @@ Three guards now exist, each at a different level:
    so an empty lever is visible in the numbers, not only in the log;
 3. the gate fails when one of those is zero for an arm the baseline expects.
 
+### The model is a variable, not an opinion
+
+Every prompt-layer mechanism tried here landed inside the noise, and one was
+actively harmful. What remains between ~58% and the published 70–73% is the model and
+the fine-tuning around it, so the model is measured the same way as an arm: identical
+questions, identical pinned inputs, identical prompts.
+
+```bash
+# workflow_dispatch, or locally:
+LLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4 \
+LLM_MODEL=glm-4.5 \
+LLM_API_KEY=$ZHIPU_API_KEY \
+BIRD_ARMS=names,inline+evidence,values \
+pnpm bench:bird
+```
+
+Three constraints keep the comparison honest:
+
+1. **The key is passed as `LLM_API_KEY`, never as `DEEPSEEK_API_KEY`.** If the DeepSeek
+   key were present, a misconfigured job would silently measure the wrong model and
+   report it under the right name.
+2. **No accuracy floor runs.** The floors in `eval/baseline/bird.json` were derived
+   from DeepSeek runs; failing them on another model says nothing about either.
+3. **The arm set is short by design.** A model comparison needs the parent chain
+   (`names` → `inline+evidence`) and the best-known lever (`values`), not all twelve
+   arms.
+
 ## What these numbers are not
 
 - **Not a SOTA claim.** The dataset is a local fixture, not BIRD, Spider 2.0 or
