@@ -1012,6 +1012,11 @@ async function main() {
             reason: 'values',
             strict: false,
             attempts: asked.attempts,
+            // Without the kind this case counted as `other`, which made
+            // `errors.execution` permanently zero and hid where failures came from:
+            // the GLM probe read as "no execution failures" while every one of its
+            // top errors was a SQLite syntax or column error.
+            errorKind: 'execution',
             error: `execution: ${predicted.error ?? 'unknown'}`,
           };
         }
