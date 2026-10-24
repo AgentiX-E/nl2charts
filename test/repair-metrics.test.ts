@@ -40,6 +40,22 @@ describe('the repair funnel', () => {
     expect(syntax).toEqual({ failureClass: 'syntax', cases: 1, fixed: 0, remaining: 1 });
   });
 
+  it('separates a repaired statement that runs from one that is right', () => {
+    // On BIRD, eight of nine repaired cases ended executable and wrong. Counting them
+    // as "still failing" alone hides what the loop actually produced.
+    const funnel = repairFunnel([
+      { attempts: 2, passed: true, failures: ['binding'] },
+      { attempts: 2, passed: false, failures: ['binding'] },
+      { attempts: 2, passed: false, failures: ['syntax'], errorKind: 'execution' },
+      { attempts: 2, passed: false, failures: ['guard'], errorKind: 'guard' },
+    ]);
+    expect(funnel.repaired).toBe(4);
+    expect(funnel.fixedByRepair).toBe(1);
+    expect(funnel.stillFailing).toBe(3);
+    // Two of the three failures still had no statement the engine would run.
+    expect(funnel.stillNotExecuting).toBe(2);
+  });
+
   it('prices the loop in model calls', () => {
     const funnel = repairFunnel(cases);
     // (1+1+2+3+3+4)/6 = 2.33 attempts, of which one is the first.

@@ -12,6 +12,8 @@ export interface RepairCase {
   readonly passed: boolean;
   /** Classes of the rejected attempts, in order. Empty when nothing was rejected. */
   readonly failures?: readonly string[];
+  /** How the case ended when it did not end with an answer: `execution`, `guard`, `llm`. */
+  readonly errorKind?: string;
 }
 
 export interface ClassFunnel {
@@ -46,6 +48,15 @@ export interface RepairFunnel {
   readonly firstPassRate: number;
   /** Share of cases the loop could possibly have fixed, i.e. its ceiling. */
   readonly repairableShare: number;
+  /**
+   * Repaired cases that still had no executable statement at the end.
+   *
+   * The difference from `stillFailing` is the mechanism's actual product: on BIRD,
+   * eight of nine repaired cases ended as *executable but wrong*. A repair that turns a
+   * syntax error into a runnable wrong answer has done what it can — it is the question
+   * that was misread, and no error message says so.
+   */
+  readonly stillNotExecuting: number;
   /** `fixedByRepair / repaired`; 0 when no case needed a repair. */
   readonly repairSuccessRate: number;
   readonly meanAttempts: number;
@@ -64,6 +75,7 @@ export function repairFunnel(cases: readonly RepairCase[]): RepairFunnel {
   let ranOnceWrong = 0;
   let repaired = 0;
   let fixedByRepair = 0;
+  let stillNotExecuting = 0;
   let attempts = 0;
   const byClass = new Map<string, { cases: number; fixed: number }>();
   for (const entry of cases) {
@@ -75,6 +87,7 @@ export function repairFunnel(cases: readonly RepairCase[]): RepairFunnel {
     }
     repaired += 1;
     if (entry.passed) fixedByRepair += 1;
+    if (entry.errorKind === 'execution' || entry.errorKind === 'guard') stillNotExecuting += 1;
     // The first rejection names the problem the repair had to overcome; later ones are
     // what happened on the way. Counting every class would double-count a case that
     // failed for two reasons and make the funnel sum past its own total.
@@ -92,6 +105,7 @@ export function repairFunnel(cases: readonly RepairCase[]): RepairFunnel {
     ranOnceWrong,
     repaired,
     fixedByRepair,
+    stillNotExecuting,
     stillFailing,
     accuracy: share(cases.filter((entry) => entry.passed).length, total),
     firstPassRate: share(firstPass, total),

@@ -1112,7 +1112,10 @@ async function main() {
     );
     // A repair arm is priced by its funnel, not only by its accuracy: an arm that
     // fixes 30 cases and breaks 25 has the same accuracy as one that does nothing.
-    const repair = arm.repairs > 0 ? repairFunnel(runs) : undefined;
+    const repair =
+      arm.repairs > 0
+        ? repairFunnel(runs.map((run) => ({ attempts: run.attempts, passed: run.passed, failures: run.failures, errorKind: run.errorKind })))
+        : undefined;
     const kindOf = (run: CaseRun): string | undefined => run.errorKind ?? (run.error === undefined ? undefined : 'other');
     const errors = {
       execution: runs.filter((run) => kindOf(run) === 'execution').length,
