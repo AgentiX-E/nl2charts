@@ -30,7 +30,7 @@ import type { BirdQuestion } from '../eval/bird/data.js';
  * delta cannot be attributed to anything else. A future edit that adds a second
  * change to a pair turns this red before it turns the benchmark unreadable.
  */
-const LEVERS = ['notes', 'evidence', 'repairs', 'linking', 'profile', 'definitions', 'focus', 'interpret', 'vote', 'demonstrations', 'select', 'values', 'plan'] as const;
+const LEVERS = ['notes', 'evidence', 'repairs', 'linking', 'profile', 'definitions', 'focus', 'interpret', 'vote', 'demonstrations', 'select', 'values', 'plan', 'repairFeedback'] as const;
 
 function changedLevers(left: Arm, right: Arm): string[] {
   return LEVERS.filter((lever) => left[lever] !== right[lever]);
@@ -173,6 +173,17 @@ describe('the chain that actually runs', () => {
     expect(() => assertRepairPathFired('inline+repair', [...flat.slice(1), { attempts: 2 }])).not.toThrow();
     // A small sample is exempt: on twenty questions the loop legitimately may not fire.
     expect(() => assertRepairPathFired('inline+repair', [{ attempts: 1 }])).not.toThrow();
+  });
+
+  it('pairs the diagnosed repair with the raw one, at the same cost', () => {
+    // The comparison that decides whether the diagnosis earns its calls: same arms, same
+    // budget, same prompt — only the text of the repair turn differs.
+    const diagnosed = ARMS.find((arm) => arm.name === 'inline+repair') as Arm;
+    const raw = ARMS.find((arm) => arm.name === 'inline+repair-raw') as Arm;
+    expect(diagnosed.repairFeedback).toBeUndefined();
+    expect(raw.repairFeedback).toBe('raw');
+    expect({ ...raw, repairFeedback: undefined, name: diagnosed.name }).toEqual(diagnosed);
+    expect(PAIRS).toContainEqual(['inline+repair-raw', 'inline+repair']);
   });
 
   it('pairs the repair arm with the best prompt stack, one lever apart', () => {

@@ -122,6 +122,11 @@ export interface Arm {
    * CHASE-SQL's second generator; one lever from `inline+evidence`.
    */
   readonly plan?: boolean;
+  /**
+   * What a repair turn says: a diagnosis (default) or the engine's raw error.
+   * Both cost the same calls, so the pair prices the diagnosis and not the retry.
+   */
+  readonly repairFeedback?: 'diagnosed' | 'raw';
 }
 
 /**
@@ -173,6 +178,9 @@ export const ARMS: readonly Arm[] = [
   // The best prompt stack plus three diagnosed repairs: one lever from
   // `inline+evidence`, so the delta prices the repair loop and nothing else.
   { name: 'inline+repair', notes: false, evidence: 'dataset', repairs: 3, linking: true, definitions: 'inline' },
+  // The same three retries with the engine's message and nothing else — the control the
+  // diagnosis has to beat on the same cases, at the same cost.
+  { name: 'inline+repair-raw', notes: false, evidence: 'dataset', repairs: 3, linking: true, definitions: 'inline', repairFeedback: 'raw' },
   { name: 'values', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', values: true },
   // A plan before the statement: the ordering decisions (scan, filter, join, group,
   // answer) are made explicitly once instead of being encoded in one draft.
@@ -211,6 +219,7 @@ export const DEFAULT_ARMS: readonly string[] = [
   'inline+retrieval',
   'inline+icl',
   'inline+repair',
+  'inline+repair-raw',
   'vote',
   'select',
   'select5',
@@ -263,6 +272,10 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   ['inline-definitions', 'inline+retrieval'],
   ['inline+retrieval', 'inline+icl'],
   ['inline+evidence', 'inline+repair'],
+  // Same three retries, same prompt, same cost — only the text differs. The pair with
+  // `inline+evidence` would change two fields (`repairs` and `repairFeedback`), and a
+  // two-lever delta cannot say which of them moved the number.
+  ['inline+repair-raw', 'inline+repair'],
   ['inline-definitions', 'interpret'],
   ['inline+evidence', 'vote'],
   ['vote', 'select'],
@@ -953,6 +966,7 @@ async function main() {
         linking: arm.linking,
         interpret: arm.interpret === true,
         plan: arm.plan === true,
+        ...(arm.repairFeedback === undefined ? {} : { repairFeedback: arm.repairFeedback }),
         temperature: arm.vote === undefined ? 0 : 0.7,
         prompt: promptFor(arm, question, blocksFor(arm, question)),
         ...(arm.repairs === 0

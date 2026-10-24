@@ -104,6 +104,14 @@ export interface PipelineOptions {
   /** When provided, a candidate is executed before it is accepted; failures
    *  become repair turns (syntax and binding errors, not wrong answers). */
   readonly execute?: (sql: string) => Promise<unknown>;
+  /**
+   * What a repair turn says: the diagnosed message (default) or the engine's raw error.
+   *
+   * The raw mode is not a fallback; it is the control. Diagnosed repair costs the same
+   * number of calls either way, so the only way to know whether the diagnosis earns them
+   * is to run both on the same cases.
+   */
+  readonly repairFeedback?: 'diagnosed' | 'raw';
 }
 
 export interface AskRequest {
@@ -288,6 +296,7 @@ export function createPipeline(options: PipelineOptions): {
               sql,
               schema: request.schema,
               ...(options.prompt?.dialect === undefined ? {} : { dialect: options.prompt.dialect }),
+              ...(options.repairFeedback === undefined ? {} : { mode: options.repairFeedback }),
               error,
             });
             failures.push(diagnosis.failureClass);

@@ -286,3 +286,33 @@ describe('the shapes a driver actually sends', () => {
     expect(diagnosis.feedback).toMatch(/No table .* is close/);
   });
 });
+
+describe('the raw baseline', () => {
+  const fields = { message: 'no such column: s.Schoolname', sqlState: '42703' };
+  const error = Object.assign(new Error(fields.message), { code: fields.sqlState, sqlState: fields.sqlState });
+
+  it('sends the engine sentence and nothing else', () => {
+    const raw = diagnoseFailure({ sql, schema, dialect: 'PostgreSQL', error, mode: 'raw' });
+    // Verbatim, including the SQLSTATE the engine attached: the raw mode exists to be
+    // the control, so it must not quietly include any of the diagnosis.
+    expect(raw.feedback).toBe('42703: no such column: s.Schoolname');
+    expect(raw.suggestions).toEqual([]);
+    expect(raw.feedback).not.toMatch(/Closest identifier|Use only tables|Fix exactly/);
+  });
+
+  it('still classifies, because the artifact is compared per class either way', () => {
+    expect(diagnoseFailure({ sql, schema, dialect: 'PostgreSQL', error, mode: 'raw' }).failureClass).toBe('binding');
+  });
+
+  it('is bounded like the diagnosed form', () => {
+    const long = Object.assign(new Error('x'.repeat(5000)), {});
+    expect(diagnoseFailure({ sql, schema, dialect: 'SQLite', error: long, mode: 'raw' }).feedback.length).toBeLessThanOrEqual(900);
+  });
+
+  it('is strictly shorter than the diagnosed form on the same failure', () => {
+    const diagnosed = diagnoseFailure({ sql, schema, dialect: 'PostgreSQL', error });
+    const raw = diagnoseFailure({ sql, schema, dialect: 'PostgreSQL', error, mode: 'raw' });
+    expect(raw.feedback.length).toBeLessThan(diagnosed.feedback.length);
+    expect(diagnosed.feedback).toContain(fields.message);
+  });
+});

@@ -328,6 +328,12 @@ export interface FailureInput {
   readonly error?: unknown;
   /** A refusal from `inspectSql`, which never reaches the engine. */
   readonly guard?: { readonly reason: string; readonly detail: string };
+  /**
+   * `diagnosed` (default) sends the engine's words plus what the schema and the class
+   * add. `raw` sends the engine's words alone — the baseline this module is measured
+   * against, because "more context helps" is a claim and not a fact.
+   */
+  readonly mode?: 'diagnosed' | 'raw';
 }
 
 /**
@@ -352,6 +358,19 @@ export function diagnoseFailure(input: FailureInput): Diagnosis {
   }
 
   const fields = readEngineError(input.error);
+  // The raw baseline is the engine's own sentence, verbatim and nothing else. It exists
+  // so the diagnosis can be priced: without it, "the model does better with hints" is an
+  // assumption that happens to be baked into every library.
+  if (input.mode === 'raw') {
+    const raw = fields.sqlState === undefined ? fields.message : `${fields.sqlState}: ${fields.message}`;
+    return {
+      failureClass: classifyFailure(fields.message),
+      summary: `raw: ${raw}`,
+      feedback: clip(raw, MAX_FEEDBACK),
+      suggestions: [],
+      ...(fields.sqlState === undefined ? {} : { sqlState: fields.sqlState }),
+    };
+  }
   const failureClass = classifyFailure(fields.message);
   const identifier = readIdentifier(fields.message, failureClass);
   const aliases = resolveAliases(input.sql, input.schema);

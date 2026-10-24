@@ -11,6 +11,7 @@
     "inline+retrieval",
     "inline+icl",
     "inline+repair",
+    "inline+repair-raw",
     "vote",
     "select",
     "select5",
