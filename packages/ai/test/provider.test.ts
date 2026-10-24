@@ -222,3 +222,20 @@ describe('retrying a rate-limited call', () => {
     expect(calls).toHaveLength(2);
   });
 });
+
+describe('an empty answer that is not an outage', () => {
+  it('names the finish reason and the fields it saw', async () => {
+    // Zhipu's reasoning models return content: null with reasoning_content filled and
+    // finish_reason=length when the token budget is spent thinking. "no content" alone
+    // sends the reader to the endpoint's status page instead of its token budget.
+    const fetchImpl = (async () =>
+      new Response(
+        JSON.stringify({ choices: [{ finish_reason: 'length', message: { content: null, reasoning_content: 'thinking…' } }] }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      )) as unknown as typeof fetch;
+    const provider = createHttpProvider({ baseUrl: 'https://example.test/v1', model: 'm', fetchImpl });
+    await expect(provider.complete({ messages: [{ role: 'user', content: 'q' }] })).rejects.toThrow(
+      /finish_reason=length, message fields: content,reasoning_content/,
+    );
+  });
+});

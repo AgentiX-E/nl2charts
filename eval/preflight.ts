@@ -31,7 +31,9 @@ try {
       { role: 'user', content: 'ping' },
     ],
     temperature: 0,
-    maxTokens: 8,
+    // No token cap. A reasoning model spends the budget thinking and returns an empty
+    // answer with finish_reason=length, which a preflight would report as a broken
+    // endpoint when the endpoint is fine.
   });
   const elapsed = Date.now() - started;
   console.log(`preflight ok: ${baseUrl} ${model} answered in ${String(elapsed)} ms (${String(reply.text.length)} chars)`);

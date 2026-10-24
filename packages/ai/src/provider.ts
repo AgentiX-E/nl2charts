@@ -65,7 +65,10 @@ function retryAfterMs(response: Response, fallback: number): number {
 
 interface CompletionBody {
   readonly model?: unknown;
-  readonly choices?: readonly { readonly message?: { readonly content?: unknown } }[];
+  readonly choices?: readonly {
+    readonly finish_reason?: unknown;
+    readonly message?: { readonly content?: unknown; readonly reasoning_content?: unknown };
+  }[];
   readonly usage?: { readonly prompt_tokens?: unknown; readonly completion_tokens?: unknown };
 }
 
@@ -143,9 +146,20 @@ export function createHttpProvider(options: HttpProviderOptions): LlmProvider {
       } catch (error) {
         throw toNl2ChartsError('NL2C_E_LLM_INVALID_RESPONSE', 'llm response is not JSON', error);
       }
-      const content = payload.choices?.[0]?.message?.content;
+      const choice = payload.choices?.[0];
+      const content = choice?.message?.content;
       if (typeof content !== 'string' || content.length === 0) {
-        throw toNl2ChartsError('NL2C_E_LLM_INVALID_RESPONSE', 'llm response has no content');
+        // A reasoning model with a small token budget spends all of it thinking and
+        // returns an empty answer with finish_reason=length. Saying so turns "no
+        // content" into a diagnosis: the budget, not the endpoint.
+        const finish = typeof choice?.finish_reason === 'string' ? choice.finish_reason : 'unknown';
+        const present = Object.keys(choice?.message ?? {});
+        throw toNl2ChartsError(
+          'NL2C_E_LLM_INVALID_RESPONSE',
+          `llm response has no content (finish_reason=${finish}${present.length === 0 ? '' : `, message fields: ${present.join(',')}`})`,
+          undefined,
+          { finishReason: finish, fields: present },
+        );
       }
       const promptTokens = Number(payload.usage?.prompt_tokens ?? 0);
       const completionTokens = Number(payload.usage?.completion_tokens ?? 0);
