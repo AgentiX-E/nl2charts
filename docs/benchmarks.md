@@ -529,6 +529,36 @@ Three constraints keep the comparison honest:
    should cost thirty seconds, not an arm — and it must fail *before* the table is built,
    because a table built during a throttle is a table about the throttle.
 
+### A weak model fails differently, and the difference is legible
+
+`glm-4-flash` on 250 questions, same prompts, same pinned inputs:
+
+| Arm | GLM-4-Flash (n=249) | DeepSeek (n=498) | SQL that would not execute |
+| --- | --- | --- | --- |
+| names only | 18.9% (47/249) | 35.9% (180/498) | **52 (20.9%)** vs 5 (1.0%) |
+| + the dataset's hint | 30.1% (75/249) | 57.6% (287/498) | **91 (36.5%)** vs 11 (2.2%) |
+
+The sample sizes differ, so the gaps are indicative rather than paired — but the
+failure *mode* is unambiguous and is the point: the weak model's losses are mostly
+statements that SQLite refuses (`near "Type": syntax error`, `no such column:
+s.SchoolName`), not statements that run and answer the wrong thing. A model that cannot
+bind a column is not going to be rescued by a better hint.
+
+One consequence of the longer prompt is visible here and not in DeepSeek: the hint makes
+`glm-4-flash`'s execution failures *worse* (20.9% → 36.5%). More context is not more
+capability.
+
+### The A/A pair is a property of the provider, not of the harness
+
+The same run repeated `inline+evidence` and got **75/249 twice, with zero disagreements**
+— a 0.0pp A/A. DeepSeek's identical pair moved 0.2–1.2pp across five runs.
+
+So the noise floor published above is a **DeepSeek** number: it measures that provider's
+nondeterminism at temperature 0, not a universal property of the harness. On a
+deterministic endpoint the same harness is exactly reproducible, which means a 1pp
+difference on such an endpoint would be real — and it also means an A/A pair is the only
+way to know which kind of endpoint you are measuring on.
+
 ## What these numbers are not
 
 - **Not a SOTA claim.** The dataset is a local fixture, not BIRD, Spider 2.0 or

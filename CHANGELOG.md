@@ -55,6 +55,13 @@ cannot be argued with.
   throttled batch was reporting 4.6% where the same arm scores 35.9%.
 - **`pnpm eval:preflight`**: one call before five hundred, so a refused key or a
   throttled account costs thirty seconds instead of an arm.
+- **A second model, measured**: `glm-4-flash`, 250 questions, `names` 18.9% and
+  `inline+evidence` 30.1% — with 20.9%/36.5% of cases failing as SQLite errors, against
+  1.0%/2.2% for DeepSeek. Same harness, same pinned inputs; the weak model loses by
+  writing statements that do not run.
+- **An A/A pair on a deterministic endpoint returns 0.0pp** (75/249 twice, zero
+  disagreements), so the published 0.2–1.2pp noise floor is a property of that provider
+  rather than of the harness.
 - **A model-ablation workflow** (`bird-model.yml`): the same harness and pinned inputs
   against another OpenAI-compatible endpoint, with the key passed as `LLM_API_KEY` and
   no DeepSeek floors applied.
