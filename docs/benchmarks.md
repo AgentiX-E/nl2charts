@@ -498,6 +498,13 @@ actively harmful. What remains between ~58% and the published 70–73% is the mo
 the fine-tuning around it, so the model is measured the same way as an arm: identical
 questions, identical pinned inputs, identical prompts.
 
+> **Status: instrumented, blocked on quota.** The first attempt at another model
+> (Zhipu `glm-4.5`) returned 429 on every call, at concurrency 2 with four retries, so
+> the comparison is pending an account that answers. The run that produced numbers
+> before the guard existed reported `names 4.6%`, which is what a throttled batch looks
+> like when each refusal is scored as a wrong answer; that table is void and the guards
+> below now refuse it.
+
 ```bash
 # workflow_dispatch, or locally:
 LLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4 \
@@ -517,6 +524,10 @@ Three constraints keep the comparison honest:
 3. **The arm set is short by design.** A model comparison needs the parent chain
    (`names` → `inline+evidence`) and the best-known lever (`values`), not all twelve
    arms.
+4. **A preflight runs first** (`pnpm eval:preflight`): one call, no retry, the endpoint
+   and the status in the message. A wrong key, a wrong model name or a throttled account
+   should cost thirty seconds, not an arm — and it must fail *before* the table is built,
+   because a table built during a throttle is a table about the throttle.
 
 ## What these numbers are not
 

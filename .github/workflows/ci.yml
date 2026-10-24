@@ -226,6 +226,10 @@ jobs:
         run: node eval/bird/fetch.mjs
       - name: Fetch the training corpus (no-op when the cache is warm)
         run: pnpm bench:bird:fetch:train
+      # One call before five hundred: a refused key or an exhausted balance should cost
+      # thirty seconds, not an arm.
+      - name: Provider preflight
+        run: pnpm eval:preflight
       - name: Gold queries, prompts and controls without a model
         run: pnpm bench:bird:dry
       - name: DuckDB portability census

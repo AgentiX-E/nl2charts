@@ -50,6 +50,11 @@ cannot be argued with.
 - **An A/A control**: `BIRD_AA` runs one arm twice in the same job, so every delta has
   a measured scale. Serialised into the artifact as `aa`, and the gate fails when the
   pair disagrees by more than the tolerance used to judge regressions.
+- **Retry on 429 and 5xx inside the provider**, honouring `Retry-After`, and a runner
+  guard that refuses an arm when more than 10% of its cases failed at the model: a
+  throttled batch was reporting 4.6% where the same arm scores 35.9%.
+- **`pnpm eval:preflight`**: one call before five hundred, so a refused key or a
+  throttled account costs thirty seconds instead of an arm.
 - **A model-ablation workflow** (`bird-model.yml`): the same harness and pinned inputs
   against another OpenAI-compatible endpoint, with the key passed as `LLM_API_KEY` and
   no DeepSeek floors applied.
