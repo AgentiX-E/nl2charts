@@ -10,6 +10,7 @@
     "inline+evidence",
     "inline+retrieval",
     "inline+icl",
+    "inline+repair",
     "vote",
     "select",
     "select5",

@@ -1,6 +1,7 @@
 import { DuckDBInstance } from '@duckdb/node-api';
 import { toNl2ChartsError } from '@agentix-e/nl2charts-spec';
 import type { Engine, EngineResult } from '@agentix-e/nl2charts-core';
+import { readDriverError } from './engine-error.js';
 import { fromDuckDbRow } from './values.js';
 
 export interface DuckDbOptions {
@@ -35,7 +36,10 @@ export async function createDuckDbEngine(options: DuckDbOptions = {}): Promise<E
           rows: (reader.getRowObjects() as Readonly<Record<string, unknown>>[]).map(fromDuckDbRow),
         };
       } catch (error) {
-        throw toNl2ChartsError('NL2C_E_ENGINE_FAILED', 'duckdb query failed', error, { engine: 'duckdb-native' });
+        throw toNl2ChartsError('NL2C_E_ENGINE_FAILED', `duckdb query failed: ${readDriverError(error).message}`, error, {
+          engine: 'duckdb-native',
+          engineError: readDriverError(error),
+        });
       }
     },
     async close(): Promise<void> {

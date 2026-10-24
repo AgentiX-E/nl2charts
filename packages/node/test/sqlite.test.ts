@@ -109,6 +109,19 @@ describe('SQLite engine', () => {
     await engine.close();
   });
 
+  it('keeps the driver message, so a repair has something to act on', async () => {
+    const engine = await createSqliteEngine({ path: file });
+    const error = await engine.run('select regionn from orders').catch((reason: unknown) => reason);
+    await engine.close();
+    expect(isNl2ChartsError(error)).toBe(true);
+    const captured = error as { message: string; details: { engineError?: { message: string; code?: string } } };
+    // The message used to be the constant "sqlite query failed", which made every
+    // failure identical and left the repair loop with nothing to say.
+    expect(captured.message).toContain('no such column');
+    expect(captured.details.engineError?.message).toContain('no such column: regionn');
+    expect(captured.details.engineError?.code).toBeDefined();
+  });
+
   it('opens in memory when asked', async () => {
     const engine = await createSqliteEngine({ path: ':memory:' });
     expect((await engine.run('select 1 + 1 as two')).rows).toEqual([{ two: 2 }]);

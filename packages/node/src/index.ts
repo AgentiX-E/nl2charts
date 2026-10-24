@@ -9,4 +9,6 @@ export type { SqliteOptions } from './sqlite.js';
 export { createFileCache } from './cache.js';
 export type { FileCache, FileCacheOptions } from './cache.js';
 export { CONNECTORS, connectorFor, describeConnector, redactConnection, requiresWrite } from './connectors.js';
+export { readDriverError } from './engine-error.js';
+export type { EngineErrorFields } from './engine-error.js';
 export type { Connector, ConnectorKind } from './connectors.js';

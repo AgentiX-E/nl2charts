@@ -15,6 +15,9 @@ export interface OracleResult {
   readonly columns: readonly string[];
   readonly rows: readonly (readonly unknown[])[];
   readonly error?: string;
+  /** SQLite's own error name (`SQLITE_ERROR`, `SQLITE_MISUSE`, …), when it reported one. */
+  readonly errorName?: string;
+  readonly errorCode?: number;
   readonly ms: number;
 }
 

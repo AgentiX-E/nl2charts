@@ -1,5 +1,6 @@
 import { toNl2ChartsError } from '@agentix-e/nl2charts-spec';
 import type { Engine, EngineResult } from '@agentix-e/nl2charts-core';
+import { readDriverError } from './engine-error.js';
 
 export interface SqliteOptions {
   /** Path to a SQLite database file, or ':memory:'. */
@@ -68,7 +69,12 @@ export async function createSqliteEngine(options: SqliteOptions): Promise<Engine
         });
         return { columns, rows };
       } catch (error) {
-        throw toNl2ChartsError('NL2C_E_ENGINE_FAILED', 'sqlite query failed', error, { engine: 'sqlite' });
+        // The message used to be the constant string "sqlite query failed", which made
+        // every SQLite failure indistinguishable from every other one.
+        throw toNl2ChartsError('NL2C_E_ENGINE_FAILED', `sqlite query failed: ${readDriverError(error).message}`, error, {
+          engine: 'sqlite',
+          engineError: readDriverError(error),
+        });
       }
     },
     async close(): Promise<void> {

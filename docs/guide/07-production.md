@@ -188,6 +188,59 @@ Three things worth knowing before you turn it on:
 - **Only executed candidates are offered.** A statement that failed to run is not a
   candidate, and a selector shown one would have to guess whether it was broken.
 
+## Repairing a rejected statement
+
+The pipeline retries a statement the guard or the engine refused, and **three** times by
+default. Each retry is not "try again": it carries a diagnosis built from what the engine
+and the schema actually contain.
+
+```ts
+const pipeline = createPipeline({
+  provider,
+  maxRepairs: 3,                                  // default
+  execute: async (sql) => { await engine.run(sql); },  // gate for execution errors
+  prompt: { dialect: 'PostgreSQL' },
+});
+```
+
+What the model is told on the second turn:
+
+```
+That statement was rejected. Fix exactly the problem below; keep the rest of the statement as it is.
+
+PostgreSQL, 42703: column s.schoolname does not exist
+Engine hint: Perhaps you meant to reference the column "s.SchoolName".
+
+Closest identifier in the schema: students.SchoolName.
+`s` has: StudentID, StudentName, Class, SchoolName.
+
+Use only tables and columns that exist in the schema above, spelled exactly as they are there.
+```
+
+Four properties make that message worth the call:
+
+- **The engine's own error**, not a summary: SQLSTATE where the engine uses one,
+  position where it reports one, and its hint.
+- **The schema's answer**: the identifier two edits away, resolved through the alias the
+  statement bound (`s` → `students`), and the columns the table really has.
+- **A class-specific instruction**: a grouping failure says to add the column to
+  `GROUP BY`; a timeout says to filter before joining. Nine classes, each with its own
+  sentence (`classifyFailure`).
+- **A bound**: the block is capped at 900 characters, so a wide schema cannot crowd out
+  the question.
+
+`ask()` returns `failures` (the class of every rejected attempt) and `diagnoses` (one line
+each), and when the budget is spent the thrown error carries `failureClasses`, `lastError`
+and `lastSql` in `details`. Those are what the repair funnel in [the benchmark page](../benchmarks.md) is computed from.
+
+Three cases where the loop does nothing, which is the point:
+
+| Case | What happens |
+| --- | --- |
+| First statement executes | `attempts: 1`, no repair turn, no extra call |
+| Guard refuses a `DELETE` | Classified as `guard`, told the read-only rule, never executed |
+| Engine reports a syntax error at a position | The caret line is drawn under that position, not under the first token |
+
 ## Gates you inherit
 
 These run in CI on every commit, and the same commands run locally:

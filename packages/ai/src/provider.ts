@@ -122,6 +122,10 @@ export function createHttpProvider(options: HttpProviderOptions): LlmProvider {
               { endpoint },
             );
           }
+          // A fetch implementation that resolves to nothing is an outcome, not a
+          // crash: the guard below turns it into "returned nothing". Before this line
+          // the guard was unreachable and the error was a TypeError.
+          if (response === undefined) break;
           if (response.ok || !RETRYABLE.has(response.status) || attempt === retries) break;
           // Backoff doubles per attempt; Retry-After wins when the endpoint sends one,
           // because only it knows when its own window reopens.

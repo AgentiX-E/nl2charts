@@ -2,6 +2,8 @@ import { inspectSql } from '@agentix-e/nl2charts-core';
 import { toNl2ChartsError } from '@agentix-e/nl2charts-spec';
 import type { LlmMessage, LlmProvider } from './provider.js';
 import { buildInterpretationPrompt, parseInterpretation } from './interpret.js';
+import { diagnoseFailure } from './diagnose.js';
+import type { Diagnosis, FailureClass } from './diagnose.js';
 import { buildPlanPrompt, parsePlan } from './plan.js';
 import { linkSchema, renderSchemaCard } from './linking.js';
 import type { LinkedColumn, SchemaCardOptions, SchemaTable } from './linking.js';
@@ -113,6 +115,16 @@ export interface AskResult {
   readonly sql: string;
   readonly attempts: number;
   readonly linked: readonly LinkedColumn[];
+  /**
+   * Why each rejected attempt was rejected, in order.
+   *
+   * Recorded so a repair can be priced: `attempts` alone cannot tell a run where the
+   * first statement was refused for a reason the schema could have prevented from one
+   * where three different mistakes were made.
+   */
+  readonly failures: readonly FailureClass[];
+  /** One-line diagnoses, for artifacts and logs. */
+  readonly diagnoses: readonly string[];
 }
 
 const SQL_FENCE = /```(?:sql)?\s*([\s\S]*?)```/i;
@@ -175,13 +187,40 @@ export function buildSqlPrompt(
 }
 
 /**
+ * The error a caller sees when the repair budget is spent.
+ *
+ * It carries the last diagnosis, the classes of every failure and the statement that
+ * was rejected, because "the model could not produce a statement" is a fact the caller
+ * can do nothing with.
+ */
+function exhausted(
+  diagnosis: Diagnosis,
+  attempts: number,
+  sql: string,
+  failures: readonly FailureClass[],
+  diagnoses: readonly string[],
+): Error {
+  const code = diagnosis.failureClass === 'guard' || diagnosis.failureClass === 'permission' ? 'NL2C_E_GUARD_REJECTED' : 'NL2C_E_ENGINE_FAILED';
+  return toNl2ChartsError(
+    code,
+    diagnosis.failureClass === 'guard' ? 'model could not produce a safe statement' : 'model could not produce an executable statement',
+    undefined,
+    { attempts, lastError: diagnosis.summary, lastSql: sql, failureClasses: failures, diagnoses },
+  );
+}
+
+/**
  * Question -> guarded SQL. The guard is applied to every candidate, including
  * repairs: a model that "fixes" a query by dropping a table is refused.
  */
 export function createPipeline(options: PipelineOptions): {
   ask(request: AskRequest): Promise<AskResult>;
 } {
-  const maxRepairs = options.maxRepairs ?? 2;
+  // Three, not two. Two is MAC-SQL's and CHASE-SQL's choice, but both stop after a
+  // second failure and ours did so with a single generic sentence; with a diagnosis
+  // that names the invented identifier, the third turn is the one that can act on it.
+  // The value is configurable because a caller with a slow endpoint pays for it.
+  const maxRepairs = options.maxRepairs ?? 3;
   const topK = options.topK ?? 12;
 
   return {
@@ -232,39 +271,44 @@ export function createPipeline(options: PipelineOptions): {
       ];
 
       let attempts = 0;
-      let lastError = '';
-      let lastKind: 'guard' | 'execution' = 'guard';
+      const failures: FailureClass[] = [];
+      const diagnoses: string[] = [];
       for (;;) {
         attempts += 1;
         const response = await options.provider.complete({ messages, temperature: options.temperature ?? 0 });
         const sql = extractSql(response.text);
         const verdict = inspectSql(sql);
         if (verdict.ok) {
-          if (!options.execute) return { sql, attempts, linked };
+          if (!options.execute) return { sql, attempts, linked, failures, diagnoses };
           try {
             await options.execute(sql);
-            return { sql, attempts, linked };
+            return { sql, attempts, linked, failures, diagnoses };
           } catch (error) {
-            lastKind = 'execution';
-            lastError = error instanceof Error ? error.message : String(error);
+            const diagnosis = diagnoseFailure({
+              sql,
+              schema: request.schema,
+              ...(options.prompt?.dialect === undefined ? {} : { dialect: options.prompt.dialect }),
+              error,
+            });
+            failures.push(diagnosis.failureClass);
+            diagnoses.push(diagnosis.summary);
+            if (attempts > maxRepairs) throw exhausted(diagnosis, attempts, sql, failures, diagnoses);
+            messages.push({ role: 'assistant', content: response.text });
+            messages.push({ role: 'user', content: diagnosis.feedback });
+            continue;
           }
-        } else {
-          lastKind = 'guard';
-          lastError = `${verdict.reason}: ${verdict.detail}`;
         }
-        if (attempts > maxRepairs) {
-          const code = lastKind === 'guard' ? 'NL2C_E_GUARD_REJECTED' : 'NL2C_E_ENGINE_FAILED';
-          throw toNl2ChartsError(code, lastKind === 'guard' ? 'model could not produce a safe statement' : 'model could not produce an executable statement', undefined, {
-            attempts,
-            lastError,
-            lastSql: sql,
-          });
-        }
-        messages.push({ role: 'assistant', content: response.text });
-        messages.push({
-          role: 'user',
-          content: `That statement failed (${lastError}). Return one SELECT statement only.`,
+        const diagnosis = diagnoseFailure({
+          sql,
+          schema: request.schema,
+          ...(options.prompt?.dialect === undefined ? {} : { dialect: options.prompt.dialect }),
+          guard: { reason: verdict.reason, detail: verdict.detail },
         });
+        failures.push(diagnosis.failureClass);
+        diagnoses.push(diagnosis.summary);
+        if (attempts > maxRepairs) throw exhausted(diagnosis, attempts, sql, failures, diagnoses);
+        messages.push({ role: 'assistant', content: response.text });
+        messages.push({ role: 'user', content: diagnosis.feedback });
       }
     },
   };

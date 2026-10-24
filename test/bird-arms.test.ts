@@ -13,6 +13,7 @@ import {
   PAIRS,
   assertArmProducedResults,
   assertFailureRate,
+  assertRepairPathFired,
   assertUniqueArmLabels,
   parseArms,
   parseLimit,
@@ -162,6 +163,27 @@ describe('the chain that actually runs', () => {
     expect(buildSqlPrompt(question.question, [], promptFor(values, question, { values: '- t.c stores \'x\'' }))).toContain(
       'Values in this database named by the question:',
     );
+  });
+
+  it('refuses a repair arm on which the repair path never fired', () => {
+    // A switch that is on and never fires produces its parent's number under its own
+    // name — the failure the retrieval arm already had once.
+    const flat = Array.from({ length: 200 }, () => ({ attempts: 1 }));
+    expect(() => assertRepairPathFired('inline+repair', flat)).toThrow(/did not run/);
+    expect(() => assertRepairPathFired('inline+repair', [...flat.slice(1), { attempts: 2 }])).not.toThrow();
+    // A small sample is exempt: on twenty questions the loop legitimately may not fire.
+    expect(() => assertRepairPathFired('inline+repair', [{ attempts: 1 }])).not.toThrow();
+  });
+
+  it('pairs the repair arm with the best prompt stack, one lever apart', () => {
+    const repair = ARMS.find((arm) => arm.name === 'inline+repair') as Arm;
+    const parent = ARMS.find((arm) => arm.name === 'inline+evidence') as Arm;
+    expect(repair.repairs).toBe(3);
+    expect(parent.repairs).toBe(0);
+    // Everything except the repair budget must be identical, or the delta prices the
+    // prompt as well as the loop.
+    expect({ ...repair, repairs: 0, name: parent.name }).toEqual(parent);
+    expect(PAIRS).toContainEqual(['inline+evidence', 'inline+repair']);
   });
 
   it('states a reason for every arm it defers', () => {

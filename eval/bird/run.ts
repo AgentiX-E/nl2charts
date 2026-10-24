@@ -24,6 +24,7 @@ import { createHttpProvider } from '@agentix-e/nl2charts-ai';
 import type { PromptOptions, SchemaTable } from '@agentix-e/nl2charts-ai';
 import { applySelection, attachDefinitions, buildSelectionPrompt, buildSqlPrompt, choosePromptProfile, createPipeline, renderDefinitions, renderEvidence, renderSchemaCard } from '@agentix-e/nl2charts-ai';
 import { compareArms, judgeOfficial, judgeStrict, majorityResult, mcnemarExact, summarise, wilsonInterval } from '@agentix-e/nl2charts-devkit';
+import { ppPerExtraCall, repairFunnel } from './metrics.js';
 import type { CaseOutcome, MatchReason } from '@agentix-e/nl2charts-devkit';
 import { buildSchema, loadDescriptions, loadQuestions, loadTables, stratifiedSample } from './data.js';
 import type { BirdQuestion } from './data.js';
@@ -169,6 +170,9 @@ export const ARMS: readonly Arm[] = [
   // The same inline arm plus the literals the question names, resolved against this
   // database. CHASE-SQL's first pipeline stage; here it is one lever from
   // `inline+evidence`, so the delta prices value grounding, not the hint.
+  // The best prompt stack plus three diagnosed repairs: one lever from
+  // `inline+evidence`, so the delta prices the repair loop and nothing else.
+  { name: 'inline+repair', notes: false, evidence: 'dataset', repairs: 3, linking: true, definitions: 'inline' },
   { name: 'values', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', values: true },
   // A plan before the statement: the ordering decisions (scan, filter, join, group,
   // answer) are made explicitly once instead of being encoded in one draft.
@@ -206,6 +210,7 @@ export const DEFAULT_ARMS: readonly string[] = [
   // 14pp from the per-question hint is knowledge or the dataset's own wording.
   'inline+retrieval',
   'inline+icl',
+  'inline+repair',
   'vote',
   'select',
   'select5',
@@ -228,7 +233,7 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'synthetic+focus': 'profile plus a focus instruction: measured null',
   adaptive: 'per-database prompt profile: measured null',
   'no-linking': 'removes the schema linker: the arm that prices linking, run when linking changes',
-  repair: 'execution-feedback repair: measured null, run when the repair path changes',
+  repair: 'the original repair arm (dataset notes, two attempts, one generic sentence): superseded by inline+repair, which is one lever from inline+evidence and reports a funnel',
   plan: 'query plan before the statement: 50.4% against 57.6% for its parent (-7.2pp, 63/27, p=0.0002) — anchoring, not helping; kept so the finding can be re-tested',
 };
 
@@ -257,6 +262,7 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   ['inline-definitions', 'inline+evidence'],
   ['inline-definitions', 'inline+retrieval'],
   ['inline+retrieval', 'inline+icl'],
+  ['inline+evidence', 'inline+repair'],
   ['inline-definitions', 'interpret'],
   ['inline+evidence', 'vote'],
   ['vote', 'select'],
@@ -281,6 +287,8 @@ interface CaseRun extends CaseOutcome {
   readonly selectedByModel?: boolean;
   readonly error?: string;
   readonly errorKind?: 'execution' | 'guard' | 'llm' | 'other';
+  /** Classes of the rejected attempts, in order; empty when the first one ran. */
+  readonly failures?: readonly string[];
   readonly attempts: number;
 }
 
@@ -380,6 +388,21 @@ export function assertFailureRate(
     `arm ${armName}: ${String(failures.length)} of ${String(runs.length)} calls (${(share * 100).toFixed(1)}%) failed at the model, ` +
       `above the ${(maxShare * 100).toFixed(0)}% this harness treats as an outage (first error: ${first}). ` +
       'The accuracy would be a function of how busy the endpoint was.',
+  );
+}
+
+/**
+ * A repair arm whose repair path never ran is its parent arm with a bigger budget.
+ *
+ * This is the same failure the retrieval arm had: a switch that is on and never fires
+ * still produces a number, and the number is the parent's. With a 40% failure rate on
+ * this benchmark the loop must fire; a run where it did not is broken, not efficient.
+ */
+export function assertRepairPathFired(armName: string, cases: readonly { attempts: number }[], minimumSample = 100): void {
+  if (cases.length < minimumSample) return;
+  if (cases.some((entry) => entry.attempts > 1)) return;
+  throw new Error(
+    `arm ${armName}: no case needed a repair across ${String(cases.length)} questions, which cannot be right on a benchmark where the parent arm fails 40% of them — the repair path did not run`,
   );
 }
 
@@ -915,7 +938,7 @@ async function main() {
 
   // 5. Arms.
   const armReports: unknown[] = [];
-  const outcomes = new Map<string, CaseOutcome[]>();
+  const outcomes = new Map<string, CaseRun[]>();
   for (const name of config.arms) {
     const arm = resolveArm(name);
     if (arm === undefined) throw new Error(`unknown arm ${name}`);
@@ -937,7 +960,17 @@ async function main() {
           : {
               execute: async (sql: string) => {
                 const result = await oracle.run(question.db_id, sql);
-                if (!result.ok) throw new Error(result.error ?? 'execution failed');
+                if (result.ok) return;
+                // The driver's own words, not a summary of them: the repair reads
+                // `details.engineError` to decide what to tell the model.
+                throw Object.assign(new Error(result.error ?? 'execution failed'), {
+                  details: {
+                    engineError: {
+                      message: (result.error ?? 'execution failed').replace(/^\w*Error:\s*/, ''),
+                      ...(result.errorName === undefined ? {} : { code: result.errorName }),
+                    },
+                  },
+                });
               },
             }),
       });
@@ -1028,12 +1061,14 @@ async function main() {
           reason,
           strict: judgeStrict(expected.rows, predicted.rows) === 'match',
           attempts: asked.attempts,
+          failures: asked.failures,
         };
       } catch (error) {
         // A repair arm reports the statement it gave up on, so a failure is
         // diagnosable from the artifact alone.
         const details = (error as { details?: Record<string, unknown> }).details ?? {};
         const lastError = typeof details.lastError === 'string' ? details.lastError : undefined;
+        const failureClasses = Array.isArray(details.failureClasses) ? (details.failureClasses as string[]) : undefined;
         const message = error instanceof Error ? error.message : String(error);
         const code = (error as { code?: string }).code ?? '';
         return {
@@ -1043,6 +1078,7 @@ async function main() {
           reason: 'values',
           strict: false,
           attempts: arm.repairs + 1,
+          ...(failureClasses === undefined ? {} : { failures: failureClasses }),
           error: lastError === undefined ? message : `${message}: ${lastError}`,
           errorKind: code === 'NL2C_E_GUARD_REJECTED' ? 'guard' : code === 'NL2C_E_ENGINE_FAILED' ? 'execution' : code.startsWith('NL2C_E_LLM') ? 'llm' : 'other',
         };
@@ -1056,6 +1092,7 @@ async function main() {
     // accuracy, and publishing 0% would hide the provider's message behind a score.
     assertArmProducedResults(name, runs);
     assertFailureRate(name, runs);
+    if (arm.repairs > 0) assertRepairPathFired(name, runs);
     const summary = summarise(name, runs);
     const strictPassed = runs.filter((run) => run.strict).length;
     const byDifficulty: Record<string, { passed: number; total: number }> = {};
@@ -1073,6 +1110,9 @@ async function main() {
           promptFor(arm, question, blocksFor(arm, question)),
         ).length,
     );
+    // A repair arm is priced by its funnel, not only by its accuracy: an arm that
+    // fixes 30 cases and breaks 25 has the same accuracy as one that does nothing.
+    const repair = arm.repairs > 0 ? repairFunnel(runs) : undefined;
     const kindOf = (run: CaseRun): string | undefined => run.errorKind ?? (run.error === undefined ? undefined : 'other');
     const errors = {
       execution: runs.filter((run) => kindOf(run) === 'execution').length,
@@ -1098,6 +1138,7 @@ async function main() {
       duplicateCredit: summary.passed - strictPassed,
       exactMatchRate: runs.filter((run) => run.strict).length / summary.total,
       repaired: runs.filter((run) => run.attempts > 1).length,
+      ...(repair === undefined ? {} : { repair }),
       ...(arm.vote === undefined
         ? {}
         : {
@@ -1184,17 +1225,31 @@ async function main() {
   }
   report.comparisons = comparisons;
 
+  // Mean attempts per arm, so a delta can be divided by what it cost. `attempts` is
+  // 1 for an arm with no repair, so the difference between two arms is the extra model
+  // calls the second one spends per case.
+  const meanAttempts = (runs: readonly { attempts: number }[]): number =>
+    runs.length === 0 ? 1 : runs.reduce((total, run) => total + run.attempts, 0) / runs.length;
+
   const ablations: Record<string, unknown> = {};
   for (const [from, to] of PAIRS) {
     const first = outcomes.get(from);
     const second = outcomes.get(to);
     if (first === undefined || second === undefined) continue;
     const comparison = compareArms(summarise(from, first), summarise(to, second));
+    const extraCalls = meanAttempts(second) - meanAttempts(first);
+    const priced = ppPerExtraCall(comparison.delta * 100, extraCalls);
     ablations[`${from} -> ${to}`] = {
       delta: comparison.delta,
       onlyFirst: comparison.onlyFirst,
       onlySecond: comparison.onlySecond,
       p: mcnemarExact(comparison.onlyFirst, comparison.onlySecond),
+      // Undefined for a lever that costs no call (placement, a hint): those are not
+      // "infinitely efficient", they are free, and dividing by zero would say the first.
+      cost: {
+        extraCallsPerCase: Number(extraCalls.toFixed(4)),
+        ...(priced === undefined ? {} : { ppPerExtraCall: Number(priced.toFixed(3)) }),
+      },
     };
   }
 

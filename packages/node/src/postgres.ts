@@ -1,6 +1,7 @@
 import { toNl2ChartsError } from '@agentix-e/nl2charts-spec';
 import type { Engine, EngineResult } from '@agentix-e/nl2charts-core';
 import { describeConnector, requiresWrite } from './connectors.js';
+import { readDriverError } from './engine-error.js';
 
 /** Message of anything thrown; drivers throw strings in a few edge cases. */
 export function messageOf(error: unknown): string {
@@ -92,6 +93,8 @@ export async function createPostgresEngine(options: PostgresOptions): Promise<En
         const message = messageOf(error);
         throw toNl2ChartsError('NL2C_E_ENGINE_FAILED', `${describeConnector('postgres', options.connectionString)}: ${message}`, error, {
           engine: 'postgres',
+          // SQLSTATE, position and hint are what a repair can act on.
+          engineError: readDriverError(error),
         });
       }
       try {
@@ -111,6 +114,8 @@ export async function createPostgresEngine(options: PostgresOptions): Promise<En
         // one might; describeConnector is the only string this library emits.
         throw toNl2ChartsError('NL2C_E_ENGINE_FAILED', `${describeConnector('postgres', options.connectionString)}: ${message}`, error, {
           engine: 'postgres',
+          // SQLSTATE, position and hint are what a repair can act on.
+          engineError: readDriverError(error),
         });
       } finally {
         client.release();

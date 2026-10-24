@@ -76,13 +76,43 @@ if (report === null) {
         `\`${report.aa.arm}\` run twice in this job: **${(report.aa.delta * 100).toFixed(1)}pp** apart (${report.aa.onlyFirst} / ${report.aa.onlySecond}, McNemar p=${report.aa.p.toFixed(3)}). This is the scale every other delta should be read against.`,
       );
     }
-    lines.push('', '### Paired ablations', '', '| change | delta | only before / only after | McNemar exact p |', '| --- | --- | --- | --- |');
+    lines.push(
+      '',
+      '### Paired ablations',
+      '',
+      '| change | delta | only before / only after | McNemar exact p | extra calls / case | pp per extra call |',
+      '| --- | --- | --- | --- | --- | --- |',
+    );
     for (const [name, effect] of Object.entries(report.ablations ?? {})) {
+      const cost = effect.cost ?? {};
+      const extra = typeof cost.extraCallsPerCase === 'number' ? cost.extraCallsPerCase.toFixed(2) : '—';
+      const perCall = typeof cost.ppPerExtraCall === 'number' ? cost.ppPerExtraCall.toFixed(2) : 'free';
       lines.push(
-        `| ${name} | ${effect.delta >= 0 ? '+' : ''}${(effect.delta * 100).toFixed(1)}pp | ${effect.onlyFirst} / ${effect.onlySecond} | ${effect.p.toFixed(4)} |`,
+        `| ${name} | ${effect.delta >= 0 ? '+' : ''}${(effect.delta * 100).toFixed(1)}pp | ${effect.onlyFirst} / ${effect.onlySecond} | ${effect.p.toFixed(4)} | ${extra} | ${perCall} |`,
       );
     }
     lines.push('');
+
+    // The funnel: accuracy says whether the arm is good, this says what the loop did.
+    const withFunnel = (report.arms ?? []).find((entry) => entry.repair !== undefined);
+    if (withFunnel !== undefined) {
+      const funnel = withFunnel.repair;
+      lines.push(
+        '### What the repair loop bought',
+        '',
+        `\`${withFunnel.arm}\` answered **${funnel.firstPass}** of ${funnel.total} on the first statement (${(funnel.firstPassRate * 100).toFixed(1)}%). ` +
+          `${funnel.repaired} cases needed a repair, **${funnel.fixedByRepair}** of them ended correct (${(funnel.repairSuccessRate * 100).toFixed(1)}%), ` +
+          `${funnel.stillFailing} did not. Mean ${funnel.meanAttempts.toFixed(2)} attempts (${funnel.extraCallsPerCase.toFixed(2)} extra calls per case).`,
+        '',
+      );
+      if ((funnel.byClass ?? []).length > 0) {
+        lines.push('| first rejection | cases | fixed | still failing |', '| --- | --- | --- | --- |');
+        for (const entry of funnel.byClass) {
+          lines.push(`| ${entry.failureClass} | ${entry.cases} | ${entry.fixed} | ${entry.remaining} |`);
+        }
+        lines.push('');
+      }
+    }
   }
   lines.push(
     '> Execution accuracy is BIRD\u2019s official judge: `set(predicted) == set(gold)` over tuples, so row order is ignored and duplicate rows collapse. The strict column repeats the comparison as a multiset; the difference is the number of cases the official rule credits because of duplicates.',

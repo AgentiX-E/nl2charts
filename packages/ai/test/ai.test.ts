@@ -136,7 +136,7 @@ describe('question to guarded sql', () => {
 
   it('repairs a rejected candidate instead of returning it', async () => {
     const provider = createReplayProvider([
-      { match: 'That statement failed', response: 'SELECT region FROM orders' },
+      { match: 'That statement was rejected', response: 'SELECT region FROM orders' },
       { match: 'revenue by region', response: 'DROP TABLE orders' },
     ]);
     const pipeline = createPipeline({ provider });
@@ -164,7 +164,7 @@ describe('question to guarded sql', () => {
   it('repairs an execution failure and returns the working statement', async () => {
     let calls = 0;
     const provider = createReplayProvider([
-      { match: 'That statement failed', response: 'SELECT region FROM orders' },
+      { match: 'That statement was rejected', response: 'SELECT region FROM orders' },
       { match: 'revenue by region', response: 'SELECT region FROM missing_table' },
     ]);
     const pipeline = createPipeline({
@@ -390,5 +390,93 @@ describe('demonstrations from another schema', () => {
   it('keeps the examples below the schema, so the schema is read first', () => {
     const prompt = buildSqlPrompt('q', tiny, { demonstrations: 'Question: x\nSQL: SELECT 1' });
     expect(prompt.indexOf('Schema:')).toBeLessThan(prompt.indexOf('Examples from other databases'));
+  });
+});
+
+describe('what a repair turn is told', () => {
+  const tables: SchemaTable[] = [
+    {
+      table: 'students',
+      columns: [
+        { name: 'StudentID', type: 'INTEGER' },
+        { name: 'StudentName', type: 'TEXT' },
+      ],
+    },
+  ];
+
+  /** Answers with the same statement, and records every message it was sent. */
+  function fixed(sql: string): { provider: LlmProvider; seen: string[][] } {
+    const seen: string[][] = [];
+    return {
+      seen,
+      provider: {
+        id: 'fixed',
+        model: 'fixed',
+        complete: async (request) => {
+          seen.push(request.messages.map((message) => `${message.role}:${message.content}`));
+          return { text: sql, model: 'fixed' };
+        },
+      },
+    };
+  }
+
+  it('names the column that does not exist and the one that does', async () => {
+    const { provider, seen } = fixed('SELECT StudentName FROM students WHERE StudentNickname = "x"');
+    const pipeline = createPipeline({
+      provider,
+      maxRepairs: 1,
+      prompt: { dialect: 'SQLite' },
+      execute: async () => {
+        throw new Error('no such column: StudentNickname');
+      },
+    });
+    await expect(pipeline.ask({ question: 'students', schema: tables })).rejects.toBeDefined();
+
+    const repairTurn = seen[1]?.at(-1) ?? '';
+    expect(repairTurn).toContain('StudentNickname');
+    // The old message was one sentence with the error pasted into it. The point of
+    // this test is that the turn now contains something to act on.
+    expect(repairTurn).toContain('The schema has');
+    expect(repairTurn).not.toContain('Return one SELECT statement only.');
+  });
+
+  it('records the class of every rejected attempt', async () => {
+    const { provider } = fixed('DELETETE FROM students');
+    const pipeline = createPipeline({ provider, maxRepairs: 2, prompt: { dialect: 'SQLite' } });
+    const error = await pipeline.ask({ question: 'students', schema: tables }).catch((reason: unknown) => reason);
+    expect((error as { details: { failureClasses: string[] } }).details.failureClasses).toEqual(['guard', 'guard', 'guard']);
+  });
+
+  it('spends three repairs by default, so four attempts in total', async () => {
+    const { provider, seen } = fixed('DELETE FROM students');
+    const pipeline = createPipeline({ provider, prompt: { dialect: 'SQLite' } });
+    const error = await pipeline.ask({ question: 'students', schema: tables }).catch((reason: unknown) => reason);
+    expect((error as { details: { attempts: number } }).details.attempts).toBe(4);
+    // One first attempt plus three repair turns, each of which was sent to the model.
+    expect(seen).toHaveLength(4);
+  });
+
+  it('honours a caller who asks for fewer', async () => {
+    const { provider, seen } = fixed('DELETE FROM students');
+    const pipeline = createPipeline({ provider, maxRepairs: 1 });
+    await pipeline.ask({ question: 'students', schema: tables }).catch(() => undefined);
+    expect(seen).toHaveLength(2);
+  });
+
+  it('reports the diagnosis of the statement it gave up on, not just the count', async () => {
+    const { provider } = fixed('SELECT Nickname FROM students');
+    const pipeline = createPipeline({
+      provider,
+      maxRepairs: 0,
+      prompt: { dialect: 'SQLite' },
+      execute: async () => {
+        throw new Error('no such column: Nickname');
+      },
+    });
+    const error = (await pipeline.ask({ question: 'students', schema: tables }).catch((reason: unknown) => reason)) as {
+      details: { diagnoses: string[]; lastSql: string };
+    };
+    expect(error.details.lastSql).toContain('Nickname');
+    expect(error.details.diagnoses[0]).toContain('no such column: Nickname');
   });
 });

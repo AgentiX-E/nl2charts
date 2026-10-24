@@ -73,6 +73,18 @@ cannot be argued with.
   `inline+retrieval` was such an arm for one release.
 - **Retrieval over BIRD's training split**: BM25 over 9,428 labelled questions from
   69 databases, none of which appears in the split under test.
+- **Diagnosed repair**: a rejected statement is retried with the engine's own error
+  (SQLSTATE, position with a caret, hint), the identifier from the schema it probably
+  meant — resolved through the statement's alias — and an instruction specific to the
+  failure class. Nine classes, 900-character bound, **3 repairs by default** and
+  configurable. Replaces the single sentence "that statement failed, try again".
+- **A repair funnel and a price per call**: `firstPass`, `repaired`, `fixedByRepair`,
+  `stillFailing`, `repairSuccessRate` and a per-class breakdown, plus
+  `extraCallsPerCase` / `ppPerExtraCall` on every ablation, so a mechanism is priced and
+  not only measured.
+- **Engine errors keep their fields**: every adapter now records the driver's message,
+  code, SQLSTATE, position and hint under `details.engineError`. The SQLite adapter's
+  message was the constant string "sqlite query failed".
 - **Two Studio views**: a trace timeline rendered to SVG and an issue list as text,
   both pure string functions with geometry asserted in tests.
 - **Six runbooks** with drills, and a runtime leak audit driven by a canary

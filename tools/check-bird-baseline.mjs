@@ -62,6 +62,31 @@ export function compare(report, baseline) {
     issues.push('BIRD1: values ran with no matched value; the profile is missing, so the arm is its parent renamed');
   }
 
+  // A repair arm has to report its funnel, and the funnel has to add up. The runner
+  // computes it from the same cases it scores, so a mismatch means the two lists
+  // drifted apart — and a funnel that does not sum is worse than no funnel, because it
+  // looks like a measurement.
+  const repairArm = (report.arms ?? []).find((arm) => arm.arm === 'inline+repair');
+  if (baseline.expectedArms.includes('inline+repair')) {
+    if (repairArm === undefined) {
+      // Already reported as a missing arm above; nothing to add.
+    } else if (repairArm.repair === undefined) {
+      issues.push('BIRD1: inline+repair has no repair funnel, so the loop cannot be priced');
+    } else {
+      const funnel = repairArm.repair;
+      if (funnel.firstPass + funnel.repaired !== funnel.total) {
+        issues.push(`BIRD1: inline+repair funnel does not add up: ${funnel.firstPass} first-pass + ${funnel.repaired} repaired != ${funnel.total}`);
+      }
+      if (funnel.fixedByRepair + funnel.stillFailing !== funnel.repaired) {
+        issues.push(`BIRD1: inline+repair funnel loses repaired cases: ${funnel.fixedByRepair} fixed + ${funnel.stillFailing} failing != ${funnel.repaired}`);
+      }
+      const byClass = (funnel.byClass ?? []).reduce((sum, entry) => sum + entry.cases, 0);
+      if (byClass !== funnel.repaired) {
+        issues.push(`BIRD1: inline+repair funnel assigns ${byClass} of ${funnel.repaired} repaired cases to a failure class`);
+      }
+    }
+  }
+
   // An A/A pair that disagrees with itself by more than the tolerance used to judge
   // regressions means the tolerance is not a threshold, it is a wish.
   const aa = report.aa;
@@ -118,6 +143,23 @@ function selfTest() {
   const unstable = compare({ selection: { scored: 100, split: 'minidev' }, aa: { delta: 0.085 }, arms: [arm('names', 42), arm('inline', 51)] }, baseline);
   if (unstable.issues.length !== 1) issues.push('BIRD1 does not notice an A/A pair that disagrees beyond the tolerance');
 
+  // The funnel that does not add up: 90 + 20 != 100.
+  const badFunnel = compare(
+    {
+      selection: { scored: 498, split: 'minidev' },
+      arms: [
+        {
+          ...arm('inline+repair', 50),
+          repair: { total: 100, firstPass: 90, repaired: 20, fixedByRepair: 5, stillFailing: 15, byClass: [] },
+        },
+      ],
+    },
+    { ...baseline, expectedArms: ['inline+repair'] },
+  );
+  if (!badFunnel.issues.some((issue) => issue.includes('does not add up'))) {
+    issues.push('BIRD1 does not notice a repair funnel whose parts exceed its total');
+  }
+
   // The lever-with-no-input case: the arms are present, the blocks are not.
   const dryLever = compare(
     { selection: { scored: 100, split: 'minidev' }, controls: { retrievedBlocks: 0, demonstrationBlocks: 0 }, arms: [arm('names', 42), arm('inline', 51)] },
@@ -147,7 +189,7 @@ if (process.argv[2] === '--self-test') {
   const issues = selfTest();
   for (const issue of issues) console.error(issue);
   if (issues.length > 0) process.exit(1);
-  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, other split, unfloored arm and empty lever all behave');
+  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, other split, unfloored arm, empty lever and a funnel that does not add up all behave');
 } else {
   const reportPath = resolve(ROOT, 'eval/out/bird-eval.json');
   const baseline = JSON.parse(readFileSync(resolve(ROOT, 'eval/baseline/bird.json'), 'utf8'));

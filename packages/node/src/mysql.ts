@@ -1,6 +1,7 @@
 import { toNl2ChartsError } from '@agentix-e/nl2charts-spec';
 import type { Engine, EngineResult } from '@agentix-e/nl2charts-core';
 import { describeConnector, requiresWrite } from './connectors.js';
+import { readDriverError } from './engine-error.js';
 
 /**
  * The first candidate name the server accepts. Version differences are a fact of
@@ -168,6 +169,7 @@ export async function createMysqlEngine(options: MysqlOptions): Promise<MysqlEng
         const message = messageOf(error);
         throw toNl2ChartsError('NL2C_E_ENGINE_FAILED', `${describeConnector('mysql', options.connectionString)}: ${message}`, error, {
           engine: 'mysql',
+          engineError: readDriverError(error),
         });
       }
     },

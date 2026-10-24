@@ -491,6 +491,40 @@ Three guards now exist, each at a different level:
    so an empty lever is visible in the numbers, not only in the log;
 3. the gate fails when one of those is zero for an arm the baseline expects.
 
+### Pricing a mechanism, not just measuring it
+
+Every experiment in this file reports a delta and a paired test. That is necessary and not
+sufficient: a mechanism that costs one extra model call per question for +2pp and one that
+costs nothing for +2pp are different propositions, and a table of deltas cannot tell them
+apart. Two numbers are added to every ablation for that reason:
+
+| Column | Definition | Why it is there |
+| --- | --- | --- |
+| `extraCallsPerCase` | mean attempts of the second arm minus the first | the price, in the unit the deployment pays |
+| `ppPerExtraCall` | delta ÷ that price; **absent** when the price is zero | a free lever is not "infinitely efficient", it is free |
+
+A repair arm also reports a **funnel**, because accuracy alone cannot say what the loop
+did:
+
+| Field | Meaning |
+| --- | --- |
+| `firstPass` | correct on the first statement, no repair involved |
+| `repaired` | cases that needed at least one retry |
+| `fixedByRepair` | of those, how many ended correct |
+| `stillFailing` | of those, how many exhausted the budget or ended wrong |
+| `repairSuccessRate` | `fixedByRepair / repaired` |
+| `byClass` | the first rejection's class, with how many of each were fixed |
+
+The `byClass` breakdown is the instrument for the next iteration: it says *which* mistakes
+the loop can recover from. If most repairs begin as `binding` and most of those are fixed,
+the diagnosis is doing its job; if they begin as `grouping` and none are fixed, the
+instruction for that class is wrong, and that is a specific thing to fix rather than a
+reason to add another mechanism.
+
+A repair arm also cannot flatter itself by never running: the runner throws when a repair
+arm needs no repair across 100 or more questions, because that is the parent arm with a
+bigger budget — the same empty-lever failure the retrieval arm had.
+
 ### The model is a variable, not an opinion
 
 Every prompt-layer mechanism tried here landed inside the noise, and one was

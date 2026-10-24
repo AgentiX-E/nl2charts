@@ -90,9 +90,15 @@ class Oracle:
                 "ms": int((time.monotonic() - started) * 1000),
             }
         except Exception as error:  # noqa: BLE001 - every failure is data here
+            # SQLite names the failure (SQLITE_ERROR, SQLITE_MISUSE, SQLITE_RANGE …)
+            # and Python 3.11 exposes that name. Without it the repair loop has to
+            # guess a class from the message text, and a syntax error and a missing
+            # column share the same one.
             return {
                 "ok": False,
                 "error": f"{type(error).__name__}: {error}",
+                "errorName": getattr(error, "sqlite_errorname", None),
+                "errorCode": getattr(error, "sqlite_errorcode", None),
                 "ms": int((time.monotonic() - started) * 1000),
             }
 
