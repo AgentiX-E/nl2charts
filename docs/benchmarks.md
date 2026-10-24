@@ -131,39 +131,86 @@ temperature 0, one sample per case. Artifacts: `eval/out/bird-eval.json`,
 | Schema fidelity: advertised columns exist in the database | **798 / 798** |
 | Prompt coverage: tables that reach the schema card | **75 / 75** (no truncation) |
 
-### Accuracy (run `39979457431`, all 498 scorable Mini-Dev questions per arm)
+### Accuracy (run `40101482710`, all 498 scorable Mini-Dev questions per arm)
 
-Every arm is scored on the identical case set, with pinned inputs (definitions,
-retrieval corpus) and one arm run twice.
+Every arm is scored on the identical case set, with pinned inputs and one arm run twice.
 
 | Arm | Execution accuracy | 95% Wilson | prompt chars |
 | --- | --- | --- | --- |
-| names only | 36.1% (180/498) | [32.0, 40.5] | 1,862 |
-| model-written definitions, as a block | 41.2% (205/498) | [36.9, 45.5] | 2,903 |
-| the same text on the column line | 45.4% (226/498) | [41.1, 49.8] | 2,504 |
-| **+ the dataset's per-question hint** | **57.6%** (287/498) | [53.2, 61.9] | 2,639 |
-| + retrieved neighbours from the training split | 45.4% (226/498) | [41.1, 49.8] | 3,060 |
-| + those neighbours as worked examples | 45.8% (228/498) | [41.5, 50.2] | 4,564 |
-| + three samples, modal result | 58.6% (292/498) | [54.3, 62.9] | 2,639 (3 calls) |
-| + three samples, chosen by the model | 57.8% (288/498) | [53.5, 62.1] | 2,639 (4 calls) |
-| + five samples, chosen by the model | 59.4% (296/498) | [55.1, 63.7] | 2,639 (6 calls) |
-| + values this database stores for words in the question | 59.0% (294/498) | [54.7, 63.3] | 2,670 |
-| metadata + the hint (798 curated notes) | 58.4% (291/498) | [54.1, 62.7] | 6,967 |
-| **a plan written before the statement** | **50.4%** (251/498) | [46.0, 54.8] | 2,639 + plan |
-| **the same arm twice (A/A)** | 57.4% (286/498) | [53.0, 61.7] | identical |
+| names only | 35.7% (178/498) | [31.7, 40.0] | 1,862 |
+| model-written definitions, as a block | 41.4% (206/498) | [37.1, 45.7] | 2,903 |
+| the same text on the column line | 45.0% (224/498) | [40.7, 49.4] | 2,504 |
+| **+ the dataset's per-question hint** | **57.4%** (286/498) | [53.0, 61.7] | 2,639 |
+| + retrieved neighbours from the training split | 46.2% (230/498) | [41.9, 50.6] | 3,060 |
+| + those neighbours as worked examples | 46.0% (229/498) | [41.7, 50.4] | 4,564 |
+| **+ three diagnosed repairs** | 57.8% (288/498) | [53.5, 62.1] | 2,639 (1.03 calls) |
+| + three samples, modal result | 56.8% (283/498) | [52.4, 61.1] | 2,639 (3 calls) |
+| + three samples, chosen by the model | 58.6% (292/498) | [54.3, 62.9] | 2,639 (4 calls) |
+| + five samples, chosen by the model | 58.4% (291/498) | [54.1, 62.7] | 2,639 (6 calls) |
+| + values this database stores for words in the question | 58.2% (290/498) | [53.9, 62.5] | 2,670 |
+| metadata + the hint (798 curated notes) | 59.2% (295/498) | [54.9, 63.5] | 6,967 |
+| **the same arm twice (A/A)** | 57.2% (285/498) | [52.8, 61.5] | identical |
 
 | Change (one lever) | Δ | only before / only after | p | verdict |
 | --- | --- | --- | --- | --- |
-| block → column line | +4.2pp | 23 / 44 | 0.014 | **real** |
-| inline → + the dataset's hint | **+12.2pp** | 16 / 77 | <1e-4 | **real** |
-| inline → + retrieved neighbours | 0.0pp | 22 / 22 | 1.00 | no effect |
-| retrieved text → the same neighbours as statements | +0.4pp | 27 / 29 | 0.89 | no effect |
-| + hint → three samples, modal result | +1.0pp | 9 / 15 | 0.31 | no effect |
-| modal result → chosen by the model | −0.8pp | 14 / 10 | 0.54 | no effect |
-| three candidates → five, same selector | +1.6pp | 13 / 20 | 0.30 | no effect |
-| + hint → values this database stores | +1.4pp | 6 / 12 | 0.24 | no effect |
-| + hint → a plan before the statement | **−7.2pp** | 63 / 27 | 0.0002 | **harmful** |
-| **the same arm twice (A/A)** | −0.2pp | 7 / 7 | 1.00 | the scale |
+| block → column line | +3.6pp | 25 / 43 | 0.039 | **real** |
+| inline → + the dataset's hint | **+12.4pp** | 15 / 77 | <1e-4 | **real** |
+| inline → + retrieved neighbours | +1.2pp | 19 / 25 | 0.45 | no effect |
+| retrieved text → the same neighbours as statements | −0.2pp | 29 / 28 | 1.00 | no effect |
+| + hint → three diagnosed repairs | +0.4pp | 2 / 4 | 0.69 | **not resolvable here** |
+| + hint → three samples, modal result | −0.6pp | 14 / 11 | 0.69 | no effect |
+| modal result → chosen by the model | +1.8pp | 7 / 17 | 0.064 | no effect |
+| three candidates → five, same selector | −0.2pp | 16 / 15 | 1.00 | no effect |
+| + hint → values this database stores | +0.8pp | 6 / 10 | 0.45 | no effect |
+| **the same arm twice (A/A)** | −0.2pp | 3 / 2 | 1.00 | the scale |
+
+The repair row is not a null result, it is an **unresolvable** one, and the funnel says why:
+
+| `inline+repair` funnel | Value |
+| --- | --- |
+| first statement correct | 286 |
+| ran once, executed, answered wrong | **200** |
+| failed at execution, needed a repair | **12** |
+| of those, ended correct | 2 |
+| repairable share (the loop's ceiling) | **2.4pp** |
+
+Twelve cases is the entire population the loop can touch on this benchmark with this model,
+because 486 of 498 first statements execute. Two runs put the delta at −1.0pp and +0.4pp. No
+498-question experiment can resolve 2.4pp, and the A/A pair moved 0.2–1.2pp on its own.
+
+### Where the repair loop does have surface, it pays: +6.4pp
+
+The same three arms on `glm-4-flash`, which writes far more invalid SQL, 249 questions
+(deterministic endpoint: the A/A pair returned **0.0pp, 0 disagreements**):
+
+| Arm | GLM-4-Flash | DeepSeek (same code) | execution failures |
+| --- | --- | --- | --- |
+| names only | 18.9% (47/249) | 35.7% | 53 (21.3%) |
+| + the dataset's hint | 30.1% (75/249) | 57.4% | 91 (36.5%) |
+| **+ three diagnosed repairs** | **36.5% (91/249)** | 57.8% | **19 (7.6%)** |
+
+**+6.4pp, sixteen cases won and none lost, McNemar p<0.0001**, at 0.63 extra calls per
+case — about 10pp per extra call. Sixteen wins and zero losses is what the mechanism
+permits: a case that never executed cannot be made worse by a repair, so the comparison has
+one direction.
+
+The funnel explains both results at once:
+
+| | GLM-4-Flash | DeepSeek |
+| --- | --- | --- |
+| repairable share | **36.9%** | 2.4% |
+| repaired cases that ended correct | 16 of 92 | 2 of 12 |
+| repaired cases still not executing | 19 | 0 |
+| execution failures before → after | 91 → 19 | 9 → 0 |
+
+So the honest claim is narrow and useful: **diagnosed repair removes most of a weak model's
+execution failures and converts some of them into correct answers; on a strong model it has
+almost nothing to work on.** It is a floor-raiser, not a ceiling-raiser — which is why it is
+the wrong instrument for closing the 58%–72% gap and the right one for making a cheap model
+usable.
+
+Repair also repairs executability, not understanding: on DeepSeek all eight of the failing
+repaired cases ended as statements that ran and answered the wrong question.
 
 ### Writing the plan first makes it worse
 

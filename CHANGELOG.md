@@ -73,6 +73,11 @@ cannot be argued with.
   `inline+retrieval` was such an arm for one release.
 - **Retrieval over BIRD's training split**: BM25 over 9,428 labelled questions from
   69 databases, none of which appears in the split under test.
+- **A repair result with a number attached**: three diagnosed retries are worth **+6.4pp**
+  on `glm-4-flash` (249 questions, 16 won / 0 lost, p<0.0001, 0.63 extra calls per case)
+  and **+0.4pp / −1.0pp** on `deepseek-chat` across two runs — where only 2.4% of first
+  statements fail, so the loop has almost nothing to repair. It raises a floor, not a
+  ceiling.
 - **Diagnosed repair**: a rejected statement is retried with the engine's own error
   (SQLSTATE, position with a caret, hint), the identifier from the schema it probably
   meant — resolved through the statement's alias — and an instruction specific to the
