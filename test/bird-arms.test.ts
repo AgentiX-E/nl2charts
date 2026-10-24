@@ -12,6 +12,7 @@ import {
   ON_DEMAND_ARMS,
   PAIRS,
   assertArmProducedResults,
+  assertFailureRate,
   assertUniqueArmLabels,
   parseArms,
   parseLimit,
@@ -192,6 +193,13 @@ describe('A/A pairs', () => {
     expect(() => assertArmProducedResults('names', [{ errorKind: 'llm' }, { errorKind: 'execution' }])).not.toThrow();
     expect(() => assertArmProducedResults('names', [{}])).not.toThrow();
     expect(() => assertArmProducedResults('names', [])).not.toThrow();
+  });
+
+  it('refuses a run where a tenth of the cases were throttled away', () => {
+    // Partial rate limiting is worse than an outage: the table looks like a result.
+    expect(() => assertFailureRate('names', Array.from({ length: 10 }, () => ({ errorKind: 'llm' })))).toThrow(/outage/);
+    expect(() => assertFailureRate('names', [{ errorKind: 'llm' }, ...Array.from({ length: 19 }, () => ({}))])).not.toThrow();
+    expect(() => assertFailureRate('names', [{ errorKind: 'execution' }, { errorKind: 'guard' }])).not.toThrow();
   });
 
   it('refuses a report where two arms share a label', () => {

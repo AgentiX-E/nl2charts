@@ -51,7 +51,10 @@ jobs:
       LLM_MODEL: ${{ inputs.model }}
       BIRD_ARMS: ${{ inputs.arms }}
       BIRD_AA: inline+evidence
-      BIRD_CONCURRENCY: '4'
+      # Two, not eight: a different endpoint has a different rate limit, and a throttled
+      # run measures the queue. The provider retries 429 with backoff on top of this.
+      BIRD_CONCURRENCY: '2'
+      BIRD_LLM_RETRIES: '4'
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

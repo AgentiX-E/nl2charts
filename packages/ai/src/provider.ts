@@ -38,6 +38,29 @@ export interface HttpProviderOptions {
   readonly model: string;
   readonly fetchImpl?: typeof fetch;
   readonly timeoutMs?: number;
+  /**
+   * Attempts for a status that is worth retrying (429 and 5xx). One means no retry.
+   *
+   * A rate-limited call is not a wrong answer, but the caller that sees it becomes one:
+   * a batch job that treats a 429 as a failed case reports an accuracy, and the accuracy
+   * is a function of how busy the endpoint was. Retrying inside the provider keeps that
+   * decision in one place instead of in every caller's loop.
+   */
+  readonly retries?: number;
+  /** Base delay for exponential backoff, in milliseconds. Zero waits not at all. */
+  readonly retryDelayMs?: number;
+  /** Injection point for tests; defaults to a real timer. */
+  readonly sleep?: (ms: number) => Promise<void>;
+}
+
+/** Statuses that mean "try again", as opposed to "the request is wrong". */
+const RETRYABLE = new Set([429, 500, 502, 503, 504]);
+
+function retryAfterMs(response: Response, fallback: number): number {
+  const header = response.headers?.get?.('retry-after');
+  if (header === null || header === undefined) return fallback;
+  const seconds = Number(header);
+  return Number.isFinite(seconds) && seconds >= 0 ? Math.round(seconds * 1000) : fallback;
 }
 
 interface CompletionBody {
@@ -49,6 +72,9 @@ interface CompletionBody {
 export function createHttpProvider(options: HttpProviderOptions): LlmProvider {
   const doFetch = options.fetchImpl ?? fetch;
   const timeoutMs = options.timeoutMs ?? 60_000;
+  const retries = Math.max(1, options.retries ?? 1);
+  const retryDelayMs = options.retryDelayMs ?? 500;
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const endpoint = `${options.baseUrl.replace(/\/$/, '')}/chat/completions`;
 
   return {
@@ -73,29 +99,41 @@ export function createHttpProvider(options: HttpProviderOptions): LlmProvider {
       if (request.maxTokens !== undefined) body.max_tokens = request.maxTokens;
       if (request.json === true) body.response_format = { type: 'json_object' };
 
-      let response: Response;
+      let response: Response | undefined;
+      let attempts = 0;
       try {
-        response = await doFetch(endpoint, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify(body),
-          signal: controller.signal,
-        });
-      } catch (error) {
-        throw toNl2ChartsError(
-          'NL2C_E_LLM_UNAVAILABLE',
-          controller.signal.aborted ? 'llm call timed out' : 'llm endpoint unreachable',
-          error,
-          { endpoint },
-        );
+        for (let attempt = 1; attempt <= retries; attempt += 1) {
+          attempts = attempt;
+          try {
+            response = await doFetch(endpoint, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify(body),
+              signal: controller.signal,
+            });
+          } catch (error) {
+            throw toNl2ChartsError(
+              'NL2C_E_LLM_UNAVAILABLE',
+              controller.signal.aborted ? 'llm call timed out' : 'llm endpoint unreachable',
+              error,
+              { endpoint },
+            );
+          }
+          if (response.ok || !RETRYABLE.has(response.status) || attempt === retries) break;
+          // Backoff doubles per attempt; Retry-After wins when the endpoint sends one,
+          // because only it knows when its own window reopens.
+          await sleep(retryAfterMs(response, retryDelayMs * 2 ** (attempt - 1)));
+          if (controller.signal.aborted) break;
+        }
       } finally {
         clearTimeout(timer);
         external?.removeEventListener('abort', onAbort);
       }
 
-      if (!response.ok) {
-        throw toNl2ChartsError('NL2C_E_LLM_UNAVAILABLE', `llm returned ${response.status}`, undefined, {
-          status: response.status,
+      if (response === undefined || !response.ok) {
+        throw toNl2ChartsError('NL2C_E_LLM_UNAVAILABLE', `llm returned ${response?.status ?? 'nothing'}`, undefined, {
+          ...(response === undefined ? {} : { status: response.status }),
+          attempts,
         });
       }
 

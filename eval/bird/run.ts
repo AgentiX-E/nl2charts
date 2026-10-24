@@ -356,6 +356,25 @@ export function assertArmProducedResults(armName: string, runs: readonly { error
   );
 }
 
+/**
+ * An arm that lost a tenth of its cases to the provider did not measure the model.
+ *
+ * The all-failed guard catches an outage; this catches a throttled run, which is worse
+ * because it looks like a result. A 429 is retried inside the provider now, so what
+ * reaches here is a failure after those attempts — for a batch this size that means the
+ * endpoint is the variable, not the prompt.
+ */
+export function assertFailureRate(armName: string, runs: readonly { errorKind?: string }[], maxShare = 0.1): void {
+  if (runs.length === 0) return;
+  const failed = runs.filter((run) => run.errorKind === 'llm').length;
+  const share = failed / runs.length;
+  if (share <= maxShare) return;
+  throw new Error(
+    `arm ${armName}: ${String(failed)} of ${String(runs.length)} calls (${(share * 100).toFixed(1)}%) failed at the model, ` +
+      `above the ${(maxShare * 100).toFixed(0)}% this harness treats as an outage. The accuracy would be a function of how busy the endpoint was.`,
+  );
+}
+
 export function assertUniqueArmLabels(labels: readonly string[]): void {
   const seen = new Set<string>();
   for (const label of labels) {
@@ -642,7 +661,15 @@ async function main() {
     const source = resolveArm(name)?.definitions;
     return source === 'synthesized' || source === 'inline';
   });
-  const provider = createHttpProvider({ baseUrl: config.baseUrl, apiKey: config.apiKey, model: config.model });
+  // Retries live in the provider, not in the loop below: a throttled call is the
+  // endpoint's answer, not a property of this arm.
+  const provider = createHttpProvider({
+    baseUrl: config.baseUrl,
+    apiKey: config.apiKey,
+    model: config.model,
+    retries: Number(process.env.BIRD_LLM_RETRIES ?? 3),
+    retryDelayMs: Number(process.env.BIRD_LLM_RETRY_DELAY_MS ?? 1000),
+  });
   // Definitions are an *input* to the definition-dependent arms, so they are pinned in
   // the repository rather than regenerated: two runs with identical prompts produced
   // different text for 6 of 11 databases, which moved `synth-definitions` by 5.1pp and
@@ -1015,6 +1042,7 @@ async function main() {
     // Before any number is printed: an arm that never reached the database has no
     // accuracy, and publishing 0% would hide the provider's message behind a score.
     assertArmProducedResults(name, runs);
+    assertFailureRate(name, runs);
     const summary = summarise(name, runs);
     const strictPassed = runs.filter((run) => run.strict).length;
     const byDifficulty: Record<string, { passed: number; total: number }> = {};
@@ -1083,6 +1111,7 @@ async function main() {
       byDifficulty,
       errors,
       topErrors: [...messages.entries()].sort((left, right) => right[1] - left[1]).slice(0, 5),
+      llmFailureShare: runs.filter((run) => run.errorKind === 'llm').length / Math.max(1, runs.length),
       // The ungrouped first failure. `topErrors` replaces digits to group messages,
       // which is right for counting and wrong for diagnosis: "llm returned N" hides
       // the status code that says whether the key is dead or the balance is empty.

@@ -158,3 +158,67 @@ describe('http provider', () => {
     );
   });
 });
+
+describe('retrying a rate-limited call', () => {
+  const body = (): Response =>
+    new Response(JSON.stringify({ model: 'm', choices: [{ message: { content: 'SELECT 1' } }], usage: { prompt_tokens: 1, completion_tokens: 1 } }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+
+  const scripted = (statuses: number[], headers: Record<string, string> = {}): { fetchImpl: typeof fetch; calls: number[] } => {
+    const calls: number[] = [];
+    const fetchImpl = (async () => {
+      const status = statuses[calls.length] ?? 200;
+      calls.push(status);
+      if (status === 200) return body();
+      return new Response('{}', { status, headers });
+    }) as unknown as typeof fetch;
+    return { fetchImpl, calls };
+  };
+
+  const delays: number[] = [];
+  const sleep = async (ms: number): Promise<void> => {
+    delays.push(ms);
+  };
+
+  it('turns a 429 into an answer when the retry succeeds', async () => {
+    // A rate-limited call is not a wrong answer; without this, accuracy becomes a
+    // function of how busy the endpoint was.
+    const { fetchImpl, calls } = scripted([429, 429, 200]);
+    const provider = createHttpProvider({ baseUrl: 'https://example.test/v1', model: 'm', fetchImpl, retries: 3, sleep });
+    const reply = await provider.complete({ messages: [{ role: 'user', content: 'q' }] });
+    expect(reply.text).toBe('SELECT 1');
+    expect(calls).toHaveLength(3);
+  });
+
+  it('backs off exponentially between attempts', async () => {
+    delays.length = 0;
+    const { fetchImpl } = scripted([429, 503, 200]);
+    const provider = createHttpProvider({ baseUrl: 'https://example.test/v1', model: 'm', fetchImpl, retries: 3, retryDelayMs: 100, sleep });
+    await provider.complete({ messages: [{ role: 'user', content: 'q' }] });
+    expect(delays).toEqual([100, 200]);
+  });
+
+  it('honours Retry-After over its own backoff', async () => {
+    delays.length = 0;
+    const { fetchImpl } = scripted([429, 200], { 'retry-after': '2' });
+    const provider = createHttpProvider({ baseUrl: 'https://example.test/v1', model: 'm', fetchImpl, retries: 2, retryDelayMs: 10, sleep });
+    await provider.complete({ messages: [{ role: 'user', content: 'q' }] });
+    expect(delays).toEqual([2000]);
+  });
+
+  it('does not retry a request that is simply wrong', async () => {
+    const { fetchImpl, calls } = scripted([400]);
+    const provider = createHttpProvider({ baseUrl: 'https://example.test/v1', model: 'm', fetchImpl, retries: 3, sleep });
+    await expect(provider.complete({ messages: [{ role: 'user', content: 'q' }] })).rejects.toThrow(/400/);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('gives up after the configured attempts and says how many it made', async () => {
+    const { fetchImpl, calls } = scripted([429, 429, 429, 429]);
+    const provider = createHttpProvider({ baseUrl: 'https://example.test/v1', model: 'm', fetchImpl, retries: 2, sleep });
+    await expect(provider.complete({ messages: [{ role: 'user', content: 'q' }] })).rejects.toThrow(/429/);
+    expect(calls).toHaveLength(2);
+  });
+});
