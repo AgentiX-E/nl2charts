@@ -364,14 +364,22 @@ export function assertArmProducedResults(armName: string, runs: readonly { error
  * reaches here is a failure after those attempts — for a batch this size that means the
  * endpoint is the variable, not the prompt.
  */
-export function assertFailureRate(armName: string, runs: readonly { errorKind?: string }[], maxShare = 0.1): void {
+export function assertFailureRate(
+  armName: string,
+  runs: readonly { errorKind?: string; error?: string }[],
+  maxShare = 0.1,
+): void {
   if (runs.length === 0) return;
-  const failed = runs.filter((run) => run.errorKind === 'llm').length;
-  const share = failed / runs.length;
+  const failures = runs.filter((run) => run.errorKind === 'llm');
+  const share = failures.length / runs.length;
   if (share <= maxShare) return;
+  // The first message, not a summary of them: "65% failed" without the reason sends the
+  // reader to the workflow file when the answer is in the provider's reply.
+  const first = failures.find((run) => run.error !== undefined)?.error ?? 'no error text';
   throw new Error(
-    `arm ${armName}: ${String(failed)} of ${String(runs.length)} calls (${(share * 100).toFixed(1)}%) failed at the model, ` +
-      `above the ${(maxShare * 100).toFixed(0)}% this harness treats as an outage. The accuracy would be a function of how busy the endpoint was.`,
+    `arm ${armName}: ${String(failures.length)} of ${String(runs.length)} calls (${(share * 100).toFixed(1)}%) failed at the model, ` +
+      `above the ${(maxShare * 100).toFixed(0)}% this harness treats as an outage (first error: ${first}). ` +
+      'The accuracy would be a function of how busy the endpoint was.',
   );
 }
 

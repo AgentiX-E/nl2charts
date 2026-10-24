@@ -197,7 +197,9 @@ describe('A/A pairs', () => {
 
   it('refuses a run where a tenth of the cases were throttled away', () => {
     // Partial rate limiting is worse than an outage: the table looks like a result.
-    expect(() => assertFailureRate('names', Array.from({ length: 10 }, () => ({ errorKind: 'llm' })))).toThrow(/outage/);
+    expect(() =>
+      assertFailureRate('names', Array.from({ length: 10 }, () => ({ errorKind: 'llm', error: 'llm returned 429' }))),
+    ).toThrow(/outage \(first error: llm returned 429\)/);
     expect(() => assertFailureRate('names', [{ errorKind: 'llm' }, ...Array.from({ length: 19 }, () => ({}))])).not.toThrow();
     expect(() => assertFailureRate('names', [{ errorKind: 'execution' }, { errorKind: 'guard' }])).not.toThrow();
   });
