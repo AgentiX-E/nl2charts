@@ -194,6 +194,11 @@ case — about 10pp per extra call. Sixteen wins and zero losses is what the mec
 permits: a case that never executed cannot be made worse by a repair, so the comparison has
 one direction.
 
+Measured twice, on the same 249 questions, with identical results down to the case counts
+(47 / 75 / 91, 0/16, p<0.0001, A/A 0.0pp both times). That meets the adoption rule this
+project set after the selection result failed to replicate — two consecutive runs at
+p<0.01 — and it is the first mechanism since the per-question hint to clear it.
+
 The funnel explains both results at once:
 
 | | GLM-4-Flash | DeepSeek |
