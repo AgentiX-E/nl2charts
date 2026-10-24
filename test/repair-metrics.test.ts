@@ -15,6 +15,10 @@ describe('the repair funnel', () => {
     const funnel = repairFunnel(cases);
     expect(funnel.total).toBe(6);
     expect(funnel.firstPass).toBe(1);
+    // The case that ran once and answered wrong: the loop cannot reach it, and leaving
+    // it out made the funnel's parts stop adding up to its total.
+    expect(funnel.ranOnceWrong).toBe(1);
+    expect(funnel.firstPass + funnel.ranOnceWrong + funnel.repaired).toBe(funnel.total);
     expect(funnel.repaired).toBe(4);
     expect(funnel.fixedByRepair).toBe(2);
     expect(funnel.stillFailing).toBe(2);
@@ -41,6 +45,9 @@ describe('the repair funnel', () => {
     // (1+1+2+3+3+4)/6 = 2.33 attempts, of which one is the first.
     expect(funnel.meanAttempts).toBeCloseTo(14 / 6, 10);
     expect(funnel.extraCallsPerCase).toBeCloseTo(14 / 6 - 1, 10);
+    // Its ceiling: four of six cases failed at execution and could in principle be
+    // repaired. Two of them were.
+    expect(funnel.repairableShare).toBeCloseTo(4 / 6, 10);
   });
 
   it('reports zero rather than NaN when nothing was repaired', () => {

@@ -28,6 +28,14 @@ export interface RepairFunnel {
   readonly total: number;
   /** Correct on the first statement, with no repair involved. */
   readonly firstPass: number;
+  /**
+   * Ran once, executed, and answered wrong.
+   *
+   * These are the cases a repair loop cannot reach: the statement was accepted, so
+   * there is no error to feed back. On BIRD with a strong model they are most of the
+   * failures, which is what bounds the loop's ceiling.
+   */
+  readonly ranOnceWrong: number;
   /** Cases that needed at least one repair. */
   readonly repaired: number;
   /** Repaired cases that ended correct. */
@@ -36,6 +44,8 @@ export interface RepairFunnel {
   readonly stillFailing: number;
   readonly accuracy: number;
   readonly firstPassRate: number;
+  /** Share of cases the loop could possibly have fixed, i.e. its ceiling. */
+  readonly repairableShare: number;
   /** `fixedByRepair / repaired`; 0 when no case needed a repair. */
   readonly repairSuccessRate: number;
   readonly meanAttempts: number;
@@ -51,6 +61,7 @@ function share(part: number, whole: number): number {
 export function repairFunnel(cases: readonly RepairCase[]): RepairFunnel {
   const total = cases.length;
   let firstPass = 0;
+  let ranOnceWrong = 0;
   let repaired = 0;
   let fixedByRepair = 0;
   let attempts = 0;
@@ -59,6 +70,7 @@ export function repairFunnel(cases: readonly RepairCase[]): RepairFunnel {
     attempts += entry.attempts;
     if (entry.attempts <= 1) {
       if (entry.passed) firstPass += 1;
+      else ranOnceWrong += 1;
       continue;
     }
     repaired += 1;
@@ -77,11 +89,13 @@ export function repairFunnel(cases: readonly RepairCase[]): RepairFunnel {
   return {
     total,
     firstPass,
+    ranOnceWrong,
     repaired,
     fixedByRepair,
     stillFailing,
     accuracy: share(cases.filter((entry) => entry.passed).length, total),
     firstPassRate: share(firstPass, total),
+    repairableShare: share(repaired, total),
     repairSuccessRate: share(fixedByRepair, repaired),
     meanAttempts: share(attempts, total),
     extraCallsPerCase: Math.max(0, share(attempts, total) - 1),

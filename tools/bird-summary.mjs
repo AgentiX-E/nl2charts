@@ -100,9 +100,11 @@ if (report === null) {
       lines.push(
         '### What the repair loop bought',
         '',
-        `\`${withFunnel.arm}\` answered **${funnel.firstPass}** of ${funnel.total} on the first statement (${(funnel.firstPassRate * 100).toFixed(1)}%). ` +
-          `${funnel.repaired} cases needed a repair, **${funnel.fixedByRepair}** of them ended correct (${(funnel.repairSuccessRate * 100).toFixed(1)}%), ` +
-          `${funnel.stillFailing} did not. Mean ${funnel.meanAttempts.toFixed(2)} attempts (${funnel.extraCallsPerCase.toFixed(2)} extra calls per case).`,
+        `\`${withFunnel.arm}\` answered **${funnel.firstPass}** of ${funnel.total} on the first statement (${(funnel.firstPassRate * 100).toFixed(1)}%); ` +
+          `${funnel.ranOnceWrong} ran once and answered wrong, which no repair can reach. ` +
+          `${funnel.repaired} cases failed at execution and needed a repair — the loop's ceiling is ${(funnel.repairableShare * 100).toFixed(1)}pp — ` +
+          `**${funnel.fixedByRepair}** of those ended correct (${(funnel.repairSuccessRate * 100).toFixed(1)}%), ${funnel.stillFailing} did not. ` +
+          `Mean ${funnel.meanAttempts.toFixed(2)} attempts (${funnel.extraCallsPerCase.toFixed(2)} extra calls per case).`,
         '',
       );
       if ((funnel.byClass ?? []).length > 0) {

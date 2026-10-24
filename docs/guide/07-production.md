@@ -231,7 +231,14 @@ Four properties make that message worth the call:
 
 `ask()` returns `failures` (the class of every rejected attempt) and `diagnoses` (one line
 each), and when the budget is spent the thrown error carries `failureClasses`, `lastError`
-and `lastSql` in `details`. Those are what the repair funnel in [the benchmark page](../benchmarks.md) is computed from.
+and `lastSql` in `details`.
+
+What the loop can and cannot reach is worth knowing before you enable it: a statement that
+executes and answers the wrong question produces **no error**, so there is nothing to
+diagnose. On BIRD Mini-Dev with `deepseek-chat`, 489 of 498 first statements executed — the
+loop's ceiling there is 1.8pp. On a weaker model writing 20–36% invalid SQL, the same loop
+has an order of magnitude more to work with. Measure the ceiling on your own model before
+budgeting for retries. Those are what the repair funnel in [the benchmark page](../benchmarks.md) is computed from.
 
 Three cases where the loop does nothing, which is the point:
 

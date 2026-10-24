@@ -509,11 +509,18 @@ did:
 | Field | Meaning |
 | --- | --- |
 | `firstPass` | correct on the first statement, no repair involved |
-| `repaired` | cases that needed at least one retry |
+| `ranOnceWrong` | ran once, executed, answered wrong — **no repair can reach these** |
+| `repaired` | cases that failed at execution and needed at least one retry |
 | `fixedByRepair` | of those, how many ended correct |
 | `stillFailing` | of those, how many exhausted the budget or ended wrong |
+| `repairableShare` | `repaired / total`: the loop's **ceiling**, in pp |
 | `repairSuccessRate` | `fixedByRepair / repaired` |
 | `byClass` | the first rejection's class, with how many of each were fixed |
+
+The three buckets have to sum to the sample, and the gate fails when they do not — which
+is how the first version of this funnel was found to be missing `ranOnceWrong`: it reported
+285 first-pass plus 9 repaired out of 498, and the 204 cases that ran fine and answered
+wrong were nowhere.
 
 The `byClass` breakdown is the instrument for the next iteration: it says *which* mistakes
 the loop can recover from. If most repairs begin as `binding` and most of those are fixed,

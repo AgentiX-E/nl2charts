@@ -74,8 +74,13 @@ export function compare(report, baseline) {
       issues.push('BIRD1: inline+repair has no repair funnel, so the loop cannot be priced');
     } else {
       const funnel = repairArm.repair;
-      if (funnel.firstPass + funnel.repaired !== funnel.total) {
-        issues.push(`BIRD1: inline+repair funnel does not add up: ${funnel.firstPass} first-pass + ${funnel.repaired} repaired != ${funnel.total}`);
+      // Three buckets, not two: a case that ran once and answered wrong is neither a
+      // first-pass success nor a repair, and leaving it out is how this check first
+      // fired on real data (285 + 9 != 498).
+      if (funnel.firstPass + funnel.ranOnceWrong + funnel.repaired !== funnel.total) {
+        issues.push(
+          `BIRD1: inline+repair funnel does not add up: ${funnel.firstPass} first-pass + ${funnel.ranOnceWrong} ran-once-wrong + ${funnel.repaired} repaired != ${funnel.total}`,
+        );
       }
       if (funnel.fixedByRepair + funnel.stillFailing !== funnel.repaired) {
         issues.push(`BIRD1: inline+repair funnel loses repaired cases: ${funnel.fixedByRepair} fixed + ${funnel.stillFailing} failing != ${funnel.repaired}`);
@@ -143,14 +148,14 @@ function selfTest() {
   const unstable = compare({ selection: { scored: 100, split: 'minidev' }, aa: { delta: 0.085 }, arms: [arm('names', 42), arm('inline', 51)] }, baseline);
   if (unstable.issues.length !== 1) issues.push('BIRD1 does not notice an A/A pair that disagrees beyond the tolerance');
 
-  // The funnel that does not add up: 90 + 20 != 100.
+  // The funnel that does not add up: 90 + 0 + 20 != 100.
   const badFunnel = compare(
     {
       selection: { scored: 498, split: 'minidev' },
       arms: [
         {
           ...arm('inline+repair', 50),
-          repair: { total: 100, firstPass: 90, repaired: 20, fixedByRepair: 5, stillFailing: 15, byClass: [] },
+          repair: { total: 100, firstPass: 90, ranOnceWrong: 0, repaired: 20, fixedByRepair: 5, stillFailing: 15, byClass: [] },
         },
       ],
     },
