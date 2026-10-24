@@ -34,6 +34,10 @@ on:
         description: Questions to score (blank = the whole split)
         required: false
         default: ''
+      concurrency:
+        description: Parallel calls (a reasoning model needs fewer, and a slow endpoint more time)
+        required: false
+        default: '2'
 
 jobs:
   model:
@@ -51,9 +55,9 @@ jobs:
       LLM_MODEL: ${{ inputs.model }}
       BIRD_ARMS: ${{ inputs.arms }}
       BIRD_AA: inline+evidence
-      # Two, not eight: a different endpoint has a different rate limit, and a throttled
-      # run measures the queue. The provider retries 429 with backoff on top of this.
-      BIRD_CONCURRENCY: '2'
+      # Not eight: a different endpoint has a different rate limit, and a throttled run
+      # measures the queue. The provider retries 429 with backoff on top of this.
+      BIRD_CONCURRENCY: ${{ inputs.concurrency }}
       BIRD_LLM_RETRIES: '4'
     steps:
       - uses: actions/checkout@v4
