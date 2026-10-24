@@ -435,8 +435,12 @@ describe('what a repair turn is told', () => {
     const repairTurn = seen[1]?.at(-1) ?? '';
     expect(repairTurn).toContain('StudentNickname');
     // The old message was one sentence with the error pasted into it. The point of
-    // this test is that the turn now contains something to act on.
-    expect(repairTurn).toContain('The schema has');
+    // this test is that the turn now contains something to act on: the engine's own
+    // sentence and the column that exists.
+    expect(repairTurn).toContain('no such column: StudentNickname');
+    // Scoped by the statement's own FROM clause: the bare list under a table name is
+    // what a person would say, and it is checkable against the schema above.
+    expect(repairTurn).toContain('`students` has: StudentID, StudentName');
     expect(repairTurn).not.toContain('Return one SELECT statement only.');
   });
 

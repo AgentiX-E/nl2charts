@@ -250,6 +250,24 @@ export function resolveAliases(sql: string, schema: readonly SchemaTable[]): Map
   return aliases;
 }
 
+/**
+ * The one table the statement reads, when there is exactly one.
+ *
+ * `no such column: StudentNickname` arrives without a qualifier, and the schema-wide
+ * column dump this used to produce was eight names from five tables. The statement's
+ * own FROM clause is better information: with one relation, its columns are the ones
+ * the statement could have meant.
+ */
+export function soleRelation(sql: string): string | undefined {
+  const names = new Set<string>();
+  const pattern = /\b(?:from|join)\s+(["`[]?[\w$]+["`\]]?)/gi;
+  for (const match of sql.matchAll(pattern)) {
+    const name = (match[1] ?? '').replace(/["`[\]]/g, '');
+    if (name.length > 0) names.add(name.toLowerCase());
+  }
+  return names.size === 1 ? [...names][0] : undefined;
+}
+
 function suggestColumns(
   schema: readonly SchemaTable[],
   identifier: { table?: string; bare: string },
@@ -337,13 +355,32 @@ export function diagnoseFailure(input: FailureInput): Diagnosis {
   const failureClass = classifyFailure(fields.message);
   const identifier = readIdentifier(fields.message, failureClass);
   const aliases = resolveAliases(input.sql, input.schema);
+  // A suggestion identical to the rejected *qualified* name is not a suggestion: the
+  // engine has already said that name does not exist, and offering it back spends the
+  // turn. Comparing only the column part would discard the useful case — the name is
+  // right and the table is wrong (`s.SchoolName` where `s` is not `schools`).
+  const relation = identifier?.table === undefined ? undefined : (aliases.get(identifier.table.toLowerCase()) ?? identifier.table);
+  // A qualifier wins; without one, a single-relation statement names its own scope.
+  const rejectedTable = relation ?? (identifier?.kind === 'column' ? soleRelation(input.sql) : undefined);
+  // Case is preserved on purpose: in PostgreSQL an unquoted `Schoolname` folds to
+  // `schoolname` and fails against a `"SchoolName"` column, so a suggestion that
+  // differs only in case is the fix rather than a repeat.
+  const canonical = (name: string): string => name.replace(/["`[\]]/g, '');
+  const notSelf = (suggestion: Suggestion): boolean => {
+    if (identifier === undefined) return true;
+    const parts = suggestion.qualified.split('.');
+    const column = parts.pop() ?? '';
+    if (identifier.kind === 'table') return canonical(column) !== canonical(identifier.bare);
+    if (canonical(column) !== canonical(identifier.bare)) return true;
+    return rejectedTable === undefined || canonical(parts.join('.')) !== canonical(rejectedTable);
+  };
   const suggestions =
     identifier === undefined
       ? []
       : identifier.kind === 'table'
-        ? suggestTables(input.schema, identifier.bare).slice(0, MAX_SUGGESTIONS)
+        ? suggestTables(input.schema, identifier.bare).filter(notSelf).slice(0, MAX_SUGGESTIONS)
         : identifier.kind === 'column'
-          ? suggestColumns(input.schema, identifier, aliases).slice(0, MAX_SUGGESTIONS)
+          ? suggestColumns(input.schema, identifier, aliases).filter(notSelf).slice(0, MAX_SUGGESTIONS)
           : [];
   const qualified = suggestions.map((suggestion) => suggestion.qualified);
   const dialect = input.dialect === undefined ? '' : `${input.dialect}, `;
@@ -367,14 +404,15 @@ export function diagnoseFailure(input: FailureInput): Diagnosis {
     lines.push('', `Closest identifier in the schema: ${qualified.join(', ')}.`);
   } else if (identifier !== undefined && identifier.kind === 'column') {
     lines.push('', `No column in the schema is close to \`${identifier.bare}\`.`);
+  } else if (identifier !== undefined && identifier.kind === 'table') {
+    lines.push('', `No table in the schema is close to \`${identifier.bare}\`.`);
   }
-  if (identifier !== undefined && identifier.kind === 'column') {
-    const named = identifier.table === undefined ? undefined : (aliases.get(identifier.table.toLowerCase()) ?? identifier.table);
-    const listed = columnList(input.schema, named, identifier.bare);
-    if (listed.length > 0) {
-      const table = named === undefined ? 'The schema' : `\`${named}\``;
-      lines.push(`${table} has: ${listed.join(', ')}.`);
-    }
+  // Only when the failure named a table. Without one, a dump of the first eight
+  // columns across the whole schema reads as `id, alignment, id, attribute_name` —
+  // noise that competes with the question and teaches nothing.
+  if (identifier !== undefined && identifier.kind === 'column' && rejectedTable !== undefined) {
+    const listed = columnList(input.schema, rejectedTable, identifier.bare);
+    if (listed.length > 0) lines.push(`\`${rejectedTable}\` has: ${listed.join(', ')}.`);
   }
   if (identifier !== undefined && identifier.kind === 'function') {
     lines.push(`${input.dialect ?? 'This dialect'} has no function \`${identifier.bare}\`. Use a documented equivalent.`);

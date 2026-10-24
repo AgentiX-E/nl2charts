@@ -245,8 +245,44 @@ describe('the shapes a driver actually sends', () => {
     expect(diagnosis.suggestions.length).toBeGreaterThan(0);
   });
 
-  it('lists the schema columns when the failure names no table', () => {
+  it('does not dump the whole schema when the failure named no table', () => {
+    // On a real database this produced `The schema has: id, alignment, id,
+    // attribute_name, …` — eight names from five tables, which competes with the
+    // question and identifies nothing.
     const diagnosis = diagnoseFailure({ sql, schema, dialect: 'SQLite', error: new Error('no such column: Schoolname') });
-    expect(diagnosis.feedback).toContain('The schema has:');
+    expect(diagnosis.feedback).not.toContain('The schema has:');
+    expect(diagnosis.suggestions.length).toBeGreaterThan(0);
+  });
+
+  it('scopes to the one relation the statement reads', () => {
+    const diagnosis = diagnoseFailure({
+      sql: 'SELECT StudentID FROM students WHERE Nickname = 1',
+      schema,
+      dialect: 'SQLite',
+      error: new Error('no such column: Nickname'),
+    });
+    expect(diagnosis.feedback).toContain('`students` has:');
+  });
+
+  it('does not scope when the statement joins two relations', () => {
+    // With two relations, a bare column name could belong to either, and picking one
+    // would be a guess dressed as a diagnosis.
+    const diagnosis = diagnoseFailure({
+      sql: 'SELECT s.StudentID FROM students s JOIN schools c ON s.SchoolName = c.SchoolName WHERE Nickname = 1',
+      schema,
+      dialect: 'SQLite',
+      error: new Error('no such column: Nickname'),
+    });
+    expect(diagnosis.feedback).not.toContain('has:');
+  });
+
+  it('never suggests the name the engine just rejected', () => {
+    // `no such table: hero_attribute` used to answer "closest identifier:
+    // hero_attribute" — the same word, offered back as the fix.
+    const diagnosis = diagnoseFailure({ sql, schema, dialect: 'SQLite', error: new Error('no such table: students') });
+    expect(diagnosis.suggestions).not.toContain('students');
+    // And it says so, instead of leaving the model to guess whether a near spelling
+    // exists.
+    expect(diagnosis.feedback).toMatch(/No table .* is close/);
   });
 });
