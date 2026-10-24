@@ -38,12 +38,16 @@ on:
         description: Parallel calls (a reasoning model needs fewer, and a slow endpoint more time)
         required: false
         default: '2'
+      aa:
+        description: Arm to run twice as an A/A control (blank = none)
+        required: false
+        default: 'inline+evidence'
 
 jobs:
   model:
     name: BIRD Mini-Dev with ${{ inputs.model }}
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 300
     concurrency:
       group: bird-model
       cancel-in-progress: false
@@ -54,7 +58,7 @@ jobs:
       LLM_BASE_URL: ${{ inputs.base_url }}
       LLM_MODEL: ${{ inputs.model }}
       BIRD_ARMS: ${{ inputs.arms }}
-      BIRD_AA: inline+evidence
+      BIRD_AA: ${{ inputs.aa }}
       # Not eight: a different endpoint has a different rate limit, and a throttled run
       # measures the queue. The provider retries 429 with backoff on top of this.
       BIRD_CONCURRENCY: ${{ inputs.concurrency }}
