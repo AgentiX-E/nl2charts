@@ -4,6 +4,10 @@
  * an explicit commit: an export that silently disappears is a breaking change.
  *
  * Usage: node tools/check-exports.mjs [--update]
+ *
+ * It reads `dist`, so run `pnpm build` first: a stale `dist` reports the previous
+ * surface as current, and that is how a new export passed this check locally and
+ * failed it in CI, where the build runs first.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';

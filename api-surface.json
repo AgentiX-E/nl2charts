@@ -205,7 +205,8 @@
     "type PromptProfile",
     "type RecordedCall",
     "type ReplayFixture",
-    "type SelectionDecision"
+    "type SelectionDecision",
+    "withCallCounter"
   ],
   "ai/linking": [
     "linkSchema",
@@ -226,7 +227,8 @@
     "type LlmRequest",
     "type LlmResponse",
     "type LlmUsage",
-    "type Role"
+    "type Role",
+    "withCallCounter"
   ],
   "node": [
     "CONNECTORS",
