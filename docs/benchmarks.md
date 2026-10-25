@@ -493,13 +493,18 @@ is visible instead of implied.
 
 ## The dev split, measured: 60.6% on the split leaderboards report
 
-First run of the 1,534-question dev split (run `40157122326`), three arms, `deepseek-chat`:
+Two runs of the 1,534-question dev split (`40157122326`, `40166834512`), three arms,
+`deepseek-chat`, 1,532 scorable:
 
-| Arm | Dev, 1,532 scorable | 95% Wilson | Mini-Dev, same code |
-| --- | --- | --- | --- |
-| names only | 42.2% (647/1532) | [39.8, 44.7] | 35.7% |
-| **+ definitions + the dataset's hint** | **60.6%** (929/1532) | [58.2, 63.1] | 57.4% |
-| metadata + the hint (798 curated notes) | **61.4%** (941/1532) | [59.0, 63.8] | 59.2% |
+| Arm | Dev run 1 | Dev run 2 | 95% Wilson (run 2) | Mini-Dev, same code |
+| --- | --- | --- | --- | --- |
+| names only | 42.2% (647) | 42.2% (646) | [39.7, 44.7] | 35.7% |
+| **+ definitions + the dataset's hint** | 60.6% (929) | **61.0%** (935) | [58.6, 63.4] | 57.4% |
+| metadata + the hint (798 curated notes) | 61.4% (941) | **61.5%** (942) | [59.0, 63.9] | 59.2% |
+
+Two runs rather than one because the first is a measurement and the second says how much of
+it is the draw: the arms land within 0.4pp of each other, which is what 1,532 questions buys
+compared with 498.
 
 Three facts about this number, in the order they matter:
 
