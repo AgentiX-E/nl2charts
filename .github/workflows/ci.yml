@@ -232,6 +232,11 @@ jobs:
         run: pnpm eval:preflight
       - name: Gold queries, prompts and controls without a model
         run: pnpm bench:bird:dry
+      # No model calls: renders the prompt and checks that every identifier the gold
+      # statement names is visible in it. If this drops, the model is being asked to use a
+      # column it was never shown, and no wording can recover that.
+      - name: Every gold identifier is in the prompt
+        run: pnpm bench:bird:recall
       - name: DuckDB portability census
         run: pnpm bench:bird:port
       - name: Ten-arm evaluation with paired ablations and an A/A control

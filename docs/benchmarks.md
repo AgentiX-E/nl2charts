@@ -491,6 +491,38 @@ duplicate rows**. The strict column compares multisets; the official rule credit
 11–21 extra cases per arm on all 498 cases. Both numbers are published so the choice
 is visible instead of implied.
 
+## What the prompt already contains: every identifier, on both splits
+
+Before spending another call on a mechanism, one question is cheap to answer: does the model
+see the columns the gold query needs? `pnpm bench:bird:recall` renders the prompt exactly as
+the pipeline sends it, reads the gold statement for the tables and columns it names, and
+checks which of them appear. No model, no database.
+
+| Split | Questions | Prompts showing every gold identifier | Identifiers visible |
+| --- | --- | --- | --- |
+| Mini-Dev | 500 | **500 (100%)** | 3,820 / 3,820 |
+| Dev | 1,534 | **1,534 (100%)** | 10,650 / 10,650 |
+
+Every column of every table is already in the card — 199 columns for
+`european_football_2`, 71 for `codebase_community` — because BIRD's schemas are small enough
+that the forty-line card never truncates.
+
+That result reprices a whole direction:
+
+- **A better schema linker cannot add information here.** The identifiers are all present;
+  the failures are choices among them. This is why every linking-adjacent lever measured
+  zero, and why `no-linking` is not on the critical path.
+- **The remaining gap is selection and reasoning**, not retrieval: which column, which join,
+  which aggregation, which literal, and what the question meant. Those are the things a
+  prompt cannot enumerate, which is consistent with every prompt-layer mechanism landing
+  inside the noise.
+- It also sets the ceiling for anything that adds text: a mechanism whose value is "more
+  context" starts from 100% context.
+
+The measurement is a CI step and fails the build if any prompt hides an identifier the gold
+statement needs, because a truncation bug in the schema card would otherwise appear only as
+a slow accuracy decline.
+
 ## The dev split, measured: 60.6% on the split leaderboards report
 
 Two runs of the 1,534-question dev split (`40157122326`, `40166834512`), three arms,
