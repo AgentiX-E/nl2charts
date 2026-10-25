@@ -391,6 +391,60 @@ incumbent in place and is counted in `selectorDecided`, because "the comparison 
 answer" and "the comparison preferred the first statement" are different facts and only
 one of them is a preference.
 
+It did not work, and the negative is informative (run `40186658774`):
+
+| arm | calls | accuracy | candidate recall | cases lost by the selector |
+| --- | --- | --- | --- | --- |
+| `select` | 4.0 | 57.6% | 61.6% | 20 |
+| `select-pair` | 4.9 | 58.4% | 63.5% | 25 |
+
++0.8pp at one more call per question (17 won / 20 lost, p=0.74), and it discarded *more*
+of its candidate set than the absolute prompt did. The selector reads every candidate the
+model wrote; giving it two of them and a binary question changes nothing about the
+information it has, and it lost slightly more. So the absolute prompt is not where the
+three points go — the pairwise shape is out of the default chain and stays in the
+catalogue with these numbers.
+
+The one thing that did move, twice, is the candidate *source*:
+
+| run | `select` | `select-mixed` | Δ | only before / only after | p |
+| --- | --- | --- | --- | --- | --- |
+| `40181585037` | 57.6% | 60.4% | +2.8pp | 10 / 24 | 0.024 |
+| `40186658774` | 57.6% | 60.4% | +2.8pp | 11 / 25 | 0.029 |
+
+Two runs, same delta, same sign, at the same four calls, with the A/A pair in the second
+run 0.2pp apart. That is not yet the pre-registered bar (p<0.01 in two consecutive runs,
+ADR-184) — 498 questions cannot resolve a 2.8pp effect that finely — so the adoption
+decision moves to the split where it can: the same two arms on the 1,532-question dev
+split, which is also the split leaderboards report.
+
+### A third of the mixed arm's candidates were duplicates
+
+The dry run builds the prompt each mixed source would send, without spending a call, and
+counted how often the three are actually different:
+
+| arm | sources | questions with every prompt distinct | degenerate |
+| --- | --- | --- | --- |
+| `select-mixed` | `inline+evidence` + `metadata+evidence` + `values` | 172/498 (34.5%) | **326 (65.5%)** |
+| `select-duo` | `inline+evidence` + `metadata+evidence` | 498/498 (100%) | 0 |
+
+The value block only exists when the question names a literal, and BIRD's questions
+mostly do not — so on two questions in three, `select-mixed` pays three generations and
+gets two opinions. Its +2.8pp came from the *difference between two prompts*, not from a
+three-way vote.
+
+`select-duo` is that pair on purpose: two sources, three calls, no duplicate by
+construction. If it matches `select-mixed` it is the same accuracy for one call less, and
+the difference prices what the value-grounded candidate was contributing (41 wins out of
+498 in the first run).
+
+The guard that found this started as a bug: it compared the three prompts on the *first*
+question of the split, and the dev split's first question names no literal, so it declared
+the arm broken and stopped a 1,532-question run at the dry-run step. A check that holds on
+one split and not another is the same mistake as `armsBySplit` and the floor list — the
+third time this project has made it — so it now measures the whole split and reports the
+degenerate share instead of asserting on a sample of one.
+
 ### Two gold statements cannot be scored, and the reason is measured
 
 The denominator is 498, not 500. Two Mini-Dev gold statements exceed the
@@ -497,14 +551,15 @@ cost what a full description card costs on window and ratio questions.
 
 ### What is still missing
 
-The best arm remains `metadata+evidence` at 58.6%, and the dataset's own evidence
-is still worth **+17.6pp** on top of any definition text. That is now the single
-largest unexplained term in the pipeline, and it is question-level by
-construction: BIRD writes one sentence per *question*, and nothing that is written
-once per *database* has moved the number.
+Single-sample arms sit at 57–59% and the best multi-sample arm at **60.4%**; its own
+candidate set contains a correct statement 63.7% of the time. So the largest remaining
+term is no longer the prompt — it is the three points between "the set has the answer" and
+"the system returns it", and beyond that the four points between the set and the published
+70–73%.
 
-Two things are settled: the text can be generated instead of curated, and it has
-to sit on the column. What is left is the per-question sentence.
+Two things are settled: the text can be generated instead of curated, and it has to sit
+on the column. The dataset's own per-question hint is still worth **+17.6pp** on top of any
+definition text, and nothing written once per *database* has moved that number.
 
 ### Noise floor: the same arm, twice, in the same job
 

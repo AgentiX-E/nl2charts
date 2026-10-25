@@ -46,13 +46,41 @@ cannot be argued with.
   best arms hold a correct statement in their candidate set 61–65% of the time and return
   57–60%: three to five points are pure selection loss. `select-mixed` — three prompts
   instead of three samples of one — is **60.4%** against `select`'s 57.6% at the same four
-  calls (+2.8pp, 10/24, p=0.024, awaiting its second run under ADR-184), and beats
-  `select5` (59.2%) with two fewer calls.
+  calls (+2.8pp, 10/24, p=0.024), and beats `select5` (59.2%) with two fewer calls.
 - **A counted cost found a bug in its own first version.** The gate rejected the run with
   `select samples 3 times and selects with the model and reports 3 calls per case`: the
   selector call was made on the unwrapped provider. Fixed, and the check now
   distinguishes a model selector from a majority vote, which correctly spends exactly one
   call per sample.
+- **`select-mixed` replicated, `select-pair` did not.** Two runs of the same code put
+  `select-mixed` at **60.4%** against `select`'s 57.6% — +2.8pp in both (10/24 p=0.024,
+  11/25 p=0.029), same four calls, A/A pair 0.2pp apart. The pre-registered bar is p<0.01
+  twice (ADR-184), which 498 questions cannot resolve for a 2.8pp effect, so the decision
+  moves to the dev split where it can.
+- **`select-pair`** (binary comparison, `k - 1` calls) reached 58.4% against 57.6%
+  (+0.8pp, 17/20, p=0.74) while discarding *more* of its candidate set: 25 cases against
+  20. The absolute prompt is not where the selector loses its points. Out of the default
+  chain, kept in the catalogue with the numbers.
+
+### Added
+
+- **`select-duo`**: two prompts that always differ — the dataset hint and the curated
+  notes — with the same selector, three calls. The dry run showed that `select-mixed`'s
+  third source (`values`) is an exact duplicate of its first on 326 of 498 Mini-Dev
+  questions, because the value block only exists when the question names a literal; the
+  trio was buying two opinions for three calls on two thirds of the set. The duo prices
+  what the third candidate contributed.
+- **A mixed arm now declares its own source list**, and `vote` must equal its length:
+  the two fields were independent, so a mismatch would have spent three generations and
+  reported two.
+
+### Fixed
+
+- **The mixed-prompt guard was split-dependent.** It compared the three prompts on the
+  first question of a split; the dev split's first question names no literal, so the guard
+  failed a correct arm and stopped a 1,532-question run before a single model call. It now
+  measures every question, fails only when a split can never build distinct prompts, and
+  reports the degenerate share as a cost.
 
 ### Changed
 

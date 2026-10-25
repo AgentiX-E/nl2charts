@@ -14,8 +14,8 @@
     "inline+repair-raw",
     "vote",
     "select",
-    "select-pair",
     "select-mixed",
+    "select-duo",
     "select5",
     "values",
     "metadata+evidence"

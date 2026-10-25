@@ -134,15 +134,15 @@ export interface Arm {
    */
   readonly shapeGuard?: boolean;
   /**
-   * Draw the candidates from different prompt styles instead of the same one.
+   * The arms whose prompts supply the candidates, in order, when they are not all the
+   * same prompt.
    *
    * `select` samples one prompt three times and gets three near-identical statements:
-   * the model's 90% agreement is real diversity of wording and not of approach. The
-   * diversity that moves an answer is a different decomposition of the question, and a
-   * different decomposition is a different prompt. One lever from `select`: same number
-   * of candidates, same selector, and only where they come from changes.
+   * the model's 90% agreement is diversity of wording, not of approach. A different
+   * decomposition of the question is a different prompt, and the list is the lever —
+   * its length is the candidate count, so `vote` must match it.
    */
-  readonly mixed?: boolean;
+  readonly mixed?: readonly string[];
   /**
    * Ask the selector to compare two statements at a time instead of ranking many.
    *
@@ -184,6 +184,16 @@ export interface Arm {
  * (-7.2pp, 63/27, p=0.0002) does not argue for including it either.
  */
 export const MIXED_SOURCES: readonly string[] = ['inline+evidence', 'metadata+evidence', 'values'];
+
+/**
+ * The two prompts that are always distinct.
+ *
+ * Measured on the dry run, not assumed: `values` only builds a block when the question
+ * names a literal, and on Mini-Dev that leaves 326 of 498 questions with two distinct
+ * prompts out of three sources. A pair that always differs is the honest denominator for
+ * what prompt diversity buys.
+ */
+export const DUO_SOURCES: readonly string[] = ['inline+evidence', 'metadata+evidence'];
 
 /**
  * A mixed candidate set is only three generations if its sources generate once each.
@@ -242,7 +252,12 @@ export const ARMS: readonly Arm[] = [
   // is how often the *set* contains a correct statement, and a set of paraphrases is a
   // narrow set. The sources are arms already measured on their own, so the candidate
   // set is a combination of known parts rather than a new invention.
-  { name: 'select-mixed', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: true },
+  { name: 'select-mixed', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: MIXED_SOURCES },
+  // The mixed arm without the value-grounded candidate. On Mini-Dev two thirds of the
+  // questions name no literal, so the value block is empty and the arm pays three
+  // generations for two distinct prompts; this is the same two prompts, always, for one
+  // call less. It prices the candidate `values` actually contributes.
+  { name: 'select-duo', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 2, select: true, mixed: DUO_SOURCES },
   // The same inline arm plus the literals the question names, resolved against this
   // database. CHASE-SQL's first pipeline stage; here it is one lever from
   // `inline+evidence`, so the delta prices value grounding, not the hint.
@@ -296,11 +311,11 @@ export const DEFAULT_ARMS: readonly string[] = [
   'inline+repair-raw',
   'vote',
   'select',
-  // The same three candidates compared two at a time instead of ranked all at once.
-  'select-pair',
   // Three decompositions instead of three samples of one: the arm that tests whether
   // the ceiling belongs to the sampler or to the prompt.
   'select-mixed',
+  // The same two prompts that always differ, one call cheaper.
+  'select-duo',
   'select5',
   'values',
   'metadata+evidence',
@@ -323,6 +338,7 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'no-linking': 'removes the schema linker: the arm that prices linking, run when linking changes',
   repair: 'the original repair arm (dataset notes, two attempts, one generic sentence): superseded by inline+repair, which is one lever from inline+evidence and reports a funnel',
   plan: 'query plan before the statement: 50.4% against 57.6% for its parent (-7.2pp, 63/27, p=0.0002) — anchoring, not helping; kept so the finding can be re-tested',
+  'select-pair': 'pairwise comparison instead of an absolute ranking: 58.4% against 57.6% for its parent (+0.8pp, 17/20, p=0.74) at one more call, and it lost more of its candidate set (25 cases against 20) — the absolute prompt is not what the selector loses; kept so a different comparison order or a two-of-three vote can be measured against it',
   'inline+shape': 'scalar-shape guard before the repair loop: 57.2% against 58.4% for its parent (-1.2pp, 11/5, p=0.21) — it fired on 21 cases, repaired 2, and shifted 14 more into the wrong column count; kept so a better shape test can be measured against this one',
 };
 
@@ -342,6 +358,8 @@ export const COMPARISONS: readonly (readonly [string, string, string])[] = [
   ['inline+evidence', 'values', 'value grounding on top of the hint: does instance knowledge add anything the hint lacks'],
   ['inline+evidence', 'metadata+evidence', 'generated definitions on the column line versus 798 curated notes'],
   ['inline+evidence', 'select-mixed', 'three decompositions and a selector versus a single sample: four calls instead of one'],
+  ['select', 'select-duo', 'two prompts and a selector versus three samples of one prompt: three calls instead of four'],
+  ['select-duo', 'select-mixed', 'the value-grounded candidate on top of two prompts: does a third source add anything'],
 ];
 
 export const PAIRS: readonly (readonly [string, string])[] = [
@@ -1112,26 +1130,42 @@ async function main() {
           }),
     }));
     report.prompts = prompts;
-    // A mixed arm is three prompts or it is one prompt paid for three times. Equality is
-    // checked here, without a model, because the failure is silent: three identical
-    // candidates agree unanimously, the selector looks confident, and the arm reads as
-    // "diversity does not help" when there was never any diversity.
-    const sample = cases[0] as BirdQuestion;
-    const mixed = MIXED_SOURCES.map((source) => {
-      const arm = resolveArm(source) as Arm;
-      return {
-        arm: source,
-        prompt: buildSqlPrompt(sample.question, schemas.get(sample.db_id) as SchemaTable[], promptFor(arm, sample, blocksFor(arm, sample))),
-      };
-    });
-    for (let left = 0; left < mixed.length; left += 1) {
-      for (let right = left + 1; right < mixed.length; right += 1) {
-        if (mixed[left]?.prompt === mixed[right]?.prompt) {
-          throw new Error(`mixed candidate sources ${String(mixed[left]?.arm)} and ${String(mixed[right]?.arm)} produce the same prompt; the arm would pay three times for one opinion`);
-        }
+    // A mixed arm is as many prompts as it claims, or it is one prompt paid for several
+    // times. The check cannot be made on one question: `values` only differs when the
+    // question names a literal, and on the dev split the first question names none — the
+    // three sources collapsed to two and the guard called the arm broken, which was the
+    // guard's mistake, in the same family as applying one split's arm list to another.
+    // What must hold is that the sources *can* differ; how often they cannot is measured
+    // here and reported as a cost, not assumed away.
+    const distinctShare = (sources: readonly string[]): { withAllDistinct: number; degenerate: number } => {
+      let withAllDistinct = 0;
+      for (const question of cases) {
+        const built = sources.map((source) => {
+          const arm = resolveArm(source) as Arm;
+          return buildSqlPrompt(question.question, schemas.get(question.db_id) as SchemaTable[], promptFor(arm, question, blocksFor(arm, question)));
+        });
+        if (new Set(built).size === sources.length) withAllDistinct += 1;
       }
-    }
-    report.mixedCandidatePrompts = mixed.map((entry) => ({ arm: entry.arm, chars: entry.prompt.length }));
+      return { withAllDistinct, degenerate: cases.length - withAllDistinct };
+    };
+    report.mixedCandidatePrompts = config.arms
+      .map((name) => resolveArm(name))
+      .filter((arm): arm is Arm => arm !== undefined && arm.mixed !== undefined)
+      .map((arm) => {
+        const sources = arm.mixed as readonly string[];
+        const counted = distinctShare(sources);
+        if (counted.withAllDistinct === 0) {
+          throw new Error(`arm ${arm.name} builds no question with ${String(sources.length)} distinct prompts from ${sources.join(', ')}; it would pay ${String(sources.length)} times for one opinion on every case`);
+        }
+        return {
+          arm: arm.name,
+          sources,
+          questions: cases.length,
+          withAllDistinct: counted.withAllDistinct,
+          degenerate: counted.degenerate,
+          degenerateShare: counted.degenerate / Math.max(1, cases.length),
+        };
+      });
     report.arms = [];
     finish(config, report);
     await oracle.close();
@@ -1153,7 +1187,12 @@ async function main() {
     if (arm === undefined) throw new Error(`unknown arm ${name}`);
     // A mixed arm runs three configurations under one label; if one of them repairs or
     // samples, the reported cost is wrong and the comparison loses its meaning.
-    if (arm.mixed === true) assertMixedSources();
+    if (arm.mixed !== undefined) {
+      assertMixedSources(arm.mixed);
+      if (arm.mixed.length !== arm.vote) {
+        throw new Error(`arm ${name} draws ${String(arm.mixed.length)} sources but declares ${String(arm.vote ?? 1)} candidates; the cost claim would be false`);
+      }
+    }
     const runs = await pool(cases, config.concurrency, async (question): Promise<CaseRun> => {
       const schema = schemas.get(question.db_id) as SchemaTable[];
       // Counted, not derived: a plan costs two calls, a selector costs one, and a
@@ -1209,8 +1248,9 @@ async function main() {
             // A mixed arm draws each candidate from a different decomposition. The
             // sources repair nothing by contract (asserted in the test suite), so a
             // candidate is always one generation and the cost stays three calls.
-            const source = arm.mixed === true ? (MIXED_SOURCES[sample % MIXED_SOURCES.length] as string) : name;
-            const sampler = arm.mixed === true ? pipelineFor(resolveArm(source) as Arm) : pipeline;
+            const sources = arm.mixed;
+            const source = sources === undefined ? name : (sources[sample % sources.length] as string);
+            const sampler = sources === undefined ? pipeline : pipelineFor(resolveArm(source) as Arm);
             const askedSample = await sampler.ask({ question: question.question, schema });
             const executed = await oracle.run(question.db_id, askedSample.sql);
             if (executed.ok) candidates.push({ sql: askedSample.sql, rows: executed.rows, source });
@@ -1276,7 +1316,7 @@ async function main() {
           agreement: majority.agreement,
           candidateRecall: candidates.some((candidate) => judgeOfficial(expected.rows, candidate.rows) === 'match'),
           ...(selectedByModel === undefined ? {} : { selectedByModel }),
-          ...(arm.mixed === true ? { winnerSource: winner.source } : {}),
+          ...(arm.mixed === undefined ? {} : { winnerSource: winner.source }),
           calls: counter.calls(),
         };
       }
@@ -1420,7 +1460,7 @@ async function main() {
             // that matched. Accuracy divided by this is what the selector kept, and the
             // difference between the two is the most a better selector could win here.
             ...candidateCeiling(runs),
-            ...(arm.mixed === true ? { sources: winnerSources(runs) } : {}),
+            ...(arm.mixed === undefined ? {} : { sources: winnerSources(runs, arm.mixed) }),
             // How often the selector produced a usable index. A selector that fails to
             // answer half the time is not a null result; it is a broken prompt.
             ...(arm.select === true

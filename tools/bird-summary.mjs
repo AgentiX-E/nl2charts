@@ -72,6 +72,21 @@ if (report === null) {
     // against what the candidate set contained. The ceiling is measured on the same
     // cases, so a null result can be read as "no candidate was right" (a generation
     // problem) instead of "the selector failed" (a prompt problem).
+    // A mixed arm's price is what it spends; whether its sources actually differ is a
+    // separate fact, measured before any model call and reported here because a
+    // degenerate candidate turns three calls into two opinions.
+    const mixedArms = Array.isArray(report.mixedCandidatePrompts) ? report.mixedCandidatePrompts : [];
+    if (mixedArms.length > 0) {
+      lines.push(
+        '',
+        '| mixed arm | sources | questions with every prompt distinct | degenerate (paid for a duplicate) |',
+        '| --- | --- | --- | --- |',
+        ...mixedArms.map(
+          (entry) =>
+            `| \`${entry.arm}\` | ${entry.sources.join(' + ')} | ${entry.withAllDistinct}/${entry.questions} (${((1 - entry.degenerateShare) * 100).toFixed(1)}%) | ${entry.degenerate} (${(entry.degenerateShare * 100).toFixed(1)}%) |`,
+        ),
+      );
+    }
     const voted = report.arms.filter((arm) => typeof arm.vote === 'number');
     if (voted.length > 0) {
       lines.push(

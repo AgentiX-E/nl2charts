@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import {
   ARMS,
   COMPARISONS,
+  DUO_SOURCES,
   MIXED_SOURCES,
   DEFAULT_ARMS,
   ON_DEMAND_ARMS,
@@ -454,5 +455,32 @@ describe('mixed candidate sources', () => {
     // A generator missing from the report would look like a generator that was never
     // tried; zero is the number that says "tried, never won".
     expect(counts).toEqual({ 'inline+evidence': 2, 'metadata+evidence': 1, values: 0 });
+  });
+});
+
+/**
+ * A mixed arm's candidate count is the length of its source list.
+ *
+ * The two are declared in different fields, so a mismatch is a false price rather than a
+ * crash: an arm that names three sources and declares two candidates would spend three
+ * generations and report two. The pair is checked for every mixed arm in the catalogue.
+ */
+describe('mixed arms declare their own sources', () => {
+  const mixed = ARMS.filter((arm) => arm.mixed !== undefined);
+
+  it('has at least the two arms under test', () => {
+    expect(mixed.map((arm) => arm.name).sort()).toEqual(['select-duo', 'select-mixed']);
+  });
+
+  it.each(mixed.map((arm) => [arm.name, arm] as const))('%s: candidates equal sources, and every source generates once', (name, arm) => {
+    expect(arm.vote, name).toBe(arm.mixed?.length);
+    expect(() => assertMixedSources(arm.mixed)).not.toThrow();
+  });
+
+  it('keeps the duo strictly inside the trio, so the comparison is a subset', () => {
+    // `select-duo` exists to price the third candidate; if it introduced a source the trio
+    // does not have, the comparison would no longer be "the same prompts, one fewer".
+    for (const source of DUO_SOURCES) expect(MIXED_SOURCES).toContain(source);
+    expect(DUO_SOURCES.length).toBe(MIXED_SOURCES.length - 1);
   });
 });
