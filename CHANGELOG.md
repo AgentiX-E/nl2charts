@@ -16,7 +16,9 @@ cannot be argued with.
   inside a repair loop and nothing else, `repaired` is reported only by an arm that has one,
   and every case records `calls` counted by `withCallCounter` around the provider. The
   gate rejects an arm whose mean calls do not exceed its sample count, an arm that reports
-  repaired cases with no funnel, and an arm with no cost at all.
+  repaired cases with no funnel, and an arm with no cost at all — and it caught the
+  selector call missing from the first version of the counter, one run after it was
+  written.
 
 ### Added
 
@@ -33,6 +35,29 @@ cannot be argued with.
   separate *sampler* diversity from *prompt* diversity; the dry run fails if two of its
   sources build the same prompt, because three identical candidates agree unanimously and
   read as "diversity does not help" when there was never any.
+- **`select-pair`** and `chooseCandidatePairwise`: the same three candidates compared two
+  at a time in `k - 1` calls, which is the shape CHASE-SQL's selector has. The refactor
+  that shares its rules block with the absolute prompt leaves that prompt byte-identical,
+  so earlier `select` numbers stay comparable.
+
+### Measured
+
+- **The candidate ceiling, and where the remaining gap is.** With the new instrument, the
+  best arms hold a correct statement in their candidate set 61–65% of the time and return
+  57–60%: three to five points are pure selection loss. `select-mixed` — three prompts
+  instead of three samples of one — is **60.4%** against `select`'s 57.6% at the same four
+  calls (+2.8pp, 10/24, p=0.024, awaiting its second run under ADR-184), and beats
+  `select5` (59.2%) with two fewer calls.
+- **A counted cost found a bug in its own first version.** The gate rejected the run with
+  `select samples 3 times and selects with the model and reports 3 calls per case`: the
+  selector call was made on the unwrapped provider. Fixed, and the check now
+  distinguishes a model selector from a majority vote, which correctly spends exactly one
+  call per sample.
+
+### Changed
+
+- **`ai` bundle budget 35,000 → 36,000 gzip bytes** for the pairwise selector, reviewed
+  and recorded in `budgets.json` rather than discovered by the gate.
 
 ### Removed from the default chain
 

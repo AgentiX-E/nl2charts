@@ -119,8 +119,12 @@ export function compare(report, baseline) {
       issues.push(`BIRD1: ${item.arm} reports no calls per case, so its delta cannot be priced`);
       continue;
     }
-    if (samples !== undefined && mean <= samples) {
-      issues.push(`BIRD1: ${item.arm} samples ${String(samples)} times and reports ${String(mean)} calls per case; the selector call is not counted`);
+    // Only an arm whose selector is the model must spend a call on it. A majority vote
+    // reads the same candidates with no model, so `calls == samples` is its correct
+    // price — the first version of this check could not tell the two apart and would
+    // have failed an arm that was right.
+    if (samples !== undefined && item.selector === 'model' && mean <= samples) {
+      issues.push(`BIRD1: ${item.arm} samples ${String(samples)} times, selects with the model, and reports ${String(mean)} calls per case; the selector call is not counted`);
     }
     if (samples === undefined && mean < 1) {
       issues.push(`BIRD1: ${item.arm} reports ${String(mean)} calls per case, fewer than the one call every arm makes`);
@@ -218,18 +222,27 @@ function selfTest() {
   // count on an arm with no loop, a selector that costs nothing, and an arm whose cost
   // cannot be read at all.
   const lyingSamples = compare(
-    { selection: { scored: 100, split: 'minidev' }, arms: [arm('select5', 58, 100, { vote: 5, calls: { mean: 5, max: 5 } })] },
+    { selection: { scored: 100, split: 'minidev' }, arms: [arm('select5', 58, 100, { vote: 5, selector: 'model', calls: { mean: 5, max: 5 } })] },
     { ...baseline, expectedArms: ['select5'] },
   );
   if (!lyingSamples.issues.some((issue) => issue.includes('selector call is not counted'))) {
     issues.push('BIRD1 does not notice a sampling arm whose selector call is missing from its cost');
   }
   const lyingRepair = compare(
-    { selection: { scored: 100, split: 'minidev' }, arms: [arm('select5', 58, 100, { vote: 5, calls: { mean: 6, max: 6 }, repaired: 496 })] },
+    { selection: { scored: 100, split: 'minidev' }, arms: [arm('select5', 58, 100, { vote: 5, selector: 'model', calls: { mean: 6, max: 6 }, repaired: 496 })] },
     { ...baseline, expectedArms: ['select5'] },
   );
   if (!lyingRepair.issues.some((issue) => issue.includes('no repair funnel'))) {
     issues.push('BIRD1 does not notice a repaired count on an arm that cannot repair');
+  }
+  // ...and the opposite mistake: a majority vote spends exactly one call per sample, so
+  // an arm whose selector is not the model must not be accused of hiding a selector call.
+  const majorityPriced = compare(
+    { selection: { scored: 100, split: 'minidev' }, arms: [arm('vote', 55, 100, { vote: 3, selector: 'majority', calls: { mean: 3, max: 3 } })] },
+    { ...baseline, expectedArms: ['vote'] },
+  );
+  if (majorityPriced.issues.length !== 0) {
+    issues.push(`BIRD1 accuses a majority-vote arm of hiding a selector call (${majorityPriced.issues.join('; ')})`);
   }
   const unpriced = compare(
     { selection: { scored: 100, split: 'minidev' }, arms: [{ arm: 'names', passed: 42, total: 100 }] },
@@ -268,7 +281,7 @@ if (process.argv[2] === '--self-test') {
   const issues = selfTest();
   for (const issue of issues) console.error(issue);
   if (issues.length > 0) process.exit(1);
-  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, other split, unfloored arm, empty lever, a funnel that does not add up, a split-specific arm list, an uncounted selector call, a repair count without a loop and an unpriced arm all behave');
+  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, other split, unfloored arm, empty lever, a funnel that does not add up, a split-specific arm list, an uncounted selector call, a majority vote that spends exactly its samples, a repair count without a loop and an unpriced arm all behave');
 } else {
   const reportPath = resolve(ROOT, 'eval/out/bird-eval.json');
   const baseline = JSON.parse(readFileSync(resolve(ROOT, 'eval/baseline/bird.json'), 'utf8'));

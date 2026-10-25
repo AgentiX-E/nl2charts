@@ -13,6 +13,6 @@ export { buildInterpretationPrompt, parseInterpretation } from './interpret.js';
 export { buildPlanPrompt, parsePlan } from './plan.js';
 export { classifyFailure, diagnoseFailure, readEngineError, resolveAliases } from './diagnose.js';
 export type { Diagnosis, EngineErrorFields, FailureClass } from './diagnose.js';
-export { applySelection, buildSelectionPrompt, chooseCandidate, parseSelection, toCandidate } from './select.js';
+export { applySelection, buildPairwisePrompt, buildSelectionPrompt, chooseCandidate, chooseCandidatePairwise, parsePairwise, parseSelection, toCandidate } from './select.js';
 export type { Candidate, ExecutedCandidate, SelectionDecision } from './select.js';
 export type { AskRequest, AskResult, PipelineOptions, PromptOptions, PromptProfile } from './pipeline.js';

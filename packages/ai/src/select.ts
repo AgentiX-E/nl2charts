@@ -32,27 +32,35 @@ export interface SelectionDecision {
  * statement and the shape of its result. No weights, so the comparison stays honest
  * about what a prompt can and cannot buy.
  */
-export function buildSelectionPrompt(question: string, candidates: readonly Candidate[]): string {
-  const numbered = candidates
-    .map((candidate, index) => {
-      const head = `${String(index + 1)}. ${candidate.sql}`;
-      const shape = `   result: ${String(candidate.rows)} rows, ${String(candidate.columns)} columns`;
-      const preview = candidate.preview.length === 0 ? '' : `   first rows: ${candidate.preview}`;
-      return [head, shape, preview].filter((line) => line.length > 0).join('\n');
-    })
+const RULES: readonly string[] = [
+  '- Choose by what the question asks, not by which statement looks shortest or most familiar.',
+  '- A row count that cannot answer the question is evidence against a candidate: a question asking for one number, one row, or one list is not answered by hundreds of rows, and a question asking for a list is not answered by a single number.',
+  '- A candidate that groups or filters on a column the question never mentions is suspect unless the question implies it.',
+];
+
+/** One candidate, as the selector reads it: statement, shape, first rows. */
+function renderCandidate(candidate: Candidate, label?: string): string {
+  const head = label === undefined ? candidate.sql : `${label}. ${candidate.sql}`;
+  return [
+    head,
+    `   result: ${String(candidate.rows)} rows, ${String(candidate.columns)} columns`,
+    candidate.preview.length === 0 ? '' : `   first rows: ${candidate.preview}`,
+  ]
+    .filter((line) => line.length > 0)
     .join('\n');
+}
+
+export function buildSelectionPrompt(question: string, candidates: readonly Candidate[]): string {
   return [
     'You choose which candidate statement answers the question. Every candidate has already been executed.',
     'Rules:',
-    '- Choose by what the question asks, not by which statement looks shortest or most familiar.',
-    '- A row count that cannot answer the question is evidence against a candidate: a question asking for one number, one row, or one list is not answered by hundreds of rows, and a question asking for a list is not answered by a single number.',
-    '- A candidate that groups or filters on a column the question never mentions is suspect unless the question implies it.',
+    ...RULES,
     '- If two candidates are equivalent, choose the one whose rows are more consistent with the question.',
     'Answer with the number of the chosen candidate and nothing else.',
     '',
     `Question: ${question}`,
     'Candidates:',
-    numbered,
+    candidates.map((candidate, index) => renderCandidate(candidate, String(index + 1))).join('\n'),
   ].join('\n');
 }
 
@@ -134,4 +142,74 @@ export async function chooseCandidate(
   });
   const decision = applySelection(reply.text, offered);
   return { ...decision, sql: (offered[decision.index] as Candidate).sql };
+}
+
+/**
+ * Compare two candidates instead of ranking many.
+ *
+ * The absolute-index prompt asks the model to hold every candidate in mind and emit one
+ * number, and on this harness it kept 94.8% of what the candidate set contained — the
+ * remaining 5pp were candidates that were present and not chosen. CHASE-SQL's selector
+ * is a *binary* comparison for this reason: two statements in view, one of two answers,
+ * no index to anchor on. This is that shape, as a prompt, so the comparison stays a
+ * comparison of mechanisms rather than of weights.
+ */
+export function buildPairwisePrompt(question: string, left: Candidate, right: Candidate): string {
+  return [
+    'Two statements were written for the same question and both were executed.',
+    'Which one answers the question?',
+    'Rules:',
+    ...RULES,
+    '- If both would be judged correct, answer 1.',
+    'Answer with 1 or 2 and nothing else.',
+    '',
+    `Question: ${question}`,
+    renderCandidate(left, '1'),
+    renderCandidate(right, '2'),
+  ].join('\n');
+}
+
+/** Read a pairwise answer back: 0 or 1, or -1 when the reply carries neither. */
+export function parsePairwise(text: string): number {
+  const cleaned = text.trim().replace(/^[*_`\s]+|[*_`\s.]+$/g, '');
+  const match = /^(?:candidates?\s*[:#-]?\s*)?([12])$/i.exec(cleaned);
+  return match === null ? -1 : Number(match[1]) - 1;
+}
+
+/**
+ * Choose by knockout: the incumbent meets each challenger in turn.
+ *
+ * Order matters no more than it does in a single-elimination bracket, and the count is
+ * exact: `k - 1` calls for `k` candidates, which is what makes the price of a comparison
+ * predictable rather than "one more call".
+ *
+ * An unreadable reply keeps the incumbent. That is the same conservative reading the
+ * absolute selector takes, and it is reported: `decided` counts the comparisons that
+ * produced no answer, so a broken pairwise prompt cannot hide behind a plausible result.
+ */
+export async function chooseCandidatePairwise(
+  provider: LlmProvider,
+  question: string,
+  executed: readonly ExecutedCandidate[],
+): Promise<SelectionDecision & { readonly sql: string }> {
+  if (executed.length === 0) throw new Error('chooseCandidatePairwise needs at least one executed candidate');
+  const offered = executed.map((candidate) => toCandidate(candidate));
+  let best = 0;
+  let decided = true;
+  for (let challenger = 1; challenger < offered.length; challenger += 1) {
+    const reply = await provider.complete({
+      messages: [
+        { role: 'system', content: buildPairwisePrompt(question, offered[best] as Candidate, offered[challenger] as Candidate) },
+        { role: 'user', content: question },
+      ],
+      temperature: 0,
+    });
+    const choice = parsePairwise(reply.text);
+    if (choice === -1) {
+      decided = false;
+      continue;
+    }
+    if (choice === 1) best = challenger;
+  }
+  return { index: best, decided, sql: (offered[best] as Candidate).sql };
 }

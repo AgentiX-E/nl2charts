@@ -22,7 +22,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHttpProvider } from '@agentix-e/nl2charts-ai';
 import type { PromptOptions, SchemaTable } from '@agentix-e/nl2charts-ai';
-import { applySelection, attachDefinitions, buildSelectionPrompt, buildSqlPrompt, choosePromptProfile, createPipeline, renderDefinitions, renderEvidence, renderSchemaCard, withCallCounter } from '@agentix-e/nl2charts-ai';
+import { applySelection, attachDefinitions, buildSelectionPrompt, chooseCandidatePairwise, buildSqlPrompt, choosePromptProfile, createPipeline, renderDefinitions, renderEvidence, renderSchemaCard, withCallCounter } from '@agentix-e/nl2charts-ai';
 import { compareArms, judgeOfficial, judgeStrict, majorityResult, mcnemarExact, summarise, wilsonInterval } from '@agentix-e/nl2charts-devkit';
 import { ppPerExtraCall, repairFunnel } from './metrics.js';
 import type { CaseOutcome, MatchReason } from '@agentix-e/nl2charts-devkit';
@@ -143,6 +143,16 @@ export interface Arm {
    * of candidates, same selector, and only where they come from changes.
    */
   readonly mixed?: boolean;
+  /**
+   * Ask the selector to compare two statements at a time instead of ranking many.
+   *
+   * The absolute prompt keeps 95% of what a mixed candidate set contained; the missing
+   * five points are candidates that were present and not chosen. Two statements and one
+   * of two answers is the shape CHASE-SQL's selector has, and the shape is the part a
+   * prompt can copy. One lever from `select`: same candidates, same count, `k - 1`
+   * comparisons instead of one ranking.
+   */
+  readonly pairwise?: boolean;
 }
 
 /**
@@ -225,6 +235,7 @@ export const ARMS: readonly Arm[] = [
   // The same selector with two more samples to choose from. If selection works by
   // reading candidates, more of them should help; if it works by picking the first
   // plausible one, it will not.
+  { name: 'select-pair', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, pairwise: true },
   { name: 'select5', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 5, select: true },
   // Three candidates from three decompositions, then the same selector. `select` draws
   // three samples of one prompt, which agree 90% of the time; the ceiling that matters
@@ -285,6 +296,8 @@ export const DEFAULT_ARMS: readonly string[] = [
   'inline+repair-raw',
   'vote',
   'select',
+  // The same three candidates compared two at a time instead of ranked all at once.
+  'select-pair',
   // Three decompositions instead of three samples of one: the arm that tests whether
   // the ceiling belongs to the sampler or to the prompt.
   'select-mixed',
@@ -352,6 +365,8 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   // Where the candidates come from, held against how many there are: same count, same
   // selector, different prompts.
   ['select', 'select-mixed'],
+  // One lever: who does the choosing, not how many candidates there are.
+  ['select', 'select-pair'],
   ['select', 'select5'],
   ['inline+evidence', 'values'],
   ['inline+evidence', 'plan'],
@@ -543,9 +558,10 @@ export function repairAccounting(
  * `candidateRecall` is the share of questions where at least one candidate matched; that
  * is the ceiling any selector, however good, is bounded by on this candidate set.
  * `selectionLoss` counts the questions the set answered and the arm did not return —
- * cases that are pure selection failure and need no better generator. A selector that
- * gains nothing while `selectionLoss` is large is a prompt problem, not a dead end; a
- * large `selectionLoss` with a small one is a ceiling that more samples cannot lift.
+ * cases that are pure selection failure and need no better generator. The two readings
+ * decide where the next hour goes: a large loss means the selector is the defect, and a
+ * loss near zero means the candidate set itself is the ceiling and no selector can lift
+ * it, however it is prompted.
  */
 export function candidateCeiling(runs: readonly { passed: boolean; candidateRecall?: boolean }[]): {
   candidateRecall: number;
@@ -1229,14 +1245,23 @@ async function main() {
             columns: candidate.rows[0]?.length ?? 0,
             preview: JSON.stringify(candidate.rows.slice(0, 3)).slice(0, 300),
           }));
-          const reply = await provider.complete({
-            messages: [
-              { role: 'system', content: buildSelectionPrompt(question.question, offered) },
-              { role: 'user', content: question.question },
-            ],
-            temperature: 0,
-          });
-          const decision = applySelection(reply.text, offered);
+          // `counter.provider`, not `provider`: this call is part of the arm's price, and
+          // the first version of this counter left it out — which the gate caught on the
+          // very next run ("select samples 3 times and reports 3 calls per case").
+          const decision =
+            arm.pairwise === true
+              ? await chooseCandidatePairwise(counter.provider, question.question, candidates)
+              : await (async () => {
+                  const reply = await counter.provider.complete({
+                    messages: [
+                      { role: 'system', content: buildSelectionPrompt(question.question, offered) },
+                      { role: 'user', content: question.question },
+                    ],
+                    temperature: 0,
+                  });
+                  const applied = applySelection(reply.text, offered);
+                  return { index: applied.index, decided: applied.decided, sql: (offered[applied.index] as { sql: string }).sql };
+                })();
           winner = candidates[decision.index] as typeof winner;
           selectedByModel = decision.decided;
         }

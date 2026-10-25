@@ -330,6 +330,67 @@ styles instead of three samples of one. Three samples of one prompt agree 90% of
 time, so they buy calls without buying a second opinion; the mixed arm is what a second
 opinion costs.
 
+### The ceiling, measured: selection is losing the points, not generation
+
+Run `40181585037` added the instrument the selection experiments were missing — how often
+the candidate set contained a correct statement at all — and the answer reorganises the
+remaining work. Mini-Dev, 498 questions, deepseek-chat:
+
+| arm | candidates | model calls | accuracy | candidate recall (ceiling) | cases lost by the selector | share of ceiling kept |
+| --- | --- | --- | --- | --- | --- | --- |
+| `vote` | 3, one prompt | 3 | 57.2% | 61.4% | 21 | 93.2% |
+| `select` | 3, one prompt | 4 | 57.6% | 61.6% | 20 | 93.5% |
+| `select5` | 5, one prompt | 6 | 59.2% | **64.7%** | 27 | 91.5% |
+| `select-mixed` | 3, three prompts | 4 | **60.4%** | 63.7% | 16 | **94.8%** |
+
+Three things follow, and they are not the three the prompt-layer work assumed:
+
+1. **The ceiling is 61–65%, and the arms return 57–60%.** Between three and five points
+   are sitting in candidate sets that were generated, executed, and not chosen. That is
+   pure selection loss, and it is larger than any prompt-layer gain measured in this
+   file except the dataset hint itself.
+2. **Prompt diversity beats sampling diversity at two thirds of the price.** Three
+   prompts (`select-mixed`) reach a higher accuracy than five samples of one prompt
+   (`select5`) with two fewer calls: +1.2pp at 4 calls versus 6. Against `select` it is
+   **+2.8pp** (10 won / 24 lost, McNemar p=0.024) at the *same* cost — the same three
+   candidates, the same selector call, only their origin changed. Under ADR-184 that is
+   not yet adoption (two consecutive runs at p<0.01); the arm stays in the chain and the
+   next run is the second measurement.
+3. **The selector, not the generator, is the next lever.** A candidate set that holds
+   the answer 64.7% of the time and returns 59.2% is not short of candidates. It is
+   picking badly.
+
+Two measurement defects were found while reading this table, both of the same kind — a
+number derived from a field that had been reused:
+
+| Symptom | What the field really held |
+| --- | --- |
+| `select5` published `repaired: 496` of 498 | samples per question, counted as repair attempts |
+| `select → select5` published `extraCallsPerCase: 0` | generations, which omit the selector's own call |
+
+Both are fixed at the source (`attempts` now means generations inside a repair loop;
+every case counts its calls at the provider), and the gate rejects either shape of lie
+on the next run. It did, immediately: the first counted version still missed the
+selector call, and the gate said so in one line before the run was published.
+
+### The next experiment: compare two statements, not five
+
+If the selector is losing three to five points, the question is what a selector should be
+shown. The absolute prompt asks the model to hold every candidate in mind and emit one
+number; CHASE-SQL's selector is a **binary** comparison instead — two statements in view,
+one of two answers, nothing to anchor on.
+
+`select-pair` is that shape and nothing else: the same three candidates `select` draws,
+the same model, two comparisons instead of one ranking (1 vs 2, winner vs 3). It is one
+lever from `select`, and its price is exactly `k - 1` calls, so the comparison stays a
+comparison of mechanisms rather than of weights — the fine-tuning CHASE-SQL adds on top
+is out of reach here and is not claimed.
+
+A pairwise answer is read strictly: a reply that is not a bare `1` or `2` leaves the
+incumbent in place and is counted in `selectorDecided`, because "the comparison did not
+answer" and "the comparison preferred the first statement" are different facts and only
+one of them is a preference.
+
 ### Two gold statements cannot be scored, and the reason is measured
 
 The denominator is 498, not 500. Two Mini-Dev gold statements exceed the

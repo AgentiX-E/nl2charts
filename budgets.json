@@ -3,11 +3,14 @@
   "packages": {
     "spec": 5000,
     "core": 36000,
-    "ai": 35000,
+    "ai": 36000,
     "node": 17000,
     "chart": 11500,
     "mcp": 7000,
     "studio": 8000,
     "devkit": 5400
+  },
+  "notes": {
+    "ai": "35000 -> 36000 (v9.3): the pairwise selector adds a prompt builder, a parser and a knockout loop, about 1.1 KB gzip. Reviewed as a capability rather than drift, and the two prompt builders were merged onto one rules block and one candidate renderer first, which returned 155 B."
   }
 }

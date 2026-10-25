@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applySelection, buildSelectionPrompt, chooseCandidate, parseSelection, toCandidate } from '../src/select.js';
+import { applySelection, buildPairwisePrompt, buildSelectionPrompt, chooseCandidate, chooseCandidatePairwise, parsePairwise, parseSelection, toCandidate } from '../src/select.js';
 import type { LlmProvider } from '../src/provider.js';
 import type { Candidate } from '../src/select.js';
 
@@ -131,5 +131,89 @@ describe('choosing among executed candidates', () => {
     expect(candidate.rows).toBe(1000);
     expect(candidate.columns).toBe(2);
     expect(candidate.preview.length).toBeLessThanOrEqual(300);
+  });
+});
+
+/**
+ * Pairwise selection: the shape CHASE-SQL's selector has, copied as a prompt.
+ *
+ * The claims worth testing are structural, not stylistic — the incumbent is challenged
+ * once per challenger, an unreadable reply leaves the ranking alone instead of handing
+ * the decision to candidate 1, and the count is exactly `k - 1` so the price of a
+ * comparison is predictable.
+ */
+describe('pairwise selection', () => {
+  const replies = (texts: readonly string[]) => {
+    const seen: string[] = [];
+    const provider: LlmProvider = {
+      id: 'scripted',
+      model: 'scripted',
+      complete: async (request) => {
+        const prompt = request.messages[0]?.content ?? '';
+        seen.push(prompt);
+        const text = texts[seen.length - 1] ?? '1';
+        return { text, model: 'scripted' };
+      },
+    };
+    return { provider, seen };
+  };
+  const executed = [
+    { sql: 'SELECT 1', rows: [[1]] as unknown[][] },
+    { sql: 'SELECT 2', rows: [[2]] as unknown[][] },
+    { sql: 'SELECT 3', rows: [[3]] as unknown[][] },
+  ];
+
+  it('challenges the incumbent once per challenger, so three candidates cost two calls', async () => {
+    const scripted = replies(['2', '2']);
+    const decision = await chooseCandidatePairwise(scripted.provider, 'q', executed);
+    expect(scripted.seen).toHaveLength(2);
+    // 1 vs 2 → 2 wins; then 2 vs 3 → 3 wins.
+    expect(decision.index).toBe(2);
+    expect(decision.sql).toBe('SELECT 3');
+  });
+
+  it('keeps the incumbent when the challenger loses', async () => {
+    const scripted = replies(['1', '1', '1']);
+    const decision = await chooseCandidatePairwise(scripted.provider, 'q', executed);
+    expect(decision.index).toBe(0);
+    expect(decision.decided).toBe(true);
+    expect(scripted.seen).toHaveLength(2);
+  });
+
+  it('costs nothing on a single candidate, which has nothing to compare against', async () => {
+    const scripted = replies([]);
+    const decision = await chooseCandidatePairwise(scripted.provider, 'q', [executed[0] as (typeof executed)[0]]);
+    expect(decision.index).toBe(0);
+    expect(decision.decided).toBe(true);
+    expect(scripted.seen).toHaveLength(0);
+  });
+
+  it('reports an unreadable comparison instead of treating it as a vote for the challenger', async () => {
+    const scripted = replies(['I think the second one', '2']);
+    const decision = await chooseCandidatePairwise(scripted.provider, 'q', executed);
+    // The first comparison is unreadable, so candidate 1 stays; the second is readable
+    // and picks candidate 3.
+    expect(decision.index).toBe(2);
+    expect(decision.decided).toBe(false);
+  });
+
+  it('shows the question and both statements, one of which is labelled 1', () => {
+    const prompt = buildPairwisePrompt('How many orders?', candidates[0] as Candidate, candidates[1] as Candidate);
+    expect(prompt).toContain('How many orders?');
+    expect(prompt).toContain(`1. ${(candidates[0] as Candidate).sql}`);
+    expect(prompt).toContain(`2. ${(candidates[1] as Candidate).sql}`);
+    expect(prompt).toContain('Answer with 1 or 2 and nothing else.');
+  });
+
+  it('reads only a bare 1 or 2, because prose containing a 2 is not a choice', () => {
+    expect(parsePairwise('2')).toBe(1);
+    expect(parsePairwise(' 1. ')).toBe(0);
+    expect(parsePairwise('Candidate 2')).toBe(1);
+    expect(parsePairwise('The second candidate has 2 rows')).toBe(-1);
+    expect(parsePairwise('3')).toBe(-1);
+  });
+
+  it('refuses an empty candidate list rather than inventing one', async () => {
+    await expect(chooseCandidatePairwise(replies([]).provider, 'q', [])).rejects.toThrow(/at least one/);
   });
 });
