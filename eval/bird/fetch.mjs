@@ -10,7 +10,7 @@
  *   node eval/bird/fetch.mjs --dbs superhero,california_schools
  *   node eval/bird/fetch.mjs --offline        # fail if the cache is cold
  */
-import { createWriteStream, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -28,10 +28,15 @@ const ROOT = resolve(new URL('../..', import.meta.url).pathname);
  * after, so the cache holds 4.2 MB rather than a second copy of the corpus.
  */
 const SPLIT = process.env.BIRD_SPLIT ?? 'minidev';
+/**
+ * `root` is where the archive puts its files; `dir` is where the harness reads them.
+ * They differ for `dev`, whose archive root is `dev_20240627` while the cache keeps it
+ * under `dev/` — the mismatch that made the workflow fail the first time it ran.
+ */
 const SPLIT_SHAPE = {
-  minidev: { archive: 'minidev.zip', dir: 'minidev/MINIDEV', questions: 'mini_dev_sqlite.json' },
-  dev: { archive: 'dev.zip', dir: 'dev/dev_20240627', questions: 'dev.json' },
-  train: { archive: 'train.zip', dir: 'train', questions: 'train.json', jsonOnly: true },
+  minidev: { archive: 'minidev.zip', root: 'minidev/MINIDEV', dir: 'minidev/MINIDEV', questions: 'mini_dev_sqlite.json' },
+  dev: { archive: 'dev.zip', root: 'dev_20240627', dir: 'dev/dev_20240627', questions: 'dev.json', nested: 'dev_databases.zip' },
+  train: { archive: 'train.zip', root: 'train', dir: 'train', questions: 'train.json', jsonOnly: true },
 };
 if (SPLIT_SHAPE[SPLIT] === undefined) throw new Error(`unknown BIRD_SPLIT: ${SPLIT}`);
 const SHAPE = SPLIT_SHAPE[SPLIT];
@@ -82,8 +87,54 @@ async function download(target) {
   console.log(`downloaded ${(statSync(target).size / 1048576).toFixed(0)} MB`);
 }
 
-function extract(entries) {
-  execFileSync('unzip', ['-qo', ARCHIVE, ...entries, '-d', CACHE], { stdio: 'inherit' });
+function extract(entries, destination = CACHE) {
+  execFileSync('unzip', ['-qo', ARCHIVE, ...entries, '-d', destination], { stdio: 'inherit' });
+}
+
+/**
+ * Expand a nested archive into place, then make its layout match the split's.
+ *
+ * `dev.zip` ships `dev_20240627/dev_databases.zip`, and that inner archive carries its
+ * own top-level directory. Extracting it into the split directory therefore produced
+ * `dev/dev_20240627/<inner>/dev_databases`, while everything downstream expects
+ * `dev/dev_20240627/dev_databases` — the workflow failed the first time it ran, in CI,
+ * because that path had never been exercised.
+ */
+/**
+ * Put the extracted tree where the harness reads it.
+ *
+ * `dev.zip` extracts to `dev_20240627/` while everything downstream reads
+ * `dev/dev_20240627/`, so the archive's own root has to be moved into place. Doing it
+ * here means no caller needs to know which split has the quirk.
+ */
+export function promote(archiveRoot, dataDir) {
+  if (archiveRoot === dataDir || !existsSync(archiveRoot)) return;
+  mkdirSync(dataDir, { recursive: true });
+  // Merge, not replace: the split is extracted twice (metadata, then databases), and
+  // replacing the directory on the second pass deleted the questions the first one
+  // had just written.
+  for (const entry of readdirSync(archiveRoot)) {
+    const from = join(archiveRoot, entry);
+    const to = join(dataDir, entry);
+    if (existsSync(to)) rmSync(to, { recursive: true, force: true });
+    renameSync(from, to);
+  }
+  rmSync(archiveRoot, { recursive: true, force: true });
+}
+
+export function expandDatabases(archivePath, destination) {
+  execFileSync('unzip', ['-qo', archivePath, '-d', destination], { stdio: 'inherit' });
+  const direct = join(destination, 'dev_databases');
+  if (existsSync(direct)) return;
+  const entries = readdirSync(destination, { withFileTypes: true }).filter((entry) => entry.isDirectory());
+  for (const entry of entries) {
+    const nested = join(destination, entry.name, 'dev_databases');
+    if (existsSync(nested)) {
+      renameSync(nested, direct);
+      return;
+    }
+  }
+  throw new Error(`dev_databases not found inside ${archivePath}; layout changed and this needs updating`);
 }
 
 function requireFile(path) {
@@ -96,6 +147,7 @@ async function main() {
   const fromEnv = (process.env.BIRD_DBS ?? '').split(',').map((name) => name.trim()).filter(Boolean);
   const dbs = args.dbs.length > 0 ? args.dbs : fromEnv.length > 0 ? fromEnv : DEFAULT_DATABASES;
   const dataDir = join(CACHE, SHAPE.dir);
+  const archiveRoot = join(CACHE, SHAPE.root);
   const manifestPath = join(dataDir, 'manifest.json');
 
   if (SHAPE.jsonOnly === true && existsSync(join(dataDir, SHAPE.questions))) {
@@ -119,13 +171,28 @@ async function main() {
     return;
   }
 
-  const entries = [`${SHAPE.dir}/${SHAPE.questions}`, `${SHAPE.dir}/dev_tables.json`];
   const missing = dbs.filter((db) => !existsSync(join(dataDir, 'dev_databases', db, `${db}.sqlite`)));
-  for (const db of missing) entries.push(`${SHAPE.dir}/dev_databases/${db}/*`);
-  // `dev.zip` hides its databases in a nested archive; extracting the outer one
-  // first is what makes the per-database entries resolvable.
-  if (SPLIT === 'dev' && missing.length > 0) extract([`${SHAPE.dir}/dev_databases.zip`]);
-  if (missing.length > 0 || !existsSync(join(dataDir, SHAPE.questions))) extract(entries);
+  const needMeta = !existsSync(join(dataDir, SHAPE.questions)) || !existsSync(join(dataDir, 'dev_tables.json'));
+  if (needMeta) {
+    extract([`${SHAPE.root}/${SHAPE.questions}`, `${SHAPE.root}/dev_tables.json`]);
+    promote(archiveRoot, dataDir);
+  }
+  if (missing.length > 0 && SHAPE.nested !== undefined) {
+    // The databases live one archive down, and the inner archive has its own root.
+    extract([`${SHAPE.root}/${SHAPE.nested}`]);
+    promote(archiveRoot, dataDir);
+    expandDatabases(join(dataDir, SHAPE.nested), dataDir);
+  } else if (missing.length > 0) {
+    extract(missing.map((db) => `${SHAPE.root}/dev_databases/${db}/*`));
+    promote(archiveRoot, dataDir);
+  }
+  // Fail on the database that is missing, not on a stat() three lines later.
+  for (const db of dbs) {
+    const file = join(dataDir, 'dev_databases', db, `${db}.sqlite`);
+    if (!existsSync(file)) {
+      throw new Error(`extraction left no SQLite file for ${db} at ${file}; the archive layout changed`);
+    }
+  }
 
   const questions = requireFile(join(dataDir, SHAPE.questions));
   const tables = requireFile(join(dataDir, 'dev_tables.json'));
@@ -142,4 +209,6 @@ async function main() {
   for (const entry of databases) console.log(`  ${entry.db} ${(entry.bytes / 1048576).toFixed(1)} MB`);
 }
 
-await main();
+// Importable for tests: the layout helpers are the part that broke in CI, and they are
+// pure filesystem operations that can be checked without downloading 330 MB.
+if (process.argv[1] !== undefined && process.argv[1].endsWith('fetch.mjs')) await main();
