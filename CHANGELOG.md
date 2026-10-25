@@ -4,6 +4,43 @@ The eight packages share one version. Each entry records what changed and what w
 measured, because a release note that only lists features is a release note that
 cannot be argued with.
 
+## Unreleased
+
+### Fixed
+
+- **Two numbers in the benchmark report were derived from a field that meant something
+  else.** `select5` published `repaired: 496` of 498 — samples per question, counted as
+  repair attempts, on an arm with no repair loop — and the cost of selection was computed
+  from generation counts, which excluded the selector's own call, so `select → select5`
+  reported `extraCallsPerCase: 0` and printed as free. `attempts` now counts generations
+  inside a repair loop and nothing else, `repaired` is reported only by an arm that has one,
+  and every case records `calls` counted by `withCallCounter` around the provider. The
+  gate rejects an arm whose mean calls do not exceed its sample count, an arm that reports
+  repaired cases with no funnel, and an arm with no cost at all.
+
+### Added
+
+- **`withCallCounter`** (`@agentix-e/nl2charts-ai`): a provider wrapper that counts the
+  calls it was asked to make, so a mechanism is priced by what it spent rather than by what
+  its configuration implies.
+- **The candidate ceiling.** An arm that generates several candidates now reports
+  `candidateRecall` (how often the set contained a correct statement) and `selectionLoss`
+  (how often it contained one and the arm returned another). A selector's score alone
+  cannot distinguish "no candidate was right" from "the selector threw the right one
+  away", and those call for opposite next steps.
+- **`select-mixed`**: three candidates from three measured prompt styles — the dataset
+  hint, the curated notes, and value grounding — then the same selector. The arm exists to
+  separate *sampler* diversity from *prompt* diversity; the dry run fails if two of its
+  sources build the same prompt, because three identical candidates agree unanimously and
+  read as "diversity does not help" when there was never any.
+
+### Removed from the default chain
+
+- **`inline+shape`**, measured at 57.2% against 58.4% for its parent (−1.2pp, 11/5,
+  p=0.21). It fired on 21 cases, repaired 2, and pushed 14 more into the wrong column
+  count. The trigger's precision, not the repair loop, is what fails; the arm stays in the
+  catalogue with its numbers.
+
 ## 1.0.0
 
 ### Added

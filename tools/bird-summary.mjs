@@ -44,7 +44,7 @@ if (report === null) {
     '',
   );
   if (Array.isArray(report.arms) && report.arms.length > 0) {
-    lines.push('| arm | execution accuracy | 95% Wilson | strict (multiset) | duplicate credit | repaired | prompt chars | simple / moderate / challenging |', '| --- | --- | --- | --- | --- | --- | --- | --- |');
+    lines.push('| arm | execution accuracy | 95% Wilson | strict (multiset) | duplicate credit | repaired | calls/question | prompt chars | simple / moderate / challenging |', '| --- | --- | --- | --- | --- | --- | --- | --- | --- |');
     for (const arm of report.arms) {
       const byDifficulty = ['simple', 'moderate', 'challenging']
         .map((key) => {
@@ -52,8 +52,12 @@ if (report === null) {
           return bucket === undefined ? '–' : `${bucket.passed}/${bucket.total}`;
         })
         .join(' / ');
+      // `repaired` exists only on an arm with a repair loop (`repairAccounting`), and
+      // `calls` only where the arm spends more than one call per question. Printing a
+      // bare `undefined` in either column would have been the honest failure; printing a
+      // sample count under "repaired" is the dishonest one that shipped.
       lines.push(
-        `| ${arm.arm} | **${(arm.accuracy * 100).toFixed(1)}%** | [${(arm.wilson.low * 100).toFixed(1)}, ${(arm.wilson.high * 100).toFixed(1)}] | ${arm.strictPassed}/${arm.total} | ${arm.duplicateCredit} | ${arm.repaired} | ${arm.promptChars?.mean ?? '–'} | ${byDifficulty} |`,
+        `| ${arm.arm} | **${(arm.accuracy * 100).toFixed(1)}%** | [${(arm.wilson.low * 100).toFixed(1)}, ${(arm.wilson.high * 100).toFixed(1)}] | ${arm.strictPassed}/${arm.total} | ${arm.duplicateCredit} | ${arm.repaired ?? '–'} | ${arm.calls?.mean ?? '–'} | ${arm.promptChars?.mean ?? '–'} | ${byDifficulty} |`,
       );
     }
     const broken = report.arms.filter((arm) => typeof arm.firstError === 'string');
@@ -64,9 +68,24 @@ if (report === null) {
         ...broken.map((arm) => `> - \`${arm.arm}\`: ${arm.firstError}`),
       );
     }
-    const voted = report.arms.find((arm) => typeof arm.vote === 'number');
-    if (voted !== undefined) {
-      lines.push('', `Vote arm \`${voted.arm}\`: ${voted.vote} samples per question, mean agreement **${(voted.agreement * 100).toFixed(1)}%**, ${voted.passed}/${voted.total} correct.`);
+    // A selector's score says nothing on its own: what it kept is only meaningful
+    // against what the candidate set contained. The ceiling is measured on the same
+    // cases, so a null result can be read as "no candidate was right" (a generation
+    // problem) instead of "the selector failed" (a prompt problem).
+    const voted = report.arms.filter((arm) => typeof arm.vote === 'number');
+    if (voted.length > 0) {
+      lines.push(
+        '',
+        '### What the candidate set contained',
+        '',
+        '| arm | samples | mean agreement | candidate recall (the ceiling) | selection loss | kept |',
+        '| --- | --- | --- | --- | --- | --- |',
+        ...voted.map((arm) => {
+          const ceiling = typeof arm.candidateRecallShare === 'number' ? arm.candidateRecallShare : undefined;
+          const kept = ceiling === undefined || ceiling === 0 ? '–' : `${((arm.passed / arm.total / ceiling) * 100).toFixed(1)}%`;
+          return `| ${arm.arm} | ${arm.vote} | ${(arm.agreement * 100).toFixed(1)}% | ${ceiling === undefined ? '–' : `**${(ceiling * 100).toFixed(1)}%**`} | ${arm.selectionLoss ?? '–'} | ${kept} |`;
+        }),
+      );
     }
     if (report.aa !== undefined) {
       lines.push(

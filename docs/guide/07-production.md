@@ -188,6 +188,27 @@ Three things worth knowing before you turn it on:
 - **Only executed candidates are offered.** A statement that failed to run is not a
   candidate, and a selector shown one would have to guess whether it was broken.
 
+### What selection can and cannot buy you
+
+Before paying for candidates, it is worth measuring the ceiling: how often the set you
+generated contains a correct statement at all. If it rarely does, a better selector has
+nothing to select from, and the money belongs in the generator. `withCallCounter` gives
+you the other half of the same ledger — what the pipeline actually spent:
+
+```ts
+import { createPipeline, createHttpProvider, withCallCounter } from '@agentix-e/nl2charts-ai';
+
+const counter = withCallCounter(createHttpProvider({ baseUrl, apiKey, model }));
+const pipeline = createPipeline({ provider: counter.provider, temperature: 0.7 });
+
+await pipeline.ask({ question, schema });
+counter.calls();  // 1, or more when a repair ran or a plan was written
+```
+
+Count rather than infer: an arm's own configuration does not know that writing a plan is
+a second call or that the selector is a third, and a cost that is inferred is a cost that
+can be wrong in the flattering direction.
+
 ## Repairing a rejected statement
 
 The pipeline retries a statement the guard or the engine refused, and **three** times by

@@ -176,3 +176,31 @@ export function createHttpProvider(options: HttpProviderOptions): LlmProvider {
     },
   };
 }
+
+/**
+ * A provider that counts the calls it is asked to make.
+ *
+ * The count is per case, which is the unit an ablation is priced in: an arm that spends
+ * four calls to gain two points is a different proposition from one that spends a tenth
+ * of a call. Deriving that number from the arm's configuration instead of counting it
+ * produced two errors worth naming — the selector call was never counted at all, so
+ * "selection" appeared free, and a plan-based candidate was counted as one call when
+ * writing the plan costs one and the statement another.
+ *
+ * A retry inside the provider is one logical call: the harness asked once, and the
+ * endpoint's queue is not the arm's design.
+ */
+export function withCallCounter(provider: LlmProvider): { readonly provider: LlmProvider; readonly calls: () => number } {
+  let calls = 0;
+  return {
+    provider: {
+      id: provider.id,
+      model: provider.model,
+      complete: async (request, options) => {
+        calls += 1;
+        return provider.complete(request, options);
+      },
+    },
+    calls: () => calls,
+  };
+}

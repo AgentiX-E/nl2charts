@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { isNl2ChartsError } from '@agentix-e/nl2charts-spec';
-import { createHttpProvider } from '../src/provider.js';
+import { createHttpProvider, withCallCounter } from '../src/provider.js';
 
 let server: Server;
 let baseUrl: string;
@@ -306,5 +306,68 @@ describe('the edges of a retried call', () => {
     const provider = createHttpProvider({ baseUrl: 'https://example.test/v1', model: 'm', fetchImpl });
     const reply = await provider.complete({ messages: [{ role: 'user', content: 'q' }] });
     expect(reply.usage).toEqual({ promptTokens: 0, completionTokens: 0 });
+  });
+});
+
+/**
+ * The counter is the harness's measuring instrument, so it is tested as one: it must
+ * count what was asked and nothing else, forward the identity the pipeline reports, and
+ * count a call that failed — a throttled call still cost the endpoint a request.
+ */
+describe('withCallCounter', () => {
+  const stub = (reply: string) => {
+    const seen: string[] = [];
+    return {
+      seen,
+      provider: {
+        id: 'stub',
+        model: 'stub-model',
+        complete: async (request: { messages: readonly { content: string }[] }) => {
+          seen.push(request.messages[0]?.content ?? '');
+          return { text: reply, model: 'stub-model' };
+        },
+      },
+    };
+  };
+
+  it('counts calls and forwards the answer unchanged', async () => {
+    const inner = stub('SELECT 1');
+    const counted = withCallCounter(inner.provider);
+    expect(counted.calls()).toBe(0);
+    const reply = await counted.provider.complete({ messages: [{ role: 'user', content: 'q1' }] });
+    expect(reply.text).toBe('SELECT 1');
+    expect(counted.calls()).toBe(1);
+    await counted.provider.complete({ messages: [{ role: 'user', content: 'q2' }] });
+    expect(counted.calls()).toBe(2);
+    expect(inner.seen).toEqual(['q1', 'q2']);
+  });
+
+  it('keeps the identity the report prints', () => {
+    const counted = withCallCounter(stub('x').provider);
+    expect(counted.provider.id).toBe('stub');
+    expect(counted.provider.model).toBe('stub-model');
+  });
+
+  it('counts a call that threw, because the endpoint still received it', async () => {
+    const counted = withCallCounter({
+      id: 'failing',
+      model: 'm',
+      complete: async () => {
+        throw new Error('429');
+      },
+    });
+    await expect(counted.provider.complete({ messages: [{ role: 'user', content: 'q' }] })).rejects.toThrow('429');
+    expect(counted.calls()).toBe(1);
+  });
+
+  it('counts two counters separately, so a concurrent case cannot borrow another case\'s calls', async () => {
+    const inner = stub('ok');
+    const first = withCallCounter(inner.provider);
+    const second = withCallCounter(inner.provider);
+    await first.provider.complete({ messages: [{ role: 'user', content: 'a' }] });
+    await first.provider.complete({ messages: [{ role: 'user', content: 'b' }] });
+    await second.provider.complete({ messages: [{ role: 'user', content: 'c' }] });
+    expect(first.calls()).toBe(2);
+    expect(second.calls()).toBe(1);
   });
 });

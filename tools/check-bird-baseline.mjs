@@ -106,6 +106,33 @@ export function compare(report, baseline) {
     }
   }
 
+  // What the artifact says an arm spent, and whether that is possible. Two numbers in
+  // this report were once derived from a field that meant something else: `repaired`
+  // counted samples on arms with no repair loop (496 of 498), and the cost of selection
+  // came from generation counts, which left out the selector call and made selection
+  // look free. A wrong number in a table outlives the run that produced it, so the
+  // possibilities are checked here instead of trusted.
+  for (const item of report.arms ?? []) {
+    const samples = typeof item.vote === 'number' ? item.vote : undefined;
+    const mean = item.calls?.mean;
+    if (typeof mean !== 'number') {
+      issues.push(`BIRD1: ${item.arm} reports no calls per case, so its delta cannot be priced`);
+      continue;
+    }
+    if (samples !== undefined && mean <= samples) {
+      issues.push(`BIRD1: ${item.arm} samples ${String(samples)} times and reports ${String(mean)} calls per case; the selector call is not counted`);
+    }
+    if (samples === undefined && mean < 1) {
+      issues.push(`BIRD1: ${item.arm} reports ${String(mean)} calls per case, fewer than the one call every arm makes`);
+    }
+    // A repair arm always reports its funnel, so a `repaired` count without one is a
+    // count of something else — which is exactly what it was: samples, on an arm whose
+    // only loop is the vote.
+    if (item.repaired !== undefined && item.repair === undefined) {
+      issues.push(`BIRD1: ${item.arm} reports ${String(item.repaired)} repaired cases and no repair funnel`);
+    }
+  }
+
   if (floors === undefined) {
     notes.push(`BIRD1: no floors recorded for split ${split}; this run is a measurement, not a gate`);
     return { issues, notes };
@@ -135,7 +162,7 @@ function selfTest() {
     expectedArms: ['names', 'inline'],
     floors: { minidev: { names: 40, inline: 50 } },
   };
-  const arm = (name, passed, total = 100) => ({ arm: name, passed, total });
+  const arm = (name, passed, total = 100, extra = {}) => ({ arm: name, passed, total, calls: { mean: 1, max: 1 }, ...extra });
   const report = (arms, scored = 100, split = 'minidev') => ({ selection: { scored, split }, arms });
   const fail = (result, count, why) => {
     if (result.issues.length !== count) issues.push(why);
@@ -187,6 +214,31 @@ function selfTest() {
     issues.push('BIRD1 does not notice a repair funnel whose parts exceed its total');
   }
 
+  // The two numbers that once lied, and the number that was simply absent: a repair
+  // count on an arm with no loop, a selector that costs nothing, and an arm whose cost
+  // cannot be read at all.
+  const lyingSamples = compare(
+    { selection: { scored: 100, split: 'minidev' }, arms: [arm('select5', 58, 100, { vote: 5, calls: { mean: 5, max: 5 } })] },
+    { ...baseline, expectedArms: ['select5'] },
+  );
+  if (!lyingSamples.issues.some((issue) => issue.includes('selector call is not counted'))) {
+    issues.push('BIRD1 does not notice a sampling arm whose selector call is missing from its cost');
+  }
+  const lyingRepair = compare(
+    { selection: { scored: 100, split: 'minidev' }, arms: [arm('select5', 58, 100, { vote: 5, calls: { mean: 6, max: 6 }, repaired: 496 })] },
+    { ...baseline, expectedArms: ['select5'] },
+  );
+  if (!lyingRepair.issues.some((issue) => issue.includes('no repair funnel'))) {
+    issues.push('BIRD1 does not notice a repaired count on an arm that cannot repair');
+  }
+  const unpriced = compare(
+    { selection: { scored: 100, split: 'minidev' }, arms: [{ arm: 'names', passed: 42, total: 100 }] },
+    { ...baseline, expectedArms: ['names'] },
+  );
+  if (!unpriced.issues.some((issue) => issue.includes('cannot be priced'))) {
+    issues.push('BIRD1 does not notice an arm that reports no calls at all');
+  }
+
   // The lever-with-no-input case: the arms are present, the blocks are not.
   const dryLever = compare(
     { selection: { scored: 100, split: 'minidev' }, controls: { retrievedBlocks: 0, demonstrationBlocks: 0 }, arms: [arm('names', 42), arm('inline', 51)] },
@@ -216,7 +268,7 @@ if (process.argv[2] === '--self-test') {
   const issues = selfTest();
   for (const issue of issues) console.error(issue);
   if (issues.length > 0) process.exit(1);
-  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, other split, unfloored arm, empty lever, a funnel that does not add up and a split-specific arm list all behave');
+  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, other split, unfloored arm, empty lever, a funnel that does not add up, a split-specific arm list, an uncounted selector call, a repair count without a loop and an unpriced arm all behave');
 } else {
   const reportPath = resolve(ROOT, 'eval/out/bird-eval.json');
   const baseline = JSON.parse(readFileSync(resolve(ROOT, 'eval/baseline/bird.json'), 'utf8'));

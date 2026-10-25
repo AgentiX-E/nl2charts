@@ -260,6 +260,37 @@ conclusion.
 The arm is out of the default chain and stays in the catalogue with its result written
 next to it, the same way a rejected hypothesis is kept.
 
+### A check the engine cannot make: built, measured, rejected
+
+A statement can execute and answer the wrong *shape*: "how many schools are in Los
+Angeles" answered with 1,436 names is a clean query that no engine will complain about,
+and the repair loop never hears about it because there is no error to feed back. The fix
+that suggested itself was a deterministic guard — a regex over the question's phrasing
+decides whether a scalar was asked for, and a result that is not one row by one column
+becomes a repair turn.
+
+It was built, wired into the repair loop and measured, and it loses:
+
+| Arm | Accuracy | Δ vs parent | only before / only after | p | cases it rejected | repaired | still wrong |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `inline+repair` | 58.4% | — | — | — | 12 | 3 | 9 |
+| `inline+shape` | 57.2% | **−1.2pp** | 11 / 5 | 0.21 | 35 | 5 | 30 |
+
+The funnel says more than the delta does. 21 of those rejections were the guard's own
+(`shape` class): 2 were fixed, 19 were not. And the cases it touched got *worse* in a
+way the accuracy hides — wrong column counts rose from 49 to 63, because forcing a
+multi-row answer into a scalar produces a different wrong answer rather than no answer.
+
+The reading this project accepts is that the trigger, not the loop, is the weak part:
+asking a regex to decide whether a question wants one value or a table is a guess with
+poor precision on BIRD's phrasing, and each wrong guess costs a rewrite of an answer
+that was already right. A shape check that earns its place would have to be one whose
+false-positive rate is measured first — over the gold statements, before it is allowed
+to touch a prompt.
+
+The arm is out of the default chain and stays in the catalogue with its numbers, so a
+better test can be measured against this one rather than against an intuition.
+
 ### Selection looked real once, and did not replicate
 
 Run `39945679683` made selection look like the one borrowed mechanism that worked:
@@ -286,6 +317,18 @@ now requires a second run before anything is called an improvement.
 A mechanism is adopted only when it reaches p<0.01 in **two consecutive runs**, which
 is stricter than the one-lever table needs and stricter than a single p=0.015
 deserves. The alternative is a README that changes its mind every week.
+
+The next experiment had to answer a question this table could not: were the candidates
+ever right? An arm that generates five statements and returns one reports a single
+number, and 58.8% is compatible with both "the set never contained the answer" and "the
+set contained it and the selector discarded it". The report now carries
+`candidateRecall` — the share of questions where **any** candidate matched, which is the
+ceiling every selector is bounded by — and `selectionLoss`, the questions in that set the
+arm did not return. With the ceiling measured, `select-mixed` asks the other half of the
+question: same three candidates, same selector, but drawn from three different prompt
+styles instead of three samples of one. Three samples of one prompt agree 90% of the
+time, so they buy calls without buying a second opinion; the mixed arm is what a second
+opinion costs.
 
 ### Two gold statements cannot be scored, and the reason is measured
 
@@ -641,8 +684,23 @@ apart. Two numbers are added to every ablation for that reason:
 
 | Column | Definition | Why it is there |
 | --- | --- | --- |
-| `extraCallsPerCase` | mean attempts of the second arm minus the first | the price, in the unit the deployment pays |
+| `extraCallsPerCase` | mean **counted** calls of the second arm minus the first | the price, in the unit the deployment pays |
 | `ppPerExtraCall` | delta ÷ that price; **absent** when the price is zero | a free lever is not "infinitely efficient", it is free |
+
+The price is counted at the provider, not inferred from the arm's configuration, and the
+distinction is not academic. Two numbers in this table were wrong for a whole release
+because they were inferred from a field that meant something else:
+
+| Symptom in the report | What the field actually held | What the reader concluded |
+| --- | --- | --- |
+| `select5` — `repaired: 496` of 498 | samples per question, counted as repair attempts | the repair loop fixed almost everything |
+| `select → select5` — `extraCallsPerCase: 0` | generations, which exclude the selector's own call | selection is free |
+
+Both are now impossible by construction: `attempts` counts generations inside a repair
+loop and nothing else, `repaired` is reported only by an arm that has one, and every case
+records `calls` counted by `withCallCounter` around the provider. A case that forgets to
+report its calls fails the build, and the gate rejects a sampling arm whose mean calls do
+not exceed its sample count.
 
 A repair arm also reports a **funnel**, because accuracy alone cannot say what the loop
 did:

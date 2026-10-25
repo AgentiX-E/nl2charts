@@ -12,9 +12,9 @@
     "inline+icl",
     "inline+repair",
     "inline+repair-raw",
-    "inline+shape",
     "vote",
     "select",
+    "select-mixed",
     "select5",
     "values",
     "metadata+evidence"

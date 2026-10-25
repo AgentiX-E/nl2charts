@@ -22,7 +22,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHttpProvider } from '@agentix-e/nl2charts-ai';
 import type { PromptOptions, SchemaTable } from '@agentix-e/nl2charts-ai';
-import { applySelection, attachDefinitions, buildSelectionPrompt, buildSqlPrompt, choosePromptProfile, createPipeline, renderDefinitions, renderEvidence, renderSchemaCard } from '@agentix-e/nl2charts-ai';
+import { applySelection, attachDefinitions, buildSelectionPrompt, buildSqlPrompt, choosePromptProfile, createPipeline, renderDefinitions, renderEvidence, renderSchemaCard, withCallCounter } from '@agentix-e/nl2charts-ai';
 import { compareArms, judgeOfficial, judgeStrict, majorityResult, mcnemarExact, summarise, wilsonInterval } from '@agentix-e/nl2charts-devkit';
 import { ppPerExtraCall, repairFunnel } from './metrics.js';
 import type { CaseOutcome, MatchReason } from '@agentix-e/nl2charts-devkit';
@@ -133,6 +133,16 @@ export interface Arm {
    * The engine reports nothing here, so without this the loop never sees the case.
    */
   readonly shapeGuard?: boolean;
+  /**
+   * Draw the candidates from different prompt styles instead of the same one.
+   *
+   * `select` samples one prompt three times and gets three near-identical statements:
+   * the model's 90% agreement is real diversity of wording and not of approach. The
+   * diversity that moves an answer is a different decomposition of the question, and a
+   * different decomposition is a different prompt. One lever from `select`: same number
+   * of candidates, same selector, and only where they come from changes.
+   */
+  readonly mixed?: boolean;
 }
 
 /**
@@ -147,6 +157,44 @@ export interface Arm {
  * The previous round compared `full` (metadata + evidence + repair) against
  * `names`, which could not separate repair from the prompt changes.
  */
+/**
+ * The decompositions a mixed candidate set is drawn from.
+ *
+ * Each is an arm already measured on its own and each is the top of its family — the
+ * direct statement with the dataset's hint, the curated-notes statement, and the
+ * value-grounded statement — because a candidate set should combine parts whose
+ * individual behaviour is known. They disagree by construction: the three prompts differ
+ * in what evidence they carry and where it sits, which is what three samples of one
+ * prompt cannot buy (they agree 90% of the time).
+ *
+ * `plan` is deliberately not a source. Its plan is written inside the pipeline at call
+ * time, so the prompt this harness can lay side by side is byte-identical to
+ * `inline+evidence` — the dry run proves it — and a candidate that costs two calls for a
+ * block the check cannot see would be a cost nobody could audit. Its own measurement
+ * (-7.2pp, 63/27, p=0.0002) does not argue for including it either.
+ */
+export const MIXED_SOURCES: readonly string[] = ['inline+evidence', 'metadata+evidence', 'values'];
+
+/**
+ * A mixed candidate set is only three generations if its sources generate once each.
+ *
+ * A source that repairs or samples would spend an unbounded number of calls inside what
+ * the arm reports as one candidate, and the arm's cost — the number the whole comparison
+ * rests on — would be wrong in the flattering direction.
+ */
+export function assertMixedSources(sources: readonly string[] = MIXED_SOURCES): void {
+  if (sources.length < 2) throw new Error(`a mixed candidate set needs at least two sources, not ${String(sources.length)}`);
+  for (const source of sources) {
+    const arm = resolveArm(source);
+    if (arm === undefined) throw new Error(`mixed candidate source ${source} is not an arm`);
+    if (arm.repairs > 0 || arm.vote !== undefined) {
+      throw new Error(
+        `mixed candidate source ${source} must generate exactly one statement, but it repairs ${String(arm.repairs)} times and samples ${String(arm.vote ?? 1)}`,
+      );
+    }
+  }
+}
+
 export const ARMS: readonly Arm[] = [
   { name: 'names', notes: false, repairs: 0, linking: true },
   { name: 'definitions', notes: false, repairs: 0, linking: true, definitions: 'structural' },
@@ -178,6 +226,12 @@ export const ARMS: readonly Arm[] = [
   // reading candidates, more of them should help; if it works by picking the first
   // plausible one, it will not.
   { name: 'select5', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 5, select: true },
+  // Three candidates from three decompositions, then the same selector. `select` draws
+  // three samples of one prompt, which agree 90% of the time; the ceiling that matters
+  // is how often the *set* contains a correct statement, and a set of paraphrases is a
+  // narrow set. The sources are arms already measured on their own, so the candidate
+  // set is a combination of known parts rather than a new invention.
+  { name: 'select-mixed', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: true },
   // The same inline arm plus the literals the question names, resolved against this
   // database. CHASE-SQL's first pipeline stage; here it is one lever from
   // `inline+evidence`, so the delta prices value grounding, not the hint.
@@ -229,9 +283,11 @@ export const DEFAULT_ARMS: readonly string[] = [
   'inline+icl',
   'inline+repair',
   'inline+repair-raw',
-  'inline+shape',
   'vote',
   'select',
+  // Three decompositions instead of three samples of one: the arm that tests whether
+  // the ceiling belongs to the sampler or to the prompt.
+  'select-mixed',
   'select5',
   'values',
   'metadata+evidence',
@@ -254,6 +310,7 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'no-linking': 'removes the schema linker: the arm that prices linking, run when linking changes',
   repair: 'the original repair arm (dataset notes, two attempts, one generic sentence): superseded by inline+repair, which is one lever from inline+evidence and reports a funnel',
   plan: 'query plan before the statement: 50.4% against 57.6% for its parent (-7.2pp, 63/27, p=0.0002) — anchoring, not helping; kept so the finding can be re-tested',
+  'inline+shape': 'scalar-shape guard before the repair loop: 57.2% against 58.4% for its parent (-1.2pp, 11/5, p=0.21) — it fired on 21 cases, repaired 2, and shifted 14 more into the wrong column count; kept so a better shape test can be measured against this one',
 };
 
 /**
@@ -271,6 +328,7 @@ export const COMPARISONS: readonly (readonly [string, string, string])[] = [
   ['inline+evidence', 'select5', 'selection over five samples versus a single sample: six calls instead of one'],
   ['inline+evidence', 'values', 'value grounding on top of the hint: does instance knowledge add anything the hint lacks'],
   ['inline+evidence', 'metadata+evidence', 'generated definitions on the column line versus 798 curated notes'],
+  ['inline+evidence', 'select-mixed', 'three decompositions and a selector versus a single sample: four calls instead of one'],
 ];
 
 export const PAIRS: readonly (readonly [string, string])[] = [
@@ -291,6 +349,9 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   ['inline-definitions', 'interpret'],
   ['inline+evidence', 'vote'],
   ['vote', 'select'],
+  // Where the candidates come from, held against how many there are: same count, same
+  // selector, different prompts.
+  ['select', 'select-mixed'],
   ['select', 'select5'],
   ['inline+evidence', 'values'],
   ['inline+evidence', 'plan'],
@@ -310,11 +371,37 @@ interface CaseRun extends CaseOutcome {
   readonly agreement?: number;
   /** True when the selector returned a usable index; absent for the modal arm. */
   readonly selectedByModel?: boolean;
+  /**
+   * True when at least one candidate answered the question correctly, whether or not
+   * the arm returned that candidate. Absent for an arm that generates once.
+   *
+   * Without it a selector's accuracy cannot be read: 58.8% could mean "the candidates
+   * contained the answer and the selector threw it away" or "no candidate ever
+   * contained it", and those call for opposite next steps. This is the ceiling any
+   * selector could reach on this arm, measured rather than assumed.
+   */
+  readonly candidateRecall?: boolean;
+  /**
+   * Which decomposition the returned statement came from, on a mixed arm.
+   *
+   * Three candidates at the same price can hide a generator that never wins, and a
+   * generator that never wins is a call that should not be in the set.
+   */
+  readonly winnerSource?: string;
   readonly error?: string;
   readonly errorKind?: 'execution' | 'guard' | 'llm' | 'shape' | 'other';
   /** Classes of the rejected attempts, in order; empty when the first one ran. */
   readonly failures?: readonly string[];
+  /** Generations the repair loop spent. The funnel's unit, not the cost's. */
   readonly attempts: number;
+  /**
+   * Model calls this case actually made, counted at the provider.
+   *
+   * Required rather than optional so a return path that forgets it fails the build: the
+   * cost column is what every ppPerExtraCall in the report is divided by, and a case
+   * that reports zero calls would price its arm as free.
+   */
+  readonly calls: number;
 }
 
 /**
@@ -431,8 +518,62 @@ export function assertRepairPathFired(armName: string, cases: readonly { attempt
   );
 }
 
-export function assertUniqueArmLabels(labels: readonly string[]): void {
-  const seen = new Set<string>();
+/**
+ * The repair and sampling fields an arm report may carry.
+ *
+ * `attempts` means one thing per arm kind: for an arm with a repair loop it is the number
+ * of generations the loop spent, and for an arm that samples several candidates it is the
+ * number of samples it drew. Counting `attempts > 1` for the second kind produced
+ * `repaired: 496` on `select5` — an arm with no repair loop at all — in the one column a
+ * reader uses to judge whether the loop is worth its calls. The field is therefore
+ * reported only where it is true, and a sampling arm states its sample count instead.
+ */
+export function repairAccounting(
+  arm: Pick<Arm, 'repairs' | 'vote'>,
+  runs: readonly { attempts: number }[],
+): { repaired?: number; samples?: number } {
+  const sampling = arm.vote !== undefined && arm.vote > 1 ? { samples: arm.vote } : {};
+  if (arm.repairs === 0) return sampling;
+  return { repaired: runs.filter((run) => run.attempts > 1).length, ...sampling };
+}
+
+/**
+ * The most a better selector could win on an arm that generates several candidates.
+ *
+ * `candidateRecall` is the share of questions where at least one candidate matched; that
+ * is the ceiling any selector, however good, is bounded by on this candidate set.
+ * `selectionLoss` counts the questions the set answered and the arm did not return —
+ * cases that are pure selection failure and need no better generator. A selector that
+ * gains nothing while `selectionLoss` is large is a prompt problem, not a dead end; a
+ * large `selectionLoss` with a small one is a ceiling that more samples cannot lift.
+ */
+export function candidateCeiling(runs: readonly { passed: boolean; candidateRecall?: boolean }[]): {
+  candidateRecall: number;
+  candidateRecallShare: number;
+  selectionLoss: number;
+} {
+  const recall = runs.filter((run) => run.candidateRecall === true).length;
+  return {
+    candidateRecall: recall,
+    candidateRecallShare: runs.length === 0 ? 0 : recall / runs.length,
+    selectionLoss: runs.filter((run) => run.candidateRecall === true && !run.passed).length,
+  };
+}
+
+/**
+ * How often each decomposition produced the statement the arm returned.
+ *
+ * A generator that never wins is a call the arm should not be paying for, and without
+ * this count the only visible fact about a mixed arm would be its total.
+ */
+export function winnerSources(
+  runs: readonly { winnerSource?: string }[],
+  sources: readonly string[] = MIXED_SOURCES,
+): Record<string, number> {
+  return Object.fromEntries(sources.map((source) => [source, runs.filter((run) => run.winnerSource === source).length]));
+}
+
+export function assertUniqueArmLabels(labels: readonly string[]): void {  const seen = new Set<string>();
   for (const label of labels) {
     if (seen.has(label)) throw new Error(`arm labels are not unique (${labels.join(', ')}); an A/A duplicate must keep its #2 name`);
     seen.add(label);
@@ -955,6 +1096,26 @@ async function main() {
           }),
     }));
     report.prompts = prompts;
+    // A mixed arm is three prompts or it is one prompt paid for three times. Equality is
+    // checked here, without a model, because the failure is silent: three identical
+    // candidates agree unanimously, the selector looks confident, and the arm reads as
+    // "diversity does not help" when there was never any diversity.
+    const sample = cases[0] as BirdQuestion;
+    const mixed = MIXED_SOURCES.map((source) => {
+      const arm = resolveArm(source) as Arm;
+      return {
+        arm: source,
+        prompt: buildSqlPrompt(sample.question, schemas.get(sample.db_id) as SchemaTable[], promptFor(arm, sample, blocksFor(arm, sample))),
+      };
+    });
+    for (let left = 0; left < mixed.length; left += 1) {
+      for (let right = left + 1; right < mixed.length; right += 1) {
+        if (mixed[left]?.prompt === mixed[right]?.prompt) {
+          throw new Error(`mixed candidate sources ${String(mixed[left]?.arm)} and ${String(mixed[right]?.arm)} produce the same prompt; the arm would pay three times for one opinion`);
+        }
+      }
+    }
+    report.mixedCandidatePrompts = mixed.map((entry) => ({ arm: entry.arm, chars: entry.prompt.length }));
     report.arms = [];
     finish(config, report);
     await oracle.close();
@@ -962,59 +1123,81 @@ async function main() {
   }
 
   // 5. Arms.
+  // Mean calls per case, counted at the provider, so a delta can be divided by what it
+  // cost. `attempts` cannot serve here: it counts generations inside a repair loop and
+  // knows nothing about a selector call or the second call a plan costs, which made
+  // selection look free and a plan candidate look like one call.
+  const meanCalls = (runs: readonly { calls: number }[]): number =>
+    runs.length === 0 ? 1 : runs.reduce((total, run) => total + run.calls, 0) / runs.length;
+
   const armReports: unknown[] = [];
   const outcomes = new Map<string, CaseRun[]>();
   for (const name of config.arms) {
     const arm = resolveArm(name);
     if (arm === undefined) throw new Error(`unknown arm ${name}`);
+    // A mixed arm runs three configurations under one label; if one of them repairs or
+    // samples, the reported cost is wrong and the comparison loses its meaning.
+    if (arm.mixed === true) assertMixedSources();
     const runs = await pool(cases, config.concurrency, async (question): Promise<CaseRun> => {
       const schema = schemas.get(question.db_id) as SchemaTable[];
-      // The execute hook exists for repairs only. Without repairs it would turn
-      // an execution failure into a thrown pipeline error and hide the statement
-      // that failed, which is the one thing a diagnosis needs.
-      const pipeline = createPipeline({
-        provider,
-        maxRepairs: arm.repairs,
-        linking: arm.linking,
-        interpret: arm.interpret === true,
-        plan: arm.plan === true,
-        ...(arm.repairFeedback === undefined ? {} : { repairFeedback: arm.repairFeedback }),
-        temperature: arm.vote === undefined ? 0 : 0.7,
-        prompt: promptFor(arm, question, blocksFor(arm, question)),
-        ...(arm.repairs === 0
-          ? {}
-          : {
-              execute: async (sql: string) => {
-                const result = await oracle.run(question.db_id, sql);
-                if (result.ok) {
-                  // A statement that runs and returns the wrong number of rows is invisible
-                  // to the engine, so this is the only place the loop can hear about it.
-                  if (arm.shapeGuard === true && shapeMismatch(question.question, result.rows)) {
-                    throw new Error(shapeFailure(result.rows));
+      // Counted, not derived: a plan costs two calls, a selector costs one, and a
+      // configuration-derived count got both wrong in opposite directions.
+      const counter = withCallCounter(provider);
+      // A pipeline is a prompt plus a budget, so building one per configuration costs
+      // nothing and lets a mixed arm ask the same question three different ways.
+      // The execute hook exists for repairs only: without repairs it would turn an
+      // execution failure into a thrown pipeline error and hide the statement that
+      // failed, which is the one thing a diagnosis needs.
+      const pipelineFor = (target: Arm): ReturnType<typeof createPipeline> =>
+        createPipeline({
+          provider: counter.provider,
+          maxRepairs: target.repairs,
+          linking: target.linking,
+          interpret: target.interpret === true,
+          plan: target.plan === true,
+          ...(target.repairFeedback === undefined ? {} : { repairFeedback: target.repairFeedback }),
+          temperature: target.vote === undefined ? 0 : 0.7,
+          prompt: promptFor(target, question, blocksFor(target, question)),
+          ...(target.repairs === 0
+            ? {}
+            : {
+                execute: async (sql: string) => {
+                  const result = await oracle.run(question.db_id, sql);
+                  if (result.ok) {
+                    // A statement that runs and returns the wrong number of rows is invisible
+                    // to the engine, so this is the only place the loop can hear about it.
+                    if (target.shapeGuard === true && shapeMismatch(question.question, result.rows)) {
+                      throw new Error(shapeFailure(result.rows));
+                    }
+                    return;
                   }
-                  return;
-                }
-                // The driver's own words, not a summary of them: the repair reads
-                // `details.engineError` to decide what to tell the model.
-                throw Object.assign(new Error(result.error ?? 'execution failed'), {
-                  details: {
-                    engineError: {
-                      message: (result.error ?? 'execution failed').replace(/^\w*Error:\s*/, ''),
-                      ...(result.errorName === undefined ? {} : { code: result.errorName }),
+                  // The driver's own words, not a summary of them: the repair reads
+                  // `details.engineError` to decide what to tell the model.
+                  throw Object.assign(new Error(result.error ?? 'execution failed'), {
+                    details: {
+                      engineError: {
+                        message: (result.error ?? 'execution failed').replace(/^\w*Error:\s*/, ''),
+                        ...(result.errorName === undefined ? {} : { code: result.errorName }),
+                      },
                     },
-                  },
-                });
-              },
-            }),
-      });
+                  });
+                },
+              }),
+        });
+      const pipeline = pipelineFor(arm);
       const expected = gold.get(question.question_id) as OracleResult;
       if (arm.vote !== undefined && arm.vote > 1) {
-        const candidates: { sql: string; rows: readonly (readonly unknown[])[] }[] = [];
+        const candidates: { sql: string; rows: readonly (readonly unknown[])[]; source: string }[] = [];
         for (let sample = 0; sample < arm.vote; sample += 1) {
           try {
-            const askedSample = await pipeline.ask({ question: question.question, schema });
+            // A mixed arm draws each candidate from a different decomposition. The
+            // sources repair nothing by contract (asserted in the test suite), so a
+            // candidate is always one generation and the cost stays three calls.
+            const source = arm.mixed === true ? (MIXED_SOURCES[sample % MIXED_SOURCES.length] as string) : name;
+            const sampler = arm.mixed === true ? pipelineFor(resolveArm(source) as Arm) : pipeline;
+            const askedSample = await sampler.ask({ question: question.question, schema });
             const executed = await oracle.run(question.db_id, askedSample.sql);
-            if (executed.ok) candidates.push({ sql: askedSample.sql, rows: executed.rows });
+            if (executed.ok) candidates.push({ sql: askedSample.sql, rows: executed.rows, source });
           } catch {
             // A sample that fails the guard or the engine casts no vote; the
             // other samples still produce one.
@@ -1029,10 +1212,12 @@ async function main() {
             strict: false,
             attempts: arm.vote,
             error: 'no sample survived guard and execution',
+            candidateRecall: false,
+            calls: counter.calls(),
           };
         }
         const majority = majorityResult(candidates, (left, right) => judgeOfficial(left.rows, right.rows) === 'match');
-        let winner = majority.winner as { sql: string; rows: readonly (readonly unknown[])[] };
+        let winner = majority.winner as { sql: string; rows: readonly (readonly unknown[])[]; source: string };
         let selectedByModel: boolean | undefined;
         if (arm.select === true) {
           // The model sees what the vote cannot: the shape of each result. A statement
@@ -1062,9 +1247,12 @@ async function main() {
           predicted: winner.sql,
           reason,
           strict: judgeStrict(expected.rows, winner.rows) === 'match',
-          attempts: candidates.length,
+          attempts: arm.vote,
           agreement: majority.agreement,
+          candidateRecall: candidates.some((candidate) => judgeOfficial(expected.rows, candidate.rows) === 'match'),
           ...(selectedByModel === undefined ? {} : { selectedByModel }),
+          ...(arm.mixed === true ? { winnerSource: winner.source } : {}),
+          calls: counter.calls(),
         };
       }
       try {
@@ -1083,6 +1271,7 @@ async function main() {
             // the GLM probe read as "no execution failures" while every one of its
             // top errors was a SQLite syntax or column error.
             errorKind: 'execution',
+            calls: counter.calls(),
             error: `execution: ${predicted.error ?? 'unknown'}`,
           };
         }
@@ -1094,6 +1283,7 @@ async function main() {
           reason,
           strict: judgeStrict(expected.rows, predicted.rows) === 'match',
           attempts: asked.attempts,
+          calls: counter.calls(),
           failures: asked.failures,
         };
       } catch (error) {
@@ -1111,6 +1301,7 @@ async function main() {
           reason: 'values',
           strict: false,
           attempts: arm.repairs + 1,
+          calls: counter.calls(),
           ...(failureClasses === undefined ? {} : { failures: failureClasses }),
           error: lastError === undefined ? message : `${message}: ${lastError}`,
           // A shape failure ends with a statement that runs, so calling it `execution`
@@ -1185,7 +1376,14 @@ async function main() {
       strictPassed,
       duplicateCredit: summary.passed - strictPassed,
       exactMatchRate: runs.filter((run) => run.strict).length / summary.total,
-      repaired: runs.filter((run) => run.attempts > 1).length,
+      ...repairAccounting(arm, runs),
+      // What the arm actually spent, beside what it gained: the division the whole
+      // comparison rests on is this number, so it is published rather than recomputed
+      // from the arm's configuration by whoever reads the artifact.
+      calls: {
+        mean: Number(meanCalls(runs).toFixed(3)),
+        max: Math.max(0, ...runs.map((run) => run.calls)),
+      },
       ...(repair === undefined ? {} : { repair }),
       ...(arm.vote === undefined
         ? {}
@@ -1193,6 +1391,11 @@ async function main() {
             vote: arm.vote,
             agreement: runs.reduce((total, run) => total + (run.agreement ?? 0), 0) / Math.max(1, runs.filter((run) => run.agreement !== undefined).length),
             selector: arm.select === true ? 'model' : 'majority',
+            // The ceiling, measured: how often the candidate set contained a statement
+            // that matched. Accuracy divided by this is what the selector kept, and the
+            // difference between the two is the most a better selector could win here.
+            ...candidateCeiling(runs),
+            ...(arm.mixed === true ? { sources: winnerSources(runs) } : {}),
             // How often the selector produced a usable index. A selector that fails to
             // answer half the time is not a null result; it is a broken prompt.
             ...(arm.select === true
@@ -1221,8 +1424,13 @@ async function main() {
         ? {}
         : { firstError: (runs.find((run) => run.error !== undefined) as CaseRun).error?.slice(0, 200) }),
     });
+    const printed = repairAccounting(arm, runs);
+    const ceiling = arm.vote === undefined ? undefined : candidateCeiling(runs);
     console.log(
-      `${name.padEnd(9)} ${summary.passed}/${summary.total}  ${(summary.accuracy * 100).toFixed(1)}%  strict ${strictPassed}  repaired ${runs.filter((run) => run.attempts > 1).length}`,
+      `${name.padEnd(9)} ${summary.passed}/${summary.total}  ${(summary.accuracy * 100).toFixed(1)}%  strict ${strictPassed}` +
+        `${printed.repaired === undefined ? '' : `  repaired ${String(printed.repaired)}`}` +
+        `${printed.samples === undefined ? '' : `  samples ${String(printed.samples)}`}` +
+        `${ceiling === undefined ? '' : `  recall@${String(arm.vote ?? 1)} ${(ceiling.candidateRecallShare * 100).toFixed(1)}% (lost ${String(ceiling.selectionLoss)})`}`,
     );
   }
 
@@ -1273,19 +1481,13 @@ async function main() {
   }
   report.comparisons = comparisons;
 
-  // Mean attempts per arm, so a delta can be divided by what it cost. `attempts` is
-  // 1 for an arm with no repair, so the difference between two arms is the extra model
-  // calls the second one spends per case.
-  const meanAttempts = (runs: readonly { attempts: number }[]): number =>
-    runs.length === 0 ? 1 : runs.reduce((total, run) => total + run.attempts, 0) / runs.length;
-
   const ablations: Record<string, unknown> = {};
   for (const [from, to] of PAIRS) {
     const first = outcomes.get(from);
     const second = outcomes.get(to);
     if (first === undefined || second === undefined) continue;
     const comparison = compareArms(summarise(from, first), summarise(to, second));
-    const extraCalls = meanAttempts(second) - meanAttempts(first);
+    const extraCalls = meanCalls(second) - meanCalls(first);
     const priced = ppPerExtraCall(comparison.delta * 100, extraCalls);
     ablations[`${from} -> ${to}`] = {
       delta: comparison.delta,

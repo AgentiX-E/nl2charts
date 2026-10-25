@@ -1,4 +1,4 @@
-export { createHttpProvider } from './provider.js';
+export { createHttpProvider, withCallCounter } from './provider.js';
 export { renderEvidence } from './evidence.js';
 export type { HttpProviderOptions, LlmMessage, LlmProvider, LlmRequest, LlmResponse, LlmUsage, Role } from './provider.js';
 export type { ColumnProfile, DatabaseProfile, EvidenceOptions, ProfileKind } from './evidence.js';

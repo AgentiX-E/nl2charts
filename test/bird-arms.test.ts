@@ -8,18 +8,23 @@ import { join } from 'node:path';
 import {
   ARMS,
   COMPARISONS,
+  MIXED_SOURCES,
   DEFAULT_ARMS,
   ON_DEMAND_ARMS,
   PAIRS,
   assertArmProducedResults,
   assertFailureRate,
+  assertMixedSources,
   assertRepairPathFired,
   assertUniqueArmLabels,
+  candidateCeiling,
   parseArms,
   parseLimit,
   promptFor,
   readPinnedDefinitions,
+  repairAccounting,
   resolveArm,
+  winnerSources,
 } from '../eval/bird/run.js';
 import type { Arm } from '../eval/bird/run.js';
 import type { BirdQuestion } from '../eval/bird/data.js';
@@ -30,7 +35,7 @@ import type { BirdQuestion } from '../eval/bird/data.js';
  * delta cannot be attributed to anything else. A future edit that adds a second
  * change to a pair turns this red before it turns the benchmark unreadable.
  */
-const LEVERS = ['notes', 'evidence', 'repairs', 'linking', 'profile', 'definitions', 'focus', 'interpret', 'vote', 'demonstrations', 'select', 'values', 'plan', 'repairFeedback', 'shapeGuard'] as const;
+const LEVERS = ['notes', 'evidence', 'repairs', 'linking', 'profile', 'definitions', 'focus', 'interpret', 'vote', 'demonstrations', 'select', 'values', 'plan', 'repairFeedback', 'shapeGuard', 'mixed'] as const;
 
 function changedLevers(left: Arm, right: Arm): string[] {
   return LEVERS.filter((lever) => left[lever] !== right[lever]);
@@ -319,5 +324,135 @@ describe('pinned definitions', () => {
     // A silent fallback restores the drift the pin exists to remove.
     expect(() => readPinnedDefinitions(write(JSON.stringify({ definitions: {} })))).toThrow(/regenerate/);
     expect(() => readPinnedDefinitions(write(JSON.stringify({ model: 'x' })))).toThrow(/regenerate/);
+  });
+});
+
+/**
+ * `attempts` counts generations for a repair arm and samples for a voting arm, so a
+ * report that reads it as "did the repair loop run" tells the truth on one arm and a
+ * fiction on the other. The published table said `select5 repaired 496` — an arm with no
+ * repair loop — which is exactly the column a reader uses to decide whether the loop is
+ * worth its calls.
+ */
+describe('repair accounting', () => {
+  it('counts generations on an arm that repairs', () => {
+    const arm = resolveArm('inline+repair');
+    expect(arm).toBeDefined();
+    const runs = [{ attempts: 1 }, { attempts: 3 }, { attempts: 2 }, { attempts: 1 }];
+    expect(repairAccounting(arm as Arm, runs)).toEqual({ repaired: 2 });
+  });
+
+  it('reports samples, and no repair count, on an arm that only samples', () => {
+    const arm = resolveArm('select5');
+    expect(arm).toBeDefined();
+    const runs = [{ attempts: 5 }, { attempts: 5 }, { attempts: 5 }];
+    const accounting = repairAccounting(arm as Arm, runs);
+    expect(accounting).toEqual({ samples: 5 });
+    // The bug was the key existing, not its value: `repaired: undefined` would still
+    // render as a column a reader could mistake for zero repairs.
+    expect('repaired' in accounting).toBe(false);
+  });
+
+  it('reports nothing at all on a single-shot arm', () => {
+    const arm = resolveArm('inline+evidence');
+    expect(arm).toBeDefined();
+    const accounting = repairAccounting(arm as Arm, [{ attempts: 1 }, { attempts: 1 }]);
+    expect(accounting).toEqual({});
+    expect('repaired' in accounting).toBe(false);
+    expect('samples' in accounting).toBe(false);
+  });
+
+  it('agrees with the arms catalogue, so no arm can be mislabelled', () => {
+    // Every arm that declares a repair loop must be able to produce a repaired count,
+    // and every arm that declares votes must produce a sample count.
+    for (const arm of ARMS) {
+      const accounting = repairAccounting(arm, [{ attempts: 2 }]);
+      expect('repaired' in accounting, arm.name).toBe(arm.repairs > 0);
+      expect('samples' in accounting, arm.name).toBe((arm.vote ?? 1) > 1);
+    }
+  });
+});
+
+/**
+ * A selector's score is unreadable without its ceiling.
+ *
+ * `select5` returning 58.8% says nothing about whether the five candidates contained a
+ * correct statement — the set could have been empty of correct answers or full of them
+ * with the selector discarding one. Those two readings imply opposite next steps, so the
+ * ceiling is measured on the same cases at no extra cost and reported beside the score.
+ */
+describe('candidate ceiling', () => {
+  it('counts the questions the candidate set answered, not the ones the arm returned', () => {
+    const ceiling = candidateCeiling([
+      { passed: true, candidateRecall: true },
+      { passed: false, candidateRecall: true },
+      { passed: true, candidateRecall: true },
+      { passed: false, candidateRecall: false },
+      { passed: false, candidateRecall: false },
+    ]);
+    expect(ceiling.candidateRecall).toBe(3);
+    expect(ceiling.candidateRecallShare).toBeCloseTo(0.6, 6);
+    // The arm scored 2/5 and the set held 3/5: exactly one question is pure selection loss.
+    expect(ceiling.selectionLoss).toBe(1);
+  });
+
+  it('reports zero rather than NaN on an empty arm', () => {
+    expect(candidateCeiling([])).toEqual({ candidateRecall: 0, candidateRecallShare: 0, selectionLoss: 0 });
+  });
+
+  it('never counts a loss on a question the arm got right', () => {
+    const ceiling = candidateCeiling([{ passed: true, candidateRecall: false }]);
+    // The candidate marker is written by the same judge as the pass, so this combination
+    // is a bug upstream; the count must not silently become "1 loss" and inflate the
+    // apparent headroom of a better selector.
+    expect(ceiling.selectionLoss).toBe(0);
+    expect(ceiling.candidateRecall).toBe(0);
+  });
+});
+
+/**
+ * The mixed arm buys a second opinion with the same three calls.
+ *
+ * Its whole claim is that three *different* decompositions beat three samples of one.
+ * That claim only holds if a candidate is one generation: a source that repairs or
+ * samples would spend unbounded calls inside a candidate the arm counts as one.
+ */
+describe('mixed candidate sources', () => {
+  it('resolves, and each source generates exactly one statement', () => {
+    expect(() => assertMixedSources()).not.toThrow();
+    expect(MIXED_SOURCES.length).toBeGreaterThanOrEqual(2);
+    for (const source of MIXED_SOURCES) {
+      const arm = resolveArm(source);
+      expect(arm, source).toBeDefined();
+      expect(arm?.repairs, source).toBe(0);
+      expect(arm?.vote, source).toBeUndefined();
+    }
+  });
+
+  it('refuses a source that repairs, because the candidate would cost more than one call', () => {
+    expect(() => assertMixedSources(['inline+evidence', 'inline+repair'])).toThrow(/one statement/);
+  });
+
+  it('refuses a source that samples', () => {
+    expect(() => assertMixedSources(['inline+evidence', 'select5'])).toThrow(/one statement/);
+  });
+
+  it('refuses a name that is not an arm', () => {
+    expect(() => assertMixedSources(['inline+evidence', 'not-an-arm'])).toThrow(/not an arm/);
+  });
+
+  it('refuses a set of one, which is not a set', () => {
+    expect(() => assertMixedSources(['inline+evidence'])).toThrow(/at least two/);
+  });
+
+  it('counts which decomposition won, including the ones that never did', () => {
+    const counts = winnerSources([
+      { winnerSource: 'inline+evidence' },
+      { winnerSource: 'metadata+evidence' },
+      { winnerSource: 'inline+evidence' },
+    ]);
+    // A generator missing from the report would look like a generator that was never
+    // tried; zero is the number that says "tried, never won".
+    expect(counts).toEqual({ 'inline+evidence': 2, 'metadata+evidence': 1, values: 0 });
   });
 });
