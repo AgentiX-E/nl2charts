@@ -19,6 +19,7 @@ export type FailureClass =
   | 'grouping'
   | 'permission'
   | 'timeout'
+  | 'shape'
   | 'unknown';
 
 /** The fields a driver reported, normalised across engines. */
@@ -96,6 +97,10 @@ export function readEngineError(error: unknown): EngineErrorFields {
 }
 
 const PATTERNS: readonly (readonly [FailureClass, RegExp])[] = [
+  // A shape failure is reported by the caller, not by the engine: the statement ran and
+  // returned the wrong number of rows for the question. It has to be checked first, because
+  // its message contains none of the words the engine's messages use.
+  ['shape', /^shape:\s|asks for a single value/i],
   // Ambiguity is checked before binding: its message contains the word "column", and
   // the fix (qualify the name) is different from the fix for a missing name.
   ['ambiguity', /\bambiguous\b|\bambiguity\b/i],
@@ -312,6 +317,7 @@ const INSTRUCTIONS: Readonly<Record<FailureClass, string>> = {
   grouping: 'Every column in the select list that is not aggregated must appear in GROUP BY, spelled identically.',
   permission: 'The connection is read-only. Rewrite as a SELECT: no INSERT, UPDATE, DELETE, DDL or temporary tables.',
   timeout: 'The query exceeded the execution limit. Filter before joining, aggregate before joining, and avoid correlated subqueries per row.',
+  shape: 'The question asks for one value. Aggregate so the result is exactly one row and one column; do not select the per-row columns that produced the counts.',
   unknown: 'Fix the engine\'s complaint and change nothing else about the question.',
 };
 

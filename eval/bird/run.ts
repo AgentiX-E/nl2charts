@@ -29,6 +29,7 @@ import type { CaseOutcome, MatchReason } from '@agentix-e/nl2charts-devkit';
 import { buildSchema, loadDescriptions, loadQuestions, loadTables, stratifiedSample } from './data.js';
 import type { BirdQuestion } from './data.js';
 import { createOracle } from './oracle.js';
+import { shapeFailure, shapeMismatch } from './shape.js';
 import type { OracleResult } from './oracle.js';
 import { profileDatabase } from './profile.js';
 import { buildIndex, renderDemonstrations, renderRetrieved, retrieve } from './retrieval.js';
@@ -127,6 +128,11 @@ export interface Arm {
    * Both cost the same calls, so the pair prices the diagnosis and not the retry.
    */
   readonly repairFeedback?: 'diagnosed' | 'raw';
+  /**
+   * Treat a scalar question answered with many rows or columns as a failure and repair it.
+   * The engine reports nothing here, so without this the loop never sees the case.
+   */
+  readonly shapeGuard?: boolean;
 }
 
 /**
@@ -181,6 +187,9 @@ export const ARMS: readonly Arm[] = [
   // The same three retries with the engine's message and nothing else — the control the
   // diagnosis has to beat on the same cases, at the same cost.
   { name: 'inline+repair-raw', notes: false, evidence: 'dataset', repairs: 3, linking: true, definitions: 'inline', repairFeedback: 'raw' },
+  // The same three retries, plus a check the engine cannot make: a question that asks for
+  // one value answered with a list is wrong in a way SQL reports no error for.
+  { name: 'inline+shape', notes: false, evidence: 'dataset', repairs: 3, linking: true, definitions: 'inline', shapeGuard: true },
   { name: 'values', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', values: true },
   // A plan before the statement: the ordering decisions (scan, filter, join, group,
   // answer) are made explicitly once instead of being encoded in one draft.
@@ -220,6 +229,7 @@ export const DEFAULT_ARMS: readonly string[] = [
   'inline+icl',
   'inline+repair',
   'inline+repair-raw',
+  'inline+shape',
   'vote',
   'select',
   'select5',
@@ -276,6 +286,8 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   // `inline+evidence` would change two fields (`repairs` and `repairFeedback`), and a
   // two-lever delta cannot say which of them moved the number.
   ['inline+repair-raw', 'inline+repair'],
+  // One lever from `inline+repair`: same budget, same feedback, plus the shape check.
+  ['inline+repair', 'inline+shape'],
   ['inline-definitions', 'interpret'],
   ['inline+evidence', 'vote'],
   ['vote', 'select'],
@@ -299,7 +311,7 @@ interface CaseRun extends CaseOutcome {
   /** True when the selector returned a usable index; absent for the modal arm. */
   readonly selectedByModel?: boolean;
   readonly error?: string;
-  readonly errorKind?: 'execution' | 'guard' | 'llm' | 'other';
+  readonly errorKind?: 'execution' | 'guard' | 'llm' | 'shape' | 'other';
   /** Classes of the rejected attempts, in order; empty when the first one ran. */
   readonly failures?: readonly string[];
   readonly attempts: number;
@@ -974,7 +986,14 @@ async function main() {
           : {
               execute: async (sql: string) => {
                 const result = await oracle.run(question.db_id, sql);
-                if (result.ok) return;
+                if (result.ok) {
+                  // A statement that runs and returns the wrong number of rows is invisible
+                  // to the engine, so this is the only place the loop can hear about it.
+                  if (arm.shapeGuard === true && shapeMismatch(question.question, result.rows)) {
+                    throw new Error(shapeFailure(result.rows));
+                  }
+                  return;
+                }
                 // The driver's own words, not a summary of them: the repair reads
                 // `details.engineError` to decide what to tell the model.
                 throw Object.assign(new Error(result.error ?? 'execution failed'), {
@@ -1094,7 +1113,18 @@ async function main() {
           attempts: arm.repairs + 1,
           ...(failureClasses === undefined ? {} : { failures: failureClasses }),
           error: lastError === undefined ? message : `${message}: ${lastError}`,
-          errorKind: code === 'NL2C_E_GUARD_REJECTED' ? 'guard' : code === 'NL2C_E_ENGINE_FAILED' ? 'execution' : code.startsWith('NL2C_E_LLM') ? 'llm' : 'other',
+          // A shape failure ends with a statement that runs, so calling it `execution`
+          // would say the engine rejected something it never saw.
+          errorKind:
+            lastError !== undefined && lastError.startsWith('shape:')
+              ? 'shape'
+              : code === 'NL2C_E_GUARD_REJECTED'
+                ? 'guard'
+                : code === 'NL2C_E_ENGINE_FAILED'
+                  ? 'execution'
+                  : code.startsWith('NL2C_E_LLM')
+                    ? 'llm'
+                    : 'other',
         };
       }
     });
@@ -1135,6 +1165,7 @@ async function main() {
       execution: runs.filter((run) => kindOf(run) === 'execution').length,
       guard: runs.filter((run) => kindOf(run) === 'guard').length,
       llm: runs.filter((run) => kindOf(run) === 'llm').length,
+      shape: runs.filter((run) => kindOf(run) === 'shape').length,
       other: runs.filter((run) => kindOf(run) === 'other').length,
       columnCount: runs.filter((run) => run.reason === 'column-count').length,
       values: runs.filter((run) => run.reason === 'values' && run.error === undefined).length,

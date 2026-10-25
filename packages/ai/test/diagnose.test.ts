@@ -316,3 +316,19 @@ describe('the raw baseline', () => {
     expect(diagnosed.feedback).toContain(fields.message);
   });
 });
+
+describe('a statement that ran but answered a different question', () => {
+  it('classifies a shape failure and says what to do about it', () => {
+    // No engine reports this: the query executed cleanly and returned 1,436 rows for a
+    // question that asked "how many". Without this class the loop would never see it.
+    const diagnosis = diagnoseFailure({
+      sql,
+      schema,
+      dialect: 'SQLite',
+      error: new Error('shape: the question asks for a single value, but the statement returned 1436 row(s) and 1 column(s)'),
+    });
+    expect(diagnosis.failureClass).toBe('shape');
+    expect(diagnosis.feedback).toContain('one row and one column');
+    expect(diagnosis.feedback).toContain('1436 row(s)');
+  });
+});

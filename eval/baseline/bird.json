@@ -12,6 +12,7 @@
     "inline+icl",
     "inline+repair",
     "inline+repair-raw",
+    "inline+shape",
     "vote",
     "select",
     "select5",
