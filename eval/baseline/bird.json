@@ -1,5 +1,5 @@
 {
-  "note": "Floors are per split, in execution accuracy percent, taken as the minimum observed across the recent runs on Mini-Dev (G 9120c2b, H d5927b0, I 700529b, J 4ad0181, and 1.0.0 run 39762058351), applied to the full 500-question split since run 39776718012. A rerun may land below a floor by tolerancePp before the gate fails, because ADR-166 measured that anything inside 4pp cannot be separated from sampling noise at n=239. `inline+retrieval` and `inline+icl` were added to the chain after those runs and have no floors yet: the gate records its first measurement and says so rather than inventing a threshold. A run scored on fewer than 95% of the baseline sample fails as a changed sample rather than as a regression.",
+  "note": "Floors are per split, in execution accuracy percent, taken as the minimum observed across the recent runs on Mini-Dev (G 9120c2b, H d5927b0, I 700529b, J 4ad0181, 1.0.0 run 39762058351, and the 13-arm runs since), applied to the full 500-question split. A rerun may land below a floor by tolerancePp before the gate fails, because ADR-166 measured that anything inside 4pp cannot be separated from sampling noise at n=239. `inline+retrieval`, `inline+icl`, `inline+repair`, `inline+repair-raw`, `select`, `select5` and `values` were added to the chain after those runs and have no floors yet: the gate records their first measurement and says so rather than inventing a threshold. A run scored on fewer than 95% of the baseline sample fails as a changed sample. `armsBySplit` states which arms each split runs; the dev split compares against a published leaderboard and needs three arms, not thirteen, and applying Mini-Dev's list to it failed the first dev run.",
   "dataset": "BIRD Mini-Dev",
   "scored": 500,
   "tolerancePp": 4,
@@ -27,5 +27,12 @@
       "metadata+evidence": 56.1,
       "vote": 55.6
     }
+  },
+  "armsBySplit": {
+    "dev": [
+      "names",
+      "inline+evidence",
+      "metadata+evidence"
+    ]
   }
 }

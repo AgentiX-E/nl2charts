@@ -41,10 +41,24 @@ export function compare(report, baseline) {
     issues.push(`BIRD1: scored ${scored} questions against a baseline of ${baseline.scored}; the sample changed`);
   }
 
+  // Which arms are expected is a property of the split, not of the project. The dev split
+  // runs three arms because it is a comparison against a published leaderboard, and the
+  // first dev run failed on "arm inline-definitions is missing" — a gate applying one
+  // split's configuration to another. `armsBySplit` lets each split state its own list.
+  const floors = baseline.floors?.[split];
+  const gated = floors !== undefined;
+  const expectedArms = baseline.armsBySplit?.[split] ?? (gated ? baseline.expectedArms : []);
   const byArm = new Map((report.arms ?? []).map((arm) => [arm.arm, arm]));
-  for (const name of baseline.expectedArms) {
+  for (const name of expectedArms) {
     if (!byArm.has(name)) {
       issues.push(`BIRD1: arm ${name} is expected by the baseline and missing from the report`);
+    }
+  }
+  if (report.aa !== undefined && baseline.tolerancePp !== undefined) {
+    // The A/A check applies to any split: it is about the harness, not the threshold.
+    const delta = Math.abs(report.aa.delta) * 100;
+    if (delta > baseline.tolerancePp) {
+      issues.push(`BIRD1: the same arm twice differs by ${delta.toFixed(1)}pp, more than the ${String(baseline.tolerancePp)}pp the gate treats as noise`);
     }
   }
 
@@ -52,13 +66,13 @@ export function compare(report, baseline) {
   // retrieval arm did exactly that once (44.4% vs 43.6%, corpus size 0), so the gate
   // checks that the blocks an arm depends on were actually built.
   const controls = report.controls ?? {};
-  if (baseline.expectedArms.includes('inline+retrieval') && (controls.retrievedBlocks ?? 0) === 0) {
+  if (expectedArms.includes('inline+retrieval') && (controls.retrievedBlocks ?? 0) === 0) {
     issues.push('BIRD1: inline+retrieval ran with no retrieved block; the corpus is missing, so the arm is its parent renamed');
   }
-  if (baseline.expectedArms.includes('inline+icl') && (controls.demonstrationBlocks ?? 0) === 0) {
+  if (expectedArms.includes('inline+icl') && (controls.demonstrationBlocks ?? 0) === 0) {
     issues.push('BIRD1: inline+icl ran with no demonstration block; the corpus is missing, so the arm is its parent renamed');
   }
-  if (baseline.expectedArms.includes('values') && (controls.valueMatches ?? 0) === 0) {
+  if (expectedArms.includes('values') && (controls.valueMatches ?? 0) === 0) {
     issues.push('BIRD1: values ran with no matched value; the profile is missing, so the arm is its parent renamed');
   }
 
@@ -67,7 +81,7 @@ export function compare(report, baseline) {
   // drifted apart — and a funnel that does not sum is worse than no funnel, because it
   // looks like a measurement.
   const repairArm = (report.arms ?? []).find((arm) => arm.arm === 'inline+repair');
-  if (baseline.expectedArms.includes('inline+repair')) {
+  if (expectedArms.includes('inline+repair')) {
     if (repairArm === undefined) {
       // Already reported as a missing arm above; nothing to add.
     } else if (repairArm.repair === undefined) {
@@ -92,16 +106,6 @@ export function compare(report, baseline) {
     }
   }
 
-  // An A/A pair that disagrees with itself by more than the tolerance used to judge
-  // regressions means the tolerance is not a threshold, it is a wish.
-  const aa = report.aa;
-  if (aa !== undefined && Math.abs(aa.delta) * 100 > baseline.tolerancePp) {
-    issues.push(
-      `BIRD1: the same arm twice differs by ${(Math.abs(aa.delta) * 100).toFixed(1)}pp, more than the ${String(baseline.tolerancePp)}pp the gate treats as noise`,
-    );
-  }
-
-  const floors = baseline.floors?.[split];
   if (floors === undefined) {
     notes.push(`BIRD1: no floors recorded for split ${split}; this run is a measurement, not a gate`);
     return { issues, notes };
@@ -115,7 +119,7 @@ export function compare(report, baseline) {
       issues.push(`BIRD1: ${name} at ${measured.toFixed(1)}% is below the ${floor}% floor less ${tolerance}pp`);
     }
   }
-  for (const name of baseline.expectedArms) {
+  for (const name of expectedArms) {
     if (floors[name] === undefined && byArm.has(name)) {
       notes.push(`BIRD1: ${name} has no floor yet; its first measurement is recorded, not enforced`);
     }
@@ -147,6 +151,24 @@ function selfTest() {
 
   const unstable = compare({ selection: { scored: 100, split: 'minidev' }, aa: { delta: 0.085 }, arms: [arm('names', 42), arm('inline', 51)] }, baseline);
   if (unstable.issues.length !== 1) issues.push('BIRD1 does not notice an A/A pair that disagrees beyond the tolerance');
+
+  // A different split with its own arm list: three arms on dev must not be judged
+  // against Mini-Dev's thirteen.
+  const devRun = compare(
+    report([arm('names', 647, 1532), arm('inline+evidence', 929, 1532), arm('metadata+evidence', 941, 1532)], 1532, 'dev'),
+    { ...baseline, armsBySplit: { dev: ['names', 'inline+evidence', 'metadata+evidence'] } },
+  );
+  if (devRun.issues.length !== 0) {
+    issues.push(`BIRD1 applies the Mini-Dev arm list to another split (${devRun.issues.join('; ')})`);
+  }
+
+  // ...but a gated split still enforces its own list.
+  const devMissing = compare(report([arm('names', 647, 1532)], 1532, 'dev'), {
+    ...baseline,
+    floors: { ...baseline.floors, dev: {} },
+    armsBySplit: { dev: ['names', 'inline+evidence'] },
+  });
+  fail(devMissing, 1, 'BIRD1 does not enforce a split-specific arm list');
 
   // The funnel that does not add up: 90 + 0 + 20 != 100.
   const badFunnel = compare(
@@ -194,7 +216,7 @@ if (process.argv[2] === '--self-test') {
   const issues = selfTest();
   for (const issue of issues) console.error(issue);
   if (issues.length > 0) process.exit(1);
-  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, other split, unfloored arm, empty lever and a funnel that does not add up all behave');
+  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, other split, unfloored arm, empty lever, a funnel that does not add up and a split-specific arm list all behave');
 } else {
   const reportPath = resolve(ROOT, 'eval/out/bird-eval.json');
   const baseline = JSON.parse(readFileSync(resolve(ROOT, 'eval/baseline/bird.json'), 'utf8'));

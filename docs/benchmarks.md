@@ -491,6 +491,33 @@ duplicate rows**. The strict column compares multisets; the official rule credit
 11–21 extra cases per arm on all 498 cases. Both numbers are published so the choice
 is visible instead of implied.
 
+## The dev split, measured: 60.6% on the split leaderboards report
+
+First run of the 1,534-question dev split (run `40157122326`), three arms, `deepseek-chat`:
+
+| Arm | Dev, 1,532 scorable | 95% Wilson | Mini-Dev, same code |
+| --- | --- | --- | --- |
+| names only | 42.2% (647/1532) | [39.8, 44.7] | 35.7% |
+| **+ definitions + the dataset's hint** | **60.6%** (929/1532) | [58.2, 63.1] | 57.4% |
+| metadata + the hint (798 curated notes) | **61.4%** (941/1532) | [59.0, 63.8] | 59.2% |
+
+Three facts about this number, in the order they matter:
+
+1. **It is on the split the published leaderboards report**, so a comparison with another
+   system is now a matter of running it rather than arguing about samples. Our 60.6% is
+   `deepseek-chat`, one sample per case, no fine-tuning; the systems at 70–73% run GPT-4o
+   class models with generated candidate pools.
+2. **The dev split is easier than Mini-Dev by ~2pp per arm** with identical code. That is
+   the dataset, not the pipeline: the two splits share eleven databases but not their
+   questions. Quoting one where the other was measured would be a 2–3pp error, which is why
+   both are stated.
+3. **Two of 1,534 questions are excluded** for the same reason as on Mini-Dev (`701`, `518`
+   exceed the step budget), so the denominator is 1,532.
+
+The gate had to be fixed for this run: it applied Mini-Dev's thirteen-arm list to a
+three-arm dev run and failed with six missing arms. `armsBySplit` now states each split's
+own list, and a split without floors remains a measurement rather than a gate.
+
 ## Which split, and how many questions
 
 The sample size was ours, not the dataset's: the runner defaulted to a 240-question

@@ -73,6 +73,9 @@ cannot be argued with.
   `inline+retrieval` was such an arm for one release.
 - **Retrieval over BIRD's training split**: BM25 over 9,428 labelled questions from
   69 databases, none of which appears in the split under test.
+- **The dev split, measured**: 1,532 scorable questions of the split leaderboards report —
+  names 42.2%, definitions + the dataset's hint **60.6%**, curated metadata 61.4%. Same code
+  scores ~2pp lower on Mini-Dev, so the two are quoted separately.
 - **A repair result that replicated**: three diagnosed retries are worth **+6.4pp** on
   `glm-4-flash` (249 questions, 16 won / 0 lost, p<0.0001, 0.63 extra calls per case),
   measured twice with identical case counts
