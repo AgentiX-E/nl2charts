@@ -79,6 +79,10 @@ cannot be argued with.
   and **+0.4pp / −1.0pp** on `deepseek-chat` across two runs — where only 2.4% of first
   statements fail, so the loop has almost nothing to repair. It raises a floor, not a
   ceiling.
+- **The raw error is worth 5.2 of those 6.4pp**: a control arm sending the engine's message
+  with no class instruction, candidate or caret reaches 35.3% (88/249). The diagnosis adds
+  +1.2pp (3 won / 6 lost, p=0.51), which is unresolved at 250 cases and kept as the default
+  for what it adds on unseen schemas, not for a proven gain.
 - **Diagnosed repair**: a rejected statement is retried with the engine's own error
   (SQLSTATE, position with a caret, hint), the identifier from the schema it probably
   meant — resolved through the statement's alias — and an instruction specific to the

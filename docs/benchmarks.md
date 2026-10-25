@@ -187,7 +187,8 @@ The same three arms on `glm-4-flash`, which writes far more invalid SQL, 249 que
 | --- | --- | --- | --- |
 | names only | 18.9% (47/249) | 35.7% | 53 (21.3%) |
 | + the dataset's hint | 30.1% (75/249) | 57.4% | 91 (36.5%) |
-| **+ three diagnosed repairs** | **36.5% (91/249)** | 57.8% | **19 (7.6%)** |
+| + three repairs carrying the **raw** engine error only | 35.3% (88/249) | — | 19 |
+| **+ three diagnosed repairs** | **36.5% (91/249)** | 57.8% | **18 (7.2%)** |
 
 **+6.4pp, sixteen cases won and none lost, McNemar p<0.0001**, at 0.63 extra calls per
 case — about 10pp per extra call. Sixteen wins and zero losses is what the mechanism
@@ -198,6 +199,30 @@ Measured twice, on the same 249 questions, with identical results down to the ca
 (47 / 75 / 91, 0/16, p<0.0001, A/A 0.0pp both times). That meets the adoption rule this
 project set after the selection result failed to replicate — two consecutive runs at
 p<0.01 — and it is the first mechanism since the per-question hint to clear it.
+
+### The raw error message is where most of that gain already is
+
+The repair turn always contained the engine's sentence verbatim; the diagnosis adds a class
+instruction, the nearest schema identifier and a caret at the reported position. Whether
+those additions earn their place was an assumption, so it was run as a control: the same
+three retries, the same prompt, the same cost, with the engine's message and nothing else.
+
+| Arm | GLM-4-Flash | Δ vs parent | repaired → correct |
+| --- | --- | --- | --- |
+| + raw engine error, three retries | 35.3% (88/249) | **+5.2pp** | 13 of 91 |
+| + diagnosis, three retries | 36.5% (91/249) | **+6.4pp** | 16 of 92 |
+| raw → diagnosis | | **+1.2pp** (3 won / 6 lost, p=0.51) | |
+
+So **the raw error is worth 5.2 of the 6.4pp**, and the classification's increment is
++1.2pp — not separable at this sample (p=0.51, nine cases moved at all). That is a real
+finding about where the value lives: telling a model *what the engine said* is most of the
+job; telling it *which column exists* is a much smaller second helping, at 250 cases.
+
+The diagnosis stays the default because it costs no extra call, and because its two
+additions are the ones that matter on a schema the model has never seen — the benchmark's
+eleven databases are the easy case, not the hard one. Its claimed gain, though, is
+**+1.2pp unresolved**, not folded into the +6.4pp, and the six cases it lost to the raw form
+are unexplained: nine cases moved in total, which is what a coin looks like at n=249.
 
 The funnel explains both results at once:
 
