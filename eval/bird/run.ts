@@ -292,9 +292,15 @@ export const ARMS: readonly Arm[] = [
   { name: 'select-cross', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: CROSS_SOURCES },
   // The same candidates, with each one's origin in front of it.
   { name: 'select-tagged', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: CROSS_SOURCES, sourcesVisible: true },
-  // The same inline arm plus the literals the question names, resolved against this
-  // database. CHASE-SQL's first pipeline stage; here it is one lever from
-  // `inline+evidence`, so the delta prices value grounding, not the hint.
+  // The same three prompts, aggregated by modal result instead of by a model. One lever
+  // from `select-mixed` — same candidates, same count, one call fewer — and the reading is
+  // the opposite of the selector experiments: a free aggregator cannot be argued with, only
+  // counted. Three diverse candidates agree less often than three samples of one prompt, so
+  // the modal answer is a weaker majority here; `agreement` says by how much.
+  { name: 'vote-mixed', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, mixed: MIXED_SOURCES },
+  // ...and the same aggregator on the cross-model set, where the candidates disagree by
+  // model as well as by prompt.
+  { name: 'vote-cross', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, mixed: CROSS_SOURCES },
   // The best prompt stack plus three diagnosed repairs: one lever from
   // `inline+evidence`, so the delta prices the repair loop and nothing else.
   { name: 'inline+repair', notes: false, evidence: 'dataset', repairs: 3, linking: true, definitions: 'inline' },
@@ -304,6 +310,9 @@ export const ARMS: readonly Arm[] = [
   // The same three retries, plus a check the engine cannot make: a question that asks for
   // one value answered with a list is wrong in a way SQL reports no error for.
   { name: 'inline+shape', notes: false, evidence: 'dataset', repairs: 3, linking: true, definitions: 'inline', shapeGuard: true },
+  // The same inline arm plus the literals the question names, resolved against this
+  // database. CHASE-SQL's first pipeline stage; here it is one lever from
+  // `inline+evidence`, so the delta prices value grounding, not the hint.
   { name: 'values', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', values: true },
   // A plan before the statement: the ordering decisions (scan, filter, join, group,
   // answer) are made explicitly once instead of being encoded in one draft.
@@ -373,6 +382,8 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   repair: 'the original repair arm (dataset notes, two attempts, one generic sentence): superseded by inline+repair, which is one lever from inline+evidence and reports a funnel',
   'select-cross': 'the trio with its first candidate from a second model: needs BIRD_SECOND_MODEL and a second key, so it is dispatched rather than run on every push',
   'select-tagged': 'the cross arm with each candidate labelled by its source: needs the second model too, and is measured against `select-cross`',
+  'vote-mixed': 'three prompts aggregated by modal result instead of by a model: 63% would make the selector call unnecessary, and below that it prices what the model adds',
+  'vote-cross': 'the cross-model candidate set aggregated by modal result: needs the second model too',
   plan: 'query plan before the statement: 50.4% against 57.6% for its parent (-7.2pp, 63/27, p=0.0002) — anchoring, not helping; kept so the finding can be re-tested',
   'select-pair': 'pairwise comparison instead of an absolute ranking: 58.4% against 57.6% for its parent (+0.8pp, 17/20, p=0.74) at one more call, and it lost more of its candidate set (25 cases against 20) — the absolute prompt is not what the selector loses; kept so a different comparison order or a two-of-three vote can be measured against it',
   'inline+shape': 'scalar-shape guard before the repair loop: 57.2% against 58.4% for its parent (-1.2pp, 11/5, p=0.21) — it fired on 21 cases, repaired 2, and shifted 14 more into the wrong column count; kept so a better shape test can be measured against this one',
@@ -425,6 +436,9 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   ['select-mixed', 'select-cross'],
   // One lever: whether the selector is told where each candidate came from.
   ['select-cross', 'select-tagged'],
+  // One lever: who aggregates the same three candidates, the model or the count.
+  ['select-mixed', 'vote-mixed'],
+  ['select-cross', 'vote-cross'],
   ['select', 'select5'],
   ['inline+evidence', 'values'],
   ['inline+evidence', 'plan'],

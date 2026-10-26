@@ -924,6 +924,59 @@ project's own rule (ADR-194) says a change of *information* is where the gains h
 from and a change of *wording* is where they have not: the labelled prompt keeps every rule
 of the unlabelled one, so what is measured is whether knowing the origin helps.
 
+## Labelling the candidates did not help, and the numbers say why
+
+`select-tagged` is `select-cross` with each candidate prefixed by its source — one lever, one
+field of information, the same question to the same selector. Run `40375082259`, seven arms,
+1,532 questions:
+
+| arm | calls | accuracy | candidate recall | cases the selector lost | share of ceiling kept |
+| --- | --- | --- | --- | --- | --- |
+| `inline+evidence` | 1 | 60.6% (929) | — | — | — |
+| `metadata+evidence` | 1 | 61.4% (940) | — | — | — |
+| `select` | 4 | 62.1% (952) | 65.5% | 51 | 94.9% |
+| `select-mixed` | 4 | 63.3% (969) | 65.5% | 35 | **96.5%** |
+| `select-cross` | 4 | 63.3% (969) | 66.8% | 54 | 94.7% |
+| **`select-tagged`** | 4 | **63.7% (976)** | **67.1%** | 52 | 94.9% |
+
+The pre-registered criterion for this arm was that its selection loss fall from about 54 to
+about 45. It fell to 52. `select-tagged` is +0.46pp over `select-cross` (26 won / 33 lost,
+p=0.43) — not adoption, and not the mechanism working: the labels did change the selector's
+preference (the second model's candidate was returned 329 times against 296), but not its
+accuracy.
+
+### The number that explains five runs
+
+Split every arm's questions by whether its candidate set contained a correct statement:
+
+| pair | questions the better set alone held | of those, returned | questions both held | returned by the better set | by the weaker set |
+| --- | --- | --- | --- | --- | --- |
+| `select-tagged` vs `select-mixed` | 37 | **18 (49%)** | 991 | 958 | 960 |
+
+**Half.** When the second model contributes a correct statement the all-DeepSeek set did not
+have, the selector finds it about half the time — and on the questions both sets held, the two
+arms return the same answers (958 against 960). That is the whole of the second model's
+effect: +2.4pp of ceiling converted at 49%, which is +0.2 to +1.2pp of accuracy depending on
+the run.
+
+It also explains a pattern that has held across five dev runs: returned accuracy sits at
+63.0–63.7% while the ceiling moves between 65.3% and 67.8%. The selector keeps 94.7–96.5% of
+whatever it is given, and the percentage falls as the set improves — a better set contains
+more statements that *look* right.
+
+### What that changes about the next experiment
+
+Two attempts to improve the selector by changing what it is asked and what it is told have
+now failed. The remaining free option is not to ask the model at all: aggregate the same three
+candidates by **modal result**, which costs no fourth call and cannot be talked into a
+plausible wrong answer.
+
+`vote-mixed` is `select-mixed` with the aggregator swapped, one lever; `vote-cross` is the
+same swap on the cross-model set. Three diverse candidates agree less often than three samples
+of one prompt, so the majority is weaker here — and on questions where two candidates are the
+same statement, the duplicate acts as a prior, which the stratification already measured. The
+arms report `agreement`, so a weak majority is visible rather than inferred.
+
 ## What a floor is a claim about
 
 A gate number has three coordinates: the split it was measured on, the arms it covers, and
