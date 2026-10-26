@@ -418,6 +418,37 @@ ADR-184) — 498 questions cannot resolve a 2.8pp effect that finely — so the 
 decision moves to the split where it can: the same two arms on the 1,532-question dev
 split, which is also the split leaderboards report.
 
+### Three runs of the same four arms, and the drift between them
+
+The mixed arm has now run three times on the same 498 questions with the same code:
+
+| run | `inline+evidence` (1 call) | `select` (4) | `select5` (6) | `select-mixed` (4) |
+| --- | --- | --- | --- | --- |
+| `40181585037` | 57.6% | 57.6% | 59.2% | **60.4%** |
+| `40186658774` | 58.0% | 57.6% | 57.8% | **60.4%** |
+| `40193372870` | 57.8% | 59.2% | 60.6% | **60.4%** |
+
+Two facts matter more than any single delta here.
+
+**The selector arms move between runs; the mixed arm did not.** `select` travelled 1.6pp
+across runs that differ in nothing but the order the questions were answered in, and
+`select5` travelled 2.8pp. `select-mixed` returned 301 of 498 in all three. A delta of
+1.2–1.4pp between two selector arms is therefore inside the between-run drift of the arms
+themselves, which is why the adoption decision for the mixed arm goes to the dev split
+rather than to a fourth Mini-Dev run.
+
+**The third candidate is not free, and it is not useless either.** `select-duo` — the two
+prompts that always differ — came in at 58.4% (291/498), *below* `select`'s 59.2%
+(−0.8pp, 17/13, p=0.58) and 2.0pp below the trio (4/14, p=0.031).
+
+Two mechanisms can produce that, and this run does not separate them: the trio may win on
+the 172 questions where `values` adds a genuinely different statement, or it may win
+because on the other 326 it presents `{inline, inline, metadata}` — and a repeated
+statement is a frequency signal to a selector reading a list. Separating them needs the
+comparison stratified by whether the value block existed, which needs per-case outcomes
+rather than per-arm totals; the report now carries per-case outcomes (`report.cases`), so the
+next run can answer it instead of carrying two hypotheses.
+
 ### A third of the mixed arm's candidates were duplicates
 
 The dry run builds the prompt each mixed source would send, without spending a call, and
@@ -713,6 +744,71 @@ Three facts about this number, in the order they matter:
 The gate had to be fixed for this run: it applied Mini-Dev's thirteen-arm list to a
 three-arm dev run and failed with six missing arms. `armsBySplit` now states each split's
 own list, and a split without floors remains a measurement rather than a gate.
+
+## The dev split with candidate selection: 63.0% (run 40202780469)
+
+Six arms on the 1,532 scorable dev questions — the split the published leaderboards
+report — with the same model and the same pinned inputs:
+
+| arm | candidates | model calls | execution accuracy | candidate recall (ceiling) | cases the selector lost |
+| --- | --- | --- | --- | --- | --- |
+| `names` | — | 1 | 42.0% (644) | — | — |
+| `inline+evidence` | 1 | 1 | 60.6% (928) | — | — |
+| `metadata+evidence` | 1 | 1 | 61.8% (946) | — | — |
+| `select` | 3 samples of one prompt | 4 | 61.3% (939) | 65.1% | 59 |
+| `select-duo` | 2 prompts | 3 | 61.8% (947) | 63.8% | 31 |
+| **`select-mixed`** | 3 prompts | 4 | **63.0% (965)** | 65.6% | 40 |
+
+The paired tests, on 1,532 questions rather than 498:
+
+| comparison | Δ | only before / only after | McNemar p |
+| --- | --- | --- | --- |
+| `inline+evidence` → `select` | +0.7pp | 38 / 49 | 0.28 |
+| `inline+evidence` → `metadata+evidence` | +1.2pp | 38 / 56 | 0.079 |
+| `inline+evidence` → **`select-mixed`** | **+2.4pp** | 23 / 60 | **0.0001** |
+| `select` → `select-mixed` | +1.7pp | 34 / 60 | 0.0095 |
+| `select-duo` → `select-mixed` | +1.2pp | 13 / 31 | 0.0096 |
+
+Three conclusions that only appear at this sample size:
+
+1. **Selection over three samples of one prompt is not worth four calls.** +0.7pp, p=0.28.
+   The Mini-Dev runs said the same thing at lower resolution and it now holds on the split
+   people quote.
+2. **Three prompts and a selector is worth four calls.** +2.4pp over the single sample at
+   p=0.0001, and the best number this project has measured on any split.
+3. **The value-grounded candidate is not worth a call of its own**: `select-duo` reaches
+   61.8% with three calls and loses to the trio by 1.2pp (p=0.0096), so the third source
+   earns its call only inside the trio — consistent with the Mini-Dev finding that two
+   thirds of its candidates are duplicates.
+
+### The second run, and the adoption
+
+Run `40245630669` repeated the same six arms:
+
+| arm | run 1 (`40202780469`) | run 2 (`40245630669`) | mean | Δ between runs |
+| --- | --- | --- | --- | --- |
+| `names` | 42.0% (644) | 41.8% (641) | 41.9% | 0.2pp |
+| `inline+evidence` | 60.6% (928) | 60.7% (930) | 60.6% | 0.1pp |
+| `metadata+evidence` | 61.8% (946) | 61.4% (941) | 61.6% | 0.3pp |
+| `select` | 61.3% (939) | 61.0% (935) | 61.1% | 0.3pp |
+| `select-duo` | 61.8% (947) | 61.6% (944) | 61.7% | 0.2pp |
+| **`select-mixed`** | **63.0% (965)** | **62.9% (963)** | **62.9%** | 0.1pp |
+
+| comparison | run 1 | run 2 |
+| --- | --- | --- |
+| `inline+evidence` → `select-mixed` | +2.4pp, p=0.0001 | +2.2pp, p=0.0002 |
+| `select` → `select-mixed` | +1.7pp, p=0.0095 | +1.8pp, p=0.0046 |
+| `inline+evidence` → `select` | +0.7pp, p=0.28 | +0.3pp, p=0.65 |
+
+Two consecutive runs, both at p<0.01, +1.7 and +1.8pp — which is the bar ADR-184 sets. So
+**`select-mixed` is adopted**: three prompt styles and a selector is the recommended
+multi-call path, at four calls per question, and the dev floors now include it (62.5%,
+tolerance 4pp) so a regression fails the build rather than becoming a paragraph.
+
+At 1,532 questions the arms repeat within 0.3pp, so the remaining differences are real:
+selection over three samples of one prompt is worth nothing (+0.3 to +0.7pp, p=0.28 and
+0.65), and two prompts are worth less than three (+1.2pp for the third, p=0.013 across
+both runs).
 
 ## Which split, and how many questions
 

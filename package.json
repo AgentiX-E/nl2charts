@@ -39,7 +39,8 @@
     "bench:bird:fetch:dev": "BIRD_SPLIT=dev node eval/bird/fetch.mjs",
     "bench:bird:fetch:train": "BIRD_SPLIT=train node eval/bird/fetch.mjs",
     "eval:preflight": "tsx eval/preflight.ts",
-    "bench:bird:recall": "tsx eval/bird/recall.ts"
+    "bench:bird:recall": "tsx eval/bird/recall.ts",
+    "bird:stratify": "node tools/stratify-mixed.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

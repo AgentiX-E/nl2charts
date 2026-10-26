@@ -82,6 +82,30 @@ cannot be argued with.
   measures every question, fails only when a split can never build distinct prompts, and
   reports the degenerate share as a cost.
 
+### Measured on the leaderboard split
+
+- **63.0% on the dev split with three prompt styles and a selector** (965/1,532), against
+  60.6% for the single sample and 61.3% for three samples of one prompt. Since the dev
+  split is the one published leaderboards report, this is the first number here that can
+  be compared with another system directly. Paired: +2.4pp over `inline+evidence`
+  (23 won / 60 lost, p=0.0001) and +1.7pp over `select` (34/60, p=0.0095).
+- **Selection over three samples of one prompt is worth nothing at 1,532 questions**:
+  +0.7pp, p=0.28. The same comparison read +2.6pp once and +0.6pp once at 498 questions;
+  the larger split settles it.
+- **Two prompts are not enough**: `select-duo` reaches 61.8% with three calls and loses to
+  the trio by 1.2pp (p=0.0096), so the third source earns its call only inside the trio.
+
+### Adopted
+
+- **Three prompt styles and a selector, four calls per question.** Two consecutive dev-split
+  runs at p<0.01 (+1.7pp p=0.0095, +1.8pp p=0.0046 against `select`; +2.4pp p=0.0001 and
+  +2.2pp p=0.0002 against the single sample) meet the ADR-184 bar, which no mechanism has
+  met since diagnosed repair. The dev split now carries floors for the five arms it always
+  runs (`names` 41.5, `inline+evidence` 60.5, `metadata+evidence` 61.0, `select` 60.9,
+  `select-mixed` 62.5), so a regression fails the build instead of becoming a paragraph.
+  The user guide's recipe replaces "three samples and a selector" with the three prompt
+  styles that were actually measured.
+
 ### Changed
 
 - **`ai` bundle budget 35,000 → 36,000 gzip bytes** for the pairwise selector, reviewed

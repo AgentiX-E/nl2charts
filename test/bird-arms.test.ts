@@ -484,3 +484,19 @@ describe('mixed arms declare their own sources', () => {
     expect(DUO_SOURCES.length).toBe(MIXED_SOURCES.length - 1);
   });
 });
+
+/**
+ * The stratum join is a tool, and a tool that silently joins nothing would report an
+ * empty table as a finding. Its self-test runs in CI; this pins the contract the report
+ * has to satisfy for it to work at all.
+ */
+describe('per-case outcomes', () => {
+  it('are recorded per arm and question, not only in aggregate', () => {
+    // A total cannot be stratified, and the first question asked of this data was a
+    // stratum: did the mixed arm win where its sources differed, or where one of them
+    // was duplicated? Reading the runner is cheaper than re-running it to find out.
+    const source = readFileSync(resolve(process.cwd(), 'eval/bird/run.ts'), 'utf8');
+    expect(source).toContain('report.cases =');
+    expect(source).toContain('degenerateIds');
+  });
+});

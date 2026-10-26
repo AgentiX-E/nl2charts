@@ -154,60 +154,58 @@ timeline would be a claim, and the claim is exactly what failed.
 
 ## Choosing among candidates
 
-One sample per question is the default. Three samples plus a model that picks between
-them measured **+2.6pp over majority voting** in one BIRD Mini-Dev run and **+0.6pp
-when repeated**, with five candidates doing no better than three — so treat this as a
-capability to try on your data, not as a known improvement. The recipe is four steps
-and no new dependency:
+One sample per question is the default and the cheapest. If you can pay four calls, the
+measured recipe is **three different prompts and a selector**, not three samples of one
+prompt:
+
+| approach | calls | accuracy on the dev split (1,532 questions, two runs) |
+| --- | --- | --- |
+| one sample | 1 | 60.6% |
+| three samples of one prompt + selector | 4 | 61.1% (no better than one sample: p=0.28 and 0.65) |
+| two prompt styles + selector | 3 | 61.7% |
+| **three prompt styles + selector** | 4 | **62.9%** (+2.2pp over the single sample, p=0.0002) |
+
+The three styles are the ones whose combination was measured: the dataset's per-question
+hint attached to the columns, curated column notes, and literal values resolved against the
+database. Same selector, same model, same four calls — only where the candidates come from
+changes.
 
 ```ts
 import { chooseCandidate, createPipeline, createHttpProvider } from '@agentix-e/nl2charts-ai';
 
 const provider = createHttpProvider({ baseUrl, apiKey, model });
-const pipeline = createPipeline({ provider, temperature: 0.7 });
+const styles = [
+  { definitions: inlineGlossary, evidence: hint },              // definitions on the column line
+  { notes: true, evidence: hint },                              // curated column notes
+  { definitions: inlineGlossary, evidence: hint, values: literals }, // plus resolved literals
+];
 
 const candidates = [];
-for (let sample = 0; sample < 3; sample += 1) {
+for (const prompt of styles) {
+  const pipeline = createPipeline({ provider, prompt });
   const { sql } = await pipeline.ask({ question, schema });
-  const result = await run(sql);              // your engine, read-only
+  const result = await run(sql);               // your engine, read-only
   if (result.ok) candidates.push({ sql, rows: result.rows });
 }
 
 const { sql, decided } = await chooseCandidate(provider, question, candidates);
 ```
 
-Three things worth knowing before you turn it on:
+Four things worth knowing before you turn it on:
 
-- **It costs three extra calls**, and on a schema the model already understands the
-  gain is inside the noise: the two runs that measured it disagree (+2.6pp, then
-  +0.6pp). Measure it on your own questions before paying for it.
-- **`decided: false` is not an error.** It means the reply carried no usable index;
-  the chosen candidate is then the first one, which is what a single call would have
-  returned. Log the rate — a selector that stops answering is a prompt regression,
-  not a model regression.
-- **Only executed candidates are offered.** A statement that failed to run is not a
-  candidate, and a selector shown one would have to guess whether it was broken.
-
-### What selection can and cannot buy you
-
-Before paying for candidates, it is worth measuring the ceiling: how often the set you
-generated contains a correct statement at all. If it rarely does, a better selector has
-nothing to select from, and the money belongs in the generator. `withCallCounter` gives
-you the other half of the same ledger — what the pipeline actually spent:
-
-```ts
-import { createPipeline, createHttpProvider, withCallCounter } from '@agentix-e/nl2charts-ai';
-
-const counter = withCallCounter(createHttpProvider({ baseUrl, apiKey, model }));
-const pipeline = createPipeline({ provider: counter.provider, temperature: 0.7 });
-
-await pipeline.ask({ question, schema });
-counter.calls();  // 1, or more when a repair ran or a plan was written
-```
-
-Count rather than infer: an arm's own configuration does not know that writing a plan is
-a second call or that the selector is a third, and a cost that is inferred is a cost that
-can be wrong in the flattering direction.
+- **It costs four calls**, and on a split of 1,532 questions that is worth +2.2 to +2.4pp
+  with p≤0.0002 in two consecutive runs. On 498 questions the same effect was only
+  p≈0.02, which is why the smaller split could not settle it.
+- **Same-prompt sampling is not a substitute.** Three samples at temperature 0.7 agree
+  90% of the time and add nothing measured at 1,532 questions. Diversity of *prompt* is
+  what moves the number.
+- **`decided: false` is not an error.** It means the reply carried no usable index; the
+  chosen candidate is then the first one, which is what a single call would have returned.
+  Log the rate — a selector that stops answering is a prompt regression, not a model
+  regression.
+- **The selector still leaves 2.6pp on the table**: its candidate set contains a correct
+  statement 65.6% of the time and it returns 62.9%. That gap is the honest description of
+  what this mechanism has not yet solved.
 
 ## Repairing a rejected statement
 

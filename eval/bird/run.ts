@@ -1137,16 +1137,17 @@ async function main() {
     // guard's mistake, in the same family as applying one split's arm list to another.
     // What must hold is that the sources *can* differ; how often they cannot is measured
     // here and reported as a cost, not assumed away.
-    const distinctShare = (sources: readonly string[]): { withAllDistinct: number; degenerate: number } => {
-      let withAllDistinct = 0;
+    const distinctShare = (sources: readonly string[]): { distinct: string[]; degenerate: string[] } => {
+      const distinct: string[] = [];
+      const degenerate: string[] = [];
       for (const question of cases) {
         const built = sources.map((source) => {
           const arm = resolveArm(source) as Arm;
           return buildSqlPrompt(question.question, schemas.get(question.db_id) as SchemaTable[], promptFor(arm, question, blocksFor(arm, question)));
         });
-        if (new Set(built).size === sources.length) withAllDistinct += 1;
+        (new Set(built).size === sources.length ? distinct : degenerate).push(String(question.question_id));
       }
-      return { withAllDistinct, degenerate: cases.length - withAllDistinct };
+      return { distinct, degenerate };
     };
     report.mixedCandidatePrompts = config.arms
       .map((name) => resolveArm(name))
@@ -1154,16 +1155,20 @@ async function main() {
       .map((arm) => {
         const sources = arm.mixed as readonly string[];
         const counted = distinctShare(sources);
-        if (counted.withAllDistinct === 0) {
+        if (counted.distinct.length === 0) {
           throw new Error(`arm ${arm.name} builds no question with ${String(sources.length)} distinct prompts from ${sources.join(', ')}; it would pay ${String(sources.length)} times for one opinion on every case`);
         }
         return {
           arm: arm.name,
           sources,
           questions: cases.length,
-          withAllDistinct: counted.withAllDistinct,
-          degenerate: counted.degenerate,
-          degenerateShare: counted.degenerate / Math.max(1, cases.length),
+          withAllDistinct: counted.distinct.length,
+          degenerate: counted.degenerate.length,
+          degenerateShare: counted.degenerate.length / Math.max(1, cases.length),
+          // The ids, not only the count: the question "did the trio win on the diverse
+          // questions or on the duplicated ones" is a stratum, and a stratum is a join
+          // between these ids and the per-case outcomes.
+          degenerateIds: counted.degenerate,
         };
       });
     report.arms = [];
@@ -1570,6 +1575,13 @@ async function main() {
 
   report.arms = armReports;
   report.ablations = ablations;
+  // Per-case outcomes, because a per-arm total cannot answer "on which questions did this
+  // lever work". The first question it is needed for: whether the mixed arm wins because
+  // its third source is distinct on 35% of cases, or because a duplicated candidate is a
+  // frequency signal on the other 65%. That is a stratum, and a stratum needs rows.
+  report.cases = [...outcomes.entries()].flatMap(([name, runs]) =>
+    runs.map((run) => ({ arm: name, id: run.id, passed: run.passed, reason: run.reason, calls: run.calls })),
+  );
   report.failures = Object.fromEntries(
     [...outcomes.entries()].map(([name, runs]) => [
       name,

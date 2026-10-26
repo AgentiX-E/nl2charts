@@ -85,6 +85,10 @@ jobs:
         run: node tools/check-secrets.mjs --self-test
       - name: Benchmark floor self-test
         run: node tools/check-bird-baseline.mjs --self-test
+      - name: Stratification self-test
+        # The stratum join is how a mixed arm's gain gets attributed, so the join itself
+        # is tested rather than trusted.
+        run: node tools/stratify-mixed.mjs --self-test
       - name: Upload coverage
         if: always()
         uses: actions/upload-artifact@v5
