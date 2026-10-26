@@ -7,9 +7,12 @@ name: bird-model
 # model and the fine-tuning around it, so the model is measured as a variable rather
 # than argued about: identical questions, identical pinned inputs, identical arms.
 #
-# No accuracy floor runs here. The floors in `eval/baseline/bird.json` were derived
-# from DeepSeek runs; applying them to another model would report a floor miss that
-# says nothing about either.
+# This job runs the same gate as the DeepSeek jobs. The floors in `eval/baseline/bird.json`
+# name the model they were taken on (`floorModel`), so a run by another model is measured
+# rather than failed on an accuracy threshold that says nothing about either — while the
+# funnel, cost, empty-lever, A/A and provenance checks still apply. Before that, this
+# workflow skipped the gate entirely, which is how a cross-model run came to have no
+# structural checks at all.
 
 on:
   workflow_dispatch:
@@ -34,6 +37,10 @@ on:
         description: Questions to score (blank = the whole split)
         required: false
         default: ''
+      split:
+        description: 'minidev or dev (dev is the split leaderboards report)'
+        required: false
+        default: 'minidev'
       concurrency:
         description: Parallel calls (a reasoning model needs fewer, and a slow endpoint more time)
         required: false
@@ -45,7 +52,7 @@ on:
 
 jobs:
   model:
-    name: BIRD Mini-Dev with ${{ inputs.model }}
+    name: BIRD ${{ inputs.split }} with ${{ inputs.model }}
     runs-on: ubuntu-latest
     timeout-minutes: 300
     concurrency:
@@ -59,6 +66,7 @@ jobs:
       LLM_MODEL: ${{ inputs.model }}
       BIRD_ARMS: ${{ inputs.arms }}
       BIRD_AA: ${{ inputs.aa }}
+      BIRD_SPLIT: ${{ inputs.split }}
       # Not eight: a different endpoint has a different rate limit, and a throttled run
       # measures the queue. The provider retries 429 with backoff on top of this.
       BIRD_CONCURRENCY: ${{ inputs.concurrency }}
@@ -76,8 +84,13 @@ jobs:
       - name: Cache the dataset
         uses: actions/cache@v4
         with:
-          path: eval/.cache/bird/minidev
-          key: bird-minidev-v3-${{ runner.os }}
+          # Both splits are cached by their own key; a dev run that found the Mini-Dev
+          # cache would score the wrong questions, and the fetch step would quietly
+          # return early because a manifest already existed.
+          path: |
+            eval/.cache/bird/minidev
+            eval/.cache/bird/dev
+          key: bird-${{ inputs.split }}-v3-${{ runner.os }}
       - name: Cache the training corpus
         uses: actions/cache@v4
         with:
@@ -88,8 +101,8 @@ jobs:
         with:
           path: eval/.cache/bird/values
           key: bird-values-v1-${{ runner.os }}
-      - name: Fetch Mini-Dev
-        run: node eval/bird/fetch.mjs
+      - name: Fetch the split
+        run: pnpm bench:bird:fetch
       - name: Fetch the training corpus
         run: pnpm bench:bird:fetch:train
       # This is where a wrong key, a wrong model name or a throttled account shows up
@@ -102,6 +115,11 @@ jobs:
         run: pnpm bench:bird
         env:
           BIRD_LIMIT: ${{ inputs.limit }}
+      - name: Structural gate
+        # Accuracy floors are skipped when the model differs from `floorModel`; everything
+        # else — expected arms, funnel arithmetic, cost provenance, empty levers, A/A — is
+        # not, and applies to any model.
+        run: pnpm gate:bird
       - name: Publish summary
         if: always()
         run: node tools/bird-summary.mjs >> "$GITHUB_STEP_SUMMARY"

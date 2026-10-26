@@ -471,7 +471,7 @@ describe('mixed arms declare their own sources', () => {
   const mixed = ARMS.filter((arm) => arm.mixed !== undefined);
 
   it('has at least the two arms under test', () => {
-    expect(mixed.map((arm) => arm.name).sort()).toEqual(['select-cross', 'select-duo', 'select-mixed', 'select-tagged']);
+    expect(mixed.map((arm) => arm.name).sort()).toEqual(['select-cross', 'select-duo', 'select-mixed', 'select-tagged', 'vote-cross', 'vote-mixed']);
   });
 
   it.each(mixed.map((arm) => [arm.name, arm] as const))('%s: candidates equal sources, and every source generates once', (name, arm) => {
@@ -538,5 +538,43 @@ describe('cross-model candidate sources', () => {
     const cross = CROSS_SOURCES.map((source) => parseMixedSource(source).arm.replace('@second', ''));
     expect([...cross].sort()).toEqual([...trio].sort());
     expect(CROSS_SOURCES.filter((source) => parseMixedSource(source).provider === 'second')).toHaveLength(1);
+  });
+});
+
+/**
+ * A floor is a claim about three coordinates, not two.
+ *
+ * The baseline stated the split and the arms and left the model implicit, so `bird-model`
+ * — the workflow whose whole purpose is another model — skipped the gate entirely, taking
+ * the funnel, cost and empty-lever checks with it. A cross-model run therefore had no
+ * structural gate at all, and nobody noticed because nothing was asked to notice.
+ */
+describe('baseline coordinates', () => {
+  const baseline = JSON.parse(readFileSync(resolve(process.cwd(), 'eval/baseline/bird.json'), 'utf8')) as {
+    floors: Record<string, Record<string, number>>;
+    floorModel?: Record<string, string>;
+    scoredBySplit?: Record<string, number>;
+  };
+
+  it('names the model behind every set of floors', () => {
+    for (const split of Object.keys(baseline.floors)) {
+      expect(baseline.floorModel?.[split], split).toBeTruthy();
+    }
+  });
+
+  it('states how many questions each floored split has, so a shrunken sample is caught', () => {
+    // The check compared every split against Mini-Dev's 500, which made a dev run scoring
+    // 600 of 1,532 questions look like a full sample.
+    for (const split of Object.keys(baseline.floors)) {
+      expect(baseline.scoredBySplit?.[split], split).toBeGreaterThan(0);
+    }
+  });
+
+  it('gates another model on structure rather than on an accuracy floor from DeepSeek', () => {
+    const workflow = readFileSync(resolve(process.cwd(), '.github/workflows/bird-model.yml'), 'utf8');
+    // Both halves matter: without the gate step a cross-model run is unguarded, and without
+    // the split input the only split it can guard is Mini-Dev.
+    expect(workflow).toContain('pnpm gate:bird');
+    expect(workflow).toContain('BIRD_SPLIT');
   });
 });

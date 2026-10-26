@@ -6,95 +6,6 @@ cannot be argued with.
 
 ## Unreleased
 
-### Fixed
-
-- **Two numbers in the benchmark report were derived from a field that meant something
-  else.** `select5` published `repaired: 496` of 498 — samples per question, counted as
-  repair attempts, on an arm with no repair loop — and the cost of selection was computed
-  from generation counts, which excluded the selector's own call, so `select → select5`
-  reported `extraCallsPerCase: 0` and printed as free. `attempts` now counts generations
-  inside a repair loop and nothing else, `repaired` is reported only by an arm that has one,
-  and every case records `calls` counted by `withCallCounter` around the provider. The
-  gate rejects an arm whose mean calls do not exceed its sample count, an arm that reports
-  repaired cases with no funnel, and an arm with no cost at all — and it caught the
-  selector call missing from the first version of the counter, one run after it was
-  written.
-
-### Added
-
-- **`withCallCounter`** (`@agentix-e/nl2charts-ai`): a provider wrapper that counts the
-  calls it was asked to make, so a mechanism is priced by what it spent rather than by what
-  its configuration implies.
-- **The candidate ceiling.** An arm that generates several candidates now reports
-  `candidateRecall` (how often the set contained a correct statement) and `selectionLoss`
-  (how often it contained one and the arm returned another). A selector's score alone
-  cannot distinguish "no candidate was right" from "the selector threw the right one
-  away", and those call for opposite next steps.
-- **`select-mixed`**: three candidates from three measured prompt styles — the dataset
-  hint, the curated notes, and value grounding — then the same selector. The arm exists to
-  separate *sampler* diversity from *prompt* diversity; the dry run fails if two of its
-  sources build the same prompt, because three identical candidates agree unanimously and
-  read as "diversity does not help" when there was never any.
-- **`select-pair`** and `chooseCandidatePairwise`: the same three candidates compared two
-  at a time in `k - 1` calls, which is the shape CHASE-SQL's selector has. The refactor
-  that shares its rules block with the absolute prompt leaves that prompt byte-identical,
-  so earlier `select` numbers stay comparable.
-
-### Measured
-
-- **The candidate ceiling, and where the remaining gap is.** With the new instrument, the
-  best arms hold a correct statement in their candidate set 61–65% of the time and return
-  57–60%: three to five points are pure selection loss. `select-mixed` — three prompts
-  instead of three samples of one — is **60.4%** against `select`'s 57.6% at the same four
-  calls (+2.8pp, 10/24, p=0.024), and beats `select5` (59.2%) with two fewer calls.
-- **A counted cost found a bug in its own first version.** The gate rejected the run with
-  `select samples 3 times and selects with the model and reports 3 calls per case`: the
-  selector call was made on the unwrapped provider. Fixed, and the check now
-  distinguishes a model selector from a majority vote, which correctly spends exactly one
-  call per sample.
-- **`select-mixed` replicated, `select-pair` did not.** Two runs of the same code put
-  `select-mixed` at **60.4%** against `select`'s 57.6% — +2.8pp in both (10/24 p=0.024,
-  11/25 p=0.029), same four calls, A/A pair 0.2pp apart. The pre-registered bar is p<0.01
-  twice (ADR-184), which 498 questions cannot resolve for a 2.8pp effect, so the decision
-  moves to the dev split where it can.
-- **`select-pair`** (binary comparison, `k - 1` calls) reached 58.4% against 57.6%
-  (+0.8pp, 17/20, p=0.74) while discarding *more* of its candidate set: 25 cases against
-  20. The absolute prompt is not where the selector loses its points. Out of the default
-  chain, kept in the catalogue with the numbers.
-
-### Added
-
-- **`select-duo`**: two prompts that always differ — the dataset hint and the curated
-  notes — with the same selector, three calls. The dry run showed that `select-mixed`'s
-  third source (`values`) is an exact duplicate of its first on 326 of 498 Mini-Dev
-  questions, because the value block only exists when the question names a literal; the
-  trio was buying two opinions for three calls on two thirds of the set. The duo prices
-  what the third candidate contributed.
-- **A mixed arm now declares its own source list**, and `vote` must equal its length:
-  the two fields were independent, so a mismatch would have spent three generations and
-  reported two.
-
-### Fixed
-
-- **The mixed-prompt guard was split-dependent.** It compared the three prompts on the
-  first question of a split; the dev split's first question names no literal, so the guard
-  failed a correct arm and stopped a 1,532-question run before a single model call. It now
-  measures every question, fails only when a split can never build distinct prompts, and
-  reports the degenerate share as a cost.
-
-### Measured on the leaderboard split
-
-- **63.0% on the dev split with three prompt styles and a selector** (965/1,532), against
-  60.6% for the single sample and 61.3% for three samples of one prompt. Since the dev
-  split is the one published leaderboards report, this is the first number here that can
-  be compared with another system directly. Paired: +2.4pp over `inline+evidence`
-  (23 won / 60 lost, p=0.0001) and +1.7pp over `select` (34/60, p=0.0095).
-- **Selection over three samples of one prompt is worth nothing at 1,532 questions**:
-  +0.7pp, p=0.28. The same comparison read +2.6pp once and +0.6pp once at 498 questions;
-  the larger split settles it.
-- **Two prompts are not enough**: `select-duo` reaches 61.8% with three calls and loses to
-  the trio by 1.2pp (p=0.0096), so the third source earns its call only inside the trio.
-
 ### Adopted
 
 - **Three prompt styles and a selector, four calls per question.** Two consecutive dev-split
@@ -105,32 +16,6 @@ cannot be argued with.
   `select-mixed` 62.5), so a regression fails the build instead of becoming a paragraph.
   The user guide's recipe replaces "three samples and a selector" with the three prompt
   styles that were actually measured.
-
-### Added
-
-- **`select-cross`**: the adopted three-prompt candidate set with its first candidate
-  generated by a **second model** (`inline+evidence@second`), same prompt, same count,
-  same four calls — one lever from `select-mixed`. The hypothesis is that sampling one
-  model buys paraphrases while a second model buys different mistakes, and only the
-  second can lift the ceiling the selector is bounded by. The harness refuses to run the
-  arm without `BIRD_SECOND_MODEL` and a second key, and says which one is missing.
-
-### Fixed
-
-- **A connection that dies is not an answer, and it no longer ends a run.** Two failures
-  escaped the provider's retry loop: a `fetch` that rejects, and a body that dies mid-read.
-  The second one ended a 1,532-question dev run at case ~700 with `llm response is not
-  JSON` and no retry, because the body was read outside the attempt. Both are retried now,
-  like a 429. A body that arrives whole and is not JSON is still *not* retried — that is an
-  answer from the wrong endpoint, and it is reported as such.
-- **One case cannot take the run down.** A provider error raised outside the per-sample
-  catch — the selector's own call, an engine call — used to escape the pool and kill the
-  process. Every case now runs inside a guard that records the error as an `llm` failure,
-  so the failure-share limit decides whether a run is publishable instead of a stack trace.
-- **An outage on a voting arm was counted as three wrong statements.** Samples that died
-  at the model were indistinguishable from samples the engine refused, so `no sample
-  survived guard and execution` covered both and the accuracy absorbed the endpoint's
-  mood. The two are now told apart, and the outage case is counted as `llm`.
 
 ### Measured
 
@@ -155,7 +40,55 @@ cannot be argued with.
   adopted: the candidate set gained 38 answers and the selector lost 22 of them (44 → 66
   cases discarded), which is where the next work is.
 
+- **63.0% on the dev split with three prompt styles and a selector** (965/1,532), against
+  60.6% for the single sample and 61.3% for three samples of one prompt. Since the dev
+  split is the one published leaderboards report, this is the first number here that can
+  be compared with another system directly. Paired: +2.4pp over `inline+evidence`
+  (23 won / 60 lost, p=0.0001) and +1.7pp over `select` (34/60, p=0.0095).
+- **Selection over three samples of one prompt is worth nothing at 1,532 questions**:
+  +0.7pp, p=0.28. The same comparison read +2.6pp once and +0.6pp once at 498 questions;
+  the larger split settles it.
+- **Two prompts are not enough**: `select-duo` reaches 61.8% with three calls and loses to
+  the trio by 1.2pp (p=0.0096), so the third source earns its call only inside the trio.
+
+- **The candidate ceiling, and where the remaining gap is.** With the new instrument, the
+  best arms hold a correct statement in their candidate set 61–65% of the time and return
+  57–60%: three to five points are pure selection loss. `select-mixed` — three prompts
+  instead of three samples of one — is **60.4%** against `select`'s 57.6% at the same four
+  calls (+2.8pp, 10/24, p=0.024), and beats `select5` (59.2%) with two fewer calls.
+- **A counted cost found a bug in its own first version.** The gate rejected the run with
+  `select samples 3 times and selects with the model and reports 3 calls per case`: the
+  selector call was made on the unwrapped provider. Fixed, and the check now
+  distinguishes a model selector from a majority vote, which correctly spends exactly one
+  call per sample.
+- **`select-mixed` replicated, `select-pair` did not.** Two runs of the same code put
+  `select-mixed` at **60.4%** against `select`'s 57.6% — +2.8pp in both (10/24 p=0.024,
+  11/25 p=0.029), same four calls, A/A pair 0.2pp apart. The pre-registered bar is p<0.01
+  twice (ADR-184), which 498 questions cannot resolve for a 2.8pp effect, so the decision
+  moves to the dev split where it can.
+- **`select-pair`** (binary comparison, `k - 1` calls) reached 58.4% against 57.6%
+  (+0.8pp, 17/20, p=0.74) while discarding *more* of its candidate set: 25 cases against
+  20. The absolute prompt is not where the selector loses its points. Out of the default
+  chain, kept in the catalogue with the numbers.
+
+- **Labelling candidates by origin moved the selector's preference and not its accuracy.**
+  `select-tagged` — `select-cross` with each candidate's source in front of it — scored
+  63.7% against 63.3% (+0.46pp, 26 won / 33 lost, p=0.43) and lost 52 of its ceiling instead
+  of 54. The pre-registered criterion (loss ≈45) was not met, so "tell the selector more"
+  closes the way "ask it differently" did last week.
+- **A better candidate set converts at half rate, which is why the ceiling gains do not
+  arrive.** On the 37 questions where the cross-model set alone held a correct statement,
+  the selector returned it 18 times; on the 991 questions both sets held, the two arms
+  returned the same answers (958 vs 960). Returned accuracy has now sat at 63.0-63.7% across
+  five dev runs while the ceiling moved from 65.3% to 67.8%.
+
 ### Added
+
+- **`vote-mixed` / `vote-cross`**: the same diverse candidate sets aggregated by **modal
+  result** instead of by a model — one lever from `select-mixed` / `select-cross`, three
+  calls instead of four. After two failed attempts to improve the selector's judgement, the
+  free aggregator is the remaining option that cannot be talked into a plausible wrong
+  answer; the arms report `agreement` so a weak majority is visible.
 
 - **`select-tagged`** and a `source` field on `Candidate`: the cross arm's three candidates
   with their origin in front of them (`1. [inline+evidence@second] SELECT …`), one lever
@@ -163,10 +96,97 @@ cannot be argued with.
   is given — the class of change ADR-194 says is worth testing. An unlabelled candidate
   renders exactly as before, which the prompt tests pin.
 
+- **`select-cross`**: the adopted three-prompt candidate set with its first candidate
+  generated by a **second model** (`inline+evidence@second`), same prompt, same count,
+  same four calls — one lever from `select-mixed`. The hypothesis is that sampling one
+  model buys paraphrases while a second model buys different mistakes, and only the
+  second can lift the ceiling the selector is bounded by. The harness refuses to run the
+  arm without `BIRD_SECOND_MODEL` and a second key, and says which one is missing.
+
+- **`select-duo`**: two prompts that always differ — the dataset hint and the curated
+  notes — with the same selector, three calls. The dry run showed that `select-mixed`'s
+  third source (`values`) is an exact duplicate of its first on 326 of 498 Mini-Dev
+  questions, because the value block only exists when the question names a literal; the
+  trio was buying two opinions for three calls on two thirds of the set. The duo prices
+  what the third candidate contributed.
+- **A mixed arm now declares its own source list**, and `vote` must equal its length:
+  the two fields were independent, so a mismatch would have spent three generations and
+  reported two.
+
+- **`withCallCounter`** (`@agentix-e/nl2charts-ai`): a provider wrapper that counts the
+  calls it was asked to make, so a mechanism is priced by what it spent rather than by what
+  its configuration implies.
+- **The candidate ceiling.** An arm that generates several candidates now reports
+  `candidateRecall` (how often the set contained a correct statement) and `selectionLoss`
+  (how often it contained one and the arm returned another). A selector's score alone
+  cannot distinguish "no candidate was right" from "the selector threw the right one
+  away", and those call for opposite next steps.
+- **`select-mixed`**: three candidates from three measured prompt styles — the dataset
+  hint, the curated notes, and value grounding — then the same selector. The arm exists to
+  separate *sampler* diversity from *prompt* diversity; the dry run fails if two of its
+  sources build the same prompt, because three identical candidates agree unanimously and
+  read as "diversity does not help" when there was never any.
+- **`select-pair`** and `chooseCandidatePairwise`: the same three candidates compared two
+  at a time in `k - 1` calls, which is the shape CHASE-SQL's selector has. The refactor
+  that shares its rules block with the absolute prompt leaves that prompt byte-identical,
+  so earlier `select` numbers stay comparable.
+
 ### Changed
 
 - **`ai` bundle budget 35,000 → 36,000 gzip bytes** for the pairwise selector, reviewed
   and recorded in `budgets.json` rather than discovered by the gate.
+
+### Fixed
+
+- **The benchmark gate could not gate another model, so it did not run at all.**
+  `bird-model.yml` skipped `pnpm gate:bird` because the accuracy floors were taken on
+  DeepSeek — and that skipped the repair-funnel arithmetic, cost accounting, empty-lever
+  checks and the A/A tolerance with them. Floors are now scoped by model
+  (`baseline.floorModel`): a run by another model is measured rather than failed, and every
+  structural check still applies. The workflow gains a `split` input and runs the gate.
+- **The sample-size check was not split-scoped.** Every split was compared against
+  Mini-Dev's 500 questions, so a dev run scoring 600 of 1,532 questions passed a check whose
+  only job is to notice a shrunken sample. `baseline.scoredBySplit` states each split's size.
+- **Every dev artifact named the wrong split.** The top-level `split` was the literal
+  `mini_dev_sqlite` while `selection.split` said `dev`; nothing read the duplicate, so it
+  stayed wrong. It is derived from the split now, and the gate rejects a report whose two
+  fields disagree.
+- **A cross-model arm did not record which second model wrote its candidate.** The artifact
+  now carries `secondModel`, and the gate refuses a report that draws an `@second` candidate
+  without naming the model behind it — `select-cross`'s 63.5% had no subject without it.
+
+- **A connection that dies is not an answer, and it no longer ends a run.** Two failures
+  escaped the provider's retry loop: a `fetch` that rejects, and a body that dies mid-read.
+  The second one ended a 1,532-question dev run at case ~700 with `llm response is not
+  JSON` and no retry, because the body was read outside the attempt. Both are retried now,
+  like a 429. A body that arrives whole and is not JSON is still *not* retried — that is an
+  answer from the wrong endpoint, and it is reported as such.
+- **One case cannot take the run down.** A provider error raised outside the per-sample
+  catch — the selector's own call, an engine call — used to escape the pool and kill the
+  process. Every case now runs inside a guard that records the error as an `llm` failure,
+  so the failure-share limit decides whether a run is publishable instead of a stack trace.
+- **An outage on a voting arm was counted as three wrong statements.** Samples that died
+  at the model were indistinguishable from samples the engine refused, so `no sample
+  survived guard and execution` covered both and the accuracy absorbed the endpoint's
+  mood. The two are now told apart, and the outage case is counted as `llm`.
+
+- **The mixed-prompt guard was split-dependent.** It compared the three prompts on the
+  first question of a split; the dev split's first question names no literal, so the guard
+  failed a correct arm and stopped a 1,532-question run before a single model call. It now
+  measures every question, fails only when a split can never build distinct prompts, and
+  reports the degenerate share as a cost.
+
+- **Two numbers in the benchmark report were derived from a field that meant something
+  else.** `select5` published `repaired: 496` of 498 — samples per question, counted as
+  repair attempts, on an arm with no repair loop — and the cost of selection was computed
+  from generation counts, which excluded the selector's own call, so `select → select5`
+  reported `extraCallsPerCase: 0` and printed as free. `attempts` now counts generations
+  inside a repair loop and nothing else, `repaired` is reported only by an arm that has one,
+  and every case records `calls` counted by `withCallCounter` around the provider. The
+  gate rejects an arm whose mean calls do not exceed its sample count, an arm that reports
+  repaired cases with no funnel, and an arm with no cost at all — and it caught the
+  selector call missing from the first version of the counter, one run after it was
+  written.
 
 ### Removed from the default chain
 

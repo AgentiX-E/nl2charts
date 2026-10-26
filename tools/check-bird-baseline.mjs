@@ -35,10 +35,21 @@ export function compare(report, baseline) {
     issues.push('BIRD1: the report has no selection.scored, so the sample size is unknown');
     return { issues, notes };
   }
+  // A report that names two splits is a report nobody can read. This one did: the top level
+  // said `mini_dev_sqlite` on every dev run while `selection.split` said `dev`, and the
+  // field was read by nothing, so it stayed wrong for four releases. Keeping the check in
+  // the gate rather than deleting the field means the disagreement cannot come back.
+  if (report?.split !== undefined && report.split !== split) {
+    issues.push(`BIRD1: the report says split ${String(report.split)} at the top level and ${split} in selection; one of them is wrong`);
+  }
+
   // A smaller sample is a different measurement, not a worse model: comparing the
-  // two would attribute a dataset change to the pipeline.
-  if (scored < Math.floor(baseline.scored * 0.95)) {
-    issues.push(`BIRD1: scored ${scored} questions against a baseline of ${baseline.scored}; the sample changed`);
+  // two would attribute a dataset change to the pipeline. The expected size is a
+  // property of the split — a dev run compared against Mini-Dev's 500 would pass while
+  // scoring a third of its own split.
+  const expectedScored = baseline.scoredBySplit?.[split] ?? baseline.scored;
+  if (scored < Math.floor(expectedScored * 0.95)) {
+    issues.push(`BIRD1: scored ${scored} questions against a baseline of ${expectedScored}; the sample changed`);
   }
 
   // Which arms are expected is a property of the split, not of the project. The dev split
@@ -137,8 +148,39 @@ export function compare(report, baseline) {
     }
   }
 
+  // Which model produced the numbers is a third coordinate of a floor, and it was missing.
+  // `bird-model.yml` therefore skipped this whole tool for cross-model runs — taking the
+  // funnel, cost and empty-lever checks with it — because an accuracy floor taken on
+  // DeepSeek says nothing about GLM. Now the floors apply only when the model matches,
+  // and everything else in this file applies always.
+  const model = report?.model;
+  const floorModel = baseline.floorModel?.[split];
+  if (model === undefined) {
+    issues.push('BIRD1: the report does not name the model that produced it, so its floors cannot be attributed');
+  }
+  if (gated && floorModel === undefined) {
+    issues.push(`BIRD1: the floors for split ${split} do not say which model they were taken on`);
+  }
+  // A cross-model run must say which second model wrote the `@second` candidates: without
+  // it the artifact cannot be reproduced, and "the cross arm scored 63.5%" has no subject.
+  const usesSecond = (report.mixedCandidatePrompts ?? []).some((entry) => (entry.sources ?? []).some((source) => source.endsWith('@second')));
+  if (usesSecond && (report.secondModel === undefined || report.secondModel === null || report.secondModel === '')) {
+    issues.push('BIRD1: an arm drew candidates from a second model and the report does not say which one');
+  }
+  if (!usesSecond && typeof report.secondModel === 'string' && report.secondModel !== '') {
+    notes.push(`BIRD1: the report names a second model (${report.secondModel}) that no arm used`);
+  }
+
   if (floors === undefined) {
     notes.push(`BIRD1: no floors recorded for split ${split}; this run is a measurement, not a gate`);
+    return { issues, notes };
+  }
+  if (model === null) {
+    notes.push('BIRD1: this report was produced without a model (dry run); accuracy floors do not apply');
+    return { issues, notes };
+  }
+  if (floorModel !== undefined && model !== floorModel) {
+    notes.push(`BIRD1: the floors for ${split} were taken with ${floorModel} and this run used ${model}; accuracy is a measurement, the structural checks still hold`);
     return { issues, notes };
   }
   const tolerance = baseline.tolerancePp;
@@ -162,12 +204,14 @@ function selfTest() {
   const issues = [];
   const baseline = {
     scored: 100,
+    scoredBySplit: { minidev: 100, dev: 1532 },
     tolerancePp: 4,
     expectedArms: ['names', 'inline'],
     floors: { minidev: { names: 40, inline: 50 } },
+    floorModel: { minidev: 'deepseek-chat' },
   };
   const arm = (name, passed, total = 100, extra = {}) => ({ arm: name, passed, total, calls: { mean: 1, max: 1 }, ...extra });
-  const report = (arms, scored = 100, split = 'minidev') => ({ selection: { scored, split }, arms });
+  const report = (arms, scored = 100, split = 'minidev', model = 'deepseek-chat') => ({ selection: { scored, split }, model, arms });
   const fail = (result, count, why) => {
     if (result.issues.length !== count) issues.push(why);
   };
@@ -180,14 +224,14 @@ function selfTest() {
 
   const empty = compare({ arms: [] }, baseline);
 
-  const unstable = compare({ selection: { scored: 100, split: 'minidev' }, aa: { delta: 0.085 }, arms: [arm('names', 42), arm('inline', 51)] }, baseline);
+  const unstable = compare({ selection: { scored: 100, split: 'minidev' }, model: 'deepseek-chat', aa: { delta: 0.085 }, arms: [arm('names', 42), arm('inline', 51)] }, baseline);
   if (unstable.issues.length !== 1) issues.push('BIRD1 does not notice an A/A pair that disagrees beyond the tolerance');
 
   // A different split with its own arm list: three arms on dev must not be judged
   // against Mini-Dev's thirteen.
   const devRun = compare(
     report([arm('names', 647, 1532), arm('inline+evidence', 929, 1532), arm('metadata+evidence', 941, 1532)], 1532, 'dev'),
-    { ...baseline, armsBySplit: { dev: ['names', 'inline+evidence', 'metadata+evidence'] } },
+    { ...baseline, scoredBySplit: { ...baseline.scoredBySplit, dev: 1532 }, armsBySplit: { dev: ['names', 'inline+evidence', 'metadata+evidence'] } },
   );
   if (devRun.issues.length !== 0) {
     issues.push(`BIRD1 applies the Mini-Dev arm list to another split (${devRun.issues.join('; ')})`);
@@ -197,14 +241,79 @@ function selfTest() {
   const devMissing = compare(report([arm('names', 647, 1532)], 1532, 'dev'), {
     ...baseline,
     floors: { ...baseline.floors, dev: {} },
+    floorModel: { ...baseline.floorModel, dev: 'deepseek-chat' },
     armsBySplit: { dev: ['names', 'inline+evidence'] },
   });
   fail(devMissing, 1, 'BIRD1 does not enforce a split-specific arm list');
+
+  // The sample-size check must be split-scoped too. It was not: every split was measured
+  // against Mini-Dev's 500, so a dev run that scored 600 of 1,532 questions passed a check
+  // whose whole job is to notice a shrunken sample.
+  const shrunkDev = compare(report([arm('names', 300, 600), arm('inline+evidence', 360, 600)], 600, 'dev'), {
+    ...baseline,
+    armsBySplit: { dev: ['names', 'inline+evidence'] },
+  });
+  if (!shrunkDev.issues.some((issue) => issue.includes('sample changed'))) {
+    issues.push('BIRD1 compares a dev run against Mini-Dev and calls 600 of 1,532 questions a full sample');
+  }
+
+  // A report that names two splits. Every dev artifact said mini_dev_sqlite at the top
+  // level while selection said dev; the field was read by nothing, so nothing noticed.
+  const twoSplits = compare({ ...report([arm('names', 42), arm('inline', 51)]), split: 'mini_dev_sqlite' }, baseline);
+  if (!twoSplits.issues.some((issue) => issue.includes('one of them is wrong'))) {
+    issues.push('BIRD1 accepts a report whose two split fields disagree');
+  }
+
+  // A floor is a claim about (split, arms, model). A cross-model run must be measured
+  // rather than failed — but only the accuracy floor is skipped, not the rest.
+  const otherModel = compare(report([arm('names', 30), arm('inline', 20)], 100, 'minidev', 'glm-4.5'), baseline);
+  fail(otherModel, 0, 'BIRD1 fails another model against floors taken on DeepSeek');
+  if (!otherModel.notes.some((note) => note.includes('glm-4.5'))) {
+    issues.push('BIRD1 does not say which model the floors were taken with');
+  }
+  const otherModelBadFunnel = compare(
+    {
+      selection: { scored: 100, split: 'minidev' },
+      model: 'glm-4.5',
+      arms: [{ ...arm('inline+repair', 50), repair: { total: 100, firstPass: 90, ranOnceWrong: 0, repaired: 20, fixedByRepair: 5, stillFailing: 15, byClass: [] } }],
+    },
+    { ...baseline, expectedArms: ['inline+repair'] },
+  );
+  if (!otherModelBadFunnel.issues.some((issue) => issue.includes('does not add up'))) {
+    issues.push('BIRD1 skips its structural checks on a run by another model, which is why bird-model ran with no gate at all');
+  }
+
+  // Provenance: a report that omits the model, a floors table that omits the model it was
+  // taken on, and a cross-model arm with no second model named.
+  const anonymous = compare({ selection: { scored: 100, split: 'minidev' }, arms: [arm('names', 42), arm('inline', 51)] }, baseline);
+  if (!anonymous.issues.some((issue) => issue.includes('does not name the model'))) {
+    issues.push('BIRD1 accepts a report that does not name the model');
+  }
+  const unnamedFloors = compare(report([arm('names', 42), arm('inline', 51)]), { ...baseline, floorModel: {} });
+  if (!unnamedFloors.issues.some((issue) => issue.includes('which model they were taken on'))) {
+    issues.push('BIRD1 enforces floors that do not say which model they came from');
+  }
+  const crossWithoutSecond = compare(
+    {
+      ...report([arm('select-cross', 42)]),
+      mixedCandidatePrompts: [{ arm: 'select-cross', sources: ['inline+evidence@second', 'metadata+evidence', 'values'] }],
+    },
+    { ...baseline, expectedArms: ['select-cross'] },
+  );
+  if (!crossWithoutSecond.issues.some((issue) => issue.includes('does not say which one'))) {
+    issues.push('BIRD1 accepts a cross-model arm whose second model is not recorded');
+  }
+  const dryRun = compare({ ...report([arm('names', 42), arm('inline', 51)]), model: null }, baseline);
+  fail(dryRun, 0, 'BIRD1 fails a dry run against a model floor');
+  if (!dryRun.notes.some((note) => note.includes('without a model'))) {
+    issues.push('BIRD1 does not say that a dry run has no accuracy to gate');
+  }
 
   // The funnel that does not add up: 90 + 0 + 20 != 100.
   const badFunnel = compare(
     {
       selection: { scored: 498, split: 'minidev' },
+      model: 'deepseek-chat',
       arms: [
         {
           ...arm('inline+repair', 50),
@@ -222,14 +331,14 @@ function selfTest() {
   // count on an arm with no loop, a selector that costs nothing, and an arm whose cost
   // cannot be read at all.
   const lyingSamples = compare(
-    { selection: { scored: 100, split: 'minidev' }, arms: [arm('select5', 58, 100, { vote: 5, selector: 'model', calls: { mean: 5, max: 5 } })] },
+    { selection: { scored: 100, split: 'minidev' }, model: 'deepseek-chat', arms: [arm('select5', 58, 100, { vote: 5, selector: 'model', calls: { mean: 5, max: 5 } })] },
     { ...baseline, expectedArms: ['select5'] },
   );
   if (!lyingSamples.issues.some((issue) => issue.includes('selector call is not counted'))) {
     issues.push('BIRD1 does not notice a sampling arm whose selector call is missing from its cost');
   }
   const lyingRepair = compare(
-    { selection: { scored: 100, split: 'minidev' }, arms: [arm('select5', 58, 100, { vote: 5, selector: 'model', calls: { mean: 6, max: 6 }, repaired: 496 })] },
+    { selection: { scored: 100, split: 'minidev' }, model: 'deepseek-chat', arms: [arm('select5', 58, 100, { vote: 5, selector: 'model', calls: { mean: 6, max: 6 }, repaired: 496 })] },
     { ...baseline, expectedArms: ['select5'] },
   );
   if (!lyingRepair.issues.some((issue) => issue.includes('no repair funnel'))) {
@@ -238,14 +347,14 @@ function selfTest() {
   // ...and the opposite mistake: a majority vote spends exactly one call per sample, so
   // an arm whose selector is not the model must not be accused of hiding a selector call.
   const majorityPriced = compare(
-    { selection: { scored: 100, split: 'minidev' }, arms: [arm('vote', 55, 100, { vote: 3, selector: 'majority', calls: { mean: 3, max: 3 } })] },
+    { selection: { scored: 100, split: 'minidev' }, model: 'deepseek-chat', arms: [arm('vote', 55, 100, { vote: 3, selector: 'majority', calls: { mean: 3, max: 3 } })] },
     { ...baseline, expectedArms: ['vote'] },
   );
   if (majorityPriced.issues.length !== 0) {
     issues.push(`BIRD1 accuses a majority-vote arm of hiding a selector call (${majorityPriced.issues.join('; ')})`);
   }
   const unpriced = compare(
-    { selection: { scored: 100, split: 'minidev' }, arms: [{ arm: 'names', passed: 42, total: 100 }] },
+    { selection: { scored: 100, split: 'minidev' }, model: 'deepseek-chat', arms: [{ arm: 'names', passed: 42, total: 100 }] },
     { ...baseline, expectedArms: ['names'] },
   );
   if (!unpriced.issues.some((issue) => issue.includes('cannot be priced'))) {
@@ -254,7 +363,7 @@ function selfTest() {
 
   // The lever-with-no-input case: the arms are present, the blocks are not.
   const dryLever = compare(
-    { selection: { scored: 100, split: 'minidev' }, controls: { retrievedBlocks: 0, demonstrationBlocks: 0 }, arms: [arm('names', 42), arm('inline', 51)] },
+    { selection: { scored: 100, split: 'minidev' }, model: 'deepseek-chat', controls: { retrievedBlocks: 0, demonstrationBlocks: 0 }, arms: [arm('names', 42), arm('inline', 51)] },
     { ...baseline, expectedArms: ['names', 'inline', 'inline+retrieval', 'inline+icl'] },
   );
   if (dryLever.issues.filter((issue) => issue.includes('corpus is missing')).length !== 2) {
@@ -281,7 +390,7 @@ if (process.argv[2] === '--self-test') {
   const issues = selfTest();
   for (const issue of issues) console.error(issue);
   if (issues.length > 0) process.exit(1);
-  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, other split, unfloored arm, empty lever, a funnel that does not add up, a split-specific arm list, an uncounted selector call, a majority vote that spends exactly its samples, a repair count without a loop and an unpriced arm all behave');
+  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, a dev run measured against its own sample, two split fields that disagree, other split, other model, unfloored arm, empty lever, a funnel that does not add up, a split-specific arm list, an uncounted selector call, a majority vote that spends exactly its samples, a repair count without a loop, an unpriced arm, an unnamed model, floors from an unnamed model and a cross-model arm with no second model named all behave');
 } else {
   const reportPath = resolve(ROOT, 'eval/out/bird-eval.json');
   const baseline = JSON.parse(readFileSync(resolve(ROOT, 'eval/baseline/bird.json'), 'utf8'));
