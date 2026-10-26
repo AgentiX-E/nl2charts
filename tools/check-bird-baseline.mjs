@@ -170,6 +170,11 @@ export function compare(report, baseline) {
   if (!usesSecond && typeof report.secondModel === 'string' && report.secondModel !== '') {
     notes.push(`BIRD1: the report names a second model (${report.secondModel}) that no arm used`);
   }
+  // A judge swap is the one experiment whose result is unreadable without knowing who judged.
+  const judged = (report.arms ?? []).filter((arm) => arm.judge === 'second');
+  if (judged.length > 0 && (report.judgeModel === undefined || report.judgeModel === null || report.judgeModel === '')) {
+    issues.push(`BIRD1: ${judged.map((arm) => arm.arm).join(', ')} is judged by the second model and the report does not say which one`);
+  }
 
   if (floors === undefined) {
     notes.push(`BIRD1: no floors recorded for split ${split}; this run is a measurement, not a gate`);
@@ -303,6 +308,13 @@ function selfTest() {
   if (!crossWithoutSecond.issues.some((issue) => issue.includes('does not say which one'))) {
     issues.push('BIRD1 accepts a cross-model arm whose second model is not recorded');
   }
+  const judgedWithoutJudge = compare(
+    { ...report([arm('select-cross-judge', 42, 100, { vote: 3, selector: 'model', judge: 'second', calls: { mean: 4, max: 4 } })]), mixedCandidatePrompts: [{ arm: 'select-cross-judge', sources: ['inline+evidence@second', 'metadata+evidence', 'values'] }] },
+    { ...baseline, expectedArms: ['select-cross-judge'] },
+  );
+  if (!judgedWithoutJudge.issues.some((issue) => issue.includes('does not say which one'))) {
+    issues.push('BIRD1 accepts a judge swap whose judge is not recorded');
+  }
   const dryRun = compare({ ...report([arm('names', 42), arm('inline', 51)]), model: null }, baseline);
   fail(dryRun, 0, 'BIRD1 fails a dry run against a model floor');
   if (!dryRun.notes.some((note) => note.includes('without a model'))) {
@@ -390,7 +402,7 @@ if (process.argv[2] === '--self-test') {
   const issues = selfTest();
   for (const issue of issues) console.error(issue);
   if (issues.length > 0) process.exit(1);
-  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, a dev run measured against its own sample, two split fields that disagree, other split, other model, unfloored arm, empty lever, a funnel that does not add up, a split-specific arm list, an uncounted selector call, a majority vote that spends exactly its samples, a repair count without a loop, an unpriced arm, an unnamed model, floors from an unnamed model and a cross-model arm with no second model named all behave');
+  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, a dev run measured against its own sample, two split fields that disagree, other split, other model, unfloored arm, empty lever, a funnel that does not add up, a split-specific arm list, an uncounted selector call, a majority vote that spends exactly its samples, a repair count without a loop, an unpriced arm, an unnamed model, floors from an unnamed model and a cross-model arm with no second model named, a judge swap with no judge named all behave');
 } else {
   const reportPath = resolve(ROOT, 'eval/out/bird-eval.json');
   const baseline = JSON.parse(readFileSync(resolve(ROOT, 'eval/baseline/bird.json'), 'utf8'));

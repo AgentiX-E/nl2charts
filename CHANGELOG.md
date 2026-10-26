@@ -84,6 +84,18 @@ cannot be argued with.
 
 ### Added
 
+- **`select-cross-judge`**, and `judge` as an arm lever: the cross-model candidate set with its
+  selector call routed to the **second** model. Same candidates, same prompt, same four calls.
+  It exists to separate two causes of an asymmetry the last artifact contains — answers only
+  the second model's candidate got right are returned 47% of the time, answers only the primary
+  model's got right 87% — either the judge prefers its own generations or the second model's
+  correct answers are harder to recognise. The artifact now records `judgeModel` and each arm's
+  `judge`, and the gate refuses a judge swap whose judge is not named.
+- **Conversion in the stratification tool.** `tools/stratify-mixed.mjs` now reports, per pair,
+  the questions one set alone held, how many of those the arm actually returned, and how the
+  two arms did on the questions both held. A ceiling gain without a conversion rate was how a
+  2.4pp improvement in material came to be read as a 2.4pp improvement in accuracy (ADR-198).
+
 - **`vote-mixed` / `vote-cross`**: the same diverse candidate sets aggregated by **modal
   result** instead of by a model — one lever from `select-mixed` / `select-cross`, three
   calls instead of four. After two failed attempts to improve the selector's judgement, the

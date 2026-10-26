@@ -162,6 +162,19 @@ export interface Arm {
    * facts in front of it grow by one field. One lever from `select-cross`.
    */
   readonly sourcesVisible?: boolean;
+  /**
+   * Who judges the candidates: the primary model (default) or the second one.
+   *
+   * The selector is the same model that wrote one of the candidates, and the measured
+   * asymmetry is stark: when only the cross arm's set held the answer — the statement the
+   * *second* model wrote — the selector returned it 47% of the time, while answers held only
+   * by the all-primary set were returned 87% of the time. Two explanations fit that: the
+   * judge prefers statements that look like its own (self-preference, measured in LLM-judge
+   * work), or the second model's correct statements are simply harder to recognise. Swapping
+   * the judge separates them: under self-preference the asymmetry flips, under oddity it does
+   * not.
+   */
+  readonly judge?: 'second';
 }
 
 /**
@@ -298,6 +311,11 @@ export const ARMS: readonly Arm[] = [
   // counted. Three diverse candidates agree less often than three samples of one prompt, so
   // the modal answer is a weaker majority here; `agreement` says by how much.
   { name: 'vote-mixed', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, mixed: MIXED_SOURCES },
+  // The cross set judged by the *other* model. One lever from `select-cross`: same
+  // candidates, same selector prompt, different judge. If the judge favours statements that
+  // read like its own, the asymmetry flips; if the second model's correct statements are
+  // merely harder to recognise, it does not.
+  { name: 'select-cross-judge', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: CROSS_SOURCES, judge: 'second' },
   // ...and the same aggregator on the cross-model set, where the candidates disagree by
   // model as well as by prompt.
   { name: 'vote-cross', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, mixed: CROSS_SOURCES },
@@ -384,6 +402,7 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'select-tagged': 'the cross arm with each candidate labelled by its source: needs the second model too, and is measured against `select-cross`',
   'vote-mixed': 'three prompts aggregated by modal result instead of by a model: 63% would make the selector call unnecessary, and below that it prices what the model adds',
   'vote-cross': 'the cross-model candidate set aggregated by modal result: needs the second model too',
+  'select-cross-judge': 'the cross set judged by the second model: needs the second model and a second key, and prices self-preference in the judge',
   plan: 'query plan before the statement: 50.4% against 57.6% for its parent (-7.2pp, 63/27, p=0.0002) — anchoring, not helping; kept so the finding can be re-tested',
   'select-pair': 'pairwise comparison instead of an absolute ranking: 58.4% against 57.6% for its parent (+0.8pp, 17/20, p=0.74) at one more call, and it lost more of its candidate set (25 cases against 20) — the absolute prompt is not what the selector loses; kept so a different comparison order or a two-of-three vote can be measured against it',
   'inline+shape': 'scalar-shape guard before the repair loop: 57.2% against 58.4% for its parent (-1.2pp, 11/5, p=0.21) — it fired on 21 cases, repaired 2, and shifted 14 more into the wrong column count; kept so a better shape test can be measured against this one',
@@ -439,6 +458,8 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   // One lever: who aggregates the same three candidates, the model or the count.
   ['select-mixed', 'vote-mixed'],
   ['select-cross', 'vote-cross'],
+  // One lever: which model judges the same three candidates.
+  ['select-cross', 'select-cross-judge'],
   ['select', 'select5'],
   ['inline+evidence', 'values'],
   ['inline+evidence', 'plan'],
@@ -964,16 +985,22 @@ async function main() {
     retries: Number(process.env.BIRD_LLM_RETRIES ?? 3),
     retryDelayMs: Number(process.env.BIRD_LLM_RETRY_DELAY_MS ?? 1000),
   });
-  const needsSecond = config.arms.some((name) => (resolveArm(name)?.mixed ?? []).some((source) => parseMixedSource(source).provider === 'second'));
+  const drawsSecond = config.arms.some((name) => (resolveArm(name)?.mixed ?? []).some((source) => parseMixedSource(source).provider === 'second'));
+  const judgesSecond = config.arms.some((name) => resolveArm(name)?.judge === 'second');
+  const needsSecond = drawsSecond || judgesSecond;
   if (needsSecond && (config.second.model === '' || config.second.apiKey === '')) {
     const missing = [config.second.model === '' ? 'BIRD_SECOND_MODEL' : '', config.second.apiKey === '' ? 'a second key (BIRD_SECOND_API_KEY or ZHIPU_API_KEY)' : '']
       .filter(Boolean)
       .join(' and ');
-    // Naming the missing variable matters: "the arm needs a second model" sent me looking
-    // at the workflow's model input the first time, when the key was what was absent.
-    throw new Error(
-      `this arm set draws a candidate from the second model, but ${missing} is not set; the arm would generate two candidates where it promised three`,
-    );
+    // Naming the missing variable matters: "the arm needs a second model" sent me looking at
+    // the workflow's model input the first time, when the key was what was absent. So does
+    // naming the reason: a judged arm generates three candidates and would still do so with
+    // no second model — it would just quietly judge with the first one.
+    const consequence = drawsSecond
+      ? 'the arm would generate two candidates where it promised three'
+      : 'the arm would be judged by the primary model while claiming a swap';
+    const cause = drawsSecond ? 'draws a candidate from the second model' : 'asks the second model to judge';
+    throw new Error(`this arm set ${cause}, but ${missing} is not set; ${consequence}`);
   }
   const secondProvider =
     config.second.model === ''
@@ -1129,6 +1156,9 @@ async function main() {
     // Which model wrote the `@second` candidates, when an arm draws one. Without it the
     // cross-arm artifact cannot be reproduced and its number has no subject.
     secondModel: config.second.model === '' ? null : config.second.model,
+    // ...and which model judged, when an arm asks the second one to. A judge swap is the one
+    // experiment whose result is unreadable without this field.
+    judgeModel: config.arms.some((name) => resolveArm(name)?.judge === 'second') ? config.second.model : null,
     generatedAt: new Date().toISOString(),
     selection: {
       databases: config.dbs,
@@ -1431,11 +1461,12 @@ async function main() {
             // `counter.provider`, not `provider`: this call is part of the arm's price, and
             // the first version of this counter left it out — which the gate caught on the
             // very next run ("select samples 3 times and reports 3 calls per case").
+            const judge = arm.judge === 'second' && secondCounter !== undefined ? secondCounter.provider : counter.provider;
             const decision =
               arm.pairwise === true
-                ? await chooseCandidatePairwise(counter.provider, question.question, candidates)
+                ? await chooseCandidatePairwise(judge, question.question, candidates)
                 : await (async () => {
-                    const reply = await counter.provider.complete({
+                    const reply = await judge.complete({
                       messages: [
                         { role: 'system', content: buildSelectionPrompt(question.question, offered) },
                         { role: 'user', content: question.question },
@@ -1600,6 +1631,10 @@ async function main() {
             vote: arm.vote,
             agreement: runs.reduce((total, run) => total + (run.agreement ?? 0), 0) / Math.max(1, runs.filter((run) => run.agreement !== undefined).length),
             selector: arm.select === true ? 'model' : 'majority',
+            // Who judges, when it is not the primary model. The gate needs this to insist the
+            // artifact names the judge: a judge swap whose result cannot be attributed is a
+            // number with no owner.
+            ...(arm.judge === undefined ? {} : { judge: arm.judge }),
             // The ceiling, measured: how often the candidate set contained a statement
             // that matched. Accuracy divided by this is what the selector kept, and the
             // difference between the two is the most a better selector could win here.

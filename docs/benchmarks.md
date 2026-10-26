@@ -977,6 +977,39 @@ of one prompt, so the majority is weaker here — and on questions where two can
 same statement, the duplicate acts as a prior, which the stratification already measured. The
 arms report `agreement`, so a weak majority is visible rather than inferred.
 
+## An asymmetry the selector shows, and the experiment that separates two causes
+
+The same artifact that rejected the labels contains a sharper fact. Pairing the cross arm with
+the mixed arm question by question, and splitting by *which* set held a correct statement:
+
+| set that alone held the answer | questions | returned by its own arm | rate |
+| --- | --- | --- | --- |
+| `select-cross` (the statement the **second** model wrote) | 34 | 16 | **47.1%** |
+| `select-mixed` (all statements from the primary model) | 15 | 13 | **86.7%** |
+
+Both arms use the same selector — the primary model. When the correct candidate is one the
+primary model wrote, the judge returns it 87% of the time; when it is one the second model
+wrote, 47%. On questions both sets held, the two arms agree almost exactly (96.4% and 96.7%
+of 989), so this is not a difference in difficulty between the two sets' shared cases.
+
+Two explanations fit, and they imply different work:
+
+1. **Self-preference in the judge.** LLM judges are known to favour text that resembles their
+   own generations. The judge here is one of the authors, so its own statement looks more
+   natural even when wrong.
+2. **Oddity of the second model's correct answers.** If GLM's correct statements are
+   structurally unusual, they are genuinely harder to recognise — no bias required.
+
+`select-cross-judge` separates them with one lever: the same three candidates, the same
+selector prompt, the same four calls — only the judge changes, to the second model. Under
+self-preference the asymmetry flips (the second model then under-selects the primary model's
+answers); under oddity it does not move.
+
+The criterion is registered before the run, as usual: **if the asymmetry flips, the judge is
+the variable and the next step is a judge that is neither author; if it does not, the second
+model's answers are simply harder and the cross arm's 47% stands as a property of the material
+rather than of the judge.**
+
 ## What a floor is a claim about
 
 A gate number has three coordinates: the split it was measured on, the arms it covers, and

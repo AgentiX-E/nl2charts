@@ -76,14 +76,20 @@ function pct(part, whole) {
 }
 
 /**
- * The ceiling, tested as a paired outcome.
+ * The ceiling and the conversion rate, as paired outcomes.
  *
- * "Contains a correct statement 65.3% of the time" and "67.8% of the time" are two shares,
- * and comparing shares across arms is the mistake this project keeps catching. The same
- * questions were answered by both arms, so the ceilings are paired too: the discordant
- * pairs are the questions where one set held the answer and the other did not.
+ * "Contains a correct statement 67.1% of the time" is a share, and comparing shares across
+ * arms is the mistake this project keeps catching. The same questions were answered by both
+ * arms, so the ceilings are paired: the discordant pairs are the questions one set held and
+ * the other did not.
+ *
+ * The half that was missing until now is what happens to those questions. A set that holds
+ * 37 correct statements the other set lacks is worth nothing if the arm returns 18 of them,
+ * and reporting only the ceiling turned a 2.4pp gain in material into an expected 2.4pp gain
+ * in accuracy. `conversion` is that second number; ADR-198 makes reporting it mandatory for
+ * any mechanism that claims to improve candidates.
  */
-export function ceilingPairs(report, pairs) {
+export function ceilingConversion(report, pairs) {
   const cases = Array.isArray(report.cases) ? report.cases : [];
   const rows = [];
   for (const [left, right] of pairs) {
@@ -91,27 +97,47 @@ export function ceilingPairs(report, pairs) {
     const byArm = new Map();
     for (const entry of marked) {
       const bucket = byArm.get(entry.arm) ?? new Map();
-      bucket.set(entry.id, entry.candidateRecall === true);
+      bucket.set(entry.id, { held: entry.candidateRecall === true, passed: entry.passed === true });
       byArm.set(entry.arm, bucket);
     }
     const first = byArm.get(left);
     const second = byArm.get(right);
     if (first === undefined || second === undefined) continue;
-    let n = 0;
-    let leftHeld = 0;
-    let rightHeld = 0;
-    let onlyLeft = 0;
-    let onlyRight = 0;
-    for (const [id, held] of first) {
+    const row = {
+      left,
+      right,
+      n: 0,
+      leftHeld: 0,
+      rightHeld: 0,
+      onlyLeft: 0,
+      onlyRight: 0,
+      onlyLeftReturned: 0,
+      onlyRightReturned: 0,
+      shared: 0,
+      sharedLeft: 0,
+      sharedRight: 0,
+    };
+    for (const [id, mine] of first) {
       if (!second.has(id)) continue;
-      n += 1;
-      const other = second.get(id) === true;
-      if (held) leftHeld += 1;
-      if (other) rightHeld += 1;
-      if (held && !other) onlyLeft += 1;
-      if (!held && other) onlyRight += 1;
+      const theirs = second.get(id);
+      row.n += 1;
+      if (mine.held) row.leftHeld += 1;
+      if (theirs.held) row.rightHeld += 1;
+      if (mine.held && !theirs.held) {
+        row.onlyLeft += 1;
+        if (mine.passed) row.onlyLeftReturned += 1;
+      }
+      if (!mine.held && theirs.held) {
+        row.onlyRight += 1;
+        if (theirs.passed) row.onlyRightReturned += 1;
+      }
+      if (mine.held && theirs.held) {
+        row.shared += 1;
+        if (mine.passed) row.sharedLeft += 1;
+        if (theirs.passed) row.sharedRight += 1;
+      }
     }
-    rows.push({ left, right, n, leftHeld, rightHeld, onlyLeft, onlyRight });
+    rows.push(row);
   }
   return rows;
 }
@@ -123,10 +149,12 @@ function main() {
     .filter((arm) => Array.isArray(report.mixedCandidatePrompts) && report.mixedCandidatePrompts.some((entry) => entry.arm === arm.arm))
     .map((arm) => [arm.arm, 'select']);
   const { rows, notes } = stratify(report, pairs);
-  const ceilings = ceilingPairs(
-    report,
-    report.arms.filter((arm) => Array.isArray(report.mixedCandidatePrompts) && report.mixedCandidatePrompts.some((entry) => entry.arm === arm.arm)).map((arm) => [arm.arm, 'select']),
-  );
+  const mixedArms = report.arms.filter((arm) => Array.isArray(report.mixedCandidatePrompts) && report.mixedCandidatePrompts.some((entry) => entry.arm === arm.arm));
+  // The selector arms are compared with each other, not with `select`: the question is what a
+  // better candidate set converts at, and `select` draws a different (same-prompt) set.
+  const reference = mixedArms.some((arm) => arm.arm === 'select-mixed') ? 'select-mixed' : 'select';
+  const pairsForCeiling = mixedArms.filter((arm) => arm.arm !== reference).map((arm) => [arm.arm, reference]);
+  const ceilings = ceilingConversion(report, pairsForCeiling);
   for (const note of notes) console.error(note);
   if (rows.length === 0) process.exit(notes.length > 0 ? 0 : 1);
   console.log('| arm | stratum | n | arm | baseline | won / lost |');
@@ -142,6 +170,14 @@ function main() {
     console.log('| --- | --- | --- | --- | --- |');
     for (const row of ceilings) {
       console.log(`| ${row.left} vs ${row.right} | ${row.n} | ${pct(row.leftHeld, row.n)} | ${pct(row.rightHeld, row.n)} | ${row.onlyLeft} / ${row.onlyRight} |`);
+    }
+    console.log('');
+    console.log('| conversion | held only by left | returned | held only by right | returned | both held | left returned | right returned |');
+    console.log('| --- | --- | --- | --- | --- | --- | --- | --- |');
+    for (const row of ceilings) {
+      console.log(
+        `| ${row.left} vs ${row.right} | ${row.onlyLeft} | ${row.onlyLeftReturned} (${pct(row.onlyLeftReturned, row.onlyLeft)}) | ${row.onlyRight} | ${row.onlyRightReturned} (${pct(row.onlyRightReturned, row.onlyRight)}) | ${row.shared} | ${pct(row.sharedLeft, row.shared)} | ${pct(row.sharedRight, row.shared)} |`,
+      );
     }
   }
 }
@@ -174,23 +210,47 @@ function selfTest() {
   if (noRecord.notes.length !== 1) issues.push('a mixed arm without a degeneracy record is not reported as such');
 
   // The ceiling pair: three questions, one where only the left set held the answer, one
-  // where only the right did, one where both did.
-  const ceiling = ceilingPairs(
+  // where only the right did, one where both did — and one question only one arm answered,
+  // which must not be paired at all.
+  const ceiling = ceilingConversion(
     {
       cases: [
-        { arm: 'a', id: '1', candidateRecall: true },
-        { arm: 'b', id: '1', candidateRecall: false },
-        { arm: 'a', id: '2', candidateRecall: false },
-        { arm: 'b', id: '2', candidateRecall: true },
-        { arm: 'a', id: '3', candidateRecall: true },
-        { arm: 'b', id: '3', candidateRecall: true },
-        { arm: 'a', id: '4', candidateRecall: true },
+        { arm: 'a', id: '1', candidateRecall: true, passed: true },
+        { arm: 'b', id: '1', candidateRecall: false, passed: false },
+        { arm: 'a', id: '2', candidateRecall: false, passed: false },
+        { arm: 'b', id: '2', candidateRecall: true, passed: false },
+        { arm: 'a', id: '3', candidateRecall: true, passed: true },
+        { arm: 'b', id: '3', candidateRecall: true, passed: true },
+        { arm: 'a', id: '4', candidateRecall: true, passed: true },
       ],
     },
     [['a', 'b']],
   );
-  if (ceiling[0]?.n !== 3 || ceiling[0]?.onlyLeft !== 1 || ceiling[0]?.onlyRight !== 1) {
+  const pair = ceiling[0];
+  if (pair?.n !== 3 || pair?.onlyLeft !== 1 || pair?.onlyRight !== 1) {
     issues.push('the ceiling pair loses its discordant questions or counts an unpaired one');
+  }
+  // The conversion half is what ADR-198 asks for: the question the left set alone answered
+  // was returned, the one the right set alone answered was not.
+  if (pair?.onlyLeftReturned !== 1 || pair?.onlyRightReturned !== 0) {
+    issues.push('the conversion count does not follow the arm that held the answer');
+  }
+  if (pair?.shared !== 1 || pair?.sharedLeft !== 1 || pair?.sharedRight !== 1) {
+    issues.push('the shared stratum loses an arm that also returned the answer');
+  }
+  // An arm that holds an answer it did not return is the whole point: it must not be counted
+  // as a conversion.
+  const missed = ceilingConversion(
+    {
+      cases: [
+        { arm: 'a', id: '1', candidateRecall: true, passed: false },
+        { arm: 'b', id: '1', candidateRecall: false, passed: false },
+      ],
+    },
+    [['a', 'b']],
+  );
+  if (missed[0]?.onlyLeft !== 1 || missed[0]?.onlyLeftReturned !== 0) {
+    issues.push('a held-but-not-returned answer is counted as a conversion');
   }
   return issues;
 }
@@ -199,7 +259,7 @@ if (process.argv[2] === '--self-test') {
   const issues = selfTest();
   for (const issue of issues) console.error(issue);
   if (issues.length > 0) process.exit(1);
-  console.log('stratify self-test: two strata, discordant pairs, an empty report and a missing degeneracy record all behave');
+  console.log('stratify self-test: two strata, discordant pairs, an unpaired question, the conversion count, a held-but-not-returned answer, an empty report and a missing degeneracy record all behave');
 } else {
   main();
 }

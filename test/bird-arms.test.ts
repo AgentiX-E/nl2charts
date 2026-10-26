@@ -38,7 +38,7 @@ import type { BirdQuestion } from '../eval/bird/data.js';
  * delta cannot be attributed to anything else. A future edit that adds a second
  * change to a pair turns this red before it turns the benchmark unreadable.
  */
-const LEVERS = ['notes', 'evidence', 'repairs', 'linking', 'profile', 'definitions', 'focus', 'interpret', 'vote', 'demonstrations', 'select', 'values', 'plan', 'repairFeedback', 'shapeGuard', 'mixed', 'pairwise', 'sourcesVisible'] as const;
+const LEVERS = ['notes', 'evidence', 'repairs', 'linking', 'profile', 'definitions', 'focus', 'interpret', 'vote', 'demonstrations', 'select', 'values', 'plan', 'repairFeedback', 'shapeGuard', 'mixed', 'pairwise', 'sourcesVisible', 'judge'] as const;
 
 function changedLevers(left: Arm, right: Arm): string[] {
   return LEVERS.filter((lever) => left[lever] !== right[lever]);
@@ -471,7 +471,7 @@ describe('mixed arms declare their own sources', () => {
   const mixed = ARMS.filter((arm) => arm.mixed !== undefined);
 
   it('has at least the two arms under test', () => {
-    expect(mixed.map((arm) => arm.name).sort()).toEqual(['select-cross', 'select-duo', 'select-mixed', 'select-tagged', 'vote-cross', 'vote-mixed']);
+    expect(mixed.map((arm) => arm.name).sort()).toEqual(['select-cross', 'select-cross-judge', 'select-duo', 'select-mixed', 'select-tagged', 'vote-cross', 'vote-mixed']);
   });
 
   it.each(mixed.map((arm) => [arm.name, arm] as const))('%s: candidates equal sources, and every source generates once', (name, arm) => {
@@ -576,5 +576,38 @@ describe('baseline coordinates', () => {
     // the split input the only split it can guard is Mini-Dev.
     expect(workflow).toContain('pnpm gate:bird');
     expect(workflow).toContain('BIRD_SPLIT');
+  });
+});
+
+/**
+ * The judge is a variable, and it is the one that separates two explanations.
+ *
+ * Measured on the dev split: answers held only by the cross set — the statement the second
+ * model wrote — were returned 47% of the time, while answers held only by the all-primary set
+ * were returned 87%. Either the judge prefers statements that read like its own, or the second
+ * model's correct statements are simply harder to recognise. Same candidates, same prompt,
+ * different judge: the first explanation makes the asymmetry flip, the second does not.
+ */
+describe('judge swap', () => {
+  const cross = resolveArm('select-cross');
+  const judged = resolveArm('select-cross-judge');
+
+  it('differs from the cross arm only in who judges', () => {
+    expect(judged).toBeDefined();
+    expect(judged?.judge).toBe('second');
+    // Everything else identical: same sources, same count, same selector, same prompt stack.
+    expect(judged?.mixed).toEqual(cross?.mixed);
+    expect(judged?.vote).toBe(cross?.vote);
+    expect(judged?.select).toBe(cross?.select);
+    expect(judged?.definitions).toBe(cross?.definitions);
+    expect(judged?.evidence).toBe(cross?.evidence);
+    expect(cross?.judge).toBeUndefined();
+  });
+
+  it('is priced like the arm it copies: one judge call, counted', () => {
+    // A judge swap does not add a call, it moves one — so the comparison stays about quality
+    // rather than about budget.
+    expect(judged?.repairs).toBe(0);
+    expect(judged?.vote).toBe(3);
   });
 });
