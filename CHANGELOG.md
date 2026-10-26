@@ -134,6 +134,15 @@ cannot be argued with.
 
 ### Measured
 
+- **The second run of the cross arm replicated, and the ceiling now has a paired test.**
+  `select-cross` 63.5% / 64.1% against `select-mixed`'s 62.4% / 62.9% (+1.1pp p=0.043,
+  +1.2pp p=0.0094); its ceiling 67.8% / 67.0% against 65.3% / 65.7%, and the paired ceiling
+  test — 31 questions held only by the cross set against 10 held only by the mixed one — is
+  p=0.0015. Not adopted: one of the two accuracy runs misses the p<0.01 bar.
+- **The duplicate candidate's contribution, answered.** Stratifying by whether the third
+  candidate is a duplicate shows the trio ahead of `select` in both strata (64.6% vs 63.1%
+  on the 599 distinct questions, 61.7% vs 60.1% on the 933 duplicate ones), so the gain is
+  not the third candidate's distinctness: a duplicate buys a prior, not a second opinion.
 - **A second model raises the ceiling, and the selector eats the gain.** `select-cross` —
   the adopted trio with its first candidate written by GLM-4.5 — holds a correct statement
   67.8% of the time against 65.3% for the all-deepseek trio, and returns 63.5% against

@@ -854,6 +854,48 @@ is, and it is not the generator.
 That is the sixth mechanism in this file whose negative reading is more useful than its
 positive one would have been.
 
+### The second run, and the ceiling as a paired test
+
+Run `40305717702` repeated the six arms:
+
+| arm | run 1 | run 2 | candidate recall, run 1 | run 2 |
+| --- | --- | --- | --- | --- |
+| `select` | 61.8% (946) | 61.3% (939) | 65.3% | 64.2% |
+| `select-mixed` | 62.4% (956) | 62.9% (963) | 65.3% | 65.7% |
+| `select-cross` | **63.5% (973)** | **64.1% (982)** | **67.8%** | **67.0%** |
+
+`select-cross` is ahead in both runs (+1.1pp, p=0.043; +1.2pp, p=0.0094) and so is its
+ceiling. The ceiling is now a paired outcome, which is the only way to state it honestly —
+comparing two shares across arms is the mistake that produced half the retractions in this
+file:
+
+| ceiling comparison, run 2 | left held | right held | only left / only right | McNemar |
+| --- | --- | --- | --- | --- |
+| `select-mixed` vs `select` | 65.7% | 64.2% | 46 / 23 | p≈0.006 |
+| **`select-cross` vs `select-mixed`** | **67.0%** | **65.7%** | **31 / 10** | **p=0.0015** |
+
+So a second model raises the ceiling, and the raise survives a paired test. The accuracy
+gain does not clear p<0.01 in both runs (0.043, 0.0094), so `select-cross` is **not
+adopted** under ADR-184; it is the best-measured arm here, with a third run dispatched to
+settle the letter of the rule rather than argue about it.
+
+### The question the duplicate count left open
+
+The stratified table answers it. If the trio's gain came only from the 172 questions where
+`values` adds a distinct statement, questions where its third candidate duplicates the
+first would show nothing:
+
+| stratum (run 2) | questions | `select-mixed` | `select` | won / lost |
+| --- | --- | --- | --- | --- |
+| third candidate distinct | 599 | 64.6% | 63.1% | 22 / 13 |
+| third candidate a duplicate | 933 | 61.7% | 60.1% | 31 / 16 |
+
+The gain is present in both strata, so it is not the third candidate's *distinctness* that
+carries the arm: a set of three prompts beats three samples of one prompt even when two of
+its members are the same statement, which is consistent with `select-duo` (two prompts)
+scoring below the trio. What a duplicate buys is not a second opinion but a different
+prior — and that is now a measured statement rather than a hypothesis.
+
 ## Telling the selector where a candidate came from
 
 The cross arm lost 22 more cases to its selector than the mixed arm did, with a candidate
