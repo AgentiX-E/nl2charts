@@ -217,3 +217,29 @@ describe('pairwise selection', () => {
     await expect(chooseCandidatePairwise(replies([]).provider, 'q', [])).rejects.toThrow(/at least one/);
   });
 });
+
+/**
+ * A label the selector cannot see is a distinction that does not exist.
+ *
+ * The adopted arm's candidates come from three prompts and, in the cross arm, two models.
+ * Unlabelled they are three SQL strings, and the selector's only handle on where a
+ * statement came from is its confidence about the SQL itself. The label is opt-in per
+ * candidate, so an arm that never sets it keeps its prompt byte-identical.
+ */
+describe('candidate source labels', () => {
+  it('renders the label in front of the statement', () => {
+    const prompt = buildSelectionPrompt('How many orders?', [
+      { ...(candidates[0] as Candidate), source: 'inline+evidence@second' },
+      { ...(candidates[1] as Candidate), source: 'metadata+evidence' },
+    ]);
+    expect(prompt).toContain(`1. [inline+evidence@second] ${(candidates[0] as Candidate).sql}`);
+    expect(prompt).toContain(`2. [metadata+evidence] ${(candidates[1] as Candidate).sql}`);
+  });
+
+  it('leaves an unlabelled candidate exactly as it was', () => {
+    const prompt = buildSelectionPrompt('How many orders?', candidates);
+    expect(prompt).toContain(`1. ${(candidates[0] as Candidate).sql}`);
+    // A preview is JSON and contains brackets, so the check is for the tag position.
+    expect(prompt).not.toContain('1. [');
+  });
+});

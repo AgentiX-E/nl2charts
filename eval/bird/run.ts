@@ -153,6 +153,15 @@ export interface Arm {
    * comparisons instead of one ranking.
    */
   readonly pairwise?: boolean;
+  /**
+   * Show the selector where each candidate came from.
+   *
+   * The cross arm's candidates differ by model and the mixed arm's by prompt, and all of
+   * that disappears once they are three SQL strings. This is a change of *information*
+   * rather than of wording (ADR-194): the question to the selector stays the same, the
+   * facts in front of it grow by one field. One lever from `select-cross`.
+   */
+  readonly sourcesVisible?: boolean;
 }
 
 /**
@@ -281,6 +290,8 @@ export const ARMS: readonly Arm[] = [
   // model buys a different set of mistakes, which is the only thing that can raise the
   // ceiling the selector is bounded by.
   { name: 'select-cross', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: CROSS_SOURCES },
+  // The same candidates, with each one's origin in front of it.
+  { name: 'select-tagged', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: CROSS_SOURCES, sourcesVisible: true },
   // The same inline arm plus the literals the question names, resolved against this
   // database. CHASE-SQL's first pipeline stage; here it is one lever from
   // `inline+evidence`, so the delta prices value grounding, not the hint.
@@ -361,6 +372,7 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'no-linking': 'removes the schema linker: the arm that prices linking, run when linking changes',
   repair: 'the original repair arm (dataset notes, two attempts, one generic sentence): superseded by inline+repair, which is one lever from inline+evidence and reports a funnel',
   'select-cross': 'the trio with its first candidate from a second model: needs BIRD_SECOND_MODEL and a second key, so it is dispatched rather than run on every push',
+  'select-tagged': 'the cross arm with each candidate labelled by its source: needs the second model too, and is measured against `select-cross`',
   plan: 'query plan before the statement: 50.4% against 57.6% for its parent (-7.2pp, 63/27, p=0.0002) — anchoring, not helping; kept so the finding can be re-tested',
   'select-pair': 'pairwise comparison instead of an absolute ranking: 58.4% against 57.6% for its parent (+0.8pp, 17/20, p=0.74) at one more call, and it lost more of its candidate set (25 cases against 20) — the absolute prompt is not what the selector loses; kept so a different comparison order or a two-of-three vote can be measured against it',
   'inline+shape': 'scalar-shape guard before the repair loop: 57.2% against 58.4% for its parent (-1.2pp, 11/5, p=0.21) — it fired on 21 cases, repaired 2, and shifted 14 more into the wrong column count; kept so a better shape test can be measured against this one',
@@ -411,6 +423,8 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   ['select', 'select-pair'],
   // One lever: which model wrote the first candidate, not how many there are.
   ['select-mixed', 'select-cross'],
+  // One lever: whether the selector is told where each candidate came from.
+  ['select-cross', 'select-tagged'],
   ['select', 'select5'],
   ['inline+evidence', 'values'],
   ['inline+evidence', 'plan'],
@@ -1392,6 +1406,7 @@ async function main() {
               rows: candidate.rows.length,
               columns: candidate.rows[0]?.length ?? 0,
               preview: JSON.stringify(candidate.rows.slice(0, 3)).slice(0, 300),
+              ...(arm.sourcesVisible === true ? { source: candidate.source } : {}),
             }));
             // `counter.provider`, not `provider`: this call is part of the arm's price, and
             // the first version of this counter left it out — which the gate caught on the

@@ -827,6 +827,46 @@ The claim under test is narrow: sampling one model buys paraphrases, a second mo
 different set of mistakes, and only the second can lift the ceiling a selector is bounded
 by. It is measured against `select-mixed`, one lever apart, on the dev split.
 
+## A second model raises the ceiling; the selector keeps the gain
+
+Run `40283047123`, the same six arms on the dev split with `select-cross` added — the
+adopted trio whose first candidate is written by **GLM-4.5** instead of deepseek-chat:
+
+| arm | calls | accuracy | candidate recall (ceiling) | cases the selector lost |
+| --- | --- | --- | --- | --- |
+| `inline+evidence` | 1 | 60.8% (931) | — | — |
+| `metadata+evidence` | 1 | 61.4% (941) | — | — |
+| `select` | 4 | 61.8% (946) | 65.3% | 55 |
+| `select-mixed` | 4 | 62.4% (956) | 65.3% | 44 |
+| **`select-cross`** | 4 | **63.5% (973)** | **67.8%** | 66 |
+
+The mechanism did what it was built to do: **the ceiling moved 2.5pp**, from 65.3% to
+67.8%. A second model does not paraphrase the first one's mistakes the way a resample does.
+The GLM candidate was the one returned on 339 of 1,532 questions (22%), which is a real
+share rather than a tie-breaker.
+
+The net gain is +1.1pp over `select-mixed` (23 won / 40 lost, p=0.043) — below the
+pre-registered p<0.01 bar, so **not adopted**. The reason is visible in the same table: the
+selector's loss grew from 44 cases to 66 while the set gained 38 answers. A candidate set
+that holds more right answers and returns fewer of them is telling you where the next work
+is, and it is not the generator.
+
+That is the sixth mechanism in this file whose negative reading is more useful than its
+positive one would have been.
+
+## Telling the selector where a candidate came from
+
+The cross arm lost 22 more cases to its selector than the mixed arm did, with a candidate
+set that held 38 more answers. One difference is visible in the same run: the selector sees
+three SQL strings and nothing about their origin, so a value-grounded statement and a
+second model's statement look like two statements, and the only tie-breaker left is style.
+
+`select-tagged` is `select-cross` with each candidate prefixed by its source — one lever,
+one field of information, the same question to the same selector. It exists because this
+project's own rule (ADR-194) says a change of *information* is where the gains have come
+from and a change of *wording* is where they have not: the labelled prompt keeps every rule
+of the unlabelled one, so what is measured is whether knowing the origin helps.
+
 ## Which split, and how many questions
 
 The sample size was ours, not the dataset's: the runner defaulted to a 240-question

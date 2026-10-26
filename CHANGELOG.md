@@ -132,6 +132,23 @@ cannot be argued with.
   survived guard and execution` covered both and the accuracy absorbed the endpoint's
   mood. The two are now told apart, and the outage case is counted as `llm`.
 
+### Measured
+
+- **A second model raises the ceiling, and the selector eats the gain.** `select-cross` —
+  the adopted trio with its first candidate written by GLM-4.5 — holds a correct statement
+  67.8% of the time against 65.3% for the all-deepseek trio, and returns 63.5% against
+  62.4% (+1.1pp, 23 won / 40 lost, p=0.043). Below the pre-registered p<0.01, so not
+  adopted: the candidate set gained 38 answers and the selector lost 22 of them (44 → 66
+  cases discarded), which is where the next work is.
+
+### Added
+
+- **`select-tagged`** and a `source` field on `Candidate`: the cross arm's three candidates
+  with their origin in front of them (`1. [inline+evidence@second] SELECT …`), one lever
+  from `select-cross`. The selector's rules are unchanged, so what changes is the facts it
+  is given — the class of change ADR-194 says is worth testing. An unlabelled candidate
+  renders exactly as before, which the prompt tests pin.
+
 ### Changed
 
 - **`ai` bundle budget 35,000 → 36,000 gzip bytes** for the pairwise selector, reviewed

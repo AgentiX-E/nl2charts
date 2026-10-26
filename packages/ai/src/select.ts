@@ -7,6 +7,14 @@ export interface Candidate {
   readonly columns: number;
   /** First few rows, rendered compactly; empty when the result was empty. */
   readonly preview: string;
+  /**
+   * Which prompt or model wrote this statement, when the caller wants it shown.
+   *
+   * The selector can only judge what it is told. Candidates that differ by *source* look
+   * interchangeable once the label is gone, and a selector that cannot tell a
+   * value-grounded statement from a notes-grounded one is choosing on style alone.
+   */
+  readonly source?: string;
 }
 
 export interface SelectionDecision {
@@ -40,7 +48,8 @@ const RULES: readonly string[] = [
 
 /** One candidate, as the selector reads it: statement, shape, first rows. */
 function renderCandidate(candidate: Candidate, label?: string): string {
-  const head = label === undefined ? candidate.sql : `${label}. ${candidate.sql}`;
+  const tag = candidate.source === undefined ? '' : `[${candidate.source}] `;
+  const head = label === undefined ? `${tag}${candidate.sql}` : `${label}. ${tag}${candidate.sql}`;
   return [
     head,
     `   result: ${String(candidate.rows)} rows, ${String(candidate.columns)} columns`,
