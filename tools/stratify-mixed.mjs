@@ -75,6 +75,47 @@ function pct(part, whole) {
   return whole === 0 ? '–' : `${((part / whole) * 100).toFixed(1)}%`;
 }
 
+/**
+ * The ceiling, tested as a paired outcome.
+ *
+ * "Contains a correct statement 65.3% of the time" and "67.8% of the time" are two shares,
+ * and comparing shares across arms is the mistake this project keeps catching. The same
+ * questions were answered by both arms, so the ceilings are paired too: the discordant
+ * pairs are the questions where one set held the answer and the other did not.
+ */
+export function ceilingPairs(report, pairs) {
+  const cases = Array.isArray(report.cases) ? report.cases : [];
+  const rows = [];
+  for (const [left, right] of pairs) {
+    const marked = cases.filter((entry) => (entry.arm === left || entry.arm === right) && entry.candidateRecall !== undefined);
+    const byArm = new Map();
+    for (const entry of marked) {
+      const bucket = byArm.get(entry.arm) ?? new Map();
+      bucket.set(entry.id, entry.candidateRecall === true);
+      byArm.set(entry.arm, bucket);
+    }
+    const first = byArm.get(left);
+    const second = byArm.get(right);
+    if (first === undefined || second === undefined) continue;
+    let n = 0;
+    let leftHeld = 0;
+    let rightHeld = 0;
+    let onlyLeft = 0;
+    let onlyRight = 0;
+    for (const [id, held] of first) {
+      if (!second.has(id)) continue;
+      n += 1;
+      const other = second.get(id) === true;
+      if (held) leftHeld += 1;
+      if (other) rightHeld += 1;
+      if (held && !other) onlyLeft += 1;
+      if (!held && other) onlyRight += 1;
+    }
+    rows.push({ left, right, n, leftHeld, rightHeld, onlyLeft, onlyRight });
+  }
+  return rows;
+}
+
 function main() {
   const path = process.argv[2] ?? resolve(ROOT, 'eval/out/bird-eval.json');
   const report = JSON.parse(readFileSync(path, 'utf8'));
@@ -82,6 +123,10 @@ function main() {
     .filter((arm) => Array.isArray(report.mixedCandidatePrompts) && report.mixedCandidatePrompts.some((entry) => entry.arm === arm.arm))
     .map((arm) => [arm.arm, 'select']);
   const { rows, notes } = stratify(report, pairs);
+  const ceilings = ceilingPairs(
+    report,
+    report.arms.filter((arm) => Array.isArray(report.mixedCandidatePrompts) && report.mixedCandidatePrompts.some((entry) => entry.arm === arm.arm)).map((arm) => [arm.arm, 'select']),
+  );
   for (const note of notes) console.error(note);
   if (rows.length === 0) process.exit(notes.length > 0 ? 0 : 1);
   console.log('| arm | stratum | n | arm | baseline | won / lost |');
@@ -90,6 +135,14 @@ function main() {
     console.log(
       `| ${row.arm} | ${row.stratum} | ${row.n} | ${pct(row.armPassed, row.n)} | ${pct(row.baselinePassed, row.n)} | ${row.onlyArm} / ${row.onlyBaseline} |`,
     );
+  }
+  if (ceilings.length > 0) {
+    console.log('');
+    console.log('| ceiling | n | left held | right held | only left / only right |');
+    console.log('| --- | --- | --- | --- | --- |');
+    for (const row of ceilings) {
+      console.log(`| ${row.left} vs ${row.right} | ${row.n} | ${pct(row.leftHeld, row.n)} | ${pct(row.rightHeld, row.n)} | ${row.onlyLeft} / ${row.onlyRight} |`);
+    }
   }
 }
 
@@ -119,6 +172,26 @@ function selfTest() {
   if (empty.notes.length !== 1) issues.push('a report without per-case outcomes is not reported as such');
   const noRecord = stratify({ arms: [], cases: [{ arm: 'a', id: '1', passed: true }] }, [['x', 'y']]);
   if (noRecord.notes.length !== 1) issues.push('a mixed arm without a degeneracy record is not reported as such');
+
+  // The ceiling pair: three questions, one where only the left set held the answer, one
+  // where only the right did, one where both did.
+  const ceiling = ceilingPairs(
+    {
+      cases: [
+        { arm: 'a', id: '1', candidateRecall: true },
+        { arm: 'b', id: '1', candidateRecall: false },
+        { arm: 'a', id: '2', candidateRecall: false },
+        { arm: 'b', id: '2', candidateRecall: true },
+        { arm: 'a', id: '3', candidateRecall: true },
+        { arm: 'b', id: '3', candidateRecall: true },
+        { arm: 'a', id: '4', candidateRecall: true },
+      ],
+    },
+    [['a', 'b']],
+  );
+  if (ceiling[0]?.n !== 3 || ceiling[0]?.onlyLeft !== 1 || ceiling[0]?.onlyRight !== 1) {
+    issues.push('the ceiling pair loses its discordant questions or counts an unpaired one');
+  }
   return issues;
 }
 

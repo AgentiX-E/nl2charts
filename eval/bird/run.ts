@@ -1166,6 +1166,55 @@ async function main() {
     },
   };
 
+  // Prompt-level facts, measured for every run and not only the dry one: the report they
+  // produce is what a stratum join needs, and the evaluation used to overwrite it away.
+  // A mixed arm is as many prompts as it claims, or it is one prompt paid for several
+  // times. The check cannot be made on one question: `values` only differs when the
+  // question names a literal, and on the dev split the first question names none — the
+  // three sources collapsed to two and the guard called the arm broken, which was the
+  // guard's mistake, in the same family as applying one split's arm list to another.
+  // What must hold is that the sources *can* differ; how often they cannot is measured
+  // here and reported as a cost, not assumed away.
+  const distinctShare = (sources: readonly string[]): { distinct: string[]; degenerate: string[] } => {
+    const distinct: string[] = [];
+    const degenerate: string[] = [];
+    for (const question of cases) {
+      // The provider is part of the identity: the same prompt sent to a second model is
+      // a different opinion, not a duplicate, and counting it as one would misreport the
+      // cost of exactly the arm that exists to test model diversity.
+      const built = sources.map((source) => {
+        const spec = parseMixedSource(source);
+        const arm = resolveArm(spec.arm) as Arm;
+        const prompt = buildSqlPrompt(question.question, schemas.get(question.db_id) as SchemaTable[], promptFor(arm, question, blocksFor(arm, question)));
+        return `${spec.provider}\u0000${prompt}`;
+      });
+      (new Set(built).size === sources.length ? distinct : degenerate).push(String(question.question_id));
+    }
+    return { distinct, degenerate };
+  };
+  report.mixedCandidatePrompts = config.arms
+    .map((name) => resolveArm(name))
+    .filter((arm): arm is Arm => arm !== undefined && arm.mixed !== undefined)
+    .map((arm) => {
+      const sources = arm.mixed as readonly string[];
+      const counted = distinctShare(sources);
+      if (counted.distinct.length === 0) {
+        throw new Error(`arm ${arm.name} builds no question with ${String(sources.length)} distinct prompts from ${sources.join(', ')}; it would pay ${String(sources.length)} times for one opinion on every case`);
+      }
+      return {
+        arm: arm.name,
+        sources,
+        questions: cases.length,
+        withAllDistinct: counted.distinct.length,
+        degenerate: counted.degenerate.length,
+        degenerateShare: counted.degenerate.length / Math.max(1, cases.length),
+        // The ids, not only the count: the question "did the trio win on the diverse
+        // questions or on the duplicated ones" is a stratum, and a stratum is a join
+        // between these ids and the per-case outcomes.
+        degenerateIds: counted.degenerate,
+      };
+    });
+
   if (config.dryRun) {
     const withSemantics = cases.find((question) => (definitions.get(question.db_id) ?? '').length > 0);
     const prompts = cases.slice(0, 3).map((question) => ({
@@ -1186,52 +1235,6 @@ async function main() {
           }),
     }));
     report.prompts = prompts;
-    // A mixed arm is as many prompts as it claims, or it is one prompt paid for several
-    // times. The check cannot be made on one question: `values` only differs when the
-    // question names a literal, and on the dev split the first question names none — the
-    // three sources collapsed to two and the guard called the arm broken, which was the
-    // guard's mistake, in the same family as applying one split's arm list to another.
-    // What must hold is that the sources *can* differ; how often they cannot is measured
-    // here and reported as a cost, not assumed away.
-    const distinctShare = (sources: readonly string[]): { distinct: string[]; degenerate: string[] } => {
-      const distinct: string[] = [];
-      const degenerate: string[] = [];
-      for (const question of cases) {
-        // The provider is part of the identity: the same prompt sent to a second model is
-        // a different opinion, not a duplicate, and counting it as one would misreport the
-        // cost of exactly the arm that exists to test model diversity.
-        const built = sources.map((source) => {
-          const spec = parseMixedSource(source);
-          const arm = resolveArm(spec.arm) as Arm;
-          const prompt = buildSqlPrompt(question.question, schemas.get(question.db_id) as SchemaTable[], promptFor(arm, question, blocksFor(arm, question)));
-          return `${spec.provider}\u0000${prompt}`;
-        });
-        (new Set(built).size === sources.length ? distinct : degenerate).push(String(question.question_id));
-      }
-      return { distinct, degenerate };
-    };
-    report.mixedCandidatePrompts = config.arms
-      .map((name) => resolveArm(name))
-      .filter((arm): arm is Arm => arm !== undefined && arm.mixed !== undefined)
-      .map((arm) => {
-        const sources = arm.mixed as readonly string[];
-        const counted = distinctShare(sources);
-        if (counted.distinct.length === 0) {
-          throw new Error(`arm ${arm.name} builds no question with ${String(sources.length)} distinct prompts from ${sources.join(', ')}; it would pay ${String(sources.length)} times for one opinion on every case`);
-        }
-        return {
-          arm: arm.name,
-          sources,
-          questions: cases.length,
-          withAllDistinct: counted.distinct.length,
-          degenerate: counted.degenerate.length,
-          degenerateShare: counted.degenerate.length / Math.max(1, cases.length),
-          // The ids, not only the count: the question "did the trio win on the diverse
-          // questions or on the duplicated ones" is a stratum, and a stratum is a join
-          // between these ids and the per-case outcomes.
-          degenerateIds: counted.degenerate,
-        };
-      });
     report.arms = [];
     finish(config, report);
     await oracle.close();
@@ -1681,7 +1684,17 @@ async function main() {
   // its third source is distinct on 35% of cases, or because a duplicated candidate is a
   // frequency signal on the other 65%. That is a stratum, and a stratum needs rows.
   report.cases = [...outcomes.entries()].flatMap(([name, runs]) =>
-    runs.map((run) => ({ arm: name, id: run.id, passed: run.passed, reason: run.reason, calls: run.calls })),
+    runs.map((run) => ({
+      arm: name,
+      id: run.id,
+      passed: run.passed,
+      reason: run.reason,
+      calls: run.calls,
+      // The ceiling per case, not only per arm: whether a candidate set contained a
+      // correct statement is a paired outcome between two arms on the same question, and
+      // a paired outcome can be tested. A share cannot.
+      ...(run.candidateRecall === undefined ? {} : { candidateRecall: run.candidateRecall }),
+    })),
   );
   report.failures = Object.fromEntries(
     [...outcomes.entries()].map(([name, runs]) => [
