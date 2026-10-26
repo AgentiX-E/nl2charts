@@ -371,3 +371,75 @@ describe('withCallCounter', () => {
     expect(second.calls()).toBe(1);
   });
 });
+
+/**
+ * A connection that dies is not an answer.
+ *
+ * Two failures used to escape the retry loop entirely: a `fetch` that rejects (the run
+ * ended with "endpoint unreachable" on the first reset), and a body that dies mid-read
+ * (the run ended with "response is not JSON" at case 700 of 1,532). Both are the same
+ * transient class as a 429 and both are retried now; a body that arrives whole and is not
+ * JSON still is not, because that is an answer from the wrong endpoint.
+ */
+describe('transport failures', () => {
+  const ok = (content: string) =>
+    new Response(JSON.stringify({ model: 'm', choices: [{ message: { content } }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+
+  it('retries a fetch that rejects, and returns the answer from the next attempt', async () => {
+    let attempt = 0;
+    const fetchImpl = (async () => {
+      attempt += 1;
+      if (attempt === 1) throw new TypeError('fetch failed: ECONNRESET');
+      return ok('SELECT 1');
+    }) as unknown as typeof fetch;
+    const provider = createHttpProvider({ baseUrl: 'https://example.test/v1', model: 'm', fetchImpl, retries: 3, retryDelayMs: 1, sleep: async () => {} });
+    const reply = await provider.complete({ messages: [{ role: 'user', content: 'q' }] });
+    expect(reply.text).toBe('SELECT 1');
+    expect(attempt).toBe(2);
+  });
+
+  it('gives up after the retry budget and says how many attempts it made', async () => {
+    let attempt = 0;
+    const fetchImpl = (async () => {
+      attempt += 1;
+      throw new TypeError('fetch failed: ECONNRESET');
+    }) as unknown as typeof fetch;
+    const provider = createHttpProvider({ baseUrl: 'https://example.test/v1', model: 'm', fetchImpl, retries: 3, retryDelayMs: 1, sleep: async () => {} });
+    await expect(provider.complete({ messages: [{ role: 'user', content: 'q' }] })).rejects.toSatisfy(
+      (error: unknown) => isNl2ChartsError(error) && error.code === 'NL2C_E_LLM_UNAVAILABLE' && error.details.attempts === 3,
+    );
+    expect(attempt).toBe(3);
+  });
+
+  it('retries a body that dies mid-read, which is the failure that killed a 1,532-question run', async () => {
+    let attempt = 0;
+    const fetchImpl = (async () => {
+      attempt += 1;
+      if (attempt === 1) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => {
+            throw new TypeError('terminated');
+          },
+        } as unknown as Response;
+      }
+      return ok('SELECT 2');
+    }) as unknown as typeof fetch;
+    const provider = createHttpProvider({ baseUrl: 'https://example.test/v1', model: 'm', fetchImpl, retries: 3, retryDelayMs: 1, sleep: async () => {} });
+    const reply = await provider.complete({ messages: [{ role: 'user', content: 'q' }] });
+    expect(reply.text).toBe('SELECT 2');
+    expect(attempt).toBe(2);
+  });
+
+  it('does not retry a body that arrived whole and is not JSON', async () => {
+    let attempt = 0;
+    const fetchImpl = (async () => {
+      attempt += 1;
+      return new Response('<html>', { status: 200, headers: { 'content-type': 'text/html' } });
+    }) as unknown as typeof fetch;
+    const provider = createHttpProvider({ baseUrl: 'https://example.test/v1', model: 'm', fetchImpl, retries: 3, retryDelayMs: 1, sleep: async () => {} });
+    await expect(provider.complete({ messages: [{ role: 'user', content: 'q' }] })).rejects.toThrow(/not JSON/);
+    expect(attempt).toBe(1);
+  });
+});

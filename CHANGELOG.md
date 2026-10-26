@@ -115,6 +115,23 @@ cannot be argued with.
   second can lift the ceiling the selector is bounded by. The harness refuses to run the
   arm without `BIRD_SECOND_MODEL` and a second key, and says which one is missing.
 
+### Fixed
+
+- **A connection that dies is not an answer, and it no longer ends a run.** Two failures
+  escaped the provider's retry loop: a `fetch` that rejects, and a body that dies mid-read.
+  The second one ended a 1,532-question dev run at case ~700 with `llm response is not
+  JSON` and no retry, because the body was read outside the attempt. Both are retried now,
+  like a 429. A body that arrives whole and is not JSON is still *not* retried — that is an
+  answer from the wrong endpoint, and it is reported as such.
+- **One case cannot take the run down.** A provider error raised outside the per-sample
+  catch — the selector's own call, an engine call — used to escape the pool and kill the
+  process. Every case now runs inside a guard that records the error as an `llm` failure,
+  so the failure-share limit decides whether a run is publishable instead of a stack trace.
+- **An outage on a voting arm was counted as three wrong statements.** Samples that died
+  at the model were indistinguishable from samples the engine refused, so `no sample
+  survived guard and execution` covered both and the accuracy absorbed the endpoint's
+  mood. The two are now told apart, and the outage case is counted as `llm`.
+
 ### Changed
 
 - **`ai` bundle budget 35,000 → 36,000 gzip bytes** for the pairwise selector, reviewed

@@ -1,4 +1,4 @@
-import { toNl2ChartsError } from '@agentix-e/nl2charts-spec';
+import { isNl2ChartsError, toNl2ChartsError } from '@agentix-e/nl2charts-spec';
 
 export type Role = 'system' | 'user' | 'assistant';
 
@@ -102,8 +102,10 @@ export function createHttpProvider(options: HttpProviderOptions): LlmProvider {
       if (request.maxTokens !== undefined) body.max_tokens = request.maxTokens;
       if (request.json === true) body.response_format = { type: 'json_object' };
 
+      let payload: CompletionBody | undefined;
       let response: Response | undefined;
       let attempts = 0;
+      let transport: unknown;
       try {
         for (let attempt = 1; attempt <= retries; attempt += 1) {
           attempts = attempt;
@@ -114,23 +116,47 @@ export function createHttpProvider(options: HttpProviderOptions): LlmProvider {
               body: JSON.stringify(body),
               signal: controller.signal,
             });
+            // A fetch implementation that resolves to nothing is an outcome, not a crash:
+            // the guard below turns it into "returned nothing".
+            if (response === undefined) break;
+            if (response.ok) {
+              // The body is read inside the attempt, because a connection that dies
+              // mid-body is the same transient failure as one that never opened — and it
+              // used to escape this loop entirely, killing a 1,532-question run at case
+              // 700 with "llm response is not JSON" and no retry. A body that arrives
+              // whole and is not JSON is a different thing: the endpoint answered, and the
+              // answer is wrong. That one is diagnosed, not retried.
+              const text = await response.text();
+              try {
+                payload = JSON.parse(text) as CompletionBody;
+              } catch (error) {
+                throw toNl2ChartsError('NL2C_E_LLM_INVALID_RESPONSE', 'llm response is not JSON', error, { attempts });
+              }
+              break;
+            }
+            if (!RETRYABLE.has(response.status) || attempt === retries) break;
+            // Backoff doubles per attempt; Retry-After wins when the endpoint sends one,
+            // because only it knows when its own window reopens.
+            await sleep(retryAfterMs(response, retryDelayMs * 2 ** (attempt - 1)));
+            if (controller.signal.aborted) break;
           } catch (error) {
-            throw toNl2ChartsError(
-              'NL2C_E_LLM_UNAVAILABLE',
-              controller.signal.aborted ? 'llm call timed out' : 'llm endpoint unreachable',
-              error,
-              { endpoint },
-            );
+            // A body that is not JSON is an answer, not a failure to get one; retrying it
+            // would turn a wrong endpoint into a slow one.
+            if (isNl2ChartsError(error) && error.code === 'NL2C_E_LLM_INVALID_RESPONSE') throw error;
+            // Any other transport failure is retried like a 429: the request never
+            // produced an answer, and the next one may. An aborted call is not retried —
+            // the caller said stop, and a timeout is the caller's own deadline.
+            transport = error;
+            if (controller.signal.aborted || attempt === retries) {
+              throw toNl2ChartsError(
+                'NL2C_E_LLM_UNAVAILABLE',
+                controller.signal.aborted ? 'llm call timed out' : 'llm endpoint unreachable',
+                error,
+                { endpoint, attempts },
+              );
+            }
+            await sleep(retryDelayMs * 2 ** (attempt - 1));
           }
-          // A fetch implementation that resolves to nothing is an outcome, not a
-          // crash: the guard below turns it into "returned nothing". Before this line
-          // the guard was unreachable and the error was a TypeError.
-          if (response === undefined) break;
-          if (response.ok || !RETRYABLE.has(response.status) || attempt === retries) break;
-          // Backoff doubles per attempt; Retry-After wins when the endpoint sends one,
-          // because only it knows when its own window reopens.
-          await sleep(retryAfterMs(response, retryDelayMs * 2 ** (attempt - 1)));
-          if (controller.signal.aborted) break;
         }
       } finally {
         clearTimeout(timer);
@@ -138,18 +164,15 @@ export function createHttpProvider(options: HttpProviderOptions): LlmProvider {
       }
 
       if (response === undefined || !response.ok) {
-        throw toNl2ChartsError('NL2C_E_LLM_UNAVAILABLE', `llm returned ${response?.status ?? 'nothing'}`, undefined, {
+        throw toNl2ChartsError('NL2C_E_LLM_UNAVAILABLE', `llm returned ${response?.status ?? 'nothing'}`, transport, {
           ...(response === undefined ? {} : { status: response.status }),
           attempts,
         });
       }
-
-      let payload: CompletionBody;
-      try {
-        payload = (await response.json()) as CompletionBody;
-      } catch (error) {
-        throw toNl2ChartsError('NL2C_E_LLM_INVALID_RESPONSE', 'llm response is not JSON', error);
+      if (payload === undefined) {
+        throw toNl2ChartsError('NL2C_E_LLM_INVALID_RESPONSE', 'llm response is not JSON', transport, { attempts });
       }
+
       const choice = payload.choices?.[0];
       const content = choice?.message?.content;
       if (typeof content !== 'string' || content.length === 0) {

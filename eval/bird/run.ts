@@ -1268,192 +1268,227 @@ async function main() {
       // Both models' calls are this case's cost. Summing two counters keeps the number
       // measured on each side instead of estimated from the arm's configuration.
       const callsMade = (): number => counter.calls() + (secondCounter?.calls() ?? 0);
-      // A pipeline is a prompt plus a budget, so building one per configuration costs
-      // nothing and lets a mixed arm ask the same question three different ways.
-      // The execute hook exists for repairs only: without repairs it would turn an
-      // execution failure into a thrown pipeline error and hide the statement that
-      // failed, which is the one thing a diagnosis needs.
-      const pipelineFor = (target: Arm, which: 'primary' | 'second' = 'primary'): ReturnType<typeof createPipeline> =>
-        createPipeline({
-          provider: which === 'second' && secondCounter !== undefined ? secondCounter.provider : counter.provider,
-          maxRepairs: target.repairs,
-          linking: target.linking,
-          interpret: target.interpret === true,
-          plan: target.plan === true,
-          ...(target.repairFeedback === undefined ? {} : { repairFeedback: target.repairFeedback }),
-          temperature: target.vote === undefined ? 0 : 0.7,
-          prompt: promptFor(target, question, blocksFor(target, question)),
-          ...(target.repairs === 0
-            ? {}
-            : {
-                execute: async (sql: string) => {
-                  const result = await oracle.run(question.db_id, sql);
-                  if (result.ok) {
-                    // A statement that runs and returns the wrong number of rows is invisible
-                    // to the engine, so this is the only place the loop can hear about it.
-                    if (target.shapeGuard === true && shapeMismatch(question.question, result.rows)) {
-                      throw new Error(shapeFailure(result.rows));
-                    }
-                    return;
-                  }
-                  // The driver's own words, not a summary of them: the repair reads
-                  // `details.engineError` to decide what to tell the model.
-                  throw Object.assign(new Error(result.error ?? 'execution failed'), {
-                    details: {
-                      engineError: {
-                        message: (result.error ?? 'execution failed').replace(/^\w*Error:\s*/, ''),
-                        ...(result.errorName === undefined ? {} : { code: result.errorName }),
-                      },
-                    },
-                  });
-                },
-              }),
-        });
-      const pipeline = pipelineFor(arm);
-      const expected = gold.get(question.question_id) as OracleResult;
-      if (arm.vote !== undefined && arm.vote > 1) {
-        const candidates: { sql: string; rows: readonly (readonly unknown[])[]; source: string }[] = [];
-        for (let sample = 0; sample < arm.vote; sample += 1) {
-          try {
-            // A mixed arm draws each candidate from a different decomposition. The
-            // sources repair nothing by contract (asserted in the test suite), so a
-            // candidate is always one generation and the cost stays three calls.
-            const sources = arm.mixed;
-            const source = sources === undefined ? name : (sources[sample % sources.length] as string);
-            const spec = parseMixedSource(source);
-            const sampler = sources === undefined ? pipeline : pipelineFor(resolveArm(spec.arm) as Arm, spec.provider);
-            const askedSample = await sampler.ask({ question: question.question, schema });
-            const executed = await oracle.run(question.db_id, askedSample.sql);
-            if (executed.ok) candidates.push({ sql: askedSample.sql, rows: executed.rows, source });
-          } catch {
-            // A sample that fails the guard or the engine casts no vote; the
-            // other samples still produce one.
-          }
-        }
-        if (candidates.length === 0) {
+      // One case cannot take the run down. A provider error raised outside the per-sample
+      // catch — the selector call, an engine call — used to escape the pool and end a
+      // 1,532-question run at case 700 with a stack trace, which is why this wrapper
+      // exists: an escaped error becomes a recorded `llm` failure, and the failure-share
+      // guard decides whether the run is publishable.
+      const guarded = async (work: () => Promise<CaseRun>): Promise<CaseRun> => {
+        try {
+          return await work();
+        } catch (error) {
           return {
             id: String(question.question_id),
             passed: false,
             predicted: '',
             reason: 'values',
             strict: false,
-            attempts: arm.vote,
-            error: 'no sample survived guard and execution',
-            candidateRecall: false,
+            attempts: 1,
+            errorKind: 'llm',
+            error: `harness: ${error instanceof Error ? error.message : String(error)}`,
             calls: callsMade(),
           };
         }
-        const majority = majorityResult(candidates, (left, right) => judgeOfficial(left.rows, right.rows) === 'match');
-        let winner = majority.winner as { sql: string; rows: readonly (readonly unknown[])[]; source: string };
-        let selectedByModel: boolean | undefined;
-        if (arm.select === true) {
-          // The model sees what the vote cannot: the shape of each result. A statement
-          // that answers a "how many" with 500 rows is wrong for a reason no majority
-          // of identical mistakes will reveal.
-          const offered = candidates.map((candidate) => ({
-            sql: candidate.sql,
-            rows: candidate.rows.length,
-            columns: candidate.rows[0]?.length ?? 0,
-            preview: JSON.stringify(candidate.rows.slice(0, 3)).slice(0, 300),
-          }));
-          // `counter.provider`, not `provider`: this call is part of the arm's price, and
-          // the first version of this counter left it out — which the gate caught on the
-          // very next run ("select samples 3 times and reports 3 calls per case").
-          const decision =
-            arm.pairwise === true
-              ? await chooseCandidatePairwise(counter.provider, question.question, candidates)
-              : await (async () => {
-                  const reply = await counter.provider.complete({
-                    messages: [
-                      { role: 'system', content: buildSelectionPrompt(question.question, offered) },
-                      { role: 'user', content: question.question },
-                    ],
-                    temperature: 0,
-                  });
-                  const applied = applySelection(reply.text, offered);
-                  return { index: applied.index, decided: applied.decided, sql: (offered[applied.index] as { sql: string }).sql };
-                })();
-          winner = candidates[decision.index] as typeof winner;
-          selectedByModel = decision.decided;
+      };
+      return guarded(async (): Promise<CaseRun> => {
+        // A pipeline is a prompt plus a budget, so building one per configuration costs
+        // nothing and lets a mixed arm ask the same question three different ways.
+        // The execute hook exists for repairs only: without repairs it would turn an
+        // execution failure into a thrown pipeline error and hide the statement that
+        // failed, which is the one thing a diagnosis needs.
+        const pipelineFor = (target: Arm, which: 'primary' | 'second' = 'primary'): ReturnType<typeof createPipeline> =>
+          createPipeline({
+            provider: which === 'second' && secondCounter !== undefined ? secondCounter.provider : counter.provider,
+            maxRepairs: target.repairs,
+            linking: target.linking,
+            interpret: target.interpret === true,
+            plan: target.plan === true,
+            ...(target.repairFeedback === undefined ? {} : { repairFeedback: target.repairFeedback }),
+            temperature: target.vote === undefined ? 0 : 0.7,
+            prompt: promptFor(target, question, blocksFor(target, question)),
+            ...(target.repairs === 0
+              ? {}
+              : {
+                  execute: async (sql: string) => {
+                    const result = await oracle.run(question.db_id, sql);
+                    if (result.ok) {
+                      // A statement that runs and returns the wrong number of rows is invisible
+                      // to the engine, so this is the only place the loop can hear about it.
+                      if (target.shapeGuard === true && shapeMismatch(question.question, result.rows)) {
+                        throw new Error(shapeFailure(result.rows));
+                      }
+                      return;
+                    }
+                    // The driver's own words, not a summary of them: the repair reads
+                    // `details.engineError` to decide what to tell the model.
+                    throw Object.assign(new Error(result.error ?? 'execution failed'), {
+                      details: {
+                        engineError: {
+                          message: (result.error ?? 'execution failed').replace(/^\w*Error:\s*/, ''),
+                          ...(result.errorName === undefined ? {} : { code: result.errorName }),
+                        },
+                      },
+                    });
+                  },
+                }),
+          });
+        const pipeline = pipelineFor(arm);
+        const expected = gold.get(question.question_id) as OracleResult;
+        if (arm.vote !== undefined && arm.vote > 1) {
+          const candidates: { sql: string; rows: readonly (readonly unknown[])[]; source: string }[] = [];
+          // Why a sample died matters: a sample the engine refused is a candidate that
+          // does not exist, while a sample the endpoint never answered is an outage that
+          // used to be counted as "no sample survived guard and execution" — a content
+          // failure the accuracy was then blamed for.
+          const sampleErrors: (string | undefined)[] = [];
+          for (let sample = 0; sample < arm.vote; sample += 1) {
+            try {
+              // A mixed arm draws each candidate from a different decomposition. The
+              // sources repair nothing by contract (asserted in the test suite), so a
+              // candidate is always one generation and the cost stays three calls.
+              const sources = arm.mixed;
+              const source = sources === undefined ? name : (sources[sample % sources.length] as string);
+              const spec = parseMixedSource(source);
+              const sampler = sources === undefined ? pipeline : pipelineFor(resolveArm(spec.arm) as Arm, spec.provider);
+              const askedSample = await sampler.ask({ question: question.question, schema });
+              const executed = await oracle.run(question.db_id, askedSample.sql);
+              if (executed.ok) candidates.push({ sql: askedSample.sql, rows: executed.rows, source });
+            } catch (error) {
+              // A sample that fails the guard or the engine casts no vote; the other
+              // samples still produce one. The reason is kept for the zero-candidate case.
+              sampleErrors.push((error as { code?: string }).code?.startsWith('NL2C_E_LLM') === true ? 'llm' : undefined);
+            }
+          }
+          if (candidates.length === 0) {
+            const outage = sampleErrors.length === arm.vote && sampleErrors.every((kind) => kind === 'llm');
+            return {
+              id: String(question.question_id),
+              passed: false,
+              predicted: '',
+              reason: 'values',
+              strict: false,
+              attempts: arm.vote,
+              error: outage ? 'every sample failed at the model' : 'no sample survived guard and execution',
+              // The distinction is what makes the failure-share guard able to fire on a
+              // voting arm at all; before it, an endpoint outage read as three wrong
+              // statements and quietly lowered the score.
+              errorKind: outage ? 'llm' : 'other',
+              candidateRecall: false,
+              calls: callsMade(),
+            };
+          }
+          const majority = majorityResult(candidates, (left, right) => judgeOfficial(left.rows, right.rows) === 'match');
+          let winner = majority.winner as { sql: string; rows: readonly (readonly unknown[])[]; source: string };
+          let selectedByModel: boolean | undefined;
+          if (arm.select === true) {
+            // The model sees what the vote cannot: the shape of each result. A statement
+            // that answers a "how many" with 500 rows is wrong for a reason no majority
+            // of identical mistakes will reveal.
+            const offered = candidates.map((candidate) => ({
+              sql: candidate.sql,
+              rows: candidate.rows.length,
+              columns: candidate.rows[0]?.length ?? 0,
+              preview: JSON.stringify(candidate.rows.slice(0, 3)).slice(0, 300),
+            }));
+            // `counter.provider`, not `provider`: this call is part of the arm's price, and
+            // the first version of this counter left it out — which the gate caught on the
+            // very next run ("select samples 3 times and reports 3 calls per case").
+            const decision =
+              arm.pairwise === true
+                ? await chooseCandidatePairwise(counter.provider, question.question, candidates)
+                : await (async () => {
+                    const reply = await counter.provider.complete({
+                      messages: [
+                        { role: 'system', content: buildSelectionPrompt(question.question, offered) },
+                        { role: 'user', content: question.question },
+                      ],
+                      temperature: 0,
+                    });
+                    const applied = applySelection(reply.text, offered);
+                    return { index: applied.index, decided: applied.decided, sql: (offered[applied.index] as { sql: string }).sql };
+                  })();
+            winner = candidates[decision.index] as typeof winner;
+            selectedByModel = decision.decided;
+          }
+          const reason = judgeOfficial(expected.rows, winner.rows);
+          return {
+            id: String(question.question_id),
+            passed: reason === 'match',
+            predicted: winner.sql,
+            reason,
+            strict: judgeStrict(expected.rows, winner.rows) === 'match',
+            attempts: arm.vote,
+            agreement: majority.agreement,
+            candidateRecall: candidates.some((candidate) => judgeOfficial(expected.rows, candidate.rows) === 'match'),
+            ...(selectedByModel === undefined ? {} : { selectedByModel }),
+            ...(arm.mixed === undefined ? {} : { winnerSource: winner.source }),
+            calls: callsMade(),
+          };
         }
-        const reason = judgeOfficial(expected.rows, winner.rows);
-        return {
-          id: String(question.question_id),
-          passed: reason === 'match',
-          predicted: winner.sql,
-          reason,
-          strict: judgeStrict(expected.rows, winner.rows) === 'match',
-          attempts: arm.vote,
-          agreement: majority.agreement,
-          candidateRecall: candidates.some((candidate) => judgeOfficial(expected.rows, candidate.rows) === 'match'),
-          ...(selectedByModel === undefined ? {} : { selectedByModel }),
-          ...(arm.mixed === undefined ? {} : { winnerSource: winner.source }),
-          calls: callsMade(),
-        };
-      }
-      try {
-        const asked = await pipeline.ask({ question: question.question, schema });
-        const predicted = await oracle.run(question.db_id, asked.sql);
-        if (!predicted.ok) {
+        try {
+          const asked = await pipeline.ask({ question: question.question, schema });
+          const predicted = await oracle.run(question.db_id, asked.sql);
+          if (!predicted.ok) {
+            return {
+              id: String(question.question_id),
+              passed: false,
+              predicted: asked.sql,
+              reason: 'values',
+              strict: false,
+              attempts: asked.attempts,
+              // Without the kind this case counted as `other`, which made
+              // `errors.execution` permanently zero and hid where failures came from:
+              // the GLM probe read as "no execution failures" while every one of its
+              // top errors was a SQLite syntax or column error.
+              errorKind: 'execution',
+              calls: callsMade(),
+              error: `execution: ${predicted.error ?? 'unknown'}`,
+            };
+          }
+          const reason = judgeOfficial(expected.rows, predicted.rows);
+          return {
+            id: String(question.question_id),
+            passed: reason === 'match',
+            predicted: asked.sql,
+            reason,
+            strict: judgeStrict(expected.rows, predicted.rows) === 'match',
+            attempts: asked.attempts,
+            calls: callsMade(),
+            failures: asked.failures,
+          };
+        } catch (error) {
+          // A repair arm reports the statement it gave up on, so a failure is
+          // diagnosable from the artifact alone.
+          const details = (error as { details?: Record<string, unknown> }).details ?? {};
+          const lastError = typeof details.lastError === 'string' ? details.lastError : undefined;
+          const failureClasses = Array.isArray(details.failureClasses) ? (details.failureClasses as string[]) : undefined;
+          const message = error instanceof Error ? error.message : String(error);
+          const code = (error as { code?: string }).code ?? '';
           return {
             id: String(question.question_id),
             passed: false,
-            predicted: asked.sql,
+            predicted: typeof details.lastSql === 'string' ? details.lastSql : '',
             reason: 'values',
             strict: false,
-            attempts: asked.attempts,
-            // Without the kind this case counted as `other`, which made
-            // `errors.execution` permanently zero and hid where failures came from:
-            // the GLM probe read as "no execution failures" while every one of its
-            // top errors was a SQLite syntax or column error.
-            errorKind: 'execution',
+            attempts: arm.repairs + 1,
             calls: callsMade(),
-            error: `execution: ${predicted.error ?? 'unknown'}`,
+            ...(failureClasses === undefined ? {} : { failures: failureClasses }),
+            error: lastError === undefined ? message : `${message}: ${lastError}`,
+            // A shape failure ends with a statement that runs, so calling it `execution`
+            // would say the engine rejected something it never saw.
+            errorKind:
+              lastError !== undefined && lastError.startsWith('shape:')
+                ? 'shape'
+                : code === 'NL2C_E_GUARD_REJECTED'
+                  ? 'guard'
+                  : code === 'NL2C_E_ENGINE_FAILED'
+                    ? 'execution'
+                    : code.startsWith('NL2C_E_LLM')
+                      ? 'llm'
+                      : 'other',
           };
         }
-        const reason = judgeOfficial(expected.rows, predicted.rows);
-        return {
-          id: String(question.question_id),
-          passed: reason === 'match',
-          predicted: asked.sql,
-          reason,
-          strict: judgeStrict(expected.rows, predicted.rows) === 'match',
-          attempts: asked.attempts,
-          calls: callsMade(),
-          failures: asked.failures,
-        };
-      } catch (error) {
-        // A repair arm reports the statement it gave up on, so a failure is
-        // diagnosable from the artifact alone.
-        const details = (error as { details?: Record<string, unknown> }).details ?? {};
-        const lastError = typeof details.lastError === 'string' ? details.lastError : undefined;
-        const failureClasses = Array.isArray(details.failureClasses) ? (details.failureClasses as string[]) : undefined;
-        const message = error instanceof Error ? error.message : String(error);
-        const code = (error as { code?: string }).code ?? '';
-        return {
-          id: String(question.question_id),
-          passed: false,
-          predicted: typeof details.lastSql === 'string' ? details.lastSql : '',
-          reason: 'values',
-          strict: false,
-          attempts: arm.repairs + 1,
-          calls: callsMade(),
-          ...(failureClasses === undefined ? {} : { failures: failureClasses }),
-          error: lastError === undefined ? message : `${message}: ${lastError}`,
-          // A shape failure ends with a statement that runs, so calling it `execution`
-          // would say the engine rejected something it never saw.
-          errorKind:
-            lastError !== undefined && lastError.startsWith('shape:')
-              ? 'shape'
-              : code === 'NL2C_E_GUARD_REJECTED'
-                ? 'guard'
-                : code === 'NL2C_E_ENGINE_FAILED'
-                  ? 'execution'
-                  : code.startsWith('NL2C_E_LLM')
-                    ? 'llm'
-                    : 'other',
-        };
-      }
+      });
     });
     // Keyed by the requested name, not the resolved one: an A/A duplicate resolves to
     // the same Arm, and keying by that overwrote the first run with the second, which
