@@ -10,6 +10,7 @@ import {
   COMPARISONS,
   DUO_SOURCES,
   MIXED_SOURCES,
+  CROSS_SOURCES,
   DEFAULT_ARMS,
   ON_DEMAND_ARMS,
   PAIRS,
@@ -21,6 +22,7 @@ import {
   candidateCeiling,
   parseArms,
   parseLimit,
+  parseMixedSource,
   promptFor,
   readPinnedDefinitions,
   repairAccounting,
@@ -469,7 +471,7 @@ describe('mixed arms declare their own sources', () => {
   const mixed = ARMS.filter((arm) => arm.mixed !== undefined);
 
   it('has at least the two arms under test', () => {
-    expect(mixed.map((arm) => arm.name).sort()).toEqual(['select-duo', 'select-mixed']);
+    expect(mixed.map((arm) => arm.name).sort()).toEqual(['select-cross', 'select-duo', 'select-mixed']);
   });
 
   it.each(mixed.map((arm) => [arm.name, arm] as const))('%s: candidates equal sources, and every source generates once', (name, arm) => {
@@ -498,5 +500,43 @@ describe('per-case outcomes', () => {
     const source = readFileSync(resolve(process.cwd(), 'eval/bird/run.ts'), 'utf8');
     expect(source).toContain('report.cases =');
     expect(source).toContain('degenerateIds');
+  });
+});
+
+/**
+ * A candidate's model is part of its identity.
+ *
+ * `@second` is a suffix rather than a second field so the arm table reads as a sentence,
+ * which means the parser is the only thing standing between a typo and an arm that
+ * silently generates two candidates while claiming three.
+ */
+describe('cross-model candidate sources', () => {
+  it('reads the suffix and leaves plain names alone', () => {
+    expect(parseMixedSource('inline+evidence')).toEqual({ arm: 'inline+evidence', provider: 'primary' });
+    expect(parseMixedSource('inline+evidence@second')).toEqual({ arm: 'inline+evidence', provider: 'second' });
+  });
+
+  it('resolves a suffixed source to an arm that generates once', () => {
+    expect(() => assertMixedSources(CROSS_SOURCES)).not.toThrow();
+    for (const source of CROSS_SOURCES) {
+      const parsed = parseMixedSource(source);
+      const arm = resolveArm(parsed.arm);
+      expect(arm, source).toBeDefined();
+      expect(arm?.repairs, source).toBe(0);
+      expect(arm?.vote, source).toBeUndefined();
+    }
+  });
+
+  it('rejects a suffixed name that is not an arm', () => {
+    // Without the parse the suffix would end up inside the lookup and fail with a less
+    // useful message; with it, the name that failed is the one that was written.
+    expect(() => assertMixedSources(['inline+evidence', 'not-an-arm@second'])).toThrow(/not an arm/);
+  });
+
+  it('is one lever from the trio: same prompts, one of them from the other model', () => {
+    const trio = MIXED_SOURCES.map((source) => source.replace('@second', ''));
+    const cross = CROSS_SOURCES.map((source) => parseMixedSource(source).arm.replace('@second', ''));
+    expect([...cross].sort()).toEqual([...trio].sort());
+    expect(CROSS_SOURCES.filter((source) => parseMixedSource(source).provider === 'second')).toHaveLength(1);
   });
 });

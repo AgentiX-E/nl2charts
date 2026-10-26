@@ -810,6 +810,23 @@ selection over three samples of one prompt is worth nothing (+0.3 to +0.7pp, p=0
 0.65), and two prompts are worth less than three (+1.2pp for the third, p=0.013 across
 both runs).
 
+## Raising the ceiling: a second model as a candidate
+
+The adopted arm holds a correct statement 65.6% of the time and returns 62.9%: 2.6pp is
+the selector, and the rest of the distance to the published 70–73% is the candidate set
+itself. More samples do not raise it — five samples of one prompt hold 65.5% and three
+hold 65.1%, and they agree 90% of the time because they make the same mistakes.
+
+`select-cross` changes one thing about the adopted arm: its first candidate comes from a
+**second model**, same prompt, same count, same four calls. It is declared as
+`inline+evidence@second` in the source list, and the harness refuses to run it when no
+second model is configured, naming the missing variable, because an arm that promises
+three opinions and generates two is a price that cannot be audited.
+
+The claim under test is narrow: sampling one model buys paraphrases, a second model buys a
+different set of mistakes, and only the second can lift the ceiling a selector is bounded
+by. It is measured against `select-mixed`, one lever apart, on the dev split.
+
 ## Which split, and how many questions
 
 The sample size was ours, not the dataset's: the runner defaulted to a 240-question

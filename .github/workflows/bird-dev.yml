@@ -18,6 +18,14 @@ on:
         description: Comma-separated arms
         required: false
         default: 'names,inline-definitions,inline+evidence,metadata+evidence'
+      second_model:
+        description: Model for `@second` candidate sources (blank = none)
+        required: false
+        default: ''
+      second_base_url:
+        description: Endpoint for the second model
+        required: false
+        default: 'https://open.bigmodel.cn/api/paas/v4'
 
 jobs:
   dev:
@@ -31,6 +39,12 @@ jobs:
       BIRD_SPLIT: dev
       BIRD_ARMS: ${{ inputs.arms }}
       BIRD_CONCURRENCY: '8'
+      # Only read when an arm names an `@second` source. The key is the second provider's
+      # own secret, never the primary model's: a run that silently used the primary key
+      # against another endpoint would measure the endpoint's auth error, not the model.
+      BIRD_SECOND_MODEL: ${{ inputs.second_model }}
+      BIRD_SECOND_BASE_URL: ${{ inputs.second_base_url }}
+      BIRD_SECOND_API_KEY: ${{ secrets.ZHIPU_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
