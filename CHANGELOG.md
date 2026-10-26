@@ -134,6 +134,11 @@ cannot be argued with.
 
 ### Measured
 
+- **The cross arm's third run did not replicate its accuracy gain.** +0.6pp (p=0.30) after
+  +1.1 (0.043) and +1.2 (0.0094), while its ceiling stayed at 67.7% against 65.9%. A second
+  model reliably improves what the selector has to choose from and does not reliably improve
+  what it returns: not adopted, and the ceiling finding is stated separately from the
+  accuracy one.
 - **The second run of the cross arm replicated, and the ceiling now has a paired test.**
   `select-cross` 63.5% / 64.1% against `select-mixed`'s 62.4% / 62.9% (+1.1pp p=0.043,
   +1.2pp p=0.0094); its ceiling 67.8% / 67.0% against 65.3% / 65.7%, and the paired ceiling

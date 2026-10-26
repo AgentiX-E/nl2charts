@@ -874,10 +874,25 @@ file:
 | `select-mixed` vs `select` | 65.7% | 64.2% | 46 / 23 | p≈0.006 |
 | **`select-cross` vs `select-mixed`** | **67.0%** | **65.7%** | **31 / 10** | **p=0.0015** |
 
-So a second model raises the ceiling, and the raise survives a paired test. The accuracy
-gain does not clear p<0.01 in both runs (0.043, 0.0094), so `select-cross` is **not
-adopted** under ADR-184; it is the best-measured arm here, with a third run dispatched to
-settle the letter of the rule rather than argue about it.
+So a second model raises the ceiling, and the raise survives a paired test.
+
+The third run (`40322733605`) settled the accuracy question, and not in the cross arm's
+favour:
+
+| run | `select-cross` | `select-mixed` | Δ | p | ceiling |
+| --- | --- | --- | --- | --- | --- |
+| `40283047123` | 63.5% | 62.4% | +1.1pp | 0.043 | 67.8% vs 65.3% |
+| `40305717702` | 64.1% | 62.9% | +1.2pp | 0.0094 | 67.0% vs 65.7% |
+| `40322733605` | 63.7% | 63.1% | +0.6pp | 0.30 | 67.7% vs 65.9% |
+
+Three runs, one at p<0.01, one almost, one at p=0.30. The ceiling moved every time — 67.0
+to 67.8 against 65.3 to 65.9, a stable +1.3 to +2.5pp — and the accuracy did not follow it
+consistently: +1.1, +1.2, +0.6. So `select-cross` is **not adopted**, and the honest summary
+is that a second model reliably improves the *material* the selector works from while the
+net effect on the answer stays around one point with a wide run-to-run spread.
+
+That is a different statement from the one the ceiling table invites, and it is the one the
+data supports.
 
 ### The question the duplicate count left open
 
