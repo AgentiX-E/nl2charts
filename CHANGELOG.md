@@ -17,78 +17,7 @@ cannot be argued with.
   The user guide's recipe replaces "three samples and a selector" with the three prompt
   styles that were actually measured.
 
-### Measured
-
-- **The cross arm's third run did not replicate its accuracy gain.** +0.6pp (p=0.30) after
-  +1.1 (0.043) and +1.2 (0.0094), while its ceiling stayed at 67.7% against 65.9%. A second
-  model reliably improves what the selector has to choose from and does not reliably improve
-  what it returns: not adopted, and the ceiling finding is stated separately from the
-  accuracy one.
-- **The second run of the cross arm replicated, and the ceiling now has a paired test.**
-  `select-cross` 63.5% / 64.1% against `select-mixed`'s 62.4% / 62.9% (+1.1pp p=0.043,
-  +1.2pp p=0.0094); its ceiling 67.8% / 67.0% against 65.3% / 65.7%, and the paired ceiling
-  test — 31 questions held only by the cross set against 10 held only by the mixed one — is
-  p=0.0015. Not adopted: one of the two accuracy runs misses the p<0.01 bar.
-- **The duplicate candidate's contribution, answered.** Stratifying by whether the third
-  candidate is a duplicate shows the trio ahead of `select` in both strata (64.6% vs 63.1%
-  on the 599 distinct questions, 61.7% vs 60.1% on the 933 duplicate ones), so the gain is
-  not the third candidate's distinctness: a duplicate buys a prior, not a second opinion.
-- **A second model raises the ceiling, and the selector eats the gain.** `select-cross` —
-  the adopted trio with its first candidate written by GLM-4.5 — holds a correct statement
-  67.8% of the time against 65.3% for the all-deepseek trio, and returns 63.5% against
-  62.4% (+1.1pp, 23 won / 40 lost, p=0.043). Below the pre-registered p<0.01, so not
-  adopted: the candidate set gained 38 answers and the selector lost 22 of them (44 → 66
-  cases discarded), which is where the next work is.
-
-- **63.0% on the dev split with three prompt styles and a selector** (965/1,532), against
-  60.6% for the single sample and 61.3% for three samples of one prompt. Since the dev
-  split is the one published leaderboards report, this is the first number here that can
-  be compared with another system directly. Paired: +2.4pp over `inline+evidence`
-  (23 won / 60 lost, p=0.0001) and +1.7pp over `select` (34/60, p=0.0095).
-- **Selection over three samples of one prompt is worth nothing at 1,532 questions**:
-  +0.7pp, p=0.28. The same comparison read +2.6pp once and +0.6pp once at 498 questions;
-  the larger split settles it.
-- **Two prompts are not enough**: `select-duo` reaches 61.8% with three calls and loses to
-  the trio by 1.2pp (p=0.0096), so the third source earns its call only inside the trio.
-
-- **The candidate ceiling, and where the remaining gap is.** With the new instrument, the
-  best arms hold a correct statement in their candidate set 61–65% of the time and return
-  57–60%: three to five points are pure selection loss. `select-mixed` — three prompts
-  instead of three samples of one — is **60.4%** against `select`'s 57.6% at the same four
-  calls (+2.8pp, 10/24, p=0.024), and beats `select5` (59.2%) with two fewer calls.
-- **A counted cost found a bug in its own first version.** The gate rejected the run with
-  `select samples 3 times and selects with the model and reports 3 calls per case`: the
-  selector call was made on the unwrapped provider. Fixed, and the check now
-  distinguishes a model selector from a majority vote, which correctly spends exactly one
-  call per sample.
-- **`select-mixed` replicated, `select-pair` did not.** Two runs of the same code put
-  `select-mixed` at **60.4%** against `select`'s 57.6% — +2.8pp in both (10/24 p=0.024,
-  11/25 p=0.029), same four calls, A/A pair 0.2pp apart. The pre-registered bar is p<0.01
-  twice (ADR-184), which 498 questions cannot resolve for a 2.8pp effect, so the decision
-  moves to the dev split where it can.
-- **`select-pair`** (binary comparison, `k - 1` calls) reached 58.4% against 57.6%
-  (+0.8pp, 17/20, p=0.74) while discarding *more* of its candidate set: 25 cases against
-  20. The absolute prompt is not where the selector loses its points. Out of the default
-  chain, kept in the catalogue with the numbers.
-
-- **Labelling candidates by origin moved the selector's preference and not its accuracy.**
-  `select-tagged` — `select-cross` with each candidate's source in front of it — scored
-  63.7% against 63.3% (+0.46pp, 26 won / 33 lost, p=0.43) and lost 52 of its ceiling instead
-  of 54. The pre-registered criterion (loss ≈45) was not met, so "tell the selector more"
-  closes the way "ask it differently" did last week.
-- **A better candidate set converts at half rate, which is why the ceiling gains do not
-  arrive.** On the 37 questions where the cross-model set alone held a correct statement,
-  the selector returned it 18 times; on the 991 questions both sets held, the two arms
-  returned the same answers (958 vs 960). Returned accuracy has now sat at 63.0-63.7% across
-  five dev runs while the ceiling moved from 65.3% to 67.8%.
-
 ### Added
-
-- **`vote-mixed` / `vote-cross`**: the same diverse candidate sets aggregated by **modal
-  result** instead of by a model — one lever from `select-mixed` / `select-cross`, three
-  calls instead of four. After two failed attempts to improve the selector's judgement, the
-  free aggregator is the remaining option that cannot be talked into a plausible wrong
-  answer; the arms report `agreement` so a weak majority is visible.
 
 - **`select-tagged`** and a `source` field on `Candidate`: the cross arm's three candidates
   with their origin in front of them (`1. [inline+evidence@second] SELECT …`), one lever
@@ -194,6 +123,60 @@ cannot be argued with.
   p=0.21). It fired on 21 cases, repaired 2, and pushed 14 more into the wrong column
   count. The trigger's precision, not the repair loop, is what fails; the arm stays in the
   catalogue with its numbers.
+
+### Measured
+
+- **The cross arm's third run did not replicate its accuracy gain.** +0.6pp (p=0.30) after
+  +1.1 (0.043) and +1.2 (0.0094), while its ceiling stayed at 67.7% against 65.9%. A second
+  model reliably improves what the selector has to choose from and does not reliably improve
+  what it returns: not adopted, and the ceiling finding is stated separately from the
+  accuracy one.
+- **The second run of the cross arm replicated, and the ceiling now has a paired test.**
+  `select-cross` 63.5% / 64.1% against `select-mixed`'s 62.4% / 62.9% (+1.1pp p=0.043,
+  +1.2pp p=0.0094); its ceiling 67.8% / 67.0% against 65.3% / 65.7%, and the paired ceiling
+  test — 31 questions held only by the cross set against 10 held only by the mixed one — is
+  p=0.0015. Not adopted: one of the two accuracy runs misses the p<0.01 bar.
+- **The duplicate candidate's contribution, answered.** Stratifying by whether the third
+  candidate is a duplicate shows the trio ahead of `select` in both strata (64.6% vs 63.1%
+  on the 599 distinct questions, 61.7% vs 60.1% on the 933 duplicate ones), so the gain is
+  not the third candidate's distinctness: a duplicate buys a prior, not a second opinion.
+- **A second model raises the ceiling, and the selector eats the gain.** `select-cross` —
+  the adopted trio with its first candidate written by GLM-4.5 — holds a correct statement
+  67.8% of the time against 65.3% for the all-deepseek trio, and returns 63.5% against
+  62.4% (+1.1pp, 23 won / 40 lost, p=0.043). Below the pre-registered p<0.01, so not
+  adopted: the candidate set gained 38 answers and the selector lost 22 of them (44 → 66
+  cases discarded), which is where the next work is.
+
+- **63.0% on the dev split with three prompt styles and a selector** (965/1,532), against
+  60.6% for the single sample and 61.3% for three samples of one prompt. Since the dev
+  split is the one published leaderboards report, this is the first number here that can
+  be compared with another system directly. Paired: +2.4pp over `inline+evidence`
+  (23 won / 60 lost, p=0.0001) and +1.7pp over `select` (34/60, p=0.0095).
+- **Selection over three samples of one prompt is worth nothing at 1,532 questions**:
+  +0.7pp, p=0.28. The same comparison read +2.6pp once and +0.6pp once at 498 questions;
+  the larger split settles it.
+- **Two prompts are not enough**: `select-duo` reaches 61.8% with three calls and loses to
+  the trio by 1.2pp (p=0.0096), so the third source earns its call only inside the trio.
+
+- **The candidate ceiling, and where the remaining gap is.** With the new instrument, the
+  best arms hold a correct statement in their candidate set 61–65% of the time and return
+  57–60%: three to five points are pure selection loss. `select-mixed` — three prompts
+  instead of three samples of one — is **60.4%** against `select`'s 57.6% at the same four
+  calls (+2.8pp, 10/24, p=0.024), and beats `select5` (59.2%) with two fewer calls.
+- **A counted cost found a bug in its own first version.** The gate rejected the run with
+  `select samples 3 times and selects with the model and reports 3 calls per case`: the
+  selector call was made on the unwrapped provider. Fixed, and the check now
+  distinguishes a model selector from a majority vote, which correctly spends exactly one
+  call per sample.
+- **`select-mixed` replicated, `select-pair` did not.** Two runs of the same code put
+  `select-mixed` at **60.4%** against `select`'s 57.6% — +2.8pp in both (10/24 p=0.024,
+  11/25 p=0.029), same four calls, A/A pair 0.2pp apart. The pre-registered bar is p<0.01
+  twice (ADR-184), which 498 questions cannot resolve for a 2.8pp effect, so the decision
+  moves to the dev split where it can.
+- **`select-pair`** (binary comparison, `k - 1` calls) reached 58.4% against 57.6%
+  (+0.8pp, 17/20, p=0.74) while discarding *more* of its candidate set: 25 cases against
+  20. The absolute prompt is not where the selector loses its points. Out of the default
+  chain, kept in the catalogue with the numbers.
 
 ## 1.0.0
 
