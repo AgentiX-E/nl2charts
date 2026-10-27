@@ -19,6 +19,7 @@ import {
   assertFailureRate,
   assertHarnessClean,
   escapeKind,
+  assertMixedFeasible,
   assertMixedSources,
   assertRepairPathFired,
   assertUniqueArmLabels,
@@ -673,5 +674,32 @@ describe('escaped errors', () => {
       ...Array.from({ length: 50 }, () => ({})),
     ];
     expect(() => assertFailureRate('names', runs)).not.toThrow();
+  });
+});
+
+/**
+ * A guard about the split must not fire on a sample of it.
+ *
+ * The degeneracy check asks whether a candidate set can ever be three opinions. Its first
+ * version asked that of whatever `BIRD_LIMIT` selected, so a five-question run whose questions
+ * name no literal declared a correct arm broken and refused to start — the same
+ * sample-standing-in-for-the-whole mistake it was written to catch.
+ */
+describe('mixed feasibility', () => {
+  const sources = ['inline+evidence', 'metadata+evidence', 'values'];
+
+  it('refuses a whole split where no question can build distinct prompts', () => {
+    expect(() => assertMixedFeasible('select-mixed', sources, { distinct: [], degenerate: ['1', '2'] }, true)).toThrow(/no question/);
+  });
+
+  it('accepts a whole split with at least one distinct question', () => {
+    expect(assertMixedFeasible('select-mixed', sources, { distinct: ['1'], degenerate: ['2'] }, true)).toBeUndefined();
+  });
+
+  it('reports a sampled run instead of failing it', () => {
+    const note = assertMixedFeasible('select-mixed', sources, { distinct: [], degenerate: ['1', '2'] }, false);
+    expect(note).toContain('sampled the split');
+    // The count has to say what it is a count of, or the next reader takes it for the split.
+    expect(note).toContain('0 of 2');
   });
 });

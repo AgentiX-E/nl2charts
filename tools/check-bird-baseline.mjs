@@ -176,6 +176,17 @@ export function compare(report, baseline) {
   if (!usesSecond && typeof report.secondModel === 'string' && report.secondModel !== '') {
     notes.push(`BIRD1: the report names a second model (${report.secondModel}) that no arm used`);
   }
+  // The instrument's settings, without which two runs of one configuration cannot be compared:
+  // a deadline shorter than the model needs produces "model failures" that are the harness's.
+  const instrument = report.run;
+  if (instrument === undefined) {
+    issues.push('BIRD1: the report does not record the deadline, concurrency or retry budget it ran with, so two runs cannot be compared');
+  } else {
+    if (!(instrument.timeoutMs >= 1000)) issues.push(`BIRD1: the report ran with a ${String(instrument.timeoutMs)}ms deadline`);
+    if (!(instrument.concurrency >= 1)) issues.push(`BIRD1: the report ran at concurrency ${String(instrument.concurrency)}`);
+    if (!(instrument.retries >= 1)) issues.push(`BIRD1: the report claims ${String(instrument.retries)} retries`);
+  }
+
   // A judge swap is the one experiment whose result is unreadable without knowing who judged.
   const judged = (report.arms ?? []).filter((arm) => arm.judge === 'second');
   if (judged.length > 0 && (report.judgeModel === undefined || report.judgeModel === null || report.judgeModel === '')) {
@@ -222,7 +233,8 @@ function selfTest() {
     floorModel: { minidev: 'deepseek-chat' },
   };
   const arm = (name, passed, total = 100, extra = {}) => ({ arm: name, passed, total, calls: { mean: 1, max: 1 }, ...extra });
-  const report = (arms, scored = 100, split = 'minidev', model = 'deepseek-chat') => ({ selection: { scored, split }, model, arms });
+  const run = { timeoutMs: 60000, concurrency: 8, retries: 3 };
+  const report = (arms, scored = 100, split = 'minidev', model = 'deepseek-chat') => ({ selection: { scored, split }, model, run, arms });
   const fail = (result, count, why) => {
     if (result.issues.length !== count) issues.push(why);
   };
@@ -235,7 +247,7 @@ function selfTest() {
 
   const empty = compare({ arms: [] }, baseline);
 
-  const unstable = compare({ selection: { scored: 100, split: 'minidev' }, model: 'deepseek-chat', aa: { delta: 0.085 }, arms: [arm('names', 42), arm('inline', 51)] }, baseline);
+  const unstable = compare({ selection: { scored: 100, split: 'minidev' }, model: 'deepseek-chat', run, aa: { delta: 0.085 }, arms: [arm('names', 42), arm('inline', 51)] }, baseline);
   if (unstable.issues.length !== 1) issues.push('BIRD1 does not notice an A/A pair that disagrees beyond the tolerance');
 
   // A different split with its own arm list: three arms on dev must not be judged
@@ -286,6 +298,7 @@ function selfTest() {
     {
       selection: { scored: 100, split: 'minidev' },
       model: 'glm-4.5',
+      run,
       arms: [{ ...arm('inline+repair', 50), repair: { total: 100, firstPass: 90, ranOnceWrong: 0, repaired: 20, fixedByRepair: 5, stillFailing: 15, byClass: [] } }],
     },
     { ...baseline, expectedArms: ['inline+repair'] },
@@ -296,7 +309,7 @@ function selfTest() {
 
   // Provenance: a report that omits the model, a floors table that omits the model it was
   // taken on, and a cross-model arm with no second model named.
-  const anonymous = compare({ selection: { scored: 100, split: 'minidev' }, arms: [arm('names', 42), arm('inline', 51)] }, baseline);
+  const anonymous = compare({ selection: { scored: 100, split: 'minidev' }, run, arms: [arm('names', 42), arm('inline', 51)] }, baseline);
   if (!anonymous.issues.some((issue) => issue.includes('does not name the model'))) {
     issues.push('BIRD1 accepts a report that does not name the model');
   }
@@ -321,6 +334,16 @@ function selfTest() {
   if (!judgedWithoutJudge.issues.some((issue) => issue.includes('does not say which one'))) {
     issues.push('BIRD1 accepts a judge swap whose judge is not recorded');
   }
+  // An unrecorded instrument is its own issue: two runs of one configuration that differ by
+  // deadline are not two measurements of the same thing.
+  const unrecorded = compare({ ...report([arm('names', 42), arm('inline', 51)]), run: undefined }, baseline);
+  if (!unrecorded.issues.some((issue) => issue.includes('cannot be compared'))) {
+    issues.push('BIRD1 accepts a report that does not record the deadline it ran with');
+  }
+  const shortDeadline = compare({ ...report([arm('names', 42), arm('inline', 51)]), run: { ...run, timeoutMs: 500 } }, baseline);
+  if (!shortDeadline.issues.some((issue) => issue.includes('ms deadline'))) {
+    issues.push('BIRD1 accepts a 500ms deadline as a measurement');
+  }
   const dryRun = compare({ ...report([arm('names', 42), arm('inline', 51)]), model: null }, baseline);
   fail(dryRun, 0, 'BIRD1 fails a dry run against a model floor');
   if (!dryRun.notes.some((note) => note.includes('without a model'))) {
@@ -332,6 +355,7 @@ function selfTest() {
     {
       selection: { scored: 498, split: 'minidev' },
       model: 'deepseek-chat',
+      run,
       arms: [
         {
           ...arm('inline+repair', 50),
@@ -349,14 +373,14 @@ function selfTest() {
   // count on an arm with no loop, a selector that costs nothing, and an arm whose cost
   // cannot be read at all.
   const lyingSamples = compare(
-    { selection: { scored: 100, split: 'minidev' }, model: 'deepseek-chat', arms: [arm('select5', 58, 100, { vote: 5, selector: 'model', calls: { mean: 5, max: 5 } })] },
+    { selection: { scored: 100, split: 'minidev' }, model: 'deepseek-chat', run, arms: [arm('select5', 58, 100, { vote: 5, selector: 'model', calls: { mean: 5, max: 5 } })] },
     { ...baseline, expectedArms: ['select5'] },
   );
   if (!lyingSamples.issues.some((issue) => issue.includes('selector call is not counted'))) {
     issues.push('BIRD1 does not notice a sampling arm whose selector call is missing from its cost');
   }
   const lyingRepair = compare(
-    { selection: { scored: 100, split: 'minidev' }, model: 'deepseek-chat', arms: [arm('select5', 58, 100, { vote: 5, selector: 'model', calls: { mean: 6, max: 6 }, repaired: 496 })] },
+    { selection: { scored: 100, split: 'minidev' }, model: 'deepseek-chat', run, arms: [arm('select5', 58, 100, { vote: 5, selector: 'model', calls: { mean: 6, max: 6 }, repaired: 496 })] },
     { ...baseline, expectedArms: ['select5'] },
   );
   if (!lyingRepair.issues.some((issue) => issue.includes('no repair funnel'))) {
@@ -365,21 +389,21 @@ function selfTest() {
   // ...and the opposite mistake: a majority vote spends exactly one call per sample, so
   // an arm whose selector is not the model must not be accused of hiding a selector call.
   const majorityPriced = compare(
-    { selection: { scored: 100, split: 'minidev' }, model: 'deepseek-chat', arms: [arm('vote', 55, 100, { vote: 3, selector: 'majority', calls: { mean: 3, max: 3 } })] },
+    { selection: { scored: 100, split: 'minidev' }, model: 'deepseek-chat', run, arms: [arm('vote', 55, 100, { vote: 3, selector: 'majority', calls: { mean: 3, max: 3 } })] },
     { ...baseline, expectedArms: ['vote'] },
   );
   if (majorityPriced.issues.length !== 0) {
     issues.push(`BIRD1 accuses a majority-vote arm of hiding a selector call (${majorityPriced.issues.join('; ')})`);
   }
   const harnessBroken = compare(
-    { selection: { scored: 100, split: 'minidev' }, model: 'deepseek-chat', arms: [arm('names', 42, 100, { errors: { harness: 3, llm: 0 } })] },
+    { selection: { scored: 100, split: 'minidev' }, model: 'deepseek-chat', run, arms: [arm('names', 42, 100, { errors: { harness: 3, llm: 0 } })] },
     { ...baseline, expectedArms: ['names'] },
   );
   if (!harnessBroken.issues.some((issue) => issue.includes('measures a bug'))) {
     issues.push('BIRD1 accepts an arm whose cases failed inside the harness');
   }
   const unpriced = compare(
-    { selection: { scored: 100, split: 'minidev' }, model: 'deepseek-chat', arms: [{ arm: 'names', passed: 42, total: 100 }] },
+    { selection: { scored: 100, split: 'minidev' }, model: 'deepseek-chat', run, arms: [{ arm: 'names', passed: 42, total: 100 }] },
     { ...baseline, expectedArms: ['names'] },
   );
   if (!unpriced.issues.some((issue) => issue.includes('cannot be priced'))) {
@@ -388,7 +412,7 @@ function selfTest() {
 
   // The lever-with-no-input case: the arms are present, the blocks are not.
   const dryLever = compare(
-    { selection: { scored: 100, split: 'minidev' }, model: 'deepseek-chat', controls: { retrievedBlocks: 0, demonstrationBlocks: 0 }, arms: [arm('names', 42), arm('inline', 51)] },
+    { selection: { scored: 100, split: 'minidev' }, model: 'deepseek-chat', run, controls: { retrievedBlocks: 0, demonstrationBlocks: 0 }, arms: [arm('names', 42), arm('inline', 51)] },
     { ...baseline, expectedArms: ['names', 'inline', 'inline+retrieval', 'inline+icl'] },
   );
   if (dryLever.issues.filter((issue) => issue.includes('corpus is missing')).length !== 2) {
@@ -415,7 +439,7 @@ if (process.argv[2] === '--self-test') {
   const issues = selfTest();
   for (const issue of issues) console.error(issue);
   if (issues.length > 0) process.exit(1);
-  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, a dev run measured against its own sample, two split fields that disagree, other split, other model, unfloored arm, empty lever, a funnel that does not add up, a split-specific arm list, an uncounted selector call, a majority vote that spends exactly its samples, a repair count without a loop, an unpriced arm, an unnamed model, floors from an unnamed model and a cross-model arm with no second model named, a judge swap with no judge named and an arm with harness errors all behave');
+  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, a dev run measured against its own sample, two split fields that disagree, other split, other model, unfloored arm, empty lever, a funnel that does not add up, a split-specific arm list, an uncounted selector call, a majority vote that spends exactly its samples, a repair count without a loop, an unpriced arm, an unnamed model, floors from an unnamed model and a cross-model arm with no second model named, a judge swap with no judge named and an arm with harness errors and an unrecorded instrument all behave');
 } else {
   const reportPath = resolve(ROOT, 'eval/out/bird-eval.json');
   const baseline = JSON.parse(readFileSync(resolve(ROOT, 'eval/baseline/bird.json'), 'utf8'));

@@ -167,6 +167,22 @@ cannot be argued with.
 
 ### Fixed
 
+- **A guard about the split fired on a sample of it.** The candidate-set feasibility check asked
+  whether *some* question can build as many distinct prompts as the set has sources, and asked it
+  of whatever `BIRD_LIMIT` selected — so a five-question run whose questions name no literal
+  declared a correct arm broken and refused to start. That is the same sample-for-the-whole
+  mistake the check exists to catch. It fires only on a whole-split run now, and a sampled run
+  records `sampled: true` with a note saying what its duplicate count is a count of.
+
+### Changed
+
+- **The artifact records the instrument**: `run.timeoutMs`, `run.concurrency`, `run.retries`
+  alongside `model`, `secondModel` and `judgeModel`. Two runs of one configuration that differ by
+  deadline are not two measurements of one thing, and a 60-second deadline once made a slower
+  model look like a broken endpoint. The gate rejects a report without them, a deadline under a
+  second, or a concurrency below one.
+
+
 - **`pnpm gate:all` was a third of the gate it claimed to be.** It ran five checks; CI ran
   sixteen. That is how a type error reached CI on a commit whose author had "run the gates" —
   the aggregate omitted typecheck, the tests, the coverage gate and three self-tests, and

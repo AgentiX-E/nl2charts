@@ -594,6 +594,31 @@ export function resolveArm(name: string): Arm | undefined {
  * as a regression. This refuses to run the table instead.
  */
 /**
+ * Can this candidate set ever be three opinions?
+ *
+ * The question is about the *split*, not about the sample: the first version of this check ran
+ * on whatever `BIRD_LIMIT` selected, and a five-question run whose questions name no literal
+ * had three sources collapse to two and was declared broken — the same mistake the check exists
+ * to prevent, a sample standing in for the whole. It now fires only on a whole-split run and
+ * reports the sample as a sample otherwise.
+ */
+export function assertMixedFeasible(
+  armName: string,
+  sources: readonly string[],
+  counted: { distinct: readonly string[]; degenerate: readonly string[] },
+  wholeSplit: boolean,
+): string | undefined {
+  if (!wholeSplit) {
+    const total = counted.distinct.length + counted.degenerate.length;
+    return `${armName}: this run sampled the split; ${String(counted.distinct.length)} of ${String(total)} questions could build ${String(sources.length)} distinct prompts, so the duplicate count describes the sample`;
+  }
+  if (counted.distinct.length === 0) {
+    throw new Error(`arm ${armName} builds no question with ${String(sources.length)} distinct prompts from ${sources.join(', ')}; it would pay ${String(sources.length)} times for one opinion on every case`);
+  }
+  return undefined;
+}
+
+/**
  * What an escaped error means.
  *
  * A provider error that got past the per-sample catch is still the provider's; anything else
@@ -1223,6 +1248,15 @@ async function main() {
     // ...and which model judged, when an arm asks the second one to. A judge swap is the one
     // experiment whose result is unreadable without this field.
     judgeModel: config.arms.some((name) => resolveArm(name)?.judge === 'second') ? config.second.model : null,
+    // The instrument's own settings. Same argument as the model: two runs of "the same"
+    // configuration can differ by the deadline, the concurrency or the retry budget, and a
+    // report that omits them cannot say whether a difference is the pipeline or the harness.
+    // A glm-4.5 run once reported 88% "model failures" that were this deadline.
+    run: {
+      timeoutMs: Number(process.env.BIRD_LLM_TIMEOUT_MS ?? 60000),
+      concurrency: config.concurrency,
+      retries: Number(process.env.BIRD_LLM_RETRIES ?? 3),
+    },
     generatedAt: new Date().toISOString(),
     selection: {
       databases: config.dbs,
@@ -1326,9 +1360,7 @@ async function main() {
     .map((arm) => {
       const sources = arm.mixed as readonly string[];
       const counted = distinctShare(sources);
-      if (counted.distinct.length === 0) {
-        throw new Error(`arm ${arm.name} builds no question with ${String(sources.length)} distinct prompts from ${sources.join(', ')}; it would pay ${String(sources.length)} times for one opinion on every case`);
-      }
+      const note = assertMixedFeasible(arm.name, sources, counted, cases.length === questions.length);
       return {
         arm: arm.name,
         sources,
@@ -1340,6 +1372,9 @@ async function main() {
         // questions or on the duplicated ones" is a stratum, and a stratum is a join
         // between these ids and the per-case outcomes.
         degenerateIds: counted.degenerate,
+        // A sampled run's degeneracy share describes the sample, not the split.
+        sampled: cases.length !== questions.length,
+        ...(note === undefined ? {} : { note }),
       };
     });
 
