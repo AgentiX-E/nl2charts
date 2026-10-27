@@ -1076,6 +1076,26 @@ the variable and the next step is a judge that is neither author; if it does not
 model's answers are simply harder and the cross arm's 47% stands as a property of the material
 rather than of the judge.**
 
+## What a report has to say about itself
+
+An artifact that names its arms and its score but not the conditions it ran under cannot be
+compared with anything, including a rerun of itself. The fields that decide whether two numbers
+are comparable:
+
+| field | why it must be there |
+| --- | --- |
+| `model`, `secondModel`, `judgeModel` | `select-cross`'s 63.5% has no subject without the model that wrote its candidates, and a judge swap is unreadable without the judge |
+| `run.timeoutMs` | a 60-second deadline once reported 1,355 of 1,532 glm-4.5 cases as "failed at the model"; the number was the harness's patience |
+| `run.concurrency` | a throttled endpoint and a fast one produce different failure profiles at the same settings |
+| `run.retries` | the same, for the transient class |
+| `split`, `selection.scored` | the sample, and its size |
+| `calls.mean` per arm | the price every `ppPerExtraCall` is divided by |
+
+The gate rejects a report missing any of these, or with a deadline under a second, or a
+concurrency below one. The point is not bookkeeping: each field stands for a way a measurement
+can silently become a measurement of the measuring instrument, and every one of them has
+happened here at least once.
+
 ## What a floor is a claim about
 
 A gate number has three coordinates: the split it was measured on, the arms it covers, and

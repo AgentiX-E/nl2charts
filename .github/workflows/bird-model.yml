@@ -71,6 +71,7 @@ jobs:
       # measures the queue. The provider retries 429 with backoff on top of this.
       BIRD_CONCURRENCY: ${{ inputs.concurrency }}
       BIRD_LLM_RETRIES: '4'
+      BIRD_PREFLIGHT_SAMPLES: '3'
       # A slower model needs a longer deadline, and a timeout reported as "the endpoint was
       # busy" is this harness measuring its own patience: glm-4.5 as primary hit the 60s
       # default on 88% of cases at concurrency 8.
