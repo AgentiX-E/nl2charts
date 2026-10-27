@@ -117,6 +117,57 @@ export function compare(report, baseline) {
     }
   }
 
+  // A candidate set that lost a third of its members to endpoint errors still answers
+  // every case, so nothing above notices: the ceiling simply falls, and the arm is read
+  // as a worse prompt. The artifact has to say how many candidates arrived.
+  for (const item of report.arms ?? []) {
+    const loss = item.candidateFailures;
+    if (loss === undefined) continue;
+    if (typeof loss.attempted !== 'number' || loss.attempted === 0) {
+      issues.push(`BIRD1: ${item.arm} reports lost candidates without the number it attempted`);
+      continue;
+    }
+    if (loss.llm + loss.other > loss.attempted) {
+      issues.push(`BIRD1: ${item.arm} lost ${String(loss.llm + loss.other)} of ${String(loss.attempted)} candidates, which is more than it drew`);
+    }
+    if (loss.llm / loss.attempted > 0.1) {
+      issues.push(
+        `BIRD1: ${item.arm} never received ${String(loss.llm)} of ${String(loss.attempted)} candidates (${((loss.llm / loss.attempted) * 100).toFixed(1)}%); its ceiling measures the endpoint`,
+      );
+    }
+  }
+
+  // An empty result is the one signal on this benchmark that is exact rather than a
+  // guess: no question in either split has an empty gold result, so a statement that
+  // returned nothing is wrong by construction. An arm that claims the lever must show
+  // what it did with it — how many candidates it removed for free, how often it spent
+  // the extra turn, and how often that turn produced rows.
+  for (const item of report.arms ?? []) {
+    const lever = item.emptyRetry;
+    if (lever === undefined) continue;
+    if (lever.mode !== 'diagnosed' && lever.mode !== 'blind') {
+      issues.push(`BIRD1: ${item.arm} runs an empty-result lever that does not say how it speaks: ${String(lever.mode)}`);
+    }
+    if (typeof lever.fired !== 'number' || typeof lever.recovered !== 'number' || typeof lever.dropped !== 'number') {
+      issues.push(`BIRD1: ${item.arm} declares an empty-result lever and does not report its funnel, so the call cannot be priced`);
+      continue;
+    }
+    if (lever.recovered > lever.fired) {
+      issues.push(`BIRD1: ${item.arm} recovers ${String(lever.recovered)} of ${String(lever.fired)} retried cases, which is impossible`);
+    }
+    if (lever.fired > (item.total ?? 0)) {
+      issues.push(`BIRD1: ${item.arm} retries ${String(lever.fired)} times on ${String(item.total ?? 0)} cases`);
+    }
+    // A lever that never fires produces its parent's number under its own name — the
+    // same failure mode as a repair loop that never repairs, and the reason both are
+    // checked instead of trusted.
+    if ((item.total ?? 0) >= 100 && lever.fired + lever.dropped === 0) {
+      issues.push(
+        `BIRD1: ${item.arm} treats empty results as failures and neither dropped a candidate nor retried one across ${String(item.total)} cases; the lever did not run`,
+      );
+    }
+  }
+
   // What the artifact says an arm spent, and whether that is possible. Two numbers in
   // this report were once derived from a field that meant something else: `repaired`
   // counted samples on arms with no repair loop (496 of 498), and the cost of selection
@@ -418,6 +469,49 @@ function selfTest() {
   if (dryLever.issues.filter((issue) => issue.includes('corpus is missing')).length !== 2) {
     issues.push('BIRD1 does not notice an arm whose retrieved block was never built');
   }
+  // A candidate set that shrank without saying so: the case-level numbers stay healthy
+  // while the ceiling measures an endpoint's quota.
+  const thinCandidates = compare(
+    { selection: { scored: 100, split: 'minidev' }, model: 'deepseek-chat', run, arms: [arm('select-cross', 60, 100, { vote: 3, selector: 'model', calls: { mean: 4, max: 4 }, candidateFailures: { llm: 90, other: 0, attempted: 300 } })] },
+    { ...baseline, expectedArms: ['select-cross'] },
+  );
+  if (!thinCandidates.issues.some((issue) => issue.includes('ceiling measures the endpoint'))) {
+    issues.push('BIRD1 accepts an arm that never received a third of its candidates');
+  }
+
+  // The empty-result lever, in three broken shapes and one working one. An arm that
+  // claims the lever without its funnel is describing a mechanism nobody can price; a
+  // funnel whose recovery exceeds its reach is arithmetic that did not happen; and a
+  // lever that neither dropped nor retried anything across a full split did not run.
+  const unpricedLever = compare(
+    { selection: { scored: 100, split: 'minidev' }, model: 'deepseek-chat', run, arms: [arm('select-mixed+empty', 60, 100, { vote: 3, selector: 'model', calls: { mean: 4, max: 5 }, emptyRetry: { mode: 'diagnosed' } })] },
+    { ...baseline, expectedArms: ['select-mixed+empty'] },
+  );
+  if (!unpricedLever.issues.some((issue) => issue.includes('does not report its funnel'))) {
+    issues.push('BIRD1 accepts an empty-result lever with no funnel behind it');
+  }
+  const impossibleLever = compare(
+    { selection: { scored: 100, split: 'minidev' }, model: 'deepseek-chat', run, arms: [arm('select-mixed+empty', 60, 100, { vote: 3, selector: 'model', calls: { mean: 4, max: 5 }, emptyRetry: { mode: 'diagnosed', dropped: 3, fired: 2, recovered: 5 } })] },
+    { ...baseline, expectedArms: ['select-mixed+empty'] },
+  );
+  if (!impossibleLever.issues.some((issue) => issue.includes('which is impossible'))) {
+    issues.push('BIRD1 accepts a lever that recovers more cases than it retried');
+  }
+  const inertLever = compare(
+    { selection: { scored: 498, split: 'minidev' }, model: 'deepseek-chat', run, arms: [arm('select-mixed+empty', 300, 498, { vote: 3, selector: 'model', calls: { mean: 4, max: 4 }, emptyRetry: { mode: 'diagnosed', dropped: 0, fired: 0, recovered: 0 } })] },
+    { ...baseline, expectedArms: ['select-mixed+empty'] },
+  );
+  if (!inertLever.issues.some((issue) => issue.includes('the lever did not run'))) {
+    issues.push('BIRD1 accepts an empty-result lever that never fired on a full split');
+  }
+  const workingLever = compare(
+    { selection: { scored: 100, split: 'minidev' }, model: 'deepseek-chat', run, arms: [arm('select-mixed+empty', 62, 100, { vote: 3, selector: 'model', calls: { mean: 4.1, max: 5 }, emptyRetry: { mode: 'diagnosed', dropped: 4, fired: 3, recovered: 2 } })] },
+    { ...baseline, expectedArms: ['select-mixed+empty'] },
+  );
+  if (workingLever.issues.length !== 0) {
+    issues.push(`BIRD1 rejects an empty-result lever that reports what it did (${workingLever.issues.join('; ')})`);
+  }
+
   fail(empty, 1, 'BIRD1 does not reject a report with no sample size');
 
   // A different split is a different measurement: floors do not transfer, and the
@@ -439,7 +533,7 @@ if (process.argv[2] === '--self-test') {
   const issues = selfTest();
   for (const issue of issues) console.error(issue);
   if (issues.length > 0) process.exit(1);
-  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, a dev run measured against its own sample, two split fields that disagree, other split, other model, unfloored arm, empty lever, a funnel that does not add up, a split-specific arm list, an uncounted selector call, a majority vote that spends exactly its samples, a repair count without a loop, an unpriced arm, an unnamed model, floors from an unnamed model and a cross-model arm with no second model named, a judge swap with no judge named and an arm with harness errors and an unrecorded instrument all behave');
+  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, a dev run measured against its own sample, two split fields that disagree, other split, other model, unfloored arm, empty lever, a funnel that does not add up, a split-specific arm list, an uncounted selector call, a majority vote that spends exactly its samples, a repair count without a loop, an unpriced arm, an unnamed model, floors from an unnamed model and a cross-model arm with no second model named, a judge swap with no judge named, an arm with harness errors, a candidate set that lost a third of itself to an endpoint, an empty-result lever with no funnel or an impossible yield or nothing behind it, and an unrecorded instrument all behave');
 } else {
   const reportPath = resolve(ROOT, 'eval/out/bird-eval.json');
   const baseline = JSON.parse(readFileSync(resolve(ROOT, 'eval/baseline/bird.json'), 'utf8'));

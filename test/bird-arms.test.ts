@@ -21,8 +21,12 @@ import {
   escapeKind,
   assertMixedFeasible,
   assertMixedSources,
+  assertCandidateSurvival,
+  assertEmptyRetryFired,
   assertRepairPathFired,
   assertUniqueArmLabels,
+  emptyRetryFunnel,
+  offeredCandidates,
   candidateCeiling,
   parseArms,
   parseLimit,
@@ -42,7 +46,7 @@ import type { BirdQuestion } from '../eval/bird/data.js';
  * delta cannot be attributed to anything else. A future edit that adds a second
  * change to a pair turns this red before it turns the benchmark unreadable.
  */
-const LEVERS = ['notes', 'evidence', 'repairs', 'linking', 'profile', 'definitions', 'focus', 'interpret', 'vote', 'demonstrations', 'select', 'values', 'plan', 'repairFeedback', 'shapeGuard', 'mixed', 'pairwise', 'sourcesVisible', 'judge'] as const;
+const LEVERS = ['notes', 'evidence', 'repairs', 'linking', 'profile', 'definitions', 'focus', 'interpret', 'vote', 'demonstrations', 'select', 'values', 'plan', 'repairFeedback', 'shapeGuard', 'mixed', 'pairwise', 'sourcesVisible', 'judge', 'emptyRetry'] as const;
 
 function changedLevers(left: Arm, right: Arm): string[] {
   return LEVERS.filter((lever) => left[lever] !== right[lever]);
@@ -187,8 +191,69 @@ describe('the chain that actually runs', () => {
     expect(() => assertRepairPathFired('inline+repair', [{ attempts: 1 }])).not.toThrow();
   });
 
-  it('pairs the diagnosed repair with the raw one, at the same cost', () => {
-    // The comparison that decides whether the diagnosis earns its calls: same arms, same
+  it('refuses an arm whose candidates never arrived, which no case count can see', () => {
+    // One candidate of three refused on every question: every case still answers, so the
+    // case-level guard passes, and the ceiling falls for a reason that is not in the arm.
+    type Lost = { candidateFailures?: { llm: number; other: number } };
+    const thin: Lost[] = Array.from({ length: 100 }, () => ({ candidateFailures: { llm: 1, other: 0 } }));
+    expect(() => assertCandidateSurvival('select-cross', thin, 3)).toThrow(/never arrived/);
+    // Under the outage threshold it is noise, not an outage.
+    const sparse: Lost[] = [...thin.slice(0, 25), ...Array.from({ length: 75 }, () => ({}))];
+    expect(() => assertCandidateSurvival('select-cross', sparse, 3)).not.toThrow();
+    // ...and the message says how many of how many, not just a share.
+    expect(() => assertCandidateSurvival('select-cross', thin, 3)).toThrow(/100 of 300 candidates \(33.3%\)/);
+  });
+
+  it('refuses an empty arm on which the empty-result turn never fired', () => {
+    const quiet = Array.from({ length: 200 }, () => ({ emptyRetried: false, emptyDropped: 0 }));
+    expect(() => assertEmptyRetryFired('select-mixed+empty', quiet as never)).toThrow(/never fired/);
+    expect(() =>
+      assertEmptyRetryFired('select-mixed+empty', [...quiet.slice(1), { emptyRetried: true, emptyDropped: 0 }] as never),
+    ).not.toThrow();
+    // Twenty questions is not enough to insist: the lever legitimately may not fire.
+    expect(() => assertEmptyRetryFired('select-mixed+empty', [{ emptyRetried: false }] as never)).not.toThrow();
+  });
+
+  it('drops only the candidates that cannot be right, and only while something is left', () => {
+    const empty = { sql: 'SELECT 1 WHERE 0', rows: [] as readonly unknown[][], source: 'a' };
+    const rows = { sql: 'SELECT 1', rows: [[1]] as readonly unknown[][], source: 'b' };
+    // The lever off: the selector sees everything, which is what its parent arm does.
+    expect(offeredCandidates([rows, empty], false)).toEqual({ offered: [rows, empty], dropped: 0 });
+    // The lever on: an option that returned nothing is removed and counted.
+    const dropped = offeredCandidates([rows, empty], true);
+    expect(dropped.offered).toEqual([rows]);
+    expect(dropped.dropped).toBe(1);
+    // When every candidate is empty there is nothing to choose, so nothing is dropped —
+    // an empty offer would read as a selector failure instead of an empty result.
+    expect(offeredCandidates([empty], true)).toEqual({ offered: [empty], dropped: 0 });
+  });
+
+  it('prices the empty-result lever by its reach and its yield', () => {
+    const runs = [
+      { emptyRetried: true, emptyRecovered: true, emptyDropped: 1, predicted: '', reason: 'values', strict: false, id: '1', passed: false, calls: 5 },
+      { emptyRetried: false, emptyDropped: 2, predicted: '', reason: 'values', strict: false, id: '2', passed: false, calls: 4 },
+      { emptyRetried: false, emptyDropped: 0, predicted: '', reason: 'values', strict: false, id: '3', passed: true, calls: 4 },
+    ];
+    const funnel = emptyRetryFunnel(runs as never);
+    expect(funnel).toEqual({ dropped: 3, fired: 1, recovered: 1, extraCallsPerCase: Number((1 / 3).toFixed(4)) });
+  });
+
+  it('keeps the empty-result pair one lever apart, in both directions', () => {
+    const parent = ARMS.find((arm) => arm.name === 'select-mixed') as Arm;
+    const diagnosed = ARMS.find((arm) => arm.name === 'select-mixed+empty') as Arm;
+    const blind = ARMS.find((arm) => arm.name === 'select-mixed+empty-blind') as Arm;
+    expect(parent.emptyRetry).toBeUndefined();
+    expect(diagnosed.emptyRetry).toBe('diagnosed');
+    expect(blind.emptyRetry).toBe('blind');
+    // Same candidates, same selector, same prompt stack: the only field that moves is
+    // the one under test, so a delta cannot borrow from a second change.
+    expect({ ...diagnosed, emptyRetry: undefined, name: parent.name }).toEqual(parent);
+    expect({ ...blind, emptyRetry: 'diagnosed', name: diagnosed.name }).toEqual(diagnosed);
+    expect(PAIRS).toContainEqual(['select-mixed', 'select-mixed+empty']);
+    expect(PAIRS).toContainEqual(['select-mixed+empty-blind', 'select-mixed+empty']);
+  });
+
+  it('pairs the diagnosed repair with the raw one, at the same cost', () => {    // The comparison that decides whether the diagnosis earns its calls: same arms, same
     // budget, same prompt — only the text of the repair turn differs.
     const diagnosed = ARMS.find((arm) => arm.name === 'inline+repair') as Arm;
     const raw = ARMS.find((arm) => arm.name === 'inline+repair-raw') as Arm;
@@ -475,7 +540,7 @@ describe('mixed arms declare their own sources', () => {
   const mixed = ARMS.filter((arm) => arm.mixed !== undefined);
 
   it('has at least the two arms under test', () => {
-    expect(mixed.map((arm) => arm.name).sort()).toEqual(['select-balanced', 'select-cross', 'select-cross-judge', 'select-duo', 'select-mixed', 'select-tagged', 'vote-cross', 'vote-mixed']);
+    expect(mixed.map((arm) => arm.name).sort()).toEqual(['select-balanced', 'select-cross', 'select-cross-judge', 'select-duo', 'select-mixed', 'select-mixed+empty', 'select-mixed+empty-blind', 'select-tagged', 'vote-cross', 'vote-mixed']);
   });
 
   it.each(mixed.map((arm) => [arm.name, arm] as const))('%s: candidates equal sources, and every source generates once', (name, arm) => {

@@ -3,7 +3,7 @@
   "packages": {
     "spec": 5000,
     "core": 36000,
-    "ai": 36000,
+    "ai": 39000,
     "node": 17000,
     "chart": 11500,
     "mcp": 7000,
@@ -11,6 +11,6 @@
     "devkit": 5400
   },
   "notes": {
-    "ai": "35000 -> 36000 (v9.3): the pairwise selector adds a prompt builder, a parser and a knockout loop, about 1.1 KB gzip. Reviewed as a capability rather than drift, and the two prompt builders were merged onto one rules block and one candidate renderer first, which returned 155 B."
+    "ai": "35000 -> 36000 (v9.3): the pairwise selector adds a prompt builder, a parser and a knockout loop, about 1.1 KB gzip. Reviewed as a capability rather than drift, and the two prompt builders were merged onto one rules block and one candidate renderer first, which returned 155 B. 36000 -> 39000 (v9.9): the empty-result turn adds the message builder, the blind control's text and the retry loop, plus a second exported builder so the runner continues the same conversation instead of rebuilding it — about 1.6 KB gzip over both module formats. A capability, priced here rather than absorbed silently."
   }
 }

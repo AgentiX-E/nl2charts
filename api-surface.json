@@ -141,6 +141,7 @@
     "type TableDef"
   ],
   "ai": [
+    "EMPTY_BLIND_MESSAGE",
     "HttpProviderOptions",
     "LinkedColumn",
     "LlmMessage",
@@ -155,7 +156,9 @@
     "SchemaTable",
     "applySelection",
     "attachDefinitions",
+    "buildAskMessages",
     "buildDefinitionPrompt",
+    "buildEmptyResultFeedback",
     "buildInterpretationPrompt",
     "buildPairwisePrompt",
     "buildPlanPrompt",
@@ -170,6 +173,7 @@
     "createPipeline",
     "createReplayProvider",
     "diagnoseFailure",
+    "emptyRetryMessages",
     "extractSql",
     "linkSchema",
     "parseDefinitions",
@@ -187,6 +191,7 @@
     "singularize",
     "toCandidate",
     "tokenizeQuestion",
+    "type AskMessagesInput",
     "type AskRequest",
     "type AskResult",
     "type AttachResult",

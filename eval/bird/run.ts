@@ -22,7 +22,11 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHttpProvider } from '@agentix-e/nl2charts-ai';
 import type { PromptOptions, SchemaTable } from '@agentix-e/nl2charts-ai';
-import { applySelection, attachDefinitions, buildSelectionPrompt, chooseCandidatePairwise, buildSqlPrompt, choosePromptProfile, createPipeline, renderDefinitions, renderEvidence, renderSchemaCard, withCallCounter } from '@agentix-e/nl2charts-ai';
+import { applySelection, attachDefinitions, buildAskMessages, buildSelectionPrompt, chooseCandidatePairwise, buildSqlPrompt, choosePromptProfile, createPipeline, emptyRetryMessages, extractSql, renderDefinitions, renderEvidence, renderSchemaCard, withCallCounter } from '@agentix-e/nl2charts-ai';
+// The retry turn writes a statement outside the pipeline, so it goes through the same
+// guard the pipeline applies. Skipping it here would let the one arm that retries be the
+// one arm that can execute DDL.
+import { inspectSql } from '@agentix-e/nl2charts-core';
 import { compareArms, judgeOfficial, judgeStrict, majorityResult, mcnemarExact, summarise, wilsonInterval } from '@agentix-e/nl2charts-devkit';
 import { ppPerExtraCall, repairFunnel } from './metrics.js';
 import type { CaseOutcome, MatchReason } from '@agentix-e/nl2charts-devkit';
@@ -175,6 +179,22 @@ export interface Arm {
    * not.
    */
   readonly judge?: 'second';
+  /**
+   * Treat an empty result as a failure and spend one call on it.
+   *
+   * The signal is exact on this benchmark rather than heuristic: no question in either
+   * split has an empty gold result, so a statement that returns no rows is wrong by
+   * construction (`emptyGoldExcluded` is 0 in every report). That is why this is a
+   * separate lever from `shapeGuard`, which guessed from row and column counts and lost
+   * 1.2pp doing it.
+   *
+   * It also drops candidates that returned nothing before the selector sees them, which
+   * costs no calls: an option that cannot be right has no reason to be offered.
+   *
+   * `diagnosed` tells the next turn what happened; `blind` spends the same call and says
+   * nothing about it, which is the control that prices the information.
+   */
+  readonly emptyRetry?: 'diagnosed' | 'blind';
 }
 
 /**
@@ -336,6 +356,16 @@ export const ARMS: readonly Arm[] = [
   // ...and the same aggregator on the cross-model set, where the candidates disagree by
   // model as well as by prompt.
   { name: 'vote-cross', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, mixed: CROSS_SOURCES },
+  // The adopted arm plus one idea no earlier arm could test: a statement that returns no
+  // rows is wrong on a split whose gold results are never empty, so the candidate that
+  // returned nothing is dropped before the selector votes and, when every candidate is
+  // empty, one more turn is spent telling the model what happened. One lever from
+  // `select-mixed`; the drop costs nothing and the turn costs a call only where it fires.
+  { name: 'select-mixed+empty', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: MIXED_SOURCES, emptyRetry: 'diagnosed' },
+  // The same drop, the same extra call, the same adoption rule, and a message that says
+  // nothing about the empty result. The pair with the arm above prices the information
+  // instead of the call.
+  { name: 'select-mixed+empty-blind', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: MIXED_SOURCES, emptyRetry: 'blind' },
   // The best prompt stack plus three diagnosed repairs: one lever from
   // `inline+evidence`, so the delta prices the repair loop and nothing else.
   { name: 'inline+repair', notes: false, evidence: 'dataset', repairs: 3, linking: true, definitions: 'inline' },
@@ -424,6 +454,8 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   plan: 'query plan before the statement: 50.4% against 57.6% for its parent (-7.2pp, 63/27, p=0.0002) — anchoring, not helping; kept so the finding can be re-tested',
   'select-pair': 'pairwise comparison instead of an absolute ranking: 58.4% against 57.6% for its parent (+0.8pp, 17/20, p=0.74) at one more call, and it lost more of its candidate set (25 cases against 20) — the absolute prompt is not what the selector loses; kept so a different comparison order or a two-of-three vote can be measured against it',
   'inline+shape': 'scalar-shape guard before the repair loop: 57.2% against 58.4% for its parent (-1.2pp, 11/5, p=0.21) — it fired on 21 cases, repaired 2, and shifted 14 more into the wrong column count; kept so a better shape test can be measured against this one',
+  'select-mixed+empty': 'the adopted arm with an empty result treated as a failure: drops the candidate that returned nothing and spends one turn when every candidate did; the only lever measured so far whose signal is exact rather than heuristic',
+  'select-mixed+empty-blind': 'the same drop and the same extra call with a message that says nothing about the empty result: the control that separates the information from the call, and it cannot be dispensed with, because a second draw at a non-zero temperature also moves the number',
 };
 
 /**
@@ -480,6 +512,11 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   ['select-cross', 'select-cross-judge'],
   // One lever: which author holds the majority among the same three prompts.
   ['select-cross', 'select-balanced'],
+  // One lever: the same candidates and selector, with an empty result treated as a
+  // failure — dropped before the vote and retried once when nothing survives.
+  ['select-mixed', 'select-mixed+empty'],
+  // One lever: the words of the extra turn, at the same cost on the same cases.
+  ['select-mixed+empty-blind', 'select-mixed+empty'],
   ['select', 'select5'],
   ['inline+evidence', 'values'],
   ['inline+evidence', 'plan'],
@@ -516,6 +553,21 @@ interface CaseRun extends CaseOutcome {
    * generator that never wins is a call that should not be in the set.
    */
   readonly winnerSource?: string;
+  /** Candidates the selector was not offered because their result was empty. */
+  readonly emptyDropped?: number;
+  /** True when the winner returned nothing and one more turn was spent. */
+  readonly emptyRetried?: boolean;
+  /** True when that turn produced a statement that returned rows. */
+  readonly emptyRecovered?: boolean;
+  /**
+   * Candidates that never arrived, by reason.
+   *
+   * A sampling arm's ceiling is a property of its candidate set, and a candidate the
+   * endpoint refused is missing from that set. Reporting only the cases where *every*
+   * candidate failed hides the run where one of three was refused for all 1,532
+   * questions — which reads as a lower ceiling and is an outage.
+   */
+  readonly candidateFailures?: { readonly llm: number; readonly other: number };
   readonly error?: string;
   readonly errorKind?: 'execution' | 'guard' | 'llm' | 'shape' | 'harness' | 'other';
   /** Classes of the rejected attempts, in order; empty when the first one ran. */
@@ -710,6 +762,75 @@ export function assertRepairPathFired(armName: string, cases: readonly { attempt
 }
 
 /**
+ * A candidate the endpoint refused is a missing candidate, not a wrong one.
+ *
+ * `assertFailureRate` looks at cases, which is right for "did this arm run at all". It
+ * cannot see a run where one of three candidates was refused on every question: every
+ * case still returns an answer, the ceiling falls, and the artifact has no field that
+ * says why. One dev run lost its second endpoint to a quota error mid-run and reported a
+ * ceiling 2pp below the previous one for exactly this reason.
+ */
+export function assertCandidateSurvival(
+  armName: string,
+  runs: readonly { candidateFailures?: { readonly llm: number; readonly other: number } }[],
+  vote: number,
+  maxShare = 0.1,
+): void {
+  const attempted = runs.length * vote;
+  if (attempted === 0) return;
+  const lost = runs.reduce((total, run) => total + (run.candidateFailures?.llm ?? 0), 0);
+  const share = lost / attempted;
+  if (share <= maxShare) return;
+  throw new Error(
+    `arm ${armName}: ${String(lost)} of ${String(attempted)} candidates (${(share * 100).toFixed(1)}%) never arrived from the model, ` +
+      `above the ${(maxShare * 100).toFixed(0)}% this harness treats as an outage. ` +
+      'The candidate set is smaller than the arm declares, so its ceiling measures the endpoint.',
+  );
+}
+
+/**
+ * What the empty-result lever did, on the cases that ran.
+ *
+ * Three numbers, because the lever has two parts and they are priced differently:
+ * `dropped` is a decision that costs nothing, `fired` is the reach of the extra call,
+ * and `recovered` is what that call bought. An arm that reports the third without the
+ * second has lost the denominator.
+ */
+export function emptyRetryFunnel(runs: readonly CaseRun[]): {
+  readonly dropped: number;
+  readonly fired: number;
+  readonly recovered: number;
+  readonly extraCallsPerCase: number;
+} {
+  const fired = runs.filter((run) => run.emptyRetried === true).length;
+  return {
+    dropped: runs.reduce((total, run) => total + (run.emptyDropped ?? 0), 0),
+    fired,
+    recovered: runs.filter((run) => run.emptyRecovered === true).length,
+    extraCallsPerCase: Number((fired / Math.max(1, runs.length)).toFixed(4)),
+  };
+}
+
+/**
+ * An empty lever is a bug, not a null result.
+ *
+ * The same reasoning as `assertRepairPathFired`: on a split where 37% of cases are wrong,
+ * a mechanism that fires on none of them did not run, and its 0.0pp delta would otherwise
+ * be published as "this does not help".
+ */
+export function assertEmptyRetryFired(
+  armName: string,
+  runs: readonly CaseRun[],
+  minimumSample = 100,
+): void {
+  if (runs.length < minimumSample) return;
+  if (runs.some((run) => run.emptyRetried === true)) return;
+  throw new Error(
+    `arm ${armName}: no case returned an empty result across ${String(runs.length)} questions, so the empty-result turn never fired — the lever did not run`,
+  );
+}
+
+/**
  * The repair and sampling fields an arm report may carry.
  *
  * `attempts` means one thing per arm kind: for an arm with a repair loop it is the number
@@ -822,8 +943,25 @@ function settings() {
   };
 }
 
-export async function pool<T, R>(items: readonly T[], limit: number, worker: (item: T, index: number) => Promise<R>): Promise<R[]> {
-  const results = new Array<R>(items.length);
+/**
+ * The candidates a selector is allowed to see.
+ *
+ * When empty results are treated as failures, a candidate that returned no rows is
+ * removed before the vote — but only while something else is left. Removing every
+ * candidate would leave nothing to select from, and the arm would report a selector
+ * failure where the truth is that the whole set came back empty.
+ */
+export function offeredCandidates<T extends { readonly rows: readonly unknown[] }>(
+  candidates: readonly T[],
+  dropEmpty: boolean,
+): { offered: readonly T[]; dropped: number } {
+  if (!dropEmpty) return { offered: candidates, dropped: 0 };
+  const nonEmpty = candidates.filter((candidate) => candidate.rows.length > 0);
+  if (nonEmpty.length === 0) return { offered: candidates, dropped: 0 };
+  return { offered: nonEmpty, dropped: candidates.length - nonEmpty.length };
+}
+
+export async function pool<T, R>(items: readonly T[], limit: number, worker: (item: T, index: number) => Promise<R>): Promise<R[]> {  const results = new Array<R>(items.length);
   let cursor = 0;
   const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
     for (;;) {
@@ -1510,6 +1648,12 @@ async function main() {
           // used to be counted as "no sample survived guard and execution" — a content
           // failure the accuracy was then blamed for.
           const sampleErrors: (string | undefined)[] = [];
+          // A candidate that never arrived is not a candidate that was wrong, and the
+          // difference is invisible in `candidateRecall`: an endpoint that refuses one of
+          // three calls lowers the ceiling exactly as much as a prompt that writes a bad
+          // statement. Counting them apart is the only way to tell the two apart after
+          // the run, because by then the request is gone.
+          const lost = { llm: 0, other: 0 };
           for (let sample = 0; sample < arm.vote; sample += 1) {
             try {
               // A mixed arm draws each candidate from a different decomposition. The
@@ -1525,7 +1669,9 @@ async function main() {
             } catch (error) {
               // A sample that fails the guard or the engine casts no vote; the other
               // samples still produce one. The reason is kept for the zero-candidate case.
-              sampleErrors.push((error as { code?: string }).code?.startsWith('NL2C_E_LLM') === true ? 'llm' : undefined);
+              const kind = (error as { code?: string }).code?.startsWith('NL2C_E_LLM') === true ? 'llm' : 'other';
+              sampleErrors.push(kind === 'llm' ? 'llm' : undefined);
+              lost[kind] += 1;
             }
           }
           if (candidates.length === 0) {
@@ -1543,17 +1689,26 @@ async function main() {
               // statements and quietly lowered the score.
               errorKind: outage ? 'llm' : 'other',
               candidateRecall: false,
+              candidateFailures: lost,
               calls: callsMade(),
             };
           }
-          const majority = majorityResult(candidates, (left, right) => judgeOfficial(left.rows, right.rows) === 'match');
+          // An empty result is not an option on this benchmark: no question in either
+          // split has an empty gold result, so a statement that returned nothing is wrong
+          // by construction. Dropping it costs no call and can only help the selector,
+          // which otherwise spends a tie-breaker on a candidate that cannot win. When
+          // every candidate is empty there is nothing to drop, and the turn below is the
+          // one thing left to spend.
+          const choice = offeredCandidates(candidates, arm.emptyRetry !== undefined);
+          const choosable = choice.offered as typeof candidates;
+          const majority = majorityResult(choosable, (left, right) => judgeOfficial(left.rows, right.rows) === 'match');
           let winner = majority.winner as { sql: string; rows: readonly (readonly unknown[])[]; source: string };
           let selectedByModel: boolean | undefined;
           if (arm.select === true) {
             // The model sees what the vote cannot: the shape of each result. A statement
             // that answers a "how many" with 500 rows is wrong for a reason no majority
             // of identical mistakes will reveal.
-            const offered = candidates.map((candidate) => ({
+            const offered = choosable.map((candidate) => ({
               sql: candidate.sql,
               rows: candidate.rows.length,
               columns: candidate.rows[0]?.length ?? 0,
@@ -1566,7 +1721,7 @@ async function main() {
             const judge = arm.judge === 'second' && secondCounter !== undefined ? secondCounter.provider : counter.provider;
             const decision =
               arm.pairwise === true
-                ? await chooseCandidatePairwise(judge, question.question, candidates)
+                ? await chooseCandidatePairwise(judge, question.question, choosable)
                 : await (async () => {
                     const reply = await judge.complete({
                       messages: [
@@ -1578,8 +1733,44 @@ async function main() {
                     const applied = applySelection(reply.text, offered);
                     return { index: applied.index, decided: applied.decided, sql: (offered[applied.index] as { sql: string }).sql };
                   })();
-            winner = candidates[decision.index] as typeof winner;
+            winner = choosable[decision.index] as typeof winner;
             selectedByModel = decision.decided;
+          }
+          // The last thing this arm can learn for free: the winner ran and produced
+          // nothing. On a split whose gold results are never empty that is proof of a
+          // wrong statement, and the only information a second statement lacks is what
+          // this one returned.
+          let recovered = false;
+          let retried = false;
+          if (arm.emptyRetry !== undefined && winner.rows.length === 0) {
+            retried = true;
+            const sourceArm =
+              arm.mixed === undefined ? arm : (resolveArm(parseMixedSource(winner.source).arm) as Arm);
+            const retryPrompt = buildAskMessages({
+              question: question.question,
+              schema,
+              prompt: promptFor(sourceArm, question, blocksFor(sourceArm, question)),
+              linking: sourceArm.linking,
+            });
+            const reply = await counter.provider.complete({
+              messages: [...retryPrompt.messages, ...emptyRetryMessages(arm.emptyRetry, winner.sql, winner.sql)],
+              // The arm samples above zero, so a blind turn is a different draw and not a
+              // copy of the statement it replaces. Both modes use the same temperature:
+              // the pair differs by the words, and by nothing else.
+              temperature: 0.7,
+            });
+            const candidate = extractSql(reply.text);
+            if (inspectSql(candidate).ok) {
+              const executed = await oracle.run(question.db_id, candidate);
+              // A replacement that returns rows is adopted; one that also returns nothing
+              // is kept as well, because the statement it replaces is equally wrong and
+              // this one was written with more in front of it. A replacement that fails to
+              // run is discarded: the original at least produced a result.
+              if (executed.ok) {
+                recovered = executed.rows.length > 0;
+                winner = { sql: candidate, rows: executed.rows, source: winner.source };
+              }
+            }
           }
           const reason = judgeOfficial(expected.rows, winner.rows);
           return {
@@ -1588,11 +1779,15 @@ async function main() {
             predicted: winner.sql,
             reason,
             strict: judgeStrict(expected.rows, winner.rows) === 'match',
-            attempts: arm.vote,
+            attempts: arm.vote + (retried ? 1 : 0),
             agreement: majority.agreement,
             candidateRecall: candidates.some((candidate) => judgeOfficial(expected.rows, candidate.rows) === 'match'),
             ...(selectedByModel === undefined ? {} : { selectedByModel }),
             ...(arm.mixed === undefined ? {} : { winnerSource: winner.source }),
+            ...(arm.emptyRetry === undefined
+              ? {}
+              : { emptyDropped: choice.dropped, emptyRetried: retried, emptyRecovered: recovered }),
+            ...(lost.llm + lost.other === 0 ? {} : { candidateFailures: lost }),
             calls: callsMade(),
           };
         }
@@ -1669,9 +1864,13 @@ async function main() {
     // accuracy, and publishing 0% would hide the provider's message behind a score.
     assertArmProducedResults(name, runs);
     assertFailureRate(name, runs);
+    // ...and a candidate that never arrived shrinks the set the ceiling is taken over,
+    // which no case-level count can see.
+    if (arm.vote !== undefined && arm.vote > 1) assertCandidateSurvival(name, runs, arm.vote);
     // ...and a bug in the runner is not a wrong answer: it fails the arm outright.
     assertHarnessClean(name, runs);
     if (arm.repairs > 0) assertRepairPathFired(name, runs);
+    if (arm.emptyRetry !== undefined) assertEmptyRetryFired(name, runs);
     const summary = summarise(name, runs);
     const strictPassed = runs.filter((run) => run.strict).length;
     const byDifficulty: Record<string, { passed: number; total: number }> = {};
@@ -1730,6 +1929,7 @@ async function main() {
         max: Math.max(0, ...runs.map((run) => run.calls)),
       },
       ...(repair === undefined ? {} : { repair }),
+      ...(arm.emptyRetry === undefined ? {} : { emptyRetry: { mode: arm.emptyRetry, ...emptyRetryFunnel(runs) } }),
       ...(arm.vote === undefined
         ? {}
         : {
@@ -1744,6 +1944,18 @@ async function main() {
             // that matched. Accuracy divided by this is what the selector kept, and the
             // difference between the two is the most a better selector could win here.
             ...candidateCeiling(runs),
+            // How much of the declared candidate set never arrived. Reported beside the
+            // ceiling, because a ceiling taken over a set that lost a third of its
+            // candidates is not a measurement of the prompts.
+            ...(runs.some((run) => run.candidateFailures !== undefined)
+              ? {
+                  candidateFailures: {
+                    llm: runs.reduce((total, run) => total + (run.candidateFailures?.llm ?? 0), 0),
+                    other: runs.reduce((total, run) => total + (run.candidateFailures?.other ?? 0), 0),
+                    attempted: runs.length * (arm.vote ?? 1),
+                  },
+                }
+              : {}),
             ...(arm.mixed === undefined ? {} : { sources: winnerSources(runs, arm.mixed) }),
             // How often the selector produced a usable index. A selector that fails to
             // answer half the time is not a null result; it is a broken prompt.

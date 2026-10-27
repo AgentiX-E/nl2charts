@@ -5,6 +5,7 @@ import { buildInterpretationPrompt, parseInterpretation } from './interpret.js';
 import { diagnoseFailure } from './diagnose.js';
 import type { Diagnosis, FailureClass } from './diagnose.js';
 import { buildPlanPrompt, parsePlan } from './plan.js';
+import { emptyRetryMessages } from './empty.js';
 import { linkSchema, renderSchemaCard } from './linking.js';
 import type { LinkedColumn, SchemaCardOptions, SchemaTable } from './linking.js';
 
@@ -102,8 +103,22 @@ export interface PipelineOptions {
   /** Sampling temperature for the SQL call. Above zero enables self-consistency. */
   readonly temperature?: number;
   /** When provided, a candidate is executed before it is accepted; failures
-   *  become repair turns (syntax and binding errors, not wrong answers). */
-  readonly execute?: (sql: string) => Promise<unknown>;
+   *  become repair turns (syntax and binding errors, not wrong answers). Returning
+   *  a row count opts the pipeline into the empty-result turn; returning nothing
+   *  says the caller does not measure it. */
+  readonly execute?: (sql: string) => Promise<{ readonly rows: number } | void>;
+  /**
+   * One more turn when an accepted statement returns no rows.
+   *
+   * Distinct from `maxRepairs`, which is budgeted for statements the engine refused:
+   * this turn answers a statement the engine accepted and the question did not. It is
+   * budgeted separately because a repair and an empty result are different failures
+   * and folding them into one counter would make the cost of each unreadable.
+   *
+   * `diagnosed` sends what the result says; `blind` sends nothing about it, which is
+   * the control that prices the information rather than the extra call.
+   */
+  readonly emptyRetry?: 'diagnosed' | 'blind';
   /**
    * What a repair turn says: the diagnosed message (default) or the engine's raw error.
    *
@@ -133,6 +148,13 @@ export interface AskResult {
   readonly failures: readonly FailureClass[];
   /** One-line diagnoses, for artifacts and logs. */
   readonly diagnoses: readonly string[];
+  /**
+   * What the empty-result turn did, when the pipeline was allowed one.
+   *
+   * `fired` is the reach of the mechanism and `recovered` is its yield; a run that
+   * reports the first without the second cannot say whether the call was worth it.
+   */
+  readonly emptyRetry?: { readonly fired: boolean; readonly recovered: boolean };
 }
 
 const SQL_FENCE = /```(?:sql)?\s*([\s\S]*?)```/i;
@@ -217,12 +239,55 @@ function exhausted(
   );
 }
 
+export interface AskMessagesInput {
+  readonly question: string;
+  readonly schema: readonly SchemaTable[];
+  readonly prompt?: PromptOptions;
+  readonly linking?: boolean;
+  readonly samples?: boolean;
+  readonly interpretation?: string;
+  readonly plan?: string;
+  readonly topK?: number;
+}
+
+/**
+ * The two messages the SQL call sees, built in one place.
+ *
+ * Extracted so a caller that needs to continue the same conversation — the empty-result
+ * turn does — can reproduce the first two messages byte for byte. A second builder that
+ * drifted would make the extra turn a different prompt, and the arm that spends it would
+ * be measuring the drift.
+ */
+export function buildAskMessages(input: AskMessagesInput): { messages: LlmMessage[]; linked: readonly LinkedColumn[] } {
+  const linked = input.linking === false ? [] : linkSchema(input.question, input.schema, input.topK ?? 12);
+  const schemaHint =
+    input.linking === false
+      ? 'Use the schema above.'
+      : linked.length > 0
+        ? `Likely columns: ${linked.map((column) => `${column.table}.${column.column}`).join(', ')}`
+        : 'No column matched; use the schema above.';
+  return {
+    linked,
+    messages: [
+      {
+        role: 'system',
+        content: buildSqlPrompt(input.question, input.schema, {
+          samples: input.samples === true,
+          ...input.prompt,
+          ...(input.interpretation === undefined ? {} : { interpretation: input.interpretation }),
+          ...(input.plan === undefined ? {} : { plan: input.plan }),
+        }),
+      },
+      { role: 'user', content: `${schemaHint}\n${input.question}` },
+    ],
+  };
+}
+
 /**
  * Question -> guarded SQL. The guard is applied to every candidate, including
  * repairs: a model that "fixes" a query by dropping a table is refused.
  */
-export function createPipeline(options: PipelineOptions): {
-  ask(request: AskRequest): Promise<AskResult>;
+export function createPipeline(options: PipelineOptions): {  ask(request: AskRequest): Promise<AskResult>;
 } {
   // Three, not two. Two is MAC-SQL's and CHASE-SQL's choice, but both stop after a
   // second failure and ours did so with a single generic sentence; with a diagnosis
@@ -233,13 +298,6 @@ export function createPipeline(options: PipelineOptions): {
 
   return {
     async ask(request) {
-      const linked = options.linking === false ? [] : linkSchema(request.question, request.schema, topK);
-      const schemaHint =
-        options.linking === false
-          ? 'Use the schema above.'
-          : linked.length > 0
-            ? `Likely columns: ${linked.map((column) => `${column.table}.${column.column}`).join(', ')}`
-            : 'No column matched; use the schema above.';
       // One extra call, only when asked: a reading of the question, written with
       // the column semantics in view, then carried into the SQL prompt.
       let interpretation: string | undefined;
@@ -265,18 +323,18 @@ export function createPipeline(options: PipelineOptions): {
         const parsed = parsePlan(planned.text);
         if (parsed.length > 0) plan = parsed;
       }
-      const messages: LlmMessage[] = [
-        {
-          role: 'system',
-          content: buildSqlPrompt(request.question, request.schema, {
-            samples: options.samples === true,
-            ...options.prompt,
-            ...(interpretation === undefined ? {} : { interpretation }),
-            ...(plan === undefined ? {} : { plan }),
-          }),
-        },
-        { role: 'user', content: `${schemaHint}\n${request.question}` },
-      ];
+      const built = buildAskMessages({
+        question: request.question,
+        schema: request.schema,
+        ...(options.prompt === undefined ? {} : { prompt: options.prompt }),
+        ...(options.linking === undefined ? {} : { linking: options.linking }),
+        ...(options.samples === undefined ? {} : { samples: options.samples }),
+        ...(interpretation === undefined ? {} : { interpretation }),
+        ...(plan === undefined ? {} : { plan }),
+        topK,
+      });
+      const messages = built.messages;
+      const linked = built.linked;
 
       let attempts = 0;
       const failures: FailureClass[] = [];
@@ -289,7 +347,19 @@ export function createPipeline(options: PipelineOptions): {
         if (verdict.ok) {
           if (!options.execute) return { sql, attempts, linked, failures, diagnoses };
           try {
-            await options.execute(sql);
+            const outcome = await options.execute(sql);
+            const rows = rowCountOf(outcome);
+            if (rows === 0 && options.emptyRetry !== undefined) {
+              const retried = await retryEmpty({ provider: options.provider, mode: options.emptyRetry, execute: options.execute, messages, previous: response.text, sql, temperature: options.temperature ?? 0 });
+              return {
+                sql: retried.sql,
+                attempts: attempts + 1,
+                linked,
+                failures,
+                diagnoses,
+                emptyRetry: { fired: true, recovered: retried.recovered },
+              };
+            }
             return { sql, attempts, linked, failures, diagnoses };
           } catch (error) {
             const diagnosis = diagnoseFailure({
@@ -321,4 +391,47 @@ export function createPipeline(options: PipelineOptions): {
       }
     },
   };
+}
+
+/**
+ * The row count an execution hook reported, or `undefined` when it reported none.
+ *
+ * A hook that returns nothing is not saying "zero rows"; it is saying it does not
+ * measure them. Reading absence as emptiness would fire the retry on every case of
+ * every caller that only wanted execution feedback.
+ */
+function rowCountOf(outcome: { readonly rows: number } | void): number | undefined {
+  if (outcome === undefined || outcome === null || typeof outcome !== 'object') return undefined;
+  return typeof outcome.rows === 'number' ? outcome.rows : undefined;
+}
+
+/**
+ * One more turn after a statement ran and returned nothing.
+ *
+ * The replacement is adopted when it returns rows; a replacement that fails to run is
+ * discarded, because the statement it would replace at least produced a result. A
+ * replacement that also returns nothing is kept — both are wrong on a split whose gold
+ * results are never empty, and the later one is the one written with the extra fact.
+ */
+async function retryEmpty(input: {
+  readonly provider: LlmProvider;
+  readonly mode: 'diagnosed' | 'blind';
+  readonly execute: (sql: string) => Promise<{ readonly rows: number } | void>;
+  readonly messages: readonly LlmMessage[];
+  readonly previous: string;
+  readonly sql: string;
+  readonly temperature: number;
+}): Promise<{ readonly sql: string; readonly recovered: boolean }> {
+  const response = await input.provider.complete({
+    messages: [...input.messages, ...emptyRetryMessages(input.mode, input.sql, input.previous)],
+    temperature: input.temperature,
+  });
+  const candidate = extractSql(response.text);
+  if (!inspectSql(candidate).ok) return { sql: input.sql, recovered: false };
+  try {
+    const rows = rowCountOf(await input.execute(candidate));
+    return { sql: candidate, recovered: rows !== undefined && rows > 0 };
+  } catch {
+    return { sql: input.sql, recovered: false };
+  }
 }
