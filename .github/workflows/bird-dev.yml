@@ -48,6 +48,9 @@ jobs:
       # A second endpoint has its own rate limit and its own connection behaviour; three
       # attempts (the default) is not enough for a 1,532-question run through a proxy.
       BIRD_LLM_RETRIES: '4'
+      # The cross arms call a second endpoint whose model is slower than DeepSeek's; 60s was
+      # enough when it only wrote one candidate, and this leaves headroom for a busy queue.
+      BIRD_LLM_TIMEOUT_MS: '120000'
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

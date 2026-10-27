@@ -121,6 +121,21 @@ pnpm verify        # typecheck, build, tests with coverage, all gates, benchmark
 
 Node 20.19+ (Node 22 is what CI uses). The packages are not published to npm yet.
 
+### Running every gate locally
+
+`pnpm gate:all` is the same set of checks the `quality` job runs, and a test keeps the two
+lists equal (`tools/check-gate-parity.mjs`) — an aggregate that silently covers less than CI
+is worse than no aggregate, because it replaces the habit of checking.
+
+Two suites need real database servers; without them they skip and the `node` package's
+coverage falls below the gate, which is a *failed* run rather than a passing one:
+
+```bash
+PG_TEST_URL="postgres://postgres:postgres@127.0.0.1:5432/nl2charts_test" \
+MYSQL_TEST_URL="mysql://analyst:s3cret@127.0.0.1:3306/nl2charts_test" \
+pnpm gate:all
+```
+
 ## Quality gates
 
 Every push runs the same gates locally and in CI:
@@ -130,7 +145,8 @@ Every push runs the same gates locally and in CI:
 | Coverage | ≥95% statements, branches, functions and lines **per package** |
 | Layering | 8 packages, no forbidden dependency edge, `devkit` never a production dependency |
 | Platform | `core`'s browser graph contains no `node:`, driver or `ai` import; declarations leak no driver types (PLT1–PLT7, with 7 mutation tests) |
-| API surface | An export that disappears fails the build (128 symbols snapshotted) |
+| API surface | An export that disappears fails the build (330 symbols snapshotted) |
+| Gate parity | `gate:all` runs every check command the quality job runs, expanded through the scripts |
 | Budgets | gzip size ceilings per package |
 | Benchmark | Oracle must score 100%, empty predictor 0%, or the run fails |
 

@@ -668,7 +668,10 @@ describe('escaped errors', () => {
   it('does not let a harness bug inflate the provider failure share', () => {
     // Fifty harness errors in a hundred cases is a broken runner, not an outage; the outage
     // guard must stay quiet so the harness assertion is the one that speaks.
-    const runs = [...Array(50)].map(() => ({ errorKind: 'harness', error: 'harness: boom' })).concat([...Array(50)].map(() => ({})));
+    const runs: { errorKind?: string; error?: string }[] = [
+      ...Array.from({ length: 50 }, () => ({ errorKind: 'harness', error: 'harness: boom' })),
+      ...Array.from({ length: 50 }, () => ({})),
+    ];
     expect(() => assertFailureRate('names', runs)).not.toThrow();
   });
 });

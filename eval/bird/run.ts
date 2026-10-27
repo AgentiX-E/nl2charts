@@ -638,9 +638,15 @@ export function assertFailureRate(
   // The first message, not a summary of them: "65% failed" without the reason sends the
   // reader to the workflow file when the answer is in the provider's reply.
   const first = failures.find((run) => run.error !== undefined)?.error ?? 'no error text';
+  // "Timed out" is not "busy": one is the endpoint queueing, the other is this harness giving
+  // up. The message says which, because the fix is different and 1,355 of 1,532 cases were once
+  // reported as an outage when the deadline was the cause.
+  const hint = first.includes('timed out')
+    ? ' Every failure is a timeout, so the deadline (BIRD_LLM_TIMEOUT_MS) may be shorter than the model needs.'
+    : '';
   throw new Error(
     `arm ${armName}: ${String(failures.length)} of ${String(runs.length)} calls (${(share * 100).toFixed(1)}%) failed at the model, ` +
-      `above the ${(maxShare * 100).toFixed(0)}% this harness treats as an outage (first error: ${first}). ` +
+      `above the ${(maxShare * 100).toFixed(0)}% this harness treats as an outage (first error: ${first}).${hint} ` +
       'The accuracy would be a function of how busy the endpoint was.',
   );
 }
@@ -1030,12 +1036,17 @@ async function main() {
   });
   // Retries live in the provider, not in the loop below: a throttled call is the
   // endpoint's answer, not a property of this arm.
+  // The deadline is a harness parameter, and leaving it at the provider's 60s default made a
+  // slower model look like a throttled one: a glm-4.5 run reported 88.4% "failed at the model
+  // … first error: llm call timed out", which is this harness measuring its own patience.
+  const timeoutMs = Number(process.env.BIRD_LLM_TIMEOUT_MS ?? 60000);
   const provider = createHttpProvider({
     baseUrl: config.baseUrl,
     apiKey: config.apiKey,
     model: config.model,
     retries: Number(process.env.BIRD_LLM_RETRIES ?? 3),
     retryDelayMs: Number(process.env.BIRD_LLM_RETRY_DELAY_MS ?? 1000),
+    timeoutMs,
   });
   const drawsSecond = config.arms.some((name) => (resolveArm(name)?.mixed ?? []).some((source) => parseMixedSource(source).provider === 'second'));
   const judgesSecond = config.arms.some((name) => resolveArm(name)?.judge === 'second');
@@ -1063,6 +1074,7 @@ async function main() {
           model: config.second.model,
           retries: Number(process.env.BIRD_LLM_RETRIES ?? 3),
           retryDelayMs: Number(process.env.BIRD_LLM_RETRY_DELAY_MS ?? 1000),
+          timeoutMs,
         });
   // Definitions are an *input* to the definition-dependent arms, so they are pinned in
   // the repository rather than regenerated: two runs with identical prompts produced

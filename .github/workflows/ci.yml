@@ -89,6 +89,12 @@ jobs:
         # The stratum join is how a mixed arm's gain gets attributed, so the join itself
         # is tested rather than trusted.
         run: node tools/stratify-mixed.mjs --self-test
+      - name: Gate parity self-test
+        run: node tools/check-gate-parity.mjs --self-test
+      - name: Gate parity (gate:all covers what this job runs)
+        # `pnpm gate:all` read like the whole gate and was a third of it, which is how a type
+        # error reached this job on a commit whose author had run it.
+        run: node tools/check-gate-parity.mjs
       - name: Upload coverage
         if: always()
         uses: actions/upload-artifact@v5

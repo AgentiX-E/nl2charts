@@ -19,6 +19,12 @@ cannot be argued with.
 
 ### Measured
 
+- **A perfect router over the seven arms is worth +6.3pp and still lands at 69.6%.** Counting
+  the questions at least one arm answered correctly: 1,066 of 1,532 (69.6%), against 63.3% for
+  the best single arm. That is below the published 70–73%, so routing is not the path; and the
+  466 questions (30.4%) no arm answered are what only new generation can reach.
+
+
 - **The fourth call is not overhead: counting votes costs 1.76pp.** `vote-mixed` — the same
   three candidates aggregated by modal result — scored 61.5% against `select-mixed`'s 63.3%
   (49 won / 22 lost, p=0.0018) on the dev split, with one call fewer. The model's judgement is
@@ -160,6 +166,20 @@ cannot be argued with.
   and recorded in `budgets.json` rather than discovered by the gate.
 
 ### Fixed
+
+- **`pnpm gate:all` was a third of the gate it claimed to be.** It ran five checks; CI ran
+  sixteen. That is how a type error reached CI on a commit whose author had "run the gates" —
+  the aggregate omitted typecheck, the tests, the coverage gate and three self-tests, and
+  nothing said so. It is now the superset, and `tools/check-gate-parity.mjs` expands
+  `pnpm <script>` through `package.json` and fails when CI runs something the aggregate does
+  not, so the two lists cannot drift again.
+- **A slower model was measured as an outage.** The provider's 60-second deadline was not
+  configurable from the runner, and a `glm-4.5` run reported 1,355 of 1,532 cases "failed at
+  the model … first error: llm call timed out" — the harness measuring its own patience.
+  `BIRD_LLM_TIMEOUT_MS` now sets it (60s default, 180s for the cross-model workflow), and the
+  outage message names the deadline when every failure is a timeout, because "busy endpoint"
+  and "impatient harness" have different fixes.
+
 
 - **A bug in the runner was recorded as a provider failure.** Every error that escaped a
   case's per-sample catch was labelled `llm`, so a `TypeError` in this file was reported as a

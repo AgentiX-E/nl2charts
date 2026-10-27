@@ -977,6 +977,35 @@ of one prompt, so the majority is weaker here — and on questions where two can
 same statement, the duplicate acts as a prior, which the stratification already measured. The
 arms report `agreement`, so a weak majority is visible rather than inferred.
 
+## What a perfect router would be worth, and why it is not enough
+
+Seven arms answered the same 1,532 questions in run `40409600418`. Counting the questions at
+least one arm got right gives the upper bound for any router over this catalogue — and the
+questions no arm got right are what only new generation can fix:
+
+| questions | count | share |
+| --- | --- | --- |
+| every arm right | 560 | 36.6% |
+| six of seven right | 313 | 20.4% |
+| two to five right | 133 | 8.7% |
+| exactly one right | 60 | 3.9% |
+| **no arm right** | **466** | **30.4%** |
+| **union** | **1,066** | **69.6%** |
+
+Two readings, both useful:
+
+1. **A perfect router is worth +6.3pp** over the best single arm (63.3% → 69.6%), and it would
+   land *below* the published 70–73%. So routing is not the path to the leaderboard, however
+   well it is done.
+2. **Thirty per cent of the questions are out of reach of every configuration in the
+   catalogue** — not of every model, but of these prompts, these candidate sets and these six
+   models' worth of calls. That is where the remaining distance lives, and it is a generation
+   problem, not a selection one.
+
+The union also cross-checks the ceiling instrument: 69.6% is exactly what `vote-cross`'s
+candidate set contained. A candidate set can only be as good as the statements the model
+writes, and the best set here is as good as the best arm — no better.
+
 ## Counting votes is not free: it costs 1.8pp
 
 `vote-mixed` is `select-mixed` with the aggregator swapped — the same three candidates, the

@@ -18,7 +18,7 @@
     "gate:platform": "node tools/check-platform.mjs && node tools/check-platform.mjs --self-test",
     "gate:exports": "node tools/check-exports.mjs",
     "gate:budgets": "node tools/check-budgets.mjs",
-    "gate:all": "pnpm gate:layering && node tools/check-platform.mjs && node tools/check-platform.mjs --self-test && pnpm gate:exports && pnpm gate:budgets && pnpm gate:secrets",
+    "gate:all": "pnpm typecheck && pnpm build && pnpm test:coverage && pnpm gate:coverage && pnpm gate:layering && node tools/check-layering.mjs --self-test && node tools/check-platform.mjs && node tools/check-platform.mjs --self-test && pnpm gate:exports && pnpm gate:budgets && pnpm gate:secrets && node tools/check-secrets.mjs --self-test && node tools/check-bird-baseline.mjs --self-test && node tools/stratify-mixed.mjs --self-test && node tools/check-gate-parity.mjs --self-test && node tools/check-gate-parity.mjs",
     "bench": "tsx eval/run.ts",
     "bench:ablate": "tsx eval/ablate.ts",
     "verify": "pnpm typecheck && pnpm build && pnpm test:coverage && pnpm gate:coverage && pnpm gate:all && pnpm bench && pnpm bench:linking && pnpm bench:semantic",
