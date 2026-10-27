@@ -825,9 +825,15 @@ export function assertEmptyRetryFired(
   minimumSample = 100,
 ): void {
   if (runs.length < minimumSample) return;
-  if (runs.some((run) => run.emptyRetried === true)) return;
+  // The lever has two halves and only one of them is unconditional: dropping costs nothing
+  // and happens on any case with a mixed candidate set, while the turn needs every
+  // candidate to come back empty, which is rarer. So the error is "neither happened" — the
+  // same condition the gate checks, because a runner that refuses a run its gate accepts
+  // is the drift this project keeps finding.
+  const dropped = runs.reduce((total, run) => total + (run.emptyDropped ?? 0), 0);
+  if (dropped > 0 || runs.some((run) => run.emptyRetried === true)) return;
   throw new Error(
-    `arm ${armName}: no case returned an empty result across ${String(runs.length)} questions, so the empty-result turn never fired — the lever did not run`,
+    `arm ${armName}: across ${String(runs.length)} questions no candidate returned an empty result, so neither the drop nor the turn ran — the lever did not run`,
   );
 }
 

@@ -206,7 +206,12 @@ describe('the chain that actually runs', () => {
 
   it('refuses an empty arm on which the empty-result turn never fired', () => {
     const quiet = Array.from({ length: 200 }, () => ({ emptyRetried: false, emptyDropped: 0 }));
-    expect(() => assertEmptyRetryFired('select-mixed+empty', quiet as never)).toThrow(/never fired/);
+    expect(() => assertEmptyRetryFired('select-mixed+empty', quiet as never)).toThrow(/the lever did not run/);
+    // A drop alone is the lever working: it is the half that costs nothing.
+    expect(() =>
+      assertEmptyRetryFired('select-mixed+empty', [...quiet.slice(1), { emptyRetried: false, emptyDropped: 2 }] as never),
+    ).not.toThrow();
+    // ...and a turn is the other half.
     expect(() =>
       assertEmptyRetryFired('select-mixed+empty', [...quiet.slice(1), { emptyRetried: true, emptyDropped: 0 }] as never),
     ).not.toThrow();
