@@ -46,6 +46,14 @@ Carried on the engine and in span attributes.
 `node` implements it for native DuckDB. An engine is the only component that
 touches a database.
 
+**Decomposition** — A shape of generation in which the model writes the
+sub-questions as working statements (`STEP 1: …`) and then composes them into
+the answer, all in one reply and one call. Opt-in (`decompose`), and unlike a
+*plan* it is not carried in from an earlier call: the benchmark measured a plan
+carried in at −7.2pp, because it anchored the statement it was meant to prepare.
+The answer is read from the last block, and `decomposedSteps` reports how many
+steps the model actually wrote, so an ignored instruction is visible.
+
 **Empty-result turn** — One extra model call, made only when a statement the
 engine accepted returned no rows. Separate from *repair*, which answers a
 statement the engine refused: the two failures have different causes and

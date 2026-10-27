@@ -129,6 +129,31 @@ On BIRD the signal is exact rather than heuristic — no question in either spli
 empty gold result, so a zero-row answer there is wrong by construction — which is why this
 turn is allowed while the row-and-column *shape* guard was rejected: that one guessed.
 
+## Writing the answer as steps
+
+A single draft is one decision: the model picks the grain, the joins and the filters all at
+once, and a mistake in the first of them is invisible in the result. `decompose` asks for the
+pieces first, in the same reply:
+
+```ts
+const pipeline = createPipeline({ provider, decompose: true });
+const { sql, decomposedSteps } = await pipeline.ask({ question, schema });
+// decomposedSteps: 3 — how many sub-statements the model wrote before the answer
+```
+
+The model writes `STEP 1: …`, `STEP 2: …` as working statements and then the answer in a
+single fenced block; the pipeline reads the **last** block, because a reply that fences each
+step would otherwise hand step one to the executor — a statement that runs and answers a
+different question. `decomposedSteps` is reported so an instruction the model ignored is
+visible rather than assumed to have worked.
+
+This is not the same as `plan`, which is written in an earlier call and carried into the
+prompt: on the benchmark that shape measured **−7.2pp**, because the plan anchored the
+statement it was meant to prepare. `decompose` keeps the reasoning inside the generation and
+costs no extra call. Its own measurement is registered in
+[benchmarks](../benchmarks.md#the-candidate-the-three-prompts-cannot-write) and is still
+running; until it reports, the option stays off by default.
+
 ## Deterministic tests with replay
 
 Recorded exchanges are a first-class provider, not a mock:

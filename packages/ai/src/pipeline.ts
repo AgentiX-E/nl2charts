@@ -5,6 +5,7 @@ import { buildInterpretationPrompt, parseInterpretation } from './interpret.js';
 import { diagnoseFailure } from './diagnose.js';
 import type { Diagnosis, FailureClass } from './diagnose.js';
 import { buildPlanPrompt, parsePlan } from './plan.js';
+import { DECOMPOSE_RULES, parseDecomposed } from './decompose.js';
 import { emptyRetryMessages } from './empty.js';
 import { linkSchema, renderSchemaCard } from './linking.js';
 import type { LinkedColumn, SchemaCardOptions, SchemaTable } from './linking.js';
@@ -39,6 +40,15 @@ export interface PromptOptions extends SchemaCardOptions {
    * the engine would answer it.
    */
   readonly plan?: string;
+  /**
+   * Ask for a decomposition: sub-questions with their own statements, then the answer.
+   *
+   * Different from `plan`, which is written in an earlier call and carried in: this
+   * instruction is part of the SQL prompt, so the decomposition happens inside the same
+   * reply and costs no extra call. Set through `PipelineOptions.decompose` as well, which
+   * keeps the reader and the prompt from disagreeing.
+   */
+  readonly decompose?: boolean;
   /** Maximum schema-card lines. Large schemas need more than the default 40. */
   readonly schemaLines?: number;
   /** Extra rule lines for a question shape, appended after the base rules. */
@@ -100,6 +110,14 @@ export interface PipelineOptions {
   readonly interpret?: boolean;
   /** Ask for a query plan (scan, filter, join, group, answer) before writing SQL. */
   readonly plan?: boolean;
+  /**
+   * Generate by decomposition: sub-questions with their own statements, then the answer.
+   *
+   * One switch for two halves that must agree — the prompt gains the instruction and the
+   * reply is read from its last block instead of its first. Set separately, the two drift
+   * into a pipeline whose prompt asks for steps and whose reader takes step one.
+   */
+  readonly decompose?: boolean;
   /** Sampling temperature for the SQL call. Above zero enables self-consistency. */
   readonly temperature?: number;
   /** When provided, a candidate is executed before it is accepted; failures
@@ -155,6 +173,14 @@ export interface AskResult {
    * reports the first without the second cannot say whether the call was worth it.
    */
   readonly emptyRetry?: { readonly fired: boolean; readonly recovered: boolean };
+  /**
+   * How many sub-statements the reply wrote, when the pipeline asked for a decomposition.
+   *
+   * Reported rather than assumed: an instruction a model ignores leaves an arm that is
+   * the plain generator with a longer prompt, and without this count the two are
+   * indistinguishable in the artifact.
+   */
+  readonly decomposedSteps?: number;
 }
 
 const SQL_FENCE = /```(?:sql)?\s*([\s\S]*?)```/i;
@@ -174,13 +200,22 @@ export function buildSqlPrompt(
   const resolved: PromptOptions = typeof options === 'boolean' ? { samples: options } : options;
   const rules = [
     'You translate questions into one read-only SQL statement.',
-    'Rules: SELECT only, no DDL or DML, one statement, no comments.',
+    // The plain rule says "one statement", which contradicts a reply that also carries
+    // step statements. Replacing it rather than appending to it keeps one instruction
+    // about statements in the prompt; two would be read as permission by whichever the
+    // model prefers.
+    resolved.decompose === true
+      ? 'Rules: SELECT only, no DDL or DML. The STEP lines are working notes and are not executed; the statement in the final block must be a single SELECT with no comments.'
+      : 'Rules: SELECT only, no DDL or DML, one statement, no comments.',
     'Use only the filters the question states. Sample values are examples, not defaults.',
   ];
   if (resolved.dialect !== undefined) {
     rules.push(`Write ${resolved.dialect} SQL. Use only functions and syntax that ${resolved.dialect} supports.`);
   }
   for (const note of resolved.notes ?? []) rules.push(note);
+  // Last, after any per-shape notes: the format instruction has to be the final word on
+  // what the reply looks like, or a note about window functions reads as the ending.
+  if (resolved.decompose === true) rules.push(...DECOMPOSE_RULES);
   const context: string[] = [];
   if (resolved.definitions !== undefined && resolved.definitions.trim().length > 0) {
     // The block arrives without its heading so that a caller cannot add a
@@ -247,6 +282,8 @@ export interface AskMessagesInput {
   readonly samples?: boolean;
   readonly interpretation?: string;
   readonly plan?: string;
+  /** Ask for a decomposition inside the same reply; the reader follows this switch. */
+  readonly decompose?: boolean;
   readonly topK?: number;
 }
 
@@ -276,6 +313,10 @@ export function buildAskMessages(input: AskMessagesInput): { messages: LlmMessag
           ...input.prompt,
           ...(input.interpretation === undefined ? {} : { interpretation: input.interpretation }),
           ...(input.plan === undefined ? {} : { plan: input.plan }),
+          // After the spread: a caller that supplies `prompt.decompose` and a pipeline
+          // switch that disagrees resolves to the pipeline's switch, which is the one the
+          // reader obeys.
+          decompose: input.decompose === true || input.prompt?.decompose === true,
         }),
       },
       { role: 'user', content: `${schemaHint}\n${input.question}` },
@@ -331,6 +372,7 @@ export function createPipeline(options: PipelineOptions): {  ask(request: AskReq
         ...(options.samples === undefined ? {} : { samples: options.samples }),
         ...(interpretation === undefined ? {} : { interpretation }),
         ...(plan === undefined ? {} : { plan }),
+        decompose: options.decompose === true,
         topK,
       });
       const messages = built.messages;
@@ -339,18 +381,25 @@ export function createPipeline(options: PipelineOptions): {  ask(request: AskReq
       let attempts = 0;
       const failures: FailureClass[] = [];
       const diagnoses: string[] = [];
+      // One reader for every reply, including repairs and the empty-result turn: a
+      // statement written under the decomposition prompt is read from its last block each
+      // time, so a repair cannot silently fall back to reading step one.
+      const readReply = (text: string): { sql: string; steps: number } =>
+        options.decompose === true ? parseDecomposed(text) : { sql: extractSql(text), steps: 0 };
       for (;;) {
         attempts += 1;
         const response = await options.provider.complete({ messages, temperature: options.temperature ?? 0 });
-        const sql = extractSql(response.text);
+        const read = readReply(response.text);
+        const sql = read.sql;
+        const steps = options.decompose === true ? { decomposedSteps: read.steps } : {};
         const verdict = inspectSql(sql);
         if (verdict.ok) {
-          if (!options.execute) return { sql, attempts, linked, failures, diagnoses };
+          if (!options.execute) return { sql, attempts, linked, failures, diagnoses, ...steps };
           try {
             const outcome = await options.execute(sql);
             const rows = rowCountOf(outcome);
             if (rows === 0 && options.emptyRetry !== undefined) {
-              const retried = await retryEmpty({ provider: options.provider, mode: options.emptyRetry, execute: options.execute, messages, previous: response.text, sql, temperature: options.temperature ?? 0 });
+              const retried = await retryEmpty({ provider: options.provider, mode: options.emptyRetry, execute: options.execute, messages, previous: response.text, sql, temperature: options.temperature ?? 0, read: (text: string) => readReply(text).sql });
               return {
                 sql: retried.sql,
                 attempts: attempts + 1,
@@ -358,9 +407,10 @@ export function createPipeline(options: PipelineOptions): {  ask(request: AskReq
                 failures,
                 diagnoses,
                 emptyRetry: { fired: true, recovered: retried.recovered },
+                ...steps,
               };
             }
-            return { sql, attempts, linked, failures, diagnoses };
+            return { sql, attempts, linked, failures, diagnoses, ...steps };
           } catch (error) {
             const diagnosis = diagnoseFailure({
               sql,
@@ -421,12 +471,14 @@ async function retryEmpty(input: {
   readonly previous: string;
   readonly sql: string;
   readonly temperature: number;
+  /** How a reply is read: the last block under a decomposition, the first otherwise. */
+  readonly read: (text: string) => string;
 }): Promise<{ readonly sql: string; readonly recovered: boolean }> {
   const response = await input.provider.complete({
     messages: [...input.messages, ...emptyRetryMessages(input.mode, input.sql, input.previous)],
     temperature: input.temperature,
   });
-  const candidate = extractSql(response.text);
+  const candidate = input.read(response.text);
   if (!inspectSql(candidate).ok) return { sql: input.sql, recovered: false };
   try {
     const rows = rowCountOf(await input.execute(candidate));

@@ -22,9 +22,13 @@ import {
   assertMixedFeasible,
   assertMixedSources,
   assertCandidateSurvival,
+  assertDecompositionFired,
   assertEmptyRetryFired,
   assertRepairPathFired,
   assertUniqueArmLabels,
+  decompositionFunnel,
+  declaresDecomposition,
+  DC_SOURCES,
   emptyRetryFunnel,
   offeredCandidates,
   candidateCeiling,
@@ -46,10 +50,15 @@ import type { BirdQuestion } from '../eval/bird/data.js';
  * delta cannot be attributed to anything else. A future edit that adds a second
  * change to a pair turns this red before it turns the benchmark unreadable.
  */
-const LEVERS = ['notes', 'evidence', 'repairs', 'linking', 'profile', 'definitions', 'focus', 'interpret', 'vote', 'demonstrations', 'select', 'values', 'plan', 'repairFeedback', 'shapeGuard', 'mixed', 'pairwise', 'sourcesVisible', 'judge', 'emptyRetry'] as const;
+const LEVERS = ['notes', 'evidence', 'repairs', 'linking', 'profile', 'definitions', 'focus', 'interpret', 'vote', 'demonstrations', 'select', 'values', 'plan', 'repairFeedback', 'shapeGuard', 'mixed', 'pairwise', 'sourcesVisible', 'judge', 'emptyRetry', 'decompose'] as const;
 
 function changedLevers(left: Arm, right: Arm): string[] {
-  return LEVERS.filter((lever) => left[lever] !== right[lever]);
+  const levers = LEVERS.filter((lever) => left[lever] !== right[lever]);
+  // On a mixed arm `vote` is not a lever: it is the length of the source list, and the
+  // suite checks that equality on every mixed arm. Counting both would make every change
+  // of candidate set look like a two-lever comparison, which is the shape this test
+  // exists to refuse.
+  return left.mixed !== undefined && right.mixed !== undefined ? levers.filter((lever) => lever !== 'vote') : levers;
 }
 
 const question = {
@@ -522,6 +531,18 @@ describe('mixed candidate sources', () => {
     expect(() => assertMixedSources(['inline+evidence'])).toThrow(/at least two/);
   });
 
+  it('puts the decomposition rules in the prompt the report measures', () => {
+    // The arm's size column and the distinct-prompt count both read `promptFor`, so a
+    // switch that only reached the pipeline would report a prompt the run never sent.
+    const arm = resolveArm('decompose') as Arm;
+    const rendered = buildSqlPrompt(question.question, [{ table: 'orders', columns: [{ name: 'id', type: 'INTEGER' }] }], promptFor(arm, question));
+    expect(rendered).toContain('STEP <n>');
+    // The parent renders the same prompt without them, which is the comparison.
+    const parent = buildSqlPrompt(question.question, [{ table: 'orders', columns: [{ name: 'id', type: 'INTEGER' }] }], promptFor(resolveArm('inline+evidence') as Arm, question));
+    expect(parent).not.toContain('STEP <n>');
+    expect(changedLevers(resolveArm('inline+evidence') as Arm, arm)).toEqual(['decompose']);
+  });
+
   it('counts which decomposition won, including the ones that never did', () => {
     const counts = winnerSources([
       { winnerSource: 'inline+evidence' },
@@ -531,6 +552,82 @@ describe('mixed candidate sources', () => {
     // A generator missing from the report would look like a generator that was never
     // tried; zero is the number that says "tried, never won".
     expect(counts).toEqual({ 'inline+evidence': 2, 'metadata+evidence': 1, values: 0 });
+  });
+});
+
+/**
+ * The decomposition lever, which is a shape of generation rather than a budget.
+ *
+ * Two things have to hold for its delta to mean anything: the arm must actually ask for
+ * a decomposition, and the model's reply must actually contain one. The second is
+ * measured, not assumed — an instruction is one paragraph among many and a model that
+ * skips it leaves an arm that is the parent with a longer prompt.
+ */
+describe('the decomposition lever', () => {
+  it('keeps the trio and adds one fourth source, so the comparison stays a superset', () => {
+    expect(DC_SOURCES.slice(0, MIXED_SOURCES.length)).toEqual(MIXED_SOURCES);
+    expect(DC_SOURCES.length).toBe(MIXED_SOURCES.length + 1);
+    const arm = resolveArm('select-mixed+dc');
+    expect(arm).toBeDefined();
+    expect(arm?.vote).toBe(4);
+    expect(arm?.select).toBe(true);
+  });
+
+  it('is one lever from its parent: the candidate set, and nothing else', () => {
+    const parent = resolveArm('select-mixed') as Arm;
+    const child = resolveArm('select-mixed+dc') as Arm;
+    // `vote` moves with it because the candidate count is the source list's length; the
+    // helper discounts it exactly where the suite pins that equality.
+    expect(changedLevers(parent, child)).toEqual(['mixed']);
+    expect(child.vote).toBe(4);
+    expect(parent.vote).toBe(3);
+  });
+
+  it('asks for a decomposition on the arm itself and on any arm that names it', () => {
+    expect(declaresDecomposition({ decompose: true })).toBe(true);
+    expect(declaresDecomposition({ mixed: DC_SOURCES })).toBe(true);
+    expect(declaresDecomposition({ mixed: MIXED_SOURCES })).toBe(false);
+    expect(declaresDecomposition({})).toBe(false);
+  });
+
+  it('counts the cases that asked, not the cases that ran', () => {
+    // A candidate that never arrived asked for nothing; folding those into the share
+    // would blame the prompt for the endpoint.
+    const runs = [
+      { decomposition: { candidates: 1, steps: 3 } },
+      { decomposition: { candidates: 1, steps: 0 } },
+      { candidateFailures: { llm: 1, other: 0 } },
+    ];
+    expect(decompositionFunnel(runs as never)).toEqual({ asked: 2, fired: 1, share: 0.5, meanSteps: 1.5 });
+  });
+
+  it('refuses an arm whose prompt never asked for a decomposition', () => {
+    const quiet = Array.from({ length: 120 }, () => ({ calls: 1 }));
+    expect(() => assertDecompositionFired('select-mixed+dc', quiet as never)).toThrow(/never asked to decompose/);
+  });
+
+  it('refuses an arm where the model ignored the format', () => {
+    // Half the cases carrying no steps is the line: below it the arm is a longer prompt,
+    // and its delta would be published as a finding about decomposition.
+    const ignored = Array.from({ length: 120 }, () => ({ decomposition: { candidates: 1, steps: 0 } }));
+    expect(() => assertDecompositionFired('select-mixed+dc', ignored as never)).toThrow(/measured decomposition rather than a longer prompt/);
+    // One step per case is a model that labels its answer, not one that decomposes.
+    const labelled = Array.from({ length: 120 }, () => ({ decomposition: { candidates: 1, steps: 1 } }));
+    expect(() => assertDecompositionFired('select-mixed+dc', labelled as never)).toThrow(/1 steps per case/);
+  });
+
+  it('accepts a model that decomposes most questions and answers the rest directly', () => {
+    const runs = [
+      ...Array.from({ length: 80 }, () => ({ decomposition: { candidates: 1, steps: 3 } })),
+      ...Array.from({ length: 20 }, () => ({ decomposition: { candidates: 1, steps: 0 } })),
+    ];
+    expect(() => assertDecompositionFired('select-mixed+dc', runs as never)).not.toThrow();
+  });
+
+  it('stays quiet on a sample too small to judge', () => {
+    expect(() =>
+      assertDecompositionFired('select-mixed+dc', Array.from({ length: 20 }, () => ({ decomposition: { candidates: 1, steps: 0 } })) as never),
+    ).not.toThrow();
   });
 });
 
@@ -545,7 +642,7 @@ describe('mixed arms declare their own sources', () => {
   const mixed = ARMS.filter((arm) => arm.mixed !== undefined);
 
   it('has at least the two arms under test', () => {
-    expect(mixed.map((arm) => arm.name).sort()).toEqual(['select-balanced', 'select-cross', 'select-cross-judge', 'select-duo', 'select-mixed', 'select-mixed+empty', 'select-mixed+empty-blind', 'select-tagged', 'vote-cross', 'vote-mixed']);
+    expect(mixed.map((arm) => arm.name).sort()).toEqual(['select-balanced', 'select-cross', 'select-cross-judge', 'select-duo', 'select-mixed', 'select-mixed+dc', 'select-mixed+empty', 'select-mixed+empty-blind', 'select-tagged', 'vote-cross', 'vote-mixed']);
   });
 
   it.each(mixed.map((arm) => [arm.name, arm] as const))('%s: candidates equal sources, and every source generates once', (name, arm) => {

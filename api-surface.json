@@ -141,6 +141,7 @@
     "type TableDef"
   ],
   "ai": [
+    "DECOMPOSE_RULES",
     "EMPTY_BLIND_MESSAGE",
     "HttpProviderOptions",
     "LinkedColumn",
@@ -169,6 +170,7 @@
     "choosePromptProfile",
     "classifyColumn",
     "classifyFailure",
+    "countSteps",
     "createHttpProvider",
     "createPipeline",
     "createReplayProvider",
@@ -176,6 +178,7 @@
     "emptyRetryMessages",
     "extractSql",
     "linkSchema",
+    "parseDecomposed",
     "parseDefinitions",
     "parseInterpretation",
     "parsePairwise",

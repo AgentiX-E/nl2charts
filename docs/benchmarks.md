@@ -1161,6 +1161,56 @@ deadline that reported 1,355 timeouts as model failures, the unrecorded clock th
 runs of one configuration look comparable, and now a candidate set that was not the size the
 arm declared. Each fix is a field, and each field is checked rather than trusted.
 
+## The candidate the three prompts cannot write
+
+Seven configurations answered 466 of the 1,532 dev questions wrongly — no arm held the right
+statement for them — and a perfect router over all seven is worth +6.3pp and still lands at
+69.6%, below the published 70–73%. Both numbers say the same thing: the binding constraint is
+no longer which candidate is chosen, it is whether one exists. Every selection experiment from
+here (`pairwise`, `tagged`, `balanced`, `vote-*`) can only redistribute what the prompts already
+produced.
+
+`decompose` is the first generation lever since the prompt stack that changes what can exist. It
+is **not** `plan`, and the difference is the reason it is worth a run: `plan` writes an ordered
+plan in an earlier call and carries it into the prompt, and it measured 50.4% against 57.6% for
+its parent (−7.2pp, 63/27, p=0.0002) — the plan anchored the statement it was meant to prepare.
+`decompose` puts the instruction inside the same reply: the model writes the sub-questions as
+statements, one per line, and then composes them into the answer. One call, like any other
+candidate, so the comparison prices a **shape of generation** rather than a budget.
+
+Two arms:
+
+| arm | candidates | calls | what it answers |
+| --- | --- | --- | --- |
+| `decompose` | 1 | 1 | does the shape help a single statement, against `inline+evidence` |
+| `select-mixed+dc` | 4 | 5 | does it add a candidate the adopted trio cannot write, against `select-mixed` |
+
+The reading order is fixed before the run, because a fourth candidate can raise the ceiling and
+still lower the score (the selector then has one more wrong statement to be talked into):
+
+1. **`candidateRecall` moves first.** It is the ceiling: how often the candidate set contained a
+   matching statement. If `select-mixed+dc` does not raise it, decomposition added no
+   information and no selection change can recover it. A rise of at least 1pp is the threshold
+   for "it added something"; the accuracy test is read only after that.
+2. **Adoption needs two rounds at p<0.01** against `select-mixed` on the same cases, as every
+   arm since v9.6.
+3. **The mechanism is counted, not assumed.** `decomposition.{asked,fired,share,meanSteps}` is
+   in the artifact, and a run where the model wrote steps on fewer than half the cases, or fewer
+   than 1.5 steps on average, is refused rather than published: a prompt whose format is ignored
+   is the parent arm with a longer instruction, and its delta would be attributed to a method
+   that never ran. The gate checks the same two thresholds, so the runner cannot reject a run its
+   gate accepts.
+
+The format is load-bearing in one place worth stating: the answer is read from the **last**
+block, not the first. A reply that fences each step would otherwise hand step one to the
+executor — a statement that runs, returns rows and answers a different question, which is the
+failure mode that costs accuracy without leaving a trace.
+
+If the ceiling moves and the score does not, the next iteration is a selector for four
+candidates; if neither moves, `decompose` closes and the generation side turns to a schema
+linker that stops inventing identifiers, which is the remaining source of candidates that never
+execute.
+
 ## What a report has to say about itself
 
 An artifact that names its arms and its score but not the conditions it ran under cannot be
@@ -1176,6 +1226,7 @@ are comparable:
 | `split`, `selection.scored` | the sample, and its size |
 | `calls.mean` per arm | the price every `ppPerExtraCall` is divided by |
 | `failureSample.{cap,total,truncated}` | the failing statements an arm keeps, and whether that is all of them |
+| `decomposition.{asked,fired,share,meanSteps}` | on an arm that asks for a decomposition: whether the model wrote one, and how many steps |
 
 The gate rejects a report missing any of these, or with a deadline under a second, or a
 concurrency below one. The point is not bookkeeping: each field stands for a way a measurement

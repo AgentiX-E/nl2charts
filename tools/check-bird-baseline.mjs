@@ -160,6 +160,39 @@ export function compare(report, baseline) {
     }
   }
 
+  // A prompt that asks for a decomposition, and a model that does not write one, produce
+  // the parent arm with a longer instruction. Accuracy cannot tell the two apart, so the
+  // artifact has to report what the prompt actually produced — and the numbers have to be
+  // possible, and the reach has to be large enough to be a measurement of the method.
+  for (const item of report.arms ?? []) {
+    const fired = item.decomposition;
+    const declares = item.arm === 'decompose' || /\+dc$/.test(item.arm);
+    if (fired === undefined) {
+      if (declares) {
+        issues.push(`BIRD1: ${item.arm} asks for a decomposition and reports none, so the arm is its parent with a longer prompt`);
+      }
+      continue;
+    }
+    if (typeof fired.asked !== 'number' || typeof fired.fired !== 'number' || typeof fired.share !== 'number' || typeof fired.meanSteps !== 'number') {
+      issues.push(`BIRD1: ${item.arm} reports a decomposition without the counts that price it`);
+      continue;
+    }
+    if (fired.asked > (item.total ?? 0) || fired.fired > fired.asked) {
+      issues.push(`BIRD1: ${item.arm} reports steps on ${String(fired.fired)} of ${String(fired.asked)} asked cases, and ${String(item.total ?? 0)} cases ran`);
+    }
+    const expectedShare = fired.asked === 0 ? 0 : fired.fired / fired.asked;
+    if (Math.abs(fired.share - expectedShare) > 0.001) {
+      issues.push(`BIRD1: ${item.arm} reports a decomposition share of ${String(fired.share)} for ${String(fired.fired)} of ${String(fired.asked)} cases`);
+    }
+    // The same threshold the runner refuses on. A gate that accepts what the runner
+    // rejects is half a gate, which is how the aggregate gate drifted in v9.9.
+    if ((item.total ?? 0) >= 100 && (fired.share < 0.5 || fired.meanSteps < 1.5)) {
+      issues.push(
+        `BIRD1: ${item.arm} wrote steps on ${(fired.share * 100).toFixed(1)}% of cases at ${String(fired.meanSteps)} per case; the format was ignored, so the arm measures a longer prompt`,
+      );
+    }
+  }
+
   // An empty result is the one signal on this benchmark that is exact rather than a
   // guess: no question in either split has an empty gold result, so a statement that
   // returned nothing is wrong by construction. An arm that claims the lever must show
@@ -418,6 +451,53 @@ function selfTest() {
   if (!shortDeadline.issues.some((issue) => issue.includes('ms deadline'))) {
     issues.push('BIRD1 accepts a 500ms deadline as a measurement');
   }
+  // The decomposition lever, in the three shapes it fails: not reported at all, reported
+  // with a share that does not follow from its own counts, and reported honestly as a
+  // format the model ignored.
+  const silentDecomposition = compare(
+    { selection: { scored: 100, split: 'minidev' }, model: 'deepseek-chat', run, arms: [arm('select-mixed+dc', 60, 100, { vote: 4, selector: 'model', calls: { mean: 5, max: 5 } })] },
+    { ...baseline, expectedArms: ['select-mixed+dc'] },
+  );
+  if (!silentDecomposition.issues.some((issue) => issue.includes('reports none'))) {
+    issues.push('BIRD1 accepts a decomposition arm that never says whether the model decomposed');
+  }
+  const mismatchedShare = compare(
+    {
+      selection: { scored: 100, split: 'minidev' },
+      model: 'deepseek-chat',
+      run,
+      arms: [arm('select-mixed+dc', 60, 100, { vote: 4, selector: 'model', calls: { mean: 5, max: 5 }, decomposition: { asked: 100, fired: 80, share: 0.95, meanSteps: 3 } })],
+    },
+    { ...baseline, expectedArms: ['select-mixed+dc'] },
+  );
+  if (!mismatchedShare.issues.some((issue) => issue.includes('decomposition share'))) {
+    issues.push('BIRD1 accepts a decomposition share that its own counts contradict');
+  }
+  const ignoredFormat = compare(
+    {
+      selection: { scored: 100, split: 'minidev' },
+      model: 'deepseek-chat',
+      run,
+      arms: [arm('select-mixed+dc', 60, 100, { vote: 4, selector: 'model', calls: { mean: 5, max: 5 }, decomposition: { asked: 100, fired: 30, share: 0.3, meanSteps: 1.2 } })],
+    },
+    { ...baseline, expectedArms: ['select-mixed+dc'] },
+  );
+  if (!ignoredFormat.issues.some((issue) => issue.includes('longer prompt'))) {
+    issues.push('BIRD1 accepts an arm whose decomposition prompt was ignored by the model');
+  }
+  const honestDecomposition = compare(
+    {
+      selection: { scored: 100, split: 'minidev' },
+      model: 'deepseek-chat',
+      run,
+      arms: [arm('select-mixed+dc', 60, 100, { vote: 4, selector: 'model', calls: { mean: 5, max: 5 }, decomposition: { asked: 98, fired: 90, share: 90 / 98, meanSteps: 2.7 } })],
+    },
+    { ...baseline, expectedArms: ['select-mixed+dc'] },
+  );
+  if (honestDecomposition.issues.length !== 0) {
+    issues.push(`BIRD1 rejects a decomposition arm that reports what it did (${honestDecomposition.issues.join('; ')})`);
+  }
+
   const dryRun = compare({ ...report([arm('names', 42), arm('inline', 51)]), model: null }, baseline);
   fail(dryRun, 0, 'BIRD1 fails a dry run against a model floor');
   if (!dryRun.notes.some((note) => note.includes('without a model'))) {
@@ -586,7 +666,7 @@ if (process.argv[2] === '--self-test') {
   const issues = selfTest();
   for (const issue of issues) console.error(issue);
   if (issues.length > 0) process.exit(1);
-  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, a dev run measured against its own sample, two split fields that disagree, other split, other model, unfloored arm, empty lever, a funnel that does not add up, a split-specific arm list, an uncounted selector call, a majority vote that spends exactly its samples, a repair count without a loop, an unpriced arm, an unnamed model, floors from an unnamed model and a cross-model arm with no second model named, a judge swap with no judge named, an arm with harness errors, a candidate set that lost a third of itself to an endpoint, a failure corpus that stopped at a cap without saying so, an empty-result lever with no funnel or an impossible yield or nothing behind it, and an unrecorded instrument all behave');
+  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, a dev run measured against its own sample, two split fields that disagree, other split, other model, unfloored arm, empty lever, a funnel that does not add up, a split-specific arm list, an uncounted selector call, a majority vote that spends exactly its samples, a repair count without a loop, an unpriced arm, an unnamed model, floors from an unnamed model and a cross-model arm with no second model named, a judge swap with no judge named, an arm with harness errors, a candidate set that lost a third of itself to an endpoint, a failure corpus that stopped at a cap without saying so, an empty-result lever with no funnel or an impossible yield or nothing behind it, a decomposition arm whose prompt the model ignored, and an unrecorded instrument all behave');
 } else {
   const reportPath = resolve(ROOT, 'eval/out/bird-eval.json');
   const baseline = JSON.parse(readFileSync(resolve(ROOT, 'eval/baseline/bird.json'), 'utf8'));

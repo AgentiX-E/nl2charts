@@ -11,6 +11,7 @@ export type { LinkedColumn, Recaller, SchemaCardOptions, SchemaColumn, SchemaTab
 export { buildAskMessages, buildSqlPrompt, choosePromptProfile, createPipeline, extractSql } from './pipeline.js';
 export { buildInterpretationPrompt, parseInterpretation } from './interpret.js';
 export { buildPlanPrompt, parsePlan } from './plan.js';
+export { countSteps, DECOMPOSE_RULES, parseDecomposed } from './decompose.js';
 export { buildEmptyResultFeedback, EMPTY_BLIND_MESSAGE, emptyRetryMessages } from './empty.js';
 export { classifyFailure, diagnoseFailure, readEngineError, resolveAliases } from './diagnose.js';
 export type { Diagnosis, EngineErrorFields, FailureClass } from './diagnose.js';

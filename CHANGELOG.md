@@ -17,6 +17,23 @@ cannot be argued with.
   The user guide's recipe replaces "three samples and a selector" with the three prompt
   styles that were actually measured.
 
+### Added
+
+- **`decompose`: a candidate written as steps, in one call.** A plan ahead of the statement
+  measured −7.2pp (63/27, p=0.0002) because it anchored the statement it was meant to prepare;
+  this is the other shape — the model writes the sub-questions as statements in the same reply
+  and composes them. `PipelineOptions.decompose` turns on both halves at once (the prompt rules
+  and a reader that takes the **last** block, not the first) because set separately they drift
+  into a pipeline whose prompt asks for steps and whose reader returns step one. The reply is
+  read the same way through repairs and the empty-result turn, and `AskResult.decomposedSteps`
+  reports how many steps the model actually wrote.
+- **Two arms to price it**: `decompose` (one lever from `inline+evidence`, same call count) and
+  `select-mixed+dc` (the adopted trio plus a fourth candidate, one call more), with the reading
+  order registered before the run in `docs/benchmarks.md`. The artifact carries
+  `decomposition.{asked,fired,share,meanSteps}` and an arm where the format was ignored on more
+  than half the cases — or that averaged fewer than 1.5 steps — is refused rather than
+  published, in the runner and in the gate alike.
+
 ### Measured
 
 - **A candidate that never arrived was being read as a candidate that was wrong.** The dev

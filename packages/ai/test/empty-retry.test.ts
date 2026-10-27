@@ -5,16 +5,19 @@ import { buildEmptyResultFeedback, EMPTY_BLIND_MESSAGE } from '../src/empty.js';
 import type { LlmProvider, LlmRequest } from '../src/provider.js';
 import type { SchemaTable } from '../src/linking.js';
 
+// The real shape, not a cast: `SchemaTable` names the table in `table`, and a fixture that
+// used `name` rendered as `undefined(id INTEGER)` while every assertion here still passed,
+// because none of them looked at the schema card.
 const schema: SchemaTable[] = [
   {
-    name: 'orders',
+    table: 'orders',
     columns: [
       { name: 'id', type: 'INTEGER' },
       { name: 'region', type: 'TEXT' },
       { name: 'revenue', type: 'REAL' },
     ],
   },
-] as unknown as SchemaTable[];
+];
 
 /** A provider that answers in sequence and keeps every request it saw. */
 function scripted(statements: readonly string[]): { provider: LlmProvider; seen: LlmRequest[] } {
