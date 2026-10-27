@@ -46,6 +46,15 @@ Carried on the engine and in span attributes.
 `node` implements it for native DuckDB. An engine is the only component that
 touches a database.
 
+**Empty-result turn** — One extra model call, made only when a statement the
+engine accepted returned no rows. Separate from *repair*, which answers a
+statement the engine refused: the two failures have different causes and
+different costs. It is opt-in (`emptyRetry` plus an `execute` hook that returns a
+row count), it never fires twice, and it reports `{ fired, recovered }` so the
+call can be divided by what it bought. On BIRD the signal is exact rather than a
+heuristic — no question in either split has an empty gold result — which is why
+this turn is allowed while the row-and-column shape guard was rejected.
+
 **Execution accuracy** — Benchmark metric: the predicted SQL's result set equals
 the gold SQL's result set. Compared both exactly (row order matters) and
 unordered. Both are reported; neither is "the" accuracy.

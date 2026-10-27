@@ -222,6 +222,23 @@ const pipeline = createPipeline({
 });
 ```
 
+Returning a row count from `execute` also enables the empty-result turn, which is
+budgeted separately (`emptyRetry`) because a statement the engine refused and a statement
+the question refused are different failures. It costs a call only where it fires, and it
+reports `{ fired, recovered }` so the cost can be divided by what it bought:
+
+```ts
+const pipeline = createPipeline({
+  provider,
+  maxRepairs: 3,
+  emptyRetry: 'diagnosed',
+  execute: async (sql) => ({ rows: (await engine.run(sql)).rowCount }),
+});
+```
+
+See [the natural-language guide](./05-natural-language.md#when-the-statement-runs-and-returns-nothing)
+for what the turn says and why the `blind` control exists.
+
 What the model is told on the second turn:
 
 ```

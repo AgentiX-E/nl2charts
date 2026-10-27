@@ -93,6 +93,42 @@ The loop is:
 A model that "fixes" a query by dropping a table cannot succeed, because the
 guard runs on every attempt.
 
+## When the statement runs and returns nothing
+
+A statement the engine accepts can still be wrong, and the cheapest evidence of that is
+an empty result: if the question asks for something and the query returns no rows, the
+filter matched nothing, a join eliminated every row, or the condition is stricter than
+the question. The pipeline can spend one turn on exactly that.
+
+```ts
+const pipeline = createPipeline({
+  provider,
+  // One turn, only when the statement returns no rows. Budgeted apart from `maxRepairs`:
+  // a statement the engine refused and a statement the question refused are different
+  // failures, and one counter would make the cost of each unreadable.
+  emptyRetry: 'diagnosed',
+  // Return the row count and the turn becomes possible. Return nothing and the pipeline
+  // does not look: "I do not measure rows" is not "there were none".
+  execute: async (sql) => ({ rows: await countRows(sql) }),
+});
+
+const { sql, emptyRetry } = await pipeline.ask({ question, schema });
+// emptyRetry: { fired: true, recovered: false } — reach and yield, so the call can be priced
+```
+
+What the second turn says is the lever, so it is a choice rather than a constant:
+
+| mode | what the model sees | why |
+| --- | --- | --- |
+| `diagnosed` | the statement it wrote, that it returned no rows, and the three causes | the model cannot infer emptiness from the schema |
+| `blind` | "write the statement again" | the control: same call, no information |
+
+Use `diagnosed`. `blind` exists because a second sample at a non-zero temperature also
+moves the number, and without the control a gain cannot be attributed to the diagnosis.
+On BIRD the signal is exact rather than heuristic — no question in either split has an
+empty gold result, so a zero-row answer there is wrong by construction — which is why this
+turn is allowed while the row-and-column *shape* guard was rejected: that one guessed.
+
 ## Deterministic tests with replay
 
 Recorded exchanges are a first-class provider, not a mock:
