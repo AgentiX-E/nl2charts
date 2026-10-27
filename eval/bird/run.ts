@@ -589,7 +589,7 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   ['synthetic', 'metadata+evidence'],
 ];
 
-interface CaseRun extends CaseOutcome {
+export interface CaseRun extends CaseOutcome {
   readonly predicted: string;
   readonly reason: MatchReason;
   readonly strict: boolean;
@@ -651,6 +651,23 @@ interface CaseRun extends CaseOutcome {
    * that reports zero calls would price its arm as free.
    */
   readonly calls: number;
+}
+
+/**
+ * One row of `report.arms`.
+ *
+ * Typed rather than `unknown` so the completeness check reads the same fields the writer
+ * fills, which is the only way a dropped instrument can be caught at write time. The open
+ * index signature keeps the rest of a row — cost, errors, difficulty, selector counts —
+ * out of this type's business.
+ */
+export interface ArmReportRow {
+  readonly arm: string;
+  readonly total: number;
+  readonly decomposition?: { readonly asked: number; readonly fired: number; readonly share: number; readonly meanSteps: number };
+  readonly candidateRecall?: number;
+  readonly emptyRetry?: { readonly mode: string; readonly dropped: number; readonly fired: number; readonly recovered: number };
+  readonly [field: string]: unknown;
 }
 
 /**
@@ -933,6 +950,50 @@ export function decompositionFunnel(runs: readonly CaseRun[]): {
 /** True when this arm asks any of its candidates to decompose. */
 export function declaresDecomposition(arm: Pick<Arm, 'decompose' | 'mixed'>): boolean {
   return arm.decompose === true || (arm.mixed ?? []).some((source) => parseMixedSource(source).arm === 'decompose');
+}
+
+/**
+ * The funnel as the artifact states it, or nothing when no case asked.
+ *
+ * Extracted because the field was emitted inside the spread reserved for arms that sample
+ * several candidates, so a single-candidate arm's funnel existed in memory and never
+ * reached the report: `decompose` scored 911/1,532 on `40534288883` with its own guard
+ * satisfied, and the gate read the missing field as "the prompt was never asked to
+ * decompose". An arm's instrument belongs to the arm, not to how many candidates it draws.
+ *
+ * Zero asked cases yield `{}` rather than `{asked: 0, ...}`: the gate divides by `asked`
+ * to check the share, so an empty funnel would be a claim with no denominator.
+ */
+export function armDecomposition(runs: readonly CaseRun[]): { decomposition?: ReturnType<typeof decompositionFunnel> } {
+  const funnel = decompositionFunnel(runs);
+  return funnel.asked === 0 ? {} : { decomposition: funnel };
+}
+
+/**
+ * The artifact has to carry every instrument its arms declare.
+ *
+ * Three kinds of claim live in a report: what an arm was configured to do (resolved from
+ * `ARMS`), what it did (the funnels), and what it scored. Nothing compared the first two,
+ * so a dropped funnel was invisible at write time and was diagnosed downstream as a
+ * mechanism that never ran — the wrong cause, in the one artifact a 90-minute run produces.
+ * This runs before the file is written and names the arm and the missing field.
+ */
+export function assertReportComplete(report: { readonly arms?: readonly ArmReportRow[] }): void {
+  for (const row of report.arms ?? []) {
+    const arm = resolveArm(row.arm);
+    if (arm === undefined) {
+      throw new Error(`the report carries a row for ${row.arm}, an arm this build does not know, so its instruments cannot be checked`);
+    }
+    if (declaresDecomposition(arm) && row.decomposition === undefined) {
+      throw new Error(`arm ${row.arm} asks for a decomposition and its row carries no decomposition funnel: the instrument ran and the artifact dropped it`);
+    }
+    if ((arm.vote ?? 1) > 1 && row.candidateRecall === undefined) {
+      throw new Error(`arm ${row.arm} samples ${String(arm.vote)} candidates and its row carries no candidate ceiling, so its accuracy cannot be read`);
+    }
+    if (arm.emptyRetry !== undefined && row.emptyRetry === undefined) {
+      throw new Error(`arm ${row.arm} runs the empty-result lever and its row carries no empty-result funnel, so the call cannot be priced`);
+    }
+  }
 }
 
 /**
@@ -1532,6 +1593,10 @@ async function main() {
       retries: Number(process.env.BIRD_LLM_RETRIES ?? 3),
     },
     generatedAt: new Date().toISOString(),
+    // The arms this run set out to score. A subset is a measurement of those arms, and the
+    // gate needs the declaration to tell it from a report that lost a row: the run that
+    // scored six arms on dev was failed for not running two it never asked for.
+    armsRequested: config.arms,
     selection: {
       databases: config.dbs,
       available: questions.length,
@@ -1686,7 +1751,7 @@ async function main() {
   const meanCalls = (runs: readonly { calls: number }[]): number =>
     runs.length === 0 ? 1 : runs.reduce((total, run) => total + run.calls, 0) / runs.length;
 
-  const armReports: unknown[] = [];
+  const armReports: ArmReportRow[] = [];
   const outcomes = new Map<string, CaseRun[]>();
   for (const name of config.arms) {
     const arm = resolveArm(name);
@@ -2084,6 +2149,10 @@ async function main() {
         max: Math.max(0, ...runs.map((run) => run.calls)),
       },
       ...(repair === undefined ? {} : { repair }),
+      // What the decomposition prompt produced, on any arm that asked for one. This was
+      // inside the sampling-arm spread and therefore absent from `decompose` itself, which
+      // is the arm the numbers exist for.
+      ...armDecomposition(runs),
       ...(arm.emptyRetry === undefined ? {} : { emptyRetry: { mode: arm.emptyRetry, ...emptyRetryFunnel(runs) } }),
       ...(arm.vote === undefined
         ? {}
@@ -2112,9 +2181,6 @@ async function main() {
                 }
               : {}),
             ...(arm.mixed === undefined ? {} : { sources: winnerSources(runs, arm.mixed) }),
-            // What the fourth prompt produced, and whether the format held. Only on arms
-            // that asked for it, so a report without the lever is unchanged.
-            ...(decompositionFunnel(runs).asked === 0 ? {} : { decomposition: decompositionFunnel(runs) }),
             // How often the selector produced a usable index. A selector that fails to
             // answer half the time is not a null result; it is a broken prompt.
             ...(arm.select === true
@@ -2156,7 +2222,7 @@ async function main() {
   // Every arm must keep its own row: two rows with the same label would let a
   // duplicate stand in for the arm it duplicates.
   // `report.arms` is assigned further down, so the guard reads the list it is about.
-  assertUniqueArmLabels((armReports as { arm: string }[]).map((entry) => entry.arm));
+  assertUniqueArmLabels(armReports.map((entry) => entry.arm));
 
   // The A/A pair, when one ran: same arm, same data, same prompt — twice.
   const aaPair = config.arms.find((name) => name.endsWith('#2'));
@@ -2248,6 +2314,9 @@ async function main() {
   report.failures = corpus.failures;
   report.failureSample = corpus.failureSample;
 
+  // Before the file is written: an instrument that ran and did not reach the artifact is
+  // indistinguishable, downstream, from a mechanism that never ran.
+  assertReportComplete({ arms: armReports });
   finish(config, report);
   await oracle.close();
   gate(report);
