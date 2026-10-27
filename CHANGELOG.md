@@ -19,6 +19,17 @@ cannot be argued with.
 
 ### Measured
 
+- **The fourth call is not overhead: counting votes costs 1.76pp.** `vote-mixed` — the same
+  three candidates aggregated by modal result — scored 61.5% against `select-mixed`'s 63.3%
+  (49 won / 22 lost, p=0.0018) on the dev split, with one call fewer. The model's judgement is
+  worth more than the call it costs.
+- **`vote-cross` reached the highest ceiling measured here (69.6%) and kept the least of it
+  (90.2%).** Modal voting returned 14 of the 65 questions its set alone answered, because the
+  set is one second-model statement and two primary-model statements: the two agree and outvote
+  the correct one. The asymmetry the model selector shows (47%) is the same mechanism, one step
+  less extreme.
+
+
 - **The cross arm's third run did not replicate its accuracy gain.** +0.6pp (p=0.30) after
   +1.1 (0.043) and +1.2 (0.0094), while its ceiling stayed at 67.7% against 65.9%. A second
   model reliably improves what the selector has to choose from and does not reliably improve

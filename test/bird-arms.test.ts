@@ -11,6 +11,7 @@ import {
   DUO_SOURCES,
   MIXED_SOURCES,
   CROSS_SOURCES,
+  BALANCED_SOURCES,
   DEFAULT_ARMS,
   ON_DEMAND_ARMS,
   PAIRS,
@@ -471,7 +472,7 @@ describe('mixed arms declare their own sources', () => {
   const mixed = ARMS.filter((arm) => arm.mixed !== undefined);
 
   it('has at least the two arms under test', () => {
-    expect(mixed.map((arm) => arm.name).sort()).toEqual(['select-cross', 'select-cross-judge', 'select-duo', 'select-mixed', 'select-tagged', 'vote-cross', 'vote-mixed']);
+    expect(mixed.map((arm) => arm.name).sort()).toEqual(['select-balanced', 'select-cross', 'select-cross-judge', 'select-duo', 'select-mixed', 'select-tagged', 'vote-cross', 'vote-mixed']);
   });
 
   it.each(mixed.map((arm) => [arm.name, arm] as const))('%s: candidates equal sources, and every source generates once', (name, arm) => {
@@ -609,5 +610,32 @@ describe('judge swap', () => {
     // rather than about budget.
     expect(judged?.repairs).toBe(0);
     expect(judged?.vote).toBe(3);
+  });
+});
+
+/**
+ * Authorship is the majority, and the majority is what wins a tie.
+ *
+ * `select-cross` is one second-model candidate and two primary ones; `select-balanced` is the
+ * same three prompt styles with the counts reversed. Nothing else moves: same sources, same
+ * count, same selector, same four calls. If the 21.5%-47% conversion of the second model's
+ * exclusive answers is authorship bias, flipping the majority flips the asymmetry.
+ */
+describe('balanced authorship', () => {
+  it('uses the same three prompts as the cross arm', () => {
+    const strip = (sources: readonly string[]): string[] => sources.map((source) => source.replace('@second', '')).sort();
+    expect(strip(BALANCED_SOURCES)).toEqual(strip(CROSS_SOURCES));
+    expect(BALANCED_SOURCES.length).toBe(CROSS_SOURCES.length);
+  });
+
+  it('reverses which author holds the majority', () => {
+    const count = (sources: readonly string[]): number => sources.filter((source) => source.endsWith('@second')).length;
+    expect(count(CROSS_SOURCES)).toBe(1);
+    expect(count(BALANCED_SOURCES)).toBe(2);
+  });
+
+  it('resolves, and every source still generates exactly one statement', () => {
+    expect(() => assertMixedSources(BALANCED_SOURCES)).not.toThrow();
+    expect(resolveArm('select-balanced')?.vote).toBe(BALANCED_SOURCES.length);
   });
 });

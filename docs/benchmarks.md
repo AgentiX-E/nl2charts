@@ -977,6 +977,43 @@ of one prompt, so the majority is weaker here — and on questions where two can
 same statement, the duplicate acts as a prior, which the stratification already measured. The
 arms report `agreement`, so a weak majority is visible rather than inferred.
 
+## Counting votes is not free: it costs 1.8pp
+
+`vote-mixed` is `select-mixed` with the aggregator swapped — the same three candidates, the
+same count of generations, one call fewer. Run `40409600418`, dev split:
+
+| arm | aggregator | calls | accuracy | candidate recall | cases lost | kept |
+| --- | --- | --- | --- | --- | --- | --- |
+| `inline+evidence` | — | 1 | 60.5% (927) | — | — | — |
+| `metadata+evidence` | — | 1 | 61.4% (941) | — | — | — |
+| `select` | model, 3 samples | 4 | 61.1% (936) | 64.7% | 55 | 93.0% |
+| `vote-mixed` | modal result | 3 | 61.5% (942) | 65.5% | 62 | 94.1% |
+| `vote-cross` | modal result | 3 | 62.9% (963) | **69.6%** | 104 | 90.2% |
+| **`select-mixed`** | model, 3 prompts | 4 | **63.3% (969)** | 65.8% | 39 | **96.1%** |
+
+`select-mixed → vote-mixed` is **−1.76pp** (49 won / 22 lost, p=0.0018). The fourth call is
+not overhead: it buys 1.8 points of judgement that counting does not provide.
+
+The interesting arm is `vote-cross`, which reaches the **highest candidate ceiling measured in
+this project — 69.6%** — with three calls, and returns 62.9%. The stratified conversion says
+why:
+
+| pair | questions the left set alone held | returned by left | questions the right set alone held | returned by right | both held | left | right |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `vote-cross` vs `select-mixed` | 65 | **14 (21.5%)** | 6 | 4 (66.7%) | 1,002 | 94.7% | 96.3% |
+| `vote-mixed` vs `select-mixed` | 5 | 0 (0%) | 9 | 7 (77.8%) | 999 | 94.3% | 96.3% |
+
+Sixty-five questions where the cross set alone held a correct statement, and modal voting
+returned fourteen. The reason is structural, not statistical: the cross set is **one GLM
+statement and two DeepSeek statements**, so on those questions the two DeepSeek candidates
+agree with each other and outvote the correct one. A majority cannot prefer a minority, and
+this candidate set makes the second model a permanent minority.
+
+That is the same asymmetry the model selector shows — 47% conversion of the cross-exclusive
+answers — one step more extreme, and it is the first time this project can name the mechanism
+rather than the symptom: **whoever wrote two of the three candidates wins the tie**. The next
+two experiments test that directly by moving the judge and by balancing the authorship.
+
 ## An asymmetry the selector shows, and the experiment that separates two causes
 
 The same artifact that rejected the labels contains a sharper fact. Pairing the cross arm with

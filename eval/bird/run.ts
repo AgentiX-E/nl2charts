@@ -221,6 +221,19 @@ export const DUO_SOURCES: readonly string[] = ['inline+evidence', 'metadata+evid
 export const CROSS_SOURCES: readonly string[] = ['inline+evidence@second', 'metadata+evidence', 'values'];
 
 /**
+ * The same three prompt styles, with the authorships reversed: two from the second model and
+ * one from the primary.
+ *
+ * `CROSS_SOURCES` gives the second model one candidate out of three, which makes it a
+ * permanent minority: when its statement alone is correct, the other two (both from the
+ * primary model) agree with each other and outvote it — measured at 21.5% conversion under
+ * modal voting and 47% under the model selector. Reversing the majority tests the authorship
+ * hypothesis without changing the prompts, the count or the cost: exactly one candidate's
+ * author moves.
+ */
+export const BALANCED_SOURCES: readonly string[] = ['inline+evidence@second', 'metadata+evidence@second', 'values'];
+
+/**
  * A mixed candidate set is only three generations if its sources generate once each.
  *
  * A source that repairs or samples would spend an unbounded number of calls inside what
@@ -316,6 +329,10 @@ export const ARMS: readonly Arm[] = [
   // read like its own, the asymmetry flips; if the second model's correct statements are
   // merely harder to recognise, it does not.
   { name: 'select-cross-judge', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: CROSS_SOURCES, judge: 'second' },
+  // The same three prompts with the authorship majority reversed: two candidates from the
+  // second model, one from the primary. One lever from `select-cross` — one candidate's author
+  // — and the direct test of "whoever wrote two of the three wins the tie".
+  { name: 'select-balanced', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: BALANCED_SOURCES },
   // ...and the same aggregator on the cross-model set, where the candidates disagree by
   // model as well as by prompt.
   { name: 'vote-cross', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, mixed: CROSS_SOURCES },
@@ -403,6 +420,7 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'vote-mixed': 'three prompts aggregated by modal result instead of by a model: 63% would make the selector call unnecessary, and below that it prices what the model adds',
   'vote-cross': 'the cross-model candidate set aggregated by modal result: needs the second model too',
   'select-cross-judge': 'the cross set judged by the second model: needs the second model and a second key, and prices self-preference in the judge',
+  'select-balanced': 'the same three prompts with two candidates from the second model instead of one: flips which author holds the majority, and needs the second model',
   plan: 'query plan before the statement: 50.4% against 57.6% for its parent (-7.2pp, 63/27, p=0.0002) — anchoring, not helping; kept so the finding can be re-tested',
   'select-pair': 'pairwise comparison instead of an absolute ranking: 58.4% against 57.6% for its parent (+0.8pp, 17/20, p=0.74) at one more call, and it lost more of its candidate set (25 cases against 20) — the absolute prompt is not what the selector loses; kept so a different comparison order or a two-of-three vote can be measured against it',
   'inline+shape': 'scalar-shape guard before the repair loop: 57.2% against 58.4% for its parent (-1.2pp, 11/5, p=0.21) — it fired on 21 cases, repaired 2, and shifted 14 more into the wrong column count; kept so a better shape test can be measured against this one',
@@ -460,6 +478,8 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   ['select-cross', 'vote-cross'],
   // One lever: which model judges the same three candidates.
   ['select-cross', 'select-cross-judge'],
+  // One lever: which author holds the majority among the same three prompts.
+  ['select-cross', 'select-balanced'],
   ['select', 'select5'],
   ['inline+evidence', 'values'],
   ['inline+evidence', 'plan'],
