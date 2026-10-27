@@ -1076,6 +1076,91 @@ the variable and the next step is a judge that is neither author; if it does not
 model's answers are simply harder and the cross arm's 47% stands as a property of the material
 rather than of the judge.**
 
+## A wrong answer that announces itself
+
+Every mechanism measured so far needed a threshold to decide whether it had fired: the shape
+guard guessed from row and column counts and cost 1.2pp doing it; the repair loop can only act
+on a statement the engine refused; a schema linker has a top-k. There is one signal on BIRD
+that needs no threshold at all.
+
+No question in either split has an empty gold result — `controls.emptyGoldExcluded` is 0 in
+every report — so a predicted statement that returns zero rows is wrong, by construction and
+not by convention. The precision of the signal is 1.0, which no other signal in this project
+has. The open question is its *reach*, and that is measurable without spending a call:
+
+| what the artifact holds | value |
+| --- | --- |
+| failing statements sampled per arm in the last dev artifact | 25 |
+| of those, statements that ran and returned no rows | 8–10% per arm, 10.3% over 175 |
+| of those, statements the engine refused | 2.3% |
+
+So roughly one failure in ten says so out loud. That is a small share of 37% failures but an
+unusually cheap one: the fix costs one call only on the cases where the winner came back empty,
+which is 8% of them, not 100%.
+
+### The lever, and its control
+
+`select-mixed+empty` differs from the adopted arm by one thing: an empty result is a failure.
+
+1. A candidate that returned nothing is dropped before the selector votes. This costs no call.
+   An option that cannot be right has no reason to be on the list, and offering it lets a
+   tie-break land on it.
+2. When every candidate is empty there is nothing to drop, so one turn is spent: the model is
+   shown the statement it wrote and told that it ran and returned no rows, with the three
+   causes that produce that on a schema it has just read — a literal that is not stored the way
+   the question spells it, a join that removed every row, a condition stricter than the
+   question.
+
+`select-mixed+empty-blind` keeps the drop, spends the same call on the same cases, and says
+nothing about the result. A pair of arms that differ only in those words separates *the model
+learned something* from *the model rolled the dice again* — and the second is a real
+possibility here, because the arm samples at temperature 0.7 and a second draw is not nothing.
+
+The turn is budgeted apart from repairs. A statement the engine refused and a statement the
+question refused are different failures, and one counter would make the cost of each
+unreadable.
+
+### What is registered before the run
+
+- **Adoption** follows ADR-184 unchanged: `select-mixed+empty` above `select-mixed` with
+  p<0.01 in two independent dev runs.
+- **The control decides the story, not the result.** If `+empty` beats `+empty-blind` the
+  information is the lever; if they tie, the second draw is, and the arm is a resampling arm
+  pretending to be a diagnosis.
+- **A loss has one suspect.** Dropping candidates cannot remove a right answer, but it does
+  show the selector a shorter list, which can change what it picks among the rest. If the arm
+  loses, `emptyRetry.dropped` is the count to look at first.
+- **The lever must fire.** An arm that names the mechanism and never invokes it is an error in
+  the report, not a 0.0pp finding — the same rule the repair funnel has had since an arm with
+  no loop was published as "repaired 496".
+
+## A candidate that never arrived is not a candidate that was wrong
+
+The dev run that was meant to judge the selector-swap experiment ended in a refusal:
+
+```
+arm select-cross-judge: 1526 of 1532 calls (99.6%) failed at the model, above the 10%
+this harness treats as an outage (first error: llm: llm returned 429)
+```
+
+That guard existed and worked: the second endpoint's quota ran out mid-run and no number was
+published. But the same job exposed a gap the guard cannot see. `select-cross` completed in
+that job with **62.5%** and a ceiling of 64.8%, against 64.3% and 67.0% in its three earlier
+runs. Nothing in the artifact explained the 2pp. The explanation is that the second endpoint
+was already refusing some of its candidates: a refused candidate casts no vote, so the set
+quietly shrinks, every case still answers, and the ceiling falls for a reason that is not in
+the arm.
+
+`candidateFailures` now counts them where they are lost — per arm, split by whether the model
+or the engine refused — and `assertCandidateSurvival` refuses to publish an arm that lost more
+than a tenth of the candidates it declared. The gate checks the same field, because an artifact
+written before the guard existed can still be read.
+
+This is the third time a measurement of ours measured the measuring instrument: the 60-second
+deadline that reported 1,355 timeouts as model failures, the unrecorded clock that let two
+runs of one configuration look comparable, and now a candidate set that was not the size the
+arm declared. Each fix is a field, and each field is checked rather than trusted.
+
 ## What a report has to say about itself
 
 An artifact that names its arms and its score but not the conditions it ran under cannot be

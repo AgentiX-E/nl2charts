@@ -19,6 +19,21 @@ cannot be argued with.
 
 ### Measured
 
+- **A candidate that never arrived was being read as a candidate that was wrong.** The dev
+  run of the judge-swap experiment stopped itself when `select-cross-judge` lost 1,526 of
+  1,532 calls (99.6%) to `429` on the second endpoint — the outage guard working as designed.
+  In the same job `select-cross` completed at 62.5% with a ceiling of 64.8%, against 64.3%
+  and 67.0% in its earlier runs, and nothing in the artifact said why: a refused candidate
+  casts no vote, so the set shrinks, every case still answers, and the ceiling falls for a
+  reason outside the arm. Candidates are now counted where they are lost, and an arm that
+  loses more than a tenth of its declared set refuses to publish a ceiling.
+- **One failure in ten announces itself.** Sampling the failing statements the last dev
+  artifact keeps, 10.3% of 175 ran and returned zero rows, and 2.3% were refused by the
+  engine. Because no question in either split has an empty gold result
+  (`emptyGoldExcluded` is 0), a zero-row answer on this benchmark is wrong by construction —
+  the only signal here with precision 1.0, and it fires on 8% of cases rather than all of
+  them.
+
 - **A perfect router over the seven arms is worth +6.3pp and still lands at 69.6%.** Counting
   the questions at least one arm answered correctly: 1,066 of 1,532 (69.6%), against 63.3% for
   the best single arm. That is below the published 70–73%, so routing is not the path; and the
