@@ -125,6 +125,11 @@ What the second turn says is the lever, so it is a choice rather than a constant
 
 Use `diagnosed`. `blind` exists because a second sample at a non-zero temperature also
 moves the number, and without the control a gain cannot be attributed to the diagnosis.
+The pair has now been run on the dev split (1,532 questions) and the gap is not subtle:
+the extra turn returned rows on **32 of 64** cases when it said what had happened, and on
+**2 of 60** when it said nothing — Fisher p ≈ 9.8e-10, at a cost difference of 0.0033 calls
+per case. "Write it again" is worth almost nothing; "here is what it returned" is worth
+half.
 On BIRD the signal is exact rather than heuristic — no question in either split has an
 empty gold result, so a zero-row answer there is wrong by construction — which is why this
 turn is allowed while the row-and-column *shape* guard was rejected: that one guessed.

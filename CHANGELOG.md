@@ -44,6 +44,17 @@ cannot be argued with.
   casts no vote, so the set shrinks, every case still answers, and the ceiling falls for a
   reason outside the arm. Candidates are now counted where they are lost, and an arm that
   loses more than a tenth of its declared set refuses to publish a ceiling.
+- **The empty-result turn earns its call on what it says, not on being a second try.** Dev,
+  1,532 questions: `select-mixed+empty` 64.03% against `select-mixed` 63.45% (+0.59pp, 14/23,
+  p=0.188 — below the adoption bar, second round dispatched), and the pair against its own
+  control is the finding: the extra turn returned rows on 32 of 64 fired cases with the
+  diagnosis and 2 of 60 without it, at 0.0033 extra calls per case (Fisher p ≈ 9.8e-10).
+  The ceiling did not move (1006 → 1005), which is the expected negative: dropping candidates
+  that returned nothing removes wrong options, it cannot write an answer.
+- **The third prompt slot was empty on three questions in five.** `values` won 81 of 1,532
+  cases (5.3%) and its block was empty on 933 (60.9%), so the adopted trio was a duo with a
+  third vote that could not differ; the dry run puts `select-mixed` at 39.1% of questions
+  with three distinct prompts against 100% for `select-dc`.
 - **One failure in ten announces itself.** Sampling the failing statements the last dev
   artifact keeps, 10.3% of 175 ran and returned zero rows, and 2.3% were refused by the
   engine. Because no question in either split has an empty gold result
