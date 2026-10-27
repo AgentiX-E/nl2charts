@@ -23,6 +23,26 @@ import { resolve } from 'node:path';
 const ROOT = resolve(new URL('..', import.meta.url).pathname);
 
 /**
+ * The arms a run set out to score, when the artifact says so.
+ *
+ * A declaration that is present but unreadable is an issue, not an absence: a report
+ * carrying `armsRequested: []` claims to have run nothing, and falling back to the strict
+ * check would hide the claim instead of refusing it. Absent means an artifact from before
+ * the field existed, which is checked against the split's full list as it always was.
+ *
+ * @returns {string[]|undefined}
+ */
+function armRequest(value, issues) {
+  if (value === undefined) return undefined;
+  const usable = Array.isArray(value) && value.length > 0 && value.every((name) => typeof name === 'string' && name.trim() !== '');
+  if (!usable) {
+    issues.push('BIRD1: the report declares an arm set it cannot describe, so no arm list can be checked against it');
+    return undefined;
+  }
+  return value;
+}
+
+/**
  * @returns {{issues: string[], notes: string[]}} issues fail the run, notes are
  * printed so a skipped check is visible rather than silent.
  */
@@ -60,9 +80,29 @@ export function compare(report, baseline) {
   const gated = floors !== undefined;
   const expectedArms = baseline.armsBySplit?.[split] ?? (gated ? baseline.expectedArms : []);
   const byArm = new Map((report.arms ?? []).map((arm) => [arm.arm, arm]));
+  // ...but a run may deliberately score a subset. The dev list is five arms; the ablation
+  // that produced `40534288883` ran six, two of them new, and this check failed the build
+  // for not running two it never asked for — a red build about the arm list rather than
+  // about the pipeline, on the one run whose numbers mattered. A report that states the
+  // arms it requested is read as a measurement of those arms: baseline arms it did not
+  // request become notes, and the declaration has to agree with the rows it published.
+  const declared = armRequest(report.armsRequested, issues);
   for (const name of expectedArms) {
-    if (!byArm.has(name)) {
+    if (byArm.has(name)) continue;
+    if (declared === undefined) {
       issues.push(`BIRD1: arm ${name} is expected by the baseline and missing from the report`);
+      continue;
+    }
+    notes.push(`BIRD1: ${name} is in this split's baseline and this run did not request it, so nothing was enforced for it`);
+  }
+  for (const name of declared ?? []) {
+    if (!byArm.has(name)) {
+      issues.push(`BIRD1: arm ${name} was requested and has no row in the report, so the run dropped a measurement it declared`);
+    }
+  }
+  for (const name of byArm.keys()) {
+    if (declared !== undefined && !declared.includes(name)) {
+      issues.push(`BIRD1: the report carries a row for ${name}, which its arm list does not declare`);
     }
   }
   if (report.aa !== undefined && baseline.tolerancePp !== undefined) {
@@ -75,15 +115,17 @@ export function compare(report, baseline) {
 
   // A lever with no input scores like its parent and reads like a finding. The
   // retrieval arm did exactly that once (44.4% vs 43.6%, corpus size 0), so the gate
-  // checks that the blocks an arm depends on were actually built.
+  // checks that the blocks an arm depends on were actually built. The condition is that
+  // the arm *ran*, not that the split expects it: a subset run on Mini-Dev that leaves
+  // `inline+retrieval` out would otherwise be failed for a corpus it never needed.
   const controls = report.controls ?? {};
-  if (expectedArms.includes('inline+retrieval') && (controls.retrievedBlocks ?? 0) === 0) {
+  if (byArm.has('inline+retrieval') && (controls.retrievedBlocks ?? 0) === 0) {
     issues.push('BIRD1: inline+retrieval ran with no retrieved block; the corpus is missing, so the arm is its parent renamed');
   }
-  if (expectedArms.includes('inline+icl') && (controls.demonstrationBlocks ?? 0) === 0) {
+  if (byArm.has('inline+icl') && (controls.demonstrationBlocks ?? 0) === 0) {
     issues.push('BIRD1: inline+icl ran with no demonstration block; the corpus is missing, so the arm is its parent renamed');
   }
-  if (expectedArms.includes('values') && (controls.valueMatches ?? 0) === 0) {
+  if (byArm.has('values') && (controls.valueMatches ?? 0) === 0) {
     issues.push('BIRD1: values ran with no matched value; the profile is missing, so the arm is its parent renamed');
   }
 
@@ -92,7 +134,7 @@ export function compare(report, baseline) {
   // drifted apart — and a funnel that does not sum is worse than no funnel, because it
   // looks like a measurement.
   const repairArm = (report.arms ?? []).find((arm) => arm.arm === 'inline+repair');
-  if (expectedArms.includes('inline+repair')) {
+  if (byArm.has('inline+repair')) {
     if (repairArm === undefined) {
       // Already reported as a missing arm above; nothing to add.
     } else if (repairArm.repair === undefined) {
@@ -565,8 +607,16 @@ function selfTest() {
   }
 
   // The lever-with-no-input case: the arms are present, the blocks are not.
+  // The arms have to be in the report for their blocks to be checked: the condition is that
+  // the arm ran, not that the baseline lists it, so the fixture carries the rows.
   const dryLever = compare(
-    { selection: { scored: 100, split: 'minidev' }, model: 'deepseek-chat', run, controls: { retrievedBlocks: 0, demonstrationBlocks: 0 }, arms: [arm('names', 42), arm('inline', 51)] },
+    {
+      selection: { scored: 100, split: 'minidev' },
+      model: 'deepseek-chat',
+      run,
+      controls: { retrievedBlocks: 0, demonstrationBlocks: 0 },
+      arms: [arm('names', 42), arm('inline', 51), arm('inline+retrieval', 52), arm('inline+icl', 53)],
+    },
     { ...baseline, expectedArms: ['names', 'inline', 'inline+retrieval', 'inline+icl'] },
   );
   if (dryLever.issues.filter((issue) => issue.includes('corpus is missing')).length !== 2) {
@@ -659,6 +709,59 @@ function selfTest() {
   const pending = compare(report([arm('names', 42), arm('inline', 51), arm('newcomer', 99)]), pendingBaseline);
   fail(pending, 0, 'BIRD1 fails an arm that has no floor yet');
   if (pending.notes.length !== 1) issues.push('BIRD1 does not say that an unfloored arm is unenforced');
+
+  // A run may declare the arms it set out to score, and then it is a measurement of those
+  // arms. `40534288883` ran six arms on dev — two of them new — and this gate failed it for
+  // the two baseline arms it never requested: a red build about the arm list, on the one
+  // run whose numbers mattered. The declaration is not a licence to lose a row, though, so
+  // the two lists have to agree in both directions.
+  const devBaseline = {
+    ...baseline,
+    armsBySplit: { dev: ['names', 'select-mixed'] },
+    floors: { dev: { names: 41.5, 'select-mixed': 62.5 } },
+    floorModel: { dev: 'deepseek-chat' },
+  };
+  const devReport = (arms, extra = {}) => ({ selection: { scored: 1532, split: 'dev' }, model: 'deepseek-chat', run, arms, ...extra });
+  const decomposed = { asked: 1532, fired: 1400, share: 0.914, meanSteps: 2.4 };
+  const subset = compare(
+    devReport([arm('names', 645, 1532), arm('decompose', 911, 1532, { decomposition: decomposed })], { armsRequested: ['names', 'decompose'] }),
+    devBaseline,
+  );
+  fail(subset, 0, 'BIRD1 fails a run that declares the subset it scored');
+  if (!subset.notes.some((note) => note.includes('select-mixed') && note.includes('did not request'))) {
+    issues.push('BIRD1 does not say which baseline arm a declared subset left unchecked');
+  }
+  // ...and what was requested has to appear. Dropping a row is the failure this check
+  // exists for, and a declaration must not be able to hide it.
+  const droppedRow = compare(devReport([arm('names', 645, 1532)], { armsRequested: ['names', 'decompose'] }), devBaseline);
+  fail(droppedRow, 1, 'BIRD1 accepts a run that requested an arm and published no row for it');
+  if (!droppedRow.issues[0]?.includes('dropped a measurement')) {
+    issues.push('BIRD1 reports a missing declared arm without saying the run dropped it');
+  }
+  // A row nobody declared is a row nobody chose to run, which is how an arm enters a report
+  // without entering the plan.
+  const undeclaredRow = compare(
+    devReport([arm('names', 645, 1532), arm('decompose', 911, 1532, { decomposition: decomposed })], { armsRequested: ['names'] }),
+    devBaseline,
+  );
+  fail(undeclaredRow, 1, 'BIRD1 accepts a row whose arm the report never declares');
+  if (!undeclaredRow.issues[0]?.includes('does not declare')) {
+    issues.push('BIRD1 reports an undeclared row without naming the declaration');
+  }
+  // An empty declaration claims to have run nothing. Reading it as "no declaration" would
+  // fall back to the strict check and hide the claim instead of refusing it.
+  const emptyDeclaration = compare(
+    devReport([arm('names', 645, 1532)], { armsRequested: [] }),
+    devBaseline,
+  );
+  if (!emptyDeclaration.issues.some((issue) => issue.includes('cannot describe'))) {
+    issues.push('BIRD1 accepts an arm list that describes nothing');
+  }
+  // A declaration does not weaken a floor: the arms it does name are still enforced.
+  const declaredRegression = compare(devReport([arm('names', 500, 1532)], { armsRequested: ['names'] }), devBaseline);
+  if (!declaredRegression.issues.some((issue) => issue.includes('is below the'))) {
+    issues.push('BIRD1 stops enforcing a floor once the run declares its arm set');
+  }
   return issues;
 }
 
@@ -666,7 +769,7 @@ if (process.argv[2] === '--self-test') {
   const issues = selfTest();
   for (const issue of issues) console.error(issue);
   if (issues.length > 0) process.exit(1);
-  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, a dev run measured against its own sample, two split fields that disagree, other split, other model, unfloored arm, empty lever, a funnel that does not add up, a split-specific arm list, an uncounted selector call, a majority vote that spends exactly its samples, a repair count without a loop, an unpriced arm, an unnamed model, floors from an unnamed model and a cross-model arm with no second model named, a judge swap with no judge named, an arm with harness errors, a candidate set that lost a third of itself to an endpoint, a failure corpus that stopped at a cap without saying so, an empty-result lever with no funnel or an impossible yield or nothing behind it, a decomposition arm whose prompt the model ignored, and an unrecorded instrument all behave');
+  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, a dev run measured against its own sample, two split fields that disagree, other split, other model, unfloored arm, empty lever, a funnel that does not add up, a split-specific arm list, an uncounted selector call, a majority vote that spends exactly its samples, a repair count without a loop, an unpriced arm, an unnamed model, floors from an unnamed model and a cross-model arm with no second model named, a judge swap with no judge named, an arm with harness errors, a candidate set that lost a third of itself to an endpoint, a failure corpus that stopped at a cap without saying so, an empty-result lever with no funnel or an impossible yield or nothing behind it, a decomposition arm whose prompt the model ignored, an unrecorded instrument, a declared arm subset, a declared arm whose row was dropped, an undeclared row, an empty declaration and a floor that a declaration does not weaken all behave');
 } else {
   const reportPath = resolve(ROOT, 'eval/out/bird-eval.json');
   const baseline = JSON.parse(readFileSync(resolve(ROOT, 'eval/baseline/bird.json'), 'utf8'));
