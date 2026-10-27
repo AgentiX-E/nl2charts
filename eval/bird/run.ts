@@ -34,6 +34,7 @@ import { buildSchema, loadDescriptions, loadQuestions, loadTables, stratifiedSam
 import type { BirdQuestion } from './data.js';
 import { createOracle } from './oracle.js';
 import { shapeFailure, shapeMismatch } from './shape.js';
+import { FAILURE_SAMPLE, failureCorpus } from './failures.js';
 import type { OracleResult } from './oracle.js';
 import { profileDatabase } from './profile.js';
 import { buildIndex, renderDemonstrations, renderRetrieved, retrieve } from './retrieval.js';
@@ -2083,21 +2084,12 @@ async function main() {
       ...(run.candidateRecall === undefined ? {} : { candidateRecall: run.candidateRecall }),
     })),
   );
-  report.failures = Object.fromEntries(
-    [...outcomes.entries()].map(([name, runs]) => [
-      name,
-      runs
-        .filter((run) => !run.passed)
-        .slice(0, 25)
-        .map((run) => ({
-          id: run.id,
-          question: cases.find((question) => String(question.question_id) === run.id)?.question,
-          predicted: (run as CaseRun).predicted,
-          reason: (run as CaseRun).reason,
-          error: (run as CaseRun).error,
-        })),
-    ]),
-  );
+  // The failure corpus, and a record of what was left out of it. The cap used to be 25
+  // per arm, which made the only material a failure can be diagnosed from a 1.4% sample
+  // — and it said nothing about being a sample, so 25 read as the set.
+  const corpus = failureCorpus([...outcomes.entries()], FAILURE_SAMPLE, (id) => cases.find((question) => String(question.question_id) === id)?.question);
+  report.failures = corpus.failures;
+  report.failureSample = corpus.failureSample;
 
   finish(config, report);
   await oracle.close();

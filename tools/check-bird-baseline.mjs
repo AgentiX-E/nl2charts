@@ -117,6 +117,29 @@ export function compare(report, baseline) {
     }
   }
 
+  // A corpus that does not say what it left out reads as a census. The artifact names
+  // the arms it truncated and the count each arm produced, so the two have to agree.
+  const sample = report.failureSample;
+  if (sample !== undefined) {
+    for (const [name, kept] of Object.entries(report.failures ?? {})) {
+      const total = sample.total?.[name];
+      if (typeof total !== 'number') {
+        issues.push(`BIRD1: ${name} reports ${String(kept.length)} failing statements and no count of how many it produced`);
+        continue;
+      }
+      if (kept.length > total) {
+        issues.push(`BIRD1: ${name} keeps ${String(kept.length)} failing statements out of ${String(total)}, which is more than it failed`);
+      }
+      const truncated = (sample.truncated ?? []).includes(name);
+      if (truncated && kept.length !== sample.cap) {
+        issues.push(`BIRD1: ${name} is listed as truncated at ${String(sample.cap)} and keeps ${String(kept.length)}`);
+      }
+      if (!truncated && kept.length !== total) {
+        issues.push(`BIRD1: ${name} keeps ${String(kept.length)} of its ${String(total)} failures and does not say it truncated them`);
+      }
+    }
+  }
+
   // A candidate set that lost a third of its members to endpoint errors still answers
   // every case, so nothing above notices: the ceiling simply falls, and the arm is read
   // as a worse prompt. The artifact has to say how many candidates arrived.
@@ -479,6 +502,36 @@ function selfTest() {
     issues.push('BIRD1 accepts an arm that never received a third of its candidates');
   }
 
+  // A truncated corpus that does not say so, and one that says so and does not match.
+  const silentTruncation = compare(
+    {
+      selection: { scored: 100, split: 'minidev' },
+      model: 'deepseek-chat',
+      run,
+      arms: [arm('names', 42)],
+      failures: { names: [{ id: '1', predicted: 'SELECT 1', reason: 'values' }] },
+      failureSample: { cap: 200, total: { names: 300 }, truncated: [] },
+    },
+    baseline,
+  );
+  if (!silentTruncation.issues.some((issue) => issue.includes('does not say it truncated'))) {
+    issues.push('BIRD1 accepts a failure corpus that quietly stopped at a cap');
+  }
+  const countedTruncation = compare(
+    {
+      selection: { scored: 100, split: 'minidev' },
+      model: 'deepseek-chat',
+      run,
+      arms: [arm('names', 42)],
+      failures: { names: Array.from({ length: 5 }, (_, index) => ({ id: String(index), predicted: 'SELECT 1', reason: 'values' })) },
+      failureSample: { cap: 200, total: { names: 300 }, truncated: ['names'] },
+    },
+    baseline,
+  );
+  if (!countedTruncation.issues.some((issue) => issue.includes('listed as truncated'))) {
+    issues.push('BIRD1 accepts a failure corpus whose truncation claim disagrees with its contents');
+  }
+
   // The empty-result lever, in three broken shapes and one working one. An arm that
   // claims the lever without its funnel is describing a mechanism nobody can price; a
   // funnel whose recovery exceeds its reach is arithmetic that did not happen; and a
@@ -533,7 +586,7 @@ if (process.argv[2] === '--self-test') {
   const issues = selfTest();
   for (const issue of issues) console.error(issue);
   if (issues.length > 0) process.exit(1);
-  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, a dev run measured against its own sample, two split fields that disagree, other split, other model, unfloored arm, empty lever, a funnel that does not add up, a split-specific arm list, an uncounted selector call, a majority vote that spends exactly its samples, a repair count without a loop, an unpriced arm, an unnamed model, floors from an unnamed model and a cross-model arm with no second model named, a judge swap with no judge named, an arm with harness errors, a candidate set that lost a third of itself to an endpoint, an empty-result lever with no funnel or an impossible yield or nothing behind it, and an unrecorded instrument all behave');
+  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, a dev run measured against its own sample, two split fields that disagree, other split, other model, unfloored arm, empty lever, a funnel that does not add up, a split-specific arm list, an uncounted selector call, a majority vote that spends exactly its samples, a repair count without a loop, an unpriced arm, an unnamed model, floors from an unnamed model and a cross-model arm with no second model named, a judge swap with no judge named, an arm with harness errors, a candidate set that lost a third of itself to an endpoint, a failure corpus that stopped at a cap without saying so, an empty-result lever with no funnel or an impossible yield or nothing behind it, and an unrecorded instrument all behave');
 } else {
   const reportPath = resolve(ROOT, 'eval/out/bird-eval.json');
   const baseline = JSON.parse(readFileSync(resolve(ROOT, 'eval/baseline/bird.json'), 'utf8'));

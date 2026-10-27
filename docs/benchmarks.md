@@ -1175,6 +1175,7 @@ are comparable:
 | `run.retries` | the same, for the transient class |
 | `split`, `selection.scored` | the sample, and its size |
 | `calls.mean` per arm | the price every `ppPerExtraCall` is divided by |
+| `failureSample.{cap,total,truncated}` | the failing statements an arm keeps, and whether that is all of them |
 
 The gate rejects a report missing any of these, or with a deadline under a second, or a
 concurrency below one. The point is not bookkeeping: each field stands for a way a measurement
