@@ -517,7 +517,7 @@ interface CaseRun extends CaseOutcome {
    */
   readonly winnerSource?: string;
   readonly error?: string;
-  readonly errorKind?: 'execution' | 'guard' | 'llm' | 'shape' | 'other';
+  readonly errorKind?: 'execution' | 'guard' | 'llm' | 'shape' | 'harness' | 'other';
   /** Classes of the rejected attempts, in order; empty when the first one ran. */
   readonly failures?: readonly string[];
   /** Generations the repair loop spent. The funnel's unit, not the cost's. */
@@ -593,6 +593,20 @@ export function resolveArm(name: string): Arm | undefined {
  * into 0% — a number that looks like a result, and that a floor gate can only report
  * as a regression. This refuses to run the table instead.
  */
+/**
+ * What an escaped error means.
+ *
+ * A provider error that got past the per-sample catch is still the provider's; anything else
+ * is this harness's own bug. Both used to be recorded as `llm`, which made a `TypeError` look
+ * like a throttled endpoint and let the failure-share guard blame the wrong party. The
+ * distinction is the difference between "the run did not happen" and "the run is wrong", and
+ * only one of them should be retried.
+ */
+export function escapeKind(error: unknown): 'llm' | 'harness' {
+  const code = (error as { code?: string } | undefined)?.code;
+  return typeof code === 'string' && code.startsWith('NL2C_E_LLM') ? 'llm' : 'harness';
+}
+
 export function assertArmProducedResults(armName: string, runs: readonly { errorKind?: string; error?: string }[]): void {
   if (runs.length === 0) return;
   const allFailed = runs.every((run) => run.errorKind === 'llm');
@@ -628,6 +642,24 @@ export function assertFailureRate(
     `arm ${armName}: ${String(failures.length)} of ${String(runs.length)} calls (${(share * 100).toFixed(1)}%) failed at the model, ` +
       `above the ${(maxShare * 100).toFixed(0)}% this harness treats as an outage (first error: ${first}). ` +
       'The accuracy would be a function of how busy the endpoint was.',
+  );
+}
+
+/**
+ * A harness error is a bug, not a property of the data.
+ *
+ * The case wrapper exists so one bad case cannot end a 1,532-question run, but the price of
+ * that is silence: a `TypeError` inside the runner scores as a wrong answer and the arm looks
+ * slightly worse. Any occurrence is reported with its first message, because a run with a bug
+ * in it should not produce a number anyone quotes.
+ */
+export function assertHarnessClean(armName: string, runs: readonly { errorKind?: string; error?: string }[]): void {
+  const broken = runs.filter((run) => run.errorKind === 'harness');
+  if (broken.length === 0) return;
+  const first = broken.find((run) => run.error !== undefined)?.error ?? 'no error text';
+  throw new Error(
+    `arm ${armName}: ${String(broken.length)} of ${String(runs.length)} cases failed inside the harness, not at the model ` +
+      `(first: ${first}). This is a bug in the runner, and its accuracy would be a measurement of the bug.`,
   );
 }
 
@@ -1364,6 +1396,7 @@ async function main() {
         try {
           return await work();
         } catch (error) {
+          const kind = escapeKind(error);
           return {
             id: String(question.question_id),
             passed: false,
@@ -1371,8 +1404,10 @@ async function main() {
             reason: 'values',
             strict: false,
             attempts: 1,
-            errorKind: 'llm',
-            error: `harness: ${error instanceof Error ? error.message : String(error)}`,
+            // `llm` only when the provider said so. A bug in this file is `harness`, which
+            // the failure-share guard ignores and `assertHarnessClean` refuses to publish.
+            errorKind: kind,
+            error: `${kind}: ${error instanceof Error ? error.message : String(error)}`,
             calls: callsMade(),
           };
         }
@@ -1587,6 +1622,8 @@ async function main() {
     // accuracy, and publishing 0% would hide the provider's message behind a score.
     assertArmProducedResults(name, runs);
     assertFailureRate(name, runs);
+    // ...and a bug in the runner is not a wrong answer: it fails the arm outright.
+    assertHarnessClean(name, runs);
     if (arm.repairs > 0) assertRepairPathFired(name, runs);
     const summary = summarise(name, runs);
     const strictPassed = runs.filter((run) => run.strict).length;
@@ -1617,6 +1654,7 @@ async function main() {
       guard: runs.filter((run) => kindOf(run) === 'guard').length,
       llm: runs.filter((run) => kindOf(run) === 'llm').length,
       shape: runs.filter((run) => kindOf(run) === 'shape').length,
+      harness: runs.filter((run) => kindOf(run) === 'harness').length,
       other: runs.filter((run) => kindOf(run) === 'other').length,
       columnCount: runs.filter((run) => run.reason === 'column-count').length,
       values: runs.filter((run) => run.reason === 'values' && run.error === undefined).length,

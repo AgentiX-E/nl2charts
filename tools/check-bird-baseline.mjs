@@ -146,6 +146,12 @@ export function compare(report, baseline) {
     if (item.repaired !== undefined && item.repair === undefined) {
       issues.push(`BIRD1: ${item.arm} reports ${String(item.repaired)} repaired cases and no repair funnel`);
     }
+    // A case that failed inside the runner scored as a wrong answer, and the arm's accuracy is
+    // then partly a measurement of the bug. The runner refuses to publish such an arm; this
+    // catches an artifact written before it did.
+    if ((item.errors?.harness ?? 0) > 0) {
+      issues.push(`BIRD1: ${item.arm} recorded ${String(item.errors.harness)} harness errors; its accuracy measures a bug, not the pipeline`);
+    }
   }
 
   // Which model produced the numbers is a third coordinate of a floor, and it was missing.
@@ -365,6 +371,13 @@ function selfTest() {
   if (majorityPriced.issues.length !== 0) {
     issues.push(`BIRD1 accuses a majority-vote arm of hiding a selector call (${majorityPriced.issues.join('; ')})`);
   }
+  const harnessBroken = compare(
+    { selection: { scored: 100, split: 'minidev' }, model: 'deepseek-chat', arms: [arm('names', 42, 100, { errors: { harness: 3, llm: 0 } })] },
+    { ...baseline, expectedArms: ['names'] },
+  );
+  if (!harnessBroken.issues.some((issue) => issue.includes('measures a bug'))) {
+    issues.push('BIRD1 accepts an arm whose cases failed inside the harness');
+  }
   const unpriced = compare(
     { selection: { scored: 100, split: 'minidev' }, model: 'deepseek-chat', arms: [{ arm: 'names', passed: 42, total: 100 }] },
     { ...baseline, expectedArms: ['names'] },
@@ -402,7 +415,7 @@ if (process.argv[2] === '--self-test') {
   const issues = selfTest();
   for (const issue of issues) console.error(issue);
   if (issues.length > 0) process.exit(1);
-  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, a dev run measured against its own sample, two split fields that disagree, other split, other model, unfloored arm, empty lever, a funnel that does not add up, a split-specific arm list, an uncounted selector call, a majority vote that spends exactly its samples, a repair count without a loop, an unpriced arm, an unnamed model, floors from an unnamed model and a cross-model arm with no second model named, a judge swap with no judge named all behave');
+  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, a dev run measured against its own sample, two split fields that disagree, other split, other model, unfloored arm, empty lever, a funnel that does not add up, a split-specific arm list, an uncounted selector call, a majority vote that spends exactly its samples, a repair count without a loop, an unpriced arm, an unnamed model, floors from an unnamed model and a cross-model arm with no second model named, a judge swap with no judge named and an arm with harness errors all behave');
 } else {
   const reportPath = resolve(ROOT, 'eval/out/bird-eval.json');
   const baseline = JSON.parse(readFileSync(resolve(ROOT, 'eval/baseline/bird.json'), 'utf8'));

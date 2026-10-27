@@ -17,6 +17,8 @@ import {
   PAIRS,
   assertArmProducedResults,
   assertFailureRate,
+  assertHarnessClean,
+  escapeKind,
   assertMixedSources,
   assertRepairPathFired,
   assertUniqueArmLabels,
@@ -637,5 +639,36 @@ describe('balanced authorship', () => {
   it('resolves, and every source still generates exactly one statement', () => {
     expect(() => assertMixedSources(BALANCED_SOURCES)).not.toThrow();
     expect(resolveArm('select-balanced')?.vote).toBe(BALANCED_SOURCES.length);
+  });
+});
+
+/**
+ * A bug in the runner is not a wrong answer, and it is not the provider's fault either.
+ *
+ * Every error that escaped the per-sample catch used to be recorded as `llm`, so a `TypeError`
+ * in this file was reported as a throttled endpoint — the failure-share guard then blamed the
+ * model, and the accuracy absorbed a defect. Three things follow from the split: the provider
+ * keeps its own bucket, the harness gets one, and an arm with a harness error cannot publish.
+ */
+describe('escaped errors', () => {
+  it('classifies by who threw: the provider or this file', () => {
+    expect(escapeKind(Object.assign(new Error('429'), { code: 'NL2C_E_LLM_UNAVAILABLE' }))).toBe('llm');
+    expect(escapeKind(Object.assign(new Error('bad json'), { code: 'NL2C_E_LLM_INVALID_RESPONSE' }))).toBe('llm');
+    // Anything else — a TypeError, a missing field, a bug in the arm table — is ours.
+    expect(escapeKind(new TypeError('x is not a function'))).toBe('harness');
+    expect(escapeKind(Object.assign(new Error('engine'), { code: 'NL2C_E_ENGINE_FAILED' }))).toBe('harness');
+    expect(escapeKind(undefined)).toBe('harness');
+  });
+
+  it('refuses to publish an arm that failed inside the harness', () => {
+    expect(() => assertHarnessClean('names', [{ errorKind: 'llm' }, { errorKind: 'execution' }])).not.toThrow();
+    expect(() => assertHarnessClean('names', [{ errorKind: 'harness', error: 'harness: x is not a function' }])).toThrow(/bug in the runner/);
+  });
+
+  it('does not let a harness bug inflate the provider failure share', () => {
+    // Fifty harness errors in a hundred cases is a broken runner, not an outage; the outage
+    // guard must stay quiet so the harness assertion is the one that speaks.
+    const runs = [...Array(50)].map(() => ({ errorKind: 'harness', error: 'harness: boom' })).concat([...Array(50)].map(() => ({})));
+    expect(() => assertFailureRate('names', runs)).not.toThrow();
   });
 });

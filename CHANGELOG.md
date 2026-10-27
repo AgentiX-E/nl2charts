@@ -161,6 +161,15 @@ cannot be argued with.
 
 ### Fixed
 
+- **A bug in the runner was recorded as a provider failure.** Every error that escaped a
+  case's per-sample catch was labelled `llm`, so a `TypeError` in this file was reported as a
+  throttled endpoint — the failure-share guard then blamed the model and the accuracy absorbed
+  a defect. Errors are now classified by who threw (`escapeKind`): the provider keeps `llm`, the
+  runner gets `harness`, and an arm with any harness error refuses to publish, because its
+  accuracy would be a measurement of the bug. The gate also rejects an artifact that contains
+  one.
+
+
 - **The benchmark gate could not gate another model, so it did not run at all.**
   `bird-model.yml` skipped `pnpm gate:bird` because the accuracy floors were taken on
   DeepSeek — and that skipped the repair-funnel arithmetic, cost accounting, empty-lever
