@@ -102,6 +102,38 @@ if (report === null) {
         }),
       );
     }
+    // The empty-result lever has two halves with different prices, so the table keeps
+    // them apart: a dropped candidate costs nothing, a turn costs a call.
+    const emptied = report.arms.filter((arm) => arm.emptyRetry !== undefined);
+    if (emptied.length > 0) {
+      lines.push(
+        '',
+        '### What the empty result bought',
+        '',
+        '| arm | message | candidates dropped | turns spent | recovered | extra calls/question |',
+        '| --- | --- | --- | --- | --- | --- |',
+        ...emptied.map(
+          (arm) =>
+            `| \`${arm.arm}\` | ${arm.emptyRetry.mode} | ${arm.emptyRetry.dropped} | ${arm.emptyRetry.fired} | ${arm.emptyRetry.recovered} | ${arm.emptyRetry.extraCallsPerCase} |`,
+        ),
+      );
+    }
+    // A candidate the endpoint refused is missing from the set the ceiling is taken over,
+    // and no case-level count can see it.
+    const lossy = report.arms.filter((arm) => arm.candidateFailures !== undefined);
+    if (lossy.length > 0) {
+      lines.push(
+        '',
+        '### Candidates that never arrived',
+        '',
+        '| arm | attempts | refused by the model | refused by the engine |',
+        '| --- | --- | --- | --- |',
+        ...lossy.map(
+          (arm) =>
+            `| \`${arm.arm}\` | ${arm.candidateFailures.attempted} | ${arm.candidateFailures.llm} | ${arm.candidateFailures.other} |`,
+        ),
+      );
+    }
     if (report.aa !== undefined) {
       lines.push(
         '',
