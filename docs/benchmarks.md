@@ -1178,12 +1178,22 @@ its parent (−7.2pp, 63/27, p=0.0002) — the plan anchored the statement it wa
 statements, one per line, and then composes them into the answer. One call, like any other
 candidate, so the comparison prices a **shape of generation** rather than a budget.
 
-Two arms:
+Two arms, and one more that the arithmetic of the adopted trio forced:
 
 | arm | candidates | calls | what it answers |
 | --- | --- | --- | --- |
 | `decompose` | 1 | 1 | does the shape help a single statement, against `inline+evidence` |
-| `select-mixed+dc` | 4 | 5 | does it add a candidate the adopted trio cannot write, against `select-mixed` |
+| `select-dc` | 3 | 4 | does the shape earn the **third slot**, against `select-mixed` at the same cost |
+| `select-mixed+dc` | 4 | 5 | does a **fourth** candidate raise the ceiling, against `select-mixed` |
+
+The third arm exists because of a number the empty-result run produced: `values` won 81 of
+1,532 cases (5.3%), and its block was empty on 933 of them (60.9%), so on three questions in
+five the adopted trio was a duo with a third vote that could not differ. The dry run states it
+directly — `select-mixed` builds three distinct prompts on 39.1% of the split, `select-dc` on
+100% — which makes `select-dc` the cheapest test of the prompt itself (same three candidates,
+same four calls, one source swapped) and `select-mixed+dc` the test of whether a fourth
+candidate is worth a fifth call. The first is run first; the second only if the ceiling has
+room that a fourth candidate could fill.
 
 The reading order is fixed before the run, because a fourth candidate can raise the ceiling and
 still lower the score (the selector then has one more wrong statement to be talked into):

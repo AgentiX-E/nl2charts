@@ -29,6 +29,7 @@ import {
   decompositionFunnel,
   declaresDecomposition,
   DC_SOURCES,
+  MIXED_DC_SOURCES,
   emptyRetryFunnel,
   offeredCandidates,
   candidateCeiling,
@@ -565,12 +566,23 @@ describe('mixed candidate sources', () => {
  */
 describe('the decomposition lever', () => {
   it('keeps the trio and adds one fourth source, so the comparison stays a superset', () => {
-    expect(DC_SOURCES.slice(0, MIXED_SOURCES.length)).toEqual(MIXED_SOURCES);
-    expect(DC_SOURCES.length).toBe(MIXED_SOURCES.length + 1);
+    expect(MIXED_DC_SOURCES.slice(0, MIXED_SOURCES.length)).toEqual(MIXED_SOURCES);
+    expect(MIXED_DC_SOURCES.length).toBe(MIXED_SOURCES.length + 1);
     const arm = resolveArm('select-mixed+dc');
     expect(arm).toBeDefined();
     expect(arm?.vote).toBe(4);
     expect(arm?.select).toBe(true);
+  });
+
+  it('swaps the third slot at the same cost on the other arm', () => {
+    // Same two prompts, same count, same four calls: the difference is which prompt holds the
+    // third candidate, and the value index it replaces had an empty block on 60.9% of the split.
+    const arm = resolveArm('select-dc') as Arm;
+    expect(arm.vote).toBe(3);
+    expect(DC_SOURCES.slice(0, 2)).toEqual(MIXED_SOURCES.slice(0, 2));
+    expect(DC_SOURCES).toContain('decompose');
+    expect(DC_SOURCES).not.toContain('values');
+    expect(changedLevers(resolveArm('select-mixed') as Arm, arm)).toEqual(['mixed']);
   });
 
   it('is one lever from its parent: the candidate set, and nothing else', () => {
@@ -642,7 +654,7 @@ describe('mixed arms declare their own sources', () => {
   const mixed = ARMS.filter((arm) => arm.mixed !== undefined);
 
   it('has at least the two arms under test', () => {
-    expect(mixed.map((arm) => arm.name).sort()).toEqual(['select-balanced', 'select-cross', 'select-cross-judge', 'select-duo', 'select-mixed', 'select-mixed+dc', 'select-mixed+empty', 'select-mixed+empty-blind', 'select-tagged', 'vote-cross', 'vote-mixed']);
+    expect(mixed.map((arm) => arm.name).sort()).toEqual(['select-balanced', 'select-cross', 'select-cross-judge', 'select-dc', 'select-duo', 'select-mixed', 'select-mixed+dc', 'select-mixed+empty', 'select-mixed+empty-blind', 'select-tagged', 'vote-cross', 'vote-mixed']);
   });
 
   it.each(mixed.map((arm) => [arm.name, arm] as const))('%s: candidates equal sources, and every source generates once', (name, arm) => {

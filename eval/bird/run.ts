@@ -251,7 +251,19 @@ export const MIXED_SOURCES: readonly string[] = ['inline+evidence', 'metadata+ev
  * before accuracy, because a fourth prompt that raises the ceiling and not the score is a
  * selection finding, while one that raises neither is a prompt that adds nothing.
  */
-export const DC_SOURCES: readonly string[] = [...MIXED_SOURCES, 'decompose'];
+export const MIXED_DC_SOURCES: readonly string[] = [...MIXED_SOURCES, 'decompose'];
+
+/**
+ * The same three candidates, with the third slot given to decomposition instead of to the
+ * value index.
+ *
+ * The dev run of the empty-result experiment made the asymmetry visible: `values` won 81 of
+ * 1,532 cases (5.3%), and on 933 of them (60.9%) its block was empty, so the trio was a duo
+ * with a third vote that could not differ. Swapping that slot for a prompt that always
+ * differs keeps the count and the cost at four calls and asks the only question the
+ * arithmetic leaves: which prompt earns the third slot.
+ */
+export const DC_SOURCES: readonly string[] = ['inline+evidence', 'metadata+evidence', 'decompose'];
 
 /**
  * The two prompts that are always distinct.
@@ -396,7 +408,10 @@ export const ARMS: readonly Arm[] = [
   // One lever from `select-mixed` in the sense that matters — the candidate set grows by
   // one source, the selector and the prompts it already had are untouched — at one more
   // call, which is the price the ceiling has to earn.
-  { name: 'select-mixed+dc', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 4, select: true, mixed: DC_SOURCES },
+  { name: 'select-mixed+dc', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 4, select: true, mixed: MIXED_DC_SOURCES },
+  // ...and the same generator occupying the third slot instead of adding a fourth: same
+  // three candidates, same four calls as the adopted arm, one source swapped.
+  { name: 'select-dc', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: DC_SOURCES },
   // The best prompt stack plus three diagnosed repairs: one lever from
   // `inline+evidence`, so the delta prices the repair loop and nothing else.
   { name: 'inline+repair', notes: false, evidence: 'dataset', repairs: 3, linking: true, definitions: 'inline' },
@@ -493,6 +508,7 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'select-mixed+empty-blind': 'the same drop and the same extra call with a message that says nothing about the empty result: the control that separates the information from the call, and it cannot be dispensed with, because a second draw at a non-zero temperature also moves the number',
   decompose: 'the statement composed from steps written in the same reply: one lever from `inline+evidence` at the same call count, so it prices a shape of generation rather than a budget',
   'select-mixed+dc': 'the adopted arm with a fourth candidate written by decomposition: the only addition that can create a statement the three prompts cannot, which is what the routing analysis left open',
+  'select-dc': 'the third candidate written by decomposition instead of by the value index: same count, same four calls, and the slot values actually won 5.3% of the time',
 };
 
 /**
@@ -562,6 +578,9 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   ['inline+evidence', 'decompose'],
   // ...and the same generator as a fourth candidate beside the adopted trio.
   ['select-mixed', 'select-mixed+dc'],
+  // Same three candidates, same cost, one source swapped: which prompt earns the third slot
+  // when the value block is empty on 61% of the split.
+  ['select-mixed', 'select-dc'],
   ['definitions', 'definitions+evidence'],
   ['synth-definitions', 'synth-definitions+evidence'],
   ['names', 'metadata'],
