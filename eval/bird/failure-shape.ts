@@ -77,3 +77,36 @@ export function classifyFailureShape(
   }
   return { shape: 'values' };
 }
+
+/**
+ * The literals the gold statement names and the prediction does not.
+ *
+ * A statement can be structurally right and answer a different question because one
+ * filter compares against a value the question did not spell the way the data stores it.
+ * That hypothesis has a signature that costs nothing to check: the gold statement mentions
+ * a literal the prediction never writes.
+ *
+ * Numbers are only counted when they stand alone, because `t2` and `col_3` are identifiers
+ * and a detector that reads them as values would report a miss on every joined query.
+ */
+export function missingLiterals(goldSql: string, predictedSql: string): string[] {
+  const gold = literals(goldSql);
+  const predicted = new Set(literals(predictedSql).map(normalise));
+  return [...gold].filter((literal) => !predicted.has(normalise(literal)));
+}
+
+function literals(sql: string): string[] {
+  // Source order, so a report of missing literals reads in the order the gold wrote them.
+  const found: { at: number; text: string }[] = [];
+  const strings = /'([^']*)'/g;
+  for (let match = strings.exec(sql); match !== null; match = strings.exec(sql)) found.push({ at: match.index, text: `'${match[1] as string}'` });
+  const numbers = /(?<![\w.])(-?\d+(?:\.\d+)?)(?![\w.])/g;
+  for (let match = numbers.exec(sql); match !== null; match = numbers.exec(sql)) found.push({ at: match.index, text: match[1] as string });
+  return found.sort((left, right) => left.at - right.at).map((entry) => entry.text);
+}
+
+function normalise(literal: string): string {
+  if (literal.startsWith("'")) return literal.toLowerCase();
+  const value = Number(literal);
+  return Number.isFinite(value) ? String(value) : literal.toLowerCase();
+}

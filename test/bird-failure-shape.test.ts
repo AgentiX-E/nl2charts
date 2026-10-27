@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyError, classifyFailureShape } from '../eval/bird/failure-shape.js';
+import { classifyError, classifyFailureShape, missingLiterals } from '../eval/bird/failure-shape.js';
 import { format, tally } from '../eval/bird/diagnose-corpus.js';
 import type { OracleResult } from '../eval/bird/oracle.js';
 
@@ -71,5 +71,29 @@ describe('the corpus tally', () => {
     const text = format([tally('a', [{ shape: 'empty' as const }], 10)]);
     expect(text.split('\n')[0]).toContain('empty');
     expect(text).toContain('100.0%');
+  });
+});
+
+describe('the literals a prediction leaves out', () => {
+  it('finds the value the gold filters on and the prediction never writes', () => {
+    expect(missingLiterals("SELECT count(*) FROM t WHERE year = 2019 AND name = 'Bob'", 'SELECT count(*) FROM t WHERE year = 2020')).toEqual([
+      '2019',
+      "'Bob'",
+    ]);
+  });
+
+  it('ignores case in strings and formatting in numbers, because the database does too', () => {
+    expect(missingLiterals("SELECT 1 WHERE name = 'bob'", "SELECT 1 WHERE name = 'BOB'")).toEqual([]);
+    expect(missingLiterals('SELECT 1 WHERE n = 3.0', 'SELECT 1 WHERE n = 3')).toEqual([]);
+  });
+
+  it('does not mistake an identifier for a literal', () => {
+    // `t2` and `col_3` are names. A detector that reads them as values would report a miss
+    // on every joined query and the hypothesis would never be testable.
+    expect(missingLiterals('SELECT t2.a FROM t2 WHERE col_3 > 5', 'SELECT x.a FROM x WHERE col_3 > 5')).toEqual([]);
+  });
+
+  it('reports nothing when the prediction names every literal, which is the other half of the test', () => {
+    expect(missingLiterals("SELECT 1 WHERE a = 'x' AND b = 2", "SELECT 1 WHERE b = 2 AND a = 'x'")).toEqual([]);
   });
 });

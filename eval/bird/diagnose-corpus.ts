@@ -18,7 +18,7 @@ import { join, resolve } from 'node:path';
 import { loadQuestions } from './data.js';
 import { createOracle } from './oracle.js';
 import type { OracleResult } from './oracle.js';
-import { classifyError, classifyFailureShape } from './failure-shape.js';
+import { classifyError, classifyFailureShape, missingLiterals } from './failure-shape.js';
 import type { FailureShape } from './failure-shape.js';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
@@ -50,13 +50,31 @@ export interface ArmDiagnosis {
   readonly errors: Record<string, number>;
   readonly scaleFactors: { factor: number; cases: number }[];
   readonly emptyShare: number;
+  /**
+   * How many failures leave out a literal the gold statement names.
+   *
+   * This is the signature of the value-grounding hypothesis: a filter comparing against a
+   * value the question did not spell the way the data stores it. If the share is small,
+   * the next iteration is not about values, whatever the `values` arm did.
+   */
+  readonly literalMiss: { cases: number; share: number; top: { literal: string; cases: number }[] };
 }
 
-export function tally(arm: string, classified: readonly { shape: FailureShape; error?: string; factor?: number }[], failing: number): ArmDiagnosis {
+export function tally(
+  arm: string,
+  classified: readonly { shape: FailureShape; error?: string; factor?: number; missing?: readonly string[] }[],
+  failing: number,
+): ArmDiagnosis {
   const shapes: Record<FailureShape, number> = { error: 0, empty: 0, 'row-count': 0, 'column-count': 0, scale: 0, values: 0 };
   const errors: Record<string, number> = {};
   const factors = new Map<string, number>();
+  const missingCounts = new Map<string, number>();
+  let literalsMissing = 0;
   for (const entry of classified) {
+    if ((entry.missing?.length ?? 0) > 0) {
+      literalsMissing += 1;
+      for (const literal of new Set(entry.missing)) missingCounts.set(literal, (missingCounts.get(literal) ?? 0) + 1);
+    }
     shapes[entry.shape] += 1;
     if (entry.shape === 'error' && entry.error !== undefined) errors[entry.error] = (errors[entry.error] ?? 0) + 1;
     if (entry.shape === 'scale' && entry.factor !== undefined) {
@@ -75,6 +93,14 @@ export function tally(arm: string, classified: readonly { shape: FailureShape; e
       .sort((left, right) => right.cases - left.cases)
       .slice(0, 5),
     emptyShare: classified.length === 0 ? 0 : shapes.empty / classified.length,
+    literalMiss: {
+      cases: literalsMissing,
+      share: classified.length === 0 ? 0 : literalsMissing / classified.length,
+      top: [...missingCounts.entries()]
+        .map(([literal, cases]) => ({ literal, cases }))
+        .sort((left, right) => right.cases - left.cases)
+        .slice(0, 5),
+    },
   };
 }
 
@@ -117,7 +143,7 @@ async function main() {
   const diagnoses: ArmDiagnosis[] = [];
   try {
     for (const [arm, failures] of Object.entries(report.failures)) {
-      const classified: { shape: FailureShape; error?: string; factor?: number }[] = [];
+      const classified: { shape: FailureShape; error?: string; factor?: number; missing?: string[] }[] = [];
       for (const failure of failures) {
         const question = byId.get(failure.id);
         if (question === undefined || failure.predicted.trim() === '') continue;
@@ -133,6 +159,9 @@ async function main() {
           shape: shape.shape,
           ...(shape.factor === undefined ? {} : { factor: shape.factor }),
           ...(predicted.ok || predicted.error === undefined ? {} : { error: classifyError(predicted.error) }),
+          ...(missingLiterals(question.SQL, failure.predicted).length === 0
+            ? {}
+            : { missing: missingLiterals(question.SQL, failure.predicted) }),
         });
       }
       const total = report.failureSample?.total?.[arm] ?? failures.length;
@@ -153,7 +182,9 @@ async function main() {
     console.log(
       `${entry.arm}: ${String(entry.failing)} failing, ${String(entry.examined)} examined` +
         `${kinds === '' ? '' : `; engine said: ${kinds}`}` +
-        `${factors === '' ? '' : `; grain factors: ${factors}`}`,
+        `${factors === '' ? '' : `; grain factors: ${factors}`}` +
+        `; leaves out a gold literal: ${String(entry.literalMiss.cases)} (${(entry.literalMiss.share * 100).toFixed(1)}%)` +
+        (entry.literalMiss.top.length === 0 ? '' : ` — most often ${entry.literalMiss.top.map((item) => `${item.literal} (${String(item.cases)})`).join(', ')}`),
     );
   }
   if (report.failureSample !== undefined && report.failureSample.truncated.length > 0) {
