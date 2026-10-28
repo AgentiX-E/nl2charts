@@ -19,6 +19,18 @@ cannot be argued with.
 
 ### Added
 
+- **Every branch under `eval/` is now reachable, and the suite says so.** Branch coverage sat at
+  92.1% while lines and functions were already 99.3% and 100%: the missing branches were not
+  untested, they were unreachable. Each one lived inside a template literal or behind a guard no
+  fixture can produce, so no test could execute the other side. Each is a function of its inputs
+  now — `ablationLines` (a negative delta and an empty id list are arguments), `missLine`
+  (the engine sentence and its absence), `endsOf` (an empty arm chain), `semanticProblems` /
+  `requireSemantic` / `equivalenceOf` / `fanoutRow` / `key`, `resolvePreflightSettings`, and
+  `phrasing` / `uniqueById` in `eval/live/cases.ts`. Two fallbacks in `bird/failure-shape.ts`
+  that no input can reach are gone rather than covered. Readings: **92.1% → 95.4% branches**,
+  99.3% lines, 100% functions, and **21 → 25 of 28 files** meet 95% on all four dimensions. The
+  three that remain short — `ablate.ts` 93.9, `bird/retrieval.ts` 91.3, `bird/run.ts` 91.0 — are
+  in the ledger by name. Tests: 1,180 → 1,211.
 - **`diagnose-corpus.ts` never wrote a diagnosis, and `recall.ts` measured a prompt nobody sends.**
   The last two entry points under `eval/` were also top-level scripts: `diagnose-corpus` printed a
   table and kept nothing, `recall` re-derived the linking hint beside `buildSqlPrompt` instead of
@@ -118,6 +130,9 @@ cannot be argued with.
 
 ### Fixed
 
+- **`ablate.ts` printed its own footer twice.** `ablationLines` ends with the arm count and the
+  path it wrote, and the caller then logged the same sentence again, so one run read as two. The
+  formatter is the only thing that prints now, and a test counts the occurrences.
 - **`diagnose-corpus.ts` divided its shares by the failures it could grade.** Three bare
   `continue`s erased a failure whose question id was not in the questions file, one whose
   prediction was empty, and one whose *gold* statement the engine refused — and every share in

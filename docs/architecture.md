@@ -239,12 +239,16 @@ The last two entries, driven the same way:
 | `eval/bird/diagnose-corpus.ts` | 53.2 / 75.0 / 58.8 | 99.1 / 100 / 98.9 |
 | `eval/bird/recall.ts` | 73.3 / 83.3 / 80.0 | 99.4 / 100 / 99.0 |
 
-`eval/` as a whole is 99.3% of lines, 100% of functions and 93.4% of branches, and 17 of its 28
-files meet 95% on all four dimensions. The remaining distance is entirely *branch* ratio in files
-whose lines are already at 100 (`ablate.ts` 90.3, `bird/data.ts` 87.5, `failure-shape.ts` 90.6,
-`retrieval.ts` 91.3, `run.ts` 91.0, `synthesize.ts` 87.0, `linking-ablation.ts` 88.9,
-`live/cases.ts` 87.5, `preflight.ts` 90.5, `run.ts` 94.4, `semantic-ablation.ts` 72.2), and the
-ledger prints it on every push.
+`eval/` as a whole is 99.3% of lines, 100% of functions and 95.4% of branches, and 25 of its 28
+files meet 95% on all four dimensions. Getting the last dimension there was not a matter of writing
+more tests: every branch that was still uncovered lived inside a template literal or behind a guard
+no fixture can produce, so the other side of it was *unreachable* rather than untested. Each one is
+a function of its inputs now (`ablationLines`, `missLine`, `endsOf`, `equivalenceOf`, `fanoutRow`,
+`semanticProblems`, `requireSemantic`, `resolvePreflightSettings`, `phrasing`, `uniqueById`), and
+two fallbacks in `bird/failure-shape.ts` that no input can reach were deleted instead of covered —
+a guard that cannot fire is not a test target, it is a claim the reader has to verify. The three
+files still short are named in the ledger on every push (`ablate.ts` 93.9, `retrieval.ts` 91.3,
+`run.ts` 91.0), which is the only reason a number like this can be trusted later.
 
 Both of those files were also measuring the wrong thing, which is the part a coverage number
 cannot show. `recall.ts` exists to answer one question — is every identifier the gold statement
