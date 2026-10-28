@@ -34,7 +34,52 @@ cannot be argued with.
   than half the cases — or that averaged fewer than 1.5 steps — is refused rather than
   published, in the runner and in the gate alike.
 
+### Fixed
+
+- **A mechanism that ran and did not reach the artifact is now an error, not a finding.**
+  `decompose` scored 911 of 1,532 on the dev split with the runner's own guard satisfied —
+  the model wrote `STEP` lines on more than half the cases — and its funnel existed in memory
+  and never reached the report, because the field was emitted inside the spread reserved for
+  arms that sample several candidates. The gate read the silence as "the prompt was never
+  asked to decompose" and failed the build for a cause that did not exist. The funnel is now
+  assembled at arm level, `report.arms` is typed (`ArmReportRow`) instead of `unknown[]`, and
+  `assertReportComplete` compares, before the file is written, what each arm was configured
+  to do against what its row carries.
+- **A declared arm set is a measurement, and it cannot hide a lost row.** The dev baseline
+  names five arms; the run above scored six, two of them new, and the gate failed it for the
+  two it never requested. `report.armsRequested` now states what the run set out to score:
+  baseline arms it did not request become notes, and the declaration has to agree with the
+  published rows in both directions. An empty or unreadable declaration is an issue, not an
+  absence — it claims to have run nothing.
+- **The run that fails is the run whose artifact has to survive.** `bird-dev.yml` published
+  its summary and uploaded its evaluation only on success, so the six-arm run above left
+  nothing behind: no per-case rows, no McNemar p-values, no funnel, and the iteration could
+  not be read at all. Both steps run on failure now, the summary states a missing artifact
+  instead of dying on it, and `ci.yml`'s benchmark summary had the same defect. A test reads
+  every benchmark workflow and fails on the next one written without `if: always()`.
+
 ### Measured
+
+- **The fourth prompt raises the ceiling and the selector spends it.** `select-dc` — the
+  adopted trio with its third slot given to decomposition instead of the value index, same
+  candidate count, same four calls, same selector — reached a candidate recall of 67.0%
+  against `select-mixed`'s 65.6% (+1.4pp, about 21 questions) and scored 61.4% against 63.4%
+  (−2.0pp, 31 questions), with selection loss up from 34 to 87. The fourth prompt does write
+  statements the three cannot, which is the half of the registered claim that had never been
+  observed; the selector then prefers them on about fifty questions where they are wrong. The
+  distance between the ceiling and the accuracy is the selector's quality, measured.
+- **A decomposition inside one reply is a negative result with a cause.** `decompose` 911 of
+  1,532 (59.5%) against `inline+evidence` 928 (60.6%), −1.1pp, and unlike an inert arm the
+  format was followed: the model wrote steps on more than half the cases and averaged more
+  than 1.5 per case. Writing the sub-statements before the answer pulls the answer toward the
+  intermediate goals, which is the same failure `plan` showed at −7.2pp from the other
+  direction.
+- **The empty-result turn, second round on dev: +8 questions and a ceiling that did not move.**
+  `select-mixed+empty` 979 of 1,532 (63.9%) against 971 (63.4%), candidate recall unchanged at
+  65.6%. The ceiling is unchanged by construction — removing zero-row candidates removes wrong
+  options and cannot write an answer — so the lever stays off by default until a paired test
+  says otherwise; that test is the re-run, because this artifact was lost to the third defect
+  above.
 
 - **A candidate that never arrived was being read as a candidate that was wrong.** The dev
   run of the judge-swap experiment stopped itself when `select-cross-judge` lost 1,526 of

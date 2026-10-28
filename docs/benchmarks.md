@@ -1472,6 +1472,49 @@ deterministic endpoint the same harness is exactly reproducible, which means a 1
 difference on such an endpoint would be real — and it also means an A/A pair is the only
 way to know which kind of endpoint you are measuring on.
 
+## A generator that raises the ceiling, and a selector that spends it
+
+The dev split, 1,532 questions, one job, six arms. The two arms that matter here differ by
+one thing: which prompt writes the third candidate. `select-mixed` gives the third slot to
+the value index, `select-dc` gives it to a decomposition — same candidate count, same four
+calls, same selector.
+
+| arm | execution accuracy | candidate recall (ceiling) | selection loss |
+| --- | --- | --- | --- |
+| `names` | 645 (42.1%) | – | – |
+| `inline+evidence` | 928 (60.6%) | – | – |
+| `decompose` | 911 (59.5%) | – | – |
+| `select-mixed` | 971 (63.4%) | 65.6% | 34 |
+| `select-dc` | 940 (61.4%) | **67.0%** | **87** |
+| `select-mixed+empty` | 979 (63.9%) | 65.6% | 39 |
+
+Read the two columns on the right together, always. The ceiling is the share of questions
+where **some** candidate was right; selection loss is the number of questions the candidate
+set answered and the arm did not return. A generator that adds a good candidate raises the
+first and says nothing about the second.
+
+Here the first moved: +1.4pp, about twenty-one questions the three prompts could not write
+and the fourth could. The second moved the wrong way by more: 34 → 87. The fourth prompt's
+statements are attractive to the selector and wrong on about fifty questions, so the arm
+answers twenty-one more questions *possible* and thirty-one fewer *correct*.
+
+That is the useful shape of a negative result. It says the generator worked and the choosing
+did not, which is a statement about where the next hour goes — and it is invisible in the
+accuracy column alone, where both arms look like "roughly 62%, one is a bit worse".
+
+The same reading applies to a single-candidate arm. `decompose` writes the sub-statements as
+executable statements in the same reply and then composes them, at the price of one call like
+any other candidate; it scored 59.5% against `inline+evidence`'s 60.6%. Its mechanism was
+verified rather than assumed — the report carries `decomposition.{asked,fired,share,meanSteps}`
+and the runner refuses to publish an arm whose steps appeared on fewer than half the cases or
+averaged under 1.5 — so the −1.1pp is a result and not an inert instruction. Writing the
+pieces first pulls the final statement toward the intermediate goals, which is the same
+failure that a plan written in a *separate* call showed at −7.2pp from the other direction.
+
+If you are reading a report to decide what to build next, the rule is: a generation claim
+needs the ceiling, and a selection claim needs the loss. An accuracy delta on its own cannot
+tell the two apart, and the two call for opposite work.
+
 ## What these numbers are not
 
 - **Not a SOTA claim.** The dataset is a local fixture, not BIRD, Spider 2.0 or
