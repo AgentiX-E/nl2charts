@@ -28,6 +28,17 @@ cannot be argued with.
   is zero (a run that covered no line is not a coverage figure, ADR-217). `--allow-regression`
   cannot record its way out of the floor: the sentence says so. Self-test: 18 → 23 checks, and
   the floor was proven to fire end-to-end on a summary whose group branch ratio was lowered.
+- **`bird/retrieval.ts` is at 100% of branches, and two of its guards were deleted.** Six sites were
+  uncovered and they split in two: `index.averageLength === 0 ? 1 :` and `index.idf.get(word) ?? 0`
+  guarded a state the only caller cannot reach — `averageLength` is zero exactly when no document
+  contributed a term, and then `idf` is empty, so `retrieve` filters every query word away and
+  returns before scoring — and they are gone, with the invariant written down at the division. The
+  other four are real inputs nobody had asked for: `retrieve` with no options (the defaults the
+  pipeline runs with), two rows that score identically (the tiebreak by question is what keeps a
+  block stable across a re-sorted training file), and both renderers handed a hit the caller
+  assembled itself, which is what an arm asking for statements only produces. `ablate.ts` 93.9 →
+  97.5 on the same pass, because `pnpm bench:ablate`'s default output directory was the one path
+  every test bypassed by passing a temporary one.
 - **Every branch under `eval/` is now reachable, and the suite says so.** Branch coverage sat at
   92.1% while lines and functions were already 99.3% and 100%: the missing branches were not
   untested, they were unreachable. Each one lived inside a template literal or behind a guard no
