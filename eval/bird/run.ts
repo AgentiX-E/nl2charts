@@ -38,6 +38,7 @@ import { FAILURE_SAMPLE, failureCorpus } from './failures.js';
 import type { OracleResult } from './oracle.js';
 import { profileDatabase } from './profile.js';
 import { BIRD_SCHEMA_LINES } from './prompt-shape.js';
+import { attachSamples, sampleValuesOf } from './samples.js';
 import { buildIndex, renderDemonstrations, renderRetrieved, retrieve } from './retrieval.js';
 import { deserializeIndex, findValues, indexCells, renderValues, serializeIndex } from './values.js';
 import type { ValueIndex } from './values.js';
@@ -124,6 +125,19 @@ export interface Arm {
    * The instance-specific counterpart to retrieved knowledge, which is generic.
    */
   readonly values?: boolean;
+  /**
+   * Show what each categorical column actually contains, on its own card line.
+   *
+   * Not `values`. That block is built from the question's own literals, so it is empty
+   * exactly when the question spells a value differently from the store — which is the case
+   * it exists to help, and it was empty on 60.9% of the questions that offered it. This one
+   * is unconditional: `status TEXT [Banned|Active]` is in front of the model whether or not
+   * the question said "banned".
+   *
+   * The cost is prompt length and the risk the renderer warns about — samples invite
+   * invented filters — which is why it is a lever and not a default.
+   */
+  readonly samples?: boolean;
   /**
    * Ask for a query plan (scan, filter, join, group, answer) before the statement.
    * CHASE-SQL's second generator; one lever from `inline+evidence`.
@@ -337,6 +351,10 @@ export const ARMS: readonly Arm[] = [
   // tell coverage apart from source quality.
   { name: 'dataset-subset', notes: false, repairs: 0, linking: true, definitions: 'dataset-subset' },
   { name: 'inline+evidence', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline' },
+  // The same prompt with the card carrying each categorical column's stored values. One
+  // lever from `inline+evidence`, one call, no extra block: the instance knowledge sits on
+  // the column line instead of in a list built from the question's wording.
+  { name: 'inline+evidence+samples', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', samples: true },
   // Retrieved knowledge instead of the dataset's per-question hint: the nearest
   // labelled questions from BIRD's train split, which shares no database with the
   // split under test. The arm exists to test whether the 13.8pp is knowledge or
@@ -485,6 +503,7 @@ export const DEFAULT_ARMS: readonly string[] = [
  * An arm that is neither here nor in `DEFAULT_ARMS` fails the suite.
  */
 export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
+  'inline+evidence+samples': "the same prompt with each categorical column's stored values on its card line: one lever, one call, and the untested half of value grounding",
   definitions: 'structural semantics built from keys: superseded by inline placement, kept as the parent of definitions+evidence',
   'dataset-subset': 'isolates coverage from author, run when a definition arm moves',
   'definitions+evidence': 'second lever of the semantics chain, not a candidate for the chain itself',
@@ -1210,7 +1229,7 @@ export function promptFor(arm: Arm, question: BirdQuestion, blocks: PromptBlocks
     descriptions:
       arm.definitions === 'inline' || arm.definitions === 'dataset-subset' ? true : (profile?.descriptions ?? arm.notes),
     foreignKeys: profile?.foreignKeys ?? arm.notes,
-    samples: false,
+    samples: arm.samples === true,
     schemaLines: BIRD_SCHEMA_LINES,
     ...(profile === undefined ? {} : { notes: profile.notes }),
     ...(arm.definitions !== undefined && definitions !== undefined && definitions.length > 0 ? { definitions } : {}),
@@ -1318,6 +1337,28 @@ async function main() {
       synthesized.set(db, '');
     }
   }
+
+  // The card with values on it, built once per database and only when an arm asks for it.
+  //
+  // `samples` is derived from the profile this run already loads, so the lever costs no
+  // query: a column whose stored spellings are bounded is exactly a column a question can
+  // fail to match, and showing them is the cheaper half of value grounding — it needs no
+  // match between the question's wording and the store, which is where `values` stalls.
+  const sampleValues = new Map<string, Map<string, readonly string[]>>();
+  const sampled = { columns: 0, values: 0 };
+  if (config.arms.some((name) => resolveArm(name)?.samples === true)) {
+    for (const [db, profile] of profiles) {
+      const byColumn = sampleValuesOf(profile);
+      sampled.columns += byColumn.size;
+      for (const values of byColumn.values()) sampled.values += values.length;
+      sampleValues.set(db, byColumn);
+    }
+  }
+
+  const withSamples = (schema: SchemaTable[], db: string): SchemaTable[] => {
+    const values = sampleValues.get(db);
+    return values === undefined ? schema : attachSamples(schema, values);
+  };
 
   // Value grounding: the literals the question names, looked up in this database.
   //
@@ -1527,9 +1568,15 @@ async function main() {
   }
 
   const schemaFor = (arm: Arm, db: string): SchemaTable[] => {
-    if (arm.definitions === 'inline') return inlineSchemas.get(db) as SchemaTable[];
-    if (arm.definitions === 'dataset-subset') return subsetSchemas.get(db) as SchemaTable[];
-    return schemas.get(db) as SchemaTable[];
+    const base =
+      arm.definitions === 'inline'
+        ? (inlineSchemas.get(db) as SchemaTable[])
+        : arm.definitions === 'dataset-subset'
+          ? (subsetSchemas.get(db) as SchemaTable[])
+          : (schemas.get(db) as SchemaTable[]);
+    // Samples are layered on whatever the arm resolved to, not on the plain schema: an arm
+    // can ask for both, and silently dropping one is a two-lever comparison nobody wrote.
+    return arm.samples === true ? withSamples(base, db) : base;
   };
 
 
@@ -1628,6 +1675,11 @@ async function main() {
       schemaMissingTotal: missingColumns.length,
       tablesInPrompts,
       tablesTotal,
+      // Columns whose stored values reached the card, and how many values that is. An arm
+      // that asks for samples and gets none is its parent renamed, so the count is a control
+      // and the gate reads it.
+      sampledColumns: sampled.columns,
+      sampledValues: sampled.values,
       truncatedPrompts: truncated,
       // How much of the schema yields a structural claim at all. A database of
       // free-text columns produces nothing, and that is a fact about the method
@@ -1687,7 +1739,7 @@ async function main() {
       const built = sources.map((source) => {
         const spec = parseMixedSource(source);
         const arm = resolveArm(spec.arm) as Arm;
-        const prompt = buildSqlPrompt(question.question, schemas.get(question.db_id) as SchemaTable[], promptFor(arm, question, blocksFor(arm, question)));
+        const prompt = buildSqlPrompt(question.question, schemaFor(arm, question.db_id), promptFor(arm, question, blocksFor(arm, question)));
         return `${spec.provider}\u0000${prompt}`;
       });
       (new Set(built).size === sources.length ? distinct : degenerate).push(String(question.question_id));
@@ -1719,25 +1771,19 @@ async function main() {
     });
 
   if (config.dryRun) {
-    const withSemantics = cases.find((question) => (definitions.get(question.db_id) ?? '').length > 0);
-    const prompts = cases.slice(0, 3).map((question) => ({
+    // The preview shows the arms this run was told to score, not the head of the chain.
+    // It used to render `ARMS[0]` and `ARMS[1]` whatever `BIRD_ARMS` said, so the dry run
+    // of a new lever put two unrelated prompts in the artifact and the lever stayed
+    // unverified — and the second field was named `definitionsPrompt` after whichever arm
+    // happened to sit at that index, which nothing read either.
+    const preview = config.arms.map((name) => resolveArm(name)).filter((arm): arm is Arm => arm !== undefined);
+    report.prompts = cases.slice(0, 3).map((question) => ({
       id: question.question_id,
-      prompt: buildSqlPrompt(
-        question.question,
-        schemas.get(question.db_id) as SchemaTable[],
-        promptFor(ARMS[0] as Arm, question),
-      ),
-      ...(withSemantics === undefined || withSemantics.question_id !== question.question_id
-        ? {}
-        : {
-            definitionsPrompt: buildSqlPrompt(
-              question.question,
-              schemas.get(question.db_id) as SchemaTable[],
-              promptFor(ARMS[1] as Arm, question, blocksFor(ARMS[1] as Arm, question)),
-            ),
-          }),
+      arms: preview.map((arm) => {
+        const rendered = buildSqlPrompt(question.question, schemaFor(arm, question.db_id), promptFor(arm, question, blocksFor(arm, question)));
+        return { arm: arm.name, chars: rendered.length, prompt: rendered };
+      }),
     }));
-    report.prompts = prompts;
     report.arms = [];
     finish(config, report);
     await oracle.close();
@@ -1766,7 +1812,7 @@ async function main() {
       }
     }
     const runs = await pool(cases, config.concurrency, async (question): Promise<CaseRun> => {
-      const schema = schemas.get(question.db_id) as SchemaTable[];
+      const schema = schemaFor(arm, question.db_id);
       // Counted, not derived: a plan costs two calls, a selector costs one, and a
       // configuration-derived count got both wrong in opposite directions.
       const counter = withCallCounter(provider);

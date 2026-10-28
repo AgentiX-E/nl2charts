@@ -51,7 +51,7 @@ import type { BirdQuestion } from '../eval/bird/data.js';
  * delta cannot be attributed to anything else. A future edit that adds a second
  * change to a pair turns this red before it turns the benchmark unreadable.
  */
-const LEVERS = ['notes', 'evidence', 'repairs', 'linking', 'profile', 'definitions', 'focus', 'interpret', 'vote', 'demonstrations', 'select', 'values', 'plan', 'repairFeedback', 'shapeGuard', 'mixed', 'pairwise', 'sourcesVisible', 'judge', 'emptyRetry', 'decompose'] as const;
+const LEVERS = ['notes', 'evidence', 'repairs', 'linking', 'profile', 'definitions', 'focus', 'interpret', 'vote', 'demonstrations', 'select', 'values', 'plan', 'repairFeedback', 'shapeGuard', 'mixed', 'pairwise', 'sourcesVisible', 'judge', 'emptyRetry', 'decompose', 'samples'] as const;
 
 function changedLevers(left: Arm, right: Arm): string[] {
   const levers = LEVERS.filter((lever) => left[lever] !== right[lever]);
@@ -542,6 +542,29 @@ describe('mixed candidate sources', () => {
     const parent = buildSqlPrompt(question.question, [{ table: 'orders', columns: [{ name: 'id', type: 'INTEGER' }] }], promptFor(resolveArm('inline+evidence') as Arm, question));
     expect(parent).not.toContain('STEP <n>');
     expect(changedLevers(resolveArm('inline+evidence') as Arm, arm)).toEqual(['decompose']);
+  });
+
+  it('puts the stored values on the card the report measures', () => {
+    // The lever is only real if the rendered prompt changes: `promptFor` sets the switch and
+    // `schemaFor` supplies the values, and an arm where one of the two landed would score
+    // like its parent and read like a finding.
+    const arm = resolveArm('inline+evidence+samples') as Arm;
+    const schema = [
+      { table: 'orders', columns: [{ name: 'id', type: 'INTEGER' }, { name: 'status', type: 'TEXT' }] },
+    ];
+    const options = promptFor(arm, question);
+    expect(options.samples).toBe(true);
+    expect(buildSqlPrompt(question.question, schema, options)).not.toContain('[Banned|Active]');
+    const withValues = schema.map((table) => ({
+      ...table,
+      columns: table.columns.map((column) => (column.name === 'status' ? { ...column, samples: ['Banned', 'Active'] } : column)),
+    }));
+    expect(buildSqlPrompt(question.question, withValues, options)).toContain('[Banned|Active]');
+    // The parent renders it without, which is the comparison the arm buys.
+    const parent = promptFor(resolveArm('inline+evidence') as Arm, question);
+    expect(parent.samples).toBe(false);
+    expect(buildSqlPrompt(question.question, withValues, parent)).not.toContain('[Banned|Active]');
+    expect(changedLevers(resolveArm('inline+evidence') as Arm, arm)).toEqual(['samples']);
   });
 
   it('counts which decomposition won, including the ones that never did', () => {
