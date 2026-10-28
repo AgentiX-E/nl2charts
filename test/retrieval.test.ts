@@ -72,6 +72,30 @@ describe('retrieval', () => {
   it('handles an empty corpus without throwing', () => {
     expect(retrieve(buildIndex([]), 'anything at all', { k: 3 })).toEqual([]);
   });
+
+  it('answers with its own defaults when the caller passes no options at all', () => {
+    // Every knob has a default, and the defaults are the ones the pipeline runs with: three
+    // neighbours, one per database, definitions first. A default nobody exercises is a value
+    // nobody has read.
+    const hits = retrieve(index, 'ratio of customers paying in EUR to CZK');
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits.length).toBeLessThanOrEqual(3);
+    expect(new Set(hits.map((hit) => hit.question)).size).toBe(hits.length);
+  });
+
+  it('breaks a score tie by question, so a block does not depend on input order', () => {
+    // Two rows with the same terms in a different order score identically, and without the
+    // tiebreak their order would come from the corpus. The comparison is the only thing that
+    // makes the rendered block stable across a re-sorted training file.
+    const tied = buildIndex([
+      { db_id: 'a', question: 'revenue by region total', evidence: 'revenue per region' },
+      { db_id: 'b', question: 'total revenue by region', evidence: 'revenue per region' },
+    ]);
+    const hits = retrieve(tied, 'revenue region total', { k: 2, perDatabase: 2 });
+    expect(hits).toHaveLength(2);
+    expect(hits[0]?.score).toBe(hits[1]?.score);
+    expect(hits.map((hit) => hit.question)).toEqual(['revenue by region total', 'total revenue by region']);
+  });
 });
 
 describe('rendering the block', () => {
@@ -91,8 +115,11 @@ describe('rendering the block', () => {
 
   it('skips a neighbour with no evidence rather than printing an empty arrow', () => {
     const bare = buildIndex([{ db_id: 'x', question: 'How many rows are there?' }]);
-    const text = renderRetrieved(retrieve(bare, 'How many rows are there?', { k: 1 }));
-    expect(text).toBe('');
+    // `retrieve` already refuses a row without evidence, so this branch is only reachable when
+    // a block is assembled from hits the caller built itself — which is exactly how the arm
+    // that asks for statements only gets here.
+    expect(renderRetrieved(retrieve(bare, 'How many rows are there?', { k: 1 }))).toBe('');
+    expect(renderRetrieved([{ question: 'How many rows are there?', evidence: '', score: 1, sql: '' }])).toBe('');
   });
 });
 
@@ -155,6 +182,12 @@ describe('statements as demonstrations', () => {
     expect(text).toContain('Question:');
     expect(text).toContain('SQL: SELECT');
     expect(text.split('SQL:').length - 1).toBe(hits.length);
+  });
+
+  it('skips a hit with no statement when a demonstration needs one', () => {
+    // The same shape as the textual block: reachable only for a caller that assembles hits
+    // itself, and the alternative is an example whose SQL line is empty.
+    expect(renderDemonstrations([{ question: 'How many orders are there?', evidence: 'orders', score: 1, sql: '' }])).toBe('');
   });
 
   it('leaves out the evidence line when a neighbour has none', () => {

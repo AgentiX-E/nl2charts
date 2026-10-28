@@ -12,7 +12,7 @@
  * ENOENT after doing all of its work. That is asserted here directly, by running it in an
  * empty directory.
  */
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -128,6 +128,23 @@ describe('normalization ablation', () => {
     // the caller, so a single run looked like two.
     expect(lines.filter((line) => line.includes('arms recorded'))).toHaveLength(1);
     expect(await ablateMain({ outDir })).toBe(0);
+  });
+
+  it('writes to the repository default when no directory is given', async () => {
+    // The default is what `pnpm bench:ablate` uses, and a default nobody exercises is a value
+    // nobody has read: the previous script had a hard-coded path here that the tests all
+    // bypassed by passing a temporary one. A developer artifact that already exists is put
+    // back afterwards, because a test is not allowed to delete work.
+    const artifact = join(ROOT, 'eval/out/ablation.json');
+    const before = existsSync(artifact) ? readFileSync(artifact, 'utf8') : undefined;
+    try {
+      const result = await runAblation({ log: () => undefined });
+      expect(result.outFile.endsWith('eval/out/ablation.json')).toBe(true);
+      expect(JSON.parse(readFileSync(result.outFile, 'utf8'))).toMatchObject({ cases: expect.any(Number) });
+    } finally {
+      if (before === undefined) rmSync(artifact, { force: true });
+      else writeFileSync(artifact, before);
+    }
   });
 
   it('computes McNemar exactly, including the degenerate and one-sided tails', () => {

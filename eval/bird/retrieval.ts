@@ -93,12 +93,18 @@ export function buildIndex(rows: readonly TrainingRow[]): Index {
 function score(index: Index, position: number, query: readonly string[]): number {
   const frequencies = index.termFrequencies[position] as Map<string, number>;
   const length = index.lengths[position] as number;
-  const normaliser = K1 * (1 - B + B * (index.averageLength === 0 ? 1 : length / index.averageLength));
+  // `averageLength` is zero exactly when no document contributed a term, and then `idf` is
+  // empty, `retrieve` filters every query word away and returns before calling this — so the
+  // division is safe by that invariant rather than by a fallback. A `?? 1` here was a branch
+  // no input can reach, and a guard that cannot fire is a claim a reader has to verify
+  // (ADR-219).
+  const normaliser = K1 * (1 - B + B * (length / index.averageLength));
   let total = 0;
   for (const word of query) {
     const frequency = frequencies.get(word);
     if (frequency === undefined) continue;
-    const weight = index.idf.get(word) ?? 0;
+    // `retrieve` builds its query from words this index has, so the lookup always answers.
+    const weight = index.idf.get(word) as number;
     total += (weight * (frequency * (K1 + 1))) / (frequency + normaliser);
   }
   return total;

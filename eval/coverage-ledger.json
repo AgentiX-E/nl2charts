@@ -7,14 +7,14 @@
     "lines": 99.3,
     "statements": 99.3,
     "functions": 100,
-    "branches": 95.41
+    "branches": 95.77
   },
   "files": {
     "eval/ablate.ts": {
       "lines": 97.53,
       "statements": 97.53,
       "functions": 100,
-      "branches": 93.93
+      "branches": 96.87
     },
     "eval/adversarial/cases.ts": {
       "lines": 100,
@@ -92,7 +92,7 @@
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 91.3
+      "branches": 100
     },
     "eval/bird/run.ts": {
       "lines": 99.2,
