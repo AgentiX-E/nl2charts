@@ -75,10 +75,14 @@ cannot be argued with.
     statement the engine rejects.
   - `runHarness` checked its controls through two `?.` chains whose failure paths were
     unreachable and whose messages were duplicated in `ablate`; both callers now share
-    `assertControls`, which is tested with a summary that scores the oracle at 95%.
-- **A case one arm skipped was counted as a case the other arm won.** `compareArms` (the
-  normalization comparison, now separable from the measurement) reported a pair for an id the
-  other arm never ran, crediting an arm for a case it did not attempt.
+    `assertControls`, which is tested against a summary that scores the oracle at 95%.
+- **The pairing rule was right and untested.** `compareArms` — the normalization comparison,
+  now separable from the measurement — already skipped a case that only one arm ran, which is
+  the correct rule: a skipped case is neither a win nor a loss, and counting it as either turns
+  a sample difference into a capability difference. The rule now has a test that pins it, and
+  the two non-degenerate conclusions (significant at 5%, direction observed but not significant)
+  have tests for the first time; on the current golden set the arms agree on all twenty cases,
+  so those branches had never executed.
 - **A run that declared its sample was failed for its sample.** `bird-model.yml` scored 298 of
   Mini-Dev's 500 questions — a 300-question slice, the declared subject of the run — and the
   artifact recorded `requested: 300` beside `available: 500`. The gate compared `scored` against
