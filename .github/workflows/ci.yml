@@ -7,10 +7,16 @@ on:
     branches: [master]
   workflow_dispatch:
 
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
-
+# Cancellation is per job, not per run.
+#
+# A run-level group with `cancel-in-progress: true` kills whatever is running the moment
+# anything is pushed, and three of these four jobs are *measurements*: a cancelled BIRD job
+# publishes no number, so "CI is green" came to depend on how long you waited before pushing
+# again rather than on the code. The BIRD job of 40615685536 was cancelled by the push that
+# started 40617682709, and the run that replaced it was killed the same way by the next one.
+#
+# So the cheap check restarts freely and the measurements serialize: a superseded number is
+# worth less than no number, and a queued job replaces the queue rather than the run.
 permissions:
   contents: read
 
@@ -19,6 +25,11 @@ jobs:
     name: quality gates
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Cheap, and worth restarting on every push: a type error should be reported for the
+    # commit that has it, not for the one before it.
+    concurrency:
+      group: ci-quality-${{ github.ref }}
+      cancel-in-progress: true
     services:
       postgres:
         image: postgres:16
@@ -107,6 +118,11 @@ jobs:
     name: benchmark and ablation
     needs: quality
     runs-on: ubuntu-latest
+    # A number, not a check: an arm that was cancelled half way scores nothing, and the
+    # artifact that would have explained it does not exist either.
+    concurrency:
+      group: ci-benchmark-${{ github.ref }}
+      cancel-in-progress: false
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
