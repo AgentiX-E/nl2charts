@@ -1545,6 +1545,48 @@ the ranking signal a second model could add is inside that bound, not above it. 
 left is what the prompt shows and what writes the candidate: the value samples and the
 generator family, in that order, because samples change the input rather than the search.
 
+### The spellings on the card: the mechanism fires, the gain does not clear the bar
+
+`samples` puts a column's stored values on its own card line — `status TEXT
+[Banned|Active]` — so a question that spells a value differently from the store no longer
+depends on the `values` block having matched it. The `values` block is empty exactly when
+it did not match, which was 60.9% of the questions that offered it. Two dev runs, 1,532
+questions each, one lever, one call:
+
+| | run 1 | run 2 |
+| --- | --- | --- |
+| `inline+evidence` | 939 (61.3%) | 934 (61.0%) |
+| `inline+evidence+samples` | 948 (61.9%) | 954 (62.3%) |
+| delta | **+0.59pp** | **+1.31pp** |
+| discordant pairs (samples / parent) | 57 / 48 | 58 / 38 |
+| McNemar exact | p = 0.44 | p = 0.052 |
+| `errors.values` | 444 → **429** | 436 → **431** |
+| `errors.columnCount` | 128 → 134 | 133 → 125 |
+| mean prompt characters | 2,568 → 3,148 (+22.6%) | idem |
+
+The mechanism is not in doubt: 118 columns and 628 values reach the card, the control
+counts them, and the error class the lever targets moves **down in both rounds** (−15 and
+−5). What does not clear the bar is the accuracy. The registered criterion is two
+consecutive runs at p<0.01 (ADR-184); +0.59 (p=0.44) and +1.31 (p=0.052) miss it, and the
+same arm repeated inside one round moved 1.2pp across these two runs, which is the scale
+"+9 questions" has to be read against. Pooling the two rounds — not the registered
+criterion, but the best estimate available — gives **+0.95pp, 201 discordant pairs,
+p=0.048**: real enough to be a direction, too small to be a mechanism worth 22.6% more
+prompt.
+
+So `samples` is not adopted as a default. It stays as an ablation reference, which is what
+this project does with levers whose mechanism is confirmed and whose effect is not: the
+number is in the artifact, the gate refuses an arm that asks for samples and attaches none,
+and the next experiment is not "turn it on".
+
+> Two levers were tested in this cycle and both came back inside the noise: a model that
+> thinks (p = 1.00) and an input that shows every stored spelling (+0.95pp pooled,
+> p = 0.048). The gap from 58% to the published 70–73% is therefore not reachable by a
+> lever this harness currently has access to. Recording that plainly is more useful than
+> another prompt variation: it says the remaining distance is in the generator family
+> (cross-vendor, blocked by quota) or in the fine-tuning around it, not in what this
+> pipeline chooses to say.
+
 ## A generator that raises the ceiling, and a selector that spends it
 
 The dev split, 1,532 questions, one job, six arms. The two arms that matter here differ by

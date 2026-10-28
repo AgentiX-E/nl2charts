@@ -114,6 +114,16 @@ cannot be argued with.
 
 ### Measured
 
+- **`samples`: the mechanism fires, the gain does not clear the bar.** Two dev runs, 1,532
+  questions each, one lever, one call: 948 against 939 (**+0.59pp**, 57/48 discordant,
+  p=0.44) and 954 against 934 (**+1.31pp**, 58/38, p=0.052). The control confirms 118 columns
+  and 628 values reach the card, and the error class the lever targets moves down in both
+  rounds (`errors.values` 444→429, 436→431) — the mechanism is doing what it says. Pooled,
+  the best estimate is **+0.95pp at p=0.048** on 201 discordant pairs, against +22.6% prompt
+  characters. Not adopted as a default (ADR-184 wants two runs at p<0.01); kept as an
+  ablation reference, with the gate still refusing an arm that asks for samples and attaches
+  none. **What this leaves**: with a thinking model at p=1.00 and every stored spelling
+  visible at +0.95pp, no lever this harness currently holds moves 58% toward 70–73%.
 - **A stronger model at the same prompt is the same measurement.** `deepseek-reasoner` on 298
   of Mini-Dev's 500 questions, one arm, plus the arm repeated as its own control: 155 (52.0%)
   and 158 (53.0%). Paired against `deepseek-chat` on the same 296 questions — same pinned
