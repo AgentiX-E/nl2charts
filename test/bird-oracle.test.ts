@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -54,6 +54,23 @@ describe('SQLite execution oracle', () => {
     expect(result.error).toContain('no such column');
   });
 
+  it('carries the name SQLite gave the failure, so a repair can act on the class', async () => {
+    // `oracle.py` returns `errorName`, `run.ts` turns it into the hint a repair turn is
+    // asked with, and the decoder here used to drop it — so every repair was told the code
+    // was `undefined` and the branch that adds the code was unreachable in production.
+    const result = await oracle.run('shop', 'select missing from items');
+    expect(result.errorName).toBe('SQLITE_ERROR');
+    expect(result.errorCode).toBeGreaterThan(0);
+  });
+
+  it('leaves the code absent when the failure was not SQLite that raised it', async () => {
+    // A missing database fails in this client, not in SQLite: there is no name to report,
+    // and a synthesised one would make a harness bug look like a query error.
+    const result = await oracle.run('absent', 'select 1');
+    expect(result.errorName).toBeUndefined();
+    expect(result.errorCode).toBeUndefined();
+  });
+
   it('reports a missing database as an error, not a hang', async () => {
     const result = await oracle.run('absent', 'select 1');
     expect(result.ok).toBe(false);
@@ -73,5 +90,70 @@ describe('SQLite execution oracle', () => {
       oracle.run('shop', 'select 4'),
     ]);
     expect(results.map((result) => result.rows[0]?.[0])).toEqual([1, 2, 3, 4]);
+  });
+});
+
+/**
+ * A second Python process that speaks the same protocol badly.
+ *
+ * `oracle.py` is one implementation of the wire format, not the format itself, and the
+ * client's job on this side is to survive a peer that is noisier than the one we ship: a
+ * banner line, a response for a request nobody made, a response with no timing. Each of
+ * those is a branch in the decoder, and none of them can be reached through the script in
+ * `eval/` because it never does any of it. So the fixture is a real peer, not a stub.
+ */
+const awkward = `
+import json, sys
+
+# A pipe is block-buffered: without the flush the client waits for an answer that the
+# interpreter is holding in a buffer, which looks exactly like a hang.
+print("", flush=True)
+print(json.dumps({"id": "not-a-request", "ok": True, "rows": []}), flush=True)
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    request = json.loads(line)
+    print(json.dumps({"id": request["id"], "ok": True, "rows": [[request["sql"]]]}), flush=True)
+`;
+
+describe('the protocol client against a noisy peer', () => {
+  it('ignores a banner line, a response for no request, and a missing timing', async () => {
+    const script = join(root, 'awkward_oracle.py');
+    writeFileSync(script, awkward);
+    const peer = createOracle(script, root);
+    try {
+      const result = await peer.run('shop', 'select 1');
+      expect(result.rows).toEqual([['select 1']]);
+      // The peer sent neither `ms` nor `columns`: the decoder fills both, so a caller never
+      // has to check for them before doing arithmetic on a duration.
+      expect(result.ms).toBe(0);
+      expect(result.columns).toEqual([]);
+    } finally {
+      await peer.close();
+    }
+  });
+
+  it('rejects a request made after close instead of writing to a dead pipe', async () => {
+    const peer = createOracle(resolve('eval/bird/oracle.py'), root);
+    await peer.close();
+    await expect(peer.run('shop', 'select 1')).rejects.toThrow(/oracle is closed/);
+  });
+
+  it('closes twice without waiting for an exit that already happened', async () => {
+    const peer = createOracle(resolve('eval/bird/oracle.py'), root);
+    await peer.close();
+    await expect(peer.close()).resolves.toBeUndefined();
+  });
+
+  it('answers a request that was in flight when the input closed, instead of hanging', async () => {
+    const peer = createOracle(resolve('eval/bird/oracle.py'), root);
+    // `close()` ends stdin, which the process sees only after it has answered everything it
+    // already read. A client that resolved `close()` by racing the answers would leave this
+    // promise pending forever, and a benchmark that hangs is indistinguishable from one
+    // that is slow.
+    const inFlight = peer.run('shop', 'select count(*) from items');
+    await peer.close();
+    await expect(inFlight).resolves.toMatchObject({ ok: true, rows: [[3]] });
   });
 });

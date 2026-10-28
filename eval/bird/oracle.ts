@@ -56,6 +56,11 @@ export function createOracle(script: string, databaseRoot: string): Oracle {
       rows: payload.rows ?? [],
       ms: payload.ms ?? 0,
       ...(payload.error === undefined ? {} : { error: payload.error }),
+      // `oracle.py` names the failure and its code, and `run.ts` turns the name into a
+      // repair hint. Both fields were declared here and dropped on the floor, so the hint
+      // was always `undefined` and the branch that builds it never fired.
+      ...(payload.errorName === undefined || payload.errorName === null ? {} : { errorName: payload.errorName }),
+      ...(payload.errorCode === undefined || payload.errorCode === null ? {} : { errorCode: payload.errorCode }),
     });
   });
   child.on('exit', (code) => {
