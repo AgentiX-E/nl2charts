@@ -905,3 +905,46 @@ describe('mixed feasibility', () => {
     expect(note).toContain('0 of 2');
   });
 });
+
+/**
+ * The guards below read a record that may carry no message.
+ *
+ * Every one of them says `run.error ?? 'no error text'`, and every existing test handed them
+ * runs that had an `error`. The fallback is not decoration: it is what a run killed before the
+ * provider wrote anything looks like, and the three guards that read it are the three that
+ * decide whether a number gets published.
+ */
+describe('guards whose record carries no message', () => {
+  it('names the missing error text instead of inventing one', () => {
+    expect(() => assertArmProducedResults('names', [{ errorKind: 'llm' }, { errorKind: 'llm' }])).toThrow(/first error: no error text/);
+    expect(() =>
+      assertFailureRate('names', Array.from({ length: 10 }, () => ({ errorKind: 'llm' }))),
+    ).toThrow(/first error: no error text/);
+    expect(() => assertHarnessClean('names', [{ errorKind: 'harness' }, { errorKind: 'harness' }])).toThrow(/first: no error text/);
+  });
+
+  it('exempts an empty table from the share and the survival checks, not just from the outage one', () => {
+    // A split with no cases is not an arm that failed; it is an arm that was not run, and the
+    // share of zero cases is not a share (ADR-216).
+    expect(() => assertFailureRate('names', [])).not.toThrow();
+    expect(() => assertCandidateSurvival('select-cross', [], 3)).not.toThrow();
+  });
+
+  it('counts a run that never recorded a drop as zero drops', () => {
+    // `emptyDropped` is written by the lever; a run from an arm without it must not turn the
+    // funnel's sum into NaN, and must not be read as "the lever ran".
+    const bare = Array.from({ length: 200 }, () => ({ emptyRetried: false }));
+    expect(emptyRetryFunnel(bare as never)).toEqual({ dropped: 0, fired: 0, recovered: 0, extraCallsPerCase: 0 });
+    expect(() => assertEmptyRetryFired('select-mixed+empty', bare as never)).toThrow(/the lever did not run/);
+  });
+
+  it('reads a decomposition record that states no steps as a decomposition that did not fire', () => {
+    // The record exists (the arm asked) but carries no counts: `asked` counts it, `fired` must
+    // not, and a missing candidate count is one candidate, not zero.
+    const runs = [{ decomposition: { steps: 3 } }, { decomposition: {} }];
+    // Three steps over two cases that each declared no candidate count: the missing count is
+    // one candidate, so the mean is 1.5 and not 3 or 0.
+    expect(decompositionFunnel(runs as never)).toEqual({ asked: 2, fired: 1, share: 0.5, meanSteps: 1.5 });
+    expect(decompositionFunnel([{ decomposition: {} }] as never)).toEqual({ asked: 1, fired: 0, share: 0, meanSteps: 0 });
+  });
+});
