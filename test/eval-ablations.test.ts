@@ -102,6 +102,12 @@ describe('ablation entrypoints', () => {
     expect(quiet.arms).toHaveLength(3);
   });
 
+  it('defaults its artifact to eval/out', () => {
+    const { outFile } = runLinkingAblation();
+    expect(outFile.endsWith('/eval/out/linking-ablation.json')).toBe(true);
+    rmSync(outFile, { force: true });
+  });
+
   it('exits zero from both command-line entrypoints', async () => {
     expect(linkingMain({ outDir })).toBe(0);
     expect(await semanticMain({ outDir })).toBe(0);

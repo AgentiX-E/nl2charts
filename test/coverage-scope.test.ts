@@ -64,7 +64,7 @@ const UNMEASURED: readonly { readonly root: string; readonly suffixes: readonly 
     root: 'eval',
     suffixes: ['.ts'],
     reason:
-      'benchmark harness. Measured on request it is 63.9% lines / 92.9% functions / 87.7% branches (2026-10-28); `tools/check-eval-coverage.mjs` holds every file to a committed ledger so none can fall back, and I-37 brings each module to 95% before eval/ joins the main include',
+      'benchmark harness. Measured on request it is 64.0% lines / 93.6% functions / 88.5% branches (2026-10-28); `tools/check-eval-coverage.mjs` holds every file to a committed ledger so none can fall back, and I-37 brings each module to 95% before eval/ joins the main include',
     task: 'I-37',
   },
   {

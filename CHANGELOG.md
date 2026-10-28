@@ -21,7 +21,7 @@ cannot be argued with.
 
 - **The harness is measured now, and no file of it may fall behind.** `eval/` produced every
   published number and sat outside the coverage include, so its coverage could only go down
-  unnoticed: 49.5% of lines. It is **63.9% lines / 92.9% functions / 87.7% branches** as of this
+  unnoticed: 49.5% of lines. It is **64.0% lines / 93.6% functions / 88.5% branches** as of this
   entry, and the direction is enforced rather than hoped for. `vitest.eval.config.ts` derives the
   measurement from the main config (and replaces its coverage scope instead of merging into it —
   `mergeConfig` concatenates `include`, so the first version measured the packages too and

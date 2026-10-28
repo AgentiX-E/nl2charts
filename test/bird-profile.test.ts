@@ -35,6 +35,11 @@ writer.exec(`
   );
   create table keys (token text);
   create table tags (tag text);
+  create table events (
+    id_tag integer,
+    starts_at time,
+    untyped
+  );
 `);
 const insertItem = writer.prepare('insert into items values (?, ?, ?, ?, ?)');
 for (let index = 1; index <= 60; index += 1) {
@@ -54,6 +59,10 @@ for (const token of ['recLKj8BbTNqxFbTb', 'recLKj8BbTNqxFbTb', 'xY9mNpQrStUvWxYz
 // A dictionary with more distinct values than the cap.
 const insertTag = writer.prepare('insert into tags values (?)');
 for (let index = 0; index < 40; index += 1) insertTag.run(`tag${String(index)}`);
+// `time` is a declared type with no numeric or text hint in its name, and `untyped` has no
+// declaration at all: both are decided by the sample value rather than by the declaration.
+const insertEvent = writer.prepare('insert into events values (?, ?, ?)');
+for (let index = 1; index <= 10; index += 1) insertEvent.run(index, `09:${String(index).padStart(2, '0')}:00`, index % 3);
 writer.close();
 
 const oracle = createOracle(resolve('eval/bird/oracle.py'), root);
@@ -105,6 +114,14 @@ describe('database profile', () => {
     const added = profile.columns.find((column) => column.column === 'added_on');
     expect(added?.kind).toBe('date');
     expect(added?.min).toContain('2024-03');
+  });
+
+  it('decides a kind from the declared type or from the sample, in that order', async () => {
+    const profile = await profileDatabase(oracle, 'shop', { cacheDir: cache });
+    // `time` is a date kind by declaration even though the values look like times.
+    expect(profile.columns.find((column) => column.column === 'starts_at')?.kind).toBe('date');
+    // An undeclared column is decided by what it holds.
+    expect(profile.columns.find((column) => column.column === 'untyped')?.kind).toBe('numeric');
   });
 
   it('reads its own cache instead of querying again, and force bypasses it', async () => {

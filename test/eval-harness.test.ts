@@ -16,9 +16,9 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { PREDICTORS, assertControls, evaluateCase, loadGolden, main, pct, runHarness, runPredictor, summarise, withFixture } from '../eval/run.js';
+import { PREDICTORS, ROOT, assertControls, evaluateCase, loadGolden, main, pct, runHarness, runPredictor, summarise, withFixture } from '../eval/run.js';
 import type { CaseOutcome, RunSummary } from '../eval/run.js';
-import { binomialTwoSided, compareArms, runAblation } from '../eval/ablate.js';
+import { binomialTwoSided, compareArms, main as ablateMain, runAblation } from '../eval/ablate.js';
 
 const outDir = mkdtempSync(join(tmpdir(), 'nl2charts-harness-'));
 afterAll(() => rmSync(outDir, { recursive: true, force: true }));
@@ -82,6 +82,15 @@ describe('harness', () => {
   it('returns an exit code from the command-line entrypoint', async () => {
     expect(await main({ outDir })).toBe(0);
   });
+
+  it('defaults its artifact to eval/out, and leaves the file where the next script looks for it', async () => {
+    // The default is the reason `pnpm bench` and `pnpm bench:ablate` can be run without
+    // arguments, so it is a contract rather than a convenience.
+    const { payload } = await runHarness();
+    const artifact = JSON.parse(readFileSync(join(ROOT, 'eval/out/results.json'), 'utf8')) as { harness: string };
+    expect(artifact.harness).toBe(payload.harness);
+    rmSync(join(ROOT, 'eval/out/results.json'), { force: true });
+  });
 });
 
 describe('normalization ablation', () => {
@@ -108,6 +117,14 @@ describe('normalization ablation', () => {
     } finally {
       rmSync(empty, { recursive: true, force: true });
     }
+  });
+
+  it('logs the comparison when asked, and exits zero from its command-line entrypoint', async () => {
+    const lines: string[] = [];
+    await runAblation({ outDir, log: (line) => lines.push(line) });
+    expect(lines[0]).toContain('ablation: template');
+    expect(lines.some((line) => line.includes('discordant'))).toBe(true);
+    expect(await ablateMain({ outDir })).toBe(0);
   });
 
   it('computes McNemar exactly, including the degenerate and one-sided tails', () => {

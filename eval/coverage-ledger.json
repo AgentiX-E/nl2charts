@@ -4,17 +4,17 @@
   "tolerancePp": 0.2,
   "measuredAt": "2026-10-28",
   "totals": {
-    "lines": 63.86,
-    "statements": 63.86,
-    "functions": 92.9,
-    "branches": 87.72
+    "lines": 64,
+    "statements": 64,
+    "functions": 93.58,
+    "branches": 88.52
   },
   "files": {
     "eval/ablate.ts": {
-      "lines": 89.87,
-      "statements": 89.87,
-      "functions": 80,
-      "branches": 77.77
+      "lines": 97.46,
+      "statements": 97.46,
+      "functions": 100,
+      "branches": 90.32
     },
     "eval/adversarial/cases.ts": {
       "lines": 100,
@@ -74,7 +74,7 @@
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 80
+      "branches": 85.1
     },
     "eval/bird/prompt-shape.ts": {
       "lines": 100,
@@ -140,7 +140,7 @@
       "lines": 97.95,
       "statements": 97.95,
       "functions": 100,
-      "branches": 83.33
+      "branches": 88.88
     },
     "eval/live/cases.ts": {
       "lines": 100,
@@ -164,7 +164,7 @@
       "lines": 98.41,
       "statements": 98.41,
       "functions": 100,
-      "branches": 92.59
+      "branches": 94.44
     },
     "eval/semantic-ablation.ts": {
       "lines": 97.67,
