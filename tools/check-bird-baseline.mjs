@@ -63,12 +63,37 @@ export function compare(report, baseline) {
     issues.push(`BIRD1: the report says split ${String(report.split)} at the top level and ${split} in selection; one of them is wrong`);
   }
 
+  // Which questions a run set out to score is a fourth coordinate of a floor, after split,
+  // arms and model — and it was the missing one. `bird-model.yml` took a 300-question slice
+  // to compare two models on one prompt, the artifact recorded `requested: 300` and
+  // `available: 500` honestly, and this tool failed the run for "the sample changed": a red
+  // build about the sample the run declared. The rule is the one the arm list already
+  // follows — a declaration is read, and the checks that need the full sample are switched
+  // off out loud rather than guessed at. An artifact from before this field existed still
+  // gets the strict check, because there is nothing to read.
+  const requested = report?.selection?.requested;
+  const available = report?.selection?.available;
+  let declaredSubset = false;
+  if (requested !== undefined) {
+    if (typeof requested !== 'number' || !(requested > 0)) {
+      issues.push(`BIRD1: selection.requested is ${JSON.stringify(requested)}, which is not a sample size`);
+    } else if (typeof available === 'number' && requested > available) {
+      issues.push(`BIRD1: the run asked for ${requested} questions and split ${split} has ${available}`);
+    } else if (scored > requested) {
+      issues.push(`BIRD1: the run asked for ${requested} questions and published ${scored} rows`);
+    } else if (typeof available === 'number' && requested < available) {
+      declaredSubset = true;
+    }
+  }
+
   // A smaller sample is a different measurement, not a worse model: comparing the
   // two would attribute a dataset change to the pipeline. The expected size is a
   // property of the split — a dev run compared against Mini-Dev's 500 would pass while
   // scoring a third of its own split.
   const expectedScored = baseline.scoredBySplit?.[split] ?? baseline.scored;
-  if (scored < Math.floor(expectedScored * 0.95)) {
+  if (declaredSubset) {
+    notes.push(`BIRD1: ${scored} of ${available} ${split} questions were requested, so this is a measurement on a declared subset`);
+  } else if (scored < Math.floor(expectedScored * 0.95)) {
     issues.push(`BIRD1: scored ${scored} questions against a baseline of ${expectedScored}; the sample changed`);
   }
 
@@ -372,10 +397,20 @@ export function compare(report, baseline) {
     notes.push('BIRD1: this report was produced without a model (dry run); accuracy floors do not apply');
     return { issues, notes };
   }
-  if (floorModel !== undefined && model !== floorModel) {
-    notes.push(`BIRD1: the floors for ${split} were taken with ${floorModel} and this run used ${model}; accuracy is a measurement, the structural checks still hold`);
+  // A floor is a rate over the questions it was taken on. Enforcing it on 298 of 500
+  // questions would read a subset's noise as a regression — and, worse, would let a subset
+  // run clear a floor and be cited as a pass. Neither direction is available: the subset is
+  // recorded, its accuracy is printed, and no floor is applied. This is checked before the
+  // model, because it names the more fundamental reason this run is not comparable.
+  if (declaredSubset) {
+    notes.push(`BIRD1: the ${split} floors were taken on the full sample, so they do not apply to ${scored} of ${available} questions; no accuracy floor was enforced`);
     return { issues, notes };
   }
+  if (floorModel !== undefined && model !== floorModel) {
+    notes.push(`BIRD1: the floors for ${split} were taken with ${floorModel} and this run used ${model}; accuracy is a measurement across models, so only the structural checks apply`);
+    return { issues, notes };
+  }
+
   const tolerance = baseline.tolerancePp;
   for (const [name, floor] of Object.entries(floors)) {
     const arm = byArm.get(name);
@@ -449,6 +484,55 @@ function selfTest() {
   });
   if (!shrunkDev.issues.some((issue) => issue.includes('sample changed'))) {
     issues.push('BIRD1 compares a dev run against Mini-Dev and calls 600 of 1,532 questions a full sample');
+  }
+
+  // ...and the same split-scoped check has to read a declared subset. `bird-model.yml`
+  // scored 298 of Mini-Dev's 500 questions to compare two models on one prompt; the artifact
+  // said so in selection.requested, and the gate failed it for the sample it declared.
+  const subsetReport = (extra) => ({
+    selection: { scored: 298, available: 500, requested: 300, split: 'minidev' },
+    model: 'deepseek-reasoner',
+    run,
+    armsRequested: ['inline'],
+    arms: [arm('inline', 100, 298)],
+    ...extra,
+  });
+  // The fixture baseline above scores 100 questions; these cases are about Mini-Dev's real
+  // 500, so they say so rather than reusing a scale that makes 298 look full.
+  const bigSample = { ...baseline, scoredBySplit: { minidev: 500, dev: 1532 } };
+  const declaredSubsetRun = compare(subsetReport({}), bigSample);
+  fail(declaredSubsetRun, 0, 'BIRD1 fails a run that declared the sample it scored');
+  if (!declaredSubsetRun.notes.some((note) => note.includes('declared subset'))) {
+    issues.push('BIRD1 does not say that a declared subset is a subset');
+  }
+  // The floor must be off, not merely passed: 33.6% against a 50% floor has to raise the
+  // same note and no issue, because 298 questions are not the 500 the floor was taken on.
+  const weakSubset = compare(subsetReport({}), bigSample);
+  if (
+    weakSubset.issues.length !== 0 ||
+    !weakSubset.notes.some((note) => note.includes('no accuracy floor was enforced'))
+  ) {
+    issues.push('BIRD1 enforces a full-sample floor on a declared subset');
+  }
+  // ...and the declaration cannot excuse a sample that shrank without saying so.
+  const undeclaredSubset = compare(subsetReport({ selection: { scored: 298, available: 500, split: 'minidev' } }), bigSample);
+  if (!undeclaredSubset.issues.some((issue) => issue.includes('sample changed'))) {
+    issues.push('BIRD1 accepts 298 of 500 questions when the run declared no sample');
+  }
+  // A declaration is checked against the split and against the rows it published: a claim
+  // of 600 questions from a 500-question split, or 400 rows from a 300-question request, is
+  // a broken instrument rather than a small sample.
+  const impossibleRequest = compare(subsetReport({ selection: { scored: 298, available: 500, requested: 600, split: 'minidev' } }), bigSample);
+  if (!impossibleRequest.issues.some((issue) => issue.includes('has 500'))) {
+    issues.push('BIRD1 accepts a request for more questions than the split holds');
+  }
+  const moreRowsThanAsked = compare(subsetReport({ selection: { scored: 400, available: 500, requested: 300, split: 'minidev' } }), bigSample);
+  if (!moreRowsThanAsked.issues.some((issue) => issue.includes('published 400 rows'))) {
+    issues.push('BIRD1 accepts more scored rows than the run asked for');
+  }
+  const nonNumeric = compare(subsetReport({ selection: { scored: 298, available: 500, requested: 'all', split: 'minidev' } }), bigSample);
+  if (!nonNumeric.issues.some((issue) => issue.includes('not a sample size'))) {
+    issues.push('BIRD1 accepts a sample declaration that is not a number');
   }
 
   // A report that names two splits. Every dev artifact said mini_dev_sqlite at the top
@@ -828,7 +912,7 @@ if (process.argv[2] === '--self-test') {
   const issues = selfTest();
   for (const issue of issues) console.error(issue);
   if (issues.length > 0) process.exit(1);
-  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, a dev run measured against its own sample, two split fields that disagree, other split, other model, unfloored arm, empty lever, a funnel that does not add up, a split-specific arm list, an uncounted selector call, a majority vote that spends exactly its samples, a repair count without a loop, an unpriced arm, an unnamed model, floors from an unnamed model and a cross-model arm with no second model named, a judge swap with no judge named, an arm with harness errors, a candidate set that lost a third of itself to an endpoint, a failure corpus that stopped at a cap without saying so, an empty-result lever with no funnel or an impossible yield or nothing behind it, a decomposition arm whose prompt the model ignored, an unrecorded instrument, a samples arm with no values behind it, a truncated schema card, a prompt with no table in it, a declared arm subset, a declared arm whose row was dropped, an undeclared row, an empty declaration and a floor that a declaration does not weaken all behave');
+  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, a dev run measured against its own sample, two split fields that disagree, other split, other model, unfloored arm, empty lever, a funnel that does not add up, a split-specific arm list, an uncounted selector call, a majority vote that spends exactly its samples, a repair count without a loop, an unpriced arm, an unnamed model, floors from an unnamed model and a cross-model arm with no second model named, a judge swap with no judge named, an arm with harness errors, a candidate set that lost a third of itself to an endpoint, a failure corpus that stopped at a cap without saying so, an empty-result lever with no funnel or an impossible yield or nothing behind it, a decomposition arm whose prompt the model ignored, an unrecorded instrument, a samples arm with no values behind it, a truncated schema card, a prompt with no table in it, a declared arm subset, a declared arm whose row was dropped, an undeclared row, an empty declaration and a floor that a declaration does not weaken, a declared sample subset, a subset that cannot clear a floor, a sample that shrank undeclared, an impossible declaration and a row count above the request all behave');
 } else {
   const reportPath = resolve(ROOT, 'eval/out/bird-eval.json');
   const baseline = JSON.parse(readFileSync(resolve(ROOT, 'eval/baseline/bird.json'), 'utf8'));

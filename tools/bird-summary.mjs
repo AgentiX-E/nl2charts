@@ -37,8 +37,16 @@ if (report === null) {
 } else {
   const gold = report.gold;
   const controls = report.controls;
+  // A subset run is a stated sample, not a shrunken one. The reader who sees "298/500" alone
+  // will read a lost measurement; a run that asked for less than the split holds says so in
+  // words, and says that no floor applies, because the floors were taken on the full sample.
+  const selection = report.selection;
+  const subsetNote =
+    typeof selection.requested === 'number' && typeof selection.available === 'number' && selection.requested < selection.available
+      ? ` · requested: **${selection.requested}** (declared subset — no accuracy floor applies)`
+      : '';
   lines.push(
-    `Model: \`${report.model ?? 'none (dry run)'}\` · split: ${report.selection.split ?? 'minidev'} · dialect: ${report.dialect} · databases: ${report.selection.databases.length} · scored: ${report.selection.scored}/${report.selection.available}`,
+    `Model: \`${report.model ?? 'none (dry run)'}\` · split: ${selection.split ?? 'minidev'} · dialect: ${report.dialect} · databases: ${selection.databases.length} · scored: ${selection.scored}/${selection.available}${subsetNote}`,
     '',
     `Gold queries executed before any model call: **${gold.runnable}/${gold.executed}** runnable (${(gold.runnableRate * 100).toFixed(1)}%).` +
       (gold.executed > gold.runnable
