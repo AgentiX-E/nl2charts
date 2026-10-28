@@ -1605,6 +1605,18 @@ which is a different claim from "it does not work", and would need a different e
 4. Ablations change one thing. Multi-change runs are labelled exploratory.
 5. Absolute targets are frozen until a ≥200-question set exists; before that,
    relative improvement is the only honest signal.
+6. A model swap is read as a single-variable experiment with two conditions
+   fixed: the same split, and the same arm. The reference point is the same arm
+   on the same split in the same report cycle, never a number from a previous
+   leaderboard entry — vendors retrain, endpoints change, and the only comparable
+   measurement is one taken under the harness that is being read. On Mini-Dev the
+   A/A control (`inline+evidence` twice) differs by two questions in 498, which is
+   the scale any model delta has to clear.
+7. A model swap does not inherit an accuracy floor. `eval/baseline/bird.json`
+   names the model its floors were taken on, and a run by another model is
+   measured rather than failed on a threshold that says nothing about either; the
+   structural checks — arm list, funnel arithmetic, cost provenance, empty
+   levers, candidate survival, A/A — apply unchanged.
 
 ## The floor is enforced, not remembered
 
