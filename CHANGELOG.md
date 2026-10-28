@@ -19,6 +19,15 @@ cannot be argued with.
 
 ### Added
 
+- **The group standard under `eval/` is a gate now, not a printed line.** `check-eval-coverage`
+  enforced the direction only: every file's four numbers are a ratchet, so a build failed when
+  something got *worse*, never when the group as a whole was below the standard. A ratchet's floor
+  is wherever the last commit left it — `eval/` was 49.5% of lines with every row honest — so the
+  two readers answer different questions and both are needed. `groupProblems` fails the build
+  while a dimension of `eval/` is under 95%, and refuses to read a group ratio whose denominator
+  is zero (a run that covered no line is not a coverage figure, ADR-217). `--allow-regression`
+  cannot record its way out of the floor: the sentence says so. Self-test: 18 → 23 checks, and
+  the floor was proven to fire end-to-end on a summary whose group branch ratio was lowered.
 - **Every branch under `eval/` is now reachable, and the suite says so.** Branch coverage sat at
   92.1% while lines and functions were already 99.3% and 100%: the missing branches were not
   untested, they were unreachable. Each one lived inside a template literal or behind a guard no

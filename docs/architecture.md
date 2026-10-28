@@ -250,6 +250,16 @@ a guard that cannot fire is not a test target, it is a claim the reader has to v
 files still short are named in the ledger on every push (`ablate.ts` 93.9, `retrieval.ts` 91.3,
 `run.ts` 91.0), which is the only reason a number like this can be trusted later.
 
+Two readers now judge these numbers, and they answer different questions. The per-file ledger is a
+*ratchet*: it fails a build when a file moves backwards from wherever the last commit left it, which
+is the only thing that was enforceable when `eval/` stood at 49.5% of lines. A ratchet's floor is by
+definition wherever it last was, so it can never say the group is good enough — that half is a
+*floor*: `groupProblems` fails while any dimension of `eval/` is below 95%, and refuses to read a
+group ratio whose denominator is zero, because a run that covered no line has not produced a
+coverage figure (ADR-217). `--allow-regression` deliberately cannot record its way out of the floor:
+a regression behind a reason is a fact about one commit, a dimension below the standard is a fact
+about the harness.
+
 Both of those files were also measuring the wrong thing, which is the part a coverage number
 cannot show. `recall.ts` exists to answer one question — is every identifier the gold statement
 needs visible in the prompt the model receives — and it was building that prompt itself:

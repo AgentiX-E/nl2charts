@@ -8,12 +8,17 @@
  * moving the number, and a directive that says "every dimension at 95%" needs something that
  * notices the distance closing.
  *
- * That something cannot be a threshold: `eval/` is at 64%, and a 95% threshold would be red
- * for months, which is how thresholds become `|| true`. So this gate enforces the *direction*
+ * That something cannot be a threshold: `eval/` at 64% would make a 95% threshold red for
+ * months, which is how thresholds become `|| true`. So this gate enforces the *direction*
  * instead: every file's four numbers are recorded in `eval/coverage-ledger.json`, and a run
  * that measures any of them lower than the ledger fails. Progress is an edit to that file;
  * a regression is a red build. The ledger also carries the target, so the distance to it is
  * a subtraction rather than an opinion.
+ *
+ * A ratchet's floor is wherever the last commit left it, so it can never say "the group is good
+ * enough". Once every dimension of `eval/` reached the standard, that half became a gate too:
+ * a dimension of the group below `target` fails the build (`groupProblems`), and a run that
+ * covered nothing at all is refused rather than read as a group ratio (ADR-217).
  *
  *   node tools/check-eval-coverage.mjs             # measure, compare, report
  *   node tools/check-eval-coverage.mjs --update    # record this run (raises only)
@@ -176,6 +181,34 @@ export function standing(summary) {
   return { done: done.sort(), short: short.sort() };
 }
 
+/**
+ * The group standard, as a gate rather than a sentence.
+ *
+ * The per-file ratchet answers "did anything get worse". It cannot answer "is the group good
+ * enough", because a ratchet's floor is wherever the last commit left it: `eval/` was 49.5% of
+ * lines when the ratchet was written and every one of its rows was honest, which is why the
+ * ratchet alone would have kept that number forever. The target therefore needs a second,
+ * harder reader — one that fails the build while a dimension of the group is below the standard,
+ * and that refuses to read a ratio whose denominator is zero (ADR-217).
+ *
+ * The zero-denominator check only fires when a denominator is actually reported. A fixture, or
+ * a summary written by another tool, may omit `covered`; absent is not the same as zero.
+ */
+export function groupProblems(total) {
+  const problems = [];
+  const covered = total?.lines?.covered;
+  if (typeof covered === 'number' && covered === 0) {
+    return ['the run covered no line at all; a group ratio over a zero denominator is not a measurement'];
+  }
+  for (const dimension of DIMENSIONS) {
+    const pct = total?.[dimension]?.pct ?? 0;
+    if (pct < TARGET) {
+      problems.push(`eval/ ${dimension} is ${pct.toFixed(2)}%, below the ${String(TARGET)}% the group must hold`);
+    }
+  }
+  return problems;
+}
+
 function readSummary(path) {
   if (!existsSync(path)) {
     console.error(`eval coverage: no summary at ${path}; run the measurement first`);
@@ -305,6 +338,28 @@ function selfTest() {
   // The relative path helper is what makes the ledger portable between machines.
   fail(relativeToRoot('/home/user/repo/eval/bird/run.ts') === 'eval/bird/run.ts', 'the relative path helper failed');
 
+  // The group floor. A ratchet cannot say "the group is good enough" — its floor is wherever the
+  // last commit left it — so the standard is a second, harder reader over the totals.
+  const group = (pcts) =>
+    Object.fromEntries(DIMENSIONS.map((dimension, index) => [dimension, { pct: pcts[index], covered: 100, total: 100 }]));
+  fail(groupProblems(group([95, 95, 95, 95])).length === 0, 'a group exactly at the standard is reported as short');
+  fail(
+    groupProblems(group([99, 99, 100, 94.9])).length === 1 && groupProblems(group([99, 99, 100, 94.9]))[0].includes('branches'),
+    'a group one tenth of a point below the standard on branches is not reported, or not named',
+  );
+  fail(groupProblems(group([90, 99, 100, 99])).length === 1, 'a group short on lines is not reported exactly once');
+  fail(
+    groupProblems({ lines: { covered: 0, total: 40, pct: 0 }, statements: { pct: 100 }, functions: { pct: 100 }, branches: { pct: 100 } }).some(
+      (problem) => problem.includes('zero denominator'),
+    ),
+    'a run that covered nothing is read as a group ratio instead of refused',
+  );
+  // A summary that omits `covered` is not a summary that covered nothing.
+  fail(
+    groupProblems(Object.fromEntries(DIMENSIONS.map((dimension) => [dimension, { pct: 99 }]))).length === 0,
+    'an unreported denominator is treated as a zero denominator',
+  );
+
   if (issues.length > 0) {
     for (const issue of issues) console.error(`SELF-TEST FAILED: ${issue}`);
     process.exit(1);
@@ -337,13 +392,22 @@ function main(argv) {
   }
 
   report(summary, previous);
-  const problems = compare(previous, summary);
+  // The group floor is checked as well as the per-file ratchet. It is the reader that fails a
+  // build for a dimension the group as a whole has not reached; the ratchet only fails a move
+  // backwards from wherever the last commit left things.
+  const belowStandard = groupProblems(summary.total);
+  const problems = [...belowStandard, ...compare(previous, summary)];
   if (problems.length > 0) {
     for (const problem of problems) console.error(`FAILED: ${problem}`);
+    // Two different failures, two different sentences: a group below the standard is fixed by
+    // writing coverage, and `--allow-regression` cannot record its way out of it.
+    if (belowStandard.length > 0) {
+      console.error(`eval coverage: a dimension of the group is below the ${String(TARGET)}% standard, which the ledger cannot record away`);
+    }
     console.error('eval coverage: the measurement fell below the ledger; either fix the coverage or record the regression with --update --allow-regression <reason>');
     process.exit(1);
   }
-  console.log('eval coverage: no file fell below its recorded coverage');
+  console.log('eval coverage: no file fell below its recorded coverage, and every dimension is at target');
 }
 
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname)) {
