@@ -21,7 +21,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHttpProvider } from '@agentix-e/nl2charts-ai';
-import type { PromptOptions, SchemaTable } from '@agentix-e/nl2charts-ai';
+import type { LlmProvider, PromptOptions, SchemaTable } from '@agentix-e/nl2charts-ai';
 import { applySelection, attachDefinitions, buildAskMessages, buildSelectionPrompt, chooseCandidatePairwise, buildSqlPrompt, choosePromptProfile, createPipeline, emptyRetryMessages, extractSql, renderDefinitions, renderEvidence, renderSchemaCard, withCallCounter } from '@agentix-e/nl2charts-ai';
 // The retry turn writes a statement outside the pipeline, so it goes through the same
 // guard the pipeline applies. Skipping it here would let the one arm that retries be the
@@ -35,7 +35,7 @@ import type { BirdQuestion } from './data.js';
 import { createOracle } from './oracle.js';
 import { shapeFailure, shapeMismatch } from './shape.js';
 import { FAILURE_SAMPLE, failureCorpus } from './failures.js';
-import type { OracleResult } from './oracle.js';
+import type { Oracle, OracleResult } from './oracle.js';
 import { profileDatabase } from './profile.js';
 import { BIRD_SCHEMA_LINES } from './prompt-shape.js';
 import { attachSamples, sampleValuesOf } from './samples.js';
@@ -43,46 +43,6 @@ import { buildIndex, renderDemonstrations, renderRetrieved, retrieve } from './r
 import { deserializeIndex, findValues, indexCells, renderValues, serializeIndex } from './values.js';
 import type { ValueIndex } from './values.js';
 import { synthesizeRecord } from './synthesize.js';
-
-const ROOT = resolve(new URL('../..', import.meta.url).pathname);
-/**
- * Which split is being measured.
- *
- * `minidev` is the 500-question subset CI runs on every commit. `dev` is the
- * 1,534-question split the published leaderboards report, kept for on-demand runs
- * because a full sweep costs a model call per question per arm.
- */
-const SPLIT = (process.env.BIRD_SPLIT ?? 'minidev') as 'minidev' | 'dev';
-const DATA =
-  process.env.BIRD_DATA ??
-  (SPLIT === 'dev' ? join(ROOT, 'eval/.cache/bird/dev/dev_20240627') : join(ROOT, 'eval/.cache/bird/minidev/MINIDEV'));
-/** The file name differs per split; everything else in the layout is identical. */
-const QUESTIONS_FILE = SPLIT === 'dev' ? 'dev.json' : 'mini_dev_sqlite.json';
-const DATABASES = process.env.BIRD_DATABASES ?? join(DATA, 'dev_databases');
-/**
- * Which databases a run covers comes from the fetch manifest, so widening the
- * dataset is one command (`fetch.mjs`) rather than two edits that can drift.
- */
-function databasesFromManifest(): string[] {
-  try {
-    const manifest = JSON.parse(readFileSync(join(DATA, 'manifest.json'), 'utf8')) as {
-      databases?: { db: string }[];
-    };
-    return (manifest.databases ?? []).map((entry) => entry.db);
-  } catch {
-    return [];
-  }
-}
-
-/** The splits that ship a manifest are the derived ones; `dev` does not. */
-function databasesFromQuestions(): string[] {
-  try {
-    const questions = loadQuestions(join(DATA, QUESTIONS_FILE));
-    return [...new Set(questions.map((question) => question.db_id))].sort();
-  } catch {
-    return [];
-  }
-}
 
 export interface Arm {
   readonly name: string;
@@ -1120,17 +1080,152 @@ export function parseLimit(raw: string | undefined, split: 'minidev' | 'dev'): n
   return Math.floor(value);
 }
 
-function settings() {
-  const argv = process.argv.slice(2);
+/**
+ * Where a run reads and writes.
+ *
+ * These used to be module constants read from `process.env` at import time, which made
+ * the layout a property of the *process* rather than of the run: a test could only point
+ * a run at a temporary dataset by re-importing the module, and a dry run could not be
+ * reproduced from its own artifact because the paths were never in it. They are a value
+ * now — resolved from an environment and a root, then passed down — which is what lets
+ * `runBird` be called twice in one process against two different datasets.
+ */
+export type BirdSplit = 'minidev' | 'dev';
+
+export interface BirdLayout {
+  readonly root: string;
+  /**
+   * `minidev` is the 500-question subset CI runs on every commit. `dev` is the
+   * 1,534-question split the published leaderboards report, kept for on-demand runs
+   * because a full sweep costs a model call per question per arm.
+   */
+  readonly split: BirdSplit;
+  readonly data: string;
+  /** The file name differs per split; everything else in the layout is identical. */
+  readonly questionsFile: string;
+  readonly tablesFile: string;
+  /** Where the SQLite files live; the oracle roots here. */
+  readonly databaseRoot: string;
+  /** Where `database_description/*.csv` live. Always under `data`, even when the databases are not. */
+  readonly descriptionsRoot: string;
+  readonly trainFile: string;
+  readonly valueCache: string;
+  readonly profileCache: string;
+  readonly definitionsCache: string;
+  readonly definitionsFile: string;
+  readonly oracleScript: string;
+  readonly out: string;
+}
+
+/**
+ * Where this file lives. The oracle is harness code, not dataset: it must be found even
+ * when the run points at a dataset outside the repository, so it is resolved against the
+ * module rather than against the run's root.
+ */
+const HARNESS = resolve(new URL('.', import.meta.url).pathname);
+
+export function resolveLayout(env: Readonly<Record<string, string | undefined>>, root: string): BirdLayout {
+  const split = (env.BIRD_SPLIT ?? 'minidev') as BirdSplit;
+  const data =
+    env.BIRD_DATA ??
+    (split === 'dev'
+      ? join(root, 'eval/.cache/bird/dev/dev_20240627')
+      : join(root, 'eval/.cache/bird/minidev/MINIDEV'));
   return {
+    root,
+    split,
+    data,
+    questionsFile: join(data, split === 'dev' ? 'dev.json' : 'mini_dev_sqlite.json'),
+    tablesFile: join(data, 'dev_tables.json'),
+    databaseRoot: env.BIRD_DATABASES ?? join(data, 'dev_databases'),
+    descriptionsRoot: join(data, 'dev_databases'),
+    trainFile: join(root, 'eval/.cache/bird/train/train.json'),
+    valueCache: join(root, 'eval/.cache/bird/values'),
+    profileCache: join(root, 'eval/.cache/bird/profiles'),
+    definitionsCache: join(root, 'eval/.cache/bird/definitions'),
+    // Definitions are an *input* to the definition-dependent arms, so they are pinned in
+    // the repository rather than regenerated: two runs with identical prompts produced
+    // different text for 6 of 11 databases, which moved `synth-definitions` by 5.1pp and
+    // made every delta on that arm a joint measurement of prompt and text.
+    definitionsFile: join(root, 'eval/baseline/definitions.minidev.json'),
+    oracleScript: join(HARNESS, 'oracle.py'),
+    out: env.BIRD_OUT ?? join(root, 'eval/out/bird-eval.json'),
+  };
+}
+
+/**
+ * Which databases a run covers comes from the fetch manifest, so widening the
+ * dataset is one command (`fetch.mjs`) rather than two edits that can drift.
+ */
+export function databasesFromManifest(data: string): string[] {
+  try {
+    const manifest = JSON.parse(readFileSync(join(data, 'manifest.json'), 'utf8')) as {
+      databases?: { db: string }[];
+    };
+    return (manifest.databases ?? []).map((entry) => entry.db);
+  } catch {
+    return [];
+  }
+}
+
+/** The splits that ship a manifest are the derived ones; `dev` does not. */
+export function databasesFromQuestions(questionsFile: string): string[] {
+  try {
+    const questions = loadQuestions(questionsFile);
+    return [...new Set(questions.map((question) => question.db_id))].sort();
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Everything a run was told to do, and nothing it inferred.
+ *
+ * The environment is a parameter rather than a global: `resolveSettings` is a pure
+ * function of (env, argv, root), so the arm list, the sample size and the second-model
+ * credentials of a published number can be re-derived from the values that produced it
+ * instead of from whatever the process happened to hold at import time.
+ */
+export interface BirdSettings {
+  readonly layout: BirdLayout;
+  readonly dryRun: boolean;
+  readonly limit: number;
+  readonly concurrency: number;
+  readonly dbs: readonly string[];
+  readonly arms: readonly string[];
+  readonly model: string;
+  readonly baseUrl: string;
+  readonly apiKey: string;
+  readonly second: { readonly model: string; readonly baseUrl: string; readonly apiKey: string };
+  /**
+   * The harness's own knobs, carried as values because a report that omits them cannot
+   * say whether a difference between two runs is the pipeline or the instrument. A
+   * glm-4.5 run once reported 88% "model failures" that were this deadline.
+   */
+  readonly timeoutMs: number;
+  readonly retries: number;
+  readonly retryDelayMs: number;
+  readonly valuesForce: boolean;
+  readonly definitionsForce: boolean;
+}
+
+export function resolveSettings(
+  env: Readonly<Record<string, string | undefined>>,
+  argv: readonly string[],
+  root: string,
+): BirdSettings {
+  const layout = resolveLayout(env, root);
+  const fromManifest = databasesFromManifest(layout.data);
+  const databaseList =
+    env.BIRD_DBS !== undefined
+      ? env.BIRD_DBS
+      : (fromManifest.length > 0 ? fromManifest : databasesFromQuestions(layout.questionsFile)).join(',');
+  return {
+    layout,
     dryRun: argv.includes('--dry-run'),
-    limit: parseLimit(process.env.BIRD_LIMIT, SPLIT),
-    concurrency: Number(process.env.BIRD_CONCURRENCY ?? 8),
-    dbs: (
-      process.env.BIRD_DBS !== undefined
-        ? process.env.BIRD_DBS
-        : (databasesFromManifest().length > 0 ? databasesFromManifest() : databasesFromQuestions()).join(',')
-    )
+    limit: parseLimit(env.BIRD_LIMIT, layout.split),
+    concurrency: Number(env.BIRD_CONCURRENCY ?? 8),
+    dbs: databaseList
       .split(',')
       .map((name) => name.trim())
       .filter(Boolean),
@@ -1139,20 +1234,24 @@ function settings() {
     // `BIRD_AA=<arm>` appends the same arm a second time under a `#2` name. The delta
     // between the pair is the harness's own noise at this sample size, which no
     // amount of within-run pairing between *different* arms can reveal.
-    arms: parseArms(process.env.BIRD_ARMS, process.env.BIRD_AA, DEFAULT_ARMS),
-    out: process.env.BIRD_OUT ?? join(ROOT, 'eval/out/bird-eval.json'),
-    model: process.env.LLM_MODEL ?? 'deepseek-chat',
-    baseUrl: process.env.LLM_BASE_URL ?? 'https://api.deepseek.com/v1',
-    apiKey: process.env.DEEPSEEK_API_KEY ?? process.env.LLM_API_KEY ?? '',
+    arms: parseArms(env.BIRD_ARMS, env.BIRD_AA, DEFAULT_ARMS),
+    model: env.LLM_MODEL ?? 'deepseek-chat',
+    baseUrl: env.LLM_BASE_URL ?? 'https://api.deepseek.com/v1',
+    apiKey: env.DEEPSEEK_API_KEY ?? env.LLM_API_KEY ?? '',
     // The second model exists for one arm (`select-cross`) and is absent otherwise. It is
     // optional on purpose: a run that does not need it must not fail because an unrelated
     // key is missing, and a run that does need it must fail with a sentence rather than
     // quietly generate two candidates where it promised three.
     second: {
-      model: process.env.BIRD_SECOND_MODEL ?? '',
-      baseUrl: process.env.BIRD_SECOND_BASE_URL ?? '',
-      apiKey: process.env.BIRD_SECOND_API_KEY ?? process.env.ZHIPU_API_KEY ?? '',
+      model: env.BIRD_SECOND_MODEL ?? '',
+      baseUrl: env.BIRD_SECOND_BASE_URL ?? '',
+      apiKey: env.BIRD_SECOND_API_KEY ?? env.ZHIPU_API_KEY ?? '',
     },
+    timeoutMs: Number(env.BIRD_LLM_TIMEOUT_MS ?? 60000),
+    retries: Number(env.BIRD_LLM_RETRIES ?? 3),
+    retryDelayMs: Number(env.BIRD_LLM_RETRY_DELAY_MS ?? 1000),
+    valuesForce: env.BIRD_VALUES_FORCE === '1',
+    definitionsForce: env.BIRD_DEFINITIONS_FORCE === '1',
   };
 }
 
@@ -1174,7 +1273,8 @@ export function offeredCandidates<T extends { readonly rows: readonly unknown[] 
   return { offered: nonEmpty, dropped: candidates.length - nonEmpty.length };
 }
 
-export async function pool<T, R>(items: readonly T[], limit: number, worker: (item: T, index: number) => Promise<R>): Promise<R[]> {  const results = new Array<R>(items.length);
+export async function pool<T, R>(items: readonly T[], limit: number, worker: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
   let cursor = 0;
   const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
     for (;;) {
@@ -1245,22 +1345,102 @@ export function promptFor(arm: Arm, question: BirdQuestion, blocks: PromptBlocks
   };
 }
 
-async function main() {
-  const config = settings();
-  const questions = loadQuestions(join(DATA, QUESTIONS_FILE)).filter((question) => config.dbs.includes(question.db_id));
-  if (questions.length === 0) throw new Error(`no questions for ${config.dbs.join(',')}; run node eval/bird/fetch.mjs first`);
-  const tables = loadTables(join(DATA, 'dev_tables.json'));
-  const selected = stratifiedSample(questions, config.limit);
+/** One advertised column the database does not have. */
+export interface MissingColumn {
+  readonly db: string;
+  readonly table: string;
+  readonly column: string;
+}
+
+/** A gold statement that does not run, and is therefore excluded rather than scored. */
+export interface UnrunnableGold {
+  readonly id: number;
+  readonly db: string;
+  readonly error: string;
+}
+
+/** Everything under `report.controls`, produced once by `prepareRun`. */
+export interface Controls {
+  selfConsistency: number;
+  retrievalCorpus: number;
+  retrievedBlocks: number;
+  demonstrationBlocks: number;
+  valueMatches: number;
+  negativeChecked: number;
+  negativeFalseMatches: number;
+  emptyGoldExcluded: number;
+  schemaChecked: number;
+  schemaMissing: MissingColumn[];
+  schemaMissingTotal: number;
+  tablesInPrompts: number;
+  tablesTotal: number;
+  sampledColumns: number;
+  sampledValues: number;
+  truncatedPrompts: { db: string; shown: number; total: number }[];
+  semanticsDatabases: number;
+  semanticsDatabaseTotal: number;
+  semanticsCases: number;
+  semanticsMeanChars: number;
+  synthesizedDefinitionDatabases: number;
+  definitionsProvenance: Record<string, { hash: string; cached: boolean; source: string }>;
+  synthesizedDefinitions: Record<string, string>;
+  inlineAttached: number;
+  inlineUnplaced: number;
+  subsetComments: number;
+  inlineSchemaComments: number;
+  synthesizedDefinitionMeanChars: number;
+}
+
+/**
+ * The dataset, the schemas and every input block, gathered before an arm runs.
+ *
+ * Separated from the arm loop because two of the four things this harness must get right
+ * — schema fidelity and the gold controls — are properties of the *inputs*. They used to
+ * live inside the same 1,100-line function as the arm loop, so the only way to find out
+ * whether they held was to spend a full model run.
+ */
+export interface PreparedRun {
+  readonly settings: BirdSettings;
+  readonly questions: readonly BirdQuestion[];
+  readonly selected: readonly BirdQuestion[];
+  readonly cases: readonly BirdQuestion[];
+  readonly schemas: ReadonlyMap<string, readonly SchemaTable[]>;
+  readonly gold: ReadonlyMap<number, OracleResult>;
+  readonly unrunnable: readonly UnrunnableGold[];
+  readonly controls: Controls;
+  /** Rendered prompt blocks for one arm and one question. The only builder, so the measured prompt and the sent prompt cannot disagree. */
+  readonly blocksFor: (arm: Arm, question: BirdQuestion) => PromptBlocks;
+  readonly schemaFor: (arm: Arm, db: string) => readonly SchemaTable[];
+  /** Per-arm distinct-prompt audit for the arms that declare a candidate set. */
+  readonly mixedCandidatePrompts: readonly unknown[];
+}
+
+/** What `prepareRun` needs from outside: an execution oracle and a model. */
+export interface PrepareIo {
+  readonly oracle: Oracle;
+  readonly provider: LlmProvider;
+}
+
+export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise<PreparedRun> {
+  const layout = settings.layout;
+  const { oracle, provider } = io;
+  const questions = loadQuestions(layout.questionsFile).filter((question) => settings.dbs.includes(question.db_id));
+  if (questions.length === 0) {
+    throw new Error(`no questions for ${settings.dbs.join(',')}; run node eval/bird/fetch.mjs first`);
+  }
+  const tables = loadTables(layout.tablesFile);
+  const selected = stratifiedSample(questions, settings.limit);
   // The training split is external knowledge, not a held-out answer: it shares no
   // database with the split under test, which is asserted in the run controls.
-  const trainPath = join(ROOT, 'eval/.cache/bird/train/train.json');
   let retrievalIndex: ReturnType<typeof buildIndex> | undefined;
   try {
-    retrievalIndex = buildIndex(JSON.parse(readFileSync(trainPath, 'utf8')) as { db_id: string; question: string; evidence?: string }[]);
+    retrievalIndex = buildIndex(
+      JSON.parse(readFileSync(layout.trainFile, 'utf8')) as { db_id: string; question: string; evidence?: string }[],
+    );
   } catch {
     retrievalIndex = undefined;
   }
-  const needsRetrieval = config.arms.some((name) => {
+  const needsRetrieval = settings.arms.some((name) => {
     const arm = resolveArm(name);
     return arm?.evidence === 'retrieved' || arm?.demonstrations === true;
   });
@@ -1269,7 +1449,7 @@ async function main() {
     // once, scored 44.4% against its parent's 43.6%, and the near-equality was read as
     // "retrieval does not help" when the truth was that nothing was retrieved.
     throw new Error(
-      `arm(s) ${config.arms.join(',')} need the BIRD training split; ` +
+      `arm(s) ${settings.arms.join(',')} need the BIRD training split; ` +
         'run BIRD_SPLIT=train node eval/bird/fetch.mjs first (or drop the arms with BIRD_ARMS)',
     );
   }
@@ -1291,17 +1471,17 @@ async function main() {
   const demonstrationsFor = (question: BirdQuestion): string | undefined =>
     demonstrationsByQuestion.get(question.question_id);
 
-  const oracle = createOracle(join(ROOT, 'eval/bird/oracle.py'), DATABASES);
-
   const schemas = new Map<string, SchemaTable[]>();
-  for (const db of config.dbs) {
+  for (const db of settings.dbs) {
     const table = tables.get(db);
     if (table === undefined) throw new Error(`dev_tables.json has no entry for ${db}`);
     schemas.set(
       db,
-      buildSchema(table, loadDescriptions(join(DATA, 'dev_databases', db, 'database_description'), table.tableNames), {
-        withNotes: true,
-      }),
+      buildSchema(
+        table,
+        loadDescriptions(join(layout.descriptionsRoot, db, 'database_description'), table.tableNames),
+        { withNotes: true },
+      ),
     );
   }
 
@@ -1309,7 +1489,7 @@ async function main() {
   // have is a guaranteed failure, and it looks like a model error. The first
   // external run advertised BIRD's humanised names instead of the original ones
   // and 155 of 200 cases died on "no such column".
-  const missingColumns: { db: string; table: string; column: string }[] = [];
+  const missingColumns: MissingColumn[] = [];
   let checkedColumns = 0;
   for (const [db, schema] of schemas) {
     for (const table of schema) {
@@ -1328,9 +1508,9 @@ async function main() {
   // curated evidence column still get the gain that BIRD's evidence buys?
   const synthesized = new Map<string, string>();
   const profiles = new Map<string, Awaited<ReturnType<typeof profileDatabase>>>();
-  for (const db of config.dbs) {
+  for (const db of settings.dbs) {
     try {
-      const profile = await profileDatabase(oracle, db);
+      const profile = await profileDatabase(oracle, db, { cacheDir: layout.profileCache });
       profiles.set(db, profile);
       synthesized.set(db, renderEvidence(profile));
     } catch {
@@ -1346,7 +1526,7 @@ async function main() {
   // match between the question's wording and the store, which is where `values` stalls.
   const sampleValues = new Map<string, Map<string, readonly string[]>>();
   const sampled = { columns: 0, values: 0 };
-  if (config.arms.some((name) => resolveArm(name)?.samples === true)) {
+  if (settings.arms.some((name) => resolveArm(name)?.samples === true)) {
     for (const [db, profile] of profiles) {
       const byColumn = sampleValuesOf(profile);
       sampled.columns += byColumn.size;
@@ -1355,7 +1535,7 @@ async function main() {
     }
   }
 
-  const withSamples = (schema: SchemaTable[], db: string): SchemaTable[] => {
+  const withSamples = (schema: readonly SchemaTable[], db: string): readonly SchemaTable[] => {
     const values = sampleValues.get(db);
     return values === undefined ? schema : attachSamples(schema, values);
   };
@@ -1367,11 +1547,10 @@ async function main() {
   // questions, which measured the index rather than the idea. The scan is cached per
   // database because it costs one query per column.
   const valueIndexes = new Map<string, ValueIndex>();
-  const valueCache = join(ROOT, 'eval/.cache/bird/values');
-  mkdirSync(valueCache, { recursive: true });
+  mkdirSync(layout.valueCache, { recursive: true });
   for (const [db, schema] of schemas) {
-    const cacheFile = join(valueCache, `${db}.json`);
-    if (existsSync(cacheFile) && process.env.BIRD_VALUES_FORCE !== '1') {
+    const cacheFile = join(layout.valueCache, `${db}.json`);
+    if (existsSync(cacheFile) && !settings.valuesForce) {
       try {
         valueIndexes.set(db, deserializeIndex(readFileSync(cacheFile, 'utf8')));
         continue;
@@ -1397,30 +1576,6 @@ async function main() {
   }
   const valuesFor = (question: BirdQuestion): string | undefined => valuesByQuestion.get(question.question_id);
 
-  /**
-   * Evidence text for one case. The focused arm re-renders the same profile with
-   * the question's words, so the two arms differ only in line order — not in
-   * which columns were profiled and not in the character budget.
-   */
-  const evidenceFor = (arm: Arm, question: BirdQuestion): string | undefined => {
-    if (arm.evidence !== 'synthetic') return undefined;
-    const profile = profiles.get(question.db_id);
-    if (profile === undefined) return undefined;
-    return arm.focus === true ? renderEvidence(profile, { focus: question.question }) : synthesized.get(question.db_id);
-  };
-
-  /**
-   * What this arm's prompt may use. One builder for every call site, so the prompt
-   * that is measured and the prompt that is sent cannot disagree.
-   */
-  const blocksFor = (arm: Arm, question: BirdQuestion): PromptBlocks => ({
-    ...(evidenceFor(arm, question) === undefined ? {} : { synthesized: evidenceFor(arm, question) }),
-    ...(definitionsFor(arm, question.db_id) === undefined ? {} : { definitions: definitionsFor(arm, question.db_id) }),
-    ...(retrievedFor(question) === undefined ? {} : { retrieved: retrievedFor(question) }),
-    ...(demonstrationsFor(question) === undefined ? {} : { demonstrations: demonstrationsFor(question) }),
-    ...(valuesFor(question) === undefined ? {} : { values: valuesFor(question) }),
-  });
-
   // Structural semantics per database. Kept separate from the value profile:
   // one block says what a column means, the other says what it contains.
   const definitions = new Map<string, string>();
@@ -1432,80 +1587,53 @@ async function main() {
   const synthesizedDefinitions = new Map<string, string>();
   /** Provenance per database: the prompt hash and whether the model was called. */
   const definitionsProvenance: Record<string, { hash: string; cached: boolean; source: string }> = {};
-  const needsSynthesis = config.arms.some((name) => {
+  const needsSynthesis = settings.arms.some((name) => {
     const source = resolveArm(name)?.definitions;
     return source === 'synthesized' || source === 'inline';
   });
   // Retries live in the provider, not in the loop below: a throttled call is the
   // endpoint's answer, not a property of this arm.
-  // The deadline is a harness parameter, and leaving it at the provider's 60s default made a
-  // slower model look like a throttled one: a glm-4.5 run reported 88.4% "failed at the model
-  // … first error: llm call timed out", which is this harness measuring its own patience.
-  const timeoutMs = Number(process.env.BIRD_LLM_TIMEOUT_MS ?? 60000);
-  const provider = createHttpProvider({
-    baseUrl: config.baseUrl,
-    apiKey: config.apiKey,
-    model: config.model,
-    retries: Number(process.env.BIRD_LLM_RETRIES ?? 3),
-    retryDelayMs: Number(process.env.BIRD_LLM_RETRY_DELAY_MS ?? 1000),
-    timeoutMs,
-  });
-  const drawsSecond = config.arms.some((name) => (resolveArm(name)?.mixed ?? []).some((source) => parseMixedSource(source).provider === 'second'));
-  const judgesSecond = config.arms.some((name) => resolveArm(name)?.judge === 'second');
-  const needsSecond = drawsSecond || judgesSecond;
-  if (needsSecond && (config.second.model === '' || config.second.apiKey === '')) {
-    const missing = [config.second.model === '' ? 'BIRD_SECOND_MODEL' : '', config.second.apiKey === '' ? 'a second key (BIRD_SECOND_API_KEY or ZHIPU_API_KEY)' : '']
-      .filter(Boolean)
-      .join(' and ');
-    // Naming the missing variable matters: "the arm needs a second model" sent me looking at
-    // the workflow's model input the first time, when the key was what was absent. So does
-    // naming the reason: a judged arm generates three candidates and would still do so with
-    // no second model — it would just quietly judge with the first one.
-    const consequence = drawsSecond
-      ? 'the arm would generate two candidates where it promised three'
-      : 'the arm would be judged by the primary model while claiming a swap';
-    const cause = drawsSecond ? 'draws a candidate from the second model' : 'asks the second model to judge';
-    throw new Error(`this arm set ${cause}, but ${missing} is not set; ${consequence}`);
-  }
-  const secondProvider =
-    config.second.model === ''
-      ? undefined
-      : createHttpProvider({
-          baseUrl: config.second.baseUrl === '' ? config.baseUrl : config.second.baseUrl,
-          apiKey: config.second.apiKey,
-          model: config.second.model,
-          retries: Number(process.env.BIRD_LLM_RETRIES ?? 3),
-          retryDelayMs: Number(process.env.BIRD_LLM_RETRY_DELAY_MS ?? 1000),
-          timeoutMs,
-        });
-  // Definitions are an *input* to the definition-dependent arms, so they are pinned in
-  // the repository rather than regenerated: two runs with identical prompts produced
-  // different text for 6 of 11 databases, which moved `synth-definitions` by 5.1pp and
-  // made every delta on that arm a joint measurement of prompt and text.
-  const pinned = readPinnedDefinitions(join(ROOT, 'eval/baseline/definitions.minidev.json'));
-  if (!config.dryRun && needsSynthesis && pinned !== undefined && process.env.BIRD_DEFINITIONS_FORCE !== '1') {
+  // Definitions are pinned rather than regenerated; see `BirdLayout.definitionsFile`.
+  const pinned = readPinnedDefinitions(layout.definitionsFile);
+  if (!settings.dryRun && needsSynthesis && pinned !== undefined && !settings.definitionsForce) {
     for (const [db] of schemas) {
       const text = pinned.get(db);
-      if (text === undefined || text.length === 0) throw new Error(`pinned definitions have no entry for ${db}; regenerate with BIRD_DEFINITIONS_FORCE=1`);
+      if (text === undefined || text.length === 0) {
+        throw new Error(`pinned definitions have no entry for ${db}; regenerate with BIRD_DEFINITIONS_FORCE=1`);
+      }
       synthesizedDefinitions.set(db, text);
       definitionsProvenance[db] = { hash: 'pinned', cached: true, source: 'pinned' };
     }
-  } else if (!config.dryRun && needsSynthesis) {
+  } else if (!settings.dryRun && needsSynthesis) {
     for (const [db, schema] of schemas) {
       try {
         const outcome = await synthesizeRecord({
           oracle,
           db,
           schema,
-          ...(profiles.get(db) === undefined ? {} : { profile: profiles.get(db) as NonNullable<ReturnType<typeof profiles.get>> }),
+          ...(profiles.get(db) === undefined
+            ? {}
+            : { profile: profiles.get(db) as NonNullable<ReturnType<typeof profiles.get>> }),
           provider,
-          model: config.model,
-          force: process.env.BIRD_DEFINITIONS_FORCE === '1',
+          model: settings.model,
+          force: settings.definitionsForce,
+          cacheDir: layout.definitionsCache,
         });
         synthesizedDefinitions.set(db, outcome.definitions);
         definitionsProvenance[db] = { hash: outcome.hash, cached: outcome.cached, source: 'generated' };
-      } catch {
+      } catch (error) {
+        // A failed generation leaves an empty block *and* a record of the failure. The
+        // block alone was silent: `definitionsProvenance` had no key for the database, so
+        // the artifact could not tell "the model declined" from "this arm never needed
+        // definitions", and the arm then read as its parent with a longer prompt. The
+        // report's own promise — which databases were written here and which came from
+        // cache — is only true if a failure is one of the states it can report.
         synthesizedDefinitions.set(db, '');
+        definitionsProvenance[db] = {
+          hash: '',
+          cached: false,
+          source: `failed: ${error instanceof Error ? error.message.slice(0, 120) : String(error).slice(0, 120)}`,
+        };
       }
     }
   }
@@ -1518,12 +1646,12 @@ async function main() {
   // carry our definitions and nothing else, or it re-measures the metadata lever
   // that was already measured in an earlier round.
   const bareSchemas = new Map<string, SchemaTable[]>();
-  for (const db of config.dbs) {
+  for (const db of settings.dbs) {
     const table = tables.get(db);
     if (table === undefined) continue;
     bareSchemas.set(
       db,
-      buildSchema(table, loadDescriptions(join(DATA, 'dev_databases', db, 'database_description'), table.tableNames), {
+      buildSchema(table, loadDescriptions(join(layout.descriptionsRoot, db, 'database_description'), table.tableNames), {
         withNotes: false,
       }),
     );
@@ -1567,7 +1695,7 @@ async function main() {
     );
   }
 
-  const schemaFor = (arm: Arm, db: string): SchemaTable[] => {
+  const schemaFor = (arm: Arm, db: string): readonly SchemaTable[] => {
     const base =
       arm.definitions === 'inline'
         ? (inlineSchemas.get(db) as SchemaTable[])
@@ -1579,9 +1707,8 @@ async function main() {
     return arm.samples === true ? withSamples(base, db) : base;
   };
 
-
   const gold = new Map<number, OracleResult>();
-  const unrunnable: { id: number; db: string; error: string }[] = [];
+  const unrunnable: UnrunnableGold[] = [];
   for (const question of selected) {
     const result = await oracle.run(question.db_id, question.SQL);
     if (result.ok) gold.set(question.question_id, result);
@@ -1617,107 +1744,88 @@ async function main() {
     }
   }
 
-  const report: Record<string, unknown> = {
-    dataset: 'bird-mini-dev',
-    // Derived from the split actually loaded. It was the literal `mini_dev_sqlite`, so every
-    // dev artifact said mini_dev_sqlite at the top level and `dev` inside `selection`, and
-    // nothing read the duplicate field so nothing noticed. The gate now compares the two.
-    split: SPLIT,
-    dialect: 'SQLite',
-    model: config.dryRun ? null : config.model,
-    // Which model wrote the `@second` candidates, when an arm draws one. Without it the
-    // cross-arm artifact cannot be reproduced and its number has no subject.
-    secondModel: config.second.model === '' ? null : config.second.model,
-    // ...and which model judged, when an arm asks the second one to. A judge swap is the one
-    // experiment whose result is unreadable without this field.
-    judgeModel: config.arms.some((name) => resolveArm(name)?.judge === 'second') ? config.second.model : null,
-    // The instrument's own settings. Same argument as the model: two runs of "the same"
-    // configuration can differ by the deadline, the concurrency or the retry budget, and a
-    // report that omits them cannot say whether a difference is the pipeline or the harness.
-    // A glm-4.5 run once reported 88% "model failures" that were this deadline.
-    run: {
-      timeoutMs: Number(process.env.BIRD_LLM_TIMEOUT_MS ?? 60000),
-      concurrency: config.concurrency,
-      retries: Number(process.env.BIRD_LLM_RETRIES ?? 3),
-    },
-    generatedAt: new Date().toISOString(),
-    // The arms this run set out to score. A subset is a measurement of those arms, and the
-    // gate needs the declaration to tell it from a report that lost a row: the run that
-    // scored six arms on dev was failed for not running two it never asked for.
-    armsRequested: config.arms,
-    selection: {
-      databases: config.dbs,
-      available: questions.length,
-      requested: config.limit,
-      split: SPLIT,
-      scored: cases.length,
-      strategy: 'stratified by difficulty, then question id',
-    },
-    gold: {
-      executed: selected.length,
-      runnable: cases.length,
-      unrunnable: unrunnable.slice(0, 20),
-      runnableRate: cases.length / selected.length,
-    },
-    controls: {
-      selfConsistency: selfConsistent / cases.length,
-      // Corpus and block counts live here, not under `selection`: they are inputs to
-      // an arm, and the gate reads them to tell a null result from an empty lever.
-      retrievalCorpus: retrievalIndex === undefined ? 0 : retrievalIndex.rows.length,
-      retrievedBlocks: retrievedByQuestion.size,
-      demonstrationBlocks: demonstrationsByQuestion.size,
-      valueMatches: valuesByQuestion.size,
-      negativeChecked,
-      negativeFalseMatches,
-      emptyGoldExcluded: emptyGold,
-      schemaChecked: checkedColumns,
-      schemaMissing: missingColumns.slice(0, 10),
-      schemaMissingTotal: missingColumns.length,
-      tablesInPrompts,
-      tablesTotal,
-      // Columns whose stored values reached the card, and how many values that is. An arm
-      // that asks for samples and gets none is its parent renamed, so the count is a control
-      // and the gate reads it.
-      sampledColumns: sampled.columns,
-      sampledValues: sampled.values,
-      truncatedPrompts: truncated,
-      // How much of the schema yields a structural claim at all. A database of
-      // free-text columns produces nothing, and that is a fact about the method
-      // worth reporting next to its accuracy.
-      semanticsDatabases: [...definitions.values()].filter((text) => text.length > 0).length,
-      semanticsDatabaseTotal: definitions.size,
-      semanticsCases: cases.filter((question) => (definitions.get(question.db_id) ?? '').length > 0).length,
-      semanticsMeanChars: Math.round(
-        [...definitions.values()].reduce((total, text) => total + text.length, 0) / Math.max(1, definitions.size),
-      ),
-      synthesizedDefinitionDatabases: [...synthesizedDefinitions.values()].filter((text) => text.length > 0).length,
-      // Which databases were written in this run and which came from cache, with the
-      // prompt hash: the difference between "the input changed" and "the model
-      // answered differently" is otherwise a guess.
-      definitionsProvenance,
-      // The text itself, so a claim about what the model wrote can be checked
-      // from the artifact instead of trusted.
-      synthesizedDefinitions: Object.fromEntries(synthesizedDefinitions),
-      inlineAttached,
-      inlineUnplaced,
-      subsetComments: [...subsetSchemas.values()].reduce(
-        (total, schema) =>
-          total + schema.reduce((count, table) => count + table.columns.filter((column) => column.comment !== undefined).length, 0),
-        0,
-      ),
-      // How many columns in the inline schema carry any comment at all. If this
-      // ever approaches the 798 dataset columns, the arm is measuring the
-      // metadata lever again instead of placement.
-      inlineSchemaComments: [...inlineSchemas.values()].reduce(
-        (total, schema) =>
-          total + schema.reduce((count, table) => count + table.columns.filter((column) => column.comment !== undefined).length, 0),
-        0,
-      ),
-      synthesizedDefinitionMeanChars: Math.round(
-        [...synthesizedDefinitions.values()].reduce((total, text) => total + text.length, 0) /
-          Math.max(1, synthesizedDefinitions.size),
-      ),
-    },
+  /**
+   * Evidence text for one case. The focused arm re-renders the same profile with
+   * the question's words, so the two arms differ only in line order — not in
+   * which columns were profiled and not in the character budget.
+   */
+  const evidenceFor = (arm: Arm, question: BirdQuestion): string | undefined => {
+    if (arm.evidence !== 'synthetic') return undefined;
+    const profile = profiles.get(question.db_id);
+    if (profile === undefined) return undefined;
+    return arm.focus === true ? renderEvidence(profile, { focus: question.question }) : synthesized.get(question.db_id);
+  };
+
+  /**
+   * What this arm's prompt may use. One builder for every call site, so the prompt
+   * that is measured and the prompt that is sent cannot disagree.
+   */
+  const blocksFor = (arm: Arm, question: BirdQuestion): PromptBlocks => ({
+    ...(evidenceFor(arm, question) === undefined ? {} : { synthesized: evidenceFor(arm, question) }),
+    ...(definitionsFor(arm, question.db_id) === undefined ? {} : { definitions: definitionsFor(arm, question.db_id) }),
+    ...(retrievedFor(question) === undefined ? {} : { retrieved: retrievedFor(question) }),
+    ...(demonstrationsFor(question) === undefined ? {} : { demonstrations: demonstrationsFor(question) }),
+    ...(valuesFor(question) === undefined ? {} : { values: valuesFor(question) }),
+  });
+
+  const controls: Controls = {
+    selfConsistency: selfConsistent / cases.length,
+    // Corpus and block counts live here, not under `selection`: they are inputs to
+    // an arm, and the gate reads them to tell a null result from an empty lever.
+    retrievalCorpus: retrievalIndex === undefined ? 0 : retrievalIndex.rows.length,
+    retrievedBlocks: retrievedByQuestion.size,
+    demonstrationBlocks: demonstrationsByQuestion.size,
+    valueMatches: valuesByQuestion.size,
+    negativeChecked,
+    negativeFalseMatches,
+    emptyGoldExcluded: emptyGold,
+    schemaChecked: checkedColumns,
+    schemaMissing: missingColumns.slice(0, 10),
+    schemaMissingTotal: missingColumns.length,
+    tablesInPrompts,
+    tablesTotal,
+    // Columns whose stored values reached the card, and how many values that is. An arm
+    // that asks for samples and gets none is its parent renamed, so the count is a control
+    // and the gate reads it.
+    sampledColumns: sampled.columns,
+    sampledValues: sampled.values,
+    truncatedPrompts: truncated,
+    // How much of the schema yields a structural claim at all. A database of
+    // free-text columns produces nothing, and that is a fact about the method
+    // worth reporting next to its accuracy.
+    semanticsDatabases: [...definitions.values()].filter((text) => text.length > 0).length,
+    semanticsDatabaseTotal: definitions.size,
+    semanticsCases: cases.filter((question) => (definitions.get(question.db_id) ?? '').length > 0).length,
+    semanticsMeanChars: Math.round(
+      [...definitions.values()].reduce((total, text) => total + text.length, 0) / Math.max(1, definitions.size),
+    ),
+    synthesizedDefinitionDatabases: [...synthesizedDefinitions.values()].filter((text) => text.length > 0).length,
+    // Which databases were written in this run and which came from cache, with the
+    // prompt hash: the difference between "the input changed" and "the model
+    // answered differently" is otherwise a guess.
+    definitionsProvenance,
+    // The text itself, so a claim about what the model wrote can be checked
+    // from the artifact instead of trusted.
+    synthesizedDefinitions: Object.fromEntries(synthesizedDefinitions),
+    inlineAttached,
+    inlineUnplaced,
+    subsetComments: [...subsetSchemas.values()].reduce(
+      (total, schema) =>
+        total + schema.reduce((count, table) => count + table.columns.filter((column) => column.comment !== undefined).length, 0),
+      0,
+    ),
+    // How many columns in the inline schema carry any comment at all. If this
+    // ever approaches the 798 dataset columns, the arm is measuring the
+    // metadata lever again instead of placement.
+    inlineSchemaComments: [...inlineSchemas.values()].reduce(
+      (total, schema) =>
+        total + schema.reduce((count, table) => count + table.columns.filter((column) => column.comment !== undefined).length, 0),
+      0,
+    ),
+    synthesizedDefinitionMeanChars: Math.round(
+      [...synthesizedDefinitions.values()].reduce((total, text) => total + text.length, 0) /
+        Math.max(1, synthesizedDefinitions.size),
+    ),
   };
 
   // Prompt-level facts, measured for every run and not only the dry one: the report they
@@ -1746,7 +1854,7 @@ async function main() {
     }
     return { distinct, degenerate };
   };
-  report.mixedCandidatePrompts = config.arms
+  const mixedCandidatePrompts = settings.arms
     .map((name) => resolveArm(name))
     .filter((arm): arm is Arm => arm !== undefined && arm.mixed !== undefined)
     .map((arm) => {
@@ -1770,509 +1878,633 @@ async function main() {
       };
     });
 
-  if (config.dryRun) {
-    // The preview shows the arms this run was told to score, not the head of the chain.
-    // It used to render `ARMS[0]` and `ARMS[1]` whatever `BIRD_ARMS` said, so the dry run
-    // of a new lever put two unrelated prompts in the artifact and the lever stayed
-    // unverified — and the second field was named `definitionsPrompt` after whichever arm
-    // happened to sit at that index, which nothing read either.
-    const preview = config.arms.map((name) => resolveArm(name)).filter((arm): arm is Arm => arm !== undefined);
-    report.prompts = cases.slice(0, 3).map((question) => ({
-      id: question.question_id,
-      arms: preview.map((arm) => {
-        const rendered = buildSqlPrompt(question.question, schemaFor(arm, question.db_id), promptFor(arm, question, blocksFor(arm, question)));
-        return { arm: arm.name, chars: rendered.length, prompt: rendered };
-      }),
-    }));
-    report.arms = [];
-    finish(config, report);
-    await oracle.close();
-    return;
-  }
+  return {
+    settings,
+    questions,
+    selected,
+    cases,
+    schemas,
+    gold,
+    unrunnable,
+    controls,
+    blocksFor,
+    schemaFor,
+    mixedCandidatePrompts,
+  };
+}
 
-  // 5. Arms.
-  // Mean calls per case, counted at the provider, so a delta can be divided by what it
-  // cost. `attempts` cannot serve here: it counts generations inside a repair loop and
-  // knows nothing about a selector call or the second call a plan costs, which made
-  // selection look free and a plan candidate look like one call.
-  const meanCalls = (runs: readonly { calls: number }[]): number =>
-    runs.length === 0 ? 1 : runs.reduce((total, run) => total + run.calls, 0) / runs.length;
+/** The report before any arm runs: everything the inputs alone can say. */
+export function baseReport(prepared: PreparedRun): Record<string, unknown> {
+  const { settings, questions, selected, cases, unrunnable, controls } = prepared;
+  const layout = settings.layout;
+  return {
+    dataset: 'bird-mini-dev',
+    // Derived from the split actually loaded. It was the literal `mini_dev_sqlite`, so every
+    // dev artifact said mini_dev_sqlite at the top level and `dev` inside `selection`, and
+    // nothing read the duplicate field so nothing noticed. The gate now compares the two.
+    split: layout.split,
+    dialect: 'SQLite',
+    model: settings.dryRun ? null : settings.model,
+    // Which model wrote the `@second` candidates, when an arm draws one. Without it the
+    // cross-arm artifact cannot be reproduced and its number has no subject.
+    secondModel: settings.second.model === '' ? null : settings.second.model,
+    // ...and which model judged, when an arm asks the second one to. A judge swap is the one
+    // experiment whose result is unreadable without this field.
+    judgeModel: settings.arms.some((name) => resolveArm(name)?.judge === 'second') ? settings.second.model : null,
+    // The instrument's own settings. Same argument as the model: two runs of "the same"
+    // configuration can differ by the deadline, the concurrency or the retry budget, and a
+    // report that omits them cannot say whether a difference is the pipeline or the harness.
+    run: {
+      timeoutMs: settings.timeoutMs,
+      concurrency: settings.concurrency,
+      retries: settings.retries,
+    },
+    generatedAt: new Date().toISOString(),
+    // The arms this run set out to score. A subset is a measurement of those arms, and the
+    // gate needs the declaration to tell it from a report that lost a row: the run that
+    // scored six arms on dev was failed for not running two it never asked for.
+    armsRequested: settings.arms,
+    selection: {
+      databases: settings.dbs,
+      available: questions.length,
+      requested: settings.limit,
+      split: layout.split,
+      scored: cases.length,
+      strategy: 'stratified by difficulty, then question id',
+    },
+    gold: {
+      executed: selected.length,
+      runnable: cases.length,
+      unrunnable: unrunnable.slice(0, 20),
+      runnableRate: cases.length / selected.length,
+    },
+    controls,
+    mixedCandidatePrompts: prepared.mixedCandidatePrompts,
+  };
+}
 
-  const armReports: ArmReportRow[] = [];
-  const outcomes = new Map<string, CaseRun[]>();
-  for (const name of config.arms) {
-    const arm = resolveArm(name);
-    if (arm === undefined) throw new Error(`unknown arm ${name}`);
-    // A mixed arm runs three configurations under one label; if one of them repairs or
-    // samples, the reported cost is wrong and the comparison loses its meaning.
-    if (arm.mixed !== undefined) {
-      assertMixedSources(arm.mixed);
-      if (arm.mixed.length !== arm.vote) {
-        throw new Error(`arm ${name} draws ${String(arm.mixed.length)} sources but declares ${String(arm.vote ?? 1)} candidates; the cost claim would be false`);
-      }
+/**
+ * The dry-run body: what each arm would send, without sending it.
+ *
+ * The preview shows the arms this run was told to score, not the head of the chain.
+ * It used to render `ARMS[0]` and `ARMS[1]` whatever `BIRD_ARMS` said, so the dry run
+ * of a new lever put two unrelated prompts in the artifact and the lever stayed
+ * unverified — and the second field was named `definitionsPrompt` after whichever arm
+ * happened to sit at that index, which nothing read either.
+ */
+export function previewPrompts(prepared: PreparedRun, report: Record<string, unknown>): void {
+  const preview = prepared.settings.arms.map((name) => resolveArm(name)).filter((arm): arm is Arm => arm !== undefined);
+  report.prompts = prepared.cases.slice(0, 3).map((question) => ({
+    id: question.question_id,
+    arms: preview.map((arm) => {
+      const rendered = buildSqlPrompt(
+        question.question,
+        prepared.schemaFor(arm, question.db_id),
+        promptFor(arm, question, prepared.blocksFor(arm, question)),
+      );
+      return { arm: arm.name, chars: rendered.length, prompt: rendered };
+    }),
+  }));
+  report.arms = [];
+}
+
+/**
+ * Mean calls per case, counted at the provider, so a delta can be divided by what it
+ * cost. `attempts` cannot serve here: it counts generations inside a repair loop and
+ * knows nothing about a selector call or the second call a plan costs, which made
+ * selection look free and a plan candidate look like one call.
+ */
+export function meanCalls(runs: readonly { readonly calls: number }[]): number {
+  return runs.length === 0 ? 1 : runs.reduce((total, run) => total + run.calls, 0) / runs.length;
+}
+
+/** What one arm produced: its cases, its artifact row and the line printed for it. */
+export interface ArmRun {
+  readonly name: string;
+  readonly runs: readonly CaseRun[];
+  readonly row: ArmReportRow;
+  readonly line: string;
+}
+
+/** What `runArm` needs from outside. */
+export interface ArmIo {
+  readonly oracle: Oracle;
+  readonly provider: LlmProvider;
+  readonly second?: LlmProvider;
+}
+
+/**
+ * One arm over every case.
+ *
+ * The arm-level guards run here, before any number leaves this function: an arm that never
+ * reached the database has no accuracy, a candidate that never arrived shrinks the set the
+ * ceiling is taken over, and a bug in this file is not a wrong answer.
+ */
+export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Promise<ArmRun> {
+  const { settings, cases, gold } = prepared;
+  const { oracle, provider, second: secondProvider } = io;
+  const arm = resolveArm(name);
+  if (arm === undefined) throw new Error(`unknown arm ${name}`);
+  // A mixed arm runs three configurations under one label; if one of them repairs or
+  // samples, the reported cost is wrong and the comparison loses its meaning.
+  if (arm.mixed !== undefined) {
+    assertMixedSources(arm.mixed);
+    if (arm.mixed.length !== arm.vote) {
+      throw new Error(
+        `arm ${name} draws ${String(arm.mixed.length)} sources but declares ${String(arm.vote ?? 1)} candidates; the cost claim would be false`,
+      );
     }
-    const runs = await pool(cases, config.concurrency, async (question): Promise<CaseRun> => {
-      const schema = schemaFor(arm, question.db_id);
-      // Counted, not derived: a plan costs two calls, a selector costs one, and a
-      // configuration-derived count got both wrong in opposite directions.
-      const counter = withCallCounter(provider);
-      const secondCounter = secondProvider === undefined ? undefined : withCallCounter(secondProvider);
-      // Both models' calls are this case's cost. Summing two counters keeps the number
-      // measured on each side instead of estimated from the arm's configuration.
-      const callsMade = (): number => counter.calls() + (secondCounter?.calls() ?? 0);
-      // One case cannot take the run down. A provider error raised outside the per-sample
-      // catch — the selector call, an engine call — used to escape the pool and end a
-      // 1,532-question run at case 700 with a stack trace, which is why this wrapper
-      // exists: an escaped error becomes a recorded `llm` failure, and the failure-share
-      // guard decides whether the run is publishable.
-      const guarded = async (work: () => Promise<CaseRun>): Promise<CaseRun> => {
-        try {
-          return await work();
-        } catch (error) {
-          const kind = escapeKind(error);
+  }
+  const runs = await pool(cases, settings.concurrency, async (question): Promise<CaseRun> => {
+    const schema = prepared.schemaFor(arm, question.db_id);
+    // Counted, not derived: a plan costs two calls, a selector costs one, and a
+    // configuration-derived count got both wrong in opposite directions.
+    const counter = withCallCounter(provider);
+    const secondCounter = secondProvider === undefined ? undefined : withCallCounter(secondProvider);
+    // Both models' calls are this case's cost. Summing two counters keeps the number
+    // measured on each side instead of estimated from the arm's configuration.
+    const callsMade = (): number => counter.calls() + (secondCounter?.calls() ?? 0);
+    // One case cannot take the run down. A provider error raised outside the per-sample
+    // catch — the selector call, an engine call — used to escape the pool and end a
+    // 1,532-question run at case 700 with a stack trace, which is why this wrapper
+    // exists: an escaped error becomes a recorded `llm` failure, and the failure-share
+    // guard decides whether the run is publishable.
+    const guarded = async (work: () => Promise<CaseRun>): Promise<CaseRun> => {
+      try {
+        return await work();
+      } catch (error) {
+        const kind = escapeKind(error);
+        return {
+          id: String(question.question_id),
+          passed: false,
+          predicted: '',
+          reason: 'values',
+          strict: false,
+          attempts: 1,
+          // `llm` only when the provider said so. A bug in this file is `harness`, which
+          // the failure-share guard ignores and `assertHarnessClean` refuses to publish.
+          errorKind: kind,
+          error: `${kind}: ${error instanceof Error ? error.message : String(error)}`,
+          calls: callsMade(),
+        };
+      }
+    };
+    return guarded(async (): Promise<CaseRun> => {
+      // A pipeline is a prompt plus a budget, so building one per configuration costs
+      // nothing and lets a mixed arm ask the same question three different ways.
+      // The execute hook exists for repairs only: without repairs it would turn an
+      // execution failure into a thrown pipeline error and hide the statement that
+      // failed, which is the one thing a diagnosis needs.
+      const pipelineFor = (target: Arm, which: 'primary' | 'second' = 'primary'): ReturnType<typeof createPipeline> =>
+        createPipeline({
+          provider: which === 'second' && secondCounter !== undefined ? secondCounter.provider : counter.provider,
+          maxRepairs: target.repairs,
+          linking: target.linking,
+          interpret: target.interpret === true,
+          plan: target.plan === true,
+          decompose: target.decompose === true,
+          ...(target.repairFeedback === undefined ? {} : { repairFeedback: target.repairFeedback }),
+          temperature: target.vote === undefined ? 0 : 0.7,
+          prompt: promptFor(target, question, prepared.blocksFor(target, question)),
+          ...(target.repairs === 0
+            ? {}
+            : {
+                execute: async (sql: string) => {
+                  const result = await oracle.run(question.db_id, sql);
+                  if (result.ok) {
+                    // A statement that runs and returns the wrong number of rows is invisible
+                    // to the engine, so this is the only place the loop can hear about it.
+                    if (target.shapeGuard === true && shapeMismatch(question.question, result.rows)) {
+                      throw new Error(shapeFailure(result.rows));
+                    }
+                    return;
+                  }
+                  // The driver's own words, not a summary of them: the repair reads
+                  // `details.engineError` to decide what to tell the model.
+                  throw Object.assign(new Error(result.error ?? 'execution failed'), {
+                    details: {
+                      engineError: {
+                        message: (result.error ?? 'execution failed').replace(/^\w*Error:\s*/, ''),
+                        ...(result.errorName === undefined ? {} : { code: result.errorName }),
+                      },
+                    },
+                  });
+                },
+              }),
+        });
+      const pipeline = pipelineFor(arm);
+      const expected = gold.get(question.question_id) as OracleResult;
+      if (arm.vote !== undefined && arm.vote > 1) {
+        const candidates: { sql: string; rows: readonly (readonly unknown[])[]; source: string }[] = [];
+        // Why a sample died matters: a sample the engine refused is a candidate that
+        // does not exist, while a sample the endpoint never answered is an outage that
+        // used to be counted as "no sample survived guard and execution" — a content
+        // failure the accuracy was then blamed for.
+        const sampleErrors: (string | undefined)[] = [];
+        // A candidate that never arrived is not a candidate that was wrong, and the
+        // difference is invisible in `candidateRecall`: an endpoint that refuses one of
+        // three calls lowers the ceiling exactly as much as a prompt that writes a bad
+        // statement. Counting them apart is the only way to tell the two apart after
+        // the run, because by then the request is gone.
+        const lost = { llm: 0, other: 0 };
+        // Only the candidates that were asked to decompose are counted here, and they are
+        // counted whether or not the statement ran: the question is what the prompt
+        // produced, not whether the engine liked it.
+        let decomposedCandidates = 0;
+        let decomposedSteps = 0;
+        for (let sample = 0; sample < arm.vote; sample += 1) {
+          try {
+            // A mixed arm draws each candidate from a different decomposition. The
+            // sources repair nothing by contract (asserted in the test suite), so a
+            // candidate is always one generation and the cost stays three calls.
+            const sources = arm.mixed;
+            const source = sources === undefined ? name : (sources[sample % sources.length] as string);
+            const spec = parseMixedSource(source);
+            const sampler = sources === undefined ? pipeline : pipelineFor(resolveArm(spec.arm) as Arm, spec.provider);
+            const askedSample = await sampler.ask({ question: question.question, schema });
+            // The mechanism has to be observable, not declared: a prompt that asks for
+            // steps and gets none is the plain generator with a longer instruction, and
+            // the two arms would then differ by wording rather than by method.
+            if (askedSample.decomposedSteps !== undefined) {
+              decomposedCandidates += 1;
+              decomposedSteps += askedSample.decomposedSteps;
+            }
+            const executed = await oracle.run(question.db_id, askedSample.sql);
+            if (executed.ok) candidates.push({ sql: askedSample.sql, rows: executed.rows, source });
+          } catch (error) {
+            // A sample that fails the guard or the engine casts no vote; the other
+            // samples still produce one. The reason is kept for the zero-candidate case.
+            const kind = (error as { code?: string }).code?.startsWith('NL2C_E_LLM') === true ? 'llm' : 'other';
+            sampleErrors.push(kind === 'llm' ? 'llm' : undefined);
+            lost[kind] += 1;
+          }
+        }
+        if (candidates.length === 0) {
+          const outage = sampleErrors.length === arm.vote && sampleErrors.every((kind) => kind === 'llm');
           return {
             id: String(question.question_id),
             passed: false,
             predicted: '',
             reason: 'values',
             strict: false,
-            attempts: 1,
-            // `llm` only when the provider said so. A bug in this file is `harness`, which
-            // the failure-share guard ignores and `assertHarnessClean` refuses to publish.
-            errorKind: kind,
-            error: `${kind}: ${error instanceof Error ? error.message : String(error)}`,
-            calls: callsMade(),
-          };
-        }
-      };
-      return guarded(async (): Promise<CaseRun> => {
-        // A pipeline is a prompt plus a budget, so building one per configuration costs
-        // nothing and lets a mixed arm ask the same question three different ways.
-        // The execute hook exists for repairs only: without repairs it would turn an
-        // execution failure into a thrown pipeline error and hide the statement that
-        // failed, which is the one thing a diagnosis needs.
-        const pipelineFor = (target: Arm, which: 'primary' | 'second' = 'primary'): ReturnType<typeof createPipeline> =>
-          createPipeline({
-            provider: which === 'second' && secondCounter !== undefined ? secondCounter.provider : counter.provider,
-            maxRepairs: target.repairs,
-            linking: target.linking,
-            interpret: target.interpret === true,
-            plan: target.plan === true,
-            decompose: target.decompose === true,
-            ...(target.repairFeedback === undefined ? {} : { repairFeedback: target.repairFeedback }),
-            temperature: target.vote === undefined ? 0 : 0.7,
-            prompt: promptFor(target, question, blocksFor(target, question)),
-            ...(target.repairs === 0
-              ? {}
-              : {
-                  execute: async (sql: string) => {
-                    const result = await oracle.run(question.db_id, sql);
-                    if (result.ok) {
-                      // A statement that runs and returns the wrong number of rows is invisible
-                      // to the engine, so this is the only place the loop can hear about it.
-                      if (target.shapeGuard === true && shapeMismatch(question.question, result.rows)) {
-                        throw new Error(shapeFailure(result.rows));
-                      }
-                      return;
-                    }
-                    // The driver's own words, not a summary of them: the repair reads
-                    // `details.engineError` to decide what to tell the model.
-                    throw Object.assign(new Error(result.error ?? 'execution failed'), {
-                      details: {
-                        engineError: {
-                          message: (result.error ?? 'execution failed').replace(/^\w*Error:\s*/, ''),
-                          ...(result.errorName === undefined ? {} : { code: result.errorName }),
-                        },
-                      },
-                    });
-                  },
-                }),
-          });
-        const pipeline = pipelineFor(arm);
-        const expected = gold.get(question.question_id) as OracleResult;
-        if (arm.vote !== undefined && arm.vote > 1) {
-          const candidates: { sql: string; rows: readonly (readonly unknown[])[]; source: string }[] = [];
-          // Why a sample died matters: a sample the engine refused is a candidate that
-          // does not exist, while a sample the endpoint never answered is an outage that
-          // used to be counted as "no sample survived guard and execution" — a content
-          // failure the accuracy was then blamed for.
-          const sampleErrors: (string | undefined)[] = [];
-          // A candidate that never arrived is not a candidate that was wrong, and the
-          // difference is invisible in `candidateRecall`: an endpoint that refuses one of
-          // three calls lowers the ceiling exactly as much as a prompt that writes a bad
-          // statement. Counting them apart is the only way to tell the two apart after
-          // the run, because by then the request is gone.
-          const lost = { llm: 0, other: 0 };
-          // Only the candidates that were asked to decompose are counted here, and they are
-          // counted whether or not the statement ran: the question is what the prompt
-          // produced, not whether the engine liked it.
-          let decomposedCandidates = 0;
-          let decomposedSteps = 0;
-          for (let sample = 0; sample < arm.vote; sample += 1) {
-            try {
-              // A mixed arm draws each candidate from a different decomposition. The
-              // sources repair nothing by contract (asserted in the test suite), so a
-              // candidate is always one generation and the cost stays three calls.
-              const sources = arm.mixed;
-              const source = sources === undefined ? name : (sources[sample % sources.length] as string);
-              const spec = parseMixedSource(source);
-              const sampler = sources === undefined ? pipeline : pipelineFor(resolveArm(spec.arm) as Arm, spec.provider);
-              const askedSample = await sampler.ask({ question: question.question, schema });
-              // The mechanism has to be observable, not declared: a prompt that asks for
-              // steps and gets none is the plain generator with a longer instruction, and
-              // the two arms would then differ by wording rather than by method.
-              if (askedSample.decomposedSteps !== undefined) {
-                decomposedCandidates += 1;
-                decomposedSteps += askedSample.decomposedSteps;
-              }
-              const executed = await oracle.run(question.db_id, askedSample.sql);
-              if (executed.ok) candidates.push({ sql: askedSample.sql, rows: executed.rows, source });
-            } catch (error) {
-              // A sample that fails the guard or the engine casts no vote; the other
-              // samples still produce one. The reason is kept for the zero-candidate case.
-              const kind = (error as { code?: string }).code?.startsWith('NL2C_E_LLM') === true ? 'llm' : 'other';
-              sampleErrors.push(kind === 'llm' ? 'llm' : undefined);
-              lost[kind] += 1;
-            }
-          }
-          if (candidates.length === 0) {
-            const outage = sampleErrors.length === arm.vote && sampleErrors.every((kind) => kind === 'llm');
-            return {
-              id: String(question.question_id),
-              passed: false,
-              predicted: '',
-              reason: 'values',
-              strict: false,
-              attempts: arm.vote,
-              error: outage ? 'every sample failed at the model' : 'no sample survived guard and execution',
-              // The distinction is what makes the failure-share guard able to fire on a
-              // voting arm at all; before it, an endpoint outage read as three wrong
-              // statements and quietly lowered the score.
-              errorKind: outage ? 'llm' : 'other',
-              candidateRecall: false,
-              candidateFailures: lost,
-              ...(decomposedCandidates === 0 ? {} : { decomposition: { candidates: decomposedCandidates, steps: decomposedSteps } }),
-              calls: callsMade(),
-            };
-          }
-          // An empty result is not an option on this benchmark: no question in either
-          // split has an empty gold result, so a statement that returned nothing is wrong
-          // by construction. Dropping it costs no call and can only help the selector,
-          // which otherwise spends a tie-breaker on a candidate that cannot win. When
-          // every candidate is empty there is nothing to drop, and the turn below is the
-          // one thing left to spend.
-          const choice = offeredCandidates(candidates, arm.emptyRetry !== undefined);
-          const choosable = choice.offered as typeof candidates;
-          const majority = majorityResult(choosable, (left, right) => judgeOfficial(left.rows, right.rows) === 'match');
-          let winner = majority.winner as { sql: string; rows: readonly (readonly unknown[])[]; source: string };
-          let selectedByModel: boolean | undefined;
-          if (arm.select === true) {
-            // The model sees what the vote cannot: the shape of each result. A statement
-            // that answers a "how many" with 500 rows is wrong for a reason no majority
-            // of identical mistakes will reveal.
-            const offered = choosable.map((candidate) => ({
-              sql: candidate.sql,
-              rows: candidate.rows.length,
-              columns: candidate.rows[0]?.length ?? 0,
-              preview: JSON.stringify(candidate.rows.slice(0, 3)).slice(0, 300),
-              ...(arm.sourcesVisible === true ? { source: candidate.source } : {}),
-            }));
-            // `counter.provider`, not `provider`: this call is part of the arm's price, and
-            // the first version of this counter left it out — which the gate caught on the
-            // very next run ("select samples 3 times and reports 3 calls per case").
-            const judge = arm.judge === 'second' && secondCounter !== undefined ? secondCounter.provider : counter.provider;
-            const decision =
-              arm.pairwise === true
-                ? await chooseCandidatePairwise(judge, question.question, choosable)
-                : await (async () => {
-                    const reply = await judge.complete({
-                      messages: [
-                        { role: 'system', content: buildSelectionPrompt(question.question, offered) },
-                        { role: 'user', content: question.question },
-                      ],
-                      temperature: 0,
-                    });
-                    const applied = applySelection(reply.text, offered);
-                    return { index: applied.index, decided: applied.decided, sql: (offered[applied.index] as { sql: string }).sql };
-                  })();
-            winner = choosable[decision.index] as typeof winner;
-            selectedByModel = decision.decided;
-          }
-          // The last thing this arm can learn for free: the winner ran and produced
-          // nothing. On a split whose gold results are never empty that is proof of a
-          // wrong statement, and the only information a second statement lacks is what
-          // this one returned.
-          let recovered = false;
-          let retried = false;
-          if (arm.emptyRetry !== undefined && winner.rows.length === 0) {
-            retried = true;
-            const sourceArm =
-              arm.mixed === undefined ? arm : (resolveArm(parseMixedSource(winner.source).arm) as Arm);
-            const retryPrompt = buildAskMessages({
-              question: question.question,
-              schema,
-              prompt: promptFor(sourceArm, question, blocksFor(sourceArm, question)),
-              linking: sourceArm.linking,
-            });
-            const reply = await counter.provider.complete({
-              messages: [...retryPrompt.messages, ...emptyRetryMessages(arm.emptyRetry, winner.sql, winner.sql)],
-              // The arm samples above zero, so a blind turn is a different draw and not a
-              // copy of the statement it replaces. Both modes use the same temperature:
-              // the pair differs by the words, and by nothing else.
-              temperature: 0.7,
-            });
-            const candidate = extractSql(reply.text);
-            if (inspectSql(candidate).ok) {
-              const executed = await oracle.run(question.db_id, candidate);
-              // A replacement that returns rows is adopted; one that also returns nothing
-              // is kept as well, because the statement it replaces is equally wrong and
-              // this one was written with more in front of it. A replacement that fails to
-              // run is discarded: the original at least produced a result.
-              if (executed.ok) {
-                recovered = executed.rows.length > 0;
-                winner = { sql: candidate, rows: executed.rows, source: winner.source };
-              }
-            }
-          }
-          const reason = judgeOfficial(expected.rows, winner.rows);
-          return {
-            id: String(question.question_id),
-            passed: reason === 'match',
-            predicted: winner.sql,
-            reason,
-            strict: judgeStrict(expected.rows, winner.rows) === 'match',
-            attempts: arm.vote + (retried ? 1 : 0),
-            agreement: majority.agreement,
-            candidateRecall: candidates.some((candidate) => judgeOfficial(expected.rows, candidate.rows) === 'match'),
-            ...(selectedByModel === undefined ? {} : { selectedByModel }),
-            ...(arm.mixed === undefined ? {} : { winnerSource: winner.source }),
-            ...(arm.emptyRetry === undefined
-              ? {}
-              : { emptyDropped: choice.dropped, emptyRetried: retried, emptyRecovered: recovered }),
-            ...(lost.llm + lost.other === 0 ? {} : { candidateFailures: lost }),
+            attempts: arm.vote,
+            error: outage ? 'every sample failed at the model' : 'no sample survived guard and execution',
+            // The distinction is what makes the failure-share guard able to fire on a
+            // voting arm at all; before it, an endpoint outage read as three wrong
+            // statements and quietly lowered the score.
+            errorKind: outage ? 'llm' : 'other',
+            candidateRecall: false,
+            candidateFailures: lost,
             ...(decomposedCandidates === 0 ? {} : { decomposition: { candidates: decomposedCandidates, steps: decomposedSteps } }),
             calls: callsMade(),
           };
         }
-        try {
-          const asked = await pipeline.ask({ question: question.question, schema });
-          const predicted = await oracle.run(question.db_id, asked.sql);
-          if (!predicted.ok) {
-            return {
-              id: String(question.question_id),
-              passed: false,
-              predicted: asked.sql,
-              reason: 'values',
-              strict: false,
-              attempts: asked.attempts,
-              // Without the kind this case counted as `other`, which made
-              // `errors.execution` permanently zero and hid where failures came from:
-              // the GLM probe read as "no execution failures" while every one of its
-              // top errors was a SQLite syntax or column error.
-              errorKind: 'execution',
-              calls: callsMade(),
-              ...(asked.decomposedSteps === undefined ? {} : { decomposition: { candidates: 1, steps: asked.decomposedSteps } }),
-              error: `execution: ${predicted.error ?? 'unknown'}`,
-            };
+        // An empty result is not an option on this benchmark: no question in either
+        // split has an empty gold result, so a statement that returned nothing is wrong
+        // by construction. Dropping it costs no call and can only help the selector,
+        // which otherwise spends a tie-breaker on a candidate that cannot win. When
+        // every candidate is empty there is nothing to drop, and the turn below is the
+        // one thing left to spend.
+        const choice = offeredCandidates(candidates, arm.emptyRetry !== undefined);
+        const choosable = choice.offered as typeof candidates;
+        const majority = majorityResult(choosable, (left, right) => judgeOfficial(left.rows, right.rows) === 'match');
+        let winner = majority.winner as { sql: string; rows: readonly (readonly unknown[])[]; source: string };
+        let selectedByModel: boolean | undefined;
+        if (arm.select === true) {
+          // The model sees what the vote cannot: the shape of each result. A statement
+          // that answers a "how many" with 500 rows is wrong for a reason no majority
+          // of identical mistakes will reveal.
+          const offered = choosable.map((candidate) => ({
+            sql: candidate.sql,
+            rows: candidate.rows.length,
+            columns: candidate.rows[0]?.length ?? 0,
+            preview: JSON.stringify(candidate.rows.slice(0, 3)).slice(0, 300),
+            ...(arm.sourcesVisible === true ? { source: candidate.source } : {}),
+          }));
+          // `counter.provider`, not `provider`: this call is part of the arm's price, and
+          // the first version of this counter left it out — which the gate caught on the
+          // very next run ("select samples 3 times and reports 3 calls per case").
+          const judge = arm.judge === 'second' && secondCounter !== undefined ? secondCounter.provider : counter.provider;
+          const decision =
+            arm.pairwise === true
+              ? await chooseCandidatePairwise(judge, question.question, choosable)
+              : await (async () => {
+                  const reply = await judge.complete({
+                    messages: [
+                      { role: 'system', content: buildSelectionPrompt(question.question, offered) },
+                      { role: 'user', content: question.question },
+                    ],
+                    temperature: 0,
+                  });
+                  const applied = applySelection(reply.text, offered);
+                  return { index: applied.index, decided: applied.decided, sql: (offered[applied.index] as { sql: string }).sql };
+                })();
+          winner = choosable[decision.index] as typeof winner;
+          selectedByModel = decision.decided;
+        }
+        // The last thing this arm can learn for free: the winner ran and produced
+        // nothing. On a split whose gold results are never empty that is proof of a
+        // wrong statement, and the only information a second statement lacks is what
+        // this one returned.
+        let recovered = false;
+        let retried = false;
+        if (arm.emptyRetry !== undefined && winner.rows.length === 0) {
+          retried = true;
+          const sourceArm = arm.mixed === undefined ? arm : (resolveArm(parseMixedSource(winner.source).arm) as Arm);
+          const retryPrompt = buildAskMessages({
+            question: question.question,
+            schema,
+            prompt: promptFor(sourceArm, question, prepared.blocksFor(sourceArm, question)),
+            linking: sourceArm.linking,
+          });
+          const reply = await counter.provider.complete({
+            messages: [...retryPrompt.messages, ...emptyRetryMessages(arm.emptyRetry, winner.sql, winner.sql)],
+            // The arm samples above zero, so a blind turn is a different draw and not a
+            // copy of the statement it replaces. Both modes use the same temperature:
+            // the pair differs by the words, and by nothing else.
+            temperature: 0.7,
+          });
+          const candidate = extractSql(reply.text);
+          if (inspectSql(candidate).ok) {
+            const executed = await oracle.run(question.db_id, candidate);
+            // A replacement that returns rows is adopted; one that also returns nothing
+            // is kept as well, because the statement it replaces is equally wrong and
+            // this one was written with more in front of it. A replacement that fails to
+            // run is discarded: the original at least produced a result.
+            if (executed.ok) {
+              recovered = executed.rows.length > 0;
+              winner = { sql: candidate, rows: executed.rows, source: winner.source };
+            }
           }
-          const reason = judgeOfficial(expected.rows, predicted.rows);
-          return {
-            id: String(question.question_id),
-            passed: reason === 'match',
-            predicted: asked.sql,
-            reason,
-            strict: judgeStrict(expected.rows, predicted.rows) === 'match',
-            attempts: asked.attempts,
-            calls: callsMade(),
-            failures: asked.failures,
-            ...(asked.decomposedSteps === undefined ? {} : { decomposition: { candidates: 1, steps: asked.decomposedSteps } }),
-          };
-        } catch (error) {
-          // A repair arm reports the statement it gave up on, so a failure is
-          // diagnosable from the artifact alone.
-          const details = (error as { details?: Record<string, unknown> }).details ?? {};
-          const lastError = typeof details.lastError === 'string' ? details.lastError : undefined;
-          const failureClasses = Array.isArray(details.failureClasses) ? (details.failureClasses as string[]) : undefined;
-          const message = error instanceof Error ? error.message : String(error);
-          const code = (error as { code?: string }).code ?? '';
+        }
+        const reason = judgeOfficial(expected.rows, winner.rows);
+        return {
+          id: String(question.question_id),
+          passed: reason === 'match',
+          predicted: winner.sql,
+          reason,
+          strict: judgeStrict(expected.rows, winner.rows) === 'match',
+          attempts: arm.vote + (retried ? 1 : 0),
+          agreement: majority.agreement,
+          candidateRecall: candidates.some((candidate) => judgeOfficial(expected.rows, candidate.rows) === 'match'),
+          ...(selectedByModel === undefined ? {} : { selectedByModel }),
+          ...(arm.mixed === undefined ? {} : { winnerSource: winner.source }),
+          ...(arm.emptyRetry === undefined
+            ? {}
+            : { emptyDropped: choice.dropped, emptyRetried: retried, emptyRecovered: recovered }),
+          ...(lost.llm + lost.other === 0 ? {} : { candidateFailures: lost }),
+          ...(decomposedCandidates === 0 ? {} : { decomposition: { candidates: decomposedCandidates, steps: decomposedSteps } }),
+          calls: callsMade(),
+        };
+      }
+      try {
+        const asked = await pipeline.ask({ question: question.question, schema });
+        const predicted = await oracle.run(question.db_id, asked.sql);
+        if (!predicted.ok) {
           return {
             id: String(question.question_id),
             passed: false,
-            predicted: typeof details.lastSql === 'string' ? details.lastSql : '',
+            predicted: asked.sql,
             reason: 'values',
             strict: false,
-            attempts: arm.repairs + 1,
+            attempts: asked.attempts,
+            // Without the kind this case counted as `other`, which made
+            // `errors.execution` permanently zero and hid where failures came from:
+            // the GLM probe read as "no execution failures" while every one of its
+            // top errors was a SQLite syntax or column error.
+            errorKind: 'execution',
             calls: callsMade(),
-            ...(failureClasses === undefined ? {} : { failures: failureClasses }),
-            error: lastError === undefined ? message : `${message}: ${lastError}`,
-            // A shape failure ends with a statement that runs, so calling it `execution`
-            // would say the engine rejected something it never saw.
-            errorKind:
-              lastError !== undefined && lastError.startsWith('shape:')
-                ? 'shape'
-                : code === 'NL2C_E_GUARD_REJECTED'
-                  ? 'guard'
-                  : code === 'NL2C_E_ENGINE_FAILED'
-                    ? 'execution'
-                    : code.startsWith('NL2C_E_LLM')
-                      ? 'llm'
-                      : 'other',
+            ...(asked.decomposedSteps === undefined ? {} : { decomposition: { candidates: 1, steps: asked.decomposedSteps } }),
+            error: `execution: ${predicted.error ?? 'unknown'}`,
           };
         }
-      });
+        const reason = judgeOfficial(expected.rows, predicted.rows);
+        return {
+          id: String(question.question_id),
+          passed: reason === 'match',
+          predicted: asked.sql,
+          reason,
+          strict: judgeStrict(expected.rows, predicted.rows) === 'match',
+          attempts: asked.attempts,
+          calls: callsMade(),
+          failures: asked.failures,
+          ...(asked.decomposedSteps === undefined ? {} : { decomposition: { candidates: 1, steps: asked.decomposedSteps } }),
+        };
+      } catch (error) {
+        // A repair arm reports the statement it gave up on, so a failure is
+        // diagnosable from the artifact alone.
+        const details = (error as { details?: Record<string, unknown> }).details ?? {};
+        const lastError = typeof details.lastError === 'string' ? details.lastError : undefined;
+        const failureClasses = Array.isArray(details.failureClasses) ? (details.failureClasses as string[]) : undefined;
+        const message = error instanceof Error ? error.message : String(error);
+        const code = (error as { code?: string }).code ?? '';
+        return {
+          id: String(question.question_id),
+          passed: false,
+          predicted: typeof details.lastSql === 'string' ? details.lastSql : '',
+          reason: 'values',
+          strict: false,
+          attempts: arm.repairs + 1,
+          calls: callsMade(),
+          ...(failureClasses === undefined ? {} : { failures: failureClasses }),
+          error: lastError === undefined ? message : `${message}: ${lastError}`,
+          // A shape failure ends with a statement that runs, so calling it `execution`
+          // would say the engine rejected something it never saw.
+          errorKind:
+            lastError !== undefined && lastError.startsWith('shape:')
+              ? 'shape'
+              : code === 'NL2C_E_GUARD_REJECTED'
+                ? 'guard'
+                : code === 'NL2C_E_ENGINE_FAILED'
+                  ? 'execution'
+                  : code.startsWith('NL2C_E_LLM')
+                    ? 'llm'
+                    : 'other',
+        };
+      }
     });
-    // Keyed by the requested name, not the resolved one: an A/A duplicate resolves to
-    // the same Arm, and keying by that overwrote the first run with the second, which
-    // silently made the pair compare an arm with itself and report `aa: undefined`.
-    outcomes.set(name, runs);
-    // Before any number is printed: an arm that never reached the database has no
-    // accuracy, and publishing 0% would hide the provider's message behind a score.
-    assertArmProducedResults(name, runs);
-    assertFailureRate(name, runs);
-    // ...and a candidate that never arrived shrinks the set the ceiling is taken over,
-    // which no case-level count can see.
-    if (arm.vote !== undefined && arm.vote > 1) assertCandidateSurvival(name, runs, arm.vote);
-    // ...and a bug in the runner is not a wrong answer: it fails the arm outright.
-    assertHarnessClean(name, runs);
-    if (arm.repairs > 0) assertRepairPathFired(name, runs);
-    if (arm.emptyRetry !== undefined) assertEmptyRetryFired(name, runs);
-    // ...and a format the model ignored is not a prompt that did not help.
-    if (declaresDecomposition(arm)) assertDecompositionFired(name, runs);
-    const summary = summarise(name, runs);
-    const strictPassed = runs.filter((run) => run.strict).length;
-    const byDifficulty: Record<string, { passed: number; total: number }> = {};
-    for (const run of runs) {
-      const difficulty = cases.find((question) => String(question.question_id) === run.id)?.difficulty ?? 'unknown';
-      const bucket = (byDifficulty[difficulty] ??= { passed: 0, total: 0 });
-      bucket.total += 1;
-      if (run.passed) bucket.passed += 1;
-    }
-    const promptSizes = cases.map(
-      (question) =>
-        buildSqlPrompt(
-          question.question,
-          schemaFor(arm, question.db_id),
-          promptFor(arm, question, blocksFor(arm, question)),
-        ).length,
-    );
-    // A repair arm is priced by its funnel, not only by its accuracy: an arm that
-    // fixes 30 cases and breaks 25 has the same accuracy as one that does nothing.
-    const repair =
-      arm.repairs > 0
-        ? repairFunnel(runs.map((run) => ({ attempts: run.attempts, passed: run.passed, failures: run.failures, errorKind: run.errorKind })))
-        : undefined;
-    const kindOf = (run: CaseRun): string | undefined => run.errorKind ?? (run.error === undefined ? undefined : 'other');
-    const errors = {
-      execution: runs.filter((run) => kindOf(run) === 'execution').length,
-      guard: runs.filter((run) => kindOf(run) === 'guard').length,
-      llm: runs.filter((run) => kindOf(run) === 'llm').length,
-      shape: runs.filter((run) => kindOf(run) === 'shape').length,
-      harness: runs.filter((run) => kindOf(run) === 'harness').length,
-      other: runs.filter((run) => kindOf(run) === 'other').length,
-      columnCount: runs.filter((run) => run.reason === 'column-count').length,
-      values: runs.filter((run) => run.reason === 'values' && run.error === undefined).length,
-    };
-    const messages = new Map<string, number>();
-    for (const run of runs) {
-      if (run.error === undefined) continue;
-      const key = run.error.replace(/\d+/g, 'N').slice(0, 120);
-      messages.set(key, (messages.get(key) ?? 0) + 1);
-    }
-    armReports.push({
-      arm: name,
-      passed: summary.passed,
-      total: summary.total,
-      accuracy: summary.accuracy,
-      wilson: wilsonInterval(summary.passed, summary.total),
-      strictPassed,
-      duplicateCredit: summary.passed - strictPassed,
-      exactMatchRate: runs.filter((run) => run.strict).length / summary.total,
-      ...repairAccounting(arm, runs),
-      // What the arm actually spent, beside what it gained: the division the whole
-      // comparison rests on is this number, so it is published rather than recomputed
-      // from the arm's configuration by whoever reads the artifact.
-      calls: {
-        mean: Number(meanCalls(runs).toFixed(3)),
-        max: Math.max(0, ...runs.map((run) => run.calls)),
-      },
-      ...(repair === undefined ? {} : { repair }),
-      // What the decomposition prompt produced, on any arm that asked for one. This was
-      // inside the sampling-arm spread and therefore absent from `decompose` itself, which
-      // is the arm the numbers exist for.
-      ...armDecomposition(runs),
-      ...(arm.emptyRetry === undefined ? {} : { emptyRetry: { mode: arm.emptyRetry, ...emptyRetryFunnel(runs) } }),
-      ...(arm.vote === undefined
-        ? {}
-        : {
-            vote: arm.vote,
-            agreement: runs.reduce((total, run) => total + (run.agreement ?? 0), 0) / Math.max(1, runs.filter((run) => run.agreement !== undefined).length),
-            selector: arm.select === true ? 'model' : 'majority',
-            // Who judges, when it is not the primary model. The gate needs this to insist the
-            // artifact names the judge: a judge swap whose result cannot be attributed is a
-            // number with no owner.
-            ...(arm.judge === undefined ? {} : { judge: arm.judge }),
-            // The ceiling, measured: how often the candidate set contained a statement
-            // that matched. Accuracy divided by this is what the selector kept, and the
-            // difference between the two is the most a better selector could win here.
-            ...candidateCeiling(runs),
-            // How much of the declared candidate set never arrived. Reported beside the
-            // ceiling, because a ceiling taken over a set that lost a third of its
-            // candidates is not a measurement of the prompts.
-            ...(runs.some((run) => run.candidateFailures !== undefined)
-              ? {
-                  candidateFailures: {
-                    llm: runs.reduce((total, run) => total + (run.candidateFailures?.llm ?? 0), 0),
-                    other: runs.reduce((total, run) => total + (run.candidateFailures?.other ?? 0), 0),
-                    attempted: runs.length * (arm.vote ?? 1),
-                  },
-                }
-              : {}),
-            ...(arm.mixed === undefined ? {} : { sources: winnerSources(runs, arm.mixed) }),
-            // How often the selector produced a usable index. A selector that fails to
-            // answer half the time is not a null result; it is a broken prompt.
-            ...(arm.select === true
-              ? {
-                  selectorDecided: runs.filter((run) => run.selectedByModel === true).length,
-                  selectorTotal: runs.filter((run) => run.selectedByModel !== undefined).length,
-                }
-              : {}),
-          }),
-      promptChars: {
-        mean: Math.round(promptSizes.reduce((total, size) => total + size, 0) / Math.max(1, promptSizes.length)),
-        max: Math.max(0, ...promptSizes),
-        // Blocks written at call time (a plan, a reading of the question) are not in
-        // the static prompt this counts, so an arm that uses one must say so: a size
-        // that silently excludes the block it added would read as "this arm is cheap".
-        ...(arm.plan === true || arm.interpret === true ? { excludes: ['plan/interpretation written at call time'] } : {}),
-      },
-      byDifficulty,
-      errors,
-      topErrors: [...messages.entries()].sort((left, right) => right[1] - left[1]).slice(0, 5),
-      llmFailureShare: runs.filter((run) => run.errorKind === 'llm').length / Math.max(1, runs.length),
-      // The ungrouped first failure. `topErrors` replaces digits to group messages,
-      // which is right for counting and wrong for diagnosis: "llm returned N" hides
-      // the status code that says whether the key is dead or the balance is empty.
-      ...(runs.find((run) => run.error !== undefined) === undefined
-        ? {}
-        : { firstError: (runs.find((run) => run.error !== undefined) as CaseRun).error?.slice(0, 200) }),
-    });
-    const printed = repairAccounting(arm, runs);
-    const ceiling = arm.vote === undefined ? undefined : candidateCeiling(runs);
-    console.log(
-      `${name.padEnd(9)} ${summary.passed}/${summary.total}  ${(summary.accuracy * 100).toFixed(1)}%  strict ${strictPassed}` +
-        `${printed.repaired === undefined ? '' : `  repaired ${String(printed.repaired)}`}` +
-        `${printed.samples === undefined ? '' : `  samples ${String(printed.samples)}`}` +
-        `${ceiling === undefined ? '' : `  recall@${String(arm.vote ?? 1)} ${(ceiling.candidateRecallShare * 100).toFixed(1)}% (lost ${String(ceiling.selectionLoss)})`}`,
-    );
+  });
+  // Before any number is printed: an arm that never reached the database has no
+  // accuracy, and publishing 0% would hide the provider's message behind a score.
+  assertArmProducedResults(name, runs);
+  assertFailureRate(name, runs);
+  // ...and a candidate that never arrived shrinks the set the ceiling is taken over,
+  // which no case-level count can see.
+  if (arm.vote !== undefined && arm.vote > 1) assertCandidateSurvival(name, runs, arm.vote);
+  // ...and a bug in the runner is not a wrong answer: it fails the arm outright.
+  assertHarnessClean(name, runs);
+  if (arm.repairs > 0) assertRepairPathFired(name, runs);
+  if (arm.emptyRetry !== undefined) assertEmptyRetryFired(name, runs);
+  // ...and a format the model ignored is not a prompt that did not help.
+  if (declaresDecomposition(arm)) assertDecompositionFired(name, runs);
+  return { name, runs, row: armReportRow(prepared, arm, runs, name), line: armSummaryLine(name, arm, runs) };
+}
+
+/**
+ * The one-line-per-arm summary, built from the same numbers the artifact carries.
+ *
+ * `label` is the name the run asked for, which is not always the arm's own name: the A/A
+ * duplicate resolves to the same `Arm` and must still print as `names#2`.
+ */
+export function armSummaryLine(label: string, arm: Arm, runs: readonly CaseRun[]): string {
+  const summary = summarise(label, runs);
+  const printed = repairAccounting(arm, runs);
+  const ceiling = arm.vote === undefined ? undefined : candidateCeiling(runs);
+  return (
+    `${label.padEnd(9)} ${summary.passed}/${summary.total}  ${(summary.accuracy * 100).toFixed(1)}%  ` +
+    `strict ${runs.filter((run) => run.strict).length}` +
+    `${printed.repaired === undefined ? '' : `  repaired ${String(printed.repaired)}`}` +
+    `${printed.samples === undefined ? '' : `  samples ${String(printed.samples)}`}` +
+    `${ceiling === undefined ? '' : `  recall@${String(arm.vote ?? 1)} ${(ceiling.candidateRecallShare * 100).toFixed(1)}% (lost ${String(ceiling.selectionLoss)})`}`
+  );
+}
+
+/**
+ * One arm's row in the artifact.
+ *
+ * `label` is the requested name for the same reason `armSummaryLine` takes it: two rows
+ * with one label would let a duplicate stand in for the arm it duplicates, and the A/A
+ * pair would silently compare an arm with itself.
+ */
+export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly CaseRun[], label: string): ArmReportRow {
+  const { cases } = prepared;
+  const summary = summarise(label, runs);
+  const strictPassed = runs.filter((run) => run.strict).length;
+  const byDifficulty: Record<string, { passed: number; total: number }> = {};
+  for (const run of runs) {
+    const difficulty = cases.find((question) => String(question.question_id) === run.id)?.difficulty ?? 'unknown';
+    const bucket = (byDifficulty[difficulty] ??= { passed: 0, total: 0 });
+    bucket.total += 1;
+    if (run.passed) bucket.passed += 1;
   }
+  const promptSizes = cases.map(
+    (question) =>
+      buildSqlPrompt(
+        question.question,
+        prepared.schemaFor(arm, question.db_id),
+        promptFor(arm, question, prepared.blocksFor(arm, question)),
+      ).length,
+  );
+  // A repair arm is priced by its funnel, not only by its accuracy: an arm that
+  // fixes 30 cases and breaks 25 has the same accuracy as one that does nothing.
+  const repair =
+    arm.repairs > 0
+      ? repairFunnel(
+          runs.map((run) => ({ attempts: run.attempts, passed: run.passed, failures: run.failures, errorKind: run.errorKind })),
+        )
+      : undefined;
+  const kindOf = (run: CaseRun): string | undefined => run.errorKind ?? (run.error === undefined ? undefined : 'other');
+  const errors = {
+    execution: runs.filter((run) => kindOf(run) === 'execution').length,
+    guard: runs.filter((run) => kindOf(run) === 'guard').length,
+    llm: runs.filter((run) => kindOf(run) === 'llm').length,
+    shape: runs.filter((run) => kindOf(run) === 'shape').length,
+    harness: runs.filter((run) => kindOf(run) === 'harness').length,
+    other: runs.filter((run) => kindOf(run) === 'other').length,
+    columnCount: runs.filter((run) => run.reason === 'column-count').length,
+    values: runs.filter((run) => run.reason === 'values' && run.error === undefined).length,
+  };
+  const messages = new Map<string, number>();
+  for (const run of runs) {
+    if (run.error === undefined) continue;
+    const key = run.error.replace(/\d+/g, 'N').slice(0, 120);
+    messages.set(key, (messages.get(key) ?? 0) + 1);
+  }
+  const firstFailure = runs.find((run) => run.error !== undefined);
+  return {
+    arm: label,
+    passed: summary.passed,
+    total: summary.total,
+    accuracy: summary.accuracy,
+    wilson: wilsonInterval(summary.passed, summary.total),
+    strictPassed,
+    duplicateCredit: summary.passed - strictPassed,
+    exactMatchRate: runs.filter((run) => run.strict).length / summary.total,
+    ...repairAccounting(arm, runs),
+    // What the arm actually spent, beside what it gained: the division the whole
+    // comparison rests on is this number, so it is published rather than recomputed
+    // from the arm's configuration by whoever reads the artifact.
+    calls: {
+      mean: Number(meanCalls(runs).toFixed(3)),
+      max: Math.max(0, ...runs.map((run) => run.calls)),
+    },
+    ...(repair === undefined ? {} : { repair }),
+    // What the decomposition prompt produced, on any arm that asked for one. This was
+    // inside the sampling-arm spread and therefore absent from `decompose` itself, which
+    // is the arm the numbers exist for.
+    ...armDecomposition(runs),
+    ...(arm.emptyRetry === undefined ? {} : { emptyRetry: { mode: arm.emptyRetry, ...emptyRetryFunnel(runs) } }),
+    ...(arm.vote === undefined
+      ? {}
+      : {
+          vote: arm.vote,
+          agreement:
+            runs.reduce((total, run) => total + (run.agreement ?? 0), 0) /
+            Math.max(1, runs.filter((run) => run.agreement !== undefined).length),
+          selector: arm.select === true ? 'model' : 'majority',
+          // Who judges, when it is not the primary model. The gate needs this to insist the
+          // artifact names the judge: a judge swap whose result cannot be attributed is a
+          // number with no owner.
+          ...(arm.judge === undefined ? {} : { judge: arm.judge }),
+          // The ceiling, measured: how often the candidate set contained a statement
+          // that matched. Accuracy divided by this is what the selector kept, and the
+          // difference between the two is the most a better selector could win here.
+          ...candidateCeiling(runs),
+          // How much of the declared candidate set never arrived. Reported beside the
+          // ceiling, because a ceiling taken over a set that lost a third of its
+          // candidates is not a measurement of the prompts.
+          ...(runs.some((run) => run.candidateFailures !== undefined)
+            ? {
+                candidateFailures: {
+                  llm: runs.reduce((total, run) => total + (run.candidateFailures?.llm ?? 0), 0),
+                  other: runs.reduce((total, run) => total + (run.candidateFailures?.other ?? 0), 0),
+                  attempted: runs.length * (arm.vote ?? 1),
+                },
+              }
+            : {}),
+          ...(arm.mixed === undefined ? {} : { sources: winnerSources(runs, arm.mixed) }),
+          // How often the selector produced a usable index. A selector that fails to
+          // answer half the time is not a null result; it is a broken prompt.
+          ...(arm.select === true
+            ? {
+                selectorDecided: runs.filter((run) => run.selectedByModel === true).length,
+                selectorTotal: runs.filter((run) => run.selectedByModel !== undefined).length,
+              }
+            : {}),
+        }),
+    promptChars: {
+      mean: Math.round(promptSizes.reduce((total, size) => total + size, 0) / Math.max(1, promptSizes.length)),
+      max: Math.max(0, ...promptSizes),
+      // Blocks written at call time (a plan, a reading of the question) are not in
+      // the static prompt this counts, so an arm that uses one must say so: a size
+      // that silently excludes the block it added would read as "this arm is cheap".
+      ...(arm.plan === true || arm.interpret === true ? { excludes: ['plan/interpretation written at call time'] } : {}),
+    },
+    byDifficulty,
+    errors,
+    topErrors: [...messages.entries()].sort((left, right) => right[1] - left[1]).slice(0, 5),
+    llmFailureShare: runs.filter((run) => run.errorKind === 'llm').length / Math.max(1, runs.length),
+    // The ungrouped first failure. `topErrors` replaces digits to group messages,
+    // which is right for counting and wrong for diagnosis: "llm returned N" hides
+    // the status code that says whether the key is dead or the balance is empty.
+    ...(firstFailure === undefined ? {} : { firstError: firstFailure.error?.slice(0, 200) }),
+  };
+}
 
-  // Every arm must keep its own row: two rows with the same label would let a
-  // duplicate stand in for the arm it duplicates.
-  // `report.arms` is assigned further down, so the guard reads the list it is about.
-  assertUniqueArmLabels(armReports.map((entry) => entry.arm));
-
+/**
+ * The paired comparisons the run is allowed to make.
+ *
+ * Every pair here is two arms measured on the same cases, so a delta is a paired outcome
+ * and not a difference of two shares. The A/A pair is the control: same arm, same data,
+ * same prompt, twice.
+ */
+export function pairedComparisons(outcomes: ReadonlyMap<string, readonly CaseRun[]>): {
+  aa?: Record<string, unknown>;
+  comparisons: Record<string, unknown>;
+  ablations: Record<string, unknown>;
+} {
   // The A/A pair, when one ran: same arm, same data, same prompt — twice.
-  const aaPair = config.arms.find((name) => name.endsWith('#2'));
+  const aaPair = [...outcomes.keys()].find((name) => name.endsWith('#2'));
   const aa =
     aaPair === undefined
       ? undefined
@@ -2290,12 +2522,6 @@ async function main() {
             p: mcnemarExact(comparison.onlyFirst, comparison.onlySecond),
           };
         })();
-  if (aa !== undefined) {
-    report.aa = aa;
-    console.log(
-      `A/A ${aa.arm}: ${(aa.delta * 100).toFixed(1)}pp (${String(aa.onlyFirst)}/${String(aa.onlySecond)}, p=${aa.p.toFixed(3)}) — the harness's own noise`,
-    );
-  }
 
   const comparisons: Record<string, unknown> = {};
   for (const [from, to, question] of COMPARISONS) {
@@ -2311,7 +2537,6 @@ async function main() {
       p: mcnemarExact(comparison.onlyFirst, comparison.onlySecond),
     };
   }
-  report.comparisons = comparisons;
 
   const ablations: Record<string, unknown> = {};
   for (const [from, to] of PAIRS) {
@@ -2334,14 +2559,15 @@ async function main() {
       },
     };
   }
+  return { ...(aa === undefined ? {} : { aa }), comparisons, ablations };
+}
 
-  report.arms = armReports;
-  report.ablations = ablations;
-  // Per-case outcomes, because a per-arm total cannot answer "on which questions did this
-  // lever work". The first question it is needed for: whether the mixed arm wins because
-  // its third source is distinct on 35% of cases, or because a duplicated candidate is a
-  // frequency signal on the other 65%. That is a stratum, and a stratum needs rows.
-  report.cases = [...outcomes.entries()].flatMap(([name, runs]) =>
+/** Per-case outcomes, because a per-arm total cannot answer "on which questions did this lever work". */
+export function caseRows(outcomes: ReadonlyMap<string, readonly CaseRun[]>): Record<string, unknown>[] {
+  // The first question it is needed for: whether the mixed arm wins because its third
+  // source is distinct on 35% of cases, or because a duplicated candidate is a frequency
+  // signal on the other 65%. That is a stratum, and a stratum needs rows.
+  return [...outcomes.entries()].flatMap(([name, runs]) =>
     runs.map((run) => ({
       arm: name,
       id: run.id,
@@ -2354,28 +2580,39 @@ async function main() {
       ...(run.candidateRecall === undefined ? {} : { candidateRecall: run.candidateRecall }),
     })),
   );
-  // The failure corpus, and a record of what was left out of it. The cap used to be 25
-  // per arm, which made the only material a failure can be diagnosed from a 1.4% sample
-  // — and it said nothing about being a sample, so 25 read as the set.
-  const corpus = failureCorpus([...outcomes.entries()], FAILURE_SAMPLE, (id) => cases.find((question) => String(question.question_id) === id)?.question);
-  report.failures = corpus.failures;
-  report.failureSample = corpus.failureSample;
-
-  // Before the file is written: an instrument that ran and did not reach the artifact is
-  // indistinguishable, downstream, from a mechanism that never ran.
-  assertReportComplete({ arms: armReports });
-  finish(config, report);
-  await oracle.close();
-  gate(report);
 }
 
-function finish(config: ReturnType<typeof settings>, report: Record<string, unknown>): void {
-  mkdirSync(join(ROOT, 'eval/out'), { recursive: true });
-  writeFileSync(config.out, `${JSON.stringify(report, null, 2)}\n`);
-  console.log(`artifact: ${config.out}`);
-  if (config.dryRun) {
-    const controls = report.controls as { selfConsistency: number; negativeFalseMatches: number; schemaChecked: number; schemaMissingTotal: number };
-    console.log(
+/** The failure corpus, and a record of what was left out of it. */
+export function failureSection(
+  prepared: PreparedRun,
+  outcomes: ReadonlyMap<string, readonly CaseRun[]>,
+): { failures: unknown; failureSample: unknown } {
+  // The cap used to be 25 per arm, which made the only material a failure can be
+  // diagnosed from a 1.4% sample — and it said nothing about being a sample, so 25 read
+  // as the set.
+  const corpus = failureCorpus([...outcomes.entries()], FAILURE_SAMPLE, (id) =>
+    prepared.cases.find((question) => String(question.question_id) === id)?.question,
+  );
+  return { failures: corpus.failures, failureSample: corpus.failureSample };
+}
+
+/**
+ * The artifact, written once and only after the reporters have agreed with the arms.
+ *
+ * Before the file is written: an instrument that ran and did not reach the artifact is
+ * indistinguishable, downstream, from a mechanism that never ran.
+ */
+export function writeArtifact(
+  settings: BirdSettings,
+  report: Record<string, unknown>,
+  log: (line: string) => void = console.log,
+): void {
+  mkdirSync(join(settings.layout.root, 'eval/out'), { recursive: true });
+  writeFileSync(settings.layout.out, `${JSON.stringify(report, null, 2)}\n`);
+  log(`artifact: ${settings.layout.out}`);
+  if (settings.dryRun) {
+    const controls = report.controls as Controls;
+    log(
       `dry run: gold runnable ${String((report.gold as { runnable: number }).runnable)}/${String((report.gold as { executed: number }).executed)}; ` +
         `self-consistency ${(controls.selfConsistency * 100).toFixed(1)}%; negative false matches ${String(controls.negativeFalseMatches)}; ` +
         `schema columns checked ${String(controls.schemaChecked)}, missing ${String(controls.schemaMissingTotal)}`,
@@ -2383,26 +2620,32 @@ function finish(config: ReturnType<typeof settings>, report: Record<string, unkn
   }
 }
 
-/** Thresholds, not decoration: a run that trips one of these must fail CI. */
-function gate(report: Record<string, unknown>): void {
+/**
+ * Thresholds, not decoration: a run that trips one of these must fail CI.
+ *
+ * Returns the problems instead of setting an exit code, so the list is a value a test can
+ * read. The version that called `process.exitCode = 1` could only be observed by running
+ * the whole harness against a real dataset.
+ */
+export function evaluateGate(report: Record<string, unknown>): string[] {
   const goldRate = (report.gold as { runnableRate: number }).runnableRate;
-  const controls = report.controls as {
-    selfConsistency: number;
-    negativeFalseMatches: number;
-    schemaMissingTotal: number;
-    schemaChecked: number;
-  };
+  const controls = report.controls as Controls;
   const arms = report.arms as { arm: string; accuracy: number }[];
   const problems: string[] = [];
   if (goldRate < 0.98) problems.push(`gold runnable rate ${(goldRate * 100).toFixed(1)}% is below 98%`);
-  if (controls.selfConsistency < 1) problems.push(`self-consistency ${(controls.selfConsistency * 100).toFixed(1)}% is not 100%`);
-  if (controls.negativeFalseMatches !== 0) problems.push(`${controls.negativeFalseMatches} negative control(s) matched a gold result`);
+  if (controls.selfConsistency < 1) {
+    problems.push(`self-consistency ${(controls.selfConsistency * 100).toFixed(1)}% is not 100%`);
+  }
+  if (controls.negativeFalseMatches !== 0) {
+    problems.push(`${controls.negativeFalseMatches} negative control(s) matched a gold result`);
+  }
   if (controls.schemaMissingTotal !== 0) {
     problems.push(`${controls.schemaMissingTotal} of ${controls.schemaChecked} advertised columns do not exist in the database`);
   }
-  const truncated = (report.controls as { truncatedPrompts: { db: string; shown: number; total: number }[] }).truncatedPrompts;
-  if (truncated.length > 0) {
-    problems.push(`schema card truncated for ${truncated.map((entry) => `${entry.db} (${entry.shown}/${entry.total})`).join(', ')}`);
+  if (controls.truncatedPrompts.length > 0) {
+    problems.push(
+      `schema card truncated for ${controls.truncatedPrompts.map((entry) => `${entry.db} (${entry.shown}/${entry.total})`).join(', ')}`,
+    );
   }
   const best = arms.reduce((top, arm) => Math.max(top, arm.accuracy), 0);
   if (best < 0.05) problems.push(`best arm accuracy ${(best * 100).toFixed(1)}% is not above 5%: the harness sees no signal`);
@@ -2411,14 +2654,149 @@ function gate(report: Record<string, unknown>): void {
   if (first !== undefined && last !== undefined && last.accuracy < first.accuracy - 0.05) {
     problems.push(`${last.arm} trails ${first.arm} by more than 5pp, which is a regression not a result`);
   }
-  if (problems.length > 0) {
-    for (const problem of problems) console.error(`GATE FAILED: ${problem}`);
-    process.exitCode = 1;
-    return;
+  return problems;
+}
+
+/**
+ * The second model is required by two arms and by nothing else.
+ *
+ * Naming the missing variable matters: "the arm needs a second model" sent me looking at
+ * the workflow's model input the first time, when the key was what was absent. So does
+ * naming the reason: a judged arm generates three candidates and would still do so with
+ * no second model — it would just quietly judge with the first one.
+ */
+export function secondModelRoles(arms: readonly string[]): { draws: boolean; judges: boolean } {
+  return {
+    draws: arms.some((name) => (resolveArm(name)?.mixed ?? []).some((source) => parseMixedSource(source).provider === 'second')),
+    judges: arms.some((name) => resolveArm(name)?.judge === 'second'),
+  };
+}
+
+export function assertSecondModel(settings: BirdSettings, roles: { draws: boolean; judges: boolean }): void {
+  if (!roles.draws && !roles.judges) return;
+  if (settings.second.model !== '' && settings.second.apiKey !== '') return;
+  const missing = [
+    settings.second.model === '' ? 'BIRD_SECOND_MODEL' : '',
+    settings.second.apiKey === '' ? 'a second key (BIRD_SECOND_API_KEY or ZHIPU_API_KEY)' : '',
+  ]
+    .filter(Boolean)
+    .join(' and ');
+  const consequence = roles.draws
+    ? 'the arm would generate two candidates where it promised three'
+    : 'the arm would be judged by the primary model while claiming a swap';
+  const cause = roles.draws ? 'draws a candidate from the second model' : 'asks the second model to judge';
+  throw new Error(`this arm set ${cause}, but ${missing} is not set; ${consequence}`);
+}
+
+/** The provider pair a run needs, built from settings. `second` is absent unless configured. */
+export function createProviders(settings: BirdSettings): {
+  provider: LlmProvider;
+  second?: LlmProvider;
+} {
+  const provider = createHttpProvider({
+    baseUrl: settings.baseUrl,
+    apiKey: settings.apiKey,
+    model: settings.model,
+    retries: settings.retries,
+    retryDelayMs: settings.retryDelayMs,
+    timeoutMs: settings.timeoutMs,
+  });
+  if (settings.second.model === '') return { provider };
+  const second = createHttpProvider({
+    baseUrl: settings.second.baseUrl === '' ? settings.baseUrl : settings.second.baseUrl,
+    apiKey: settings.second.apiKey,
+    model: settings.second.model,
+    retries: settings.retries,
+    retryDelayMs: settings.retryDelayMs,
+    timeoutMs: settings.timeoutMs,
+  });
+  return { provider, second };
+}
+
+export interface BirdRunOptions {
+  readonly log?: (line: string) => void;
+}
+
+/**
+ * A whole run, from a settings object to an artifact on disk.
+ *
+ * No `process.exit`, no module-level environment, and no work behind an early return that
+ * a caller cannot observe: the report is returned and the artifact is written before the
+ * function resolves, which is what makes "the instrument ran" a fact a test can assert.
+ */
+export async function runBird(settings: BirdSettings, options: BirdRunOptions = {}): Promise<Record<string, unknown>> {
+  const log = options.log ?? ((line: string) => console.log(line));
+  const { provider, second } = createProviders(settings);
+  assertSecondModel(settings, secondModelRoles(settings.arms));
+  const oracle = createOracle(settings.layout.oracleScript, settings.layout.databaseRoot);
+  try {
+    const prepared = await prepareRun(settings, { oracle, provider });
+    const report = baseReport(prepared);
+    if (settings.dryRun) {
+      previewPrompts(prepared, report);
+      writeArtifact(settings, report, log);
+      return report;
+    }
+    const outcomes = new Map<string, readonly CaseRun[]>();
+    const armReports: ArmReportRow[] = [];
+    for (const name of settings.arms) {
+      const armRun = await runArm(prepared, name, { oracle, provider, ...(second === undefined ? {} : { second }) });
+      // Keyed by the requested name, not the resolved one: an A/A duplicate resolves to
+      // the same Arm, and keying by that overwrote the first run with the second, which
+      // silently made the pair compare an arm with itself and report `aa: undefined`.
+      outcomes.set(name, armRun.runs);
+      armReports.push(armRun.row);
+      log(armRun.line);
+    }
+    // Every arm must keep its own row: two rows with the same label would let a
+    // duplicate stand in for the arm it duplicates.
+    assertUniqueArmLabels(armReports.map((entry) => entry.arm));
+    const paired = pairedComparisons(outcomes);
+    if (paired.aa !== undefined) {
+      const aa = paired.aa as { arm: string; delta: number; onlyFirst: number; onlySecond: number; p: number };
+      report.aa = paired.aa;
+      log(
+        `A/A ${aa.arm}: ${(aa.delta * 100).toFixed(1)}pp (${String(aa.onlyFirst)}/${String(aa.onlySecond)}, p=${aa.p.toFixed(3)}) — the harness's own noise`,
+      );
+    }
+    report.comparisons = paired.comparisons;
+    report.ablations = paired.ablations;
+    report.arms = armReports;
+    report.cases = caseRows(outcomes);
+    const { failures, failureSample } = failureSection(prepared, outcomes);
+    report.failures = failures;
+    report.failureSample = failureSample;
+    assertReportComplete({ arms: armReports });
+    writeArtifact(settings, report, log);
+    return report;
+  } finally {
+    await oracle.close();
   }
-  console.log('gates: gold runnable, controls, signal and no regression all hold');
+}
+
+/**
+ * The CLI: read the environment once, run, gate, and return an exit code.
+ *
+ * Nothing else lives here. The oracle's lifetime, the artifact and the gate's verdict are
+ * all in `runBird`/`evaluateGate`, so a test drives the same code the workflow does.
+ */
+export async function main(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+  argv: readonly string[] = process.argv.slice(2),
+  root: string = resolve(new URL('../..', import.meta.url).pathname),
+): Promise<number> {
+  const settings = resolveSettings(env, argv, root);
+  const report = await runBird(settings);
+  if (settings.dryRun) return 0;
+  const problems = evaluateGate(report);
+  if (problems.length === 0) {
+    console.log('gates: gold runnable, controls, signal and no regression all hold');
+    return 0;
+  }
+  for (const problem of problems) console.error(`GATE FAILED: ${problem}`);
+  return 1;
 }
 
 if (process.argv[1] !== undefined && pathToFileURL(process.argv[1]).href === import.meta.url) {
-  await main();
+  process.exitCode = await main();
 }
