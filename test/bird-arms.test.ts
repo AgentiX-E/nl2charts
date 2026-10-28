@@ -948,3 +948,58 @@ describe('guards whose record carries no message', () => {
     expect(decompositionFunnel([{ decomposition: {} }] as never)).toEqual({ asked: 1, fired: 0, share: 0, meanSteps: 0 });
   });
 });
+
+/**
+ * The adaptive arm is the only one whose prompt is chosen per question.
+ *
+ * It is in the arm table and has never been run end to end (a full run costs four calls a
+ * question), so its three branches — the profile lookup, the profile's own `descriptions`
+ * and `foreignKeys`, and the notes block it adds — were all unexecuted. They are read here
+ * through the same `promptFor` the runner and the prompt-size column both use.
+ */
+describe('the adaptive profile arm', () => {
+  const question = {
+    question_id: 1,
+    db_id: 'shop',
+    question: 'What is the ratio of orders paid in EUR?',
+    evidence: '',
+    SQL: 'select 1',
+    difficulty: 'moderate' as const,
+  };
+
+  it('turns the schema-card descriptions off for a question whose shape dictates the notes', () => {
+    const options = promptFor(resolveArm('adaptive') as Arm, question, {});
+    expect(options.descriptions).toBe(false);
+    expect(options.foreignKeys).toBe(false);
+    expect(options.notes?.join(' ')).toContain('NULLIF');
+  });
+
+  it('answers a window question with window notes, not ratio ones', () => {
+    const options = promptFor(resolveArm('adaptive') as Arm, { ...question, question: 'Rank the stores by revenue and show the previous month.' }, {});
+    expect(options.notes?.join(' ')).toContain('window function');
+    expect(options.notes?.join(' ')).not.toContain('NULLIF');
+  });
+
+  it('leaves an ordinary question with no notes and the descriptions on', () => {
+    const options = promptFor(resolveArm('adaptive') as Arm, { ...question, question: 'How many orders are there?' }, {});
+    expect(options.notes).toEqual([]);
+    expect(options.descriptions).toBe(true);
+    expect(options.foreignKeys).toBe(true);
+  });
+
+  it('reads the same profile for the distinct-prompt count as for the request', () => {
+    // The size column and the distinct-prompt check both call `promptFor`, so a profile that
+    // is chosen in one place and not the other would make two different questions look
+    // identical — the drift this function was extracted to stop.
+    const first = promptFor(resolveArm('adaptive') as Arm, question, {});
+    const second = promptFor(resolveArm('adaptive') as Arm, { ...question, question: 'Rank the stores by revenue.' }, {});
+    expect(JSON.stringify(first)).not.toBe(JSON.stringify(second));
+  });
+
+  it('treats the dataset-subset placement as the inline one, descriptions included', () => {
+    // `definitions: 'dataset-subset'` attaches the same sentences to the column line, so the
+    // descriptions switch is part of that placement rather than a second lever.
+    const subset = promptFor({ ...(resolveArm('names') as Arm), definitions: 'dataset-subset' }, question, {});
+    expect(subset.descriptions).toBe(true);
+  });
+});
