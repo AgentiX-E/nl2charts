@@ -14,7 +14,7 @@ import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterAll, describe, expect, it } from 'vitest';
 import { createOracle } from '../eval/bird/oracle.js';
-import { profileDatabase } from '../eval/bird/profile.js';
+import { defaultProfileCache, profileDatabase } from '../eval/bird/profile.js';
 
 const root = mkdtempSync(join(tmpdir(), 'nl2charts-profile-'));
 const cache = join(root, 'cache');
@@ -142,5 +142,61 @@ describe('database profile', () => {
     const profile = await profileDatabase(oracle, 'shop', { cacheDir: cache, force: true });
     expect(profile.columns.length).toBeGreaterThan(5);
     expect(profile.db).toBe('shop');
+  });
+});
+
+/**
+ * A database whose table disappears halfway through a profile.
+ *
+ * `drop table` between the listing and the aggregate is the failure the `!stats.ok` guard
+ * exists for, and it is reachable with nothing but SQLite: a second connection renames the
+ * table after the listing has been read. The wrapper only delegates — every query is still
+ * answered by the real oracle, and the error the profile sees is SQLite's own.
+ */
+describe('a table that vanishes mid-profile', () => {
+  const racing = join(root, 'races');
+  mkdirSync(racing, { recursive: true });
+
+  it('keeps every other column and does not fail the database', async () => {
+    const file = join(racing, 'races.sqlite');
+    const writer = new DatabaseSync(file);
+    writer.exec(`
+      create table alpha (a_id integer, label text);
+      insert into alpha values (1, 'x'), (2, 'y');
+      create table beta (b_id integer, grade text);
+      insert into beta values (1, 'a'), (2, 'b');
+    `);
+    writer.close();
+
+    let renamed = false;
+    let sawStatsFailure = false;
+    const racingOracle = {
+      async run(db: string, sql: string) {
+        // The listing and `pragma_table_info` both succeed; the table is renamed before the
+        // aggregate runs, which is the ordering that produces a failing statistic rather
+        // than a column list that is simply empty.
+        if (!renamed && sql.startsWith('select count(')) {
+          const other = new DatabaseSync(file);
+          other.exec('alter table alpha rename to alpha_gone');
+          other.close();
+          renamed = true;
+        }
+        const result = await oracle.run(db, sql);
+        if (!result.ok) sawStatsFailure = true;
+        return result;
+      },
+      close: () => oracle.close(),
+    };
+
+    const profile = await profileDatabase(racingOracle, 'races', { cacheDir: cache, force: true });
+    expect(sawStatsFailure).toBe(true);
+    expect(profile.columns.map((column) => column.column)).toContain('grade');
+    expect(profile.columns.map((column) => column.column)).not.toContain('label');
+  });
+
+  it('names the repository cache directory without writing to it', () => {
+    // The default is a value, not a branch: making it reachable through a call would mean a
+    // test that leaves a profile inside the repository for the next run to read.
+    expect(defaultProfileCache().endsWith('eval/.cache/bird/profiles')).toBe(true);
   });
 });

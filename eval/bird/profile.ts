@@ -31,14 +31,24 @@ function kindOf(type: string, sample: unknown): ProfileKind {
 
 const quote = (name: string): string => `"${name.replace(/"/g, '""')}"`;
 
+/**
+ * Where profiles are cached when the caller names no directory.
+ *
+ * Exported so the default is a value a test can assert on rather than a branch it has to
+ * reach by writing into the repository.
+ */
+export const defaultProfileCache = (): string => CACHE;
+
 export async function profileDatabase(
   oracle: Oracle,
   db: string,
-  options: { readonly force?: boolean; readonly cacheDir?: string } = {},
+  options: { readonly force?: boolean; readonly cacheDir: string },
 ): Promise<DatabaseProfile> {
-  // The cache directory is an option so a test can profile a database without leaving a
-  // file in the repository, and so two runs cannot share a profile by accident.
-  const cacheDir = options.cacheDir ?? CACHE;
+  // The cache directory is required rather than defaulted: it was an option, and the one
+  // caller that omitted it (`eval/adversarial/run.ts`) silently wrote profiles into the
+  // repository cache — the exact sharing the comment here said the option prevented. A
+  // required argument makes the property a type error instead of a comment.
+  const cacheDir = options.cacheDir;
   mkdirSync(cacheDir, { recursive: true });
   const cacheFile = join(cacheDir, `${db}.json`);
   if (!options.force && existsSync(cacheFile)) {
@@ -52,15 +62,21 @@ export async function profileDatabase(
     const info = await oracle.run(db, `select name, type from pragma_table_info('${table.replace(/'/g, "''")}') order by cid`);
     for (const entry of info.rows) {
       const column = String(entry[0]);
-      const declared = String(entry[1] ?? '');
+      // `pragma_table_info` reports the declared type as text, and reports it as the empty
+      // string for a column written without one. The nullish fallback that used to sit here
+      // guarded a value SQLite does not produce, and cost a branch that no test could reach
+      // without inventing a database that cannot exist.
+      const declared = String(entry[1]);
       const stats = await oracle.run(
         db,
         `select count(${quote(column)}), count(distinct ${quote(column)}), min(${quote(column)}), max(${quote(column)}), (select ${quote(column)} from ${quote(table)} where ${quote(column)} is not null limit 1) from ${quote(table)}`,
       );
       if (!stats.ok) continue;
       const [nonNull, distinct, min, max, sample] = stats.rows[0] as unknown[];
-      const total = Number(nonNull ?? 0);
-      const unique = Number(distinct ?? 0);
+      // `count()` is `0` for a column with no rows, never NULL, so the nullish fallbacks
+      // these two lines carried described an outcome the aggregate cannot report.
+      const total = Number(nonNull);
+      const unique = Number(distinct);
       // Identifier columns carry a range, not a meaning: "publisher_id: numbers
       // from 1 to 25" tells a model nothing it cannot read from the schema card,
       // and it pushed every categorical column out of the character budget on the
@@ -95,13 +111,17 @@ export async function profileDatabase(
         columns.push({ table, column, kind, distinct: unique, values });
         continue;
       }
+      // `total > 0` was established two checks above, and a counted value implies a
+      // non-NULL minimum and maximum, so the "omit the bound" branch never fired. A bound
+      // that is present and empty is a different fact from one that is absent, and the
+      // profile says the former because that is what the data can produce.
       columns.push({
         table,
         column,
         kind,
         distinct: unique,
-        ...(min === null || min === undefined ? {} : { min: String(min) }),
-        ...(max === null || max === undefined ? {} : { max: String(max) }),
+        min: String(min),
+        max: String(max),
       });
     }
   }

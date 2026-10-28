@@ -21,8 +21,8 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
 import { afterAll, describe, expect, it, vi } from 'vitest';
+import { MINI_GOLD, MINI_QUESTIONS, writeMiniBirdDataset } from './helpers/bird-dataset.js';
 import { startEndpoint } from './helpers/endpoint.js';
 import type { EndpointRequest } from './helpers/endpoint.js';
 import { assertSecondModel, main, resolveSettings } from '../eval/bird/run.js';
@@ -35,29 +35,12 @@ afterAll(() => {
 /** Where `BIRD_DATA` points: the directory BIRD ships under `MINIDEV/`. */
 const data = join(root, 'MINIDEV');
 
-/**
- * Six questions whose gold statements all return rows.
- *
- * Not decoration: the negative control executes each gold against `[]` and fails the run
- * if the judge calls that a match, so a gold returning nothing would make the control
- * vacuous and the run unpublishable for the wrong reason.
- */
-const QUESTIONS: { id: number; question: string; sql: string; difficulty: 'simple' | 'moderate' | 'challenging' }[] = [
-  { id: 1, question: 'How many items are there?', sql: 'select count(*) from items', difficulty: 'simple' },
-  { id: 2, question: 'What is the total price of every item?', sql: 'select sum(price) from items', difficulty: 'simple' },
-  { id: 3, question: 'How many orders are there?', sql: 'select count(*) from orders', difficulty: 'moderate' },
-  { id: 4, question: 'What is the largest quantity on an order?', sql: 'select max(qty) from orders', difficulty: 'moderate' },
-  { id: 5, question: 'How many distinct item names are there?', sql: 'select count(distinct name) from items', difficulty: 'challenging' },
-  { id: 6, question: 'What is the average item price?', sql: 'select avg(price) from items', difficulty: 'challenging' },
-  // The one question that names a stored literal. `values` only builds a block when the
-  // question spells a value the database holds, so without a question like this the
-  // value-grounded candidate is byte-identical to its parent and a mixed arm's third
-  // source is a copy — which is what `assertMixedFeasible` refuses to let a run publish.
-  { id: 7, question: 'How many orders are there for the pen?', sql: "select count(*) from orders where item_id = 1", difficulty: 'moderate' },
-];
-
+/** The fixture's questions, under the names this file has always used. */
+const QUESTIONS = MINI_QUESTIONS;
 /** The statement a well-behaved model writes for each question. */
-const GOLD: Record<string, string> = Object.fromEntries(QUESTIONS.map((entry) => [entry.question, entry.sql]));
+const GOLD = MINI_GOLD;
+
+writeMiniBirdDataset(data);
 
 /** What the model answers when the prompt asks for the semantics of a schema. */
 const DEFINITIONS = [
@@ -69,76 +52,6 @@ const DEFINITIONS = [
 function fenced(sql: string): string {
   return '```sql\n' + sql + '\n```';
 }
-
-function writeDataset(): void {
-  const db = join(data, 'dev_databases', 'shop');
-  const descriptions = join(db, 'database_description');
-  mkdirSync(descriptions, { recursive: true });
-  const writer = new DatabaseSync(join(db, 'shop.sqlite'));
-  writer.exec(`
-    create table items (id integer primary key, name text, price real);
-    insert into items values (1, 'pen', 1.5), (2, 'cup', 3.25), (3, 'pen', 1.5);
-    create table orders (id integer primary key, item_id integer, qty integer);
-    insert into orders values (1, 1, 2), (2, 2, 1), (3, 1, 5);
-  `);
-  writer.close();
-  writeFileSync(
-    join(data, 'mini_dev_sqlite.json'),
-    JSON.stringify(
-      QUESTIONS.map((entry) => ({
-        question_id: entry.id,
-        db_id: 'shop',
-        question: entry.question,
-        evidence: '',
-        SQL: entry.sql,
-        difficulty: entry.difficulty,
-      })),
-    ),
-  );
-  writeFileSync(
-    join(data, 'dev_tables.json'),
-    JSON.stringify([
-      {
-        db_id: 'shop',
-        table_names: ['Items', 'Orders'],
-        table_names_original: ['items', 'orders'],
-        column_names: [
-          [-1, '*'],
-          [0, 'id'],
-          [0, 'name'],
-          [0, 'price'],
-          [1, 'id'],
-          [1, 'item_id'],
-          [1, 'qty'],
-        ],
-        column_names_original: [
-          [-1, '*'],
-          [0, 'id'],
-          [0, 'name'],
-          [0, 'price'],
-          [1, 'id'],
-          [1, 'item_id'],
-          [1, 'qty'],
-        ],
-        column_types: ['text', 'integer', 'text', 'real', 'integer', 'integer', 'integer'],
-        foreign_keys: [[5, 1]],
-      },
-    ]),
-  );
-  // The manifest is what a derived split ships; `databasesFromManifest` reads it first.
-  writeFileSync(join(data, 'manifest.json'), JSON.stringify({ databases: [{ db: 'shop' }] }));
-  writeFileSync(
-    join(descriptions, 'items.csv'),
-    [
-      'original_column_name,column_name,column_description,data_format,value_description',
-      'id,id,primary key,integer,',
-      'name,name,the label the store sells under,text,',
-      'price,price,list price of one unit,real,in yuan',
-    ].join('\n'),
-  );
-}
-
-writeDataset();
 
 /**
  * How one scenario answers.
