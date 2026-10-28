@@ -64,13 +64,14 @@ const UNMEASURED: readonly { readonly root: string; readonly suffixes: readonly 
     root: 'eval',
     suffixes: ['.ts'],
     reason:
-      'benchmark harness. Measured on request it is 49.5% lines / 86.6% functions / 87.1% branches; the gaps are the run entrypoints, which need a dataset and a model endpoint. Its correctness is currently held by the artifact gates and by the runs themselves',
+      'benchmark harness. Measured on request it is 63.9% lines / 92.9% functions / 87.7% branches (2026-10-28); `tools/check-eval-coverage.mjs` holds every file to a committed ledger so none can fall back, and I-37 brings each module to 95% before eval/ joins the main include',
     task: 'I-37',
   },
   {
     root: 'tools',
     suffixes: ['.mjs'],
-    reason: 'gate scripts. Each is executed by gate:all, and every one that decides something carries a --self-test that runs in CI',
+    reason:
+      'gate scripts. Each is executed by gate:all, and every one that decides something carries a --self-test that runs in CI; what protects the numbers is that the gate runs, not its own line coverage',
     task: 'I-37',
   },
 ];

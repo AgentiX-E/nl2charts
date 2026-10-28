@@ -9,3 +9,4 @@ coverage/
 !.env.example
 eval/out/
 eval/.cache/
+coverage-eval/

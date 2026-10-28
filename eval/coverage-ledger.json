@@ -1,0 +1,176 @@
+{
+  "note": "Per-file eval coverage. Enforced by tools/check-eval-coverage.mjs: a number may rise freely and may only fall with an explicit, reviewed edit. `target` is the standard every file must reach before eval/ joins the main gate.",
+  "target": 95,
+  "tolerancePp": 0.2,
+  "measuredAt": "2026-10-28",
+  "totals": {
+    "lines": 63.86,
+    "statements": 63.86,
+    "functions": 92.9,
+    "branches": 87.72
+  },
+  "files": {
+    "eval/ablate.ts": {
+      "lines": 89.87,
+      "statements": 89.87,
+      "functions": 80,
+      "branches": 77.77
+    },
+    "eval/adversarial/cases.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 100
+    },
+    "eval/adversarial/run.ts": {
+      "lines": 0,
+      "statements": 0,
+      "functions": 100,
+      "branches": 100
+    },
+    "eval/baseline.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 98.8
+    },
+    "eval/bird/data.ts": {
+      "lines": 98.25,
+      "statements": 98.25,
+      "functions": 100,
+      "branches": 84.88
+    },
+    "eval/bird/diagnose-corpus.ts": {
+      "lines": 53.23,
+      "statements": 53.23,
+      "functions": 75,
+      "branches": 58.82
+    },
+    "eval/bird/failure-shape.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 89.58
+    },
+    "eval/bird/failures.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 87.5
+    },
+    "eval/bird/metrics.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 96.15
+    },
+    "eval/bird/oracle.ts": {
+      "lines": 98.03,
+      "statements": 98.03,
+      "functions": 100,
+      "branches": 66.66
+    },
+    "eval/bird/profile.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 80
+    },
+    "eval/bird/prompt-shape.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 100
+    },
+    "eval/bird/recall.ts": {
+      "lines": 73.33,
+      "statements": 73.33,
+      "functions": 83.33,
+      "branches": 80
+    },
+    "eval/bird/retrieval.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 90.9
+    },
+    "eval/bird/run.ts": {
+      "lines": 31.42,
+      "statements": 31.42,
+      "functions": 78.78,
+      "branches": 90.81
+    },
+    "eval/bird/samples.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 100
+    },
+    "eval/bird/shape.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 100
+    },
+    "eval/bird/stability.ts": {
+      "lines": 0,
+      "statements": 0,
+      "functions": 100,
+      "branches": 100
+    },
+    "eval/bird/synthesize.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 68.42
+    },
+    "eval/bird/values.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 95.91
+    },
+    "eval/fixtures/semantic-model.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 100
+    },
+    "eval/linking-ablation.ts": {
+      "lines": 97.95,
+      "statements": 97.95,
+      "functions": 100,
+      "branches": 83.33
+    },
+    "eval/live/cases.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 87.5
+    },
+    "eval/live/run.ts": {
+      "lines": 0,
+      "statements": 0,
+      "functions": 0,
+      "branches": 0
+    },
+    "eval/preflight.ts": {
+      "lines": 97.64,
+      "statements": 97.64,
+      "functions": 100,
+      "branches": 90.47
+    },
+    "eval/run.ts": {
+      "lines": 98.41,
+      "statements": 98.41,
+      "functions": 100,
+      "branches": 92.59
+    },
+    "eval/semantic-ablation.ts": {
+      "lines": 97.67,
+      "statements": 97.67,
+      "functions": 100,
+      "branches": 72.22
+    }
+  }
+}

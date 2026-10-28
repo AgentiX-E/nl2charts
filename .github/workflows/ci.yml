@@ -78,6 +78,13 @@ jobs:
         run: pnpm test:coverage
       - name: Coverage gate (per package, all four dimensions)
         run: pnpm gate:coverage
+      # The packages are measured and the harness that produces every published number was
+      # not, so its coverage could only go down. This is not a threshold — `eval/` is at 64%
+      # and a 95% red would be red for months — it is a ratchet against a committed ledger:
+      # no file may measure lower than it did, and the distance to 95% is printed on every
+      # push so the campaign's progress is a diff rather than a claim.
+      - name: Eval coverage ratchet (no file below its ledger)
+        run: node tools/check-eval-coverage.mjs --self-test && node tools/check-eval-coverage.mjs
       - name: Dependency layering
         run: pnpm gate:layering
       - name: Layering checker self-test
