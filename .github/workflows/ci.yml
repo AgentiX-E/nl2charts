@@ -127,7 +127,15 @@ jobs:
       - name: Semantic compiler ablation
         run: pnpm bench:semantic
       - name: Publish summary
-        run: node tools/bench-summary.mjs >> "$GITHUB_STEP_SUMMARY"
+        # Same reason as the BIRD jobs: a failed benchmark is the run whose numbers are
+        # needed, and a summary that only runs on success publishes the passing runs only.
+        if: always()
+        run: |
+          if [ -f eval/out/results.json ]; then
+            node tools/bench-summary.mjs >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'no artifact was written, so there is nothing to summarise' >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Upload benchmark artifacts
         if: always()
         uses: actions/upload-artifact@v5

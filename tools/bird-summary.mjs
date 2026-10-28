@@ -16,7 +16,17 @@ function read(name) {
   }
 }
 
-const report = read('bird-eval.json');
+// The artifact carries the path it was written to, because a run may be told to write
+// somewhere else (`BIRD_OUT`); a summary that read the default path would describe a
+// different run than the one that just finished. Overridable for the same reason.
+const reportPath = process.env.BIRD_OUT ?? join(ROOT, 'eval/out/bird-eval.json');
+const report = (() => {
+  try {
+    return JSON.parse(readFileSync(reportPath, 'utf8'));
+  } catch {
+    return null;
+  }
+})();
 const portability = read('duckdb-portability.json');
 const stability = read('bird-stability.json');
 const adversarial = read('adversarial.json');
@@ -115,6 +125,23 @@ if (report === null) {
         ...emptied.map(
           (arm) =>
             `| \`${arm.arm}\` | ${arm.emptyRetry.mode} | ${arm.emptyRetry.dropped} | ${arm.emptyRetry.fired} | ${arm.emptyRetry.recovered} | ${arm.emptyRetry.extraCallsPerCase} |`,
+        ),
+      );
+    }
+    // What the fourth prompt produced. Whether the model followed the format decides
+    // whether a delta measures decomposition or a longer instruction, so it is printed
+    // beside the number instead of being left in an artifact nobody opens.
+    const decomposed = report.arms.filter((arm) => arm.decomposition !== undefined);
+    if (decomposed.length > 0) {
+      lines.push(
+        '',
+        '### What the decomposition prompt produced',
+        '',
+        '| arm | cases asked | wrote steps | share | steps per case |',
+        '| --- | --- | --- | --- | --- |',
+        ...decomposed.map(
+          (arm) =>
+            `| \`${arm.arm}\` | ${arm.decomposition.asked} | ${arm.decomposition.fired} | ${(arm.decomposition.share * 100).toFixed(1)}% | ${arm.decomposition.meanSteps} |`,
         ),
       );
     }

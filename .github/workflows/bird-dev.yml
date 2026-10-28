@@ -79,9 +79,20 @@ jobs:
           BIRD_LIMIT: ${{ inputs.limit }}
       - name: Accuracy floor
         run: pnpm gate:bird
+      # The run that fails is the run whose numbers matter most, and these two steps used to
+      # run only on success: `40534288883` failed the floor gate and the artifact — the only
+      # copy of the per-case rows and the McNemar p-values — was never uploaded, so the run
+      # could not be read at all. The summary states the absence instead of crashing on it.
       - name: Publish summary
-        run: node tools/bird-summary.mjs
+        if: always()
+        run: |
+          if [ -f eval/out/bird-eval.json ]; then
+            node tools/bird-summary.mjs >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'no artifact was written, so there is nothing to summarise' >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Upload dev evaluation
+        if: always()
         uses: actions/upload-artifact@v5
         with:
           name: bird-dev-eval

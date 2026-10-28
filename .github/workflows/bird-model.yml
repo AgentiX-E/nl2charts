@@ -127,7 +127,12 @@ jobs:
         run: pnpm gate:bird
       - name: Publish summary
         if: always()
-        run: node tools/bird-summary.mjs >> "$GITHUB_STEP_SUMMARY"
+        run: |
+          if [ -f eval/out/bird-eval.json ]; then
+            node tools/bird-summary.mjs >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'no artifact was written, so there is nothing to summarise' >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Upload the run
         if: always()
         uses: actions/upload-artifact@v5
