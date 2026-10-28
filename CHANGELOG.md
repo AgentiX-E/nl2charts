@@ -19,6 +19,29 @@ cannot be argued with.
 
 ### Added
 
+- **The BIRD runner is drivable, so its guards are testable.** `eval/bird/run.ts` was one
+  1,124-line `main()` that read `process.env` at import time and exited through
+  `process.exitCode`; nothing in it could be observed without spending a model run on the real
+  benchmark, so schema fidelity, the gold controls, the failure-share refusal and the gate were
+  all claims with no test behind them. It is now `resolveLayout` (paths as a value),
+  `resolveSettings` (the environment as a parameter), `prepareRun` (dataset, schemas, blocks and
+  controls), `runArm` (one arm over every case), `armReportRow`, `pairedComparisons`,
+  `evaluateGate` (returns the problems; the caller decides the exit code) and `runBird`, with a
+  `main` that is nine lines. `eval/bird/run.ts` is **99.2% lines / 100% functions / 90.9%
+  branches**, from 31.4 / 78.8 / 90.8 — and the branch ratio *rose* even though the denominator
+  it was taken over grew from 196 sites to 685 (ADR-216).
+- **A BIRD-shaped dataset in a temporary directory, and a real endpoint.**
+  `test/bird-run-e2e.test.ts` builds questions, `dev_tables.json`, a description CSV and a real
+  SQLite file, serves the OpenAI chat shape from a loopback `http.Server`, and drives the same
+  `main()` the workflow calls: 38 cases covering the dry run, two paired arms, an A/A duplicate,
+  a sampling arm with an empty-result turn, a repair arm that succeeds and one that never lands,
+  the pairwise selector, a decomposed candidate, a candidate set that lost exactly one member, a
+  corrupt value cache, pinned and regenerated definitions, a semantics request that never
+  answers, a gold that does not run, a table file advertising a column the database does not
+  have, a gold that returns no rows, and an endpoint that is down for the selector, for every
+  sample, or too slow to answer before the deadline. The oracle is the real Python process;
+  nothing here is a mock.
+
 - **The harness is measured now, and no file of it may fall behind.** `eval/` produced every
   published number and sat outside the coverage include, so its coverage could only go down
   unnoticed: 49.5% of lines. It is **64.0% lines / 93.6% functions / 88.5% branches** as of this
@@ -59,6 +82,19 @@ cannot be argued with.
   silently dropping the other.
 
 ### Fixed
+
+- **A definition block that failed to generate left no trace in the artifact.**
+  `synthesizedDefinitions` recorded the empty string and `definitionsProvenance` recorded
+  nothing, so a database whose semantics request was refused was indistinguishable in the report
+  from a database whose arm never needed definitions — and the arm then read as its parent with a
+  longer prompt. The failure is now a provenance state (`failed: <message>`), which is what the
+  report already promised when it said which databases were written in this run and which came
+  from cache.
+- **An A/A duplicate was labelled with the arm it resolved to, not the name it was asked for.**
+  Both rows said `names`, and the uniqueness guard refused the run — correctly, since two rows
+  with one label let a duplicate stand in for the arm it duplicates. The row and the printed line
+  now carry the requested name, so `names#2` keeps its own row and the pair compares two runs.
+
 - **Six measurement scripts could only be observed through `process.exit`.** `preflight`,
   `run`, `ablate`, `linking-ablation`, `semantic-ablation` and `profile` were top-level scripts
   whose result was a log line and an exit code, so the properties they exist to establish could

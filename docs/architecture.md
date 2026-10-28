@@ -197,6 +197,33 @@ code. That is what makes the controls testable: `runPreflight` is driven against
 endpoint that answers, refuses, and answers too slowly; `runHarness` and both ablations run
 against the real DuckDB fixtures; `profileDatabase` runs against a real SQLite file.
 
+The BIRD runner (`eval/bird/run.ts`) needed one more step, because its parts are not
+independent scripts. It is now a pipeline of values rather than one `main()`:
+
+| Function | What it owns |
+| --- | --- |
+| `resolveLayout(env, root)` | every path a run reads or writes, as a value instead of a module constant read at import time |
+| `resolveSettings(env, argv, root)` | the arm chain, the sample size, the harness knobs, the second model — a pure function of its arguments |
+| `prepareRun(settings, io)` | dataset, schemas, blocks, schema fidelity, gold execution, and the controls, all before an arm runs |
+| `runArm(prepared, name, io)` | one arm over every case, its guards, its artifact row and its printed line |
+| `pairedComparisons` / `caseRows` / `failureSection` | the paired tests and the per-case rows a stratum needs |
+| `evaluateGate(report)` | the thresholds, returned as a list of problems rather than set as an exit code |
+| `runBird(settings)` | the whole run, from prepare to a written artifact |
+| `main(env, argv, root)` | nine lines: resolve, run, gate, exit code |
+
+`test/bird-run-e2e.test.ts` then drives `main` itself: a BIRD-shaped dataset in a temporary
+directory (questions, table file, description CSV, a real SQLite file), a loopback
+`http.Server` speaking the OpenAI chat shape, and the real Python oracle. The endpoint decides
+each answer from the prompt, so one server plays a correct model, a wrong one, one that returns
+no rows, one that is refused, and one that is too slow — and the same `main()` the workflow
+calls produces an artifact each time. That is the difference between a guard that is written
+and a guard that is known to fire.
+
+One measurement changed meaning in the process, which is worth recording: the file's *branch*
+ratio was 90.8% before this round and 90.9% after, while the number of branch sites v8 counted
+went from 196 to 685. An unexecuted body reports fewer sites, so the earlier ratio was taken
+over the part of the file that happened to run (ADR-216).
+
 ## Value model
 
 Rows are `Record<string, CanonicalValue>`. Before a row leaves the runtime:
