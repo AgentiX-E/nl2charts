@@ -31,9 +31,16 @@ function kindOf(type: string, sample: unknown): ProfileKind {
 
 const quote = (name: string): string => `"${name.replace(/"/g, '""')}"`;
 
-export async function profileDatabase(oracle: Oracle, db: string, options: { readonly force?: boolean } = {}): Promise<DatabaseProfile> {
-  mkdirSync(CACHE, { recursive: true });
-  const cacheFile = join(CACHE, `${db}.json`);
+export async function profileDatabase(
+  oracle: Oracle,
+  db: string,
+  options: { readonly force?: boolean; readonly cacheDir?: string } = {},
+): Promise<DatabaseProfile> {
+  // The cache directory is an option so a test can profile a database without leaving a
+  // file in the repository, and so two runs cannot share a profile by accident.
+  const cacheDir = options.cacheDir ?? CACHE;
+  mkdirSync(cacheDir, { recursive: true });
+  const cacheFile = join(cacheDir, `${db}.json`);
   if (!options.force && existsSync(cacheFile)) {
     return JSON.parse(readFileSync(cacheFile, 'utf8')) as DatabaseProfile;
   }

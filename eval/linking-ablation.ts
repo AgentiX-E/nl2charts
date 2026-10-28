@@ -1,4 +1,5 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';
 import { linkSchema } from '@agentix-e/nl2charts-ai';
 import type { Recaller, SchemaTable } from '@agentix-e/nl2charts-ai';
@@ -9,7 +10,7 @@ import { ROOT } from './run.js';
  * only when every expected column appears in the top 3, which is the budget the
  * prompt can afford.
  */
-const SCHEMA: SchemaTable[] = [
+export const SCHEMA: SchemaTable[] = [
   {
     table: 'orders',
     columns: [
@@ -32,12 +33,12 @@ const SCHEMA: SchemaTable[] = [
   },
 ];
 
-interface LinkingCase {
+export interface LinkingCase {
   readonly question: string;
   readonly expected: readonly string[];
 }
 
-const CASES: readonly LinkingCase[] = [
+export const CASES: readonly LinkingCase[] = [
   { question: 'revenue by region', expected: ['orders.amount', 'orders.region'] },
   { question: 'sales by territory', expected: ['orders.amount', 'orders.region'] },
   { question: 'orders in the north', expected: ['orders.order_id', 'orders.region'] },
@@ -65,13 +66,13 @@ const CASES: readonly LinkingCase[] = [
   { question: 'north store widget', expected: ['orders.region', 'orders.channel', 'orders.product'] },
 ];
 
-const ARMS: Record<string, readonly Recaller[]> = {
+export const ARMS: Record<string, readonly Recaller[]> = {
   name: ['name'],
   'name+alias': ['name', 'alias'],
   'name+alias+value': ['name', 'alias', 'value'],
 };
 
-function evaluate(recallers: readonly Recaller[]): { hits: number; misses: string[] } {
+export function evaluate(recallers: readonly Recaller[]): { hits: number; misses: string[] } {
   const misses: string[] = [];
   for (const testCase of CASES) {
     const top = linkSchema(testCase.question, SCHEMA, 3, recallers).map((column) => `${column.table}.${column.column}`);
@@ -81,23 +82,61 @@ function evaluate(recallers: readonly Recaller[]): { hits: number; misses: strin
   return { hits: CASES.length - misses.length, misses };
 }
 
-const results = Object.entries(ARMS).map(([arm, recallers]) => {
-  const { hits, misses } = evaluate(recallers);
-  return { arm, recallers, hits, total: CASES.length, recallAt3: hits / CASES.length, misses };
-});
-
-const baseline = results[0];
-const best = results[results.length - 1];
-if (!baseline || !best) throw new Error('no arms evaluated');
-
-mkdirSync(join(ROOT, 'eval/out'), { recursive: true });
-writeFileSync(
-  join(ROOT, 'eval/out/linking-ablation.json'),
-  `${JSON.stringify({ generatedAt: new Date().toISOString(), cases: CASES.length, topK: 3, arms: results }, null, 2)}\n`,
-);
-
-for (const arm of results) {
-  console.log(`${arm.arm.padEnd(18)} recall@3 ${(arm.recallAt3 * 100).toFixed(1)}% (${arm.hits}/${arm.total})`);
-  for (const miss of arm.misses) console.log(`  MISS ${miss}`);
+export interface LinkingArmRow {
+  readonly arm: string;
+  readonly recallers: readonly Recaller[];
+  readonly hits: number;
+  readonly total: number;
+  readonly recallAt3: number;
+  readonly misses: readonly string[];
 }
-console.log(`\nlinking ablation: value profiler adds ${((best.recallAt3 - baseline.recallAt3) * 100).toFixed(1)}pp over name-only`);
+
+export interface LinkingAblation {
+  readonly arms: readonly LinkingArmRow[];
+  readonly baseline: LinkingArmRow;
+  readonly best: LinkingArmRow;
+  /** What the value recaller adds over name-only, in percentage points. */
+  readonly gainPp: number;
+  readonly outFile: string;
+}
+
+/**
+ * Every arm is the previous one plus a recaller, so the delta between the first and the
+ * last is the contribution of alias and value evidence together — which is the number the
+ * prompt budget is decided on.
+ */
+export function runLinkingAblation(options: { readonly outDir?: string; readonly log?: (line: string) => void } = {}): LinkingAblation {
+  const arms: LinkingArmRow[] = Object.entries(ARMS).map(([arm, recallers]) => {
+    const { hits, misses } = evaluate(recallers);
+    return { arm, recallers, hits, total: CASES.length, recallAt3: hits / CASES.length, misses };
+  });
+
+  const baseline = arms[0];
+  const best = arms[arms.length - 1];
+  if (baseline === undefined || best === undefined) throw new Error('no arms evaluated');
+
+  const outDir = options.outDir ?? join(ROOT, 'eval/out');
+  mkdirSync(outDir, { recursive: true });
+  const outFile = join(outDir, 'linking-ablation.json');
+  writeFileSync(
+    outFile,
+    `${JSON.stringify({ generatedAt: new Date().toISOString(), cases: CASES.length, topK: 3, arms }, null, 2)}\n`,
+  );
+
+  const gainPp = (best.recallAt3 - baseline.recallAt3) * 100;
+  for (const arm of arms) {
+    options.log?.(`${arm.arm.padEnd(18)} recall@3 ${(arm.recallAt3 * 100).toFixed(1)}% (${arm.hits}/${arm.total})`);
+    for (const miss of arm.misses) options.log?.(`  MISS ${miss}`);
+  }
+  options.log?.(`\nlinking ablation: value profiler adds ${gainPp.toFixed(1)}pp over name-only`);
+  return { arms, baseline, best, gainPp, outFile };
+}
+
+export function main(options: { readonly outDir?: string } = {}): number {
+  runLinkingAblation({ ...options, log: (line) => console.log(line) });
+  return 0;
+}
+
+if (process.argv[1] !== undefined && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  process.exitCode = main();
+}
