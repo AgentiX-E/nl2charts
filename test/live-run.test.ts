@@ -18,7 +18,8 @@ import { createDuckDbEngine } from '@agentix-e/nl2charts-node';
 import type { Engine } from '@agentix-e/nl2charts-core';
 import type { ResultSet } from '@agentix-e/nl2charts-devkit';
 import { startEndpoint } from './helpers/endpoint.js';
-import { liveCases } from '../eval/live/cases.js';
+import { liveCases, phrasing, uniqueById } from '../eval/live/cases.js';
+import type { LiveCase } from '../eval/live/cases.js';
 import {
   LIVE_ARMS,
   executeGold,
@@ -113,6 +114,42 @@ describe('settings', () => {
         .slice(0, 4)
         .map((entry) => entry.id),
     );
+  });
+});
+
+describe('the generated questions', () => {
+  it('wraps the variant around the phrasings of one intent', () => {
+    const first = phrasing('revenue_by_region', 0);
+    expect(phrasing('revenue_by_region', 3)).toBe(first);
+    expect(phrasing('revenue_by_region', 1)).not.toBe(first);
+  });
+
+  it('fills every placeholder it is given', () => {
+    expect(phrasing('revenue_for_region', 0, { region: 'north' })).toContain('north');
+  });
+
+  it('refuses an intent with no phrasings instead of generating an empty question', () => {
+    // The defect this pins: the old default produced `''`, the case entered the set, and the
+    // run then scored the model on a question nobody wrote.
+    expect(() => phrasing('no_such_intent', 0)).toThrow(/no phrasings for intent: no_such_intent/);
+  });
+
+  it('refuses a template whose value was not supplied instead of leaving a hole in it', () => {
+    expect(() => phrasing('revenue_for_region', 0)).toThrow(/uses \{region\} but no value was supplied/);
+  });
+
+  it('refuses a case set with a repeated id, and names the id', () => {
+    const entry: LiveCase = { id: 'dup', intent: 'revenue_by_region', question: 'q', goldSql: 'select 1' };
+    expect(uniqueById([entry, { ...entry, id: 'other' }])).toHaveLength(2);
+    expect(() => uniqueById([entry, { ...entry, question: 'rewritten' }])).toThrow(/not unique: dup/);
+  });
+
+  it('generates a unique id for every case it ships', () => {
+    const cases = liveCases();
+    expect(cases).toHaveLength(210);
+    expect(new Set(cases.map((entry) => entry.id)).size).toBe(210);
+    // A question is never empty: 210 empty questions would score as 210 model failures.
+    for (const entry of cases) expect(entry.question.trim().length).toBeGreaterThan(0);
   });
 });
 

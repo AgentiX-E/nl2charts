@@ -24,10 +24,23 @@ const MONTHS = [
 
 const pick = <T,>(values: readonly T[], index: number): T => values[index % values.length] as T;
 
-function phrasing(intent: string, variant: number, params: Record<string, string | number>): string {
-  const options = PHRASINGS[intent] ?? [];
-  const template = options[variant % options.length] ?? '';
-  return template.replace(/\{(\w+)\}/g, (_match, key: string) => String(params[key] ?? ''));
+/**
+ * One question, from the templates of its intent.
+ *
+ * Both defaults in the first version were silent: an intent with no phrasings produced an
+ * empty question, and a template naming a value the caller did not supply produced a
+ * question with a hole in it. A case like that is scored anyway, so the failure lands on the
+ * model — a typo in a table of strings becomes an accuracy reading. Both are errors now.
+ */
+export function phrasing(intent: string, variant: number, params: Record<string, string | number> = {}): string {
+  const options = PHRASINGS[intent];
+  if (options === undefined) throw new Error(`no phrasings for intent: ${intent}`);
+  const template = options[variant % options.length] as string;
+  return template.replace(/\{(\w+)\}/g, (_match, key: string) => {
+    const value = params[key];
+    if (value === undefined) throw new Error(`intent ${intent} uses {${key}} but no value was supplied`);
+    return String(value);
+  });
 }
 
 const PHRASINGS: Record<string, readonly string[]> = {
@@ -133,14 +146,18 @@ const PHRASINGS: Record<string, readonly string[]> = {
   ],
 };
 
+/**
+ * One intent's case factory.
+ *
+ * The intent used to be declared here as well as inside the case the factory returns, which
+ * is two places for one string to drift, and nothing read the outer one.
+ */
 interface Builder {
-  readonly intent: string;
   readonly build: (index: number, variant: number) => LiveCase;
 }
 
 const builders: readonly Builder[] = [
   {
-    intent: 'revenue_by_region',
     build: (index, variant) => ({
       id: `rev-region-${index}`,
       intent: 'revenue_by_region',
@@ -149,7 +166,6 @@ const builders: readonly Builder[] = [
     }),
   },
   {
-    intent: 'revenue_by_channel',
     build: (index, variant) => ({
       id: `rev-channel-${index}`,
       intent: 'revenue_by_channel',
@@ -158,7 +174,6 @@ const builders: readonly Builder[] = [
     }),
   },
   {
-    intent: 'revenue_by_segment',
     build: (index, variant) => ({
       id: `rev-segment-${index}`,
       intent: 'revenue_by_segment',
@@ -168,7 +183,6 @@ const builders: readonly Builder[] = [
     }),
   },
   {
-    intent: 'orders_by_region',
     build: (index, variant) => ({
       id: `orders-region-${index}`,
       intent: 'orders_by_region',
@@ -177,7 +191,6 @@ const builders: readonly Builder[] = [
     }),
   },
   {
-    intent: 'avg_amount_by_region',
     build: (index, variant) => ({
       id: `avg-region-${index}`,
       intent: 'avg_amount_by_region',
@@ -186,7 +199,6 @@ const builders: readonly Builder[] = [
     }),
   },
   {
-    intent: 'tax_by_region',
     build: (index, variant) => ({
       id: `tax-region-${index}`,
       intent: 'tax_by_region',
@@ -195,7 +207,6 @@ const builders: readonly Builder[] = [
     }),
   },
   {
-    intent: 'monthly_revenue',
     build: (index, variant) => ({
       id: `monthly-revenue-${index}`,
       intent: 'monthly_revenue',
@@ -205,7 +216,6 @@ const builders: readonly Builder[] = [
     }),
   },
   {
-    intent: 'top_regions',
     build: (index, variant) => {
       const n = 2 + (index % 3);
       return {
@@ -217,7 +227,6 @@ const builders: readonly Builder[] = [
     },
   },
   {
-    intent: 'revenue_for_region',
     build: (index, variant) => {
       const region = pick(REGIONS, index);
       return {
@@ -229,7 +238,6 @@ const builders: readonly Builder[] = [
     },
   },
   {
-    intent: 'orders_for_channel',
     build: (index, variant) => {
       const channel = pick(CHANNELS, index);
       return {
@@ -241,7 +249,6 @@ const builders: readonly Builder[] = [
     },
   },
   {
-    intent: 'revenue_by_region_channel',
     build: (index, variant) => ({
       id: `rev-region-channel-${index}`,
       intent: 'revenue_by_region_channel',
@@ -251,7 +258,6 @@ const builders: readonly Builder[] = [
     }),
   },
   {
-    intent: 'completed_revenue_by_region',
     build: (index, variant) => ({
       id: `completed-rev-${index}`,
       intent: 'completed_revenue_by_region',
@@ -261,7 +267,6 @@ const builders: readonly Builder[] = [
     }),
   },
   {
-    intent: 'monthly_orders',
     build: (index, variant) => ({
       id: `monthly-orders-${index}`,
       intent: 'monthly_orders',
@@ -271,7 +276,6 @@ const builders: readonly Builder[] = [
     }),
   },
   {
-    intent: 'avg_amount_by_channel',
     build: (index, variant) => ({
       id: `avg-channel-${index}`,
       intent: 'avg_amount_by_channel',
@@ -280,7 +284,6 @@ const builders: readonly Builder[] = [
     }),
   },
   {
-    intent: 'customers_by_segment',
     build: (index, variant) => ({
       id: `customers-segment-${index}`,
       intent: 'customers_by_segment',
@@ -289,7 +292,6 @@ const builders: readonly Builder[] = [
     }),
   },
   {
-    intent: 'max_amount_by_region',
     build: (index, variant) => ({
       id: `max-region-${index}`,
       intent: 'max_amount_by_region',
@@ -298,7 +300,6 @@ const builders: readonly Builder[] = [
     }),
   },
   {
-    intent: 'min_amount_by_channel',
     build: (index, variant) => ({
       id: `min-channel-${index}`,
       intent: 'min_amount_by_channel',
@@ -307,7 +308,6 @@ const builders: readonly Builder[] = [
     }),
   },
   {
-    intent: 'revenue_by_segment_region',
     build: (index, variant) => ({
       id: `rev-segment-region-${index}`,
       intent: 'revenue_by_segment_region',
@@ -317,7 +317,6 @@ const builders: readonly Builder[] = [
     }),
   },
   {
-    intent: 'orders_in_month',
     build: (index, variant) => {
       const month = pick(MONTHS, index);
       return {
@@ -329,7 +328,6 @@ const builders: readonly Builder[] = [
     },
   },
   {
-    intent: 'revenue_in_month',
     build: (index, variant) => {
       const month = pick(MONTHS, index);
       return {
@@ -342,6 +340,23 @@ const builders: readonly Builder[] = [
   },
 ];
 
+/**
+ * Refuse a set with a repeated id.
+ *
+ * Each factory writes its own id, so a copy-pasted factory is one edit away from producing
+ * two cases with one name — and a duplicate would be scored twice, silently weighting one
+ * intent. Named and exported so the refusal can be observed instead of being a line no run
+ * can reach.
+ */
+export function uniqueById(cases: readonly LiveCase[]): LiveCase[] {
+  const seen = new Set<string>();
+  for (const entry of cases) {
+    if (seen.has(entry.id)) throw new Error(`generated case id is not unique: ${entry.id}`);
+    seen.add(entry.id);
+  }
+  return [...cases];
+}
+
 /** 20 intents x 10 variants + 10 extra parameter cases = 210. */
 export function liveCases(): LiveCase[] {
   const cases: LiveCase[] = [];
@@ -352,9 +367,7 @@ export function liveCases(): LiveCase[] {
     const builder = builders[extra % builders.length] as Builder;
     cases.push(builder.build(10 + extra, extra));
   }
-  const ids = new Set(cases.map((entry) => entry.id));
-  if (ids.size !== cases.length) throw new Error('generated case ids are not unique');
-  return cases;
+  return uniqueById(cases);
 }
 
 export const liveSchema = [

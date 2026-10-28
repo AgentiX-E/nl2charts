@@ -4,17 +4,17 @@
   "tolerancePp": 0.2,
   "measuredAt": "2026-10-28",
   "totals": {
-    "lines": 99.27,
-    "statements": 99.27,
+    "lines": 99.3,
+    "statements": 99.3,
     "functions": 100,
-    "branches": 93.4
+    "branches": 95.41
   },
   "files": {
     "eval/ablate.ts": {
-      "lines": 97.46,
-      "statements": 97.46,
+      "lines": 97.53,
+      "statements": 97.53,
       "functions": 100,
-      "branches": 90.32
+      "branches": 93.93
     },
     "eval/adversarial/cases.ts": {
       "lines": 100,
@@ -38,7 +38,7 @@
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 87.5
+      "branches": 97.97
     },
     "eval/bird/diagnose-corpus.ts": {
       "lines": 99.12,
@@ -50,7 +50,7 @@
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 90.56
+      "branches": 100
     },
     "eval/bird/failures.ts": {
       "lines": 100,
@@ -122,7 +122,7 @@
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 86.95
+      "branches": 100
     },
     "eval/bird/values.ts": {
       "lines": 100,
@@ -143,16 +143,16 @@
       "branches": 100
     },
     "eval/linking-ablation.ts": {
-      "lines": 97.95,
-      "statements": 97.95,
+      "lines": 98.03,
+      "statements": 98.03,
       "functions": 100,
-      "branches": 88.88
+      "branches": 95.23
     },
     "eval/live/cases.ts": {
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 87.5
+      "branches": 100
     },
     "eval/live/run.ts": {
       "lines": 99.4,
@@ -161,22 +161,22 @@
       "branches": 99.07
     },
     "eval/preflight.ts": {
-      "lines": 97.64,
-      "statements": 97.64,
+      "lines": 97.72,
+      "statements": 97.72,
       "functions": 100,
-      "branches": 90.47
+      "branches": 95.12
     },
     "eval/run.ts": {
-      "lines": 98.41,
-      "statements": 98.41,
+      "lines": 98.46,
+      "statements": 98.46,
       "functions": 100,
-      "branches": 94.44
+      "branches": 98.18
     },
     "eval/semantic-ablation.ts": {
-      "lines": 97.67,
-      "statements": 97.67,
+      "lines": 98.74,
+      "statements": 98.74,
       "functions": 100,
-      "branches": 72.22
+      "branches": 97.95
     }
   }
 }

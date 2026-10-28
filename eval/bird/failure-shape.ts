@@ -59,8 +59,13 @@ export function classifyFailureShape(
     return { shape: gold.length === 0 ? 'values' : 'empty' };
   }
   if (rows.length !== gold.length) return { shape: 'row-count' };
-  const columns = gold[0]?.length ?? 0;
-  if ((rows[0]?.length ?? 0) !== columns) return { shape: 'column-count' };
+  // Both sets are non-empty here — the two returns above leave `rows.length === gold.length`
+  // with at least one row — so the rows exist and no fallback is needed. The first version
+  // carried `?? 0` twice, which was a branch no result set could take.
+  const goldRow = gold[0] as readonly unknown[];
+  const predictedRow = rows[0] as readonly unknown[];
+  const columns = goldRow.length;
+  if (predictedRow.length !== columns) return { shape: 'column-count' };
   // One numeric column, every value a constant multiple of the gold's: a grain error.
   // Two rows at least: a single wrong value is equally well explained by a factor, so a
   // one-row case has no evidence for the grain reading and is left as a value error.
@@ -105,8 +110,14 @@ function literals(sql: string): string[] {
   return found.sort((left, right) => left.at - right.at).map((entry) => entry.text);
 }
 
+/**
+ * Compare a literal the way the database would.
+ *
+ * Strings are case-insensitive, numbers are compared by value: `3.0` and `3` are one literal.
+ * `literals()` only returns quoted strings and numeric patterns, so every number it hands over
+ * parses — the `Number.isFinite` guard this used to carry was a branch that could not run.
+ */
 function normalise(literal: string): string {
   if (literal.startsWith("'")) return literal.toLowerCase();
-  const value = Number(literal);
-  return Number.isFinite(value) ? String(value) : literal.toLowerCase();
+  return String(Number(literal));
 }

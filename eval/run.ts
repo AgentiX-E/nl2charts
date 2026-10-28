@@ -17,6 +17,7 @@ import { createRunner } from '@agentix-e/nl2charts-core';
 import type { Runner } from '@agentix-e/nl2charts-core';
 import { canonicalRow } from '@agentix-e/nl2charts-core';
 import { createDuckDbEngine } from '@agentix-e/nl2charts-node';
+import { describeError } from './errors.js';
 import { predict } from './baseline.js';
 import type { GoldenCase } from './baseline.js';
 
@@ -91,7 +92,7 @@ export async function evaluateCase(runner: Runner, testCase: GoldenCase, predict
       ok: false,
       exact: false,
       unordered: false,
-      error: error instanceof Error ? error.message : String(error),
+      error: describeError(error),
       predicted,
     };
   }
@@ -156,6 +157,18 @@ export function pct(value: number): string {
 /** The number of distinct predictors the harness measures, exported so callers stop guessing. */
 export const PREDICTORS = ['oracle', 'empty', 'template-raw', 'template'] as const;
 
+/**
+ * One line per miss, with the engine's sentence when there is one.
+ *
+ * A function rather than an inline template because the two halves of the interpolation have
+ * different inputs: the predictors in this harness all miss with valid SQL, so the half that
+ * prints an error message was a branch that only a broken case can reach — and a broken case
+ * is exactly what a reader of the log is looking for.
+ */
+export function missLine(outcome: CaseOutcome): string {
+  return `  MISS ${outcome.id}${outcome.error === undefined ? '' : ` (${outcome.error})`}`;
+}
+
 export interface HarnessPayload {
   readonly generatedAt: string;
   readonly harness: string;
@@ -186,7 +199,7 @@ export async function runHarness(options: { readonly outDir?: string; readonly l
       options.log?.(`  ${tag.padEnd(10)} ${bucket.passed}/${bucket.total}`);
     }
     for (const outcome of summary.cases) {
-      if (!outcome.exact) options.log?.(`  MISS ${outcome.id}${outcome.error ? ` (${outcome.error})` : ''}`);
+      if (!outcome.exact) options.log?.(missLine(outcome));
     }
   }
 

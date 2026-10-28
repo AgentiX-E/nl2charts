@@ -25,6 +25,18 @@ describe('the shape of a wrong answer', () => {
     expect(shape.factor).toBe(3);
   });
 
+  it('treats an empty prediction against an empty gold as a value difference', () => {
+    // Both sides empty is not "the filter matched nothing": there was nothing to match.
+    expect(classifyFailureShape(ok([]), []).shape).toBe('values');
+  });
+
+  it('does not read a factor out of values it cannot divide', () => {
+    // Non-numeric rows, and a zero denominator: a ratio is not defined, and a NaN that
+    // compared equal to itself would have reported a grain error on every string column.
+    expect(classifyFailureShape(ok([['x'], ['y']]), [['a'], ['b']]).shape).toBe('values');
+    expect(classifyFailureShape(ok([[1], [2]]), [[0], [0]]).shape).toBe('values');
+  });
+
   it('does not call a genuine value difference a factor', () => {
     expect(classifyFailureShape(ok([[300], [700]]), [[100], [200]]).shape).toBe('values');
     // ...nor a factor of one, which would be a match.

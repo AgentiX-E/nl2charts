@@ -109,6 +109,46 @@ describe('dataset readers', () => {
   it('skips a table with no description file instead of failing', () => {
     expect(loadDescriptions(join(directory, 'missing'), ['nothing']).size).toBe(0);
   });
+
+  it('survives the four ways a description row can be unusable', () => {
+    // An empty file (no header), a row shorter than the header, a row with no name, and a row
+    // whose only content is a value legend. Every one of them is a real shape in BIRD's own
+    // CSVs, and none of them may become a comment with the word "undefined" in it.
+    write('empty.csv', '');
+    write(
+      'ragged.csv',
+      [
+        'original_column_name,column_name,column_description,data_format,value_description',
+        'id,,primary key,integer,',
+        ',humanised only,ignored,text,',
+        'short',
+        'region,,where the order came from,text,north: the north',
+        'status,,,text,"open: still open"',
+      ].join('\n'),
+    );
+    const notes = loadDescriptions(directory, ['empty', 'ragged']);
+    expect(notes.has('empty')).toBe(false);
+    expect([...(notes.get('ragged')?.keys() ?? [])]).toEqual(['id', 'region', 'status']);
+    expect(notes.get('ragged')?.get('id')).toEqual({ description: 'primary key' });
+    // Both halves present, and one half alone: a note is the parts that exist, never a
+    // comment with the word "undefined" in it.
+    expect(notes.get('ragged')?.get('region')).toEqual({ description: 'where the order came from', values: 'north: the north' });
+    expect(notes.get('ragged')?.get('status')).toEqual({ values: 'open: still open' });
+  });
+
+  it('flattens a wrapped description and cuts it at the budget', () => {
+    // A BIRD description can carry newlines and markdown; a prompt line cannot. The cut is
+    // 180 characters because a card with three wrapped paragraphs per column is a card that
+    // silently loses its last tables.
+    const long = `first line\n\nsecond line ${'x'.repeat(400)}`;
+    // Quoted, because the newlines are part of the field rather than a row break.
+    write('long.csv', `original_column_name,column_name,column_description,data_format,value_description\nid,,"${long}",integer,\n`);
+    const notes = loadDescriptions(directory, ['long']);
+    const description = notes.get('long')?.get('id')?.description as string;
+    expect(description.startsWith('first line second line xxx')).toBe(true);
+    expect(description).toHaveLength(180);
+    expect(description.endsWith('...')).toBe(true);
+  });
 });
 
 describe('schema construction', () => {
@@ -173,6 +213,21 @@ describe('schema construction', () => {
     };
     expect(buildSchema(empty, new Map(), { withNotes: true })).toEqual([{ table: 'void', columns: [] }]);
   });
+
+  it('falls back to a text type when the manifest is shorter than its column list', () => {
+    // `dev_tables.json` carries one type per column; a manifest that carries fewer would
+    // otherwise put the string "undefined" in the card, which reads as a SQL type to a model.
+    const short: BirdTable = {
+      db_id: 'db',
+      tableNames: ['t'],
+      tableNamesReadable: ['t'],
+      columnNames: [[0, 'a'], [0, 'b']],
+      columnNamesReadable: [[0, 'a'], [0, 'b']],
+      columnTypes: ['integer'],
+      foreignKeys: [],
+    };
+    expect(buildSchema(short, new Map(), { withNotes: false })[0]?.columns.map((column) => column.type)).toEqual(['BIGINT', 'VARCHAR']);
+  });
 });
 
 describe('stratified sampling', () => {
@@ -205,5 +260,23 @@ describe('stratified sampling', () => {
   it('is deterministic and stops when the buckets run dry', () => {
     expect(stratifiedSample(questions, 4).map((question) => question.question_id)).toEqual([1, 3, 5, 2]);
     expect(stratifiedSample([make(1, 'simple')], 5)).toHaveLength(1);
+  });
+
+  it('skips an exhausted bucket and keeps drawing from the others', () => {
+    // One simple question and four moderate ones: the third round has nothing in the simple
+    // bucket, and a sampler that treated that as the end would return two cases for a limit
+    // of four — a sample smaller than the one that was asked for, silently.
+    const lopsided = [make(1, 'simple'), make(2, 'moderate'), make(3, 'moderate'), make(4, 'moderate'), make(5, 'moderate')];
+    expect(stratifiedSample(lopsided, 4).map((question) => question.question_id)).toEqual([1, 2, 3, 4]);
+  });
+
+  it('files an unrecognised difficulty with the moderates rather than dropping it', () => {
+    // A split whose difficulty column says something new must still be sampled: the
+    // alternative is a question that silently never runs. The limit has to be below the
+    // input size, or the sampler returns the whole file and never consults the buckets.
+    const odd = [{ ...make(1, 'simple'), difficulty: 'unknown' as BirdQuestion['difficulty'] }, make(2, 'simple'), make(3, 'simple')];
+    const picked = stratifiedSample(odd, 2).map((question) => question.question_id);
+    expect(picked).toHaveLength(2);
+    expect(picked).toContain(1);
   });
 });

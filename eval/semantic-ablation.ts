@@ -64,8 +64,79 @@ export function buildQueries(limit = 200): MetricQuery[] {
   return queries;
 }
 
-function key(rows: readonly Readonly<Record<string, unknown>>[]): string {
+/** One result set, reduced to a comparable string. Order-insensitive by construction. */
+export function key(rows: readonly Readonly<Record<string, unknown>>[]): string {
   return rows.map((row) => JSON.stringify(canonicalRow(row))).sort().join('\n');
+}
+
+/** What one arm pair produced: two result sets and whether they agree. */
+export interface PairOutcome {
+  readonly query: MetricQuery;
+  readonly left: readonly Readonly<Record<string, unknown>>[];
+  readonly right: readonly Readonly<Record<string, unknown>>[];
+}
+
+/**
+ * The equivalence share, from the pairs themselves.
+ *
+ * Extracted so the property can be observed on a pair that *disagrees*. The real fixture
+ * never produces one — that is the point of the measurement — so the branch that records a
+ * mismatch was, until this function existed, a branch no run could take and no test could
+ * reach. Comparing keys is enough: the key is the sorted canonical rows joined by newlines,
+ * so equal keys already mean equal row counts.
+ */
+export function equivalenceOf(pairs: readonly PairOutcome[]): SemanticReport['equivalence'] {
+  const mismatches: string[] = [];
+  for (const pair of pairs) {
+    if (key(pair.left) !== key(pair.right)) mismatches.push(JSON.stringify(pair.query));
+  }
+  return {
+    passed: pairs.length - mismatches.length,
+    total: pairs.length,
+    rate: pairs.length === 0 ? 0 : (pairs.length - mismatches.length) / pairs.length,
+    mismatches,
+  };
+}
+
+/** One fan-out case: what a hand-written join totals against what the compiler totals. */
+export function fanoutRow(
+  segment: string,
+  naive: readonly Readonly<Record<string, unknown>>[],
+  compiled: readonly Readonly<Record<string, unknown>>[],
+): { query: string; naive: number; compiled: number; ratio: number } {
+  const sum = (rows: readonly Readonly<Record<string, unknown>>[], keep: (row: Readonly<Record<string, unknown>>) => boolean): number =>
+    rows.reduce((total, row) => (keep(row) ? total + Number(row.revenue ?? 0) : total), 0);
+  const naiveTotal = sum(naive, () => true);
+  const compiledTotal = sum(compiled, (row) => row.segment === segment);
+  return { query: segment, naive: naiveTotal, compiled: compiledTotal, ratio: compiledTotal === 0 ? 0 : naiveTotal / compiledTotal };
+}
+
+/**
+ * What the report refuses.
+ *
+ * Two conditions, and they are the reason this file exists: an optimizer that changes a
+ * result set is a correctness bug, and a fixture that no longer reproduces fan-out has
+ * stopped testing the thing it was built to test. Returned as data so both can be tested
+ * with a report that is wrong on purpose; the entry decides the exit code (ADR-218).
+ */
+export function semanticProblems(report: SemanticReport): string[] {
+  const problems: string[] = [];
+  if (report.equivalence.passed !== report.equivalence.total) problems.push('optimizer changed at least one result set');
+  if (report.fanout.minRatio < 2) problems.push('fan-out fixture no longer reproduces the trap');
+  return problems;
+}
+
+/**
+ * The same verdict, as an exception.
+ *
+ * Named so the entry keeps a single line and the throwing side stays testable: a report that
+ * is right on purpose returns itself, and one that is wrong on purpose is the only way to
+ * observe the exit path the two assertions feed.
+ */
+export function requireSemantic(report: SemanticReport): SemanticReport {
+  const problems = semanticProblems(report);
+  if (problems.length > 0) throw new Error(problems.join('; '));
+  return report;
 }
 
 export interface SemanticReport {
@@ -98,18 +169,16 @@ export async function runSemanticAblation(
       (await runner.sql(sql, { limit: 10_000 })).rows;
 
     const queries = buildQueries();
-    let equivalent = 0;
+    const pairs: PairOutcome[] = [];
     let optimizedCtes = 0;
     let plainCtes = 0;
-    const mismatches: string[] = [];
     for (const query of queries) {
       const optimized = compileQuery(query, model);
       const plain = compileQuery(query, model, { optimize: false });
       optimizedCtes += optimized.sqlPlan.ctes.length;
       plainCtes += plain.sqlPlan.ctes.length;
       const [left, right] = await Promise.all([rowsOf(optimized.sql), rowsOf(plain.sql)]);
-      if (key(left) === key(right) && left.length === right.length) equivalent += 1;
-      else mismatches.push(JSON.stringify(query));
+      pairs.push({ query, left, right });
     }
 
     const fanout: { query: string; naive: number; compiled: number; ratio: number }[] = [];
@@ -120,16 +189,15 @@ export async function runSemanticAblation(
       const compiled = await rowsOf(
         compileQuery({ metrics: ['revenue'], dimensions: ['segment'], filters: [{ column: 'customers.segment', op: '=', value: segment }] }, model).sql,
       );
-      const naiveTotal = naive.reduce((total, row) => total + Number(row.revenue ?? 0), 0);
-      const compiledTotal = compiled.reduce((total, row) => total + (row.segment === segment ? Number(row.revenue ?? 0) : 0), 0);
-      fanout.push({ query: segment, naive: naiveTotal, compiled: compiledTotal, ratio: compiledTotal === 0 ? 0 : naiveTotal / compiledTotal });
+      fanout.push(fanoutRow(segment, naive, compiled));
     }
 
+    const equivalence = equivalenceOf(pairs);
     const report: SemanticReport = {
       generatedAt: new Date().toISOString(),
       dataset: 'eval/fixtures/semantic.sql',
       cases: queries.length,
-      equivalence: { passed: equivalent, total: queries.length, rate: equivalent / queries.length, mismatches },
+      equivalence,
       optimizer: {
         averageCtesOptimized: optimizedCtes / queries.length,
         averageCtesUnoptimized: plainCtes / queries.length,
@@ -143,7 +211,7 @@ export async function runSemanticAblation(
     const outFile = join(outDir, 'semantic-ablation.json');
     writeFileSync(outFile, `${JSON.stringify(report, null, 2)}\n`);
 
-    options.log?.(`\nsemantic optimizer: ${String(equivalent)}/${String(queries.length)} identical result sets`);
+    options.log?.(`\nsemantic optimizer: ${String(equivalence.passed)}/${String(queries.length)} identical result sets`);
     options.log?.(
       `  CTEs per query: ${report.optimizer.averageCtesUnoptimized.toFixed(2)} -> ${report.optimizer.averageCtesOptimized.toFixed(2)} (${(report.optimizer.reduction * 100).toFixed(1)}% fewer)`,
     );
@@ -153,11 +221,7 @@ export async function runSemanticAblation(
       );
     }
 
-    // The two assertions are the reason this file exists: an optimizer that changes a result
-    // set is a correctness bug, and a fixture that no longer reproduces fan-out has stopped
-    // testing the thing it was built to test.
-    if (equivalent !== queries.length) throw new Error('optimizer changed at least one result set');
-    if (report.fanout.minRatio < 2) throw new Error('fan-out fixture no longer reproduces the trap');
+    requireSemantic(report);
     return { report, outFile };
   } finally {
     await runner.close();

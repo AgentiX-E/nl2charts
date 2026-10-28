@@ -16,9 +16,9 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { PREDICTORS, ROOT, assertControls, evaluateCase, loadGolden, main, pct, runHarness, runPredictor, summarise, withFixture } from '../eval/run.js';
+import { PREDICTORS, ROOT, assertControls, evaluateCase, loadGolden, main, missLine, pct, runHarness, runPredictor, summarise, withFixture } from '../eval/run.js';
 import type { CaseOutcome, RunSummary } from '../eval/run.js';
-import { binomialTwoSided, compareArms, main as ablateMain, runAblation } from '../eval/ablate.js';
+import { ablationLines, binomialTwoSided, compareArms, main as ablateMain, runAblation } from '../eval/ablate.js';
 
 const outDir = mkdtempSync(join(tmpdir(), 'nl2charts-harness-'));
 afterAll(() => rmSync(outDir, { recursive: true, force: true }));
@@ -124,6 +124,9 @@ describe('normalization ablation', () => {
     await runAblation({ outDir, log: (line) => lines.push(line) });
     expect(lines[0]).toContain('ablation: template');
     expect(lines.some((line) => line.includes('discordant'))).toBe(true);
+    // The arm-count footer is printed once: it used to be emitted both by the formatter and by
+    // the caller, so a single run looked like two.
+    expect(lines.filter((line) => line.includes('arms recorded'))).toHaveLength(1);
     expect(await ablateMain({ outDir })).toBe(0);
   });
 
@@ -236,5 +239,43 @@ describe('paired comparison', () => {
     expect(report.mcnemarExactP).toBeLessThan(0.05);
     expect(report.conclusion).toContain('5% level');
     expect(report.deltaPp).toBe(50);
+  });
+});
+
+describe('the lines a harness prints', () => {
+  it('names the engine when a miss has one, and says nothing extra when it does not', () => {
+    // Both halves are read by whoever debugs a red run: the id says which case, the sentence
+    // says whether the case was wrong or the statement did not run.
+    const clean: CaseOutcome = { id: 'q1', ok: false, exact: false, unordered: false, predicted: 'select 1' };
+    expect(missLine(clean)).toBe('  MISS q1');
+    expect(missLine({ ...clean, error: 'no such column: nmae' })).toBe('  MISS q1 (no such column: nmae)');
+  });
+
+  it('prints the ablation delta with its sign, and a dash for an empty id list', () => {
+    // A negative delta is the case that says a lever hurt, and an empty list is the case that
+    // says the arms agreed: neither can be produced by the fixture, both are read out loud.
+    const report = {
+      generatedAt: '2026-01-01T00:00:00.000Z',
+      dataset: 'eval/golden.jsonl',
+      cases: 2,
+      arms: { normalized: 1, raw: 1 },
+      discordant: { onlyNormalized: [], onlyRaw: [] },
+      deltaPp: -1.5,
+      mcnemarExactP: 1,
+      conclusion: 'no discordant pairs; the arms are indistinguishable on this set',
+    };
+    const lines = ablationLines(report, 0.5, 0.515, '/tmp/ablation.json');
+    expect(lines).toHaveLength(4);
+    expect(lines[1]).toBe('  delta -1.5pp, discordant 0 (only template: - / only template-raw: -)');
+    expect(lines[0]).toContain('ablation: template 50.0% vs template-raw 51.5%');
+    expect(lines[3]).toContain('arms recorded; wrote /tmp/ablation.json');
+
+    const positive = ablationLines(
+      { ...report, deltaPp: 2, discordant: { onlyNormalized: ['q1'], onlyRaw: ['q2'] } },
+      0.52,
+      0.5,
+      '/tmp/ablation.json',
+    );
+    expect(positive[1]).toBe('  delta +2pp, discordant 2 (only template: q1 / only template-raw: q2)');
   });
 });

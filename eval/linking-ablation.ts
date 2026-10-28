@@ -101,6 +101,20 @@ export interface LinkingAblation {
 }
 
 /**
+ * The two ends of the arm chain, or an error.
+ *
+ * `ARMS` always has three entries, so the lookup could not fail on the data this module ships
+ * — which is why the guard sat in the middle of the entry as a branch nothing could drive.
+ * Named, it can be asked about an empty chain, and the entry keeps the arithmetic.
+ */
+export function endsOf(arms: readonly LinkingArmRow[]): { baseline: LinkingArmRow; best: LinkingArmRow } {
+  const baseline = arms[0];
+  const best = arms[arms.length - 1];
+  if (baseline === undefined || best === undefined) throw new Error('no arms evaluated');
+  return { baseline, best };
+}
+
+/**
  * Every arm is the previous one plus a recaller, so the delta between the first and the
  * last is the contribution of alias and value evidence together — which is the number the
  * prompt budget is decided on.
@@ -111,9 +125,7 @@ export function runLinkingAblation(options: { readonly outDir?: string; readonly
     return { arm, recallers, hits, total: CASES.length, recallAt3: hits / CASES.length, misses };
   });
 
-  const baseline = arms[0];
-  const best = arms[arms.length - 1];
-  if (baseline === undefined || best === undefined) throw new Error('no arms evaluated');
+  const { baseline, best } = endsOf(arms);
 
   const outDir = options.outDir ?? join(ROOT, 'eval/out');
   mkdirSync(outDir, { recursive: true });

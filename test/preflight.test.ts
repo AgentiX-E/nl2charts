@@ -3,6 +3,7 @@ import type { AddressInfo } from 'node:net';
 import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
+import { resolvePreflightSettings } from '../eval/preflight.js';
 
 /**
  * The preflight is a latency check, not a liveness check.
@@ -79,5 +80,33 @@ describe('preflight', () => {
     const run = await preflight({ LLM_BASE_URL: baseUrl, BIRD_LLM_TIMEOUT_MS: '300', BIRD_PREFLIGHT_SAMPLES: '1' });
     expect(run.status).toBe(1);
     expect(run.stderr).toContain('did not answer every call');
+  });
+});
+
+describe('the settings a preflight reads', () => {
+  it('defaults to the endpoint the published numbers were produced on', () => {
+    // The defaults used to live inside `main`, where a test that pointed at a local server
+    // never reached them: a default that has never been read is a default nobody has checked.
+    expect(resolvePreflightSettings({})).toEqual({
+      baseUrl: 'https://api.deepseek.com/v1',
+      model: 'deepseek-chat',
+      apiKey: '',
+      samples: 3,
+      deadlineMs: 60_000,
+    });
+  });
+
+  it('takes every override, and prefers LLM_API_KEY over the older name', () => {
+    expect(
+      resolvePreflightSettings({
+        LLM_BASE_URL: 'http://127.0.0.1:9/v1',
+        LLM_MODEL: 'm',
+        LLM_API_KEY: 'new',
+        DEEPSEEK_API_KEY: 'old',
+        BIRD_PREFLIGHT_SAMPLES: '1',
+        BIRD_LLM_TIMEOUT_MS: '250',
+      }),
+    ).toEqual({ baseUrl: 'http://127.0.0.1:9/v1', model: 'm', apiKey: 'new', samples: 1, deadlineMs: 250 });
+    expect(resolvePreflightSettings({ DEEPSEEK_API_KEY: 'old' }).apiKey).toBe('old');
   });
 });

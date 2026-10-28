@@ -17,6 +17,7 @@
 import { pathToFileURL } from 'node:url';
 import { createHttpProvider } from '@agentix-e/nl2charts-ai';
 import { isNl2ChartsError } from '@agentix-e/nl2charts-spec';
+import { describeError } from './errors.js';
 
 export interface PreflightOptions {
   /** Required: the endpoint the run will use, passed in rather than defaulted to a URL a
@@ -86,7 +87,7 @@ export async function runPreflight(options: PreflightOptions): Promise<Preflight
     } catch (error) {
       failures += 1;
       const status = isNl2ChartsError(error) ? (error.details as { status?: number } | undefined)?.status : undefined;
-      const message = error instanceof Error ? error.message : String(error);
+      const message = describeError(error);
       if (firstError === '') firstError = `${status === undefined ? '' : `answered ${String(status)}: `}${message}`;
     }
   }
@@ -133,20 +134,38 @@ export async function runPreflight(options: PreflightOptions): Promise<Preflight
  * Returns the code instead of calling `process.exit` so the branch that matters most —
  * "no key at all" — is a value a test can read.
  */
+/**
+ * The four knobs, from the environment, with their defaults.
+ *
+ * Extracted because the defaults were the one part of this module no test could reach: a test
+ * that pointed at a local endpoint never took the `??` side, and taking it would have meant
+ * calling a public provider from a unit test. As values, they are assertable.
+ */
+export interface PreflightSettings {
+  readonly baseUrl: string;
+  readonly model: string;
+  readonly apiKey: string;
+  readonly samples: number;
+  readonly deadlineMs: number;
+}
+
+export function resolvePreflightSettings(env: NodeJS.ProcessEnv): PreflightSettings {
+  return {
+    baseUrl: env.LLM_BASE_URL ?? 'https://api.deepseek.com/v1',
+    model: env.LLM_MODEL ?? 'deepseek-chat',
+    apiKey: env.LLM_API_KEY ?? env.DEEPSEEK_API_KEY ?? '',
+    samples: Number(env.BIRD_PREFLIGHT_SAMPLES ?? 3),
+    deadlineMs: Number(env.BIRD_LLM_TIMEOUT_MS ?? 60_000),
+  };
+}
+
 export async function main(env: NodeJS.ProcessEnv = process.env): Promise<number> {
-  const apiKey = env.LLM_API_KEY ?? env.DEEPSEEK_API_KEY ?? '';
-  if (apiKey.length === 0) {
+  const settings = resolvePreflightSettings(env);
+  if (settings.apiKey.length === 0) {
     console.error('preflight: no key. Set LLM_API_KEY (preferred) or DEEPSEEK_API_KEY.');
     return 1;
   }
-  const report = await runPreflight({
-    baseUrl: env.LLM_BASE_URL ?? 'https://api.deepseek.com/v1',
-    model: env.LLM_MODEL ?? 'deepseek-chat',
-    apiKey,
-    samples: Number(env.BIRD_PREFLIGHT_SAMPLES ?? 3),
-    deadlineMs: Number(env.BIRD_LLM_TIMEOUT_MS ?? 60_000),
-    log: (line) => console.log(line),
-  });
+  const report = await runPreflight({ ...settings, log: (line) => console.log(line) });
   if (!report.ok) {
     console.error(`${report.summary}; ${String(report.failures)} failed (first: ${report.firstError})`);
     for (const problem of report.problems) console.error(`preflight failed: ${problem}`);

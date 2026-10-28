@@ -37,6 +37,15 @@ describe('sample table choice', () => {
     expect(pickSampleTables(schema, 0)).toEqual([]);
     expect(pickSampleTables(schema, 10)).toHaveLength(3);
   });
+
+  it('breaks a width tie by name, so the sample set does not depend on input order', () => {
+    const tied: readonly SchemaTable[] = [
+      { table: 'zed', columns: [{ name: 'z1', type: 'TEXT' }, { name: 'z2', type: 'TEXT' }] },
+      { table: 'alpha', columns: [{ name: 'a1', type: 'TEXT' }, { name: 'a2', type: 'TEXT' }] },
+    ];
+    expect(pickSampleTables(tied, 2).map((table) => table.table)).toEqual(['alpha', 'zed']);
+    expect(pickSampleTables([...tied].reverse(), 2).map((table) => table.table)).toEqual(['alpha', 'zed']);
+  });
 });
 
 describe('synthesis run', () => {
@@ -184,3 +193,136 @@ describe('synthesis run', () => {
   });
 });
 
+
+describe('sample rows, when the database does not cooperate', () => {
+  const directories: string[] = [];
+  afterEach(() => {
+    for (const directory of directories) rmSync(directory, { recursive: true, force: true });
+    directories.length = 0;
+  });
+
+  function provider(reply: string): { complete(): Promise<{ text: string; model: string; usage: never }> } {
+    return {
+      async complete() {
+        return { text: reply, model: 'fixture', usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 } as never };
+      },
+    };
+  }
+
+  it('samples the tables it can read and skips the ones it cannot', async () => {
+    // Two ways a sample can fail to arrive: the statement is refused (a table the
+    // database does not have) and the statement succeeds with nothing in it. Neither is a
+    // reason to fail a run, and neither may put an empty sample block in the prompt — the
+    // block costs characters and teaches nothing.
+    const cacheDir = mkdtempSync(join(tmpdir(), 'nl2charts-synth-'));
+    directories.push(cacheDir);
+    const asked: string[] = [];
+    const oracle = {
+      async run(_db: string, sql: string) {
+        asked.push(sql);
+        if (sql.includes('"b"')) return { ok: false, columns: [], rows: [], ms: 1, error: 'no such table: b' };
+        if (sql.includes('"c"')) return { ok: true, columns: [], rows: [], ms: 1 };
+        return { ok: true, columns: [], rows: [['1', 'x']], ms: 1 };
+      },
+    };
+    const outcome = await synthesizeRecord({
+      oracle: oracle as never,
+      db: 'shop',
+      schema,
+      provider: provider('- a = b.') as never,
+      model: 'm',
+      sampleTables: 3,
+      sampleRows: 1,
+      cacheDir,
+    });
+    expect(asked).toHaveLength(3);
+    // One table survives, so the prompt carries a sample block for exactly that table.
+    expect(outcome.definitions).toBe('- a = b.');
+    expect(outcome.cached).toBe(false);
+  });
+
+  it('sends no sample block at all when every table came back empty', async () => {
+    const cacheDir = mkdtempSync(join(tmpdir(), 'nl2charts-synth-'));
+    directories.push(cacheDir);
+    const oracle = { async run() { return { ok: true, columns: [], rows: [], ms: 1 }; } };
+    const empty = await synthesizeRecord({
+      oracle: oracle as never,
+      db: 'shop',
+      schema,
+      provider: provider('- a = b.') as never,
+      model: 'm',
+      sampleTables: 3,
+      cacheDir,
+    });
+    // The hash is a function of the prompt, so two runs that differ only in whether a
+    // sample block was sent must not share a cache entry.
+    const oracle2 = { async run() { return { ok: true, columns: [], rows: [['1']], ms: 1 }; } };
+    const withRows = await synthesizeRecord({
+      oracle: oracle2 as never,
+      db: 'shop',
+      schema,
+      provider: provider('- a = b.') as never,
+      model: 'm',
+      sampleTables: 3,
+      cacheDir,
+    });
+    expect(withRows.hash).not.toBe(empty.hash);
+  });
+});
+
+describe('the two defaults a caller can omit', () => {
+  const directories: string[] = [];
+  afterEach(() => {
+    for (const directory of directories) rmSync(directory, { recursive: true, force: true });
+    directories.length = 0;
+  });
+
+  function provider(reply: string): { complete(): Promise<{ text: string; model: string; usage: never }> } {
+    return { async complete() { return { text: reply, model: 'fixture', usage: {} as never }; } };
+  }
+
+  it('carries the database profile into the prompt when one is supplied', async () => {
+    // The profile is the difference between "here is the schema" and "here is what the
+    // columns actually contain"; leaving it out of the prompt would make the arm that
+    // pays for profiling identical to the one that does not.
+    const cacheDir = mkdtempSync(join(tmpdir(), 'nl2charts-synth-'));
+    directories.push(cacheDir);
+    const oracle = { async run() { return { ok: true, columns: [], rows: [], ms: 1 }; } };
+    const base = {
+      oracle: oracle as never,
+      db: 'shop',
+      schema,
+      provider: provider('- a = b.') as never,
+      model: 'm',
+      cacheDir,
+    };
+    const without = await synthesizeRecord(base);
+    const withProfile = await synthesizeRecord({
+      ...base,
+      profile: { db: 'shop', columns: [{ table: 'a', column: 'a1', kind: 'categorical', values: ['x', 'y'] }] },
+    });
+    expect(withProfile.hash).not.toBe(without.hash);
+  });
+
+  it('falls back to the repository cache, which is the path a real run takes', async () => {
+    // Every unit test above passes a directory, so the default was the one path nobody
+    // had run. It writes into the repository cache, so the entry is removed afterwards.
+    const { join: joinPath } = await import('node:path');
+    const oracle = { async run() { return { ok: true, columns: [], rows: [], ms: 1 }; } };
+    const db = `coverage-probe-${String(process.pid)}`;
+    const file = joinPath(process.cwd(), 'eval/.cache/bird/definitions', `${db}.json`);
+    try {
+      const outcome = await synthesizeRecord({
+        oracle: oracle as never,
+        db,
+        schema,
+        provider: provider('- a = b.') as never,
+        model: 'm',
+      });
+      expect(outcome.cached).toBe(false);
+      expect(readFileSync(file, 'utf8')).toContain('- a = b.');
+    } finally {
+      rmSync(file, { force: true });
+    }
+  });
+});

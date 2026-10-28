@@ -90,6 +90,25 @@ export function compareArms(normalized: RunSummary, raw: RunSummary): AblationRe
   };
 }
 
+/**
+ * What the run prints.
+ *
+ * The delta's sign and the two id lists are the parts a reader quotes, and both used to live
+ * inside one interpolated template: a negative delta and an empty list were branches no test
+ * could reach, because the fixture produces a positive delta with both lists populated. As a
+ * function of the report, they are inputs a test chooses.
+ */
+export function ablationLines(report: AblationReport, normalizedAccuracy: number, rawAccuracy: number, outFile: string): string[] {
+  const { onlyNormalized, onlyRaw } = report.discordant;
+  return [
+    `\nablation: ${NORMALIZED} ${(normalizedAccuracy * 100).toFixed(1)}% vs ${RAW} ${(rawAccuracy * 100).toFixed(1)}%`,
+    `  delta ${report.deltaPp >= 0 ? '+' : ''}${report.deltaPp}pp, discordant ${String(onlyNormalized.length + onlyRaw.length)} ` +
+      `(only ${NORMALIZED}: ${onlyNormalized.join(',') || '-'} / only ${RAW}: ${onlyRaw.join(',') || '-'})`,
+    `  McNemar exact p=${String(report.mcnemarExactP)}; ${report.conclusion}`,
+    `  ${String(PREDICTORS.length)} arms recorded; wrote ${outFile}`,
+  ];
+}
+
 export async function runAblation(options: { readonly outDir?: string; readonly log?: (line: string) => void } = {}): Promise<AblationResult> {
   const normalized = await runPredictor(NORMALIZED);
   const raw = await runPredictor(RAW);
@@ -101,21 +120,15 @@ export async function runAblation(options: { readonly outDir?: string; readonly 
   assertControls([normalized, raw, oracle, empty]);
 
   const report = compareArms(normalized, raw);
-  const onlyNormalized = report.discordant.onlyNormalized;
-  const onlyRaw = report.discordant.onlyRaw;
-  const discordant = onlyNormalized.length + onlyRaw.length;
 
   const outDir = options.outDir ?? join(ROOT, 'eval/out');
   mkdirSync(outDir, { recursive: true });
   const outFile = join(outDir, 'ablation.json');
   writeFileSync(outFile, `${JSON.stringify(report, null, 2)}\n`);
 
-  options.log?.(`\nablation: ${NORMALIZED} ${(normalized.accuracy * 100).toFixed(1)}% vs ${RAW} ${(raw.accuracy * 100).toFixed(1)}%`);
-  options.log?.(
-    `  delta ${report.deltaPp >= 0 ? '+' : ''}${report.deltaPp}pp, discordant ${discordant} (only ${NORMALIZED}: ${onlyNormalized.join(',') || '-'} / only ${RAW}: ${onlyRaw.join(',') || '-'})`,
-  );
-  options.log?.(`  McNemar exact p=${report.mcnemarExactP}; ${report.conclusion}`);
-  options.log?.(`  ${PREDICTORS.length} arms recorded; wrote ${outFile}`);
+  // Every line the reader sees comes from `ablationLines`: printing the arm count here as well
+  // duplicated it on the terminal, which read as two runs having happened.
+  for (const line of ablationLines(report, normalized.accuracy, raw.accuracy, outFile)) options.log?.(line);
   return { report, arms: PREDICTORS.length, outFile };
 }
 
