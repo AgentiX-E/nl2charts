@@ -129,6 +129,22 @@ export function compare(report, baseline) {
     issues.push('BIRD1: values ran with no matched value; the profile is missing, so the arm is its parent renamed');
   }
 
+  // A truncated schema card drops tables from the prompt, and a model cannot query a table
+  // it was never shown — but the run only *reported* the truncation, so a card that lost
+  // half a database looked like a hard question set. `controls.tablesInPrompts` and the
+  // arms now render at the same limit, which is what makes this comparison mean anything.
+  const truncated = controls.truncatedPrompts;
+  if (Array.isArray(truncated) && truncated.length > 0) {
+    const worst = truncated
+      .slice(0, 3)
+      .map((entry) => `${String(entry?.db)}: ${String(entry?.shown)}/${String(entry?.total)} tables`)
+      .join(', ');
+    issues.push(`BIRD1: the schema card drops tables from the prompt (${worst}), so the arm is measured on a schema it cannot query`);
+  }
+  if ((controls.tablesTotal ?? 0) > 0 && (controls.tablesInPrompts ?? 0) === 0) {
+    issues.push('BIRD1: no table reached the prompt; every arm was asked to write SQL against an empty schema');
+  }
+
   // A repair arm has to report its funnel, and the funnel has to add up. The runner
   // computes it from the same cases it scores, so a mismatch means the two lists
   // drifted apart — and a funnel that does not sum is worse than no funnel, because it
@@ -762,6 +778,30 @@ function selfTest() {
   if (!declaredRegression.issues.some((issue) => issue.includes('is below the'))) {
     issues.push('BIRD1 stops enforcing a floor once the run declares its arm set');
   }
+
+  // A schema card that drops tables measures the model on a schema it cannot query. The
+  // run has always reported the truncation and nothing ever read it, so a card that lost
+  // half a database was indistinguishable from a hard question set.
+  const cutCard = compare(
+    {
+      selection: { scored: 100, split: 'minidev' },
+      model: 'deepseek-chat',
+      run,
+      controls: { tablesInPrompts: 40, tablesTotal: 75, truncatedPrompts: [{ db: 'california_schools', shown: 3, total: 6 }] },
+      arms: [arm('names', 42)],
+    },
+    { ...baseline, expectedArms: ['names'] },
+  );
+  fail(cutCard, 1, 'BIRD1 accepts a schema card that dropped tables from the prompt');
+  if (!cutCard.issues.some((issue) => issue.includes('california_schools') && issue.includes('3/6'))) {
+    issues.push('BIRD1 reports a truncated card without naming the database and the loss');
+  }
+  // ...and the degenerate case: no table at all reached the prompt.
+  const emptySchema = compare(
+    { selection: { scored: 100, split: 'minidev' }, model: 'deepseek-chat', run, controls: { tablesInPrompts: 0, tablesTotal: 75 }, arms: [arm('names', 42)] },
+    { ...baseline, expectedArms: ['names'] },
+  );
+  fail(emptySchema, 1, 'BIRD1 accepts a prompt with no schema in it');
   return issues;
 }
 
@@ -769,7 +809,7 @@ if (process.argv[2] === '--self-test') {
   const issues = selfTest();
   for (const issue of issues) console.error(issue);
   if (issues.length > 0) process.exit(1);
-  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, a dev run measured against its own sample, two split fields that disagree, other split, other model, unfloored arm, empty lever, a funnel that does not add up, a split-specific arm list, an uncounted selector call, a majority vote that spends exactly its samples, a repair count without a loop, an unpriced arm, an unnamed model, floors from an unnamed model and a cross-model arm with no second model named, a judge swap with no judge named, an arm with harness errors, a candidate set that lost a third of itself to an endpoint, a failure corpus that stopped at a cap without saying so, an empty-result lever with no funnel or an impossible yield or nothing behind it, a decomposition arm whose prompt the model ignored, an unrecorded instrument, a declared arm subset, a declared arm whose row was dropped, an undeclared row, an empty declaration and a floor that a declaration does not weaken all behave');
+  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, a dev run measured against its own sample, two split fields that disagree, other split, other model, unfloored arm, empty lever, a funnel that does not add up, a split-specific arm list, an uncounted selector call, a majority vote that spends exactly its samples, a repair count without a loop, an unpriced arm, an unnamed model, floors from an unnamed model and a cross-model arm with no second model named, a judge swap with no judge named, an arm with harness errors, a candidate set that lost a third of itself to an endpoint, a failure corpus that stopped at a cap without saying so, an empty-result lever with no funnel or an impossible yield or nothing behind it, a decomposition arm whose prompt the model ignored, an unrecorded instrument, a truncated schema card, a prompt with no table in it, a declared arm subset, a declared arm whose row was dropped, an undeclared row, an empty declaration and a floor that a declaration does not weaken all behave');
 } else {
   const reportPath = resolve(ROOT, 'eval/out/bird-eval.json');
   const baseline = JSON.parse(readFileSync(resolve(ROOT, 'eval/baseline/bird.json'), 'utf8'));
