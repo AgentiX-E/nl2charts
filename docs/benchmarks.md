@@ -1515,6 +1515,74 @@ If you are reading a report to decide what to build next, the rule is: a generat
 needs the ceiling, and a selection claim needs the loss. An accuracy delta on its own cannot
 tell the two apart, and the two call for opposite work.
 
+## The ceiling is not the constraint, and the selector is not either
+
+The previous section read one run. This is the same experiment one candidate further: the
+adopted trio plus a fourth generator, `select-mixed+dc`. Same selector, same prompt for the
+selector, one more candidate and one more call. Dev split, 1,532 questions.
+
+| arm | execution accuracy | candidate recall | selection loss | calls/case |
+| --- | --- | --- | --- | --- |
+| `names` | 647 (42.2%) | – | – | 1.00 |
+| `inline+evidence` | 929 (60.6%) | – | – | 1.00 |
+| `decompose` | 916 (59.8%) | – | – | 1.00 |
+| `select-mixed` | 964 (62.9%) | 66.0% | 47 | 4.00 |
+| `select-dc` | 949 (62.0%) | 66.9% | 75 | 4.00 |
+| `select-mixed+dc` | 960 (62.7%) | **68.4%** | **88** | 5.00 |
+| `select-mixed+empty` | **971 (63.4%)** | 65.7% | 48 | 4.04 |
+
+The ceiling moved again, and by more this time: +37 questions the three prompts could not
+write and the four could, +2.4pp. The accuracy moved by −4. Paired McNemar over the same
+1,532 questions puts the accuracy difference at p=0.72 while charging one extra call per
+question, which the report prices as −0.26pp per extra call.
+
+Two runs now say the same thing. Raising the number of statements a question can be answered
+with raises the ceiling, and the selector returns a smaller share of it: 95.4% of the
+reachable set with three candidates, 91.6% with four. The fourth candidate is not neutral
+noise — it is attractive and wrong often enough to cancel the 37 questions it newly makes
+possible.
+
+That leaves a bound worth stating precisely, because it is what decides where the next hour
+goes. A **perfect** selector over the four-candidate set would score 68.4%, and a perfect
+selector over the three-candidate set 66.0%. The published BIRD dev leaderboard sits at
+70-73%. So:
+
+> No selector, however good, reaches the leaderboard from these candidate sets. The gap that
+> remains is in what the generator can write, not in how the answer is chosen.
+
+That is a stronger claim than the previous round could make, because it no longer depends on
+the selector being good — it is arithmetic on the ceiling. It also inverts the obvious next
+move: adding candidates is now known to be a losing trade at this selector, and improving the
+selector cannot pay more than the 88 questions it currently misses.
+
+### The empty-result turn, measured twice
+
+`select-mixed+empty` keeps the three candidates, drops any that returned nothing before the
+selector sees them, and spends one call when every remaining candidate is wrong in that
+specific way.
+
+| round | arm | execution accuracy | delta | paired |
+| --- | --- | --- | --- | --- |
+| one | `select-mixed+empty` | 979 (63.9%) | +0.59pp | p=0.19 |
+| two | `select-mixed+empty` | 971 (63.4%) | +0.46pp | p=0.37 |
+
+Both rounds are in the right direction and neither clears a 1% threshold. The mechanism is
+not in doubt — on this split no question has an empty gold result, so a statement that returns
+no rows is wrong by construction, and 73 candidates were dropped for free while 61 cases spent
+the extra call and 30 of them came back with something. What is in doubt, now with two
+independent samples, is that the effect is large enough to measure at 1,532 questions.
+
+The run-to-run noise floor is visible in the same two reports: `select-mixed` scored 971 in
+round one and 964 in round two with no change to the arm, and its ceiling moved from 65.6% to
+66.0%. Seven questions of drift on an unchanged configuration is the scale against which a
++7 result has to be read, and the paired test inside each run is what makes the comparison
+worth anything at all.
+
+So the lever stays off by default. The honest statement is: the information is worth
+something, the drop is free, and the accuracy effect is smaller than this split can resolve —
+which is a different claim from "it does not work", and would need a different experiment
+(repeated splits, or the same split at higher sample) to separate them.
+
 ## What these numbers are not
 
 - **Not a SOTA claim.** The dataset is a local fixture, not BIRD, Spider 2.0 or

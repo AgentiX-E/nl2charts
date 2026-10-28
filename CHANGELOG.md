@@ -34,7 +34,37 @@ cannot be argued with.
   than half the cases — or that averaged fewer than 1.5 steps — is refused rather than
   published, in the runner and in the gate alike.
 
+- **`samples`: a column's stored spellings on its own card line.** `values` builds a block
+  from the question's literals matched against the cells, so it is empty exactly when the
+  question spells a value differently from the store; it was empty on 60.9% of the questions
+  that offered it. The other half needs no match — `status TEXT [Banned|Active]` is in front of
+  the model whether or not the question said "banned", at the price of prompt length rather
+  than a call. The arm is `inline+evidence+samples`: one lever, one call, 113 columns and 597
+  values across the dev split's eleven databases, and the sample prompt grows from 2,411 to
+  4,230 characters. The values reach an arm through a decorator on the schema it resolved to,
+  not a parallel map, so an arm can ask for samples and for inline definitions without one
+  silently dropping the other.
+
 ### Fixed
+- **Two instruments rendered a prompt nobody sends.** The arms render the schema card at 400
+  lines with descriptions and join hints; the coverage control rendered at 2,000, so a
+  truncation could never appear in it; and `bench:bird:recall` — the check that exists to catch
+  a column the model was never shown — rendered at the default 40 lines from a schema built
+  without notes. All three were green. The shape now lives in `eval/bird/prompt-shape.ts` and a
+  test refuses a numeric limit at either call site. Measured again after the fix on all 1,534
+  dev questions: 10,650 of 10,650 gold identifiers visible, and a stricter check that matches
+  each reference inside its own table's block agrees at 7,672 of 7,672.
+- **A card that dropped tables was reported and never refused.** `controls.tablesInPrompts`
+  carried the comment "a truncated schema card silently drops tables, and a model cannot query
+  what it was never shown" and nothing acted on it: the count was printed, and the gate read
+  every lever except the one whose absence no rewording can recover. Any database whose card is
+  shorter than its schema now fails the build, naming the database and the loss; so does a
+  prompt with no table in it at all.
+- **The dry run previewed arms that were not requested.** It rendered `ARMS[0]` and `ARMS[1]`
+  whatever `BIRD_ARMS` said, so the dry run of a new lever put two unrelated prompts in the
+  artifact and left the lever unverified — and wrote the second one under `definitionsPrompt`,
+  after whichever arm happened to sit at that index, where nothing read it. The preview now
+  renders the arms the run was asked to score, with their sizes.
 
 - **A mechanism that ran and did not reach the artifact is now an error, not a finding.**
   `decompose` scored 911 of 1,532 on the dev split with the runner's own guard satisfied —
@@ -59,6 +89,22 @@ cannot be argued with.
   every benchmark workflow and fails on the next one written without `if: always()`.
 
 ### Measured
+
+- **The ceiling moved again and the accuracy did not, so the bound is now arithmetic.** A fourth
+  generator (`select-mixed+dc`) raised candidate recall from 66.0% to **68.4%** — 37 questions
+  the three prompts could not write — and scored 960 against 964, p=0.72, at one extra call per
+  question. Conversion fell from 95.4% to 91.6%. With two runs saying the same thing, the useful
+  statement is a bound rather than a delta: a **perfect** selector over these candidate sets
+  scores 66.0% on three and 68.4% on four, while the published dev leaderboard sits at 70-73%.
+  No selector reaches it from here; the remaining gap is in what the generator can write.
+- **`select-dc` second reading**: 949 (62.0%) against 964 (62.9%), p=0.09, ceiling 66.9% against
+  66.0%. The first run put the same arm at −2.0pp; the direction holds and the size does not, and
+  the ceiling gain shrank from +1.4pp to +0.9pp. Not adopted.
+- **The empty-result turn, measured twice**: +0.59pp (p=0.19) then +0.46pp (p=0.37), same
+  direction, neither clearing a 1% bar. The mechanism is exact (73 zero-row candidates dropped
+  for free, 61 retries, 30 came back with something); the effect is smaller than 1,532 questions
+  can resolve. The run-to-run drift of an unchanged arm in the same pair of reports — 971 then
+  964, ceiling 65.6% then 66.0% — is the scale that "+7" has to be read against.
 
 - **The fourth prompt raises the ceiling and the selector spends it.** `select-dc` — the
   adopted trio with its third slot given to decomposition instead of the value index, same
