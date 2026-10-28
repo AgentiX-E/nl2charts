@@ -244,7 +244,8 @@ async function main(): Promise<void> {
   const { mkdirSync, writeFileSync } = await import('node:fs');
   const { join } = await import('node:path');
   const { buildSqlPrompt, linkSchema } = await import('@agentix-e/nl2charts-ai');
-  const { buildSchema, loadQuestions, loadTables } = await import('./data.js');
+  const { buildSchema, loadDescriptions, loadQuestions, loadTables } = await import('./data.js');
+  const { BIRD_CARD } = await import('./prompt-shape.js');
 
   const root = process.cwd();
   const split = process.env.BIRD_SPLIT ?? 'minidev';
@@ -265,13 +266,22 @@ async function main(): Promise<void> {
     if (table === undefined) continue;
     let schema = schemas.get(question.db_id);
     if (schema === undefined) {
-      schema = buildSchema(table, new Map(), { withNotes: false });
+      // The runner's own schema: notes on, descriptions merged into the column line. A gate
+      // that renders a sparser card than the arms send is green about a card nobody sends,
+      // and it was: this line built the schema without notes while every arm sends one with
+      // them, then rendered it at the default 40 lines while the arms send 400.
+      schema = buildSchema(
+        table,
+        loadDescriptions(join(data, 'dev_databases', question.db_id, 'database_description'), table.tableNames),
+        { withNotes: true },
+      );
       schemas.set(question.db_id, schema);
     }
     const linked = linkSchema(question.question, schema, 12);
     const hint = linked.length === 0 ? '' : `Likely columns: ${linked.map((column) => `${column.table}.${column.column}`).join(', ')}`;
     const prompt = buildSqlPrompt(question.question, schema, {
       dialect: 'SQLite',
+      ...BIRD_CARD,
       ...(question.evidence === undefined ? {} : { evidence: question.evidence }),
     });
     const coverage = coverageOf(`${prompt}\n${hint}`, goldReferences(question.SQL, schema));

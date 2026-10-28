@@ -37,6 +37,7 @@ import { shapeFailure, shapeMismatch } from './shape.js';
 import { FAILURE_SAMPLE, failureCorpus } from './failures.js';
 import type { OracleResult } from './oracle.js';
 import { profileDatabase } from './profile.js';
+import { BIRD_SCHEMA_LINES } from './prompt-shape.js';
 import { buildIndex, renderDemonstrations, renderRetrieved, retrieve } from './retrieval.js';
 import { deserializeIndex, findValues, indexCells, renderValues, serializeIndex } from './values.js';
 import type { ValueIndex } from './values.js';
@@ -1210,7 +1211,7 @@ export function promptFor(arm: Arm, question: BirdQuestion, blocks: PromptBlocks
       arm.definitions === 'inline' || arm.definitions === 'dataset-subset' ? true : (profile?.descriptions ?? arm.notes),
     foreignKeys: profile?.foreignKeys ?? arm.notes,
     samples: false,
-    schemaLines: 400,
+    schemaLines: BIRD_SCHEMA_LINES,
     ...(profile === undefined ? {} : { notes: profile.notes }),
     ...(arm.definitions !== undefined && definitions !== undefined && definitions.length > 0 ? { definitions } : {}),
     ...(evidence === undefined || evidence.length === 0 ? {} : { evidence }),
@@ -1547,7 +1548,7 @@ async function main() {
   let tablesTotal = 0;
   const truncated: { db: string; shown: number; total: number }[] = [];
   for (const [db, schema] of schemas) {
-    const card = renderSchemaCard(schema, 2000, { descriptions: true, foreignKeys: true, samples: false });
+    const card = renderSchemaCard(schema, BIRD_SCHEMA_LINES, { descriptions: true, foreignKeys: true, samples: false });
     const shown = card.split('\n').filter((line) => !line.startsWith('  ')).length;
     tablesInPrompts += shown;
     tablesTotal += schema.length;
