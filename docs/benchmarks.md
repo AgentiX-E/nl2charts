@@ -1289,6 +1289,44 @@ comparison with another system is a matter of running the workflow, not of argui
 about samples. What is still not comparable is the model and the prompting budget;
 those are stated with every number instead of being implied away.
 
+### A run that asks for 300 questions is not a run that lost 200
+
+`bird-model.yml` scores a slice — 300 of Mini-Dev's 500 — because a model comparison
+needs one prompt and two models, not a full dev run. The artifact recorded the request
+in `selection.requested` and the split's size in `selection.available`, and the gate
+failed the run anyway:
+
+```
+BIRD1: scored 298 questions against a baseline of 500; the sample changed
+```
+
+The check was written to catch an artifact that lost rows, and it could not tell that
+from a run that never asked for them: it compared `scored` against the split's size and
+ignored the declaration sitting next to it. A red build about the sample the run
+declared, on the one run whose numbers were the reason it existed.
+
+The rule is now the one the arm list already followed. A declaration is read: a request
+for fewer questions than the split holds is a **measurement on a declared subset**, and
+the floors — taken on the full sample — are switched off rather than guessed at, in both
+directions. A subset cannot fail a floor (298 questions are not 500, and the noise is
+twice as wide) and cannot clear one either (a green check on a fifth of the sample is
+exactly what a SOTA claim is made of). What is left is arithmetic that a declaration
+cannot excuse:
+
+| Declaration | Gate | Why |
+| --- | --- | --- |
+| no `requested` field | strict, as before | an older artifact has nothing to read |
+| `requested < available` | subset: floors off, one note | the run says what it scored |
+| `requested` ≥ `available`, `scored` short | **fail** | rows were lost, not unrequested |
+| `requested > available` | **fail** | a request the split cannot satisfy |
+| `scored > requested` | **fail** | rows that were never asked for |
+| `requested` not a number | **fail** | a declaration nobody can read |
+
+The same run, against the same artifact, now prints `298 of 500 minidev questions were
+requested, so this is a measurement on a declared subset` and exits 0. The job summary
+carries the phrase *declared subset — no accuracy floor applies* next to the number, so
+a reader who meets `298/500` does not have to reconstruct which kind of run it was.
+
 ## Retrieved knowledge from the training split
 
 The per-question hint in BIRD's dev split is worth 14pp and cannot be regenerated from
@@ -1471,6 +1509,41 @@ nondeterminism at temperature 0, not a universal property of the harness. On a
 deterministic endpoint the same harness is exactly reproducible, which means a 1pp
 difference on such an endpoint would be real — and it also means an A/A pair is the only
 way to know which kind of endpoint you are measuring on.
+
+### A stronger model at the same prompt is the same measurement
+
+`deepseek-reasoner` thinks before it writes. If the remaining gap between ~58% and the
+published 70–73% were the model *reasoning* its way to a join nobody showed it, this is
+where it would show. `bird-model.yml`, 300-question slice of Mini-Dev, one arm, plus the
+arm repeated as its own control:
+
+| | `inline+evidence` | `inline+evidence#2` |
+| --- | --- | --- |
+| deepseek-reasoner, 298 scored | 155 (52.0%) | 158 (53.0%) |
+| deepseek-chat on the same 296 questions | 153 (51.7%) | — |
+| discordant, reasoner-only wins | 32 | — |
+| discordant, chat-only wins | 32 | — |
+| McNemar exact, two-sided | **p = 1.00** | — |
+
+Thirty-two disagreements in each direction. Not "no significant difference" in the sense
+of an underpowered run: with 64 discordant pairs out of 296 the test resolves roughly
+**±5.3pp** at 95%, and the observed difference is **0.0pp**. The A/A pair inside the run
+moved 1.0pp (12 of 15 discordant, p = 0.70), so the harness was behaving the way the
+harness behaves.
+
+The comparison is paired on question ids, which is why the chat column is not the 58.0%
+in the tables above: those are 498 questions, these are the same 296 the reasoner run
+scored, and even a single-model score moves 6pp between samples that size. Paired is the
+only comparison that means anything here, and both models were run through this harness
+with the same pinned inputs, same prompt, same 400-line schema cards.
+
+What this closes: **model reasoning depth is not the lever, at this prompt.** The same
+information in the same shape produces the same SQL. It does not follow that reasoner
+would not help a *selector* that ranks candidates it did not write — but the ceiling
+argument already bounds that: a perfect selector over four candidates scores 68.4%, and
+the ranking signal a second model could add is inside that bound, not above it. What is
+left is what the prompt shows and what writes the candidate: the value samples and the
+generator family, in that order, because samples change the input rather than the search.
 
 ## A generator that raises the ceiling, and a selector that spends it
 

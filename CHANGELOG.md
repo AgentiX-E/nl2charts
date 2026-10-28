@@ -46,6 +46,30 @@ cannot be argued with.
   silently dropping the other.
 
 ### Fixed
+- **A run that declared its sample was failed for its sample.** `bird-model.yml` scored 298 of
+  Mini-Dev's 500 questions — a 300-question slice, the declared subject of the run — and the
+  artifact recorded `requested: 300` beside `available: 500`. The gate compared `scored` against
+  the split's size, ignored the declaration, and failed the run with "the sample changed": a red
+  build about the sample the run declared, on the one run whose numbers were the reason it
+  existed. The rule is now the one the arm list already followed. A declaration is read, and a
+  request for fewer questions than the split holds is a **measurement on a declared subset**:
+  the floors, taken on the full sample, are switched off in both directions — a subset can
+  neither fail a floor (298 questions carry twice the noise) nor clear one (a green check on a
+  fifth of the sample is what a SOTA claim is made of). What remains is arithmetic a declaration
+  cannot excuse: `requested > available`, `scored > requested`, a non-numeric request, and a
+  sample that shrank with no declaration at all are each fatal. Six self-test cases cover the
+  six rows of that table, and the job summary now prints *declared subset — no accuracy floor
+  applies* beside the number so a reader who meets `298/500` does not have to reconstruct which
+  kind of run it was.
+- **The coverage gate had a silent boundary, and `eval/` was outside it.** `coverage-gate.mjs`
+  buckets by `packages/<name>/` and skips every other path without a word, so the harness every
+  published number comes out of was never measured. Asked directly it is **49.5% lines, 86.6%
+  functions, 87.1% branches** — the gaps are the run entrypoints, which need a dataset and an
+  endpoint. `test/coverage-scope.test.ts` now draws the boundary: every source file in the
+  repository is either inside the include globs declared in `vitest.config.ts` or listed as
+  unmeasured with a reason and the task that will bring it inside, and a stale declaration (a
+  root that moved, a file that became measured) fails as loudly as a new unmeasured directory.
+  Verified by adding `scripts/probe.ts` and watching the test refuse it.
 - **Two instruments rendered a prompt nobody sends.** The arms render the schema card at 400
   lines with descriptions and join hints; the coverage control rendered at 2,000, so a
   truncation could never appear in it; and `bench:bird:recall` — the check that exists to catch
@@ -90,6 +114,15 @@ cannot be argued with.
 
 ### Measured
 
+- **A stronger model at the same prompt is the same measurement.** `deepseek-reasoner` on 298
+  of Mini-Dev's 500 questions, one arm, plus the arm repeated as its own control: 155 (52.0%)
+  and 158 (53.0%). Paired against `deepseek-chat` on the same 296 questions — same pinned
+  inputs, same 400-line cards, same prompt — chat scores 153 and reasoner scores 153:
+  **32 disagreements in each direction, McNemar exact p = 1.00**. With 64 discordant pairs the
+  test resolves about ±5.3pp at 95%, so this is a measured zero rather than an underpowered
+  run; the in-run A/A moved 1.0pp (12 of 15, p=0.70). The conclusion is narrow and it closes a
+  family: at this prompt, model reasoning depth is not the lever. What is left is what the
+  prompt shows (`inline+evidence+samples`, unmeasured) and what writes the candidate (I-36).
 - **The ceiling moved again and the accuracy did not, so the bound is now arithmetic.** A fourth
   generator (`select-mixed+dc`) raised candidate recall from 66.0% to **68.4%** — 37 questions
   the three prompts could not write — and scored 960 against 964, p=0.72, at one extra call per
