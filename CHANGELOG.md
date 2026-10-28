@@ -19,6 +19,25 @@ cannot be argued with.
 
 ### Added
 
+- **The last three harness entries are values too, and all three are above 95% on every
+  dimension.** `eval/bird/stability.ts` (94 lines), `eval/live/run.ts` (206) and
+  `eval/adversarial/run.ts` (280) were the remaining 505 lines of `eval/` at zero, each a top-level
+  script that read `process.env` at import time, built its own engine or oracle, and threw where a
+  caller wanted an exit code. They are now `resolve*Settings` (the environment as a parameter),
+  `prepare*`/`run*` (the work as a function of those settings), a report function, and a `main`
+  that owns nothing but the exit code. Readings: **stability 99.0 / 100 / 98.6**, **live 99.4 / 100
+  / 99.1**, **adversarial 98.7 / 100 / 96.9** (lines / functions / branches). `eval/` overall went
+  from **85.6% lines, 89.9% branches** to **96.8% lines, 92.1% branches**, and the number of files
+  meeting the 95% standard on all four dimensions went from 9 to 15 of 28.
+- **One BIRD-shaped dataset, written once.** `test/helpers/bird-dataset.ts` builds the four things
+  every `eval/bird/` entry reads — a questions file, `dev_tables.json`, a description CSV and a
+  real SQLite file — so the runner, the stability probe and the adversarial harness are driven
+  against the same seven questions instead of three copies of them that can drift. The runner's
+  38-case end-to-end test was refactored onto it and kept passing unchanged.
+- **`pnpm bench:live -- --dry-run` and `pnpm bench:adversarial -- --dry-run`.** Both execute every
+  gold statement, print how many ran, and call no model. `LIVE_LIMIT` runs a prefix of the
+  generated cases, which is what CI uses to prove the path without spending 1,890 calls.
+
 - **The BIRD runner is drivable, so its guards are testable.** `eval/bird/run.ts` was one
   1,124-line `main()` that read `process.env` at import time and exited through
   `process.exitCode`; nothing in it could be observed without spending a model run on the real
@@ -82,6 +101,52 @@ cannot be argued with.
   silently dropping the other.
 
 ### Fixed
+
+- **`oracle.ts` dropped the two fields that make an engine error legible.** `oracle.py` sends
+  `errorName` and `errorCode` — with a comment explaining that without the name a repair has to
+  guess the failure class from prose — `OracleResult` declares both, and `eval/bird/run.ts` turns
+  the name into `details.engineError.code` for the repair turn. The decoder never copied them, so
+  the code was always `undefined` and the branch that reads it was dead in production. A test now
+  asserts `SQLITE_ERROR` survives the round trip, and that a failure raised by this client rather
+  than by SQLite carries no code at all.
+- **`profile.ts` could be made to write into the repository.** The cache directory was an optional
+  argument defaulted inside the function, and `eval/adversarial/run.ts` omitted it — so the
+  adversarial harness read and wrote the repository's profile cache, which is exactly the sharing
+  the comment above the option said it prevented. The argument is required now, which makes the
+  property a type error instead of a comment. Four more branches in the same file guarded outcomes
+  SQLite cannot produce (`count()` returning NULL, `min()` of a counted column being NULL,
+  `pragma_table_info` reporting a NULL type, a capture group that did not participate); they are
+  gone, and the file reads **100% on all four dimensions** where it read 86.3% of a denominator
+  that changed with the tests that ran.
+- **`stability.ts` reported an arm it had not measured.** `BIRD_STABILITY_ARM` fell back to
+  `ARMS[2]` when the name did not resolve, so a typo produced a complete artifact labelled
+  `metadata+evidence` while the operator believed they had measured something else; the lookup is
+  now an error that lists the arms that exist. The same probe conflated a call that never reached
+  the model with an answer that was wrong, which made an endpoint outage look like model noise:
+  `outages` and `engineFailures` are counted separately, and a statement the engine refused is
+  scored rather than lost. The artifact also hard-coded `bird-mini-dev` as its dataset whatever
+  split it ran on.
+- **`live/run.ts` compared an empty result against `undefined`.** The negative control read
+  `cases[0]` through an `as string` cast, so a run with no cases compared against nothing and
+  passed. It is an error now. The "N cases, N gold queries executed" line printed the case count
+  twice, the gates were exceptions thrown after the artifact was written, and the per-intent
+  breakdown existed only as console output — it is in the artifact, which is where a reader looks
+  for it a week later.
+- **`adversarial/run.ts` published the metadata lever with the definitions arm's numbers.** The
+  headline ablation and the per-category table both read `outcomes.get(ARMS[1])` — the
+  `definitions` arm — and labelled it `names -> metadata`, so the number the docs quote for the
+  metadata lever belonged to a different arm. Both now look the arm up by name, and a missing one
+  is an error rather than a silently empty pairing. The inline arm's definitions were also
+  synthesized by the model *before* the gold statements ran, which spent a call per database on a
+  case set that might not run; gold comes first.
+- **The eval ratchet recorded 100% for files it had never executed.** v8 reports a function and
+  branch ratio of 100% for a module it never entered, because the denominator is zero and 0/0 is
+  rendered as perfection: `eval/adversarial/run.ts` sat in the ledger as `lines 0.0, branches
+  100.0`, and the first honest measurement of it read as a regression from a promise nobody had
+  made. The ledger now records zero in all four dimensions for a file that executed nothing, and a
+  recorded row that cannot describe a measurement is replaced by the first one that can. The
+  recorder also used a strict comparison while the check used a 0.2pp tolerance, so a hundredth of
+  a point of jitter refused to write a run at all.
 
 - **A definition block that failed to generate left no trace in the artifact.**
   `synthesizedDefinitions` recorded the empty string and `definitionsProvenance` recorded

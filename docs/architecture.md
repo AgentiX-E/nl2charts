@@ -224,6 +224,30 @@ ratio was 90.8% before this round and 90.9% after, while the number of branch si
 went from 196 to 685. An unexecuted body reports fewer sites, so the earlier ratio was taken
 over the part of the file that happened to run (ADR-216).
 
+The other three entries followed the same shape, and the same rule applied to them:
+
+| Entry | Before | After (lines / functions / branches) |
+| --- | --- | --- |
+| `eval/bird/stability.ts` | 0% | 99.0 / 100 / 98.6 |
+| `eval/live/run.ts` | 0% | 99.4 / 100 / 99.1 |
+| `eval/adversarial/run.ts` | 0% | 98.7 / 100 / 96.9 |
+
+`eval/` as a whole is 96.8% of lines and 92.1% of branches, and 15 of its 28 files meet 95% on
+all four dimensions. The remaining distance is in the files nothing has driven yet
+(`eval/bird/diagnose-corpus.ts` at 53%, `eval/bird/recall.ts` at 73%), and the ledger prints it
+on every push.
+
+A second reading lesson came out of this round and it is the same lesson as ADR-216 from the
+other side. v8 reports **100% of functions and 100% of branches for a module it never
+executed**, because those ratios have a zero denominator and 0/0 prints as perfection. The
+ledger had recorded exactly that for the two files above — `lines 0.0, branches 100.0` in one
+row — so the first honest measurement of them looked like a regression, and the documented
+escape (`--allow-regression`) would have written a sentence about a drop that never happened.
+The ledger now records zero in every dimension for a file that executed nothing, and a recorded
+row that cannot describe a measurement is replaced by the first one that can (ADR-217). A ratio
+is only comparable when its denominator is reported with it; a ratio whose denominator is zero
+is not a measurement at all.
+
 ## Value model
 
 Rows are `Record<string, CanonicalValue>`. Before a row leaves the runtime:

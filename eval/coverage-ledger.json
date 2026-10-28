@@ -4,10 +4,10 @@
   "tolerancePp": 0.2,
   "measuredAt": "2026-10-28",
   "totals": {
-    "lines": 85.55,
-    "statements": 85.55,
-    "functions": 98.38,
-    "branches": 89.87
+    "lines": 96.8,
+    "statements": 96.8,
+    "functions": 99.15,
+    "branches": 92.1
   },
   "files": {
     "eval/ablate.ts": {
@@ -23,10 +23,10 @@
       "branches": 100
     },
     "eval/adversarial/run.ts": {
-      "lines": 0,
-      "statements": 0,
+      "lines": 98.69,
+      "statements": 98.69,
       "functions": 100,
-      "branches": 100
+      "branches": 96.96
     },
     "eval/baseline.ts": {
       "lines": 100,
@@ -38,7 +38,7 @@
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 87.36
+      "branches": 87.5
     },
     "eval/bird/diagnose-corpus.ts": {
       "lines": 53.23,
@@ -65,16 +65,16 @@
       "branches": 96.15
     },
     "eval/bird/oracle.ts": {
-      "lines": 98.03,
-      "statements": 98.03,
+      "lines": 98.11,
+      "statements": 98.11,
       "functions": 100,
-      "branches": 66.66
+      "branches": 96.42
     },
     "eval/bird/profile.ts": {
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 86.27
+      "branches": 100
     },
     "eval/bird/prompt-shape.ts": {
       "lines": 100,
@@ -98,7 +98,7 @@
       "lines": 99.2,
       "statements": 99.2,
       "functions": 100,
-      "branches": 90.94
+      "branches": 90.96
     },
     "eval/bird/samples.ts": {
       "lines": 100,
@@ -113,22 +113,28 @@
       "branches": 100
     },
     "eval/bird/stability.ts": {
-      "lines": 0,
-      "statements": 0,
+      "lines": 98.97,
+      "statements": 98.97,
       "functions": 100,
-      "branches": 100
+      "branches": 98.57
     },
     "eval/bird/synthesize.ts": {
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 82.6
+      "branches": 86.95
     },
     "eval/bird/values.ts": {
       "lines": 100,
       "statements": 100,
       "functions": 100,
       "branches": 97.95
+    },
+    "eval/errors.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 100
     },
     "eval/fixtures/semantic-model.ts": {
       "lines": 100,
@@ -149,10 +155,10 @@
       "branches": 87.5
     },
     "eval/live/run.ts": {
-      "lines": 0,
-      "statements": 0,
-      "functions": 0,
-      "branches": 0
+      "lines": 99.4,
+      "statements": 99.4,
+      "functions": 100,
+      "branches": 99.07
     },
     "eval/preflight.ts": {
       "lines": 97.64,

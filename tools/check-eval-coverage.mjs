@@ -38,11 +38,30 @@ export function relativeToRoot(file) {
   return index === -1 ? file : file.slice(index + 1);
 }
 
+/**
+ * Did anything in this file execute?
+ *
+ * v8 reports a branch and a function ratio of 100% for a module it never entered, because
+ * the denominator is zero and 0/0 is rendered as perfection. That is how
+ * `eval/adversarial/run.ts` came to have `lines 0.0` and `branches 100.0` recorded in the
+ * same row: the ledger was promising a number the file had never been asked for, and the
+ * first honest measurement of it read as a regression. A file that executed no line has
+ * measured nothing, and the ledger says so in all four dimensions.
+ */
+export function executed(metrics) {
+  const lines = metrics?.lines ?? {};
+  if (typeof lines.covered === 'number') return lines.covered > 0;
+  return (lines.pct ?? 0) > 0;
+}
+
 export function buildLedger(summary, options = {}) {
   const files = {};
   for (const [file, metrics] of Object.entries(summary)) {
     if (file === 'total') continue;
-    files[relativeToRoot(file)] = Object.fromEntries(DIMENSIONS.map((dimension) => [dimension, round(metrics[dimension].pct)]));
+    const name = relativeToRoot(file);
+    files[name] = executed(metrics)
+      ? Object.fromEntries(DIMENSIONS.map((dimension) => [dimension, round(metrics[dimension].pct)]))
+      : { ...Object.fromEntries(DIMENSIONS.map((dimension) => [dimension, 0])), unmeasured: true };
   }
   const totals = Object.fromEntries(DIMENSIONS.map((dimension) => [dimension, round(summary.total[dimension].pct)]));
   return {
@@ -62,10 +81,24 @@ function round(value) {
 }
 
 /**
+ * A record that cannot describe a measurement.
+ *
+ * A file with `lines: 0` executed nothing, so its functions and branches ratios came from a
+ * zero denominator rather than from the file. The ledger carried two such rows — recorded as
+ * `branches: 100` beside `lines: 0` — and the first real measurement of those files read as a
+ * regression from a promise nobody had made. A record like that is replaced, not defended.
+ */
+export function unmeasuredRecord(entry) {
+  return entry === undefined || entry.unmeasured === true || (entry.lines ?? 0) === 0;
+}
+
+/**
  * Raise-only merge: the ledger records the best number each file has ever produced.
  *
  * A drop is never silent. Passing `--allow-regression` with a reason is the only way to
  * record one, and the reason is written into the ledger so the next reader can weigh it.
+ * The one exception is a record with no measurement behind it: it is replaced by the first
+ * one that has.
  */
 export function mergeLedger(previous, next) {
   const files = {};
@@ -79,9 +112,18 @@ export function mergeLedger(previous, next) {
       if (present !== undefined) files[name] = present;
       continue;
     }
+    if (unmeasuredRecord(before)) {
+      files[name] = after;
+      continue;
+    }
     const merged = {};
     for (const dimension of DIMENSIONS) {
-      if (after[dimension] < before[dimension]) drops.push({ file: name, dimension, before: before[dimension], after: after[dimension] });
+      // The same tolerance the comparison uses. It was strict here, so a hundredth of a point
+      // of jitter — the difference between 98.97% and 98.96% of sixty-odd lines — refused to
+      // record a run at all, while `compare` would have called the same move noise.
+      if (after[dimension] < before[dimension] - TOLERANCE_PP) {
+        drops.push({ file: name, dimension, before: before[dimension], after: after[dimension] });
+      }
       merged[dimension] = Math.max(before[dimension], after[dimension]);
     }
     files[name] = merged;
@@ -181,12 +223,20 @@ function selfTest() {
     checks += 1;
     if (!condition) issues.push(message);
   };
+  // `covered` is part of the fixture because it is part of the question: a file at 0% has
+  // no measurement behind its ratios, and the ledger has to be able to tell that apart from
+  // a file at 100%.
   const summary = (files) => ({
     total: { lines: { pct: 90 }, statements: { pct: 90 }, functions: { pct: 90 }, branches: { pct: 90 } },
     ...Object.fromEntries(
       Object.entries(files).map(([name, pct]) => [
         `/repo/eval/${name}`,
-        Object.fromEntries(DIMENSIONS.map((dimension) => [dimension, { pct }])),
+        Object.fromEntries(
+          DIMENSIONS.map((dimension) => [
+            dimension,
+            { pct, covered: pct > 0 ? 1 : 0, total: 1 },
+          ]),
+        ),
       ]),
     ),
   });
@@ -218,6 +268,36 @@ function selfTest() {
     drops.length === DIMENSIONS.length && drops.every((drop) => drop.file === 'eval/a.ts'),
     'the merge did not name the files and dimensions it absorbed',
   );
+  // An unexecuted file measured nothing: v8 reports 100% functions and branches for a module
+  // it never entered, and the ledger must not promise those numbers.
+  const hollow = buildLedger({
+    total: { lines: { pct: 0 }, statements: { pct: 0 }, functions: { pct: 0 }, branches: { pct: 0 } },
+    '/repo/eval/never.ts': {
+      lines: { pct: 0, covered: 0, total: 40 },
+      statements: { pct: 0, covered: 0, total: 40 },
+      functions: { pct: 100, covered: 0, total: 0 },
+      branches: { pct: 100, covered: 0, total: 0 },
+    },
+  });
+  const never = hollow.files['eval/never.ts'];
+  fail(
+    DIMENSIONS.every((dimension) => never?.[dimension] === 0),
+    'a file that executed nothing was recorded with ratios it never measured',
+  );
+  fail(never?.unmeasured === true, 'an unmeasured file is not marked as such');
+  // A legacy record with `lines: 0` beside `branches: 100` is replaced by the first real
+  // measurement, not defended as a regression.
+  const legacy = { files: { 'eval/never.ts': { lines: 0, statements: 0, functions: 100, branches: 100 } }, totals: {} };
+  const corrected = mergeLedger(legacy, buildLedger(summary({ 'never.ts': 90 }), { now: '2026-03-01' }));
+  fail(corrected.ledger.files['eval/never.ts']?.branches === 90, 'an impossible ledger record was kept instead of replaced');
+  fail(corrected.drops.length === 0, 'replacing an unmeasured record was reported as a regression');
+
+  // Noise inside the tolerance is absorbed by the merge as well as by the comparison: a
+  // recorder that refuses to write a run because a ratio moved by a hundredth of a point is a
+  // recorder that stops recording.
+  const jitter = mergeLedger(ledger, buildLedger(summary({ 'a.ts': 89.9, 'b.ts': 50 }), { now: '2026-02-02' }));
+  fail(jitter.drops.length === 0, 'a drop inside the tolerance was reported as a regression by the merge');
+
   // Standing: the target is per file and all four dimensions.
   const standingResult = standing(summary({ 'a.ts': 96, 'b.ts': 94 }));
   fail(standingResult.done.join(',') === 'eval/a.ts', 'the standing list does not separate files that meet the target');
