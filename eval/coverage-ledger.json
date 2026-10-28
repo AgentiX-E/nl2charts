@@ -4,10 +4,10 @@
   "tolerancePp": 0.2,
   "measuredAt": "2026-10-28",
   "totals": {
-    "lines": 96.8,
-    "statements": 96.8,
-    "functions": 99.15,
-    "branches": 92.1
+    "lines": 99.27,
+    "statements": 99.27,
+    "functions": 100,
+    "branches": 93.4
   },
   "files": {
     "eval/ablate.ts": {
@@ -41,16 +41,16 @@
       "branches": 87.5
     },
     "eval/bird/diagnose-corpus.ts": {
-      "lines": 53.23,
-      "statements": 53.23,
-      "functions": 75,
-      "branches": 58.82
+      "lines": 99.12,
+      "statements": 99.12,
+      "functions": 100,
+      "branches": 98.86
     },
     "eval/bird/failure-shape.ts": {
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 89.58
+      "branches": 90.56
     },
     "eval/bird/failures.ts": {
       "lines": 100,
@@ -83,10 +83,10 @@
       "branches": 100
     },
     "eval/bird/recall.ts": {
-      "lines": 73.33,
-      "statements": 73.33,
-      "functions": 83.33,
-      "branches": 80
+      "lines": 99.37,
+      "statements": 99.37,
+      "functions": 100,
+      "branches": 98.98
     },
     "eval/bird/retrieval.ts": {
       "lines": 100,

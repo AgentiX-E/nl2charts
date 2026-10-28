@@ -232,10 +232,31 @@ The other three entries followed the same shape, and the same rule applied to th
 | `eval/live/run.ts` | 0% | 99.4 / 100 / 99.1 |
 | `eval/adversarial/run.ts` | 0% | 98.7 / 100 / 96.9 |
 
-`eval/` as a whole is 96.8% of lines and 92.1% of branches, and 15 of its 28 files meet 95% on
-all four dimensions. The remaining distance is in the files nothing has driven yet
-(`eval/bird/diagnose-corpus.ts` at 53%, `eval/bird/recall.ts` at 73%), and the ledger prints it
-on every push.
+The last two entries, driven the same way:
+
+| Entry | Before | After (lines / functions / branches) |
+| --- | --- | --- |
+| `eval/bird/diagnose-corpus.ts` | 53.2 / 75.0 / 58.8 | 99.1 / 100 / 98.9 |
+| `eval/bird/recall.ts` | 73.3 / 83.3 / 80.0 | 99.4 / 100 / 99.0 |
+
+`eval/` as a whole is 99.3% of lines, 100% of functions and 93.4% of branches, and 17 of its 28
+files meet 95% on all four dimensions. The remaining distance is entirely *branch* ratio in files
+whose lines are already at 100 (`ablate.ts` 90.3, `bird/data.ts` 87.5, `failure-shape.ts` 90.6,
+`retrieval.ts` 91.3, `run.ts` 91.0, `synthesize.ts` 87.0, `linking-ablation.ts` 88.9,
+`live/cases.ts` 87.5, `preflight.ts` 90.5, `run.ts` 94.4, `semantic-ablation.ts` 72.2), and the
+ledger prints it on every push.
+
+Both of those files were also measuring the wrong thing, which is the part a coverage number
+cannot show. `recall.ts` exists to answer one question — is every identifier the gold statement
+needs visible in the prompt the model receives — and it was building that prompt itself:
+`buildSqlPrompt` plus its own `Likely columns:` line. The pipeline puts that hint in the *user*
+message and words it `No column matched; use the schema above.` when the linker finds nothing, so
+for every question with no linked column the ceiling was measured on a prompt that is never sent,
+and any change to `buildAskMessages` would have left the gate green about a prompt nobody sends.
+It calls `buildAskMessages` now (ADR-218). `diagnose-corpus.ts` exists to say what kind of wrong
+the failures are, and it dropped three kinds of ungradable failure with a bare `continue` before
+dividing its shares by the survivors — a shape distribution over the cases that happened to run
+(ADR-216 again, at a second site).
 
 A second reading lesson came out of this round and it is the same lesson as ADR-216 from the
 other side. v8 reports **100% of functions and 100% of branches for a module it never
@@ -247,6 +268,16 @@ The ledger now records zero in every dimension for a file that executed nothing,
 row that cannot describe a measurement is replaced by the first one that can (ADR-217). A ratio
 is only comparable when its denominator is reported with it; a ratio whose denominator is zero
 is not a measurement at all.
+
+ADR-218 adds the sibling rule for gates: **a gate must measure the bytes that are actually sent,
+and must write its verdict before it acts on it.** `recall.ts` failed the first half — it
+re-rendered the prompt instead of asking the pipeline — and both entries failed the second:
+`recall.ts` threw before writing its artifact, so a failing run left the previous green
+`recall-<split>.json` on disk for the next reader to trust, and `diagnose-corpus.ts` wrote
+nothing at all. Every harness entry now writes an artifact carrying its own verdict
+(`passed`, `problems`, the denominator, the drops) and only then turns that verdict into an exit
+code. A measurement that cannot be read back is not a measurement; a green artifact left behind
+by a red run is worse than no artifact.
 
 ## Value model
 

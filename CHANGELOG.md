@@ -19,6 +19,22 @@ cannot be argued with.
 
 ### Added
 
+- **`diagnose-corpus.ts` never wrote a diagnosis, and `recall.ts` measured a prompt nobody sends.**
+  The last two entry points under `eval/` were also top-level scripts: `diagnose-corpus` printed a
+  table and kept nothing, `recall` re-derived the linking hint beside `buildSqlPrompt` instead of
+  asking the pipeline for the two messages it sends. Both are `resolve*Settings` +
+  `measure*`/`run*` + a report function + a `main` now, they share the runner's own
+  `resolveLayout`, and each writes an artifact (`diagnosis-<split>.json`, `recall-<split>.json`)
+  whose keys can be diffed between runs. Readings: **diagnose-corpus 99.1 / 100 / 98.9**,
+  **recall 99.4 / 100 / 99.0** (lines / functions / branches), from 53.2 / 75.0 / 58.8 and
+  73.3 / 83.3 / 80.0. `eval/` overall: **96.8% → 99.3% lines**, **99.2% → 100% functions**,
+  **92.1% → 93.4% branches**, and 15 → **17 of 28 files** meet 95% on all four dimensions.
+  Verified against the real Mini-Dev cache, not only fixtures: `pnpm bench:bird:recall` still
+  reports 500/500 questions and 3,820/3,820 identifiers visible.
+- **A `--import tsx` child process runs both entries in a test.** The module guard cannot fire
+  inside a test process — `process.argv[1]` is vitest there — so a guard nobody executes is a CLI
+  nobody has run. Two tests spawn the entry exactly as the workflow does and assert the printed
+  table and the artifact it leaves behind.
 - **The last three harness entries are values too, and all three are above 95% on every
   dimension.** `eval/bird/stability.ts` (94 lines), `eval/live/run.ts` (206) and
   `eval/adversarial/run.ts` (280) were the remaining 505 lines of `eval/` at zero, each a top-level
@@ -102,6 +118,36 @@ cannot be argued with.
 
 ### Fixed
 
+- **`diagnose-corpus.ts` divided its shares by the failures it could grade.** Three bare
+  `continue`s erased a failure whose question id was not in the questions file, one whose
+  prediction was empty, and one whose *gold* statement the engine refused — and every share in
+  the table was then computed over the survivors. A run with a broken gold would have published a
+  confident shape distribution over the handful of cases that happened to run. The drops are
+  counted by reason, printed under the table, and written into the artifact (ADR-216 at a second
+  site). The gold was also fetched and the literals extracted twice per failure, and the whole
+  entry read `BIRD_SPLIT` at import time, so one process could not diagnose two splits.
+- **`recall.ts` threw before it wrote, and skipped the databases it could not describe.** The gate
+  raised after the console lines, so a failing run left the previous green `recall-<split>.json`
+  in place — a file that said 100% about a split nobody had just measured. The artifact is written
+  first and carries `passed` and `problems`; the entry throws afterwards. Questions whose `db_id`
+  is missing from `dev_tables.json` were dropped by a `continue`, shrinking the denominator of the
+  completeness rate in silence; they are counted per database and named on the first line. A split
+  where nothing was measured used to fail with "0 of 0 prompts hide at least one identifier",
+  which is a true statement about no measurement at all — it now says so.
+- **`recall.ts` rendered its own prompt.** It called `buildSqlPrompt` and appended a `Likely
+  columns:` line, while the pipeline appends that hint to the *user* message and words it
+  `No column matched; use the schema above.` when the linker finds nothing. For a question with no
+  linked column the ceiling was measured on a prompt that is never sent, and any future change to
+  `buildAskMessages` would have left the gate green about a prompt nobody sends. It calls
+  `buildAskMessages` now. The `BIRD_LIMIT` sample bound counted measured rows rather than examined
+  questions, so a split with three undescribed databases examined `limit + 3`; and the entry
+  guard was `argv[1].endsWith('recall.ts')`, which a file called `notrecall.ts` also satisfies.
+- **A fallback that no input can reach sat in the middle of both entries.** `report.failures ?? {}`,
+  `outcome.cap ?? '?'` and a second lookup of an alias that had just been resolved from the same
+  map were unreachable branches: no test could cover them and no run could take them. The failures
+  record is a validated type now, `cap` and `truncated` travel as one `sample`, the alias table
+  holds the table rather than its name, and the example collector is a named rule
+  (`noteExample`) instead of a compound condition inside the loop.
 - **`oracle.ts` dropped the two fields that make an engine error legible.** `oracle.py` sends
   `errorName` and `errorCode` — with a comment explaining that without the name a repair has to
   guess the failure class from prose — `OracleResult` declares both, and `eval/bird/run.ts` turns

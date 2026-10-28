@@ -114,6 +114,8 @@ pnpm bench:bird:dry             # gold execution, schema fidelity, prompt covera
 pnpm bench:bird:port            # DuckDB portability census
 pnpm bench:bird                 # seven arms, paired ablations, live model
 pnpm bench:bird:stability       # 60 cases x 3 repeats: the noise floor
+pnpm bench:bird:recall          # every gold identifier is in the prompt; no model
+pnpm bench:bird:diagnose <report.json>   # classify the failures a run kept; no model
 ```
 
 Scope: **all 11 databases, all 500 Mini-Dev questions** (498 scorable: two gold
@@ -708,6 +710,33 @@ That result reprices a whole direction:
   inside the noise.
 - It also sets the ceiling for anything that adds text: a mechanism whose value is "more
   context" starts from 100% context.
+
+The measurement renders the prompt with `buildAskMessages`, the builder the pipeline itself
+calls, rather than re-deriving the schema card and the linking hint beside it. The earlier
+version did the latter and had already drifted: it appended no hint at all when the linker
+matched nothing, while the pipeline sends `No column matched; use the schema above.` — so for
+those questions the ceiling was measured on a prompt nothing sends (ADR-218). The run also
+names any database in the split that `dev_tables.json` does not describe, because a
+completeness rate over an unstated subset is the kind of number this repository has had to
+withdraw before, and writes `eval/out/recall-<split>.json` with its own verdict inside it
+(`passed`, `problems`, `measured`, `skipped`) before it can fail.
+
+## What kind of wrong the failures are
+
+Scoring tells you an arm lost; it does not tell you what to build. `pnpm bench:bird:diagnose
+<report.json>` reads an artifact that kept its failing statements, executes each one against
+the database the run used, and classifies it as `error`, `empty`, `row-count`,
+`column-count`, `scale` or `values`, plus the literals the prediction leaves out. It costs no
+model call, so it runs over every failure rather than a sample, and it writes
+`eval/out/diagnosis-<split>.json` so two runs can be diffed instead of retyped.
+
+Two facts belong with the table and are now printed beneath it. The first is the **drops**:
+a failure whose question id is not in the questions file, one whose prediction is empty, and
+one whose *gold* statement the engine refused cannot be classified, and a shape share computed
+over the survivors is not a shape share for the run. The second is the **literal miss** — the
+share of failures that omit a value the gold statement names — because that distinguishes "the
+filter was wrong" from "the model never saw the value", and only the second is a reason to
+build value grounding.
 
 The measurement is a CI step and fails the build if any prompt hides an identifier the gold
 statement needs, because a truncation bug in the schema card would otherwise appear only as
