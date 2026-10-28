@@ -19,6 +19,19 @@ cannot be argued with.
 
 ### Added
 
+- **The harness is measured now, and no file of it may fall behind.** `eval/` produced every
+  published number and sat outside the coverage include, so its coverage could only go down
+  unnoticed: 49.5% of lines. It is **63.9% lines / 92.9% functions / 87.7% branches** as of this
+  entry, and the direction is enforced rather than hoped for. `vitest.eval.config.ts` derives the
+  measurement from the main config (and replaces its coverage scope instead of merging into it —
+  `mergeConfig` concatenates `include`, so the first version measured the packages too and
+  reported a confident 81.5% about a set nobody meant to measure). `eval/coverage-ledger.json`
+  records each of the 27 files' four numbers, and `tools/check-eval-coverage.mjs` fails the build
+  if any of them measures lower, if a recorded file stops being measured, or if a file is
+  measured without a ledger entry. The run prints the distance to 95% on every push, and eight
+  files already meet it on all four dimensions. A threshold was the alternative and it would have
+  been red for months, which is how thresholds become `|| true`.
+
 - **`decompose`: a candidate written as steps, in one call.** A plan ahead of the statement
   measured −7.2pp (63/27, p=0.0002) because it anchored the statement it was meant to prepare;
   this is the other shape — the model writes the sub-questions as statements in the same reply
@@ -46,6 +59,26 @@ cannot be argued with.
   silently dropping the other.
 
 ### Fixed
+- **Six measurement scripts could only be observed through `process.exit`.** `preflight`,
+  `run`, `ablate`, `linking-ablation`, `semantic-ablation` and `profile` were top-level scripts
+  whose result was a log line and an exit code, so the properties they exist to establish could
+  only be read off a job. Each is a function returning a report, with a `main` that prints and
+  returns a code, and each is now exercised against real inputs: a local HTTP endpoint for the
+  preflight (healthy, one refusal, too slow for the deadline, unreachable, empty reply), real
+  DuckDB for the harness and both ablations, a real SQLite file for the profile. Three defects
+  fell out of the conversion:
+  - `pnpm bench:ablate` **failed with ENOENT on a clean checkout**, because it read
+    `eval/out/results.json` — a file the *other* script writes — for one log line.
+  - A predictor that emitted SQL the engine refuses **would have crashed the run** instead of
+    scoring a zero: the `catch` in `runPredictor` was unreachable by construction, since no
+    predictor here emits invalid SQL. It is `evaluateCase` now, and a test drives it with a
+    statement the engine rejects.
+  - `runHarness` checked its controls through two `?.` chains whose failure paths were
+    unreachable and whose messages were duplicated in `ablate`; both callers now share
+    `assertControls`, which is tested with a summary that scores the oracle at 95%.
+- **A case one arm skipped was counted as a case the other arm won.** `compareArms` (the
+  normalization comparison, now separable from the measurement) reported a pair for an id the
+  other arm never ran, crediting an arm for a case it did not attempt.
 - **A run that declared its sample was failed for its sample.** `bird-model.yml` scored 298 of
   Mini-Dev's 500 questions — a 300-question slice, the declared subject of the run — and the
   artifact recorded `requested: 300` beside `available: 500`. The gate compared `scored` against

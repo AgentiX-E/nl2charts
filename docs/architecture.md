@@ -181,6 +181,22 @@ the share that disagree with themselves (8.3% on the current slice). Without tha
 number a 2pp delta is a story, not a measurement — which is why the schema linker
 and the repair loop are reported as "no measurable effect" rather than as wins.
 
+### The harnesses are measured too
+
+Everything in `eval/` was, until recently, outside the coverage scope, so the code that
+produces every number above could lose coverage with nothing noticing: measured directly it
+was 49.5% of lines. `pnpm gate:eval-coverage` measures it with its own config and compares
+every file against `eval/coverage-ledger.json`. The rule is direction rather than a
+threshold: a file may not measure lower than the ledger says, a file that stops being
+measured is a failure, and a file measured without an entry is a failure. The command also
+prints how far each dimension is from 95%, so the remaining work is a number on every push
+rather than a sentence in a plan.
+
+Each harness is a function returning a report plus a `main` that prints and returns an exit
+code. That is what makes the controls testable: `runPreflight` is driven against a local
+endpoint that answers, refuses, and answers too slowly; `runHarness` and both ablations run
+against the real DuckDB fixtures; `profileDatabase` runs against a real SQLite file.
+
 ## Value model
 
 Rows are `Record<string, CanonicalValue>`. Before a row leaves the runtime:
@@ -238,6 +254,7 @@ test/              cross-package public-surface snapshot
 | `check-platform --self-test` | the checker stopped detecting a known mutation |
 | `pnpm gate:exports` | the public surface (including subpaths) drifted without review |
 | `pnpm gate:budgets` | a package exceeded its gzip ceiling |
+| `pnpm gate:eval-coverage` | an `eval/` file dropped below its recorded coverage |
 | `pnpm bench` | a control broke (oracle ≠ 100% or empty ≠ 0%) |
 
 ## Design decisions worth knowing
