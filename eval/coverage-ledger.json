@@ -70,6 +70,12 @@
       "functions": 100,
       "branches": 98.68
     },
+    "eval/bird/literal-repair.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 96.77
+    },
     "eval/bird/losses.ts": {
       "lines": 98.64,
       "statements": 98.64,
@@ -112,6 +118,12 @@
       "functions": 100,
       "branches": 98.98
     },
+    "eval/bird/repair.ts": {
+      "lines": 99.11,
+      "statements": 99.11,
+      "functions": 100,
+      "branches": 96.66
+    },
     "eval/bird/retrieval.ts": {
       "lines": 100,
       "statements": 100,
@@ -147,6 +159,12 @@
       "statements": 98.97,
       "functions": 100,
       "branches": 98.57
+    },
+    "eval/bird/statement.ts": {
+      "lines": 98.53,
+      "statements": 98.53,
+      "functions": 100,
+      "branches": 96.85
     },
     "eval/bird/strata.ts": {
       "lines": 98.96,

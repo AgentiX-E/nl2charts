@@ -861,6 +861,62 @@ each with the sentence pair that produces it in the test suite.
 not, because a split that covers 72% of a new corpus is a finding about the taxonomy and not a
 regression in the product.
 
+## Two cases, and a gold query that is wrong
+
+The taxonomy above says the biggest part of the bucket is conditions and tables. It also says
+six dev cases are one value away: the question says "directly funded", the column stores
+`Directly Funded`, and SQLite compares them as different strings. That is the only entry in the
+table a *text edit* could close, so it is the only one worth a tool.
+`pnpm bench:bird:repair <report.json> --arm <name>` offers every no-answer statement one edit —
+substitute the single stored spelling that equals the literal ignoring case — and reports what it
+recovers and what it would break.
+
+The second half is what makes the first publishable. Applied to everything, the edit rewrites one
+gold statement in the dev split:
+
+```
+dev 640, codebase_community
+  stored:  users.DisplayName = 'mornington'
+  gold:    users.DisplayName = 'Mornington'
+```
+
+BIRD's reference statement compares a value in a case the table does not store. Its answer is
+therefore the answer to a filter that matches nothing — and a model that writes the *correct*
+statement is judged wrong on that question. The repair, applied unconditionally, "fixes" the
+gold, which is exactly how a repair breaks a case that passes.
+
+So the edit is gated on a statement that returned no rows, and the gate is a property of the
+corpus rather than a heuristic: `controls.emptyGoldExcluded` is 0 in both splits — no question has
+an empty gold answer — so a statement that returns nothing is already failing, and editing it
+cannot turn a pass into a failure. Measured both ways, on the 1,532 scorable dev questions:
+
+| | ungated | gated on an empty result |
+|---|---|---|
+| gold statements edited | **1** of 1,534 (`640`) | **0** of 1,534 |
+| no-answer statements offered | 515 | 70 |
+| rewritten | 13 | 5 |
+| **fixed** | 6 | **2** |
+| still wrong | 7 | 3 |
+| refused by the engine | 0 | 0 |
+
+The ungated column is the reading that killed the lever in the form it was proposed in: six
+recoveries against one edit to the reference answer. The gated column is safe and worth
+**+0.13pp** — two cases, which no paired test at n = 1,532 can distinguish from zero (the
+minimum detectable effect is 1.27pp). It is not adopted, and the reason is arithmetic rather
+than doubt about the mechanism: of the 70 statements that returned nothing, only 5 compared a
+value the column stores in another case, and 3 of those five were wrong for a second reason too.
+
+The instrument is kept and gated anyway, for two reasons that outlive the lever. The absolute bar
+it enforces — a statement edit must touch no gold statement — is the check any future repair has
+to pass before it can be believed, and it is the check that found dev 640. And the gold-literal
+defect it exposed is a property of the benchmark that changes how `literal-case` should be read:
+the case-correct statement is not always the rewarded one.
+
+One probe was considered and is not there. `select distinct` would be the obvious way to test
+whether `filter-wide` is a fan-out multiplying rows, and it cannot be: BIRD's judge compares
+result *sets*, so duplicates are already collapsed and `distinct` is a provable no-op on the
+metric. The 88 `filter-wide` cases are different rows, not repeated ones.
+
 ## The dev split, measured: 60.6% on the split leaderboards report
 
 Two runs of the 1,534-question dev split (`40157122326`, `40166834512`), three arms,

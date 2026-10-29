@@ -8,6 +8,23 @@ cannot be argued with.
 
 ### Measured
 
+- **One provable repair recovers two cases, and it found a gold query that is wrong.** `pnpm
+  bench:bird:repair <report> --arm <name> --strict` offers every no-answer statement one edit —
+  substitute the single stored spelling a column has for a literal that differs only in case — and
+  reports what it recovers against what it would break. The second half is the finding. Applied
+  unconditionally the edit rewrites **1 of 1,534** gold statements: dev `640` stores
+  `users.DisplayName = 'mornington'` where BIRD's gold compares `'Mornington'`, so the reference
+  answer is the answer to a filter that matches nothing, and a model that writes the *correct*
+  statement is judged wrong on that question.
+
+  Gated on a statement that returned no rows — a property of the corpus rather than a heuristic,
+  since `controls.emptyGoldExcluded` is 0 in both splits — the edit touches **0 of 1,534** gold
+  statements and recovers **2** of the 1,532 scorable dev questions: 70 statements returned nothing,
+  5 of them compared a case-twin literal, 3 of those were wrong for a second reason too. Two cases
+  is **+0.13pp**, below the 1.27pp the split can resolve, so the repair is **not adopted**: it stays
+  a measured candidate while the instrument stays a gate, because the absolute bar it enforces —
+  a statement edit must touch no gold statement — is what any future repair has to pass.
+
 - **The `values` bucket is conditions and join paths, not aggregation.** `pnpm bench:bird:gap:values
   <report> --arm <name> --strict` reads the bucket the parent tool cannot split and files every case
   under the clause a fix would change: `no-statement`, `filter-narrow`, `filter-wide`, `scale`,

@@ -114,6 +114,11 @@ jobs:
       # and arm it has been measured on.
       - name: What kind of wrong the no-answer statements are
         run: pnpm bench:bird:gap:values eval/out/bird-eval.json --arm select-cross
+      # 1534 gold statements and 515 no-answer statements through one literal edit, one oracle
+      # query each and no model call. No `--strict`: this is where a repair is tried on the
+      # split that has room for one, and a reading that says "it recovers two" is the finding.
+      - name: What one provable edit recovers, and what it would break
+        run: pnpm bench:bird:repair eval/out/bird-eval.json --arm select-cross
       # The run that fails is the run whose numbers matter most, and these two steps used to
       # run only on success: `40534288883` failed the floor gate and the artifact — the only
       # copy of the per-case rows and the McNemar p-values — was never uploaded, so the run

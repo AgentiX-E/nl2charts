@@ -307,6 +307,13 @@ jobs:
       # instrument, and the instrument is what the next iteration is planned from.
       - name: What kind of wrong the no-answer statements are
         run: pnpm bench:bird:gap:values eval/out/bird-eval.json --arm select --strict
+      # The instrument behind the deterministic half of the repair question, and the one gate
+      # that can be absolute: a statement edit offered only to statements that returned nothing
+      # must touch no gold statement, because no gold answer in this split is empty. The number
+      # of cases it recovers is a reading, not a floor — the repair recovers two, which is below
+      # what a paired test can resolve, and saying so is the point of running it every commit.
+      - name: What one provable edit recovers, and what it would break
+        run: pnpm bench:bird:repair eval/out/bird-eval.json --arm select --strict
       - name: Noise floor (same cases, three repeats)
         run: pnpm bench:bird:stability
       - name: Adversarial gold, widths and controls without a model
