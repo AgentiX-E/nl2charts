@@ -8,6 +8,25 @@ cannot be argued with.
 
 ### Measured
 
+- **The cross-vendor half: the ceiling rises 2.7pp, the selector buries it, and the sign does not
+  flip.** The same pair on all 1,532 questions with `glm-4-flash` as the second model (run
+  `40817333043`): `select-mixed` **62.7%**, `select-cross` **61.6%**, onlyFirst 42 / onlySecond
+  25, **Δ = −1.11pp, 95% CI [−2.16, −0.06], p = 0.0498**, discordance 4.37%, resolves **1.5pp**.
+
+  | second model | ceiling (mixed / cross) | selection loss | delta | p | `@second` wins |
+  | --- | --- | --- | --- | --- | --- |
+  | `deepseek-chat` | 975 / 974 | 18 / 29 | −0.78pp | 0.029 | 87% |
+  | `glm-4-flash` | 977 / **1018** | 17 / **75** | −1.11pp | 0.0498 | 28% |
+
+  Two things this settles and one it refuses to. The sign is the same under both second models,
+  so the cost is "a candidate the prompts were not written for", not a vendor interaction. And
+  the diversity argument is now measured rather than asserted: the cross-vendor candidate adds
+  **41 questions** of ceiling (+2.7pp), and the selector converts that into a **58-question**
+  loss, ending 17 lower — the ceiling is not the constraint, converting it is. What it refuses
+  to settle is the size: the resolution at 4.37% discordance is 1.5pp, wider than the 1.11pp it
+  measured, so the sign is supported and the magnitude is not. A 1pp claim on this split would
+  need 3,434 cases.
+
 - **The full dev split answers the question 120 questions could not: −0.78pp, and the loss is
   the selector's.** `select-mixed` against `select-cross`, one lever, 1,532 cases: **62.5% vs
   61.7%**, 19 cases only the mixed arm got, 7 only the cross arm, **Δ = −0.78pp, 95% CI

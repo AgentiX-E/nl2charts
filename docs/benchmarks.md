@@ -2022,6 +2022,43 @@ What changed with the sample size is not its preference but its cost. A candidat
 second model looks enough like a better answer that the selector prefers it, and it is not
 better often enough to pay for the preference.
 
+### The cross-vendor half: the ceiling rises and the selector buries it
+
+The same pair was run again on all 1,532 questions with `glm-4-flash` as the second model
+(run `40817333043`), which is the half that separates "a second model" from "a different
+vendor" — the earlier 120-question groups could not, because their interval was ±5pp.
+
+| second model | ceiling (mixed / cross) | selection loss (mixed / cross) | accuracy | delta | p | `@second` wins |
+| --- | --- | --- | --- | --- | --- | --- |
+| `deepseek-chat` (same vendor) | 975 / 974 | 18 / 29 | 62.5% / 61.7% | −0.78pp | 0.029 | 87% |
+| `glm-4-flash` (cross-vendor) | 977 / **1018** | 17 / **75** | 62.7% / 61.6% | −1.11pp | 0.0498 | 28% |
+
+Three readings, in order of how much they can carry:
+
+1. **The sign is the same under both second models.** −0.78pp and −1.11pp, on the same
+   questions, with the same first arm. A vendor interaction would have had to flip it; it did
+   not. What costs accuracy is *a candidate the three prompts were not written for*, not which
+   company wrote it.
+2. **The cross-vendor candidate raises the ceiling by 2.7pp and the arm still loses.** With
+   `glm-4-flash` there are **41 more questions** where some candidate was right (1,018 against
+   977) — that is the diversity argument, measured, and it is real. The selector then threw away
+   75 of them instead of 17, so the arm ends 17 questions lower. **The ceiling is not the
+   constraint; converting it is.** This is the same shape as the same-vendor half, one order of
+   magnitude larger.
+3. **The magnitude is unresolved, and the artifact says so.** The design's resolution at this
+   discordance (4.37%) is **1.5pp** — wider than the 1.11pp it measured — and p = 0.0498 sits on
+   the edge. The interval [−2.16, −0.06] excludes zero, so the sign is supported; the size is
+   not. A 2pp claim here needs 859 cases, which this split has; a 1pp claim needs 3,434, which
+   it does not. Reporting "−1.11pp" without the 1.5pp resolution would be the mistake the
+   previous round spent a section undoing.
+
+The selector's preference is what changed with the author: it takes the `@second` candidate on
+**87%** of decided questions when the second model is its own vendor and on **28%** when it is
+not. Rejecting a candidate 72% of the time and still losing 58 questions to the 28% it accepts is
+not a threshold that needs tuning; it is a selector that ranks a prompt's provenance above its
+contents. The run-to-run drift of the same arm across the two runs (62.47% vs 62.66%, 0.19pp) is
+smaller than either effect, so the comparison is not reading noise between runs.
+
 ### The confound, checked instead of argued
 
 `select-mixed` and `select-cross` do not run the same *number* of distinct prompts. Two of the
