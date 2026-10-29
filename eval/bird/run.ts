@@ -390,6 +390,11 @@ export const ARMS: readonly Arm[] = [
   // authorship from formatting, so removing formatting is the test of whether the 6pp was
   // readability or taste.
   { name: 'select-cross-canon', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: CROSS_SOURCES, canonical: true },
+  // ...and the same canonical text read by the second model, which is where the style channel was
+  // measured: the 128-case loss group belongs to that judge, so closing the channel has to be
+  // priced on the judge that used it. One lever from `select-cross-judge`, and the arm that can
+  // answer "does canonicalisation recover what the swap lost".
+  { name: 'select-cross-judge-canon', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: CROSS_SOURCES, judge: 'second', canonical: true },
   // The same three prompts with the authorship majority reversed: two candidates from the
   // second model, one from the primary. One lever from `select-cross` — one candidate's author
   // — and the direct test of "whoever wrote two of the three wins the tie".
@@ -505,6 +510,7 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'vote-cross': 'the cross-model candidate set aggregated by modal result: needs the second model too',
   'select-cross-judge': 'the cross set judged by the second model: needs the second model and a second key, and prices self-preference in the judge',
   'select-cross-canon': 'the cross set rewritten into one SQL style before the selector reads it: the lever that closes the style channel the judge swap proved is open, not a different judge; needs the second model, and is measured against `select-cross`',
+  'select-cross-judge-canon': 'the canonical text read by the second model: the arm that prices canonicalisation where the style channel was measured, one lever from `select-cross-judge` and two from `select-cross-canon`; needs the second model and a second key',
   'select-balanced': 'the same three prompts with two candidates from the second model instead of one: flips which author holds the majority, and needs the second model',
   plan: 'query plan before the statement: 50.4% against 57.6% for its parent (-7.2pp, 63/27, p=0.0002) — anchoring, not helping; kept so the finding can be re-tested',
   'select-pair': 'pairwise comparison instead of an absolute ranking: 58.4% against 57.6% for its parent (+0.8pp, 17/20, p=0.74) at one more call, and it lost more of its candidate set (25 cases against 20) — the absolute prompt is not what the selector loses; kept so a different comparison order or a two-of-three vote can be measured against it',
@@ -570,6 +576,8 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   ['select-cross', 'select-cross-judge'],
   // One lever: the same candidates in one SQL style, so the selector cannot see who wrote them.
   ['select-cross', 'select-cross-canon'],
+  // One lever on the judge that used the channel: the same canonical text, read by its author.
+  ['select-cross-judge', 'select-cross-judge-canon'],
   // One lever: which author holds the majority among the same three prompts.
   ['select-cross', 'select-balanced'],
   // One lever: the same candidates and selector, with an empty result treated as a
