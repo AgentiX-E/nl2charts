@@ -595,6 +595,20 @@ export interface CaseRun extends CaseOutcome {
    * generator that never wins is a call that should not be in the set.
    */
   readonly winnerSource?: string;
+  /**
+   * The candidate set, in the order the selector saw it, with the truth for each.
+   *
+   * `candidateRecall` says whether the set held an answer; it cannot say *which* candidate
+   * held it, so a selection loss has no address. The cross-vendor run lost 75 cases while
+   * its set held the answer 1,018 times, and the artifact could not distinguish "the
+   * selector rejected the second model's statement" from "it took a wrong statement while
+   * a right one sat next to it" — two readings that call for opposite fixes. Recording the
+   * verdict per candidate makes every loss attributable from the file.
+   *
+   * Absent for an arm that generates once, where the set has one member and the answer is
+   * already in `passed`.
+   */
+  readonly candidates?: readonly { readonly source: string; readonly correct: boolean }[];
   /** Candidates the selector was not offered because their result was empty. */
   readonly emptyDropped?: number;
   /** True when the winner returned nothing and one more turn was spent. */
@@ -1272,6 +1286,22 @@ export function offeredCandidates<T extends { readonly rows: readonly unknown[] 
   const nonEmpty = candidates.filter((candidate) => candidate.rows.length > 0);
   if (nonEmpty.length === 0) return { offered: candidates, dropped: 0 };
   return { offered: nonEmpty, dropped: candidates.length - nonEmpty.length };
+}
+
+/**
+ * The candidate set, in the order the selector saw it, with the truth for each member.
+ *
+ * One pass of the official judge over the set answers both questions the report asks of
+ * it — `candidateRecall` ("was the answer in there at all") and the per-candidate verdict
+ * ("which member held it") — so the second cannot drift from the first. Judging each
+ * candidate twice would let a loss be attributed to a candidate the recall count never
+ * counted.
+ */
+export function candidateVerdicts(
+  candidates: readonly { readonly rows: readonly (readonly unknown[])[]; readonly source: string }[],
+  expected: readonly (readonly unknown[])[],
+): readonly { readonly source: string; readonly correct: boolean }[] {
+  return candidates.map((candidate) => ({ source: candidate.source, correct: judgeOfficial(expected, candidate.rows) === 'match' }));
 }
 
 export async function pool<T, R>(items: readonly T[], limit: number, worker: (item: T, index: number) => Promise<R>): Promise<R[]> {
@@ -2173,6 +2203,16 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
             }
             const executed = await oracle.run(question.db_id, askedSample.sql);
             if (executed.ok) candidates.push({ sql: askedSample.sql, rows: executed.rows, source });
+            else {
+              // A statement the engine refused is a candidate that never arrived, and it used
+              // to be dropped in silence here: `if (executed.ok) push` has no else, so the set
+              // shrank, the case still answered, the ceiling fell, and `candidateFailures`
+              // stayed zero — the same defect `assertCandidateSurvival` was written for on the
+              // endpoint side. The verdict on a set that is missing a member is not a fact
+              // about the selector, so the loss is counted where it happened.
+              sampleErrors.push(undefined);
+              lost.other += 1;
+            }
           } catch (error) {
             // A sample that fails the guard or the engine casts no vote; the other
             // samples still produce one. The reason is kept for the zero-candidate case.
@@ -2280,6 +2320,10 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
           }
         }
         const reason = judgeOfficial(expected.rows, winner.rows);
+        // Judged once here and read twice below: the ceiling and the per-candidate record
+        // are the same pass, so a loss cannot be attributed to a member the ceiling count
+        // never saw.
+        const verdicts = candidateVerdicts(candidates, expected.rows);
         return {
           id: String(question.question_id),
           passed: reason === 'match',
@@ -2288,7 +2332,8 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
           strict: judgeStrict(expected.rows, winner.rows) === 'match',
           attempts: arm.vote + (retried ? 1 : 0),
           agreement: majority.agreement,
-          candidateRecall: candidates.some((candidate) => judgeOfficial(expected.rows, candidate.rows) === 'match'),
+          candidateRecall: verdicts.some((verdict) => verdict.correct),
+          ...(verdicts.length < 2 ? {} : { candidates: verdicts }),
           ...(selectedByModel === undefined ? {} : { selectedByModel }),
           ...(arm.mixed === undefined ? {} : { winnerSource: winner.source }),
           ...(arm.emptyRetry === undefined
@@ -2677,6 +2722,12 @@ export function caseRows(outcomes: ReadonlyMap<string, readonly CaseRun[]>): Rec
       // correct statement is a paired outcome between two arms on the same question, and
       // a paired outcome can be tested. A share cannot.
       ...(run.candidateRecall === undefined ? {} : { candidateRecall: run.candidateRecall }),
+      // The candidate set and the member it took. `candidateRecall` alone makes every
+      // selection loss anonymous: on the cross-vendor run 75 cases held the answer and
+      // returned something else, and the file could not say whether the selector refused
+      // the second model's statement or took a different wrong one beside it.
+      ...(run.candidates === undefined ? {} : { candidates: run.candidates }),
+      ...(run.winnerSource === undefined ? {} : { winnerSource: run.winnerSource }),
       // Why this case has no candidate, when it has none.
       //
       // `select-mixed` cost 3 calls on two of 120 questions while `select-cross` cost 4,

@@ -42,6 +42,7 @@
     "eval:preflight": "tsx eval/preflight.ts",
     "bench:bird:recall": "tsx eval/bird/recall.ts",
     "bench:bird:strata": "tsx eval/bird/strata.ts",
+    "bench:bird:losses": "tsx eval/bird/losses.ts",
     "bench:bird:diagnose": "tsx eval/bird/diagnose-corpus.ts",
     "bird:stratify": "node tools/stratify-mixed.mjs"
   },

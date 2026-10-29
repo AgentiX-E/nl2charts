@@ -216,6 +216,18 @@ ones is not the arm its label says it is; the artifact counts those questions
 comparison on them, because a pooled delta across arms with different
 independence mixes two comparisons in an unknown proportion.
 
+**Selection loss** — The ceiling minus what the arm returned: the cases where some
+candidate answered the question and the arm did not come back with it. It is the
+whole room a better selector has, and it is bounded by the candidate set — an arm
+that loses nothing cannot be improved by choosing better, and an arm that loses a
+lot cannot be improved by generating more.
+
+**Candidate record** — Per case, the candidate set with the judge's verdict on each
+member, and which member the arm returned (`cases[].candidates`,
+`cases[].winnerSource`). Without it a loss has a size but no address: "the selector
+rejected the second model's statement" and "it took a different wrong statement
+while a right one sat beside it" are the same two numbers.
+
 **Visual baseline** — A committed fingerprint per series type: the element
 skeleton and the count of drawn shapes, not the coordinates. It fails when a chart
 stops drawing or changes shape and stays quiet when a label moves, because a

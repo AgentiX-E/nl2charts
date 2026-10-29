@@ -121,6 +121,25 @@ cannot be argued with.
 
 ### Added
 
+- **A selection loss has an address.** `candidateRecall` says whether an arm's candidate set
+  held an answer and `selectionLoss` counts the cases it did not return, and neither says
+  *which* candidate was thrown away — which is the difference between "the selector rejected
+  the second model's statement" and "it took a wrong statement while a right one sat beside
+  it". The cross-vendor run lost 75 of its 1,018 ceiling cases and the artifact supported both
+  readings, so the runner now writes `cases[].candidates` (each member with the judge's verdict)
+  and `cases[].winnerSource`, and `pnpm bench:bird:losses --arm <arm>` reads them back: the
+  selector's conversion rate per source — the 47%/87% asymmetry with its denominators printed —
+  and every loss grouped by which sources held the answer and which one the arm returned.
+
+  The record and the ceiling are one pass over one array (`candidateVerdicts` returns the
+  verdicts, `candidateRecall` is `.some(correct)` of them), so a loss cannot be attributed to a
+  member the ceiling never counted. The reader refuses three shapes rather than averaging them:
+  an artifact written before the field existed (no record anywhere → stated absence, non-zero
+  exit), a row whose recall is true while its record marks nothing correct (contradiction → fail),
+  and a row that failed while its record marks the returned statement correct (same). A case
+  whose two candidates both answered is kept as a set and neither source is priced alone.
+  23 tests, and `eval/` is 30 of 30 files at 95% on all four dimensions.
+
 - **A comparison can be stratified by the candidates it actually sent.** `eval/bird/strata.ts`
   (`pnpm bench:bird:strata --arm select-mixed --against select-cross`) joins an artifact's
   `mixedCandidatePrompts.degenerateIds` with its per-case outcomes and reports the paired delta,
@@ -301,6 +320,18 @@ cannot be argued with.
   silently dropping the other.
 
 ### Fixed
+
+- **A candidate the engine refused was dropped in silence.** The sampling loop read
+  `const executed = await oracle.run(...); if (executed.ok) candidates.push(...)` with no
+  `else`: a statement the read-only oracle refused (a write, a missing table, a timeout)
+  vanished from the set, the case still answered, the ceiling fell, and `candidateFailures` —
+  whose own comment promises a split between "the model refused" and "the engine refused" —
+  stayed at zero. That is the defect `assertCandidateSurvival` was written for, one layer down
+  from where it was looking. Found by a test that makes one source of a mixed set answer with
+  `delete from items`: the arm now reports `{ llm: 0, other: 1, attempted: 21 }`, and the
+  candidate record shows the two that survived rather than three that look like the whole set.
+  45 tests in the end-to-end file, and `eval/bird/run.ts` is back to **95.2%** branches with
+  all 30 files at 95% on all four dimensions.
 
 - **The coverage gate names the file that is short, and whether its suite needed a service.**
   `FAIL node st=85.83 br=87.50` was read as "coverage fell" on two consecutive rounds; it meant

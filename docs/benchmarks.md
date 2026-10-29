@@ -117,6 +117,7 @@ pnpm bench:bird:stability       # 60 cases x 3 repeats: the noise floor
 pnpm bench:bird:recall          # every gold identifier is in the prompt; no model
 pnpm bench:bird:diagnose <report.json>   # classify the failures a run kept; no model
 pnpm bench:bird:strata --arm A --against B   # split a pair by candidate independence; no model
+pnpm bench:bird:losses --arm A               # attribute every selection loss to a source; no model
 ```
 
 Scope: **all 11 databases, all 500 Mini-Dev questions** (498 scorable: two gold
@@ -2090,6 +2091,68 @@ would be claiming a resolution it does not have.
 The tool cross-checks its own pooled row against the artifact's `ablations` entry for the same
 pair and fails when the two disagree, because two readers of one file that differ mean one of
 them is wrong, and printing both for the reader to choose between is not a measurement.
+
+## A loss has an address
+
+`candidateRecall` splits an arm's cases in two: the candidate set held an answer, or it did
+not. `selectionLoss` is the first half minus what the arm returned — the cases a better
+selector could have won. Neither of them says *which* candidate was thrown away, and the
+cross-vendor run made that gap expensive: it lost **75** of the 1,018 cases whose set held
+the answer, and the artifact could support two readings that call for opposite work.
+
+- The selector **rejected the second model's statement** — a preference to attack.
+- The selector took a different wrong statement **while a right one sat beside it** — a
+  ranking failure to attack, on the same candidate set.
+
+Two readings, one file, no way to choose. So the runner now writes the set it chose among,
+with the judge's verdict on each member, and which member it took — the fields abbreviated
+here to the ones this section is about:
+
+```json
+{ "arm": "select-cross", "id": "…", "passed": false, "candidateRecall": true,
+  "candidates": [ { "source": "inline+evidence@second", "correct": true },
+                  { "source": "metadata+evidence", "correct": false },
+                  { "source": "values", "correct": false } ],
+  "winnerSource": "metadata+evidence" }
+```
+
+That row is the first reading's answer *and* the second's: the answer was in the one
+candidate the arm did not take. The record and the ceiling come from the same pass over the
+same array — `candidateVerdicts` returns the verdicts once and `candidateRecall` is
+`.some(correct)` of them — so the two cannot disagree by a rounding difference or by a
+candidate the ceiling never counted.
+
+### The reader
+
+```bash
+pnpm bench:bird:losses --arm select-cross --report eval/out/bird-eval.json
+```
+
+Two tables. The first is the selector's conversion rate per source: of the questions where
+exactly one candidate was right, how often the arm came back with it. That is the 47%/87%
+asymmetry with its **denominators printed** instead of implied — the number a judge swap has
+to move, and the number that says how much of the loss a per-source fix could reach. The
+second groups the losses by address: which sources held the answer, and which one the arm
+returned instead.
+
+Three refusals, all of them the same rule as the strata reader's (ADR-226): a stratum that
+would be a fiction is reported as an absence, and a file that contradicts itself is a failure
+rather than a table.
+
+1. **An artifact written before the record existed** has no candidate set on any row, and the
+   tool says so and exits non-zero. A loss attributed over zero records would be a table of
+   nothing dressed as a measurement.
+2. **A row whose recall is true while its own record marks no candidate correct** is a
+   contradiction between two fields written by one pass. The tool reports it and fails: the
+   fix is in the writer, not in the reader's preference for one of the two.
+3. **A row that failed while its record marks the returned statement correct** is the same
+   contradiction from the other side, and the same answer.
+
+The singleton table reads `passed` rather than `winnerSource`, because the sampled arms have
+three candidates from one source and no source to name; "the arm came back with it" is the
+question, and `passed` answers it for every arm. Where two candidates both answered, the case
+is kept as a *set* and neither source is priced alone: a loss with two right statements is a
+choice between them, and attributing it to one would invent a preference the score cannot see.
 
 ## The floor is enforced, not remembered
 

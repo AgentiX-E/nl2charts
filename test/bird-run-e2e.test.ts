@@ -69,6 +69,14 @@ interface Plan {
   readonly steps?: boolean;
   /** Questions whose second attempt keeps the first answer, for a repair that never lands. */
   readonly stubborn?: readonly string[];
+  /**
+   * A statement returned whenever the prompt offers the question's literal values.
+   *
+   * That block belongs to one source of a mixed set, which is how one candidate can be made
+   * wrong while its two siblings stay right — the only way to see whether the runner records
+   * the truth *per candidate* or just copies the set-wide recall.
+   */
+  readonly whenValues?: string;
   readonly definitions?: string;
 }
 
@@ -101,6 +109,9 @@ function replyFor(request: EndpointRequest, plan: Plan): { status?: number; cont
     prompt.includes('Write the statement for this question again') ||
     prompt.includes('no such table') ||
     prompt.includes('but the statement returned');
+  if (plan.whenValues !== undefined && prompt.includes('Values in this database named by the question:')) {
+    return send(fenced(plan.whenValues));
+  }
   const gold = GOLD[question];
   // `GOLD` is built from `QUESTIONS`, so a question without an entry is a defect in this
   // file and not a case to handle: failing here keeps the fixture honest.
@@ -275,6 +286,78 @@ describe('a full run', () => {
 });
 
 describe('a sampling arm', () => {
+  it('records which candidate held the answer, one verdict per candidate', async () => {
+    // One source of the mixed set (the one that carries the question's literal values) is
+    // made to answer wrongly while its two siblings answer correctly. That is the only shape
+    // in which the record can be seen to be per candidate rather than a set-wide recall
+    // copied three times, and it is the shape the cross-vendor run needed: 75 losses whose
+    // address the artifact could not name.
+    const result = await run({
+      plan: { whenValues: 'select -1 as impossible' },
+      env: { BIRD_ARMS: 'select-mixed' },
+    });
+    const cases = result.report.cases as {
+      id: string;
+      passed: boolean;
+      candidateRecall?: boolean;
+      winnerSource?: string;
+      candidates?: { source: string; correct: boolean }[];
+    }[];
+    const recorded = cases.filter((row) => row.candidates !== undefined);
+    expect(recorded).toHaveLength(QUESTIONS.length);
+    for (const row of recorded) {
+      expect(row.candidates?.map((verdict) => verdict.source)).toEqual(['inline+evidence', 'metadata+evidence', 'values']);
+      // The ceiling and the record are the same population: a case whose recall is true must
+      // name a correct candidate, and one whose recall is false must name none.
+      expect(row.candidates?.some((verdict) => verdict.correct)).toBe(row.candidateRecall);
+    }
+    // The pen question names a stored literal, so its `values` candidate carried the wrong
+    // statement while the other two answered it.
+    const pen = recorded.find((row) => row.id === '7');
+    expect(pen?.candidates?.map((verdict) => verdict.correct)).toEqual([true, true, false]);
+    expect(pen?.candidateRecall).toBe(true);
+    expect(pen?.passed).toBe(true);
+    expect(pen?.winnerSource).toBe('inline+evidence');
+  });
+
+  it('counts a candidate the guard refused instead of letting the set shrink quietly', async () => {
+    // A candidate that never arrives is not a candidate that was wrong: the set is smaller,
+    // the case still answers, and the ceiling falls for a reason that is not in the arm. The
+    // guard rejects a write, so this is the `other` side of `candidateFailures` — the side a
+    // real endpoint outage never exercises.
+    const result = await run({
+      plan: { whenValues: 'delete from items' },
+      env: { BIRD_ARMS: 'select-mixed' },
+    });
+    const arms = result.report.arms as { candidateFailures?: { llm: number; other: number } }[];
+    // The oracle opens every database read-only, so the write is refused by the engine and
+    // counted as `other`: the split that tells "the endpoint refused" from "the engine did".
+    expect(arms[0]?.candidateFailures).toMatchObject({ llm: 0, other: 1 });
+    const cases = result.report.cases as {
+      id: string;
+      passed: boolean;
+      candidates?: { source: string; correct: boolean }[];
+    }[];
+    const pen = cases.find((row) => row.id === '7');
+    // The record is the set that survived: two sources, both of them correct, so the case is
+    // decided by the candidates that arrived rather than by the one that did not.
+    expect(pen?.candidates).toEqual([
+      { source: 'inline+evidence', correct: true },
+      { source: 'metadata+evidence', correct: true },
+    ]);
+    expect(pen?.passed).toBe(true);
+    // Every other question kept its three candidates.
+    expect(cases.filter((row) => row.candidates?.length === 2)).toHaveLength(1);
+  });
+
+  it('writes no candidate record for an arm that generates once', async () => {
+    const result = await run({ plan: {}, env: { BIRD_ARMS: 'names' } });
+    const cases = result.report.cases as { candidates?: unknown }[];
+    // One candidate is not a set: `passed` already says what happened, and a record of one
+    // would invite a reader to compute a loss that cannot exist.
+    expect(cases.every((row) => row.candidates === undefined)).toBe(true);
+  });
+
   it('spends one turn on a candidate set that came back empty, and adopts the answer', async () => {
     const result = await run({ plan: { first: () => empty() }, env: { BIRD_ARMS: 'select-mixed+empty' } });
     expect(result.code).toBe(0);
