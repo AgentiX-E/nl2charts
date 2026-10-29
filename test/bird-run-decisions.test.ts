@@ -14,6 +14,7 @@ import { describe, expect, it } from 'vitest';
 import {
   armReportRow,
   armSummaryLine,
+  caseRows,
   databasesFromManifest,
   databasesFromQuestions,
   evaluateGate,
@@ -473,5 +474,57 @@ describe('what an arm row says about itself', () => {
     const priced = ablations['names -> definitions'] as { cost: { extraCallsPerCase: number; ppPerExtraCall?: number } };
     expect(priced.cost.extraCallsPerCase).toBe(0);
     expect(priced.cost.ppPerExtraCall).toBeUndefined();
+  });
+});
+
+/**
+ * The per-case rows, which are the only place a reader can ask why one case cost less.
+ *
+ * `select-mixed` spent three calls on two of 120 questions while `select-cross` spent
+ * four, and the artifact could not say why: `reason: 'values'` with `candidateRecall:
+ * false` is what a zero-candidate case looks like *and* what a surviving-candidates-but-
+ * wrong case looks like. The two are different problems — statements the engine refused
+ * versus statements that ran and were wrong — and telling them apart needed one field.
+ */
+describe('the per-case rows an artifact carries', () => {
+  const bare = (over: Partial<CaseRun> = {}): CaseRun => ({
+    id: '1',
+    passed: false,
+    predicted: '',
+    reason: 'values',
+    strict: false,
+    attempts: 3,
+    calls: 3,
+    ...over,
+  });
+
+  it('says why a case has no candidate, not only that it has none', () => {
+    const rows = caseRows(
+      new Map<string, readonly CaseRun[]>([
+        ['select-mixed', [bare(), bare({ error: 'no sample survived guard and execution', errorKind: 'other' })]],
+      ]),
+    );
+    // A case that ran and was wrong carries neither field: an absent error is not an
+    // error with an empty message.
+    expect(rows[0]).not.toHaveProperty('errorKind');
+    expect(rows[0]).not.toHaveProperty('error');
+    expect(rows[1]?.errorKind).toBe('other');
+    expect(rows[1]?.error).toBe('no sample survived guard and execution');
+  });
+
+  it('truncates a long message so one row cannot dominate the artifact', () => {
+    const rows = caseRows(new Map<string, readonly CaseRun[]>([['names', [bare({ error: 'x'.repeat(400) })]]]));
+    expect(rows[0]?.error).toHaveLength(160);
+  });
+
+  it('keeps the ceiling per case, because a paired outcome can be tested and a share cannot', () => {
+    const rows = caseRows(
+      new Map<string, readonly CaseRun[]>([
+        ['select-mixed', [bare({ candidateRecall: true }), bare({ id: '2' })]],
+      ]),
+    );
+    expect(rows[0]?.candidateRecall).toBe(true);
+    expect(rows[1]).not.toHaveProperty('candidateRecall');
+    expect(rows.map((row) => row.arm)).toEqual(['select-mixed', 'select-mixed']);
   });
 });

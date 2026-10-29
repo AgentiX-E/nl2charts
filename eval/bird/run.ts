@@ -2608,6 +2608,16 @@ export function caseRows(outcomes: ReadonlyMap<string, readonly CaseRun[]>): Rec
       // correct statement is a paired outcome between two arms on the same question, and
       // a paired outcome can be tested. A share cannot.
       ...(run.candidateRecall === undefined ? {} : { candidateRecall: run.candidateRecall }),
+      // Why this case has no candidate, when it has none.
+      //
+      // `select-mixed` cost 3 calls on two of 120 questions while `select-cross` cost 4,
+      // and the artifact could not say why: `reason: 'values'` with `candidateRecall:
+      // false` is exactly what a zero-candidate case looks like, and also what a
+      // surviving-candidates-but-wrong case looks like. The difference — three statements
+      // the engine refused versus three that ran and were wrong — is the whole question,
+      // and it was one field away.
+      ...(run.errorKind === undefined ? {} : { errorKind: run.errorKind }),
+      ...(run.error === undefined ? {} : { error: run.error.slice(0, 160) }),
     })),
   );
 }
