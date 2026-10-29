@@ -7,7 +7,7 @@
     "lines": 99.31,
     "statements": 99.31,
     "functions": 100,
-    "branches": 97.23
+    "branches": 97.25
   },
   "files": {
     "eval/ablate.ts": {
@@ -38,7 +38,7 @@
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 97.97
+      "branches": 98.13
     },
     "eval/bird/diagnose-corpus.ts": {
       "lines": 99.12,
@@ -95,8 +95,8 @@
       "branches": 100
     },
     "eval/bird/run.ts": {
-      "lines": 99.21,
-      "statements": 99.21,
+      "lines": 99.22,
+      "statements": 99.22,
       "functions": 100,
       "branches": 95.08
     },
@@ -117,6 +117,12 @@
       "statements": 98.97,
       "functions": 100,
       "branches": 98.57
+    },
+    "eval/bird/strata.ts": {
+      "lines": 98.92,
+      "statements": 98.92,
+      "functions": 100,
+      "branches": 98.13
     },
     "eval/bird/synthesize.ts": {
       "lines": 100,

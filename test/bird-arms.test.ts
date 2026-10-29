@@ -304,8 +304,16 @@ describe('the chain that actually runs', () => {
       floors: Record<string, Record<string, number>>;
     };
     expect([...baseline.expectedArms].sort()).toEqual([...DEFAULT_ARMS].sort());
-    for (const floors of Object.values(baseline.floors)) {
-      for (const name of Object.keys(floors)) expect(baseline.expectedArms, name).toContain(name);
+    // A floor may name any arm in the catalogue, not only an arm in the default chain: the
+    // dev split carries a floor for `select-cross`, which is on-demand because it needs a
+    // second model. Tying floors to the chain made that floor fail the build, which is the
+    // same one-split's-configuration mistake the `armsBySplit` field was added to stop.
+    const catalogue = ARMS.map((arm) => arm.name);
+    for (const [split, floors] of Object.entries(baseline.floors as Record<string, Record<string, number>>)) {
+      for (const name of Object.keys(floors)) expect(catalogue, `${split}/${name}`).toContain(name);
+    }
+    for (const [split, arms] of Object.entries((baseline as { armsBySplit?: Record<string, string[]> }).armsBySplit ?? {})) {
+      for (const name of arms) expect(catalogue, `${split}/${name}`).toContain(name);
     }
   });
 });

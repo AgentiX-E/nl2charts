@@ -1984,6 +1984,75 @@ An artifact from before this change has no `ci`, no `mde` and no `casesForClaim`
 summary prints a dash for those columns instead of a zero, which says "not measured" rather
 than "measured as exact".
 
+## The full split answers what 120 questions could not: −0.78pp, and it is the selector
+
+The two 120-question groups above were sized for a 2pp claim, and the answer needed 818 cases
+at the discordance they showed. The dev split has 1,532, so it was run with the pair as the
+only difference between the arms — `select-mixed` against `select-cross`, one lever, same
+model (`deepseek-chat` on both sides), same three prompts except that the cross arm's first
+one is written by the second model.
+
+| arm | accuracy | 95% CI (Wilson) | ceiling | selection loss |
+| --- | --- | --- | --- | --- |
+| `select-mixed` | **62.5%** (957/1,532) | [60.0, 64.9] | 975 | 18 |
+| `select-cross` | **61.7%** (945/1,532) | [59.2, 64.1] | 974 | 29 |
+
+Paired: 19 cases only the mixed arm got right, 7 only the cross arm → **Δ = −0.78pp**, 95% CI
+**[−1.44, −0.13]**, McNemar **p = 0.029**, discordance 1.7%, the design resolves **0.93pp**, and
+a 2pp claim would have needed **334** cases. Three things follow.
+
+1. **The effect is real and smaller than anyone would have claimed.** 0.78pp is below the 2pp
+   the previous round was waiting for, and it is significant only because 1,532 cases resolve
+   0.93pp. The scan of "the two groups pointed in opposite directions" is over: at 120 cases
+   the interval was ±5pp and both directions fit inside it.
+2. **The sign is negative.** Swapping one of three candidates for a second model's version
+   *costs* 0.78pp on the one comparison where nothing else changes. That does not contradict
+   the earlier finding that a second model raises the ceiling — that run compared
+   `select-cross` against `names`, four levers away — it says the ceiling and the selection are
+   different quantities, and only one of them moved.
+3. **The loss is in the selector, exactly.** `passed = ceiling − selection loss` for both arms:
+   975 − 18 = 957 and 974 − 29 = 945. The candidate set is as good as it was — 974 against 975
+   questions where *some* candidate was right, a difference of one case — and the selector
+   threw away eleven more. Those eleven cases are 0.72pp of the 0.78pp.
+
+The selector's taste is stable across sample sizes: it picks the `@second` candidate on
+1,323 of 1,513 decided questions, 87%, the same preference the 120-question run showed at 79%.
+What changed with the sample size is not its preference but its cost. A candidate written by a
+second model looks enough like a better answer that the selector prefers it, and it is not
+better often enough to pay for the preference.
+
+### The confound, checked instead of argued
+
+`select-mixed` and `select-cross` do not run the same *number* of distinct prompts. Two of the
+mixed arm's three sources produce byte-identical text on 933 of 1,532 dev questions, so 61% of
+its cases were decided by two prompts; the cross arm's first candidate is sent to a second
+model, so all 1,532 of its cases had three. A pooled delta over those arms mixes "three against
+three" with "two against three" in an unknown proportion.
+
+`pnpm bench:bird:strata --arm select-mixed --against select-cross` joins the artifact's own
+`degenerateIds` with its per-case outcomes and splits the comparison:
+
+| stratum | n | `select-mixed` | `select-cross` | delta | 95% CI | p | resolves |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| all cases | 1,532 | 62.5% | 61.7% | −0.78pp | [−1.44, −0.13] | 0.029 | 0.93pp |
+| all prompts distinct | 599 | 65.8% | 65.1% | −0.67pp | [−1.59, +0.26] | 0.289 | 1.3pp |
+| first arm duplicated a prompt | 933 | 60.3% | 59.5% | −0.86pp | [−1.75, +0.03] | 0.096 | 1.3pp |
+
+The sign holds in both halves at the same magnitude, and the duplicated half — where the cross
+arm has one *more* distinct prompt — is not where the effect lives. If a third distinct
+candidate were the lever, that is the stratum where the cross arm should have won. It lost
+there too, slightly worse. The pooled number is therefore about who wrote the candidate, not
+about how many candidates there were.
+
+Neither stratum resolves better than 1.3pp on its own, which is why the claim is carried by the
+pooled row and why the tool says so in the same breath: a stratification that halves the sample
+cannot confirm a 0.78pp effect in either half, and a reading that reported only the strata
+would be claiming a resolution it does not have.
+
+The tool cross-checks its own pooled row against the artifact's `ablations` entry for the same
+pair and fails when the two disagree, because two readers of one file that differ mean one of
+them is wrong, and printing both for the reader to choose between is not a measurement.
+
 ## The floor is enforced, not remembered
 
 A benchmark that only produces a report gets read once. The BIRD arms have a

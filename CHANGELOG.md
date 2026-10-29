@@ -8,6 +8,30 @@ cannot be argued with.
 
 ### Measured
 
+- **The full dev split answers the question 120 questions could not: −0.78pp, and the loss is
+  the selector's.** `select-mixed` against `select-cross`, one lever, 1,532 cases: **62.5% vs
+  61.7%**, 19 cases only the mixed arm got, 7 only the cross arm, **Δ = −0.78pp, 95% CI
+  [−1.44, −0.13], p = 0.029**, discordance 1.7%, resolves **0.93pp**, 334 cases for a 2pp
+  claim. The previous round had computed that this question needed 818 cases; the split had
+  1,532, and the effect it found is smaller than the 2pp anyone would have claimed — but the
+  interval excludes zero, so "the cross-vendor candidate contributes nothing measurable" now
+  has a sign and a size instead of an unresolved interval.
+
+  The mechanism is exact, because the artifact carries both halves of the identity
+  `passed = ceiling − selection loss`: the candidate sets are equal (**975 vs 974** questions
+  where some candidate was right, a difference of one case) and the selector's losses are not
+  (**18 vs 29**). All eleven extra discarded points are 0.72pp of the 0.78pp. The selector picks
+  the `@second` candidate on 1,323 of 1,513 decided questions, 87% — the same preference the
+  120-question run showed at 79%. Its taste did not change with the sample size; its cost did.
+
+- **The confound was checked, not argued.** `select-mixed` duplicated a prompt on 933 of 1,532
+  cases (61%), so the pooled delta mixed "three prompts against three" with "two against three".
+  Splitting on those ids: **−0.67pp** where all three prompts were distinct (n=599) and
+  **−0.86pp** where one was duplicated (n=933). The sign holds in both, so the delta is about who
+  wrote the candidate, not about how many candidates there were — and the half where the cross
+  arm has *more* distinct prompts is not where it gains. Neither stratum resolves better than
+  1.3pp, which is why the pooled row carries the claim and the tool says so.
+
 - **The cross-vendor candidate contributes nothing measurable on 120 questions, and the
   measurement itself is why we can say so.** Three groups on the same 120 dev questions:
 
@@ -58,6 +82,15 @@ cannot be argued with.
 
 ### Adopted
 
+- **A floor may name any arm in the catalogue, not only an arm in the chain.** Recording
+  `select-cross`'s dev floor failed `test/bird-arms.test.ts`, which required every floor to
+  appear in `expectedArms` — that is, in the seven-arm default chain. `select-cross` is on
+  demand because it needs a second model, so the invariant made the arm's own floor unrecordable:
+  the same "one list applied to a configuration it does not describe" mistake that `armsBySplit`
+  and `split`-scoped floors were added to stop. The check now resolves both `floors` and
+  `armsBySplit` against `ARMS`, the catalogue, which is the set that actually defines what can be
+  run.
+
 - **Three prompt styles and a selector, four calls per question.** Two consecutive dev-split
   runs at p<0.01 (+1.7pp p=0.0095, +1.8pp p=0.0046 against `select`; +2.4pp p=0.0001 and
   +2.2pp p=0.0002 against the single sample) meet the ADR-184 bar, which no mechanism has
@@ -68,6 +101,22 @@ cannot be argued with.
   styles that were actually measured.
 
 ### Added
+
+- **A comparison can be stratified by the candidates it actually sent.** `eval/bird/strata.ts`
+  (`pnpm bench:bird:strata --arm select-mixed --against select-cross`) joins an artifact's
+  `mixedCandidatePrompts.degenerateIds` with its per-case outcomes and reports the paired delta,
+  interval, p and resolution inside each stratum, using the same `pairedResolution` and
+  `mcnemarExact` the runner uses. It reads an artifact and calls no model, which is why the
+  question could be asked at all rather than answered by another 1,532-case run.
+
+  It refuses the cases where a stratum would be a fiction: an artifact that counts duplicated
+  prompts without listing them, a list that covers fewer ids than its own count, and an empty
+  stratum are each reported as a stated absence rather than as a stratum of zero. It audits its
+  own pooled row against the artifact's `ablations` entry and **throws** when the two readers
+  disagree, because printing both for the reader to choose between is not a measurement.
+  `isEntry` is a value rather than an inline guard for the same reason the other entries ended
+  up that way: the first half of `argv[1] !== undefined && …` is permanently dark inside a test
+  process. 28 tests, and `eval/` is 29 of 29 files at 95% on all four dimensions.
 
 - **The job summary has a test, and it prints the resolution beside every delta.** The summary is
   the only part of a benchmark run a human reads, and until now no test touched it: every column in
