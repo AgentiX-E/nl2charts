@@ -95,6 +95,7 @@ const CORPUS: readonly string[] = [
   "select printf('%d-%s', id, name) from items order by id",
   'select (select count(*) from items) as n',
   'select case when price > 3 then 1 else 0 end from items order by id',
+  'select name, Row_Number() OVER (PARTITION BY note ORDER BY id) as rn from items order by id',
 ];
 
 describe('canonicalisation on a real engine', () => {

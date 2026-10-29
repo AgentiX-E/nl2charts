@@ -23,6 +23,24 @@ cannot be argued with.
 
 ### Measured
 
+- **The judge swap reproduces: −5.87pp, and the rerun exposes a counter that merges two
+  mechanisms.** The re-dispatched pair (`40835164245`, full dev, second model `glm-4-flash`) is the
+  second independent reading of the same experiment: `select-cross` **60.90%** (933/1,532) against
+  `select-cross-judge` **55.03%** (843/1,532), 129 cases only the first arm got and 39 only the
+  second, **Δ = −5.87pp, 95% CI [−7.53, −4.22], p = 1.9e-12**, discordance 11.0%, resolves 2.37pp.
+  The first run measured −6.01pp. Two runs, two p-values below 1e-11, same sign and same size: the
+  cost of the swap is a property of the judge, not of one afternoon.
+
+  It also put a number on something the candidate record had never printed. `candidateFailures`
+  reads `{llm: 1, other: 440}` of **4,596** attempts, and the shape of the loss is not random:
+  **380** of 1,532 cases carry two candidates instead of three, and **375** of those are missing
+  `inline+evidence@second` — the second model's statement. So a quarter of the cross arm's cases
+  never had that candidate to choose from, and the 25.6%→68.2% asymmetry is computed over the cases
+  where it survived. What the counter cannot say is *why*: `other` merges a statement the engine
+  refused with a reply no statement could be extracted from, and those call for opposite fixes
+  (prompt vs parser). Splitting it is the next increment; until then the honest reading is that the
+  ceiling of 1,011 is a ceiling over the candidates that ran.
+
 - **The judge is the variable — and the swap costs 6.01pp because the other judge cannot read
   SQL.** The registered experiment finally ran: `select-cross` against `select-cross-judge`, same
   candidates, same selector prompt, same four calls, only the judge changes (run `40828283888`,
@@ -46,7 +64,7 @@ cannot be argued with.
   Next lever: canonicalise the candidate text (keyword case, whitespace, operator spelling), one
   lever on the existing arm, no third model required — the record prices it directly.
 
-- **The same arm has now read 61.70%, 61.55% and 60.70% on dev.** A 1.0pp spread across three runs
+- **The same arm has now read 61.70%, 61.55%, 60.70% and 60.90% on dev.** A 1.0pp spread across three runs
   is larger than the −0.78pp the first of them was used to claim. Every claim in `docs/benchmarks.md`
   comes from a paired comparison *inside* one run, which cancels this; the number is written down
   so a cross-run comparison is not made by accident.

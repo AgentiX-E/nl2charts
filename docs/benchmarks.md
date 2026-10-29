@@ -2214,12 +2214,26 @@ canonicalisation that works moves the 128 without touching the 12.
 
 ### The drift between runs, stated where it can be seen
 
-The same arm has now been measured three times on dev: **61.70%** (`40806666847`), **61.55%**
-(`40817333043`) and **60.70%** (`40828283888`). A 1.0pp spread is larger than the −0.78pp the
+The same arm has now been measured four times on dev: **61.70%** (`40806666847`), **61.55%**
+(`40817333043`), **60.70%** (`40828283888`) and **60.90%** (`40835164245`). A 1.0pp spread is larger than the −0.78pp the
 first of those runs was used to claim, which is exactly why every claim in this file comes from a
 *paired* comparison inside one run: pairing cancels the drift, and comparing two arms from two
 different runs does not. The three numbers are printed here so that the next reader does not
 discover it the way this one did.
+
+The fourth reading came with a reproduction of the swap itself: the same pair re-dispatched
+(`40835164245`) reads `select-cross` **60.90%** against `select-cross-judge` **55.03%**, Δ = **−5.87pp**,
+95% CI [−7.53, −4.22], p = 1.9e-12, discordance 11.0%, resolves 2.37pp. Two runs, two p-values below
+1e-11, same size: the 6pp belongs to the judge and not to the afternoon.
+
+That run also printed a number this file had no place for until the candidate record existed:
+`candidateFailures` is `{llm: 1, other: 440}` out of **4,596** attempts, and the losses are not
+scattered — **380** of 1,532 cases carry two candidates instead of three, and **375** of those are
+missing `inline+evidence@second`. A quarter of the cross arm's cases never had the second model's
+statement to choose from, so the 25.6% / 68.2% asymmetry is measured over the cases where it
+survived. `other` merges two mechanisms — a statement the engine refused and a reply no statement
+could be extracted from — and they call for opposite work (fix the prompt, or fix the parser), which
+is why splitting it is the next increment rather than a footnote.
 
 ### The channel is style, and style can be closed without a third model
 
