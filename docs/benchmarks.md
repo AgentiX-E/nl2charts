@@ -1190,6 +1190,43 @@ deadline that reported 1,355 timeouts as model failures, the unrecorded clock th
 runs of one configuration look comparable, and now a candidate set that was not the size the
 arm declared. Each fix is a field, and each field is checked rather than trusted.
 
+## The preflight that only called one endpoint
+
+Run `40792849132` was the first cross-vendor dispatch after the second provider's quota came
+back. It was asked for two arms, 120 questions and `second_model=glm-4.5`:
+
+```
+names     43/120  35.8%  strict 41
+Error: arm select-cross: 120 of 360 candidates (33.3%) never arrived from the model, above
+the 10% this harness treats as an outage.
+```
+
+Every `@second` draw failed, from the first case to the last: 120 cases, 120 candidates, none
+arrived. The guard did its job — no number was published, and the message said what the arm
+could not do. But it took three minutes to say it, and on the 1,534-question split it would
+have taken forty.
+
+The preflight exists for exactly this. ADR-202 wrote it after a `glm-4.5` run spent 3h43m and
+1,532 calls discovering that 41% of them exceeded a 180-second deadline: three timed calls
+would have said so in nine minutes. What that preflight never did was check the *second*
+endpoint — and `bird-dev.yml`, the only workflow that can name one, was the only workflow with
+no preflight step at all, while carrying `BIRD_PREFLIGHT_SAMPLES: '2'` as though it had one.
+
+So the ordering is now:
+
+1. `resolvePreflightTargets` lists every endpoint the run will call, with the same URL
+   fallback `createProviders` uses. A run that preflights one endpoint and calls another has
+   measured the wrong thing twice.
+2. Each target is checked with the run's own deadline, and named in the output
+   (`preflight[primary]` / `preflight[second]`), so one refusal does not erase the fact that
+   the other endpoint answered.
+3. A target with no key is reported rather than skipped: the run would still try to draw the
+   candidate, and a preflight that quietly checks only what it can is the failure mode it
+   exists to remove.
+
+The cost is two calls. The saving is the forty minutes between "the endpoint is refusing" and
+"the arm has already spent itself finding out".
+
 ## The candidate the three prompts cannot write
 
 Seven configurations answered 466 of the 1,532 dev questions wrongly — no arm held the right

@@ -19,6 +19,19 @@ cannot be argued with.
 
 ### Added
 
+- **The preflight checks every endpoint the run will call, and `bird-dev` finally has one.** Run
+  `40792849132` is the evidence: `bird-dev` was dispatched with `second_model=glm-4.5`, `names`
+  finished at 43/120 in twenty-five seconds, and the cross arm then threw after three minutes with
+  "120 of 360 candidates never arrived" — every single `@second` draw, from an endpoint that never
+  answered. On the 1,534-question split that discovery costs forty minutes, which is the exact
+  failure ADR-202 was written to prevent ("three timed calls instead of a 3h43m run"). The preflight
+  only ever called the primary endpoint, and `bird-dev.yml` — the only workflow that can name a
+  second model — was the only one with no preflight step, while carrying `BIRD_PREFLIGHT_SAMPLES: '2'`
+  as though it had one. `resolvePreflightTargets` now returns every endpoint with the same URL
+  fallback `createProviders` uses, `targetProblem` states which variable is missing on which target,
+  and `main` names the target it is reporting (`preflight[primary]` / `preflight[second]`) and keeps
+  going, so one failure does not erase the fact that the other endpoint answered.
+
 - **The `@second` path is executed, not described.** `select-cross-judge` — the one arm whose result
   is unreadable without the name of the judge — had never been scored end to end; `createProviders`'s
   fallback to the primary URL (two keys against one gateway) had never run, because every test that
