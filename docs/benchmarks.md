@@ -1190,6 +1190,46 @@ deadline that reported 1,355 timeouts as model failures, the unrecorded clock th
 runs of one configuration look comparable, and now a candidate set that was not the size the
 arm declared. Each fix is a field, and each field is checked rather than trusted.
 
+## The cross-vendor candidate, measured against a same-vendor control
+
+The first cross-vendor run after the second provider's quota came back looked like a win:
+`names` 41/120 (34.2%) against `select-cross` 60/120 (50.0%), a ceiling of 52.5% and a
+selector that lost three cases. +15.8pp.
+
+It is not a cross-vendor result. `select-cross` and `names` differ by four levers — three
+candidates instead of one, a model selector, schema linking, and inline definitions — and
+`PAIRS` does not contain that pair, so the artifact carries no p-value for it.
+
+The single-lever pair does exist: `select-mixed` and `select-cross` ask the same three
+prompts with the same selector, and differ only in who wrote the first candidate.
+
+| group | second model | `select-mixed` | `select-cross` | delta | onlyFirst / onlySecond | p | `@second` won |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| A | `glm-4-flash` | 61/120 · 50.8% | 59/120 · 49.2% | **−1.7pp** | 3 / 1 | 0.625 | 18 / 120 |
+| B | `deepseek-chat` | 59/120 · 49.2% | 62/120 · 51.7% | **+2.5pp** | 1 / 4 | 0.375 | **95 / 120** |
+
+Three things have to be read together:
+
+1. The two groups point in opposite directions and neither is significant. The honest reading
+   of their difference is "inside the noise".
+2. `select-mixed` was **50.8%** in group A and **49.2%** in group B — the same arm, the same
+   questions, the same model, the same prompts. That 1.6pp is what 120 questions can resolve:
+   **±2pp**. No claim smaller than that survives this sample.
+3. `sources` gives the mechanism. A `deepseek-chat` candidate wins 95 of 120 cases (79%); a
+   `glm-4-flash` candidate wins 18 (15%). A candidate's author decides how often it wins, and
+   how often it wins decides how far a ceiling can move.
+
+So the negative point estimate is not evidence that heterogeneity hurts. It is evidence that
+the second model in group A is much weaker than the primary one, and that a weaker candidate
+rarely wins the vote. Testing whether heterogeneity *by itself* helps needs a second model in
+the same class as the primary — `glm-4.5` answers 429 from this account (two serial preflight
+calls, both 429), so that experiment is blocked outside this repository.
+
+One detail worth keeping: `cost.extraCallsPerCase` is **0.0167**, not zero, in both groups.
+Both arms declare `vote: 3` and `repairs: 0`, so the count should be identical; roughly two
+extra calls per 120 cases arrive from somewhere. It is reproducible, so it is not sampling
+noise, and it is the only unexplained difference between the two arms.
+
 ## The preflight that only called one endpoint
 
 Run `40792849132` was the first cross-vendor dispatch after the second provider's quota came

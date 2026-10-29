@@ -6,6 +6,35 @@ cannot be argued with.
 
 ## Unreleased
 
+### Measured
+
+- **The cross-vendor candidate contributes nothing measurable on 120 questions, and the
+  measurement itself is why we can say so.** Three groups on the same 120 dev questions:
+
+  | group | second model | `select-mixed` | `select-cross` | delta | p | `@second` won |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | A | `glm-4-flash` (cross-vendor) | 50.8% | 49.2% | −1.7pp | 0.625 | 18 / 120 |
+  | B | `deepseek-chat` (same vendor) | 49.2% | 51.7% | +2.5pp | 0.375 | 95 / 120 |
+
+  `select-cross` had shown 50.0% against `names`' 34.2% in the run before this, but that pair
+  differs by four levers (three candidates, a model selector, linking, inline definitions) and
+  is not in `PAIRS`, so it carried no p-value. Against `select-mixed` — same three prompts,
+  only the first candidate's author changed — the cross-vendor arm loses 1.7pp. The two groups
+  point in opposite directions and neither is significant. `select-mixed` was 50.8% and 49.2%
+  in its two runs, which is the resolution of 120 questions: **±2pp**. Anything smaller than
+  that cannot be claimed on this sample.
+
+  The mechanism is in `sources`: a `deepseek-chat` candidate wins 95 of 120 cases, a
+  `glm-4-flash` candidate wins 18. **A candidate's author decides how often it wins, and how
+  often it wins decides how far the ceiling moves** — so the negative point estimate is a weak
+  second model, not a property of heterogeneity. `glm-4.5` returns 429 from this account (two
+  serial preflight calls, both 429), which is an external block on the question, not a design
+  defect.
+
+  To express the control at all, `bird-dev.yml` needed `second_provider`: it hard-coded
+  `BIRD_SECOND_API_KEY` to `secrets.ZHIPU_API_KEY`, and Actions cannot index `secrets[name]`
+  by an input, so "same vendor" was not expressible as an arm.
+
 ### Adopted
 
 - **Three prompt styles and a selector, four calls per question.** Two consecutive dev-split
