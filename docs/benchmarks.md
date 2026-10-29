@@ -2405,6 +2405,12 @@ case and reads **35.9%**, while the shuffled arm reads **36.3%** on its slot-0 c
 apart, intervals overlapping. Permuting the order did not change the candidate set, which is the
 check the registered criteria asked for first.
 
+Two independent measurements say "only the lever moved", and neither is sufficient alone. The
+arms' `promptChars` are identical to the character (mean 2,568, max 5,570), so the permutation
+added and removed nothing — but equal length does not prove equal content. The same source's own
+correctness is flat across the three slots (49.7 / 45.7 / 46.7 for `@second`), which is what
+content changing would have moved.
+
 Putting all three sources on one table (the 1,129 cases that carry all three, so two-candidate
 cases cannot inflate the slot-0 rate) shows what the judge is actually reading:
 
