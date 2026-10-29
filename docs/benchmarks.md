@@ -2441,6 +2441,38 @@ winners in this run (409/1,517) — the judge is the primary model. The 52.6% th
 shuffle came from the judge-swap run, where the second model judged its own statements. The two
 are not comparable: same candidates, different judge, and a stronger second model in the swap.
 
+### The budget the artifact already contained
+
+Every arm satisfies an identity, exactly rather than approximately:
+
+```
+candidateRecall − selectionLoss = passed
+```
+
+| arm | ceiling | no answer in the set | selection loss | passed | selector efficiency |
+| --- | --- | --- | --- | --- | --- |
+| `select-cross` | 1,009 / 1,532 = **65.86%** | 523 = **34.14%** | 71 = **4.63pp** | 61.23% | **93.0%** |
+| `select-cross-shuffled` | 1,012 / 1,532 = **66.06%** | 520 = **33.94%** | 84 = **5.48pp** | 60.57% | 91.7% |
+
+That table re-prices every experiment this file has recorded over the last five rounds, because
+all of them act on the third column: the judge swap (−6.01 / −5.87pp), canonical text (−0.46pp,
+p = 0.31), candidate order (−0.65pp, p = 0.19), more candidates and prompt rewording (negative or
+dominated). Those are not insensitive designs. The channel is **4.63pp** wide and the minimum
+detectable effect at n = 1,532 is 1.27pp, so a real effect in that column is barely larger than
+the design's own resolution.
+
+The selector recovers **93.0%** of the questions whose candidate set held an answer. Taking that
+to 97% would buy 4.63pp at most. The **34.14%** where the set held nothing is 7.4 times larger,
+and it was never touched by any experiment here — because `candidateRecall` only became a
+first-class field in ADR-192, and before that "no answer in the set" and "an answer that was
+dropped" were hidden behind the same accuracy number.
+
+The consequence is a direction, not a number: the next iteration diagnoses those 523 questions,
+puts `candidateRecall` into the baseline gate alongside accuracy (65.86% is a hard ceiling, so a
+recall drop that accuracy cannot see is currently silent), and builds the coverage/recall
+stratification that says how much prompt coverage is worth. The third-party judge, which used to
+be the only remaining exit, is now one more candidate in the narrow column.
+
 ## The floor is enforced, not remembered
 
 A benchmark that only produces a report gets read once. The BIRD arms have a

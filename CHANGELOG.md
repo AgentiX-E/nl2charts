@@ -8,6 +8,24 @@ cannot be argued with.
 
 ### Measured
 
+- **The artifact already contained an accuracy budget, and every recent experiment spent it in the
+  narrow column.** `candidateRecall − selectionLoss = passed` holds exactly on both arms of run
+  `40865112253`: 1,009 − 71 = 938 and 1,012 − 84 = 928. Read as a budget it says the ceiling is
+  **65.86%**, the selection loss is **4.63pp**, and **34.14%** of cases have no correct candidate
+  at all. The selector already recovers **93.0%** of what it is given.
+
+  That re-prices the last five rounds, all of which act on the 4.63pp column: judge swap
+  −6.01/−5.87pp, canonical text −0.46pp (p = 0.31), candidate order −0.65pp (p = 0.19), more
+  candidates and prompt rewording negative or dominated. The channel is narrower than the design's
+  own resolution at n = 1,532 (MDE 1.27pp), which is why none of them moved the score. The
+  untouched column is 7.4 times larger and it is a generation problem — prompt, retrieval,
+  evidence, repair loop — with no repair in common with the selection problem.
+
+  So the next iteration diagnoses the 523 no-answer cases, puts `candidateRecall` into the baseline
+  gate beside accuracy (65.86% is a hard ceiling, and a recall drop that accuracy cannot see is
+  currently silent), and builds the prompt-coverage/recall stratification. The third-party judge
+  drops from "only remaining exit" to one more candidate in the narrow column.
+
 - **The judge reads the slot, not the author — and that moves nothing that counts.** Run
   `40865112253` (dev, 1,532 scorable, `glm-4-flash` writing the `@second` candidate) held the
   candidate set fixed and permuted only the order per question. On the 1,129 cases that carry all
