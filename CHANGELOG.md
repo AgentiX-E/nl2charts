@@ -243,6 +243,19 @@ cannot be argued with.
   sample is **73/36/11**, and `selection.mix` prints the sample's counts next to the split's so
   an old reading can be reweighted rather than merely trusted.
 
+- **Fixing that exposed a larger bias: the sampler took the head of the file.** Each bucket was
+  consumed in ascending question id, and BIRD's dev file is grouped by database, so a subset was
+  a prefix of the split. The 120-question runs scored **2 of 11 databases**, `california_schools`
+  at **74.2%** of the sample against **5.8%** of the split — which is most of the gap between
+  49.2% on 120 questions and 63.0% on the full split. The order is now `mix32(question_id)`, the
+  murmur3 finalizer: deterministic, uncorrelated with the id, and a 120-question dev sample
+  covers **11 of 11 databases** within 2.1pp of their shares. FNV-1a was tried first and rejected
+  — consecutive ids keep neighbouring hashes, which put 45 of 73 simple picks in one database.
+  `selection.databases` now lists the databases that were *scored* (it repeated the ones that
+  were requested), `availableDatabases` lists the split's, and the summary prints `covers 11 of
+  11 databases` or `covers 2 of 11 databases, and a sample that skips one is not an estimate of
+  the split`.
+
 - **`eval/` no longer carries a fallback that no arm can reach.** `arm.vote ?? 1` appeared twice — in
   the summary line's `recall@` column and in the attempted-call count — and both sat inside a branch
   guarded by `arm.vote` being defined, so neither `1` could ever be returned. The column is built by

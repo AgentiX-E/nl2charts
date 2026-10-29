@@ -1958,18 +1958,20 @@ export function baseReport(prepared: PreparedRun): Record<string, unknown> {
     // scored six arms on dev was failed for not running two it never asked for.
     armsRequested: settings.arms,
     selection: {
-      databases: settings.dbs,
+      // The databases this run actually scored. It used to be the databases that were asked
+      // for, which is a different claim: a 120-question sample of dev covered 2 of the 11.
+      databases: [...new Set(cases.map((question) => question.db_id))].sort(),
+      availableDatabases: [...new Set(questions.map((question) => question.db_id))].sort(),
       available: questions.length,
       requested: settings.limit,
       split: layout.split,
       scored: cases.length,
       // What this sample actually is, not what the sampler was meant to do. A subset's
-      // accuracy is an estimate of the split only if its difficulty mix matches, and the
-      // mix was invisible in the artifact while the sampler allocated one case per bucket:
-      // 120 questions of dev came back 40/40/40 from a split that is 60/30/10, which
-      // over-weights the hardest bucket by 3.5x. Printing both mixes is what lets a reader
-      // reweight, or refuse to.
-      strategy: 'proportional to the split difficulty mix (largest deficit first), then question id',
+      // accuracy is an estimate of the split only if its difficulty mix and its databases
+      // match, and both were invisible in the artifact while the sampler allocated one case
+      // per bucket and consumed them in file order: 120 questions of dev came back 40/40/40
+      // from a split that is 60/30/10, drawn from 2 of 11 databases.
+      strategy: 'proportional to the split difficulty mix (largest remainder), seeded order within each stratum',
       mix: { sample: difficultyMix(selected), available: difficultyMix(questions) },
     },
     gold: {

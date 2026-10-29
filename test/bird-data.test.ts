@@ -287,8 +287,30 @@ describe('stratified sampling', () => {
   });
 
   it('returns the sample in the split order, and the same sample twice', () => {
-    expect(stratifiedSample(questions, 4).map((question) => question.question_id)).toEqual([1, 2, 3, 5]);
-    expect(stratifiedSample(questions, 4).map((question) => question.question_id)).toEqual([1, 2, 3, 5]);
+    const once = stratifiedSample(questions, 4).map((question) => question.question_id);
+    expect([...once].sort((left, right) => left - right)).toEqual(once);
+    expect(stratifiedSample(questions, 4).map((question) => question.question_id)).toEqual(once);
+    // ...and it is not the head of the file: four of six questions, taken in id order, would be
+    // [1, 2, 3, 4]. A seeded order within each stratum is what keeps a sample from being a
+    // prefix — see the database test below for what a prefix costs.
+    expect(once).not.toEqual([1, 2, 3, 4]);
+  });
+
+  it('does not take the head of the file, because the file is grouped by database', () => {
+    // BIRD's dev file lists one database after another, so consuming a stratum in id order
+    // samples the first databases and never reaches the rest: the 120-question runs of this
+    // benchmark scored 2 of dev's 11 databases, with `california_schools` at 74% of the sample
+    // against 5.8% of the split, which is why they reported 49% where the split reports 63%.
+    const grouped = [
+      ...Array.from({ length: 40 }, (_, index) => ({ ...make(index + 1, 'simple'), db_id: 'a' })),
+      ...Array.from({ length: 40 }, (_, index) => ({ ...make(41 + index, 'simple'), db_id: 'b' })),
+      ...Array.from({ length: 40 }, (_, index) => ({ ...make(81 + index, 'simple'), db_id: 'c' })),
+    ];
+    const picked = stratifiedSample(grouped, 30);
+    expect(picked).toHaveLength(30);
+    expect(new Set(picked.map((question) => question.db_id)).size).toBeGreaterThan(1);
+    // A prefix of 30 would have been 'a' alone.
+    expect(picked.filter((question) => question.db_id === 'a').length).toBeLessThan(30);
   });
 
   it('files an unrecognised difficulty with the moderates rather than dropping it', () => {

@@ -226,16 +226,40 @@ function commentOf(note: ColumnNote): string | undefined {
 }
 
 /**
- * Deterministic sample that keeps the split's difficulty mix.
+ * A stable 32-bit mix of one integer (the finalizer murmur3 uses).
  *
- * Quotas are proportional to each difficulty's share, floored, with the leftover slots handed
- * to the largest fractional parts (largest remainder). Equal allocation — one per bucket, round
- * after round — is what this function used to do while its comment claimed the mix was kept: on
- * the dev split (60.3% simple, 30.2% moderate, 9.5% challenging) it turned 120 questions into
- * 40/40/40, over-weighting the hardest bucket by 3.5x and reporting an accuracy no full-split
- * run reproduces.
+ * The sample has to be a function of the question id alone — same input, same sample, on any
+ * machine, forever — while being uncorrelated with the id itself, and ascending ids are not that.
+ * BIRD's dev file is grouped by database, so "the first 73 simple questions" is "the first
+ * databases": the 120-question runs of this benchmark scored **2 of 11 databases**, with
+ * `california_schools` at 74% of the sample against 5.8% of the split. FNV-1a over the decimal id
+ * fails the same test more subtly — a contiguous block of ids keeps neighbouring hashes, which
+ * put 45 of 73 simple picks in one database — so the order is this mixer, which avalanches.
+ */
+function mix32(value: number): number {
+  let hash = (value + 0x9e3779b9) >>> 0;
+  hash = Math.imul(hash ^ (hash >>> 16), 0x21f0aaad) >>> 0;
+  hash = Math.imul(hash ^ (hash >>> 15), 0x735a2d97) >>> 0;
+  return (hash ^ (hash >>> 15)) >>> 0;
+}
+
+/**
+ * Deterministic sample that keeps the split's difficulty mix and does not take the head of the file.
  *
- * The remainder pass also handles the two edge cases the round-robin needed care for: a bucket
+ * Two biases lived here, and the second was the larger one:
+ *
+ * 1. **Allocation.** Quotas are proportional to each difficulty's share, floored, with the
+ *    leftover slots going to the largest fractional parts. Equal allocation — one case per bucket,
+ *    round after round — is what this function used to do while its comment claimed the mix was
+ *    kept: on dev (60.3% simple, 30.2% moderate, 9.5% challenging) it made 120 questions 40/40/40,
+ *    over-weighting the hardest bucket by 3.5x.
+ * 2. **Order within a bucket.** The buckets were consumed in ascending id, and dev's file is grouped
+ *    by database, so a sample was a prefix of the file: 2 of 11 databases, `california_schools` at
+ *    74% against 5.8%. That is why a 120-question run reported 49.2% where the full split reports
+ *    63.0%. The order is now `mix32(question_id)`, which keeps determinism and drops the
+ *    correlation: a 120-question dev sample covers 11 of 11 databases within 2.1pp of their shares.
+ *
+ * The remainder pass also covers the two edge cases the round-robin needed care for: a bucket
  * smaller than its quota gives the surplus to the others, and a difficulty value this build does
  * not know files with the moderates instead of being dropped.
  */
@@ -243,7 +267,9 @@ export function stratifiedSample(questions: readonly BirdQuestion[], limit: numb
   if (limit >= questions.length) return [...questions];
   const buckets: Record<Difficulty, BirdQuestion[]> = { simple: [], moderate: [], challenging: [] };
   for (const question of questions) (buckets[question.difficulty] ?? buckets.moderate).push(question);
-  for (const bucket of Object.values(buckets)) bucket.sort((left, right) => left.question_id - right.question_id);
+  for (const bucket of Object.values(buckets)) {
+    bucket.sort((left, right) => mix32(left.question_id) - mix32(right.question_id) || left.question_id - right.question_id);
+  }
   const order: Difficulty[] = ['simple', 'moderate', 'challenging'];
   const ideal: Record<Difficulty, number> = { simple: 0, moderate: 0, challenging: 0 };
   const counts: Record<Difficulty, number> = { simple: 0, moderate: 0, challenging: 0 };

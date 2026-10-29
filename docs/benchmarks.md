@@ -1216,9 +1216,9 @@ Three things have to be read together:
    questions, the same model, the same prompts. That 1.6pp is what two runs of this sample
    happened to differ by; the resolution computed from the discordance rate is 4.7–5.2pp
    (see *The resolution of a delta, computed instead of discovered* below), and both mixes are
-   a third challenging where dev is a tenth (see *A subset is an estimate only if its mix is
-   the split's*). No claim smaller than 5pp survives this sample, and no absolute accuracy
-   from it describes dev.
+   a third challenging where dev is a tenth and drawn from 2 of the split's 11 databases (see
+   *A subset is an estimate only if its mix and its databases are the split's*). No claim
+   smaller than 5pp survives this sample, and no absolute accuracy from it describes dev.
 3. `sources` gives the mechanism. A `deepseek-chat` candidate wins 95 of 120 cases (79%); a
    `glm-4-flash` candidate wins 18 (15%). A candidate's author decides how often it wins, and
    how often it wins decides how far a ceiling can move.
@@ -1450,7 +1450,7 @@ requested, so this is a measurement on a declared subset` and exits 0. The job s
 carries the phrase *declared subset — no accuracy floor applies* next to the number, so
 a reader who meets `298/500` does not have to reconstruct which kind of run it was.
 
-## A subset is an estimate only if its mix is the split's
+## A subset is an estimate only if its mix and its databases are the split's
 
 The paragraph above says a subset run is a measurement rather than a gate. It does not say
 what the measurement is *of*, and for a year of runs the answer was not the split. The
@@ -1486,19 +1486,42 @@ parts, which also covers the two cases the round-robin needed separate logic for
 smaller than its quota, an unknown difficulty value). A 120-question dev sample is
 **73 / 36 / 11**.
 
+### Fixing the mix exposed a larger bias underneath it
+
+The mix was the smaller of the two. Each bucket was still consumed in **ascending question
+id**, and BIRD's dev file is grouped by database, so "the first 73 simple questions" is "the
+first databases": the 120-question runs scored **2 of the split's 11 databases**, with
+`california_schools` at **74.2%** of the sample against **5.8%** of the split. That is the
+bulk of the gap between a 120-question run at 49.2% and the full split's 63.0% — the sample
+was not a small dev, it was two databases.
+
+| | what a 120-question run covered |
+| --- | --- |
+| before, ascending id inside each bucket | **2 of 11** databases, largest at 74.2% (split: 5.8%) |
+| after, `mix32(question_id)` inside each bucket | **11 of 11**, largest deviation 2.1pp |
+
+The order has to be a function of the question id alone — same sample on any machine, forever —
+*and* uncorrelated with it. Ascending ids are not; FNV-1a over the decimal id is not either, in
+a subtler way: consecutive ids keep neighbouring hashes, which put 45 of 73 simple picks in one
+database. The mixer is the murmur3 finalizer, which avalanches, so a 120-question sample spreads
+across databases the way the split does.
+
 The artifact states what the sample *is* rather than what the sampler meant:
 
 ```json
 "selection": {
-  "strategy": "proportional to the split difficulty mix (largest remainder), then question id",
+  "strategy": "proportional to the split difficulty mix (largest remainder), seeded order within each stratum",
   "mix": { "sample": { "simple": 73, "moderate": 36, "challenging": 11 },
-           "available": { "simple": 925, "moderate": 464, "challenging": 145 } }
+           "available": { "simple": 925, "moderate": 464, "challenging": 145 } },
+  "databases": ["california_schools", "…"],            // the 11 that were scored
+  "availableDatabases": ["california_schools", "…"]     // the 11 the split has
 }
 ```
 
-Those two objects are what let a reader decide whether an accuracy is an estimate of the split
-or of some other population — and reweight a reading taken before the fix, which is the only
-honest way to reuse it.
+Those fields are what let a reader decide whether an accuracy is an estimate of the split or of
+some other population — and reweight a reading taken before the fix, which is the only honest
+way to reuse it. `databases` used to repeat the databases that were *requested*, which is a
+different claim: a run asked for all 11 and scored 2.
 
 ## Retrieved knowledge from the training split
 

@@ -48,33 +48,43 @@ if (report === null) {
     typeof selection.requested === 'number' && typeof selection.available === 'number' && selection.requested < selection.available;
   const subsetNote = subset ? ` · requested: **${selection.requested}** (declared subset — no accuracy floor applies)` : '';
   // What a subset is made of decides whether its accuracy is an estimate of the split. The
-  // sampler allocated one case per difficulty bucket for a year, so 120 dev questions came
-  // back 40/40/40 from a split that is 60/30/10 and every number in this summary described a
-  // harder population. The mix is in the artifact now; printing it here is what makes the
-  // difference between "50.8% on dev" and "50.8% on a third-challenging sample" visible.
-  const mixLine = (() => {
+  // sampler allocated one case per difficulty bucket and consumed the buckets in file order,
+  // so 120 dev questions came back 40/40/40 from a split that is 60/30/10 and drawn from 2 of
+  // its 11 databases — and every number in this summary described a harder population. Both
+  // axes are in the artifact now; printing them is what makes "50.8% on dev" readable.
+  const sampledDatabases = Array.isArray(selection.databases) ? selection.databases.length : 0;
+  const availableDatabases = Array.isArray(selection.availableDatabases) ? selection.availableDatabases.length : undefined;
+  const databasesCell = availableDatabases === undefined ? `databases: ${sampledDatabases}` : `databases: ${sampledDatabases}/${availableDatabases}`;
+  const sampleLine = (() => {
+    if (subset === false) return undefined;
+    const parts = [];
     const mix = selection.mix;
-    if (mix === undefined || subset === false) return undefined;
-    const keys = ['simple', 'moderate', 'challenging'];
-    const sampled = keys.map((key) => mix.sample?.[key] ?? 0);
-    const split = keys.map((key) => mix.available?.[key] ?? 0);
-    const sampledTotal = sampled.reduce((sum, value) => sum + value, 0);
-    const splitTotal = split.reduce((sum, value) => sum + value, 0);
-    if (sampledTotal === 0 || splitTotal === 0) return undefined;
-    const worst = keys
-      .map((key, index) => ({
-        key,
-        gap: (sampled[index] / sampledTotal - split[index] / splitTotal) * 100,
-      }))
-      .sort((left, right) => Math.abs(right.gap) - Math.abs(left.gap))[0];
-    const shape = `sample **${sampled.join(' / ')}** against the split's ${split.join(' / ')}`;
-    return Math.abs(worst.gap) > 5
-      ? `Sample mix: ${shape} — ${worst.gap > 0 ? 'over' : 'under'}-weights \`${worst.key}\` by **${Math.abs(worst.gap).toFixed(0)}pp**, so this accuracy describes that sample, not the split.`
-      : `Sample mix: ${shape} — proportional, so the accuracy estimates the split.`;
+    if (mix !== undefined) {
+      const keys = ['simple', 'moderate', 'challenging'];
+      const sampled = keys.map((key) => mix.sample?.[key] ?? 0);
+      const split = keys.map((key) => mix.available?.[key] ?? 0);
+      const sampledTotal = sampled.reduce((sum, value) => sum + value, 0);
+      const splitTotal = split.reduce((sum, value) => sum + value, 0);
+      if (sampledTotal > 0 && splitTotal > 0) {
+        const worst = keys
+          .map((key, index) => ({ key, gap: (sampled[index] / sampledTotal - split[index] / splitTotal) * 100 }))
+          .sort((left, right) => Math.abs(right.gap) - Math.abs(left.gap))[0];
+        const shape = `sample **${sampled.join(' / ')}** against the split's ${split.join(' / ')}`;
+        parts.push(
+          Math.abs(worst.gap) > 5
+            ? `${shape} — ${worst.gap > 0 ? 'over' : 'under'}-weights \`${worst.key}\` by **${Math.abs(worst.gap).toFixed(0)}pp**, so this accuracy describes that sample, not the split`
+            : `${shape} — proportional, so the accuracy estimates the split`,
+        );
+      }
+    }
+    if (availableDatabases !== undefined && sampledDatabases < availableDatabases) {
+      parts.push(`covers **${sampledDatabases} of ${availableDatabases}** databases, and a sample that skips one is not an estimate of the split`);
+    }
+    return parts.length === 0 ? undefined : `Sample: ${parts.join('; ')}.`;
   })();
   lines.push(
-    `Model: \`${report.model ?? 'none (dry run)'}\` · split: ${selection.split ?? 'minidev'} · dialect: ${report.dialect} · databases: ${selection.databases.length} · scored: ${selection.scored}/${selection.available}${subsetNote}`,
-    ...(mixLine === undefined ? [] : [mixLine]),
+    `Model: \`${report.model ?? 'none (dry run)'}\` · split: ${selection.split ?? 'minidev'} · dialect: ${report.dialect} · ${databasesCell} · scored: ${selection.scored}/${selection.available}${subsetNote}`,
+    ...(sampleLine === undefined ? [] : [sampleLine]),
     '',
     `Gold queries executed before any model call: **${gold.runnable}/${gold.executed}** runnable (${(gold.runnableRate * 100).toFixed(1)}%).` +
       (gold.executed > gold.runnable
@@ -402,23 +412,46 @@ function selfTest() {
   if (!legacy.includes('| +2.5pp |')) issues.push('a delta without an interval did not render as a bare delta');
   if (!legacy.includes('| — |')) issues.push('a comparison without a resolution did not render as a dash');
   if (legacy.includes('could not have separated')) issues.push('an artifact without a resolution claimed one in the A/A sentence');
-  if (legacy.includes('Sample mix:')) issues.push('an artifact without a sample mix claimed one');
+  if (legacy.includes('Sample:')) issues.push('an artifact without a sample mix claimed one');
 
   // A subset's mix is the difference between "50.8% on dev" and "50.8% on a sample with a
   // third of its questions challenging", and the summary has to say which one it is printing.
+  const elevenDatabases = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k'];
   const skewed = render({
     ...base,
-    selection: { split: 'dev', databases: ['a'], available: 1534, requested: 120, scored: 120, mix: { sample: { simple: 40, moderate: 40, challenging: 40 }, available: { simple: 925, moderate: 464, challenging: 145 } } },
+    selection: {
+      split: 'dev',
+      databases: ['california_schools', 'toxicology'],
+      availableDatabases: elevenDatabases,
+      available: 1534,
+      requested: 120,
+      scored: 120,
+      mix: { sample: { simple: 40, moderate: 40, challenging: 40 }, available: { simple: 925, moderate: 464, challenging: 145 } },
+    },
   });
   if (!skewed.includes('under-weights `simple` by **27pp**')) {
     issues.push('a subset whose mix over-weights the hard buckets is not reported as distorting the easiest one');
   }
+  if (!skewed.includes('covers **2 of 11** databases')) {
+    issues.push('a subset that scored 2 of the split\'s 11 databases is not reported as covering two of them');
+  }
   const proportional = render({
     ...base,
-    selection: { split: 'dev', databases: ['a'], available: 1534, requested: 120, scored: 120, mix: { sample: { simple: 73, moderate: 36, challenging: 11 }, available: { simple: 925, moderate: 464, challenging: 145 } } },
+    selection: {
+      split: 'dev',
+      databases: elevenDatabases,
+      availableDatabases: elevenDatabases,
+      available: 1534,
+      requested: 120,
+      scored: 120,
+      mix: { sample: { simple: 73, moderate: 36, challenging: 11 }, available: { simple: 925, moderate: 464, challenging: 145 } },
+    },
   });
   if (!proportional.includes('proportional, so the accuracy estimates the split')) {
     issues.push('a proportionally sampled subset is not reported as an estimate of the split');
+  }
+  if (proportional.includes('covers **11 of 11**')) {
+    issues.push('a sample that covers every database is reported as skipping one');
   }
 
   // A run that scored nothing still has to render: the summary prints its header and skips
