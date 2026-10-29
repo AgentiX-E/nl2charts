@@ -129,7 +129,10 @@ export function attribute(artifact: Artifact, arm: string): LossReading {
     // The singleton table is the selector's conversion rate per source: of the questions where
     // exactly one candidate was right, how often did the arm come back with it. `passed` rather
     // than `winnerSource` so the number exists for arms whose winner is not labelled — the
-    // sampled arms have three candidates of one source and no source to name.
+    // sampled arms have three candidates of one source and no source to name. A retry arm can
+    // in principle come back with a correct statement that is not in the set, and that would
+    // count as this source being taken; the arms with a retry say so in `emptyRetry`, and none
+    // of them is the subject of a judge swap.
     if (correct.length === 1) {
       const only = correct[0] as string;
       const entry = sources.get(only) ?? { alone: 0, returned: 0 };
@@ -212,9 +215,14 @@ export function conclusion(reading: LossReading): string {
 
 /** The table, capped so one wide run cannot bury the sentence under rows. */
 export function reportLines(reading: LossReading, cap = 8): string[] {
+  // A run with no record at all has no ceiling and no loss *to report*. Printing zeros there
+  // would read as an arm whose candidate set never held an answer, which is the opposite of
+  // what the file says: it says nothing (ADR-217's rule, one layer up).
   const lines = [
-    `${reading.arm} on ${reading.split}: ${String(reading.scored)} scored, ${String(reading.recorded)} with a candidate record, ` +
-      `${String(reading.ceiling)} held an answer, ${String(reading.returned)} returned one, ${String(reading.lost.length)} lost`,
+    reading.recorded === 0
+      ? `${reading.arm} on ${reading.split}: ${String(reading.scored)} scored, none with a candidate record — nothing below is a measurement`
+      : `${reading.arm} on ${reading.split}: ${String(reading.scored)} scored, ${String(reading.recorded)} with a candidate record, ` +
+        `${String(reading.ceiling)} held an answer, ${String(reading.returned)} returned one, ${String(reading.lost.length)} lost`,
   ];
   if (reading.sources.length > 0) {
     lines.push('', '| source | only correct candidate | returned it | conversion |', '| --- | --- | --- | --- |');

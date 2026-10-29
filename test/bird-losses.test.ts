@@ -169,6 +169,8 @@ describe('attribution', () => {
       'select-cross carries no candidate record in this artifact, so no loss can be attributed — the run predates the field',
     ]);
     expect(reading.attributions).toEqual([]);
+    // Zeros here would be a measurement of an absent set rather than an absent measurement.
+    expect(reportLines(reading)[0]).toBe('select-cross on dev: 2 scored, none with a candidate record — nothing below is a measurement');
   });
 
   it('reads an arm the artifact never scored as empty rather than as an error', () => {
