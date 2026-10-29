@@ -239,21 +239,28 @@ The last two entries, driven the same way:
 | `eval/bird/diagnose-corpus.ts` | 53.2 / 75.0 / 58.8 | 99.1 / 100 / 98.9 |
 | `eval/bird/recall.ts` | 73.3 / 83.3 / 80.0 | 99.4 / 100 / 99.0 |
 
-`eval/` as a whole is 99.3% of lines, 100% of functions and 95.8% of branches, and 27 of its 28
-files meet 95% on all four dimensions — the exception is `bird/run.ts` at 91.0, whose sixty-two
-remaining sites are the `?? default` fallbacks of a 1,100-line orchestration entry. Getting the
-dimension there was not a matter of writing
+`eval/` as a whole is 99.3% of lines, 100% of functions and 97.2% of branches, and **all 28 of its
+files** meet 95% on all four dimensions. Getting the last dimension there was not a matter of writing
 more tests: every branch that was still uncovered lived inside a template literal or behind a guard
 no fixture can produce, so the other side of it was *unreachable* rather than untested. Each one is
 a function of its inputs now (`ablationLines`, `missLine`, `endsOf`, `equivalenceOf`, `fanoutRow`,
 `semanticProblems`, `requireSemantic`, `resolvePreflightSettings`, `phrasing`, `uniqueById`), and
-two fallbacks in `bird/failure-shape.ts` that no input can reach were deleted instead of covered —
-a guard that cannot fire is not a test target, it is a claim the reader has to verify. Two such
-guards in `bird/retrieval.ts` — `averageLength === 0 ? 1 :` and `idf.get(word) ?? 0` — were deleted
-on the same principle: `averageLength` is zero exactly when no document contributed a term, and
-then `idf` is empty and `retrieve` returns before scoring, so the fallbacks guarded a state the only
-caller cannot reach. The file still short is named in the ledger on every push (`run.ts` 91.0),
-which is the only reason a number like this can be trusted later.
+fallbacks that no input can reach were deleted instead of covered — a guard that cannot fire is not
+a test target, it is a claim the reader has to verify. `bird/failure-shape.ts` had two (`?? 0` after
+a statement already known non-empty, and after a counted row set); `bird/retrieval.ts` had two more
+(`averageLength === 0 ? 1 :` and `idf.get(word) ?? 0`, which guard a state `retrieve` returns before
+reaching); `bird/run.ts` had two (`arm.vote ?? 1` in the summary line and in the attempted-call
+count, both behind a guard that already proved `vote` defined, now `ceilingColumn(vote, ceiling)`
+taking a number). Every remaining short marker is named in the ledger on every push, which is the
+only reason a number like this can be trusted later.
+
+The last mile of `bird/run.ts` (93.1 → 96.5) came from the other direction: with the second
+provider's quota back, the `@second` path stopped being describable and became executable.
+`select-cross-judge` had never been scored end to end, `createProviders`'s fallback to the primary
+URL had never run (every test that configured a second model also gave it a URL), and
+`assertSecondModel` had four missing-setting combinations of which one had been read. The artifact's
+`judgeModel` was written inline; it is `judgeModelName(arms, second)` now, where `null` means
+"nobody judged but the primary model", not "no second model is configured".
 
 Two readers now judge these numbers, and they answer different questions. The per-file ledger is a
 *ratchet*: it fails a build when a file moves backwards from wherever the last commit left it, which

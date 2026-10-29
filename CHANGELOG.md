@@ -19,6 +19,15 @@ cannot be argued with.
 
 ### Added
 
+- **The `@second` path is executed, not described.** `select-cross-judge` — the one arm whose result
+  is unreadable without the name of the judge — had never been scored end to end; `createProviders`'s
+  fallback to the primary URL (two keys against one gateway) had never run, because every test that
+  configured a second model also gave it a URL; and `assertSecondModel`'s four missing-setting
+  combinations had only one of them read, so its sentence "this arm needs a second model" could not
+  say whether the model or the key was absent. All three are driven now against a real
+  `http.Server`, and `judgeModelName(arms, second)` makes "who judged" a function whose `null` means
+  "nobody but the primary model" rather than "no second model is configured".
+
 - **The group standard under `eval/` is a gate now, not a printed line.** `check-eval-coverage`
   enforced the direction only: every file's four numbers are a ratchet, so a build failed when
   something got *worse*, never when the group as a whole was below the standard. A ratchet's floor
@@ -149,6 +158,12 @@ cannot be argued with.
   silently dropping the other.
 
 ### Fixed
+
+- **`eval/` no longer carries a fallback that no arm can reach.** `arm.vote ?? 1` appeared twice — in
+  the summary line's `recall@` column and in the attempted-call count — and both sat inside a branch
+  guarded by `arm.vote` being defined, so neither `1` could ever be returned. The column is built by
+  `ceilingColumn(vote, ceiling)`, which takes a number, and the branch is gone from the ledger
+  instead of being counted against it (ADR-219).
 
 - **`ablate.ts` printed its own footer twice.** `ablationLines` ends with the arm count and the
   path it wrote, and the caller then logged the same sentence again, so one run read as two. The
