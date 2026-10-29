@@ -3,8 +3,11 @@
  * Render the BIRD evaluation artifacts as Markdown for the job summary.
  * Reads only; every number comes from a run, never from this file.
  */
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(new URL('..', import.meta.url).pathname);
 
@@ -170,29 +173,51 @@ if (report === null) {
       );
     }
     if (report.aa !== undefined) {
+      const aa = report.aa;
+      // "0.0pp apart" is the most misread line this summary can print: two runs of the same
+      // arm have not shown the harness is exact, they have shown it cannot resolve anything
+      // smaller than `mde`. The number belongs in the sentence, not in the artifact only.
+      const resolution =
+        typeof aa.mde === 'number'
+          ? ` The same cases could not have separated anything smaller than **${(aa.mde * 100).toFixed(1)}pp** at 80% power, so that is the smallest delta this job can call non-zero.`
+          : '';
       lines.push(
         '',
         `### The same arm twice (A/A)`,
         '',
-        `\`${report.aa.arm}\` run twice in this job: **${(report.aa.delta * 100).toFixed(1)}pp** apart (${report.aa.onlyFirst} / ${report.aa.onlySecond}, McNemar p=${report.aa.p.toFixed(3)}). This is the scale every other delta should be read against.`,
+        `\`${aa.arm}\` run twice in this job: **${(aa.delta * 100).toFixed(1)}pp** apart (${aa.onlyFirst} / ${aa.onlySecond}, McNemar p=${aa.p.toFixed(3)}).${resolution} This is the scale every other delta should be read against.`,
       );
     }
     lines.push(
       '',
       '### Paired ablations',
       '',
-      '| change | delta | only before / only after | McNemar exact p | extra calls / case | pp per extra call |',
-      '| --- | --- | --- | --- | --- | --- |',
+      '| change | delta (95% CI) | only before / only after | McNemar exact p | resolves (80% power) | extra calls / case | pp per extra call |',
+      '| --- | --- | --- | --- | --- | --- | --- |',
     );
     for (const [name, effect] of Object.entries(report.ablations ?? {})) {
       const cost = effect.cost ?? {};
       const extra = typeof cost.extraCallsPerCase === 'number' ? cost.extraCallsPerCase.toFixed(2) : '—';
       const perCall = typeof cost.ppPerExtraCall === 'number' ? cost.ppPerExtraCall.toFixed(2) : 'free';
+      // An artifact written before this column existed has no interval and no resolution.
+      // Printing a dash is the honest answer; printing 0.0 would claim the design was exact.
+      const interval =
+        effect.ci === undefined
+          ? ''
+          : ` [${(effect.ci.low * 100).toFixed(1)}, ${(effect.ci.high * 100).toFixed(1)}]`;
+      const resolves = typeof effect.mde === 'number' ? `${(effect.mde * 100).toFixed(1)}pp` : '—';
+      // The same arithmetic run forwards: how many cases a 2pp claim would need at the
+      // discordance this pair actually showed. A reader who sees "resolves 5.2pp" is
+      // owed the number that says what it would take to resolve less.
+      const needed = typeof effect.casesForClaim === 'number' ? ` · ${effect.casesForClaim} for 2pp` : '';
       lines.push(
-        `| ${name} | ${effect.delta >= 0 ? '+' : ''}${(effect.delta * 100).toFixed(1)}pp | ${effect.onlyFirst} / ${effect.onlySecond} | ${effect.p.toFixed(4)} | ${extra} | ${perCall} |`,
+        `| ${name} | ${effect.delta >= 0 ? '+' : ''}${(effect.delta * 100).toFixed(1)}pp${interval} | ${effect.onlyFirst} / ${effect.onlySecond} | ${effect.p.toFixed(4)} | ${resolves}${needed} | ${extra} | ${perCall} |`,
       );
     }
-    lines.push('');
+    lines.push(
+      '',
+      '> `resolves` is the smallest difference the same cases could have detected at 80% power, from the share of cases the two arms disagreed on. A delta inside it is not a small effect, it is an unmeasured one — whichever way it points.',
+    );
 
     // The funnel: accuracy says whether the arm is good, this says what the loop did.
     const withFunnel = (report.arms ?? []).find((entry) => entry.repair !== undefined);
@@ -261,4 +286,112 @@ if (portability !== null) {
   lines.push('', '> The dataset is SQLite and the product\u2019s default engine is DuckDB. This table is the measured gap, not an opinion: two documented rewrites (backtick quoting, an `iif` macro) recover most of it, and the rest is dialect strictness that a compiler must avoid emitting.', '');
 }
 
-console.log(lines.join('\n'));
+/**
+ * The one thing a human reads from CI, and until now it had no test.
+ *
+ * Every column in this file is a formatter, and a formatter that prints the wrong field
+ * looks exactly like a run that measured the wrong thing. The cases below are the ones
+ * that were wrong or would have been: an artifact from before the resolution columns
+ * existed must render dashes rather than zeros, a delta must carry its interval, and the
+ * A/A sentence must state what the harness could not have seen.
+ */
+function selfTest() {
+  const issues = [];
+  const script = fileURLToPath(import.meta.url);
+  const base = {
+    dataset: 'bird-mini-dev',
+    split: 'dev',
+    dialect: 'SQLite',
+    model: 'deepseek-chat',
+    selection: { split: 'dev', databases: ['a'], available: 1534, requested: 1534, scored: 1534 },
+    gold: { executed: 100, runnable: 100, runnableRate: 1, unrunnable: [] },
+    controls: {
+      selfConsistency: 1,
+      negativeFalseMatches: 0,
+      emptyGoldExcluded: 0,
+      semanticsDatabases: 1,
+      semanticsDatabaseTotal: 1,
+      semanticsCases: 100,
+      semanticsMeanChars: 700,
+      retrievedBlocks: 0,
+      demonstrationBlocks: 0,
+      valueMatches: 0,
+      retrievalCorpus: 0,
+      inlineAttached: 0,
+      inlineUnplaced: 0,
+      subsetComments: 0,
+    },
+    arms: [
+      {
+        arm: 'names',
+        accuracy: 0.5,
+        wilson: { low: 0.4, high: 0.6 },
+        strictPassed: 50,
+        total: 100,
+        duplicateCredit: 0,
+        byDifficulty: {},
+      },
+    ],
+  };
+  const render = (report) => {
+    const dir = mkdtempSync(join(tmpdir(), 'bird-summary-'));
+    const path = join(dir, 'bird-eval.json');
+    writeFileSync(path, JSON.stringify(report));
+    const run = spawnSync(process.execPath, [script], { env: { ...process.env, BIRD_OUT: path }, encoding: 'utf8' });
+    if (run.status !== 0) issues.push(`the summary exited ${String(run.status)} on an artifact it must render: ${run.stderr}`);
+    return run.stdout ?? '';
+  };
+
+  const resolved = render({
+    ...base,
+    aa: { arm: 'names', delta: 0, onlyFirst: 0, onlySecond: 0, p: 1, ci: { low: -0.02, high: 0.02 }, mde: 0.0404, discordantShare: 0.025 },
+    ablations: {
+      'names -> metadata': {
+        delta: 0.025,
+        onlyFirst: 1,
+        onlySecond: 4,
+        p: 0.375,
+        ci: { low: -0.02, high: 0.07 },
+        mde: 0.0522,
+        discordantShare: 0.0417,
+        casesForClaim: 818,
+        cost: { extraCallsPerCase: 0.25, ppPerExtraCall: 10 },
+      },
+    },
+  });
+  if (!resolved.includes('+2.5pp [-2.0, 7.0]')) issues.push('the ablation row does not print the delta with its interval');
+  if (!resolved.includes('| 5.2pp · 818 for 2pp |')) {
+    issues.push('the ablation row does not print the resolution the delta is read against, or the cases a 2pp claim needs');
+  }
+  if (!resolved.includes('could not have separated anything smaller than **4.0pp**')) {
+    issues.push('the A/A sentence does not state what the same cases could have detected');
+  }
+
+  // An artifact written before the resolution columns existed still has to render: a dash
+  // in the column says "not measured", while a zero would say "measured as exact".
+  const legacy = render({
+    ...base,
+    aa: { arm: 'names', delta: 0, onlyFirst: 0, onlySecond: 0, p: 1 },
+    ablations: { 'names -> metadata': { delta: 0.025, onlyFirst: 1, onlySecond: 4, p: 0.375, cost: { extraCallsPerCase: 0.25 } } },
+  });
+  if (!legacy.includes('| +2.5pp |')) issues.push('a delta without an interval did not render as a bare delta');
+  if (!legacy.includes('| — |')) issues.push('a comparison without a resolution did not render as a dash');
+  if (legacy.includes('could not have separated')) issues.push('an artifact without a resolution claimed one in the A/A sentence');
+
+  // A run that scored nothing still has to render: the summary prints its header and skips
+  // the arm tables, instead of failing the step that reports the failure.
+  const noArms = render({ ...base, arms: [] });
+  if (!noArms.includes('Model: `deepseek-chat`')) issues.push('an artifact with no arms did not render its header');
+  if (noArms.includes('### Paired ablations')) issues.push('an artifact with no arms printed an ablation table');
+
+  return issues;
+}
+
+if (process.argv[2] === '--self-test') {
+  const issues = selfTest();
+  for (const issue of issues) console.error(issue);
+  if (issues.length > 0) process.exit(1);
+  console.log('BIRD summary self-test: a delta with its interval, a resolution column, an A/A sentence that says what it could not see, an artifact from before those columns, and an artifact with no arms all render');
+} else {
+  console.log(lines.join('\n'));
+}

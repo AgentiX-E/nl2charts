@@ -103,6 +103,11 @@ jobs:
         run: node tools/check-secrets.mjs --self-test
       - name: Benchmark floor self-test
         run: node tools/check-bird-baseline.mjs --self-test
+      - name: Summary renderer self-test
+        # The job summary is the only part of a benchmark run a human reads, and a
+        # formatter that prints the wrong column looks exactly like a run that measured
+        # the wrong thing.
+        run: node tools/bird-summary.mjs --self-test
       - name: Stratification self-test
         # The stratum join is how a mixed arm's gain gets attributed, so the join itself
         # is tested rather than trusted.
