@@ -76,10 +76,11 @@ export function groupingColumns(sql: string): string[] {
   const text = sql.replace(/'([^']|'')*'/g, "''").toLowerCase();
   const match = /\bgroup\s+by\b([\s\S]*?)(\border\s+by\b|\bhaving\b|\blimit\b|$)/.exec(text);
   if (match === null) return [];
-  // `[\s\S]*?` can match the empty string, so `group by` at the end of a statement is a
-  // clause with no columns rather than a group 1 that is missing (ADR-219: no unreachable
-  // fallback).
-  return match[1]
+  // `[\s\S]*?` can match the empty string, so a match always carries a group 1 — `group by`
+  // at the end of a statement is a clause with no columns, not a missing group. The cast says
+  // so; a `?? ''` here would be a branch no input can take (ADR-219).
+  const body = match[1] as string;
+  return body
     .split(',')
     .map((part) => part.replace(/["'`]/g, '').replace(/\s+/g, ' ').trim())
     .filter((part) => part !== '')
