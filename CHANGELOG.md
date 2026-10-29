@@ -35,6 +35,27 @@ cannot be argued with.
   `BIRD_SECOND_API_KEY` to `secrets.ZHIPU_API_KEY`, and Actions cannot index `secrets[name]`
   by an input, so "same vendor" was not expressible as an arm.
 
+- **The ±2pp above was a coincidence, and the artifact can now compute the number it needs.**
+  "`select-mixed` was 50.8% and 49.2% in its two runs, which is the resolution" is a resolution
+  obtained by waiting for two runs of the same arm to differ; it is not a property of the design,
+  it cannot be planned with, and it silently assumes the two runs are interchangeable. The
+  paired difference's standard error is `sqrt(discordance / n)` — only the cases the arms
+  disagree on carry information — so the resolution is `(1.96 + 0.8416)` standard errors at 80%
+  power, and it can be computed from the same artifact:
+
+  | second model | cases | discordant | delta (cross − mixed) | 95% CI | resolves (80%) | cases for 2pp |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | `glm-4-flash` (cross-vendor) | 120 | 1 / 3 | −1.7pp | [−4.9, +1.6] | 4.7pp | 655 |
+  | `deepseek-chat` (same vendor) | 120 | 1 / 4 | +2.5pp | [−1.2, +6.2] | 5.2pp | 818 |
+
+  Both intervals include zero, both are 4.7–5.2pp wide, and **they overlap each other almost
+  entirely** — so "the two groups point in opposite directions" was direction read into noise.
+  The substantive finding is smaller and firmer: the cross-vendor candidate changes the answer on
+  **3–4% of questions**, which is why 120 cases cannot settle it and why the 1,532-case dev split
+  (≈1.5pp at this discordance) is the smallest split that can. Every comparison in the artifact
+  now carries `ci`, `discordantShare`, `mde` and `casesForClaim`; the log's A/A line states what it
+  could not see instead of printing "0.0pp" and letting that read as exact.
+
 ### Adopted
 
 - **Three prompt styles and a selector, four calls per question.** Two consecutive dev-split
@@ -47,6 +68,16 @@ cannot be argued with.
   styles that were actually measured.
 
 ### Added
+
+- **The job summary has a test, and it prints the resolution beside every delta.** The summary is
+  the only part of a benchmark run a human reads, and until now no test touched it: every column in
+  `tools/bird-summary.mjs` is a formatter, and a formatter that prints the wrong field looks exactly
+  like a run that measured the wrong thing. The ablation table gained the interval on each delta and
+  a `resolves` column (`5.2pp · 818 for 2pp`), the A/A sentence gained the difference the same cases
+  could not have separated, and `node tools/bird-summary.mjs --self-test` renders three artifacts
+  through the real CLI: one with the new columns, one written before they existed (which must show
+  dashes rather than zeros), and one with no arms. The step is in the quality job and in `gate:all`,
+  so the parity check covers it.
 
 - **The preflight checks every endpoint the run will call, and `bird-dev` finally has one.** Run
   `40792849132` is the evidence: `bird-dev` was dispatched with `second_model=glm-4.5`, `names`

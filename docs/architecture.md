@@ -206,7 +206,7 @@ independent scripts. It is now a pipeline of values rather than one `main()`:
 | `resolveSettings(env, argv, root)` | the arm chain, the sample size, the harness knobs, the second model — a pure function of its arguments |
 | `prepareRun(settings, io)` | dataset, schemas, blocks, schema fidelity, gold execution, and the controls, all before an arm runs |
 | `runArm(prepared, name, io)` | one arm over every case, its guards, its artifact row and its printed line |
-| `pairedComparisons` / `caseRows` / `failureSection` | the paired tests and the per-case rows a stratum needs |
+| `pairedComparisons` / `caseRows` / `failureSection` | the paired tests, the resolution each delta is read against, and the per-case rows a stratum needs |
 | `evaluateGate(report)` | the thresholds, returned as a list of problems rather than set as an exit code |
 | `runBird(settings)` | the whole run, from prepare to a written artifact |
 | `main(env, argv, root)` | nine lines: resolve, run, gate, exit code |

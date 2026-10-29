@@ -1852,6 +1852,61 @@ which is a different claim from "it does not work", and would need a different e
    structural checks — arm list, funnel arithmetic, cost provenance, empty
    levers, candidate survival, A/A — apply unchanged.
 
+## The resolution of a delta, computed instead of discovered
+
+The previous round ended with a number that was true and useless: a delta of +2.5pp at
+McNemar p=0.375, which reads equally well as "the lever does nothing" and "this sample could
+not see it". The report could not tell those apart, because a p-value only answers whether the
+difference is zero — never whether the design was capable of seeing it.
+
+That capability is arithmetic, and it was already implicit in the data. A paired test uses
+**only the discordant cases** — the ones where one arm answered right and the other wrong — so
+the paired difference has standard error `sqrt(π / n)` where `π` is the observed discordance
+share. The smallest difference this design could have detected is `(1.96 + 0.8416)` standard
+errors at 80% power:
+
+```
+select-mixed -> select-cross, 120 cases, 1 before / 4 after
+  delta            +2.5pp
+  95% CI           [-1.2, +6.2]pp        <- includes zero
+  discordance      4.17%  (5 cases of 120)
+  resolves         5.22pp at 80% power   <- the delta is inside it
+  cases for 2pp    818 at this discordance rate
+```
+
+The same arithmetic, run over both cross-vendor groups and stated as `select-cross` minus
+`select-mixed`:
+
+| second model | cases | discordant | delta | 95% CI | resolves (80%) | cases for 2pp |
+| --- | --- | --- | --- | --- | --- | --- |
+| `glm-4-flash` (cross-vendor) | 120 | 1 / 3 | −1.7pp | [−4.9, +1.6] | 4.7pp | 655 |
+| `deepseek-chat` (same vendor) | 120 | 1 / 4 | +2.5pp | [−1.2, +6.2] | 5.2pp | 818 |
+
+Three facts follow, and only the first one was visible before:
+
+1. **Both intervals include zero**, and they are 4.7–5.2pp wide. Neither group is evidence for
+   or against the cross-vendor candidate; both are consistent with nothing.
+2. **The intervals overlap each other almost entirely.** So the previous round's "the two
+   groups point in opposite directions" was reading noise as direction: at 120 cases the
+   *difference between the two second models* is not measured either.
+3. **The next dispatch has a size, not an opinion.** At 4.17% discordance a 2pp claim needs
+   818 cases and a 1.5pp claim needs 1,454, so the 1,532-case dev split resolves ≈1.5pp and is
+   the smallest split that can settle a 2pp question. That number is now in every artifact, per
+   comparison, as `casesForClaim` — computed from the discordance the pair actually showed
+   rather than quoted from this paragraph.
+
+**Zero discordant pairs is not a zero-width interval.** Two arms that agree on all 120 cases
+have a plug-in discordance rate of zero, which would produce a zero standard error and claim
+the harness is exact. The 95% upper bound on a rate that produced no event is instead 3/n
+(the rule of three), so perfect agreement on 120 cases still cannot exclude a **4.0pp**
+difference. The function returns that bound rather than zero, because the alternative is a
+report that calls an unresolved question resolved — the same error as reading a large p as
+evidence of no effect, with an extra decimal place of confidence.
+
+An artifact from before this change has no `ci`, no `mde` and no `casesForClaim`; the job
+summary prints a dash for those columns instead of a zero, which says "not measured" rather
+than "measured as exact".
+
 ## The floor is enforced, not remembered
 
 A benchmark that only produces a report gets read once. The BIRD arms have a
