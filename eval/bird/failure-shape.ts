@@ -100,6 +100,28 @@ export function missingLiterals(goldSql: string, predictedSql: string): string[]
   return [...gold].filter((literal) => !predicted.has(normalise(literal)));
 }
 
+/**
+ * The literals the gold spells one way and the prediction spells another way in case only.
+ *
+ * This is the most actionable defect on the dev split and the least visible: SQLite compares
+ * strings case-sensitively, so `'Directly funded'` and `'Directly Funded'` are different
+ * values, and a statement that filters on the second returns a different count while looking
+ * — to any reader and to `missingLiterals`, which compares case-insensitively — like the
+ * right query. The fix is not in the model's reasoning but in what the prompt shows it: the
+ * schema card carries column names and no values, so the stored casing of a district name is
+ * something the statement has to guess.
+ *
+ * Numbers are skipped: they have no case, and `3` versus `3.0` is already one literal.
+ */
+export function caseMismatchedLiterals(goldSql: string, predictedSql: string): string[] {
+  const predicted = literals(predictedSql).filter((literal) => literal.startsWith("'"));
+  const exact = new Set(predicted);
+  const folded = new Set(predicted.map((literal) => literal.toLowerCase()));
+  return literals(goldSql).filter(
+    (literal) => literal.startsWith("'") && !exact.has(literal) && folded.has(literal.toLowerCase()),
+  );
+}
+
 function literals(sql: string): string[] {
   // Source order, so a report of missing literals reads in the order the gold wrote them.
   const found: { at: number; text: string }[] = [];

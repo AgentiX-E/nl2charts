@@ -787,6 +787,80 @@ Mini-Dev `select-mixed` carries a 58.8% ceiling against `select`'s 61.6% and ret
 against 56.0%, which is a real purchase at a named price and would be invisible without a
 column of its own.
 
+## The wrong numbers, by the clause that is wrong
+
+The `values` bucket is the largest column in the failure table and the least actionable sentence
+in the project: *the statement ran, the width matched, the numbers were wrong.* `pnpm
+bench:bird:gap:values <report.json> --arm <name>` reads the retained statements and files every
+case under the clause a fix would change. It costs one oracle query per case and no model call.
+
+There are thirteen causes, and they are ordered by the strength of the evidence rather than by
+how often they occur:
+
+| cause | what was measured | the fix it names |
+|---|---|---|
+| `no-statement` | the model returned nothing | generation |
+| `filter-narrow` | the statement returned no rows | a predicate that matches nothing |
+| `filter-wide` | a different number of rows | a weak predicate or a fan-out join |
+| `scale` | every value a constant multiple | an aggregation at the wrong level |
+| `literal-missing` | a value the gold names is absent | what the prompt shows about values |
+| `literal-case` | the value is there, in another case | the stored casing of the value |
+| `tables` | the two statements read different tables | join selection |
+| `predicate` | same tables, different conditions | condition coverage |
+| `aggregate` | different aggregate calls | which function answers the question |
+| `grain` | different `group by` | the aggregation level |
+| `projection` | different select list, in order | which columns, in what order |
+| `window` | different `order by` / `limit` | which window of the same rows |
+| `equivalent` | the statements are one statement | the engine broke a tie |
+
+The ladder stops at the first part that differs, because that is the part a fix would change: a
+statement that joined an extra table also has different conditions, and reporting both would put
+one case in two work items and neither in the queue first.
+
+Two runs, on two splits and two arms:
+
+| cause | dev `select-cross` (`40908325901`) | Mini-Dev `select` (`40878610004`) |
+|---|---|---|
+| `filter-wide` | 88 (22.2%) | 24 (18.5%) |
+| `predicate` | 76 (19.2%) | 28 (21.5%) |
+| `literal-missing` | 70 (17.7%) | 24 (18.5%) |
+| `tables` | 61 (15.4%) | 22 (16.9%) |
+| `filter-narrow` | 53 (13.4%) | 22 (16.9%) |
+| `no-statement` | 17 (4.3%) | 3 (2.3%) |
+| `aggregate` | 11 (2.8%) | 0 |
+| `projection` | 10 (2.5%) | 4 (3.1%) |
+| `literal-case` | 6 (1.5%) | 2 (1.5%) |
+| `window` | 2 (0.5%) | 0 |
+| `grain` | 1 (0.3%) | 0 |
+| `scale` | 0 | 0 |
+| `equivalent` | 0 | 0 |
+| `unclassified` | 1 (0.3%) | 1 (0.8%) |
+| **named** | **99.7%** | **99.2%** |
+
+**The reading contradicts the hypothesis.** More than half of the bucket — 213 of 396 on dev —
+reads a different table or applies different conditions. Another 76 writes a value the gold never
+names. The aggregation-level story, which the first version of this taxonomy led with, accounts
+for one case out of 396: these statements are not wrong about arithmetic, they are wrong about
+which tables join, which rows qualify, and which literal values go in them.
+
+That has a direct consequence for where the next iteration goes. The 34pp candidate-set gap is not
+closed by better prompting about aggregates or by repair loops; it is closed by showing the model
+how the tables relate and which values the columns actually hold. Six of the literals are the right
+word in the wrong case — `'Directly funded'` against `'Directly Funded'`, which SQLite compares as
+different values — and no amount of reasoning recovers that, because the schema card names columns
+and not their contents.
+
+The tool also caught two defects in itself before any of these numbers were trusted. Its first run
+scored **72.1%** and refused to publish; **86 of the 139** unattributed cases were cases the judge
+had filed under `column-count`, which this tool has no business splitting — a statement with the
+wrong width has a projection finding and no clause reading improves on it. The denominator is now
+the parent tool's bucket. The remaining 53 were real gaps, and eight of them are now named causes,
+each with the sentence pair that produces it in the test suite.
+
+`--strict` turns the coverage bar into a failure. The quality gate runs it; the dev workflow does
+not, because a split that covers 72% of a new corpus is a finding about the taxonomy and not a
+regression in the product.
+
 ## The dev split, measured: 60.6% on the split leaderboards report
 
 Two runs of the 1,534-question dev split (`40157122326`, `40166834512`), three arms,

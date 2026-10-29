@@ -107,12 +107,11 @@ jobs:
       # that is not the selector. Printed before the summary so a failed run still shows it.
       - name: Where the candidate set had no answer
         run: pnpm bench:bird:gap
-      # The `values` bucket is three quarters of the no-answer set, and it is three different
-      # bugs: a filter that matched nothing, a replaced literal, and an aggregation at the
-      # wrong level. This runs the oracle over every retained statement to split it, which
-      # costs one query per case and no model call. It is measured here before it is gated in
-      # `ci.yml`, because a bucket that turns out to be mostly `unclassified` is a finding
-      # about the taxonomy and not a reason to red the build.
+      # Splits the values bucket into the clause a fix would change, one oracle query per
+      # case and no model call. No `--strict` here on purpose: the dev split is where a new
+      # bucket is tried, and a reading that says "the taxonomy covers 72% of this" is the
+      # finding rather than a reason to red the run. The gate lives in `ci.yml`, on the split
+      # and arm it has been measured on.
       - name: What kind of wrong the no-answer statements are
         run: pnpm bench:bird:gap:values eval/out/bird-eval.json --arm select-cross
       # The run that fails is the run whose numbers matter most, and these two steps used to

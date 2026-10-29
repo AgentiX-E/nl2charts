@@ -8,25 +8,40 @@ cannot be argued with.
 
 ### Measured
 
-- **The `values` bucket is three bugs, and the split is mechanical.** Three quarters of the
-  no-answer questions have the right width and the wrong numbers, which is still four different
-  mistakes. `pnpm bench:bird:gap:values <report> --arm <name>` runs the oracle over every retained
-  statement and splits them by the fix they ask for: `filter-narrow` (the predicate matched
-  nothing), `filter-wide` (too many rows: a weak predicate or a fan-out join), `missing-literal`
-  (a value the gold names is absent from the statement), `scale` (every value a constant multiple:
-  an aggregation at the wrong level), `aggregate` (a different aggregate function) and `grain`
-  (a different `group by` at the same cardinality). The order is the order of evidence, not of
-  frequency: an empty result is visible without reading the SQL, and "the aggregate is wrong" is
-  a hypothesis about the same statement, so it is tried last. 26 unit cases including a real
-  SQLite file through the real oracle, and it is a measurement step in `bird-dev.yml` before it
-  is a gate in `ci.yml`.
+- **The `values` bucket is conditions and join paths, not aggregation.** `pnpm bench:bird:gap:values
+  <report> --arm <name> --strict` reads the bucket the parent tool cannot split and files every case
+  under the clause a fix would change: `no-statement`, `filter-narrow`, `filter-wide`, `scale`,
+  `literal-missing`, `literal-case`, `tables`, `predicate`, `aggregate`, `grain`, `projection`,
+  `window`, `equivalent`. On the dev split (`40908325901`, `select-cross`) the **396** cases fall:
+  `filter-wide` 88, `predicate` 76, `literal-missing` 70, `tables` 61, `filter-narrow` 53,
+  `no-statement` 17, `aggregate` 11, `projection` 10, `literal-case` 6, `window` 2, `grain` 1,
+  `scale` 0, `equivalent` 0, `unclassified` 1 (99.7% named). Mini-Dev repeats the shape on `select`
+  (130 cases, 99.2%).
+
+  **The reading, and it contradicts the hypothesis the taxonomy was built on.** 213 of 396 cases
+  (53.8%) read a different table or applied different conditions, and 76 more (19.2%) wrote a value
+  the gold does not name. The aggregation-level story — `scale` and `grain`, the two buckets the
+  first version led with — accounts for **one** case. Statements are not wrong about arithmetic;
+  they are wrong about which tables join and which rows qualify, and about the literal values in
+  them. Six of those literals are the right word in the wrong case (`'Directly funded'` against
+  `'Directly Funded'`), which SQLite compares as different values: a right-looking statement with a
+  wrong answer, and the one bucket whose fix is in what the prompt shows rather than in reasoning.
+
+  Two defects were found in the instrument before any of those numbers were trusted. The first
+  reading scored **72.1%** and refused to publish; the 139 unattributed cases were **86 cases the
+  judge had filed under `column-count`**, which this tool has no business splitting — a statement
+  whose width is wrong has a projection finding, and no clause reading improves on it — plus 53 that
+  the taxonomy genuinely lacked a name for. The denominator is now the parent's bucket, the missing
+  rungs exist, and the thirteen-cause ladder reaches 99.7%. `--strict` is what a gate uses; a measurement
+  prints the same table without failing the run, so a new split can be read before it is enforced.
 
 - **The 34pp column has a shape now, and it is not the engine.** `pnpm bench:bird:gap` reads a run
   artifact and classifies every question whose candidate set held no answer. On the dev split
   (`40865112253`) `select-cross` has **523** such questions: **15** `engine-refused`, **120**
   `column-count`, **388** `values`; on Mini-Dev (`40878610004`) the same shape repeats across five
   arms (1.6–3.9% / 21.7–27.4% / 70.3–76.6%). The statements run and the numbers are wrong, so the
-  fix is grain, filters and literals — not error recovery. The tool also measured the instrument
+  fix is not error recovery — and the split below is what says which of grain, filters and literals
+  it actually is. The tool also measured the instrument
   rather than the model: **687 of 1,043** no-answer cases had no retained statement, because the
   failure corpus was capped at 200 per arm. The cap is now above the largest split (1,534), so the
   corpus is a census and `truncated` stays empty.

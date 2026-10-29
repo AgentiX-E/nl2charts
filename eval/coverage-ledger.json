@@ -7,7 +7,7 @@
     "lines": 99.31,
     "statements": 99.31,
     "functions": 100,
-    "branches": 97.51
+    "branches": 97.57
   },
   "files": {
     "eval/ablate.ts": {
@@ -136,6 +136,12 @@
       "functions": 100,
       "branches": 100
     },
+    "eval/bird/sql-shape.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 100
+    },
     "eval/bird/stability.ts": {
       "lines": 98.97,
       "statements": 98.97,
@@ -155,10 +161,10 @@
       "branches": 100
     },
     "eval/bird/values-gap.ts": {
-      "lines": 98.91,
-      "statements": 98.91,
+      "lines": 98.99,
+      "statements": 98.99,
       "functions": 100,
-      "branches": 98.59
+      "branches": 98.86
     },
     "eval/bird/values.ts": {
       "lines": 100,

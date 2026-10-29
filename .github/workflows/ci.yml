@@ -300,6 +300,13 @@ jobs:
       # 34pp column nothing had ever measured and the 4.6pp column everything had been.
       - name: Where the candidate set had no answer
         run: pnpm bench:bird:gap
+      # The next level down, and now a gate rather than a measurement: the values bucket is
+      # split into the clause a fix would change, and on both splits it reaches a named cause
+      # for more than 99% of the bucket. `--strict` says what a drop below four fifths would
+      # mean — the taxonomy stopped explaining the corpus — which is a regression in the
+      # instrument, and the instrument is what the next iteration is planned from.
+      - name: What kind of wrong the no-answer statements are
+        run: pnpm bench:bird:gap:values eval/out/bird-eval.json --arm select --strict
       - name: Noise floor (same cases, three repeats)
         run: pnpm bench:bird:stability
       - name: Adversarial gold, widths and controls without a model
