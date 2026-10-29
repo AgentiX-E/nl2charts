@@ -116,6 +116,7 @@ pnpm bench:bird                 # seven arms, paired ablations, live model
 pnpm bench:bird:stability       # 60 cases x 3 repeats: the noise floor
 pnpm bench:bird:recall          # every gold identifier is in the prompt; no model
 pnpm bench:bird:diagnose <report.json>   # classify the failures a run kept; no model
+pnpm bench:bird:strata --arm A --against B   # split a pair by candidate independence; no model
 ```
 
 Scope: **all 11 databases, all 500 Mini-Dev questions** (498 scorable: two gold

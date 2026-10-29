@@ -195,6 +195,27 @@ from names, declared types and foreign keys, with no human-written dictionary.
 Rendered by `renderDefinitions()` and passed to the prompt as `definitions`. It
 states what the schema licenses, not what a business owner meant.
 
+**Discordance (paired)** — The share of cases where exactly one of two arms is
+right. Only those cases carry information about a paired difference, whose
+standard error is `sqrt(π/n)`. A pair that agrees on every case has a plug-in
+discordance of zero, which would claim the harness is exact; the report answers
+`3/n` instead (the rule of three), because zero events do not bound a difference
+at zero.
+
+**Resolution (of a delta)** — The smallest difference a comparison could have
+detected: `(1.96 + 0.8416)` standard errors at 80% power, computed from the
+observed discordance. It is a property of the design rather than of the result,
+so it is printed beside every p-value — a p-value answers whether a difference is
+zero, never whether the run was able to see it. `casesForClaim` is the inverse
+question: how many cases a given delta would need.
+
+**Candidate independence** — Whether the prompts an arm declares are actually
+distinct for a question. An arm that names three prompts and sends two identical
+ones is not the arm its label says it is; the artifact counts those questions
+(`mixedCandidatePrompts.degenerateIds`), and `pnpm bench:bird:strata` splits a
+comparison on them, because a pooled delta across arms with different
+independence mixes two comparisons in an unknown proportion.
+
 **Visual baseline** — A committed fingerprint per series type: the element
 skeleton and the count of drawn shapes, not the coordinates. It fails when a chart
 stops drawing or changes shape and stays quiet when a label moves, because a
