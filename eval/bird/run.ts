@@ -34,6 +34,7 @@ import type { CaseOutcome, MatchReason } from '@agentix-e/nl2charts-devkit';
 import { buildSchema, loadDescriptions, loadQuestions, loadTables, stratifiedSample } from './data.js';
 import type { BirdQuestion } from './data.js';
 import { createOracle } from './oracle.js';
+import { canonicalSql } from './canonical.js';
 import { shapeFailure, shapeMismatch } from './shape.js';
 import { FAILURE_SAMPLE, failureCorpus } from './failures.js';
 import type { Oracle, OracleResult } from './oracle.js';
@@ -165,6 +166,22 @@ export interface Arm {
    * not.
    */
   readonly judge?: 'second';
+  /**
+   * Rewrite every candidate into one SQL style before the selector reads it.
+   *
+   * The judge swap answered *whose* preference it is and left the *channel* open: the same
+   * second model's statement was returned 25.6% of the time under the primary judge and
+   * 68.2% under its author, on identical candidates, and the only thing that changed is who
+   * reads the text. A judge sees no label and no author, so the preference has to travel
+   * through keyword case, spacing, line breaks and comments — none of which is SQL.
+   *
+   * This lever removes that channel without changing a single computed value: keywords and
+   * function names upper case, identifiers lower case, one space between tokens, comments
+   * gone, string literals and quoted identifiers copied byte for byte. It does not reorder,
+   * rename or simplify, so if accuracy moves the movement belongs to style and not to the
+   * statements. One lever from `select-cross`: same candidates, same count, same cost.
+   */
+  readonly canonical?: boolean;
   /**
    * Treat an empty result as a failure and spend one call on it.
    *
@@ -367,6 +384,12 @@ export const ARMS: readonly Arm[] = [
   // read like its own, the asymmetry flips; if the second model's correct statements are
   // merely harder to recognise, it does not.
   { name: 'select-cross-judge', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: CROSS_SOURCES, judge: 'second' },
+  // The cross set read in one SQL style. One lever from `select-cross`: same candidates, same
+  // count, same four calls, same selector prompt — the text in front of the selector has its
+  // signatures removed. The judge swap showed the asymmetry is authorship; a judge recognises
+  // authorship from formatting, so removing formatting is the test of whether the 6pp was
+  // readability or taste.
+  { name: 'select-cross-canon', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: CROSS_SOURCES, canonical: true },
   // The same three prompts with the authorship majority reversed: two candidates from the
   // second model, one from the primary. One lever from `select-cross` — one candidate's author
   // — and the direct test of "whoever wrote two of the three wins the tie".
@@ -481,6 +504,7 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'vote-mixed': 'three prompts aggregated by modal result instead of by a model: 63% would make the selector call unnecessary, and below that it prices what the model adds',
   'vote-cross': 'the cross-model candidate set aggregated by modal result: needs the second model too',
   'select-cross-judge': 'the cross set judged by the second model: needs the second model and a second key, and prices self-preference in the judge',
+  'select-cross-canon': 'the cross set rewritten into one SQL style before the selector reads it: the lever that closes the style channel the judge swap proved is open, not a different judge; needs the second model, and is measured against `select-cross`',
   'select-balanced': 'the same three prompts with two candidates from the second model instead of one: flips which author holds the majority, and needs the second model',
   plan: 'query plan before the statement: 50.4% against 57.6% for its parent (-7.2pp, 63/27, p=0.0002) — anchoring, not helping; kept so the finding can be re-tested',
   'select-pair': 'pairwise comparison instead of an absolute ranking: 58.4% against 57.6% for its parent (+0.8pp, 17/20, p=0.74) at one more call, and it lost more of its candidate set (25 cases against 20) — the absolute prompt is not what the selector loses; kept so a different comparison order or a two-of-three vote can be measured against it',
@@ -544,6 +568,8 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   ['select-cross', 'vote-cross'],
   // One lever: which model judges the same three candidates.
   ['select-cross', 'select-cross-judge'],
+  // One lever: the same candidates in one SQL style, so the selector cannot see who wrote them.
+  ['select-cross', 'select-cross-canon'],
   // One lever: which author holds the majority among the same three prompts.
   ['select-cross', 'select-balanced'],
   // One lever: the same candidates and selector, with an empty result treated as a
@@ -1302,6 +1328,19 @@ export function candidateVerdicts(
   expected: readonly (readonly unknown[])[],
 ): readonly { readonly source: string; readonly correct: boolean }[] {
   return candidates.map((candidate) => ({ source: candidate.source, correct: judgeOfficial(expected, candidate.rows) === 'match' }));
+}
+
+/**
+ * The candidate set as the selector will read it.
+ *
+ * `canonical` is a display transformation and stays one: the returned statements replace the
+ * text the selector sees, while the winner is taken from the untouched set by index, so the
+ * arm executes the model's own statement and every other report field describes what ran.
+ * An index is the only thing that crosses from one to the other.
+ */
+export function readableCandidates<T extends { readonly sql: string }>(candidates: readonly T[], canonical: boolean | undefined): readonly T[] {
+  if (canonical !== true) return candidates;
+  return candidates.map((candidate): T => ({ ...candidate, sql: canonicalSql(candidate.sql) }));
 }
 
 export async function pool<T, R>(items: readonly T[], limit: number, worker: (item: T, index: number) => Promise<R>): Promise<R[]> {
@@ -2253,10 +2292,13 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
         let winner = majority.winner as { sql: string; rows: readonly (readonly unknown[])[]; source: string };
         let selectedByModel: boolean | undefined;
         if (arm.select === true) {
+          // What the selector reads, as opposed to what the arm runs: on a canonical arm the
+          // text carries no author signature, and `winner` below still comes from the raw set.
+          const readable = readableCandidates(choosable, arm.canonical);
           // The model sees what the vote cannot: the shape of each result. A statement
           // that answers a "how many" with 500 rows is wrong for a reason no majority
           // of identical mistakes will reveal.
-          const offered = choosable.map((candidate) => ({
+          const offered = readable.map((candidate) => ({
             sql: candidate.sql,
             rows: candidate.rows.length,
             columns: candidate.rows[0]?.length ?? 0,
@@ -2269,7 +2311,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
           const judge = arm.judge === 'second' && secondCounter !== undefined ? secondCounter.provider : counter.provider;
           const decision =
             arm.pairwise === true
-              ? await chooseCandidatePairwise(judge, question.question, choosable)
+              ? await chooseCandidatePairwise(judge, question.question, readable)
               : await (async () => {
                   const reply = await judge.complete({
                     messages: [

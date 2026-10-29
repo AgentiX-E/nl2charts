@@ -604,6 +604,88 @@ describe('the second model as a judge', () => {
   });
 });
 
+describe('the same candidates in one SQL style', () => {
+  /**
+   * The gold statement, written the way a model with opinions about layout writes it.
+   *
+   * Every change here is style and nothing else: spacing, a space before the parenthesis, a
+   * trailing semicolon. If the canonical arm executes the selector's copy instead of the
+   * model's, the answer is unchanged — so the only thing that can betray a leak is what the
+   * artifact records as the statement that ran.
+   */
+  const styled = (question: string): string | undefined => {
+    const gold = GOLD[question];
+    return gold === undefined ? undefined : `${gold.replace('(', ' ( ').replace(')', ' ) ')}  ;`;
+  };
+
+  it('shows the selector one style and runs the statement the model wrote', async () => {
+    const second = await startEndpoint({ reply: (request) => replyFor(request, { first: styled }) });
+    try {
+      const result = await run({
+        plan: { first: styled },
+        env: {
+          BIRD_ARMS: 'select-cross-canon',
+          BIRD_SECOND_MODEL: 'second-model',
+          BIRD_SECOND_BASE_URL: second.url,
+          BIRD_SECOND_API_KEY: 'second-key',
+        },
+      });
+      expect(result.code).toBe(0);
+      const selector = result.requests.filter((request) => request.prompt.includes('which candidate statement answers the question'));
+      expect(selector.length).toBe(QUESTIONS.length);
+      // The style channel is closed in what the judge reads: keyword case normalised, the
+      // gap before the parenthesis gone, the trailing semicolon gone.
+      expect(selector[0]?.prompt).toContain('SELECT COUNT(*) FROM items');
+      expect(selector[0]?.prompt).not.toContain('count ( * )');
+      expect(selector[0]?.prompt).not.toContain(');');
+      // Three candidates from three prompts and two models, written identically here on
+      // purpose: after canonicalisation they are the same line, which is the whole point —
+      // nothing in the text says who wrote it.
+      const lines = selector[0]?.prompt.split('\n').filter((line) => /^\d\. SELECT COUNT\(\*\) FROM items$/u.test(line)) ?? [];
+      expect(lines).toHaveLength(3);
+      // ...and the arm still answers every question, and still records the set it chose
+      // from: the winner is taken by index out of the untouched candidate list, so the
+      // canonical text is a display transformation and not a rewrite of the prediction
+      // (`readableCandidates` pins that contract in `bird-canonical.test.ts`).
+      const cases = result.report.cases as { id: string; passed: boolean; candidates?: unknown }[];
+      const first = cases.find((row) => row.id === '1');
+      expect(first?.passed).toBe(true);
+      expect(cases.every((row) => row.passed)).toBe(true);
+      // The candidate record still describes the set, because the winner is taken by index
+      // from the untouched set rather than from the copy the judge read.
+      expect(first?.candidates).toEqual([
+        { source: 'inline+evidence@second', correct: true },
+        { source: 'metadata+evidence', correct: true },
+        { source: 'values', correct: true },
+      ]);
+    } finally {
+      await second.close();
+    }
+  });
+
+  it('leaves the statement alone on an arm that does not ask for one style', async () => {
+    // The control for the test above: same endpoint, same styled statements, no lever, and
+    // the judge sees exactly what the model wrote.
+    const second = await startEndpoint({ reply: (request) => replyFor(request, { first: styled }) });
+    try {
+      const result = await run({
+        plan: { first: styled },
+        env: {
+          BIRD_ARMS: 'select-cross',
+          BIRD_SECOND_MODEL: 'second-model',
+          BIRD_SECOND_BASE_URL: second.url,
+          BIRD_SECOND_API_KEY: 'second-key',
+        },
+      });
+      expect(result.code).toBe(0);
+      const selector = result.requests.filter((request) => request.prompt.includes('which candidate statement answers the question'));
+      expect(selector[0]?.prompt).toContain('count ( * )');
+    } finally {
+      await second.close();
+    }
+  });
+});
+
 describe('the artifact', () => {
   it('records the harness settings that a difference between runs could come from', async () => {
     const result = await run({

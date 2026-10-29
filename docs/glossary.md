@@ -242,6 +242,21 @@ candidate's conversion moved by 42.6pp. It is also *expensive*: the second model
 bias takes its own statement over two candidates that agree and are both right on
 128 cases, where the first model's bias does so on 23.
 
+**Canonical candidate text** — The one form a statement takes before a selector
+reads it: keyword and function names upper case, identifiers lower case, one space
+between tokens, comments gone, `!=` written `<>`, a trailing semicolon dropped
+(`eval/bird/canonical.ts`). It exists to close the only channel a judge can use to
+recognise an author, and it is a *display* transformation: the winner is taken by
+index from the untouched set, so what executes is still the statement the model
+wrote. It is not a normal form for SQL — aliases are not renamed and literals are
+copied byte for byte, because both would change answers.
+
+**Load-bearing separator** — A space that is part of the statement rather than of
+its layout, and that a canonicaliser therefore copies instead of normalising:
+`x'41'` is a blob literal and `x '41'` is a name beside a string, `?1`/`:name`/
+`@name`/`$name` are one bound parameter. It is the reason whitespace normalisation
+is enumerated per token pair (`glued`) rather than applied everywhere.
+
 **Visual baseline** — A committed fingerprint per series type: the element
 skeleton and the count of drawn shapes, not the coordinates. It fails when a chart
 stops drawing or changes shape and stays quiet when a label moves, because a

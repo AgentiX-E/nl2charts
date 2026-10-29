@@ -6,6 +6,21 @@ cannot be argued with.
 
 ## Unreleased
 
+### Added
+
+- **A statement can be made to look like nobody's.** The judge swap proved the preference is
+  authorship and left the channel open; `eval/bird/canonical.ts` closes it. `canonicalSql` uppercases
+  keywords and functions, lowercases identifiers, normalises whitespace, drops comments, writes `!=`
+  as `<>` and drops a trailing semicolon — and copies string literals, blob literals and quoted
+  identifiers byte for byte, keeps a separator where the source's own was load-bearing (`x'41'` is a
+  blob, `x '41'` is a name beside a string; `?1`, `:name`, `@name`, `$name` are one parameter), and
+  renames no alias, because a rename needs scope and `1.0` is REAL where `1` is INTEGER.
+
+  The new arm is `select-cross-canon`: one lever from `select-cross`, same candidates, same count,
+  same four calls. The transformation is display-only — the selector reads the canonical text and
+  the winner is taken by index from the untouched set (`readableCandidates`), so what executes and
+  what the artifact calls the prediction are the model's own statement.
+
 ### Measured
 
 - **The judge is the variable — and the swap costs 6.01pp because the other judge cannot read
@@ -28,7 +43,7 @@ cannot be argued with.
   single largest loss group is **128** cases where two candidates agreed, both were right, and the
   judge took its own statement anyway — against **23** for the other judge. Not doubt, not a
   threshold: a channel. The judge never sees a label, but it sees style, and style is authorship.
-  Next lever: canonicalise the candidate text (case, whitespace, aliasing, literal formatting), one
+  Next lever: canonicalise the candidate text (keyword case, whitespace, operator spelling), one
   lever on the existing arm, no third model required — the record prices it directly.
 
 - **The same arm has now read 61.70%, 61.55% and 60.70% on dev.** A 1.0pp spread across three runs

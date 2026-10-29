@@ -2207,7 +2207,7 @@ attached to its own prose, and the table is what tells them apart.
 So the bias is not a threshold to tune and not a prompt to sharpen. It is a channel: the judge
 never sees a label, but it sees the *style* of a statement, and style is authorship. The next
 lever is therefore to close that channel rather than to change who speaks through it —
-**canonicalise the candidate text** (keyword case, whitespace, aliasing, literal formatting) so
+**canonicalise the candidate text** (keyword case, whitespace, operator spelling) so
 that two statements which compute the same thing look the same thing. It is one lever on the
 existing arm, it needs no third model, and the candidate record now prices it directly: a
 canonicalisation that works moves the 128 without touching the 12.
@@ -2220,6 +2220,51 @@ first of those runs was used to claim, which is exactly why every claim in this 
 *paired* comparison inside one run: pairing cancels the drift, and comparing two arms from two
 different runs does not. The three numbers are printed here so that the next reader does not
 discover it the way this one did.
+
+### The channel is style, and style can be closed without a third model
+
+The attribution table says the largest loss group is a judge recognising its own prose. That
+leaves two ways to act on it: change who judges, or change what the judge can recognise. The first
+is blocked (`glm-4.5` answers 429 on this account); the second is a string transformation, and it
+was written down as an arm before it was measured:
+
+> `select-cross` (control) against a canonicalised arm, in one run. The 128-group loss must fall by
+> at least half, and total accuracy must not fall. Δ with a 95% interval, the resolvable effect and
+> a p value; the candidate record reports the two groups (128 and 12) separately.
+
+`eval/bird/canonical.ts` is that transformation. It rewrites a statement so that two authors who
+computed the same thing hand the judge the same text:
+
+| what changes | why it cannot change the answer |
+| --- | --- |
+| keyword and function names upper case, identifiers lower case | SQLite matches both case-insensitively; only literals and quoted identifiers are case-sensitive, and neither is touched |
+| runs of whitespace, tabs and newlines become one space, and vanish where punctuation already separates | whitespace is only ever a separator, so normalising it changes where tokens are *drawn*, never what they say |
+| `--` and `/* */` comments are removed | a comment is not part of the statement |
+| a trailing semicolon is dropped (an interior one is kept, because it separates two statements) | punctuation with no meaning |
+| `!=` becomes `<>`, `==` becomes `=` | SQLite documents both as the same operator; which one a model picks is authorship |
+
+What it refuses to touch is the interesting half, because each refusal is a way the transformation
+could have changed an answer:
+
+- **String literals, blob literals and quoted identifiers are copied byte for byte.** `'Pen'` and
+  `'pen'` are different filters, and `"Order ID"` is a different identifier from `"order id"`.
+- **A separator that is load-bearing stays where the author put it.** `x'41'` is the blob `A`;
+  `x '41'` is a column beside a string. `?1`, `:name`, `@name` and `$name` are one bound parameter
+  and fall apart if a space is inserted. These are enumerated in `glued`, not guessed.
+- **Aliases are not renamed, and numbers are not reformatted.** Renaming an alias needs scope
+  analysis — a rename that collides with a column name changes the answer — and `1.0` is REAL
+  where `1` is INTEGER in SQLite, so "tidying" it would change a type and sometimes a comparison.
+  Both are style channels this lever therefore leaves open; the honest claim is that it closes the
+  four above, not that it makes two statements indistinguishable.
+
+The transformation is also display-only by construction: the selector reads the canonical text, and
+the arm then takes the winner *by index* from the untouched candidate list, so the statement that
+executes and the statement the artifact calls the prediction are the model's own. `readableCandidates`
+pins that contract, and `test/bird-canonical.test.ts` pins the rest against SQLite itself: a corpus
+of 40 statements — literals whose case decides the answer, a blob, JSON operators, both comment
+styles, a negative number beside a subtraction, two statements and a semicolon — is executed in both
+forms and must return identical rows, plus 100 restylings of one statement that must collapse to a
+single string.
 
 ## The floor is enforced, not remembered
 
