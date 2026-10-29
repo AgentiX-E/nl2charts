@@ -6,6 +6,30 @@ cannot be argued with.
 
 ## Unreleased
 
+### Measured
+
+- **The judge reads the slot, not the author — and that moves nothing that counts.** Run
+  `40865112253` (dev, 1,532 scorable, `glm-4-flash` writing the `@second` candidate) held the
+  candidate set fixed and permuted only the order per question. On the 1,129 cases that carry all
+  three candidates, every source's selection rate collapses with its slot
+  (`metadata+evidence` 79.8% → 33.8% → 5.1%, `values` 78.2% → 35.0% → 7.9%,
+  `inline+evidence@second` 36.2% → 13.8% → 11.2%) while **each source's own correctness does not
+  move at all** (65.5/62.9/66.2, 60.0/69.2/65.0, 49.7/45.7/46.7). 64.7% of winners sit in slot 0.
+
+  Accuracy: **61.23% → 60.57%**, Δ **−0.65pp**, McNemar 29/19, **p = 0.19**, interval
+  **[−1.54pp, +0.23pp]**, MDE 1.27pp. The permutation moved selection by 25 to 75pp and the score
+  by less than its own noise floor. The reason is measurable before the run: cases where **only**
+  the second model's statement is correct are **3.7–4.6%**, while cases where at least one
+  candidate is correct are 63.9–70.5%. Redundant candidates make "which one" almost irrelevant to
+  "is it right".
+
+  So placement is a first-class lever on the selector and not on accuracy. The registered criteria
+  predicted the first and prescribed work on the second; this run falsified the prescription with
+  its own paired numbers. Two consequences are recorded rather than fixed by a threshold: the
+  criterion's 52.6% threshold belonged to the judge-swap run (`@second` is 27.0% of winners under
+  the primary judge here), and `select-cross-shuffled` stays out of the adoption chain as a
+  diagnostic lever.
+
 ### Added
 
 - **A rate per stratum, with the width that makes it readable.** A shuffled run produces one

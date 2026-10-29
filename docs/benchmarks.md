@@ -2389,6 +2389,52 @@ rather than the selector. Neither Wilson nor Newcombe is decoration here — the
 where the textbook interval fails, because a slot taken on every case or on none has an estimated
 variance of zero and would read as certainty.
 
+Run `40865112253` (dev, 1,532 scorable, `deepseek-chat` judging, `glm-4-flash` writing the
+`@second` candidate) is the first artifact this tool read:
+
+| arm | slot | cases | took it | 95% | passed | 95% |
+| --- | --- | --- | --- | --- | --- | --- |
+| `select-cross` | 0 | 1,132 | 35.9% | 33.1–38.7 | 64.7% | 61.8–67.4 |
+| `select-cross-shuffled` | 0 | 380 | 36.3% | 31.6–41.3 | 68.7% | 63.9–73.1 |
+| `select-cross-shuffled` | 1 | 386 | 13.7% | 10.7–17.5 | 61.9% | 57.0–66.6 |
+| `select-cross-shuffled` | 2 | 366 | 11.2% | 8.4–14.8 | 61.5% | 56.4–66.3 |
+
+The gap is **+25.1pp**, interval **[+19.2, +30.8]**, so the verdict is `separated`. Two numbers
+in that table are worth more than the verdict: `select-cross` puts `@second` in slot 0 on every
+case and reads **35.9%**, while the shuffled arm reads **36.3%** on its slot-0 cases — 0.4pp
+apart, intervals overlapping. Permuting the order did not change the candidate set, which is the
+check the registered criteria asked for first.
+
+Putting all three sources on one table (the 1,129 cases that carry all three, so two-candidate
+cases cannot inflate the slot-0 rate) shows what the judge is actually reading:
+
+| source | slot 0 | slot 1 | slot 2 | its own correctness (0 / 1 / 2) |
+| --- | --- | --- | --- | --- |
+| `inline+evidence@second` | 36.2% | 13.8% | 11.2% | 49.7% / 45.7% / 46.7% |
+| `metadata+evidence` | **79.8%** | 33.8% | 5.1% | 65.5% / 62.9% / 66.2% |
+| `values` | **78.2%** | 35.0% | 7.9% | 60.0% / 69.2% / 65.0% |
+
+Selection rate collapses with the slot; the same statement's own correctness does not move at
+all. 64.7% of winners sit in slot 0. Authorship is not what the judge is following here.
+
+**And none of it reaches accuracy.** The paired comparison in the same artifact is Δ **−0.65pp**,
+McNemar 29/19, **p = 0.19**, interval **[−1.54pp, +0.23pp]**, MDE 1.27pp. Permuting the order
+moved every source's selection rate by 25 to 75pp and moved the score by less than its own noise
+floor. The reason is redundancy, and it is measurable in advance: cases where **only** the second
+model's statement is right are **3.7–4.6%** of the set, while cases where at least one candidate
+is right are 63.9–70.5%. When three quarters of the questions have more than one correct
+statement, which one the judge picks barely decides whether the answer is right.
+
+So placement is a first-class lever on the *selector* and not on *accuracy*. The registered
+criteria predicted the first and prescribed work on the second; the same run falsified the
+prescription. That distinction did not exist in this file before: `selectionLoss` (71 → 84 here)
+measures what the selector threw away, and accuracy measures what is left after it.
+
+One caveat about the number this experiment started from. `@second` accounts for **27.0%** of
+winners in this run (409/1,517) — the judge is the primary model. The 52.6% that motivated the
+shuffle came from the judge-swap run, where the second model judged its own statements. The two
+are not comparable: same candidates, different judge, and a stronger second model in the swap.
+
 ## The floor is enforced, not remembered
 
 A benchmark that only produces a report gets read once. The BIRD arms have a

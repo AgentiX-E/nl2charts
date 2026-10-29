@@ -247,18 +247,30 @@ conversion of *another* source's statement moved 50.0% → 72.4%. What canonical
 fixed was comprehension, not allegiance.
 
 **Position bias** — A judge's tendency to prefer the candidate it reads first,
-independent of who wrote it. It is an *untested confound* here rather than a
-finding: `CROSS_SOURCES` always puts the second model's candidate first, so
-authorship and position are perfectly correlated in every cross experiment run so
-far, and "it prefers its own writing" and "it prefers candidate 1" predict exactly
-the same number. `select-cross-shuffled` is the arm that separates them: the same
-three candidates permuted by question id (`shuffleByCase`, FNV-1a over `id#slot`,
-then Fisher–Yates), one lever from `select-cross`, zero extra calls. The record
-that makes the reading possible is the existing `candidates` array — on a shuffled
-arm entry `i` is the statement offered in slot `i`, so author crossed with index
-answers the question after the run instead of before it. `pnpm bench:bird:position`
-does the crossing, and it reports intervals rather than percentages (see *Slot
-stratum*).
+independent of who wrote it. It was a confound before it was a finding:
+`CROSS_SOURCES` always puts the second model's candidate first, so authorship and
+position were perfectly correlated in every cross experiment and "it prefers its
+own writing" and "it prefers candidate 1" predicted exactly the same number.
+`select-cross-shuffled` separated them — the same three candidates permuted by
+question id (`shuffleByCase`, FNV-1a over `id#slot`, then Fisher–Yates), one lever
+from `select-cross`, zero extra calls — and run `40865112253` answered it: on the
+1,129 cases carrying all three candidates, every source's selection rate collapses
+with its slot (79.8% → 33.8% → 5.1% for `metadata+evidence`) while **each source's
+own correctness does not move at all**. The judge reads the slot, not the author.
+
+What it does *not* do is change the score. The same run's paired comparison is
+−0.65pp at p = 0.19, because the candidates are redundant: only 3.7–4.6% of cases
+have exactly one correct statement. Position is a lever on the selector and not on
+accuracy, and the number that says so in advance is the *only-correct share*.
+
+**Only-correct share** — The fraction of cases where exactly one candidate is
+right. It is the ceiling on what any selector-side lever can win: if three quarters
+of the questions have more than one correct statement, then choosing differently
+changes almost nothing. Worth computing before proposing a change to candidate
+order, prompt layout, or the judge, because it bounds the prize. In run
+`40865112253` it was 3.7–4.6% per source, against 63.9–70.5% for "at least one
+candidate correct" — which is why a 25pp shift in selection produced a 0.65pp shift
+in accuracy.
 
 **Slot stratum** — The set of cases in which the tracked candidate occupied one
 particular index of the selector's list. A shuffled run produces two or three of
