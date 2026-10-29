@@ -2311,6 +2311,47 @@ measured is `select-cross-judge-canon` (the same canonical text read by the seco
 the time of writing); and not that the 6.01pp swap was "readability rather than taste", which needs
 that arm to separate style from the act of reading.
 
+### The channel is worth 1.24pp — to the judge that was using it
+
+The same canonical text, read by the second model (run `40843792747`, full dev, second model
+`glm-4-flash`). One field from its control:
+
+| arm | judge | accuracy | ceiling | selection loss | two candidates agreed > took its own | its own alone > returned | another alone > returned |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `select-cross-judge` | `glm-4-flash` | 54.83% (840/1,532) | 1,003 | 169 | 124 | 26 of 40 (65.0%) | 13 of 26 (50.0%) |
+| `select-cross-judge-canon` | `glm-4-flash` | **56.07%** (859/1,532) | 1,008 | 152 | 111 | 29 of 43 (67.4%) | 21 of 29 (**72.4%**) |
+
+Ceiling, loss and both conversions are over the 1,506 / 1,507 cases that carry a candidate record
+(`pnpm bench:bird:losses`); the accuracies are over all 1,532.
+
+Paired: 21 cases only the control got, 40 only the canonical arm, **Δ = +1.24pp, 95% CI
+[+0.24, +2.24], p = 0.020**, discordance 3.98%, the design resolves 1.43pp.
+
+So the lever does something, and only where the channel was measured: **+1.24pp under the judge
+that used it, −0.46pp (p = 0.31) under the judge that did not.** The swap cost 5.87–6.01pp in two
+other runs, so closing the channel recovers roughly a fifth of it — a ratio that mixes runs and
+should be read as an order of magnitude, not a measurement.
+
+The registered mechanism, however, is **falsified**, and the two conversions say what replaced it.
+The criterion asked for the two-agree group to halve; it went **124 → 111**, a tenth. The movement
+is in the *other* column: when `metadata+evidence` alone held the answer, the weak judge returned it
+**13 of 26** times before and **21 of 29** times after — 50.0% → **72.4%** — while its own
+statement's conversion barely moved (65.0% → 67.4%) and its overall share of wins only drifted from
+52.6% to 50.5%.
+
+So the channel was not mainly a *loyalty* channel. It was a *comprehension* channel: canonical text
+let the judge read a statement it did not write and see that it answered the question. That is also
+why the two-agree group barely moved — two candidates that return the same rows usually do so with
+**different statements** (different joins, different filters, a subquery here and a `GROUP BY`
+there), and no text normalisation can collapse those, because the difference is content and not
+style. Style was one channel; equivalence is another, and it is the bigger one.
+
+That leaves a confound this file has been carrying since the first cross run and never tested:
+`CROSS_SOURCES` always puts the second model's candidate **first**. Authorship and position are
+perfectly correlated in every cross experiment so far, so "the judge prefers its own statement" and
+"the judge prefers candidate 1" predict the same 52.6%. Shuffling the candidate order per case
+separates them, costs nothing, and is the next registered experiment.
+
 ## The floor is enforced, not remembered
 
 A benchmark that only produces a report gets read once. The BIRD arms have a

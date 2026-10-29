@@ -23,6 +23,22 @@ cannot be argued with.
 
 ### Measured
 
+- **The style channel is worth 1.24pp — and only to the judge that was using it.** The same
+  canonical text read by the second model (run `40843792747`, full dev, one field from its control):
+  `select-cross-judge` **54.83%** (840/1,532) against `select-cross-judge-canon` **56.07%**
+  (859/1,532), **Δ = +1.24pp, 95% CI [+0.24, +2.24], p = 0.020**, 21 cases only the control, 40 only
+  the canonical arm. Paired against the −0.46pp (p = 0.31) the same lever produced under the judge
+  that can read SQL, the conclusion is that the channel's cost belongs to the weak reader.
+
+  The registered *mechanism* is falsified, and the replacement is sharper than the criterion was.
+  The two-agree group was asked to halve and went **124 → 111**. What moved is the column nobody
+  predicted: when `metadata+evidence` alone held the answer, the weak judge returned it **13 of 26**
+  times before and **21 of 29** after — 50.0% → **72.4%** — while its own statement's conversion
+  barely changed (65.0% → 67.4%). So the channel was a **comprehension** channel, not a loyalty one:
+  canonical text let the judge read a statement it did not write. And the two-agree group could not
+  halve for a reason worth writing down — two candidates that return the same rows usually do so
+  with *different statements*, and no text normalisation collapses different content.
+
 - **Canonicalising the candidates changes nothing for a judge that can read SQL.** The lever ran on
   the full dev split (run `40842268219`, one field apart): `select-cross` **61.42%** (941/1,532)
   against `select-cross-canon` **60.97%** (934/1,532), **Δ = −0.46pp, 95% CI [−1.21, +0.30],

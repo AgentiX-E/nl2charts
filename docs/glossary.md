@@ -240,7 +240,18 @@ its own generations. It is measured here rather than assumed: the same three
 candidates, the same prompt, only the judge's identity changed, and that
 candidate's conversion moved by 42.6pp. It is also *expensive*: the second model's
 bias takes its own statement over two candidates that agree and are both right on
-128 cases, where the first model's bias does so on 23.
+128 cases, where the first model's bias does so on 23. Closing the style channel
+then showed that the bias is smaller than it looked: with the text normalised, the
+weak judge's conversion of its own statement moved 65.0% → 67.4% while its
+conversion of *another* source's statement moved 50.0% → 72.4%. What canonical text
+fixed was comprehension, not allegiance.
+
+**Position bias** — A judge's tendency to prefer the candidate it reads first,
+independent of who wrote it. It is an *untested confound* here rather than a
+finding: `CROSS_SOURCES` always puts the second model's candidate first, so
+authorship and position are perfectly correlated in every cross experiment run so
+far, and "it prefers its own writing" and "it prefers candidate 1" predict exactly
+the same number. A per-case shuffle separates them and costs nothing.
 
 **Canonical candidate text** — The one form a statement takes before a selector
 reads it: keyword and function names upper case, identifiers lower case, one space
