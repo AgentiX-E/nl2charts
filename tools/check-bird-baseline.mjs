@@ -357,6 +357,7 @@ export function compare(report, baseline) {
   // and everything else in this file applies always.
   const model = report?.model;
   const floorModel = baseline.floorModel?.[split];
+  const floorSecond = baseline.floorSecondModel?.[split];
   if (model === undefined) {
     issues.push('BIRD1: the report does not name the model that produced it, so its floors cannot be attributed');
   }
@@ -412,9 +413,32 @@ export function compare(report, baseline) {
   }
 
   const tolerance = baseline.tolerancePp;
+  // Which arms drew candidates from a second model, read from the report rather than from a
+  // table in this file: the arm definitions live in `eval/bird/run.ts`, and a second copy
+  // here would be a list to keep in step by hand.
+  const secondArms = new Set(
+    (report.mixedCandidatePrompts ?? [])
+      .filter((entry) => (entry.sources ?? []).some((source) => source.endsWith('@second')))
+      .map((entry) => entry.arm),
+  );
   for (const [name, floor] of Object.entries(floors)) {
     const arm = byArm.get(name);
     if (arm === undefined) continue; // already reported as a missing expected arm
+    // A floor on an arm that samples a second model is a claim about two models, and the
+    // second one is the coordinate that was still missing: the dev floor for `select-cross`
+    // was taken with `deepseek-chat` writing the `@second` candidate, and the same arm with
+    // `glm-4-flash` is a different experiment. Enforcing the floor there would either fail
+    // a legitimate run or, worse, pass a regression by coincidence.
+    if (secondArms.has(name)) {
+      if (floorSecond === undefined) {
+        issues.push(`BIRD1: the floor for ${split}/${name} does not say which second model wrote its candidates, so a run that swapped that model would be judged on a number it never derived`);
+        continue;
+      }
+      if (report.secondModel !== floorSecond) {
+        notes.push(`BIRD1: the floor for ${name} was taken with ${floorSecond} as the second model and this run used ${String(report.secondModel)}; accuracy is a measurement across second models, so no floor was enforced`);
+        continue;
+      }
+    }
     const measured = (arm.passed / arm.total) * 100;
     if (measured < floor - tolerance) {
       issues.push(`BIRD1: ${name} at ${measured.toFixed(1)}% is below the ${floor}% floor less ${tolerance}pp`);
@@ -905,6 +929,45 @@ function selfTest() {
     { ...baseline, expectedArms: ['names'] },
   );
   fail(emptySchema, 1, 'BIRD1 accepts a prompt with no schema in it');
+
+  // A floor on an arm whose candidates come from a second model is a claim about two
+  // models. `select-cross`'s dev floor was taken with `deepseek-chat` writing the `@second`
+  // candidate; the same arm with `glm-4-flash` is a different measurement, and a gate that
+  // enforced the floor anyway would either fail a legitimate experiment or pass a
+  // regression by coincidence. Four cases: above the floor, below it, a different second
+  // model, and a floor that never says which second model it was taken with.
+  const crossBaseline = {
+    ...baseline,
+    armsBySplit: { dev: ['names', 'select-cross'] },
+    floors: { dev: { names: 41.5, 'select-cross': 45 } },
+    floorModel: { dev: 'deepseek-chat' },
+    floorSecondModel: { dev: 'deepseek-chat' },
+  };
+  const crossArm = (passed) => ({ arm: 'select-cross', passed, total: 1532, vote: 3, selector: 'model', calls: { mean: 4, max: 4 } });
+  const crossReport = (passed, secondModel) => ({
+    selection: { scored: 1532, split: 'dev' },
+    model: 'deepseek-chat',
+    run,
+    arms: [arm('names', 645, 1532), crossArm(passed)],
+    mixedCandidatePrompts: [{ arm: 'select-cross', sources: ['inline@second', 'metadata', 'values'], questions: 1532, withAllDistinct: 1500, degenerate: 32, degenerateShare: 0.02 }],
+    secondModel,
+  });
+  fail(compare(crossReport(800, 'deepseek-chat'), crossBaseline), 0, 'BIRD1 fails a cross arm above its floor');
+  fail(compare(crossReport(600, 'deepseek-chat'), crossBaseline), 1, 'BIRD1 does not enforce a floor on a cross arm whose second model matches the floor');
+  const otherSecond = compare(crossReport(600, 'glm-4-flash'), crossBaseline);
+  fail(otherSecond, 0, 'BIRD1 enforces a floor taken with one second model on a run that used another');
+  if (!otherSecond.notes.some((note) => note.includes('select-cross') && note.includes('glm-4-flash') && note.includes('deepseek-chat'))) {
+    issues.push('BIRD1 drops a cross arm floor without naming both second models');
+  }
+  const unattributedSecond = compare(crossReport(800, 'deepseek-chat'), { ...crossBaseline, floorSecondModel: undefined });
+  fail(unattributedSecond, 1, 'BIRD1 enforces a cross arm floor without saying which second model it was taken with');
+  // An arm that did not draw from a second model is unaffected by the attribution: the
+  // same missing field must not turn every floor in the split into an issue.
+  const plainOnly = compare(
+    { selection: { scored: 1532, split: 'dev' }, model: 'deepseek-chat', run, arms: [arm('names', 645, 1532)] },
+    { ...crossBaseline, floorSecondModel: undefined, armsBySplit: { dev: ['names'] }, floors: { dev: { names: 41.5 } } },
+  );
+  fail(plainOnly, 0, 'BIRD1 demands a second-model attribution from an arm that has no second model');
   return issues;
 }
 
@@ -912,7 +975,7 @@ if (process.argv[2] === '--self-test') {
   const issues = selfTest();
   for (const issue of issues) console.error(issue);
   if (issues.length > 0) process.exit(1);
-  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, a dev run measured against its own sample, two split fields that disagree, other split, other model, unfloored arm, empty lever, a funnel that does not add up, a split-specific arm list, an uncounted selector call, a majority vote that spends exactly its samples, a repair count without a loop, an unpriced arm, an unnamed model, floors from an unnamed model and a cross-model arm with no second model named, a judge swap with no judge named, an arm with harness errors, a candidate set that lost a third of itself to an endpoint, a failure corpus that stopped at a cap without saying so, an empty-result lever with no funnel or an impossible yield or nothing behind it, a decomposition arm whose prompt the model ignored, an unrecorded instrument, a samples arm with no values behind it, a truncated schema card, a prompt with no table in it, a declared arm subset, a declared arm whose row was dropped, an undeclared row, an empty declaration and a floor that a declaration does not weaken, a declared sample subset, a subset that cannot clear a floor, a sample that shrank undeclared, an impossible declaration and a row count above the request all behave');
+  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, a dev run measured against its own sample, two split fields that disagree, other split, other model, unfloored arm, empty lever, a funnel that does not add up, a split-specific arm list, an uncounted selector call, a majority vote that spends exactly its samples, a repair count without a loop, an unpriced arm, an unnamed model, floors from an unnamed model and a cross-model arm with no second model named, a judge swap with no judge named, an arm with harness errors, a candidate set that lost a third of itself to an endpoint, a failure corpus that stopped at a cap without saying so, an empty-result lever with no funnel or an impossible yield or nothing behind it, a decomposition arm whose prompt the model ignored, an unrecorded instrument, a samples arm with no values behind it, a truncated schema card, a prompt with no table in it, a declared arm subset, a declared arm whose row was dropped, an undeclared row, an empty declaration and a floor that a declaration does not weaken, a declared sample subset, a subset that cannot clear a floor, a sample that shrank undeclared, an impossible declaration and a row count above the request, and a cross-arm floor with a matching second model, a swapped one and an unattributed one all behave');
 } else {
   const reportPath = resolve(ROOT, 'eval/out/bird-eval.json');
   const baseline = JSON.parse(readFileSync(resolve(ROOT, 'eval/baseline/bird.json'), 'utf8'));
