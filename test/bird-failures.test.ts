@@ -34,8 +34,12 @@ describe('the failure corpus', () => {
     expect(JSON.stringify(failures.arm?.[0])).not.toContain('undefined');
   });
 
-  it('keeps a corpus large enough to diagnose from', () => {
-    // 200 of a dev arm's ~563 failures is a third, not 1.4%.
-    expect(FAILURE_SAMPLE).toBeGreaterThanOrEqual(200);
+  it('keeps a corpus large enough to diagnose a whole split from', () => {
+    // 200 was a third of a dev arm's failures, and the no-answer diagnosis measured the
+    // consequence: 687 of 1,043 no-answer cases across two dev arms had no retained
+    // statement, so no oracle could be run on two thirds of the set the next iteration is
+    // about. The limit has to be above the largest split (1,534 questions), not above the
+    // failure count of a sample.
+    expect(FAILURE_SAMPLE).toBeGreaterThanOrEqual(1534);
   });
 });

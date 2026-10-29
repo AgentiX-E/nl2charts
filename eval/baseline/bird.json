@@ -1,5 +1,5 @@
 {
-  "note": "Floors are per split, in execution accuracy percent, taken as the minimum observed across the recent runs on Mini-Dev (G 9120c2b, H d5927b0, I 700529b, J 4ad0181, 1.0.0 run 39762058351, and the 13-arm runs since), applied to the full 500-question split. A rerun may land below a floor by tolerancePp before the gate fails, because ADR-166 measured that anything inside 4pp cannot be separated from sampling noise at n=239. `inline+retrieval`, `inline+icl`, `inline+repair`, `inline+repair-raw`, `select`, `select5` and `values` were added to the chain after those runs and have no floors yet: the gate records their first measurement and says so rather than inventing a threshold. A run scored on fewer than 95% of the baseline sample fails as a changed sample. `armsBySplit` states which arms each split runs; the dev split compares against a published leaderboard, needs five arms rather than thirteen, and now carries floors of its own taken from the two runs of `40202780469` and `40245630669` — the split that decides adoption is the split that must also guard against regression. A floor is a claim about three coordinates — split, arms, and model — and the model was the one missing: `bird-model.yml` therefore skipped this tool entirely for cross-model runs, which also skipped the funnel, cost and empty-lever checks. `floorModel` states the model each floor was taken on, and a run by another model is measured rather than failed while every structural check still applies. `scoredBySplit` does the same for the sample size: the dev split was being compared against Mini-Dev's 500, so a dev run scoring 600 of 1,532 questions passed a check whose whole job is to notice a shrunken sample. A floor is also a claim about which second model wrote the cross candidates: `select-cross` draws one of its three prompts from a second model, so its dev floor (61.7, run 40806666847) is recorded in `floorSecondModel.dev` and a run that used another second model is measured rather than failed — the same treatment `floorModel` gives the primary model. The arm is listed in `armsBySplit.dev` even though routine dev runs do not request it, because a floor that no arm list mentions is a floor nothing will notice. The `select-cross` floor is the `deepseek-chat` observation (61.7). The same arm measured 61.6 with `glm-4-flash` as the second model (run 40817333043), which is a measurement under a different second model and is therefore not enforced: a floor is one point in a three-coordinate space, and a run that changes a coordinate produces a reading rather than a verdict.",
+  "note": "Floors are per split, in execution accuracy percent, taken as the minimum observed across the recent runs on Mini-Dev (G 9120c2b, H d5927b0, I 700529b, J 4ad0181, 1.0.0 run 39762058351, and the 13-arm runs since), applied to the full 500-question split. A rerun may land below a floor by tolerancePp before the gate fails, because ADR-166 measured that anything inside 4pp cannot be separated from sampling noise at n=239. `inline+retrieval`, `inline+icl`, `inline+repair`, `inline+repair-raw`, `select`, `select5` and `values` were added to the chain after those runs and have no floors yet: the gate records their first measurement and says so rather than inventing a threshold. A run scored on fewer than 95% of the baseline sample fails as a changed sample. `armsBySplit` states which arms each split runs; the dev split compares against a published leaderboard, needs five arms rather than thirteen, and now carries floors of its own taken from the two runs of `40202780469` and `40245630669` — the split that decides adoption is the split that must also guard against regression. A floor is a claim about three coordinates — split, arms, and model — and the model was the one missing: `bird-model.yml` therefore skipped this tool entirely for cross-model runs, which also skipped the funnel, cost and empty-lever checks. `floorModel` states the model each floor was taken on, and a run by another model is measured rather than failed while every structural check still applies. `scoredBySplit` does the same for the sample size: the dev split was being compared against Mini-Dev's 500, so a dev run scoring 600 of 1,532 questions passed a check whose whole job is to notice a shrunken sample. A floor is also a claim about which second model wrote the cross candidates: `select-cross` draws one of its three prompts from a second model, so its dev floor (61.7, run 40806666847) is recorded in `floorSecondModel.dev` and a run that used another second model is measured rather than failed — the same treatment `floorModel` gives the primary model. The arm is listed in `armsBySplit.dev` even though routine dev runs do not request it, because a floor that no arm list mentions is a floor nothing will notice. The `select-cross` floor is the `deepseek-chat` observation (61.7). The same arm measured 61.6 with `glm-4-flash` as the second model (run 40817333043), which is a measurement under a different second model and is therefore not enforced: a floor is one point in a three-coordinate space, and a run that changes a coordinate produces a reading rather than a verdict. `recallFloors` guards the other half of a sampling arm: `candidateRecall - selectionLoss = passed`, so a score is the product of a candidate set and a selector, and a run can trade one for the other without the product moving. The floors are the minimum observed across six Mini-Dev runs of the current arm set (40830721508, 40835406287, 40844442393, 40851090483, 40852749682, 40878610004) and four dev runs of `select-cross` (40835164245, 40842268219, 40843792747, 40865112253), rounded down to one decimal, and enforced with the same 4pp tolerance as accuracy because both are proportions over the same questions. The observed run-to-run spread of the ceiling is 0.8-2.6pp, i.e. inside that tolerance. The Mini-Dev accuracy floors for `select`, `select-duo`, `select-mixed` and `select5` were added in the same pass, from the same six runs: they were being measured every push and guarded by nothing. The ceiling floors also record a real trade rather than forbidding it: `select-mixed` carries a 58.8% ceiling against `select`'s 61.6% and returns 57.8% against 56.0%, which is a purchased selector for a named price, and the ceiling floor is what keeps that price visible in every later run.",
   "dataset": "BIRD Mini-Dev",
   "scored": 500,
   "scoredBySplit": {
@@ -31,7 +31,11 @@
       "inline-definitions": 41.8,
       "inline+evidence": 52.3,
       "metadata+evidence": 56.1,
-      "vote": 55.6
+      "vote": 55.6,
+      "select": 56,
+      "select-duo": 55.6,
+      "select-mixed": 56.8,
+      "select5": 56
     },
     "dev": {
       "names": 41.5,
@@ -40,6 +44,18 @@
       "select": 60.9,
       "select-mixed": 62.5,
       "select-cross": 61.7
+    }
+  },
+  "recallFloors": {
+    "minidev": {
+      "vote": 60.6,
+      "select": 61.6,
+      "select-duo": 56.4,
+      "select-mixed": 58.8,
+      "select5": 63.8
+    },
+    "dev": {
+      "select-cross": 65.8
     }
   },
   "floorModel": {

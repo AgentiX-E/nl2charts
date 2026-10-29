@@ -745,6 +745,48 @@ The measurement is a CI step and fails the build if any prompt hides an identifi
 statement needs, because a truncation bug in the schema card would otherwise appear only as
 a slow accuracy decline.
 
+## The half of the score that is not the selector
+
+`candidateRecall − selectionLoss = passed` is an identity, not an approximation: an arm's
+accuracy is the product of a candidate set and a selector that picks from it. Every ablation
+this project has run acts on the second factor, and the second factor is 4.6pp wide. The
+first factor is 34pp wide, and it had no instrument until `pnpm bench:bird:gap <report.json>`.
+
+The tool reads the artifact, spends no model call and no database, and classifies every
+question whose candidate set held no answer by the shape of its failure — `engine-refused`
+(the statement never ran), `column-count` (it ran and returned the wrong number of columns:
+grain), or `values` (right width, wrong numbers: filters, aggregation level, literals). It
+then prints how many of those cases the artifact kept a statement for, because a
+classification needs the statement and the retention cap is per failure rather than per
+question.
+
+Two runs, read with it:
+
+| split / run | arm | no answer | engine-refused | column-count | values | classified |
+|---|---|---|---|---|---|---|
+| dev `40865112253` | `select-cross` | 523 (34.1%) | 15 (2.9%) | 120 (22.9%) | 388 (74.2%) | 100% |
+| dev `40865112253` | `select-cross-shuffled` | 520 (33.9%) | 18 (3.5%) | 121 (23.3%) | 381 (73.3%) | 100% |
+| Mini-Dev `40878610004` | `select` | 184 (36.9%) | 3 (1.6%) | 40 (21.7%) | 141 (76.6%) | 100% |
+| Mini-Dev `40878610004` | `select-mixed` | 204 (41.0%) | 8 (3.9%) | 49 (24.0%) | 147 (72.1%) | 100% |
+
+The reading is stable across splits, arms and vendors of candidate: **about three quarters of
+the questions no candidate answered are `values`, and about a quarter are `column-count`**.
+`engine-refused` is under 4% everywhere, so "the engine would not take the statement" is not
+the missing 34pp — the statements ran, and the numbers were wrong.
+
+The first run of the tool also found a defect in the instrument rather than in the model:
+**687 of the 1,043 no-answer cases in that artifact had no retained statement**, so the oracle
+could not be asked why the numbers were wrong for two thirds of the set the iteration exists
+for. The retention cap was 200 per arm and is now above the largest split, which makes the
+corpus a census for both splits and leaves `truncated` empty.
+
+The gate reads `candidateRecall` beside accuracy. The floors are the minimum observed across
+six Mini-Dev runs and four dev runs, enforced with the same 4pp tolerance, because a score can
+be bought with a shrinking candidate set and the accuracy column cannot see the trade: on
+Mini-Dev `select-mixed` carries a 58.8% ceiling against `select`'s 61.6% and returns 57.8%
+against 56.0%, which is a real purchase at a named price and would be invisible without a
+column of its own.
+
 ## The dev split, measured: 60.6% on the split leaderboards report
 
 Two runs of the 1,534-question dev split (`40157122326`, `40166834512`), three arms,

@@ -294,6 +294,12 @@ jobs:
         run: pnpm bench:bird
       - name: Accuracy floor (a regression fails the build)
         run: pnpm gate:bird
+      # The score is a product of two mechanisms — the candidate set and the selector — and
+      # the floor above only guards the product. This one splits it: every question whose
+      # candidate set held no answer is classified by the shape of its failure, which is the
+      # 34pp column nothing had ever measured and the 4.6pp column everything had been.
+      - name: Where the candidate set had no answer
+        run: pnpm bench:bird:gap
       - name: Noise floor (same cases, three repeats)
         run: pnpm bench:bird:stability
       - name: Adversarial gold, widths and controls without a model

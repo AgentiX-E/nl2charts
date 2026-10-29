@@ -462,6 +462,80 @@ export function compare(report, baseline) {
       notes.push(`BIRD1: ${name} has no floor yet; its first measurement is recorded, not enforced`);
     }
   }
+
+  // The ceiling of a sampling arm, in the same table as its score.
+  //
+  // `candidateRecall` is the share of questions whose candidate set held an answer, and it
+  // is the hard bound on accuracy: `candidateRecall − selectionLoss = passed`. The score is
+  // therefore a *product* of two mechanisms, and a run can trade one for the other without
+  // the product moving — a selector that gains exactly what the candidate set lost reports
+  // 61% over a set that answers 5pp fewer questions, and every published number looks
+  // healthy while the arm's headroom is gone. That trade is not hypothetical: on Mini-Dev
+  // `select-mixed` carries a ceiling of 58.8% against `select`'s 61.6% and returns a higher
+  // score (57.8% vs 56.0%), which is a deliberate purchase with a price the accuracy column
+  // does not show. A floor on the ceiling is how the price stays visible.
+  //
+  // The floors are the minimum observed across the recent runs, exactly like the accuracy
+  // floors, and they are enforced with the same tolerance: both are proportions over the
+  // same questions, so the noise that made 4pp the accuracy threshold applies here too. The
+  // observed run-to-run spread of the ceiling is smaller than that (0.8–2.6pp across six
+  // Mini-Dev runs), so 4pp is the safe side of the measurement rather than a loosening.
+  const recallFloors = baseline.recallFloors?.[split] ?? {};
+  for (const [name, floor] of Object.entries(recallFloors)) {
+    // A floor that names an arm this split never runs is a floor nothing will notice. The
+    // accuracy table had the same defect when `select-cross` was left out of
+    // `armsBySplit.dev`, and the fix was to make the arm list the authority.
+    if (!expectedArms.includes(name)) {
+      issues.push(`BIRD1: the ceiling floor for ${split}/${name} is on an arm this split does not run, so it is a floor nothing will notice`);
+      continue;
+    }
+    const arm = byArm.get(name);
+    if (arm === undefined) continue; // already reported as a missing expected arm
+    if (secondArms.has(name) && report.secondModel !== floorSecond) {
+      // The same coordinate the accuracy floor refuses to cross: the ceiling is a property
+      // of *which models wrote the candidates*, so a second-model swap is a measurement
+      // rather than a regression. The note is already printed by the accuracy floor.
+      continue;
+    }
+    const recall = arm.candidateRecall;
+    if (typeof recall !== 'number') {
+      issues.push(
+        `BIRD1: ${name} samples candidates and its row carries no ceiling, so the ${floor}% ceiling floor cannot be enforced and the score could be bought with a shrinking candidate set`,
+      );
+      continue;
+    }
+    if (typeof arm.total !== 'number' || arm.total <= 0 || recall > arm.total) {
+      issues.push(`BIRD1: ${name} reports ${String(recall)} of ${String(arm.total)} cases with an answer in the candidate set`);
+      continue;
+    }
+    const share = (recall / arm.total) * 100;
+    // Two fields, one reading. The artifact writes the count and the share, and a report
+    // whose share does not follow from its own count is an instrument that will be quoted
+    // for whichever of the two its reader happened to look at.
+    if (typeof arm.candidateRecallShare === 'number' && Math.abs(arm.candidateRecallShare * 100 - share) > 0.1) {
+      issues.push(
+        `BIRD1: ${name} reports a ceiling share of ${(arm.candidateRecallShare * 100).toFixed(1)}% for ${String(recall)} of ${String(arm.total)} cases, so the two fields disagree`,
+      );
+    }
+    if (typeof floor !== 'number' || !(floor > 0)) {
+      issues.push(`BIRD1: the ceiling floor for ${split}/${name} is ${JSON.stringify(floor)}, which is not a share`);
+      continue;
+    }
+    if (share < floor - tolerance) {
+      issues.push(
+        `BIRD1: ${name} answers ${share.toFixed(1)}% of questions at best, below the ${String(floor)}% ceiling floor less ${String(tolerance)}pp; the score may be masking a candidate set that lost its headroom`,
+      );
+    }
+  }
+  // ...and a sampling arm with no ceiling floor is visible rather than silent. The rows that
+  // report a ceiling are read from the report, not from a list in this file, so a new arm
+  // arrives with its own reading instead of waiting to be added to a table here.
+  for (const item of report.arms ?? []) {
+    if (typeof item.candidateRecall !== 'number') continue;
+    if (recallFloors[item.arm] === undefined) {
+      notes.push(`BIRD1: ${item.arm} reports a ceiling of ${((item.candidateRecall / item.total) * 100).toFixed(1)}% and has no ceiling floor; its first measurement is recorded, not enforced`);
+    }
+  }
   return { issues, notes };
 }
 
@@ -981,6 +1055,87 @@ function selfTest() {
     { ...crossBaseline, floorSecondModel: undefined, armsBySplit: { dev: ['names'] }, floors: { dev: { names: 41.5 } } },
   );
   fail(plainOnly, 0, 'BIRD1 demands a second-model attribution from an arm that has no second model');
+
+  // The ceiling of a sampling arm, gated like its score.
+  //
+  // Accuracy is bounded by `candidateRecall`, and the two move independently: a selector
+  // that improves by more than the candidate set lost reports a flat score over a set that
+  // answers fewer questions. Guarding only the score leaves that trade silent — and it is
+  // the exact trade a small-sample run can make by accident. Four shapes: a ceiling within
+  // tolerance, a ceiling that fell while the score held, a ceiling that fell without being
+  // reported at all, and a score that fell while the ceiling held (the direction the
+  // accuracy floor already covered, kept here so neither check can mask the other).
+  const ceilingBaseline = {
+    ...baseline,
+    expectedArms: ['select-cross', 'names'],
+    floors: { minidev: { 'select-cross': 60, names: 40 } },
+    floorModel: { minidev: 'deepseek-chat' },
+    recallFloors: { minidev: { 'select-cross': 65.9 } },
+  };
+  const sampling = (passed, recall, extra = {}) => ({
+    arm: 'select-cross',
+    passed,
+    total: 100,
+    vote: 3,
+    selector: 'model',
+    calls: { mean: 4, max: 4 },
+    candidateRecall: recall,
+    candidateRecallShare: recall / 100,
+    ...extra,
+  });
+  const ceilingRun = (armRows) => ({
+    selection: { scored: 100, split: 'minidev' },
+    model: 'deepseek-chat',
+    run,
+    arms: [arm('names', 42), ...armRows],
+  });
+  const steadyCeiling = compare(ceilingRun([sampling(61, 66)]), ceilingBaseline);
+  if (steadyCeiling.issues.length !== 0) {
+    issues.push(`BIRD1 fails a sampling arm whose ceiling held (${steadyCeiling.issues.join('; ')})`);
+  }
+  // 61% recall against a 65.9% floor is a 4.9pp loss with the score still above its floor:
+  // the case this check exists for.
+  const lostCeiling = compare(ceilingRun([sampling(61, 61)]), ceilingBaseline);
+  if (lostCeiling.issues.length !== 1 || !lostCeiling.issues[0].includes('ceiling')) {
+    issues.push('BIRD1 does not notice a candidate set that answers 4.9pp fewer questions while the score holds');
+  }
+  const insideNoiseCeiling = compare(ceilingRun([sampling(61, 62.5)]), ceilingBaseline);
+  if (insideNoiseCeiling.issues.length !== 0) {
+    issues.push(`BIRD1 fails a ceiling inside the noise threshold, which is not a regression (${insideNoiseCeiling.issues.join('; ')})`);
+  }
+  // The instrument, not the number: a sampling arm that publishes a score and no ceiling
+  // cannot be gated at all, and reporting it as "fine" is how the hole opened.
+  const ceilless = compare(ceilingRun([{ ...sampling(61, 66), candidateRecall: undefined, candidateRecallShare: undefined }]), ceilingBaseline);
+  if (!ceilless.issues.some((issue) => issue.includes('carries no ceiling'))) {
+    issues.push('BIRD1 accepts a sampling arm with a score and no candidate ceiling');
+  }
+  // ...and the two ceiling fields have to agree with the sample they were taken on.
+  const lyingCeiling = compare(ceilingRun([sampling(61, 66, { candidateRecallShare: 0.8 })]), ceilingBaseline);
+  if (!lyingCeiling.issues.some((issue) => issue.includes('disagree'))) {
+    issues.push('BIRD1 accepts a ceiling share that its own counts contradict');
+  }
+  // A floor that names an arm the split never runs is a floor nothing will notice.
+  const orphanFloor = compare(ceilingRun([sampling(61, 66)]), {
+    ...ceilingBaseline,
+    recallFloors: { minidev: { 'select-cross': 65.9, 'select5': 63.8 } },
+  });
+  if (!orphanFloor.issues.some((issue) => issue.includes('floor nothing will notice'))) {
+    issues.push('BIRD1 accepts a recall floor on an arm the split does not run');
+  }
+  // The other direction: the score falls and the ceiling does not move. Keeping this in the
+  // ceiling block is what stops one check from being read as a pass for the pair. The floor
+  // is 60% less the 4pp tolerance, so the fixture has to land below 56 rather than merely
+  // below the floor: a run inside the noise threshold is not a regression.
+  const lostScore = compare(ceilingRun([sampling(50, 66)]), ceilingBaseline);
+  if (lostScore.issues.length !== 1 || !lostScore.issues[0].includes('is below the')) {
+    issues.push('BIRD1 does not notice a score that fell while the ceiling held');
+  }
+  // A ceiling without a floor is measured and not enforced, and the gate says so rather
+  // than reporting silence as a pass.
+  const unflooredCeiling = compare(ceilingRun([sampling(61, 66)]), { ...ceilingBaseline, recallFloors: { minidev: {} } });
+  if (!unflooredCeiling.notes.some((note) => note.includes('no ceiling floor'))) {
+    issues.push('BIRD1 does not say that a sampling arm has no ceiling floor yet');
+  }
   return issues;
 }
 
@@ -988,7 +1143,7 @@ if (process.argv[2] === '--self-test') {
   const issues = selfTest();
   for (const issue of issues) console.error(issue);
   if (issues.length > 0) process.exit(1);
-  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, a dev run measured against its own sample, two split fields that disagree, other split, other model, unfloored arm, empty lever, a funnel that does not add up, a split-specific arm list, an uncounted selector call, a majority vote that spends exactly its samples, a repair count without a loop, an unpriced arm, an unnamed model, floors from an unnamed model and a cross-model arm with no second model named, a judge swap with no judge named, an arm with harness errors, a candidate set that lost a third of itself to an endpoint, a failure corpus that stopped at a cap without saying so, an empty-result lever with no funnel or an impossible yield or nothing behind it, a decomposition arm whose prompt the model ignored, an unrecorded instrument, a samples arm with no values behind it, a truncated schema card, a prompt with no table in it, a declared arm subset, a declared arm whose row was dropped, an undeclared row, an empty declaration and a floor that a declaration does not weaken, a declared sample subset, a subset that cannot clear a floor, a sample that shrank undeclared, an impossible declaration and a row count above the request, and a cross-arm floor with a matching second model, a swapped one and an unattributed one all behave');
+  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, a dev run measured against its own sample, two split fields that disagree, other split, other model, unfloored arm, empty lever, a funnel that does not add up, a split-specific arm list, an uncounted selector call, a majority vote that spends exactly its samples, a repair count without a loop, an unpriced arm, an unnamed model, floors from an unnamed model and a cross-model arm with no second model named, a judge swap with no judge named, an arm with harness errors, a candidate set that lost a third of itself to an endpoint, a failure corpus that stopped at a cap without saying so, an empty-result lever with no funnel or an impossible yield or nothing behind it, a decomposition arm whose prompt the model ignored, an unrecorded instrument, a samples arm with no values behind it, a truncated schema card, a prompt with no table in it, a declared arm subset, a declared arm whose row was dropped, an undeclared row, an empty declaration and a floor that a declaration does not weaken, a declared sample subset, a subset that cannot clear a floor, a sample that shrank undeclared, an impossible declaration and a row count above the request, a cross-arm floor with a matching second model, a swapped one and an unattributed one, and a ceiling that held, a ceiling that fell while the score held, a ceiling inside the noise threshold, a sampling arm with no ceiling at all, a ceiling whose two fields disagree, a ceiling floor on an arm the split does not run, a score that fell while the ceiling held and a ceiling with no floor yet all behave');
 } else {
   const reportPath = resolve(ROOT, 'eval/out/bird-eval.json');
   const baseline = JSON.parse(readFileSync(resolve(ROOT, 'eval/baseline/bird.json'), 'utf8'));

@@ -103,6 +103,10 @@ jobs:
           BIRD_LIMIT: ${{ inputs.limit }}
       - name: Accuracy floor
         run: pnpm gate:bird
+      # Zero model calls, and the only reading in this workflow about the half of the score
+      # that is not the selector. Printed before the summary so a failed run still shows it.
+      - name: Where the candidate set had no answer
+        run: pnpm bench:bird:gap
       # The run that fails is the run whose numbers matter most, and these two steps used to
       # run only on success: `40534288883` failed the floor gate and the artifact — the only
       # copy of the per-case rows and the McNemar p-values — was never uploaded, so the run

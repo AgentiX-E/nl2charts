@@ -8,6 +8,28 @@ cannot be argued with.
 
 ### Measured
 
+- **The 34pp column has a shape now, and it is not the engine.** `pnpm bench:bird:gap` reads a run
+  artifact and classifies every question whose candidate set held no answer. On the dev split
+  (`40865112253`) `select-cross` has **523** such questions: **15** `engine-refused`, **120**
+  `column-count`, **388** `values`; on Mini-Dev (`40878610004`) the same shape repeats across five
+  arms (1.6–3.9% / 21.7–27.4% / 70.3–76.6%). The statements run and the numbers are wrong, so the
+  fix is grain, filters and literals — not error recovery. The tool also measured the instrument
+  rather than the model: **687 of 1,043** no-answer cases had no retained statement, because the
+  failure corpus was capped at 200 per arm. The cap is now above the largest split (1,534), so the
+  corpus is a census and `truncated` stays empty.
+
+- **`candidateRecall` is a gate, beside accuracy, from the minimum of ten runs.** The score is the
+  product of a candidate set and a selector, and only the product was guarded: `select-mixed` buys
+  4.9pp of score with 2.8pp of ceiling on Mini-Dev (`58.8%` vs `select`'s `61.6%`), a trade the
+  accuracy column cannot see and a later run could extend by accident. `eval/baseline/bird.json`
+  now carries `recallFloors` per split, taken as the minimum observed across six Mini-Dev runs
+  (`vote` 60.6, `select` 61.6, `select-duo` 56.4, `select-mixed` 58.8, `select5` 63.8) and four dev
+  runs (`select-cross` 65.8), enforced with the same 4pp tolerance because both are proportions over
+  the same questions. The four Mini-Dev sampling arms also gained accuracy floors in the same pass:
+  they were measured every push and guarded by nothing. Eight new self-test cases, including a
+  ceiling that falls while the score holds, a sampling arm that publishes no ceiling at all, and a
+  ceiling share that contradicts its own count.
+
 - **The artifact already contained an accuracy budget, and every recent experiment spent it in the
   narrow column.** `candidateRecall − selectionLoss = passed` holds exactly on both arms of run
   `40865112253`: 1,009 − 71 = 938 and 1,012 − 84 = 928. Read as a budget it says the ceiling is
