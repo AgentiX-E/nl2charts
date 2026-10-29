@@ -694,6 +694,118 @@ describe('the same candidates in one SQL style', () => {
   });
 });
 
+/**
+ * The same three candidates, in an order that does not follow authorship.
+ *
+ * `CROSS_SOURCES` puts the second model's statement in slot zero on every question, so every arm
+ * measured so far has authorship and position perfectly collinear: `@second` is returned 52.6%
+ * of the time and that number is compatible with "the judge prefers this author" and with "the
+ * judge prefers slot zero". The shuffled arm permutes the order by question id and changes
+ * nothing else, which makes the per-candidate `winnerSource` able to tell the two apart.
+ *
+ * The order is a published rule, so it is re-implemented here from the description instead of
+ * imported: a test that calls the same function it is checking would agree with a broken runner.
+ */
+describe('the same candidates in an order that does not follow authorship', () => {
+  /** FNV-1a over `${id}#${i}`, then Fisher-Yates — the rule the arm documents. */
+  const expectedOrder = (id: number): number[] => {
+    const hash = (text: string): number => {
+      let value = 2166136261;
+      for (const character of text) {
+        value ^= character.charCodeAt(0);
+        value = Math.imul(value, 16777619);
+      }
+      return value >>> 0;
+    };
+    const order = [0, 1, 2];
+    for (let i = order.length - 1; i > 0; i -= 1) {
+      const j = hash(`${String(id)}#${String(i)}`) % (i + 1);
+      const swap = order[i] as number;
+      order[i] = order[j] as number;
+      order[j] = swap;
+    }
+    return order;
+  };
+
+  /** The only candidate with a space before the parenthesis, written by the second model. */
+  const styled = (question: string): string | undefined => {
+    const gold = GOLD[question];
+    return gold === undefined ? undefined : gold.replace('(', ' ( ').replace(')', ' ) ');
+  };
+
+  const candidateRows = (prompt: string): string[] =>
+    prompt
+      .split('\n')
+      .filter((line) => /^\d\. /u.test(line))
+      .map((line) => line.replace(/^\d\. /u, '').trim());
+
+  it('moves the second model out of slot zero, and the arm still answers every question', async () => {
+    const second = await startEndpoint({ reply: (request) => replyFor(request, { first: styled }) });
+    try {
+      const result = await run({
+        plan: { first: (question) => GOLD[question] },
+        env: {
+          BIRD_ARMS: 'select-cross,select-cross-shuffled',
+          BIRD_SECOND_MODEL: 'second-model',
+          BIRD_SECOND_BASE_URL: second.url,
+          BIRD_SECOND_API_KEY: 'second-key',
+        },
+      });
+      expect(result.code).toBe(0);
+      const selector = result.requests.filter((request) => request.prompt.includes('which candidate statement answers the question'));
+      // Two arms, every question, one selection call each.
+      expect(selector.length).toBe(QUESTIONS.length * 2);
+
+      const slotsByQuestion = new Map<string, number[]>();
+      for (const request of selector) {
+        const asked = QUESTIONS.find((question) => request.prompt.includes(question.question));
+        expect(asked, request.prompt.slice(0, 120)).toBeDefined();
+        const rows = candidateRows(request.prompt);
+        expect(rows).toHaveLength(3);
+        // The same set in both arms: a permutation cannot add, drop or rewrite a statement.
+        expect(rows.filter((row) => row.includes(' ( '))).toHaveLength(1);
+        const slot = rows.findIndex((row) => row.includes(' ( '));
+        expect(slot).toBeGreaterThanOrEqual(0);
+        const slots = slotsByQuestion.get(asked?.question ?? '') ?? [];
+        slots.push(slot);
+        slotsByQuestion.set(asked?.question ?? '', slots);
+      }
+      expect(slotsByQuestion.size).toBe(QUESTIONS.length);
+
+      let moved = 0;
+      for (const question of QUESTIONS) {
+        const slots = (slotsByQuestion.get(question.question) ?? []).slice().sort((left, right) => left - right);
+        const shuffledSlot = expectedOrder(question.id).indexOf(0);
+        // One arm keeps the author in slot zero by construction; the other puts it where the
+        // permutation says. Compared as a multiset, because the order the two arms reach the
+        // endpoint in is a race and not a fact.
+        expect(slots, question.question).toEqual([0, shuffledSlot].sort((left, right) => left - right));
+        if (shuffledSlot !== 0) moved += 1;
+      }
+      // A permutation that never moves anything is not a control: on this fixture five of the
+      // seven questions relocate the second model's statement, so the arm has something to say.
+      expect(moved).toBe(5);
+
+      const cases = result.report.cases as { arm: string; id: string; passed: boolean; candidates?: { source: string; correct: boolean }[] }[];
+      expect(cases.every((row) => row.passed)).toBe(true);
+
+      // The artifact has to carry the position, not just the author, or the reading after the
+      // run is the same collinear one this arm exists to break. Entry `i` of `candidates` is
+      // slot `i` of the prompt, so author (the `source`) crossed with the index is the record.
+      const counting = (arm: string): { source: string; correct: boolean }[] =>
+        (cases.find((row) => row.arm === arm && row.id === '1')?.candidates ?? []) as { source: string; correct: boolean }[];
+      expect(counting('select-cross').map((entry) => entry.source)).toEqual(['inline+evidence@second', 'metadata+evidence', 'values']);
+      expect(counting('select-cross-shuffled')[expectedOrder(1).indexOf(0)]?.source).toBe('inline+evidence@second');
+      // ...and the truth travels with the member rather than with the slot: all three answer
+      // this question in the fixture, so a permutation that rewrote the verdicts would show up
+      // as a `correct` that moved with the position.
+      expect(counting('select-cross-shuffled').every((entry) => entry.correct)).toBe(true);
+    } finally {
+      await second.close();
+    }
+  });
+});
+
 describe('the artifact', () => {
   it('records the harness settings that a difference between runs could come from', async () => {
     const result = await run({

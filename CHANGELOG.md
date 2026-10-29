@@ -8,6 +8,23 @@ cannot be argued with.
 
 ### Added
 
+- **The order of the candidates is a channel, and it was confounded with authorship.** Every
+  cross-model arm so far lists the second model's statement first (`CROSS_SOURCES`), so the 52.6%
+  of cases where `@second` is returned supports two readings that call for opposite next steps —
+  the judge prefers that author, or the judge prefers slot zero. `select-cross-shuffled` permutes
+  the same three candidates per question id (`shuffleByCase`: FNV-1a over `id#slot`, then
+  Fisher–Yates) and changes nothing else: one lever from `select-cross`, same candidates, same
+  count, same four calls, and the permutation is a function of the question, so a rerun is
+  comparable to the run it is compared with rather than to the order the pool happened to finish
+  in. The modal vote deliberately stays on the unpermuted set, so a tie it breaks is broken the
+  same way in both arms.
+
+  The artifact needed no new field: `cases[].candidates` is documented as "the order the selector
+  saw it", and it now actually is — on a canonical arm the text moves and the order does not, on a
+  shuffled arm the order moves and the text does not. Author (`source`) crossed with index is the
+  position record, which is why the reading is available after a 90-minute run instead of needing
+  a second one.
+
 - **A statement can be made to look like nobody's.** The judge swap proved the preference is
   authorship and left the channel open; `eval/bird/canonical.ts` closes it. `canonicalSql` uppercases
   keywords and functions, lowercases identifiers, normalises whitespace, drops comments, writes `!=`

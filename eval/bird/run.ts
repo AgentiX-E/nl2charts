@@ -183,6 +183,21 @@ export interface Arm {
    */
   readonly canonical?: boolean;
   /**
+   * Present the candidates in an order that does not depend on who wrote them.
+   *
+   * `CROSS_SOURCES` lists the second model's statement first on every question, so on this
+   * benchmark authorship and position are perfectly collinear: the candidate that is returned
+   * 52.6% of the time may be preferred for its author or for its slot, and no count over the
+   * existing arms separates the two readings. The experiment cannot change the candidate set
+   * without becoming a different experiment, so it permutes the same three statements by
+   * question id: reproducible, one lever, zero calls.
+   *
+   * It is measured against `select-cross` on the frozen per-candidate `winnerSource` field
+   * rather than on accuracy alone — under authorship the second model keeps its 52.6% wherever
+   * it is placed, under position the rate falls towards the 1-in-3 a permutation implies.
+   */
+  readonly shuffle?: boolean;
+  /**
    * Treat an empty result as a failure and spend one call on it.
    *
    * The signal is exact on this benchmark rather than heuristic: no question in either
@@ -399,6 +414,14 @@ export const ARMS: readonly Arm[] = [
   // second model, one from the primary. One lever from `select-cross` — one candidate's author
   // — and the direct test of "whoever wrote two of the three wins the tie".
   { name: 'select-balanced', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: BALANCED_SOURCES },
+  // The same three candidates in an order that does not follow authorship. `select-cross` and
+  // `select-balanced` both move authors, and both keep the second model's statement in slot
+  // zero, so authorship and position stay collinear over every arm measured so far: the 52.6%
+  // that `@second` is returned at is compatible with "the judge prefers that author" and with
+  // "the judge prefers slot zero", and the two readings predict opposite next steps. This arm
+  // permutes the order per question id and changes nothing else — same candidates, same
+  // prompts, same four calls — so the per-candidate `winnerSource` decides between them.
+  { name: 'select-cross-shuffled', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: CROSS_SOURCES, shuffle: true },
   // ...and the same aggregator on the cross-model set, where the candidates disagree by
   // model as well as by prompt.
   { name: 'vote-cross', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, mixed: CROSS_SOURCES },
@@ -512,6 +535,7 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'select-cross-canon': 'the cross set rewritten into one SQL style before the selector reads it: the lever that closes the style channel the judge swap proved is open, not a different judge; needs the second model, and is measured against `select-cross`',
   'select-cross-judge-canon': 'the canonical text read by the second model: the arm that prices canonicalisation where the style channel was measured, one lever from `select-cross-judge` and two from `select-cross-canon`; needs the second model and a second key',
   'select-balanced': 'the same three prompts with two candidates from the second model instead of one: flips which author holds the majority, and needs the second model',
+  'select-cross-shuffled': 'the same three candidates permuted per question id: flips which author holds slot zero, which is the one thing `select-cross` and `select-balanced` both hold fixed; needs the second model',
   plan: 'query plan before the statement: 50.4% against 57.6% for its parent (-7.2pp, 63/27, p=0.0002) — anchoring, not helping; kept so the finding can be re-tested',
   'select-pair': 'pairwise comparison instead of an absolute ranking: 58.4% against 57.6% for its parent (+0.8pp, 17/20, p=0.74) at one more call, and it lost more of its candidate set (25 cases against 20) — the absolute prompt is not what the selector loses; kept so a different comparison order or a two-of-three vote can be measured against it',
   'inline+shape': 'scalar-shape guard before the repair loop: 57.2% against 58.4% for its parent (-1.2pp, 11/5, p=0.21) — it fired on 21 cases, repaired 2, and shifted 14 more into the wrong column count; kept so a better shape test can be measured against this one',
@@ -580,6 +604,9 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   ['select-cross-judge', 'select-cross-judge-canon'],
   // One lever: which author holds the majority among the same three prompts.
   ['select-cross', 'select-balanced'],
+  // One lever: where the authors sit, holding the majority and the prompts fixed. The pair
+  // that can say whether the 52.6% belongs to the author or to slot zero.
+  ['select-cross', 'select-cross-shuffled'],
   // One lever: the same candidates and selector, with an empty result treated as a
   // failure — dropped before the vote and retried once when nothing survives.
   ['select-mixed', 'select-mixed+empty'],
@@ -641,6 +668,11 @@ export interface CaseRun extends CaseOutcome {
    *
    * Absent for an arm that generates once, where the set has one member and the answer is
    * already in `passed`.
+   *
+   * On a shuffled arm this is also the position record: entry `i` sat in slot `i` of the
+   * prompt, so `source` crossed with the index says both who wrote the candidate and where it
+   * was offered. That is what makes "52.6% for the author" and "52.6% for slot zero"
+   * separable after the fact, without a second field to drift out of step with the order.
    */
   readonly candidates?: readonly { readonly source: string; readonly correct: boolean }[];
   /** Candidates the selector was not offered because their result was empty. */
@@ -1349,6 +1381,43 @@ export function candidateVerdicts(
 export function readableCandidates<T extends { readonly sql: string }>(candidates: readonly T[], canonical: boolean | undefined): readonly T[] {
   if (canonical !== true) return candidates;
   return candidates.map((candidate): T => ({ ...candidate, sql: canonicalSql(candidate.sql) }));
+}
+
+/** FNV-1a over the string form of a key. Only needs to be stable across machines. */
+function hash32(text: string): number {
+  let hash = 2166136261;
+  for (const character of text) {
+    // `charCodeAt(0)` rather than `codePointAt(0) ?? 0`: the fallback is unreachable, and an
+    // unreachable branch in a hash is a line of coverage nobody can honestly earn. Keys here
+    // are question ids, so a surrogate pair never reaches this loop.
+    hash ^= character.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+/**
+ * The same candidates, in an order that carries no information about authorship.
+ *
+ * The permutation is keyed by the question id so that two arms running the same question see
+ * the same order, and so that a rerun is comparable to the run it is being compared with. Each
+ * swap draws its own hash — `key#i` — rather than advancing one generator: a single stream
+ * would make the order of question N depend on how many questions were processed before it,
+ * which silently breaks that comparability under a different concurrency or a different limit.
+ *
+ * Fewer than two candidates have nothing to permute and are returned untouched, which keeps
+ * the identity between a returned index and the set the arm executes.
+ */
+export function shuffleByCase<T>(candidates: readonly T[], key: string | number): readonly T[] {
+  if (candidates.length < 2) return candidates;
+  const out = [...candidates];
+  for (let i = out.length - 1; i > 0; i -= 1) {
+    const j = hash32(`${String(key)}#${String(i)}`) % (i + 1);
+    const swap = out[i] as T;
+    out[i] = out[j] as T;
+    out[j] = swap;
+  }
+  return out;
 }
 
 export async function pool<T, R>(items: readonly T[], limit: number, worker: (item: T, index: number) => Promise<R>): Promise<R[]> {
@@ -2299,10 +2368,16 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
         const majority = majorityResult(choosable, (left, right) => judgeOfficial(left.rows, right.rows) === 'match');
         let winner = majority.winner as { sql: string; rows: readonly (readonly unknown[])[]; source: string };
         let selectedByModel: boolean | undefined;
+        // The order the selector will read, which is the raw order unless the arm permutes it.
+        // The vote above deliberately ran on the unpermuted set, so a tie it breaks is broken the
+        // same way in both arms; only the selector's information changes. `ordered` is what the
+        // per-candidate record below is written from, because a verdict is only attributable if
+        // it is filed under the slot the judge actually saw.
+        const ordered = arm.shuffle === true ? shuffleByCase(choosable, question.question_id) : choosable;
         if (arm.select === true) {
           // What the selector reads, as opposed to what the arm runs: on a canonical arm the
           // text carries no author signature, and `winner` below still comes from the raw set.
-          const readable = readableCandidates(choosable, arm.canonical);
+          const readable = readableCandidates(ordered, arm.canonical);
           // The model sees what the vote cannot: the shape of each result. A statement
           // that answers a "how many" with 500 rows is wrong for a reason no majority
           // of identical mistakes will reveal.
@@ -2331,7 +2406,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
                   const applied = applySelection(reply.text, offered);
                   return { index: applied.index, decided: applied.decided, sql: (offered[applied.index] as { sql: string }).sql };
                 })();
-          winner = choosable[decision.index] as typeof winner;
+          winner = ordered[decision.index] as typeof winner;
           selectedByModel = decision.decided;
         }
         // The last thing this arm can learn for free: the winner ran and produced
@@ -2373,7 +2448,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
         // Judged once here and read twice below: the ceiling and the per-candidate record
         // are the same pass, so a loss cannot be attributed to a member the ceiling count
         // never saw.
-        const verdicts = candidateVerdicts(candidates, expected.rows);
+        const verdicts = candidateVerdicts(ordered, expected.rows);
         return {
           id: String(question.question_id),
           passed: reason === 'match',

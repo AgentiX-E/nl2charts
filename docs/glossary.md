@@ -251,7 +251,12 @@ independent of who wrote it. It is an *untested confound* here rather than a
 finding: `CROSS_SOURCES` always puts the second model's candidate first, so
 authorship and position are perfectly correlated in every cross experiment run so
 far, and "it prefers its own writing" and "it prefers candidate 1" predict exactly
-the same number. A per-case shuffle separates them and costs nothing.
+the same number. `select-cross-shuffled` is the arm that separates them: the same
+three candidates permuted by question id (`shuffleByCase`, FNV-1a over `id#slot`,
+then Fisher–Yates), one lever from `select-cross`, zero extra calls. The record
+that makes the reading possible is the existing `candidates` array — on a shuffled
+arm entry `i` is the statement offered in slot `i`, so author crossed with index
+answers the question after the run instead of before it.
 
 **Canonical candidate text** — The one form a statement takes before a selector
 reads it: keyword and function names upper case, identifiers lower case, one space
