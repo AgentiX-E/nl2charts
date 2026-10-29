@@ -2812,7 +2812,17 @@ export function evaluateGate(report: Record<string, unknown>): string[] {
   const first = arms[0];
   const last = arms[arms.length - 1];
   if (first !== undefined && last !== undefined && last.accuracy < first.accuracy - 0.05) {
-    problems.push(`${last.arm} trails ${first.arm} by more than 5pp, which is a regression not a result`);
+    // A judge swap is the one comparison where trailing is the measurement rather than a
+    // defect: the arm exists to price the judge, so its delta is the answer to the question
+    // the run asked. The gate refused to publish `select-cross-judge` at 54.7% against 60.7%
+    // (run 40828283888) — a 6.0pp drop with p = 2.7e-13 — and that refusal is what the arm
+    // was built to produce: the second model judges its own candidate back into the answer
+    // on 68% of the cases where it was the only right one, and agrees with two correct
+    // candidates only when it is not the judge. An outage is caught elsewhere (the failure
+    // share, the candidate survival, an arm that produced no results), so the exemption
+    // cannot hide a broken endpoint.
+    const swapped = resolveArm(first.arm)?.judge !== resolveArm(last.arm)?.judge;
+    if (!swapped) problems.push(`${last.arm} trails ${first.arm} by more than 5pp, which is a regression not a result`);
   }
   return problems;
 }

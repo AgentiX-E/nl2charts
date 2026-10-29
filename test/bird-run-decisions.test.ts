@@ -393,6 +393,31 @@ describe('the gate', () => {
     ).toEqual(['metadata trails names by more than 5pp, which is a regression not a result']);
   });
 
+  it('does not call a judge swap that loses ground a regression', () => {
+    // The arm exists to price the judge, so a large negative delta is the answer rather than
+    // a defect: `40828283888` read 54.7% against 60.7% and the gate refused to publish the
+    // one number the experiment was run for. Outages are caught by their own guards.
+    expect(
+      evaluateGate({
+        ...report(),
+        arms: [
+          { arm: 'select-cross', accuracy: 0.607 },
+          { arm: 'select-cross-judge', accuracy: 0.547 },
+        ],
+      }),
+    ).toEqual([]);
+    // The same gap between two arms that share a judge is still a regression.
+    expect(
+      evaluateGate({
+        ...report(),
+        arms: [
+          { arm: 'select-cross', accuracy: 0.607 },
+          { arm: 'select-mixed', accuracy: 0.547 },
+        ],
+      }),
+    ).toEqual(['select-mixed trails select-cross by more than 5pp, which is a regression not a result']);
+  });
+
   it('reports every problem it found, not only the first', () => {
     // A run that trips three thresholds should not have to be fixed three times.
     expect(evaluateGate(report({ runnableRate: 0.5 }, { selfConsistency: 0.5, schemaMissingTotal: 1 }))).toHaveLength(3);
