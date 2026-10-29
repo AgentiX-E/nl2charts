@@ -341,6 +341,7 @@
     "verifyTrace"
   ],
   "devkit": [
+    "casesForEffect",
     "compareArms",
     "formatReport",
     "judgeOfficial",
@@ -349,6 +350,7 @@
     "judgeStrictResult",
     "majorityResult",
     "mcnemarExact",
+    "pairedResolution",
     "recordCase",
     "runContractSuite",
     "sameResult",
@@ -364,6 +366,7 @@
     "type Majority",
     "type MatchReason",
     "type PairedComparison",
+    "type PairedResolution",
     "type ResultSet",
     "type SqlResultSet",
     "type Tuple",

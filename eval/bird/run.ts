@@ -27,7 +27,8 @@ import { applySelection, attachDefinitions, buildAskMessages, buildSelectionProm
 // guard the pipeline applies. Skipping it here would let the one arm that retries be the
 // one arm that can execute DDL.
 import { inspectSql } from '@agentix-e/nl2charts-core';
-import { compareArms, judgeOfficial, judgeStrict, majorityResult, mcnemarExact, summarise, wilsonInterval } from '@agentix-e/nl2charts-devkit';
+import { casesForEffect, compareArms, judgeOfficial, judgeStrict, majorityResult, mcnemarExact, pairedResolution, summarise, wilsonInterval } from '@agentix-e/nl2charts-devkit';
+import type { PairedComparison } from '@agentix-e/nl2charts-devkit';
 import { ppPerExtraCall, repairFunnel } from './metrics.js';
 import type { CaseOutcome, MatchReason } from '@agentix-e/nl2charts-devkit';
 import { buildSchema, loadDescriptions, loadQuestions, loadTables, stratifiedSample } from './data.js';
@@ -2522,6 +2523,45 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
 }
 
 /**
+ * The difference this project is willing to act on, in share of cases (2pp).
+ *
+ * Not a statistical convention: it is the size of claim the cross-vendor question was asked
+ * with, and the smallest one the product would change a default over. Fixing it here is what
+ * makes "how many cases would settle this" a number the harness can compute.
+ */
+const CLAIM_PP = 0.02;
+
+/**
+ * The resolution a paired delta has to be read against.
+ *
+ * A p-value cannot tell "no effect" from "no measurement". This harness already states its
+ * noise floor as a number of percentage points; the smallest difference the same number of
+ * cases could detect is the other half of that sentence, and it is a property of the design
+ * (discordance rate and case count), not of the outcome. Delta +2.5pp at p=0.375 with a
+ * resolution of 5.2pp says the sign is not the finding.
+ *
+ * `casesForClaim` is the same arithmetic run forwards: at the discordance this pair showed,
+ * how many cases would a 2pp claim need? That number is what turns "run the full split next
+ * time" from an opinion into a count, and it is computed here rather than in a document so
+ * it cannot drift from the data it was derived from.
+ */
+export function resolutionFields(comparison: PairedComparison): {
+  ci: { low: number; high: number };
+  discordantShare: number;
+  mde: number;
+  casesForClaim: number;
+} {
+  const resolution = pairedResolution(comparison.onlyFirst, comparison.onlySecond, comparison.total);
+  const four = (value: number): number => Number(value.toFixed(4));
+  return {
+    ci: { low: four(resolution.low), high: four(resolution.high) },
+    discordantShare: four(resolution.discordantShare),
+    mde: four(resolution.mde),
+    casesForClaim: casesForEffect(resolution.discordantShare, CLAIM_PP),
+  };
+}
+
+/**
  * The paired comparisons the run is allowed to make.
  *
  * Every pair here is two arms measured on the same cases, so a delta is a paired outcome
@@ -2550,6 +2590,7 @@ export function pairedComparisons(outcomes: ReadonlyMap<string, readonly CaseRun
             onlyFirst: comparison.onlyFirst,
             onlySecond: comparison.onlySecond,
             p: mcnemarExact(comparison.onlyFirst, comparison.onlySecond),
+            ...resolutionFields(comparison),
           };
         })();
 
@@ -2565,6 +2606,7 @@ export function pairedComparisons(outcomes: ReadonlyMap<string, readonly CaseRun
       onlyFirst: comparison.onlyFirst,
       onlySecond: comparison.onlySecond,
       p: mcnemarExact(comparison.onlyFirst, comparison.onlySecond),
+      ...resolutionFields(comparison),
     };
   }
 
@@ -2581,6 +2623,7 @@ export function pairedComparisons(outcomes: ReadonlyMap<string, readonly CaseRun
       onlyFirst: comparison.onlyFirst,
       onlySecond: comparison.onlySecond,
       p: mcnemarExact(comparison.onlyFirst, comparison.onlySecond),
+      ...resolutionFields(comparison),
       // Undefined for a lever that costs no call (placement, a hint): those are not
       // "infinitely efficient", they are free, and dividing by zero would say the first.
       cost: {
@@ -2793,10 +2836,21 @@ export async function runBird(settings: BirdSettings, options: BirdRunOptions = 
     assertUniqueArmLabels(armReports.map((entry) => entry.arm));
     const paired = pairedComparisons(outcomes);
     if (paired.aa !== undefined) {
-      const aa = paired.aa as { arm: string; delta: number; onlyFirst: number; onlySecond: number; p: number };
+      const aa = paired.aa as {
+        arm: string;
+        delta: number;
+        onlyFirst: number;
+        onlySecond: number;
+        p: number;
+        mde: number;
+        ci: { low: number; high: number };
+      };
       report.aa = paired.aa;
+      // The noise floor is not a single number: a 0pp A/A on 120 cases still leaves a
+      // 5pp difference unexcluded, and the delta of every other arm is read against that.
       log(
-        `A/A ${aa.arm}: ${(aa.delta * 100).toFixed(1)}pp (${String(aa.onlyFirst)}/${String(aa.onlySecond)}, p=${aa.p.toFixed(3)}) — the harness's own noise`,
+        `A/A ${aa.arm}: ${(aa.delta * 100).toFixed(1)}pp (${String(aa.onlyFirst)}/${String(aa.onlySecond)}, p=${aa.p.toFixed(3)}, ` +
+          `95% CI [${(aa.ci.low * 100).toFixed(1)}, ${(aa.ci.high * 100).toFixed(1)}]pp, resolves ${(aa.mde * 100).toFixed(1)}pp) — the harness's own noise`,
       );
     }
     report.comparisons = paired.comparisons;

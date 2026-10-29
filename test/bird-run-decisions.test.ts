@@ -244,6 +244,85 @@ describe('the paired comparisons', () => {
   });
 });
 
+describe('what a delta is resolved to', () => {
+  const run = (id: string, passed: boolean): CaseRun => ({
+    id,
+    passed,
+    predicted: 'select 1',
+    reason: 'values',
+    strict: false,
+    attempts: 1,
+    calls: 1,
+  });
+
+  it('carries the interval and the smallest difference the cases could detect', () => {
+    // p alone cannot separate "no effect" from "no measurement". Two cases with one
+    // discordant pair resolve nothing, and the row says so instead of quoting a delta.
+    const { ablations } = pairedComparisons(
+      new Map<string, readonly CaseRun[]>([
+        ['names', [run('1', true), run('2', false)]],
+        ['metadata', [run('1', true), run('2', true)]],
+      ]),
+    );
+    expect(ablations['names -> metadata']).toMatchObject({
+      delta: 0.5,
+      ci: { low: -0.48, high: 1.48 },
+      discordantShare: 0.5,
+      // Capped at the whole range: a design that can only detect "everything" resolves nothing.
+      mde: 1,
+    });
+  });
+
+  it('does not read two arms that agreed on every case as a resolved question', () => {
+    const cases = Array.from({ length: 20 }, (_, index) => run(String(index), true));
+    const { comparisons } = pairedComparisons(
+      new Map<string, readonly CaseRun[]>([
+        ['inline+evidence', cases],
+        ['select', cases],
+      ]),
+    );
+    // Zero discordant pairs: the rule of three puts the 95% bound on the discordance rate
+    // at 3/20, so the design still cannot exclude a 24pp difference.
+    expect(comparisons['inline+evidence -> select']).toMatchObject({
+      delta: 0,
+      ci: { low: -0.1697, high: 0.1697 },
+      discordantShare: 0.15,
+      mde: 0.2426,
+    });
+  });
+
+  it('states the resolution of the A/A pair, because every other delta is read against it', () => {
+    const paired = pairedComparisons(
+      new Map<string, readonly CaseRun[]>([
+        ['names', [run('1', true), run('2', false)]],
+        ['names#2', [run('1', true), run('2', true)]],
+      ]),
+    );
+    expect(paired.aa).toMatchObject({ delta: 0.5, discordantShare: 0.5, mde: 1 });
+  });
+
+  it('sizes the run a 2pp claim would need from the discordance the pair showed', () => {
+    // The cross-vendor pair as measured: 120 cases, 1 before and 4 after. 818 is the number
+    // that decides the next dispatch, and it is computed from this artifact rather than
+    // quoted from a document.
+    const first = Array.from({ length: 120 }, (_, index) => run(String(index), index !== 1 && index !== 2 && index !== 3 && index !== 4));
+    const second = Array.from({ length: 120 }, (_, index) => run(String(index), index !== 0));
+    const { comparisons } = pairedComparisons(
+      new Map<string, readonly CaseRun[]>([
+        ['inline+evidence', first],
+        ['select', second],
+      ]),
+    );
+    expect(comparisons['inline+evidence -> select']).toMatchObject({
+      onlyFirst: 1,
+      onlySecond: 4,
+      mde: 0.0522,
+      discordantShare: 0.0417,
+      casesForClaim: 818,
+    });
+  });
+});
+
 describe('the gate', () => {
   const report = (
     gold: Record<string, unknown> = {},

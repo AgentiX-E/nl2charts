@@ -256,6 +256,9 @@ describe('a full run', () => {
     const aa = result.report.aa as { arm: string; delta: number; onlyFirst: number; onlySecond: number; p: number };
     expect(aa).toMatchObject({ arm: 'names', delta: 0, onlyFirst: 0, onlySecond: 0, p: 1 });
     expect(result.printed.some((line) => line.startsWith('A/A names:'))).toBe(true);
+    // A zero delta is not a zero-noise floor: the line has to say what difference the same
+    // cases could have detected, or the reader takes "0.0pp" as the resolution.
+    expect(result.printed.some((line) => line.startsWith('A/A names:') && /resolves \d/.test(line))).toBe(true);
   });
 
   it('refuses to publish a run whose arms see no signal', async () => {
