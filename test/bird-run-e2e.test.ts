@@ -25,7 +25,7 @@ import { afterAll, describe, expect, it, vi } from 'vitest';
 import { MINI_GOLD, MINI_QUESTIONS, writeMiniBirdDataset } from './helpers/bird-dataset.js';
 import { startEndpoint } from './helpers/endpoint.js';
 import type { EndpointRequest } from './helpers/endpoint.js';
-import { assertSecondModel, main, resolveSettings } from '../eval/bird/run.js';
+import { assertSecondModel, judgeModelName, main, resolveSettings } from '../eval/bird/run.js';
 
 const root = mkdtempSync(join(tmpdir(), 'nl2charts-bird-run-'));
 afterAll(() => {
@@ -366,6 +366,33 @@ describe('inputs an arm needs and does not have', () => {
     expect(() => assertSecondModel(settings, { draws: false, judges: false })).not.toThrow();
   });
 
+  it('names only the variable that is actually missing, and names both when both are', () => {
+    // The first version of this guard said "this arm needs a second model", which sent me
+    // looking at the workflow's model input when the key was what was absent. A sentence
+    // that cannot say which of two settings is missing costs a CI run to find out.
+    const base = resolveSettings({ BIRD_DATA: data }, [], root);
+    const withModel = { ...base, second: { model: 'glm-4.5', baseUrl: '', apiKey: '' } };
+    expect(() => assertSecondModel(withModel, { draws: true, judges: false })).toThrow(
+      /but a second key \(BIRD_SECOND_API_KEY or ZHIPU_API_KEY\) is not set/,
+    );
+    expect(() => assertSecondModel(withModel, { draws: true, judges: false })).not.toThrow(
+      /BIRD_SECOND_MODEL is not set/,
+    );
+    const withKey = { ...base, second: { model: '', baseUrl: '', apiKey: 'k' } };
+    expect(() => assertSecondModel(withKey, { draws: false, judges: true })).toThrow(
+      /but BIRD_SECOND_MODEL is not set/,
+    );
+    expect(() => assertSecondModel(withKey, { draws: false, judges: true })).not.toThrow(
+      /second key/,
+    );
+    const neither = { ...base, second: { model: '', baseUrl: '', apiKey: '' } };
+    expect(() => assertSecondModel(neither, { draws: true, judges: false })).toThrow(
+      /BIRD_SECOND_MODEL and a second key/,
+    );
+    const both = { ...base, second: { model: 'glm-4.5', baseUrl: '', apiKey: 'k' } };
+    expect(() => assertSecondModel(both, { draws: true, judges: true })).not.toThrow();
+  });
+
   it('refuses a database it has no questions for', async () => {
     await expect(run({ plan: { first: correct }, env: { BIRD_DBS: 'nowhere', BIRD_ARMS: 'names' } })).rejects.toThrow(
       /no questions for nowhere/,
@@ -426,6 +453,68 @@ describe('retrieval and the second model, when they are configured', () => {
     } finally {
       await second.close();
     }
+  });
+});
+
+describe('the second model as a judge', () => {
+  it('falls back to the primary endpoint when the second model has no endpoint of its own', async () => {
+    // A provider pair can be two keys against one gateway, which is what a run does when
+    // the harness is pointed at a proxy. The fallback is the only reason that works, and
+    // it was never executed: every test that configured a second model also gave it a URL.
+    const result = await run({
+      plan: { first: correct },
+      env: {
+        BIRD_ARMS: 'select-cross',
+        BIRD_SECOND_MODEL: 'second-model',
+        BIRD_SECOND_API_KEY: 'second-key',
+      },
+    });
+    expect(result.code).toBe(0);
+    const fromSecondKey = result.requests.filter((request) => request.authorization === 'Bearer second-key');
+    expect(fromSecondKey.length).toBeGreaterThan(0);
+    // One candidate of three per case, drawn with the second key against the primary URL.
+    expect(fromSecondKey).toHaveLength(QUESTIONS.length);
+  });
+
+  it('judges the candidate set with the second model and names the judge in the artifact', async () => {
+    const second = await startEndpoint({ reply: (request) => replyFor(request, { first: correct }) });
+    try {
+      const result = await run({
+        plan: { first: correct },
+        env: {
+          BIRD_ARMS: 'select-cross-judge',
+          BIRD_SECOND_MODEL: 'judge-model',
+          BIRD_SECOND_BASE_URL: second.url,
+          BIRD_SECOND_API_KEY: 'second-key',
+        },
+      });
+      expect(result.code).toBe(0);
+      // A judge swap is the one experiment whose result is unreadable without the name of
+      // the judge, so the artifact carries it at the top level and on the arm row.
+      expect(result.report.judgeModel).toBe('judge-model');
+      expect(result.report.secondModel).toBe('judge-model');
+      const arms = result.report.arms as { arm: string; judge?: string; selectorDecided?: number; selectorTotal?: number }[];
+      expect(arms[0]?.arm).toBe('select-cross-judge');
+      expect(arms[0]?.judge).toBe('second');
+      // The selector is the second provider here, and it answered every case: a judge whose
+      // calls are not counted as the arm's price would understate what the swap costs.
+      expect(arms[0]?.selectorDecided).toBe(QUESTIONS.length);
+      expect(arms[0]?.selectorTotal).toBe(QUESTIONS.length);
+      expect(second.requests.some((request) => request.prompt.includes('which candidate statement answers the question'))).toBe(true);
+    } finally {
+      await second.close();
+    }
+  });
+
+  it('names no judge when no arm asks for one, even with a second model configured', () => {
+    // `judgeModel` answers "who judged", not "who could have". A report that named a
+    // configured model would make a judge swap look like it happened.
+    expect(judgeModelName(['select-cross'], { model: 'glm-4.5' })).toBeNull();
+    expect(judgeModelName(['names', 'inline+evidence'], { model: 'glm-4.5' })).toBeNull();
+    expect(judgeModelName(['select-cross-judge'], { model: 'glm-4.5' })).toBe('glm-4.5');
+    // A judged arm with no configured model reaches the guard before it reaches the
+    // report, so the empty string here is a value the guard has already refused.
+    expect(judgeModelName(['select-cross-judge'], { model: '' })).toBe('');
   });
 });
 

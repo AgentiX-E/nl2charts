@@ -2,12 +2,12 @@
   "note": "Per-file eval coverage. Enforced by tools/check-eval-coverage.mjs: a number may rise freely and may only fall with an explicit, reviewed edit. `target` is the standard every file must reach before eval/ joins the main gate.",
   "target": 95,
   "tolerancePp": 0.2,
-  "measuredAt": "2026-10-28",
+  "measuredAt": "2026-10-29",
   "totals": {
     "lines": 99.3,
     "statements": 99.3,
     "functions": 100,
-    "branches": 96.51
+    "branches": 97.19
   },
   "files": {
     "eval/ablate.ts": {
@@ -98,7 +98,7 @@
       "lines": 99.2,
       "statements": 99.2,
       "functions": 100,
-      "branches": 93.1
+      "branches": 95.04
     },
     "eval/bird/samples.ts": {
       "lines": 100,

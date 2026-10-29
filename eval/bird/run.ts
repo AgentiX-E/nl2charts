@@ -1893,6 +1893,21 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
   };
 }
 
+/**
+ * Which model judged, or `null` when no arm asked for a swap.
+ *
+ * `null` means "nobody judged but the primary model", not "no second model is configured":
+ * a run that has one configured and no judged arm would otherwise publish the name of a
+ * model that never read anything. The distinction is the whole reason a judge-swap result
+ * can be attributed, and it was written inline where no test could choose the second arm.
+ */
+export function judgeModelName(
+  arms: readonly string[],
+  second: Pick<BirdSettings['second'], 'model'>,
+): string | null {
+  return arms.some((name) => resolveArm(name)?.judge === 'second') ? second.model : null;
+}
+
 /** The report before any arm runs: everything the inputs alone can say. */
 export function baseReport(prepared: PreparedRun): Record<string, unknown> {
   const { settings, questions, selected, cases, unrunnable, controls } = prepared;
@@ -1910,7 +1925,7 @@ export function baseReport(prepared: PreparedRun): Record<string, unknown> {
     secondModel: settings.second.model === '' ? null : settings.second.model,
     // ...and which model judged, when an arm asks the second one to. A judge swap is the one
     // experiment whose result is unreadable without this field.
-    judgeModel: settings.arms.some((name) => resolveArm(name)?.judge === 'second') ? settings.second.model : null,
+    judgeModel: judgeModelName(settings.arms, settings.second),
     // The instrument's own settings. Same argument as the model: two runs of "the same"
     // configuration can differ by the deadline, the concurrency or the retry budget, and a
     // report that omits them cannot say whether a difference is the pipeline or the harness.
@@ -2349,14 +2364,29 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
 export function armSummaryLine(label: string, arm: Arm, runs: readonly CaseRun[]): string {
   const summary = summarise(label, runs);
   const printed = repairAccounting(arm, runs);
-  const ceiling = arm.vote === undefined ? undefined : candidateCeiling(runs);
+  const vote = arm.vote;
   return (
     `${label.padEnd(9)} ${summary.passed}/${summary.total}  ${(summary.accuracy * 100).toFixed(1)}%  ` +
     `strict ${runs.filter((run) => run.strict).length}` +
     `${printed.repaired === undefined ? '' : `  repaired ${String(printed.repaired)}`}` +
     `${printed.samples === undefined ? '' : `  samples ${String(printed.samples)}`}` +
-    `${ceiling === undefined ? '' : `  recall@${String(arm.vote ?? 1)} ${(ceiling.candidateRecallShare * 100).toFixed(1)}% (lost ${String(ceiling.selectionLoss)})`}`
+    `${vote === undefined ? '' : ceilingColumn(vote, candidateCeiling(runs))}`
   );
+}
+
+/**
+ * The ceiling column, on the arms that have a candidate set to measure.
+ *
+ * `vote` is a number here rather than `arm.vote ?? 1`: the column only exists when the arm
+ * samples, so the fallback could not be reached, and a test cannot choose a value that
+ * never occurs. Its presence in the template made the branch unreachable, which is the
+ * same defect as an untested one — a claim the reader has to verify (ADR-219).
+ */
+function ceilingColumn(
+  vote: number,
+  ceiling: { candidateRecallShare: number; selectionLoss: number },
+): string {
+  return `  recall@${String(vote)} ${(ceiling.candidateRecallShare * 100).toFixed(1)}% (lost ${String(ceiling.selectionLoss)})`;
 }
 
 /**
@@ -2458,7 +2488,7 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
                 candidateFailures: {
                   llm: runs.reduce((total, run) => total + (run.candidateFailures?.llm ?? 0), 0),
                   other: runs.reduce((total, run) => total + (run.candidateFailures?.other ?? 0), 0),
-                  attempted: runs.length * (arm.vote ?? 1),
+                  attempted: runs.length * arm.vote,
                 },
               }
             : {}),

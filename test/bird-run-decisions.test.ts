@@ -12,6 +12,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  armReportRow,
+  armSummaryLine,
   databasesFromManifest,
   databasesFromQuestions,
   evaluateGate,
@@ -19,10 +21,11 @@ import {
   offeredCandidates,
   pairedComparisons,
   resolveLayout,
+  resolveArm,
   resolveSettings,
   secondModelRoles,
 } from '../eval/bird/run.js';
-import type { CaseRun } from '../eval/bird/run.js';
+import type { Arm, CaseRun, PreparedRun } from '../eval/bird/run.js';
 
 describe('where a run points', () => {
   it('derives every path from the split, and lets the environment move each one', () => {
@@ -332,5 +335,143 @@ describe('the dataset a run reads', () => {
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
+  });
+});
+
+/**
+ * What a row and a line say, read without running anything.
+ *
+ * `armSummaryLine` and `armReportRow` are what a reader sees after a run and what the
+ * artifact carries; every branch in them is a decision about a *label* — whether to print
+ * a recall column, whether to name a judge, whether to admit that a case's difficulty is
+ * unknown. They were only ever reached through a full run, which means the arms the
+ * default list does not contain had their labels written by code no test could choose.
+ */
+describe('what an arm row says about itself', () => {
+  const outcome = (id: string, passed: boolean): CaseRun => ({
+    id,
+    passed,
+    predicted: 'select 1',
+    reason: 'values',
+    strict: false,
+    attempts: 1,
+    calls: 1,
+  });
+  const question = (id: number, difficulty: 'simple' | 'moderate' | 'challenging') => ({
+    question_id: id,
+    db_id: 'shop',
+    question: `question ${id}`,
+    evidence: '',
+    SQL: 'select 1',
+    difficulty,
+  });
+  const preparedWith = (cases: readonly ReturnType<typeof question>[]): PreparedRun =>
+    ({
+      cases,
+      schemaFor: () => [],
+      blocksFor: () => ({}),
+    }) as unknown as PreparedRun;
+
+  it('leaves the recall column off an arm that generates once', () => {
+    // `names` draws one statement, so a ceiling would be a column that always reads 100%
+    // and a selector loss that is always zero. The column is absent, not zero.
+    const line = armSummaryLine('names', resolveArm('names') as Arm, [outcome('1', true), outcome('2', false)]);
+    expect(line).toContain('1/2  50.0%');
+    expect(line).toContain('strict 0');
+    expect(line).not.toContain('recall@');
+  });
+
+  it('prints the ceiling on the arm that samples, and names the vote it measured', () => {
+    const runs: CaseRun[] = [
+      // The first case kept the answer it had; the second threw one away, which is the
+      // only kind of case a selector loss can be counted on.
+      { ...outcome('1', true), candidateRecall: true, agreement: 0.66 },
+      { ...outcome('2', false), candidateRecall: true, agreement: 0.33 },
+    ];
+    const line = armSummaryLine('select-cross', resolveArm('select-cross') as Arm, runs);
+    // The ceiling is 100% — both candidate sets contained a match — and the arm kept half.
+    expect(line).toContain('samples 3');
+    expect(line).toContain('recall@3 100.0% (lost 1)');
+  });
+
+  it('files a case the dataset does not describe under unknown', () => {
+    // A run row whose question is not in `cases` is a defect upstream, but the row still
+    // has to land somewhere: an unlabelled bucket is honest, and dropping it would make
+    // the difficulty table sum to less than the arm's own total.
+    const row = armReportRow(preparedWith([question(1, 'simple')]), resolveArm('names') as Arm, [outcome('99', true)], 'names');
+    expect(row.byDifficulty).toEqual({ unknown: { passed: 1, total: 1 } });
+  });
+
+  it('counts a run that carries a message but no kind as an unclassified error', () => {
+    // `errorKind` is set by the arm loop; a case that failed the way the loop does not
+    // expect still has a message, and the four counters must add up to the failures.
+    const row = armReportRow(preparedWith([question(1, 'simple'), question(2, 'moderate')]), resolveArm('names') as Arm, [
+      { ...outcome('1', false), error: 'boom' },
+      { ...outcome('2', false), error: 'the engine refused', errorKind: 'execution' },
+      outcome('3', true),
+    ], 'names');
+    expect(row.errors).toMatchObject({ execution: 1, guard: 0, llm: 0, other: 1 });
+    expect(row.firstError).toBe('boom');
+    expect(row.llmFailureShare).toBe(0);
+  });
+
+  it('names a judge only on the arm that has one, and says which one', () => {
+    const cross = armReportRow(preparedWith([question(1, 'simple')]), resolveArm('select-cross') as Arm, [outcome('1', true)], 'select-cross');
+    expect(cross.vote).toBe(3);
+    expect(cross.judge).toBeUndefined();
+    expect(cross.selector).toBe('model');
+    const judged = armReportRow(
+      preparedWith([question(1, 'simple')]),
+      resolveArm('select-cross-judge') as Arm,
+      [outcome('1', true)],
+      'select-cross-judge',
+    );
+    expect(judged.judge).toBe('second');
+  });
+
+  it('admits that the prompt size excludes a block written at call time', () => {
+    // A size that silently leaves out the plan it added would report the arm as cheap.
+    const charsOf = (row: unknown): { excludes?: readonly string[] } =>
+      (row as { promptChars: { excludes?: readonly string[] } }).promptChars;
+    for (const name of ['plan', 'interpret']) {
+      const row = armReportRow(preparedWith([question(1, 'simple')]), resolveArm(name) as Arm, [outcome('1', true)], name);
+      expect(charsOf(row).excludes).toEqual(['plan/interpretation written at call time']);
+    }
+    const plain = armReportRow(preparedWith([question(1, 'simple')]), resolveArm('names') as Arm, [outcome('1', true)], 'names');
+    expect(charsOf(plain).excludes).toBeUndefined();
+  });
+
+  it('prices a lever that spends extra calls by the point it buys per call', () => {
+    // A voting arm costs three calls where the arm it is compared to costs one, and the
+    // pair is the only place the per-call price exists: without it a +6pp lever and a
+    // +6pp lever that costs three times as much look the same in the artifact.
+    const called = (id: string, passed: boolean, calls: number): CaseRun => ({
+      ...outcome(id, passed),
+      calls,
+    });
+    const { ablations } = pairedComparisons(
+      new Map<string, readonly CaseRun[]>([
+        ['inline+evidence', [called('1', false, 1), called('2', false, 1)]],
+        ['vote', [called('1', true, 3), called('2', true, 3)]],
+      ]),
+    );
+    const priced = ablations['inline+evidence -> vote'] as {
+      cost: { extraCallsPerCase: number; ppPerExtraCall?: number };
+    };
+    expect(priced.cost.extraCallsPerCase).toBe(2);
+    expect(priced.cost.ppPerExtraCall).toBe(50);
+  });
+
+  it('prices a lever that costs a call and leaves a free one unpriced', () => {
+    // A placement lever spends nothing extra; dividing its delta by zero extra calls would
+    // call it infinitely efficient, which is a different claim from "it is free".
+    const outcomes = new Map<string, readonly CaseRun[]>([
+      ['names', [outcome('1', false), outcome('2', false)]],
+      ['definitions', [outcome('1', true), outcome('2', false)]],
+    ]);
+    const { ablations } = pairedComparisons(outcomes);
+    const priced = ablations['names -> definitions'] as { cost: { extraCallsPerCase: number; ppPerExtraCall?: number } };
+    expect(priced.cost.extraCallsPerCase).toBe(0);
+    expect(priced.cost.ppPerExtraCall).toBeUndefined();
   });
 });
