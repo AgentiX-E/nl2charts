@@ -7,7 +7,7 @@
     "lines": 99.3,
     "statements": 99.3,
     "functions": 100,
-    "branches": 97.19
+    "branches": 97.22
   },
   "files": {
     "eval/ablate.ts": {
@@ -161,10 +161,10 @@
       "branches": 99.07
     },
     "eval/preflight.ts": {
-      "lines": 97.72,
-      "statements": 97.72,
+      "lines": 98.46,
+      "statements": 98.46,
       "functions": 100,
-      "branches": 95.12
+      "branches": 96.77
     },
     "eval/run.ts": {
       "lines": 98.46,

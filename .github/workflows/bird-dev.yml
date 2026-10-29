@@ -69,6 +69,13 @@ jobs:
           key: bird-dev-20240627-${{ runner.os }}
       - name: Fetch dev (no-op when the cache is warm)
         run: pnpm bench:bird:fetch
+      # One call per endpoint before 1,534 questions. This workflow is the only one that can
+      # name a second model, and it was the only one without a preflight: run `40792849132`
+      # dispatched `second_model=glm-4.5`, drew 120 of 360 candidates — every `@second`
+      # draw — from an endpoint that never answered, and spent three minutes finding out.
+      # The preflight now checks both targets and says which one refused.
+      - name: Provider preflight (every endpoint this run will call)
+        run: pnpm eval:preflight
       - name: Gold queries and controls without a model
         run: pnpm bench:bird:dry
       - name: Four-arm evaluation on the public split

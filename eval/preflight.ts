@@ -159,20 +159,93 @@ export function resolvePreflightSettings(env: NodeJS.ProcessEnv): PreflightSetti
   };
 }
 
+/** One endpoint, named, because a report that says "failed" without saying which is a riddle. */
+export interface PreflightTarget {
+  readonly role: 'primary' | 'second';
+  readonly baseUrl: string;
+  readonly model: string;
+  readonly apiKey: string;
+}
+
+/**
+ * Every endpoint the run will actually call.
+ *
+ * The second model exists only for the cross arms, and its endpoint is discovered the same
+ * way `createProviders` discovers it: its own URL when it has one, the primary URL when it
+ * does not. The fallback has to be identical in both places, or a run would preflight one
+ * endpoint and call another.
+ *
+ * A `BIRD_SECOND_MODEL` with no key is returned as a target rather than skipped: the run
+ * would draw candidates it cannot get, and a preflight that quietly checks only what it can
+ * is the failure mode this function exists to remove.
+ */
+export function resolvePreflightTargets(env: NodeJS.ProcessEnv): PreflightTarget[] {
+  const settings = resolvePreflightSettings(env);
+  const targets: PreflightTarget[] = [
+    { role: 'primary', baseUrl: settings.baseUrl, model: settings.model, apiKey: settings.apiKey },
+  ];
+  const secondModel = env.BIRD_SECOND_MODEL ?? '';
+  if (secondModel === '') return targets;
+  targets.push({
+    role: 'second',
+    baseUrl: env.BIRD_SECOND_BASE_URL === undefined || env.BIRD_SECOND_BASE_URL === '' ? settings.baseUrl : env.BIRD_SECOND_BASE_URL,
+    model: secondModel,
+    apiKey: env.BIRD_SECOND_API_KEY ?? env.ZHIPU_API_KEY ?? '',
+  });
+  return targets;
+}
+
+/**
+ * Why this target cannot be measured, or `null` when it can.
+ *
+ * A keyless target is not a measurement: the call would measure the endpoint's rejection of
+ * an empty bearer token, which says nothing about the model. This is a function rather than
+ * a branch inside `main` because `main` is only reachable through a child process, and v8
+ * does not collect coverage across processes — the sentence would exist without ever being
+ * read by a test (the same reason the module guard is the one permanently unread line).
+ */
+export function targetProblem(target: PreflightTarget): string | null {
+  if (target.apiKey.length > 0) return null;
+  const variable =
+    target.role === 'second'
+      ? 'BIRD_SECOND_API_KEY or ZHIPU_API_KEY'
+      : 'LLM_API_KEY (preferred) or DEEPSEEK_API_KEY';
+  return `no key for ${target.model}. Set ${variable}.`;
+}
+
 export async function main(env: NodeJS.ProcessEnv = process.env): Promise<number> {
   const settings = resolvePreflightSettings(env);
   if (settings.apiKey.length === 0) {
     console.error('preflight: no key. Set LLM_API_KEY (preferred) or DEEPSEEK_API_KEY.');
     return 1;
   }
-  const report = await runPreflight({ ...settings, log: (line) => console.log(line) });
-  if (!report.ok) {
-    console.error(`${report.summary}; ${String(report.failures)} failed (first: ${report.firstError})`);
-    for (const problem of report.problems) console.error(`preflight failed: ${problem}`);
-    return 1;
+  const targets = resolvePreflightTargets(env);
+  const named = (target: PreflightTarget): string => `preflight[${target.role}]`;
+  let failed = false;
+  for (const target of targets) {
+    const problem = targetProblem(target);
+    if (problem !== null) {
+      console.error(`${named(target)}: ${problem}`);
+      failed = true;
+      continue;
+    }
+    const report = await runPreflight({
+      baseUrl: target.baseUrl,
+      model: target.model,
+      apiKey: target.apiKey,
+      samples: settings.samples,
+      deadlineMs: settings.deadlineMs,
+      log: (line) => console.log(line),
+    });
+    if (!report.ok) {
+      console.error(`${named(target)}: ${report.summary}; ${String(report.failures)} failed (first: ${report.firstError})`);
+      for (const problem of report.problems) console.error(`${named(target)} failed: ${problem}`);
+      failed = true;
+      continue;
+    }
+    console.log(`${named(target)}: ${report.summary}`);
   }
-  console.log(report.summary);
-  return 0;
+  return failed ? 1 : 0;
 }
 
 if (process.argv[1] !== undefined && pathToFileURL(process.argv[1]).href === import.meta.url) {
