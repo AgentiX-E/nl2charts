@@ -1422,6 +1422,23 @@ export interface PrepareIo {
   readonly provider: LlmProvider;
 }
 
+/**
+ * How many questions of each difficulty a set holds.
+ *
+ * The sample's mix is the only thing that decides whether its accuracy estimates the split's,
+ * so it is reported rather than assumed. Unknown difficulty files with the moderates, the same
+ * rule the sampler uses — two places with two rules would let the artifact describe a mix the
+ * sample does not have.
+ */
+export function difficultyMix(questions: readonly BirdQuestion[]): Record<string, number> {
+  const mix: Record<string, number> = { simple: 0, moderate: 0, challenging: 0 };
+  for (const question of questions) {
+    const key = question.difficulty === 'simple' || question.difficulty === 'challenging' ? question.difficulty : 'moderate';
+    mix[key] = (mix[key] ?? 0) + 1;
+  }
+  return mix;
+}
+
 export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise<PreparedRun> {
   const layout = settings.layout;
   const { oracle, provider } = io;
@@ -1946,7 +1963,14 @@ export function baseReport(prepared: PreparedRun): Record<string, unknown> {
       requested: settings.limit,
       split: layout.split,
       scored: cases.length,
-      strategy: 'stratified by difficulty, then question id',
+      // What this sample actually is, not what the sampler was meant to do. A subset's
+      // accuracy is an estimate of the split only if its difficulty mix matches, and the
+      // mix was invisible in the artifact while the sampler allocated one case per bucket:
+      // 120 questions of dev came back 40/40/40 from a split that is 60/30/10, which
+      // over-weights the hardest bucket by 3.5x. Printing both mixes is what lets a reader
+      // reweight, or refuse to.
+      strategy: 'proportional to the split difficulty mix (largest deficit first), then question id',
+      mix: { sample: difficultyMix(selected), available: difficultyMix(questions) },
     },
     gold: {
       executed: selected.length,

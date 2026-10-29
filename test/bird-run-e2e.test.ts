@@ -535,10 +535,17 @@ describe('the artifact', () => {
     });
     expect(result.code).toBe(0);
     expect(result.report.run).toEqual({ timeoutMs: 12345, concurrency: 2, retries: 4 });
-    const selection = result.report.selection as { requested: number; scored: number; available: number; databases: string[] };
+    const selection = result.report.selection as { requested: number; scored: number; available: number; databases: string[]; strategy: string };
     // A sample is declared as a sample: the limit is in the artifact beside the number it
     // produced, so a 4-question run cannot be read as a 500-question one.
     expect(selection).toMatchObject({ requested: 4, scored: 4, available: QUESTIONS.length, databases: ['shop'] });
+    // ...and its difficulty mix is in the artifact, beside the split's. The fixture is
+    // 2 / 3 / 2, so a proportionally allocated sample of four is 1 / 2 / 1; equal allocation
+    // would have given 2 / 2 / 0 and an accuracy over a mix the split does not have.
+    expect(selection).toMatchObject({
+      mix: { sample: { simple: 1, moderate: 2, challenging: 1 }, available: { simple: 2, moderate: 3, challenging: 2 } },
+    });
+    expect(String(selection.strategy)).toMatch(/proportional to the split difficulty mix/);
     const split = result.report.split;
     expect(split).toBe('minidev');
     expect((result.report.selection as { split: string }).split).toBe(split);

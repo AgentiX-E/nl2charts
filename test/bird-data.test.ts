@@ -247,27 +247,48 @@ describe('stratified sampling', () => {
     make(6, 'challenging'),
     make(3, 'moderate'),
   ];
+  const counts = (picked: readonly BirdQuestion[]): Record<string, number> => {
+    const out: Record<string, number> = { simple: 0, moderate: 0, challenging: 0 };
+    for (const question of picked) out[question.difficulty] = (out[question.difficulty] ?? 0) + 1;
+    return out;
+  };
 
   it('returns everything when the limit exceeds the input', () => {
     expect(stratifiedSample(questions, 10)).toHaveLength(6);
   });
 
-  it('keeps the difficulty mix instead of taking the head of the file', () => {
-    const picked = stratifiedSample(questions, 3);
-    expect(picked.map((question) => question.question_id)).toEqual([1, 3, 5]);
+  it('allocates in proportion to the split, not one per bucket', () => {
+    // The dev split is 60.3% simple, 30.2% moderate, 9.5% challenging. A sampler that takes
+    // one per bucket turns that into 33/33/33, which over-weights the hardest bucket by
+    // 3.5x: a 120-question run then reports an accuracy no full-split run reproduces, and
+    // the word "stratified" in the artifact describes a mix it never had.
+    const lopsided = [
+      ...Array.from({ length: 10 }, (_, index) => make(index + 1, 'simple')),
+      ...Array.from({ length: 5 }, (_, index) => make(20 + index, 'moderate')),
+      ...Array.from({ length: 5 }, (_, index) => make(40 + index, 'challenging')),
+    ];
+    expect(counts(stratifiedSample(lopsided, 10))).toEqual({ simple: 5, moderate: 3, challenging: 2 });
   });
 
-  it('is deterministic and stops when the buckets run dry', () => {
-    expect(stratifiedSample(questions, 4).map((question) => question.question_id)).toEqual([1, 3, 5, 2]);
+  it('keeps a rare bucket rare instead of promoting it', () => {
+    const rare = [
+      ...Array.from({ length: 90 }, (_, index) => make(index + 1, 'simple')),
+      ...Array.from({ length: 10 }, (_, index) => make(100 + index, 'challenging')),
+    ];
+    expect(counts(stratifiedSample(rare, 10))).toEqual({ simple: 9, moderate: 0, challenging: 1 });
+  });
+
+  it('gives a bucket that runs out to the ones that still have questions', () => {
+    // One simple question in a split of ten: its quota is 0.5 of a case, and the sample has
+    // to come from somewhere or it is smaller than the limit that was asked for.
+    const lopsided = [make(1, 'simple'), ...Array.from({ length: 9 }, (_, index) => make(2 + index, 'moderate'))];
+    expect(counts(stratifiedSample(lopsided, 5))).toEqual({ simple: 1, moderate: 4, challenging: 0 });
     expect(stratifiedSample([make(1, 'simple')], 5)).toHaveLength(1);
   });
 
-  it('skips an exhausted bucket and keeps drawing from the others', () => {
-    // One simple question and four moderate ones: the third round has nothing in the simple
-    // bucket, and a sampler that treated that as the end would return two cases for a limit
-    // of four — a sample smaller than the one that was asked for, silently.
-    const lopsided = [make(1, 'simple'), make(2, 'moderate'), make(3, 'moderate'), make(4, 'moderate'), make(5, 'moderate')];
-    expect(stratifiedSample(lopsided, 4).map((question) => question.question_id)).toEqual([1, 2, 3, 4]);
+  it('returns the sample in the split order, and the same sample twice', () => {
+    expect(stratifiedSample(questions, 4).map((question) => question.question_id)).toEqual([1, 2, 3, 5]);
+    expect(stratifiedSample(questions, 4).map((question) => question.question_id)).toEqual([1, 2, 3, 5]);
   });
 
   it('files an unrecognised difficulty with the moderates rather than dropping it', () => {

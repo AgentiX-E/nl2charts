@@ -226,9 +226,18 @@ function commentOf(note: ColumnNote): string | undefined {
 }
 
 /**
- * Deterministic stratified sample: round-robin over the three difficulty
- * buckets, each sorted by question id. A limit of 200 therefore keeps the
- * difficulty mix instead of taking whatever happens to be first in the file.
+ * Deterministic sample that keeps the split's difficulty mix.
+ *
+ * Quotas are proportional to each difficulty's share, floored, with the leftover slots handed
+ * to the largest fractional parts (largest remainder). Equal allocation — one per bucket, round
+ * after round — is what this function used to do while its comment claimed the mix was kept: on
+ * the dev split (60.3% simple, 30.2% moderate, 9.5% challenging) it turned 120 questions into
+ * 40/40/40, over-weighting the hardest bucket by 3.5x and reporting an accuracy no full-split
+ * run reproduces.
+ *
+ * The remainder pass also handles the two edge cases the round-robin needed care for: a bucket
+ * smaller than its quota gives the surplus to the others, and a difficulty value this build does
+ * not know files with the moderates instead of being dropped.
  */
 export function stratifiedSample(questions: readonly BirdQuestion[], limit: number): BirdQuestion[] {
   if (limit >= questions.length) return [...questions];
@@ -236,19 +245,23 @@ export function stratifiedSample(questions: readonly BirdQuestion[], limit: numb
   for (const question of questions) (buckets[question.difficulty] ?? buckets.moderate).push(question);
   for (const bucket of Object.values(buckets)) bucket.sort((left, right) => left.question_id - right.question_id);
   const order: Difficulty[] = ['simple', 'moderate', 'challenging'];
-  const picked: BirdQuestion[] = [];
-  let round = 0;
-  while (picked.length < limit) {
-    let progressed = false;
-    for (const difficulty of order) {
-      const candidate = buckets[difficulty][round];
-      if (candidate === undefined) continue;
-      picked.push(candidate);
-      progressed = true;
-      if (picked.length === limit) break;
-    }
-    if (!progressed) break;
-    round += 1;
+  const ideal: Record<Difficulty, number> = { simple: 0, moderate: 0, challenging: 0 };
+  const counts: Record<Difficulty, number> = { simple: 0, moderate: 0, challenging: 0 };
+  for (const difficulty of order) ideal[difficulty] = (limit * buckets[difficulty].length) / questions.length;
+  for (const difficulty of order) counts[difficulty] = Math.floor(ideal[difficulty]);
+  let leftover = limit - (counts.simple + counts.moderate + counts.challenging);
+  const byFraction = [...order].sort(
+    (left, right) =>
+      ideal[right] - counts[right] - (ideal[left] - counts[left]) || order.indexOf(left) - order.indexOf(right),
+  );
+  for (const difficulty of byFraction) {
+    if (leftover <= 0) break;
+    const room = buckets[difficulty].length - counts[difficulty];
+    const give = Math.min(room, leftover);
+    counts[difficulty] += give;
+    leftover -= give;
   }
-  return picked;
+  return order
+    .flatMap((difficulty) => buckets[difficulty].slice(0, counts[difficulty]))
+    .sort((left, right) => left.question_id - right.question_id);
 }
