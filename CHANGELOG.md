@@ -8,6 +8,19 @@ cannot be argued with.
 
 ### Measured
 
+- **The `values` bucket is three bugs, and the split is mechanical.** Three quarters of the
+  no-answer questions have the right width and the wrong numbers, which is still four different
+  mistakes. `pnpm bench:bird:gap:values <report> --arm <name>` runs the oracle over every retained
+  statement and splits them by the fix they ask for: `filter-narrow` (the predicate matched
+  nothing), `filter-wide` (too many rows: a weak predicate or a fan-out join), `missing-literal`
+  (a value the gold names is absent from the statement), `scale` (every value a constant multiple:
+  an aggregation at the wrong level), `aggregate` (a different aggregate function) and `grain`
+  (a different `group by` at the same cardinality). The order is the order of evidence, not of
+  frequency: an empty result is visible without reading the SQL, and "the aggregate is wrong" is
+  a hypothesis about the same statement, so it is tried last. 26 unit cases including a real
+  SQLite file through the real oracle, and it is a measurement step in `bird-dev.yml` before it
+  is a gate in `ci.yml`.
+
 - **The 34pp column has a shape now, and it is not the engine.** `pnpm bench:bird:gap` reads a run
   artifact and classifies every question whose candidate set held no answer. On the dev split
   (`40865112253`) `select-cross` has **523** such questions: **15** `engine-refused`, **120**

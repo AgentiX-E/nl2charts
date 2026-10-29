@@ -107,6 +107,14 @@ jobs:
       # that is not the selector. Printed before the summary so a failed run still shows it.
       - name: Where the candidate set had no answer
         run: pnpm bench:bird:gap
+      # The `values` bucket is three quarters of the no-answer set, and it is three different
+      # bugs: a filter that matched nothing, a replaced literal, and an aggregation at the
+      # wrong level. This runs the oracle over every retained statement to split it, which
+      # costs one query per case and no model call. It is measured here before it is gated in
+      # `ci.yml`, because a bucket that turns out to be mostly `unclassified` is a finding
+      # about the taxonomy and not a reason to red the build.
+      - name: What kind of wrong the no-answer statements are
+        run: pnpm bench:bird:gap:values eval/out/bird-eval.json --arm select-cross
       # The run that fails is the run whose numbers matter most, and these two steps used to
       # run only on success: `40534288883` failed the floor gate and the artifact — the only
       # copy of the per-case rows and the McNemar p-values — was never uploaded, so the run

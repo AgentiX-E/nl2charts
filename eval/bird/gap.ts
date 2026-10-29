@@ -51,6 +51,10 @@ export interface CaseRecord {
 
 export interface ReportedFailure {
   readonly id?: string;
+  readonly question?: string;
+  readonly predicted?: string;
+  readonly reason?: string;
+  readonly error?: string;
 }
 
 export interface GapReportShape {

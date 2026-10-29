@@ -46,6 +46,7 @@
     "bench:bird:position": "tsx eval/bird/position.ts",
     "bench:bird:diagnose": "tsx eval/bird/diagnose-corpus.ts",
     "bench:bird:gap": "tsx eval/bird/gap.ts",
+    "bench:bird:gap:values": "tsx eval/bird/values-gap.ts",
     "bird:stratify": "node tools/stratify-mixed.mjs"
   },
   "devDependencies": {
