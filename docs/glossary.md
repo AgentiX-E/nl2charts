@@ -228,6 +228,20 @@ member, and which member the arm returned (`cases[].candidates`,
 rejected the second model's statement" and "it took a different wrong statement
 while a right one sat beside it" are the same two numbers.
 
+**Selector judge** — The model asked which of an arm's candidates answers the
+question. It never sees a label, so any preference it has for statements one model
+wrote has to travel through *style* — which is why the same candidate set scores
+25.6% on the second model's own statement under one judge and 68.2% under the
+model that wrote it, and why canonicalising the candidate text is a lever rather
+than a cosmetic change.
+
+**Self-preference (of a judge)** — A judge's tendency to prefer text that resembles
+its own generations. It is measured here rather than assumed: the same three
+candidates, the same prompt, only the judge's identity changed, and that
+candidate's conversion moved by 42.6pp. It is also *expensive*: the second model's
+bias takes its own statement over two candidates that agree and are both right on
+128 cases, where the first model's bias does so on 23.
+
 **Visual baseline** — A committed fingerprint per series type: the element
 skeleton and the count of drawn shapes, not the coordinates. It fails when a chart
 stops drawing or changes shape and stays quiet when a label moves, because a

@@ -2154,6 +2154,73 @@ question, and `passed` answers it for every arm. Where two candidates both answe
 is kept as a *set* and neither source is priced alone: a loss with two right statements is a
 choice between them, and attributing it to one would invent a preference the score cannot see.
 
+## The judge is the variable, and a judge that cannot read the table
+
+*An asymmetry the selector shows* ends on a registered question and a criterion written down
+before any run:
+
+> if the asymmetry flips, the judge is the variable and the next step is a judge that is neither
+> author; if it does not, the second model's answers are simply harder and the cross arm's 47%
+> stands as a property of the material rather than of the judge.
+
+`select-cross-judge` is that experiment: the same three candidates, the same selector prompt, the
+same four calls, one coordinate changed — who judges (run `40828283888`, full dev, second model
+`glm-4-flash`).
+
+| arm | judge | accuracy | ceiling | selection loss | `@second` taken | `@second` alone → returned |
+| --- | --- | --- | --- | --- | --- | --- |
+| `select-cross` | `deepseek-chat` | **60.70%** (930/1,532) | 1,006 | 76 | 27.7% | 11 of 43 (**25.6%**) |
+| `select-cross-judge` | `glm-4-flash` | **54.70%** (838/1,532) | 1,004 | 166 | 53.1% | 30 of 44 (**68.2%**) |
+
+**The asymmetry flips.** On the same construction — the second model writes the first candidate —
+that candidate is the answer 25.6% of the time when the *other* model judges and 68.2% of the
+time when its own author does. Paired: 128 cases only the first arm got, 36 only the second,
+**Δ = −6.01pp, 95% CI [−7.64, −4.37], p = 2.7e-13**, discordance 10.7%, the design resolves
+**2.3pp**. Two things follow, and the second is the one that matters.
+
+1. **The judge's preference is authorship, measured rather than assumed.** Nothing else changed:
+   the candidates were generated the same way, the ceiling is two questions apart (1,006 vs 1,004,
+   which is generation drift), and the prompt the judge reads is identical. The only difference in
+   the world is which model answers it.
+2. **A judge swap is not the fix, because the other judge cannot read SQL.** `glm-4-flash` loses
+   **166** of its 1,004 ceiling cases where the first judge loses **76** of 1,006. Both judges
+   prefer their own writing; only one of them is good at the job. So the registered next step
+   stands — a judge that is neither author — and it is unavailable today (`glm-4.5` answers 429 on
+   this account).
+
+### What the attribution table adds to the accuracy
+
+Accuracy says the swap cost 6.01pp. The candidate record says *how*, and it is not the same
+mistake in both directions:
+
+| the answer was in | the arm returned | `select-cross` | `select-cross-judge` |
+| --- | --- | --- | --- |
+| `metadata+evidence` + `values` (two candidates agree) | `inline+evidence@second` | **23** | **128** |
+| `inline+evidence@second` (the second model alone) | `metadata+evidence` | **30** | 12 |
+
+The `glm` judge does not merely prefer its own statement when the alternatives are doubtful. It
+takes it **against two candidates that agree with each other and are both right**, 128 times
+against 23. That is the single largest group of losses in the whole experiment, and no accuracy
+number could have found it: it is the same 6pp whether the judge is confused about SQL or
+attached to its own prose, and the table is what tells them apart.
+
+So the bias is not a threshold to tune and not a prompt to sharpen. It is a channel: the judge
+never sees a label, but it sees the *style* of a statement, and style is authorship. The next
+lever is therefore to close that channel rather than to change who speaks through it —
+**canonicalise the candidate text** (keyword case, whitespace, aliasing, literal formatting) so
+that two statements which compute the same thing look the same thing. It is one lever on the
+existing arm, it needs no third model, and the candidate record now prices it directly: a
+canonicalisation that works moves the 128 without touching the 12.
+
+### The drift between runs, stated where it can be seen
+
+The same arm has now been measured three times on dev: **61.70%** (`40806666847`), **61.55%**
+(`40817333043`) and **60.70%** (`40828283888`). A 1.0pp spread is larger than the −0.78pp the
+first of those runs was used to claim, which is exactly why every claim in this file comes from a
+*paired* comparison inside one run: pairing cancels the drift, and comparing two arms from two
+different runs does not. The three numbers are printed here so that the next reader does not
+discover it the way this one did.
+
 ## The floor is enforced, not remembered
 
 A benchmark that only produces a report gets read once. The BIRD arms have a

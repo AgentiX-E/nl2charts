@@ -8,6 +8,34 @@ cannot be argued with.
 
 ### Measured
 
+- **The judge is the variable — and the swap costs 6.01pp because the other judge cannot read
+  SQL.** The registered experiment finally ran: `select-cross` against `select-cross-judge`, same
+  candidates, same selector prompt, same four calls, only the judge changes (run `40828283888`,
+  full dev, second model `glm-4-flash`).
+
+  | arm | judge | accuracy | ceiling | loss | `@second` taken | alone → returned |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | `select-cross` | `deepseek-chat` | 60.70% | 1,006 | 76 | 27.7% | 11 of 43 (25.6%) |
+  | `select-cross-judge` | `glm-4-flash` | 54.70% | 1,004 | 166 | 53.1% | 30 of 44 (68.2%) |
+
+  **The asymmetry flips** (25.6% → 68.2% on the same construction), which answers the registered
+  question: the preference is authorship, not "the second model's answers are harder". Paired
+  Δ = −6.01pp, 95% CI [−7.64, −4.37], p = 2.7e-13, resolves 2.3pp. And the swap is not a fix —
+  `glm-4-flash` loses 166 of its 1,004 ceiling cases against 76 of 1,006, so both judges prefer
+  their own writing and only one can read the table.
+
+  The candidate record says *how*, and this is the part accuracy could not: with `glm` judging, the
+  single largest loss group is **128** cases where two candidates agreed, both were right, and the
+  judge took its own statement anyway — against **23** for the other judge. Not doubt, not a
+  threshold: a channel. The judge never sees a label, but it sees style, and style is authorship.
+  Next lever: canonicalise the candidate text (case, whitespace, aliasing, literal formatting), one
+  lever on the existing arm, no third model required — the record prices it directly.
+
+- **The same arm has now read 61.70%, 61.55% and 60.70% on dev.** A 1.0pp spread across three runs
+  is larger than the −0.78pp the first of them was used to claim. Every claim in `docs/benchmarks.md`
+  comes from a paired comparison *inside* one run, which cancels this; the number is written down
+  so a cross-run comparison is not made by accident.
+
 - **The cross-vendor half: the ceiling rises 2.7pp, the selector buries it, and the sign does not
   flip.** The same pair on all 1,532 questions with `glm-4-flash` as the second model (run
   `40817333043`): `select-mixed` **62.7%**, `select-cross` **61.6%**, onlyFirst 42 / onlySecond
@@ -320,6 +348,16 @@ cannot be argued with.
   silently dropping the other.
 
 ### Fixed
+
+- **A judge swap that loses ground is the result, not a regression.** `evaluateGate` fails a run
+  whose last arm trails its first by more than 5pp — a sane rule for an arm that was a candidate
+  for adoption, and exactly wrong for an arm built to price the judge: it refused to publish
+  `select-cross-judge` at 54.7% against 60.7%, the one number the experiment existed to produce,
+  after 57 minutes of evaluation. The rule now exempts a pair whose arms declare different judges,
+  because that delta *is* the measurement; outages are caught by their own guards (failure share,
+  candidate survival, an arm that produced no results), so the exemption cannot hide a dead
+  endpoint. Two `evaluateGate` cases hold it: the swap passes, and the same 6pp gap between two
+  arms that share a judge still fails.
 
 - **A candidate the engine refused was dropped in silence.** The sampling loop read
   `const executed = await oracle.run(...); if (executed.ok) candidates.push(...)` with no
