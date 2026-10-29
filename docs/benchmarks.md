@@ -1225,10 +1225,23 @@ rarely wins the vote. Testing whether heterogeneity *by itself* helps needs a se
 the same class as the primary — `glm-4.5` answers 429 from this account (two serial preflight
 calls, both 429), so that experiment is blocked outside this repository.
 
-One detail worth keeping: `cost.extraCallsPerCase` is **0.0167**, not zero, in both groups.
-Both arms declare `vote: 3` and `repairs: 0`, so the count should be identical; roughly two
-extra calls per 120 cases arrive from somewhere. It is reproducible, so it is not sampling
-noise, and it is the only unexplained difference between the two arms.
+One detail worth keeping, because it turned out not to be noise. `cost.extraCallsPerCase`
+was **0.0167**, not zero, in both groups: both arms declare `vote: 3` and `repairs: 0`, so
+the count should be identical. The per-case rows put it on two questions, ids 25 and 46,
+where `select-mixed` spent three calls and `select-cross` spent four.
+
+The counter is right and the arms differ for a reason worth having. On those two questions
+every `select-mixed` candidate was refused by the engine, so the arm returned from the
+zero-candidate branch before spending the selector call. `select-cross` kept at least one
+candidate there — written by the other model — and spent it. The extra call is a rescue, not
+a cost.
+
+What was wrong is that the artifact could not say so. `reason: 'values'` with
+`candidateRecall: false` is what a zero-candidate case looks like *and* what a
+surviving-candidates-but-wrong case looks like, and those are different problems: three
+statements the engine refused versus three that ran and were wrong. `caseRows` now carries
+`errorKind` and a truncated `error`, so the next reader gets this in two minutes instead of
+following the same trail.
 
 ## The preflight that only called one endpoint
 
