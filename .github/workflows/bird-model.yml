@@ -56,7 +56,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 300
     concurrency:
-      group: bird-model
+      # The same slot as `bird-dev.yml` and `ci.yml`'s Mini-Dev job: a different group name
+      # here meant two dev-split runs could share a provider quota at once, which reads as a
+      # slower endpoint rather than as two jobs. Never cancel in progress — a 60-minute
+      # benchmark thrown away by a push is worse than waiting for it.
+      group: bird-eval
       cancel-in-progress: false
     env:
       # Deliberately not DEEPSEEK_API_KEY: this job must fail loudly if the other

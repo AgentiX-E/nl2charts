@@ -2280,6 +2280,37 @@ styles, a negative number beside a subtraction, two statements and a semicolon �
 forms and must return identical rows, plus 100 restylings of one statement that must collapse to a
 single string.
 
+### Closing the channel does not help the judge that can read SQL
+
+The lever ran on the full dev split (run `40842268219`, second model `glm-4-flash`), one field
+apart from its control:
+
+| arm | judge | accuracy | ceiling | selection loss | two candidates agreed > took its own |
+| --- | --- | --- | --- | --- | --- |
+| `select-cross` | `deepseek-chat` | **61.42%** (941/1,532) | 1,005 | 68 | 21 |
+| `select-cross-canon` | `deepseek-chat` | 60.97% (934/1,532) | 1,004 | 74 | 27 |
+
+Paired: 21 cases only the control got, 14 only the canonical arm, **Δ = −0.46pp, 95% CI
+[−1.21, +0.30], p = 0.31**, discordance 2.28%, and the design resolves **1.08pp**. The registered
+criterion is **not met**: the two-agree group did not fall by half (21 → 27), and accuracy did not
+hold.
+
+The ceiling is the part that makes the null readable rather than disappointing: 1,005 against 1,004
+means the two arms generated equally good candidate sets, and 60.97% of the cases were decided the
+same way. What moved is not the material. One line in the table is sharper than the delta: the
+control took the second model's statement **32** times when it was the only answer, and so did the
+canonical arm — **32**. Whatever the primary judge is doing with its 68 losses, recognising the
+author's prose is not it.
+
+Three things this licenses, and two it does not. **Licensed:** canonicalisation costs nothing (no
+call, no token) and changes nothing for a judge that reads SQL; the `128` that motivated the lever
+is **21** under this judge, so the two numbers were never the same phenomenon; and a style channel
+that is real for one judge can be absent for another, which is a fact about judges and not about
+text. **Not licensed:** that canonicalisation is useless — the arm that can test it where it was
+measured is `select-cross-judge-canon` (the same canonical text read by the second model, queued at
+the time of writing); and not that the 6.01pp swap was "readability rather than taste", which needs
+that arm to separate style from the act of reading.
+
 ## The floor is enforced, not remembered
 
 A benchmark that only produces a report gets read once. The BIRD arms have a

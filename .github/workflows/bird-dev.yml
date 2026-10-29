@@ -36,6 +36,15 @@ jobs:
     name: BIRD dev (1534 questions)
     runs-on: ubuntu-latest
     timeout-minutes: 240
+    # One slot for every heavyweight run, shared with `ci.yml`'s Mini-Dev job and with
+    # `bird-model.yml`. They draw from the same provider quota and write to the same
+    # artifact path, and this workflow used to declare no group at all — so a dispatched
+    # dev run and a CI Mini-Dev run overlapped for an hour. The measurement was not wrong,
+    # it was slow: 60 minutes for an arm that takes 29 alone, and a slow enough run trips
+    # the timeout guards, which then get read as an endpoint verdict.
+    concurrency:
+      group: bird-eval
+      cancel-in-progress: false
     env:
       DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
       LLM_BASE_URL: https://api.deepseek.com/v1

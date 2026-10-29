@@ -23,6 +23,16 @@ cannot be argued with.
 
 ### Measured
 
+- **Canonicalising the candidates changes nothing for a judge that can read SQL.** The lever ran on
+  the full dev split (run `40842268219`, one field apart): `select-cross` **61.42%** (941/1,532)
+  against `select-cross-canon` **60.97%** (934/1,532), **Δ = −0.46pp, 95% CI [−1.21, +0.30],
+  p = 0.31**, 21 cases only the control, 14 only the canonical arm, discordance 2.28%, the design
+  resolves 1.08pp. The registered criterion is not met, and the runner-up reading is the
+  interesting one: the control took the second model's statement **32** times when it was the only
+  correct answer, and so did the canonical arm — 32. The `128` that motivated the lever is **21**
+  under this judge, so the two numbers were never the same phenomenon: a style channel that is real
+  for one judge can be absent for another.
+
 - **The judge swap reproduces: −5.87pp, and the rerun exposes a counter that merges two
   mechanisms.** The re-dispatched pair (`40835164245`, full dev, second model `glm-4-flash`) is the
   second independent reading of the same experiment: `select-cross` **60.90%** (933/1,532) against
