@@ -323,16 +323,24 @@ describe('a sampling arm', () => {
   it('counts a candidate the guard refused instead of letting the set shrink quietly', async () => {
     // A candidate that never arrives is not a candidate that was wrong: the set is smaller,
     // the case still answers, and the ceiling falls for a reason that is not in the arm. The
-    // guard rejects a write, so this is the `other` side of `candidateFailures` — the side a
-    // real endpoint outage never exercises.
+    // guard rejects a write, so this is the `engine` side of `candidateFailures` — the side a
+    // real endpoint outage never exercises, and the side that used to share a cell with
+    // "the reply carried no statement".
     const result = await run({
       plan: { whenValues: 'delete from items' },
       env: { BIRD_ARMS: 'select-mixed' },
     });
-    const arms = result.report.arms as { candidateFailures?: { llm: number; other: number } }[];
+    const arms = result.report.arms as {
+      candidateFailures?: { llm: number; engine: number; unparsed: number };
+      candidateSurvival?: Record<string, { generated: number; survived: number }>;
+    }[];
     // The oracle opens every database read-only, so the write is refused by the engine and
-    // counted as `other`: the split that tells "the endpoint refused" from "the engine did".
-    expect(arms[0]?.candidateFailures).toMatchObject({ llm: 0, other: 1 });
+    // counted as `engine`: the split that tells "the endpoint refused" from "the engine did".
+    expect(arms[0]?.candidateFailures).toMatchObject({ llm: 0, engine: 1, unparsed: 0 });
+    // ...and the arm says which source it came from, which a merged count cannot: a cross arm
+    // that loses the second model on every question is a different finding from one that loses
+    // its own prompt.
+    expect(arms[0]?.candidateSurvival?.values).toEqual({ generated: QUESTIONS.length, survived: QUESTIONS.length - 1 });
     const cases = result.report.cases as {
       id: string;
       passed: boolean;
@@ -971,9 +979,9 @@ describe('levers that need their input to be present', () => {
     expect(result.code).toBe(0);
     const arms = result.report.arms as {
       passed: number;
-      candidateFailures?: { llm: number; other: number; attempted: number };
+      candidateFailures?: { llm: number; engine: number; unparsed: number; attempted: number };
     }[];
-    expect(arms[0]?.candidateFailures).toEqual({ llm: 1, other: 0, attempted: QUESTIONS.length * 3 });
+    expect(arms[0]?.candidateFailures).toEqual({ llm: 1, engine: 0, unparsed: 0, attempted: QUESTIONS.length * 3 });
     expect(arms[0]?.passed).toBe(QUESTIONS.length);
   });
 

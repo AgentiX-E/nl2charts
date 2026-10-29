@@ -239,8 +239,21 @@ export function compare(report, baseline) {
       issues.push(`BIRD1: ${item.arm} reports lost candidates without the number it attempted`);
       continue;
     }
-    if (loss.llm + loss.other > loss.attempted) {
-      issues.push(`BIRD1: ${item.arm} lost ${String(loss.llm + loss.other)} of ${String(loss.attempted)} candidates, which is more than it drew`);
+    // `engine` and `unparsed` are separate mechanisms with separate repairs, and an artifact
+    // written before the split has neither -- reading its merged `other` as one of them would
+    // invent which mechanism it was, so the halves count as zero here.
+    const lostTotal = loss.llm + (loss.engine ?? 0) + (loss.unparsed ?? 0);
+    if (lostTotal > loss.attempted) {
+      issues.push(`BIRD1: ${item.arm} lost ${String(lostTotal)} of ${String(loss.attempted)} candidates, which is more than it drew`);
+    }
+    if (loss.engine !== undefined && loss.engine / loss.attempted > 0.5) {
+      // A note, not an issue: a statement the engine refuses is the model's output quality, and
+      // an arm whose statements are all unrunnable is a 0% reading rather than a broken harness.
+      // It is only worth saying out loud, because accuracy and ceiling both measure the sample
+      // and neither of them says so.
+      notes.push(
+        `BIRD1: ${item.arm} had ${String(loss.engine)} of ${String(loss.attempted)} candidates refused by the engine (${((loss.engine / loss.attempted) * 100).toFixed(1)}%); its accuracy and ceiling both measure the sample`,
+      );
     }
     if (loss.llm / loss.attempted > 0.1) {
       issues.push(
@@ -755,7 +768,7 @@ function selfTest() {
   // A candidate set that shrank without saying so: the case-level numbers stay healthy
   // while the ceiling measures an endpoint's quota.
   const thinCandidates = compare(
-    { selection: { scored: 100, split: 'minidev' }, model: 'deepseek-chat', run, arms: [arm('select-cross', 60, 100, { vote: 3, selector: 'model', calls: { mean: 4, max: 4 }, candidateFailures: { llm: 90, other: 0, attempted: 300 } })] },
+    { selection: { scored: 100, split: 'minidev' }, model: 'deepseek-chat', run, arms: [arm('select-cross', 60, 100, { vote: 3, selector: 'model', calls: { mean: 4, max: 4 }, candidateFailures: { llm: 90, engine: 0, unparsed: 0, attempted: 300 } })] },
     { ...baseline, expectedArms: ['select-cross'] },
   );
   if (!thinCandidates.issues.some((issue) => issue.includes('ceiling measures the endpoint'))) {

@@ -204,8 +204,8 @@ describe('the chain that actually runs', () => {
   it('refuses an arm whose candidates never arrived, which no case count can see', () => {
     // One candidate of three refused on every question: every case still answers, so the
     // case-level guard passes, and the ceiling falls for a reason that is not in the arm.
-    type Lost = { candidateFailures?: { llm: number; other: number } };
-    const thin: Lost[] = Array.from({ length: 100 }, () => ({ candidateFailures: { llm: 1, other: 0 } }));
+    type Lost = { candidateFailures?: { llm: number; engine: number; unparsed: number } };
+    const thin: Lost[] = Array.from({ length: 100 }, () => ({ candidateFailures: { llm: 1, engine: 0, unparsed: 0 } }));
     expect(() => assertCandidateSurvival('select-cross', thin, 3)).toThrow(/never arrived/);
     // Under the outage threshold it is noise, not an outage.
     const sparse: Lost[] = [...thin.slice(0, 25), ...Array.from({ length: 75 }, () => ({}))];
@@ -639,7 +639,7 @@ describe('the decomposition lever', () => {
     const runs = [
       { decomposition: { candidates: 1, steps: 3 } },
       { decomposition: { candidates: 1, steps: 0 } },
-      { candidateFailures: { llm: 1, other: 0 } },
+      { candidateFailures: { llm: 1, engine: 0, unparsed: 0 } },
     ];
     expect(decompositionFunnel(runs as never)).toEqual({ asked: 2, fired: 1, share: 0.5, meanSteps: 1.5 });
   });

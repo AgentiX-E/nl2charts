@@ -8,6 +8,30 @@ cannot be argued with.
 
 ### Added
 
+- **`candidateFailures` had one cell for two mechanisms and now has three.** A rerun put 440 of
+  4,596 candidates in `other`, and 375 of the 380 cases that were short a candidate were short the
+  *second model's* — which reads as a cross-arm ceiling finding when the cause may be a statement
+  the engine refused (the prompt writes SQL that will not run) or a reply the parser could not read
+  (the prompt produced nothing usable). Those are repaired by changing the prompt and by changing
+  extraction respectively, and a merged counter recommends neither. The field is now
+  `{llm, engine, unparsed}`, classified straight off the error code
+  (`classifyCandidateFailure`: `NL2C_E_TIMEOUT`/`NL2C_E_LLM_UNAVAILABLE` → `llm`,
+  `NL2C_E_GUARD_REJECTED`/`NL2C_E_ENGINE_FAILED` → `engine`, everything else including
+  `NL2C_E_LLM_INVALID_RESPONSE` → `unparsed` — an unusable answer is output quality, not an outage).
+
+  Each arm also carries `candidateSurvival`: per source, how many candidates it was asked for and how
+  many arrived. `candidateFailures` says how many were lost; this says *whose*, which is the
+  difference between a second endpoint refusing its candidate (a vendor problem) and one of our own
+  prompts never parsing (ours). The per-case record is written even when every candidate died, which
+  is the case a merged count is least able to describe.
+
+  Only `llm` still fails a run. `engine` above the same share is a *note*, not a gate: a statement
+  that will not run is the model's output quality, and the arm's 0% is a reading the report has to
+  be able to carry. The first version of this change gated `engine` at 10% and the existing
+  "no sample survived" end-to-end test turned red on the next run, which is the test doing its job.
+
+### Added
+
 - **The order of the candidates is a channel, and it was confounded with authorship.** Every
   cross-model arm so far lists the second model's statement first (`CROSS_SOURCES`), so the 52.6%
   of cases where `@second` is returned supports two readings that call for opposite next steps —

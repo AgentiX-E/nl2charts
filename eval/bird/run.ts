@@ -631,6 +631,25 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   ['synthetic', 'metadata+evidence'],
 ];
 
+/**
+ * Why a candidate is missing from the set the ceiling is taken over.
+ *
+ * One number used to hold two mechanisms, and the two call for opposite repairs: a statement
+ * the engine refused means the prompt writes SQL that will not run, a reply the parser could not
+ * read means the prompt produced nothing usable. A rerun put 440 of 4,596 candidates in that one
+ * cell and 375 of the 380 cases that were short a candidate were short the *second model's* —
+ * which is either a cross-arm ceiling finding or a prompt finding, and the merged counter could
+ * not say which.
+ */
+export interface CandidateFailures {
+  /** The endpoint did not answer: a throttled key, an outage, a timeout. */
+  readonly llm: number;
+  /** The statement was written and the database refused to run it. */
+  readonly engine: number;
+  /** No statement could be read out of the reply, or the call failed for a reason that is not the endpoint. */
+  readonly unparsed: number;
+}
+
 export interface CaseRun extends CaseOutcome {
   readonly predicted: string;
   readonly reason: MatchReason;
@@ -689,7 +708,17 @@ export interface CaseRun extends CaseOutcome {
    * candidate failed hides the run where one of three was refused for all 1,532
    * questions — which reads as a lower ceiling and is an outage.
    */
-  readonly candidateFailures?: { readonly llm: number; readonly other: number };
+  readonly candidateFailures?: CandidateFailures;
+  /**
+   * Per source: how many candidates it was asked for, and how many arrived.
+   *
+   * A mixed arm draws exactly one candidate from each source (a contract the suite enforces),
+   * so a source that survived on 60% of the questions is a source that was refused or unparsed on
+   * the other 40%. `candidateFailures` says how many were lost; this says *whose* — and on the
+   * cross-model arm the answer was 375 of 380 times the second model, which is a statement about
+   * that endpoint or that prompt rather than about the selector.
+   */
+  readonly candidateSurvival?: Readonly<Record<string, { readonly generated: number; readonly survived: number }>>;
   /**
    * What the decomposition prompt produced, on the candidates that were asked for one.
    *
@@ -917,15 +946,70 @@ export function assertRepairPathFired(armName: string, cases: readonly { attempt
  * says why. One dev run lost its second endpoint to a quota error mid-run and reported a
  * ceiling 2pp below the previous one for exactly this reason.
  */
+/**
+ * Per-source survival, summed over the run.
+ *
+ * `candidateFailures` answers "how many candidates were lost"; this answers "whose". On the
+ * cross-model arm the two are different questions with different repairs — a second endpoint that
+ * refused its candidate is a vendor problem, and a prompt that never parsed is ours.
+ */
+export function candidateSurvivalBySource(
+  runs: readonly { candidateSurvival?: Readonly<Record<string, { readonly generated: number; readonly survived: number }>> }[],
+): Record<string, { generated: number; survived: number }> {
+  const out: Record<string, { generated: number; survived: number }> = {};
+  for (const run of runs) {
+    for (const [source, count] of Object.entries(run.candidateSurvival ?? {})) {
+      const total = (out[source] ??= { generated: 0, survived: 0 });
+      total.generated += count.generated;
+      total.survived += count.survived;
+    }
+  }
+  return out;
+}
+
+/**
+ * Which of the three mechanisms a failed candidate belongs to.
+ *
+ * The error codes already distinguish them, and the distinction is exactly the repair:
+ *
+ *   `NL2C_E_TIMEOUT` / `NL2C_E_LLM_UNAVAILABLE`  the endpoint did not answer      -> llm
+ *   `NL2C_E_GUARD_REJECTED` / `NL2C_E_ENGINE_FAILED`  a statement that must not run -> engine
+ *   `NL2C_E_LLM_INVALID_RESPONSE` and everything else  no usable statement         -> unparsed
+ *
+ * `INVALID_RESPONSE` is deliberately *not* `llm`: the endpoint answered, the answer was unusable,
+ * which is output quality and not an outage. Counting it as an outage would let a prompt that
+ * produces unparseable replies fail the run with "the endpoint is down".
+ */
+export function classifyCandidateFailure(code: string | undefined): keyof CandidateFailures {
+  if (code === 'NL2C_E_TIMEOUT' || code === 'NL2C_E_LLM_UNAVAILABLE') return 'llm';
+  if (code === 'NL2C_E_GUARD_REJECTED' || code === 'NL2C_E_ENGINE_FAILED') return 'engine';
+  return 'unparsed';
+}
+
+export function candidateFailureTotals(
+  runs: readonly { candidateFailures?: CandidateFailures }[],
+): CandidateFailures {
+  return runs.reduce<CandidateFailures>(
+    (total, run) => ({
+      // A record written before the split carries no `engine`/`unparsed`. Reading its merged
+      // `other` as either half would invent which mechanism it was, so the halves total zero.
+      llm: total.llm + (run.candidateFailures?.llm ?? 0),
+      engine: total.engine + (run.candidateFailures?.engine ?? 0),
+      unparsed: total.unparsed + (run.candidateFailures?.unparsed ?? 0),
+    }),
+    { llm: 0, engine: 0, unparsed: 0 },
+  );
+}
+
 export function assertCandidateSurvival(
   armName: string,
-  runs: readonly { candidateFailures?: { readonly llm: number; readonly other: number } }[],
+  runs: readonly { candidateFailures?: CandidateFailures }[],
   vote: number,
   maxShare = 0.1,
 ): void {
   const attempted = runs.length * vote;
   if (attempted === 0) return;
-  const lost = runs.reduce((total, run) => total + (run.candidateFailures?.llm ?? 0), 0);
+  const lost = candidateFailureTotals(runs).llm;
   const share = lost / attempted;
   if (share <= maxShare) return;
   throw new Error(
@@ -934,6 +1018,7 @@ export function assertCandidateSurvival(
       'The candidate set is smaller than the arm declares, so its ceiling measures the endpoint.',
   );
 }
+
 
 /**
  * What the empty-result lever did, on the cases that ran.
@@ -2294,7 +2379,11 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
         // three calls lowers the ceiling exactly as much as a prompt that writes a bad
         // statement. Counting them apart is the only way to tell the two apart after
         // the run, because by then the request is gone.
-        const lost = { llm: 0, other: 0 };
+        const lost: { llm: number; engine: number; unparsed: number } = { llm: 0, engine: 0, unparsed: 0 };
+        // Who was asked, and who answered. Kept per source because a merged count cannot say
+        // whether the cross arm's missing candidate came from the second model or from one of
+        // the two prompts the primary model wrote.
+        const survival: Record<string, { generated: number; survived: number }> = {};
         // Only the candidates that were asked to decompose are counted here, and they are
         // counted whether or not the statement ran: the question is what the prompt
         // produced, not whether the engine liked it.
@@ -2308,6 +2397,8 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
             const sources = arm.mixed;
             const source = sources === undefined ? name : (sources[sample % sources.length] as string);
             const spec = parseMixedSource(source);
+            const drawn = (survival[source] ??= { generated: 0, survived: 0 });
+            drawn.generated += 1;
             const sampler = sources === undefined ? pipeline : pipelineFor(resolveArm(spec.arm) as Arm, spec.provider);
             const askedSample = await sampler.ask({ question: question.question, schema });
             // The mechanism has to be observable, not declared: a prompt that asks for
@@ -2318,7 +2409,10 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
               decomposedSteps += askedSample.decomposedSteps;
             }
             const executed = await oracle.run(question.db_id, askedSample.sql);
-            if (executed.ok) candidates.push({ sql: askedSample.sql, rows: executed.rows, source });
+            if (executed.ok) {
+              candidates.push({ sql: askedSample.sql, rows: executed.rows, source });
+              drawn.survived += 1;
+            }
             else {
               // A statement the engine refused is a candidate that never arrived, and it used
               // to be dropped in silence here: `if (executed.ok) push` has no else, so the set
@@ -2327,12 +2421,15 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
               // endpoint side. The verdict on a set that is missing a member is not a fact
               // about the selector, so the loss is counted where it happened.
               sampleErrors.push(undefined);
-              lost.other += 1;
+              lost.engine += 1;
             }
           } catch (error) {
             // A sample that fails the guard or the engine casts no vote; the other
             // samples still produce one. The reason is kept for the zero-candidate case.
-            const kind = (error as { code?: string }).code?.startsWith('NL2C_E_LLM') === true ? 'llm' : 'other';
+            // Three outcomes, not two, and the error code already says which: the endpoint did
+            // not answer, the statement must not run, or no statement came out. Merging them let
+            // a prompt that produced nothing usable be read as a throttled key.
+            const kind = classifyCandidateFailure((error as { code?: string }).code);
             sampleErrors.push(kind === 'llm' ? 'llm' : undefined);
             lost[kind] += 1;
           }
@@ -2353,6 +2450,9 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
             errorKind: outage ? 'llm' : 'other',
             candidateRecall: false,
             candidateFailures: lost,
+            // The case where every candidate died is the one a per-source record is most needed
+            // for, and it is the one the success path cannot write.
+            ...(Object.keys(survival).length === 0 ? {} : { candidateSurvival: survival }),
             ...(decomposedCandidates === 0 ? {} : { decomposition: { candidates: decomposedCandidates, steps: decomposedSteps } }),
             calls: callsMade(),
           };
@@ -2464,7 +2564,8 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
           ...(arm.emptyRetry === undefined
             ? {}
             : { emptyDropped: choice.dropped, emptyRetried: retried, emptyRecovered: recovered }),
-          ...(lost.llm + lost.other === 0 ? {} : { candidateFailures: lost }),
+          ...(lost.llm + lost.engine + lost.unparsed === 0 ? {} : { candidateFailures: lost }),
+          ...(Object.keys(survival).length === 0 ? {} : { candidateSurvival: survival }),
           ...(decomposedCandidates === 0 ? {} : { decomposition: { candidates: decomposedCandidates, steps: decomposedSteps } }),
           calls: callsMade(),
         };
@@ -2543,6 +2644,12 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
   // ...and a candidate that never arrived shrinks the set the ceiling is taken over,
   // which no case-level count can see.
   if (arm.vote !== undefined && arm.vote > 1) assertCandidateSurvival(name, runs, arm.vote);
+  // `engine` refusals are deliberately *not* guarded here: a statement that will not run is the
+  // model's output quality, which is what the arm is measuring. The endpoint rule above is an
+  // infrastructure verdict and belongs in a guard; this one belongs in the report. A run whose
+  // every candidate the engine refused (a read-only database and a prompt that writes INSERTs)
+  // is a 0% reading, not a broken harness -- the first version of this split failed that case
+  // and the suite said so.
   // ...and a bug in the runner is not a wrong answer: it fails the arm outright.
   assertHarnessClean(name, runs);
   if (arm.repairs > 0) assertRepairPathFired(name, runs);
@@ -2683,13 +2790,15 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
           ...(runs.some((run) => run.candidateFailures !== undefined)
             ? {
                 candidateFailures: {
-                  llm: runs.reduce((total, run) => total + (run.candidateFailures?.llm ?? 0), 0),
-                  other: runs.reduce((total, run) => total + (run.candidateFailures?.other ?? 0), 0),
+                  ...candidateFailureTotals(runs),
                   attempted: runs.length * arm.vote,
                 },
               }
             : {}),
           ...(arm.mixed === undefined ? {} : { sources: winnerSources(runs, arm.mixed) }),
+          ...(runs.some((run) => run.candidateSurvival !== undefined)
+            ? { candidateSurvival: candidateSurvivalBySource(runs) }
+            : {}),
           // How often the selector produced a usable index. A selector that fails to
           // answer half the time is not a null result; it is a broken prompt.
           ...(arm.select === true
@@ -2852,6 +2961,7 @@ export function caseRows(outcomes: ReadonlyMap<string, readonly CaseRun[]>): Rec
       // returned something else, and the file could not say whether the selector refused
       // the second model's statement or took a different wrong one beside it.
       ...(run.candidates === undefined ? {} : { candidates: run.candidates }),
+      ...(run.candidateSurvival === undefined ? {} : { candidateSurvival: run.candidateSurvival }),
       ...(run.winnerSource === undefined ? {} : { winnerSource: run.winnerSource }),
       // Why this case has no candidate, when it has none.
       //

@@ -199,13 +199,32 @@ if (report === null) {
         '',
         '### Candidates that never arrived',
         '',
-        '| arm | attempts | refused by the model | refused by the engine |',
-        '| --- | --- | --- | --- |',
+        '| arm | attempts | endpoint did not answer | engine refused | no usable statement |',
+        '| --- | --- | --- | --- | --- |',
         ...lossy.map(
           (arm) =>
-            `| \`${arm.arm}\` | ${arm.candidateFailures.attempted} | ${arm.candidateFailures.llm} | ${arm.candidateFailures.other} |`,
+            `| \`${arm.arm}\` | ${arm.candidateFailures.attempted} | ${arm.candidateFailures.llm} | ${arm.candidateFailures.engine ?? 0} | ${arm.candidateFailures.unparsed ?? 0} |`,
         ),
       );
+      // `candidateFailures` says how many candidates were lost; this says whose. On a cross arm
+      // they are different findings: a second endpoint that refused its candidate is a vendor
+      // problem, a prompt that never parsed is ours.
+      const sourced = lossy.filter((arm) => arm.candidateSurvival !== undefined && Object.keys(arm.candidateSurvival).length > 0);
+      for (const arm of sourced) {
+        lines.push(
+          '',
+          `#### \`${arm.arm}\`: which source lost its candidate`,
+          '',
+          '| source | asked | arrived | share |',
+          '| --- | --- | --- | --- |',
+          ...Object.entries(arm.candidateSurvival)
+            .sort(([left], [right]) => left.localeCompare(right))
+            .map(([source, count]) => {
+              const share = count.generated === 0 ? 0 : count.survived / count.generated;
+              return `| \`${source}\` | ${count.generated} | ${count.survived} | ${(share * 100).toFixed(1)}% |`;
+            }),
+        );
+      }
     }
     if (report.aa !== undefined) {
       const aa = report.aa;

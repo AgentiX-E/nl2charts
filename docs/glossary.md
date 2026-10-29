@@ -258,6 +258,15 @@ that makes the reading possible is the existing `candidates` array — on a shuf
 arm entry `i` is the statement offered in slot `i`, so author crossed with index
 answers the question after the run instead of before it.
 
+**Candidate failure** — A candidate that never reached the selector's shortlist, counted by
+mechanism instead of merged: `llm` (the endpoint did not answer), `engine` (the statement
+was written and the database refused to run it), `unparsed` (the reply carried no usable
+statement). Each arm also reports `candidateSurvival` per source, because *how many* were
+lost and *whose* were lost are different findings — a second endpoint that refused its
+candidate is a vendor problem, a prompt of ours that never parsed is ours. Only `llm` fails
+a run: it measures the key. The other two measure the model, and an arm whose whole set was
+refused is a 0% reading that the artifact has to be able to carry.
+
 **Canonical candidate text** — The one form a statement takes before a selector
 reads it: keyword and function names upper case, identifiers lower case, one space
 between tokens, comments gone, `!=` written `<>`, a trailing semicolon dropped

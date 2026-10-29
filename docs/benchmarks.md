@@ -2231,9 +2231,18 @@ That run also printed a number this file had no place for until the candidate re
 scattered — **380** of 1,532 cases carry two candidates instead of three, and **375** of those are
 missing `inline+evidence@second`. A quarter of the cross arm's cases never had the second model's
 statement to choose from, so the 25.6% / 68.2% asymmetry is measured over the cases where it
-survived. `other` merges two mechanisms — a statement the engine refused and a reply no statement
-could be extracted from — and they call for opposite work (fix the prompt, or fix the parser), which
-is why splitting it is the next increment rather than a footnote.
+survived.
+
+`candidateFailures` no longer has an `other` cell. It is `{llm, engine, unparsed}` — the endpoint did
+not answer, the statement was written and the database would not run it, the reply carried no
+statement — and each arm also carries `candidateSurvival` per source, so "375 of 380 were the second
+model's" becomes a reported share instead of a post-hoc grep over `cases[].candidates`. Only `llm`
+still fails a run: an endpoint that refuses a tenth of the candidates measures the key, while a
+statement the engine refuses measures the model — and an arm whose every candidate was refused (a
+read-only database against a prompt that writes `INSERT`s) is a 0% reading that has to survive to be
+reported. The first version of this split gated `engine` at 10% and one existing end-to-end test
+refuted it immediately: it would have crashed the run that was written to prove the 0% is reported
+as a reading rather than as an outage.
 
 ### The channel is style, and style can be closed without a third model
 
