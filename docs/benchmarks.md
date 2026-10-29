@@ -1446,6 +1446,56 @@ requested, so this is a measurement on a declared subset` and exits 0. The job s
 carries the phrase *declared subset — no accuracy floor applies* next to the number, so
 a reader who meets `298/500` does not have to reconstruct which kind of run it was.
 
+## A subset is an estimate only if its mix is the split's
+
+The paragraph above says a subset run is a measurement rather than a gate. It does not say
+what the measurement is *of*, and for a year of runs the answer was not the split. The
+sampler walked the three difficulty buckets round-robin — one case each per round — under a
+comment that claimed "a limit of 200 therefore keeps the difficulty mix". Equal allocation
+does the opposite: it replaces the mix with 33/33/33 as far as the buckets allow.
+
+| | simple | moderate | challenging |
+| --- | --- | --- | --- |
+| dev split (1,534 questions) | 925 (60.3%) | 464 (30.2%) | 145 (9.5%) |
+| a 120-question run, round-robin | 40 (33%) | 40 (33%) | **40 (33%)** |
+
+The hardest bucket is over-weighted by **3.5×** and the easiest under-weighted by 1.8×, so
+every accuracy quoted from a 120-question run described a subpopulation harder than the split
+it was named after. The size of the bias is measurable in the artifact the run already wrote,
+because it carries per-difficulty counts: reweighting `select-mixed`'s
+24/40 · 15/40 · 20/40 to the split's mix gives **52.2%** where the run reported **49.2%**.
+
+What survives and what does not:
+
+- **paired deltas survive.** Both arms scored the same 120 cases, so a difference between them
+  is still a difference on a harder subpopulation. The cross-vendor numbers, their intervals
+  and their discordance rates are *about that subpopulation*, and should be read as such.
+- **absolute accuracy does not.** `49.2%` on dev means nothing next to a dev floor taken on the
+  full split, and the gate was right to switch floors off for a declared subset — for a reason
+  nobody had written down.
+- **per-difficulty cells were the round-robin's only defence.** 40 challenging cases per arm is
+  a real signal; a proportional 120-case sample carries 11 of them, which is ±15pp. The two
+  goals conflict, and the estimator's job — estimating the split — wins.
+
+Quotas are proportional now, floored, with the leftover slots going to the largest fractional
+parts, which also covers the two cases the round-robin needed separate logic for (a bucket
+smaller than its quota, an unknown difficulty value). A 120-question dev sample is
+**73 / 36 / 11**.
+
+The artifact states what the sample *is* rather than what the sampler meant:
+
+```json
+"selection": {
+  "strategy": "proportional to the split difficulty mix (largest remainder), then question id",
+  "mix": { "sample": { "simple": 73, "moderate": 36, "challenging": 11 },
+           "available": { "simple": 925, "moderate": 464, "challenging": 145 } }
+}
+```
+
+Those two objects are what let a reader decide whether an accuracy is an estimate of the split
+or of some other population — and reweight a reading taken before the fix, which is the only
+honest way to reuse it.
+
 ## Retrieved knowledge from the training split
 
 The per-question hint in BIRD's dev split is worth 14pp and cannot be regenerated from

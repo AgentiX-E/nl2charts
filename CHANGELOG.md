@@ -232,6 +232,17 @@ cannot be argued with.
 
 ### Fixed
 
+- **The sampler did equal allocation and its comment claimed proportional — so every subset
+  accuracy described a harder split.** `stratifiedSample` walked the difficulty buckets
+  round-robin, one case per round, under a docstring promising that "a limit of 200 therefore
+  keeps the difficulty mix". A 120-question dev run was therefore 40/40/40 against a split that
+  is 925/464/145 (60.3 / 30.2 / 9.5): the challenging bucket over-weighted 3.5×. Reweighting the
+  per-difficulty counts the artifact already carries moves `select-mixed` from **49.2% to
+  52.2%**, which is the size of the bias. Paired deltas survive (both arms saw the same cases);
+  absolute accuracy does not. Quotas are proportional now (largest remainder), a 120-question
+  sample is **73/36/11**, and `selection.mix` prints the sample's counts next to the split's so
+  an old reading can be reweighted rather than merely trusted.
+
 - **`eval/` no longer carries a fallback that no arm can reach.** `arm.vote ?? 1` appeared twice — in
   the summary line's `recall@` column and in the attempted-call count — and both sat inside a branch
   guarded by `arm.vote` being defined, so neither `1` could ever be returned. The column is built by
