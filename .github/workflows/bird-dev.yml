@@ -26,6 +26,10 @@ on:
         description: Endpoint for the second model
         required: false
         default: 'https://open.bigmodel.cn/api/paas/v4'
+      second_provider:
+        description: Which secret holds the second key — zhipu (cross-vendor) or deepseek (the control that separates a vendor from a weaker model)
+        required: false
+        default: 'zhipu'
 
 jobs:
   dev:
@@ -44,7 +48,11 @@ jobs:
       # against another endpoint would measure the endpoint's auth error, not the model.
       BIRD_SECOND_MODEL: ${{ inputs.second_model }}
       BIRD_SECOND_BASE_URL: ${{ inputs.second_base_url }}
-      BIRD_SECOND_API_KEY: ${{ secrets.ZHIPU_API_KEY }}
+      # A control arm needs the *same* vendor as the primary model, and the only way to
+      # express that in Actions is to pick the secret here: `secrets[name]` cannot be
+      # indexed by an input. Without this, `select-cross` can only ever mean "a different
+      # vendor", and a weaker model's result cannot be told from a vendor's.
+      BIRD_SECOND_API_KEY: ${{ inputs.second_provider == 'deepseek' && secrets.DEEPSEEK_API_KEY || secrets.ZHIPU_API_KEY }}
       # A second endpoint has its own rate limit and its own connection behaviour; three
       # attempts (the default) is not enough for a 1,532-question run through a proxy.
       BIRD_LLM_RETRIES: '4'
