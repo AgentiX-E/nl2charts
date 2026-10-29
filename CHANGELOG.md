@@ -111,12 +111,14 @@ cannot be argued with.
 
   It refuses the cases where a stratum would be a fiction: an artifact that counts duplicated
   prompts without listing them, a list that covers fewer ids than its own count, and an empty
-  stratum are each reported as a stated absence rather than as a stratum of zero. It audits its
+  stratum are each reported as a stated absence rather than as a stratum of zero. A question
+  scored twice for one arm is reported too — the artifact is a file this tool did not write, and
+  last-wins would resolve an ambiguity into a number nobody can reproduce. It audits its
   own pooled row against the artifact's `ablations` entry and **throws** when the two readers
   disagree, because printing both for the reader to choose between is not a measurement.
   `isEntry` is a value rather than an inline guard for the same reason the other entries ended
   up that way: the first half of `argv[1] !== undefined && …` is permanently dark inside a test
-  process. 28 tests, and `eval/` is 29 of 29 files at 95% on all four dimensions.
+  process. 29 tests, and `eval/` is 29 of 29 files at 95% on all four dimensions.
 
 - **The job summary has a test, and it prints the resolution beside every delta.** The summary is
   the only part of a benchmark run a human reads, and until now no test touched it: every column in

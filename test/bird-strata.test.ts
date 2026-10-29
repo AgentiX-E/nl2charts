@@ -83,6 +83,18 @@ describe('pairing two arms', () => {
     const extra = [...cases, { arm: 'against', id: 'q7', passed: true }];
     expect(pairCases(extra, 'first', 'against').unpaired).toEqual(['q7']);
   });
+
+  it('reports a case scored twice rather than letting the last row win', () => {
+    // The artifact is a file this tool did not write. Two rows for one arm on one question
+    // mean the join is ambiguous, and an ambiguity reported is a measurement; one hidden is
+    // a number nobody can reproduce.
+    const twice = [...cases, { arm: 'first', id: 'q1', passed: false }];
+    const paired = pairCases(twice, 'first', 'against');
+    expect(paired.duplicates).toEqual(['first/q1']);
+    expect(paired.pairs).toHaveLength(6);
+    const reading = stratify(artifact({ cases: twice }), 'first', 'against');
+    expect(reading.problems[0]).toContain('scores 1 case(s) twice (first/q1)');
+  });
 });
 
 describe('one stratum', () => {

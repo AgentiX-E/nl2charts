@@ -93,12 +93,21 @@ export interface StrataReading {
 export function pairCases(cases: readonly CaseRow[], arm: string, against: string): {
   pairs: { id: string; first: boolean; second: boolean }[];
   unpaired: string[];
+  duplicates: string[];
 } {
   const first = new Map<string, boolean>();
   const second = new Map<string, boolean>();
+  // Two rows for one arm on one question make the join ambiguous: last-wins would silently
+  // pick one, and the artifact is a file this tool did not write. Legacy and hand-edited
+  // artifacts are exactly why a reader validates its input rather than trusting it.
+  const duplicates = new Set<string>();
+  const record = (target: Map<string, boolean>, row: CaseRow): void => {
+    if (target.has(row.id)) duplicates.add(`${row.arm}/${row.id}`);
+    target.set(row.id, row.passed);
+  };
   for (const row of cases) {
-    if (row.arm === arm) first.set(row.id, row.passed);
-    else if (row.arm === against) second.set(row.id, row.passed);
+    if (row.arm === arm) record(first, row);
+    else if (row.arm === against) record(second, row);
   }
   const pairs: { id: string; first: boolean; second: boolean }[] = [];
   const unpaired: string[] = [];
@@ -108,7 +117,7 @@ export function pairCases(cases: readonly CaseRow[], arm: string, against: strin
     else pairs.push({ id, first: passed, second: other });
   }
   for (const id of second.keys()) if (!first.has(id)) unpaired.push(id);
-  return { pairs, unpaired };
+  return { pairs, unpaired, duplicates: [...duplicates] };
 }
 
 export function summariseStratum(stratum: Stratum, pairs: readonly { first: boolean; second: boolean }[]): StratumRow {
@@ -155,6 +164,9 @@ export function summariseStratum(stratum: Stratum, pairs: readonly { first: bool
 export function stratify(artifact: Artifact, arm: string, against: string): StrataReading {
   const problems: string[] = [];
   const pairs = pairCases(artifact.cases ?? [], arm, against);
+  if (pairs.duplicates.length > 0) {
+    problems.push(`the artifact scores ${pairs.duplicates.length} case(s) twice (${pairs.duplicates.slice(0, 5).join(', ')}), so the join took the last one of each`);
+  }
   const pooled = summariseStratum('all', pairs.pairs);
   const rows: StratumRow[] = [pooled];
   const entry = artifact.mixedCandidatePrompts?.find((candidate) => candidate.arm === arm);
