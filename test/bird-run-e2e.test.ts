@@ -634,14 +634,17 @@ describe('the same candidates in one SQL style', () => {
       const selector = result.requests.filter((request) => request.prompt.includes('which candidate statement answers the question'));
       expect(selector.length).toBe(QUESTIONS.length);
       // The style channel is closed in what the judge reads: keyword case normalised, the
-      // gap before the parenthesis gone, the trailing semicolon gone.
-      expect(selector[0]?.prompt).toContain('SELECT COUNT(*) FROM items');
-      expect(selector[0]?.prompt).not.toContain('count ( * )');
-      expect(selector[0]?.prompt).not.toContain(');');
+      // gap before the parenthesis gone, the trailing semicolon gone. Asserted across every
+      // selection request rather than the first, because the questions are scored in a pool
+      // and which one reaches the endpoint first is a race, not a fact.
+      expect(selector.every((request) => !request.prompt.includes('count ( * )'))).toBe(true);
+      expect(selector.every((request) => !request.prompt.includes(');'))).toBe(true);
+      const counting = selector.filter((request) => request.prompt.includes('SELECT COUNT(*) FROM items'));
+      expect(counting.length).toBeGreaterThan(0);
       // Three candidates from three prompts and two models, written identically here on
       // purpose: after canonicalisation they are the same line, which is the whole point —
       // nothing in the text says who wrote it.
-      const lines = selector[0]?.prompt.split('\n').filter((line) => /^\d\. SELECT COUNT\(\*\) FROM items$/u.test(line)) ?? [];
+      const lines = (counting[0]?.prompt ?? '').split('\n').filter((line) => /^\d\. SELECT COUNT\(\*\) FROM items$/u.test(line));
       expect(lines).toHaveLength(3);
       // ...and the arm still answers every question, and still records the set it chose
       // from: the winner is taken by index out of the untouched candidate list, so the
@@ -679,7 +682,12 @@ describe('the same candidates in one SQL style', () => {
       });
       expect(result.code).toBe(0);
       const selector = result.requests.filter((request) => request.prompt.includes('which candidate statement answers the question'));
-      expect(selector[0]?.prompt).toContain('count ( * )');
+      // Every request carries the model's own layout, semicolon and all — the same style the
+      // arm above removes.
+      expect(selector.length).toBe(QUESTIONS.length);
+      expect(selector.every((request) => request.prompt.includes(' ( '))).toBe(true);
+      expect(selector.some((request) => request.prompt.includes('count ( * )'))).toBe(true);
+      expect(selector.every((request) => !request.prompt.includes('SELECT COUNT(*)'))).toBe(true);
     } finally {
       await second.close();
     }
