@@ -78,6 +78,11 @@ jobs:
         run: pnpm test:coverage
       - name: Coverage gate (per package, all four dimensions)
         run: pnpm gate:coverage
+      # A gate whose failure does not name the short file gets misdiagnosed: `FAIL node
+      # st=85.83` read as "coverage fell" for two rounds when it meant "the database services
+      # were not running". The self-test plants that tree.
+      - name: Coverage gate self-test (names the short file and the unset variable)
+        run: node tools/coverage-gate.mjs --self-test
       # The packages are measured and the harness that produces every published number was
       # not, so its coverage could only go down. This is not a threshold — `eval/` is at 64%
       # and a 95% red would be red for months — it is a ratchet against a committed ledger:

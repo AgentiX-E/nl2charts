@@ -281,6 +281,27 @@ cannot be argued with.
 
 ### Fixed
 
+- **The coverage gate names the file that is short, and whether its suite needed a service.**
+  `FAIL node st=85.83 br=87.50` was read as "coverage fell" on two consecutive rounds; it meant
+  "PostgreSQL and MariaDB were not running on this machine", because `mysql.test.ts` and
+  `postgres.test.ts` are `describe.skipIf(url === undefined)` and a skipped suite subtracts its
+  lines without touching the denominator. With the services up the same tree measures
+  **99.18 / 97.13 / 100 / 99.18**. The gate printed one aggregate line per package and nothing
+  else, so the two readings were indistinguishable — a gate that does not name its failure point
+  manufactures misdiagnosis, and a misdiagnosis costs more than a red build.
+
+  The gate now prints, under a failing package, each short file worst-first with its four
+  numbers; it carries a declared table of files whose suite is gated on a variable
+  (`ENV_GATED`), and when that variable is unset it says which one. The closing line states
+  which of the two causes it is: *"2 short file(s) belong to suites gated on an unset variable"*
+  or *"no short file belongs to an environment-gated suite, so this is missing tests"*. A zero
+  denominator is now **n/a** and a problem rather than 100% (ADR-217 at the package level). The
+  declaration cannot rot: `--self-test` fails if a listed file no longer exists, and it plants
+  the exact tree that caused the misdiagnosis — gated file, unset variable — plus the same tree
+  with the variable set, a renamed gated file, an unmeasured package, an empty summary and a
+  capped offender list. The self-test is in the quality job and in `gate:all`, so parity covers
+  it (19 commands).
+
 - **The sampler did equal allocation and its comment claimed proportional — so every subset
   accuracy described a harder split.** `stratifiedSample` walked the difficulty buckets
   round-robin, one case per round, under a docstring promising that "a limit of 200 therefore
