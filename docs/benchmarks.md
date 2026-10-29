@@ -1213,8 +1213,12 @@ Three things have to be read together:
 1. The two groups point in opposite directions and neither is significant. The honest reading
    of their difference is "inside the noise".
 2. `select-mixed` was **50.8%** in group A and **49.2%** in group B — the same arm, the same
-   questions, the same model, the same prompts. That 1.6pp is what 120 questions can resolve:
-   **±2pp**. No claim smaller than that survives this sample.
+   questions, the same model, the same prompts. That 1.6pp is what two runs of this sample
+   happened to differ by; the resolution computed from the discordance rate is 4.7–5.2pp
+   (see *The resolution of a delta, computed instead of discovered* below), and both mixes are
+   a third challenging where dev is a tenth (see *A subset is an estimate only if its mix is
+   the split's*). No claim smaller than 5pp survives this sample, and no absolute accuracy
+   from it describes dev.
 3. `sources` gives the mechanism. A `deepseek-chat` candidate wins 95 of 120 cases (79%); a
    `glm-4-flash` candidate wins 18 (15%). A candidate's author decides how often it wins, and
    how often it wins decides how far a ceiling can move.
