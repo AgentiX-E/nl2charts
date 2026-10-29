@@ -8,6 +8,28 @@ cannot be argued with.
 
 ### Added
 
+- **A rate per stratum, with the width that makes it readable.** A shuffled run produces one
+  conversion rate per candidate slot, four hundred to a thousand cases each, and `52.6 / 49.1 /
+  55.3` reads the same as `52.6 / 20.0 / 48.0` to anyone who is not shown the intervals — while
+  only the second is a finding. `eval/bird/position.ts` (`pnpm bench:bird:position --arm A`)
+  groups an arm's cases by the slot the tracked candidate sat in and prints, per stratum, the
+  cases, `took`, `passed`, and a Wilson interval for each, then a Newcombe interval for the
+  difference between the two extreme strata.
+
+  The verdict has three states, and the middle one is the reason for the tool: `separated` (the
+  interval excludes zero — the slot moved the choice in this run), `overlapping` (this run does
+  not separate the slot from the author, which is **not** the same as showing they are the same),
+  and `single-slot` (the artifact cannot answer the question at all, because an arm that never
+  moves the statement gives one number for both readings). Wilson rather than the textbook
+  interval because the strata are exactly where it fails: a slot taken on every case or on none
+  has an estimated variance of zero, and Wald would report a certainty the sample cannot carry.
+  `took` and `passed` are counted apart, since their gap is the part the judge decided rather
+  than the selector. The comparison is a union type with no `spreadPp` on the one-stratum branch,
+  so "no comparison was made" cannot wear the clothes of "a zero was measured".
+
+  The tool writes no verdict about which hypothesis wins: the criteria were registered in advance
+  and are read off it, which is the order this repository got wrong once before.
+
 - **`candidateFailures` had one cell for two mechanisms and now has three.** A rerun put 440 of
   4,596 candidates in `other`, and 375 of the 380 cases that were short a candidate were short the
   *second model's* — which reads as a cross-arm ceiling finding when the cause may be a statement

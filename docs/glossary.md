@@ -256,7 +256,31 @@ three candidates permuted by question id (`shuffleByCase`, FNV-1a over `id#slot`
 then Fisher–Yates), one lever from `select-cross`, zero extra calls. The record
 that makes the reading possible is the existing `candidates` array — on a shuffled
 arm entry `i` is the statement offered in slot `i`, so author crossed with index
-answers the question after the run instead of before it.
+answers the question after the run instead of before it. `pnpm bench:bird:position`
+does the crossing, and it reports intervals rather than percentages (see *Slot
+stratum*).
+
+**Slot stratum** — The set of cases in which the tracked candidate occupied one
+particular index of the selector's list. A shuffled run produces two or three of
+them, four hundred to a thousand cases each, and the point of stratifying is that
+the *same* candidate's conversion rate can then be read at each position. The
+reading is not a percentage: each stratum carries a Wilson interval and the two
+extreme strata carry a Newcombe interval for their difference, and the verdict is
+one of `separated` (the interval excludes zero), `overlapping` (this run does not
+separate the slot from the author), or `single-slot` (the artifact cannot answer
+the question, because an arm that never moves the statement gives one number for
+both readings). The third case is why the comparison is a union type with no
+`spreadPp` field rather than a struct of optionals: a `spreadPp: 0` would let "no
+comparison was made" wear the clothes of "a zero was measured".
+
+**Wilson interval** — The score interval for a binomial proportion, used instead
+of `p ± 1.96·√(p(1−p)/n)` wherever a rate in this repository is quoted per stratum.
+The reason is specific rather than stylistic: the strata are exactly where the
+textbook (Wald) interval fails. A slot whose candidate was taken on all of its
+cases, or on none, has an estimated variance of zero, so Wald reports a zero-width
+interval and turns a small sample into a certainty. Wilson keeps a width there.
+`Newcombe` is the matching construction for the *difference* of two proportions,
+built from the two Wilson intervals rather than from the two point estimates.
 
 **Candidate failure** — A candidate that never reached the selector's shortlist, counted by
 mechanism instead of merged: `llm` (the endpoint did not answer), `engine` (the statement

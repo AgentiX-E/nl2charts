@@ -82,6 +82,12 @@
       "functions": 100,
       "branches": 96.42
     },
+    "eval/bird/position.ts": {
+      "lines": 98.82,
+      "statements": 98.82,
+      "functions": 100,
+      "branches": 98.57
+    },
     "eval/bird/profile.ts": {
       "lines": 100,
       "statements": 100,
@@ -107,8 +113,8 @@
       "branches": 100
     },
     "eval/bird/run.ts": {
-      "lines": 99.23,
-      "statements": 99.23,
+      "lines": 99.26,
+      "statements": 99.26,
       "functions": 100,
       "branches": 95.23
     },

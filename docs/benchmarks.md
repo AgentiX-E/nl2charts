@@ -118,6 +118,7 @@ pnpm bench:bird:recall          # every gold identifier is in the prompt; no mod
 pnpm bench:bird:diagnose <report.json>   # classify the failures a run kept; no model
 pnpm bench:bird:strata --arm A --against B   # split a pair by candidate independence; no model
 pnpm bench:bird:losses --arm A               # attribute every selection loss to a source; no model
+pnpm bench:bird:position --arm A             # stratify a shuffle arm by candidate slot, with intervals; no model
 ```
 
 Scope: **all 11 databases, all 500 Mini-Dev questions** (498 scorable: two gold
@@ -2358,8 +2359,35 @@ style. Style was one channel; equivalence is another, and it is the bigger one.
 That leaves a confound this file has been carrying since the first cross run and never tested:
 `CROSS_SOURCES` always puts the second model's candidate **first**. Authorship and position are
 perfectly correlated in every cross experiment so far, so "the judge prefers its own statement" and
-"the judge prefers candidate 1" predict the same 52.6%. Shuffling the candidate order per case
-separates them, costs nothing, and is the next registered experiment.
+"the judge prefers candidate 1" predict the same 52.6%. `select-cross-shuffled` separates them at no
+extra cost — the same three statements, permuted per question id — and `pnpm bench:bird:position`
+reads the result.
+
+### Three rates are not a reading
+
+The shuffled artifact holds one percentage per slot, four hundred to a thousand cases each. Read raw,
+`52.6 / 49.1 / 55.3` and `52.6 / 20.0 / 48.0` are the same line to a reader who is not shown the
+widths, and only the second is a finding. So the tool prints each stratum with a **Wilson** interval
+and the two extreme strata with a **Newcombe** interval for their difference, and it says one of three
+things rather than two:
+
+| verdict | means | does not mean |
+| --- | --- | --- |
+| `separated` | the difference interval excludes zero: in this run, the slot moves the choice | that authorship is absent |
+| `overlapping` | this run does not separate the slot from the author | **that they are the same** |
+| `single-slot` | the artifact cannot answer the question at all — an arm that never moves the statement gives one number for both readings | a position effect of zero |
+
+```bash
+pnpm bench:bird:position --arm select-cross-shuffled --report eval/out/bird-eval.json
+# | slot | cases | took it | took it, 95% | passed | passed, 95% |
+```
+
+`took` and `passed` are counted apart: the first is "the arm returned that source", which is what
+"the judge preferred that author" means in an artifact; the second is "the answer was judged right".
+They can both hold, or one can hold alone, and the gap between them is the part the judge decided
+rather than the selector. Neither Wilson nor Newcombe is decoration here — the strata are exactly
+where the textbook interval fails, because a slot taken on every case or on none has an estimated
+variance of zero and would read as certainty.
 
 ## The floor is enforced, not remembered
 
