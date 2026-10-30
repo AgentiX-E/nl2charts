@@ -968,6 +968,42 @@ That ceiling explains a number from two iterations ago that had no explanation a
 had headroom for about a third of its ceiling and delivered that third. It was not a lever without
 headroom, which is how a null at p = 0.052 is usually read.
 
+Crossed with the clause taxonomy, the 18 addressable cases are not spread evenly — and the
+shape of that spread is the useful part:
+
+| bucket | `spelled` | `none` | `casing` | `notation` | `absent` | cases |
+|---|---|---|---|---|---|---|
+| `filter-narrow` | 9 | 4 | 3 | 4 | 2 | 22 |
+| `literal-missing` | 13 | 6 | 1 | 1 | 2 | 23 |
+| `tables` | **17** | 5 | 0 | 0 | 0 | 22 |
+| `predicate` | 14 | 15 | 0 | 0 | 0 | 29 |
+| `filter-wide` | 13 | 11 | 0 | 0 | 0 | 24 |
+| `projection` | 4 | 0 | 0 | 0 | 0 | 4 |
+| `literal-case` | 0 | 0 | 2 | 0 | 0 | 2 |
+| `no-statement` | 1 | 2 | 0 | 0 | 0 | 3 |
+| `column-count` (not in the taxonomy) | 38 | 12 | 2 | 1 | 0 | 53 |
+
+Two readings, both of which change what the next lever should be:
+
+- **`tables` and `predicate` hold no addressable case at all** — 31 of their 51 cases are `spelled`
+  and the other 20 compare against no string. A value-grounding lever cannot move them, and the
+  identifier axis cannot either (100% visible), so their failure is in how the join is chosen and
+  how the condition is expressed. That is a different lever from this one and it can be measured
+  separately.
+- **`filter-narrow` holds half the addressable set** — 9 of 18. That is the bucket whose statement
+  ran and returned nothing, which is exactly the symptom of a predicate comparing against a value
+  the column does not store in that form. Two thirds of the addressable cases are in the bucket
+  whose signature the lever predicts, which is a stronger check on the classification than the
+  class shares are.
+
+One denominator detail, found while building this cross-tab and recorded rather than fixed:
+**the Mini-Dev question file carries questions 137 and 138 twice**, so 500 rows are 498 unique
+questions and the `select` arm's `total` of 498 is 496 unique questions with two rows counted
+twice. The cross-tab above totals 183 for that reason. The effect on a rate is 2/498 = 0.4%,
+below what the split can resolve, but the fix is not free: deduplicating moves every published
+Mini-Dev denominator and the floors calibrated on them, so it belongs in one deliberate change
+with a recalibration rather than folded into a feature commit. It is queued as such.
+
 Two qualifications, because the classes are narrower than "the model knew":
 
 - **Class is about spelling, not about knowing where the value goes.** A value can be in the

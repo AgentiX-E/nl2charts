@@ -29,6 +29,18 @@ cannot be argued with.
   prompt needs a block the artifact does not keep). The quality gate runs it; the dev workflow
   runs it without `--strict` because the class distribution is a reading.
 
+  Crossed with the clause taxonomy the addressable cases are not spread evenly: `filter-narrow`
+  holds **9 of the 18** — the bucket whose statement returned nothing, which is the symptom the
+  lever predicts — while `tables` and `predicate` hold **none** (31 of their 51 cases are
+  `spelled`, 20 compare against no string), so their failure is in how the join is chosen and how
+  the condition is expressed rather than in a value nobody showed the model.
+
+  The cross-tab also surfaced a denominator detail that is recorded rather than fixed: the
+  Mini-Dev question file carries questions **137 and 138 twice**, so its 500 rows are 498 unique
+  questions and an arm's `total` of 498 is 496 unique cases with two counted twice. 2/498 = 0.4%,
+  below the split's resolution, and deduplicating moves every published Mini-Dev denominator and
+  the floors calibrated on them, so it is queued as one deliberate change with a recalibration.
+
 - **The vocabulary taxonomy read a value that contains a quote as two values.** The reader behind
   `literal-missing` and `literal-case` scanned literals with `/'([^']*)'/g`, which turns
   `'Ancestor''s Chosen'` into `'Ancestor'` and `'s Chosen'` — two values that exist nowhere — so a
