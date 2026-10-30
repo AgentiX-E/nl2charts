@@ -30,8 +30,8 @@ import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { attachDefinitions, buildAskMessages, renderSchemaCard } from '@agentix-e/nl2charts-ai';
 import type { PromptOptions, SchemaTable } from '@agentix-e/nl2charts-ai';
-import { buildSchema, loadQuestions, loadTables } from './data.js';
-import type { BirdQuestion, BirdTable } from './data.js';
+import { buildSchema, loadDescriptions, loadQuestions, loadTables } from './data.js';
+import type { BirdQuestion, BirdTable, ColumnNote } from './data.js';
 import type { CaseRecord } from './gap.js';
 import { graphOf } from './join-graph.js';
 import { CANDIDATE_RECALLERS, SHIPPED_RECALLERS, linkedTables, pruneSchema } from './prune.js';
@@ -506,8 +506,28 @@ export function promptOf(
   question: BirdQuestion,
   definitions: string,
   tables: BirdTable,
+  notes?: Map<string, Map<string, ColumnNote>>,
 ): { system: string; user: string; schema: readonly SchemaTable[] } {
-  const card = attachDefinitions(buildSchema(tables, new Map(), { withNotes: false }), definitions);
+  const options = promptFor(arm, question, {});
+  // Which arms take their column comments from the dataset, and which from a generated
+  // definition block. `select` renders comments too — they are the definitions
+  // `attachDefinitions` wrote — so `descriptions` alone is the wrong test: it is true for both,
+  // and reading it here would demand dataset notes for a prompt that never carries them.
+  const sendsNotes = options.descriptions === true && arm.notes === true && arm.definitions !== 'inline' && arm.definitions !== 'dataset-subset';
+  // An arm that sends column notes and an instrument that was handed none would measure a
+  // prompt nobody sends — the defect this file exists to catch, in the one place it survived:
+  // `metadata+evidence` is the cheapest arm on the frontier at 798 curated notes, and the card
+  // report was pricing it without them.
+  if (sendsNotes && notes === undefined) {
+    throw new Error(`arm ${arm.name} sends column notes and this instrument was given none, so the prompt it would measure is not the one sent`);
+  }
+  // Where the comments come from, decided the way the run decides it: `schemaFor` attaches the
+  // generated definitions only for the arms that ask for them, and the rest carry the dataset's
+  // own notes or nothing. Attaching them to every arm was the second half of the same defect —
+  // it made `metadata+evidence` pay for a definition block its prompt never contains.
+  const withDefinitions = arm.definitions === 'inline' || arm.definitions === 'dataset-subset';
+  const base = buildSchema(tables, notes ?? new Map(), { withNotes: sendsNotes });
+  const card = withDefinitions ? attachDefinitions(base, definitions) : { schema: base };
   // The prune arm sends the closure, so this instrument has to render the closure. Rebuilding
   // the whole card for it would measure a prompt nobody sends — the same defect the two
   // `information` fixes were about — and would report the arm as its parent with a longer name.
@@ -517,7 +537,6 @@ export function promptOf(
       : (pruneSchema({ schema: card.schema as SchemaTable[], question: question.question, graph: graphOf(tables), hops: arm.prune })
           .schema as SchemaTable[]);
   const schema = pruned;
-  const options = promptFor(arm, question, {});
   const built = buildAskMessages({
     question: question.question,
     schema,
@@ -544,6 +563,17 @@ export async function runCard(settings: CardSettings): Promise<CardOutcome> {
   const rows: CardRow[] = [];
   const drops = { unknownQuestion: 0, unknownArm: 0, definitionGap: 0, unrenderable: 0 };
   const cases = (report.cases ?? []).filter((row) => row.arm === settings.arm);
+  // One database's descriptions, read once. The card report used to render every arm without
+  // them, which made the cheapest arm on the frontier — a single call carrying 798 curated
+  // notes — the one arm whose prompt this instrument could not price.
+  const noteCache = new Map<string, Map<string, Map<string, ColumnNote>>>();
+  const notesFor = (db: string, table: BirdTable): Map<string, Map<string, ColumnNote>> => {
+    const cached = noteCache.get(db);
+    if (cached !== undefined) return cached;
+    const loaded = loadDescriptions(join(settings.layout.descriptionsRoot, db, 'database_description'), table.tableNames);
+    noteCache.set(db, loaded);
+    return loaded;
+  };
   const seen = new Set<string>();
   if (arm === undefined) {
     drops.unknownArm = cases.length;
@@ -567,7 +597,7 @@ export async function runCard(settings: CardSettings): Promise<CardOutcome> {
         drops.definitionGap += 1;
         continue;
       }
-      const built = promptOf(arm, question, text ?? '', table);
+      const built = promptOf(arm, question, text ?? '', table, arm.notes === true ? notesFor(question.db_id, table) : undefined);
       // `costOf` throws rather than returning a sentinel: a prompt these builders produced
       // always decomposes, the end-to-end tests below assert that on a real split, and a case
       // silently dropped for a reason nobody can act on is worse than a loud failure.

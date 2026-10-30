@@ -3069,6 +3069,63 @@ computed against the accuracy axis in the same artifact, and that the cheapest a
 weakest one — which makes "spend fewer calls" a hypothesis with a mechanism instead of an
 optimisation with a target.
 
+### The arm the instrument could not see
+
+The two columns of that table come from different instruments: tokens from the provider, characters
+from `bench:bird:card`. They are supposed to check each other. They could not, because the card
+instrument rendered a prompt the cheapest arm never sends — `buildSchema(..., { withNotes: false })`
+left all 798 curated notes out of the card — and then attached the generated definition block to
+every arm, including the ones whose prompt has no such block. One error made the cheapest arm look
+cheaper than it is; the other made every arm look more expensive. `promptOf` now decides the source
+of the column comments the way `schemaFor` in the run decides it, and throws rather than rendering a
+noted arm without its notes:
+
+| arm | prompt, rendered | of which card | card share | calls per case | characters per case, billed |
+| --- | --- | --- | --- | --- | --- |
+| `metadata+evidence` | 7,207 | 6,464 | 89.7% | 1.00 | **7,190** |
+| `metadata+evidence+prune` | **6,232** | 5,489 | 88.1% | 1.00 | not run |
+| `select` | 2,866 | 2,123 | 74.1% | 3.99 | 10,286 |
+| `select-prune` | 2,507 | 1,764 | 70.4% | 3.99 | 9,210 |
+
+Three things follow, and none of them needed a model call:
+
+1. **The single call is 30% cheaper per case than the four-call arm**, not 3.6 times dearer. The
+   generation prompt is two and a half times longer and is sent once; the four-call arm sends a
+   shorter one four times, and its selector call is billed too. The frontier's ordering was right
+   for the wrong reason — the token column was measured, but the block that dominates it was not.
+2. **The closure is worth more here than there.** Cutting the card to the tables one join from the
+   ones the question names removes 13.5% of this prompt (7,207 → 6,232) against 12.5% of
+   `select`'s, because the card is 89.7% of the one and 74.1% of the other. Neither arm's savings
+   depend on a model.
+3. **The price is identical on both**: 33 of the 496 cases lose one gold table and none lose all of
+   them, and the cases that lose one are the same cases, because the rule is the same rule. So the
+   lever that cost 2.2pp on `select` has the same bet to offer on the arm that is already cheapest.
+
+Whether that bet pays is a different question, and the artifact can now be asked it directly. The
+three pairs below were computed from the per-case rows of the two runs — the same rows the report
+publishes, paired by question — and are now part of `COMPARISONS` so that a run states them itself:
+
+| pair | run `57f70f71` | run `947134b0` | per question, both draws | p |
+| --- | --- | --- | --- | --- |
+| `metadata+evidence` → `select` | −3.41pp (0.040) | −2.41pp (0.119) | 43 : 29 | 0.125 |
+| `metadata+evidence` → `select-prune` | −3.41pp (0.033) | −4.62pp (0.003) | 48 : 27 | **0.020** |
+| `metadata+evidence` → `select-mixed` | −2.61pp (0.105) | −1.20pp (0.489) | 34 : 25 | 0.298 |
+
+Every row is negative on both runs: the arm that makes one call scores higher than the arm that
+makes four. Against the pruned card the gap is the only one that clears p < 0.01 in either run
+(0.003), and pooling the two draws by question — the honest unit, since the same 496 questions were
+measured twice — puts it at 0.020. That is short of the 0.01 ADR-184 asks before an adoption claim,
+and the p-values above are not corrected for the eight other pairs the artifact publishes: at nine
+comparisons the smallest p that survives a Bonferroni correction is 0.0056, which none of these
+clears. The direction is stable and the cost is measured; the effect size is not yet resolved at
+n=496.
+
+Two measurements would resolve it, and only one of them needs a run. The dev split is 1,532
+scorable questions, so the same pair carries an MDE near 2.3pp instead of 4.0pp — and a 2.4pp gap
+at that size is inside what the design can detect. The other is the arm in the second row of the
+table above: `metadata+evidence+prune` is priced on the card measurement, and its 13.5% is the
+largest saving this project has found that costs no call at all.
+
 ## The floor is enforced, not remembered
 
 A benchmark that only produces a report gets read once. The BIRD arms have a

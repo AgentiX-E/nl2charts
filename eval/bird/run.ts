@@ -490,6 +490,11 @@ export const ARMS: readonly Arm[] = [
   { name: 'synthetic', notes: true, evidence: 'synthetic', repairs: 0, linking: true },
   { name: 'synthetic+focus', notes: true, evidence: 'synthetic', repairs: 0, linking: true, focus: true },
   { name: 'metadata+evidence', notes: true, evidence: 'dataset', repairs: 0, linking: true },
+  // The cheapest arm on the frontier with its card cut to the join closure. The card measurement
+  // points at it: 90.5% of that prompt is the card, and 53.5% of the card belongs to tables the
+  // gold statement never reads — so the lever that removed 12.6% of `select`'s prompt has more
+  // to remove here, and the arm it acts on has no selector call to dilute the saving.
+  { name: 'metadata+evidence+prune', notes: true, evidence: 'dataset', repairs: 0, linking: true, prune: 1 },
   { name: 'adaptive', notes: true, evidence: 'dataset', repairs: 0, linking: true, profile: 'adaptive' },
   // Available on demand (BIRD_ARMS=...,no-linking,repair). Both measured null in
   // the previous round and are kept instead of deleted, so a change that should
@@ -545,6 +550,7 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'synth-definitions+evidence': 'combines two levers already measured separately',
   interpret: 'one extra call per question; measured null, kept for re-testing',
   metadata: 'no definitions at all: parent of metadata+evidence, run only to re-derive the parent',
+  'metadata+evidence+prune': 'one lever from metadata+evidence, on the arm where the card is 90.5% of the prompt: priced on the card measurement first, then dispatched, because the closure costs 33 of the 496 cases a gold table',
   synthetic: 'profiles as evidence: measured null',
   'synthetic+focus': 'profile plus a focus instruction: measured null',
   adaptive: 'per-database prompt profile: measured null',
@@ -588,6 +594,13 @@ export const COMPARISONS: readonly (readonly [string, string, string])[] = [
   ['select', 'select-duo', 'two prompts and a selector versus three samples of one prompt: three calls instead of four'],
   ['select-duo', 'select-mixed', 'the value-grounded candidate on top of two prompts: does a third source add anything'],
   ['select', 'select-prune', 'the same three samples and the same selector with a card cut to the join closure: does the model need the tables the question does not reach'],
+  // The cost frontier, stated as comparisons rather than left to a reader of the token
+  // column. These pairs are the ones that decide whether a multi-call arm is worth its
+  // bill, so they are measured on the same cases in the same run instead of being
+  // reconstructed afterwards from two artifacts that happened to share a split.
+  ['metadata+evidence', 'select', 'one prompt carrying 798 curated notes against three samples and a selector: three stack levels and 3.6 times the tokens'],
+  ['metadata+evidence', 'select-prune', 'the same single prompt against the pruned card: the cheapest multi-call arm, priced against the cheapest arm'],
+  ['metadata+evidence', 'select-mixed', 'the same single prompt against three decompositions and a selector: what the fourth call buys when the candidates are aimed'],
 ];
 
 export const PAIRS: readonly (readonly [string, string])[] = [

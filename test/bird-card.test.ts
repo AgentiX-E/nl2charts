@@ -37,10 +37,16 @@ import {
 import type { CardRow, CardTally } from '../eval/bird/card.js';
 import { resolveArm } from '../eval/bird/run.js';
 import { writeChainBirdDataset, writeMiniBirdDataset } from './helpers/bird-dataset.js';
-import { loadTables } from '../eval/bird/data.js';
+import { loadDescriptions, loadTables } from '../eval/bird/data.js';
 import { promptOf } from '../eval/bird/card.js';
 
-const loadTablesFor = (data: string) => loadTables(join(data, 'dev_tables.json')).get('shop');
+const loadTablesFor = (data: string) => {
+  const table = loadTables(join(data, 'dev_tables.json')).get('shop');
+  // A fixture that ships no table renders no prompt, and a test that compares two prompts it
+  // could not build is a test that passes for the wrong reason.
+  if (table === undefined) throw new Error('the fixture ships no shop table');
+  return table;
+};
 
 const ROOT = process.cwd();
 
@@ -65,7 +71,7 @@ function settingsFor(data: string, overrides: Record<string, unknown> = {}, arm 
   const dir = mkdtempSync(join(tmpdir(), 'card-'));
   const path = join(dir, 'bird-eval.json');
   writeFileSync(path, JSON.stringify({ split: 'minidev', cases: [], controls: {}, ...overrides }));
-  return { report: path, layout: { split: 'minidev', questionsFile: join(data, 'mini_dev_sqlite.json'), tablesFile: join(data, 'dev_tables.json'), out: join(dir, 'out.json') }, arm, out: dir, strict: true } as never;
+  return { report: path, layout: { split: 'minidev', questionsFile: join(data, 'mini_dev_sqlite.json'), tablesFile: join(data, 'dev_tables.json'), descriptionsRoot: join(data, 'dev_databases'), out: join(dir, 'out.json') }, arm, out: dir, strict: true } as never;
 }
 
 /** One report row per question, with a known call count. */
@@ -518,6 +524,46 @@ describe('whether the card an arm sends still holds the gold tables', () => {
 });
 
 describe('the paths a real report can take', () => {
+  it('refuses to price an arm whose prompt carries column notes it was never given', () => {
+    // `metadata+evidence` is the cheapest arm on the frontier — one call carrying 798 curated
+    // notes — and every arm used to be rendered from a schema built with `withNotes: false`.
+    // The 1,774 tokens that arm costs were the provider's count, never this file's, which is
+    // the defect: a cost instrument blind to the largest block of the prompt it is pricing.
+    const data = writeMiniBirdDataset(mkdtempSync(join(tmpdir(), 'card-data-')));
+    const tables = loadTablesFor(data);
+    const question = JSON.parse(readFileSync(join(data, 'mini_dev_sqlite.json'), 'utf8'))[0];
+    expect(() => promptOf(resolveArm('metadata+evidence') as never, question, '', tables as never)).toThrow(/not the one sent/);
+  });
+
+  it('charges the notes to the card once it is given them', () => {
+    const data = writeMiniBirdDataset(mkdtempSync(join(tmpdir(), 'card-data-')));
+    const tables = loadTablesFor(data);
+    const question = JSON.parse(readFileSync(join(data, 'mini_dev_sqlite.json'), 'utf8'))[0];
+    const notes = loadDescriptions(join(data, 'dev_databases', 'shop', 'database_description'), tables.tableNames);
+    const arm = resolveArm('metadata+evidence') as never;
+    // The same arm twice, so the difference is the notes rather than the arm: an empty map is a
+    // schema with the lever off, and the two prompts then differ by exactly the comments.
+    const without = promptOf(arm, question, '', tables as never, new Map());
+    const noted = promptOf(arm, question, '', tables as never, notes);
+    expect(without.system).not.toContain('list price of one unit');
+    expect(noted.system).toContain('list price of one unit');
+    expect(noted.system.length - without.system.length).toBeGreaterThan(50);
+    expect(costOf(noted.system, noted.user, question.question).card).toBeGreaterThan(
+      costOf(without.system, without.user, question.question).card,
+    );
+  });
+
+  it('renders the notes an arm sends, reading each database once', async () => {
+    // The whole report used to be priced from cards built without the dataset's notes, which is
+    // the one block the cheapest arm is mostly made of. Two cases in one database also pin the
+    // cache: the descriptions are read per database, not per case.
+    const data = writeMiniBirdDataset(mkdtempSync(join(tmpdir(), 'card-data-')));
+    const outcome = await runCard(settingsFor(data, reportBody([1, 2], {}, 'metadata+evidence'), 'metadata+evidence'));
+    expect(outcome.rows).toHaveLength(2);
+    expect(outcome.rows.every((entry) => entry.cost.card > 0)).toBe(true);
+    expect(outcome.drops).toEqual({ unknownQuestion: 0, unknownArm: 0, definitionGap: 0, unrenderable: 0 });
+  });
+
   it('charges a card that costs nothing without dividing by zero', () => {
     // A table with no columns would cost nothing, and a share over nothing is not a number.
     const empty = row({ cost: { system: 10, user: 5, rules: 5, card: 0, context: 0, hint: 2, question: 3 }, spareChars: 0 });
@@ -585,7 +631,7 @@ describe('the paths a real report can take', () => {
     );
     const outcome = await runCard({
       report: path,
-      layout: { split: 'minidev', questionsFile: join(data, 'mini_dev_sqlite.json'), tablesFile: join(data, 'dev_tables.json'), out: join(dir, 'out.json') },
+      layout: { split: 'minidev', questionsFile: join(data, 'mini_dev_sqlite.json'), tablesFile: join(data, 'dev_tables.json'), descriptionsRoot: join(data, 'dev_databases'), out: join(dir, 'out.json') },
       arm: 'select',
       out: dir,
       strict: true,

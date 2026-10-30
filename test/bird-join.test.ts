@@ -502,7 +502,7 @@ describe('a measurement over a real split', () => {
     );
     return {
       report: path,
-      layout: { split: 'minidev', questionsFile: join(data, 'mini_dev_sqlite.json'), tablesFile: join(data, 'dev_tables.json'), out: join(dir, 'out.json') },
+      layout: { split: 'minidev', questionsFile: join(data, 'mini_dev_sqlite.json'), tablesFile: join(data, 'dev_tables.json'), descriptionsRoot: join(data, 'dev_databases'), out: join(dir, 'out.json') },
       arm,
       out: dir,
       strict: true,
@@ -523,6 +523,15 @@ describe('a measurement over a real split', () => {
   it('reads every case once, even when the question file holds it twice', async () => {
     const outcome = await runJoin(settingsFor(dataset(), [1, 1, 2]));
     expect(outcome.tally.total).toBe(2);
+  });
+
+  it('renders the notes an arm sends, reading each database once', async () => {
+    // `metadata+evidence` takes its column comments from the dataset, so the card this tool
+    // rebuilds is the card that was sent — and two cases in one database must read that
+    // database's descriptions once, not once per case.
+    const outcome = await runJoin(settingsFor(dataset(), [1, 2], 'metadata+evidence'));
+    expect(outcome.tally.total).toBe(2);
+    expect(outcome.problems).toEqual([]);
   });
 
   it('drops a case the question file does not have', async () => {

@@ -89,6 +89,16 @@ describe('ablation arms', () => {
     }
   });
 
+  it('prices every multi-call arm against the single prompt that undercuts it', () => {
+    // The cost table reads a token column, and a table is not a test. These three pairs are
+    // the ones that can say "the cheaper arm is not the worse one", and they were missing
+    // for four runs because this list carried levers and one generated-versus-curated swap
+    // and nothing about the bill. A pair that is not here is a question the artifact cannot
+    // answer without a second artifact from the same split.
+    const against = COMPARISONS.filter(([from]) => from === 'metadata+evidence').map(([, to]) => to);
+    expect(against).toEqual(expect.arrayContaining(['select', 'select-prune', 'select-mixed']));
+  });
+
   it('changes exactly one lever per pair', () => {
     for (const [left, right] of PAIRS) {
       const before = ARMS.find((arm) => arm.name === left) as Arm;

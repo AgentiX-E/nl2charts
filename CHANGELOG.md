@@ -8,6 +8,30 @@ cannot be argued with.
 
 ### Measured
 
+- **The card instrument was pricing a prompt nobody sends.** `bench:bird:card` renders every arm's
+  prompt from `buildSchema`, and it built that schema with `withNotes: false` — so the 798 curated
+  notes that are most of `metadata+evidence` were priced at zero — and then attached the generated
+  definition block to every arm, including the ones whose prompt has none. Fixed in both
+  directions: comments come from the source the run uses, and an arm that sends notes without being
+  given any now fails instead of being rendered. The single-call arm's prompt is **7,207 characters
+  against `select`'s 2,866**, and it is sent once where that arm sends four: **7,190 characters per
+  case against 10,286** — 30% cheaper rather than 3.6 times dearer.
+
+- **The cheaper arm is not the worse one, on both runs.** Paired by question from the same
+  artifacts: `metadata+evidence` → `select` −3.41pp (p = 0.040) then −2.41pp (p = 0.119);
+  → `select-prune` −3.41pp (0.033) then −4.62pp (0.0032); → `select-mixed` −2.61pp (0.105) then
+  −1.20pp (0.489). Negative means the one-call arm scores higher. Pooled by question over both
+  draws — the honest unit, since each of the 496 questions was measured twice — the pruned-card gap
+  is 48:27, p = 0.020. Short of the 0.01 ADR-184 asks before an adoption claim, and uncorrected for
+  the eight other pairs the artifact publishes; recorded as a direction with a measured price.
+
+- **`metadata+evidence+prune` priced without a call: −13.5% of the prompt.** The closure removes
+  13.5% of the single-call arm's prompt (7,207 → 6,232 characters) against 12.5% of `select`'s,
+  because the card is 89.7% of one and 74.1% of the other. The price is identical: 33 of 496 cases
+  lose one gold table, none lose all of them, and they are the same 33 cases — the rule is the same
+  rule. The arm is in the catalogue and on demand; its 13.5% is the largest saving found so far
+  that costs no model call.
+
 - **Every four-call arm is dominated on tokens per question.** With both units in one artifact the
   arms can be compared on what a deployment pays: `inline+evidence` **756 tokens per question** at
   57.0%, `values` 763 at 56.6%, `metadata+evidence` **1,774 at 59.2%**, `vote` 2,271 at 56.8%,

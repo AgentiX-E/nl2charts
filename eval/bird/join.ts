@@ -44,8 +44,8 @@ import { EDGE_SOURCES, closureOf, joinGraphOf } from './join-graph.js';
 import { CANDIDATE_RECALLERS, SHIPPED_RECALLERS, linkedTables } from './prune.js';
 import type { EdgeSource, JoinGraph } from './join-graph.js';
 import type { Coverage } from './card.js';
-import { loadQuestions, loadTables } from './data.js';
-import type { BirdQuestion, BirdTable } from './data.js';
+import { loadDescriptions, loadQuestions, loadTables } from './data.js';
+import type { BirdQuestion, BirdTable, ColumnNote } from './data.js';
 import type { CaseRecord } from './gap.js';
 import { promptFor, renderableArm, resolveArm, resolveLayout } from './run.js';
 import { definesOwnName, tableRefs } from './statement.js';
@@ -380,8 +380,14 @@ export interface JoinReportShape {
 }
 
 /** The schema a case's card is rendered from, built the way the pipeline builds it. */
-export function schemaOf(arm: Arm, question: BirdQuestion, definitions: string, tables: BirdTable): SchemaTable[] {
-  return promptOf(arm, question, definitions, tables).schema as SchemaTable[];
+export function schemaOf(
+  arm: Arm,
+  question: BirdQuestion,
+  definitions: string,
+  tables: BirdTable,
+  notes?: Map<string, Map<string, ColumnNote>>,
+): SchemaTable[] {
+  return promptOf(arm, question, definitions, tables, notes).schema as SchemaTable[];
 }
 
 export function seedsOf(question: string, schema: readonly SchemaTable[]): Record<RecallerSet, readonly string[]> {
@@ -405,6 +411,16 @@ export async function runJoin(settings: JoinSettings): Promise<JoinOutcome> {
   const byId = new Map(questions.map((question) => [String(question.question_id), question]));
   const definitions = report.controls?.synthesizedDefinitions ?? {};
   const graphs = graphsOf(tables);
+  // Same rule as the card report: an arm that sends column notes is rendered with them, or the
+  // prompt this instrument prices is not the one the arm sends.
+  const noteCache = new Map<string, Map<string, Map<string, ColumnNote>>>();
+  const notesFor = (db: string, table: BirdTable): Map<string, Map<string, ColumnNote>> => {
+    const cached = noteCache.get(db);
+    if (cached !== undefined) return cached;
+    const loaded = loadDescriptions(join(settings.layout.descriptionsRoot, db, 'database_description'), table.tableNames);
+    noteCache.set(db, loaded);
+    return loaded;
+  };
   const cases: JoinCase[] = [];
   const drops: { -readonly [K in keyof JoinDrops]: number } = { unknownQuestion: 0, unknownArm: 0, unrenderable: 0, definitionGap: 0 };
   const selected = (report.cases ?? []).filter((row) => row.arm === settings.arm);
@@ -434,7 +450,7 @@ export async function runJoin(settings: JoinSettings): Promise<JoinOutcome> {
         drops.definitionGap += 1;
         continue;
       }
-      const schema = schemaOf(arm, question, text ?? '', table);
+      const schema = schemaOf(arm, question, text ?? '', table, arm.notes === true ? notesFor(question.db_id, table) : undefined);
       const names = new Set(schema.map((entry) => entry.table.toLowerCase()));
       const refs = classifyGold(question.SQL, names);
       if (refs.unknown.length > 0) unknownRefs.push(...refs.unknown.map((name) => `${question.db_id}.${name}`));
