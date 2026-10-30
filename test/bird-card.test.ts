@@ -36,7 +36,7 @@ import {
 } from '../eval/bird/card.js';
 import type { CardRow, CardTally } from '../eval/bird/card.js';
 import { resolveArm } from '../eval/bird/run.js';
-import { writeMiniBirdDataset } from './helpers/bird-dataset.js';
+import { writeChainBirdDataset, writeMiniBirdDataset } from './helpers/bird-dataset.js';
 import { loadTables } from '../eval/bird/data.js';
 import { promptOf } from '../eval/bird/card.js';
 
@@ -172,6 +172,8 @@ function row(overrides: Partial<CardRow> = {}): CardRow {
     candidate: 'all',
     shippedTables: 0,
     candidateTables: 2,
+    carded: 'all',
+    cardedKept: 1,
     ...overrides,
   };
 }
@@ -476,6 +478,42 @@ describe('a measurement over a real split', () => {
   it('does not treat an arm it cannot name as renderable', () => {
     expect(resolveArm('select')).toBeDefined();
     expect(resolveArm('inline+retrieval')?.evidence).toBe('retrieved');
+  });
+});
+
+describe('whether the card an arm sends still holds the gold tables', () => {
+  const chain = (): string => writeChainBirdDataset(mkdtempSync(join(tmpdir(), 'card-chain-')));
+  const pruned = (data: string, id: number) =>
+    runCard(settingsFor(data, reportBody([id], {}, 'select-prune'), 'select-prune'));
+
+  it('reports the tables the card shows, not the ones the linker named', async () => {
+    // "How many items are there?" names a table and no column of it, so the shipped recallers name
+    // nothing and the rule falls back to the whole card. The linker saw none of the gold's tables
+    // and the model is still shown all of them: a report that published the linker's coverage as
+    // the card's would call that case a loss it never took.
+    const [first] = (await runCard(settingsFor(chain(), reportBody([1])))).rows;
+    expect(first?.shipped).toBe('none');
+    expect(first?.carded).toBe('all');
+    expect(first?.cardedKept).toBe(first?.goldTables);
+  });
+
+  it('charges a dropped gold table to the card, and names the coverage it lost', async () => {
+    // The third question reads `warehouses`, which is one join beyond the two tables a card cut to
+    // one join of `items` keeps. The parent sends the same schema the linker named; the pruned arm
+    // sends a card that cannot answer the question, and the report has to say so in a column of its
+    // own rather than folding it into the linker's coverage.
+    const data = chain();
+    const parent = (await runCard(settingsFor(data, reportBody([3])))).rows[0];
+    const smaller = (await pruned(data, 3)).rows[0];
+    expect(smaller?.carded).toBe('some');
+    expect(smaller?.cardedKept).toBeLessThan(parent?.cardedKept ?? 0);
+    expect(smaller?.tables).toBeLessThan(parent?.tables ?? 0);
+  });
+
+  it('counts the coverages of the card it sends beside the ones the linker reached', () => {
+    const tally = tallyCards([row({ carded: 'all' }), row({ carded: 'some', goldTables: 2 })]);
+    expect(tally.carded).toEqual({ all: 1, some: 1, none: 0 });
+    expect(cardLines(tally).join('\n')).toContain('the card this arm sends keeps');
   });
 });
 

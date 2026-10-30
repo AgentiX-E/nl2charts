@@ -50,6 +50,134 @@ export const MINI_GOLD: Readonly<Record<string, string>> = Object.fromEntries(
 export const MINI_DB = 'shop';
 
 /**
+ * The same shape as `MINI_QUESTIONS`, on a schema where a table can be out of reach.
+ *
+ * `items` and `orders` are one join apart in both fixtures, so neither can show what a rule that
+ * removes tables takes away: every table it could drop is one join from every table it could keep.
+ * Here the tables form a line — `items — orders — warehouses — cities` — so a card cut to one join
+ * of the tables a question names can hold the middle of the line and miss its end. The third
+ * question is that case: it names `orders` through the column `qty` and reads `cities`, which is
+ * two joins away.
+ */
+export const CHAIN_QUESTIONS: readonly MiniQuestion[] = [
+  { id: 1, question: 'How many items are there?', sql: 'select count(*) from items', difficulty: 'simple' },
+  { id: 2, question: 'How many orders are there?', sql: 'select count(*) from orders', difficulty: 'moderate' },
+  {
+    id: 3,
+    question: 'What is the largest qty on an order placed in Hangzhou?',
+    sql: "select max(o.qty) from orders o join warehouses w on w.id = o.warehouse_id join cities c on c.id = w.city_id where c.name = 'Hangzhou'",
+    difficulty: 'challenging',
+  },
+];
+
+/**
+ * Write the line `items — orders — warehouses — cities` under `dir` and return the directory.
+ *
+ * Same four files the mini fixture writes, because the harnesses read the same four; the only
+ * difference is the schema, which exists to make a dropped table observable.
+ */
+export function writeChainBirdDataset(dir: string): string {
+  const db = join(dir, 'dev_databases', MINI_DB);
+  const descriptions = join(db, 'database_description');
+  mkdirSync(descriptions, { recursive: true });
+  const writer = new DatabaseSync(join(db, `${MINI_DB}.sqlite`));
+  writer.exec(`
+    create table items (id integer primary key, name text, price real);
+    insert into items values (1, 'pen', 1.5), (2, 'cup', 3.25);
+    create table cities (id integer primary key, name text);
+    insert into cities values (1, 'Hangzhou'), (2, 'Chengdu');
+    create table warehouses (id integer primary key, city_id integer);
+    insert into warehouses values (1, 1), (2, 2);
+    create table orders (id integer primary key, item_id integer, warehouse_id integer, qty integer);
+    insert into orders values (1, 1, 1, 2), (2, 2, 2, 1), (3, 1, 1, 5);
+  `);
+  writer.close();
+  writeFileSync(
+    join(dir, 'mini_dev_sqlite.json'),
+    JSON.stringify(
+      CHAIN_QUESTIONS.map((entry) => ({
+        question_id: entry.id,
+        db_id: MINI_DB,
+        question: entry.question,
+        evidence: '',
+        SQL: entry.sql,
+        difficulty: entry.difficulty,
+      })),
+    ),
+  );
+  writeFileSync(
+    join(dir, 'dev_tables.json'),
+    JSON.stringify([
+      {
+        db_id: MINI_DB,
+        table_names: ['Items', 'Orders', 'Warehouses', 'Cities'],
+        table_names_original: ['items', 'orders', 'warehouses', 'cities'],
+        // Column zero is the `*` every manifest carries; the foreign keys below index into it.
+        column_names: [
+          [-1, '*'],
+          [0, 'id'],
+          [0, 'name'],
+          [0, 'price'],
+          [1, 'id'],
+          [1, 'item_id'],
+          [1, 'warehouse_id'],
+          [1, 'qty'],
+          [2, 'id'],
+          [2, 'city_id'],
+          [3, 'id'],
+          [3, 'name'],
+        ],
+        column_names_original: [
+          [-1, '*'],
+          [0, 'id'],
+          [0, 'name'],
+          [0, 'price'],
+          [1, 'id'],
+          [1, 'item_id'],
+          [1, 'warehouse_id'],
+          [1, 'qty'],
+          [2, 'id'],
+          [2, 'city_id'],
+          [3, 'id'],
+          [3, 'name'],
+        ],
+        column_types: [
+          'text',
+          'integer',
+          'text',
+          'real',
+          'integer',
+          'integer',
+          'integer',
+          'integer',
+          'integer',
+          'integer',
+          'integer',
+          'text',
+        ],
+        // orders.item_id -> items.id, orders.warehouse_id -> warehouses.id, warehouses.city_id -> cities.id
+        foreign_keys: [
+          [5, 1],
+          [6, 8],
+          [9, 10],
+        ],
+      },
+    ]),
+  );
+  writeFileSync(join(dir, 'manifest.json'), JSON.stringify({ databases: [{ db: MINI_DB }] }));
+  writeFileSync(
+    join(descriptions, 'items.csv'),
+    [
+      'original_column_name,column_name,column_description,data_format,value_description',
+      'id,id,primary key,integer,',
+      'name,name,the label the store sells under,text,',
+      'price,price,list price of one unit,real,in yuan',
+    ].join('\n'),
+  );
+  return dir;
+}
+
+/**
  * Write the dataset under `dir` and return the directory to point `BIRD_DATA` at.
  *
  * `dir` is the split directory (`…/MINIDEV` in BIRD's own layout), not a parent of it.

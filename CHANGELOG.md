@@ -8,6 +8,67 @@ cannot be argued with.
 
 ### Measured
 
+- **Every four-call arm is dominated on tokens per question.** With both units in one artifact the
+  arms can be compared on what a deployment pays: `inline+evidence` **756 tokens per question** at
+  57.0%, `values` 763 at 56.6%, `metadata+evidence` **1,774 at 59.2%**, `vote` 2,271 at 56.8%,
+  `select` 2,717 at 56.8%, `select-mixed` 2,721 at 58.0%, `select5` 4,402 at 57.4%. `select` spends
+  3.6 times a single prompt to score 0.2pp below it; `select-mixed` spends 3.6 times to score 1.0pp
+  above that arm and 1.5 times `metadata+evidence` to score 1.2pp below it; `select5` spends 2.5
+  times `metadata+evidence` for 1.8pp less.
+
+  Recorded as a reading rather than an adoption, because the gaps it ranks by are 1–2pp and a no-op
+  change moved an arm 1.8pp between runs (below). What it establishes is that the cost axis had
+  never been computed against the accuracy axis in the same artifact, and that the cheapest arm
+  here is not the weakest one.
+
+- **The card as a join closure: 12.6% of the prompt, no measured gain, and a loss where the closure
+  cut a table.** `select-prune` is one lever from `select` — same linker, same three samples, same
+  selector — with the card cut to the tables within one join of the ones the question names, and the
+  whole card when it names none. Mini-Dev: the generation prompt falls **2,864 → 2,504 characters
+  (−12.6%)** and 11,420 → 9,984 per question; over every call, **2,579 → 2,309 characters (−10.5%)**
+  and **636 → 570 prompt tokens (−10.4%)**, at the same **4.05 characters per token**, which says the
+  pruned card is not a different kind of text. The average call saves less than the generation
+  prompt because one call in four is the selector's, and it never carried the card.
+
+  Two runs of the same arm, on prompts that no commit between them touched: `57f70f71` scored
+  **281/498 against 281/498** (18 exchanged, p = 1) and `947134b0` scored **283 against 272**
+  (−2.21pp, 23 lost and 12 gained, p = 0.090). So a four-call arm moves 1.8pp between runs with
+  nothing changed but the draw. Stratified by the new `carded` column, the direction survives both
+  runs even though the size does not: in the 33 cases whose card lost a table the pruned arm lost
+  **10 of 11** exchanges (p = 0.012), and in the other 463 it is 31 lost to 27 gained (p = 0.69) —
+  a resample, not a gain.
+
+- **The card report reports the card now, and the gap it had been hiding was 33 questions.**
+  `bench:bird:card` published what the *linker* named and what an extra recaller would name — the
+  same population on both arms of a card lever, and never the tables of the prompt that was sent.
+  The new `carded` column compares the rendered card against the tables the gold statement reads:
+  `select` holds **all 1,022** of them across 496 cases, `select-prune` holds **987** with 33 cases
+  short of one and none short of all — the last being the evidence that the no-seed fallback fires.
+
+- **Mini-Dev scores 498 rows over 496 distinct questions, and the duplicated pair decides close
+  calls.** Questions 137 and 138 are listed twice in `mini_dev_sqlite.json`. The run counts rows,
+  which is the official protocol; the card instrument measures each prompt once. `select` and
+  `select-prune` are 283/272 by rows and 282/270 by distinct question in `947134b0`, so the two
+  denominators differ by one case in each direction. Both are now stated wherever a delta is
+  reported: a single question that flips moves the row-based score by 2/498, which is larger than
+  the MDE at this sample size.
+
+- **What the provider billed, and the ratio that calibrates the character instruments.** The two
+  cost instruments could only count characters, because they never touch a provider; the runner now
+  sums each answer's `usage` beside the characters of the same request, and reports both per case
+  and per arm. Mini-Dev `select`: **2,579 characters and 636 prompt tokens per call over every
+  call**, which is **4.05 characters per token**, against 2,309 and 570 — also 4.05 — for the
+  pruned arm. `bench:bird:card` prints both units side by side, because a character count is a
+  property of the text and a token count is a property of the tokenizer, and the ratio between them
+  is the only calibration either zero-call instrument can get.
+
+  The first version of this meter divided the tokens of four calls by the characters of one message
+  and reported 1.04 characters per token. Four failures now fail the gate, none of them a target: an
+  arm that made calls and metered none, an arm whose token column is zero despite its calls, an
+  answer that arrived without a usage block (an unknown cost, not a free one), and a ratio below
+  half a character per token — which no tokenizer produces, so the two columns would be describing
+  different prompts.
+
 - **Three quarters of every call is the schema card, and the card is the whole database.**
   `pnpm bench:bird:card <report> --arm <name> [--strict]` prices the prompt with zero model calls:
   it rebuilds the two messages the pipeline sends — the split's questions, the bare card, the

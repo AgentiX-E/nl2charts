@@ -1190,8 +1190,11 @@ Neither was the experiment, and both change how the numbers should be read.
 
 The prune arm itself is not in this section because it is not a measurement — it is a change to the
 prompt, and a prompt change needs an accuracy reading rather than a character count. What this
-section establishes is the parameter it will be run at: declared keys, table recaller, one hop,
-whole card on the 24 cases the closure cannot finish.
+section establishes is the shape of the rule rather than its settings: seed from the question, expand
+one hop, send the whole card when the seed is empty. The arm has since been run and read against its
+parent in *The card as a join closure: what it saves, and what it costs*. It ships the shipped
+recallers rather than the table recaller, so that the card is the only thing that differs between the
+two arms, which also moves the fallback count from the 24 this block priced to the 70 of the arm.
 
 ## The dev split, measured: 60.6% on the split leaderboards report
 
@@ -2920,6 +2923,151 @@ puts `candidateRecall` into the baseline gate alongside accuracy (65.86% is a ha
 recall drop that accuracy cannot see is currently silent), and builds the coverage/recall
 stratification that says how much prompt coverage is worth. The third-party judge, which used to
 be the only remaining exit, is now one more candidate in the narrow column.
+
+## The card as a join closure: what it saves, and what it costs
+
+The join measurement priced the lever and named the depth; this is the arm that sends it.
+`select-prune` is one lever from `select` — the same linker, the same three samples, the same
+selector — with the card cut to the tables within one join of the ones the question names, and the
+whole card when the question names none. The rule lives in one function, `pruneSchema`, and both
+instruments that render a prompt call it: an instrument that measured the whole card and called it
+the prompt that was sent would report this lever as its parent with a longer name.
+
+| reading | instrument | `select` | `select-prune` |
+| --- | --- | --- | --- |
+| characters of the generation prompt | `bench:bird:card` | 2,864 | **2,504 (−12.6%)** |
+| the card's share of it | `bench:bird:card` | 74.1% | 70.3% |
+| tables on the card | `bench:bird:card` | 7.3 | 5.9 |
+| characters per question | `bench:bird:card` | 11,420 | **9,984 (−12.6%)** |
+| the gold's tables the card holds | `bench:bird:card` | 1,022 / 1,022 | 987 / 1,022 |
+| the candidate set held an answer | the run | 306 / 498 = 61.4% | 296 / 498 = 59.4% |
+| characters per call, every call | the run | 2,579 | **2,309 (−10.5%)** |
+| prompt tokens per call, every call | the run | 636 | **570 (−10.4%)** |
+| characters per token | the run | 4.05 | 4.05 |
+| accuracy | the run | 283 / 498 = 56.83% | 272 / 498 = **54.62%** |
+
+The saving is smaller than the 58.4% ceiling the card measurement named, and smaller than the 15.1%
+the join measurement priced, for three reasons that are facts about the rule rather than about the
+instrument.
+
+1. **The rule seeds itself from the arm's own linker.** The join measurement's best block used the
+   `table` recaller, which is a different linker: adding a fourth recaller changes the reciprocal
+   rank fusion, so the columns near the twelve-slot cutoff move and the `Likely columns` hint in
+   the user message changes with them. An arm built on that set would differ from `select` by two
+   levers — the hint and the card — and no delta could say which one moved the score. So the arm
+   ships the shipped recallers and the depth the measurement pointed at, and nothing else.
+2. **Seventy of the split's 498 questions name nothing the linker can see, and those keep the whole
+   card.** That is the same population the join instrument reports, and the fallback is what makes
+   it a rule a prompt can run rather than an oracle: a card built from an empty seed set would be a
+   prompt with no schema in it at all.
+3. **One call in four never carries the card.** The selector's prompt holds the candidates and the
+   question, so cutting the card leaves it untouched: the generation prompt loses 12.6% and the
+   average call loses 10.5%. The ratio of the two is the share of the bill that was prunable.
+
+What the rule cannot ask is whether its closure held the tables the *answer* needs. That is now a
+column of its own rather than an inference: the card report used to publish what the linker named,
+which is identical on both arms, and the lever is a statement about the card. Comparing the tables
+the rendered prompt shows against the tables the gold statement reads:
+
+| the card the arm sends | cases | `select` | `select-prune` |
+| --- | --- | --- | --- |
+| holds every table the gold reads | 463 | 58.1% (269) | 56.2% (260) |
+| holds some of them | 33 | 39.4% (13) | 30.3% (10) |
+| holds none of them | 0 | — | — |
+
+`select` sends a card that holds all 1,022 gold tables in all 496 cases; the pruned card holds 987,
+short of one table in 33 cases and short of all of them in none — the last row being the evidence
+that the no-seed fallback fires rather than a coincidence. Recall falls with it: 304 → 294 overall,
+16 → 10 inside the 33, and 288 → 284 outside them. Those counts are over the 496 distinct questions,
+which is what the card instrument sees once; the run's own ceiling column counts rows and therefore
+reads two higher on both arms (306 → 296, the table above), because Mini-Dev lists 137 and 138 twice
+and answers both.
+
+### The same arm, two runs: 1.8pp apart, and the prompts were byte-identical
+
+The first run of this arm (`57f70f71`) reported **281/498 against 281/498** — eighteen cases each
+way, McNemar p = 1. The second (`947134b0`) reported **283 against 272**, −2.21pp, 23 lost and 12
+gained, p = 0.090, CI −4.54 to +0.12pp. The two commits differ only in how the runner counts
+characters and tokens: no prompt, no sample and no case changed between them.
+
+| run | `select` | `select-prune` | Δ | exchanged | p |
+| --- | --- | --- | --- | --- | --- |
+| `57f70f71` | 56.43% | 56.43% | 0.00pp | 18 / 18 | 1 |
+| `947134b0` | 56.83% | 54.62% | −2.21pp | 23 / 12 | 0.090 |
+
+So a four-call arm moves 1.8pp between runs with nothing changed but the draw: three samples at
+temperature 0.7, four calls, 498 questions. That number is the floor under every reading in this
+section and under the cost table below, and it is larger than the gaps by which that table ranks
+the arms. What survives two runs is the direction of what the closure removed, not its size:
+
+| the cases | `57f70f71` | `947134b0` | pooled |
+| --- | --- | --- | --- |
+| 33 whose card lost a table | 6 lost / 0 gained | 4 lost / 1 gained | **10 / 1** (p = 0.012) |
+| 463 whose card kept all of them | 12 lost / 17 gained | 19 lost / 10 gained | 31 / 27 (p = 0.69) |
+
+Where the closure deleted a table the answer needed, the arm lost ten of eleven exchanges across
+both runs. Everywhere else it is a coin, which is what "a different prompt is a different sample"
+looks like: the same three-sample draw on different text, with no mechanism to prefer either. The
+lever therefore has no measured gain to trade for its 10.5%: it stays a cost lever, one switch away
+from `select`, rather than a candidate for the default.
+
+### What the provider billed
+
+The cost instruments before this one counted characters, because they never touch a provider. That
+is a property of the text and not of the tokenizer, and the ratio between the two is the only
+calibration either can get. `bench:bird:card` now prints both, per arm, from the artifact the run
+wrote:
+
+- `chars/call` and `tokens/call` are summed over every call a case made — three generations and the
+  selector — and divided by calls. They are the same calls, message for message, which is the only
+  way the ratio between them describes one request.
+- `chars/token` is that ratio. It is reported rather than assumed, and a ratio below half a
+  character per token fails the gate: there is no tokenizer that produces it, so the two columns
+  would be describing different prompts. Here it is **4.05 for both arms**, which says the pruned
+  card is not a different *kind* of text — the same characters per token, 10.5% fewer of them.
+- `unbilled` counts answers that arrived without a usage block. Those calls are unknown, not free,
+  and a cost column that reported them as zero would be a measurement of nothing that reads as a
+  measurement of zero.
+
+The generation prompt the card instrument renders is 2,864 characters against 636 tokens per call
+over all calls; the two numbers are not supposed to divide into 4.5, because the selector's prompt
+is a different text. An earlier version of this meter did divide them — the token count of four
+calls by the characters of one message — and reported 1.04 characters per token, which is how a
+mismatched pair announces itself: no tokenizer is that dense.
+
+Four failures fail the build, and none of them is a target: an arm that made calls and metered
+none, an arm whose token column is zero despite its calls, an answer without a usage block, and the
+impossible ratio.
+
+### What the tokens buy
+
+With both units in one artifact the arms can be compared on what a deployment pays. Total tokens per
+question, prompt and completion:
+
+| arm | calls | tokens per question | accuracy |
+| --- | --- | --- | --- |
+| `names` | 1 | 598 | 36.8% |
+| `inline+evidence` | 1 | **756** | 57.0% |
+| `values` | 1 | 763 | 56.6% |
+| `inline+repair-raw` | 1.03 | 787 | 56.6% |
+| `metadata+evidence` | 1 | 1,774 | **59.2%** |
+| `vote` | 3 | 2,271 | 56.8% |
+| `select-prune` | 3.99 | 2,454 | 54.6% |
+| `select` | 3.99 | 2,717 | 56.8% |
+| `select-mixed` | 3.99 | 2,721 | 58.0% |
+| `select5` | 5.99 | 4,402 | 57.4% |
+
+Every multi-call arm is dominated here: `select` spends 3.6 times `inline+evidence` to score
+0.2pp below it, `select-mixed` spends 3.6 times the same arm to score 1.0pp above it and 1.5 times
+`metadata+evidence` to score 1.2pp below that, and `select5` spends 2.5 times `metadata+evidence` to
+score 1.8pp below it. The pruned card does what it was built to do — 2,717 → 2,454 at a cost — and
+is still 3.2 times a single prompt.
+
+This is a reading, not an adoption. The gaps it ranks by are 1–2pp, and the table above shows a
+no-op change moving an arm 1.8pp. What it does establish is that the cost axis had never been
+computed against the accuracy axis in the same artifact, and that the cheapest arm here is not the
+weakest one — which makes "spend fewer calls" a hypothesis with a mechanism instead of an
+optimisation with a target.
 
 ## The floor is enforced, not remembered
 

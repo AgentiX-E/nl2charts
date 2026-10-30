@@ -157,6 +157,18 @@ export interface CardRow {
   readonly candidate: Coverage;
   readonly shippedTables: number;
   readonly candidateTables: number;
+  /**
+   * What the card this arm sends keeps of the gold's tables.
+   *
+   * `shipped` and `candidate` are about the *linker*: how many of the gold's tables the recallers
+   * named. An arm that removes tables changes the answer, and the removed table is the risk the
+   * lever is priced on — a card that lost a table the gold reads cannot be asked about it. Reported
+   * separately rather than folded in, so a linker that named nothing and a rule that dropped
+   * something are two numbers instead of one ambiguous one.
+   */
+  readonly carded: Coverage;
+  /** The gold's tables the card shows, counted rather than bucketed. */
+  readonly cardedKept: number;
 }
 
 export interface CardTally {
@@ -174,6 +186,8 @@ export interface CardTally {
   readonly candidate: Readonly<Record<Coverage, number>>;
   readonly shippedKept: number;
   readonly candidateKept: number;
+  readonly carded: Readonly<Record<Coverage, number>>;
+  readonly cardedKept: number;
 }
 
 /**
@@ -196,11 +210,13 @@ export function tallyCards(rows: readonly CardRow[]): CardTally {
   };
   const shipped = zero();
   const candidate = zero();
-  const sum = { calls: 0, tables: 0, goldTables: 0, goldChars: 0, spareChars: 0, shippedKept: 0, candidateKept: 0, cardShare: 0, spareShare: 0 };
+  const carded = zero();
+  const sum = { calls: 0, tables: 0, goldTables: 0, goldChars: 0, spareChars: 0, shippedKept: 0, candidateKept: 0, cardedKept: 0, cardShare: 0, spareShare: 0 };
   for (const row of rows) {
     for (const key of Object.keys(total) as (keyof PromptCost)[]) total[key] += row.cost[key];
     shipped[row.shipped] += 1;
     candidate[row.candidate] += 1;
+    carded[row.carded] += 1;
     sum.calls += row.calls;
     sum.tables += row.tables;
     sum.goldTables += row.goldTables;
@@ -208,6 +224,7 @@ export function tallyCards(rows: readonly CardRow[]): CardTally {
     sum.spareChars += row.spareChars;
     sum.shippedKept += row.shippedTables;
     sum.candidateKept += row.candidateTables;
+    sum.cardedKept += row.cardedKept;
     const cardTotal = row.cost.card === 0 ? 1 : row.cost.card;
     sum.cardShare += row.cost.card / (row.cost.system + row.cost.user);
     sum.spareShare += row.spareChars / cardTotal;
@@ -227,6 +244,8 @@ export function tallyCards(rows: readonly CardRow[]): CardTally {
     candidate,
     shippedKept: sum.shippedKept,
     candidateKept: sum.candidateKept,
+    carded,
+    cardedKept: sum.cardedKept,
   };
 }
 
@@ -261,6 +280,11 @@ export function cardLines(tally: CardTally): string[] {
   );
   out.push(
     `  with the table recaller  keeps ${(tally.candidateKept / n).toFixed(1)} tables: all of the gold's ${String(tally.candidate.all)}, some of it ${String(tally.candidate.some)}, none of it ${String(tally.candidate.none)}`,
+  );
+  // The card is the lever. A rule that removes tables is priced on what it removed, and the two
+  // lines above cannot say it: they are about the linker, and the linker is the same on both arms.
+  out.push(
+    `  the card this arm sends keeps ${(tally.cardedKept / n).toFixed(1)} of the gold's ${(tally.goldTables / n).toFixed(1)} tables: all ${String(tally.carded.all)}, some ${String(tally.carded.some)}, none ${String(tally.carded.none)}`,
   );
   return out;
 }
@@ -552,6 +576,9 @@ export async function runCard(settings: CardSettings): Promise<CardOutcome> {
       const gold = goldTables(question.SQL);
       const shipped = linkedTables(question.question, built.schema, SHIPPED_RECALLERS);
       const candidate = linkedTables(question.question, built.schema, CANDIDATE_RECALLERS);
+      // The tables the prompt shows are the keys of `chars`: one entry per table in the schema this
+      // arm rendered, whatever rule produced it.
+      const shown = new Set(chars.keys());
       let goldChars = 0;
       for (const name of gold) goldChars += chars.get(name) ?? 0;
       const total = [...chars.values()].reduce((sum, value) => sum + value, 0);
@@ -567,6 +594,8 @@ export async function runCard(settings: CardSettings): Promise<CardOutcome> {
         candidate: coverage(gold, candidate),
         shippedTables: shipped.size,
         candidateTables: candidate.size,
+        carded: coverage(gold, shown),
+        cardedKept: [...gold].filter((name) => shown.has(name)).length,
       });
     }
   }

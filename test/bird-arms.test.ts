@@ -766,6 +766,7 @@ describe('cross-model candidate sources', () => {
 describe('baseline coordinates', () => {
   const baseline = JSON.parse(readFileSync(resolve(process.cwd(), 'eval/baseline/bird.json'), 'utf8')) as {
     floors: Record<string, Record<string, number>>;
+    recallFloors?: Record<string, Record<string, number>>;
     floorModel?: Record<string, string>;
     scoredBySplit?: Record<string, number>;
   };
@@ -773,6 +774,18 @@ describe('baseline coordinates', () => {
   it('names the model behind every set of floors', () => {
     for (const split of Object.keys(baseline.floors)) {
       expect(baseline.floorModel?.[split], split).toBeTruthy();
+    }
+  });
+
+  it('floors the ceiling only of an arm whose score is floored in the same split', () => {
+    // A ceiling floor on an arm with no score floor guards a number that nothing else
+    // compares against: the ceiling can fall, the note fires, and no verdict depends on it.
+    // The pairing is the point — `select-prune` arrived with both in one pass, because the
+    // arm it is a lever from carries both and a lever inherits the two halves of a score.
+    for (const split of Object.keys(baseline.recallFloors ?? {})) {
+      for (const name of Object.keys(baseline.recallFloors?.[split] ?? {})) {
+        expect(Object.keys(baseline.floors?.[split] ?? {}), `${split}/${name}`).toContain(name);
+      }
     }
   });
 
