@@ -8,6 +8,32 @@ cannot be argued with.
 
 ### Measured
 
+- **Three quarters of every call is the schema card, and the card is the whole database.**
+  `pnpm bench:bird:card <report> --arm <name> [--strict]` prices the prompt with zero model calls:
+  it rebuilds the two messages the pipeline sends — the split's questions, the bare card, the
+  artifact's definitions, the runner's `promptFor`, the pipeline's own `buildAskMessages` — and
+  charges every character to the block that spent it. Mini-Dev `select`, 496 questions at 3.99
+  calls each: **2,864 characters per call**, of which the card is **2,121 (74.1%)**, rules 274
+  (9.6%), evidence 135 (4.7%), the linker's hint 133 (4.6%) and the question 90 (3.2%); 11,438
+  characters per question.
+
+  The card shows 7.3 tables and the gold statement reads 2.1 of them, so 41.6% of the card
+  belongs to a table the gold never mentions and **a linker that never erred would remove 58.4%
+  of the card**. `--strict` gates the two ways the instrument can be wrong, both absolute:
+  nothing read, and a card rebuilt without the text the run placed on it.
+
+- **The linker could name no table at all for one case in six.** `linkSchema` scores columns, and
+  its name recaller tokenized the *column* name, so the table half of every identifier was
+  invisible: "how many customers are there" matched nothing, because `customer_id` holds
+  `customer` and `id`. Measured on 496 Mini-Dev questions: **86 cases (17.3%) kept no gold table**
+  and 230 (46.4%) kept all of them. With the new `table` recaller, **9 (1.8%)** and **300
+  (60.5%)**. It is opt-in — the default set is unchanged, so every accuracy number in this
+  repository still describes the prompt it was measured on — and the pipeline gained a `recallers`
+  option so a caller can turn it on, because a recaller nobody can select is dead code.
+
+  60.5% is why the card is not pruned: 196 cases would lose a table they need, and the residue is
+  the join partner the question never names (`gold customers, yearmonth`, kept `yearmonth`).
+
 - **Three fifths of the no-answer cases had every value the gold needs in the prompt.** `pnpm
   bench:bird:info <report> --arm <name> [--strict]` renders the prompt the arm actually sent — the
   split's questions, the bare card, the definitions the artifact recorded, the runner's own
@@ -157,6 +183,26 @@ cannot be argued with.
   criterion's 52.6% threshold belonged to the judge-swap run (`@second` is 27.0% of winners under
   the primary judge here), and `select-cross-shuffled` stays out of the adoption chain as a
   diagnostic lever.
+
+### Fixed
+
+- **The prompt instruments measured the system message and called it the prompt.** The model
+  receives `buildSqlPrompt`'s output *and* a user turn carrying the linker's hint and the question
+  again; `bench:bird:info` stopped at the first. Re-measured through `buildAskMessages` the five
+  value classes are unchanged (111/8/6/4/55) because the hint lists identifiers and the classes
+  are about values — zero cases moved, and the claim now matches the measurement.
+
+- **The gate that refuses an arm whose prompt cannot be rebuilt had a hole at the arm it was
+  written for.** `renderableArm` listed the synthesized hint, matched values, worked examples and
+  decompositions, but not retrieved evidence, although the artifact keeps only a count of the
+  retrieved blocks. `inline+retrieval` therefore came back renderable, `promptFor` dropped the
+  evidence without saying so, and an instrument would have reported a prompt the model never saw
+  as the prompt that was sent. The check now lives with the arm definition in `run.ts` and refuses
+  it by name.
+
+- `buildAskMessages` returns its pair as a fixed two-tuple, so a caller cannot index a third
+  message that does not exist, and `CaseRecord` declares the `calls` field the runner has always
+  written — every tool that priced an arm had been going around the type to read it.
 
 ### Added
 

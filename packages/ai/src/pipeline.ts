@@ -8,7 +8,7 @@ import { buildPlanPrompt, parsePlan } from './plan.js';
 import { DECOMPOSE_RULES, parseDecomposed } from './decompose.js';
 import { emptyRetryMessages } from './empty.js';
 import { linkSchema, renderSchemaCard } from './linking.js';
-import type { LinkedColumn, SchemaCardOptions, SchemaTable } from './linking.js';
+import type { LinkedColumn, Recaller, SchemaCardOptions, SchemaTable } from './linking.js';
 
 export interface PromptOptions extends SchemaCardOptions {
   /** Dialect the statement must be written in, e.g. 'SQLite'. */
@@ -106,6 +106,13 @@ export interface PipelineOptions {
   readonly prompt?: PromptOptions;
   /** Ask the three-recaller linker for a column hint. Defaults to true. */
   readonly linking?: boolean;
+  /**
+   * Which recallers the linker may use. Absent means its default set.
+   *
+   * A caller that has measured a recaller on its own corpus can turn it on here; nothing in
+   * the product does, so the hint every shipped prompt carries is the one that was measured.
+   */
+  readonly recallers?: readonly Recaller[];
   /** Ask for a one-sentence reading of the question before writing SQL. */
   readonly interpret?: boolean;
   /** Ask for a query plan (scan, filter, join, group, answer) before writing SQL. */
@@ -279,6 +286,8 @@ export interface AskMessagesInput {
   readonly schema: readonly SchemaTable[];
   readonly prompt?: PromptOptions;
   readonly linking?: boolean;
+  /** Which recallers the linker may use; absent means its default set. */
+  readonly recallers?: readonly Recaller[];
   readonly samples?: boolean;
   readonly interpretation?: string;
   readonly plan?: string;
@@ -295,8 +304,11 @@ export interface AskMessagesInput {
  * drifted would make the extra turn a different prompt, and the arm that spends it would
  * be measuring the drift.
  */
-export function buildAskMessages(input: AskMessagesInput): { messages: LlmMessage[]; linked: readonly LinkedColumn[] } {
-  const linked = input.linking === false ? [] : linkSchema(input.question, input.schema, input.topK ?? 12);
+export function buildAskMessages(input: AskMessagesInput): {
+  messages: readonly [LlmMessage, LlmMessage];
+  linked: readonly LinkedColumn[];
+} {
+  const linked = input.linking === false ? [] : linkSchema(input.question, input.schema, input.topK ?? 12, input.recallers);
   const schemaHint =
     input.linking === false
       ? 'Use the schema above.'
@@ -369,13 +381,15 @@ export function createPipeline(options: PipelineOptions): {  ask(request: AskReq
         schema: request.schema,
         ...(options.prompt === undefined ? {} : { prompt: options.prompt }),
         ...(options.linking === undefined ? {} : { linking: options.linking }),
+        ...(options.recallers === undefined ? {} : { recallers: options.recallers }),
         ...(options.samples === undefined ? {} : { samples: options.samples }),
         ...(interpretation === undefined ? {} : { interpretation }),
         ...(plan === undefined ? {} : { plan }),
         decompose: options.decompose === true,
         topK,
       });
-      const messages = built.messages;
+      // The builder returns a pair; the repair loop appends to a copy of it.
+      const messages: LlmMessage[] = [...built.messages];
       const linked = built.linked;
 
       let attempts = 0;

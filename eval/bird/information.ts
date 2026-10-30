@@ -42,12 +42,14 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { attachDefinitions, buildSqlPrompt } from '@agentix-e/nl2charts-ai';
+import { attachDefinitions, buildAskMessages } from '@agentix-e/nl2charts-ai';
 import type { SchemaTable } from '@agentix-e/nl2charts-ai';
 import { buildSchema, loadQuestions, loadTables } from './data.js';
 import type { BirdQuestion, BirdTable } from './data.js';
 import type { CaseRecord } from './gap.js';
-import { promptFor, resolveArm, resolveLayout } from './run.js';
+import { promptFor, renderableArm, resolveArm, resolveLayout } from './run.js';
+// Re-exported: this instrument's gate is a property of the arm, and its callers import it here.
+export { renderableArm };
 import type { Arm, BirdLayout } from './run.js';
 import { literalSites } from './statement.js';
 
@@ -205,7 +207,9 @@ export function informationProblems(input: {
   readonly unrenderable: number;
 }): string[] {
   const problems: string[] = [];
-  if (input.tally.total === 0) {
+  // One root cause, not two symptoms: a population that was dropped for a named reason has
+  // already said what went wrong, and "nothing was read" would only restate it.
+  if (input.tally.total === 0 && input.definitionGap === 0 && input.unrenderable === 0) {
     problems.push('INFO: no no-answer case could be read, so nothing about the prompt was measured');
   }
   if (input.definitionGap > 0) {
@@ -278,29 +282,30 @@ export interface InfoReportShape {
 }
 
 /**
- * The gate that this instrument can be a gate at all.
- *
- * The prompt an arm sends is the card plus whatever blocks it asked for, and the artifact keeps
- * only one of them. An arm that draws its prompt from a block the artifact does not carry — a
- * data profile, retrieved neighbours, matched values — cannot be measured here without inventing
- * text, and inventing text is how a benchmark ends up reporting a prompt nobody sent. Such an
- * arm is refused by name instead.
- */
-export function renderableArm(arm: Arm): boolean {
-  return arm.evidence !== 'synthetic' && arm.values !== true && arm.demonstrations !== true && arm.decompose !== true;
-}
-
-/**
  * Render the prompt one arm would send for one question, from the artifact's own text.
  *
- * Both halves are the runner's: `buildSchema` with `withNotes: false` produces the bare card the
- * inline arm is built on, `attachDefinitions` places the synthesized text, and `promptFor` is the
- * very function the run calls. Reimplementing any of the three would make this instrument a
+ * Every half is the runner's: `buildSchema` with `withNotes: false` produces the bare card the
+ * inline arm is built on, `attachDefinitions` places the synthesized text, `promptFor` is the
+ * function the run calls, and `buildAskMessages` is what turns those options into the two
+ * messages the model receives. Reimplementing any of them would make this instrument a
  * measurement of its own copy of the prompt.
+ *
+ * Both messages, not the system one. The first version of this function stopped at
+ * `buildSqlPrompt`, which is the system message; the user message carries the linker's hint and
+ * the question again, so the prompt it measured was missing a block the model reads. The
+ * classes below barely move — the hint lists identifiers, not values — but a file whose header
+ * promises the prompt that was sent has to measure the prompt that was sent.
  */
 export function promptForCase(arm: Arm, question: BirdQuestion, definitions: string, tables: BirdTable): string {
   const card = attachDefinitions(buildSchema(tables, new Map(), { withNotes: false }), definitions);
-  return buildSqlPrompt(question.question, card.schema as SchemaTable[], promptFor(arm, question, {}));
+  const built = buildAskMessages({
+    question: question.question,
+    schema: card.schema as SchemaTable[],
+    prompt: promptFor(arm, question, {}),
+    linking: arm.linking,
+    samples: arm.samples === true,
+  });
+  return built.messages.map((message) => message.content).join('\n');
 }
 
 export async function runInformation(settings: InfoSettings): Promise<InfoOutcome> {

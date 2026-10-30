@@ -47,6 +47,13 @@ export interface CaseRecord {
   readonly candidateRecall?: boolean;
   readonly candidates?: readonly { readonly source?: string; readonly correct?: boolean }[];
   readonly winnerSource?: string;
+  /**
+   * Model calls this case made, as the runner counted them at the provider.
+   *
+   * The runner has always written it; this reader did not declare it, so every tool that prices
+   * an arm had to go around the type to find out what the arm cost.
+   */
+  readonly calls?: number;
 }
 
 export interface ReportedFailure {

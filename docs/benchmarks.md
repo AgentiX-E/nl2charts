@@ -1028,6 +1028,85 @@ The taxonomy above is unchanged by this instrument, and the one case that *did* 
 defect described in the section before this one: Mini-Dev 1068 was filed under `literal-missing`
 by a reader that compared spellings, and is a `predicate` difference in fact.
 
+## What a question costs to ask, and what a smaller card would save
+
+The prompt had never been priced. Every round so far measured what the prompt *says* — which
+identifiers it shows, which values it spells — and none measured what it *costs*, so the token
+work in the plan had no data under it. `pnpm bench:bird:card <report> --arm <name> [--strict]`
+answers it with zero model calls: it rebuilds the two messages the pipeline sends, with the
+split's own questions, the bare card, the definitions the artifact recorded, the runner's
+`promptFor` and the pipeline's own `buildAskMessages`, and charges every character to the block
+that spent it.
+
+Mini-Dev, `select`, 496 questions at 3.99 calls each:
+
+| block | characters per call | share |
+|---|---|---|
+| rules | 274 | 9.6% |
+| **schema card** | **2,121** | **74.1%** |
+| context (evidence) | 135 | 4.7% |
+| the linker's hint (user turn) | 133 | 4.6% |
+| question | 90 | 3.2% |
+| **total** | **2,864** | |
+
+Eleven thousand four hundred characters per question, because an arm that samples spends four
+calls on the same card. **Three quarters of every call is the schema card**, and the card is the
+whole database: 7.3 tables per case, where the gold statement reads 2.1 of them. 41.6% of the
+card's characters belong to a table the gold never mentions, so a linker that never erred would
+remove **58.4% of the card** — roughly two fifths of the prompt, on every call, four times a case.
+
+That is a ceiling, not a plan. Two numbers say why:
+
+| | no gold table kept | some kept | every gold table kept |
+|---|---|---|---|
+| shipped recallers (`name`, `alias`, `value`) | **86 (17.3%)** | 180 (36.3%) | 230 (46.4%) |
+| with the table recaller | **9 (1.8%)** | 187 (37.7%) | 300 (60.5%) |
+
+### The linker could not see a table name
+
+The left column of that table is a defect, not a tuning result. `linkSchema` scores *columns*,
+and its name recaller tokenizes the column's name, so the table half of every identifier was
+invisible: asked "how many customers are there", it looked for a column whose name contains
+"customers", found none — `customer_id` contains `customer` and `id` — and returned an empty
+list. One case in six. In BIRD that is the common shape of a question, because the entity is
+named and the columns are not: *"what is the ratio of customers who pay in EUR"*, *"who had the
+least consumption in LAM"*.
+
+The fix is a fourth recaller that reads table names, with a plural allowance and a four-character
+floor so that `orders` is not matched by `or`. It is **opt-in**: adding it to the default set
+would have changed the hint every measured arm sends, and every accuracy number in this document
+would then describe a prompt nobody had run. The pipeline gained a `recallers` option so the
+recaller is reachable at all — a recaller nobody can select is dead code — and the default still
+resolves to the three the arms were measured with.
+
+What comes out: no table at all falls from 86 cases to 9, and full coverage rises from 46.4% to
+60.5%. Not enough to prune with. 196 cases would still lose a table they need, and the residue is
+not noise — it is the join partner the question never names (`gold customers, yearmonth`, kept
+`yearmonth`). A card that omits it cannot be written correctly, so the next step is a join
+closure over the linked tables, which is the table-relation entry in the plan and not a card
+tuning exercise. Until then the card ships whole, and this section is the measurement that says
+so rather than a change that guesses.
+
+### Two instruments that were measuring someone else's prompt
+
+Both were found while building the above, and both are recorded because the class of error is the
+one this file keeps rediscovering: a measurement of a prompt nobody sent.
+
+1. **`bench:bird:info` measured the system message.** It called `buildSqlPrompt` and stopped;
+   the model receives `buildSqlPrompt`'s output *and* a user turn carrying the linker's hint and
+   the question again. Re-measured through `buildAskMessages`, the five classes are unchanged —
+   111 `spelled`, 8 `casing`, 6 `notation`, 4 `absent`, 55 `none` — because the hint lists
+   identifiers and the classes are about values. Zero cases moved, and the correction still
+   matters: a file whose header promises the prompt that was sent has to measure it.
+2. **`renderableArm` accepted an arm whose evidence is retrieved.** The check exists so that an
+   instrument never invents a block the artifact does not keep, and it listed the synthesized
+   hint, matched values, worked examples and decompositions — but not retrieval, although the
+   artifact keeps only a count of the retrieved blocks. `inline+retrieval` came back renderable,
+   `promptFor` then dropped the evidence without saying so, and an instrument would have reported
+   the result as the prompt that was sent. No gate ran that arm, which is why the hole survived;
+   it is refused by name now, and the check lives with the arm definition in `run.ts` rather than
+   in one instrument.
+
 ## The dev split, measured: 60.6% on the split leaderboards report
 
 Two runs of the 1,534-question dev split (`40157122326`, `40166834512`), three arms,

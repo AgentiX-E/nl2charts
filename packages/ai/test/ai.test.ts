@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { isNl2ChartsError } from '@agentix-e/nl2charts-spec';
-import { buildSqlPrompt, choosePromptProfile, createPipeline, extractSql } from '../src/pipeline.js';
+import { buildAskMessages, buildSqlPrompt, choosePromptProfile, createPipeline, extractSql } from '../src/pipeline.js';
 import { linkSchema, renderName, renderSchemaCard, tokenizeQuestion } from '../src/linking.js';
 import type { SchemaTable } from '../src/linking.js';
 import { createReplayProvider, recordProvider } from '../src/replay.js';
@@ -31,6 +31,35 @@ describe('question tokenization', () => {
   });
 });
 
+describe('the hint that travels with the question', () => {
+  it('says which columns the linker chose, in the user turn', () => {
+    const built = buildAskMessages({ question: 'revenue by region', schema, linking: true });
+    expect(built.messages[1]?.content.startsWith('Likely columns: ')).toBe(true);
+    expect(built.messages[1]?.content).toContain('orders.revenue');
+    expect(built.messages[1]?.content.endsWith('revenue by region')).toBe(true);
+  });
+
+  it('says so when nothing matched, rather than sending an empty hint', () => {
+    const built = buildAskMessages({ question: 'how many customers are there', schema, linking: true });
+    expect(built.messages[1]?.content).toBe('No column matched; use the schema above.\nhow many customers are there');
+  });
+
+  it('lets a caller turn on a recaller the default set does not use', () => {
+    const built = buildAskMessages({
+      question: 'how many customers are there',
+      schema,
+      linking: true,
+      recallers: ['name', 'table'],
+    });
+    expect(built.messages[1]?.content).toContain('customers.customer_id');
+  });
+
+  it('leaves the hint alone when linking is off', () => {
+    const built = buildAskMessages({ question: 'revenue by region', schema, linking: false });
+    expect(built.messages[1]?.content).toBe('Use the schema above.\nrevenue by region');
+  });
+});
+
 describe('schema linking', () => {
   it('ranks the measure and the dimension first', () => {
     const linked = linkSchema('revenue by region', schema);
@@ -58,6 +87,58 @@ describe('schema linking', () => {
     expect(linkSchema('unrelated words entirely', schema)).toEqual([]);
     expect(linkSchema('', schema)).toEqual([]);
     expect(linkSchema('what is the', schema)).toEqual([]);
+  });
+
+  /**
+   * The recaller that reads a table name.
+   *
+   * Every candidate is a column, and the name recaller split the *column* name into tokens,
+   * so the table half of `customers.customer_id` was invisible. A question that names its
+   * entity and none of its columns — "how many customers are there", which is how a third of
+   * BIRD's questions are written — matched nothing at all and the linker returned an empty
+   * list, on a schema where the answer is one table away.
+   *
+   * It is a separate recaller rather than a wider `name`, because a table name is weaker
+   * evidence than a column name: it says which table, not which column. Folding it into
+   * `name` would have changed the hint every measured arm sends, and those measurements
+   * would no longer be about the prompt they were taken on.
+   */
+  it('finds the table a question names and no column of it', () => {
+    const linked = linkSchema('how many customers are there', schema, 12, ['table']);
+    expect(linked.map((column) => `${column.table}.${column.column}`)).toEqual(['customers.customer_id', 'customers.segment']);
+    expect(linked.every((column) => column.recalledBy.includes('table'))).toBe(true);
+  });
+
+  it('reads a singular question against a plural table name', () => {
+    expect(linkSchema('how many customer', schema, 12, ['table']).map((column) => column.table)).toEqual([
+      'customers',
+      'customers',
+    ]);
+  });
+
+  it('ignores a token too short to be a table name', () => {
+    // `orders` starts with `or`, and matching on two letters would make every table whose
+    // name begins with a stopword look named.
+    expect(linkSchema('or', schema, 12, ['table'])).toEqual([]);
+  });
+
+  it('stacks the table recaller with the column one', () => {
+    // One column scored by two independent recallers outranks a column scored by one, which is
+    // the property that lets a pruned card keep both the table a question names and the column
+    // it measures.
+    const both = linkSchema('customers revenue', schema, 12, ['name', 'table']);
+    expect(both.find((column) => column.column === 'revenue')?.recalledBy).toEqual(['name']);
+    expect(both.filter((column) => column.table === 'customers')).toHaveLength(2);
+    expect(both.filter((column) => column.table === 'customers').every((column) => column.recalledBy.includes('table'))).toBe(
+      true,
+    );
+  });
+
+  it('leaves the default recallers alone', () => {
+    // The hint every measured arm sends is built from the default list. Adding `table` to it
+    // would silently re-open every accuracy number this project has, so the default stays and
+    // the new recaller is opt-in.
+    expect(linkSchema('how many customers are there', schema)).toEqual([]);
   });
 
   it('honours the top-k limit', () => {

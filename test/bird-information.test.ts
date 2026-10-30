@@ -167,6 +167,13 @@ describe('the gate the instrument can be', () => {
     expect(informationProblems({ tally: tallyInformation([]), definitionGap: 0, unrenderable: 0 })[0]).toContain('nothing about the prompt');
   });
 
+  it('does not restate a drop as an empty population', () => {
+    // One root cause, not two symptoms.
+    const named = informationProblems({ tally: tallyInformation([]), definitionGap: 2, unrenderable: 0 });
+    expect(named).toHaveLength(1);
+    expect(named[0]).toContain('not the card that was sent');
+  });
+
   it('fails when a case is in a database whose definitions the artifact does not carry', () => {
     expect(informationProblems({ tally, definitionGap: 2, unrenderable: 0 })[0]).toContain('not the card that was sent');
   });
@@ -191,6 +198,14 @@ describe('which arms this instrument may measure', () => {
 
   it('refuses an arm that draws on worked examples', () => {
     expect(renderableArm(resolveArm('inline+icl') as never)).toBe(false);
+  });
+
+  it('refuses an arm whose evidence is retrieved, which the artifact keeps only a count of', () => {
+    // `inline+retrieval` was accepted until this round. `promptFor` then dropped the evidence
+    // block without saying so, so an instrument would have measured a prompt the model never
+    // saw — the exact failure the check exists to prevent — and reported it as the prompt that
+    // was sent. No gate ran the arm, which is why the hole survived.
+    expect(renderableArm(resolveArm('inline+retrieval') as never)).toBe(false);
   });
 
   it('refuses an arm whose prompt carries a decomposition', () => {

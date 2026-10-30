@@ -114,6 +114,11 @@ jobs:
       # and arm it has been measured on.
       - name: What kind of wrong the no-answer statements are
         run: pnpm bench:bird:gap:values eval/out/bird-eval.json --arm select-cross
+      # The same instrument on the split with room for a result. No `--strict`: the ceiling is
+      # a reading, and the two failures it can catch are the ones the Mini-Dev gate already
+      # fails on.
+      - name: What the prompt costs, and what a smaller card would save
+        run: pnpm bench:bird:card eval/out/bird-eval.json --arm select-cross
       # The same instrument on the split with room for a result. No `--strict`: the two failures
       # this gate can catch are absolute (nothing read, or a card rebuilt without the text the
       # run placed on it) and the dev split is where a rendering bug shows up first, but the

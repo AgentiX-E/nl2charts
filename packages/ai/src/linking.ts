@@ -58,11 +58,33 @@ function nameTokens(column: SchemaColumn): string[] {
 }
 
 /**
+ * Whether a question token names a table.
+ *
+ * The plural question is the common one: the question says "customers" and the table is
+ * `customers`, or the question says "customer" and the table is plural. Four characters is
+ * the floor, because `orders` starts with `or` and a two-letter prefix would make every table
+ * whose name begins with a stopword look named.
+ */
+function namesTable(token: string, table: string): boolean {
+  const name = table.toLowerCase();
+  if (token === name) return true;
+  if (token.length < 4 || name.length < 4) return false;
+  return name.startsWith(token) || token.startsWith(name);
+}
+
+/**
  * Multi-recaller schema linking fused with Reciprocal Rank Fusion. Each recaller
  * is independent, so a failure in one (for example, no sample values) degrades
  * the ranking instead of emptying it.
+ *
+ * `table` is not in the default set. It was added after the corpus was measured rather than
+ * before: on 496 Mini-Dev questions the linker with the default recallers named no column at
+ * all for one case in six, because the questions that fail it name an entity ("the customers
+ * who pay in EUR") and no column of it. Widening `name` to read table names would have fixed
+ * that and changed the hint every measured arm sends, which would have made those
+ * measurements describe a prompt nobody had run. The recaller is opt-in for that reason.
  */
-export type Recaller = 'name' | 'alias' | 'value';
+export type Recaller = 'name' | 'alias' | 'value' | 'table';
 
 export function linkSchema(
   question: string,
@@ -107,6 +129,11 @@ export function linkSchema(
   if (recallers.includes('name')) rank('name', (candidate) => {
     const parts = nameTokens({ name: candidate.column, type: '' });
     return parts.filter((part) => tokenSet.has(part)).length;
+  });
+
+  if (recallers.includes('table')) rank('table', (candidate) => {
+    const table = candidate.table.toLowerCase();
+    return tokens.filter((token) => namesTable(token, table)).length;
   });
 
   if (recallers.includes('alias')) rank('alias', (candidate) => {

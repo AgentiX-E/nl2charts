@@ -1542,6 +1542,32 @@ export interface PromptBlocks {
  * with the retrieved block, the request was sent without it, and the arm's accuracy
  * was then read as evidence that retrieval does not help.
  */
+/**
+ * Whether an instrument can rebuild this arm's prompt from the artifact alone.
+ *
+ * An arm whose prompt draws on a block the artifact does not keep cannot be measured offline
+ * without inventing text, and inventing text is how a benchmark ends up reporting a prompt
+ * nobody sent. Four blocks are in that position: a synthesized evidence hint, retrieved
+ * neighbours (the artifact keeps their count, not their text), matched values and a
+ * decomposition.
+ *
+ * Retrieved evidence was missing from this list until `bench:bird:card` was written, and the
+ * hole was exactly where the comment said the check was: `inline+retrieval` came back
+ * renderable, and `promptFor` then dropped the evidence block without saying so, so an
+ * instrument would have measured a prompt with the retrieved text missing and reported it as
+ * the prompt that was sent. No gate ran that arm — the gates run `select` — which is why the
+ * hole survived.
+ */
+export function renderableArm(arm: Arm): boolean {
+  return (
+    arm.evidence !== 'synthetic' &&
+    arm.evidence !== 'retrieved' &&
+    arm.values !== true &&
+    arm.demonstrations !== true &&
+    arm.decompose !== true
+  );
+}
+
 export function promptFor(arm: Arm, question: BirdQuestion, blocks: PromptBlocks = {}): PromptOptions {
   const { synthesized, definitions, retrieved, demonstrations, values } = blocks;
   const profile = arm.profile === 'adaptive' ? choosePromptProfile(question.question) : undefined;
