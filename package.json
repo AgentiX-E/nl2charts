@@ -50,6 +50,7 @@
     "bench:bird:repair": "tsx eval/bird/repair.ts",
     "bench:bird:info": "tsx eval/bird/information.ts",
     "bench:bird:card": "tsx eval/bird/card.ts",
+    "bench:bird:join": "tsx eval/bird/join.ts",
     "bird:stratify": "node tools/stratify-mixed.mjs"
   },
   "devDependencies": {

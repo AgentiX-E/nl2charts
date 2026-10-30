@@ -141,6 +141,15 @@ describe('what the gold statement reads and what a proposal keeps', () => {
     ]);
   });
 
+  it('does not count a table the statement defines itself', () => {
+    // A CTE is a table of the statement's own making: the card cannot show it, so counting it would
+    // make the case permanently short of `all` and read as a linker failure rather than a reading
+    // about a name the database never had.
+    expect([...goldTables('with recent as (select 1), older as (select 2) select * from recent join older join items')].sort()).toEqual([
+      'items',
+    ]);
+  });
+
   it('calls a proposal that keeps every gold table `all`, one that keeps none `none`', () => {
     expect(coverage(new Set(['items', 'orders']), new Set(['items', 'orders', 'extra']))).toBe('all');
     expect(coverage(new Set(['items', 'orders']), new Set(['items']))).toBe('some');

@@ -1059,8 +1059,8 @@ That is a ceiling, not a plan. Two numbers say why:
 
 | | no gold table kept | some kept | every gold table kept |
 |---|---|---|---|
-| shipped recallers (`name`, `alias`, `value`) | **86 (17.3%)** | 180 (36.3%) | 230 (46.4%) |
-| with the table recaller | **9 (1.8%)** | 187 (37.7%) | 300 (60.5%) |
+| shipped recallers (`name`, `alias`, `value`) | **86 (17.3%)** | 176 (35.5%) | 234 (47.2%) |
+| with the table recaller | **9 (1.8%)** | 185 (37.3%) | 302 (60.9%) |
 
 ### The linker could not see a table name
 
@@ -1079,13 +1079,25 @@ would then describe a prompt nobody had run. The pipeline gained a `recallers` o
 recaller is reachable at all — a recaller nobody can select is dead code — and the default still
 resolves to the three the arms were measured with.
 
-What comes out: no table at all falls from 86 cases to 9, and full coverage rises from 46.4% to
-60.5%. Not enough to prune with. 196 cases would still lose a table they need, and the residue is
+What comes out: no table at all falls from 86 cases to 9, and full coverage rises from 47.2% to
+60.9%. Not enough to prune with. 194 cases would still lose a table they need, and the residue is
 not noise — it is the join partner the question never names (`gold customers, yearmonth`, kept
 `yearmonth`). A card that omits it cannot be written correctly, so the next step is a join
 closure over the linked tables, which is the table-relation entry in the plan and not a card
-tuning exercise. Until then the card ships whole, and this section is the measurement that says
-so rather than a change that guesses.
+tuning exercise. That closure is measured in the next section: it ends the 86 and reaches 95.2%,
+and the saving it leaves is 15.1% of the prompt rather than 58.4%.
+
+### A CTE is not a table
+
+The table above said 46.4% and 60.5% until the join instrument needed the same reading. `goldTables`
+lowered every `from` and `join` reference, and BIRD's statements define tables of their own:
+`with time_in_seconds as (...), champion_time as (...) select ... from champion_time` contributed
+three names the card cannot show, so those cases could never be `all` no matter what the linker did.
+Five of the 496 do it. Excluding them moves the shipped set to 234 (47.2%) and the candidate set to
+302 (60.9%); the 58.4% ceiling does not move, because a CTE has no characters on the card. The
+predicate lives in `statement.ts` beside the scanner, and it matches a *definition*
+(`name as (select`) rather than a `with`, because a statement with two CTEs would otherwise have
+only its first one recognised.
 
 ### Two instruments that were measuring someone else's prompt
 
@@ -1106,6 +1118,80 @@ one this file keeps rediscovering: a measurement of a prompt nobody sent.
    the result as the prompt that was sent. No gate ran that arm, which is why the hole survived;
    it is refused by name now, and the check lives with the arm definition in `run.ts` rather than
    in one instrument.
+
+## What a question names, and what its answer joins
+
+The card measurement ended on a residue rather than a conclusion: 194 cases lose a gold table with
+the best linker this repository has, and the missing table is the join partner the question never
+names. `pnpm bench:bird:join <report> --arm <name> [--strict]` asks whether the foreign keys reach
+it. Zero model calls, the same shape as the card instrument: the tables the linker names are the
+seeds, the graph is breadth-first walked to a stated depth, and the result is compared with the
+tables the gold statement reads.
+
+Two decisions are what make the reading usable. The edges come from `dev_tables.json`'s
+`foreign_keys`, which are column indices — parsing the `"a.x = b.y"` hints the card renders would
+have measured a string format. And every case has two character counts: one for narrowing it, one
+for narrowing it only when the closure provably holds every gold table, with the whole card sent
+otherwise. The second is the only one a deployment can bank, so it is a column rather than a
+footnote.
+
+Mini-Dev, `select`, 496 questions, 2,122-character card:
+
+| edges | recallers | hops | kept tables | chars | saved | **safe** | gold all | some | none | finished | no seed |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| declared | shipped | 0 | 3.7 | 1,348 | 36.5% | 15.8% | 304 | 176 | 16 | 0 | 70 |
+| declared | shipped | 1 | 5.9 | 1,762 | 17.0% | 14.6% | 463 | 33 | **0** | 159 | 70 |
+| declared | shipped | 2 | 6.8 | 2,029 | 4.4% | 4.1% | 485 | 11 | 0 | 181 | 70 |
+| declared | +table | 0 | 2.9 | 1,178 | 44.5% | 24.2% | 305 | 185 | 6 | 0 | 3 |
+| **declared** | **+table** | **1** | **5.7** | **1,768** | **16.7%** | **15.1%** | **472** | 24 | **0** | 167 | 3 |
+| declared | +table | 2 | 6.7 | 2,007 | 5.4% | 5.1% | 485 | 11 | 0 | 180 | 3 |
+| +shared columns | +table | 1 | 6.2 | 1,868 | 12.0% | 11.2% | 481 | 15 | 0 | 176 | 3 |
+| +shared columns | +table | 2 | 7.0 | 2,078 | 2.1% | 2.1% | **496** | **0** | 0 | 191 | 3 |
+
+`finished` is the number this instrument exists for: cases whose seeds miss a gold table and whose
+closure has all of them. One hop finishes **167** of them, ends all six cases that kept nothing, and
+leaves 24 that keep part of the gold — down from 185. The depth that fixes coverage is not free:
+two hops with a shared-column graph reaches **every** gold table for **every** case and saves
+**2.1%**, because the closure has become the card. The plan's prune experiment is therefore pinned
+at one hop with the declared keys, where the ceiling is 95.2% coverage and **15.1% of the prompt**
+— 2,122 → 1,802 characters, which is 20% of the card.
+
+### The manifest does not declare its own joins
+
+`debit_card_specializing` declares **one** foreign key. Its gold statements join four tables on
+`CustomerID` and `GasStationID`, and eight of the eleven cases that two hops still cannot finish are
+in that database. The second edge source is the join the manifest forgot: a column name two tables
+share (`GasStationID`, `gas_station_id` — flattened so spelling does not matter). It is measured as
+its own block rather than merged, because more edges means more reach and less saving, and the two
+numbers are 472 → 481 cases for 15.1% → 11.2% saved. That trade is the reason the declared graph is
+the recommendation: it is a fact about the dataset, and a saving measured on invented edges is a
+saving measured on a graph nobody ships.
+
+The guard on the second source is the interesting part. A shared column is evidence only when it is
+not vocabulary: `year`, `name` and `id` appear in most tables of most databases, and connecting every
+table that carries one makes the closure the whole card. A name carried by more than a third of a
+database's tables is dropped, with a floor of two so that a three-table database keeps its keys.
+
+### Two things the closure taught the linker
+
+Neither was the experiment, and both change how the numbers should be read.
+
+1. **The table recaller is not a superset of the shipped set.** Adding a fourth recaller changes the
+   reciprocal-rank fusion, so columns near the twelve-slot cutoff move. Case 1057
+   (`european_football_2`, *"average home team goal in the country of Poland"*) keeps `country` with
+   the shipped recallers and loses it with the candidate set, while the totals move the other way by
+   nine cases. `candidate` is a different linker, not a larger one — a report that called it an
+   extension would mis-read every per-case delta computed from it.
+2. **Seventy cases have no seed at all with the shipped recallers.** A question like *"how many
+   percent of female heroes were published by Marvel Comics"* names no column and no table the
+   linker can see, so the closure has nowhere to start and the case falls back to the whole card.
+   The table recaller cuts that to three; the remaining three name nothing at all in the schema's
+   vocabulary, which is a different failure and not one a graph can fix.
+
+The prune arm itself is not in this section because it is not a measurement — it is a change to the
+prompt, and a prompt change needs an accuracy reading rather than a character count. What this
+section establishes is the parameter it will be run at: declared keys, table recaller, one hop,
+whole card on the 24 cases the closure cannot finish.
 
 ## The dev split, measured: 60.6% on the split leaderboards report
 

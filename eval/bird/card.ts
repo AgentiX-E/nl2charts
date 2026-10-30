@@ -35,7 +35,7 @@ import type { BirdQuestion, BirdTable } from './data.js';
 import type { CaseRecord } from './gap.js';
 import { promptFor, renderableArm, resolveArm, resolveLayout } from './run.js';
 import type { Arm, BirdLayout } from './run.js';
-import { tableRefs } from './statement.js';
+import { definesOwnName, tableRefs } from './statement.js';
 
 /** How much of a case's gold tables a proposal keeps. */
 export const COVERAGES = ['all', 'some', 'none'] as const;
@@ -126,9 +126,21 @@ export function tableChars(schema: readonly SchemaTable[], options: PromptOption
   return byTable;
 }
 
-/** The tables a gold statement reads, lower-cased because a card may spell them otherwise. */
+/**
+ * The tables a gold statement reads, lower-cased because a card may spell them otherwise.
+ *
+ * A CTE is not a table. `with a as (select ...), b as (select ...) select * from a join b` reads
+ * one table that is not written here at all, and counting `a` and `b` would make the coverage of
+ * that case permanently short of `all` — a defect in the instrument that reads as a linker failure.
+ * Names the statement defines itself are left out; `classifyGold` in the join instrument is where
+ * the distinction is also reported rather than only applied.
+ */
 export function goldTables(sql: string): Set<string> {
-  return new Set(tableRefs(sql).map((ref) => ref.table.toLowerCase()));
+  return new Set(
+    tableRefs(sql)
+      .map((ref) => ref.table.toLowerCase())
+      .filter((name) => !definesOwnName(sql, name)),
+  );
 }
 
 /** How much of the gold's table set a proposal keeps. */

@@ -314,6 +314,13 @@ jobs:
       # pipeline sends, and the gate fails only if it could not be rebuilt.
       - name: What the prompt costs, and what a smaller card would save
         run: pnpm bench:bird:card eval/out/bird-eval.json --arm select --strict
+      # Whether the tables a question never names can be reached by a join. The card measurement
+      # priced the lever and this one says who can pull it: a question that names an entity and
+      # none of its columns is one case in six, and the foreign keys are what carry it to the
+      # partner table the answer reads. Zero model calls, and the gate is the graph's own
+      # consistency rather than a target share.
+      - name: What a question names, and what its answer joins
+        run: pnpm bench:bird:join eval/out/bird-eval.json --arm select --strict
       # The coverage axis the plan asked for, one level down. Identifier coverage is saturated
       # — the recall gate above reports every gold identifier visible, in every split — so the
       # only coverage with variance left is whether the value a gold filter compares against is

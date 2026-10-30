@@ -294,6 +294,20 @@ export function tableRefs(sql: string): TableRef[] {
   return out;
 }
 
+/**
+ * Whether the statement defines this name itself, as a CTE.
+ *
+ * The pattern is a definition, not a mention: `name as (select` is a CTE, and BIRD writes several
+ * per statement (`with a as (...), b as (...)`), so anchoring on the `with` would classify only the
+ * first. A column alias is not a match — `... end as time_seconds` is followed by no parenthesis —
+ * which is exactly the distinction that matters to a caller reading table references: a CTE is a
+ * table of the statement's own making and not a table of the database.
+ */
+export function definesOwnName(sql: string, name: string): boolean {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(String.raw`(?<![\w"])"?${escaped}"?\s+as\s*\(\s*(?:select|with)\b`, 'i').test(sql);
+}
+
 /** Split a written column reference into its qualifier and its name. */
 function splitColumn(text: string): { column: string; qualifier?: string } {
   const parts: string[] = [];

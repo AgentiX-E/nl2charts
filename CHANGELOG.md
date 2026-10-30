@@ -26,12 +26,12 @@ cannot be argued with.
   its name recaller tokenized the *column* name, so the table half of every identifier was
   invisible: "how many customers are there" matched nothing, because `customer_id` holds
   `customer` and `id`. Measured on 496 Mini-Dev questions: **86 cases (17.3%) kept no gold table**
-  and 230 (46.4%) kept all of them. With the new `table` recaller, **9 (1.8%)** and **300
-  (60.5%)**. It is opt-in — the default set is unchanged, so every accuracy number in this
+  and 234 (47.2%) kept all of them. With the new `table` recaller, **9 (1.8%)** and **302
+  (60.9%)**. It is opt-in — the default set is unchanged, so every accuracy number in this
   repository still describes the prompt it was measured on — and the pipeline gained a `recallers`
   option so a caller can turn it on, because a recaller nobody can select is dead code.
 
-  60.5% is why the card is not pruned: 196 cases would lose a table they need, and the residue is
+  60.9% is why the card is not pruned: 194 cases would lose a table they need, and the residue is
   the join partner the question never names (`gold customers, yearmonth`, kept `yearmonth`).
 
 - **Three fifths of the no-answer cases had every value the gold needs in the prompt.** `pnpm
@@ -184,7 +184,52 @@ cannot be argued with.
   the primary judge here), and `select-cross-shuffled` stays out of the adoption chain as a
   diagnostic lever.
 
+- **One foreign key reaches the table the question never names, and two hops reach almost the whole
+  card.** `pnpm bench:bird:join <report> --arm <name> [--strict]` walks the foreign-key graph from
+  the tables the linker names and compares the closure with the tables the gold statement reads.
+  Zero model calls. Mini-Dev `select`, 496 questions, 2,122-character card:
+
+  | edges | recallers | hops | kept tables | chars | saved | **safe** | gold all | some | none |
+  |---|---|---|---|---|---|---|---|---|---|
+  | declared | shipped | 0 | 3.7 | 1,348 | 36.5% | 15.8% | 304 | 176 | 16 |
+  | declared | shipped | 1 | 5.9 | 1,762 | 17.0% | 14.6% | **463** | 33 | **0** |
+  | declared | +table | 1 | 5.7 | 1,768 | 16.7% | **15.1%** | **472** | 24 | **0** |
+  | declared | +table | 2 | 6.7 | 2,007 | 5.4% | 5.1% | 485 | 11 | 0 |
+  | +shared columns | +table | 1 | 6.2 | 1,868 | 12.0% | 11.2% | 481 | 15 | 0 |
+  | +shared columns | +table | 2 | 7.0 | 2,078 | 2.1% | 2.1% | **496** | **0** | 0 |
+
+  One hop with the table recaller keeps every gold table for **95.2%** of cases (472 of 496) and
+  ends the 86 cases that kept none — the residue the card measurement named. The shippable saving
+  is **15.1%** of the prompt (2,122 → 1,802 characters), which is **20% of the card**, because a
+  case whose closure misses a gold table is sent the whole card. Two hops reaches 100% with the
+  shared-column graph and saves 2.1%: the depth that fixes coverage is the depth that removes the
+  saving, which is why the plan's prune experiment is pinned at one hop.
+
+  Two facts about the graph belong in the same entry. The manifest's keys are incomplete —
+  `debit_card_specializing` declares **one** foreign key and its gold statements join four tables
+  on `CustomerID` and `GasStationID` — so the shared-column source is measured beside it: 26 more
+  edges, 481 cases at one hop instead of 472, and 3.9pp less saving. And a shared column is only
+  evidence when it is not vocabulary: a name carried by more than a third of a database's tables
+  (`year`, `name`, `id`) is dropped, because connecting every table that has one makes the closure
+  the whole card.
+
+- **The table recaller is not a superset of the shipped one.** Adding a fourth recaller changes the
+  reciprocal-rank fusion, and the columns near the twelve-slot cutoff move: case 1057
+  (`european_football_2`, "average home team goal in the country of Poland") keeps `country` with
+  the shipped set and loses it with the candidate set, while the totals move the other way by nine
+  cases. `candidate` is a different linker, not a larger one, and a report that called it an
+  extension would mis-read every per-case delta computed from it.
+
 ### Fixed
+
+- **A CTE is not a table, and the card instrument counted it as one.** `goldTables` lowered every
+  `from` and `join` reference, so `with a as (...), b as (...) select * from a join b` contributed
+  two tables the card cannot show and the case could never be `all` — a linker failure read off an
+  instrument defect. Five Mini-Dev statements define their own tables; excluding them moves the
+  shipped linker's full coverage **230 → 234** and the candidate's **300 → 302**, with the 58.4%
+  ceiling unchanged because a CTE contributes no characters. The predicate lives in `statement.ts`
+  beside the scanner, matches a *definition* (`name as (select`) rather than a `with`, because BIRD
+  writes several CTEs per statement, and is shared by both instruments.
 
 - **The prompt instruments measured the system message and called it the prompt.** The model
   receives `buildSqlPrompt`'s output *and* a user turn carrying the linker's hint and the question

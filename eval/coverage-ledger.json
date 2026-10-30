@@ -4,10 +4,10 @@
   "tolerancePp": 0.2,
   "measuredAt": "2026-10-30",
   "totals": {
-    "lines": 99.31,
-    "statements": 99.31,
+    "lines": 99.27,
+    "statements": 99.27,
     "functions": 100,
-    "branches": 97.57
+    "branches": 97.47
   },
   "files": {
     "eval/ablate.ts": {
@@ -41,10 +41,10 @@
       "branches": 100
     },
     "eval/bird/card.ts": {
-      "lines": 99.3,
-      "statements": 99.3,
+      "lines": 99.31,
+      "statements": 99.31,
       "functions": 100,
-      "branches": 96
+      "branches": 96.11
     },
     "eval/bird/data.ts": {
       "lines": 100,
@@ -81,6 +81,12 @@
       "statements": 99.07,
       "functions": 100,
       "branches": 98.01
+    },
+    "eval/bird/join.ts": {
+      "lines": 99.47,
+      "statements": 99.47,
+      "functions": 100,
+      "branches": 96.91
     },
     "eval/bird/literal-repair.ts": {
       "lines": 100,
@@ -146,7 +152,7 @@
       "lines": 99.27,
       "statements": 99.27,
       "functions": 100,
-      "branches": 95.23
+      "branches": 95.15
     },
     "eval/bird/samples.ts": {
       "lines": 100,
@@ -167,14 +173,14 @@
       "branches": 100
     },
     "eval/bird/stability.ts": {
-      "lines": 98.97,
-      "statements": 98.97,
+      "lines": 98.96,
+      "statements": 98.96,
       "functions": 100,
       "branches": 98.57
     },
     "eval/bird/statement.ts": {
-      "lines": 98.71,
-      "statements": 98.71,
+      "lines": 98.73,
+      "statements": 98.73,
       "functions": 100,
       "branches": 97.45
     },
