@@ -3126,6 +3126,60 @@ at that size is inside what the design can detect. The other is the arm in the s
 table above: `metadata+evidence+prune` is priced on the card measurement, and its 13.5% is the
 largest saving this project has found that costs no call at all.
 
+### Three runs, and the p-value a repeat buys
+
+The pair above has now been run three times on byte-identical prompts — `57f70f71`, `947134b0` and
+`ff9295e7` — which is enough to look at what moves and what does not:
+
+| arm | run 1 | run 2 | run 3 | mean | range |
+| --- | --- | --- | --- | --- | --- |
+| `metadata+evidence` (1 call) | 59.84% | 59.24% | 59.24% | 59.44% | **0.60pp** |
+| `select-mixed` (4) | 57.23% | 58.03% | 57.63% | 57.63% | 0.80pp |
+| `select` (4) | 56.43% | 56.83% | 57.43% | 56.89% | 1.00pp |
+| `inline+evidence` (1) | 56.22% | 57.03% | 55.62% | 56.29% | 1.41pp |
+| `vote` (3) | 57.43% | 56.83% | 56.02% | 56.76% | 1.41pp |
+| `select-prune` (4) | 56.43% | 54.62% | 55.02% | 55.35% | **1.81pp** |
+| `select5` (6) | 59.04% | 57.43% | 56.22% | 57.56% | **2.81pp** |
+
+The spread grows with the number of calls, which is what an arm that samples should do: every call
+is another draw at temperature 0.7, so an arm that makes six of them has six chances to differ from
+itself. Three points cannot fit a curve, but they rule out the assumption the previous section had
+to make — that one arm's A/A floor can be lent to another. The self-pair, three times:
+−0.60pp (7:4, p = 0.55), −0.40pp (8:7, p = 1), 0.00pp (7:8, p = 1). A 1-call arm agrees with itself
+to within 0.6pp; a 4-call arm moves 1.8pp; a 6-call arm moves 2.8pp. Comparisons belong inside a
+call-count tier, and a 2pp difference between a 1-call arm and a 4-call arm is competing with the
+4-call arm's own noise, not with the 1-call arm's.
+
+Paired by question, the three runs give:
+
+| pair | run 1 | run 2 | run 3 | rows, pooled | per question, three draws |
+| --- | --- | --- | --- | --- | --- |
+| `metadata+evidence` → `select` | −3.41pp (0.040) | −2.41pp (0.119) | −1.81pp (0.321) | 105 : 69 (0.0078) | 48 : 34 (p = 0.151) |
+| `metadata+evidence` → `select-prune` | −3.41pp (0.033) | −4.62pp (**0.0032**) | −4.22pp (**0.0075**) | 115 : 55 (<0.0001) | 52 : 29 (p = 0.014) |
+| `metadata+evidence` → `select-mixed` | −2.61pp (0.105) | −1.20pp (0.489) | −1.61pp (0.332) | 90 : 66 (0.065) | 40 : 27 (p = 0.142) |
+
+Two of the three runs put the pruned-card gap under 0.01 with an interval that excludes zero
+(−7.19 to −1.25pp in the third), which is the shape ADR-184 asks for. Three things keep it short of
+an adoption claim, and the first one is a trap worth naming:
+
+1. **Pooling repeated runs into one McNemar test is pseudoreplication.** Stack the three runs and
+   the `select` pair reads 105 : 69 at **p = 0.0078**; the `select-prune` pair reads 115 : 55 at
+   p < 0.0001. Those numbers are wrong, and they are wrong in the direction that flatters the
+   claim: the 1,488 pairs contain each question three times, and the same question does not become
+   three questions by being asked again. Aggregating per question first — a sign test over the 496,
+   which is the unit that was sampled — gives 48:34 (p = 0.151) and 52:29 (p = 0.014).
+2. **Nine comparisons are published.** A Bonferroni floor of 0.05/9 = 0.0056 leaves one run
+   (0.0032) and not the other (0.0075).
+3. **The gap shrank against `select` and held against `select-prune`.** −3.41 → −2.41 → −1.81pp is
+   three draws of a quantity near −2.5pp; −3.41 → −4.62 → −4.22pp is three draws near −4pp. Only
+   the second interval excludes zero in two runs.
+
+So the reading is: **the single call is 28% cheaper than the pruned card (1,774 against 2,454 tokens
+per question, 1 call against 4) and, on this split, 4pp more accurate, twice at p < 0.01.** What
+that does not yet say is that it will hold on another split, and the size of the effect is the one
+thing three runs of 496 questions cannot settle. The dev split can: 1,532 questions, the same pair,
+an MDE near 2.3pp.
+
 ## The floor is enforced, not remembered
 
 A benchmark that only produces a report gets read once. The BIRD arms have a
