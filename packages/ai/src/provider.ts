@@ -213,17 +213,47 @@ export function createHttpProvider(options: HttpProviderOptions): LlmProvider {
  * A retry inside the provider is one logical call: the harness asked once, and the
  * endpoint's queue is not the arm's design.
  */
-export function withCallCounter(provider: LlmProvider): { readonly provider: LlmProvider; readonly calls: () => number } {
+/**
+ * ...and what it was billed, in the endpoint's own unit.
+ *
+ * `unbilled` is the field that makes the other two publishable. A provider that answers without a
+ * usage block is not free — it is unmeasured, and a cost column that reported it as zero tokens
+ * would be a measurement of nothing that reads as zero. Counting those answers apart is what lets
+ * a gate refuse the column instead of publishing a number that means "unknown".
+ *
+ * The return type is written out rather than named: this meter exists for the evaluation
+ * harness, and a public type for it would be a contract the product has to keep without ever
+ * using it.
+ */
+export function withCallCounter(provider: LlmProvider): {
+  readonly provider: LlmProvider;
+  /** Calls the harness asked for, including the ones that never answered. */
+  readonly calls: () => number;
+  readonly usage: () => { readonly promptTokens: number; readonly completionTokens: number; readonly unbilled: number };
+} {
   let calls = 0;
+  let promptTokens = 0;
+  let completionTokens = 0;
+  let unbilled = 0;
   return {
     provider: {
       id: provider.id,
       model: provider.model,
       complete: async (request, options) => {
         calls += 1;
-        return provider.complete(request, options);
+        const response = await provider.complete(request, options);
+        // Read per answer rather than per arm: an endpoint that reports usage on some answers and
+        // not others is a state that exists, and summing only what arrived would hide it.
+        if (response.usage === undefined) {
+          unbilled += 1;
+          return response;
+        }
+        promptTokens += response.usage.promptTokens;
+        completionTokens += response.usage.completionTokens;
+        return response;
       },
     },
     calls: () => calls,
+    usage: () => ({ promptTokens, completionTokens, unbilled }),
   };
 }

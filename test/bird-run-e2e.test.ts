@@ -257,6 +257,42 @@ describe('a full run', () => {
     expect(result.report.armsRequested).toEqual(['names', 'metadata']);
   });
 
+  it('records what the endpoint billed beside what it charged in calls', async () => {
+    // The two units a cost claim can be made in, both measured: `calls` is what the harness asked
+    // for and `tokens` is what came back. A report with one and not the other is a report whose
+    // cost cannot be checked against a provider's invoice.
+    const result = await run({ plan: { first: correct }, env: { BIRD_ARMS: 'inline+evidence' } });
+    const [row] = result.report.arms as { arm: string; calls: { mean: number }; tokens: { prompt: number; completion: number; unbilled: number } }[];
+    // The stub endpoint prices every answer at seven prompt tokens and three completion tokens,
+    // one call per case: a mean that differs from that is a meter reading the wrong request.
+    expect(row?.tokens).toEqual({ prompt: 7, completion: 3, unbilled: 0 });
+    const cases = result.report.cases as { arm: string; tokens?: { prompt: number; completion: number; unbilled: number } }[];
+    expect(cases.every((entry) => entry.tokens?.prompt === 7 && entry.tokens.completion === 3 && entry.tokens.unbilled === 0)).toBe(true);
+  });
+
+  it('sends the join closure on the prune arm, and says what it billed', async () => {
+    // The one arm whose card is decided per question. It runs here for the reason the whole
+    // benchmark exists: a lever that is never executed is a lever nobody has measured, and this
+    // one changes the prompt on every case it touches.
+    const result = await run({ plan: { first: correct }, env: { BIRD_ARMS: 'select-prune' } });
+    const [row] = result.report.arms as {
+      arm: string;
+      passed: number;
+      total: number;
+      calls: { mean: number };
+      promptChars: { mean: number };
+      tokens: { prompt: number; completion: number; unbilled: number };
+    }[];
+    expect(row?.arm).toBe('select-prune');
+    expect(row?.passed).toBe(QUESTIONS.length);
+    // Three samples and a selector, the same budget as its parent.
+    expect(row?.calls.mean).toBe(4);
+    // Four calls at seven prompt tokens each: the meter is reading the whole case, not the last
+    // call, which is the mistake a per-call total would make invisible.
+    expect(row?.tokens).toEqual({ prompt: 28, completion: 12, unbilled: 0 });
+    expect(row?.promptChars.mean).toBeGreaterThan(0);
+  });
+
   it('records an A/A duplicate as the harness\'s own noise and keeps both rows', async () => {
     const result = await run({ plan: { first: correct }, env: { BIRD_ARMS: 'names', BIRD_AA: 'names' } });
     expect(result.code).toBe(0);

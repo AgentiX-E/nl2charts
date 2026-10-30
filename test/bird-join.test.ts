@@ -19,26 +19,23 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
-  EDGE_SOURCES,
   HOPS,
   RECALLER_SETS,
-  SHARED_SHARE,
   classifyGold,
-  closureOf,
   graphsOf,
   isEntry,
-  joinGraphOf,
   joinLines,
   joinPath,
   joinProblems,
   main,
   resolveJoinSettings,
   runJoin,
-  sharedColumns,
   tallyJoins,
   writeJoinArtifact,
 } from '../eval/bird/join.js';
-import type { JoinCase, JoinGraph, JoinTally } from '../eval/bird/join.js';
+import type { JoinCase, JoinTally } from '../eval/bird/join.js';
+import { EDGE_SOURCES, SHARED_SHARE, closureOf, joinGraphOf, sharedColumns } from '../eval/bird/join-graph.js';
+import type { JoinGraph } from '../eval/bird/join-graph.js';
 import type { BirdTable } from '../eval/bird/data.js';
 import { definesOwnName } from '../eval/bird/statement.js';
 import { writeMiniBirdDataset } from './helpers/bird-dataset.js';

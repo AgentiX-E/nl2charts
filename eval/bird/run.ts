@@ -29,7 +29,9 @@ import { applySelection, attachDefinitions, buildAskMessages, buildSelectionProm
 import { inspectSql } from '@agentix-e/nl2charts-core';
 import { casesForEffect, compareArms, judgeOfficial, judgeStrict, majorityResult, mcnemarExact, pairedResolution, summarise, wilsonInterval } from '@agentix-e/nl2charts-devkit';
 import type { PairedComparison } from '@agentix-e/nl2charts-devkit';
+import { graphForDatabase } from './join-graph.js';
 import { ppPerExtraCall, repairFunnel } from './metrics.js';
+import { pruneSchema } from './prune.js';
 import type { CaseOutcome, MatchReason } from '@agentix-e/nl2charts-devkit';
 import { buildSchema, loadDescriptions, loadQuestions, loadTables, stratifiedSample } from './data.js';
 import type { BirdQuestion } from './data.js';
@@ -87,6 +89,20 @@ export interface Arm {
    * The instance-specific counterpart to retrieved knowledge, which is generic.
    */
   readonly values?: boolean;
+  /**
+   * Send the join closure instead of the card: keep the tables within this many joins of the
+   * ones the question names, and fall back to the whole card when it names none.
+   *
+   * The number is hops, not a switch, because the join instrument priced depth as a parameter
+   * and the optimum was not the deepest: one hop keeps every gold table for 95.2% of Mini-Dev
+   * cases and leaves 15.1% of the prompt, two hops reaches 100% and leaves 2.1%, because a
+   * closure that covers everything has become the card. `select-prune` runs at one.
+   *
+   * The rule is the closure of the arm's own linker. A prune that seeded itself from a different
+   * recaller set would change the `Likely columns` hint as well — a hidden table cannot be named
+   * by a hint — and the delta against the parent would price two levers at once.
+   */
+  readonly prune?: number;
   /**
    * Show what each categorical column actually contains, on its own card line.
    *
@@ -358,6 +374,11 @@ export const ARMS: readonly Arm[] = [
   { name: 'inline+icl', notes: false, evidence: 'retrieved', repairs: 0, linking: true, definitions: 'inline', demonstrations: true },
   // The only text that has measured is written per question; this arm writes it.
   { name: 'interpret', notes: false, repairs: 0, linking: true, definitions: 'inline', interpret: true },
+  // The card as the join closure rather than the whole schema. One lever from `select`: the
+  // same linker, the same three samples, the same selector, and a smaller card — the 74.1% of
+  // the prompt that the card measurement priced and the 15.1% of it the join measurement said
+  // one hop can remove.
+  { name: 'select-prune', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, prune: 1 },
   // Self-consistency over executed answers: no external knowledge, pure variance
   // reduction. Three samples at temperature 0.7, modal result set wins.
   { name: 'vote', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3 },
@@ -500,6 +521,8 @@ export const DEFAULT_ARMS: readonly string[] = [
   'inline+repair-raw',
   'vote',
   'select',
+  // The same arm with the card cut to the tables one join from the ones the question names.
+  'select-prune',
   // Three decompositions instead of three samples of one: the arm that tests whether
   // the ceiling belongs to the sampler or to the prompt.
   'select-mixed',
@@ -564,6 +587,7 @@ export const COMPARISONS: readonly (readonly [string, string, string])[] = [
   ['inline+evidence', 'select-mixed', 'three decompositions and a selector versus a single sample: four calls instead of one'],
   ['select', 'select-duo', 'two prompts and a selector versus three samples of one prompt: three calls instead of four'],
   ['select-duo', 'select-mixed', 'the value-grounded candidate on top of two prompts: does a third source add anything'],
+  ['select', 'select-prune', 'the same three samples and the same selector with a card cut to the join closure: does the model need the tables the question does not reach'],
 ];
 
 export const PAIRS: readonly (readonly [string, string])[] = [
@@ -587,6 +611,9 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   // Where the candidates come from, held against how many there are: same count, same
   // selector, different prompts.
   ['select', 'select-mixed'],
+  // One lever: the card. Same linker, same samples, same selector — the prompt carries the
+  // closure of the tables the question names instead of the whole schema.
+  ['select', 'select-prune'],
   // One lever: who does the choosing, not how many candidates there are.
   ['select', 'select-pair'],
   // One lever: which model wrote the first candidate, not how many there are.
@@ -650,6 +677,14 @@ export interface CandidateFailures {
   readonly unparsed: number;
 }
 
+/** What one case cost the endpoint, in the endpoint's own unit. */
+export interface CaseTokens {
+  readonly prompt: number;
+  readonly completion: number;
+  /** Answers that arrived without a usage block: a cost that is unknown, not zero. */
+  readonly unbilled: number;
+}
+
 export interface CaseRun extends CaseOutcome {
   readonly predicted: string;
   readonly reason: MatchReason;
@@ -668,6 +703,16 @@ export interface CaseRun extends CaseOutcome {
    * selector could reach on this arm, measured rather than assumed.
    */
   readonly candidateRecall?: boolean;
+  /**
+   * What the endpoint said it billed for this case, in its own unit.
+   *
+   * `calls` counts what the harness asked for and this counts what came back, because the two
+   * disagree in two ways worth seeing: a provider out of balance answers nothing, and a provider
+   * that omits its usage block answers without a price. `unbilled` is how many answers arrived
+   * without one — a case whose cost is unknown rather than zero — so the cost column can be
+   * refused instead of published as a saving.
+   */
+  readonly tokens?: CaseTokens;
   /**
    * Which decomposition the returned statement came from, on a mixed arm.
    *
@@ -1668,7 +1713,7 @@ export interface PreparedRun {
   readonly controls: Controls;
   /** Rendered prompt blocks for one arm and one question. The only builder, so the measured prompt and the sent prompt cannot disagree. */
   readonly blocksFor: (arm: Arm, question: BirdQuestion) => PromptBlocks;
-  readonly schemaFor: (arm: Arm, db: string) => readonly SchemaTable[];
+  readonly schemaFor: (arm: Arm, question: BirdQuestion) => readonly SchemaTable[];
   /** Per-arm distinct-prompt audit for the arms that declare a candidate set. */
   readonly mixedCandidatePrompts: readonly unknown[];
 }
@@ -1970,7 +2015,19 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
     );
   }
 
-  const schemaFor = (arm: Arm, db: string): readonly SchemaTable[] => {
+  // One graph per database, built the first time a prune arm asks for it.
+  const graphFor = graphForDatabase(tables);
+
+  /**
+   * The card an arm sends for one question.
+   *
+   * Takes the question rather than only its database because one lever is about the question: an
+   * arm that sends the join closure decides per question which tables to show. Every caller that
+   * cannot prune still passes the question, so there is one signature and one place where a card
+   * is decided — a second entry point is how the measured prompt and the sent prompt drift apart.
+   */
+  const schemaFor = (arm: Arm, question: BirdQuestion): readonly SchemaTable[] => {
+    const db = question.db_id;
     const base =
       arm.definitions === 'inline'
         ? (inlineSchemas.get(db) as SchemaTable[])
@@ -1979,7 +2036,9 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
           : (schemas.get(db) as SchemaTable[]);
     // Samples are layered on whatever the arm resolved to, not on the plain schema: an arm
     // can ask for both, and silently dropping one is a two-lever comparison nobody wrote.
-    return arm.samples === true ? withSamples(base, db) : base;
+    const layered = arm.samples === true ? withSamples(base, db) : base;
+    if (arm.prune === undefined) return layered;
+    return pruneSchema({ schema: layered, question: question.question, graph: graphFor(db), hops: arm.prune }).schema;
   };
 
   const gold = new Map<number, OracleResult>();
@@ -2122,7 +2181,7 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
       const built = sources.map((source) => {
         const spec = parseMixedSource(source);
         const arm = resolveArm(spec.arm) as Arm;
-        const prompt = buildSqlPrompt(question.question, schemaFor(arm, question.db_id), promptFor(arm, question, blocksFor(arm, question)));
+        const prompt = buildSqlPrompt(question.question, schemaFor(arm, question), promptFor(arm, question, blocksFor(arm, question)));
         return `${spec.provider}\u0000${prompt}`;
       });
       (new Set(built).size === sources.length ? distinct : degenerate).push(String(question.question_id));
@@ -2258,7 +2317,7 @@ export function previewPrompts(prepared: PreparedRun, report: Record<string, unk
     arms: preview.map((arm) => {
       const rendered = buildSqlPrompt(
         question.question,
-        prepared.schemaFor(arm, question.db_id),
+        prepared.schemaFor(arm, question),
         promptFor(arm, question, prepared.blocksFor(arm, question)),
       );
       return { arm: arm.name, chars: rendered.length, prompt: rendered };
@@ -2315,7 +2374,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
     }
   }
   const runs = await pool(cases, settings.concurrency, async (question): Promise<CaseRun> => {
-    const schema = prepared.schemaFor(arm, question.db_id);
+    const schema = prepared.schemaFor(arm, question);
     // Counted, not derived: a plan costs two calls, a selector costs one, and a
     // configuration-derived count got both wrong in opposite directions.
     const counter = withCallCounter(provider);
@@ -2323,6 +2382,20 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
     // Both models' calls are this case's cost. Summing two counters keeps the number
     // measured on each side instead of estimated from the arm's configuration.
     const callsMade = (): number => counter.calls() + (secondCounter?.calls() ?? 0);
+    // Both models' usage is this case's cost, for the same reason both counters are. Added on
+    // the way out rather than at each of the eleven return sites in this function, because a
+    // cost that has to be remembered per branch is a cost that will be missing from one.
+    const costOfCase = (): Pick<CaseRun, 'tokens'> => {
+      const primary = counter.usage();
+      const second = secondCounter?.usage();
+      return {
+        tokens: {
+          prompt: primary.promptTokens + (second?.promptTokens ?? 0),
+          completion: primary.completionTokens + (second?.completionTokens ?? 0),
+          unbilled: primary.unbilled + (second?.unbilled ?? 0),
+        },
+      };
+    };
     // One case cannot take the run down. A provider error raised outside the per-sample
     // catch — the selector call, an engine call — used to escape the pool and end a
     // 1,532-question run at case 700 with a stack trace, which is why this wrapper
@@ -2348,7 +2421,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
         };
       }
     };
-    return guarded(async (): Promise<CaseRun> => {
+    const scored = await guarded(async (): Promise<CaseRun> => {
       // A pipeline is a prompt plus a budget, so building one per configuration costs
       // nothing and lets a mixed arm ask the same question three different ways.
       // The execute hook exists for repairs only: without repairs it would turn an
@@ -2662,6 +2735,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
         };
       }
     });
+    return { ...scored, ...costOfCase() };
   });
   // Before any number is printed: an arm that never reached the database has no
   // accuracy, and publishing 0% would hide the provider's message behind a score.
@@ -2737,11 +2811,14 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
     bucket.total += 1;
     if (run.passed) bucket.passed += 1;
   }
+  // The cases whose cost the endpoint reported. An arm measured by a stub has none, and a mean
+  // taken over a mixed list would divide by cases it never priced.
+  const metered = runs.flatMap((run) => (run.tokens === undefined ? [] : [run.tokens]));
   const promptSizes = cases.map(
     (question) =>
       buildSqlPrompt(
         question.question,
-        prepared.schemaFor(arm, question.db_id),
+        prepared.schemaFor(arm, question),
         promptFor(arm, question, prepared.blocksFor(arm, question)),
       ).length,
   );
@@ -2788,6 +2865,21 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
       mean: Number(meanCalls(runs).toFixed(3)),
       max: Math.max(0, ...runs.map((run) => run.calls)),
     },
+    // What the request cost in the endpoint's own unit, beside the characters the prompt
+    // measurement counts. The two are not interchangeable: characters are a property of the text
+    // and this is a property of the tokenizer, and the ratio between them is the only calibration
+    // the zero-call instruments can get. Absent, rather than zero, for an artifact written before
+    // the meter existed or by a provider that answered without a usage block — those are the two
+    // states in which the column means nothing, and both are visible.
+    ...(metered.length === 0
+      ? {}
+      : {
+          tokens: {
+            prompt: Math.round(metered.reduce((total, cost) => total + cost.prompt, 0) / metered.length),
+            completion: Math.round(metered.reduce((total, cost) => total + cost.completion, 0) / metered.length),
+            unbilled: metered.reduce((total, cost) => total + cost.unbilled, 0),
+          },
+        }),
     ...(repair === undefined ? {} : { repair }),
     // What the decomposition prompt produced, on any arm that asked for one. This was
     // inside the sampling-arm spread and therefore absent from `decompose` itself, which
@@ -2978,6 +3070,10 @@ export function caseRows(outcomes: ReadonlyMap<string, readonly CaseRun[]>): Rec
       passed: run.passed,
       reason: run.reason,
       calls: run.calls,
+      // The provider's own count for this case, when there is one. Per case rather than per arm
+      // because the cost of a lever has to be paired with its outcome: an arm that spends more on
+      // the questions it gets right is a different finding from one that spends more everywhere.
+      ...(run.tokens === undefined ? {} : { tokens: run.tokens }),
       // The ceiling per case, not only per arm: whether a candidate set contained a
       // correct statement is a paired outcome between two arms on the same question, and
       // a paired outcome can be tested. A share cannot.

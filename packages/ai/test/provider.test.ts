@@ -360,6 +360,27 @@ describe('withCallCounter', () => {
     expect(counted.calls()).toBe(1);
   });
 
+  it('sums what each answer says it billed, and counts the ones that say nothing', async () => {
+    // A provider is not a ledger: DeepSeek reports `usage` on every answer, a stub may report
+    // none, and the two states have to be told apart, because "no usage block" is an unknown cost
+    // and publishing it as zero would make the arm look free.
+    let answer = 0;
+    const priced = withCallCounter({
+      id: 'priced',
+      model: 'm',
+      complete: async () => {
+        answer += 1;
+        return answer === 3
+          ? { text: 'x', model: 'm' }
+          : { text: 'x', model: 'm', usage: { promptTokens: 100, completionTokens: 10 } };
+      },
+    });
+    expect(priced.usage()).toEqual({ promptTokens: 0, completionTokens: 0, unbilled: 0 });
+    for (let index = 0; index < 3; index += 1) await priced.provider.complete({ messages: [{ role: 'user', content: 'q' }] });
+    expect(priced.calls()).toBe(3);
+    expect(priced.usage()).toEqual({ promptTokens: 200, completionTokens: 20, unbilled: 1 });
+  });
+
   it('counts two counters separately, so a concurrent case cannot borrow another case\'s calls', async () => {
     const inner = stub('ok');
     const first = withCallCounter(inner.provider);

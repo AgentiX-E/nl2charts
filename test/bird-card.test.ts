@@ -15,10 +15,11 @@
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
-  CANDIDATE_RECALLERS,
-  SHIPPED_RECALLERS,
+  billedLines,
+  billedProblems,
+  billedRows,
   cardLines,
   cardPath,
   cardProblems,
@@ -26,7 +27,6 @@ import {
   coverage,
   goldTables,
   isEntry,
-  linkedTables,
   main,
   resolveCardSettings,
   runCard,
@@ -157,18 +157,6 @@ describe('what the gold statement reads and what a proposal keeps', () => {
     expect(coverage(new Set(), new Set())).toBe('all');
   });
 
-  it('finds nothing with the shipped recallers when a question names only its table', () => {
-    // The bug this round fixed is on the other side: the linker saw column names only, so a
-    // question that names an entity and no column of it matched nothing at all.
-    const schema = [TABLE('customers', ['customer_id', 'segment'])];
-    expect(linkedTables('how many customers are there', schema, SHIPPED_RECALLERS).size).toBe(0);
-    expect([...linkedTables('how many customers are there', schema, CANDIDATE_RECALLERS)]).toEqual(['customers']);
-  });
-
-  it('finds the column a question names with either set', () => {
-    const schema = [TABLE('orders', ['revenue', 'region'])];
-    expect([...linkedTables('revenue by region', schema, SHIPPED_RECALLERS)]).toEqual(['orders']);
-  });
 });
 
 function row(overrides: Partial<CardRow> = {}): CardRow {
@@ -264,6 +252,91 @@ describe('the four ways the instrument can be wrong', () => {
 
 });
 
+describe('what the provider billed', () => {
+  const armRow = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
+    arm: 'select',
+    calls: { mean: 4, max: 4 },
+    promptChars: { mean: 12_000, max: 13_000 },
+    tokens: { prompt: 3_200, completion: 200, unbilled: 0 },
+    ...overrides,
+  });
+
+  it('turns per-case sums into per-call means, because a call is the unit the lever is priced in', () => {
+    const [row] = billedRows({ arms: [armRow()] });
+    // 12,000 characters over four calls is 3,000 a call; 3,200 tokens over four is 800, so the
+    // ratio is 3.75 characters per token — the calibration the character instrument cannot get
+    // on its own.
+    expect(row).toMatchObject({ arm: 'select', calls: 4, charsPerCall: 3_000, promptTokensPerCall: 800, charsPerToken: 3.75 });
+    expect(row?.unmetered).toBe(false);
+  });
+
+  it('says "not metered" for an artifact written before the meter existed', () => {
+    const [row] = billedRows({ arms: [armRow({ tokens: undefined })] });
+    expect(row?.unmetered).toBe(true);
+    expect(billedLines([row!]).join('\n')).toContain('not metered');
+  });
+
+  it('prints no table at all for a report with no arms', () => {
+    expect(billedRows({})).toEqual([]);
+    expect(billedLines([])).toEqual([]);
+  });
+
+  it('skips an arm the artifact did not name', () => {
+    expect(billedRows({ arms: [{ calls: { mean: 1 } }] })).toEqual([]);
+  });
+
+  it('fails an arm that made calls the artifact never metered', () => {
+    const problems = billedProblems(billedRows({ arms: [armRow({ tokens: undefined })] }));
+    expect(problems[0]).toContain('did not meter');
+  });
+
+  it('fails an arm that reports calls and zero tokens', () => {
+    // The failure the gate exists for: a meter that did not run reads exactly like free work.
+    const problems = billedProblems(billedRows({ arms: [armRow({ tokens: { prompt: 0, completion: 0, unbilled: 0 } })] }));
+    expect(problems[0]).toContain('zero prompt tokens');
+  });
+
+  it('fails an answer that arrived without a usage block', () => {
+    const problems = billedProblems(billedRows({ arms: [armRow({ tokens: { prompt: 3_200, completion: 200, unbilled: 2 } })] }));
+    expect(problems[0]).toContain('select (2)');
+    expect(problems[0]).toContain('unknown');
+  });
+
+  it('fails a character count that cannot be the same text as the token count', () => {
+    // Below half a character per token there is no tokenizer: the two columns describe different
+    // requests, which is the one disagreement neither number shows on its own.
+    const problems = billedProblems(billedRows({ arms: [armRow({ promptChars: { mean: 1_000 }, tokens: { prompt: 3_200, completion: 0, unbilled: 0 } })] }));
+    expect(problems[0]).toContain('different prompts');
+  });
+
+  it('publishes a report whose calls, tokens and characters agree', () => {
+    expect(billedProblems(billedRows({ arms: [armRow()] }))).toEqual([]);
+  });
+
+  it('reports no per-call cost for an arm the artifact gave no call count', () => {
+    // Not an error: an arm that never ran has no denominator, and dividing by a substituted one
+    // would invent a cost per call.
+    const [row] = billedRows({ arms: [{ arm: 'names', tokens: { prompt: 0, completion: 0, unbilled: 0 } }] });
+    expect(row).toMatchObject({ calls: 0, charsPerCall: 0, promptTokensPerCall: 0, charsPerToken: 0 });
+    expect(billedLines([row!]).join('\n')).toContain(' - ');
+  });
+
+  it('reports no character count when the artifact carries no prompt size', () => {
+    // A report from before `promptChars` existed still has calls and tokens: the token column is
+    // readable and the ratio is not, and saying so is better than a ratio of zero.
+    const [row] = billedRows({ arms: [{ arm: 'names', calls: { mean: 2 }, tokens: { prompt: 100, completion: 10, unbilled: 0 } }] });
+    expect(row).toMatchObject({ charsPerCall: 0, promptTokensPerCall: 50, charsPerToken: 0 });
+  });
+
+  it('carries the billed arms into the measurement it publishes', () => {
+    const rows = billedRows({ arms: [armRow(), armRow({ arm: 'select-prune', tokens: { prompt: 2_800, completion: 190, unbilled: 0 } })] });
+    expect(rows.map((row) => row.arm)).toEqual(['select', 'select-prune']);
+    const lines = billedLines(rows).join('\n');
+    expect(lines).toContain('select-prune');
+    expect(lines).toContain('chars/token');
+  });
+});
+
 describe('where the measurement reads and writes', () => {
   it('takes the arm from the flag and the path from the argument', () => {
     const settings = resolveCardSettings({ BIRD_SPLIT: 'minidev' }, ['report.json', '--arm', 'select-cross'], ROOT);
@@ -284,6 +357,30 @@ describe('where the measurement reads and writes', () => {
     // The arm name is kept as it is written — `+` and `-` both survive — because a report a
     // reader cannot match to its arm is a report about an arm nobody can find.
     expect(cardPath(settings).endsWith('card-select-mixed+dc.json')).toBe(true);
+  });
+});
+
+describe('the entry point', () => {
+  it('exits zero and prints both tables when the measurement holds', async () => {
+    const data = writeMiniBirdDataset(mkdtempSync(join(tmpdir(), 'card-main-')));
+    const dir = mkdtempSync(join(tmpdir(), 'card-main-out-'));
+    const report = join(dir, 'bird-eval.json');
+    writeFileSync(report, JSON.stringify(reportBody([1, 2], { arms: [{ arm: 'select', calls: { mean: 4 }, promptChars: { mean: 3_200 }, tokens: { prompt: 900, completion: 60, unbilled: 0 } }] })));
+    const printed: string[] = [];
+    const log = vi.spyOn(console, 'log').mockImplementation((line: unknown) => {
+      printed.push(String(line));
+    });
+    try {
+      const code = await main([report, '--arm', 'select', '--strict'], ROOT, { BIRD_SPLIT: 'minidev', BIRD_DATA: data, BIRD_OUT: join(dir, 'out.json') });
+      expect(code).toBe(0);
+      expect(printed.join('\n')).toContain('what the provider billed');
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it('is not the entry point when it was not invoked as one', () => {
+    expect(isEntry(undefined, import.meta.url)).toBe(false);
   });
 });
 
@@ -309,6 +406,15 @@ describe('a measurement over a real split', () => {
     // shape the shipped recallers miss.
     expect(first?.shipped).toBe('none');
     expect(first?.candidate).toBe('all');
+  });
+
+  it('reads a report that carries no controls block at all', async () => {
+    // An artifact from before the block existed, or one written by a dry run: the definitions are
+    // then empty rather than missing, and an inline arm's cases are dropped for the reason the
+    // drop names instead of throwing halfway through a measurement.
+    const outcome = await runCard(settingsFor(dataset(), reportBody([1], { controls: undefined })));
+    expect(outcome.drops.definitionGap).toBe(1);
+    expect(outcome.problems[0]).toContain('not the card that was sent');
   });
 
   it('drops a case whose database the manifest does not describe', async () => {

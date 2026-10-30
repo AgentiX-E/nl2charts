@@ -29,10 +29,12 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { attachDefinitions, buildAskMessages, renderSchemaCard } from '@agentix-e/nl2charts-ai';
-import type { PromptOptions, Recaller, SchemaTable } from '@agentix-e/nl2charts-ai';
+import type { PromptOptions, SchemaTable } from '@agentix-e/nl2charts-ai';
 import { buildSchema, loadQuestions, loadTables } from './data.js';
 import type { BirdQuestion, BirdTable } from './data.js';
 import type { CaseRecord } from './gap.js';
+import { joinGraphOf } from './join-graph.js';
+import { CANDIDATE_RECALLERS, SHIPPED_RECALLERS, linkedTables, pruneSchema } from './prune.js';
 import { promptFor, renderableArm, resolveArm, resolveLayout } from './run.js';
 import type { Arm, BirdLayout } from './run.js';
 import { definesOwnName, tableRefs } from './statement.js';
@@ -41,16 +43,6 @@ import { definesOwnName, tableRefs } from './statement.js';
 export const COVERAGES = ['all', 'some', 'none'] as const;
 export type Coverage = (typeof COVERAGES)[number];
 
-/**
- * The recallers the product uses, and the set this instrument also prices.
- *
- * The second adds `table`, which is what a question that names an entity and none of its
- * columns needs. Keeping both lists here rather than deriving one from the other means the
- * report always shows the shipped number next to the candidate, which is the comparison a
- * reader has to make before an arm is worth a run.
- */
-export const SHIPPED_RECALLERS: readonly Recaller[] = ['name', 'alias', 'value'];
-export const CANDIDATE_RECALLERS: readonly Recaller[] = ['name', 'alias', 'value', 'table'];
 
 /** The character cost of one prompt, split by the block that spent it. */
 export interface PromptCost {
@@ -151,11 +143,6 @@ export function coverage(gold: ReadonlySet<string>, kept: ReadonlySet<string>): 
 }
 
 /** The tables a linker keeps, at the budget the prompt can afford. */
-export function linkedTables(question: string, schema: readonly SchemaTable[], recallers: readonly Recaller[]): Set<string> {
-  const linked = buildAskMessages({ question, schema, linking: true, recallers }).linked;
-  return new Set(linked.map((column) => column.table.toLowerCase()));
-}
-
 /** What one case costs, and what each proposal would keep of it. */
 export interface CardRow {
   readonly id: string;
@@ -314,6 +301,126 @@ export function cardProblems(input: {
   return problems;
 }
 
+/** One arm's cost in the endpoint's own unit, as the artifact recorded it. */
+export interface BilledRow {
+  readonly arm: string;
+  /** Mean calls per case, which is the denominator of every per-call number below. */
+  readonly calls: number;
+  /** Mean characters per call, rebuilt from the prompt — the unit the rest of this tool uses. */
+  readonly charsPerCall: number;
+  readonly promptTokensPerCall: number;
+  readonly completionTokensPerCase: number;
+  /** Answers that arrived without a usage block: calls whose cost is unknown, not zero. */
+  readonly unbilled: number;
+  /**
+   * Characters per prompt token.
+   *
+   * The calibration the zero-call instruments cannot get on their own. They count characters
+   * because they never touch a provider; the ratio is what turns that count into an estimate of
+   * what a request costs, and a ratio outside the range any tokenizer produces is the one way the
+   * two measurements can disagree loudly rather than quietly.
+   */
+  readonly charsPerToken: number;
+  /** True when the artifact has no token column at all: nothing was metered. */
+  readonly unmetered: boolean;
+}
+
+/** A report as this instrument reads it, for the cost table. */
+export interface BilledReportShape {
+  readonly arms?: readonly {
+    readonly arm?: string;
+    readonly calls?: { readonly mean?: number };
+    readonly promptChars?: { readonly mean?: number };
+    readonly tokens?: { readonly prompt?: number; readonly completion?: number; readonly unbilled?: number };
+  }[];
+}
+
+/**
+ * What each arm was billed, per call.
+ *
+ * Absent is not zero. An artifact written before the meter existed carries no `tokens`, and a
+ * provider that answers without a usage block carries `unbilled` — both are states in which the
+ * cost column means nothing, and both are reported rather than filled in with zeros. The third
+ * state, a report with calls and a token column of zeros, is the one that would otherwise read as
+ * free work, and it is what `billedProblems` fails on.
+ */
+export function billedRows(report: BilledReportShape): BilledRow[] {
+  const rows: BilledRow[] = [];
+  for (const arm of report.arms ?? []) {
+    const name = arm.arm;
+    if (name === undefined) continue;
+    const calls = arm.calls?.mean ?? 0;
+    const chars = arm.promptChars?.mean ?? 0;
+    const tokens = arm.tokens;
+    const promptTokens = tokens?.prompt ?? 0;
+    const perCall = calls > 0 ? promptTokens / calls : 0;
+    const perCallChars = calls > 0 ? chars / calls : 0;
+    rows.push({
+      arm: name,
+      calls,
+      charsPerCall: Math.round(perCallChars),
+      promptTokensPerCall: Math.round(perCall),
+      completionTokensPerCase: tokens?.completion ?? 0,
+      unbilled: tokens?.unbilled ?? 0,
+      charsPerToken: perCall > 0 ? Number((perCallChars / perCall).toFixed(2)) : 0,
+      unmetered: tokens === undefined,
+    });
+  }
+  return rows;
+}
+
+/** The billed table, printed under the character table because it is the same cost in another unit. */
+export function billedLines(rows: readonly BilledRow[]): string[] {
+  if (rows.length === 0) return [];
+  const out = ['', 'what the provider billed, per case and per call', ''];
+  out.push(`  ${'arm'.padEnd(22)} ${'calls'.padStart(6)} ${'chars/call'.padStart(11)} ${'tokens/call'.padStart(12)} ${'chars/token'.padStart(12)} ${'completion'.padStart(11)} ${'unbilled'.padStart(9)}`);
+  for (const row of rows) {
+    out.push(
+      `  ${row.arm.padEnd(22)} ${row.calls.toFixed(2).padStart(6)} ${String(row.charsPerCall).padStart(11)} ` +
+        `${(row.unmetered ? 'not metered' : String(row.promptTokensPerCall)).padStart(12)} ` +
+        `${(row.charsPerToken === 0 ? '-' : row.charsPerToken.toFixed(2)).padStart(12)} ` +
+        `${String(row.completionTokensPerCase).padStart(11)} ${String(row.unbilled).padStart(9)}`,
+    );
+  }
+  return out;
+}
+
+/**
+ * Whether the billed column can be published.
+ *
+ * Three absolute failures, none of them a target: a report that made calls and metered none, a
+ * provider that answered without a price, and a character count that cannot be the same text as
+ * the token count it is paired with. A ratio below half a character per token means the two
+ * columns describe different requests — the only way these two measurements can contradict each
+ * other without either of them looking wrong on its own.
+ */
+export function billedProblems(rows: readonly BilledRow[]): string[] {
+  const problems: string[] = [];
+  const unmetered = rows.filter((row) => row.calls > 0 && row.unmetered).map((row) => row.arm);
+  if (unmetered.length > 0) {
+    problems.push(
+      `CARD: ${unmetered.join(', ')} made calls the artifact did not meter, so the token column would publish a measurement of nothing`,
+    );
+  }
+  const silent = rows.filter((row) => !row.unmetered && row.calls > 0 && row.promptTokensPerCall === 0).map((row) => row.arm);
+  if (silent.length > 0) {
+    problems.push(`CARD: ${silent.join(', ')} reports calls and zero prompt tokens, which is a meter that did not run rather than a free request`);
+  }
+  const unbilled = rows.filter((row) => row.unbilled > 0);
+  if (unbilled.length > 0) {
+    problems.push(
+      `CARD: ${unbilled.map((row) => `${row.arm} (${String(row.unbilled)})`).join(', ')} answered without a usage block, so the cost of those calls is unknown and the column understates it`,
+    );
+  }
+  const impossible = rows.filter((row) => !row.unmetered && row.charsPerToken > 0 && row.charsPerToken < 0.5).map((row) => row.arm);
+  if (impossible.length > 0) {
+    problems.push(
+      `CARD: ${impossible.join(', ')} reports fewer than half a character per token, so the character count and the token count describe different prompts`,
+    );
+  }
+  return problems;
+}
+
 /** Where a measurement reads and writes. */
 export interface CardSettings {
   readonly report: string;
@@ -351,6 +458,8 @@ export interface CardOutcome {
   readonly rows: readonly CardRow[];
   readonly tally: CardTally;
   readonly drops: CardDrops;
+  /** Every arm the artifact billed, not only the one this invocation measured. */
+  readonly billed: readonly BilledRow[];
   readonly problems: readonly string[];
 }
 
@@ -369,7 +478,15 @@ export function promptOf(
   tables: BirdTable,
 ): { system: string; user: string; schema: readonly SchemaTable[] } {
   const card = attachDefinitions(buildSchema(tables, new Map(), { withNotes: false }), definitions);
-  const schema = card.schema as SchemaTable[];
+  // The prune arm sends the closure, so this instrument has to render the closure. Rebuilding
+  // the whole card for it would measure a prompt nobody sends — the same defect the two
+  // `information` fixes were about — and would report the arm as its parent with a longer name.
+  const pruned =
+    arm.prune === undefined
+      ? (card.schema as SchemaTable[])
+      : (pruneSchema({ schema: card.schema as SchemaTable[], question: question.question, graph: joinGraphOf(tables), hops: arm.prune })
+          .schema as SchemaTable[]);
+  const schema = pruned;
   const options = promptFor(arm, question, {});
   const built = buildAskMessages({
     question: question.question,
@@ -378,9 +495,11 @@ export function promptOf(
     linking: arm.linking,
     samples: arm.samples === true,
   });
+  // Two messages by the builder's own return type, so there is nothing to fall back to: a
+  // `?? ''` here would have been a branch no prompt can reach (ADR-219).
   return {
-    system: built.messages[0]?.content ?? '',
-    user: built.messages[1]?.content ?? '',
+    system: built.messages[0].content,
+    user: built.messages[1].content,
     schema,
   };
 }
@@ -446,12 +565,16 @@ export async function runCard(settings: CardSettings): Promise<CardOutcome> {
     }
   }
   const tally = tallyCards(rows);
-  const problems = cardProblems({
-    tally,
-    definitionGap: drops.definitionGap,
-    unrenderable: drops.unrenderable + drops.unknownArm,
-  });
-  return { split: settings.layout.split, arm: settings.arm, rows, tally, drops, problems };
+  const billed = billedRows(report as BilledReportShape);
+  const problems = [
+    ...cardProblems({
+      tally,
+      definitionGap: drops.definitionGap,
+      unrenderable: drops.unrenderable + drops.unknownArm,
+    }),
+    ...billedProblems(billed),
+  ];
+  return { split: settings.layout.split, arm: settings.arm, rows, tally, drops, billed, problems };
 }
 
 export function cardPath(settings: CardSettings): string {
@@ -473,6 +596,7 @@ export async function main(
   const settings = resolveCardSettings(env, argv, root);
   const outcome = await runCard(settings);
   for (const line of cardLines(outcome.tally)) console.log(line);
+  for (const line of billedLines(outcome.billed)) console.log(line);
   console.log(
     `\n  dropped: ${String(outcome.drops.unknownQuestion)} unknown question, ${String(outcome.drops.definitionGap)} without definitions, ` +
       `${String(outcome.drops.unrenderable)} unrenderable arm, ${String(outcome.drops.unknownArm)} unknown arm`,
