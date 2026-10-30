@@ -314,11 +314,11 @@ jobs:
       # pipeline sends, and the gate fails only if it could not be rebuilt.
       - name: What the prompt costs, and what a smaller card would save
         run: pnpm bench:bird:card eval/out/bird-eval.json --arm select --strict
-      # The same instrument on the arm that sends the closure. Two invocations of one tool, so
-      # the difference between the two cards is measured by the same code rather than by a
-      # subtraction of two numbers taken on different days.
-      - name: What the pruned card costs
-        run: pnpm bench:bird:card eval/out/bird-eval.json --arm select-prune --strict
+      # The pruned card's reading moved with its arm: `select-prune` now runs on demand, because
+      # its verdict is in (−1.4pp, and the loss is the ceiling rather than the selector) and its
+      # gap on 498 questions is inside its own MDE. A second invocation here would have been a
+      # step that fails on an arm the run does not contain — which is what the presence check
+      # now says out loud instead of printing a table of zeros.
       # Whether the tables a question never names can be reached by a join. The card measurement
       # priced the lever and this one says who can pull it: a question that names an entity and
       # none of its columns is one case in six, and the foreign keys are what carry it to the

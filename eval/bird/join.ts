@@ -47,6 +47,7 @@ import type { Coverage } from './card.js';
 import { loadDescriptions, loadQuestions, loadTables } from './data.js';
 import type { BirdQuestion, BirdTable, ColumnNote } from './data.js';
 import type { CaseRecord } from './gap.js';
+import { SHIPPED_ARM, requireArm } from './presence.js';
 import { promptFor, renderableArm, resolveArm, resolveLayout } from './run.js';
 import { definesOwnName, tableRefs } from './statement.js';
 import type { Arm, BirdLayout } from './run.js';
@@ -354,7 +355,7 @@ export function resolveJoinSettings(
   const path = argv.find((item, index) => !item.startsWith('--') && !consumed.includes(index));
   if (path === undefined) throw new Error('usage: join.ts <report.json> [--arm <name>] [--strict]');
   const layout = resolveLayout(env, root);
-  return { report: path, layout, arm: named ?? 'select-cross', out: dirname(layout.out), strict: argv.includes('--strict') };
+  return { report: path, layout, arm: named ?? SHIPPED_ARM, out: dirname(layout.out), strict: argv.includes('--strict') };
 }
 
 export interface JoinDrops {
@@ -405,6 +406,7 @@ export function graphsOf(tables: ReadonlyMap<string, BirdTable>): Record<EdgeSou
 
 export async function runJoin(settings: JoinSettings): Promise<JoinOutcome> {
   const report = JSON.parse(readFileSync(settings.report, 'utf8')) as JoinReportShape;
+
   const arm = resolveArm(settings.arm);
   const questions = loadQuestions(settings.layout.questionsFile);
   const tables = loadTables(settings.layout.tablesFile);
@@ -423,7 +425,9 @@ export async function runJoin(settings: JoinSettings): Promise<JoinOutcome> {
   };
   const cases: JoinCase[] = [];
   const drops: { -readonly [K in keyof JoinDrops]: number } = { unknownQuestion: 0, unknownArm: 0, unrenderable: 0, definitionGap: 0 };
-  const selected = (report.cases ?? []).filter((row) => row.arm === settings.arm);
+  const selected = requireArm(report.cases, settings.arm, settings.report).filter(
+    (row) => row.arm === settings.arm,
+  );
   const unknownRefs: string[] = [];
   let excluded = 0;
   let own = 0;

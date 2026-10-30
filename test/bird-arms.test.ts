@@ -177,6 +177,22 @@ describe('the chain that actually runs', () => {
     for (const name of DEFAULT_ARMS) expect(ARMS.map((arm) => arm.name), name).toContain(name);
   });
 
+  it('keeps the chain inside its call budget', () => {
+    // A budget, not a threshold: the chain's bill is the one number every push pays, and it
+    // grew one arm at a time to sixteen — 23,840 prompt tokens a question, 11.9M a run. The
+    // cut that took it to eleven was justified by measurement (`vote` +0.00pp against `select`
+    // at 17:17, `select-duo` −0.60pp, `select5` +0.40pp inside a 3.33pp MDE) and this line is
+    // what keeps the next arm from being added without that argument: fourteen nominal calls
+    // today and a ceiling of fifteen, so one single-call rung fits and a four-call variant
+    // does not.
+    const nominal = DEFAULT_ARMS.reduce((total, name) => {
+      const arm = ARMS.find((entry) => entry.name === name) as Arm;
+      return total + (arm.vote ?? 1) + (arm.select === true ? 1 : 0);
+    }, 0);
+    expect(nominal).toBeLessThanOrEqual(15);
+    expect(nominal).toBe(14);
+  });
+
   it('gives the demonstration arm statements and the textual arm only text', () => {
     // One lever apart: if the textual arm also carried examples, the delta would
     // price two things at once.

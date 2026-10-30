@@ -17,7 +17,12 @@ on:
       arms:
         description: Comma-separated arms
         required: false
-        default: 'names,inline-definitions,inline+evidence,metadata+evidence'
+        # `select` is in the default list because this is the split that can decide the
+        # four-call tier: the MDE here is 2.30pp against Mini-Dev's 3.98pp, so a 2pp
+        # non-inferiority claim is decidable on 1,532 questions and not on 498. It is also the
+        # only arm that carries a candidate set, which is what four of the instruments below
+        # read — they used to name `select-cross`, an arm this workflow never ran.
+        default: 'names,inline-definitions,inline+evidence,metadata+evidence,select'
       second_model:
         description: Model for `@second` candidate sources (blank = none)
         required: false
@@ -113,29 +118,29 @@ jobs:
       # finding rather than a reason to red the run. The gate lives in `ci.yml`, on the split
       # and arm it has been measured on.
       - name: What kind of wrong the no-answer statements are
-        run: pnpm bench:bird:gap:values eval/out/bird-eval.json --arm select-cross
+        run: pnpm bench:bird:gap:values eval/out/bird-eval.json --arm select
       # The same instrument on the split with room for a result. No `--strict`: the ceiling is
       # a reading, and the two failures it can catch are the ones the Mini-Dev gate already
       # fails on.
       - name: What the prompt costs, and what a smaller card would save
-        run: pnpm bench:bird:card eval/out/bird-eval.json --arm select-cross
+        run: pnpm bench:bird:card eval/out/bird-eval.json --arm select
       # The same reading on the split with room for a result, and without `--strict` for the same
       # reason the card step omits it: the depth table is a ceiling, and the failures it can catch
       # are the ones the Mini-Dev gate already fails on.
       - name: What a question names, and what its answer joins
-        run: pnpm bench:bird:join eval/out/bird-eval.json --arm select-cross
+        run: pnpm bench:bird:join eval/out/bird-eval.json --arm select
       # The same instrument on the split with room for a result. No `--strict`: the two failures
       # this gate can catch are absolute (nothing read, or a card rebuilt without the text the
       # run placed on it) and the dev split is where a rendering bug shows up first, but the
       # shape of the answer — how many failures needed a value the prompt never spells — is a
       # reading, and a reading is the finding rather than a reason to red the run.
       - name: What the prompt would have had to say
-        run: pnpm bench:bird:info eval/out/bird-eval.json --arm select-cross
+        run: pnpm bench:bird:info eval/out/bird-eval.json --arm select
       # 1534 gold statements and 515 no-answer statements through one literal edit, one oracle
       # query each and no model call. No `--strict`: this is where a repair is tried on the
       # split that has room for one, and a reading that says "it recovers two" is the finding.
       - name: What one provable edit recovers, and what it would break
-        run: pnpm bench:bird:repair eval/out/bird-eval.json --arm select-cross
+        run: pnpm bench:bird:repair eval/out/bird-eval.json --arm select
       # The run that fails is the run whose numbers matter most, and these two steps used to
       # run only on success: `40534288883` failed the floor gate and the artifact — the only
       # copy of the per-case rows and the McNemar p-values — was never uploaded, so the run

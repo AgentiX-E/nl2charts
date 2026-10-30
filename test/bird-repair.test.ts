@@ -284,9 +284,31 @@ describe('the entry, run the way a workflow runs it', () => {
     expect(outcome.cases).toMatchObject({ offered: 1, repaired: 0 });
   });
 
-  it('reads a report with no cases and no failures', async () => {
+  it('refuses an artifact that holds no cases', async () => {
+    // The other half of the same rule: an artifact that predates the `cases` field has nothing
+    // to offer, and a repair loop that reports "nothing to repair" about it is reporting a run
+    // that did not happen.
     const data = dataset([caseGold]);
-    const settings = settingsFor(data, { split: 'minidev', model: 'deepseek-chat' });
+    const settings = settingsFor(data, { split: 'minidev', model: 'deepseek-chat', failures: { 'select-cross': [] } });
+    await expect(runRepair(settings)).rejects.toThrow(/holds no cases, so arm select-cross cannot be measured/);
+  });
+
+  it('refuses an arm the artifact does not hold', async () => {
+    // The corpus below names `select-cross`; asking for `select` used to build an empty
+    // offered set and report a repair loop that had nothing to do, which is a claim about a
+    // run that did not happen.
+    const data = dataset([caseGold]);
+    const settings = settingsFor(data, report([emptyFailure], [noAnswer('902')]));
+    await expect(runRepair({ ...settings, arm: 'select' })).rejects.toThrow(
+      /has no arm select; it holds select-cross/,
+    );
+  });
+
+  it('reads a run in which nothing failed', async () => {
+    // The artifact of a run where every case passed: the cases are there and `failures` is
+    // empty. A report with no cases at all is a different state and is refused before here.
+    const data = dataset([caseGold]);
+    const settings = settingsFor(data, { split: 'minidev', model: 'deepseek-chat', cases: [{ arm: 'select-cross', id: '901', passed: true }] });
     const outcome = await runRepair(settings);
     expect(outcome.cases).toMatchObject({ offered: 0, repaired: 0, gated: 0 });
     expect(outcome.problems).toEqual([]);
@@ -305,7 +327,9 @@ describe('the entry, run the way a workflow runs it', () => {
     const data = dataset([
       { question_id: 904, db_id: 'shop', question: 'A gold that returns nothing', evidence: '', SQL: 'select name from items where 0', difficulty: 'simple' },
     ]);
-    const settings = settingsFor(data, report([], []));
+    // A run whose every case passed: the rows are there so the arm is in the artifact, and the
+    // offered set is empty. A report with no rows at all is refused before here.
+    const settings = settingsFor(data, report([], [{ arm: 'select-cross', id: '904', passed: true }]));
     const outcome = await runRepair(settings);
     expect(outcome.gold).toMatchObject({ empty: 1, changed: [] });
   });

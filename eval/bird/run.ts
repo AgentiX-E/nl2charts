@@ -525,18 +525,16 @@ export const DEFAULT_ARMS: readonly string[] = [
   'inline+icl',
   'inline+repair',
   'inline+repair-raw',
-  'vote',
-  'select',
-  // The same arm with the card cut to the tables one join from the ones the question names.
-  'select-prune',
-  // Three decompositions instead of three samples of one: the arm that tests whether
-  // the ceiling belongs to the sampler or to the prompt.
-  'select-mixed',
-  // The same two prompts that always differ, one call cheaper.
-  'select-duo',
-  'select5',
   'values',
   'metadata+evidence',
+  // The only multi-call arm left in the chain, and it is here to keep the path alive rather
+  // than to answer a question. Its verdict — 0.39pp over a single call on the dev split, at
+  // 37% more tokens — cannot be resolved on the 498 questions this workflow runs, so running
+  // it every push buys no reading. What it buys is execution: the selector is the one codepath
+  // that a prompt change, a provider change or a refactor can break without any unit test
+  // noticing, and `inline+retrieval` is the precedent — written, wired, paired and never run.
+  // Its four calls are 2,540 of this chain's 11,075 prompt tokens per question.
+  'select',
 ];
 
 /**
@@ -544,6 +542,18 @@ export const DEFAULT_ARMS: readonly string[] = [
  * An arm that is neither here nor in `DEFAULT_ARMS` fails the suite.
  */
 export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
+  // Moved out of the chain in the round that priced it. Each has a verdict, and each verdict
+  // was taken on the split that can express it; what none of them can do is produce a *new*
+  // verdict on 498 questions, because every one of their gaps is inside its own MDE there.
+  // Measured on `41116622974` (498 questions): `vote` +0.00pp against `select` (17:17, p = 1,
+  // MDE 3.28pp) for 2,092 tokens a case; `select-duo` −0.60pp (14:11, p = 0.690); `select-prune`
+  // −1.41pp through the card's ceiling (1,008 → 980 reachable cases); `select-mixed` +0.60pp
+  // inside 2.10pp; `select5` +0.40pp inside 3.33pp for the largest bill in the catalogue.
+  vote: 'majority over the same three candidates: the selector control, measured 17:17 against `select` (p = 1) — running it every push re-derives a tie at 2,092 tokens',
+  'select-prune': 'the card cut to the join closure: measured −1.4pp, and the loss is the ceiling rather than the selector (1,008 → 980 reachable cases), so it is priced; run it when the card changes',
+  'select-mixed': 'three decompositions instead of three samples: within its MDE of a single call on this split, and the decomposition question needs the dev split to be answered',
+  'select-duo': 'two prompts and a selector: measured −0.60pp against `vote` for the same money, superseded',
+  select5: 'five samples and a selector: 4,103 tokens a case, the largest bill in the catalogue, and +0.40pp inside a 3.33pp MDE — the arm whose own measurement says the ceiling is not the sampler',
   'inline+evidence+samples': "the same prompt with each categorical column's stored values on its card line: one lever, one call, and the untested half of value grounding",
   definitions: 'structural semantics built from keys: superseded by inline placement, kept as the parent of definitions+evidence',
   'dataset-subset': 'isolates coverage from author, run when a definition arm moves',

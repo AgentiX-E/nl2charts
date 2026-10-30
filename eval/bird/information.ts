@@ -49,6 +49,7 @@ import type { BirdQuestion, BirdTable } from './data.js';
 import type { CaseRecord } from './gap.js';
 import { graphOf } from './join-graph.js';
 import { pruneSchema } from './prune.js';
+import { SHIPPED_ARM, requireArm } from './presence.js';
 import { promptFor, renderableArm, resolveArm, resolveLayout } from './run.js';
 // Re-exported: this instrument's gate is a property of the arm, and its callers import it here.
 export { renderableArm };
@@ -249,7 +250,7 @@ export function resolveInfoSettings(
   const path = argv.find((item, index) => !item.startsWith('--') && !consumed.includes(index));
   if (path === undefined) throw new Error('usage: information.ts <report.json> [--arm <name>] [--strict]');
   const layout = resolveLayout(env, root);
-  return { report: path, layout, arm: named ?? 'select-cross', out: dirname(layout.out), strict: argv.includes('--strict') };
+  return { report: path, layout, arm: named ?? SHIPPED_ARM, out: dirname(layout.out), strict: argv.includes('--strict') };
 }
 
 /** A case as this instrument records it, with the values behind the class. */
@@ -319,6 +320,7 @@ export function promptForCase(arm: Arm, question: BirdQuestion, definitions: str
 
 export async function runInformation(settings: InfoSettings): Promise<InfoOutcome> {
   const report = JSON.parse(readFileSync(settings.report, 'utf8')) as InfoReportShape;
+
   const arm = resolveArm(settings.arm);
   const questions = loadQuestions(settings.layout.questionsFile);
   const tables = loadTables(settings.layout.tablesFile);
@@ -326,7 +328,9 @@ export async function runInformation(settings: InfoSettings): Promise<InfoOutcom
   const definitions = report.controls?.synthesizedDefinitions ?? {};
   const rows: InfoRow[] = [];
   const drops = { unknownQuestion: 0, unknownArm: 0, definitionGap: 0, unrenderable: 0 };
-  const noAnswer = (report.cases ?? []).filter((row) => row.arm === settings.arm && row.candidateRecall === false);
+  const noAnswer = requireArm(report.cases, settings.arm, settings.report).filter(
+    (row) => row.arm === settings.arm && row.candidateRecall === false,
+  );
   if (arm === undefined) {
     drops.unknownArm = noAnswer.length;
   } else if (!renderableArm(arm)) {

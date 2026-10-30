@@ -299,10 +299,26 @@ describe('the measurement over an artifact', () => {
     expect(outcome.problems.join('\n')).toContain('a block the artifact does not keep');
   });
 
-  it('does not divide by zero on a report that predates the cases field', async () => {
-    const outcome = await runInformation(settingsFor(dataset(), { split: 'minidev' }));
+  it('does not divide by zero when no case lacked an answer', async () => {
+    // A run whose candidate set always held an answer is a legitimate zero — nothing to
+    // attribute — unlike a report with no rows at all, which is refused before this point.
+    const body = { split: 'minidev', cases: [{ arm: 'select', id: '101', candidateRecall: true, reason: 'values' }], controls: {} };
+    const outcome = await runInformation(settingsFor(dataset(), body));
     expect(outcome.tally.total).toBe(0);
     expect(outcome.problems[0]).toContain('nothing about the prompt');
+  });
+
+  it('refuses a report that predates the cases field', async () => {
+    await expect(runInformation(settingsFor(dataset(), { split: 'minidev' }))).rejects.toThrow(
+      /holds no cases, so arm select cannot be measured/,
+    );
+  });
+
+  it('refuses an arm the artifact does not hold', async () => {
+    const settings = settingsFor(dataset(), reportBody([101]));
+    await expect(runInformation({ ...settings, arm: 'select-cross' })).rejects.toThrow(
+      /has no arm select-cross; it holds select/,
+    );
   });
 
   it('drops a case whose database the table manifest does not describe', async () => {
@@ -330,11 +346,11 @@ describe('the measurement over an artifact', () => {
 });
 
 describe('the settings', () => {
-  it('defaults to the arm the report is read from most often', () => {
+  it('defaults to the arm the chain runs and the pipeline ships', () => {
     const dir = mkdtempSync(join(tmpdir(), 'info-settings-'));
     const path = join(dir, 'bird-eval.json');
     writeFileSync(path, '{}');
-    expect(resolveInfoSettings({ BIRD_OUT: join(dir, 'o.json') }, [path], ROOT).arm).toBe('select-cross');
+    expect(resolveInfoSettings({ BIRD_OUT: join(dir, 'o.json') }, [path], ROOT).arm).toBe('metadata+evidence');
   });
 
   it('reads --arm and --strict', () => {

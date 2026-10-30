@@ -18,6 +18,7 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import {
   billedLines,
+  billedTotal,
   billedProblems,
   billedRows,
   purposeLines,
@@ -482,6 +483,27 @@ describe('what the provider billed', () => {
     expect(lines).toContain('select-prune');
     expect(lines).toContain('chars/token');
   });
+
+  it('adds the arms up, because a push pays for all of them', () => {
+    // The number the per-arm table left to the reader: 2,540 + 1,716 = 4,256 tokens a question
+    // to run these two arms once. It is what a cut has to move, and it was nowhere in print.
+    const rows = billedRows({
+      arms: [
+        armRow({ arm: 'select', tokens: { prompt: 2_540, completion: 150, chars: 9_600, unbilled: 0 } }),
+        armRow({ arm: 'metadata+evidence', tokens: { prompt: 1_716, completion: 60, chars: 7_197, unbilled: 0 } }),
+      ],
+    });
+    expect(billedTotal(rows)).toBe(4_256);
+    expect(billedLines(rows).join('\n')).toContain('chain: 4256 prompt tokens a question over 2 arms');
+  });
+
+  it('prints no chain line when no arm was metered', () => {
+    // Zero is not a bill of nothing: an artifact written before the meter existed has no token
+    // column, and a chain line reading `0` would be a claim about money nobody counted.
+    const rows = billedRows({ arms: [{ arm: 'names', calls: { mean: 1 } }] });
+    expect(billedTotal(rows)).toBe(0);
+    expect(billedLines(rows).join('\n')).not.toContain('chain:');
+  });
 });
 
 describe('where the measurement reads and writes', () => {
@@ -490,8 +512,10 @@ describe('where the measurement reads and writes', () => {
     expect([settings.arm, settings.report, settings.strict]).toEqual(['select-cross', 'report.json', false]);
   });
 
-  it('defaults to the arm the gates run', () => {
-    expect(resolveCardSettings({}, ['report.json', '--strict'], ROOT).arm).toBe('select-cross');
+  it('defaults to the arm the chain runs and the pipeline ships', () => {
+    // It used to default to `select-cross`, which no chain contains: a bare invocation then
+    // measured a run that had not happened and printed the zeros as a reading.
+    expect(resolveCardSettings({}, ['report.json', '--strict'], ROOT).arm).toBe('metadata+evidence');
   });
 
   it('refuses a flag without a value and a run without a report', () => {
@@ -610,7 +634,8 @@ describe('a measurement over a real split', () => {
     const env = { BIRD_SPLIT: 'minidev', BIRD_DATA: data, BIRD_OUT: join(dir, 'out.json') };
     writeFileSync(path, JSON.stringify(reportBody([1])));
     expect(await main([path, '--arm', 'select'], ROOT, env)).toBe(0);
-    writeFileSync(path, JSON.stringify(reportBody([])));
+    // A measurement that ran and failed is a finding: zero without `--strict`, one with it.
+    writeFileSync(path, JSON.stringify(reportBody([1], { controls: undefined })));
     expect(await main([path, '--arm', 'select'], ROOT, env)).toBe(0);
     expect(await main([path, '--arm', 'select', '--strict'], ROOT, env)).toBe(1);
   });
@@ -724,10 +749,22 @@ describe('the paths a real report can take', () => {
     expect(built.user.startsWith('No column matched; use the schema above.')).toBe(true);
   });
 
-  it('reads a report that keeps no cases at all', async () => {
-    const outcome = await runCard(settingsFor(writeMiniBirdDataset(mkdtempSync(join(tmpdir(), 'card-data-'))), {}));
-    expect(outcome.tally.total).toBe(0);
-    expect(outcome.problems[0]).toContain('no case could be read');
+  it('refuses an arm the artifact does not hold, by naming the ones it does', async () => {
+    // The defect this closes: the filter returned nothing, the table printed zeros, and in
+    // non-strict mode the step passed. `select-cross` is the arm five workflow steps used to
+    // read, and no chain contains it.
+    const data = writeMiniBirdDataset(mkdtempSync(join(tmpdir(), 'card-data-')));
+    await expect(runCard(settingsFor(data, reportBody([1], {}, 'select'), 'select-cross'))).rejects.toThrow(
+      /has no arm select-cross; it holds select/,
+    );
+  });
+
+  it('refuses a report that keeps no cases at all instead of reading a zero', async () => {
+    // This used to return a tally of zero and a problem that only `--strict` turned into a
+    // failure, which is how five workflow steps measured nothing for as long as they existed.
+    await expect(
+      runCard(settingsFor(writeMiniBirdDataset(mkdtempSync(join(tmpdir(), 'card-data-'))), {})),
+    ).rejects.toThrow(/holds no cases, so arm select cannot be measured/);
   });
 
   it('renders an arm whose definitions are a block rather than the card', async () => {

@@ -318,13 +318,27 @@ describe('the entry, run the way a workflow runs it', () => {
 
   it('reports a perfect run as a zero bucket rather than as a broken artifact', async () => {
     // No case in the artifact has `candidateRecall: false`, which is what an arm that answered
-    // everything looks like. A gate must not red on that.
+    // everything looks like. A gate must not red on that. The cases are present: a report with
+    // no rows at all is a different state — nothing was measured — and is refused before here.
     const data = dataset();
-    const settings = settingsFor(data, { split: 'minidev', model: 'deepseek-chat', arms: [{ arm: 'select-cross', candidateRecall: 0 }] });
+    const settings = settingsFor(data, {
+      split: 'minidev',
+      model: 'deepseek-chat',
+      arms: [{ arm: 'select-cross', candidateRecall: 0 }],
+      cases: [{ arm: 'select-cross', id: '1', passed: true, candidateRecall: true }],
+    });
     const outcome = await runValuesGap(settings);
     expect(outcome.tally.total).toBe(0);
     expect(outcome.drops.unretained).toBe(0);
     expect(outcome.problems).toEqual([]);
+  });
+
+  it('refuses an arm the artifact does not hold', async () => {
+    const data = dataset();
+    const settings = settingsFor(data, report({ '91': 'select qty * 2 from orders' }));
+    await expect(runValuesGap({ ...settings, arm: 'select' })).rejects.toThrow(
+      /has no arm select; it holds select-cross/,
+    );
   });
 
   it('reports an arm whose no-answer cases are all unreadable as a broken artifact', async () => {
@@ -345,9 +359,9 @@ describe('the entry, run the way a workflow runs it', () => {
     expect(outcome.problems[0]).toContain('no statement');
   });
 
-  it('resolves the arm from the flag and defaults to the cross arm, with `--strict` separated from the path', () => {
+  it('resolves the arm from the flag and defaults to the shipped arm, with `--strict` separated from the path', () => {
     const env = { BIRD_SPLIT: 'minidev', BIRD_DATA: '/data' };
-    expect(resolveValuesGapSettings(env, ['/r.json'], ROOT)).toMatchObject({ arm: 'select-cross', report: '/r.json', strict: false });
+    expect(resolveValuesGapSettings(env, ['/r.json'], ROOT)).toMatchObject({ arm: 'metadata+evidence', report: '/r.json', strict: false });
     expect(resolveValuesGapSettings(env, ['/r.json', '--arm', 'select5'], ROOT).arm).toBe('select5');
     expect(resolveValuesGapSettings(env, ['--strict', '/r.json', '--arm', 'select5'], ROOT)).toMatchObject({ arm: 'select5', report: '/r.json', strict: true });
     // The arm name is not a path, however it is ordered.
@@ -386,7 +400,12 @@ describe('the entry, run the way a workflow runs it', () => {
     });
     expect(await main([unreadable.report, '--arm', 'select-cross'], ROOT, env)).toBe(0);
     expect(await main([unreadable.report, '--arm', 'select-cross', '--strict'], ROOT, env)).toBe(1);
-    const perfect = settingsFor(data, report({}));
+    // A run whose every candidate set held an answer: no case to split, so a zero with `--strict`.
+    const perfect = settingsFor(data, {
+      split: 'minidev',
+      model: 'deepseek-chat',
+      cases: [{ arm: 'select-cross', id: '1', passed: true, candidateRecall: true }],
+    });
     expect(await main([perfect.report, '--arm', 'select-cross', '--strict'], ROOT, env)).toBe(0);
   });
 

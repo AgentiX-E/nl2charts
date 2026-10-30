@@ -8,6 +8,39 @@ cannot be argued with.
 
 ### Measured
 
+- **The chain's bill, and the five arms that were paying it for no verdict.** Nobody had added up
+  what `pnpm bench:bird` costs. The artifact of `41116622974` now prints it — `billedTotal` sums the
+  per-arm row the meter writes — and the answer for the sixteen-arm chain is **23,840 prompt tokens
+  a question**, 24,537 with the A/A control, **12.2M tokens for one push** over 498 questions. Read
+  against each other the arms say where that money went: every multi-call variant's gap to `select`
+  is **inside the MDE of the pair that produced it** — `vote` -0.40pp against 3.47pp, `select-prune`
+  -1.41 against 3.51, `select-duo` -1.20 against 2.87, `select-mixed` +0.60 against 3.13, `select5`
+  +0.40 against 3.08 — so another push cannot resolve any of them, and would pay 12,765 tokens a
+  question to re-derive the same unresolved reading.
+
+  Those five arms moved to `ON_DEMAND_ARMS`, each with the verdict that retired it. The chain is
+  eleven arms: **14 nominal calls a question instead of 34, 11,075 prompt tokens instead of 23,840
+  (-53.5%), 5.9M a push instead of 12.2M**. `metadata+evidence` stays because it is the prompt that
+  ships; `select` stays at 2,540 tokens (23% of the new chain) for a reason that is not a delta — it
+  is the only arm that executes the selector path every push, and `inline+retrieval` is the
+  precedent for a path that is written, wired, paired and never run.
+
+  A budget keeps it from growing back: `test/bird-arms.test.ts` asserts the chain's nominal calls
+  are at most fifteen against fourteen today, so one single-call rung fits and a four-call variant
+  does not. The retired arms' floors were removed with them rather than left as floors nothing would
+  notice — the gate's own rule — and their numbers are the table in `docs/benchmarks.md`.
+
+- **The leaderboard table was never a pipeline comparison.** The dev-split section reported three
+  gaps — 11.3pp to the published state of the art, 2.1-3.6pp to the DeepSeek-family systems, 5.5pp to
+  a strong model's zero-shot baseline — as if they said something about this harness. They do not.
+  Every row in that table differs from ours in the model, and most differ in the prompt, the
+  executor and the judge as well; `deepseek-chat` today is not the `DeepSeek-v2` RSL-SQL was built
+  on. The section now carries the five coordinates a comparison has to hold and states the correct
+  claim instead: **11.3pp behind, and how much of that is the pipeline is unknown.** A comparison
+  that counts has to run a pinned competitor commit on this repository's runner against the same
+  endpoint and question file, with its predictions scored by this harness's executor and judge;
+  none of those runs exist yet, and the plan's first item is to build the harness that produces them.
+
 - **The selector is billed for 17.6% of every case and returns a coin.** The first run that meters
   per call (`41092489988`) splits `select`'s 2,539 prompt tokens per question into 2,092 for the
   three samples and **447 for the call that chooses between them** — 17.6% of the bill, on the pair
@@ -363,6 +396,19 @@ cannot be argued with.
   extension would mis-read every per-case delta computed from it.
 
 ### Fixed
+
+- **Five instruments measured nothing and exited zero.** `card`, `join`, `information`, `repair` and
+  `values-gap` all filter an artifact's cases by arm name, and when the name is not there the filter
+  returns nothing and the table prints zeros in the typography of a measurement. `--strict` turned
+  that into a failure; the dev workflow omits `--strict` on purpose, because the readings there are
+  findings rather than floors. The result is that five steps of `bird-dev.yml` read `select-cross` —
+  an arm that workflow never runs — and have been green and empty for as long as they have existed.
+
+  `requireArm` now runs before the filter and throws, naming the arms the report does hold; a zero is
+  a finding and no rows is a missing input, and only the first may be reported. The dev workflow runs
+  `select` in its default arm list and its five instrument steps read it, so the steps measure the
+  run they are attached to. The tools' default arm changed with the same reasoning: it was
+  `select-cross`, which no chain contains, and is now `metadata+evidence`, the prompt that ships.
 
 - **The paired comparison keyed on an id that Mini-Dev does not keep unique.** `compareArms` built a
   map from the second arm's outcomes by case id, so when a split lists a question twice — Mini-Dev's

@@ -41,6 +41,7 @@ import { loadQuestions } from './data.js';
 import { caseMismatchedLiterals, classifyFailureShape, missingLiterals } from './failure-shape.js';
 import type { FailureShape } from './failure-shape.js';
 import { createOracle } from './oracle.js';
+import { SHIPPED_ARM, requireArm } from './presence.js';
 import { resolveLayout } from './run.js';
 import type { BirdLayout } from './run.js';
 import type { GapReportShape } from './gap.js';
@@ -192,7 +193,7 @@ export function resolveValuesGapSettings(
   const path = argv.find((item, index) => !item.startsWith('--') && !consumed.includes(index));
   if (path === undefined) throw new Error('usage: values-gap.ts <report.json> [--arm <name>] [--strict]');
   const layout = resolveLayout(env, root);
-  return { report: path, layout, arm: named ?? 'select-cross', out: dirname(layout.out), strict: argv.includes('--strict') };
+  return { report: path, layout, arm: named ?? SHIPPED_ARM, out: dirname(layout.out), strict: argv.includes('--strict') };
 }
 
 export interface ValuesRow {
@@ -247,10 +248,13 @@ export interface ValuesOutcome {
  */
 export async function runValuesGap(settings: ValuesGapSettings): Promise<ValuesOutcome> {
   const report = JSON.parse(readFileSync(settings.report, 'utf8')) as GapReportShape;
+
   const questions = loadQuestions(settings.layout.questionsFile);
   const byId = new Map(questions.map((question) => [String(question.question_id), question]));
   const statements = new Map((report.failures?.[settings.arm] ?? []).map((entry) => [String(entry.id), entry]));
-  const noAnswer = (report.cases ?? []).filter((row) => row.arm === settings.arm && row.candidateRecall === false);
+  const noAnswer = requireArm(report.cases, settings.arm, settings.report).filter(
+    (row) => row.arm === settings.arm && row.candidateRecall === false,
+  );
   const scored = noAnswer.filter((row) => row.reason === 'values');
   const rows: ValuesRow[] = [];
   const drops = { unknownQuestion: 0, unretained: 0, otherBucket: 0, engineRefused: 0, goldFailed: 0 };

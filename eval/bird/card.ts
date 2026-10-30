@@ -34,6 +34,7 @@ import { buildSchema, loadDescriptions, loadQuestions, loadTables } from './data
 import type { BirdQuestion, BirdTable, ColumnNote } from './data.js';
 import type { CaseRecord } from './gap.js';
 import { graphOf } from './join-graph.js';
+import { SHIPPED_ARM, requireArm } from './presence.js';
 import { CANDIDATE_RECALLERS, SHIPPED_RECALLERS, linkedTables, pruneSchema } from './prune.js';
 import { promptFor, renderableArm, resolveArm, resolveLayout } from './run.js';
 import type { Arm, BirdLayout } from './run.js';
@@ -419,7 +420,25 @@ export function billedLines(rows: readonly BilledRow[]): string[] {
         `${String(row.completionTokensPerCase).padStart(11)} ${String(row.unbilled).padStart(9)}`,
     );
   }
+  const total = billedTotal(rows);
+  if (total > 0) {
+    // The one number the table left to the reader. A push pays for every arm in the chain, so
+    // the sum is the bill; leaving it as an exercise is how the chain grew to 23,840 prompt
+    // tokens a question one arm at a time without any single step looking expensive.
+    out.push('', `  chain: ${String(total)} prompt tokens a question over ${String(rows.length)} arms`);
+  }
   return out;
+}
+
+/**
+ * What the arms in one report cost a question, summed.
+ *
+ * `promptTokensPerCase` is already an average over the cases the arm scored, so the sum is the
+ * per-question bill of running this chain once — which is what a push buys. It is deliberately
+ * a sum over arms and not over calls: two arms with different prompts are two runs.
+ */
+export function billedTotal(rows: readonly BilledRow[]): number {
+  return rows.reduce((total, row) => total + row.promptTokensPerCase, 0);
 }
 
 /**
@@ -564,7 +583,7 @@ export function resolveCardSettings(
   const path = argv.find((item, index) => !item.startsWith('--') && !consumed.includes(index));
   if (path === undefined) throw new Error('usage: card.ts <report.json> [--arm <name>] [--strict]');
   const layout = resolveLayout(env, root);
-  return { report: path, layout, arm: named ?? 'select-cross', out: dirname(layout.out), strict: argv.includes('--strict') };
+  return { report: path, layout, arm: named ?? SHIPPED_ARM, out: dirname(layout.out), strict: argv.includes('--strict') };
 }
 
 export interface CardDrops {
@@ -656,7 +675,9 @@ export async function runCard(settings: CardSettings): Promise<CardOutcome> {
   const definitions = report.controls?.synthesizedDefinitions ?? {};
   const rows: CardRow[] = [];
   const drops = { unknownQuestion: 0, unknownArm: 0, definitionGap: 0, unrenderable: 0 };
-  const cases = (report.cases ?? []).filter((row) => row.arm === settings.arm);
+  // Before the filter: an arm that is not in the artifact produces an empty table, and an empty
+  // table prints as zeros in the same columns a measured zero would.
+  const cases = requireArm(report.cases, settings.arm, settings.report).filter((row) => row.arm === settings.arm);
   // One database's descriptions, read once. The card report used to render every arm without
   // them, which made the cheapest arm on the frontier — a single call carrying 798 curated
   // notes — the one arm whose prompt this instrument could not price.

@@ -459,9 +459,9 @@ describe('the four ways the reading can be wrong', () => {
 });
 
 describe('where the measurement reads and writes', () => {
-  it('defaults to the arm every other tool reports on', () => {
+  it('defaults to the arm the chain runs and the pipeline ships', () => {
     const settings = resolveJoinSettings({ BIRD_DATA: '/data' }, ['report.json'], ROOT);
-    expect(settings.arm).toBe('select-cross');
+    expect(settings.arm).toBe('metadata+evidence');
     expect(settings.strict).toBe(false);
     expect(settings.report).toBe('report.json');
   });
@@ -488,7 +488,15 @@ describe('where the measurement reads and writes', () => {
 describe('a measurement over a real split', () => {
   const dataset = (): string => writeMiniBirdDataset(mkdtempSync(join(tmpdir(), 'join-data-')));
 
-  function settingsFor(data: string, ids: readonly number[] = [1], arm = 'select', overrides: Record<string, unknown> = {}) {
+  // `read` is the arm the tool is asked for, which is not always the arm the rows carry: the
+  // mismatch is the state the presence check exists for, and it needs to be constructible.
+  function settingsFor(
+    data: string,
+    ids: readonly number[] = [1],
+    arm = 'select',
+    overrides: Record<string, unknown> = {},
+    read = arm,
+  ) {
     const dir = mkdtempSync(join(tmpdir(), 'join-report-'));
     const path = join(dir, 'bird-eval.json');
     writeFileSync(
@@ -503,11 +511,18 @@ describe('a measurement over a real split', () => {
     return {
       report: path,
       layout: { split: 'minidev', questionsFile: join(data, 'mini_dev_sqlite.json'), tablesFile: join(data, 'dev_tables.json'), descriptionsRoot: join(data, 'dev_databases'), out: join(dir, 'out.json') },
-      arm,
+      arm: read,
       out: dir,
       strict: true,
     } as never;
   }
+
+  it('refuses an arm the artifact does not hold', async () => {
+    // Without this the run below would print a table of zeros and pass: the filter returns
+    // nothing, and nothing is not a measurement of zero.
+    const settings = settingsFor(dataset(), [1], 'select', {}, 'select-cross');
+    await expect(runJoin(settings)).rejects.toThrow(/has no arm select-cross; it holds select/);
+  });
 
   it('finds the gold table one join from the one the question names', async () => {
     // "How many orders are there for the pen?" names the stored value and no column, so the
@@ -601,7 +616,8 @@ describe('a measurement over a real split', () => {
       JSON.stringify({ split: 'minidev', cases: [{ arm: 'select', id: '1', passed: false, reason: 'values' }], controls: { synthesizedDefinitions: { shop: '' } } }),
     );
     expect(await main([path, '--arm', 'select'], ROOT, env)).toBe(0);
-    writeFileSync(path, JSON.stringify({ split: 'minidev', cases: [], controls: {} }));
+    // A measurement that ran and failed is a finding: zero without `--strict`, one with it.
+    writeFileSync(path, JSON.stringify({ split: 'minidev', cases: [{ arm: 'select', id: '1', passed: false, reason: 'values' }], controls: {} }));
     expect(await main([path, '--arm', 'select'], ROOT, env)).toBe(0);
     expect(await main([path, '--arm', 'select', '--strict'], ROOT, env)).toBe(1);
   });

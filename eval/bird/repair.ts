@@ -49,6 +49,7 @@ import { literalSites, tableRefs } from './statement.js';
 import { loadQuestions } from './data.js';
 import type { BirdQuestion } from './data.js';
 import { createOracle } from './oracle.js';
+import { requireArm } from './presence.js';
 import { resolveLayout } from './run.js';
 import type { BirdLayout } from './run.js';
 import type { CaseRecord, GapReportShape, ReportedFailure } from './gap.js';
@@ -199,6 +200,7 @@ export function repairProblems(outcome: {
 
 export async function runRepair(settings: RepairSettings): Promise<RepairOutcome> {
   const report = JSON.parse(readFileSync(settings.reportPath, 'utf8')) as GapReportShape;
+  requireArm(casesOf(report), settings.arm, settings.reportPath);
   const questions = loadQuestions(settings.layout.questionsFile);
   const byId = new Map(questions.map((question) => [String(question.question_id), question]));
   const statements = new Map((report.failures?.[settings.arm] ?? []).map((entry: ReportedFailure) => [String(entry.id), entry]));

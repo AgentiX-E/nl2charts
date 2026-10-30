@@ -4,10 +4,10 @@
   "tolerancePp": 0.2,
   "measuredAt": "2026-10-30",
   "totals": {
-    "lines": 99.29,
-    "statements": 99.29,
+    "lines": 99.3,
+    "statements": 99.3,
     "functions": 100,
-    "branches": 97.59
+    "branches": 97.64
   },
   "files": {
     "eval/ablate.ts": {
@@ -41,10 +41,10 @@
       "branches": 100
     },
     "eval/bird/card.ts": {
-      "lines": 99.45,
-      "statements": 99.45,
+      "lines": 99.55,
+      "statements": 99.55,
       "functions": 100,
-      "branches": 98.63
+      "branches": 99.02
     },
     "eval/bird/data.ts": {
       "lines": 100,
@@ -77,10 +77,10 @@
       "branches": 98.68
     },
     "eval/bird/information.ts": {
-      "lines": 99.07,
-      "statements": 99.07,
+      "lines": 99.11,
+      "statements": 99.11,
       "functions": 100,
-      "branches": 98.01
+      "branches": 98.05
     },
     "eval/bird/join-graph.ts": {
       "lines": 100,
@@ -89,10 +89,10 @@
       "branches": 100
     },
     "eval/bird/join.ts": {
-      "lines": 99.3,
-      "statements": 99.3,
+      "lines": 99.34,
+      "statements": 99.34,
       "functions": 100,
-      "branches": 95.37
+      "branches": 96.46
     },
     "eval/bird/literal-repair.ts": {
       "lines": 100,
@@ -124,6 +124,12 @@
       "functions": 100,
       "branches": 98.57
     },
+    "eval/bird/presence.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 100
+    },
     "eval/bird/profile.ts": {
       "lines": 100,
       "statements": 100,
@@ -149,10 +155,10 @@
       "branches": 98.98
     },
     "eval/bird/repair.ts": {
-      "lines": 99.11,
-      "statements": 99.11,
+      "lines": 99.12,
+      "statements": 99.12,
       "functions": 100,
-      "branches": 96.66
+      "branches": 96.73
     },
     "eval/bird/retrieval.ts": {
       "lines": 100,
@@ -161,8 +167,8 @@
       "branches": 100
     },
     "eval/bird/run.ts": {
-      "lines": 99.28,
-      "statements": 99.28,
+      "lines": 99.3,
+      "statements": 99.3,
       "functions": 100,
       "branches": 95.28
     },
@@ -209,8 +215,8 @@
       "branches": 100
     },
     "eval/bird/values-gap.ts": {
-      "lines": 98.99,
-      "statements": 98.99,
+      "lines": 99,
+      "statements": 99,
       "functions": 100,
       "branches": 98.86
     },

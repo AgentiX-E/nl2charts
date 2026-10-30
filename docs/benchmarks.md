@@ -3234,39 +3234,63 @@ much. The arithmetic of where the next point comes from is in *The ceiling, not 
 this section's contribution is narrower: it prices the four-call chain at +37% for +0.39pp on the
 split that matters.
 
-### Where 61.88% sits
+### What a comparison has to hold, and none of these do
 
-The dev split is the one published systems report, so the gap can be named rather than described.
-These are the published numbers as of the BIRD leaderboard and the papers that feed it; the model
-column is the one that matters, because most of the gap is the model and not the method.
+The dev split is the one published systems report, so a gap can be named — but naming a gap is not
+measuring one. Two numbers are comparable only if they share five coordinates: the split and its
+exact question set, the model, the harness that renders the prompt, the executor that runs the
+statement, and the judge that compares result sets. The published numbers below share at most one
+of them with ours.
 
-| system | BIRD dev EX | model | trained |
-| --- | --- | --- | --- |
-| SQLConductor | **73.2%** | Qwen3-8B policy + Gemma4-31B actions | yes (SFT + GRPO) |
-| CHASE-SQL | 73.0–73.01% | Gemini-1.5-Pro | selection agent fine-tuned |
-| DeepEye-SQL | 70.6% | Qwen2.5-Coder-32B | yes |
-| Alpha-SQL | 69.7% | Qwen2.5-Coder-32B | yes |
-| OpenSearch-SQL | 69.3% | GPT-4o | multi-agent, no fine-tune |
-| RSL-SQL | 65.51% | DeepSeek-v2 | no |
-| MSL-SQL | 64.00% | DeepSeek-V2.5 | partial |
-| **this harness, `select`** | **61.88%** | deepseek-chat | no |
-| **this harness, `metadata+evidence`** | 61.49% | deepseek-chat | no |
+| system | BIRD dev EX | model | trained | what it shares with us |
+| --- | --- | --- | --- | --- |
+| SQLConductor | **73.2%** | Qwen3-8B policy + Gemma4-31B actions | yes (SFT + GRPO) | the split |
+| CHASE-SQL | 73.0–73.01% | Gemini-1.5-Pro | selection agent fine-tuned | the split |
+| DeepEye-SQL | 70.6% | Qwen2.5-Coder-32B | yes | the split |
+| Alpha-SQL | 69.7% | Qwen2.5-Coder-32B | yes | the split |
+| OpenSearch-SQL | 69.3% | GPT-4o | multi-agent, no fine-tune | the split |
+| RSL-SQL | 65.51% | DeepSeek-v2 | no | the split, and a sibling model |
+| MSL-SQL | 64.00% | DeepSeek-V2.5 | partial | the split, and a sibling model |
+| **this harness, `select`** | **61.88%** | deepseek-chat | no | — |
+| **this harness, `metadata+evidence`** | 61.49% | deepseek-chat | no | — |
 
-Two gaps, and they should not be reported as one:
+Read the last column first. It is empty for every row but ours, and that is the finding. Three
+differences used to be reported from this table — 11.3pp, 2.1–3.6pp, 5.5pp — and not one of them is
+a claim about the pipeline. The honest version of each is narrower:
 
-- **Against SOTA: 11.3pp** (61.88 → 73.2). Every system above 69% runs a stronger backbone than
-  `deepseek-chat`, and four of the five are trained. This gap is mostly a model gap and partly a
-  candidate-generation gap; the selector is not where it lives, because a perfect selector over this split's
-  three-candidate set would score 65.8% — the ceiling itself.
-- **Against the same model class: 2.1–3.6pp** (61.88 against RSL-SQL's 65.51 and MSL-SQL's 64.00,
-  both DeepSeek-family, neither trained end-to-end). That is the gap this harness can close by
-  method, and it is the one worth spending iterations on.
+- **11.3pp to the leaderboard's top** (61.88 → 73.2) is a difference in model and training, not in
+  method. The top five rows run backbones this harness cannot call, and four of them were trained on
+  the task. A pipeline that is 11pp behind a trained Qwen3-8B policy has learned nothing about its
+  own prompts.
+- **2.1–3.6pp to the DeepSeek-family systems** (RSL-SQL 65.51, MSL-SQL 64.00) is the closest thing
+  here to a method comparison and still is not one: `deepseek-chat` today is not the `DeepSeek-v2`
+  RSL-SQL was built on, their candidate sets come from their own prompts, and both numbers were
+  produced by harnesses that execute and judge differently from this one. The gap is a lead, not a
+  measurement.
+- **5.5pp to a strong model's zero-shot baseline** measures the opposite of method: how much
+  accuracy a bigger model buys, which is precisely the axis this project does not optimize for.
 
-The leaderboard also carries strong-model baselines — a Claude 4.5 Sonnet baseline at 67.34% on the
-new dev split, for one — which is the honest comparison for a harness that adds structure rather
-than training: a 61.88% harness over `deepseek-chat` is 5.5pp under a strong model's *zero-shot*
-baseline, and the 61.49% single-call arm is 5.9pp under it, at one call and 1,778 tokens per
-question.
+What this document does own is every *paired* comparison inside a single run: same questions, same
+model, same executor, same judge, one lever apart. Those deltas are the only ones quoted as findings
+anywhere above, and they are the reason the arms exist.
+
+A comparison that would count has to be run where the numbers are produced — a pinned competitor
+commit, checked out on this repository's runner, driving the same endpoint and model on the same
+question file, with its predictions scored by this harness's executor and judge — and each
+coordinate is a way for a model difference to wear the clothes of a method difference:
+
+| coordinate | how it is held | what breaks when it is not |
+| --- | --- | --- |
+| question set | the split's own file, and the count is checked against the baseline | a sample that is easier for one pipeline |
+| model | one `LLM_MODEL` and one endpoint, set by the workflow | a stronger backbone read as a better method |
+| prompt | the competitor's own templates, unmodified | two levers changed and one attributed |
+| executor | this repository's oracle, one process per run | dialect differences read as errors |
+| judge | `judgeOfficial` over executed result sets | two judges, two scores, one table |
+
+None of those runs exist yet. Until they do, the correct statement about the leaderboard is the one
+this section now makes: **this harness is 11.3pp behind the published state of the art, and how much
+of that gap is the pipeline is unknown.**
+
 
 ### Where the pruned card's 1.5 points go
 
@@ -3340,7 +3364,7 @@ Read down the last two rows: four calls cost 37% more than one and return 0.39pp
 chooses between the candidates is the one with the most measurable price and the least measurable
 return. That is not an argument for deleting the selector — a stronger generator moves the ceiling
 and could make it pay — but it is an argument for not paying for it by default, which is what the
-next iteration's default-chain budget review is for.
+chain's bill, below, was the review for.
 
 ### Why this reading is the one to quote
 
@@ -3351,6 +3375,70 @@ is what a 498-question split produces for a 0.4pp effect, because the sign is mo
 size. That is the second time this round has met the same mistake in a different costume — the
 first was pooling repeated runs as if they were new questions (*152*) — and both are the same rule:
 **a bigger number of observations is not a bigger observation.**
+
+## The chain's bill
+
+`pnpm bench:bird` runs the default chain, and until this round nobody had added it up. The artifact
+of `41116622974` did the addition — every arm metered, every call attributed to a purpose — and the
+number is **24,537 prompt tokens per question**, or 12.2M for one push over 498 questions:
+
+| arm | calls | prompt tokens | accuracy (498) | Δ vs `select` | MDE of that pair | inside |
+| --- | --- | --- | --- | --- | --- | --- |
+| `names` | 1.00 | 536 | 36.35% | — | — | — |
+| `synth-definitions` | 1.00 | 770 | 41.16% | — | — | — |
+| `inline-definitions` | 1.00 | 663 | 40.96% | — | — | — |
+| `inline+retrieval` | 1.00 | 801 | 40.96% | — | — | — |
+| `inline+icl` | 1.00 | 1,213 | 41.77% | — | — | — |
+| `inline+repair-raw` | 1.02 | 713 | 56.43% | — | — | — |
+| `inline+repair` | 1.02 | 722 | 56.63% | — | — | — |
+| `values` | 1.00 | 704 | 56.63% | — | — | — |
+| `inline+evidence` | 1.00 | 697 | 56.22% | — | — | — |
+| `metadata+evidence` | 1.00 | 1,716 | **59.44%** | — | — | — |
+| `select` | 3.99 | 2,540 | 57.23% | — | — | — |
+| `vote` | 3.00 | 2,092 | 56.83% | −0.40pp | 3.47pp | yes |
+| `select-prune` | 3.99 | 2,271 | 55.82% | −1.41pp | 3.51pp | yes |
+| `select-duo` | 2.98 | 1,753 | 56.02% | −1.20pp | 2.87pp | yes |
+| `select-mixed` | 3.99 | 2,546 | 57.83% | +0.60pp | 3.13pp | yes |
+| `select5` | 5.99 | 4,103 | 57.63% | +0.40pp | 3.08pp | yes |
+
+The last column is the whole argument. **Every multi-call variant's gap to `select` is inside the
+MDE of the pair that produced it**, between 0.40 and 1.41pp against 2.87 to 3.51pp. That is not a
+claim that the arms are equivalent — *What the selector costs* is careful about the difference, and
+it matters here too: it is a claim about what another push buys. An arm whose effect the split
+cannot resolve produces the same unresolved reading next time, at the same price, and the price is
+not small: those five arms are 12,765 of the 23,840 tokens a question the chain spends.
+
+So they moved to on-demand, each with the verdict that retired it, and the chain is eleven arms:
+
+| | before | after | change |
+| --- | --- | --- | --- |
+| arms in the chain | 16 | 11 | −5 |
+| nominal calls a question | 34 | 14 | −59% |
+| prompt tokens a question (chain) | 23,840 | 11,075 | −53.5% |
+| prompt tokens a question (with the A/A control) | 24,537 | 11,772 | −52.0% |
+| tokens for one push over 498 questions | 12.2M | 5.9M | −6.4M |
+
+Two things stay, and both for reasons that are not a delta.
+
+`metadata+evidence` is the prompt that ships: nine arms price the rungs that built it, and dropping
+the rung is what turns a prompt regression into an unexplained 3pp.
+
+`select` stays at 2,540 tokens a question, 23% of the new chain, and the argument is execution rather
+than accuracy: it is the only arm that runs the selector path end to end. `inline+retrieval` is the
+precedent for what happens without one — it was written, wired into the prompt, paired for ablation,
+and never executed, because the chain is a second list that nothing compared against the catalogue.
+A path that no push executes is a path that breaks silently, and the four calls are the insurance
+premium, stated as such.
+
+What keeps this from un-happening is a budget rather than a resolution: `test/bird-arms.test.ts`
+asserts the chain's nominal calls are at most fifteen against fourteen today, so one more
+single-call rung fits and a four-call variant does not. The next arm that wants four calls has to
+remove two, and write down why.
+
+The retired arms did not lose their floors so much as outlive them: a floor on an arm the chain does
+not run is a floor nothing will notice, and the gate says so out loud. Their measurements are the
+table above, and a dispatch of `BIRD_ARMS=select5` re-measures against a fresh reading rather than
+against a number from a chain that no longer runs it.
 
 ## The floor is enforced, not remembered
 
