@@ -3125,8 +3125,12 @@ Mini-Dev lists two of its questions twice (137 and 138, in a file of 500 rows fo
 one arm's two draws of a question could be compared against the other arm's last one. The size of
 that error is measured rather than assumed — on the artifact that carries it, 2 of 11 pairs move and
 neither verdict changes (`23:21`, p = 0.8804, becomes `23:22`, p = 1.0000; `38:23`, 0.0722, becomes
-`37:23`, 0.0925). The next run of each pair republishes its own counts; the numbers above are what
-those artifacts said.
+`37:23`, 0.0925) — and those two are exactly the pairs whose counts did not reconcile with their own
+delta, since `onlyFirst − onlySecond` has to equal the first arm's passes minus the second's. That
+identity is now an assertion, so a pairing that drops or duplicates a pair fails instead of
+publishing a table: the first run after the fix (`41107220836`) reports `select` 285 against
+`select-prune` 278 as 23:16, and 23 − 16 = 7 = 285 − 278. The next run of each pair republishes its
+own counts; the numbers above are what those artifacts said.
 
 Two measurements would resolve it, and only one of them needs a run. The dev split is 1,532
 scorable questions, so the same pair carries an MDE near 2.3pp instead of 4.0pp — and a 2.4pp gap

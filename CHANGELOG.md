@@ -378,9 +378,15 @@ cannot be argued with.
   the 11 published pairs move**, both toward "no difference" — `select` → `select-prune` 23:21
   (p = 0.8804) becomes 23:22 (p = 1.0000), and `metadata+evidence` → `select-prune` 38:23 (p = 0.0722)
   becomes 37:23 (p = 0.0925). The other nine are unchanged, including every pair this document draws
-  a conclusion from, and no verdict flips: nothing crosses 0.01 or 0.05 in either direction. The
-  p-values quoted for runs whose artifacts are not in the repository were computed before this fix
-  and are republished by the next run of each pair; the size of the correction is bounded above.
+  a conclusion from, and no verdict flips: nothing crosses 0.01 or 0.05 in either direction. Those
+  two pairs are also the only two whose counts did not reconcile with their own delta: a cell count
+  of 23:21 implies the first arm passed 2 more cases, and its delta said 1. That identity is now
+  asserted — **`onlyFirst - onlySecond` must equal the first arm's passes minus the second's** —
+  so a pairing that drops or duplicates a pair fails instead of publishing a plausible table. The
+  first run after the fix (`41107220836`) reports `select` 285 against `select-prune` 278 as 23:16,
+  and 23 − 16 = 7 = 285 − 278. The p-values quoted for runs whose artifacts are not in the
+  repository were computed before this fix and are republished by the next run of each pair; the size
+  of the correction is bounded above.
 
 - **A CTE is not a table, and the card instrument counted it as one.** `goldTables` lowered every
   `from` and `join` reference, so `with a as (...), b as (...) select * from a join b` contributed

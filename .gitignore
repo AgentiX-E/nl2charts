@@ -10,3 +10,4 @@ coverage/
 eval/out/
 eval/.cache/
 coverage-eval/
+.scratch/

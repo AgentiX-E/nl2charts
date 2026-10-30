@@ -193,11 +193,26 @@ describe('arm summaries', () => {
   it('refuses arms that did not answer the same questions', () => {
     const twice = summarise('t', [{ id: '7', passed: true }, { id: '7', passed: true }]);
     const once = summarise('u', [{ id: '7', passed: true }]);
+    // The first arm runs out of answers to consume…
     expect(() => compareArms(twice, once)).toThrow(/missing case/);
+    // …and when it is the second arm that has the extra row, the identity catches it, because its
+    // `passed` total counts a row no pair ever used.
+    expect(() => compareArms(once, twice)).toThrow(/add up/);
     // Equal counts and different questions: the queue runs dry inside the loop, so a shorter arm
     // cannot pass for a mismatched one just because the totals match.
     const elsewhere = summarise('o', [{ id: '8', passed: true }, { id: '8', passed: true }]);
     expect(() => compareArms(twice, elsewhere)).toThrow(/missing case 7/);
+  });
+
+  it('refuses a pair whose cells do not add up to the arm totals', () => {
+    // This is the check that would have caught the duplicate-id defect: a pairing that loses or
+    // double-counts a pair breaks `onlyFirst - onlySecond == passes(first) - passes(second)` while
+    // `delta` stays right, which is why the broken table looked plausible. `summarise` cannot build
+    // such an arm, but a hand-assembled or stale `ArmResult` can, so the identity is asserted here
+    // rather than assumed.
+    const counted = summarise('a', [{ id: '1', passed: true }, { id: '2', passed: false }]);
+    const lying = { arm: 'b', total: 2, passed: 2, accuracy: 1, outcomes: counted.outcomes };
+    expect(() => compareArms(counted, lying)).toThrow(/do not add up/);
   });
 });
 
