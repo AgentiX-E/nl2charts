@@ -8,6 +8,20 @@ cannot be argued with.
 
 ### Measured
 
+- **The pruned-card gap reproduced three times, and the p-value a repeat buys.** A third run
+  (`ff9295e7`) scored `metadata+evidence` 295/498 against `select` 286 and `select-prune` 274. The
+  paired gaps against the pruned card are now −3.41pp (0.033), −4.62pp (**0.0032**) and −4.22pp
+  (**0.0075**) — two runs under 0.01 with intervals that exclude zero. Three reservations keep that
+  from being an adoption: pooling the three runs into one McNemar test is pseudoreplication and
+  returns 115:55 (p < 0.0001) for a set of 1,488 pairs that holds each question three times, while
+  the sign test over the 496 sampled questions gives 52:29 (p = 0.014); nine comparisons are
+  published, and a Bonferroni floor of 0.0056 leaves one run and not the other; and the gap against
+  `select` shrank across the three runs (−3.41 → −2.41 → −1.81pp) while the pruned-card gap held.
+
+  The same three runs price the A/A floor by call count: the self-pair is −0.60pp, −0.40pp and
+  0.00pp, and the across-run range of an arm grows with its call count — 0.60pp at one call,
+  0.80–1.81pp at three to four, 2.81pp at six. Comparisons belong inside a call-count tier.
+
 - **The card instrument was pricing a prompt nobody sends.** `bench:bird:card` renders every arm's
   prompt from `buildSchema`, and it built that schema with `withNotes: false` — so the 798 curated
   notes that are most of `metadata+evidence` were priced at zero — and then attached the generated
