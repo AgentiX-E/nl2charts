@@ -819,11 +819,11 @@ one case in two work items and neither in the queue first.
 
 Two runs, on two splits and two arms:
 
-| cause | dev `select-cross` (`40908325901`) | Mini-Dev `select` (`40878610004`) |
+| cause | dev `select-cross` (`40908325901`) | Mini-Dev `select`, re-read |
 |---|---|---|
 | `filter-wide` | 88 (22.2%) | 24 (18.5%) |
-| `predicate` | 76 (19.2%) | 28 (21.5%) |
-| `literal-missing` | 70 (17.7%) | 24 (18.5%) |
+| `predicate` | 76 (19.2%) | 29 (22.3%) |
+| `literal-missing` | 70 (17.7%) | 23 (17.7%) |
 | `tables` | 61 (15.4%) | 22 (16.9%) |
 | `filter-narrow` | 53 (13.4%) | 22 (16.9%) |
 | `no-statement` | 17 (4.3%) | 3 (2.3%) |
@@ -860,6 +860,26 @@ each with the sentence pair that produces it in the test suite.
 `--strict` turns the coverage bar into a failure. The quality gate runs it; the dev workflow does
 not, because a split that covers 72% of a new corpus is a finding about the taxonomy and not a
 regression in the product.
+
+### The reader behind the table read a value with a quote as two values
+
+The Mini-Dev column above is one case moved from an earlier reading, and the reason is a defect
+in the reader rather than in the corpus. `literals()` found values with `/'([^']*)'/g`, which turns
+`'Ancestor''s Chosen'` into `'Ancestor'` and `'s Chosen'` — two values, neither of which exists.
+Any prediction that wrote the value correctly was then reported as missing both, so the taxonomy
+named `literal-missing` on a case whose literal was present. 19 dev questions and 8 Mini-Dev
+questions carry a value with an apostrophe, so the shape was not hypothetical.
+
+The reader now uses the same scanner the repair stage edits with. Re-measured, Mini-Dev 1068
+leaves `literal-missing` for `predicate`: its gold writes `strftime('%Y', date) >= '2010'` and its
+prediction writes `cast(strftime('%Y', date) as integer) >= 2010`, so the value is named and the
+difference is an affinity question rather than a value nobody retrieved. One case of 130, and the
+one the old reader had misattributed.
+
+The same pass stopped reading the digits of a value as a second literal — `where year = '2020'`
+names one value, not a value and the number 2020 — and taught `missingLiterals` to compare
+`'18'` with `18` as one value. Both change what the report *names*; between them they moved one
+case of 130, which is the honest size of the defect.
 
 ## Two cases, and a gold query that is wrong
 
@@ -916,6 +936,61 @@ One probe was considered and is not there. `select distinct` would be the obviou
 whether `filter-wide` is a fan-out multiplying rows, and it cannot be: BIRD's judge compares
 result *sets*, so duplicates are already collapsed and `distinct` is a provable no-op on the
 metric. The 88 `filter-wide` cases are different rows, not repeated ones.
+
+## The coverage axis that has variance: what the prompt would have had to say
+
+`pnpm bench:bird:recall` answers the question the prompt-coverage entry started from, and it
+answers it completely: 500 of 500 Mini-Dev questions and 3,820 of 3,820 gold identifiers are
+visible in the prompt the arms send. An ablation on that axis would compare a hundred per cent
+with a hundred per cent, because the card advertises every table and column the split asks about,
+in both splits and in every arm that carries the card.
+
+The axis one level down is not saturated. Whether a *value* a gold filter compares against is
+spelled anywhere in the prompt is a different question, and it has a distribution behind it:
+
+| class | what it means | Mini-Dev `select`, 184 no-answer cases |
+|---|---|---|
+| `spelled` | every value the gold compares against is in the prompt, as the gold spells it | 111 (60.3%) |
+| `casing` | the value is there, in another case | 8 (4.3%) |
+| `notation` | the value is there, in another notation | 6 (3.3%) |
+| `absent` | the value is not in the prompt in any form | 4 (2.2%) |
+| `none` | the gold compares against no string value at all | 55 (29.9%) |
+
+**Three fifths of the failures had every value in front of the model.** 111 of 184 no-answer
+cases compared against values the prompt spelled exactly; the prompt was not the reason they
+failed, and no prompt-side lever can add information that is already there. The addressable set —
+`casing` plus `notation` plus `absent` — is **18 cases, 9.8%**, and that is the ceiling for showing
+stored values, before any question of whether a model then uses them.
+
+That ceiling explains a number from two iterations ago that had no explanation at the time. The
+`inline+evidence+samples` arm measured +1.31pp at p = 0.052 and was set aside as unresolved; on
+500 questions 1.31pp is 6.5 cases, and this instrument says at most 18 were reachable. The lever
+had headroom for about a third of its ceiling and delivered that third. It was not a lever without
+headroom, which is how a null at p = 0.052 is usually read.
+
+Two qualifications, because the classes are narrower than "the model knew":
+
+- **Class is about spelling, not about knowing where the value goes.** A value can be in the
+  prompt — in the evidence, in a definition, in a column description — and still be attached to
+  the wrong column by the model. `spelled` says the prompt was not the constraint; it does not say
+  the case was answerable.
+- **Three kinds of literal are out of scope**, each for its own reason: the right-hand side of
+  `like`/`glob`/`match` is a pattern the statement derives from the question, anything containing
+  `%` is a strftime mask, and numbers are excluded because an age written as `18` may be computed
+  from "underage" rather than retrieved. What remains is the stored-value question, which is the
+  one a sample answers.
+
+The instrument renders the prompt rather than approximating it: the split's questions, the bare
+card `buildSchema` produces with `withNotes: false`, the definitions the artifact recorded under
+`controls.synthesizedDefinitions`, and the runner's own `promptFor`. The two ways it could end up
+measuring a prompt nobody sent are failures and not caveats — an artifact that dropped a
+database's definitions, or an arm whose prompt needs a block the artifact does not keep — and
+both are absolute zeros, which is what makes `--strict` a gate rather than a threshold. Zero
+model calls, zero queries, no oracle.
+
+The taxonomy above is unchanged by this instrument, and the one case that *did* move is the reader
+defect described in the section before this one: Mini-Dev 1068 was filed under `literal-missing`
+by a reader that compared spellings, and is a `predicate` difference in fact.
 
 ## The dev split, measured: 60.6% on the split leaderboards report
 

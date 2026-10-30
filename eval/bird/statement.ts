@@ -167,44 +167,102 @@ export function stringLiterals(sql: string): StringLiteral[] {
   return out;
 }
 
+/** What a region is, so a caller can decide whether to read through it. */
+type RegionKind = 'literal' | 'comment' | 'quoting';
+
 interface Region {
   readonly start: number;
   readonly end: number;
+  readonly kind: RegionKind;
+}
+
+/**
+ * The region that starts at `at`, or nothing when code starts here.
+ *
+ * One reader for both walks. The two callers disagree on exactly one point — a table name may
+ * be quoted and has to be read as a name, while a quoted `"2020"` is a column name and must
+ * not be read as the number 2020 — so the walk is shared and the *filter* differs, which is
+ * the difference the `kind` field exists to express.
+ *
+ * Quoting is a region even for the callers that read through it, and that is the whole point:
+ * `"O'Brien"` is a column name, and a walk that did not skip it would open a literal at the
+ * apostrophe and read the rest of the statement as a value.
+ *
+ * An unterminated literal is not a region: `readLiteral` refuses it, the statement is broken,
+ * and a caller that guessed where the quote closes would be guessing about text it never saw.
+ */
+function regionAt(sql: string, at: number): { end: number; kind: RegionKind } | undefined {
+  const char = sql[at] as string;
+  const next = sql[at + 1];
+  if (char === '-' && next === '-') {
+    const end = sql.indexOf('\n', at);
+    return { end: end === -1 ? sql.length : end, kind: 'comment' };
+  }
+  if (char === '/' && next === '*') {
+    const end = sql.indexOf('*/', at + 2);
+    return { end: end === -1 ? sql.length : end + 2, kind: 'comment' };
+  }
+  if (char === '"' || char === '`') {
+    const end = sql.indexOf(char, at + 1);
+    return { end: end === -1 ? sql.length : end + 1, kind: 'quoting' };
+  }
+  if (char === '[') {
+    const end = sql.indexOf(']', at + 1);
+    return { end: end === -1 ? sql.length : end + 1, kind: 'quoting' };
+  }
+  if (char === "'") {
+    const literal = readLiteral(sql, at);
+    return literal === undefined ? undefined : { end: literal.end, kind: 'literal' };
+  }
+  return undefined;
 }
 
 /**
  * The regions a keyword must not be looked for in: literals and both comment forms.
  *
- * Quoted identifiers are not listed because a table name may legitimately be quoted, and
- * `readIdentifier` handles them where they are read.
+ * Quoted identifiers are walked over but not reported, because a table name may legitimately
+ * be quoted and `readIdentifier` handles them where they are read.
  */
 function ignoredRegions(sql: string): Region[] {
-  const regions: Region[] = stringLiterals(sql).map((literal) => ({ start: literal.start, end: literal.end }));
+  const regions: Region[] = [];
   let index = 0;
   while (index < sql.length) {
-    const char = sql[index] as string;
-    const next = sql[index + 1];
-    if (char === '-' && next === '-') {
-      const end = sql.indexOf('\n', index);
-      const stop = end === -1 ? sql.length : end;
-      regions.push({ start: index, end: stop });
-      index = stop;
+    const region = regionAt(sql, index);
+    if (region === undefined) {
+      index += 1;
       continue;
     }
-    if (char === '/' && next === '*') {
-      const end = sql.indexOf('*/', index + 2);
-      const stop = end === -1 ? sql.length : end + 2;
-      regions.push({ start: index, end: stop });
-      index = stop;
-      continue;
-    }
-    index += 1;
+    if (region.kind !== 'quoting') regions.push({ start: index, end: region.end, kind: region.kind });
+    index = region.end;
   }
   return regions;
 }
 
 function enclosedBy(regions: readonly Region[], at: number): boolean {
   return regions.some((region) => at >= region.start && at < region.end);
+}
+
+/**
+ * The statement with every quoted region blanked out, at the same length.
+ *
+ * Length is preserved because the caller finds a pattern and then looks the position up in the
+ * original: a mask built by deleting text moves every offset after the first literal, which is
+ * the class of bug this file exists to avoid. Blanking rather than removing also keeps word
+ * boundaries — two identifiers either side of a literal do not become one token.
+ */
+export function codeOnly(sql: string): string {
+  const blank = sql.split('');
+  let index = 0;
+  while (index < sql.length) {
+    const region = regionAt(sql, index);
+    if (region === undefined) {
+      index += 1;
+      continue;
+    }
+    for (let at = index; at < region.end; at += 1) blank[at] = ' ';
+    index = region.end;
+  }
+  return blank.join('');
 }
 
 /**

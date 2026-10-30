@@ -1,4 +1,5 @@
 import type { OracleResult } from './oracle.js';
+import { codeOnly, stringLiterals } from './statement.js';
 
 /**
  * What kind of wrong a failing statement is.
@@ -122,24 +123,46 @@ export function caseMismatchedLiterals(goldSql: string, predictedSql: string): s
   );
 }
 
+/**
+ * The literals a statement names, in source order, spelled the way it wrote them.
+ *
+ * Strings are read with the same scanner the repair stage edits with, and that is not a
+ * tidiness point. `'Ancestor''s Chosen'` is one value; the regex that used to live here read it
+ * as two, `'Ancestor'` and `'s Chosen'`, and then reported both as missing from a prediction
+ * that had written the value correctly — a taxonomy naming the wrong cause on a case it had
+ * already read. Nineteen dev questions and eight Mini-Dev questions carry a value with an
+ * apostrophe, so this was not a hypothetical shape.
+ *
+ * Numbers are read from `codeOnly`, so the digits of a value string are not a second literal:
+ * `where year = '2020'` names one value, not a value and the number 2020.
+ */
 function literals(sql: string): string[] {
   // Source order, so a report of missing literals reads in the order the gold wrote them.
-  const found: { at: number; text: string }[] = [];
-  const strings = /'([^']*)'/g;
-  for (let match = strings.exec(sql); match !== null; match = strings.exec(sql)) found.push({ at: match.index, text: `'${match[1] as string}'` });
+  const found: { at: number; text: string }[] = stringLiterals(sql).map((literal) => ({
+    at: literal.start,
+    text: `'${literal.value}'`,
+  }));
   const numbers = /(?<![\w.])(-?\d+(?:\.\d+)?)(?![\w.])/g;
-  for (let match = numbers.exec(sql); match !== null; match = numbers.exec(sql)) found.push({ at: match.index, text: match[1] as string });
+  const code = codeOnly(sql);
+  for (let match = numbers.exec(code); match !== null; match = numbers.exec(code)) found.push({ at: match.index, text: match[1] as string });
   return found.sort((left, right) => left.at - right.at).map((entry) => entry.text);
 }
 
 /**
- * Compare a literal the way the database would.
+ * Compare a literal the way the question means it, not the way the statement spells it.
  *
- * Strings are case-insensitive, numbers are compared by value: `3.0` and `3` are one literal.
+ * Strings are case-insensitive and unquoted, numbers are compared by value: `3.0` and `3` are
+ * one literal, and so are `18` and `'18'`. The last pair is the one that matters — SQLite's
+ * affinity rules make the two spellings behave differently, but those are two ways of naming
+ * the same value, and this function answers "did the prediction name it", not "did it name it
+ * correctly". A rule that compared spellings put dev-adjacent Mini-Dev 1171 in `literal-missing`
+ * because the gold writes the age as a number and the prediction writes it as a string, which
+ * is a claim about the comparison operator, not about a value nobody retrieved.
+ *
  * `literals()` only returns quoted strings and numeric patterns, so every number it hands over
  * parses — the `Number.isFinite` guard this used to carry was a branch that could not run.
  */
 function normalise(literal: string): string {
-  if (literal.startsWith("'")) return literal.toLowerCase();
+  if (literal.startsWith("'")) return literal.slice(1, -1).toLowerCase();
   return String(Number(literal));
 }

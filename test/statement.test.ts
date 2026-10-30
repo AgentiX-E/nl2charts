@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { literalSites, stringLiterals, tableRefs } from '../eval/bird/statement.js';
+import { codeOnly, literalSites, stringLiterals, tableRefs } from '../eval/bird/statement.js';
 
 /**
  * The scanner exists so that an edit lands on the token a human would point at. Every
@@ -253,4 +253,56 @@ describe('literalSites', () => {
     expect(literalSites('select * from t where s = ')).toEqual([]);
   });
 
+});
+
+/**
+ * The mask a caller reads numbers from.
+ *
+ * It exists because the reader that looked for numeric literals with a regex over the whole
+ * statement found the digits of a value string as well: `where year = '2020'` came back with
+ * two literals, one of which nobody wrote. The contract that makes the fix safe is length
+ * preservation — the caller finds a match in the mask and slices the original at that offset.
+ */
+describe('codeOnly', () => {
+  it('blanks a literal and keeps every offset', () => {
+    const sql = "select * from t where a = 'xyz' and b = 7";
+    expect(codeOnly(sql)).toBe("select * from t where a =       and b = 7");
+    expect(codeOnly(sql)).toHaveLength(sql.length);
+  });
+
+  it('blanks a doubled quote as one region', () => {
+    expect(codeOnly("where n = 'Ancestor''s Chosen'")).toBe('where n =                     ');
+  });
+
+  it('blanks an empty literal', () => {
+    expect(codeOnly("a <> ''")).toBe('a <>   ');
+  });
+
+  it('blanks a line comment', () => {
+    expect(codeOnly("select 1 -- 'x' 2020\nselect 2")).toBe('select 1            \nselect 2');
+  });
+
+  it('blanks a block comment', () => {
+    expect(codeOnly('select 1 /* 2020 */ 2')).toBe('select 1            2');
+  });
+
+  it('blanks a double-quoted identifier so its digits are not a number', () => {
+    expect(codeOnly('select "2020" from t')).toBe('select        from t');
+  });
+
+  it('blanks a backtick-quoted identifier', () => {
+    expect(codeOnly('select `a b` from t')).toBe('select       from t');
+  });
+
+  it('blanks a bracketed identifier', () => {
+    expect(codeOnly('select [a 1] from t')).toBe('select       from t');
+  });
+
+  it('does not open a literal at a quote inside a quoted identifier', () => {
+    expect(codeOnly(`select "O'Brien Rd", 5`)).toBe('select             , 5');
+  });
+
+  it('leaves an unterminated literal readable', () => {
+    expect(codeOnly("select 1 where a = 'x")).toBe("select 1 where a = 'x");
+  });
 });

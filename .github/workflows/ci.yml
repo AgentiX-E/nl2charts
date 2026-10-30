@@ -307,6 +307,14 @@ jobs:
       # instrument, and the instrument is what the next iteration is planned from.
       - name: What kind of wrong the no-answer statements are
         run: pnpm bench:bird:gap:values eval/out/bird-eval.json --arm select --strict
+      # The coverage axis the plan asked for, one level down. Identifier coverage is saturated
+      # — the recall gate above reports every gold identifier visible, in every split — so the
+      # only coverage with variance left is whether the value a gold filter compares against is
+      # spelled in the prompt at all. Zero model calls: the prompt is rendered from the
+      # artifact's own definitions and the split's own questions, so this measures the prompt
+      # that was sent rather than a reconstruction of it.
+      - name: What the prompt would have had to say
+        run: pnpm bench:bird:info eval/out/bird-eval.json --arm select --strict
       # The instrument behind the deterministic half of the repair question, and the one gate
       # that can be absolute: a statement edit offered only to statements that returned nothing
       # must touch no gold statement, because no gold answer in this split is empty. The number

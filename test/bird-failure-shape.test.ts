@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyError, classifyFailureShape, missingLiterals } from '../eval/bird/failure-shape.js';
+import { caseMismatchedLiterals, classifyError, classifyFailureShape, missingLiterals } from '../eval/bird/failure-shape.js';
 import { format, tally } from '../eval/bird/diagnose-corpus.js';
 import type { OracleResult } from '../eval/bird/oracle.js';
 
@@ -107,5 +107,45 @@ describe('the literals a prediction leaves out', () => {
 
   it('reports nothing when the prediction names every literal, which is the other half of the test', () => {
     expect(missingLiterals("SELECT 1 WHERE a = 'x' AND b = 2", "SELECT 1 WHERE b = 2 AND a = 'x'")).toEqual([]);
+  });
+});
+
+/**
+ * The value that contains the delimiter.
+ *
+ * `'Ancestor''s Chosen'` is one value, and the reader that regexed for `'([^']*)'` saw two:
+ * `'Ancestor'` and `'s Chosen'`. It then reported both as missing from a prediction that had
+ * written the value correctly, so the taxonomy named `literal-missing` on a case whose literal
+ * was present — the wrong cause, on a case it had already read. Nineteen dev questions and
+ * eight Mini-Dev questions carry a value with an apostrophe, and dev question 465 is one of
+ * the Mini-Dev cases that was misattributed this way.
+ */
+describe('a literal whose value holds a quote', () => {
+  it('reads a doubled quote as one value and finds nothing missing', () => {
+    expect(missingLiterals("WHERE name = 'Ancestor''s Chosen'", "WHERE name = 'Ancestor''s Chosen'")).toEqual([]);
+  });
+
+  it('reports the whole value, not its fragments, when the prediction writes another one', () => {
+    expect(missingLiterals("WHERE event_name = 'Women''s Soccer'", "WHERE event_name = 'Mens Soccer'")).toEqual(["'Women's Soccer'"]);
+  });
+
+  it('compares a doubled quote case-insensitively', () => {
+    expect(missingLiterals("WHERE name = 'Ancestor''s Chosen'", "WHERE name = 'ancestor''s chosen'")).toEqual([]);
+  });
+
+  it('reads a case mismatch inside a value that holds a quote', () => {
+    expect(caseMismatchedLiterals("WHERE name = 'Ancestor''s Chosen'", "WHERE name = 'ancestor''s chosen'")).toEqual([
+      "'Ancestor's Chosen'",
+    ]);
+  });
+
+  it('does not read the digits of a value string as a second literal', () => {
+    // `where year = '2020'` names one value. The old reader also returned the number 2020,
+    // so a report about the literal listed a token nobody wrote.
+    expect(missingLiterals("WHERE year = '2020' AND n = 5", "WHERE n = 5")).toEqual(["'2020'"]);
+  });
+
+  it('does not read a literal inside a comment', () => {
+    expect(missingLiterals('SELECT 1 -- WHERE a = \'x\'', 'SELECT 1')).toEqual([]);
   });
 });

@@ -114,6 +114,13 @@ jobs:
       # and arm it has been measured on.
       - name: What kind of wrong the no-answer statements are
         run: pnpm bench:bird:gap:values eval/out/bird-eval.json --arm select-cross
+      # The same instrument on the split with room for a result. No `--strict`: the two failures
+      # this gate can catch are absolute (nothing read, or a card rebuilt without the text the
+      # run placed on it) and the dev split is where a rendering bug shows up first, but the
+      # shape of the answer — how many failures needed a value the prompt never spells — is a
+      # reading, and a reading is the finding rather than a reason to red the run.
+      - name: What the prompt would have had to say
+        run: pnpm bench:bird:info eval/out/bird-eval.json --arm select-cross
       # 1534 gold statements and 515 no-answer statements through one literal edit, one oracle
       # query each and no model call. No `--strict`: this is where a repair is tried on the
       # split that has room for one, and a reading that says "it recovers two" is the finding.

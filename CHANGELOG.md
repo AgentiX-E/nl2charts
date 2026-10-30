@@ -8,6 +8,37 @@ cannot be argued with.
 
 ### Measured
 
+- **Three fifths of the no-answer cases had every value the gold needs in the prompt.** `pnpm
+  bench:bird:info <report> --arm <name> [--strict]` renders the prompt the arm actually sent — the
+  split's questions, the bare card, the definitions the artifact recorded, the runner's own
+  `promptFor` — and classifies each filter value the gold statement compares against as `spelled`,
+  `casing`, `notation` or `absent`, with `none` for a statement that compares against no string at
+  all. The plan's prompt-coverage entry started on identifiers and that axis is saturated
+  (`bench:bird:recall`: 500 of 500 questions, 3,820 of 3,820 identifiers), so this is the same
+  question one level down, where the axis has variance.
+
+  Mini-Dev `select`, **184** no-answer cases: `spelled` **111 (60.3%)**, `casing` 8 (4.3%),
+  `notation` 6 (3.3%), `absent` 4 (2.2%), `none` 55 (29.9%). The addressable set — the cases a
+  stored-value sample could reach — is **18, 9.8%**, and that is a ceiling rather than an estimate.
+  It prices a lever two iterations old: `inline+evidence+samples` measured +1.31pp at p = 0.052 and
+  was set aside as unresolved, and 18 cases is 3.6pp, so the lever had headroom for roughly a third
+  of what it could have reached. Zero model calls, zero queries, no oracle.
+
+  `--strict` gates two things, both absolute: nothing read, and a prompt this tool rebuilt without
+  the text the run placed on it (an artifact missing a database's definitions, or an arm whose
+  prompt needs a block the artifact does not keep). The quality gate runs it; the dev workflow
+  runs it without `--strict` because the class distribution is a reading.
+
+- **The vocabulary taxonomy read a value that contains a quote as two values.** The reader behind
+  `literal-missing` and `literal-case` scanned literals with `/'([^']*)'/g`, which turns
+  `'Ancestor''s Chosen'` into `'Ancestor'` and `'s Chosen'` — two values that exist nowhere — so a
+  prediction that wrote the value correctly was reported as missing both. It now uses the same
+  scanner the repair stage edits with, which unescapes `''` and skips comments and quoted
+  identifiers. `missingLiterals` also compares `'18'` with `18` as one value, because the question
+  is whether the prediction named it, not how it spelled it. Both changes move exactly one case of
+  130: Mini-Dev 1068 leaves `literal-missing` for `predicate`. 19 dev and 8 Mini-Dev gold
+  statements carry a value with an apostrophe, so the shape was not hypothetical.
+
 - **One provable repair recovers two cases, and it found a gold query that is wrong.** `pnpm
   bench:bird:repair <report> --arm <name> --strict` offers every no-answer statement one edit —
   substitute the single stored spelling a column has for a literal that differs only in case — and
