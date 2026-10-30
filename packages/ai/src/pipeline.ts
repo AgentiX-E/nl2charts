@@ -361,6 +361,10 @@ export function createPipeline(options: PipelineOptions): {  ask(request: AskReq
             { role: 'user', content: request.question },
           ],
           temperature: 0,
+          // Named for the meter: this call exists only on an arm that asked for a reading, and
+          // a cost table that folded it into generation would make it look like part of the
+          // statement's price.
+          purpose: 'interpret',
         });
         const parsed = parseInterpretation(reading.text);
         if (parsed.length > 0) interpretation = parsed;
@@ -372,6 +376,7 @@ export function createPipeline(options: PipelineOptions): {  ask(request: AskReq
         const planned = await options.provider.complete({
           messages: [{ role: 'user', content: buildPlanPrompt(request.question, request.schema) }],
           temperature: 0,
+          purpose: 'plan',
         });
         const parsed = parsePlan(planned.text);
         if (parsed.length > 0) plan = parsed;
@@ -402,7 +407,14 @@ export function createPipeline(options: PipelineOptions): {  ask(request: AskReq
         options.decompose === true ? parseDecomposed(text) : { sql: extractSql(text), steps: 0 };
       for (;;) {
         attempts += 1;
-        const response = await options.provider.complete({ messages, temperature: options.temperature ?? 0 });
+        const response = await options.provider.complete({
+          messages,
+          temperature: options.temperature ?? 0,
+          // The first turn is the statement the arm is named for; every later turn is a repair,
+          // and a repair's price is the thing a repair arm is judged on. One label would make
+          // "three attempts cost three times one attempt" an assumption instead of a column.
+          purpose: attempts === 1 ? 'generate' : 'retry',
+        });
         const read = readReply(response.text);
         const sql = read.sql;
         const steps = options.decompose === true ? { decomposedSteps: read.steps } : {};
@@ -491,6 +503,7 @@ async function retryEmpty(input: {
   const response = await input.provider.complete({
     messages: [...input.messages, ...emptyRetryMessages(input.mode, input.sql, input.previous)],
     temperature: input.temperature,
+    purpose: 'retry',
   });
   const candidate = input.read(response.text);
   if (!inspectSql(candidate).ok) return { sql: input.sql, recovered: false };

@@ -141,6 +141,7 @@
     "type TableDef"
   ],
   "ai": [
+    "CallPurpose",
     "DECOMPOSE_RULES",
     "EMPTY_BLIND_MESSAGE",
     "HttpProviderOptions",
@@ -150,6 +151,7 @@
     "LlmRequest",
     "LlmResponse",
     "LlmUsage",
+    "PurposeUsage",
     "Recaller",
     "Role",
     "SchemaCardOptions",
@@ -231,13 +233,16 @@
     "type SchemaTable"
   ],
   "ai/llm": [
+    "UNLABELLED",
     "createHttpProvider",
+    "type CallPurpose",
     "type HttpProviderOptions",
     "type LlmMessage",
     "type LlmProvider",
     "type LlmRequest",
     "type LlmResponse",
     "type LlmUsage",
+    "type PurposeUsage",
     "type Role",
     "withCallCounter"
   ],

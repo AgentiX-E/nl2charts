@@ -7,11 +7,49 @@ export interface LlmMessage {
   readonly content: string;
 }
 
+/**
+ * What a call is for.
+ *
+ * Carried on the request rather than inferred at the call site's caller, because one provider
+ * serves four different calls inside the pipeline and the same provider also serves the
+ * selector. A meter that reports only per case cannot answer the one question a multi-call arm
+ * raises — which of its calls earned its tokens — and the selector, which answers with one digit
+ * to a prompt nobody else reads, is the call whose price is easiest to hide.
+ */
+export type CallPurpose = 'generate' | 'retry' | 'select' | 'compare' | 'plan' | 'interpret' | 'synthesize';
+
+/**
+ * The bucket a call lands in when it names no purpose.
+ *
+ * Reported as its own row and never folded into a named one: filing it under `generate` would
+ * dissolve an unattributed cost into the bucket nobody questions, which is the metering version
+ * of an instrument pricing a prompt nobody sends.
+ */
+export const UNLABELLED = 'unlabelled';
+
+/** One bucket of the meter: what this kind of call cost, in the same unit as the case total. */
+export interface PurposeUsage {
+  readonly calls: number;
+  readonly promptTokens: number;
+  readonly completionTokens: number;
+  readonly chars: number;
+  readonly unbilled: number;
+}
+
 export interface LlmRequest {
   readonly messages: readonly LlmMessage[];
   readonly temperature?: number;
   readonly maxTokens?: number;
   readonly json?: boolean;
+  /**
+   * What this call is for, for the meter to file it under.
+   *
+   * Optional because a caller that is not being measured (a preflight probe, a replay) has no
+   * cost claim to attribute; the harness's own counter treats an omission as a reporting
+   * problem rather than as a default, so a new call site that forgets is visible in the artifact
+   * instead of being absorbed.
+   */
+  readonly purpose?: CallPurpose;
 }
 
 export interface LlmUsage {
@@ -233,36 +271,61 @@ export function withCallCounter(provider: LlmProvider): {
   /** Calls the harness asked for, including the ones that never answered. */
   readonly calls: () => number;
   readonly usage: () => { readonly promptTokens: number; readonly completionTokens: number; readonly chars: number; readonly unbilled: number };
+  /**
+   * The same totals, split by what each call was for.
+   *
+   * Summing these gives `usage()` exactly, because the total *is* their sum rather than a second
+   * running count: two counts written at the same point still drift apart whenever one is updated
+   * on a branch the other is not, and a share divided by a total it does not add up to is not a
+   * share.
+   */
+  readonly byPurpose: () => ReadonlyMap<CallPurpose | typeof UNLABELLED, PurposeUsage>;
+  /** Calls that named no purpose. Zero on a harness that labels every call it measures. */
+  readonly unlabelled: () => number;
 } {
-  let calls = 0;
-  let promptTokens = 0;
-  let completionTokens = 0;
-  let chars = 0;
-  let unbilled = 0;
+  type Meter = { calls: number; promptTokens: number; completionTokens: number; chars: number; unbilled: number };
+  const zero = (): Meter => ({ calls: 0, promptTokens: 0, completionTokens: 0, chars: 0, unbilled: 0 });
+  // One ledger, two views: the totals are accumulated beside the buckets at the same point rather
+  // than recounted later, and a test holds them to the property that makes the share meaningful —
+  // the buckets add up to the total. Recounting would be a second implementation of the same sum.
+  const totals = zero();
+  const purposes = new Map<CallPurpose | typeof UNLABELLED, Meter>();
   return {
     provider: {
       id: provider.id,
       model: provider.model,
       complete: async (request, options) => {
-        calls += 1;
+        const key = request.purpose ?? UNLABELLED;
+        const meter = purposes.get(key) ?? zero();
+        purposes.set(key, meter);
+        meter.calls += 1;
+        totals.calls += 1;
         // The characters of the request as it was sent. A token count can only be calibrated
         // against the text of the *same* request: pairing it with a character count taken from a
         // different prompt (say, the system message alone) produces a ratio that has no tokenizer
         // behind it and still looks like one.
-        for (const message of request.messages) chars += message.content.length;
+        for (const message of request.messages) {
+          meter.chars += message.content.length;
+          totals.chars += message.content.length;
+        }
         const response = await provider.complete(request, options);
         // Read per answer rather than per arm: an endpoint that reports usage on some answers and
         // not others is a state that exists, and summing only what arrived would hide it.
         if (response.usage === undefined) {
-          unbilled += 1;
+          meter.unbilled += 1;
+          totals.unbilled += 1;
           return response;
         }
-        promptTokens += response.usage.promptTokens;
-        completionTokens += response.usage.completionTokens;
+        meter.promptTokens += response.usage.promptTokens;
+        meter.completionTokens += response.usage.completionTokens;
+        totals.promptTokens += response.usage.promptTokens;
+        totals.completionTokens += response.usage.completionTokens;
         return response;
       },
     },
-    calls: () => calls,
-    usage: () => ({ promptTokens, completionTokens, chars, unbilled }),
+    calls: () => totals.calls,
+    usage: () => ({ promptTokens: totals.promptTokens, completionTokens: totals.completionTokens, chars: totals.chars, unbilled: totals.unbilled }),
+    byPurpose: () => new Map(purposes),
+    unlabelled: () => purposes.get(UNLABELLED)?.calls ?? 0,
   };
 }

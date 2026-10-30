@@ -347,6 +347,10 @@ export interface BilledRow {
   readonly charsPerToken: number;
   /** True when the artifact has no token column at all: nothing was metered. */
   readonly unmetered: boolean;
+  /** The case total the per-purpose split is checked against. */
+  readonly promptTokensPerCase: number;
+  /** The same cost split by what each call was for. Absent on an artifact written before it. */
+  readonly byPurpose?: Readonly<Record<string, { readonly calls?: number; readonly prompt?: number }>>;
 }
 
 /** A report as this instrument reads it, for the cost table. */
@@ -359,6 +363,7 @@ export interface BilledReportShape {
       readonly completion?: number;
       readonly chars?: number;
       readonly unbilled?: number;
+      readonly byPurpose?: Readonly<Record<string, { readonly calls?: number; readonly prompt?: number }>>;
     };
   }[];
 }
@@ -394,6 +399,8 @@ export function billedRows(report: BilledReportShape): BilledRow[] {
       unbilled: tokens?.unbilled ?? 0,
       charsPerToken: perCall > 0 ? Number((perCallChars / perCall).toFixed(2)) : 0,
       unmetered: tokens === undefined,
+      promptTokensPerCase: promptTokens,
+      ...(tokens?.byPurpose === undefined ? {} : { byPurpose: tokens.byPurpose }),
     });
   }
   return rows;
@@ -412,6 +419,69 @@ export function billedLines(rows: readonly BilledRow[]): string[] {
         `${String(row.completionTokensPerCase).padStart(11)} ${String(row.unbilled).padStart(9)}`,
     );
   }
+  return out;
+}
+
+/**
+ * What each kind of call cost, and what share of the arm's bill it is.
+ *
+ * The split exists because a four-call arm buys three different things — a statement, a
+ * selector's judgement, and extra draws — and a single number makes "the selector earns its
+ * tokens" an opinion. The share is taken over the case total the meter wrote beside it, so the
+ * two columns check each other; `billedProblems` fails a split that does not add up.
+ */
+export interface PurposeRow {
+  readonly arm: string;
+  readonly purpose: string;
+  readonly calls: number;
+  readonly promptTokensPerCase: number;
+  /** This purpose's prompt tokens over the arm's per-case total, 0..1. Zero when that is zero. */
+  readonly share: number;
+}
+
+/** Every arm's split, largest first, so the table reads like the bill it describes. */
+export function purposeRows(report: BilledReportShape): PurposeRow[] {
+  const rows: PurposeRow[] = [];
+  for (const arm of report.arms ?? []) {
+    const name = arm.arm;
+    const split = arm.tokens?.byPurpose;
+    if (name === undefined || split === undefined) continue;
+    const total = arm.tokens?.prompt ?? 0;
+    for (const [purpose, usage] of Object.entries(split)) {
+      const prompt = usage.prompt ?? 0;
+      rows.push({
+        arm: name,
+        purpose,
+        calls: usage.calls ?? 0,
+        promptTokensPerCase: prompt,
+        share: total > 0 ? Number((prompt / total).toFixed(4)) : 0,
+      });
+    }
+  }
+  // Arm, then cost, then name: two buckets that cost the same still print in one order, so a diff of
+  // two artifacts is a diff of measurements rather than of insertion order.
+  return rows.sort(
+    (left, right) =>
+      left.arm.localeCompare(right.arm) ||
+      right.promptTokensPerCase - left.promptTokensPerCase ||
+      left.purpose.localeCompare(right.purpose),
+  );
+}
+
+/** The split table, printed under the billed table because it explains one row of it. */
+export function purposeLines(rows: readonly PurposeRow[]): string[] {
+  if (rows.length === 0) return [];
+  const out = ['', 'what each kind of call cost, per case', ''];
+  out.push(`  ${'arm'.padEnd(22)} ${'call'.padStart(12)} ${'calls'.padStart(6)} ${'tokens'.padStart(9)} ${'share'.padStart(8)}`);
+  for (const row of rows) {
+    out.push(
+      `  ${row.arm.padEnd(22)} ${row.purpose.padStart(12)} ${row.calls.toFixed(2).padStart(6)} ` +
+        `${String(row.promptTokensPerCase).padStart(9)} ${`${(row.share * 100).toFixed(1)}%`.padStart(8)}`,
+    );
+  }
+  // The rows above are only actionable if the reader knows which of them is a purchase rather
+  // than a requirement: a statement has to be written, a judgement has to earn its place.
+  out.push('', "  'select' and 'compare' are the selector's calls: they read the candidates and answer one digit.");
   return out;
 }
 
@@ -446,6 +516,28 @@ export function billedProblems(rows: readonly BilledRow[]): string[] {
   if (impossible.length > 0) {
     problems.push(
       `CARD: ${impossible.join(', ')} reports fewer than half a character per token, so the character count and the token count describe different prompts`,
+    );
+  }
+  // Two failures of the split, and neither is a target. A call with no purpose inflates the whole
+  // and belongs to no row, so every other bucket's share is taken over money nobody can name. A
+  // split that does not add up to the total means one of the two is recounted somewhere else, and
+  // a share divided by a total it does not add up to is not a share.
+  const anonymous = rows
+    .map((row) => ({ arm: row.arm, calls: row.byPurpose?.unlabelled?.calls ?? 0 }))
+    .filter((entry) => entry.calls > 0);
+  if (anonymous.length > 0) {
+    problems.push(
+      `CARD: ${anonymous.map((entry) => `${entry.arm} (${String(entry.calls)})`).join(', ')} spend calls that do not say what they were for, so every share of the bill is taken over money nobody can name`,
+    );
+  }
+  const wrongSplit = rows.filter((row) => {
+    if (row.byPurpose === undefined) return false;
+    const sum = Object.values(row.byPurpose).reduce((total, part) => total + (part.prompt ?? 0), 0);
+    return Math.abs(sum - row.promptTokensPerCase) > Math.max(1, row.promptTokensPerCase * 0.02);
+  });
+  if (wrongSplit.length > 0) {
+    problems.push(
+      `CARD: ${wrongSplit.map((row) => row.arm).join(', ')} report per-purpose splits that do not add up to the case total, so a share of them would be a share of the wrong number`,
     );
   }
   return problems;
@@ -490,6 +582,8 @@ export interface CardOutcome {
   readonly drops: CardDrops;
   /** Every arm the artifact billed, not only the one this invocation measured. */
   readonly billed: readonly BilledRow[];
+  /** How much of each arm's bill each kind of call is. Empty on an artifact written before the split. */
+  readonly purposes: readonly PurposeRow[];
   readonly problems: readonly string[];
 }
 
@@ -639,7 +733,7 @@ export async function runCard(settings: CardSettings): Promise<CardOutcome> {
     }),
     ...billedProblems(billed),
   ];
-  return { split: settings.layout.split, arm: settings.arm, rows, tally, drops, billed, problems };
+  return { split: settings.layout.split, arm: settings.arm, rows, tally, drops, billed, purposes: purposeRows(report as BilledReportShape), problems };
 }
 
 export function cardPath(settings: CardSettings): string {
@@ -662,6 +756,7 @@ export async function main(
   const outcome = await runCard(settings);
   for (const line of cardLines(outcome.tally)) console.log(line);
   for (const line of billedLines(outcome.billed)) console.log(line);
+  for (const line of purposeLines(outcome.purposes)) console.log(line);
   console.log(
     `\n  dropped: ${String(outcome.drops.unknownQuestion)} unknown question, ${String(outcome.drops.definitionGap)} without definitions, ` +
       `${String(outcome.drops.unrenderable)} unrenderable arm, ${String(outcome.drops.unknownArm)} unknown arm`,

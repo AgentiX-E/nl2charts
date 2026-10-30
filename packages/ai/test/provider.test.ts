@@ -383,6 +383,81 @@ describe('withCallCounter', () => {
     expect(priced.usage()).toEqual({ promptTokens: 200, completionTokens: 20, chars: 3, unbilled: 1 });
   });
 
+  it('files each call under the purpose it declared', async () => {
+    // The selector is the call whose price is easiest to hide: it reads a prompt nobody else
+    // reads and answers with one digit, and on a four-call arm it is a quarter of the bill. A
+    // meter that reports only per case cannot say whether that quarter earned itself.
+    let answer = 0;
+    const counted = withCallCounter({
+      id: 'priced',
+      model: 'm',
+      complete: async () => {
+        answer += 1;
+        return { text: 'x', model: 'm', usage: { promptTokens: 100 * answer, completionTokens: 10 } };
+      },
+    });
+    await counted.provider.complete({ messages: [{ role: 'user', content: 'aa' }], purpose: 'generate' });
+    await counted.provider.complete({ messages: [{ role: 'user', content: 'b' }], purpose: 'select' });
+    const byPurpose = counted.byPurpose();
+    expect(byPurpose.get('generate')).toEqual({ calls: 1, promptTokens: 100, completionTokens: 10, chars: 2, unbilled: 0 });
+    expect(byPurpose.get('select')).toEqual({ calls: 1, promptTokens: 200, completionTokens: 10, chars: 1, unbilled: 0 });
+    // The case total is the sum of the parts rather than a second measurement of them, so the
+    // share taken over it cannot disagree with the table it is taken from.
+    expect(counted.usage()).toEqual({ promptTokens: 300, completionTokens: 20, chars: 3, unbilled: 0 });
+    expect(counted.unlabelled()).toBe(0);
+  });
+
+  it('files an undeclared call under unlabelled instead of guessing', async () => {
+    // Filing it under generation would dissolve the selector's share into the one bucket
+    // nobody questions — the same defect as an instrument pricing a prompt nobody sends, in
+    // the unit the cost claim is made in.
+    const counted = withCallCounter({
+      id: 'stub',
+      model: 'm',
+      complete: async () => ({ text: 'x', model: 'm', usage: { promptTokens: 5, completionTokens: 1 } }),
+    });
+    await counted.provider.complete({ messages: [{ role: 'user', content: 'q' }] });
+    expect(counted.byPurpose().get('unlabelled')).toEqual({ calls: 1, promptTokens: 5, completionTokens: 1, chars: 1, unbilled: 0 });
+    expect(counted.byPurpose().has('generate')).toBe(false);
+    expect(counted.unlabelled()).toBe(1);
+  });
+
+  it('keeps an unbilled answer inside the purpose that spent it', async () => {
+    // A call that arrived without a usage block is still a call of that kind. Counting it
+    // nowhere would shrink the denominator the selector's share is divided by, and a share
+    // over a denominator that excludes the call it describes is not a share.
+    const counted = withCallCounter({ id: 'stub', model: 'm', complete: async () => ({ text: 'x', model: 'm' }) });
+    await counted.provider.complete({ messages: [{ role: 'user', content: 'q' }], purpose: 'select' });
+    expect(counted.byPurpose().get('select')).toEqual({ calls: 1, promptTokens: 0, completionTokens: 0, chars: 1, unbilled: 1 });
+  });
+
+  it('adds the buckets up to the same total it reports', async () => {
+    // The property every share rests on. It is asserted here rather than enforced by recounting
+    // inside the meter: two implementations of one sum drift apart, one accumulation and one
+    // assertion do not.
+    let answer = 0;
+    const counted = withCallCounter({
+      id: 'priced',
+      model: 'm',
+      complete: async () => {
+        answer += 1;
+        return answer === 2 ? { text: 'x', model: 'm' } : { text: 'x', model: 'm', usage: { promptTokens: 40, completionTokens: 4 } };
+      },
+    });
+    for (const purpose of ['generate', 'select', 'retry'] as const) {
+      await counted.provider.complete({ messages: [{ role: 'user', content: `${purpose} text` }], purpose });
+    }
+    const parts = [...counted.byPurpose().values()];
+    expect(parts.reduce((total, part) => total + part.promptTokens, 0)).toBe(counted.usage().promptTokens);
+    expect(parts.reduce((total, part) => total + part.chars, 0)).toBe(counted.usage().chars);
+    expect(parts.reduce((total, part) => total + part.unbilled, 0)).toBe(counted.usage().unbilled);
+    expect(parts.reduce((total, part) => total + part.calls, 0)).toBe(counted.calls());
+    // And the unbilled answer stays in the bucket that spent it rather than vanishing from the
+    // numerator while staying in the denominator.
+    expect(counted.byPurpose().get('select')?.unbilled).toBe(1);
+    expect(counted.byPurpose().get('generate')?.unbilled).toBe(0);
+  });
+
   it('counts two counters separately, so a concurrent case cannot borrow another case\'s calls', async () => {
     const inner = stub('ok');
     const first = withCallCounter(inner.provider);

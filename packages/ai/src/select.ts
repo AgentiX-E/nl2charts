@@ -148,6 +148,7 @@ export async function chooseCandidate(
       { role: 'user', content: question },
     ],
     temperature: 0,
+    purpose: 'select',
   });
   const decision = applySelection(reply.text, offered);
   return { ...decision, sql: (offered[decision.index] as Candidate).sql };
@@ -212,6 +213,7 @@ export async function chooseCandidatePairwise(
         { role: 'user', content: question },
       ],
       temperature: 0,
+      purpose: 'compare',
     });
     const choice = parsePairwise(reply.text);
     if (choice === -1) {

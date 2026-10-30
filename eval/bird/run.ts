@@ -23,6 +23,7 @@ import { pathToFileURL } from 'node:url';
 import { createHttpProvider } from '@agentix-e/nl2charts-ai';
 import type { LlmProvider, PromptOptions, SchemaTable } from '@agentix-e/nl2charts-ai';
 import { applySelection, attachDefinitions, buildAskMessages, buildSelectionPrompt, chooseCandidatePairwise, buildSqlPrompt, choosePromptProfile, createPipeline, emptyRetryMessages, extractSql, renderDefinitions, renderEvidence, renderSchemaCard, withCallCounter } from '@agentix-e/nl2charts-ai';
+import type { PurposeUsage } from '@agentix-e/nl2charts-ai';
 // The retry turn writes a statement outside the pipeline, so it goes through the same
 // guard the pipeline applies. Skipping it here would let the one arm that retries be the
 // one arm that can execute DDL.
@@ -705,6 +706,22 @@ export interface CaseTokens {
   readonly chars: number;
   /** Answers that arrived without a usage block: a cost that is unknown, not zero. */
   readonly unbilled: number;
+  /**
+   * The same cost split by what each call was for.
+   *
+   * Absent on an artifact written before the meter split it. Present, it sums to the fields
+   * above exactly, because both are written at the same point rather than recounted later.
+   */
+  readonly byPurpose?: Readonly<Record<string, PurposeCost>>;
+}
+
+/** One kind of call: what those calls cost this case. */
+export interface PurposeCost {
+  readonly calls: number;
+  readonly prompt: number;
+  readonly completion: number;
+  readonly chars: number;
+  readonly unbilled: number;
 }
 
 export interface CaseRun extends CaseOutcome {
@@ -818,12 +835,48 @@ export interface CaseRun extends CaseOutcome {
  * index signature keeps the rest of a row — cost, errors, difficulty, selector counts —
  * out of this type's business.
  */
+/**
+ * Two meters' buckets, added by purpose.
+ *
+ * `first` is the primary model's and `second` an optional second model's. A purpose spent on
+ * both sides is summed rather than listed twice: a cost table with two `select` rows is a table
+ * whose share nobody can divide by.
+ */
+export function mergePurposes(
+  first: ReadonlyMap<string, PurposeUsage>,
+  second?: ReadonlyMap<string, PurposeUsage>,
+): Readonly<Record<string, PurposeCost>> {
+  const total: Record<string, { calls: number; prompt: number; completion: number; chars: number; unbilled: number }> = {};
+  for (const source of second === undefined ? [first] : [first, second]) {
+    for (const [purpose, usage] of source) {
+      const slot = (total[purpose] ??= { calls: 0, prompt: 0, completion: 0, chars: 0, unbilled: 0 });
+      slot.calls += usage.calls;
+      slot.prompt += usage.promptTokens;
+      slot.completion += usage.completionTokens;
+      slot.chars += usage.chars;
+      slot.unbilled += usage.unbilled;
+    }
+  }
+  return total;
+}
+
 export interface ArmReportRow {
   readonly arm: string;
   readonly total: number;
   readonly decomposition?: { readonly asked: number; readonly fired: number; readonly share: number; readonly meanSteps: number };
   readonly candidateRecall?: number;
   readonly emptyRetry?: { readonly mode: string; readonly dropped: number; readonly fired: number; readonly recovered: number };
+  /**
+   * What the arm spent per case, and — when the meter split it — how much of that each kind of
+   * call was. The split is what turns "the selector should earn its tokens" into a column.
+   */
+  readonly tokens?: {
+    readonly prompt: number;
+    readonly completion: number;
+    readonly chars: number;
+    readonly unbilled: number;
+    readonly byPurpose?: Readonly<Record<string, { readonly calls: number; readonly prompt: number; readonly completion: number; readonly chars: number }>>;
+  };
   readonly [field: string]: unknown;
 }
 
@@ -2416,6 +2469,11 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
           completion: primary.completionTokens + (second?.completionTokens ?? 0),
           chars: primary.chars + (second?.chars ?? 0),
           unbilled: primary.unbilled + (second?.unbilled ?? 0),
+          // The same money, split by what each call was for. A cross arm draws candidates from a
+          // second model and may have that model judge them, so one purpose can be spent on both
+          // sides; adding per purpose keeps one row per kind of call, which is the only shape a
+          // share can be read from.
+          byPurpose: mergePurposes(counter.byPurpose(), secondCounter?.byPurpose()),
         },
       };
     };
@@ -2624,6 +2682,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
                       { role: 'user', content: question.question },
                     ],
                     temperature: 0,
+                    purpose: 'select',
                   });
                   const applied = applySelection(reply.text, offered);
                   return { index: applied.index, decided: applied.decided, sql: (offered[applied.index] as { sql: string }).sql };
@@ -2652,6 +2711,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
             // copy of the statement it replaces. Both modes use the same temperature:
             // the pair differs by the words, and by nothing else.
             temperature: 0.7,
+            purpose: 'retry',
           });
           const candidate = extractSql(reply.text);
           if (inspectSql(candidate).ok) {
@@ -2837,6 +2897,43 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
   // The cases whose cost the endpoint reported. An arm measured by a stub has none, and a mean
   // taken over a mixed list would divide by cases it never priced.
   const metered = runs.flatMap((run) => (run.tokens === undefined ? [] : [run.tokens]));
+  // An unattributed call is a cost with no owner: it inflates the total and belongs to no row of
+  // the table the total is read against. The run fails rather than publishing a share whose
+  // denominator holds calls nobody can name — the same rule as an instrument that may not price
+  // a prompt nobody sends, applied to the unit the cost claim is made in.
+  const unattributed = metered.reduce((total, cost) => total + (cost.byPurpose?.unlabelled?.calls ?? 0), 0);
+  if (unattributed > 0) {
+    throw new Error(`${String(unattributed)} calls on arm ${label} do not say what they were for, so their tokens cannot be attributed`);
+  }
+  // Per case, per kind of call. Averaged the same way the total is, so the parts add up to the
+  // whole a reader checks them against.
+  const purposeSums = new Map<string, { calls: number; prompt: number; completion: number; chars: number }>();
+  for (const cost of metered) {
+    for (const [purpose, usage] of Object.entries(cost.byPurpose ?? {})) {
+      const slot = (purposeSums.get(purpose) ?? { calls: 0, prompt: 0, completion: 0, chars: 0 });
+      slot.calls += usage.calls;
+      slot.prompt += usage.prompt;
+      slot.completion += usage.completion;
+      slot.chars += usage.chars;
+      purposeSums.set(purpose, slot);
+    }
+  }
+  const byPurpose =
+    purposeSums.size === 0
+      ? undefined
+      : Object.fromEntries(
+          [...purposeSums.entries()]
+            .sort(([left], [right]) => left.localeCompare(right))
+            .map(([purpose, sums]) => [
+              purpose,
+              {
+                calls: Number((sums.calls / metered.length).toFixed(3)),
+                prompt: Math.round(sums.prompt / metered.length),
+                completion: Math.round(sums.completion / metered.length),
+                chars: Math.round(sums.chars / metered.length),
+              },
+            ]),
+        );
   const promptSizes = cases.map(
     (question) =>
       buildSqlPrompt(
@@ -2902,6 +2999,7 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
             completion: Math.round(metered.reduce((total, cost) => total + cost.completion, 0) / metered.length),
             chars: Math.round(metered.reduce((total, cost) => total + cost.chars, 0) / metered.length),
             unbilled: metered.reduce((total, cost) => total + cost.unbilled, 0),
+            ...(byPurpose === undefined ? {} : { byPurpose }),
           },
         }),
     ...(repair === undefined ? {} : { repair }),

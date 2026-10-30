@@ -20,6 +20,8 @@ import {
   billedLines,
   billedProblems,
   billedRows,
+  purposeLines,
+  purposeRows,
   cardLines,
   cardPath,
   cardProblems,
@@ -315,6 +317,143 @@ describe('what the provider billed', () => {
     // requests, which is the one disagreement neither number shows on its own.
     const problems = billedProblems(billedRows({ arms: [armRow({ tokens: { prompt: 3_200, completion: 0, chars: 1_000, unbilled: 0 } })] }));
     expect(problems[0]).toContain('different prompts');
+  });
+
+  it('says what each kind of call cost, and what share of the bill it is', () => {
+    // A four-call arm buys three things and the artifact used to price them as one number. The
+    // selector is the call whose price is easiest to hide: it answers one digit to a prompt
+    // nobody else reads, so "the selector should earn its tokens" had no column to argue with.
+    const rows = purposeRows({
+      arms: [
+        armRow({
+          tokens: {
+            prompt: 3_200,
+            completion: 200,
+            chars: 12_000,
+            unbilled: 0,
+            byPurpose: {
+              generate: { calls: 1, prompt: 2_400, completion: 180, chars: 9_000 },
+              select: { calls: 1, prompt: 800, completion: 20, chars: 3_000 },
+            },
+          },
+        }),
+      ],
+    });
+    expect(rows[0]).toMatchObject({ arm: 'select', purpose: 'generate', calls: 1, promptTokensPerCase: 2_400, share: 0.75 });
+    expect(rows[1]).toMatchObject({ arm: 'select', purpose: 'select', promptTokensPerCase: 800, share: 0.25 });
+    // The two shares are the whole bill, because the artifact's two buckets are its two calls.
+    expect(rows.reduce((total, row) => total + row.share, 0)).toBeCloseTo(1, 6);
+    expect(purposeLines(rows).join('\n')).toContain('selector');
+  });
+
+  it('prints no purpose table for an artifact written before the split', () => {
+    expect(purposeRows({ arms: [armRow()] })).toEqual([]);
+    expect(purposeLines([])).toEqual([]);
+  });
+
+  it('fails a bill whose parts do not add up to the whole', () => {
+    // The split is taken at the same point as the total, so a disagreement means one of them is
+    // being recounted somewhere else — and a share divided by a total it does not add up to is
+    // not a share.
+    const problems = billedProblems(
+      billedRows({
+        arms: [
+          armRow({
+            tokens: {
+              prompt: 3_200,
+              completion: 200,
+              chars: 12_000,
+              unbilled: 0,
+              byPurpose: { generate: { calls: 1, prompt: 2_400, completion: 180, chars: 9_000 } },
+            },
+          }),
+        ],
+      }),
+    );
+    expect(problems[0]).toContain('do not add up');
+  });
+
+  it('fails a bill with a call that does not say what it was for', () => {
+    // An unattributed call inflates the total and belongs to no row: the share of every other
+    // bucket is then taken over money nobody can name.
+    const problems = billedProblems(
+      billedRows({
+        arms: [
+          armRow({
+            tokens: {
+              prompt: 3_200,
+              completion: 200,
+              chars: 12_000,
+              unbilled: 0,
+              byPurpose: {
+                generate: { calls: 1, prompt: 2_400, completion: 180, chars: 9_000 },
+                unlabelled: { calls: 1, prompt: 800, completion: 20, chars: 3_000 },
+              },
+            },
+          }),
+        ],
+      }),
+    );
+    expect(problems[0]).toContain('do not say what they were for');
+  });
+
+  it('skips a split whose arm the artifact did not name', () => {
+    // The same rule `billedRows` follows, for the same reason: a row with no arm has no arm to put
+    // a share under, and inventing one would attribute a cost to whichever arm the reader guessed.
+    expect(purposeRows({ arms: [{ tokens: { prompt: 10, byPurpose: { generate: { calls: 1, prompt: 10 } } } }] })).toEqual([]);
+  });
+
+  it('reads a bucket the artifact left incomplete as zero rather than as a missing row', () => {
+    // An artifact written by a version that reported the split without both fields is a bucket with
+    // unknown numbers, not an arm whose cost vanished. Reporting it as zero keeps the sum honest and
+    // leaves the total to fail the add-up check if the omission was real.
+    const [row] = purposeRows({ arms: [{ arm: 'select', tokens: { prompt: 100, byPurpose: { retry: {} } } }] });
+    expect(row).toMatchObject({ purpose: 'retry', calls: 0, promptTokensPerCase: 0, share: 0 });
+  });
+
+  it('takes the share over the arm total, and orders the split by what it costs', () => {
+    // Two buckets whose shares are taken over a total of zero would divide by nothing; the order is
+    // the reason the table reads as a bill rather than as an inventory.
+    const rows = purposeRows({
+      arms: [
+        {
+          arm: 'select',
+          tokens: {
+            prompt: 0,
+            byPurpose: { retry: { calls: 1, prompt: 0 }, generate: { calls: 1, prompt: 0 } },
+          },
+        },
+      ],
+    });
+    expect(rows.map((row) => row.purpose)).toEqual(['generate', 'retry']);
+    expect(rows.every((row) => row.share === 0)).toBe(true);
+  });
+
+  it('reads a split written without a per-case total as zero rather than as a division by nothing', () => {
+    // An artifact can carry the split and not the total it was taken over — a hand-written fixture,
+    // or a version boundary. The share is unknown, not infinite, and the add-up check below is what
+    // refuses the column if the omission was real.
+    const [row] = purposeRows({ arms: [{ arm: 'select', tokens: { byPurpose: { generate: { calls: 1, prompt: 40 } } } }] });
+    expect(row).toMatchObject({ purpose: 'generate', promptTokensPerCase: 40, share: 0 });
+  });
+
+  it('counts a bucket with no token field as zero when it checks the split', () => {
+    const problems = billedProblems(
+      billedRows({
+        arms: [
+          armRow({
+            tokens: {
+              prompt: 3_200,
+              completion: 200,
+              chars: 12_000,
+              unbilled: 0,
+              byPurpose: { generate: { calls: 1 }, select: { calls: 1, prompt: 3_000 } },
+            },
+          }),
+        ],
+      }),
+    );
+    expect(problems[0]).toContain('do not add up');
   });
 
   it('publishes a report whose calls, tokens and characters agree', () => {

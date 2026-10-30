@@ -124,7 +124,7 @@ export async function synthesizeRecord(request: SynthesisRequest): Promise<Synth
     }
   }
 
-  const reply = await request.provider.complete({ messages: [{ role: 'user', content: prompt }], temperature: 0 });
+  const reply = await request.provider.complete({ messages: [{ role: 'user', content: prompt }], temperature: 0, purpose: 'synthesize' });
   const definitions = parseDefinitions(reply.text, maxChars);
   mkdirSync(cacheDir, { recursive: true });
   const record: SynthesisRecord = {

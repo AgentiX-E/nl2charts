@@ -546,6 +546,49 @@ describe('what an arm row says about itself', () => {
     expect(charsOf(plain).excludes).toBeUndefined();
   });
 
+  it('says how much of the bill each kind of call is', () => {
+    // A four-call arm is a purchase of three things: a statement, a selector's judgement, and
+    // the extra draws. Reporting the price as one number makes "the selector is worth its
+    // tokens" an argument; reporting it per call makes it a column.
+    const priced = (id: string, passed: boolean): CaseRun => ({
+      ...outcome(id, passed),
+      calls: 2,
+      tokens: {
+        prompt: 130,
+        completion: 20,
+        chars: 400,
+        unbilled: 0,
+        byPurpose: {
+          generate: { calls: 1, prompt: 100, completion: 18, chars: 380, unbilled: 0 },
+          select: { calls: 1, prompt: 30, completion: 2, chars: 20, unbilled: 0 },
+        },
+      },
+    });
+    const row = armReportRow(preparedWith([question(1, 'simple')]), resolveArm('select') as Arm, [priced('1', true)], 'select');
+    expect(row.tokens?.byPurpose?.generate?.prompt).toBe(100);
+    expect(row.tokens?.byPurpose?.select).toMatchObject({ calls: 1, prompt: 30, completion: 2 });
+  });
+
+  it('refuses to publish a cost whose calls do not say what they were for', () => {
+    // An unattributed call is a cost with no owner: it inflates the total and belongs to no
+    // row of the table the total is read against. The run fails rather than publishing a
+    // share whose denominator contains calls nobody can name.
+    const anonymous: CaseRun = {
+      ...outcome('1', true),
+      calls: 1,
+      tokens: {
+        prompt: 10,
+        completion: 1,
+        chars: 20,
+        unbilled: 0,
+        byPurpose: { unlabelled: { calls: 1, prompt: 10, completion: 1, chars: 20, unbilled: 0 } },
+      },
+    };
+    expect(() => armReportRow(preparedWith([question(1, 'simple')]), resolveArm('select') as Arm, [anonymous], 'select')).toThrow(
+      /do not say what they were for/,
+    );
+  });
+
   it('prices a lever that spends extra calls by the point it buys per call', () => {
     // A voting arm costs three calls where the arm it is compared to costs one, and the
     // pair is the only place the per-call price exists: without it a +6pp lever and a
