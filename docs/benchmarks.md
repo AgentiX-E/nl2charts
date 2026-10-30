@@ -3120,6 +3120,14 @@ comparisons the smallest p that survives a Bonferroni correction is 0.0056, whic
 clears. The direction is stable and the cost is measured; the effect size is not yet resolved at
 n=496.
 
+These p-values predate a fix to how a pair is built: the comparison keyed on the case id, and
+Mini-Dev lists two of its questions twice (137 and 138, in a file of 500 rows for 498 questions), so
+one arm's two draws of a question could be compared against the other arm's last one. The size of
+that error is measured rather than assumed — on the artifact that carries it, 2 of 11 pairs move and
+neither verdict changes (`23:21`, p = 0.8804, becomes `23:22`, p = 1.0000; `38:23`, 0.0722, becomes
+`37:23`, 0.0925). The next run of each pair republishes its own counts; the numbers above are what
+those artifacts said.
+
 Two measurements would resolve it, and only one of them needs a run. The dev split is 1,532
 scorable questions, so the same pair carries an MDE near 2.3pp instead of 4.0pp — and a 2.4pp gap
 at that size is inside what the design can detect. The other is the arm in the second row of the
@@ -3174,11 +3182,171 @@ an adoption claim, and the first one is a trap worth naming:
    three draws of a quantity near −2.5pp; −3.41 → −4.62 → −4.22pp is three draws near −4pp. Only
    the second interval excludes zero in two runs.
 
-So the reading is: **the single call is 28% cheaper than the pruned card (1,774 against 2,454 tokens
-per question, 1 call against 4) and, on this split, 4pp more accurate, twice at p < 0.01.** What
-that does not yet say is that it will hold on another split, and the size of the effect is the one
-thing three runs of 496 questions cannot settle. The dev split can: 1,532 questions, the same pair,
-an MDE near 2.3pp.
+So the reading on this split is: **the single call is 28% cheaper than the pruned card (1,774
+against 2,454 tokens per question, 1 call against 4) and 4pp more accurate, twice at p < 0.01.** The
+size of that effect is the one thing three runs of 496 questions cannot settle, which is why the
+next section asks the same question on 1,532.
+
+## The dev split, asked once: four calls buy 0.39 points
+
+One run of the split the leaderboards report (`41085194983`), three arms, `deepseek-chat`, 1,532
+scorable of 1,534. The pair that decides the cost question is `metadata+evidence` against `select`;
+the third arm is there because the pruned card has been measured on every run so far and would
+otherwise be the only arm whose dev reading is missing.
+
+| arm | execution accuracy | calls/case | tokens/case | chars/case | candidate recall |
+| --- | --- | --- | --- | --- | --- |
+| `metadata+evidence` | 61.49% (942) | 1.00 | **1,778** | 7,474 | — |
+| `select` | **61.88%** (948) | 3.99 | 2,441 | 9,950 | 65.8% (1,008) |
+| `select-prune` | 60.38% (925) | 3.99 | 2,222 | 9,057 | 64.0% (980) |
+
+| pair | delta | 95% CI | p | MDE |
+| --- | --- | --- | --- | --- |
+| `metadata+evidence` → `select` | **+0.39pp** | −1.22 … +2.00 | 0.691 | 2.30pp |
+| `metadata+evidence` → `select-prune` | −1.11pp | −2.76 … +0.54 | 0.216 | 2.36pp |
+| `select` → `select-prune` | −1.50pp | −2.84 … −0.17 | **0.035** | 1.91pp |
+
+Three things this settles, and one it does not.
+
+1. **Four calls buy 0.39 points.** The single-call arm and the four-call arm are 0.39pp apart over
+   1,532 questions, with an interval that spans zero. At an MDE of 2.30pp this design would have
+   seen a 2pp difference; it did not see a difference at all. The bill is 2,441 against 1,778 tokens
+   per question — **37% more for 0.39pp, or 0.13pp per extra call**.
+2. **The claim is non-inferiority, not equality.** "The same" is not something 1,532 questions can
+   establish, and writing it would be the error this document spends its length avoiding. What the
+   interval supports is: against a 2pp margin, the single call is not worse. One-sided at that
+   margin, z = (0.39 + 2) / 0.82 = 2.91, p ≈ 0.002 — and 0.002 survives a Bonferroni floor of
+   0.0167 for the three pairs in the table.
+3. **The 2.5pp gap did not reproduce; the 1.5pp cost of the pruned card did.** Mini-Dev's three
+   runs put `metadata+evidence` 2.54pp above `select` on average; dev puts it 0.39pp above. The
+   pruned card, by contrast, is −1.54pp on Mini-Dev (three-run mean) and −1.50pp here — the same
+   number on both splits and in five runs. A comparison that moves 2.5 → 0.4 between splits is a
+   sample, an arm that lands on −1.5 twice is a cost.
+
+What it does not settle is whether the selector pays at all, because the answer depends on the
+generator: the three-candidate ceiling here is 65.8%, the selector returns 94.0% of it (948 of
+1,008), and a 94% selector over a 65.8% ceiling cannot beat a single draw that is already at 61.5% by
+much. The arithmetic of where the next point comes from is in *The ceiling, not the selector*, and
+this section's contribution is narrower: it prices the four-call chain at +37% for +0.39pp on the
+split that matters.
+
+### Where 61.88% sits
+
+The dev split is the one published systems report, so the gap can be named rather than described.
+These are the published numbers as of the BIRD leaderboard and the papers that feed it; the model
+column is the one that matters, because most of the gap is the model and not the method.
+
+| system | BIRD dev EX | model | trained |
+| --- | --- | --- | --- |
+| SQLConductor | **73.2%** | Qwen3-8B policy + Gemma4-31B actions | yes (SFT + GRPO) |
+| CHASE-SQL | 73.0–73.01% | Gemini-1.5-Pro | selection agent fine-tuned |
+| DeepEye-SQL | 70.6% | Qwen2.5-Coder-32B | yes |
+| Alpha-SQL | 69.7% | Qwen2.5-Coder-32B | yes |
+| OpenSearch-SQL | 69.3% | GPT-4o | multi-agent, no fine-tune |
+| RSL-SQL | 65.51% | DeepSeek-v2 | no |
+| MSL-SQL | 64.00% | DeepSeek-V2.5 | partial |
+| **this harness, `select`** | **61.88%** | deepseek-chat | no |
+| **this harness, `metadata+evidence`** | 61.49% | deepseek-chat | no |
+
+Two gaps, and they should not be reported as one:
+
+- **Against SOTA: 11.3pp** (61.88 → 73.2). Every system above 69% runs a stronger backbone than
+  `deepseek-chat`, and four of the five are trained. This gap is mostly a model gap and partly a
+  candidate-generation gap; the selector is not where it lives, because a perfect selector over this split's
+  three-candidate set would score 65.8% — the ceiling itself.
+- **Against the same model class: 2.1–3.6pp** (61.88 against RSL-SQL's 65.51 and MSL-SQL's 64.00,
+  both DeepSeek-family, neither trained end-to-end). That is the gap this harness can close by
+  method, and it is the one worth spending iterations on.
+
+The leaderboard also carries strong-model baselines — a Claude 4.5 Sonnet baseline at 67.34% on the
+new dev split, for one — which is the honest comparison for a harness that adds structure rather
+than training: a 61.88% harness over `deepseek-chat` is 5.5pp under a strong model's *zero-shot*
+baseline, and the 61.49% single-call arm is 5.9pp under it, at one call and 1,778 tokens per
+question.
+
+### Where the pruned card's 1.5 points go
+
+The pruned card loses 28 reachable questions (ceiling 1,008 → 980) and returns 925 instead of 948.
+If its selector were as good as the full card's, the smaller ceiling would still pay 28 × 0.94 ≈ 26
+questions, i.e. 948 → 922 — and it returns 925. So **the loss is the ceiling, not the selector**: the
+card that omits a table the question needs makes the answer unreachable, and the selector cannot
+pick what was never written.
+
+The difficulty split says the same thing from the other side:
+
+| difficulty | `metadata+evidence` | `select` | `select-prune` | prune − select |
+| --- | --- | --- | --- | --- |
+| simple (925) | 614 (66.4%) | 626 (67.7%) | 607 (65.6%) | −2.1pp |
+| moderate (463) | 249 (53.8%) | 245 (52.9%) | 248 (53.6%) | +0.7pp |
+| challenging (144) | 79 (54.9%) | 77 (53.5%) | 70 (48.6%) | **−4.9pp** |
+
+The loss is not confined to one stratum, which is the honest reading: −19 questions simple, +3
+moderate, −7 challenging. Challenging is the worst *rate* (4.9pp on 144 questions) and simple is the
+largest *count* (19 of 1,532) — a one-hop closure is not "enough for the easy ones", it is a draw
+whose cost is spread across the split and slightly worse where the question names fewer tables. The
+only claim the table supports is the net one that matches the ceiling arithmetic: the pruned card
+loses reachable questions, and everything else follows from that.
+
+## What the selector costs, and what it returns
+
+`select` and `vote` draw the same three samples from the same prompt and differ in one thing: how
+one of the three is chosen. `select` asks the model; `vote` takes the majority answer. That is a
+single-lever pair in the strict sense, and the run that finally prices it is the one that also
+started metering per call (`41092489988`):
+
+| arm | choose by | calls/case | tokens/case | of which the selector | accuracy |
+| --- | --- | --- | --- | --- | --- |
+| `vote` | majority | 3.00 | **2,092** | — | 284 (57.03%) |
+| `select` | model | 3.99 | 2,539 | **447 (17.6%)** | 284 (57.03%) |
+| `select-duo` | model, 2 candidates | 2.98 | 1,754 | 359 (20.5%) | 281 (56.43%) |
+
+Paired over all 498 questions, `select` against `vote` is **+0.00pp**: 17 questions only the
+selector got right, 17 only the majority got right, p = 1. Over the same design the MDE is 3.28pp,
+so this is "no discernible return", not "proven useless" — but the 17:17 split is what a coin looks
+like, and the selector is billed for 17.6% of every case to flip it.
+
+The same table prices the second candidate: `select-duo` spends 359 tokens on a selector over two
+candidates and lands 0.6pp under the majority over three (p = 0.690). Neither the extra candidate
+nor the judgement is buying much here.
+
+Two of these numbers disagree with the earlier run tabulated in *What the tokens buy*, and the
+disagreement is the point: that run bills `vote` 2,271 prompt tokens and `select` 2,717, this one
+2,092 and 2,539 — same arms, same split, same model, 7–9% apart. Whatever moves a prompt's size
+between runs is not in the artifact, so a token figure here is never quoted without the run that
+produced it, and each table is read against its own accuracy column.
+
+### What this does to the cost story
+
+Put the two rounds together and the chain's parts are priced:
+
+| what it buys | calls added | tokens added | accuracy bought | where measured |
+| --- | --- | --- | --- | --- |
+| two more samples of the same prompt | +2 | +1,395 | — | Mini-Dev, 697 × 2 |
+| a model selector over three | +1 | +447 | **0.00pp** (284:284, p = 1) | Mini-Dev |
+| the whole chain vs one call | +3 | +663 | **+0.39pp** (p = 0.691) | dev |
+
+The first two rows price the inside of `select`: it sends a 697-token prompt three times and a
+447-token selector call once, and `select-duo`'s generated line is literally the two-sample version
+of that — 1,395 for two calls. The third row is a different subtraction: one arm against another,
+where the arms do not send the same prompt, so 1,395 + 447 is 1,842 while one chain minus one call
+is 663. Both are arithmetic; only the third is the price of the chain, and only the first two are
+the price of the parts.
+
+Read down the last two rows: four calls cost 37% more than one and return 0.39pp, and the call that
+chooses between the candidates is the one with the most measurable price and the least measurable
+return. That is not an argument for deleting the selector — a stronger generator moves the ceiling
+and could make it pay — but it is an argument for not paying for it by default, which is what the
+next iteration's default-chain budget review is for.
+
+### Why this reading is the one to quote
+
+The dev split's MDE for this pair is 2.30pp against 3.98–4.10pp on Mini-Dev, so the same 2.5pp
+question is inside one design's resolution and outside the other's. Three Mini-Dev runs
+agreeing in direction is not the same as one dev run measuring a magnitude: agreement in direction
+is what a 498-question split produces for a 0.4pp effect, because the sign is more robust than the
+size. That is the second time this round has met the same mistake in a different costume — the
+first was pooling repeated runs as if they were new questions (*152*) — and both are the same rule:
+**a bigger number of observations is not a bigger observation.**
 
 ## The floor is enforced, not remembered
 

@@ -8,6 +8,49 @@ cannot be argued with.
 
 ### Measured
 
+- **The selector is billed for 17.6% of every case and returns a coin.** The first run that meters
+  per call (`41092489988`) splits `select`'s 2,539 prompt tokens per question into 2,092 for the
+  three samples and **447 for the call that chooses between them** — 17.6% of the bill, on the pair
+  that isolates exactly one lever, since `vote` draws the same three samples from the same prompt and
+  chooses by majority instead of by asking. Paired over all 498 questions the two arms finish
+  **284:284**: 17 questions only the selector got right, 17 only the majority got right, p = 1, on a
+  design whose MDE for this pair is 3.28pp. That is "no discernible return" rather than "proven
+  useless" — a stronger generator moves the ceiling and could make the judgement pay — but the bill
+  is not in doubt. `select-duo` prices the cheaper version of the same bet: 359 tokens (20.5%) on a
+  selector over two candidates, landing 0.6pp under the majority over three (p = 0.690).
+
+  The parts now price separately: **+1,395 tokens for two more samples** of the same prompt (the
+  two-sample generation line `select-duo` bills is literally that), **+447 for the selector**, and
+  **+663 tokens for the whole chain against one call on dev, where it buys +0.39pp**. The first two
+  are priced inside one arm's prompt and the third is a difference between two arms whose prompts
+  differ by two and a half times, so they do not add up to each other — both subtractions are
+  arithmetic, only the third is the price of the chain.
+
+  A token figure belongs to the run that produced it: the same arms, split and model were billed
+  2,271 and 2,717 prompt tokens in an earlier run against 2,092 and 2,539 here, 7–9% apart, and the
+  artifact cannot say from inside what moved. Every cost table in `docs/benchmarks.md` therefore
+  names its run and is read against its own accuracy column.
+
+- **The dev split prices the four-call chain at +37% for +0.39pp.** One run of the 1,532-question
+  split the leaderboards report (`41085194983`) scores `metadata+evidence` 942 (61.49%), `select` 948
+  (61.88%) and `select-prune` 925 (60.38%). Paired over the same questions the single call is
+  **+0.39pp** above the four-call chain, interval −1.22…+2.00, p = 0.691, on a design whose MDE for
+  this pair is 2.30pp — it would have seen a 2pp difference and saw none. The bill is 1,778 against
+  2,441 prompt tokens per question, so the chain is 37% more expensive for 0.39pp, or 0.13pp per
+  extra call.
+
+  The claim is non-inferiority, not equality: against a 2pp margin the single call is not worse
+  (one-sided z = 2.91, p ≈ 0.002), which survives a Bonferroni floor of 0.0167 for the three pairs
+  published. Two facts move from "direction" to "measurement" as a result: the 2.5pp advantage the
+  single call showed on Mini-Dev (three-run mean 2.54pp) does **not** reproduce at 1,532 questions, while the pruned card's
+  cost does — −1.54pp on Mini-Dev (three-run mean) and −1.50pp on dev, the same number in five runs.
+
+- **The pruned card's loss is the ceiling, not the selector.** It loses 28 reachable questions
+  (1,008 → 980) and returns 925 where the full card returns 948; a selector as good as the full
+  card's would have paid 26 of those 28, i.e. 922. By difficulty the cost is −2.1pp on simple
+  (−19 questions), +0.7pp on moderate (+3) and −4.9pp on challenging (−7): a one-hop closure is a
+  draw spread across the split, not a tax on one stratum.
+
 - **The pruned-card gap reproduced three times, and the p-value a repeat buys.** A third run
   (`ff9295e7`) scored `metadata+evidence` 295/498 against `select` 286 and `select-prune` 274. The
   paired gaps against the pruned card are now −3.41pp (0.033), −4.62pp (**0.0032**) and −4.22pp
@@ -321,6 +364,24 @@ cannot be argued with.
 
 ### Fixed
 
+- **The paired comparison keyed on an id that Mini-Dev does not keep unique.** `compareArms` built a
+  map from the second arm's outcomes by case id, so when a split lists a question twice — Mini-Dev's
+  published file has 500 rows for 498 questions, with questions 137 and 138 each appearing twice —
+  both of the first arm's rows for that question read the **last** answer the second arm recorded.
+  One draw's pass was then compared with another draw's pass. `delta` was unaffected, because it is
+  taken from the accuracies; `onlyFirst` and `onlySecond` were not, and those are the counts
+  `mcnemarExact` and the interval are computed from. Occurrences are now consumed in the order the
+  arms answered them, and an arm that answers a different multiset of questions is refused instead of
+  matched to whatever was left over.
+
+  Measured on the 17-arm artifact that carries the defect (every arm has the two duplicates): **2 of
+  the 11 published pairs move**, both toward "no difference" — `select` → `select-prune` 23:21
+  (p = 0.8804) becomes 23:22 (p = 1.0000), and `metadata+evidence` → `select-prune` 38:23 (p = 0.0722)
+  becomes 37:23 (p = 0.0925). The other nine are unchanged, including every pair this document draws
+  a conclusion from, and no verdict flips: nothing crosses 0.01 or 0.05 in either direction. The
+  p-values quoted for runs whose artifacts are not in the repository were computed before this fix
+  and are republished by the next run of each pair; the size of the correction is bounded above.
+
 - **A CTE is not a table, and the card instrument counted it as one.** `goldTables` lowered every
   `from` and `join` reference, so `with a as (...), b as (...) select * from a join b` contributed
   two tables the card cannot show and the case could never be `all` — a linker failure read off an
@@ -349,6 +410,24 @@ cannot be argued with.
   written — every tool that priced an arm had been going around the type to read it.
 
 ### Added
+
+- **Every call says what it was for, and a bill that cannot be split refuses to publish.** The
+  interesting cost in a four-call arm is not the total: it is which call carries it. `LlmRequest`
+  now takes an optional `purpose` from a closed set — `generate`, `retry`, `select`, `compare`,
+  `plan`, `interpret`, `synthesize` — and `withCallCounter` meters every call twice from one ledger,
+  into running totals and into a per-purpose map. A call that does not declare a purpose lands in
+  `unlabelled`, and `armReportRow` treats that as fatal rather than as rounding: *"N calls on arm A
+  do not say what they were for, so their tokens cannot be attributed."* The alternative — a second
+  pass that recomputed the split from the per-purpose map — was implemented, measured **284 bytes**
+  fatter in the `ai` bundle (41,555 B against 41,271 B), and reverted; a property test pins
+  `Σ purposes == totals` so a purpose added to one view and not the other fails a test instead of
+  skewing a table.
+
+  The split lands per case in `tokens.byPurpose`, is averaged into `ArmReportRow.tokens.byPurpose`,
+  and `bench:bird:card` prints it as shares of the case total with two absolute failures beside it: a
+  non-zero `unlabelled` count, and a per-purpose split that does not add up to the billed total
+  within `max(1, 2%)`. `select` and `compare` are named as selector calls in the footnote, because a
+  reader who is told only "447 tokens" cannot tell whether that is a sample or a decision.
 
 - **A rate per stratum, with the width that makes it readable.** A shuffled run produces one
   conversion rate per candidate slot, four hundred to a thousand cases each, and `52.6 / 49.1 /

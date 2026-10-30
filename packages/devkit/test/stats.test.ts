@@ -165,6 +165,40 @@ describe('arm summaries', () => {
   it('refuses arms with different case sets', () => {
     expect(() => compareArms(first, summarise('c', [{ id: '1', passed: true }]))).toThrow(/missing case/);
   });
+
+  it('pairs a question the split lists twice by occurrence, not by id', () => {
+    // Mini-Dev lists questions 137 and 138 twice each. A second arm keyed by id makes both of the
+    // first arm's rows look up the last answer recorded for that id, so a pass on one draw is
+    // compared against a pass on the other and the discordant counts — the numbers McNemar and the
+    // interval are computed from — move by up to one pair per duplicate.
+    const repeated = summarise('r', [
+      { id: '137', passed: false },
+      { id: '137', passed: true },
+    ]);
+    const crossed = summarise('c', [
+      { id: '137', passed: true },
+      { id: '137', passed: false },
+    ]);
+    expect(compareArms(repeated, crossed)).toEqual({
+      onlyFirst: 1,
+      onlySecond: 1,
+      both: 0,
+      neither: 0,
+      total: 2,
+      delta: 0,
+      discordant: 2,
+    });
+  });
+
+  it('refuses arms that did not answer the same questions', () => {
+    const twice = summarise('t', [{ id: '7', passed: true }, { id: '7', passed: true }]);
+    const once = summarise('u', [{ id: '7', passed: true }]);
+    expect(() => compareArms(twice, once)).toThrow(/missing case/);
+    // Equal counts and different questions: the queue runs dry inside the loop, so a shorter arm
+    // cannot pass for a mismatched one just because the totals match.
+    const elsewhere = summarise('o', [{ id: '8', passed: true }, { id: '8', passed: true }]);
+    expect(() => compareArms(twice, elsewhere)).toThrow(/missing case 7/);
+  });
 });
 
 describe('execution accuracy', () => {

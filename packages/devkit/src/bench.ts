@@ -32,20 +32,34 @@ export interface PairedComparison {
   readonly discordant: number;
 }
 
-/** Pair two arms case by case. The ids must match exactly. */
+/**
+ * Pair two arms case by case. The ids must match exactly.
+ *
+ * An id is not a key. Mini-Dev lists questions 137 and 138 twice each — the published file has
+ * 500 rows for 498 questions — and a map keyed by id lets both of the first arm's rows read the
+ * last answer the second arm recorded for that id, so a pass on one draw is compared with a pass
+ * on the other. That moves a pair between `onlyFirst` and `onlySecond`, which are the counts
+ * McNemar and the interval are computed from, while `delta` stays right because it is taken from
+ * the accuracies. Occurrences are consumed in the order the arms answered them instead, and an
+ * arm that did not answer a question the same number of times is refused rather than matched to
+ * whatever was left over.
+ */
 export function compareArms(first: ArmResult, second: ArmResult): PairedComparison {
-  const secondById = new Map(second.outcomes.map((outcome) => [outcome.id, outcome.passed]));
+  if (first.outcomes.length !== second.outcomes.length) throw new Error(`arm ${second.arm} is missing cases`);
+  const pending = new Map<string, boolean[]>();
+  for (const { id, passed } of second.outcomes) pending.set(id, [...(pending.get(id) ?? []), passed]);
   let onlyFirst = 0;
   let onlySecond = 0;
   let both = 0;
   let neither = 0;
-  for (const outcome of first.outcomes) {
-    const other = secondById.get(outcome.id);
-    if (other === undefined) throw new Error(`arm ${second.arm} is missing case ${outcome.id}`);
-    if (outcome.passed && other) both += 1;
-    else if (outcome.passed) onlyFirst += 1;
-    else if (other) onlySecond += 1;
-    else neither += 1;
+  for (const { id, passed } of first.outcomes) {
+    const other = pending.get(id)?.shift();
+    if (other === undefined) throw new Error(`arm ${second.arm} is missing case ${id}`);
+    if (passed === other) {
+      if (passed) both += 1;
+      else neither += 1;
+    } else if (passed) onlyFirst += 1;
+    else onlySecond += 1;
   }
   return {
     onlyFirst,
