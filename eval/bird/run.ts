@@ -681,6 +681,15 @@ export interface CandidateFailures {
 export interface CaseTokens {
   readonly prompt: number;
   readonly completion: number;
+  /**
+   * Characters of the requests those tokens were counted from.
+   *
+   * The same calls, message for message, so the ratio between this and `prompt` is a fact about
+   * one request. Pairing the token count with a character count taken from the system message
+   * alone would produce a ratio no tokenizer stands behind — the selector call sends candidates
+   * and no system card, and it is a quarter of the bill.
+   */
+  readonly chars: number;
   /** Answers that arrived without a usage block: a cost that is unknown, not zero. */
   readonly unbilled: number;
 }
@@ -2392,6 +2401,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
         tokens: {
           prompt: primary.promptTokens + (second?.promptTokens ?? 0),
           completion: primary.completionTokens + (second?.completionTokens ?? 0),
+          chars: primary.chars + (second?.chars ?? 0),
           unbilled: primary.unbilled + (second?.unbilled ?? 0),
         },
       };
@@ -2877,6 +2887,7 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
           tokens: {
             prompt: Math.round(metered.reduce((total, cost) => total + cost.prompt, 0) / metered.length),
             completion: Math.round(metered.reduce((total, cost) => total + cost.completion, 0) / metered.length),
+            chars: Math.round(metered.reduce((total, cost) => total + cost.chars, 0) / metered.length),
             unbilled: metered.reduce((total, cost) => total + cost.unbilled, 0),
           },
         }),

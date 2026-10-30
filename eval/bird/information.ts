@@ -47,6 +47,8 @@ import type { SchemaTable } from '@agentix-e/nl2charts-ai';
 import { buildSchema, loadQuestions, loadTables } from './data.js';
 import type { BirdQuestion, BirdTable } from './data.js';
 import type { CaseRecord } from './gap.js';
+import { graphOf } from './join-graph.js';
+import { pruneSchema } from './prune.js';
 import { promptFor, renderableArm, resolveArm, resolveLayout } from './run.js';
 // Re-exported: this instrument's gate is a property of the arm, and its callers import it here.
 export { renderableArm };
@@ -298,9 +300,16 @@ export interface InfoReportShape {
  */
 export function promptForCase(arm: Arm, question: BirdQuestion, definitions: string, tables: BirdTable): string {
   const card = attachDefinitions(buildSchema(tables, new Map(), { withNotes: false }), definitions);
+  // The same rule the runner applies: an arm that sends the join closure sends it here too, or
+  // this instrument would measure the whole card and call it the prompt that was sent.
+  const schema =
+    arm.prune === undefined
+      ? (card.schema as SchemaTable[])
+      : (pruneSchema({ schema: card.schema as SchemaTable[], question: question.question, graph: graphOf(tables), hops: arm.prune })
+          .schema as SchemaTable[]);
   const built = buildAskMessages({
     question: question.question,
-    schema: card.schema as SchemaTable[],
+    schema,
     prompt: promptFor(arm, question, {}),
     linking: arm.linking,
     samples: arm.samples === true,

@@ -12,7 +12,8 @@
  * asserted is the text a model would read rather than a schema object that looks right.
  */
 import { describe, expect, it } from 'vitest';
-import { graphForDatabase, joinGraphOf } from '../eval/bird/join-graph.js';
+import { graphForDatabase, graphOf, joinGraphOf } from '../eval/bird/join-graph.js';
+import { promptForCase } from '../eval/bird/information.js';
 import { CANDIDATE_RECALLERS, SHIPPED_RECALLERS, linkedTables, pruneSchema } from '../eval/bird/prune.js';
 import { promptOf } from '../eval/bird/card.js';
 import { resolveArm } from '../eval/bird/run.js';
@@ -174,6 +175,9 @@ describe('the graph a run builds', () => {
     // question would make the lever pay for a walk of the manifest it never uses.
     const graphFor = graphForDatabase(new Map([['db', MANIFEST]]));
     expect(graphFor('db')).toBe(graphFor('db'));
+    // One cache, two entry points: the map keyed by database and the one keyed by manifest are
+    // the same graph, so an instrument cannot build a second graph and measure a second thing.
+    expect(graphFor('db')).toBe(graphOf(MANIFEST));
     expect(graphFor('db').edges).toBe(joinGraphOf(MANIFEST).edges);
   });
 
@@ -207,6 +211,14 @@ describe('the prompt the arm sends', () => {
     // a cheaper prompt measuring a different question.
     expect(closed.system).toContain('items');
     expect(closed.system).toContain('orders');
+  });
+
+  it('is the same rule in the instrument that reads the prompt, not only in the runner', () => {
+    // `bench:bird:info` renders the prompt to ask what information it carries. An arm that sends
+    // the closure must send it there too, or that instrument measures the whole card and reports
+    // it as the prompt that was sent.
+    expect(promptForCase(parent, question(NAMES_A_COLUMN), '', MANIFEST)).toContain('warehouse_code');
+    expect(promptForCase(pruned, question(NAMES_A_COLUMN), '', MANIFEST)).not.toContain('warehouse_code');
   });
 
   it('renders the whole card for a question the linker cannot see', () => {

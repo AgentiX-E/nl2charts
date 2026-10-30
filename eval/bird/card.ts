@@ -33,7 +33,7 @@ import type { PromptOptions, SchemaTable } from '@agentix-e/nl2charts-ai';
 import { buildSchema, loadQuestions, loadTables } from './data.js';
 import type { BirdQuestion, BirdTable } from './data.js';
 import type { CaseRecord } from './gap.js';
-import { joinGraphOf } from './join-graph.js';
+import { graphOf } from './join-graph.js';
 import { CANDIDATE_RECALLERS, SHIPPED_RECALLERS, linkedTables, pruneSchema } from './prune.js';
 import { promptFor, renderableArm, resolveArm, resolveLayout } from './run.js';
 import type { Arm, BirdLayout } from './run.js';
@@ -306,7 +306,7 @@ export interface BilledRow {
   readonly arm: string;
   /** Mean calls per case, which is the denominator of every per-call number below. */
   readonly calls: number;
-  /** Mean characters per call, rebuilt from the prompt — the unit the rest of this tool uses. */
+  /** Mean characters per call, counted from the requests the endpoint answered. */
   readonly charsPerCall: number;
   readonly promptTokensPerCall: number;
   readonly completionTokensPerCase: number;
@@ -330,8 +330,12 @@ export interface BilledReportShape {
   readonly arms?: readonly {
     readonly arm?: string;
     readonly calls?: { readonly mean?: number };
-    readonly promptChars?: { readonly mean?: number };
-    readonly tokens?: { readonly prompt?: number; readonly completion?: number; readonly unbilled?: number };
+    readonly tokens?: {
+      readonly prompt?: number;
+      readonly completion?: number;
+      readonly chars?: number;
+      readonly unbilled?: number;
+    };
   }[];
 }
 
@@ -350,11 +354,13 @@ export function billedRows(report: BilledReportShape): BilledRow[] {
     const name = arm.arm;
     if (name === undefined) continue;
     const calls = arm.calls?.mean ?? 0;
-    const chars = arm.promptChars?.mean ?? 0;
     const tokens = arm.tokens;
     const promptTokens = tokens?.prompt ?? 0;
+    // Both per-call means come from the same calls: the characters are the text of the requests
+    // the meter saw, not the system message this tool rebuilds. That is the only pairing under
+    // which "characters per token" is a fact about a request rather than about two of them.
     const perCall = calls > 0 ? promptTokens / calls : 0;
-    const perCallChars = calls > 0 ? chars / calls : 0;
+    const perCallChars = calls > 0 ? (tokens?.chars ?? 0) / calls : 0;
     rows.push({
       arm: name,
       calls,
@@ -484,7 +490,7 @@ export function promptOf(
   const pruned =
     arm.prune === undefined
       ? (card.schema as SchemaTable[])
-      : (pruneSchema({ schema: card.schema as SchemaTable[], question: question.question, graph: joinGraphOf(tables), hops: arm.prune })
+      : (pruneSchema({ schema: card.schema as SchemaTable[], question: question.question, graph: graphOf(tables), hops: arm.prune })
           .schema as SchemaTable[]);
   const schema = pruned;
   const options = promptFor(arm, question, {});

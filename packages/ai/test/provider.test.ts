@@ -375,10 +375,12 @@ describe('withCallCounter', () => {
           : { text: 'x', model: 'm', usage: { promptTokens: 100, completionTokens: 10 } };
       },
     });
-    expect(priced.usage()).toEqual({ promptTokens: 0, completionTokens: 0, unbilled: 0 });
+    expect(priced.usage()).toEqual({ promptTokens: 0, completionTokens: 0, chars: 0, unbilled: 0 });
     for (let index = 0; index < 3; index += 1) await priced.provider.complete({ messages: [{ role: 'user', content: 'q' }] });
     expect(priced.calls()).toBe(3);
-    expect(priced.usage()).toEqual({ promptTokens: 200, completionTokens: 20, unbilled: 1 });
+    // `chars` is the text of the same three requests: one character per call in this stub, which
+    // is how the ratio stays a fact about one request rather than two.
+    expect(priced.usage()).toEqual({ promptTokens: 200, completionTokens: 20, chars: 3, unbilled: 1 });
   });
 
   it('counts two counters separately, so a concurrent case cannot borrow another case\'s calls', async () => {

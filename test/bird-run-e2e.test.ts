@@ -262,12 +262,20 @@ describe('a full run', () => {
     // for and `tokens` is what came back. A report with one and not the other is a report whose
     // cost cannot be checked against a provider's invoice.
     const result = await run({ plan: { first: correct }, env: { BIRD_ARMS: 'inline+evidence' } });
-    const [row] = result.report.arms as { arm: string; calls: { mean: number }; tokens: { prompt: number; completion: number; unbilled: number } }[];
+    const [row] = result.report.arms as { arm: string; calls: { mean: number }; tokens: { prompt: number; completion: number; chars: number; unbilled: number } }[];
     // The stub endpoint prices every answer at seven prompt tokens and three completion tokens,
     // one call per case: a mean that differs from that is a meter reading the wrong request.
-    expect(row?.tokens).toEqual({ prompt: 7, completion: 3, unbilled: 0 });
-    const cases = result.report.cases as { arm: string; tokens?: { prompt: number; completion: number; unbilled: number } }[];
+    expect(row?.tokens).toMatchObject({ prompt: 7, completion: 3, unbilled: 0 });
+    // One call per case, so the characters are the length of the prompts the stub saw.
+    expect(row?.tokens.chars).toBeGreaterThan(0);
+    const cases = result.report.cases as {
+      arm: string;
+      tokens?: { prompt: number; completion: number; chars: number; unbilled: number };
+    }[];
     expect(cases.every((entry) => entry.tokens?.prompt === 7 && entry.tokens.completion === 3 && entry.tokens.unbilled === 0)).toBe(true);
+    // The characters are counted from the same requests: four calls, so a case's character count
+    // is four times the length of a prompt the stub saw, never zero.
+    expect(cases.every((entry) => (entry.tokens?.chars ?? 0) > 0)).toBe(true);
   });
 
   it('sends the join closure on the prune arm, and says what it billed', async () => {
@@ -281,7 +289,7 @@ describe('a full run', () => {
       total: number;
       calls: { mean: number };
       promptChars: { mean: number };
-      tokens: { prompt: number; completion: number; unbilled: number };
+      tokens: { prompt: number; completion: number; chars: number; unbilled: number };
     }[];
     expect(row?.arm).toBe('select-prune');
     expect(row?.passed).toBe(QUESTIONS.length);
@@ -289,7 +297,8 @@ describe('a full run', () => {
     expect(row?.calls.mean).toBe(4);
     // Four calls at seven prompt tokens each: the meter is reading the whole case, not the last
     // call, which is the mistake a per-call total would make invisible.
-    expect(row?.tokens).toEqual({ prompt: 28, completion: 12, unbilled: 0 });
+    expect(row?.tokens).toMatchObject({ prompt: 28, completion: 12, unbilled: 0 });
+    expect(row?.tokens.chars).toBeGreaterThan(0);
     expect(row?.promptChars.mean).toBeGreaterThan(0);
   });
 

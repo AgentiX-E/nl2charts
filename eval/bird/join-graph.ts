@@ -166,24 +166,34 @@ export function closureOf(adjacency: ReadonlyMap<string, readonly string[]>, see
 }
 
 /**
- * The graph of every database, built once and on demand.
+ * The graph of one manifest, built once.
  *
- * The prune arm asks for the same database's graph on every one of its questions, and building it
- * per question would make the lever pay for a walk of the manifest it does not use.
+ * Cached on the manifest itself, because every caller asks for the same database's graph on every
+ * question it scores: the card instrument, the join instrument and the prune rule all loop over
+ * one manifest, and rebuilding the graph per question would make a lever pay for a walk of the
+ * manifest it never uses. A `WeakMap` keyed on the manifest means the cache goes away with it.
+ */
+const GRAPHS = new WeakMap<BirdTable, JoinGraph>();
+
+export function graphOf(manifest: BirdTable): JoinGraph {
+  const cached = GRAPHS.get(manifest);
+  if (cached !== undefined) return cached;
+  const graph = joinGraphOf(manifest);
+  GRAPHS.set(manifest, graph);
+  return graph;
+}
+
+/**
+ * The graph of every database a run covers.
  *
  * A database the manifest does not describe is an error rather than an empty graph: an empty
  * graph would prune every card down to the tables the question named, and that would look like a
  * saving rather than a broken input.
  */
 export function graphForDatabase(tables: ReadonlyMap<string, BirdTable>): (db: string) => JoinGraph {
-  const built = new Map<string, JoinGraph>();
   return (db) => {
-    const cached = built.get(db);
-    if (cached !== undefined) return cached;
     const manifest = tables.get(db);
     if (manifest === undefined) throw new Error(`prune: the run has no manifest for ${db}`);
-    const graph = joinGraphOf(manifest);
-    built.set(db, graph);
-    return graph;
+    return graphOf(manifest);
   };
 }

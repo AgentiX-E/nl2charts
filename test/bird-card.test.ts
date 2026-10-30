@@ -256,16 +256,16 @@ describe('what the provider billed', () => {
   const armRow = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
     arm: 'select',
     calls: { mean: 4, max: 4 },
-    promptChars: { mean: 12_000, max: 13_000 },
-    tokens: { prompt: 3_200, completion: 200, unbilled: 0 },
+    tokens: { prompt: 3_200, completion: 200, chars: 12_000, unbilled: 0 },
     ...overrides,
   });
 
   it('turns per-case sums into per-call means, because a call is the unit the lever is priced in', () => {
     const [row] = billedRows({ arms: [armRow()] });
     // 12,000 characters over four calls is 3,000 a call; 3,200 tokens over four is 800, so the
-    // ratio is 3.75 characters per token — the calibration the character instrument cannot get
-    // on its own.
+    // ratio is 3.75 characters per token — the calibration the character instruments cannot get
+    // on their own. Both means come from the same four calls: a ratio taken across two different
+    // requests would have no tokenizer behind it.
     expect(row).toMatchObject({ arm: 'select', calls: 4, charsPerCall: 3_000, promptTokensPerCall: 800, charsPerToken: 3.75 });
     expect(row?.unmetered).toBe(false);
   });
@@ -292,12 +292,12 @@ describe('what the provider billed', () => {
 
   it('fails an arm that reports calls and zero tokens', () => {
     // The failure the gate exists for: a meter that did not run reads exactly like free work.
-    const problems = billedProblems(billedRows({ arms: [armRow({ tokens: { prompt: 0, completion: 0, unbilled: 0 } })] }));
+    const problems = billedProblems(billedRows({ arms: [armRow({ tokens: { prompt: 0, completion: 0, chars: 0, unbilled: 0 } })] }));
     expect(problems[0]).toContain('zero prompt tokens');
   });
 
   it('fails an answer that arrived without a usage block', () => {
-    const problems = billedProblems(billedRows({ arms: [armRow({ tokens: { prompt: 3_200, completion: 200, unbilled: 2 } })] }));
+    const problems = billedProblems(billedRows({ arms: [armRow({ tokens: { prompt: 3_200, completion: 200, chars: 12_000, unbilled: 2 } })] }));
     expect(problems[0]).toContain('select (2)');
     expect(problems[0]).toContain('unknown');
   });
@@ -305,7 +305,7 @@ describe('what the provider billed', () => {
   it('fails a character count that cannot be the same text as the token count', () => {
     // Below half a character per token there is no tokenizer: the two columns describe different
     // requests, which is the one disagreement neither number shows on its own.
-    const problems = billedProblems(billedRows({ arms: [armRow({ promptChars: { mean: 1_000 }, tokens: { prompt: 3_200, completion: 0, unbilled: 0 } })] }));
+    const problems = billedProblems(billedRows({ arms: [armRow({ tokens: { prompt: 3_200, completion: 0, chars: 1_000, unbilled: 0 } })] }));
     expect(problems[0]).toContain('different prompts');
   });
 
@@ -316,20 +316,20 @@ describe('what the provider billed', () => {
   it('reports no per-call cost for an arm the artifact gave no call count', () => {
     // Not an error: an arm that never ran has no denominator, and dividing by a substituted one
     // would invent a cost per call.
-    const [row] = billedRows({ arms: [{ arm: 'names', tokens: { prompt: 0, completion: 0, unbilled: 0 } }] });
+    const [row] = billedRows({ arms: [{ arm: 'names', tokens: { prompt: 0, completion: 0, chars: 0, unbilled: 0 } }] });
     expect(row).toMatchObject({ calls: 0, charsPerCall: 0, promptTokensPerCall: 0, charsPerToken: 0 });
     expect(billedLines([row!]).join('\n')).toContain(' - ');
   });
 
-  it('reports no character count when the artifact carries no prompt size', () => {
-    // A report from before `promptChars` existed still has calls and tokens: the token column is
-    // readable and the ratio is not, and saying so is better than a ratio of zero.
+  it('reports no character count when the meter did not count characters', () => {
+    // A report written before the meter counted characters still has calls and tokens: the token
+    // column is readable and the ratio is not, and saying so is better than a ratio of zero.
     const [row] = billedRows({ arms: [{ arm: 'names', calls: { mean: 2 }, tokens: { prompt: 100, completion: 10, unbilled: 0 } }] });
     expect(row).toMatchObject({ charsPerCall: 0, promptTokensPerCall: 50, charsPerToken: 0 });
   });
 
   it('carries the billed arms into the measurement it publishes', () => {
-    const rows = billedRows({ arms: [armRow(), armRow({ arm: 'select-prune', tokens: { prompt: 2_800, completion: 190, unbilled: 0 } })] });
+    const rows = billedRows({ arms: [armRow(), armRow({ arm: 'select-prune', tokens: { prompt: 2_800, completion: 190, chars: 10_400, unbilled: 0 } })] });
     expect(rows.map((row) => row.arm)).toEqual(['select', 'select-prune']);
     const lines = billedLines(rows).join('\n');
     expect(lines).toContain('select-prune');

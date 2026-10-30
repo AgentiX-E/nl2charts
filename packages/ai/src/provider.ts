@@ -216,6 +216,9 @@ export function createHttpProvider(options: HttpProviderOptions): LlmProvider {
 /**
  * ...and what it was billed, in the endpoint's own unit.
  *
+ * `chars` is the text those tokens were counted from — the same calls, the same messages — which
+ * is what makes the characters-per-token ratio a measurement rather than a coincidence.
+ *
  * `unbilled` is the field that makes the other two publishable. A provider that answers without a
  * usage block is not free — it is unmeasured, and a cost column that reported it as zero tokens
  * would be a measurement of nothing that reads as zero. Counting those answers apart is what lets
@@ -229,11 +232,12 @@ export function withCallCounter(provider: LlmProvider): {
   readonly provider: LlmProvider;
   /** Calls the harness asked for, including the ones that never answered. */
   readonly calls: () => number;
-  readonly usage: () => { readonly promptTokens: number; readonly completionTokens: number; readonly unbilled: number };
+  readonly usage: () => { readonly promptTokens: number; readonly completionTokens: number; readonly chars: number; readonly unbilled: number };
 } {
   let calls = 0;
   let promptTokens = 0;
   let completionTokens = 0;
+  let chars = 0;
   let unbilled = 0;
   return {
     provider: {
@@ -241,6 +245,11 @@ export function withCallCounter(provider: LlmProvider): {
       model: provider.model,
       complete: async (request, options) => {
         calls += 1;
+        // The characters of the request as it was sent. A token count can only be calibrated
+        // against the text of the *same* request: pairing it with a character count taken from a
+        // different prompt (say, the system message alone) produces a ratio that has no tokenizer
+        // behind it and still looks like one.
+        for (const message of request.messages) chars += message.content.length;
         const response = await provider.complete(request, options);
         // Read per answer rather than per arm: an endpoint that reports usage on some answers and
         // not others is a state that exists, and summing only what arrived would hide it.
@@ -254,6 +263,6 @@ export function withCallCounter(provider: LlmProvider): {
       },
     },
     calls: () => calls,
-    usage: () => ({ promptTokens, completionTokens, unbilled }),
+    usage: () => ({ promptTokens, completionTokens, chars, unbilled }),
   };
 }
