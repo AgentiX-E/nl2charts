@@ -591,7 +591,7 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   // inside 2.10pp; `select5` +0.40pp inside 3.33pp for the largest bill in the catalogue.
   vote: 'majority over the same three candidates: the selector control, measured 17:17 against `select` (p = 1) — running it every push re-derives a tie at 2,092 tokens',
   'select-prune': 'the card cut to the join closure: measured −1.4pp, and the loss is the ceiling rather than the selector (1,008 → 980 reachable cases), so it is priced; run it when the card changes',
-  'inline+evidence+llm-select': 'the card cut to the columns the model names: one call before the statement, and the only arm here whose relevance rule is not the lexical linker — dispatched to answer the mechanism question a competitor gap raises, not on every push',
+  'inline+evidence+llm-select': 'the card cut to the columns the model names: measured −5.65pp against its parent (53:25, p = 0.0020, MDE 4.99pp) on 496 questions at `41190457163`, with the choice deciding 495 of 496 cases and keeping 10.8% of the columns for +39% prompt tokens — the mechanism fires and is a net loss, so it is kept as the ablation reference for relevance-by-model rather than run on every push',
   'select-mixed': 'three decompositions instead of three samples: within its MDE of a single call on this split, and the decomposition question needs the dev split to be answered',
   'select-duo': 'two prompts and a selector: measured −0.60pp against `vote` for the same money, superseded',
   select5: 'five samples and a selector: 4,103 tokens a case, the largest bill in the catalogue, and +0.40pp inside a 3.33pp MDE — the arm whose own measurement says the ceiling is not the sampler',
@@ -672,6 +672,10 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   ['inline+repair', 'inline+shape'],
   ['inline-definitions', 'interpret'],
   ['inline+evidence', 'vote'],
+  // One lever: who cuts the card — nobody, or the model in one call before the statement. The
+  // only card pair in this table whose rule is not the lexical linker, which is what makes it
+  // the pair that can price relevance-by-model against relevance-by-graph.
+  ['inline+evidence', 'inline+evidence+llm-select'],
   ['vote', 'select'],
   // Where the candidates come from, held against how many there are: same count, same
   // selector, different prompts.
@@ -1282,7 +1286,7 @@ export function decompositionFunnel(runs: readonly CaseRun[]): {
 /**
  * What the column choice kept, over the cases that made one.
  *
- * `share` is the mean of the per-case `kept / total`, not the ratio of the sums: databases
+ * `cardShare` is the mean of the per-case `kept / total`, not the ratio of the sums: databases
  * differ by a factor of ten in column count, and a ratio of sums would let one wide database
  * decide what "the card shrank" means. `decided` is reported beside it because a reply that
  * resolved nothing sends the whole card and would otherwise look like a choice that kept
@@ -1334,7 +1338,8 @@ export function assertColumnChoiceRan(armName: string, runs: readonly CaseRun[],
   );
 }
 
-/** True when this arm asks any of its candidates to decompose. */export function declaresDecomposition(arm: Pick<Arm, 'decompose' | 'mixed'>): boolean {
+/** True when this arm asks any of its candidates to decompose. */
+export function declaresDecomposition(arm: Pick<Arm, 'decompose' | 'mixed'>): boolean {
   return arm.decompose === true || (arm.mixed ?? []).some((source) => parseMixedSource(source).arm === 'decompose');
 }
 

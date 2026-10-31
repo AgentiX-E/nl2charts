@@ -31,6 +31,15 @@ cannot be argued with.
   `before-column-selection`: it spends no calls and therefore cannot show the card a model would
   choose, and a preview presented as the sent prompt is the drift this harness exists to prevent.
 
+  **Measured, and rejected.** On `41190457163` (496 questions, `deepseek-chat`, one arm per run)
+  the mechanism fires on 495 of 496 cases and keeps a mean 10.8% of the columns — and scores
+  250/496 against the parent's 278/496: **−5.65pp, 53 only-parent / 25 only-lever, McNemar
+  p = 0.0020, MDE 4.99pp, 95% CI [−9.14, −2.16]pp**. It is also more expensive, not less: the
+  choice costs 778 prompt tokens a case to remove 505 from the generation prompt, +39% net. A
+  model-chosen card therefore does not explain a competitor gap on this pipeline; it is the
+  ablation reference for relevance-by-model, and `select-prune` (−1.4pp, the graph closure) stays
+  the cheaper and better card lever.
+
 - **A comparison harness that holds the five coordinates in code, and two competitors pinned under
   it.** The leaderboard section says a number is comparable only if it shares the question set, the
   model, the prompt, the executor and the judge — and then says none of the runs that would share

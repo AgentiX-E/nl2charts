@@ -3737,6 +3737,15 @@ Three numbers make the reading admissible, and all three are in the artifact:
   afterwards. A dry run, which spends no calls, labels its preview
   `before-column-selection` instead of presenting an unpruned card as the sent prompt.
 
+The measurement (`41190457163`): the choice decided 495 of 496 cases and kept a mean
+10.8% of the columns — and the arm scored **250/496 against its parent's 278/496**, a
+loss of **5.65pp** (53 only-parent, 25 only-lever, McNemar p = 0.0020, MDE 4.99pp,
+95% CI [−9.14, −2.16]pp). It is also dearer: 778 prompt tokens for the choice to
+remove 505 from the generation prompt, +39% net. Cutting the card to what the model
+names removes columns the statement needs, so the arm is kept as the ablation
+reference for relevance-by-model and the graph closure (`select-prune`, −1.4pp) stays
+the card lever that ships.
+
 ## The floor is enforced, not remembered
 
 A benchmark that only produces a report gets read once. The BIRD arms have a
