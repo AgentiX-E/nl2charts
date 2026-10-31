@@ -3306,7 +3306,11 @@ wrong, because that is the denominator our own numbers use; it prints the answer
 accuracy and a declared-database disagreement beside both.
 
 `workflow_dispatch` on `competitors.yml` runs it in two stages. `probe` checks the checkout against
-the pin and the patch against the checkout, for the price of a clone and no model call. `full`
+the pin and the patch against the checkout, for the price of a clone and no model call. Both pins
+have been probed on a runner: `41149938353` reads MAC-SQL's head as `31a9df5e`, six of six named
+files present, nine pinned requirement lines, adapter applies; `41150217544` reads CHESS's head as
+`3d6e835f`, eight of eight, twenty-eight requirement lines, adapter applies. Neither produced a
+number, which is what the stage is for. `full`
 installs their dependencies, runs their own inference over the subset, runs one arm of ours over the
 same subset, and scores theirs against ours with the paired delta, its McNemar p and the MDE of the
 design that produced it.

@@ -28,7 +28,10 @@ cannot be argued with.
 
   `.github/workflows/competitors.yml` dispatches it in two stages: `probe` costs a clone and no model
   call, `full` installs the competitor's dependencies and runs the pipeline, one arm of ours on the
-  same subset, and the scorer. No accuracy has been published from it yet — a number from a
+  same subset, and the scorer. Both probes have run on a runner — `41149938353` for MAC-SQL (head is
+  the pin, six of six named files, nine pinned requirement lines, adapter applies) and `41150217544`
+  for CHESS (eight of eight, twenty-eight) — and neither produced a number, which is the point of the
+  stage. No accuracy has been published from it yet — a number from a
   half-installed pipeline is a number about an install — and `docs/benchmarks.md` says so.
 
 ### Measured
