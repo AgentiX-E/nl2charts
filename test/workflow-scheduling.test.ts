@@ -27,6 +27,9 @@ const HEAVY = [
   'bird-dev.yml',
   // The same split against another endpoint.
   'bird-model.yml',
+  // A competitor's pipeline, which calls the same endpoint on the same questions: the one job in
+  // this repository whose quota is somebody else's software's timing as well as ours.
+  'competitors.yml',
 ] as const;
 
 function workflow(name: string): string {

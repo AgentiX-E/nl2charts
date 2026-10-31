@@ -290,7 +290,9 @@ jobs:
         run: pnpm bench:bird:recall
       - name: DuckDB portability census
         run: pnpm bench:bird:port
-      - name: Ten-arm evaluation with paired ablations and an A/A control
+      # No number in the label: the chain has been ten, eleven and sixteen arms, and a step name
+      # that counts is a step name that lies after the next retirement.
+      - name: Every arm in the chain, with paired ablations and an A/A control
         run: pnpm bench:bird
       - name: Accuracy floor (a regression fails the build)
         run: pnpm gate:bird

@@ -1,0 +1,46 @@
+# Adapter for wbbeyourself/MAC-SQL @ 31a9df5e0d520be4769be57a4b9022e5e34a14f4.
+#
+# Two hunks, both about how a request is spelled: their config hard-codes `openai.api_type =
+# "azure"` and passes the deployment name as `engine`, which an OpenAI-compatible endpoint does not
+# accept. The endpoint, the key and the model name move to the environment; the selector, the
+# decomposer, the refiner and every prompt stay theirs.
+#
+diff --git a/core/api_config.py b/core/api_config.py
+index 63754d3..56f30bb 100644
+--- a/core/api_config.py
++++ b/core/api_config.py
+@@ -4,13 +4,16 @@ OPENAI_API_BASE = os.getenv("OPENAI_API_BASE", "your_own_api_base")
+ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "your_own_api_key")
+ 
+ import openai
+-openai.api_type = "azure"
++# The endpoint is the model coordinate: an OpenAI-compatible server rather than an Azure
++# deployment, and the model name comes from the environment rather than from a literal. This
++# is the whole adapter — the selector, the decomposer, the refiner and every prompt stay theirs.
++openai.api_type = os.getenv("OPENAI_API_TYPE", "openai")
+ openai.api_base = OPENAI_API_BASE
+-# set your own api_version
+-openai.api_version = "2023-07-01-preview"
++if os.getenv("OPENAI_API_VERSION"):
++    openai.api_version = os.getenv("OPENAI_API_VERSION")
+ openai.api_key = OPENAI_API_KEY
+ 
+-MODEL_NAME = 'gpt-4-1106-preview' # 128k 版本
++MODEL_NAME = os.getenv("LLM_MODEL", "gpt-4-1106-preview") # 128k 版本
+ # MODEL_NAME = 'CodeLlama-7b-hf'
+ # MODEL_NAME = 'gpt-4-32k' # 0613版本
+ # MODEL_NAME = 'gpt-4' # 0613版本
+diff --git a/core/llm.py b/core/llm.py
+index 51f65c2..ad4806b 100644
+--- a/core/llm.py
++++ b/core/llm.py
+@@ -42,7 +42,8 @@ def api_func(prompt:str):
+         )
+     else:
+         response = openai.ChatCompletion.create(
+-            engine=MODEL_NAME,
++            # `engine` is the Azure spelling; an OpenAI-compatible endpoint takes `model`.
++            model=MODEL_NAME,
+             messages=[{"role": "user", "content": prompt}],
+             temperature=0.1
+         )

@@ -6,6 +6,31 @@ cannot be argued with.
 
 ## Unreleased
 
+### Added
+
+- **A comparison harness that holds the five coordinates in code, and two competitors pinned under
+  it.** The leaderboard section says a number is comparable only if it shares the question set, the
+  model, the prompt, the executor and the judge — and then says none of the runs that would share
+  them exist. `eval/competitors/` is that run's machinery: `pins.json` (CHESS at `3d6e835f`, MAC-SQL
+  at `31a9df5e`, each with its licence and entrypoint), one adapter patch each that does nothing but
+  point their engine at an OpenAI-compatible endpoint, `probe.ts` (the checkout against the pin, the
+  patch against the checkout), `subset.ts` (the question file cut by the same `stratifiedSample` that
+  cuts `BIRD_LIMIT`), `predictions.ts` (the three shapes competitors write — CHESS's id-keyed map,
+  MAC-SQL's JSON Lines, BIRD's text-keyed pairs — and what each one left out), and `score.ts` (their
+  statements through this repository's `oracle.py`, judged by `judgeOfficial`).
+
+  Three refusals define it. No accuracy is printed before the coordinates hold: a failing coordinate
+  exits non-zero with both values and the cost of the mismatch, and the artifact records the
+  violation instead of a rate. No accuracy is divided by the answered subset: an unanswered question
+  is counted wrong, and the answered share is printed beside it. No delta is called a size when it is
+  inside the MDE of its own design — the line says so and prints how many questions the effect would
+  need, computed by `casesForEffect` from the discordance the run actually observed.
+
+  `.github/workflows/competitors.yml` dispatches it in two stages: `probe` costs a clone and no model
+  call, `full` installs the competitor's dependencies and runs the pipeline, one arm of ours on the
+  same subset, and the scorer. No accuracy has been published from it yet — a number from a
+  half-installed pipeline is a number about an install — and `docs/benchmarks.md` says so.
+
 ### Measured
 
 - **The chain's bill, and the five arms that were paying it for no verdict.** Nobody had added up
@@ -25,6 +50,11 @@ cannot be argued with.
   is the only arm that executes the selector path every push, and `inline+retrieval` is the
   precedent for a path that is written, wired, paired and never run.
 
+  The next push re-measured the same eleven arms on `41144429545`: **11,073 prompt tokens a question**
+  against the 11,075 predicted, 14.04 nominal calls — the arithmetic to two tokens. The per-arm
+  accuracies did not hold as tightly (`select` 57.23% → 58.23%, `metadata+evidence` 59.44% twice),
+  which is the arm-level noise the repeat runs measured, arriving on the four-call arm.
+
   A budget keeps it from growing back: `test/bird-arms.test.ts` asserts the chain's nominal calls
   are at most fifteen against fourteen today, so one single-call rung fits and a four-call variant
   does not. The retired arms' floors were removed with them rather than left as floors nothing would
@@ -38,8 +68,8 @@ cannot be argued with.
   on. The section now carries the five coordinates a comparison has to hold and states the correct
   claim instead: **11.3pp behind, and how much of that is the pipeline is unknown.** A comparison
   that counts has to run a pinned competitor commit on this repository's runner against the same
-  endpoint and question file, with its predictions scored by this harness's executor and judge;
-  none of those runs exist yet, and the plan's first item is to build the harness that produces them.
+  endpoint and question file, with its predictions scored by this harness's executor and judge. That
+  harness now exists (`eval/competitors/`, see Added) and no run through it has been published yet.
 
 - **The selector is billed for 17.6% of every case and returns a coin.** The first run that meters
   per call (`41092489988`) splits `select`'s 2,539 prompt tokens per question into 2,092 for the

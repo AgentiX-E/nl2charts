@@ -3287,9 +3287,36 @@ coordinate is a way for a model difference to wear the clothes of a method diffe
 | executor | this repository's oracle, one process per run | dialect differences read as errors |
 | judge | `judgeOfficial` over executed result sets | two judges, two scores, one table |
 
-None of those runs exist yet. Until they do, the correct statement about the leaderboard is the one
-this section now makes: **this harness is 11.3pp behind the published state of the art, and how much
-of that gap is the pipeline is unknown.**
+None of those runs existed when this table was written. The harness for them does now, and it is the
+table above written as code rather than as prose:
+
+| piece | what it holds | what it refuses |
+| --- | --- | --- |
+| `eval/competitors/pins.json` | two competitors at a full sha, with the date, the licence and the entrypoint | a branch, a tag or a short sha |
+| `eval/competitors/patches/*.patch` | one adapter each — the engine alias, and nothing else | a patch that stopped applying, checked before a model call |
+| `eval/competitors/probe.ts` | the checkout against the pin, the patch against the checkout | a run from a half-patched tree |
+| `eval/competitors/subset.ts` | the question file, cut by the same `stratifiedSample` that cuts `BIRD_LIMIT` | two samples read as one question set |
+| `eval/competitors/predictions.ts` | the three shapes competitors write, and what each left out | an accuracy whose denominator is the answered subset |
+| `eval/competitors/score.ts` | their statements through `oracle.py`, judged by `judgeOfficial` | any accuracy before all five coordinates hold |
+
+The two pins are CHESS (`ShayanTalaei/CHESS`, Apache-2.0, five agents, ten-plus-ten candidates a
+question) and MAC-SQL (`wbbeyourself/MAC-SQL`, no licence file, three agents, two or three calls a
+question, and therefore the cheap one to run first). `score.ts` counts an unanswered question as
+wrong, because that is the denominator our own numbers use; it prints the answered share beside the
+accuracy and a declared-database disagreement beside both.
+
+`workflow_dispatch` on `competitors.yml` runs it in two stages. `probe` checks the checkout against
+the pin and the patch against the checkout, for the price of a clone and no model call. `full`
+installs their dependencies, runs their own inference over the subset, runs one arm of ours over the
+same subset, and scores theirs against ours with the paired delta, its McNemar p and the MDE of the
+design that produced it.
+
+No accuracy has been published from it, and the reason is the discipline that retired five arms: a
+number from a half-installed pipeline is a number about an install. What exists is the machinery
+that makes the first number checkable — commit, model, host, question-set hash and judge in the same
+file as the rate. Until one arrives, the correct statement about the leaderboard is still: **this
+harness is 11.3pp behind the published state of the art, and how much of that gap is the pipeline is
+unknown.**
 
 
 ### Where the pruned card's 1.5 points go
@@ -3434,6 +3461,14 @@ What keeps this from un-happening is a budget rather than a resolution: `test/bi
 asserts the chain's nominal calls are at most fifteen against fourteen today, so one more
 single-call rung fits and a four-call variant does not. The next arm that wants four calls has to
 remove two, and write down why.
+
+One push later the same eleven arms re-measured the bill, on `41144429545`: **11,073** prompt tokens
+a question against the 11,075 predicted above, and 14.04 nominal calls. That is the arithmetic
+holding to two tokens. The accuracies did not hold as tightly — `select` read 58.23% in that run
+against 57.23% here, and `metadata+evidence` 59.44% both times — which is the arm-level noise
+*Three runs, and the p-value a repeat buys* measured, arriving on the one arm with four calls in it.
+The bill is stable across runs; the per-arm accuracy is not, which is why no sentence above rests on
+a single arm's rate.
 
 The retired arms did not lose their floors so much as outlive them: a floor on an arm the chain does
 not run is a floor nothing will notice, and the gate says so out loud. Their measurements are the

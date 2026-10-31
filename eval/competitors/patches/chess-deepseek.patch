@@ -1,0 +1,53 @@
+# Adapter for ShayanTalaei/CHESS @ 3d6e835f858d26885d21d4bc0215aeecf855efbe.
+#
+# One engine alias onto an OpenAI-compatible endpoint, so that every agent, every prompt and every
+# sampling count in their tree runs unchanged. The alias is the model coordinate — the thing a
+# comparison holds fixed — and nothing else about their pipeline moves: the same five agents, the
+# same ten-plus-ten candidate sampling, the same unit-test agent, their config file untouched but
+# for the engine name.
+#
+# Applied by the workflow with `git apply`, checked before the run by `probe.ts`, and checked into
+# this repository so that a pin that stops accepting it fails on the next dispatch rather than
+# producing a number from a half-patched tree.
+#
+diff --git a/src/llm/engine_configs.py b/src/llm/engine_configs.py
+index 735c3bf..ee45a25 100644
+--- a/src/llm/engine_configs.py
++++ b/src/llm/engine_configs.py
+@@ -35,6 +35,23 @@ This module defines configurations for various language models using the langcha
+ Each configuration includes a constructor, parameters, and an optional preprocessing function.
+ """
+ 
++def _compat_engine_params() -> Dict[str, Any]:
++    """Parameters for an OpenAI-compatible endpoint, taken entirely from the environment.
++
++    The model name, the base URL and the key are the coordinates a comparison holds fixed, so
++    they are read at import time rather than written here. Nothing else about the pipeline
++    changes: this is one engine alias, not a fork of the method.
++    """
++    params: Dict[str, Any] = {"model": os.getenv("LLM_MODEL", "deepseek-chat"), "temperature": 0}
++    base = os.getenv("OPENAI_BASE_URL") or os.getenv("OPENAI_API_BASE")
++    key = os.getenv("OPENAI_API_KEY")
++    if base:
++        params["openai_api_base"] = base
++    if key:
++        params["openai_api_key"] = key
++    return params
++
++
+ ENGINE_CONFIGS: Dict[str, Dict[str, Any]] = {
+     "gemini-pro": {
+         "constructor": ChatGoogleGenerativeAI,
+@@ -158,5 +175,12 @@ ENGINE_CONFIGS: Dict[str, Dict[str, Any]] = {
+                 "stop": [""]
+             }
+         }
++    },
++    # The model coordinate: one alias onto an OpenAI-compatible endpoint, so that every agent
++    # and every prompt in this tree runs unchanged against the same backbone this repository's
++    # own numbers were measured with.
++    "deepseek-chat": {
++        "constructor": ChatOpenAI,
++        "params": _compat_engine_params()
+     }
+ }

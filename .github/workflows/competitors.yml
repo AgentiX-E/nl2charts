@@ -1,0 +1,219 @@
+name: competitor pipelines
+
+# Somebody else's pipeline, on this repository's runner, under this repository's instruments.
+#
+# The leaderboard gap is 11.3pp and none of it is a claim about method: the top rows run backbones
+# this harness cannot call, four of them were trained on the task, and every number was produced by
+# a different harness executing and judging differently. The only comparison that counts is the one
+# where the only difference is the pipeline, so this workflow checks out a competitor at a pinned
+# commit, runs it against the same endpoint and the same question file, and scores its statements
+# with `eval/bird/oracle.py` and `judgeOfficial` — the two instruments every number in
+# `docs/benchmarks.md` was measured with.
+#
+# Two stages, because the first costs nothing and the second costs model calls:
+#
+# * `probe` — clone the pin, check the head, check that the adapter patch still applies. A pin that
+#   moved or a patch that rotted fails here rather than producing a number from a half-patched tree.
+# * `full` — install the competitor's dependencies, run its own inference on a subset, run our own
+#   arm on the same subset, and score theirs against ours. The subset is cut by the same
+#   `stratifiedSample` that cuts our `BIRD_LIMIT`, so the two runs answer the same questions by
+#   construction, and `score.ts` checks the two id sets against each other instead of trusting it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      competitor:
+        description: Which pinned pipeline to run
+        required: true
+        type: choice
+        default: mac-sql
+        options:
+          - mac-sql
+          - chess
+      stage:
+        description: probe checks the pin only; full runs the pipeline and scores it
+        required: true
+        type: choice
+        default: probe
+        options:
+          - probe
+          - full
+      limit:
+        description: Questions to score (blank = the whole split)
+        required: false
+        default: '25'
+      effect:
+        description: The accuracy difference a future run should be able to detect
+        required: false
+        default: '0.02'
+      arms:
+        description: Our own arm the competitor is paired against
+        required: false
+        default: metadata+evidence
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: pin ${{ inputs.competitor }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      repo: ${{ steps.pin.outputs.repo }}
+      commit: ${{ steps.pin.outputs.commit }}
+    env:
+      COMPETITOR: ${{ inputs.competitor }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Read the pin
+        id: pin
+        run: |
+          node -e '
+            const pins = require("./eval/competitors/pins.json");
+            const pin = pins[process.env.COMPETITOR];
+            if (!pin) throw new Error(`${process.env.COMPETITOR} is not pinned; pins.json holds ${Object.keys(pins).join(", ")}`);
+            console.log(`repo=${pin.repo}`);
+            console.log(`commit=${pin.commit}`);
+          ' >> "$GITHUB_OUTPUT"
+      - name: Check out the competitor at its pin
+        env:
+          REPO: ${{ steps.pin.outputs.repo }}
+          COMMIT: ${{ steps.pin.outputs.commit }}
+        run: |
+          mkdir -p .competitor
+          git -C .competitor init --quiet
+          git -C .competitor remote add origin "https://github.com/${REPO}.git"
+          # A depth-one fetch of a sha is the cheap path; a repository that refuses it gets the
+          # refs instead, and `probe.ts` is what decides whether the checkout is the pin.
+          git -C .competitor fetch --quiet --depth 1 origin "${COMMIT}" \
+            || git -C .competitor fetch --quiet origin '+refs/heads/*:refs/remotes/origin/*'
+          git -C .competitor checkout --quiet "${COMMIT}"
+      - name: The checkout is the pin, and the adapter still applies
+        run: pnpm exec tsx eval/competitors/probe.ts --name "${COMPETITOR}" --tree .competitor
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: competitor-probe-${{ inputs.competitor }}
+          path: eval/out/competitors/${{ inputs.competitor }}-probe.json
+          if-no-files-found: error
+
+  measure:
+    name: ${{ inputs.competitor }} vs ${{ inputs.arms }}
+    needs: probe
+    if: inputs.stage == 'full'
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    # One slot for every heavyweight run: they draw from the same provider quota and write to the
+    # same artifact paths.
+    concurrency:
+      group: bird-eval
+      cancel-in-progress: false
+    env:
+      COMPETITOR: ${{ inputs.competitor }}
+      BIRD_SPLIT: minidev
+      BIRD_LIMIT: ${{ inputs.limit }}
+      BIRD_ARMS: ${{ inputs.arms }}
+      BIRD_CONCURRENCY: '4'
+      LLM_MODEL: deepseek-chat
+      LLM_BASE_URL: https://api.deepseek.com/v1
+      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+      # The competitors read the OpenAI-shaped variables, because that is the SDK they call. The key
+      # is the same one: the model coordinate is what the comparison holds fixed, and a second key
+      # would be a second vendor.
+      OPENAI_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+      OPENAI_BASE_URL: https://api.deepseek.com/v1
+      OPENAI_API_BASE: https://api.deepseek.com/v1
+      OPENAI_API_TYPE: openai
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Check out the competitor at its pin, and apply the adapter
+        # Its own copy of the checkout, so the probe is repeated here: a patch that stopped applying
+        # would otherwise be discovered by a model call rather than by git.
+        run: |
+          REPO="$(node -e 'console.log(require("./eval/competitors/pins.json")[process.env.COMPETITOR].repo)')"
+          COMMIT="$(node -e 'console.log(require("./eval/competitors/pins.json")[process.env.COMPETITOR].commit)')"
+          PATCH="$(node -e 'console.log(require("./eval/competitors/pins.json")[process.env.COMPETITOR].patch)')"
+          mkdir -p .competitor
+          git -C .competitor init --quiet
+          git -C .competitor remote add origin "https://github.com/${REPO}.git"
+          git -C .competitor fetch --quiet --depth 1 origin "${COMMIT}" \
+            || git -C .competitor fetch --quiet origin '+refs/heads/*:refs/remotes/origin/*'
+          git -C .competitor checkout --quiet "${COMMIT}"
+          pnpm exec tsx eval/competitors/probe.ts --name "${COMPETITOR}" --tree .competitor
+          git -C .competitor apply "${PWD}/${PATCH}"
+          git -C .competitor diff --stat
+      - name: Install the competitor's dependencies
+        run: |
+          REQUIREMENTS="$(node -e 'console.log(require("./eval/competitors/pins.json")[process.env.COMPETITOR].requirements)')"
+          python3 -m pip install --quiet --disable-pip-version-check -r ".competitor/${REQUIREMENTS}"
+      - name: Cache the external dataset
+        uses: actions/cache@v4
+        with:
+          path: eval/.cache/bird/minidev
+          key: bird-minidev-v3-${{ runner.os }}
+      - name: Fetch Mini-Dev (no-op when the cache is warm)
+        run: node eval/bird/fetch.mjs
+      - name: Cut the subset both pipelines will answer
+        run: pnpm exec tsx eval/competitors/subset.ts --limit "${BIRD_LIMIT}" --out "eval/out/competitors/${COMPETITOR}-subset.json"
+      - name: Our own arm on the same questions
+        run: pnpm bench:bird
+      - name: Declare the run's coordinates
+        # Written here rather than derived by `score.ts`: the five coordinates are what the run
+        # claims about itself, and a scorer that filled them in would be checking itself.
+        env:
+          REPO: ${{ needs.probe.outputs.repo }}
+          COMMIT: ${{ needs.probe.outputs.commit }}
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const subset = JSON.parse(fs.readFileSync(`eval/out/competitors/${process.env.COMPETITOR}-subset.json`, "utf8"));
+            const coordinates = {
+              competitor: process.env.COMPETITOR,
+              repo: process.env.REPO,
+              commit: process.env.COMMIT,
+              split: process.env.BIRD_SPLIT,
+              questionIds: subset.map((question) => question.question_id),
+              model: process.env.LLM_MODEL,
+              endpoint: process.env.LLM_BASE_URL,
+              prompt: "competitor",
+              executor: "eval/bird/oracle.py",
+              judge: "judgeOfficial",
+            };
+            fs.writeFileSync(`eval/out/competitors/${process.env.COMPETITOR}-coordinates.json`, `${JSON.stringify(coordinates, null, 2)}\n`);
+          '
+      - name: Run the competitor's pipeline
+        run: bash .github/competitors/${{ inputs.competitor }}.sh
+      - name: Score its statements with our executor and our judge
+        run: |
+          pnpm exec tsx eval/competitors/score.ts \
+            --predictions "eval/out/competitors/predictions.json" \
+            --coordinates "eval/out/competitors/${COMPETITOR}-coordinates.json" \
+            --arm "${BIRD_ARMS}" \
+            --effect "${{ inputs.effect }}" \
+            --out "eval/out/competitors/${COMPETITOR}-score.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: competitor-${{ inputs.competitor }}
+          path: |
+            eval/out/competitors/
+            eval/out/bird-eval.json
+          if-no-files-found: warn

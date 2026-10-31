@@ -1,0 +1,39 @@
+{
+  "chess": {
+    "repo": "ShayanTalaei/CHESS",
+    "commit": "3d6e835f858d26885d21d4bc0215aeecf855efbe",
+    "committedAt": "2024-11-13T21:13:34Z",
+    "license": "Apache-2.0",
+    "entrypoint": "src/main.py",
+    "requirements": "requirements.txt",
+    "patch": "eval/competitors/patches/chess-deepseek.patch",
+    "modelHook": "src/llm/engine_configs.py",
+    "config": "run/configs/CHESS_IR_CG_UT.yaml",
+    "probe": ["src/preprocess.py", "run/run_preprocess.sh", "src/llm/prompts.py", "src/llm/models.py"],
+    "predictions": "results/<data_mode>/<setting_name>/<dataset>/<run>/-predictions.json",
+    "notes": [
+      "The pipeline is five agents: extract keywords, retrieve context, select schema, generate ten candidates twice, revise, then generate and evaluate unit tests. Their config, not ours: the only edit is the engine alias, because the alias is the model coordinate and the rest is the method under test.",
+      "Predictions are a JSON object keyed by question id whose value is `statement\t----- bird -----\tdatabase`, which `predictions.ts` reads in that shape.",
+      "requirements.txt carries sentence-transformers, faiss-cpu and chromadb, so the preprocess step downloads a sentence embedding model; the run is therefore minutes of install and a few hundred model calls, which is why it is dispatched rather than run per push.",
+      "`get_llm_chain` accepts a base_uri, but no caller passes one, so the engine has to be declared by alias: `ChatOpenAI` with `openai_api_base` from the environment is the whole adapter."
+    ]
+  },
+  "mac-sql": {
+    "repo": "wbbeyourself/MAC-SQL",
+    "commit": "31a9df5e0d520be4769be57a4b9022e5e34a14f4",
+    "committedAt": "2025-02-27T04:01:53Z",
+    "license": "none declared",
+    "entrypoint": "run.py",
+    "requirements": "requirements.txt",
+    "patch": "eval/competitors/patches/mac-sql-deepseek.patch",
+    "modelHook": "core/api_config.py",
+    "probe": ["core/llm.py", "core/chat_manager.py", "evaluation/evaluation_bird_ex.py"],
+    "predictions": "outputs/<name>/output_bird.json (JSON Lines) and outputs/<name>/predict_<mode>.json (BIRD pairs)",
+    "notes": [
+      "Three agents — a selector, a decomposer and a refiner — over a light dependency set (openai 0.28, no torch), which makes it the cheapest of the pinned pipelines to run: two or three calls a question rather than forty.",
+      "`core/api_config.py` hard-codes `openai.api_type = \"azure\"`, so the adapter is three lines: the type, the base and the model name, all from the environment.",
+      "No LICENSE file in the tree, which means no licence to redistribute: the workflow clones it at a pinned sha and never vendors it.",
+      "It writes both shapes of predictions the parser reads, so the same file supports either."
+    ]
+  }
+}

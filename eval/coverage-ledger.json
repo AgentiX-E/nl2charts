@@ -2,12 +2,12 @@
   "note": "Per-file eval coverage. Enforced by tools/check-eval-coverage.mjs: a number may rise freely and may only fall with an explicit, reviewed edit. `target` is the standard every file must reach before eval/ joins the main gate.",
   "target": 95,
   "tolerancePp": 0.2,
-  "measuredAt": "2026-10-30",
+  "measuredAt": "2026-10-31",
   "totals": {
-    "lines": 99.3,
-    "statements": 99.3,
+    "lines": 99.32,
+    "statements": 99.32,
     "functions": 100,
-    "branches": 97.64
+    "branches": 97.75
   },
   "files": {
     "eval/ablate.ts": {
@@ -225,6 +225,36 @@
       "statements": 100,
       "functions": 100,
       "branches": 97.95
+    },
+    "eval/competitors/coordinates.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 100
+    },
+    "eval/competitors/predictions.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 98.09
+    },
+    "eval/competitors/probe.ts": {
+      "lines": 98.5,
+      "statements": 98.5,
+      "functions": 100,
+      "branches": 98.71
+    },
+    "eval/competitors/score.ts": {
+      "lines": 99.2,
+      "statements": 99.2,
+      "functions": 100,
+      "branches": 98.96
+    },
+    "eval/competitors/subset.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 100
     },
     "eval/errors.ts": {
       "lines": 100,
