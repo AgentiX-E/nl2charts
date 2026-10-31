@@ -14,7 +14,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { runIfEntry } from '../entry.js';
 import { isPinnedCommit } from './coordinates.js';
 
 export interface Pin {
@@ -220,10 +220,5 @@ export function main(argv: readonly string[] = process.argv.slice(2), root = pro
   return report.problems.length === 0 ? 0 : 1;
 }
 
-export function isEntry(argv1: string | undefined, moduleUrl: string): boolean {
-  return argv1 !== undefined && pathToFileURL(argv1).href === moduleUrl;
-}
-
-if (isEntry(process.argv[1], import.meta.url)) {
-  process.exitCode = main();
-}
+// The same guard the other two tools use: a module that imported this one must not probe a tree.
+process.exitCode = runIfEntry(process.argv[1], import.meta.url, () => main());

@@ -8,10 +8,10 @@
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { loadQuestions, stratifiedSample } from '../eval/bird/data.js';
 import { questionSetHash } from '../eval/competitors/coordinates.js';
-import { main, readIdMap, resolveSubsetSettings, runIfEntry, writeSubset } from '../eval/competitors/subset.js';
+import { main, readIdMap, resolveSubsetSettings, writeSubset } from '../eval/competitors/subset.js';
 import { writeMiniBirdDataset } from './helpers/bird-dataset.js';
 
 const ROOT = process.cwd();
@@ -77,20 +77,6 @@ describe('the subset a competitor is given', () => {
     expect(main(['--limit', '4', '--out', out], dir, envFor(dir))).toBe(0);
   });
 
-  it('runs only when this module is the one being run, and says so by what it returns', () => {
-    let ran = 0;
-    const run = (): number => {
-      ran += 1;
-      return 7;
-    };
-    // Imported by a test: no command line, so no run.
-    expect(runIfEntry(undefined, 'file:///a/subset.ts', run)).toBeUndefined();
-    // Run as a different script: still no run.
-    expect(runIfEntry('/a/other.ts', 'file:///a/subset.ts', run)).toBeUndefined();
-    expect(ran).toBe(0);
-    expect(runIfEntry('/a/subset.ts', 'file:///a/subset.ts', run)).toBe(7);
-    expect(ran).toBe(1);
-  });
 });
 
 describe('the same file read back as a numbering', () => {
@@ -145,5 +131,58 @@ describe('the same file read back as a numbering', () => {
     const dir = mkdtempSync(join(tmpdir(), 'subset-'));
     const path = write(dir, [{ question_id: 36 }, { question_id: 112 }, { question_id: 36 }]);
     expect(() => readIdMap(path)).toThrow(/repeats 36, so a position no longer names one question/);
+  });
+});
+
+/**
+ * The file a competitor is given is also the numbering it is read through.
+ *
+ * Mini-Dev carries 500 rows for 498 ids, and the two repeats are at the end of the file. A subset
+ * cut from the rows therefore hands a position-numbered pipeline a file in which two positions name
+ * one question, and `readIdMap` — correctly — refuses to resolve it: a position would no longer name
+ * one question, so no statement could be attributed. Cutting from the questions instead is what
+ * keeps position and question in one-to-one correspondence.
+ */
+describe('a split that names one question twice', () => {
+  const withDuplicate = (): string => {
+    const dir = mkdtempSync(join(tmpdir(), 'subset-'));
+    writeMiniBirdDataset(dir);
+    const file = join(dir, 'mini_dev_sqlite.json');
+    const rows = JSON.parse(readFileSync(file, 'utf8')) as unknown[];
+    writeFileSync(file, JSON.stringify([...rows, rows[2]]));
+    return dir;
+  };
+
+  it('is cut one row per question, so a position names exactly one question', () => {
+    const dir = withDuplicate();
+    const subset = writeSubset(resolveSubsetSettings(envFor(dir), ['--limit', '40'], dir));
+    expect(subset.shape.rows).toBe(8);
+    expect(subset.ids).toHaveLength(7);
+    expect(new Set(subset.ids).size).toBe(7);
+    // The map a position-numbered pipeline is read through, accepted rather than refused.
+    expect(readIdMap(subset.path).ids).toEqual(subset.ids);
+  });
+
+  it('says what it collapsed, above the subset it wrote', () => {
+    const dir = withDuplicate();
+    const printed: string[] = [];
+    const log = vi.spyOn(console, 'log').mockImplementation((line: unknown) => printed.push(String(line)));
+    try {
+      expect(main(['--limit', '40', '--out', join(dir, 'subset.json')], dir, envFor(dir))).toBe(0);
+    } finally {
+      log.mockRestore();
+    }
+    expect(printed[0]).toBe('minidev split: 8 row(s), 7 question(s) — 3 repeats byte-for-byte and is counted once');
+    expect(printed[1]).toContain('7 of the minidev split');
+  });
+
+  it('refuses a split whose id names two different questions', () => {
+    const dir = withDuplicate();
+    const file = join(dir, 'mini_dev_sqlite.json');
+    const rows = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>[];
+    writeFileSync(file, JSON.stringify([...rows, { ...(rows[0] as Record<string, unknown>), SQL: 'select 1' }]));
+    expect(() => writeSubset(resolveSubsetSettings(envFor(dir), ['--limit', '40'], dir))).toThrow(
+      /question 1 appears at rows 0 and 8 with different content \(SQL\)/,
+    );
   });
 });

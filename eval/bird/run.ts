@@ -34,8 +34,8 @@ import { graphForDatabase } from './join-graph.js';
 import { ppPerExtraCall, repairFunnel } from './metrics.js';
 import { pruneSchema } from './prune.js';
 import type { CaseOutcome, MatchReason } from '@agentix-e/nl2charts-devkit';
-import { buildSchema, loadDescriptions, loadQuestions, loadTables, stratifiedSample } from './data.js';
-import type { BirdQuestion } from './data.js';
+import { buildSchema, describeQuestionSet, distinctQuestions, loadDescriptions, loadQuestions, loadTables, stratifiedSample } from './data.js';
+import type { BirdQuestion, QuestionSet } from './data.js';
 import { createOracle } from './oracle.js';
 import { canonicalSql } from './canonical.js';
 import { shapeFailure, shapeMismatch } from './shape.js';
@@ -1789,6 +1789,12 @@ export interface Controls {
  */
 export interface PreparedRun {
   readonly settings: BirdSettings;
+  /**
+   * The pool the run draws from, as a set rather than a list: rows read, questions kept, and the
+   * ids the file repeats. `questions` is one row per question id, so a rate computed from it is a
+   * rate per question rather than per row of somebody else's file.
+   */
+  readonly shape: QuestionSet;
   readonly questions: readonly BirdQuestion[];
   readonly selected: readonly BirdQuestion[];
   readonly cases: readonly BirdQuestion[];
@@ -1829,7 +1835,10 @@ export function difficultyMix(questions: readonly BirdQuestion[]): Record<string
 export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise<PreparedRun> {
   const layout = settings.layout;
   const { oracle, provider } = io;
-  const questions = loadQuestions(layout.questionsFile).filter((question) => settings.dbs.includes(question.db_id));
+  const shape = distinctQuestions(
+    loadQuestions(layout.questionsFile).filter((question) => settings.dbs.includes(question.db_id)),
+  );
+  const questions = shape.questions;
   if (questions.length === 0) {
     throw new Error(`no questions for ${settings.dbs.join(',')}; run node eval/bird/fetch.mjs first`);
   }
@@ -2279,7 +2288,9 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
     .map((arm) => {
       const sources = arm.mixed as readonly string[];
       const counted = distinctShare(sources);
-      const note = assertMixedFeasible(arm.name, sources, counted, cases.length === questions.length);
+      // `selected.length`, not `cases.length`: two questions whose gold statements refused do not
+      // make a full run a sample, and the guard below must not be skipped because of them.
+      const note = assertMixedFeasible(arm.name, sources, counted, selected.length === questions.length);
       return {
         arm: arm.name,
         sources,
@@ -2291,14 +2302,17 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
         // questions or on the duplicated ones" is a stratum, and a stratum is a join
         // between these ids and the per-case outcomes.
         degenerateIds: counted.degenerate,
-        // A sampled run's degeneracy share describes the sample, not the split.
-        sampled: cases.length !== questions.length,
+        // A sampled run's degeneracy share describes the sample, not the split. Sampling is
+        // `selected` versus the pool; a case count that fell short because a gold statement refused
+        // is a different fact and used to be read as a sample.
+        sampled: selected.length !== questions.length,
         ...(note === undefined ? {} : { note }),
       };
     });
 
   return {
     settings,
+    shape,
     questions,
     selected,
     cases,
@@ -2329,7 +2343,7 @@ export function judgeModelName(
 
 /** The report before any arm runs: everything the inputs alone can say. */
 export function baseReport(prepared: PreparedRun): Record<string, unknown> {
-  const { settings, questions, selected, cases, unrunnable, controls } = prepared;
+  const { settings, shape, questions, selected, cases, unrunnable, controls } = prepared;
   const layout = settings.layout;
   return {
     dataset: 'bird-mini-dev',
@@ -2363,10 +2377,19 @@ export function baseReport(prepared: PreparedRun): Record<string, unknown> {
       // for, which is a different claim: a 120-question sample of dev covered 2 of the 11.
       databases: [...new Set(cases.map((question) => question.db_id))].sort(),
       availableDatabases: [...new Set(questions.map((question) => question.db_id))].sort(),
+      // Rows and questions are two different counts, and only one of them is a denominator. The
+      // split's file carries 500 rows for 498 ids; a report that said `available: 500` was
+      // quoting a row count as if it were a question count.
+      rows: shape.rows,
       available: questions.length,
+      repeats: shape.repeats.map((repeat) => repeat.id),
       requested: settings.limit,
       split: layout.split,
       scored: cases.length,
+      // Whether the pool was sampled or scored whole. The two facts `scored < available` confuses —
+      // a sample, and a full run that lost cases to refused gold — decide different things, and one
+      // of them is whether a rate estimates the split at all.
+      sampled: selected.length !== questions.length,
       // What this sample actually is, not what the sampler was meant to do. A subset's
       // accuracy is an estimate of the split only if its difficulty mix and its databases
       // match, and both were invisible in the artifact while the sampler allocated one case
@@ -2378,7 +2401,10 @@ export function baseReport(prepared: PreparedRun): Record<string, unknown> {
     gold: {
       executed: selected.length,
       runnable: cases.length,
-      unrunnable: unrunnable.slice(0, 20),
+      // The whole list, not the first twenty. `score.ts` reads it to tell a question whose gold
+      // refused from a question the file no longer holds, and a truncated list would make the
+      // twenty-first refusal look like a numbering error in the competitor's file.
+      unrunnable,
       runnableRate: cases.length / selected.length,
     },
     controls,
@@ -3390,6 +3416,9 @@ export async function runBird(settings: BirdSettings, options: BirdRunOptions = 
   const oracle = createOracle(settings.layout.oracleScript, settings.layout.databaseRoot);
   try {
     const prepared = await prepareRun(settings, { oracle, provider });
+    // Above the rates, not below them: what the denominator is, stated before anything is
+    // measured with it. A reader who stops after the first arm line still knows the pool.
+    log(describeQuestionSet(prepared.shape, settings.layout.split));
     const report = baseReport(prepared);
     if (settings.dryRun) {
       previewPrompts(prepared, report);

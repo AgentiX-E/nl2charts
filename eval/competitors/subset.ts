@@ -14,8 +14,9 @@
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { pathToFileURL } from 'node:url';
-import { loadQuestions, stratifiedSample } from '../bird/data.js';
+import { runIfEntry } from '../entry.js';
+import { describeQuestionSet, distinctQuestions, loadQuestions, stratifiedSample } from '../bird/data.js';
+import type { QuestionSet } from '../bird/data.js';
 import { parseLimit, resolveLayout } from '../bird/run.js';
 import type { BirdLayout } from '../bird/run.js';
 import { questionSetHash } from './coordinates.js';
@@ -31,6 +32,14 @@ export interface Subset {
   readonly ids: readonly number[];
   readonly hash: string;
   readonly path: string;
+  /**
+   * The file the subset was cut from, as rows and questions.
+   *
+   * Carried out of the writer because a subset is a statement about a bigger file, and the two
+   * counts that make that statement meaningful — how many rows it holds and how many distinct
+   * questions they name — are read here and nowhere else on this path.
+   */
+  readonly shape: QuestionSet;
 }
 
 export function resolveSubsetSettings(
@@ -58,12 +67,16 @@ export function resolveSubsetSettings(
 
 /** Writes the subset, and returns the ids it holds so a caller can print or check them. */
 export function writeSubset(settings: SubsetSettings): Subset {
-  const questions = loadQuestions(settings.questions);
-  const selected = stratifiedSample(questions, settings.limit);
+  // One row per question id, because the file written here is also the numbering a position-based
+  // pipeline is read through: a file that names one question twice cannot say what position 484
+  // answered, and a subset of 500 rows for 498 questions would hand a competitor a question it
+  // was asked twice and a reader that cannot resolve it.
+  const shape = distinctQuestions(loadQuestions(settings.questions));
+  const selected = stratifiedSample(shape.questions, settings.limit);
   mkdirSync(dirname(settings.out), { recursive: true });
   writeFileSync(settings.out, `${JSON.stringify(selected, null, 2)}\n`);
   const ids = selected.map((question) => question.question_id);
-  return { ids, hash: questionSetHash(ids), path: settings.out };
+  return { ids, hash: questionSetHash(ids), path: settings.out, shape };
 }
 
 /** A question file read as a numbering: position → question id, in the file's own order. */
@@ -121,27 +134,13 @@ export function main(
 ): number {
   const settings = resolveSubsetSettings(env, argv, root);
   const subset = writeSubset(settings);
+  // The shape of the file the subset was cut from, before the subset's own size: a sample is
+  // always described relative to something, and that something used to be unstated.
+  console.log(describeQuestionSet(subset.shape, `${settings.layout.split} split`));
   console.log(
     `${String(subset.ids.length)} of the ${settings.layout.split} split (hash ${subset.hash}) written to ${subset.path}`,
   );
   return 0;
-}
-
-/**
- * The entry guard, as a function that returns what to do rather than a branch at module scope.
- *
- * The shape matters for two reasons. A module-scope `if` runs once, in a context no test can enter,
- * so the line is either uncovered or covered by a subprocess whose coverage is not counted. And a
- * guard that *returns* the code leaves the module body one unconditional assignment: importing this
- * file cannot start a run, and running it cannot be forgotten.
- */
-export function runIfEntry(
-  argv1: string | undefined,
-  moduleUrl: string,
-  run: () => number,
-): number | undefined {
-  if (argv1 === undefined || pathToFileURL(argv1).href !== moduleUrl) return undefined;
-  return run();
 }
 
 process.exitCode = runIfEntry(process.argv[1], import.meta.url, () => main());

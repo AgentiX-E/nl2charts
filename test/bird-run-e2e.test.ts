@@ -1406,3 +1406,71 @@ describe('a voting arm whose statements never execute', () => {
     expect(arms[0]?.candidateRecall).toBe(0);
   });
 });
+
+/**
+ * A question file that names one question twice.
+ *
+ * Mini-Dev is such a file: ids 137 and 138 appear twice, byte for byte, so 500 rows are 498
+ * questions. The runner scored the repeats as two questions for as long as the file has been read
+ * as a list, which weights one arbitrary question twice and makes the denominator a property of
+ * the file layout. This drives the whole harness to show the two facts that follow: the duplicate
+ * is asked once, and the artifact says how many rows it read and what it collapsed.
+ */
+describe('a question file that carries a duplicate row', () => {
+  it('asks it once and prints the shape of the file above the rates', async () => {
+    const file = join(data, 'mini_dev_sqlite.json');
+    const rows = JSON.parse(readFileSync(file, 'utf8')) as { question_id: number }[];
+    // Two repeats, appended exactly as Mini-Dev appends its own: the same record again.
+    writeFileSync(file, JSON.stringify([...rows, rows[0], rows[3]]));
+    try {
+      const result = await run({ plan: { first: correct }, env: { BIRD_ARMS: 'names' } });
+      const selection = result.report.selection as {
+        rows: number;
+        available: number;
+        repeats: number[];
+        scored: number;
+        requested: number;
+        sampled: boolean;
+      };
+      expect(selection.rows).toBe(QUESTIONS.length + 2);
+      expect(selection.available).toBe(QUESTIONS.length);
+      expect(selection.repeats).toEqual([1, 4]);
+      // One case per question, not per row: the duplicate is not asked a second time.
+      expect(selection.scored).toBe(QUESTIONS.length);
+      expect((result.report.cases as unknown[]).length).toBe(QUESTIONS.length);
+      // A whole-pool run, not a sample: the two counts `scored < available` used to conflate are
+      // separate fields now, and this run is the case where they disagree without sampling.
+      expect(selection.sampled).toBe(false);
+      expect(result.printed.some((line) => line.startsWith(`minidev: ${String(QUESTIONS.length + 2)} row(s), ${String(QUESTIONS.length)} question(s)`))).toBe(true);
+      expect(result.printed.some((line) => line.includes('1, 4 repeat byte-for-byte and are counted once'))).toBe(true);
+    } finally {
+      writeFileSync(file, JSON.stringify(rows));
+    }
+  });
+});
+
+/**
+ * A sampled run of an arm whose prompts are built from several sources.
+ *
+ * `assertMixedFeasible` refuses a whole-split run whose candidates are never distinct — an arm that
+ * pays three times for one opinion — and on a sample it returns a note instead, because a share of
+ * a sample describes the sample. That distinction used to be drawn from `cases.length`, so a full
+ * run that lost two cases to a refused gold statement was read as a sample and the refusal never
+ * fired. `selected.length` is the question the guard actually asks.
+ */
+describe('a sample of an arm that builds several candidates', () => {
+  it('records that the run sampled the split, and says the degeneracy share describes the sample', async () => {
+    const result = await run({
+      plan: { first: correct },
+      env: { BIRD_ARMS: 'select-mixed', BIRD_LIMIT: '4', BIRD_DEFINITIONS_FORCE: '1' },
+    });
+    const selection = result.report.selection as { requested: number; scored: number; available: number; sampled: boolean };
+    expect(selection.requested).toBe(4);
+    expect(selection.scored).toBe(4);
+    expect(selection.available).toBe(QUESTIONS.length);
+    expect(selection.sampled).toBe(true);
+    const mixed = result.report.mixedCandidatePrompts as { arm: string; sampled: boolean; note?: string }[];
+    expect(mixed[0]?.sampled).toBe(true);
+    expect(mixed[0]?.note).toContain('this run sampled the split');
+  });
+});

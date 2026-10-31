@@ -83,8 +83,125 @@ export function parseCsv(text: string): string[][] {
   return rows;
 }
 
+/** The rows a question file holds, exactly as written: no filtering, no collapse. */
 export function loadQuestions(file: string): BirdQuestion[] {
   return JSON.parse(readFileSync(file, 'utf8')) as BirdQuestion[];
+}
+
+/**
+ * One question id carried by more than one row.
+ *
+ * `positions` are zero-based row positions in file order, so a repeat can be looked up rather than
+ * described. There is no `identical` flag because a repeat that is not identical is refused below:
+ * every repeat this type describes is a byte-for-byte duplicate.
+ */
+export interface QuestionRepeat {
+  readonly id: number;
+  readonly positions: readonly number[];
+}
+
+/**
+ * The pool a rate is computed over: one row per question id.
+ *
+ * A question file is a list of rows, and a list of rows is not always a list of questions.
+ * Mini-Dev carries 500 rows and 498 question ids, because ids 137 and 138 each appear twice, byte
+ * for byte — a fact no count in this repository had noticed until a 500-question run was paired
+ * against a pipeline that numbers its answers by row, which is a renumbering that can only be
+ * stated if position and question are in one-to-one correspondence.
+ *
+ * Every rate here is per question, so the pool is read one row per id and the repetition is
+ * reported rather than absorbed: a question counted twice is a question weighted twice, and the
+ * denominator then depends on a file artifact instead of on the benchmark. Measured on the twelve
+ * arms of CI run 41158744927, collapsing the two repeats moves no arm by more than 0.18pp — the
+ * same size as the harness's own A/A noise — but the label "498 questions" was two questions and
+ * one twice.
+ *
+ * Two rows with one id and different content are refused: there the id names two questions, so it
+ * cannot be the key a pairing is joined on, and both id-keyed readers (`predictions.ts` for a
+ * competitor's answers, `caseRows` for ours) would silently keep one of them and drop the other.
+ */
+export interface QuestionSet {
+  readonly questions: BirdQuestion[];
+  readonly rows: number;
+  readonly repeats: readonly QuestionRepeat[];
+}
+
+/**
+ * A stable key for "is this the same record": key order in the file is not a difference.
+ *
+ * `Object.keys(...).sort()` is the default lexical order, so there is no comparator here to get
+ * subtly wrong — the first version had a three-way comparator whose middle case (two equal keys)
+ * cannot happen, and a branch that cannot happen is a line no test can reach.
+ */
+const recordKey = (value: unknown): string => {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
+  if (Array.isArray(value)) return `[${value.map(recordKey).join(',')}]`;
+  const record = value as Record<string, unknown>;
+  const body = Object.keys(record)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${recordKey(record[key])}`)
+    .join(',');
+  return `{${body}}`;
+};
+
+/** The first field two records disagree on, for a repeat that is not a duplicate. */
+const firstDifference = (left: Record<string, unknown>, right: Record<string, unknown>): string => {
+  const keys = [...new Set([...Object.keys(left), ...Object.keys(right)])].sort();
+  for (const key of keys) {
+    if (recordKey(left[key]) !== recordKey(right[key])) return key;
+  }
+  return 'no field differs';
+};
+
+export function distinctQuestions(rows: readonly BirdQuestion[]): QuestionSet {
+  const kept: BirdQuestion[] = [];
+  const firstAt = new Map<number, number>();
+  const positions = new Map<number, number[]>();
+  for (const [index, row] of rows.entries()) {
+    const at = firstAt.get(row.question_id);
+    if (at === undefined) {
+      firstAt.set(row.question_id, kept.length);
+      kept.push(row);
+    } else if (recordKey(kept[at]) !== recordKey(row)) {
+      const first = kept[at] as unknown as Record<string, unknown>;
+      const again = row as unknown as Record<string, unknown>;
+      throw new Error(
+        `question ${String(row.question_id)} appears at rows ${String(positions.get(row.question_id)?.[0])} and ` +
+          `${String(index)} with different content (${firstDifference(first, again)}), so the id names two questions ` +
+          'and cannot be the key a pairing is joined on',
+      );
+    }
+    const seen = positions.get(row.question_id);
+    if (seen === undefined) positions.set(row.question_id, [index]);
+    else seen.push(index);
+  }
+  const repeats: QuestionRepeat[] = [];
+  for (const [id, at] of positions) {
+    if (at.length > 1) repeats.push({ id, positions: at });
+  }
+  repeats.sort((left, right) => left.id - right.id);
+  return { questions: kept, rows: rows.length, repeats };
+}
+
+/**
+ * The line that states the pool above the rates computed from it.
+ *
+ * Identical wording wherever a question set is read, so the two pipelines in a comparison cannot
+ * describe the same file differently.
+ */
+export function describeQuestionSet(set: QuestionSet, split: string): string {
+  const repeats = set.repeats.map((repeat) => String(repeat.id));
+  return (
+    `${split}: ${String(set.rows)} row(s), ${String(set.questions.length)} question(s)` +
+    (repeats.length === 0
+      ? ''
+      : ` — ${repeats.join(', ')} repeat${repeats.length === 1 ? 's' : ''} byte-for-byte and ${repeats.length === 1 ? 'is' : 'are'} counted once`)
+  );
+}
+
+/** A question file read as a pool: rows in, one row per question id out. */
+export function loadQuestionSet(file: string): QuestionSet {
+  return distinctQuestions(loadQuestions(file));
 }
 
 export function loadTables(file: string): Map<string, BirdTable> {

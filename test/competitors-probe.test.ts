@@ -14,7 +14,6 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   failureDetail,
-  isEntry,
   main,
   probeLines,
   probeTree,
@@ -214,14 +213,6 @@ describe('the failure a git refusal becomes', () => {
 
   it('truncates a diagnostic that would fill a log', () => {
     expect(failureDetail(new Error('x'.repeat(400)))).toHaveLength(300);
-  });
-});
-
-describe('the entry guard', () => {
-  it('matches only the module that is being run, not the module that is being imported', () => {
-    expect(isEntry(undefined, 'file:///a/probe.ts')).toBe(false);
-    expect(isEntry('/a/probe.ts', 'file:///a/other.ts')).toBe(false);
-    expect(isEntry('/a/probe.ts', 'file:///a/probe.ts')).toBe(true);
   });
 });
 

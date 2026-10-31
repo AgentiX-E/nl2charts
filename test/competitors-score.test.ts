@@ -17,19 +17,32 @@ import { resolveLayout } from '../eval/bird/run.js';
 import { EXECUTOR, JUDGE } from '../eval/competitors/coordinates.js';
 import {
   armOutcomes,
-  isEntry,
   main,
+  poolDatabases,
+  refusedGold,
   resolveScoreSettings,
+  scopeLine,
   scoreLines,
   scoreRun,
   writeScoreArtifact,
 } from '../eval/competitors/score.js';
 import { silentRun } from '../eval/competitors/score.js';
-import type { ScoreOutcome, ScoreSettings } from '../eval/competitors/score.js';
+import type { ScopeSummary, ScoreOutcome, ScoreSettings } from '../eval/competitors/score.js';
 import { parsePredictions } from '../eval/competitors/predictions.js';
 import { MINI_DB, MINI_QUESTIONS, writeMiniBirdDataset } from './helpers/bird-dataset.js';
 
 const ROOT = process.cwd();
+/** The scope of a whole-split run on Mini-Dev as its file actually is: 500 rows, 498 questions. */
+const SCOPE: ScopeSummary = {
+  split: 'minidev',
+  rows: 500,
+  questions: 498,
+  repeats: [137, 138],
+  asked: 498,
+  judged: 498,
+  excluded: [],
+  sampled: false,
+};
 const ARM = 'metadata+evidence';
 const COMMIT = '3d6e835f858d26885d21d4bc0215aeecf855efbe';
 
@@ -420,6 +433,7 @@ describe('a pipeline that numbers its answers by row', () => {
 describe('the reading puts the provenance above the number', () => {
   it('reports an inside-MDE delta as a sign, with the questions the effect would need', () => {
     const outcome: ScoreOutcome = {
+      scope: SCOPE,
       run: {
         competitor: 'chess',
         repo: 'ShayanTalaei/CHESS',
@@ -454,6 +468,14 @@ describe('the reading puts the provenance above the number', () => {
     const lines = scoreLines(outcome);
     expect(lines[0]).toBe('');
     expect(lines[1]).toContain('chess @ 3d6e835f858d');
+    // The scope goes above the answered count and the accuracy: the denominator first.
+    const scopeAt = lines.findIndex((line) => line.includes('  scope:'));
+    const answeredAt = lines.findIndex((line) => line.includes('  answered:'));
+    expect(scopeAt).toBeGreaterThan(0);
+    expect(scopeAt).toBeLessThan(answeredAt);
+    expect(lines[scopeAt]).toContain('the whole minidev split — 498 of 498 question(s), 500 row(s) in the file');
+    expect(lines[scopeAt]).toContain('137, 138 appear twice and are counted once');
+    expect(lines[scopeAt]).toContain('498 judged');
     expect(lines.some((line) => line.includes('answered: 470/498 (94.38%)'))).toBe(true);
     expect(lines.some((line) => line.includes('declared database disagrees with the question on 1 cases'))).toBe(true);
     expect(lines.some((line) => line.includes('unreadable line 9: is not JSON'))).toBe(true);
@@ -465,6 +487,7 @@ describe('the reading puts the provenance above the number', () => {
 
   it('reports an outside-MDE delta as a size', () => {
     const lines = scoreLines({
+      scope: SCOPE,
       run: {
         competitor: 'chess',
         repo: 'a/b',
@@ -560,11 +583,6 @@ describe('a clean run, through the command line', () => {
     expect(JSON.parse(readFileSync(out, 'utf8')).comparable).toBe(true);
   });
 
-  it('matches only the module that is being run, not the module that is being imported', () => {
-    expect(isEntry(undefined, 'file:///a/score.ts')).toBe(false);
-    expect(isEntry('/a/score.ts', 'file:///a/other.ts')).toBe(false);
-    expect(isEntry('/a/score.ts', 'file:///a/score.ts')).toBe(true);
-  });
 });
 
 describe('the report and the split can disagree, and then nothing is measured', () => {
@@ -593,9 +611,16 @@ describe('the report and the split can disagree, and then nothing is measured', 
     const path = writePredictions(base, predictionsFor(THEIRS_CORRECT));
     const outcome = await scoreRun(settingsFor(base, path));
     expect(outcome.ledger.declared).toBe(0);
-    expect(outcome.problems).toEqual(['no question could be judged: every gold statement failed to run']);
+    // The finding moved, and it moved up: a report whose every question id is absent from the split
+    // is a question-set coordinate that does not hold, not a judge that failed to run. Both readings
+    // refuse to publish a rate; only this one prints the two sets and their hashes, and it does so
+    // before anything is judged rather than after.
+    expect(outcome.comparable).toBe(false);
+    expect(outcome.problems).toEqual([]);
+    expect(outcome.violations.some((line) => line.startsWith('question set:'))).toBe(true);
     const lines = scoreLines(outcome);
     expect(lines.some((line) => line.includes('answered: 0/0 (0.00%)'))).toBe(true);
+    expect(lines.some((line) => line.includes('no accuracy: the coordinates above do not hold'))).toBe(true);
   });
 
   it('reports an id outside the split and a repeated answer beside the accuracy', async () => {
@@ -636,5 +661,169 @@ describe('the report and the split can disagree, and then nothing is measured', 
       base.env,
     );
     expect(code).toBe(1);
+  });
+});
+
+/**
+ * The scope: how much of the split a rate is a rate about.
+ *
+ * Two counts used to be one line. A 25-question sample and a 25-question split printed the same
+ * "answered: 25/25", and a question whose gold statement refused left the denominator without
+ * saying so — the competitor's answer to it then read as an unknown id, which is an accusation
+ * about its numbering rather than a fact about our own executor.
+ */
+describe('the scope a rate is a rate about', () => {
+  /** Every fixture question answered with its gold, except the ones named as wrong. */
+  const answered = (wrong: readonly number[] = []): string => {
+    const body: Record<string, string> = {};
+    for (const question of MINI_QUESTIONS) {
+      body[String(question.id)] = payload(wrong.includes(question.id) ? 'select count(*) from items' : question.sql);
+    }
+    return JSON.stringify(body, null, 2);
+  };
+
+  /** Our own report, rewritten to have asked every question and judged all but `refused`. */
+  const reportWithRefusedGold = (base: Fixture, refused: readonly number[]): void => {
+    const report = JSON.parse(readFileSync(base.report, 'utf8')) as Record<string, unknown>;
+    const cases = (report.cases as { id: string }[]).filter((row) => !refused.includes(Number(row.id)));
+    writeFileSync(
+      base.report,
+      JSON.stringify({
+        ...report,
+        cases,
+        gold: {
+          executed: MINI_QUESTIONS.length,
+          runnable: cases.length,
+          unrunnable: refused.map((id) => ({ id, db: MINI_DB, error: 'OperationalError: interrupted' })),
+          runnableRate: cases.length / MINI_QUESTIONS.length,
+        },
+      }),
+    );
+  };
+
+  it('excludes a question whose gold refused instead of calling the competitor\'s answer unknown', async () => {
+    const base = fixture();
+    reportWithRefusedGold(base, [5]);
+    const path = writePredictions(base, answered());
+    const outcome = await scoreRun(settingsFor(base, path));
+    // Seven were asked and seven were answered; six reached the judge.
+    expect(outcome.ledger.declared).toBe(7);
+    expect(outcome.ledger.answered).toBe(7);
+    expect(outcome.ledger.unknown).toEqual([]);
+    expect(outcome.scope).toMatchObject({ asked: 7, judged: 6, questions: 7, sampled: false });
+    expect(outcome.scope.excluded).toEqual([{ id: 5, why: 'OperationalError: interrupted' }]);
+    // The question-set coordinate still holds: both pipelines were asked the same seven questions,
+    // and the judge could not score one of them for a reason on our side of the comparison.
+    expect(outcome.comparable).toBe(true);
+    expect(outcome.reference.questionIds).toEqual(MINI_QUESTIONS.map((question) => question.id));
+    expect(outcome.execution?.judged).toBe(6);
+    expect(
+      scoreLines(outcome).some((line) =>
+        line.includes('1 outside the comparison because the gold statement would not run (5: OperationalError: interrupted)'),
+      ),
+    ).toBe(true);
+  });
+
+  it('says a sample is a sample, with the size of the thing it sampled', async () => {
+    const base = fixture();
+    const keep = [1, 2, 3];
+    const report = JSON.parse(readFileSync(base.report, 'utf8')) as Record<string, unknown>;
+    writeFileSync(
+      base.report,
+      JSON.stringify({ ...report, cases: (report.cases as { id: string }[]).filter((row) => keep.includes(Number(row.id))) }),
+    );
+    extendCoordinates(base, keep);
+    const path = writePredictions(base, answered());
+    const outcome = await scoreRun(settingsFor(base, path));
+    expect(outcome.comparable).toBe(true);
+    expect(outcome.scope).toMatchObject({ asked: 3, questions: 7, sampled: true });
+    const line = scoreLines(outcome).find((entry) => entry.includes('  scope:'));
+    expect(line).toContain("3 of the minidev split's 7 question(s)");
+    expect(line).toContain('a sample: every rate below is a rate about these 3');
+  });
+
+  it('is recorded in the artifact, not only printed', async () => {
+    const base = fixture();
+    reportWithRefusedGold(base, [5]);
+    const path = writePredictions(base, answered());
+    const settings = settingsFor(base, path);
+    const written = writeScoreArtifact(settings, await scoreRun(settings));
+    const body = JSON.parse(readFileSync(written, 'utf8')) as { scope: Record<string, unknown> };
+    expect(body.scope).toMatchObject({ split: 'minidev', asked: 7, judged: 6, sampled: false });
+    expect(body.scope.excluded).toEqual([{ id: 5, why: 'OperationalError: interrupted' }]);
+  });
+
+  it('reads the refused gold out of a report, and ignores entries that name no integer id', () => {
+    expect(refusedGold({})).toEqual([]);
+    expect(refusedGold({ gold: { unrunnable: 'not a list' } })).toEqual([]);
+    expect(
+      refusedGold({
+        gold: {
+          unrunnable: [
+            { id: 5, error: 'OperationalError: interrupted' },
+            { id: 'six', error: 'x' },
+            { id: 7.5 },
+            { id: 8 },
+            { error: 'no id at all' },
+          ],
+        },
+      }),
+    ).toEqual([
+      { id: 5, why: 'OperationalError: interrupted' },
+      { id: 8, why: 'the gold statement did not run' },
+    ]);
+  });
+
+  it('reads the databases of our own pool, and says it does not know rather than guessing', () => {
+    expect(poolDatabases({})).toBeUndefined();
+    expect(poolDatabases({ selection: {} })).toBeUndefined();
+    expect(poolDatabases({ selection: { availableDatabases: ['shop', 3, 'other'] } })).toEqual(['shop', 'other']);
+  });
+
+  it('narrows the pool to the databases our run scored, not to the whole file', () => {
+    const base = fixture();
+    const file = join(base.dir, 'mini_dev_sqlite.json');
+    const rows = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>[];
+    // A question in a database this run never touched: it is in the split, and it is not in the
+    // pool, so it must not appear in the denominator of a rate about `shop`.
+    writeFileSync(file, JSON.stringify([...rows, { ...(rows[0] as Record<string, unknown>), question_id: 99, db_id: 'elsewhere' }]));
+    const report = JSON.parse(readFileSync(base.report, 'utf8')) as Record<string, unknown>;
+    writeFileSync(base.report, JSON.stringify({ ...report, selection: { availableDatabases: [MINI_DB] } }));
+    const path = writePredictions(base, answered());
+    return scoreRun(settingsFor(base, path)).then((outcome) => {
+      expect(outcome.scope.questions).toBe(MINI_QUESTIONS.length);
+      expect(outcome.scope.asked).toBe(MINI_QUESTIONS.length);
+      expect(outcome.scope.sampled).toBe(false);
+    });
+  });
+
+  it('counts one repeat in the singular, and cuts an exclusion list that would fill a log', () => {
+    const one: ScopeSummary = { ...SCOPE, repeats: [7], asked: 3, questions: 3, judged: 3, rows: 4 };
+    expect(scopeLine(one)).toContain('; 7 appears twice and is counted once');
+    const many: ScopeSummary = {
+      ...SCOPE,
+      repeats: [],
+      asked: 9,
+      questions: 9,
+      judged: 5,
+      excluded: [11, 12, 13, 14].map((id) => ({ id, why: 'interrupted' })),
+    };
+    const line = scopeLine(many);
+    expect(line).toContain('4 outside the comparison because the gold statement would not run');
+    expect(line).toContain('(11: interrupted, 12: interrupted, 13: interrupted, …)');
+  });
+
+  it('writes no scope line for an empty scope, so a refusal is not dressed as a measurement', () => {
+    const empty: ScopeSummary = {
+      split: 'minidev',
+      rows: 0,
+      questions: 0,
+      repeats: [],
+      asked: 0,
+      judged: 0,
+      excluded: [],
+      sampled: false,
+    };
+    expect(scopeLine(empty)).toBe('  scope: the whole minidev split — 0 of 0 question(s), 0 row(s) in the file, 0 judged');
   });
 });

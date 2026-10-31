@@ -23,7 +23,7 @@ import { createHttpProvider, createPipeline, renderDefinitions } from '@agentix-
 import type { LlmProvider, PromptOptions, SchemaTable } from '@agentix-e/nl2charts-ai';
 import { judgeOfficial } from '@agentix-e/nl2charts-devkit';
 import { describeError } from '../errors.js';
-import { buildSchema, loadDescriptions, loadQuestions, loadTables, stratifiedSample } from './data.js';
+import { buildSchema, distinctQuestions, loadDescriptions, loadQuestions, loadTables, stratifiedSample } from './data.js';
 import { createOracle } from './oracle.js';
 import type { Oracle } from './oracle.js';
 import { ARMS, pool, promptFor, resolveLayout } from './run.js';
@@ -128,8 +128,10 @@ export async function prepareStability(settings: StabilitySettings, io: Stabilit
   const manifest = JSON.parse(readFileSync(join(data, 'manifest.json'), 'utf8')) as { databases: { db: string }[] };
   const dbs = manifest.databases.map((entry) => entry.db);
   const tables = loadTables(join(data, 'dev_tables.json'));
+  // The same pool the runner draws from: one row per question id, so the noise floor this
+  // measures is the noise floor of the number it is quoted beside.
   const questions = stratifiedSample(
-    loadQuestions(layout.questionsFile).filter((question) => dbs.includes(question.db_id)),
+    distinctQuestions(loadQuestions(layout.questionsFile).filter((question) => dbs.includes(question.db_id))).questions,
     limit,
   );
   const schemas = new Map<string, SchemaTable[]>();

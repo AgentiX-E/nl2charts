@@ -4,7 +4,10 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import {
   buildSchema,
+  describeQuestionSet,
+  distinctQuestions,
   loadDescriptions,
+  loadQuestionSet,
   loadQuestions,
   loadTables,
   parseCsv,
@@ -321,5 +324,105 @@ describe('stratified sampling', () => {
     const picked = stratifiedSample(odd, 2).map((question) => question.question_id);
     expect(picked).toHaveLength(2);
     expect(picked).toContain(1);
+  });
+});
+
+/**
+ * A file of rows is not a file of questions.
+ *
+ * Mini-Dev is both: 500 rows, 498 ids, because ids 137 and 138 each appear twice, byte for byte.
+ * These cases hold the two rules that follow — a duplicate is one question counted once, and an id
+ * that names two different questions is refused — because everything downstream joins on the id:
+ * a competitor's answers, our own cases, and the pairing between them.
+ */
+describe('one row per question', () => {
+  const make = (id: number, overrides: Partial<BirdQuestion> = {}): BirdQuestion => ({
+    question_id: id,
+    db_id: 'db',
+    question: `q${id}`,
+    evidence: '',
+    SQL: 'SELECT 1',
+    difficulty: 'simple',
+    ...overrides,
+  });
+
+  it('is the whole file when every id appears once, and reports nothing repeated', () => {
+    const set = distinctQuestions([make(1), make(2), make(3)]);
+    expect(set.rows).toBe(3);
+    expect(set.questions.map((question) => question.question_id)).toEqual([1, 2, 3]);
+    expect(set.repeats).toEqual([]);
+  });
+
+  it('keeps one row for a byte-for-byte repeat and reports where the copies were', () => {
+    const set = distinctQuestions([make(1), make(2), make(1), make(3), make(1)]);
+    expect(set.rows).toBe(5);
+    expect(set.questions.map((question) => question.question_id)).toEqual([1, 2, 3]);
+    expect(set.repeats).toEqual([{ id: 1, positions: [0, 2, 4] }]);
+  });
+
+  it('keeps the first occurrence, so the pool is in the file\'s own order', () => {
+    const set = distinctQuestions([make(2), make(7, { SQL: 'SELECT 7' }), make(2)]);
+    // First occurrence wins: the pool is the file's order, not the order of last mention.
+    expect(set.questions.map((question) => question.question_id)).toEqual([2, 7]);
+    expect(set.questions[1]?.SQL).toBe('SELECT 7');
+  });
+
+  it('refuses an id that names two different questions, naming the field that disagrees', () => {
+    // Not a duplicate: two questions with one id. Keeping either one would make the id a key that
+    // silently answers a different question than the one it was asked about.
+    expect(() => distinctQuestions([make(4), make(4, { question: 'a different question' })])).toThrow(
+      /question 4 appears at rows 0 and 1 with different content \(question\)/,
+    );
+  });
+
+  it('refuses a repeat whose only difference is a field that is absent from one copy', () => {
+    // The records differ, but no shared field explains it: the message has to say so rather than
+    // name a field that matches on both sides.
+    const withNull = { ...make(9), note: null } as unknown as BirdQuestion;
+    expect(() => distinctQuestions([make(9), withNull])).toThrow(/different content \(no field differs\)/);
+  });
+
+  it('treats a record with its keys in another order as the same record', () => {
+    // A JSON object's key order is not part of its content, and a re-serialised duplicate is the
+    // same duplicate.
+    const reordered = JSON.parse('{"difficulty":"simple","SQL":"SELECT 1","evidence":"","question":"q5","db_id":"db","question_id":5}') as BirdQuestion;
+    const set = distinctQuestions([make(5), reordered]);
+    expect(set.questions).toHaveLength(1);
+    expect(set.repeats).toEqual([{ id: 5, positions: [0, 1] }]);
+  });
+
+  it('sees a difference inside a nested value', () => {
+    const nested = { ...make(6), tags: ['a'] } as unknown as BirdQuestion;
+    const other = { ...make(6), tags: ['b'] } as unknown as BirdQuestion;
+    expect(() => distinctQuestions([nested, other])).toThrow(/question 6 .* \(tags\)/);
+  });
+
+  it('reads a file through the same rule, and can say what it found', () => {
+    const file = write(
+      'dupes.json',
+      JSON.stringify([
+        { question_id: 137, db_id: 'db', question: 'q', evidence: '', SQL: 'SELECT 1', difficulty: 'simple' },
+        { question_id: 138, db_id: 'db', question: 'r', evidence: '', SQL: 'SELECT 2', difficulty: 'simple' },
+        { question_id: 137, db_id: 'db', question: 'q', evidence: '', SQL: 'SELECT 1', difficulty: 'simple' },
+      ]),
+    );
+    const set = loadQuestionSet(file);
+    expect(set.rows).toBe(3);
+    expect(describeQuestionSet(set, 'minidev')).toBe(
+      'minidev: 3 row(s), 2 question(s) — 137 repeats byte-for-byte and is counted once',
+    );
+  });
+
+  it('says nothing about repeats when there are none', () => {
+    const set = distinctQuestions([make(1), make(2)]);
+    expect(describeQuestionSet(set, 'minidev')).toBe('minidev: 2 row(s), 2 question(s)');
+    expect(describeQuestionSet(distinctQuestions([]), 'dev')).toBe('dev: 0 row(s), 0 question(s)');
+  });
+
+  it('counts several repeats in one sentence, in the plural', () => {
+    const set = distinctQuestions([make(1), make(2), make(1), make(2)]);
+    expect(describeQuestionSet(set, 'minidev')).toBe(
+      'minidev: 4 row(s), 2 question(s) — 1, 2 repeat byte-for-byte and are counted once',
+    );
   });
 });

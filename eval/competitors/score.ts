@@ -25,7 +25,7 @@
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { runIfEntry } from '../entry.js';
 import {
   casesForEffect,
   compareArms,
@@ -36,7 +36,7 @@ import {
   wilsonInterval,
 } from '@agentix-e/nl2charts-devkit';
 import type { ArmResult, CaseOutcome } from '@agentix-e/nl2charts-devkit';
-import { loadQuestions } from '../bird/data.js';
+import { distinctQuestions, loadQuestions } from '../bird/data.js';
 import type { BirdQuestion } from '../bird/data.js';
 import { createOracle } from '../bird/oracle.js';
 import { SHIPPED_ARM, requireArm } from '../bird/presence.js';
@@ -98,8 +98,37 @@ export interface PairedSummary {
   readonly needed: number;
 }
 
+/**
+ * What this comparison is a comparison of: the split, and how much of it reached the judge.
+ *
+ * Every number below the coordinates is a rate over `judged` questions, and the four ways that
+ * count can be smaller than the split are not the same finding: a sample was never asked, a
+ * question was asked and its gold statement refused, a question was asked and the pipeline left it
+ * blank, and a question was asked and no longer exists in the file. Only the first is a design, so
+ * the scope carries it as a flag rather than leaving a reader to infer it from two counts that used
+ * to look identical — "25 questions" and "25 of 498" printed the same line.
+ */
+export interface ScopeSummary {
+  readonly split: string;
+  /** Rows in the split's question file. Not a denominator. */
+  readonly rows: number;
+  /** Distinct questions in the split, for the databases this run scored. */
+  readonly questions: number;
+  /** Ids the file carries more than once; each is counted once in `questions`. */
+  readonly repeats: readonly number[];
+  /** Questions both pipelines were asked. */
+  readonly asked: number;
+  /** Questions that reached our executor and our judge, on both sides. */
+  readonly judged: number;
+  /** Asked, and outside the comparison because the gold statement would not run. */
+  readonly excluded: readonly { readonly id: number; readonly why: string }[];
+  /** Whether `asked` is a proper part of the split rather than the whole of it. */
+  readonly sampled: boolean;
+}
+
 export interface ScoreOutcome {
   readonly run: RunCoordinates;
+  readonly scope: ScopeSummary;
   readonly reference: ReferenceCoordinates;
   readonly ledger: PredictionLedger;
   readonly comparable: boolean;
@@ -227,7 +256,25 @@ export async function scoreRun(settings: ScoreSettings): Promise<ScoreOutcome> {
     );
   }
   const split = typeof report.split === 'string' ? report.split : settings.layout.split;
-  const questionIds = ours.map((outcome) => Number(outcome.id));
+  // The pool: one row per question id, for the databases this run scored. `distinctQuestions`
+  // refuses a file whose id names two different questions, so everything below may join on ids.
+  const shape = distinctQuestions(loadQuestions(settings.layout.questionsFile));
+  const poolDbs = poolDatabases(report);
+  const pool = poolDbs === undefined ? shape.questions : shape.questions.filter((question) => poolDbs.includes(question.db_id));
+
+  // Judged, asked, and the difference. Our own run's report says which questions it asked and
+  // could not judge, and why — so a question whose gold statement refused is *excluded* rather
+  // than counted as the competitor naming an id that does not exist. Before this, the reference
+  // declared only the judged ids as its question set, the coordinate check then compared 496
+  // against the 498 the competitor was given, and a comparison on the full split could never have
+  // been called comparable for a reason that has nothing to do with either pipeline.
+  const judgedIds = new Set(ours.map((outcome) => Number(outcome.id)));
+  const excluded = refusedGold(report);
+  const askedIds = new Set<number>([...judgedIds, ...excluded.map((entry) => entry.id)]);
+  const set = pool.filter((question) => judgedIds.has(question.question_id));
+  const asked = pool.filter((question) => askedIds.has(question.question_id));
+
+  const questionIds = asked.map((question) => question.question_id);
   const reference: ReferenceCoordinates = {
     arm: settings.arm,
     split,
@@ -237,24 +284,33 @@ export async function scoreRun(settings: ScoreSettings): Promise<ScoreOutcome> {
   };
   const run = parseCoordinates(readFileSync(settings.coordinates, 'utf8'), settings.coordinates);
 
-  const questions = loadQuestions(settings.layout.questionsFile);
-  const wanted = new Set(questionIds);
-  const set = questions.filter((question) => wanted.has(question.question_id));
+  const scopeBase = {
+    split,
+    rows: shape.rows,
+    questions: pool.length,
+    repeats: shape.repeats.map((repeat) => repeat.id),
+    asked: asked.length,
+    excluded: excluded.filter((entry) => !judgedIds.has(entry.id)),
+    sampled: asked.length < pool.length,
+  };
   const idMap = settings.idMap === undefined ? undefined : readIdMap(settings.idMap);
+  // Parsed against the asked set, not the judged one: a statement about a question whose gold
+  // refused is an answer to a question, and calling it an unknown id would be a false accusation
+  // about the competitor's numbering.
   const ledger = parsePredictions(
     readFileSync(settings.predictions, 'utf8'),
-    set.map((question) => ({ id: question.question_id, question: question.question, db: question.db_id })),
+    asked.map((question) => ({ id: question.question_id, question: question.question, db: question.db_id })),
     idMap?.ids,
   );
   const numbering = idMap === undefined ? {} : { idMap };
   const violations = coordinateViolations(run, reference);
   if (violations.length > 0) {
-    return { run, reference, ledger, comparable: false, violations, problems, ...numbering };
+    return { run, scope: { ...scopeBase, judged: 0 }, reference, ledger, comparable: false, violations, problems, ...numbering };
   }
   const silence = silentRun(ledger);
   if (silence !== undefined) {
     problems.push(`${settings.predictions} ${silence}`);
-    return { run, reference, ledger, comparable: true, violations, problems, ...numbering };
+    return { run, scope: { ...scopeBase, judged: 0 }, reference, ledger, comparable: true, violations, problems, ...numbering };
   }
 
   const byId = new Map<string, BirdQuestion>(set.map((question) => [String(question.question_id), question]));
@@ -297,7 +353,7 @@ export async function scoreRun(settings: ScoreSettings): Promise<ScoreOutcome> {
   const judged = competitorOutcomes.length;
   if (judged === 0) {
     problems.push('no question could be judged: every gold statement failed to run');
-    return { run, reference, ledger, comparable: true, violations, problems, ...numbering };
+    return { run, scope: { ...scopeBase, judged }, reference, ledger, comparable: true, violations, problems, ...numbering };
   }
   const accuracy = passed / judged;
   const interval = wilsonInterval(passed, judged);
@@ -328,7 +384,83 @@ export async function scoreRun(settings: ScoreSettings): Promise<ScoreOutcome> {
     needed: casesForEffect(resolution.discordantShare, settings.effect),
   };
 
-  return { run, reference, ledger, comparable: true, violations, execution, paired, problems, ...numbering };
+  return {
+    run,
+    scope: { ...scopeBase, judged },
+    reference,
+    ledger,
+    comparable: true,
+    violations,
+    execution,
+    paired,
+    problems,
+    ...numbering,
+  };
+}
+
+/**
+ * The questions our own run asked and could not judge, as its report records them.
+ *
+ * The report is the only place this fact exists: `selection.scored` says how many were judged, and
+ * `gold.unrunnable` says which and why. A comparison that dropped the second list would turn every
+ * refused gold into a question the competitor answered an id for that the file does not hold.
+ */
+export function refusedGold(report: Record<string, unknown>): readonly { id: number; why: string }[] {
+  const gold = report.gold as { unrunnable?: unknown } | undefined;
+  if (!Array.isArray(gold?.unrunnable)) return [];
+  const out: { id: number; why: string }[] = [];
+  for (const entry of gold.unrunnable) {
+    const record = entry as { id?: unknown; error?: unknown };
+    if (typeof record.id !== 'number' || !Number.isInteger(record.id)) continue;
+    out.push({
+      id: record.id,
+      why: typeof record.error === 'string' && record.error.length > 0 ? record.error : 'the gold statement did not run',
+    });
+  }
+  return out;
+}
+
+/** The databases our own run's pool covered, when its report says. */
+export function poolDatabases(report: Record<string, unknown>): readonly string[] | undefined {
+  const selection = report.selection as { availableDatabases?: unknown } | undefined;
+  const dbs = selection?.availableDatabases;
+  if (!Array.isArray(dbs)) return undefined;
+  return dbs.filter((db): db is string => typeof db === 'string');
+}
+
+/**
+ * What the rate below is a rate about.
+ *
+ * Printed before the answered count and above the accuracy, because the count that a reader needs
+ * first is the denominator: "25 questions" and "25 of 498" were the same line for four rounds, and
+ * the only thing that distinguished them was a number the artifact did not carry.
+ */
+export function scopeLine(scope: ScopeSummary): string {
+  const repeats =
+    scope.repeats.length === 0
+      ? ''
+      : `; ${scope.repeats.join(', ')} ${scope.repeats.length === 1 ? 'appears' : 'appear'} twice and ${scope.repeats.length === 1 ? 'is' : 'are'} counted once`;
+  const rows = `, ${String(scope.rows)} row(s) in the file${repeats}`;
+  const excluded =
+    scope.excluded.length === 0
+      ? ''
+      : `; ${String(scope.excluded.length)} outside the comparison because the gold statement would not run (` +
+        scope.excluded
+          .slice(0, 3)
+          .map((entry) => `${String(entry.id)}: ${entry.why}`)
+          .join(', ') +
+        (scope.excluded.length > 3 ? ', …' : '') +
+        ')';
+  if (scope.sampled) {
+    return (
+      `  scope: ${String(scope.asked)} of the ${scope.split} split's ${String(scope.questions)} question(s)${rows}` +
+      ` — a sample: every rate below is a rate about these ${String(scope.asked)}${excluded}`
+    );
+  }
+  return (
+    `  scope: the whole ${scope.split} split — ${String(scope.asked)} of ${String(scope.questions)} question(s)${rows}, ` +
+    `${String(scope.judged)} judged${excluded}`
+  );
 }
 
 const pct = (value: number): string => `${(value * 100).toFixed(2)}%`;
@@ -344,6 +476,7 @@ export function scoreLines(outcome: ScoreOutcome): readonly string[] {
   lines.push(
     `  reference: arm ${outcome.reference.arm}, ${outcome.reference.split}, ${String(outcome.reference.questionIds.length)} questions`,
   );
+  lines.push(scopeLine(outcome.scope));
   if (outcome.idMap !== undefined) {
     lines.push(
       `  numbering: read through ${outcome.idMap.path}, ${String(outcome.idMap.ids.length)} positions` +
@@ -407,6 +540,7 @@ export function writeScoreArtifact(settings: ScoreSettings, outcome: ScoreOutcom
     reference: outcome.reference,
     comparable: outcome.comparable,
     violations: outcome.violations,
+    scope: outcome.scope,
     idMap: outcome.idMap ?? null,
     ledger: {
       declared: outcome.ledger.declared,
@@ -440,10 +574,7 @@ export async function main(
   return outcome.problems.length === 0 ? 0 : 1;
 }
 
-export function isEntry(argv1: string | undefined, moduleUrl: string): boolean {
-  return argv1 !== undefined && pathToFileURL(argv1).href === moduleUrl;
-}
-
-if (isEntry(process.argv[1], import.meta.url)) {
-  process.exitCode = await main();
-}
+// The guard is a value, so importing this module cannot start a scoring run and the answer to
+// "was this the entry point" is a call a test can make. `await`, because `main` is asynchronous:
+// the assignment is the last statement either way.
+process.exitCode = await runIfEntry(process.argv[1], import.meta.url, () => main());
