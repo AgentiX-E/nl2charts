@@ -4070,6 +4070,27 @@ and 160 of 211 (75.8%) are one of those two.
 That is what the next work item has to attack, and it is not a shape guard: a guard can see that a
 statement is the wrong width, and nothing in this table is.
 
+### The same three instruments on a second live run
+
+Every number above comes from one artifact (`41206085907`). The CI job on the commit that added the
+three instruments runs them again on a fresh live evaluation, so the two readings can be compared
+rather than trusted:
+
+| | artifact `41206085907` | CI `41226576767` |
+|---|---|---|
+| `column-count` cases | 52 | 51 |
+| wide / narrow / exact | 37 / 15 / 0 | 36 / 15 / 0 |
+| recovered by removing columns | 11 | 11 |
+| width ceiling | 2.22pp | 2.22pp |
+| failures on the arm | 220 | 216 |
+| a gold condition's column never filtered | 80 (36.4%) | 93 (43.1%) |
+| `grain` / `scale` / `window` | 0 / 0 / 0 | 0 / 0 / 0 |
+
+The ceiling is identical to the second decimal because it is 11 of 496 in both runs; what moves is
+the failure count, which is the model's variance and not the instrument's. So the population the
+constraint audit would attack is a range, **16.1–18.8pp**, not a point — reported as a range here
+so that a reader who reruns it does not conclude the instrument drifted.
+
 ## The floor is enforced, not remembered
 
 A benchmark that only produces a report gets read once. The BIRD arms have a

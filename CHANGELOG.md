@@ -382,6 +382,14 @@ cannot be argued with.
   `aggregate`. 160 of 211 (75.8%) are a wrong table or a wrong condition, which is what the next
   work item has to attack; a shape guard cannot see any of it.
 
+- **A second live run reproduces the ceiling and brackets the population.** CI (`41226576767`) runs
+  the same three instruments on a fresh evaluation: 51 `column-count` cases (36 wide / 15 narrow /
+  0 exact), **the same 11 recovered and the same 2.22pp**, 216 failures rather than 220, and **93
+  (43.1%) missing a condition against 80 (36.4%)** on the artifact — `grain` / `scale` / `window`
+  zero in both. The ceiling is identical because it is 11 of 496 either way; what moves is the
+  model's failure count. The population the constraint audit targets is therefore published as the
+  range **16.1–18.8pp**, not as a point.
+
 
 - **Their refiner sees 54 of 496 cases and 166 of the 220 failures are invisible to it.** Applying
   `_is_need_refine` to the artifact's failing statements (`41206085907`, 496 questions, a census:
