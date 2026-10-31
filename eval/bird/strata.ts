@@ -21,7 +21,8 @@
  * Nothing here calls a model: it is a second reading of an artifact that already exists, which
  * is why the question could be asked at all rather than answered by another 1,532-case run.
  */
-import { casesForEffect, mcnemarExact, pairedResolution } from '@agentix-e/nl2charts-devkit';
+import { casesForEffect, mcnemarExact, pairedResolution, pairByOccurrence } from '@agentix-e/nl2charts-devkit';
+import type { CaseOutcome } from '@agentix-e/nl2charts-devkit';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -92,32 +93,46 @@ export interface StrataReading {
  */
 export function pairCases(cases: readonly CaseRow[], arm: string, against: string): {
   pairs: { id: string; first: boolean; second: boolean }[];
+  /** Questions only one of the two arms scored: they cannot be paired at all. */
   unpaired: string[];
-  duplicates: string[];
+  /** Questions both scored, a different number of times: one draw is matched with one draw. */
+  mismatched: string[];
 } {
-  const first = new Map<string, boolean>();
-  const second = new Map<string, boolean>();
-  // Two rows for one arm on one question make the join ambiguous: last-wins would silently
-  // pick one, and the artifact is a file this tool did not write. Legacy and hand-edited
-  // artifacts are exactly why a reader validates its input rather than trusting it.
-  const duplicates = new Set<string>();
-  const record = (target: Map<string, boolean>, row: CaseRow): void => {
-    if (target.has(row.id)) duplicates.add(`${row.arm}/${row.id}`);
-    target.set(row.id, row.passed);
+  const rowsOf = (name: string): CaseOutcome[] =>
+    cases.filter((row) => row.arm === name).map((row) => ({ id: row.id, passed: row.passed }));
+  // The pairing is the runner's, not a second opinion about it: `pairByOccurrence` is what
+  // `compareArms` folds over, so this tool and the artifact it explains count the same pairs.
+  // The map this used to build (`id -> passed`, last row wins) disagreed with the runner by one
+  // pair on a split that repeats a question, and reported the repetition as a defect in the
+  // artifact rather than as the two draws it is.
+  const mine = rowsOf(arm);
+  const theirs = rowsOf(against);
+  const pairing = pairByOccurrence(mine, theirs);
+  // The leftovers say which id was answered unevenly, not whether the other arm answered it at
+  // all: consumption is one-sided, so a question answered twice by one arm and once by the other
+  // leaves a leftover on one side only. The two kinds of problem are therefore read from the
+  // counts — an id one arm never answered is unpaired, an id both answered a different number of
+  // times is ambiguous — while the pairs themselves come from the shared alignment.
+  const count = (rows: readonly CaseOutcome[]): Map<string, number> => {
+    const seen = new Map<string, number>();
+    for (const row of rows) seen.set(row.id, (seen.get(row.id) ?? 0) + 1);
+    return seen;
   };
-  for (const row of cases) {
-    if (row.arm === arm) record(first, row);
-    else if (row.arm === against) record(second, row);
-  }
-  const pairs: { id: string; first: boolean; second: boolean }[] = [];
+  const mineCount = count(mine);
+  const theirsCount = count(theirs);
   const unpaired: string[] = [];
-  for (const [id, passed] of first) {
-    const other = second.get(id);
-    if (other === undefined) unpaired.push(id);
-    else pairs.push({ id, first: passed, second: other });
+  const mismatched: string[] = [];
+  for (const id of new Set([...mineCount.keys(), ...theirsCount.keys()])) {
+    const here = mineCount.get(id) ?? 0;
+    const there = theirsCount.get(id) ?? 0;
+    if (here === 0 || there === 0) unpaired.push(id);
+    else if (here !== there) mismatched.push(id);
   }
-  for (const id of second.keys()) if (!first.has(id)) unpaired.push(id);
-  return { pairs, unpaired, duplicates: [...duplicates] };
+  return {
+    pairs: pairing.pairs.map((pair) => ({ id: pair.id, first: pair.first, second: pair.second })),
+    unpaired,
+    mismatched,
+  };
 }
 
 export function summariseStratum(stratum: Stratum, pairs: readonly { first: boolean; second: boolean }[]): StratumRow {
@@ -164,8 +179,15 @@ export function summariseStratum(stratum: Stratum, pairs: readonly { first: bool
 export function stratify(artifact: Artifact, arm: string, against: string): StrataReading {
   const problems: string[] = [];
   const pairs = pairCases(artifact.cases ?? [], arm, against);
-  if (pairs.duplicates.length > 0) {
-    problems.push(`the artifact scores ${pairs.duplicates.length} case(s) twice (${pairs.duplicates.slice(0, 5).join(', ')}), so the join took the last one of each`);
+  if (pairs.mismatched.length > 0) {
+    // A different number of rows per arm for one question means one draw of one arm is matched
+    // with one draw of the other and the rest of that question's rows are unpaired. Reporting it
+    // is the point: the pairing is still occurrence by occurrence, but which draw belongs to
+    // which is not in the file.
+    problems.push(
+      `the artifact answers ${pairs.mismatched.length} question(s) a different number of times for ${arm} and ${against} ` +
+        `(${pairs.mismatched.slice(0, 5).join(', ')}), so one draw is paired with one draw`,
+    );
   }
   const pooled = summariseStratum('all', pairs.pairs);
   const rows: StratumRow[] = [pooled];

@@ -43,6 +43,37 @@ cannot be argued with.
 
 ### Fixed
 
+- **One artifact, two pairings: the tool that explains a delta and the tool that produces it
+  counted different pairs.** `compareArms` consumed each arm's answers by occurrence, because a map
+  keyed by id let Mini-Dev's repeated 137 read the last answer recorded for it; `pairCases` in
+  `eval/bird/strata.ts` built that map anyway and reported the repetition as a defect in the
+  artifact ("took the last one of each"). On a file with a repeated id the two disagreed by one
+  pair, so the cross-check that makes a strata reading believable compared two populations. The
+  alignment now lives once, in `pairByOccurrence`, and both readers fold over it; `pairCases`
+  separates the two things it used to merge — a question one arm never answered (`unpaired`) and a
+  question both answered a different number of times (`mismatched`). The regression is held by a
+  test that pairs a six-row artifact (two arms, one question twice) and asserts the stratification
+  and the runner produce the same four cells; it fails on the old implementation with 2 pairs where
+  the runner counted 3.
+
+- **`gap.ts` was the only one of the six instruments that could not be aimed.** `values-gap`,
+  `card`, `join`, `info` and `repair` all take `--arm <name>`; this one printed a row per arm and
+  left the reader to find the one that failed a gate. It now takes `--arm`, writes its table to
+  `eval/out/bird-gap-<arm>.json` rather than over the whole chain's, and refuses two absences
+  differently: an arm the artifact never scored (naming the arms it does hold, via `requireArm`) and
+  an arm that publishes no candidate ceiling (naming the arms that do) — because an empty table
+  would read as "no gaps found".
+
+- **The dev arm list had two owners and neither was the code.** `bird-dev.yml`'s default was
+  `names,inline-definitions,inline+evidence,metadata+evidence,select` while
+  `eval/baseline/bird.json`'s `armsBySplit.dev` named six arms including the adopted ceiling
+  `select-mixed`. Which arms a dev run measures therefore had two answers that nothing compared.
+  `DEV_ARMS` in `eval/bird/run.ts` is now the authority: the workflow quotes it byte for byte
+  (asserted by a test that reads the YAML), the baseline must equal it plus the arms whose sources
+  name `@second`, and every arm in it must be in the catalogue and carry a dev floor. The default
+  itself moves from the superseded definition-source arm to `select-mixed`, the arm the dev split
+  was run six times to adopt.
+
 - **The default sample size was still the row count, so every push declared a request the split
   could not satisfy.** `selection.available` became a count of question ids in the round above,
   while `parseLimit` kept answering `500` for Mini-Dev — a row count standing where a question

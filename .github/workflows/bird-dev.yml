@@ -17,12 +17,14 @@ on:
       arms:
         description: Comma-separated arms
         required: false
-        # `select` is in the default list because this is the split that can decide the
-        # four-call tier: the MDE here is 2.30pp against Mini-Dev's 3.98pp, so a 2pp
-        # non-inferiority claim is decidable on 1,532 questions and not on 498. It is also the
-        # only arm that carries a candidate set, which is what four of the instruments below
-        # read — they used to name `select-cross`, an arm this workflow never ran.
-        default: 'names,inline-definitions,inline+evidence,metadata+evidence,select'
+        # Kept byte-identical to `DEV_ARMS` in `eval/bird/run.ts`, which is the authority:
+        # `test/bird-arms.test.ts` reads this file and fails when the two disagree, and
+        # `eval/baseline/bird.json`'s `armsBySplit.dev` must equal this list plus the arms that
+        # need a second model. `select-mixed` is here because it is the ceiling this workflow
+        # exists to reproduce (63.0% on 1,532 questions); `select` because this is the split
+        # whose MDE (2.30pp) can decide the four-call tier; `select-cross` is not, because it
+        # needs a second model that a routine dispatch does not configure.
+        default: 'names,inline+evidence,metadata+evidence,select,select-mixed'
       second_model:
         description: Model for `@second` candidate sources (blank = none)
         required: false

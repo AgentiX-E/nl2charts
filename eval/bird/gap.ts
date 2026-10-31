@@ -31,6 +31,7 @@
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { requireArm } from './presence.js';
 
 /** The shapes the artifact can tell apart on its own. */
 export const GAP_BUCKETS = ['engine-refused', 'column-count', 'values', 'unclassified'] as const;
@@ -153,11 +154,31 @@ export function gapTable(report: GapReportShape): ArmGap[] {
 export interface GapSettings {
   readonly report: string;
   readonly out: string;
+  /** The one arm to diagnose, or `undefined` for every arm that publishes a ceiling. */
+  readonly arm?: string;
 }
 
+/**
+ * `--arm` exists because this was the only one of the six instruments that could not be aimed.
+ *
+ * `values-gap`, `card`, `join`, `info` and `repair` all take `--arm <name>` and refuse a name the
+ * artifact does not hold; this one printed every arm that carries a candidate set and left the
+ * reader to find the row. A gate that reads a table with eleven arms in it cannot say which arm
+ * failed it, and the artifact it writes is not one arm's diagnosis but eleven.
+ */
 export function resolveGapSettings(argv: readonly string[] = [], root = process.cwd()): GapSettings {
-  const path = argv[0] ?? 'eval/out/bird-eval.json';
-  return { report: resolve(root, path), out: resolve(root, 'eval/out/bird-gap.json') };
+  const flag = argv.indexOf('--arm');
+  const named = flag === -1 ? undefined : argv[flag + 1];
+  if (flag !== -1 && named === undefined) throw new Error('--arm needs a name');
+  const consumed = flag === -1 ? [] : [flag, flag + 1];
+  const path = argv.find((item, index) => !item.startsWith('--') && !consumed.includes(index)) ?? 'eval/out/bird-eval.json';
+  return {
+    report: resolve(root, path),
+    // An arm's table gets its own file: the whole chain's table and one arm's table are two
+    // artifacts, and writing both to one path makes the second look like the first shrank.
+    out: resolve(root, named === undefined ? 'eval/out/bird-gap.json' : `eval/out/bird-gap-${named}.json`),
+    ...(named === undefined ? {} : { arm: named }),
+  };
 }
 
 /**
@@ -274,9 +295,35 @@ export function writeGapArtifact(settings: GapSettings, artifact: GapArtifact): 
   return settings.out;
 }
 
+/**
+ * The one row an `--arm` asked for, or a refusal that names what the artifact does hold.
+ *
+ * Two absences are different: an arm the report never scored (`requireArm` says which arms it
+ * has) and an arm it scored without a candidate set (it cannot have a no-answer bucket at all,
+ * because it never had a choice to make). Both are refused here rather than printed as a table
+ * of zeros, which is what an empty filter would have produced.
+ */
+export function armOrThrow(
+  table: readonly ArmGap[],
+  report: GapReportShape,
+  arm: string,
+  source: string,
+): ArmGap {
+  requireArm(report.cases, arm, source);
+  const row = table.find((entry) => entry.arm === arm);
+  if (row !== undefined) return row;
+  const published = samplingArms(report);
+  throw new Error(
+    published.length === 0
+      ? `${source} holds no arm with a candidate ceiling, so ${arm} has no no-answer set to diagnose`
+      : `${arm} publishes no candidate ceiling in ${source}, so it has no no-answer set to diagnose; the arms that do are ${published.join(', ')}`,
+  );
+}
+
 export function runGap(settings: GapSettings): { artifact: GapArtifact; problems: string[]; path: string } {
   const report = JSON.parse(readFileSync(settings.report, 'utf8')) as GapReportShape;
-  const arms = gapTable(report);
+  const table = gapTable(report);
+  const arms = settings.arm === undefined ? table : [armOrThrow(table, report, settings.arm, settings.report)];
   const problems = gapProblems(arms);
   const artifact = gapArtifact(report, arms);
   const path = writeGapArtifact(settings, artifact);

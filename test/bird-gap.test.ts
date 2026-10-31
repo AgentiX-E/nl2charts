@@ -10,7 +10,7 @@
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   classifyGapCase,
   gapArtifact,
@@ -261,6 +261,66 @@ describe('the entry, run the way a workflow runs it', () => {
     const settings = resolveGapSettings([], ROOT);
     expect(settings.report).toBe(join(ROOT, 'eval/out/bird-eval.json'));
     expect(gapPath(settings)).toBe(join(ROOT, 'eval/out/bird-gap.json'));
+  });
+
+  it('aims at one arm, writes beside the chain table, and prints that arm alone', async () => {
+    // The chain table has eleven rows; a reader looking for the arm that failed a gate had to
+    // find the row themselves, which is not a diagnosis. `--arm` is the same flag the other
+    // five instruments take.
+    const { root, report: path } = written(
+      report([hit('select-cross', '0'), miss('select-cross', '1'), hit('names', '2'), hit('names', '3')]),
+    );
+    const settings = resolveGapSettings([path, '--arm', 'select-cross'], root);
+    expect(settings.arm).toBe('select-cross');
+    expect(gapPath(settings)).toBe(join(root, 'eval/out/bird-gap-select-cross.json'));
+    const printed: string[] = [];
+    const log = vi.spyOn(console, 'log').mockImplementation((line: unknown) => printed.push(String(line)));
+    try {
+      expect(await main([path, '--arm', 'select-cross'], root)).toBe(0);
+    } finally {
+      log.mockRestore();
+    }
+    // One row, for the arm that was asked for: the other arm's row is gone rather than
+    // sorted below it, which is the difference between aiming and scanning.
+    expect(printed.some((line) => line.startsWith('select-cross'))).toBe(true);
+    expect(printed.some((line) => line.startsWith('names'))).toBe(false);
+  });
+
+  it('refuses an arm the artifact never scored, naming the arms it does hold', () => {
+    const { root, report: path } = written(report([hit('select-cross', '0')]));
+    expect(() => runGap(resolveGapSettings([path, '--arm', 'select-mixed'], root))).toThrow(
+      /has no arm select-mixed; it holds select-cross/,
+    );
+  });
+
+  it('refuses an arm with no candidate ceiling, because it has no no-answer set', () => {
+    // `names` was scored and publishes no `candidateRecall`: it generates one statement, so it
+    // never had a candidate set to lose. An empty table would read as "no gaps found".
+    const { root, report: path } = written(report([hit('names', '1')]));
+    expect(() => runGap(resolveGapSettings([path, '--arm', 'names'], root))).toThrow(
+      /names publishes no candidate ceiling .*the arms that do are select-cross/,
+    );
+  });
+
+  it('refuses a flag with no name rather than diagnosing every arm', () => {
+    expect(() => resolveGapSettings(['--arm'], ROOT)).toThrow(/--arm needs a name/);
+  });
+
+  it('reads the report path on either side of the flag, and defaults when there is none', () => {
+    // `--arm sel eval/out/x.json` and `eval/out/x.json --arm sel` are the same request; the
+    // path is whatever is left once the flag and its value are consumed.
+    expect(resolveGapSettings(['--arm', 'select-cross', 'eval/out/x.json'], ROOT).report).toBe(join(ROOT, 'eval/out/x.json'));
+    expect(resolveGapSettings(['eval/out/x.json', '--arm', 'select-cross'], ROOT).report).toBe(join(ROOT, 'eval/out/x.json'));
+    expect(resolveGapSettings(['--arm', 'select-cross'], ROOT).report).toBe(join(ROOT, 'eval/out/bird-eval.json'));
+  });
+
+  it('refuses an arm when the artifact holds no ceiling at all, and says so once', () => {
+    // No arm publishes a `candidateRecall`: there is no no-answer set anywhere, so naming one
+    // arm cannot produce a table and the message must not claim the arm is the problem.
+    const { root, report: path } = written({ split: 'dev', arms: [], cases: [hit('names', '1')] });
+    expect(() => runGap(resolveGapSettings([path, '--arm', 'names'], root))).toThrow(
+      /holds no arm with a candidate ceiling, so names has no no-answer set to diagnose/,
+    );
   });
 
   it('writes the artifact where it says it will', () => {

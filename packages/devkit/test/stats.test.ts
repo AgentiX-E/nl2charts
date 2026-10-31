@@ -195,9 +195,11 @@ describe('arm summaries', () => {
     const once = summarise('u', [{ id: '7', passed: true }]);
     // The first arm runs out of answers to consume…
     expect(() => compareArms(twice, once)).toThrow(/missing case/);
-    // …and when it is the second arm that has the extra row, the identity catches it, because its
-    // `passed` total counts a row no pair ever used.
-    expect(() => compareArms(once, twice)).toThrow(/add up/);
+    // …and when it is the second arm that has the extra row, the pairing says so with the id
+    // rather than leaving it to the arithmetic identity: the old loop never looked at the
+    // leftovers, so an arm with an extra row failed as "pairs do not add up", which names neither
+    // the arm nor the case.
+    expect(() => compareArms(once, twice)).toThrow(/arm u is missing case 7/);
     // Equal counts and different questions: the queue runs dry inside the loop, so a shorter arm
     // cannot pass for a mismatched one just because the totals match.
     const elsewhere = summarise('o', [{ id: '8', passed: true }, { id: '8', passed: true }]);

@@ -1,7 +1,7 @@
 export { formatReport, recordCase, runContractSuite } from './contract.js';
 export type { CaseResult, ContractCase, ContractExpectation } from './contract.js';
-export { compareArms, sameResult, sameRows, summarise } from './bench.js';
-export type { ArmResult, CaseOutcome, PairedComparison, ResultSet } from './bench.js';
+export { compareArms, pairByOccurrence, sameResult, sameRows, summarise } from './bench.js';
+export type { AlignedPair, ArmResult, CaseOutcome, PairedComparison, Pairing, ResultSet } from './bench.js';
 export { casesForEffect, mcnemarExact, pairedResolution, wilsonInterval } from './stats.js';
 export type { Interval, PairedResolution } from './stats.js';
 export { judgeOfficial, judgeOfficialResult, judgeStrict, judgeStrictResult, toTuples } from './judge.js';

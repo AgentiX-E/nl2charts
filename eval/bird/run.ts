@@ -538,6 +538,20 @@ export const DEFAULT_ARMS: readonly string[] = [
 ];
 
 /**
+ * The arms `bird-dev.yml` runs when a dispatch names none.
+ *
+ * The dev split is the one that decides adoption, so its default list is the adopted arms and
+ * the arms they are read against — `select-mixed` (63.0% on 1,532 questions) is the ceiling, and
+ * the other four are what that ceiling is 2.4pp above. The list lives here rather than in the
+ * workflow so that `eval/baseline/bird.json` (`armsBySplit.dev`) and the YAML cannot drift into
+ * two opinions about which arms a dev run has: the baseline says which arms a dev run must be
+ * *able to fail*, this says which ones a routine run *asks for*, and the difference is derived —
+ * `select-cross` carries a dev floor and needs a second model a routine dispatch does not
+ * configure.
+ */
+export const DEV_ARMS: readonly string[] = ['names', 'inline+evidence', 'metadata+evidence', 'select', 'select-mixed'];
+
+/**
  * Arms that exist for on-demand runs, each with the reason it is not in the chain.
  * An arm that is neither here nor in `DEFAULT_ARMS` fails the suite.
  */

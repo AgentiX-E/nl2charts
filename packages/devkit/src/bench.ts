@@ -51,20 +51,80 @@ export interface PairedComparison {
  * loop cannot see — a second arm with more rows than the first runs out of questions to consume and
  * fails here instead of being silently truncated.
  */
-export function compareArms(first: ArmResult, second: ArmResult): PairedComparison {
+export interface AlignedPair {
+  readonly id: string;
+  readonly first: boolean;
+  readonly second: boolean;
+}
+
+export interface Pairing {
+  readonly pairs: readonly AlignedPair[];
+  /** Ids the first arm answered more often than the second, in the first arm's order. */
+  readonly unmatchedFirst: readonly string[];
+  /** Ids the second arm answered more often than the first, in the second arm's order. */
+  readonly unmatchedSecond: readonly string[];
+}
+
+/**
+ * Align two arms' cases by occurrence — the one definition of "the same case twice".
+ *
+ * There used to be two. `compareArms` consumed occurrences in the order the arms answered them,
+ * because a map keyed by id let the first arm's two rows for Mini-Dev's repeated 137 read the
+ * last answer the second arm recorded for that id; `pairCases` in `eval/bird/strata.ts` built that
+ * map anyway and reported the repetition as "took the last one of each". Two pairings of the same
+ * artifact then disagreed by one pair on a split with a repeated question, which meant the tool
+ * that explains a delta and the tool that produces it could not be cross-checked — and the
+ * cross-check is the only reason either number is believable.
+ *
+ * So the alignment is here, and both readers fold over it. Occurrence order is the only ordering
+ * that needs no assumption about the file: an artifact lists what each arm did, in the order it
+ * did it, and a repeated question is two draws rather than one answer recorded twice.
+ */
+export function pairByOccurrence(
+  first: readonly CaseOutcome[],
+  second: readonly CaseOutcome[],
+): Pairing {
   const pending = new Map<string, boolean[]>();
-  for (const { id, passed } of second.outcomes) pending.set(id, [...(pending.get(id) ?? []), passed]);
+  for (const { id, passed } of second) pending.set(id, [...(pending.get(id) ?? []), passed]);
+  const pairs: AlignedPair[] = [];
+  const unmatchedFirst: string[] = [];
+  for (const { id, passed } of first) {
+    const other = pending.get(id)?.shift();
+    if (other === undefined) {
+      unmatchedFirst.push(id);
+      continue;
+    }
+    pairs.push({ id, first: passed, second: other });
+  }
+  const unmatchedSecond: string[] = [];
+  for (const { id } of second) {
+    const queue = pending.get(id);
+    if (queue !== undefined && queue.length > 0) {
+      unmatchedSecond.push(id);
+      queue.shift();
+    }
+  }
+  return { pairs, unmatchedFirst, unmatchedSecond };
+}
+
+export function compareArms(first: ArmResult, second: ArmResult): PairedComparison {
+  const pairing = pairByOccurrence(first.outcomes, second.outcomes);
+  // Both leftovers are refused, and each names the arm that answered the case fewer times: an
+  // arm with an extra row used to pass through the loop untouched and fail on the arithmetic
+  // identity, which names neither the arm nor the case.
+  const missing = pairing.unmatchedFirst[0];
+  if (missing !== undefined) throw new Error(`arm ${second.arm} is missing case ${missing}`);
+  const extra = pairing.unmatchedSecond[0];
+  if (extra !== undefined) throw new Error(`arm ${first.arm} is missing case ${extra}`);
   let onlyFirst = 0;
   let onlySecond = 0;
   let both = 0;
   let neither = 0;
-  for (const { id, passed } of first.outcomes) {
-    const other = pending.get(id)?.shift();
-    if (other === undefined) throw new Error(`arm ${second.arm} is missing case ${id}`);
-    if (passed === other) {
-      if (passed) both += 1;
+  for (const pair of pairing.pairs) {
+    if (pair.first === pair.second) {
+      if (pair.first) both += 1;
       else neither += 1;
-    } else if (passed) onlyFirst += 1;
+    } else if (pair.first) onlyFirst += 1;
     else onlySecond += 1;
   }
   if (onlyFirst - onlySecond !== first.passed - second.passed) throw new Error('pairs do not add up');

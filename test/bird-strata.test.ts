@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
+import { compareArms, summarise } from '@agentix-e/nl2charts-devkit';
 import { pathToFileURL } from 'node:url';
 import {
   checkAgainstAblation,
@@ -84,16 +85,46 @@ describe('pairing two arms', () => {
     expect(pairCases(extra, 'first', 'against').unpaired).toEqual(['q7']);
   });
 
-  it('reports a case scored twice rather than letting the last row win', () => {
-    // The artifact is a file this tool did not write. Two rows for one arm on one question
-    // mean the join is ambiguous, and an ambiguity reported is a measurement; one hidden is
-    // a number nobody can reproduce.
+  it('reports a question the two arms answered a different number of times', () => {
+    // The artifact is a file this tool did not write. One arm answering a question twice while
+    // the other answers it once leaves which draw is which undecided — and an ambiguity reported
+    // is a measurement, while one hidden is a number nobody can reproduce. The pair itself is
+    // still made occurrence by occurrence, which is why the count of pairs does not change.
     const twice = [...cases, { arm: 'first', id: 'q1', passed: false }];
     const paired = pairCases(twice, 'first', 'against');
-    expect(paired.duplicates).toEqual(['first/q1']);
+    expect(paired.mismatched).toEqual(['q1']);
+    expect(paired.unpaired).toEqual([]);
     expect(paired.pairs).toHaveLength(6);
     const reading = stratify(artifact({ cases: twice }), 'first', 'against');
-    expect(reading.problems[0]).toContain('scores 1 case(s) twice (first/q1)');
+    expect(reading.problems[0]).toContain('answers 1 question(s) a different number of times for first and against (q1)');
+  });
+
+  it('counts exactly the pairs the runner counted, on a split that repeats a question', () => {
+    // The regression this guards. `pairCases` built a map keyed by id and kept the last row,
+    // while `compareArms` consumed occurrences in order, so an artifact carrying Mini-Dev's
+    // repeated 137/138 gave the two readers a different number of pairs — and the tool that
+    // explains a delta then blamed the artifact for the repetition. Both now fold over
+    // `pairByOccurrence`, so the four cells are the same four cells.
+    const repeated: Case[] = [
+      { arm: 'first', id: 'q1', passed: true },
+      { arm: 'first', id: 'q2', passed: false },
+      { arm: 'first', id: 'q2', passed: true },
+      { arm: 'against', id: 'q1', passed: true },
+      { arm: 'against', id: 'q2', passed: true },
+      { arm: 'against', id: 'q2', passed: false },
+    ];
+    const reading = stratify(artifact({ cases: repeated, ablation: undefined } as Record<string, unknown>), 'first', 'against');
+    const comparison = compareArms(
+      summarise('first', repeated.filter((row) => row.arm === 'first').map(({ id, passed }) => ({ id, passed }))),
+      summarise('against', repeated.filter((row) => row.arm === 'against').map(({ id, passed }) => ({ id, passed }))),
+    );
+    // Three pairs, not two: q2 was answered twice by each arm, so it contributes two draws.
+    expect(reading.pooled.n).toBe(3);
+    expect(reading.pooled.n).toBe(comparison.total);
+    expect(reading.pooled.onlyFirst).toBe(comparison.onlyFirst);
+    expect(reading.pooled.onlySecond).toBe(comparison.onlySecond);
+    expect(reading.pooled.first).toBe(comparison.total - comparison.onlySecond - comparison.neither);
+    expect(reading.pooled.second).toBe(comparison.total - comparison.onlyFirst - comparison.neither);
   });
 });
 

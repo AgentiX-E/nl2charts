@@ -13,6 +13,7 @@ import {
   CROSS_SOURCES,
   BALANCED_SOURCES,
   DEFAULT_ARMS,
+  DEV_ARMS,
   ON_DEMAND_ARMS,
   PAIRS,
   assertArmProducedResults,
@@ -810,6 +811,54 @@ describe('cross-model candidate sources', () => {
  * the funnel, cost and empty-lever checks with it. A cross-model run therefore had no
  * structural gate at all, and nobody noticed because nothing was asked to notice.
  */
+describe('the arms a dev run starts from', () => {
+  /** The `default:` under the `arms:` input of a workflow, as the workflow would read it. */
+  function defaultArms(file: string): string {
+    const lines = readFileSync(resolve(process.cwd(), file), 'utf8').split('\n');
+    const at = lines.findIndex((line) => line.trim() === 'arms:');
+    expect(at, `${file} has an arms input`).toBeGreaterThan(-1);
+    for (const line of lines.slice(at + 1)) {
+      const match = /^\s+default: '([^']*)'/.exec(line);
+      if (match !== null) return match[1] as string;
+      if (/^\s+[a-z_]+:$/.test(line)) break;
+    }
+    throw new Error(`${file} declares an arms input with no default`);
+  }
+
+  it('is one list, and the workflow quotes it rather than keeping a second copy', () => {
+    // The workflow had its own default and the baseline had another, so "which arms does a dev
+    // run measure" had two answers that no check compared. Now the YAML quotes `DEV_ARMS` and
+    // this test is what makes the quote binding.
+    expect(defaultArms('.github/workflows/bird-dev.yml')).toBe(DEV_ARMS.join(','));
+  });
+
+  it('is every arm the dev baseline names, less the ones that need a second model', () => {
+    // The gap is derived rather than listed: an arm with an `@second` source cannot be in a
+    // routine run, because the dispatch configures no second model by default.
+    const baseline = JSON.parse(readFileSync(resolve(process.cwd(), 'eval/baseline/bird.json'), 'utf8')) as {
+      armsBySplit?: Record<string, string[]>;
+    };
+    // "Needs a second model" is read from the arm, not from a third list: a mixed arm whose
+    // sources name `@second` cannot run without one.
+    const needsSecond = (name: string): boolean =>
+      (resolveArm(name)?.mixed ?? []).some((source) => source.includes('@second'));
+    const expected = (baseline.armsBySplit?.dev ?? []).filter((name) => !needsSecond(name));
+    expect([...DEV_ARMS].sort()).toEqual([...expected].sort());
+  });
+
+  it('names only arms the catalogue holds, and every one of them a floor covers', () => {
+    const catalogue = ARMS.map((arm) => arm.name);
+    const baseline = JSON.parse(readFileSync(resolve(process.cwd(), 'eval/baseline/bird.json'), 'utf8')) as {
+      floors: Record<string, Record<string, number>>;
+    };
+    for (const name of DEV_ARMS) {
+      expect(catalogue, name).toContain(name);
+      // An arm a dev run measures without a floor is an arm whose regression nothing notices.
+      expect(Object.keys(baseline.floors.dev ?? {}), name).toContain(name);
+    }
+  });
+});
+
 describe('baseline coordinates', () => {
   const baseline = JSON.parse(readFileSync(resolve(process.cwd(), 'eval/baseline/bird.json'), 'utf8')) as {
     floors: Record<string, Record<string, number>>;
