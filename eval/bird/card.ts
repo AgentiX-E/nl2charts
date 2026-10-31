@@ -655,7 +655,7 @@ export function promptOf(
     schema,
     prompt: options,
     linking: arm.linking,
-    samples: arm.samples === true,
+    samples: arm.samples !== undefined,
   });
   // Two messages by the builder's own return type, so there is nothing to fall back to: a
   // `?? ''` here would have been a branch no prompt can reach (ADR-219).

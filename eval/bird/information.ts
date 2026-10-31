@@ -313,7 +313,7 @@ export function promptForCase(arm: Arm, question: BirdQuestion, definitions: str
     schema,
     prompt: promptFor(arm, question, {}),
     linking: arm.linking,
-    samples: arm.samples === true,
+    samples: arm.samples !== undefined,
   });
   return built.messages.map((message) => message.content).join('\n');
 }

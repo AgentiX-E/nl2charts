@@ -8,6 +8,48 @@ cannot be argued with.
 
 ### Added
 
+- **The competitor's value-example block, ported from their code and priced without a model call.**
+  MAC-SQL's selector reads a card on which every non-key column carries `Value examples: [...]`;
+  ours carries stored values for categorical columns only. `eval/bird/value-examples.ts` ports their
+  rule from `core/agents.py` at `31a9df5e` — six most-frequent values per non-key column, a numeric
+  column above ten distinct values skipped whole, a text column dropped for one URL, one email or
+  one value longer than fifty characters, dates collapsed to one, a NULL emitted first, keys skipped
+  by identity at both ends of every foreign key and by name for anything ending in `id`, `email` or
+  `url`. The quirks are kept: the type tests are exact-case, so `varchar(50)` gets neither cut-off
+  nor filters, and a column named `paid` is skipped because the name ends in `id`.
+
+  **Verified against their own code, not against a reading of it.** `eval/bird/macsql-examples.py`
+  extracts their two methods by `ast`, binds the helpers their bodies import, and runs them over
+  the same SQLite files: **332 columns, 0 disagreements** across the eleven Mini-Dev databases. Two
+  corrections came out of that comparison and neither was visible by inspection — their dictionary
+  marks *both* ends of a foreign key as a key column, and their tie order is SQLite's, so a
+  tiebreak showed different values for most columns of a database where every value is distinct.
+
+- **`pnpm bench:bird:differential`: the block is priced from the database and the artifact, no model
+  call.** For every gold filter value it asks whether the block would have shown it, whether the
+  column stores it outside their six, or whether it is in no column at all — three work items that
+  were one question before. On the 496-question artifact from `41190457163`: 349 cases already spell
+  every value, 12 differ only in case, 8 in notation, 4 not at all, 123 compare against no value;
+  **15 literal sites are spelled by the block, 14 are stored but outside their six, 1 is in no
+  column**. That is **13 reachable cases, 11 of them failures — a 2.22pp ceiling** against a 6.45pp
+  gap, for **+1,154 characters a case on a 1,480-character card (43.8%)**. The ceiling is below this
+  split's 4.99pp MDE, so the reading is "at most 2.22pp", not "2.22pp".
+
+- **`inline+evidence+samples-wide`, the same lever with their sampler instead of ours.** `samples`
+  is now a rule (`'profile' | 'example'`) rather than a flag, because which columns are shown and
+  what a shown column says is the mechanism being priced; `inline+evidence+samples` keeps our
+  profiler's eight categorical spellings and the new arm carries their six, with a small numeric
+  dictionary and the nullability marker our profiler never shows. Both are compared pairwise against
+  `inline+evidence` in one run, and the second pair prices the rule rather than the information.
+
+### Fixed
+
+- **A samples arm that sampled nothing could publish as its parent.** `controls.sampledColumns` was
+  written and the comment beside it said the gate read it; the floor gate matched the arm's *name*
+  for `samples` and read a total over every database the run touched, so a run holding one samples
+  arm and one plain arm had a positive total whichever sampler fired. `assertSamplesRan` now takes
+  the arm's own count and refuses the arm before a number is printed.
+
 - **The card can be cut by the model, which is the one card mechanism this repository did not
   have.** Every card-cutting instrument here decides *tables* through the same lexical linker: the
   card measurement (74.1% of the prompt is the card, 58.4% of the card belongs to tables the gold

@@ -3746,6 +3746,68 @@ names removes columns the statement needs, so the arm is kept as the ablation
 reference for relevance-by-model and the graph closure (`select-prune`, −1.4pp) stays
 the card lever that ships.
 
+## The competitor's block, priced before it is run
+
+MAC-SQL leads this repository on the split both are measured on: 65.73% against our
+59.10% (`metadata+evidence`, 496 questions, same endpoint, same judge, −6.45pp,
+McNemar p = 0.0027). The next step is to attribute that gap to a *block* of their
+prompt rather than to "their pipeline", and the cheapest way to start is to price the
+block without spending a model call.
+
+Their selector reads a card on which every non-key column carries
+`Value examples: [...]`, gathered by `core/agents.py` at sha `31a9df5e`. Ours carries
+stored values for categorical columns only, eight of them, and never says whether a
+column stores a NULL. `eval/bird/value-examples.ts` is a port of their rule —
+six most-frequent values per non-key column, a numeric column above ten distinct
+values skipped whole, a text column dropped for one URL, one email or one value longer
+than fifty characters, dates collapsed to one, a NULL emitted first. It keeps their
+quirks rather than tidying them: the type tests are exact-case, so a column declared
+`varchar(50)` gets neither the numeric cut-off nor the text filters, and a column named
+`paid` is skipped because the name ends in `id`.
+
+**The port is checked against their code, not against a reading of it.**
+`eval/bird/macsql-examples.py` extracts the two methods from their `core/agents.py` by
+`ast` (not by transcription), binds the helpers their bodies import, and runs them over
+the same SQLite files. Over the eleven Mini-Dev databases that is **332 columns with
+examples on both sides, 0 disagreements** — 0 differing in which columns are shown, 0
+differing in a single value. Two things moved the port to that state and both were
+found by the comparison rather than by inspection: their dictionary marks *both* ends of
+a foreign key as a key column, so the referenced column is skipped as well as the
+referring one; and their tie order is SQLite's, so a tiebreak spelled different six
+values for most columns of a database where every value is distinct.
+
+```bash
+pnpm bench:bird:differential eval/out/bird-eval.json --arm inline+evidence
+```
+
+The instrument answers three questions with the database and the artifact, no model
+call: is a gold filter value the block would have shown, is it stored but outside their
+six, or is it in no column at all. On the 496-question artifact from `41190457163`:
+
+| reading | count | share |
+| --- | --- | --- |
+| cases whose prompt already spells every value | 349 | 70.4% |
+| ...spells it in another case, which the block would fix | 12 | 2.4% |
+| ...spells it in another notation | 8 | 1.6% |
+| ...does not spell it at all | 4 | 0.8% |
+| cases whose gold statement compares against no value | 123 | 24.8% |
+
+Of the 568 literal sites, 553 are already spelled, **15 are spelled by the block**, 14
+are stored but outside their six, and 1 is in no column at all. That gives the ceiling:
+**13 cases the block could reach, 11 of them failures — 2.22pp**, against a gap of
+6.45pp. Ten further cases need a *wider* sample than their six, and one needs a value
+the column does not store, which no prompt-side lever will supply.
+
+It also gives the bill: **1,154 characters a case on a 1,480-character card, +43.8%**,
+from 30.2 columns a database and 4.7 values a column. So the block that distinguishes
+their selector's input from ours can explain at most a third of the gap and costs nearly
+half again as much prompt — and 2.22pp is below the 4.99pp this split can resolve, which
+means the honest statement is "at most 2.22pp", not "2.22pp".
+
+The arm exists so that claim can be tested rather than computed: `inline+evidence+samples-wide`
+carries that block on our card, `inline+evidence+samples` carries our own sampler for
+the same lever, and both are compared pairwise against `inline+evidence` in one run.
+
 ## The floor is enforced, not remembered
 
 A benchmark that only produces a report gets read once. The BIRD arms have a

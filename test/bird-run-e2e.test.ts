@@ -25,7 +25,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { MINI_DB, MINI_GOLD, MINI_QUESTIONS, writeMiniBirdDataset } from './helpers/bird-dataset.js';
 import { startEndpoint } from './helpers/endpoint.js';
 import type { EndpointRequest } from './helpers/endpoint.js';
-import { assertSecondModel, judgeModelName, main, resolveSettings } from '../eval/bird/run.js';
+import { assertSamplesRan, assertSecondModel, judgeModelName, main, resolveSettings } from '../eval/bird/run.js';
 
 const root = mkdtempSync(join(tmpdir(), 'nl2charts-bird-run-'));
 afterAll(() => {
@@ -1632,5 +1632,78 @@ describe('an arm where the model chooses the columns', () => {
     expect(result.requests).toHaveLength(0);
     const prompts = result.report.prompts as { arms: { arm: string; card?: string }[] }[];
     expect(prompts[0]?.arms[0]?.card).toBe('before-column-selection');
+  });
+});
+
+/**
+ * The two samplers, driven through the endpoint, on the same questions.
+ *
+ * The lever is one card field away from the parent, so what has to be shown is that the two
+ * rules put *different* information on that field: our profiler shows a categorical column and
+ * stops, the competitor's rule also shows a small numeric dictionary, marks nullability and
+ * drops keys. Neither claim can be read off a schema object — they are claims about the text a
+ * model received — so the assertions read the request log.
+ */
+describe('an arm whose card carries the competitor\'s value examples', () => {
+  /** The arm rows, as the artifact states them. */
+  interface Row {
+    readonly arm: string;
+    readonly calls: { readonly mean: number };
+    readonly tokens?: { readonly prompt?: { readonly mean: number } };
+  }
+  /** The line a table occupies on the card, in the renderer's own format. */
+  const tableLineOf = (prompt: string, table: string): string | undefined =>
+    prompt.split('\n').find((line) => line.startsWith(`${table}(`));
+
+  it('shows a small numeric dictionary the profiler never shows', async () => {
+    const question = QUESTIONS[0]?.question ?? '';
+    const result = await run({
+      plan: { first: correct },
+      env: { BIRD_ARMS: 'inline+evidence+samples,inline+evidence+samples-wide', BIRD_DEFINITIONS_FORCE: '1' },
+    });
+    expect(result.code).toBe(0);
+    const prompts = result.requests.map((request) => request.prompt).filter((prompt) => prompt.includes(question));
+    const items = prompts.map((prompt) => tableLineOf(prompt, 'items')).filter((line): line is string => line !== undefined);
+    expect(items.length).toBeGreaterThan(0);
+    // `price` has two distinct values in the fixture, which their rule shows and ours does not:
+    // the profile calls a numeric column a measure and keeps a range instead of a dictionary.
+    expect(items.some((line) => /price DOUBLE \[1\.5\|3\.25\]/.test(line))).toBe(true);
+    // The categorical column is on both cards, so the lever is the rule and not the bracket.
+    expect(items.some((line) => /name VARCHAR \[pen\|cup\]/.test(line))).toBe(true);
+    expect(items.filter((line) => /name VARCHAR \[pen\|cup\]/.test(line))).toHaveLength(items.length);
+    // The two arms cost the same number of calls: this is a prompt lever, not a plan.
+    const rows = result.report.arms as Row[];
+    expect(rows.map((row) => row.calls.mean)).toEqual([1, 1]);
+  });
+
+  it('keeps a primary key off the card, as their selector does', async () => {
+    const question = QUESTIONS[0]?.question ?? '';
+    const result = await run({
+      plan: { first: correct },
+      env: { BIRD_ARMS: 'inline+evidence+samples-wide', BIRD_DEFINITIONS_FORCE: '1' },
+    });
+    expect(result.code).toBe(0);
+    const prompt = result.requests.map((request) => request.prompt).find((text) => text.includes(question));
+    expect(prompt).toBeDefined();
+    const items = tableLineOf(prompt as string, 'items') as string;
+    // `items.id` is the primary key: their rule skips keys by identity, and a key's values are
+    // identifiers rather than a dictionary.
+    expect(items).not.toContain('id INTEGER [');
+    // The foreign key on the other side of the join is skipped the same way.
+    const orders = tableLineOf(prompt as string, 'orders') as string;
+    expect(orders).not.toContain('item_id INTEGER [');
+    expect(orders).toContain('qty BIGINT [');
+  });
+
+  it('refuses to publish a samples arm whose card carries none', () => {
+    // An empty block is the parent renamed, and a delta of 0.0pp with every gate green is the
+    // shape this repository keeps finding. The gate is a pure function of the count the runner
+    // took, so it is asserted directly: driving an empty block through a run would mean a
+    // database the sampler cannot read, which the runner refuses several steps earlier.
+    expect(() => assertSamplesRan('inline+evidence+samples', { columns: 0, values: 0 })).toThrow('its parent renamed');
+    // A block with columns but no values is the same shape: a bracket rendered empty says
+    // nothing and costs the characters of a bracket.
+    expect(() => assertSamplesRan('inline+evidence+samples', { columns: 3, values: 0 })).toThrow('its parent renamed');
+    expect(() => assertSamplesRan('inline+evidence+samples', { columns: 3, values: 9 })).not.toThrow();
   });
 });

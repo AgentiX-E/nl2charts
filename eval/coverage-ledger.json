@@ -4,10 +4,10 @@
   "tolerancePp": 0.2,
   "measuredAt": "2026-10-31",
   "totals": {
-    "lines": 99.39,
-    "statements": 99.39,
+    "lines": 99.4,
+    "statements": 99.4,
     "functions": 100,
-    "branches": 97.95
+    "branches": 98
   },
   "files": {
     "eval/ablate.ts": {
@@ -64,6 +64,12 @@
       "functions": 100,
       "branches": 98.86
     },
+    "eval/bird/differential.ts": {
+      "lines": 99.28,
+      "statements": 99.28,
+      "functions": 100,
+      "branches": 99.21
+    },
     "eval/bird/failure-shape.ts": {
       "lines": 100,
       "statements": 100,
@@ -86,7 +92,7 @@
       "lines": 99.11,
       "statements": 99.11,
       "functions": 100,
-      "branches": 98.05
+      "branches": 98.09
     },
     "eval/bird/join-graph.ts": {
       "lines": 100,
@@ -173,8 +179,8 @@
       "branches": 100
     },
     "eval/bird/run.ts": {
-      "lines": 99.34,
-      "statements": 99.34,
+      "lines": 99.35,
+      "statements": 99.35,
       "functions": 100,
       "branches": 95.31
     },
@@ -206,7 +212,7 @@
       "lines": 98.73,
       "statements": 98.73,
       "functions": 100,
-      "branches": 97.43
+      "branches": 97.46
     },
     "eval/bird/strata.ts": {
       "lines": 99,
@@ -215,6 +221,12 @@
       "branches": 98.24
     },
     "eval/bird/synthesize.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 100
+    },
+    "eval/bird/value-examples.ts": {
       "lines": 100,
       "statements": 100,
       "functions": 100,

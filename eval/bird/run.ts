@@ -45,6 +45,7 @@ import type { Oracle, OracleResult } from './oracle.js';
 import { profileDatabase } from './profile.js';
 import { BIRD_SCHEMA_LINES } from './prompt-shape.js';
 import { attachSamples, sampleValuesOf } from './samples.js';
+import { exampleMapOf, exampleSetFor } from './value-examples.js';
 import { buildIndex, renderDemonstrations, renderRetrieved, retrieve } from './retrieval.js';
 import { deserializeIndex, findValues, indexCells, renderValues, serializeIndex } from './values.js';
 import type { ValueIndex } from './values.js';
@@ -106,7 +107,7 @@ export interface Arm {
    */
   readonly prune?: number;
   /**
-   * Show what each categorical column actually contains, on its own card line.
+   * Show what a column actually contains, on its own card line.
    *
    * Not `values`. That block is built from the question's own literals, so it is empty
    * exactly when the question spells a value differently from the store — which is the case
@@ -114,10 +115,17 @@ export interface Arm {
    * is unconditional: `status TEXT [Banned|Active]` is in front of the model whether or not
    * the question said "banned".
    *
+   * Two samplers, because the rule is the lever and not the bracket. `profile` is ours: the
+   * profiler's top eight spellings of a categorical column, and nothing else. `example` is
+   * MAC-SQL's, ported in `value-examples.ts`: six most-frequent values of every non-key
+   * column, a small numeric dictionary included, a date collapsed to one, and a NULL first
+   * when the column stores one. They differ in which columns are shown and in what a shown
+   * column says, and a lever that silently picked one of them would make the pair one arm.
+   *
    * The cost is prompt length and the risk the renderer warns about — samples invite
    * invented filters — which is why it is a lever and not a default.
    */
-  readonly samples?: boolean;
+  readonly samples?: 'profile' | 'example';
   /**
    * Ask for a query plan (scan, filter, join, group, answer) before the statement.
    * CHASE-SQL's second generator; one lever from `inline+evidence`.
@@ -385,7 +393,12 @@ export const ARMS: readonly Arm[] = [
   // The same prompt with the card carrying each categorical column's stored values. One
   // lever from `inline+evidence`, one call, no extra block: the instance knowledge sits on
   // the column line instead of in a list built from the question's wording.
-  { name: 'inline+evidence+samples', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', samples: true },
+  { name: 'inline+evidence+samples', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', samples: 'profile' },
+  // The same lever with the competitor's rule instead of ours: six most-frequent values of
+  // every non-key column, a small numeric dictionary included, a date collapsed to one, and a
+  // NULL first when the column stores one. It exists to put the block MAC-SQL's selector reads
+  // on our card, so the 6.45pp can be attributed to a block and not to "their pipeline".
+  { name: 'inline+evidence+samples-wide', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', samples: 'example' },
   // The same prompt with the card cut to the columns the model names, in one call before the
   // statement. One lever from `inline+evidence`, and the only card-cutting arm here whose rule
   // is not the lexical linker: `select-prune` prices the join closure and loses 1.4pp, this one
@@ -596,6 +609,9 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'select-duo': 'two prompts and a selector: measured −0.60pp against `vote` for the same money, superseded',
   select5: 'five samples and a selector: 4,103 tokens a case, the largest bill in the catalogue, and +0.40pp inside a 3.33pp MDE — the arm whose own measurement says the ceiling is not the sampler',
   'inline+evidence+samples': "the same prompt with each categorical column's stored values on its card line: one lever, one call, and the untested half of value grounding",
+  // Its note is a question until the run that answers it lands. Saying "measured" here before
+  // the number exists is how an arm acquires a verdict it never earned.
+  'inline+evidence+samples-wide': "the same lever with MAC-SQL's rule instead of ours: six most-frequent values of every non-key column, a small numeric dictionary included, a date collapsed to one, NULL first — dispatched to price the competitor's block on our cases, and until that artifact exists this note is the question rather than the verdict",
   definitions: 'structural semantics built from keys: superseded by inline placement, kept as the parent of definitions+evidence',
   'dataset-subset': 'isolates coverage from author, run when a definition arm moves',
   'definitions+evidence': 'second lever of the semantics chain, not a candidate for the chain itself',
@@ -641,6 +657,11 @@ export const COMPARISONS: readonly (readonly [string, string, string])[] = [
   ['inline+evidence', 'select', 'selection over three samples versus a single sample: four calls instead of one'],
   ['inline+evidence', 'select5', 'selection over five samples versus a single sample: six calls instead of one'],
   ['inline+evidence', 'values', 'value grounding on top of the hint: does instance knowledge add anything the hint lacks'],
+  // The block the competitor's selector reads, against the same card without it, and against
+  // the same lever under our own sampler: the first prices the information, the second prices
+  // the rule that selected it.
+  ['inline+evidence', 'inline+evidence+samples-wide', "the competitor's value examples on our card: the block MAC-SQL's selector reads, priced against the card without it"],
+  ['inline+evidence+samples', 'inline+evidence+samples-wide', 'the same lever under two samplers: which columns are shown and what a shown column says'],
   ['inline+evidence', 'metadata+evidence', 'generated definitions on the column line versus 798 curated notes'],
   ['inline+evidence', 'select-mixed', 'three decompositions and a selector versus a single sample: four calls instead of one'],
   ['select', 'select-duo', 'two prompts and a selector versus three samples of one prompt: three calls instead of four'],
@@ -1338,6 +1359,27 @@ export function assertColumnChoiceRan(armName: string, runs: readonly CaseRun[],
   );
 }
 
+/**
+ * An arm that asks for samples and shows none is its parent under another name.
+ *
+ * `check-bird-baseline.mjs` already refuses a samples arm with no values behind it, and it is
+ * not enough for two reasons that this assertion closes at the source. It matches the arm's
+ * *name* for `samples`, so an arm whose sampler is declared but named otherwise is invisible to
+ * it; and it reads `controls.sampledColumns`, which is a total over every database the run
+ * touched, so a run holding one samples arm and one plain arm has a positive total whichever
+ * sampler fired. This reads the arm's own declaration and the arm's own count, which is the
+ * quantity the floor gate is trying to infer.
+ */
+export function assertSamplesRan(
+  armName: string,
+  sampled: { readonly columns: number; readonly values: number },
+): void {
+  if (sampled.columns > 0 && sampled.values > 0) return;
+  throw new Error(
+    `arm ${armName}: the card was asked to carry stored values and ${String(sampled.columns)} column(s) had any, so the arm is its parent renamed`,
+  );
+}
+
 /** True when this arm asks any of its candidates to decompose. */
 export function declaresDecomposition(arm: Pick<Arm, 'decompose' | 'mixed'>): boolean {
   return arm.decompose === true || (arm.mixed ?? []).some((source) => parseMixedSource(source).arm === 'decompose');
@@ -1557,6 +1599,8 @@ export interface BirdLayout {
   readonly trainFile: string;
   readonly valueCache: string;
   readonly profileCache: string;
+  /** Where `value-examples.ts` caches its per-database block. */
+  readonly exampleCache: string;
   readonly definitionsCache: string;
   readonly definitionsFile: string;
   readonly oracleScript: string;
@@ -1588,6 +1632,10 @@ export function resolveLayout(env: Readonly<Record<string, string | undefined>>,
     trainFile: join(root, 'eval/.cache/bird/train/train.json'),
     valueCache: join(root, 'eval/.cache/bird/values'),
     profileCache: join(root, 'eval/.cache/bird/profiles'),
+    // The competitor-rule sampler caches separately from the profiler: same column names,
+    // different rule, and sharing a directory would serve one rule's answer under the other's
+    // name. Old entries are rejected by the rule field they carry.
+    exampleCache: join(root, 'eval/.cache/bird/value-examples'),
     definitionsCache: join(root, 'eval/.cache/bird/definitions'),
     // Definitions are an *input* to the definition-dependent arms, so they are pinned in
     // the repository rather than regenerated: two runs with identical prompts produced
@@ -1872,7 +1920,7 @@ export function promptFor(arm: Arm, question: BirdQuestion, blocks: PromptBlocks
     descriptions:
       arm.definitions === 'inline' || arm.definitions === 'dataset-subset' ? true : (profile?.descriptions ?? arm.notes),
     foreignKeys: profile?.foreignKeys ?? arm.notes,
-    samples: arm.samples === true,
+    samples: arm.samples !== undefined,
     schemaLines: BIRD_SCHEMA_LINES,
     ...(profile === undefined ? {} : { notes: profile.notes }),
     ...(arm.definitions !== undefined && definitions !== undefined && definitions.length > 0 ? { definitions } : {}),
@@ -1985,6 +2033,15 @@ export interface PreparedRun {
   /** Rendered prompt blocks for one arm and one question. The only builder, so the measured prompt and the sent prompt cannot disagree. */
   readonly blocksFor: (arm: Arm, question: BirdQuestion) => PromptBlocks;
   readonly schemaFor: (arm: Arm, question: BirdQuestion) => readonly SchemaTable[];
+  /**
+   * How many columns this arm's sampler put on a card, over the databases the run covers.
+   *
+   * The gate below reads it. `controls.sampledColumns` reports the same total for the run, which
+   * is enough for a reader and not enough for a gate: with one samples arm and one plain arm in
+   * the same run the total is positive even when the samples arm itself sampled nothing, so the
+   * arm would publish as its parent renamed and every gate would be green.
+   */
+  readonly sampledFor: (arm: Arm) => { readonly columns: number; readonly values: number };
   /**
    * The card to send for one case, spending the call that a column-choosing arm costs.
    *
@@ -2140,8 +2197,10 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
   // fail to match, and showing them is the cheaper half of value grounding — it needs no
   // match between the question's wording and the store, which is where `values` stalls.
   const sampleValues = new Map<string, Map<string, readonly string[]>>();
+  const exampleValues = new Map<string, Map<string, readonly string[]>>();
   const sampled = { columns: 0, values: 0 };
-  if (settings.arms.some((name) => resolveArm(name)?.samples === true)) {
+  const widen = settings.arms.some((name) => resolveArm(name)?.samples === 'example');
+  if (settings.arms.some((name) => resolveArm(name)?.samples === 'profile')) {
     for (const [db, profile] of profiles) {
       const byColumn = sampleValuesOf(profile);
       sampled.columns += byColumn.size;
@@ -2149,9 +2208,19 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
       sampleValues.set(db, byColumn);
     }
   }
+  // The competitor's rule needs its own query: it samples numeric columns the profile calls
+  // measures, collapses dates, and marks nullability, so it cannot be derived from the
+  // profile the other arms already load.
+  for (const db of widen ? settings.dbs : []) {
+    const set = await exampleSetFor(oracle, db, { cacheDir: layout.exampleCache });
+    const byColumn = exampleMapOf(set);
+    sampled.columns += byColumn.size;
+    for (const values of byColumn.values()) sampled.values += values.length;
+    exampleValues.set(db, byColumn);
+  }
 
-  const withSamples = (schema: readonly SchemaTable[], db: string): readonly SchemaTable[] => {
-    const values = sampleValues.get(db);
+  const withSamples = (schema: readonly SchemaTable[], db: string, rule: 'profile' | 'example'): readonly SchemaTable[] => {
+    const values = (rule === 'example' ? exampleValues : sampleValues).get(db);
     return values === undefined ? schema : attachSamples(schema, values);
   };
 
@@ -2331,7 +2400,7 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
           : (schemas.get(db) as SchemaTable[]);
     // Samples are layered on whatever the arm resolved to, not on the plain schema: an arm
     // can ask for both, and silently dropping one is a two-lever comparison nobody wrote.
-    const layered = arm.samples === true ? withSamples(base, db) : base;
+    const layered = arm.samples === undefined ? base : withSamples(base, db, arm.samples);
     if (arm.prune === undefined) return layered;
     return pruneSchema({ schema: layered, question: question.question, graph: graphFor(db), hops: arm.prune }).schema;
   };
@@ -2565,6 +2634,19 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
     controls,
     blocksFor,
     schemaFor,
+    // Summed over the databases the run covers rather than read off the first one: a run can
+    // mix a database with dictionaries and one without, and the first is not the run.
+    sampledFor: (arm: Arm) => {
+      const maps = arm.samples === 'example' ? exampleValues : sampleValues;
+      let columns = 0;
+      let values = 0;
+      for (const db of settings.dbs) {
+        const byColumn = maps.get(db);
+        columns += byColumn?.size ?? 0;
+        for (const list of byColumn?.values() ?? []) values += list.length;
+      }
+      return { columns, values };
+    },
     cardFor,
     cardOf,
     mixedCandidatePrompts,
@@ -3134,6 +3216,8 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
   assertHarnessClean(name, runs);
   if (arm.repairs > 0) assertRepairPathFired(name, runs);
   if (arm.emptyRetry !== undefined) assertEmptyRetryFired(name, runs);
+  // ...and an arm that asks for samples and gets none is its parent under another name.
+  if (arm.samples !== undefined) assertSamplesRan(name, prepared.sampledFor(arm));
   // ...and a format the model ignored is not a prompt that did not help.
   if (declaresDecomposition(arm)) assertDecompositionFired(name, runs);
   return { name, runs, row: armReportRow(prepared, arm, runs, name), line: armSummaryLine(name, arm, runs) };
