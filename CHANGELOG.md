@@ -33,10 +33,13 @@ cannot be argued with.
   `.github/workflows/competitors.yml` dispatches it in two stages: `probe` costs a clone and no model
   call, `full` installs the competitor's dependencies and runs the pipeline, one arm of ours on the
   same subset, and the scorer. Both probes have run on a runner — `41149938353` for MAC-SQL (head is
-  the pin, six of six named files, nine pinned requirement lines, adapter applies) and `41150217544`
+  the pin, six of six named files then, seven of seven once the fourth hunk named `core/agents.py`,
+  nine pinned requirement lines, adapter applies, four files changed) and `41150217544`
   for CHESS (eight of eight, twenty-eight) — and neither produced a number, which is the point of the
-  stage. No accuracy has been published from it yet — a number from a
-  half-installed pipeline is a number about an install — and `docs/benchmarks.md` says so.
+  stage. The `full` stage then took three dispatches to produce a reading at all: the first two are
+  under **Fixed** (an empty file read as a zero, then an absolute database root read as a relative
+  one), and the third is under **Measured** — 25 questions, MAC-SQL 76.00%, this harness 64.00%,
+  inside an MDE of 29.65pp.
 
 ### Fixed
 
@@ -77,6 +80,28 @@ cannot be argued with.
   are now printed before the verdict, and a test asserts the line survives that return.
 
 ### Measured
+
+- **The first reading in which the only difference is the pipeline: MAC-SQL 76.0%, our shipped arm
+  64.0%, and nothing resolved.** `41162862386` ran MAC-SQL at `31a9df5e` on this repository's runner,
+  against the same endpoint and model, on the same 25 questions (set hash `51ad259b9396483c`), and
+  scored its statements with `oracle.py` and `judgeOfficial`. MAC-SQL answered 25/25, all 25 ran, 19
+  were correct — **76.00% [56.57, 88.50]** against `metadata+evidence` at 16/25 = **64.00%**. Paired:
+  14 both, 5 only theirs, 2 only ours, 4 neither; delta **12.00pp in their favour**, McNemar
+  **p = 0.4531**, MDE **29.65pp** — inside the resolution, so this is a sign and not a size, and a 2pp
+  effect at this discordance would need **5,495** questions.
+
+  The reading is checkable in three ways that are worth more than the rate. The ledger holds no
+  unknown ids, no duplicates, no blanks and **no database disagreements**, so all 25 records declared
+  the database of the question their position resolved to — the check that fails first if a
+  renumbering is off by one, and it is what makes this a reading rather than an alignment. Both sides
+  answered the same 25 questions, checked by hash rather than by the workflow passing the same limit
+  twice. And the artifact carries the declared `idMap` and the 25 `renumbered` ids beside the accuracy,
+  so the numbering a score was read through travels with it.
+
+  What it is not: 25 questions is a smoke run against a split of 498, nothing here composes with the
+  published leaderboard table, and the direction it points — the competitor ahead — is the opposite of
+  what an 11.3pp gap to state of the art would suggest about this harness's method. That is worth
+  exactly as much as a 25-question sign is worth, which is why the MDE is quoted beside it.
 
 - **The chain's bill, and the five arms that were paying it for no verdict.** Nobody had added up
   what `pnpm bench:bird` costs. The artifact of `41116622974` now prints it — `billedTotal` sums the

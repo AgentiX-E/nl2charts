@@ -3310,7 +3310,9 @@ the pin and the patch against the checkout, for the price of a clone and no mode
 have been probed on a runner: `41149938353` reads MAC-SQL's head as `31a9df5e`, six of six named
 files present, nine pinned requirement lines, adapter applies; `41150217544` reads CHESS's head as
 `3d6e835f`, eight of eight, twenty-eight requirement lines, adapter applies. Neither produced a
-number, which is what the stage is for. `full`
+number, which is what the stage is for — and after the fourth hunk named `core/agents.py`, the run
+that produced the first reading reports seven of seven present, adapter applies, four files changed.
+`full`
 installs their dependencies, runs their own inference over the subset, runs one arm of ours over the
 same subset, and scores theirs against ours with the paired delta, its McNemar p and the MDE of the
 design that produced it.
@@ -3355,12 +3357,43 @@ Four fixes, three of them on the reading side and one on theirs:
    to open its database, because the problems were only printed on the way out of the happy path. An
    explanation that only appears when nothing went wrong is an explanation that is never read.
 
-No accuracy has been published from it yet, and the reason is the discipline that retired five arms:
-a number from a half-installed pipeline is a number about an install, and a number from an empty file
-is not a number at all. What exists is the machinery that makes the first number checkable — commit,
-model, host, question-set hash, declared numbering and judge in the same file as the rate. Until one
-arrives, the correct statement about the leaderboard is still: **this harness is 11.3pp behind the
-published state of the art, and how much of that gap is the pipeline is unknown.**
+### The first comparable reading: MAC-SQL on twenty-five of our questions
+
+`41162862386` is the first run in this repository where the only difference between two numbers is
+the pipeline. MAC-SQL at `31a9df5e`, on this runner, pointed at the same endpoint and model, given the
+same 25 questions (set hash `51ad259b9396483c`), its statements executed by `oracle.py` and judged by
+`judgeOfficial`:
+
+| | MAC-SQL | `metadata+evidence` |
+| --- | --- | --- |
+| answered | 25/25 | 25/25 |
+| statements that ran | 25/25 | — |
+| correct | 19 | 16 |
+| accuracy | **76.00%** [56.57, 88.50] | 64.00% |
+
+Paired case by case: 14 both, 5 only theirs, 2 only ours, 4 neither. The delta is **12.00pp in
+MAC-SQL's favour**, McNemar p = **0.4531**, against an MDE of **29.65pp** for this design. That is
+inside the resolution, so the reading is a sign and not a size: on 25 questions a 12-point gap and a
+zero are the same reading, and resolving a 2pp effect at this discordance would need **5,495**
+questions.
+
+Three things make the number checkable rather than merely printed. The ledger has no unknown ids, no
+duplicates, no blank answers and **no database disagreements** — every one of the 25 records declared
+the database of the question its position resolved to, which is the check that would have failed first
+had the renumbering been off by one. The artifact carries the declared `idMap` and the `renumbered`
+list beside the rate. And both sides answered the same 25 questions, checked by hash rather than by
+the workflow remembering to pass the same limit twice.
+
+What it does not say: nothing here is comparable to the leaderboard table above, and 25 questions is a
+smoke run. What it does say is the thing this section has never been able to say — **the apparatus
+produces a reading with a direction, and the direction is not in this harness's favour.**
+
+The discipline that retired five arms still holds for the rest: a number from a half-installed
+pipeline is a number about an install, and a number from an empty file is not a number at all — the
+two dispatches before this one were both refused by exactly that rule. Until a fuller run resolves one
+of these deltas, the correct statement about the leaderboard is still: **this harness is 11.3pp behind
+the published state of the art, how much of that gap is the pipeline remains unknown, and the first
+paired measurement available points the same way as the assembled one.**
 
 
 ### Where the pruned card's 1.5 points go
