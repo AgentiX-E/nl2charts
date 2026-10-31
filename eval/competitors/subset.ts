@@ -7,8 +7,12 @@
  * `BIRD_LIMIT`, applied to the same file. A competitor given this file and a run of ours with the
  * same limit are then paired by construction, and `score.ts` checks the two id sets against each
  * other anyway rather than trusting the workflow to have passed the same number twice.
+ *
+ * The same file is also the numbering a competitor answers in, which is why the reader lives here:
+ * a pipeline that numbers its rows instead of naming the dataset's ids is read through this file
+ * (`readIdMap`), and the tool that wrote it is the tool that knows what it contains.
  */
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { loadQuestions, stratifiedSample } from '../bird/data.js';
@@ -60,6 +64,54 @@ export function writeSubset(settings: SubsetSettings): Subset {
   writeFileSync(settings.out, `${JSON.stringify(selected, null, 2)}\n`);
   const ids = selected.map((question) => question.question_id);
   return { ids, hash: questionSetHash(ids), path: settings.out };
+}
+
+/** A question file read as a numbering: position → question id, in the file's own order. */
+export interface IdMap {
+  readonly path: string;
+  readonly ids: readonly number[];
+}
+
+/**
+ * Reads the numbering a competitor used, from the question file it was given.
+ *
+ * A pipeline that numbers its answers by row rather than by the dataset's id has not answered
+ * different questions; it has used a different numbering, and saying so is the difference between
+ * reading its answers and discarding them as unknown ids. What it must not be is a guess: an id
+ * map deduced from a file's contents would make any dropped row silently shift every later row onto
+ * the wrong question, so this reader is strict about the three shapes that cannot be a numbering —
+ * not an array, an entry with no `question_id`, a repeated id — and refuses all three.
+ *
+ * An empty map is refused too. It resolves nothing, so passing one would turn every statement into
+ * an unknown id while looking like the map had been honoured.
+ */
+export function readIdMap(path: string): IdMap {
+  const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
+  if (!Array.isArray(parsed)) {
+    throw new Error(
+      `${path} is not a question file: an id map is the array of questions in the order the competitor numbered them`,
+    );
+  }
+  const ids: number[] = [];
+  parsed.forEach((entry: unknown, index: number) => {
+    const id =
+      entry !== null && typeof entry === 'object' ? (entry as { question_id?: unknown }).question_id : undefined;
+    if (typeof id !== 'number' || !Number.isInteger(id)) {
+      throw new Error(`${path}: entry ${String(index)} carries no question_id, so position ${String(index)} names nothing`);
+    }
+    ids.push(id);
+  });
+  if (ids.length === 0) {
+    throw new Error(`${path} holds no positions, so a position-numbered statement cannot be resolved against it`);
+  }
+  const seen = new Set<number>();
+  const repeated = ids.filter((id) => (seen.has(id) ? true : (seen.add(id), false)));
+  if (repeated.length > 0) {
+    throw new Error(
+      `${path} repeats ${repeated.slice(0, 3).join(', ')}, so a position no longer names one question`,
+    );
+  }
+  return { path, ids };
 }
 
 export function main(

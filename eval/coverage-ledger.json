@@ -7,7 +7,7 @@
     "lines": 99.32,
     "statements": 99.32,
     "functions": 100,
-    "branches": 97.75
+    "branches": 97.83
   },
   "files": {
     "eval/ablate.ts": {
@@ -50,7 +50,7 @@
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 98.13
+      "branches": 98.14
     },
     "eval/bird/diagnose-corpus.ts": {
       "lines": 99.12,
@@ -236,7 +236,7 @@
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 98.09
+      "branches": 100
     },
     "eval/competitors/probe.ts": {
       "lines": 98.5,
@@ -245,10 +245,10 @@
       "branches": 98.71
     },
     "eval/competitors/score.ts": {
-      "lines": 99.2,
-      "statements": 99.2,
+      "lines": 99.29,
+      "statements": 99.29,
       "functions": 100,
-      "branches": 98.96
+      "branches": 99.13
     },
     "eval/competitors/subset.ts": {
       "lines": 100,

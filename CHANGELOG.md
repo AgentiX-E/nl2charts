@@ -12,19 +12,23 @@ cannot be argued with.
   it.** The leaderboard section says a number is comparable only if it shares the question set, the
   model, the prompt, the executor and the judge — and then says none of the runs that would share
   them exist. `eval/competitors/` is that run's machinery: `pins.json` (CHESS at `3d6e835f`, MAC-SQL
-  at `31a9df5e`, each with its licence and entrypoint), one adapter patch each that does nothing but
-  point their engine at an OpenAI-compatible endpoint, `probe.ts` (the checkout against the pin, the
-  patch against the checkout), `subset.ts` (the question file cut by the same `stratifiedSample` that
-  cuts `BIRD_LIMIT`), `predictions.ts` (the three shapes competitors write — CHESS's id-keyed map,
-  MAC-SQL's JSON Lines, BIRD's text-keyed pairs — and what each one left out), and `score.ts` (their
-  statements through this repository's `oracle.py`, judged by `judgeOfficial`).
+  at `31a9df5e`, each with its licence and entrypoint), one adapter patch each that points their
+  engine at an OpenAI-compatible endpoint and, for MAC-SQL, renumbers a row at their own I/O
+  boundary, `probe.ts` (the checkout against the pin, the patch against the checkout), `subset.ts`
+  (the question file cut by the same `stratifiedSample` that cuts `BIRD_LIMIT`, and read back by
+  `readIdMap` as the numbering a row-numbered pipeline answered in), `predictions.ts` (the three
+  shapes competitors write — CHESS's id-keyed map, MAC-SQL's JSON Lines, BIRD's text-keyed pairs —
+  and what each one left out), and `score.ts` (their statements through this repository's
+  `oracle.py`, judged by `judgeOfficial`).
 
-  Three refusals define it. No accuracy is printed before the coordinates hold: a failing coordinate
+  Four refusals define it. No accuracy is printed before the coordinates hold: a failing coordinate
   exits non-zero with both values and the cost of the mismatch, and the artifact records the
   violation instead of a rate. No accuracy is divided by the answered subset: an unanswered question
   is counted wrong, and the answered share is printed beside it. No delta is called a size when it is
   inside the MDE of its own design — the line says so and prints how many questions the effect would
-  need, computed by `casesForEffect` from the discordance the run actually observed.
+  need, computed by `casesForEffect` from the discordance the run actually observed. And no file that
+  nothing could be attributed from is read as a run that answered nothing — see the fix below, which
+  is what the first `full` dispatch cost.
 
   `.github/workflows/competitors.yml` dispatches it in two stages: `probe` costs a clone and no model
   call, `full` installs the competitor's dependencies and runs the pipeline, one arm of ours on the
@@ -33,6 +37,33 @@ cannot be argued with.
   for CHESS (eight of eight, twenty-eight) — and neither produced a number, which is the point of the
   stage. No accuracy has been published from it yet — a number from a
   half-installed pipeline is a number about an install — and `docs/benchmarks.md` says so.
+
+### Fixed
+
+- **The first `full` competitor run read a zero-byte file as a "significant" 60pp gap.** The
+  dispatch finished green with an empty `predictions.json`, and `score.ts` scored it as 0% over 25
+  questions with `delta +60pp, p = 6.1e-05, resolves true`. Their side: MAC-SQL's `run.py` builds
+  `unfinished_ids` as `range(len(batch))` and compares `question_id` against it, so a question file
+  carrying BIRD's own ids — this split starts at 36 — matched no row, the batch emptied, and
+  `0it [00:00, ?it/s]` was written where the statements belonged. Our side: nothing in the tool
+  distinguished "the pipeline wrote nothing" from "the pipeline answered nothing".
+
+  Three changes. A file that nothing could be attributed from stops the run and exits non-zero, and
+  the message says which of the three silences it was — no records at all, every statement numbered
+  outside the question set, or every record naming a question this split does not hold — while a file
+  whose records are all blank still scores 0%, because that run happened and the model returned
+  nothing for every question. `pins.json` now records `numbering` per competitor
+  (`position` for MAC-SQL, `question-id` for CHESS), the score step passes `--id-map <subset>` only
+  for the first, and `subset.ts`'s `readIdMap` reads that same file back as position → question id.
+  A declared map governs **every** record, including one whose number is also a question id: letting
+  each record pick whichever numbering resolves it makes the pairing depend on which ids are small,
+  so one file would pair differently against a different subset. And the MAC-SQL adapter patch
+  gained a third hunk that renumbers at their I/O boundary, keeping the original id under
+  `bird_question_id`, so the selector, the decomposer, the refiner and their prompts still are the
+  method under test.
+
+  The artifact now carries `idMap` (or `null`) and `ledger.renumbered`, so a score read through a
+  different numbering is not the same artifact as one read by id.
 
 ### Measured
 

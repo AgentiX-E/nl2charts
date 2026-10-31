@@ -24,7 +24,9 @@ import {
   scoreRun,
   writeScoreArtifact,
 } from '../eval/competitors/score.js';
+import { silentRun } from '../eval/competitors/score.js';
 import type { ScoreOutcome, ScoreSettings } from '../eval/competitors/score.js';
+import { parsePredictions } from '../eval/competitors/predictions.js';
 import { MINI_DB, MINI_QUESTIONS, writeMiniBirdDataset } from './helpers/bird-dataset.js';
 
 const ROOT = process.cwd();
@@ -177,6 +179,9 @@ describe('scoring a predictions file against the split gold', () => {
     expect(body.comparable).toBe(true);
     expect(body.execution.passed).toBe(4);
     expect(body.violations).toEqual([]);
+    // No map was declared, so the artifact says so rather than leaving the field out: a reader
+    // has to be able to tell "read by id" from "the writer forgot".
+    expect(body.idMap).toBeNull();
   });
 });
 
@@ -274,6 +279,140 @@ describe('the cases a comparison has to leave out, and why', () => {
   });
 });
 
+describe('a file that holds nothing is missing input, not a zero', () => {
+  it('refuses to score a predictions file with no records at all', async () => {
+    const base = fixture();
+    const path = writePredictions(base, '');
+    const outcome = await scoreRun(settingsFor(base, path));
+    // The first `full` dispatch published exactly this: a green job, a zero-byte file and a
+    // sixty-point gap read as significant. Nothing was answered because nothing was written.
+    expect(outcome.execution).toBeUndefined();
+    expect(outcome.paired).toBeUndefined();
+    expect(outcome.problems).toEqual([
+      `${path} holds no records at all: the pipeline wrote nothing, so this is a missing input rather than a measurement of zero`,
+    ]);
+    const lines = scoreLines(outcome);
+    expect(lines.some((line) => line.includes('unreadable file: is empty'))).toBe(true);
+    expect(lines.some((line) => line.includes('no accuracy: nothing was judged'))).toBe(true);
+    const code = await main(
+      [
+        '--predictions', path,
+        '--coordinates', base.coordinates,
+        '--report', base.report,
+        '--model', 'deepseek-chat',
+        '--endpoint', 'https://api.deepseek.com',
+        '--out', join(base.dir, 'out', 'empty.json'),
+      ],
+      ROOT,
+      base.env,
+    );
+    expect(code).toBe(1);
+  });
+
+  it('still scores a run whose every answer came back blank', async () => {
+    // This pipeline ran and the model returned nothing for every question, which is a measurement
+    // of zero. The difference from the case above is that there are records: the file says
+    // "nothing here", rather than not existing.
+    const base = fixture();
+    const body = Object.fromEntries(MINI_QUESTIONS.map((question) => [String(question.id), '   ']));
+    const path = writePredictions(base, JSON.stringify(body));
+    const outcome = await scoreRun(settingsFor(base, path));
+    expect(outcome.execution?.judged).toBe(7);
+    expect(outcome.execution?.accuracy).toBe(0);
+    expect(outcome.ledger.empty).toHaveLength(7);
+    expect(outcome.problems).toEqual([]);
+  });
+
+  it('refuses a file whose every statement is numbered differently from the question set', async () => {
+    // The mirror of the case above: records exist, and not one of them names a question in this
+    // set. Scoring it would publish 0% for a run that answered seven questions correctly.
+    const base = fixture();
+    const body = Object.fromEntries(
+      MINI_QUESTIONS.map((question, position) => [String(100 + position), payload(question.sql)]),
+    );
+    const path = writePredictions(base, JSON.stringify(body));
+    const outcome = await scoreRun(settingsFor(base, path));
+    expect(outcome.execution).toBeUndefined();
+    expect(outcome.ledger.answered).toBe(0);
+    expect(outcome.ledger.unknown).toHaveLength(7);
+    expect(outcome.problems).toEqual([
+      `${path} holds 7 statement(s) and not one names a question in this set: the numbering does not match, so a rate from it would be a rate about nothing`,
+    ]);
+    expect(scoreLines(outcome).some((line) => line.includes('no accuracy: nothing was judged'))).toBe(true);
+  });
+
+  it('refuses a file whose records name questions this split does not hold', async () => {
+    const base = fixture();
+    const path = writePredictions(base, JSON.stringify([['A question nobody asked?', payload('select 1')]]));
+    const outcome = await scoreRun(settingsFor(base, path));
+    expect(outcome.execution).toBeUndefined();
+    expect(outcome.ledger.unknown).toEqual([]);
+    expect(outcome.ledger.drops[0]?.why).toContain('names a question that is not in this split');
+    expect(outcome.problems).toEqual([
+      `${path} holds nothing that could be attributed to a question in this set, so there is nothing to measure`,
+    ]);
+  });
+
+  it('does not read an empty question set as a silent file, because nothing was asked', () => {
+    // The guard above fires on the answer counts, and an empty set has none of them. Confusing the
+    // two would replace "the split offers no question" with a message about the pipeline.
+    expect(silentRun(parsePredictions('', []))).toBeUndefined();
+  });
+});
+
+describe('a pipeline that numbers its answers by row', () => {
+  /** The same statements, keyed by the row they answer instead of by the question's own id. */
+  function byPosition(correct: readonly number[]): string {
+    const body: Record<string, string> = {};
+    MINI_QUESTIONS.forEach((question, position) => {
+      body[String(position)] = payload(correct.includes(question.id) ? question.sql : 'select count(*) from items');
+    });
+    return JSON.stringify(body, null, 2);
+  }
+
+  const idMapFor = (base: Fixture): string => {
+    const path = join(base.dir, 'id-map.json');
+    writeFileSync(path, JSON.stringify(MINI_QUESTIONS.map((question) => ({ question_id: question.id }))));
+    return path;
+  };
+
+  it('scores the positions through the numbering it was given, and says so', async () => {
+    const base = fixture();
+    const idMap = idMapFor(base);
+    const path = writePredictions(base, byPosition(THEIRS_CORRECT));
+    const outcome = await scoreRun(settingsFor(base, path, { idMap }));
+    expect(outcome.ledger.answered).toBe(7);
+    expect(outcome.ledger.unknown).toEqual([]);
+    expect(outcome.ledger.renumbered).toEqual(MINI_QUESTIONS.map((question) => question.id));
+    expect(outcome.execution?.passed).toBe(THEIRS_CORRECT.length);
+    expect(outcome.idMap?.ids).toEqual(MINI_QUESTIONS.map((question) => question.id));
+    const lines = scoreLines(outcome);
+    expect(lines.some((line) => line.includes(`numbering: read through ${idMap}, 7 positions`))).toBe(true);
+    expect(lines.some((line) => line.includes('7 statement(s) resolved by position'))).toBe(true);
+  });
+
+  it('writes the numbering into the artifact, because a score read through a different map is a different score', async () => {
+    const base = fixture();
+    const idMap = idMapFor(base);
+    const path = writePredictions(base, byPosition(THEIRS_CORRECT));
+    const settings = settingsFor(base, path, { idMap });
+    const written = writeScoreArtifact(settings, await scoreRun(settings));
+    const body = JSON.parse(readFileSync(written, 'utf8')) as Record<string, any>;
+    expect(body.idMap.path).toBe(idMap);
+    expect(body.idMap.ids).toEqual(MINI_QUESTIONS.map((question) => question.id));
+    expect(body.ledger.renumbered).toEqual(MINI_QUESTIONS.map((question) => question.id));
+    expect(body.execution.passed).toBe(THEIRS_CORRECT.length);
+  });
+
+  it('refuses an empty map instead of reading every statement as an unknown id', async () => {
+    const base = fixture();
+    const path = writePredictions(base, byPosition(THEIRS_CORRECT));
+    const empty = join(base.dir, 'empty-map.json');
+    writeFileSync(empty, '[]');
+    await expect(scoreRun(settingsFor(base, path, { idMap: empty }))).rejects.toThrow(/holds no positions/);
+  });
+});
+
 describe('the reading puts the provenance above the number', () => {
   it('reports an inside-MDE delta as a sign, with the questions the effect would need', () => {
     const outcome: ScoreOutcome = {
@@ -298,6 +437,7 @@ describe('the reading puts the provenance above the number', () => {
         empty: [],
         duplicates: [],
         unknown: [],
+        renumbered: [],
         databaseMismatch: [{ id: 4, declared: 'other', expected: 'shop' }],
         drops: [{ where: 'line 9', why: 'is not JSON' }],
       },
@@ -334,7 +474,7 @@ describe('the reading puts the provenance above the number', () => {
         judge: JUDGE,
       },
       reference: { arm: ARM, split: 'minidev', questionIds: [1], model: 'deepseek-chat', endpoint: 'https://api.deepseek.com' },
-      ledger: { predictions: [], declared: 1, answered: 1, missing: [], empty: [], duplicates: [], unknown: [], databaseMismatch: [], drops: [] },
+      ledger: { predictions: [], declared: 1, answered: 1, missing: [], empty: [], duplicates: [], unknown: [], renumbered: [], databaseMismatch: [], drops: [] },
       comparable: true,
       violations: [],
       execution: { judged: 1, goldFailed: 0, executable: 1, passed: 1, accuracy: 1, interval: { low: 0.2, high: 1 } },
@@ -369,6 +509,15 @@ describe('the command line', () => {
 
   it('refuses a flag with no value', () => {
     expect(() => resolveScoreSettings({}, ['--predictions'], ROOT)).toThrow(/--predictions needs a value/);
+    expect(() =>
+      resolveScoreSettings({}, ['--predictions', 'p.json', '--coordinates', 'c.json', '--model', 'm', '--endpoint', 'e', '--id-map'], ROOT),
+    ).toThrow(/--id-map needs a value/);
+  });
+
+  it('carries the numbering flag into the settings, and leaves it unset when it is not declared', () => {
+    const base = ['--predictions', 'p.json', '--coordinates', 'c.json', '--model', 'm', '--endpoint', 'e'];
+    expect(resolveScoreSettings({}, [...base, '--id-map', 'ids.json'], ROOT).idMap).toBe('ids.json');
+    expect(resolveScoreSettings({}, base, ROOT).idMap).toBeUndefined();
   });
 
   it('derives the artifact path from the predictions file when none is given', () => {

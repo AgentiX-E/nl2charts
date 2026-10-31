@@ -9,8 +9,14 @@
     "patch": "eval/competitors/patches/chess-deepseek.patch",
     "modelHook": "src/llm/engine_configs.py",
     "config": "run/configs/CHESS_IR_CG_UT.yaml",
-    "probe": ["src/preprocess.py", "run/run_preprocess.sh", "src/llm/prompts.py", "src/llm/models.py"],
+    "probe": [
+      "src/preprocess.py",
+      "run/run_preprocess.sh",
+      "src/llm/prompts.py",
+      "src/llm/models.py"
+    ],
     "predictions": "results/<data_mode>/<setting_name>/<dataset>/<run>/-predictions.json",
+    "numbering": "question-id",
     "notes": [
       "The pipeline is five agents: extract keywords, retrieve context, select schema, generate ten candidates twice, revise, then generate and evaluate unit tests. Their config, not ours: the only edit is the engine alias, because the alias is the model coordinate and the rest is the method under test.",
       "Predictions are a JSON object keyed by question id whose value is `statement\t----- bird -----\tdatabase`, which `predictions.ts` reads in that shape.",
@@ -27,8 +33,13 @@
     "requirements": "requirements.txt",
     "patch": "eval/competitors/patches/mac-sql-deepseek.patch",
     "modelHook": "core/api_config.py",
-    "probe": ["core/llm.py", "core/chat_manager.py", "evaluation/evaluation_bird_ex.py"],
+    "probe": [
+      "core/llm.py",
+      "core/chat_manager.py",
+      "evaluation/evaluation_bird_ex.py"
+    ],
     "predictions": "outputs/<name>/output_bird.json (JSON Lines) and outputs/<name>/predict_<mode>.json (BIRD pairs)",
+    "numbering": "position",
     "notes": [
       "Three agents — a selector, a decomposer and a refiner — over a light dependency set (openai 0.28, no torch), which makes it the cheapest of the pinned pipelines to run: two or three calls a question rather than forty.",
       "`core/api_config.py` hard-codes `openai.api_type = \"azure\"`, so the adapter is three lines: the type, the base and the model name, all from the environment.",

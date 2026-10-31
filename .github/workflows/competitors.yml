@@ -202,12 +202,21 @@ jobs:
       - name: Run the competitor's pipeline
         run: bash .github/competitors/${{ inputs.competitor }}.sh
       - name: Score its statements with our executor and our judge
+        # `--id-map` is passed only for a pipeline the pin records as numbering its answers by row.
+        # Declaring a renumbering for a pipeline that names the dataset's ids would be a false
+        # statement about it, and the map would then reinterpret any id small enough to be a row.
         run: |
+          NUMBERING="$(node -e 'console.log(require("./eval/competitors/pins.json")[process.env.COMPETITOR].numbering)')"
+          ID_MAP=()
+          if [ "${NUMBERING}" = "position" ]; then
+            ID_MAP=(--id-map "eval/out/competitors/${COMPETITOR}-subset.json")
+          fi
           pnpm exec tsx eval/competitors/score.ts \
             --predictions "eval/out/competitors/predictions.json" \
             --coordinates "eval/out/competitors/${COMPETITOR}-coordinates.json" \
             --arm "${BIRD_ARMS}" \
             --effect "${{ inputs.effect }}" \
+            "${ID_MAP[@]}" \
             --out "eval/out/competitors/${COMPETITOR}-score.json"
       - uses: actions/upload-artifact@v4
         if: always()

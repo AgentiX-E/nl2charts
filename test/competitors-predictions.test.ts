@@ -196,3 +196,83 @@ describe('the denominator is the split, not the file', () => {
     expect(ledger.drops).toEqual([{ where: 'key "1.5"', why: 'is not a question id' }]);
   });
 });
+
+describe('the record shapes a JSON Lines file can hold', () => {
+  it('skips a blank line between records rather than dropping the file', () => {
+    const text = [
+      JSON.stringify({ idx: 1, pred: 'select count(*) from items' }),
+      '',
+      JSON.stringify({ idx: 2, pred: 'select sum(price) from items' }),
+    ].join('\n');
+    const ledger = parsePredictions(text, questions);
+    expect(ledger.answered).toBe(2);
+    expect(ledger.drops).toEqual([]);
+  });
+
+  it('reads an id-keyed file against a question set that carries no text', () => {
+    // A set built from ids alone cannot be matched by text, and does not need to be: the map shape
+    // names the id directly. The parser has to be able to see a question with no text at all.
+    const idsOnly: readonly PredictionQuestion[] = [{ id: 1, db: 'shop' }, { id: 2, db: 'shop' }];
+    const ledger = parsePredictions(JSON.stringify({ 1: payload('select count(*) from items') }), idsOnly);
+    expect(ledger.predictions.map((prediction) => prediction.id)).toEqual([1]);
+    expect(ledger.missing).toEqual([2]);
+    expect(ledger.drops).toEqual([]);
+  });
+});
+
+describe('a pipeline that numbers its answers by row', () => {
+  // The ids a BIRD split actually carries: a row-numbered file cannot have written these.
+  const numbered: readonly PredictionQuestion[] = [
+    { id: 36, question: 'How many items are there?', db: 'shop' },
+    { id: 112, question: 'What is the total price of every item?', db: 'shop' },
+    { id: 140, question: 'How many orders are there?', db: 'shop' },
+  ];
+  const ids = numbered.map((question) => question.id);
+
+  it('reads a position back through the numbering it was given', () => {
+    const text = [
+      JSON.stringify({ idx: 0, pred: 'select count(*) from items' }),
+      JSON.stringify({ idx: 2, pred: 'select count(*) from orders' }),
+    ].join('\n');
+    const ledger = parsePredictions(text, numbered, ids);
+    expect(ledger.predictions).toEqual([
+      { id: 36, sql: 'select count(*) from items' },
+      { id: 140, sql: 'select count(*) from orders' },
+    ]);
+    expect(ledger.renumbered).toEqual([36, 140]);
+    expect(ledger.unknown).toEqual([]);
+    expect(ledger.missing).toEqual([112]);
+  });
+
+  it('lets the declared numbering govern even where the position is also a question id', () => {
+    // Every number here is both a position and a question id, and the two readings disagree:
+    // reading by id lands on "How many orders", by position on "How many items". Reading each
+    // record under whichever numbering resolves it would make the pairing depend on which ids are
+    // small, so the same file would pair differently against a different subset.
+    const collide: readonly PredictionQuestion[] = [
+      { id: 0, question: 'How many items are there?', db: 'shop' },
+      { id: 1, question: 'What is the total price of every item?', db: 'shop' },
+      { id: 2, question: 'How many orders are there?', db: 'shop' },
+    ];
+    const ledger = parsePredictions(JSON.stringify({ 2: payload('select count(*) from items') }), collide, [1, 2, 0]);
+    expect(ledger.predictions.map((prediction) => prediction.id)).toEqual([0]);
+    expect(ledger.renumbered).toEqual([0]);
+  });
+
+  it('reports a number beyond the numbering as unknown rather than clamping it', () => {
+    const ledger = parsePredictions(JSON.stringify({ 3: payload('select 1') }), numbered, ids);
+    expect(ledger.unknown).toEqual([3]);
+    expect(ledger.answered).toBe(0);
+  });
+
+  it('checks the database the record declares against the question the position names', () => {
+    const ledger = parsePredictions(JSON.stringify({ 0: payload('select 1', 'warehouse') }), numbered, ids);
+    expect(ledger.databaseMismatch).toEqual([{ id: 36, declared: 'warehouse', expected: 'shop' }]);
+  });
+
+  it('reads a file with no map as ids, because that is what it claims to hold', () => {
+    const ledger = parsePredictions(JSON.stringify({ 0: payload('select 1') }), numbered);
+    expect(ledger.unknown).toEqual([0]);
+    expect(ledger.renumbered).toEqual([]);
+  });
+});

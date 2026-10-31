@@ -1,9 +1,19 @@
 # Adapter for wbbeyourself/MAC-SQL @ 31a9df5e0d520be4769be57a4b9022e5e34a14f4.
 #
-# Two hunks, both about how a request is spelled: their config hard-codes `openai.api_type =
+# Three hunks, none of them about the method under test.
+#
+# The first two are about how a request is spelled: their config hard-codes `openai.api_type =
 # "azure"` and passes the deployment name as `engine`, which an OpenAI-compatible endpoint does not
 # accept. The endpoint, the key and the model name move to the environment; the selector, the
 # decomposer, the refiner and every prompt stay theirs.
+#
+# The third is about how a row is numbered, and it is the one that made the first `full` dispatch
+# finish green with a zero-byte predictions file: their resume bookkeeping enumerates the batch by
+# position and compares BIRD's `question_id` against those positions, so a file carrying the
+# dataset's own ids (this split's start at 36, not 0) matches no row, the batch empties, and
+# `0it [00:00, ?it/s]` is written where the statements should have been. Renumbering the row at
+# that boundary is plumbing, not method: the original id is kept beside it and the scorer maps the
+# position back through the same input file (`--id-map`).
 #
 diff --git a/core/api_config.py b/core/api_config.py
 index 63754d3..56f30bb 100644
@@ -44,3 +54,29 @@ index 51f65c2..ad4806b 100644
              messages=[{"role": "user", "content": prompt}],
              temperature=0.1
          )
+diff --git a/run.py b/run.py
+--- a/run.py
++++ b/run.py
+@@ -89,12 +89,18 @@
+         for o in output_data_lst:
+             finished_ids.add(o['idx'])
+     unfinished_ids = [n for n in range(len(batch)) if n not in finished_ids and n >= start_pos]
+     print(f"len(unfinished_data) = {len(unfinished_ids)}")
+ 
+-    # add question_id if needed
+-    for k, item in enumerate(batch):
+-        if 'question_id' not in item:
+-            item['question_id'] = k
++    # The bookkeeping above indexes rows by position (`range(len(batch))`) and the filter below
++    # compares `question_id` against it, so an input file carrying BIRD's own ids -- this split's
++    # start at 36, not 0 -- matches no row, the batch empties, and the run finishes green with an
++    # empty output. The renumbering is confined to this boundary and stated rather than hidden:
++    # the original id is kept under `bird_question_id`, and `question_id` becomes the row's
++    # position, which is what the rest of this file already assumes. The scorer maps the position
++    # back through the same input file.
++    for k, item in enumerate(batch):
++        item['bird_question_id'] = item.get('question_id', k)
++        item['question_id'] = k
+ 
+     # skip some json data
+     excluded_db_ids = []

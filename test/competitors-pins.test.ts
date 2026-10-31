@@ -81,6 +81,26 @@ describe('every pin ships the four things a dispatch needs', () => {
   });
 });
 
+describe('the pin says how its predictions name questions', () => {
+  it.each(names)('%s declares a numbering', (name) => {
+    expect(['question-id', 'position'], name).toContain(pins[name]!.numbering);
+  });
+
+  it('records one of each, because the map only earns its place if some pipeline needs it', () => {
+    const values = Object.values(pins).map((pin) => pin.numbering);
+    expect(values).toContain('position');
+    expect(values).toContain('question-id');
+  });
+
+  it('hands the scorer the map, and decides that from the same field the pin declares', () => {
+    // The score step reads `numbering` rather than naming a competitor: a pipeline that renumbers
+    // without a map scores every statement as an unknown id, and a pipeline that does not renumber
+    // but is given one has its ids reinterpreted as rows. Both are silent without this.
+    expect(WORKFLOW).toContain('pins.json")[process.env.COMPETITOR].numbering');
+    expect(WORKFLOW).toContain('--id-map');
+  });
+});
+
 describe('the workflow scores with our instruments, not theirs', () => {
   it('hands the scoring step our coordinates file and our effect', () => {
     expect(WORKFLOW).toContain('eval/competitors/score.ts');

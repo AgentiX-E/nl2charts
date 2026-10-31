@@ -8,7 +8,7 @@
  * tool does with the half of the comparison that can be instrumented: their statements, our
  * `oracle.py`, our `judgeOfficial`, our question set.
  *
- * Three things it refuses to do, each because doing them is how a comparison lies:
+ * Four things it refuses to do, each because doing them is how a comparison lies:
  *
  * 1. **Quote an accuracy before the five coordinates hold.** A failing coordinate is printed
  *    with both values and the cost of the mismatch, and the run exits non-zero with no accuracy
@@ -18,6 +18,10 @@
  * 3. **Call a difference a size when it is inside the design's resolution.** The paired delta
  *    comes with its MDE, and when the delta is smaller the line says so and prints how many
  *    cases the effect would need.
+ * 4. **Read a file with no records as a run that answered nothing.** This one was learned the
+ *    expensive way: the first `full` dispatch scored a zero-byte predictions file as 0% and
+ *    reported a sixty-point gap as significant, because nothing in the tool distinguished "it
+ *    wrote nothing" from "it wrote zeros".
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -46,6 +50,8 @@ import {
 import type { ReferenceCoordinates, RunCoordinates } from './coordinates.js';
 import { parsePredictions } from './predictions.js';
 import type { PredictionLedger } from './predictions.js';
+import { readIdMap } from './subset.js';
+import type { IdMap } from './subset.js';
 
 export interface ScoreSettings {
   readonly predictions: string;
@@ -57,6 +63,14 @@ export interface ScoreSettings {
   readonly endpoint: string;
   /** The effect a future run would have to detect, in absolute accuracy. */
   readonly effect: number;
+  /**
+   * A question file whose order is the numbering the competitor used.
+   *
+   * Some pipelines number their answers by the row they were asked about rather than by the
+   * dataset's own id. That is a renumbering, not a different question set, and stating it is the
+   * difference between reading their answers and dropping them as unknown.
+   */
+  readonly idMap?: string;
   readonly out: string;
   readonly layout: BirdLayout;
 }
@@ -90,6 +104,14 @@ export interface ScoreOutcome {
   readonly ledger: PredictionLedger;
   readonly comparable: boolean;
   readonly violations: readonly string[];
+  /**
+   * The numbering the competitor answered in, when it was declared.
+   *
+   * Carried on the outcome rather than left in the settings so the artifact records the exact map a
+   * score was computed through: a score computed through a different file is a different score, and
+   * the ids are the only thing that distinguishes the two.
+   */
+  readonly idMap?: IdMap;
   readonly execution?: ExecutionSummary;
   readonly paired?: PairedSummary;
   readonly problems: readonly string[];
@@ -120,7 +142,7 @@ export function resolveScoreSettings(
   const coordinates = flagValue(argv, '--coordinates');
   if (predictions === undefined || coordinates === undefined) {
     throw new Error(
-      'usage: score.ts --predictions <file> --coordinates <file> [--report <file>] [--arm <name>] [--model <name>] [--endpoint <url>] [--effect 0.02] [--out <file>]',
+      'usage: score.ts --predictions <file> --coordinates <file> [--report <file>] [--arm <name>] [--model <name>] [--endpoint <url>] [--effect 0.02] [--id-map <questions.json>] [--out <file>]',
     );
   }
   const model = flagValue(argv, '--model') ?? env.LLM_MODEL;
@@ -132,6 +154,7 @@ export function resolveScoreSettings(
   const effect = Number(flagValue(argv, '--effect') ?? '0.02');
   if (!Number.isFinite(effect) || effect <= 0) throw new Error('--effect must be a positive accuracy difference');
   const competitor = predictions.replace(/^.*\//, '').replace(/\.[a-z]+$/, '');
+  const idMap = flagValue(argv, '--id-map');
   return {
     predictions,
     coordinates,
@@ -140,6 +163,7 @@ export function resolveScoreSettings(
     model,
     endpoint,
     effect,
+    ...(idMap === undefined ? {} : { idMap }),
     out:
       flagValue(argv, '--out') ??
       `${dirname(layout.out)}/competitors/${competitor}.json`,
@@ -157,6 +181,33 @@ export function armOutcomes(
   if (!Array.isArray(cases)) throw new Error(`${source} holds no cases; a comparison needs our own rows too`);
   const rows = requireArm(cases as readonly { arm?: string; id?: string; passed?: boolean }[], arm, source);
   return rows.map((row) => ({ id: String(row.id), passed: row.passed === true }));
+}
+
+/**
+ * Why nothing landed on a question, when nothing did.
+ *
+ * Three different failures look identical in every count a score is built from: no answer, no blank
+ * answers, every question missing, and an accuracy of zero over the whole set. They are not the same
+ * finding. A file that was never written is a missing input; a file numbered differently from the
+ * question set is a declaration that was not passed; a file whose records name questions this split
+ * does not hold is a question-set disagreement. Only one of the three is a measurement, and it is not
+ * one of these — a run that *answered* blank has an entry per question and is scored as the zero it
+ * is, which is why `empty` being non-empty ends this check.
+ *
+ * The first `full` dispatch of `competitors.yml` published the first of these as a rate: a green job,
+ * a zero-byte predictions file and a sixty-point gap read as significant (p = 6.1e-05).
+ */
+export function silentRun(ledger: PredictionLedger): string | undefined {
+  // Nothing was asked, so nothing can be silent. That case is reported by the caller, which knows
+  // the question set is empty rather than the answers.
+  if (ledger.declared === 0 || ledger.answered > 0 || ledger.empty.length > 0) return undefined;
+  if (ledger.drops.some((drop) => drop.where === 'file')) {
+    return 'holds no records at all: the pipeline wrote nothing, so this is a missing input rather than a measurement of zero';
+  }
+  if (ledger.unknown.length > 0) {
+    return `holds ${String(ledger.unknown.length)} statement(s) and not one names a question in this set: the numbering does not match, so a rate from it would be a rate about nothing`;
+  }
+  return 'holds nothing that could be attributed to a question in this set, so there is nothing to measure';
 }
 
 /**
@@ -190,13 +241,21 @@ export async function scoreRun(settings: ScoreSettings): Promise<ScoreOutcome> {
   const questions = loadQuestions(settings.layout.questionsFile);
   const wanted = new Set(questionIds);
   const set = questions.filter((question) => wanted.has(question.question_id));
+  const idMap = settings.idMap === undefined ? undefined : readIdMap(settings.idMap);
   const ledger = parsePredictions(
     readFileSync(settings.predictions, 'utf8'),
     set.map((question) => ({ id: question.question_id, question: question.question, db: question.db_id })),
+    idMap?.ids,
   );
+  const numbering = idMap === undefined ? {} : { idMap };
   const violations = coordinateViolations(run, reference);
   if (violations.length > 0) {
-    return { run, reference, ledger, comparable: false, violations, problems };
+    return { run, reference, ledger, comparable: false, violations, problems, ...numbering };
+  }
+  const silence = silentRun(ledger);
+  if (silence !== undefined) {
+    problems.push(`${settings.predictions} ${silence}`);
+    return { run, reference, ledger, comparable: true, violations, problems, ...numbering };
   }
 
   const byId = new Map<string, BirdQuestion>(set.map((question) => [String(question.question_id), question]));
@@ -239,7 +298,7 @@ export async function scoreRun(settings: ScoreSettings): Promise<ScoreOutcome> {
   const judged = competitorOutcomes.length;
   if (judged === 0) {
     problems.push('no question could be judged: every gold statement failed to run');
-    return { run, reference, ledger, comparable: true, violations, problems };
+    return { run, reference, ledger, comparable: true, violations, problems, ...numbering };
   }
   const accuracy = passed / judged;
   const interval = wilsonInterval(passed, judged);
@@ -270,7 +329,7 @@ export async function scoreRun(settings: ScoreSettings): Promise<ScoreOutcome> {
     needed: casesForEffect(resolution.discordantShare, settings.effect),
   };
 
-  return { run, reference, ledger, comparable: true, violations, execution, paired, problems };
+  return { run, reference, ledger, comparable: true, violations, execution, paired, problems, ...numbering };
 }
 
 const pct = (value: number): string => `${(value * 100).toFixed(2)}%`;
@@ -286,6 +345,12 @@ export function scoreLines(outcome: ScoreOutcome): readonly string[] {
   lines.push(
     `  reference: arm ${outcome.reference.arm}, ${outcome.reference.split}, ${String(outcome.reference.questionIds.length)} questions`,
   );
+  if (outcome.idMap !== undefined) {
+    lines.push(
+      `  numbering: read through ${outcome.idMap.path}, ${String(outcome.idMap.ids.length)} positions` +
+        ` (${String(outcome.ledger.renumbered.length)} statement(s) resolved by position)`,
+    );
+  }
   for (const violation of outcome.violations) lines.push(`  NOT COMPARABLE  ${violation}`);
   const { ledger } = outcome;
   lines.push(
@@ -339,6 +404,7 @@ export function writeScoreArtifact(settings: ScoreSettings, outcome: ScoreOutcom
     reference: outcome.reference,
     comparable: outcome.comparable,
     violations: outcome.violations,
+    idMap: outcome.idMap ?? null,
     ledger: {
       declared: outcome.ledger.declared,
       answered: outcome.ledger.answered,
@@ -346,6 +412,7 @@ export function writeScoreArtifact(settings: ScoreSettings, outcome: ScoreOutcom
       empty: outcome.ledger.empty,
       duplicates: outcome.ledger.duplicates,
       unknown: outcome.ledger.unknown,
+      renumbered: outcome.ledger.renumbered,
       databaseMismatch: outcome.ledger.databaseMismatch,
       drops: outcome.ledger.drops,
     },

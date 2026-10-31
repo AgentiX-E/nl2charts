@@ -3292,12 +3292,12 @@ table above written as code rather than as prose:
 
 | piece | what it holds | what it refuses |
 | --- | --- | --- |
-| `eval/competitors/pins.json` | two competitors at a full sha, with the date, the licence and the entrypoint | a branch, a tag or a short sha |
-| `eval/competitors/patches/*.patch` | one adapter each — the engine alias, and nothing else | a patch that stopped applying, checked before a model call |
+| `eval/competitors/pins.json` | two competitors at a full sha, with the date, the licence, the entrypoint and how its output names questions | a branch, a tag or a short sha |
+| `eval/competitors/patches/*.patch` | one adapter each — the engine alias, and one row renumbering where their own bookkeeping demands it | a patch that stopped applying, checked before a model call |
 | `eval/competitors/probe.ts` | the checkout against the pin, the patch against the checkout | a run from a half-patched tree |
-| `eval/competitors/subset.ts` | the question file, cut by the same `stratifiedSample` that cuts `BIRD_LIMIT` | two samples read as one question set |
+| `eval/competitors/subset.ts` | the question file, cut by the same `stratifiedSample` that cuts `BIRD_LIMIT`, and read back by `readIdMap` as the numbering a row-numbered pipeline answered in | two samples read as one question set |
 | `eval/competitors/predictions.ts` | the three shapes competitors write, and what each left out | an accuracy whose denominator is the answered subset |
-| `eval/competitors/score.ts` | their statements through `oracle.py`, judged by `judgeOfficial` | any accuracy before all five coordinates hold |
+| `eval/competitors/score.ts` | their statements through `oracle.py`, judged by `judgeOfficial` | any accuracy before all five coordinates hold, and any accuracy at all from a file with no records |
 
 The two pins are CHESS (`ShayanTalaei/CHESS`, Apache-2.0, five agents, ten-plus-ten candidates a
 question) and MAC-SQL (`wbbeyourself/MAC-SQL`, no licence file, three agents, two or three calls a
@@ -3315,12 +3315,39 @@ installs their dependencies, runs their own inference over the subset, runs one 
 same subset, and scores theirs against ours with the paired delta, its McNemar p and the MDE of the
 design that produced it.
 
-No accuracy has been published from it, and the reason is the discipline that retired five arms: a
-number from a half-installed pipeline is a number about an install. What exists is the machinery
-that makes the first number checkable — commit, model, host, question-set hash and judge in the same
-file as the rate. Until one arrives, the correct statement about the leaderboard is still: **this
-harness is 11.3pp behind the published state of the art, and how much of that gap is the pipeline is
-unknown.**
+The first `full` dispatch ran, and its reading is why two mechanisms in this tool exist. It finished
+**green with a zero-byte predictions file**. MAC-SQL's `run.py` enumerates its batch by position and
+compares `question_id` against `range(len(batch))`, so a question file carrying BIRD's own ids — this
+split's start at 36, not 0 — matched no row: the batch emptied, `0it [00:00, ?it/s]` was printed
+and an empty file was written. `score.ts` then scored that empty file as **0% on 25 questions** and
+reported a **60pp gap as significant** (p = 6.1e-05) — the exact failure this section exists to
+prevent, produced by this repository's own tool on its own first run.
+
+Three fixes, all of them on the reading side rather than the blame side:
+
+1. **A file with no records is missing input, not a measurement of zero.** It stops the run with
+   `holds no records at all` and exits non-zero. The same check covers the other two ways a file can
+   be silent — every statement numbered outside the question set, and every record naming a question
+   the split does not hold — and names which of the three it was. A file whose records are all
+   *blank* still scores 0%, because that run happened and the model returned nothing for every
+   question; the difference is whether the pipeline wrote anything that could be attributed.
+2. **A row-numbered pipeline is a declared renumbering, not an unreadable file.** `pins.json`
+   records `numbering` per competitor (`position` for MAC-SQL, `question-id` for CHESS); the score
+   step passes `--id-map <subset>` only for the first, and `readIdMap` reads that same file back as
+   position → question id. A declared map governs **every** record, including one whose number also
+   happens to be a question id: letting each record pick whichever numbering resolves it would make
+   the pairing depend on which ids are small, so one file would pair differently against a different
+   subset.
+3. **The adapter patch's third hunk renumbers at their I/O boundary**, keeping the original id under
+   `bird_question_id`. The selector, the decomposer, the refiner, the prompts and the sampling counts
+   are untouched, which is what makes the run still their method.
+
+No accuracy has been published from it yet, and the reason is the discipline that retired five arms:
+a number from a half-installed pipeline is a number about an install, and a number from an empty file
+is not a number at all. What exists is the machinery that makes the first number checkable — commit,
+model, host, question-set hash, declared numbering and judge in the same file as the rate. Until one
+arrives, the correct statement about the leaderboard is still: **this harness is 11.3pp behind the
+published state of the art, and how much of that gap is the pipeline is unknown.**
 
 
 ### Where the pruned card's 1.5 points go

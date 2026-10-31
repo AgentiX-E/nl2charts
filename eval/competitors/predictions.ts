@@ -63,6 +63,14 @@ export interface PredictionLedger {
   readonly duplicates: readonly number[];
   /** Ids that are not in the question set at all. */
   readonly unknown: readonly number[];
+  /**
+   * Questions reached by reading a number as a position rather than as a question id.
+   *
+   * Reported rather than folded into `answered`, because a renumbering that silently succeeded and
+   * a file that named the right ids look identical in every other field, and only this one says
+   * which of the two happened.
+   */
+  readonly renumbered: readonly number[];
   readonly databaseMismatch: readonly DatabaseMismatch[];
   readonly drops: readonly PredictionDrop[];
 }
@@ -269,10 +277,16 @@ function textIndex(questions: readonly PredictionQuestion[]): {
  * `questions` is the run's whole question set, not the answered subset: the denominator of a
  * comparable accuracy is fixed by the design, and a parser that only saw answered ids could not
  * report what was left out.
+ *
+ * `idMap` is the question file in the order the competitor numbered it, for pipelines that answer
+ * by row rather than by dataset id. It is a declared renumbering, not a guess: without it a
+ * position-numbered file makes every row an unknown id, which is the failure that produced a 0-byte
+ * predictions file and a "significant" 60pp gap on the first `full` dispatch.
  */
 export function parsePredictions(
   text: string,
   questions: readonly PredictionQuestion[],
+  idMap?: readonly number[],
 ): PredictionLedger {
   const drops: PredictionDrop[] = [];
   const { byId, byText, ambiguous } = textIndex(questions);
@@ -282,6 +296,7 @@ export function parsePredictions(
   const duplicates: number[] = [];
   const unknown: number[] = [];
   const empty: number[] = [];
+  const renumbered: number[] = [];
   const databaseMismatch: DatabaseMismatch[] = [];
 
   for (const record of records) {
@@ -302,29 +317,41 @@ export function parsePredictions(
       drops.push({ where: record.where, why: 'names no question' });
       continue;
     }
-    const question = byId.get(id);
-    if (question === undefined) {
+    // A competitor that numbers its answers by the position of the question in the file it was
+    // given is not naming a different question — MAC-SQL's `run.py` builds `unfinished_ids` as
+    // `range(len(batch))` and compares `question_id` against it, so against a file whose ids are
+    // BIRD's own it skips every row and writes an empty output. The map is that renumbering,
+    // stated rather than guessed: `idMap[position]` is the question the position stands for.
+    //
+    // A declared map governs every record, including one whose number happens to be a question id
+    // in this set. Letting each record choose whichever numbering resolves it would make the
+    // pairing depend on which ids are small, so the same file would pair differently against a
+    // different subset — a property a score cannot have.
+    const resolved = idMap === undefined ? id : id >= 0 && id < idMap.length ? (idMap[id] as number) : undefined;
+    const question = resolved === undefined ? undefined : byId.get(resolved);
+    if (question === undefined || resolved === undefined) {
       unknown.push(id);
       continue;
     }
+    if (idMap !== undefined) renumbered.push(resolved);
     const payload = splitBirdPayload(record.sql ?? '');
     const declaredDb = payload.db ?? record.db;
     const expected = question.db;
     if (declaredDb !== undefined && expected !== undefined && declaredDb !== expected) {
-      databaseMismatch.push({ id, declared: declaredDb, expected });
+      databaseMismatch.push({ id: resolved, declared: declaredDb, expected });
     }
     if (payload.sql.length === 0) {
       // A retry that came back blank is the answer, not a missing one: keeping the earlier
       // statement would report a run that ends with nothing as a run that answered.
-      kept.delete(id);
-      empty.push(id);
+      kept.delete(resolved);
+      empty.push(resolved);
       continue;
     }
     // Appended files resume rather than rewrite, so a repeated id means the later answer is the
     // one that finished. Keeping the first would report a run half-way through its retry.
-    if (kept.has(id)) duplicates.push(id);
-    kept.set(id, {
-      id,
+    if (kept.has(resolved)) duplicates.push(resolved);
+    kept.set(resolved, {
+      id: resolved,
       sql: payload.sql,
       ...(declaredDb === undefined ? {} : { db: declaredDb }),
     });
@@ -346,6 +373,7 @@ export function parsePredictions(
     empty: [...blank].sort((left, right) => left - right),
     duplicates: [...new Set(duplicates)].sort((left, right) => left - right),
     unknown: [...new Set(unknown)].sort((left, right) => left - right),
+    renumbered: [...new Set(renumbered)].sort((left, right) => left - right),
     databaseMismatch,
     drops,
   };

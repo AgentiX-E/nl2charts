@@ -29,6 +29,15 @@ export interface Pin {
   readonly config?: string;
   readonly probe?: readonly string[];
   readonly predictions?: string;
+  /**
+   * How its predictions name questions.
+   *
+   * `question-id` means the dataset's own ids come back; `position` means the row's index in the
+   * input file does, which `score.ts` reads through `--id-map`. Declared rather than detected: a
+   * map applied to a pipeline that names ids would reinterpret any small id as a row, and that is
+   * a mis-pairing with no symptom except a wrong score.
+   */
+  readonly numbering?: 'question-id' | 'position';
   readonly notes?: readonly string[];
 }
 

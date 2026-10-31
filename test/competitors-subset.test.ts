@@ -5,13 +5,13 @@
  * `run.ts` would score at the same limit. If that ever stops holding, the two runs answer
  * different questions and the comparison is between two samples rather than two pipelines.
  */
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { loadQuestions, stratifiedSample } from '../eval/bird/data.js';
 import { questionSetHash } from '../eval/competitors/coordinates.js';
-import { main, resolveSubsetSettings, runIfEntry, writeSubset } from '../eval/competitors/subset.js';
+import { main, readIdMap, resolveSubsetSettings, runIfEntry, writeSubset } from '../eval/competitors/subset.js';
 import { writeMiniBirdDataset } from './helpers/bird-dataset.js';
 
 const ROOT = process.cwd();
@@ -90,5 +90,60 @@ describe('the subset a competitor is given', () => {
     expect(ran).toBe(0);
     expect(runIfEntry('/a/subset.ts', 'file:///a/subset.ts', run)).toBe(7);
     expect(ran).toBe(1);
+  });
+});
+
+describe('the same file read back as a numbering', () => {
+  const write = (dir: string, body: unknown): string => {
+    const path = join(dir, 'id-map.json');
+    writeFileSync(path, typeof body === 'string' ? body : JSON.stringify(body));
+    return path;
+  };
+
+  it('is the ids of the subset in the order the competitor was given them', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'subset-'));
+    writeMiniBirdDataset(dir);
+    const subset = writeSubset(resolveSubsetSettings(envFor(dir), ['--limit', '4'], dir));
+    const map = readIdMap(subset.path);
+    expect(map.ids).toEqual(subset.ids);
+    expect(map.path).toBe(subset.path);
+    // Round-tripping through the file the competitor was handed, not through the in-memory ids:
+    // the renumbering a pipeline applies is over the file, so the reader has to agree with it.
+    expect(readIdMap(subset.path).ids.every((id) => typeof id === 'number')).toBe(true);
+  });
+
+  it('refuses a file that is not a question list', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'subset-'));
+    const path = write(dir, { questions: [{ question_id: 1 }] });
+    expect(() => readIdMap(path)).toThrow(/is not a question file/);
+  });
+
+  it('refuses an entry with no id, naming the position that would have named nothing', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'subset-'));
+    const path = write(dir, [{ question_id: 36 }, { question: 'no id here' }]);
+    expect(() => readIdMap(path)).toThrow(/entry 1 carries no question_id/);
+  });
+
+  it('refuses an entry that is not a question at all', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'subset-'));
+    expect(() => readIdMap(write(dir, [36]))).toThrow(/entry 0 carries no question_id/);
+    expect(() => readIdMap(write(dir, [null]))).toThrow(/entry 0 carries no question_id/);
+  });
+
+  it('refuses an id that is not a whole number, which would resolve to nothing', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'subset-'));
+    expect(() => readIdMap(write(dir, [{ question_id: 1.5 }]))).toThrow(/entry 0 carries no question_id/);
+    expect(() => readIdMap(write(dir, [{ question_id: '36' }]))).toThrow(/entry 0 carries no question_id/);
+  });
+
+  it('refuses an empty map, which would resolve every statement to nothing', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'subset-'));
+    expect(() => readIdMap(write(dir, []))).toThrow(/holds no positions/);
+  });
+
+  it('refuses a map that repeats an id, because a position must name one question', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'subset-'));
+    const path = write(dir, [{ question_id: 36 }, { question_id: 112 }, { question_id: 36 }]);
+    expect(() => readIdMap(path)).toThrow(/repeats 36, so a position no longer names one question/);
   });
 });
