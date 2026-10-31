@@ -43,6 +43,50 @@ cannot be argued with.
 
 ### Fixed
 
+- **The split was read as 500 rows, so one question was asked, weighted and scored twice.** Mini-Dev
+  carries 500 rows and **498 question ids**: ids 137 and 138 each appear twice, byte for byte, at
+  positions 484/487 and 485/488. The harness read the file as a list of rows, so every published rate
+  was over 498 cases of which 496 were distinct — one arbitrary question weighted twice — and the
+  artifact's `available: 500` was a row count printed where a question count belonged. `data.ts` now
+  reads a question file as a pool (`distinctQuestions`): one row per id, the file's own order, and the
+  repeats reported. Two rows with one id and **different** content are refused, because there the id
+  names two questions and neither id-keyed reader can join on it.
+
+  The correction changes no reading. Recomputed from the cases of `41158744927`, the largest movement
+  across its twelve arms is **0.18pp** (`inline+evidence` 281/498 → 279/496), against a harness noise
+  floor of **0.81pp** in the same run (the A/A pair `inline+evidence` against `inline+evidence#2` over
+  the same denominator). What it changes is what the number is a rate *about*.
+
+  Three defects were the same confusion in three places. `scored < available` was read as "this run
+  sampled the split", which two refused gold statements make true on a whole-split run — so a
+  mixed-candidate arm's feasibility guard, the one that refuses three prompts for one opinion, was
+  switched off for a reason that has nothing to do with sampling; sampling is now
+  `selected.length !== questions.length`, recorded as `selection.sampled`. `gold.unrunnable` was
+  truncated to twenty, so the twenty-first refused statement was invisible to everything downstream.
+  And `score.ts` parsed a competitor's answers against the questions this harness *could judge*, so a
+  question whose gold refused came back as an `unknown` id — a false accusation about their numbering.
+  Their statements are now read against the questions both pipelines were asked, the question-set
+  coordinate compares asked against asked, and the difference is an exclusion carrying the executor's
+  own reason. That last one is not cosmetic: it is the reason a full-split comparison can be called
+  comparable at all, since the coordinate would otherwise compare their 498 declared questions with
+  this harness's 496 judged ones and refuse for a reason neither pipeline controls.
+
+- **The subset handed to a row-numbered pipeline was cut from rows, so `readIdMap` refused it.**
+  `readIdMap` refuses a map that repeats an id — correctly, because a position would no longer name
+  one question — and a 500-row map of a 498-question file does exactly that. The subset is now cut
+  from the pool and prints what it collapsed above the subset it wrote:
+  `minidev: 500 row(s), 498 question(s) — 137, 138 repeat byte-for-byte and are counted once`. The
+  same line is printed by a run of our own, so the two pipelines in a comparison cannot describe the
+  same file differently.
+
+- **Two tools carried their entry guard as a module-scope `if`, and the ledger recorded the debt.**
+  `eval/competitors/probe.ts` and `eval/competitors/score.ts` each took that branch exactly once per
+  process, in the one context no test can enter, so both the condition and the call were uncovered.
+  `eval/entry.ts` holds one guard that *returns* the work instead — generic over the exit code, so
+  the synchronous tools and the asynchronous one share it — and the module body is one unconditional
+  assignment. Both files move to **100% on all four dimensions** (score.ts was 99.29/99.13, probe.ts
+  98.50/98.71); eval coverage is 50 of 50 files at target, 99.38% lines and 97.94% branches.
+
 - **The first `full` competitor run read a zero-byte file as a "significant" 60pp gap.** The
   dispatch finished green with an empty `predictions.json`, and `score.ts` scored it as 0% over 25
   questions with `delta +60pp, p = 6.1e-05, resolves true`. Their side: MAC-SQL's `run.py` builds

@@ -3396,6 +3396,100 @@ the published state of the art, how much of that gap is the pipeline remains unk
 paired measurement available points the same way as the assembled one.**
 
 
+### The split is 500 rows and 498 questions, and 496 of them can be judged
+
+Three different counts have been called "the split" in this document, and only the smallest of them
+is a denominator. The file carries **500 rows**; it names **498 questions**, because ids 137 and 138
+each appear twice, byte for byte, at positions 484/487 and 485/488; and a run scores **496**, because
+two gold statements do not finish inside the executor's thirty-second budget. Until this round the
+harness read the file as a list of rows and treated `500 - 2 gold failures = 498` as the question
+count, which meant one arbitrary question was asked, weighted and scored **twice**.
+
+The two repeats are exact duplicates, not variants: same question text, same evidence, same gold
+statement, same database. Every arm answered both copies the same way in twelve out of twelve arms,
+which is what an indistinguishable duplicate should do — and is also why collapsing them changes no
+verdict:
+
+| arm | over 498 rows | over 496 questions | change |
+| --- | --- | --- | --- |
+| `names` | 180/498 = 36.14% | 180/496 = 36.29% | +0.15pp |
+| `synth-definitions` | 202/498 = 40.56% | 201/496 = 40.52% | -0.04pp |
+| `inline-definitions` | 202/498 = 40.56% | 201/496 = 40.52% | -0.04pp |
+| `inline+evidence` | 281/498 = 56.43% | 279/496 = 56.25% | -0.18pp |
+| `inline+retrieval` | 203/498 = 40.76% | 202/496 = 40.73% | -0.04pp |
+| `inline+icl` | 207/498 = 41.57% | 206/496 = 41.53% | -0.03pp |
+| `inline+repair` | 281/498 = 56.43% | 280/496 = 56.45% | +0.03pp |
+| `inline+repair-raw` | 284/498 = 57.03% | 283/496 = 57.06% | +0.03pp |
+| `values` | 285/498 = 57.23% | 284/496 = 57.26% | +0.03pp |
+| `metadata+evidence` | 290/498 = 58.23% | 288/496 = 58.06% | -0.17pp |
+| `select` | 289/498 = 58.03% | 288/496 = 58.06% | +0.03pp |
+| `inline+evidence#2` | 284/498 = 57.03% | 283/496 = 57.06% | +0.03pp |
+
+Computed from the cases of `41158744927`, not re-run: the same file answers both questions. The
+largest movement is **0.18pp**, and the harness's own noise at this size — the A/A pair
+`inline+evidence` against `inline+evidence#2` in the same run — is **0.81pp** over the same
+denominator. So the correction changes no reading above. It changes what the reading *is*: a rate per
+question rather than a rate per row of somebody else's file, and one in which no question is asked
+twice.
+
+The two questions that cannot be judged are `701` (`codebase_community`) and `518` (`card_games`),
+both `OperationalError: interrupted`, which is this harness's own progress handler stopping a
+statement at thirty seconds. Measured on one machine, with the same files: `518` finishes in **39.4 s**
+and `701` does not finish in **120 s**. So one is a slow query just over the budget and the other is a
+pathological plan, and neither is a statement a pipeline can be scored on. The budget stays at thirty
+seconds — BIRD's reference harness uses a thirty-second wall clock, and a budget raised between two
+rounds makes the later round's number incomparable with the earlier one. What changes is that both
+questions are now **named**, in `gold.unrunnable` in full rather than the first twenty, in the scope
+line of a competitor's score, and in the artifact beside the rate.
+
+Three things went wrong because of the counts, and each one is a way a rate can be about something
+other than what it says:
+
+1. **`available: 500` was a row count printed as a question count.** `selection` in the artifact now
+   carries `rows`, `available` and `repeats` separately, and the run prints the shape of the file
+   above the first arm: `minidev: 500 row(s), 498 question(s) — 137, 138 repeat byte-for-byte and are
+   counted once`. A reader who stops after that line still knows what the denominator is.
+2. **`scored < available` was read as "this run sampled the split".** Two gold refusals make that
+   inequality true on a whole-split run, which meant a mixed-candidate arm's feasibility guard was
+   switched off for a reason that has nothing to do with sampling — the guard that refuses three
+   prompts for one opinion. Sampling is now `selected.length !== questions.length`, recorded as
+   `selection.sampled`.
+3. **A question whose gold refused was read as an unknown id in a competitor's file.** `score.ts`
+   parsed their answers against the questions *this harness could judge*, so any question it could
+   not judge came back as `unknown`, which is an accusation about their numbering. Their statements
+   are now read against the questions both pipelines were **asked**, the coordinate compares asked
+   against asked, and the difference is reported as an exclusion with the executor's own reason.
+
+That third one was not cosmetic: it is why the full-split comparison below is even possible. The
+question-set coordinate compared the competitor's 498 declared questions against this harness's 496
+judged ones and would have called the run **not comparable** for a reason neither pipeline controls.
+And `readIdMap` refused a 500-position map for a file with two repeats — correctly, because a position
+would no longer name one question — which is why the subset a competitor is given is now cut from
+questions rather than from rows.
+
+### The scope line: what a rate is a rate about
+
+`score.ts` prints, before the answered count and above the accuracy:
+
+```
+  scope: the whole minidev split — 498 of 498 question(s), 500 row(s) in the file; 137, 138 appear
+  twice and are counted once, 496 judged; 2 outside the comparison because the gold statement would
+  not run (518: OperationalError: interrupted, 701: OperationalError: interrupted)
+```
+
+and for a sample:
+
+```
+  scope: 25 of the minidev split's 498 question(s), 500 row(s) in the file — a sample: every rate
+  below is a rate about these 25
+```
+
+Until this round a sampled run and a whole-split run printed the same shape of line — `answered:
+25/25 (100.00%)` — and the only thing that distinguished them was a number neither the line nor the
+artifact carried. The scope is one line and one artifact field, and it is the cheapest honest thing
+this section has.
+
+
 ### Where the pruned card's 1.5 points go
 
 The pruned card loses 28 reachable questions (ceiling 1,008 → 980) and returns 925 instead of 948.
