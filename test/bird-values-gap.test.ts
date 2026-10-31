@@ -18,6 +18,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   aggregateCalls,
+  answerlessCases,
   classifyValuesGap,
   groupingColumns,
   isEntry,
@@ -147,6 +148,37 @@ describe('which fix the difference asks for', () => {
   });
 });
 
+describe('how "no answer" is decided', () => {
+  it('reads the candidate set when the arm records one', () => {
+    const { rows, population } = answerlessCases([
+      { id: 'a', passed: false, candidateRecall: false },
+      { id: 'b', passed: false, candidateRecall: true },
+      { id: 'c', passed: true, candidateRecall: true },
+    ]);
+    // `b` had an answer in its candidate set and the selector missed it: a different defect,
+    // and the reason this definition is the one a selecting arm keeps.
+    expect(population).toBe('candidate-set');
+    expect(rows.map((row) => row.id)).toEqual(['a']);
+  });
+
+  it('reads the failures when the arm records no candidate set at all', () => {
+    // A single-call arm writes no `candidateRecall`, so filtering on it selected nothing and
+    // every reading of the shipped prompt's arm was "0 cases".
+    const { rows, population } = answerlessCases([
+      { id: 'a', passed: false },
+      { id: 'b', passed: true },
+    ]);
+    expect(population).toBe('failures');
+    expect(rows.map((row) => row.id)).toEqual(['a']);
+  });
+
+  it('falls back to the failures definition when no case records the field, including an empty corpus', () => {
+    // There is no evidence either way, and the artifact that writes the field always writes it
+    // on at least one case: the fallback is the single-call arm's shape.
+    expect(answerlessCases([])).toEqual({ rows: [], population: 'failures' });
+  });
+});
+
 describe('the tally', () => {
   it('counts every bucket and separates a named cause from a gap', () => {
     const tally = tallyValues(['filter-narrow', 'filter-narrow', 'grain', 'unclassified']);
@@ -180,6 +212,13 @@ describe('what makes the split unpublishable', () => {
     expect(problems[0]).toContain('1 of 5');
   });
 
+  it('says the cases were out of scope rather than that they had no statement', () => {
+    // Two states with the same ratio and opposite causes: nothing retained, and everything
+    // retained outside the scope the caller asked for.
+    const problems = valuesProblems(tallyValues([]), 0.8, { unknownQuestion: 0, unretained: 0, otherBucket: 3, engineRefused: 0, goldFailed: 0 });
+    expect(problems[0]).toContain('3 no-answer cases and every one is outside this scope');
+  });
+
   it('passes at the boundary', () => {
     expect(valuesProblems(tallyValues(['grain', 'grain', 'grain', 'grain', 'unclassified']))).toEqual([]);
   });
@@ -203,6 +242,11 @@ describe('the lines a reader sees', () => {
 
   it('prints zero rather than nothing for an empty split', () => {
     expect(valuesLines(tallyValues([])).join('\n')).toContain('0 cases, 0 classified (100.0%)');
+  });
+
+  it('names the population it split, so a table of every failure cannot be read as the values bucket', () => {
+    expect(valuesLines(tallyValues([]), 'values').join('\n')).toContain('values bucket');
+    expect(valuesLines(tallyValues([]), 'all').join('\n')).toContain('every no-answer case');
   });
 });
 
@@ -243,11 +287,15 @@ describe('the entry, run the way a workflow runs it', () => {
     };
   }
 
-  function settingsFor(data: string, body: unknown): ReturnType<typeof resolveValuesGapSettings> {
+  function writeReport(body: unknown): string {
     const dir = mkdtempSync(join(tmpdir(), 'vgap-report-'));
     const path = join(dir, 'bird-eval.json');
     writeFileSync(path, JSON.stringify(body));
-    return resolveValuesGapSettings({ BIRD_SPLIT: 'minidev', BIRD_DATA: data }, [path, '--arm', 'select-cross'], ROOT);
+    return path;
+  }
+
+  function settingsFor(data: string, body: unknown): ReturnType<typeof resolveValuesGapSettings> {
+    return resolveValuesGapSettings({ BIRD_SPLIT: 'minidev', BIRD_DATA: data }, [writeReport(body), '--arm', 'select-cross'], ROOT);
   }
 
   it('splits the bucket end to end, counting what it had to drop', async () => {
@@ -285,18 +333,98 @@ describe('the entry, run the way a workflow runs it', () => {
     expect(outcome.problems).toEqual([]);
   });
 
-  it('leaves the column-count bucket to the tool that owns it', async () => {
-    // The judge files ~a fifth of the no-answer set under `column-count`. Splitting those by
-    // clause is how the first version of this tool reported 86 width errors as unclassified
-    // cases: a statement whose width is wrong has a projection finding, not a clause finding.
+  it('leaves the column-count bucket out of the default scope, and counts it', async () => {
+    // The judge files about a fifth of the no-answer set under `column-count`, and the default
+    // scope is the `values` bucket alone so that every published denominator keeps its meaning.
+    // What changed is that the exclusion is counted: `otherBucket` was declared, printed and
+    // never incremented, so this line read 0 on every artifact this tool ever ran.
     const data = dataset();
     const settings = settingsFor(data, report({}, [{ id: 901, reason: 'column-count' }]));
     const outcome = await runValuesGap(settings);
     expect(outcome.tally.total).toBe(0);
+    expect(outcome.drops.otherBucket).toBe(1);
+    expect(outcome.problems[0]).toContain('every one is outside this scope');
+  });
+
+  it('admits the column-count bucket under `--scope all`, which is what the width measurement asks for', async () => {
+    // `bench:bird:width` priced the projection lever at 11 of 37 wide cases recoverable by
+    // deleting columns, so 26 of them are wrong for a reason the ladder can name. This is the
+    // switch that lets it name it.
+    const data = dataset();
+    const body = {
+      split: 'minidev',
+      model: 'deepseek-chat',
+      arms: [{ arm: 'select-cross', candidateRecall: 0 }],
+      cases: [{ arm: 'select-cross', id: '91', passed: false, reason: 'column-count', candidateRecall: false }],
+      failures: { 'select-cross': [{ id: '91', predicted: 'select 1', reason: 'column-count' }] },
+    };
+    const settings = settingsFor(data, body);
+    expect((await runValuesGap(settings)).drops.otherBucket).toBe(1);
+    const outcome = await runValuesGap({ ...settings, scope: 'all' });
     expect(outcome.drops.otherBucket).toBe(0);
-    // 901 is not in `failures` for a `values` reason, so it is not in the split at all: the
-    // case row carries the reason the split filters on.
-    expect(outcome.tally.buckets['literal-missing']).toBe(0);
+    expect(outcome.scope).toBe('all');
+    // `select 1` against a three-row gold is a filter that is too weak: a bucket the split
+    // reaches only because the case is admitted at all.
+    expect(outcome.tally.total).toBe(1);
+    expect(outcome.tally.buckets['filter-wide']).toBe(1);
+  });
+
+  it('splits a column-count case under `--scope all` instead of dropping it', async () => {
+    const data = dataset();
+    // 5 returns three rows of one column against a one-row, one-column gold: a filter too weak,
+    // which is a reading the ladder can reach whether or not the widths agree.
+    const body = {
+      split: 'minidev',
+      model: 'deepseek-chat',
+      arms: [{ arm: 'select-cross', candidateRecall: 0 }],
+      cases: [{ arm: 'select-cross', id: '5', passed: false, reason: 'column-count', candidateRecall: false }],
+      failures: { 'select-cross': [{ id: '5', predicted: 'select name from items', reason: 'column-count' }] },
+    };
+    const settings = settingsFor(data, body);
+    const narrowed = await runValuesGap(settings);
+    expect(narrowed.drops.otherBucket).toBe(1);
+    expect(narrowed.tally.total).toBe(0);
+    const widened = await runValuesGap({ ...settings, scope: 'all' });
+    expect(widened.tally.buckets['filter-wide']).toBe(1);
+    expect(widened.drops.otherBucket).toBe(0);
+  });
+
+  it('counts a case that carries no reason at all as outside the scope', async () => {
+    // An artifact written before the field existed, or by a runner that dropped it: the case is
+    // a no-answer case with nothing to file it under, and it must be counted rather than
+    // silently left out of both the numerator and the denominator.
+    const data = dataset();
+    const body = {
+      split: 'minidev',
+      model: 'deepseek-chat',
+      arms: [{ arm: 'select-cross', candidateRecall: 0 }],
+      cases: [{ arm: 'select-cross', id: '1', passed: false, candidateRecall: false }],
+      failures: { 'select-cross': [{ id: '1', predicted: 'select name from items' }] },
+    };
+    const outcome = await runValuesGap(settingsFor(data, body));
+    expect(outcome.drops.otherBucket).toBe(1);
+    expect(outcome.tally.total).toBe(0);
+  });
+
+  it('reads a single-call arm from its failures, because it writes no candidate set', async () => {
+    const data = dataset();
+    const body = {
+      split: 'minidev',
+      model: 'deepseek-chat',
+      arms: [{ arm: 'inline+evidence' }],
+      cases: [
+        { arm: 'inline+evidence', id: '91', passed: false, reason: 'values' },
+        { arm: 'inline+evidence', id: '2', passed: true, reason: 'match' },
+      ],
+      failures: { 'inline+evidence': [{ id: '91', predicted: 'select qty * 2 from orders', reason: 'values' }] },
+    };
+    const settings = resolveValuesGapSettings({ BIRD_SPLIT: 'minidev', BIRD_DATA: data }, [writeReport(body), '--arm', 'inline+evidence'], ROOT);
+    const outcome = await runValuesGap(settings);
+    expect(outcome.population).toBe('failures');
+    expect(outcome.tally.buckets.scale).toBe(1);
+    // And the line a reader sees says which population it split, because "0 cases" from a
+    // single-call arm and "0 cases" from a selecting one are different claims.
+    expect(await main([settings.report, '--arm', 'inline+evidence'], ROOT, { BIRD_SPLIT: 'minidev', BIRD_DATA: data })).toBe(0);
   });
 
   it('counts a statement the engine refused as a refusal rather than a value error', async () => {
@@ -366,6 +494,11 @@ describe('the entry, run the way a workflow runs it', () => {
     expect(resolveValuesGapSettings(env, ['--strict', '/r.json', '--arm', 'select5'], ROOT)).toMatchObject({ arm: 'select5', report: '/r.json', strict: true });
     // The arm name is not a path, however it is ordered.
     expect(resolveValuesGapSettings(env, ['--arm', 'select5', '/r.json'], ROOT).report).toBe('/r.json');
+    // The scope defaults to the values bucket and is a path-safe flag with a value.
+    expect(resolveValuesGapSettings(env, ['/r.json'], ROOT).scope).toBe('values');
+    expect(resolveValuesGapSettings(env, ['--scope', 'all', '/r.json'], ROOT)).toMatchObject({ report: '/r.json', scope: 'all' });
+    expect(() => resolveValuesGapSettings({}, ['/r.json', '--scope'], ROOT)).toThrow('--scope needs a name');
+    expect(() => resolveValuesGapSettings({}, ['/r.json', '--scope', 'every'], ROOT)).toThrow('--scope must be one of values, all');
     expect(() => resolveValuesGapSettings({}, ['/r.json', '--arm'], ROOT)).toThrow('--arm needs a name');
     expect(() => resolveValuesGapSettings({}, [], ROOT)).toThrow('usage');
     expect(() => resolveValuesGapSettings({}, ['--strict'], ROOT)).toThrow('usage');
@@ -381,6 +514,9 @@ describe('the entry, run the way a workflow runs it', () => {
     expect(JSON.parse(readFileSync(path, 'utf8'))).toMatchObject({ arm: 'select-cross', split: 'minidev' });
     const awkward = { ...settings, arm: 'select-cross@second' };
     expect(valuesGapPath(awkward)).toContain('values-gap-select-cross-second.json');
+    // Two scopes are two readings of one arm, and one file would let the second overwrite the
+    // first under a name that reads like the other one.
+    expect(valuesGapPath({ ...settings, scope: 'all' })).toContain('values-gap-select-cross-all.json');
   });
 
   it('exits zero for a measurement and non-zero for a gate that misses its bar', async () => {

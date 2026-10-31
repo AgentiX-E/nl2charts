@@ -8,6 +8,61 @@ cannot be argued with.
 
 ### Added
 
+- **`pnpm bench:bird:width`: the answer's width, and whether the extra columns are the mistake.**
+  `eval/bird/width.ts` reads the arm's `column-count` cases, takes both widths from the executed
+  result sets (`select *` is one item and three columns), and then prices the one edit the bucket
+  permits: delete items from the select list, **every subset**, re-execute, and ask the same judge.
+  On `41206085907` the bucket is **37 wide and 15 narrow**, and removing columns recovers **11 of
+  the 37 — a 2.22pp ceiling of 496 questions, and an oracle's**: the subsets are chosen with
+  knowledge of the answer's width, so no implementable rule beats it. The other 26 stay wrong with
+  the right width, which is the finding: the width was a symptom. Narrow cases have no deletion to
+  try, so they are named instead — the gold items the statement never spells.
+
+  Two statements the tool rebuilds are re-spaced at both edges, because `head` stops after
+  `distinct` and `tail` starts at `from`: the first version produced `… AS ageFROM Player …` and
+  `select distinct(…)`, every subset failed to run, every failure counted as "that did not help",
+  and the ceiling read **1** where the truth was **11**. A silent zero is the failure mode this
+  file exists to avoid, so it is recorded here rather than fixed quietly.
+
+- **`pnpm bench:bird:conditions`: which condition of the question the statement never wrote.**
+  `eval/bird/conditions.ts` takes the ladder's `predicate` row one level down and asks a question a
+  mechanism would have to answer — the gold compares a column to a value; does the prediction
+  compare that column to anything at all? On `41206085907`: **80 of 220 failures (36.4%) never
+  filter on a column the gold filters**, 107 conditions in total, which is **16.1pp of the 496
+  questions** — seven times the projection ceiling, and a population no spelling lever can reach.
+  It joins a `values-gap` artifact with `--ladder`, so the reading is per bucket: `tables` 23 of 36
+  (partly mechanical — a statement reading other tables cannot filter a column of one it never
+  read), `predicate` 17 of 49, `filter-wide` 13 of 41, `projection` 0 of 11, `aggregate` 0 of 8,
+  `literal-case` 0 of 5.
+
+- **`--scope all` on `pnpm bench:bird:gap:values`: the same ladder over every no-answer case.**
+  The scope is a flag rather than a rewrite of the tool, because the `values` denominator is what
+  every published table counts; the artifact's name carries the scope so two readings of one arm
+  cannot overwrite each other. What it produces is the first complete attribution of the corpus:
+  of 220 failures, 211 readable and 210 named, and **`grain`, `scale` and `window` are all zero**.
+
+### Fixed
+
+- **A counter that could not move: `otherBucket`.** `values-gap` declared it, printed it
+  ("0 in the column-count bucket") and never incremented it, so the exclusion the tool documents at
+  length was reported as zero on every artifact it ever ran. It now counts the no-answer cases
+  outside the split's scope, and the state it was hiding — every retained case out of scope — gets
+  its own sentence instead of the one about having no statements.
+
+- **The shipped arm's failures were invisible to the ladder.** `values-gap` selected its population
+  as `candidateRecall === false`, a field only a multi-candidate arm writes. On a single-call arm it
+  is absent rather than false, so filtering on it selected nothing and every reading of the prompt
+  the product ships was "0 cases", in the typography of a measurement. The population is now
+  `candidateRecall === false` when the arm records one and `passed === false` when it does not, and
+  which definition a reading used is written into the artifact beside it.
+
+- **A raw statement read as a statement with no conditions.** `predicateAtoms` splits on lowercase
+  `where`/`on`/`and`, because its only caller normalized the statement first. Handed BIRD's gold —
+  which writes `WHERE` — it returns an empty list, and an empty list of gold conditions makes every
+  statement look complete: the condition census read **13** where the truth is **80**. The new
+  reader normalizes before splitting, and a test pins the upper-case gold.
+
+
 - **`pnpm bench:bird:agents`: their three agents' firing conditions, counted from their source with
   no model call.** `eval/bird/agents.ts` transcribes `_is_need_prune` (fires unless
   `columns // tables ≤ 6 and columns ≤ 30`), `_is_need_refine` (fires on an error, on zero rows, or
@@ -309,6 +364,24 @@ cannot be argued with.
   are now printed before the verdict, and a test asserts the line survives that return.
 
 ### Measured
+
+- **The projection is not the finding: 2.22pp for an oracle, at or below this harness's noise.**
+  The 52 `column-count` failures at `41206085907` split 37 wide / 15 narrow, and the smallest
+  deletion that fixes each of them recovers **11** — 1486 (two intermediate `SUM(CASE …)` columns),
+  1533 (`c.CustomerID` in a question about an aggregate), 1031 (`p.player_name` in a question about
+  an age), 1078 and 865 (the raw date behind the age). Sometimes the key is the extra column and
+  sometimes the measure is, so the four rows would need four different instructions: the number is
+  published as a ceiling, not chased as a lever: 2.22pp is 0.22pp above this harness's own A/A
+  movement (2.0pp) on 496 questions, and any rule a prompt can state reaches strictly less.
+
+- **The 166 are wrong tables and wrong conditions, not wrong grain.** With both buckets admitted
+  (`--scope all`), the 220 failures read: `predicate` 49, `filter-wide` 41, `tables` 36,
+  `literal-missing` 34, `filter-narrow` 26, `projection` 11, `aggregate` 8, `literal-case` 5,
+  unclassified 1 — and **`grain` 0, `scale` 0, `window` 0**. The `column-count` half of the bucket
+  splits into 15 `predicate`, 15 `filter-wide`, 7 `tables`, 6 `projection`, 5 `literal-missing`, 4
+  `aggregate`. 160 of 211 (75.8%) are a wrong table or a wrong condition, which is what the next
+  work item has to attack; a shape guard cannot see any of it.
+
 
 - **Their refiner sees 54 of 496 cases and 166 of the 220 failures are invisible to it.** Applying
   `_is_need_refine` to the artifact's failing statements (`41206085907`, 496 questions, a census:

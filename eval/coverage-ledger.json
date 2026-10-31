@@ -58,6 +58,12 @@
       "functions": 100,
       "branches": 100
     },
+    "eval/bird/conditions.ts": {
+      "lines": 99.09,
+      "statements": 99.09,
+      "functions": 100,
+      "branches": 96.62
+    },
     "eval/bird/data.ts": {
       "lines": 100,
       "statements": 100,
@@ -239,16 +245,22 @@
       "branches": 100
     },
     "eval/bird/values-gap.ts": {
-      "lines": 99,
-      "statements": 99,
+      "lines": 99.23,
+      "statements": 99.23,
       "functions": 100,
-      "branches": 98.86
+      "branches": 99.14
     },
     "eval/bird/values.ts": {
       "lines": 100,
       "statements": 100,
       "functions": 100,
       "branches": 97.95
+    },
+    "eval/bird/width.ts": {
+      "lines": 99.33,
+      "statements": 99.33,
+      "functions": 100,
+      "branches": 98.69
     },
     "eval/competitors/coordinates.ts": {
       "lines": 100,

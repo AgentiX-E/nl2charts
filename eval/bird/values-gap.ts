@@ -73,6 +73,57 @@ export const VALUES_BUCKETS = [
 ] as const;
 export type ValuesBucket = (typeof VALUES_BUCKETS)[number];
 
+/**
+ * Which of the judge's buckets this split reads.
+ *
+ * The first version read only `values`, and stated the reason: "a statement whose width is
+ * wrong cannot be diagnosed clause by clause — the projection is the finding". That is an
+ * assumption about the corpus, and it is false. `bench:bird:width` tried the only edit the
+ * assumption allows — deleting the extra projected items, every subset, executed — and
+ * recovered 2 of the 37 wide cases; the other 35 stay wrong with the right width, so their
+ * width was a symptom of a different clause. Excluding them therefore excluded the majority
+ * of a bucket whose cause this ladder can name.
+ *
+ * `values` is still the default so that every published table keeps its denominator, and
+ * because the two buckets answer different questions until someone asks for both.
+ */
+export const SCOPES = ['values', 'all'] as const;
+export type Scope = (typeof SCOPES)[number];
+
+/** The judge's reasons each scope admits. */
+const ADMITTED: Readonly<Record<Scope, readonly string[]>> = {
+  values: ['values'],
+  all: ['values', 'column-count'],
+};
+
+/**
+ * How "no answer" was decided, which is a property of the arm rather than of the corpus.
+ *
+ * A multi-candidate arm records `candidateRecall` per case, and the tool's subject has always
+ * been the cases where it is false: the query was never generated, so the ladder is reading
+ * generation rather than selection. A single-call arm writes no candidate set at all, so the
+ * field is absent rather than false — and filtering on it selected nothing, which is how this
+ * tool reported "0 cases" on the arm the product ships.
+ *
+ * Both definitions are honest and they are not the same number on a selecting arm, so the one
+ * a reading used is written into the artifact beside it.
+ */
+export const POPULATIONS = ['candidate-set', 'failures'] as const;
+export type Population = (typeof POPULATIONS)[number];
+
+export function answerlessCases<T extends { readonly passed?: boolean; readonly candidateRecall?: boolean }>(
+  rows: readonly T[],
+): { readonly rows: readonly T[]; readonly population: Population } {
+  const population: Population = rows.some((row) => row.candidateRecall !== undefined) ? 'candidate-set' : 'failures';
+  return {
+    population,
+    rows:
+      population === 'candidate-set'
+        ? rows.filter((row) => row.candidateRecall === false)
+        : rows.filter((row) => row.passed === false),
+  };
+}
+
 /** Which fix the difference asks for, from the two statements and the measured shape. */
 export function classifyValuesGap(input: {
   readonly gold: string;
@@ -129,10 +180,18 @@ export function tallyValues(rows: readonly ValuesBucket[]): ValuesTally {
  * worth saying out loud, since a `values` bucket of zero means the parent tool disagrees
  * with the diagnosis and one of the two is measuring the wrong thing.
  */
-export function valuesProblems(tally: ValuesTally, minimumCoverage = 0.8): string[] {
+export function valuesProblems(tally: ValuesTally, minimumCoverage = 0.8, drops: ValuesDrops = NO_VALUE_DROPS): string[] {
   const problems: string[] = [];
   if (tally.total === 0) {
-    problems.push('VGAP: the artifact holds no statement for any no-answer case, so the values bucket cannot be split');
+    // Two states that read the same in a ratio and mean opposite things: nothing was retained,
+    // or everything retained was outside the scope the caller asked for. Naming the second one
+    // is the reason `otherBucket` was fixed — the sentence "no statement for any no-answer
+    // case" was printed over artifacts that held a statement for every one of them.
+    problems.push(
+      drops.otherBucket === 0
+        ? 'VGAP: the artifact holds no statement for any no-answer case, so the values bucket cannot be split'
+        : `VGAP: the artifact holds ${String(drops.otherBucket)} no-answer cases and every one is outside this scope, so the split has nothing of its own to read`,
+    );
     return problems;
   }
   if (tally.coverage < minimumCoverage) {
@@ -150,11 +209,16 @@ export function valuesProblems(tally: ValuesTally, minimumCoverage = 0.8): strin
  * table" are answered by different parts of the product, and a flat list of thirteen rows
  * makes a reader add that up themselves.
  */
-export function valuesLines(tally: ValuesTally): string[] {
+export function valuesLines(tally: ValuesTally, scope: Scope = 'values'): string[] {
   const share = (count: number): string => (tally.total === 0 ? '0.0%' : `${((count / tally.total) * 100).toFixed(1)}%`);
   const rows = (buckets: readonly ValuesBucket[]): string[] =>
     buckets.map((bucket) => `  ${bucket.padEnd(18)} ${String(tally.buckets[bucket]).padStart(4)}  ${share(tally.buckets[bucket])}`);
-  const out = ['values bucket, split by the fix it asks for', ''];
+  const out = [
+    scope === 'all'
+      ? 'every no-answer case, split by the fix it asks for'
+      : 'values bucket, split by the fix it asks for',
+    '',
+  ];
   out.push('  did it run and return rows');
   out.push(...rows(['no-statement', 'filter-narrow', 'filter-wide', 'scale']));
   out.push('');
@@ -177,6 +241,8 @@ export interface ValuesGapSettings {
   readonly layout: BirdLayout;
   readonly arm: string;
   readonly out: string;
+  /** Which judge buckets the split admits. See `SCOPES`. */
+  readonly scope: Scope;
   /** Exit non-zero when the split misses the coverage bar. Off for a measurement, on for a gate. */
   readonly strict: boolean;
 }
@@ -189,11 +255,24 @@ export function resolveValuesGapSettings(
   const flag = argv.indexOf('--arm');
   const named = flag === -1 ? undefined : argv[flag + 1];
   if (flag !== -1 && named === undefined) throw new Error('--arm needs a name');
-  const consumed = flag === -1 ? [] : [flag, flag + 1];
+  const scopeFlag = argv.indexOf('--scope');
+  const scopeName = scopeFlag === -1 ? undefined : argv[scopeFlag + 1];
+  if (scopeFlag !== -1 && scopeName === undefined) throw new Error('--scope needs a name');
+  if (scopeName !== undefined && !(SCOPES as readonly string[]).includes(scopeName)) {
+    throw new Error(`--scope must be one of ${SCOPES.join(', ')}`);
+  }
+  const consumed = [...(flag === -1 ? [] : [flag, flag + 1]), ...(scopeFlag === -1 ? [] : [scopeFlag, scopeFlag + 1])];
   const path = argv.find((item, index) => !item.startsWith('--') && !consumed.includes(index));
-  if (path === undefined) throw new Error('usage: values-gap.ts <report.json> [--arm <name>] [--strict]');
+  if (path === undefined) throw new Error('usage: values-gap.ts <report.json> [--arm <name>] [--scope values|all] [--strict]');
   const layout = resolveLayout(env, root);
-  return { report: path, layout, arm: named ?? SHIPPED_ARM, out: dirname(layout.out), strict: argv.includes('--strict') };
+  return {
+    report: path,
+    layout,
+    arm: named ?? SHIPPED_ARM,
+    out: dirname(layout.out),
+    scope: (scopeName ?? 'values') as Scope,
+    strict: argv.includes('--strict'),
+  };
 }
 
 export interface ValuesRow {
@@ -204,11 +283,13 @@ export interface ValuesRow {
 /**
  * The cases the split could not read, each with the reason.
  *
- * `otherBucket` is the one that matters: the judge calls about a fifth of the no-answer set
- * `column-count` and this tool has no business splitting those, because a statement whose
- * width is wrong cannot be diagnosed clause by clause — the projection is the finding. Before
- * this counter existed the tool split them anyway and reported 86 of them as `unclassified`,
- * which is how a taxonomy reports its own scope as its own blind spot.
+ * `otherBucket` is the one that matters, and it was dead: declared, printed, and never
+ * incremented, so the line a reader saw — "0 in the column-count bucket" — was true by
+ * construction on every artifact this tool ever ran. A counter that cannot move is worse
+ * than no counter: it reads as evidence that the exclusion was measured.
+ *
+ * It now counts the no-answer cases whose judge reason is outside the split's scope, which
+ * is the `column-count` bucket under the default scope and nothing at all under `all`.
  */
 export interface ValuesDrops {
   readonly unknownQuestion: number;
@@ -229,6 +310,8 @@ export const NO_VALUE_DROPS: ValuesDrops = {
 export interface ValuesOutcome {
   readonly split: string;
   readonly arm: string;
+  readonly scope: Scope;
+  readonly population: Population;
   readonly rows: readonly ValuesRow[];
   readonly tally: ValuesTally;
   readonly drops: ValuesDrops;
@@ -236,12 +319,13 @@ export interface ValuesOutcome {
 }
 
 /**
- * Split the arm's `values` cases, one oracle run each.
+ * Split the arm's no-answer cases, one oracle run each.
  *
- * The input is the bucket `bench:bird:gap` publishes — cases the judge scored as `values` —
- * not "every case with no answer". The two sets differ by the `column-count` cases, and
- * admitting them would make the split's denominator disagree with the parent's numerator:
- * the first run of this tool did exactly that and attributed 86 width errors to clauses.
+ * The input is the bucket `bench:bird:gap` publishes. The default scope is the `values`
+ * bucket alone, which is what every published table's denominator counts; `--scope all`
+ * admits the `column-count` cases too, because `bench:bird:width` showed that a width
+ * difference is usually a symptom rather than the finding and this ladder can name the
+ * clause behind it.
  *
  * The statement comes from the artifact's retained failures rather than from the case row:
  * the case row carries the verdict and the candidate set, the failure row carries the SQL.
@@ -252,12 +336,18 @@ export async function runValuesGap(settings: ValuesGapSettings): Promise<ValuesO
   const questions = loadQuestions(settings.layout.questionsFile);
   const byId = new Map(questions.map((question) => [String(question.question_id), question]));
   const statements = new Map((report.failures?.[settings.arm] ?? []).map((entry) => [String(entry.id), entry]));
-  const noAnswer = requireArm(report.cases, settings.arm, settings.report).filter(
-    (row) => row.arm === settings.arm && row.candidateRecall === false,
-  );
-  const scored = noAnswer.filter((row) => row.reason === 'values');
+  const scoped = requireArm(report.cases, settings.arm, settings.report).filter((row) => row.arm === settings.arm);
+  const { rows: noAnswer, population } = answerlessCases(scoped);
+  const admitted = ADMITTED[settings.scope];
+  const scored = noAnswer.filter((row) => row.reason !== undefined && admitted.includes(row.reason));
   const rows: ValuesRow[] = [];
-  const drops = { unknownQuestion: 0, unretained: 0, otherBucket: 0, engineRefused: 0, goldFailed: 0 };
+  const drops = {
+    unknownQuestion: 0,
+    unretained: 0,
+    otherBucket: noAnswer.length - scored.length,
+    engineRefused: 0,
+    goldFailed: 0,
+  };
   const oracle = createOracle(settings.layout.oracleScript, settings.layout.databaseRoot);
   const gold = new Map<string, Awaited<ReturnType<typeof oracle.run>>>();
   try {
@@ -306,13 +396,31 @@ export async function runValuesGap(settings: ValuesGapSettings): Promise<ValuesO
   // empty bucket is the reading, not the failure. An arm with no-answer cases but nothing filed
   // under `values` is the opposite — either the artifact predates the field or the judge is
   // reporting something the split cannot see — and that is worth failing a gate over.
-  const problems = noAnswer.length === 0 ? [] : valuesProblems(tally);
-  const outcome: ValuesOutcome = { split: settings.layout.split, arm: settings.arm, rows, tally, drops, problems };
+  const problems = noAnswer.length === 0 ? [] : valuesProblems(tally, 0.8, drops);
+  const outcome: ValuesOutcome = {
+    split: settings.layout.split,
+    arm: settings.arm,
+    scope: settings.scope,
+    population,
+    rows,
+    tally,
+    drops,
+    problems,
+  };
   return outcome;
 }
 
+/**
+ * Where the split is written.
+ *
+ * The scope is part of the name, because two scopes are two readings of the same arm and one
+ * file would have made the second invocation overwrite the first — the artifact on the runner
+ * would then be whichever step ran last, under a name that reads like the other one.
+ */
 export function valuesGapPath(settings: ValuesGapSettings): string {
-  return join(settings.out, `values-gap-${settings.arm.replace(/[^a-z0-9+_-]/gi, '-')}.json`);
+  const arm = settings.arm.replace(/[^a-z0-9+_-]/gi, '-');
+  const scope = settings.scope === 'values' ? '' : `-${settings.scope}`;
+  return join(settings.out, `values-gap-${arm}${scope}.json`);
 }
 
 export function writeValuesArtifact(settings: ValuesGapSettings, outcome: ValuesOutcome): string {
@@ -338,9 +446,12 @@ export async function main(
 ): Promise<number> {
   const settings = resolveValuesGapSettings(env, argv, root);
   const outcome = await runValuesGap(settings);
-  for (const line of valuesLines(outcome.tally)) console.log(line);
+  for (const line of valuesLines(outcome.tally, outcome.scope)) console.log(line);
   console.log(
-    `  dropped: ${String(outcome.drops.unretained)} unretained, ${String(outcome.drops.otherBucket)} in the column-count bucket, ` +
+    `  population: ${outcome.population === 'candidate-set' ? 'cases whose candidate set held no answer' : 'cases the arm failed'}`,
+  );
+  console.log(
+    `  dropped: ${String(outcome.drops.unretained)} unretained, ${String(outcome.drops.otherBucket)} outside the ${outcome.scope} scope, ` +
       `${String(outcome.drops.engineRefused)} refused by the engine, ${String(outcome.drops.goldFailed)} unrunnable gold, ` +
       `${String(outcome.drops.unknownQuestion)} unknown question`,
   );

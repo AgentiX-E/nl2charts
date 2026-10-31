@@ -309,6 +309,27 @@ jobs:
       # instrument, and the instrument is what the next iteration is planned from.
       - name: What kind of wrong the no-answer statements are
         run: pnpm bench:bird:gap:values eval/out/bird-eval.json --arm select --strict
+      # The same ladder over every no-answer case, not just the `values` bucket. The exclusion
+      # it lifts was justified by "a statement whose width is wrong cannot be diagnosed clause
+      # by clause — the projection is the finding"; the width step below tries that finding
+      # (every subset of the select list, executed) and recovers 11 of 37 wide cases, so 26 of
+      # them are wrong for a reason this ladder can name. A measurement, not a gate: the
+      # taxonomy's coverage is gated one step up.
+      - name: The same ladder over every no-answer case
+        run: pnpm bench:bird:gap:values eval/out/bird-eval.json --arm select --scope all
+      # Prices the projection lever before anyone writes it: delete items from the select list,
+      # every subset, and ask the judge again. What it recovers is an oracle's ceiling — the
+      # subsets are chosen with knowledge of the answer's width — so no implementable rule can
+      # beat it. `--strict` fails only if the instrument cannot read a statement, which is how a
+      # silent zero would otherwise look exactly like a corpus with nothing to recover.
+      - name: What the answer's width costs, and what removing columns would recover
+        run: pnpm bench:bird:width eval/out/bird-eval.json --arm select --strict
+      # The next level down from the ladder's `predicate` row: of the conditions the gold
+      # states, which ones name a column the statement never filters on at all. Zero model
+      # calls and zero queries — both statements are in the artifact — and the ladder artifact
+      # joins in so the reading is per bucket.
+      - name: Which condition the statement never wrote
+        run: pnpm bench:bird:conditions eval/out/bird-eval.json --arm select --ladder eval/out/values-gap-select-all.json --strict
       # Where the prompt's characters go, and what a smaller card could save. The card is
       # three quarters of every call and one case in six had a linker that named nothing at
       # all, so the two numbers that matter are the oracle ceiling and the coverage of the

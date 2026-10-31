@@ -50,6 +50,8 @@
     "bench:bird:diagnose": "tsx eval/bird/diagnose-corpus.ts",
     "bench:bird:gap": "tsx eval/bird/gap.ts",
     "bench:bird:gap:values": "tsx eval/bird/values-gap.ts",
+    "bench:bird:width": "tsx eval/bird/width.ts",
+    "bench:bird:conditions": "tsx eval/bird/conditions.ts",
     "bench:bird:repair": "tsx eval/bird/repair.ts",
     "bench:bird:info": "tsx eval/bird/information.ts",
     "bench:bird:differential": "tsx eval/bird/differential.ts",

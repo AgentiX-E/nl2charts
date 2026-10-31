@@ -3945,6 +3945,131 @@ own A/A movement (2.0pp) on 496 questions and under the dev split's MDE. The arm
 `ON_DEMAND_ARMS` with that arithmetic in its note, because "we wrote it and did not run it"
 is a defensible decision only if the prediction that justified it is written down.
 
+## The answer's width, and whether the extra columns are the mistake
+
+`gap` files 52 of the 496 scored questions under `column-count`: the statement ran, returned the
+same number of rows, and carried a different number of columns. The clause ladder deliberately
+skipped them — *"a statement whose width is wrong has a projection finding, not a clause
+finding"* — and that sentence is a claim about the corpus, so it can be tested.
+
+`pnpm bench:bird:width <report> --arm <name>` tests it with the only edit the claim allows:
+delete items from the select list, every subset of them, re-execute, and hand the result to the
+same judge. Widths come from the engine (`cursor.description`), not from a scan for commas —
+`select *` is one item and three columns, and a reader that counted items would call that case
+`exact` and skip the search entirely.
+
+| | cases | share of the bucket |
+|---|---|---|
+| **wide** — more columns than the answer | 37 | 71.2% |
+| **narrow** — fewer columns than the answer | 15 | 28.8% |
+| **exact** — the artifact and the re-execution disagree | 0 | — |
+
+**Removing columns recovers 11 of the 37: a ceiling of 2.22pp of the 496 scored questions.** The
+subsets are chosen with knowledge of the answer's width, so that is an oracle's number and no
+implementable rule can beat it; the rule that is actually writable is one line in the prompt,
+which reaches fewer. One case offered more than the 64-subset budget and is reported as
+unexplored rather than counted as a zero. (The value-sample block's ceiling is also 2.22pp, from
+11 reachable cases on a different population — the same arithmetic on different sets, not the same
+number copied.)
+
+What the other 26 look like is the finding: **they stay wrong with the right width**, so the
+width was a symptom. Five of the eleven, named:
+
+| question | what had to go | what the model had added |
+|---|---|---|
+| 1486 | two intermediate `SUM(CASE …)` columns | the two operands of a difference nobody asked for |
+| 1533 | `c.CustomerID` | the key, in a question about an aggregate |
+| 1031 | `p.player_name` | the name, in a question about an age |
+| 1078 / 865 | `birthday` / `d.dob` | the raw date behind the age |
+
+Sometimes the key is the extra column and sometimes the measure is, so there is no rule to write:
+those four rows would need four different instructions. That is why the number is published as a
+ceiling instead of chased as a lever: 2.22pp is an oracle's number, 0.22pp above this harness's own
+A/A movement (2.0pp) on 496 questions, and any rule a prompt can state reaches strictly less.
+
+The 15 narrow cases are the direction with no deletion to try, so they are *named* instead — the
+gold items the statement never spells — and they are dominated by multi-column projections of one
+entity (`T2.forename`, `T2.surname`, twice each) and by a `CASE`-guarded `COUNT(DISTINCT …)`.
+
+## The condition the statement never wrote
+
+The ladder's largest row on this arm is `predicate` (49 of 211), and "the condition is different"
+is where a reader starts rather than where they finish. `pnpm bench:bird:conditions` splits it in
+two, because the two have different fixes:
+
+- **a condition on that column, spelled differently** — another literal, operator or range. This
+  is the spelling family, and the value-sample block has already been priced at a 2.22pp ceiling.
+- **no condition on that column at all** — the statement filters on something else, or on nothing.
+  No amount of value spelling reaches this: the model never decided the column was part of the
+  question.
+
+The match is on identifiers rather than on text, and both normalizations are load-bearing. Aliases
+are rewritten to their table, so `t1.segment` and `customers.segment` are one condition; comparing
+the text would report a missing condition on every case where the model chose a different alias.
+Keywords are folded before the split, because BIRD's gold writes `WHERE` and the shared atom reader
+splits on lowercase — handed a raw statement it returns nothing, which reads as *the gold has no
+conditions and the statement wrote them all*. **Both defects were live for one run of this
+instrument, and that run said 13 where the answer is 80.**
+
+| | failures | share |
+|---|---|---|
+| a gold condition names a column the statement never filters on | **80** | 36.4% |
+| every gold condition is written somewhere | 140 | 63.6% |
+
+107 conditions in total. They are not spread evenly across the ladder:
+
+| ladder bucket | cases | missing a condition |
+|---|---|---|
+| tables | 36 | 23 |
+| predicate | 49 | 17 |
+| filter-wide | 41 | 13 |
+| literal-missing | 34 | 13 |
+| filter-narrow | 26 | 8 |
+| projection | 11 | 0 |
+| aggregate | 8 | 0 |
+| literal-case | 5 | 0 |
+
+The `tables` row is partly mechanical — a statement reading other tables cannot filter a column of
+the table it did not read — so the informative rows are `predicate` and `filter-wide`, where the
+tables agree and **30 of 90 conditions are on a column the statement never filters at all**.
+
+**80 cases is 16.1pp of the 496 questions: seven times the projection ceiling**, and it is a
+population no spelling lever can reach, because 63.6% of the failures already name every column the
+gold filters. The two instruments are complements rather than rivals: the ladder says which clause
+differs, this says whether it differs in *value* or in *column*, and a mechanism has to answer the
+second before it can answer the first.
+
+## The 166, named
+
+The two buckets the previous round left unexamined — 47 `column-count` and 119 `values` with no
+execution trigger — are now read through the same ladder, by admitting both under
+`pnpm bench:bird:gap:values <report> --arm <name> --scope all`. Of 220 failures, 211 can be read
+(9 were refused by the engine), and 210 of the 211 reach a named cause:
+
+| bucket | cases | share |
+|---|---|---|
+| predicate | 49 | 23.2% |
+| filter-wide | 41 | 19.4% |
+| tables | 36 | 17.1% |
+| literal-missing | 34 | 16.1% |
+| filter-narrow | 26 | 12.3% |
+| projection | 11 | 5.2% |
+| aggregate | 8 | 3.8% |
+| literal-case | 5 | 2.4% |
+| **grain** | **0** | — |
+| **scale** | **0** | — |
+| **window** | **0** | — |
+| unclassified | 1 | 0.5% |
+
+**Not one failure is a grouping, aggregation-level or window error.** The `column-count` bucket was
+the last place a grain hypothesis could live, and it does not: its 52 cases split into 15
+`predicate`, 15 `filter-wide`, 7 `tables`, 6 `projection`, 5 `literal-missing` and 4 `aggregate`.
+The two buckets are the same problem — the statement reads the wrong table or the wrong condition —
+and 160 of 211 (75.8%) are one of those two.
+
+That is what the next work item has to attack, and it is not a shape guard: a guard can see that a
+statement is the wrong width, and nothing in this table is.
+
 ## The floor is enforced, not remembered
 
 A benchmark that only produces a report gets read once. The BIRD arms have a
