@@ -101,6 +101,27 @@ describe('ablation arms', () => {
     expect(against).toEqual(expect.arrayContaining(['select', 'select-prune', 'select-mixed']));
   });
 
+  it('prices every sampler against the card that carries no stored values', () => {
+    // A sampler changes what the card says about a column, so the question it answers is
+    // "did the stored values help", and that question needs the arm without them. The two
+    // samplers were compared to each other and to nothing else for one run, so the artifact
+    // could say their rules tie but not whether either of them beat the plain card — and a
+    // tie between two arms that each beat the base is a different finding from a tie at the
+    // base's level. Found by writing the report: the paired row for `inline+evidence+samples`
+    // did not exist, and the number had to be recomputed from the case rows by hand.
+    const declared = new Set(
+      [...COMPARISONS.map(([left, right]) => `${left}\u0000${right}`), ...PAIRS.map(([left, right]) => `${left}\u0000${right}`)],
+    );
+    const samplers = ARMS.filter((arm) => arm.samples !== undefined);
+    expect(samplers.length).toBeGreaterThan(0);
+    for (const arm of samplers) {
+      const parent = ARMS.find((other) => other.samples === undefined && changedLevers(other, arm).length === 1);
+      expect(parent, arm.name).toBeDefined();
+      const name = (parent as Arm).name;
+      expect(declared.has(`${name}\u0000${arm.name}`) || declared.has(`${arm.name}\u0000${name}`), arm.name).toBe(true);
+    }
+  });
+
   it('changes exactly one lever per pair', () => {
     for (const [left, right] of PAIRS) {
       const before = ARMS.find((arm) => arm.name === left) as Arm;

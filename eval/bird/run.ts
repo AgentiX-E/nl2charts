@@ -660,6 +660,12 @@ export const COMPARISONS: readonly (readonly [string, string, string])[] = [
   // The block the competitor's selector reads, against the same card without it, and against
   // the same lever under our own sampler: the first prices the information, the second prices
   // the rule that selected it.
+  //
+  // Three arms are needed and not two. `samples` is the arm that says "stored values at all",
+  // and without its pair against the plain card the two samplers' agreement could not be told
+  // from both of them doing nothing: 20 cases each way is a tie, and a tie between two arms
+  // that each beat the base is a different finding from a tie at the base's level.
+  ['inline+evidence', 'inline+evidence+samples', 'stored values on the card, sampled by our profiler: the information, before any question of which values'],
   ['inline+evidence', 'inline+evidence+samples-wide', "the competitor's value examples on our card: the block MAC-SQL's selector reads, priced against the card without it"],
   ['inline+evidence+samples', 'inline+evidence+samples-wide', 'the same lever under two samplers: which columns are shown and what a shown column says'],
   ['inline+evidence', 'metadata+evidence', 'generated definitions on the column line versus 798 curated notes'],
@@ -1635,7 +1641,12 @@ export function resolveLayout(env: Readonly<Record<string, string | undefined>>,
     // The competitor-rule sampler caches separately from the profiler: same column names,
     // different rule, and sharing a directory would serve one rule's answer under the other's
     // name. Old entries are rejected by the rule field they carry.
-    exampleCache: join(root, 'eval/.cache/bird/value-examples'),
+    //
+    // It lives *inside* the dataset rather than in one directory for every dataset, because
+    // the examples are a description of these files: a fixture and the corpus can name a
+    // database alike, and a single directory let a test's `shop` be served to whatever read
+    // `shop` next. Written into the dataset, the cache is also fetched and evicted with it.
+    exampleCache: join(data, '.value-examples'),
     definitionsCache: join(root, 'eval/.cache/bird/definitions'),
     // Definitions are an *input* to the definition-dependent arms, so they are pinned in
     // the repository rather than regenerated: two runs with identical prompts produced

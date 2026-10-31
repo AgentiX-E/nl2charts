@@ -332,6 +332,7 @@ describe('an engine that dies under one statement', () => {
         if (sql.trim() === 'select 1') throw new Error('oracle process died');
         return oracle.run(db, sql);
       },
+      databaseRoot: oracle.databaseRoot,
       close: () => oracle.close(),
     };
     const endpoint = await startEndpoint({ reply: (request) => reply(request.prompt, false) });

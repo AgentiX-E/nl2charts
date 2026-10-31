@@ -8,7 +8,7 @@
  * card builder and the runner's own `promptFor`, because a stubbed prompt would agree with
  * whatever this file was written to expect.
  */
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -30,6 +30,7 @@ import {
 import type { DifferentialOutcome, DifferentialRow, DifferentialSite, Reach } from '../eval/bird/differential.js';
 import { createOracle } from '../eval/bird/oracle.js';
 import { resolveArm } from '../eval/bird/run.js';
+import { EXAMPLE_RULE } from '../eval/bird/value-examples.js';
 import { writeMiniBirdDataset } from './helpers/bird-dataset.js';
 
 const ROOT = process.cwd();
@@ -304,11 +305,12 @@ describe('one corpus, read through the oracle', () => {
     expect(outcome.tally.flippableCases).toBe(2);
     expect(outcome.tally.derivedCases).toBe(1);
     expect(ceilingPoints(outcome.tally)).toBe(50);
-    // Three columns, not one: their rule shows a small numeric dictionary (`price` with two
-    // distinct values, `qty` with three), which our profiler calls a measure and never shows.
-    // That difference *is* the mechanism being priced, so it is asserted rather than noted.
-    expect(outcome.cost.columnsPerDb).toBe(3);
-    expect(outcome.cost.valuesPerColumn).toBeCloseTo(7 / 3, 5);
+    // Four columns, not one: their rule shows a small numeric dictionary (`price` with two
+    // distinct values, `qty` with three), which our profiler calls a measure and never shows,
+    // and `tags.label`, whose eight distinct labels make it a dictionary too. That difference
+    // *is* the mechanism being priced, so it is asserted rather than noted.
+    expect(outcome.cost.columnsPerDb).toBe(4);
+    expect(outcome.cost.valuesPerColumn).toBeCloseTo(13 / 4, 5);
     expect(outcome.cost.charsPerCase).toBeGreaterThan(0);
     expect(outcome.cost.cardCharsPerCase).toBeGreaterThan(0);
     expect(outcome.cost.shareOfCard).toBeGreaterThan(0);
@@ -370,9 +372,25 @@ describe('one corpus, read through the oracle', () => {
     // rule with no columns is exactly what a database without dictionaries produces, and
     // reaching it through a run would need a database the runner refuses several steps earlier.
     const dir = mkdtempSync(join(tmpdir(), 'diff-empty-'));
-    writeFileSync(join(dir, 'shop.json'), JSON.stringify({ db: 'shop', rule: 'mac-sql@31a9df5e', columns: [], capped: [], typeQuirks: 0 }));
-    const settings = { ...settingsFor(data, body([201])), exampleCache: dir };
-    const outcome = await runDifferential(settings, oracle);
+    const stats = statSync(join(data, 'dev_databases', 'shop', 'shop.sqlite'));
+    writeFileSync(
+      join(dir, 'shop.json'),
+      JSON.stringify({
+        db: 'shop',
+        rule: EXAMPLE_RULE,
+        // The entry has to describe the file in front of it or the cache is a miss: a set
+        // without a fingerprint is the answer to some other database's question.
+        source: { bytes: stats.size, mtimeMs: Math.round(stats.mtimeMs) },
+        columns: [],
+        capped: [],
+        typeQuirks: 0,
+      }),
+    );
+    const settings = settingsFor(data, body([201]));
+    const outcome = await runDifferential(
+      { ...settings, layout: { ...settings.layout, exampleCache: dir } },
+      oracle,
+    );
     expect(outcome.drops.noExamples).toBe(1);
     expect(outcome.rows).toHaveLength(0);
     expect(outcome.problems[0]).toContain('a missing instrument');
@@ -443,5 +461,17 @@ describe('one corpus, read through the oracle', () => {
   it('resolves the arm it measures from the arms table, not from a copy', () => {
     const settings = settingsFor(data, body([201]));
     expect(settings.armSpec).toEqual(resolveArm('inline+evidence'));
+  });
+
+  it('keeps its cache with the dataset it describes, not in the repository', async () => {
+    // One directory for every dataset meant a fixture's `shop` and a corpus `shop` were the
+    // same entry: the fixture's three-column set was served to the corpus, and to the next
+    // fixture, because both name a database `shop` and neither names a file.
+    const fresh = dataset();
+    const settings = settingsFor(fresh, body([202]));
+    expect(settings.layout.exampleCache.startsWith(fresh)).toBe(true);
+    const outcome = await runDifferential(settings, oracle);
+    expect(outcome.rows).toHaveLength(1);
+    expect(existsSync(join(fresh, '.value-examples', 'shop.json'))).toBe(true);
   });
 });

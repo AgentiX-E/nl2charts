@@ -27,6 +27,8 @@ interface Pending {
 }
 
 export interface Oracle {
+  /** Where the SQLite files live, so a caller can stat the file it is reading. */
+  readonly databaseRoot: string;
   run(db: string, sql: string): Promise<OracleResult>;
   close(): Promise<void>;
 }
@@ -71,6 +73,7 @@ export function createOracle(script: string, databaseRoot: string): Oracle {
   });
 
   return {
+    databaseRoot,
     run(db, sql) {
       if (closed) return Promise.reject(new Error(`oracle is closed: ${stderr.trim().slice(0, 200)}`));
       const id = String(nextId);

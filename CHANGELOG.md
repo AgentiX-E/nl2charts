@@ -44,6 +44,32 @@ cannot be argued with.
 
 ### Fixed
 
+- **The value-example cache was keyed to a database's name, which is not the database.** An entry
+  was served as long as the rule string matched, so a set read from one file was returned to a
+  reader pointing at another with the same id, and a dataset re-fetched in place kept the values of
+  the dataset it replaced. Every entry now carries the size and modification time of the file it
+  describes, and a mismatch — or a missing fingerprint, which every entry written before this
+  change has — is a miss. The cache also lives inside the dataset (`<data>/.value-examples/`)
+  rather than in one directory shared by every dataset, because a fixture and the corpus can name
+  a database alike.
+
+  **CI found this and the local suite could not**, which is the whole argument for the guard:
+  `test/bird-differential.test.ts` expected three example columns and CI read four, because the
+  fixture's `shop` set was still on disk from a run before the fixture grew a fourth column. A
+  suite that passes on a machine with a stale cache and fails on a clean one is worse than a suite
+  that is red, and the fix is in the cache, not in the expectation.
+
+- **A database that could not be listed was cached as a database without dictionaries.** The
+  `sqlite_master` listing ran without a check, so a failure fell through into an empty set, which
+  was then written to the cache: a block smaller than the competitor's, remembered as the answer.
+  It throws now, with the engine's own text.
+
+- **The two samplers were compared to each other and to nothing else.** `inline+evidence+samples`
+  had no pair against `inline+evidence` in `COMPARISONS`, so the artifact could report that the two
+  rules tie but not whether either of them beats a card with no stored values — and a tie between
+  two arms that each beat the base is a different finding from a tie at the base's level. The pair
+  is declared, and a test refuses a sampler without one.
+
 - **A samples arm that sampled nothing could publish as its parent.** `controls.sampledColumns` was
   written and the comment beside it said the gate read it; the floor gate matched the arm's *name*
   for `samples` and read a total over every database the run touched, so a run holding one samples
@@ -252,6 +278,29 @@ cannot be argued with.
   are now printed before the verdict, and a test asserts the line survives that return.
 
 ### Measured
+
+- **The competitor's block, priced before it was run and then run: +2.82pp, of which the block
+  explains at most 2.22pp and their selection rule explains 0.00pp.** `41206085907`, 496 scored
+  questions, `deepseek-chat`, three arms and a duplicate: `inline+evidence` **55.6%** [51.2, 60.0] at
+  2,641 prompt characters, `inline+evidence+samples` **58.5%** [54.1, 62.7] at 3,209, and
+  `inline+evidence+samples-wide` — the block MAC-SQL's selector reads — **58.5%** [54.1, 62.7] at
+  3,795. Paired: **+2.82pp** for the wide block (14/28, p=0.044, CI [+0.3, +5.4]) and **+2.82pp** for
+  our sampler (13/27, p=0.039, CI [+0.3, +5.3]), and **0.00pp** between the two samplers (20/20,
+  p=1.000, CI [−2.5, +2.5]). The A/A duplicate moved 0.2pp and could not resolve under 2.0pp.
+
+  Two things make this a reading rather than a rate. The prompt grew by **exactly 1,154 characters**
+  (2,641 → 3,795), which is the cost `bench:bird:differential` computed from the databases and the
+  artifact with no model call — the instrument's bill and the endpoint's bill agree to the character
+  on 496 cases. And the two samplers tie while both beat the card without them, so what the model
+  used is the *information* (stored values, a small numeric dictionary, a nullability marker) and not
+  the rule that picked which values: their rule spends +586 characters a case, +18.3%, for 0.00pp.
+
+  The honest limits: both intervals reach down to +0.3pp, so 496 cases cannot separate +2.8pp from
+  +0.3pp; 28 gains against 14 losses is not the ceiling's claim, because the arm changes 1,154
+  characters of everything else the model reads and loses 14 cases the base got right; and the
+  ceiling was computed on the previous artifact, whose base arm failed a different set of cases, so
+  it bounds the *mechanism* (2.22pp of cases where the block spells a value the card did not) and not
+  the arm's net.
 
 - **The first reading in which the only difference is the pipeline: MAC-SQL 76.0%, our shipped arm
   64.0%, and nothing resolved.** `41162862386` ran MAC-SQL at `31a9df5e` on this repository's runner,

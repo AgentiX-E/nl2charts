@@ -185,6 +185,7 @@ describe('a table that vanishes mid-profile', () => {
         if (!result.ok) sawStatsFailure = true;
         return result;
       },
+      databaseRoot: oracle.databaseRoot,
       close: () => oracle.close(),
     };
 

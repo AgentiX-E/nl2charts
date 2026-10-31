@@ -3792,8 +3792,9 @@ six, or is it in no column at all. On the 496-question artifact from `4119045716
 | ...does not spell it at all | 4 | 0.8% |
 | cases whose gold statement compares against no value | 123 | 24.8% |
 
-Of the 568 literal sites, 553 are already spelled, **15 are spelled by the block**, 14
-are stored but outside their six, and 1 is in no column at all. That gives the ceiling:
+Of the 583 literal sites — 496 cases, so 1.18 comparisons each — 553 are already
+spelled, **15 are spelled by the block**, 14 are stored but outside their six, and 1 is
+in no column at all. That gives the ceiling:
 **13 cases the block could reach, 11 of them failures — 2.22pp**, against a gap of
 6.45pp. Ten further cases need a *wider* sample than their six, and one needs a value
 the column does not store, which no prompt-side lever will supply.
@@ -3801,12 +3802,67 @@ the column does not store, which no prompt-side lever will supply.
 It also gives the bill: **1,154 characters a case on a 1,480-character card, +43.8%**,
 from 30.2 columns a database and 4.7 values a column. So the block that distinguishes
 their selector's input from ours can explain at most a third of the gap and costs nearly
-half again as much prompt — and 2.22pp is below the 4.99pp this split can resolve, which
-means the honest statement is "at most 2.22pp", not "2.22pp".
+half again as much prompt — and 2.22pp is below the smallest delta this split can resolve
+(3.6pp for this pair, 5.0pp for the widest one), which means the honest statement is
+"at most 2.22pp", not "2.22pp".
 
 The arm exists so that claim can be tested rather than computed: `inline+evidence+samples-wide`
 carries that block on our card, `inline+evidence+samples` carries our own sampler for
 the same lever, and both are compared pairwise against `inline+evidence` in one run.
+
+### What the block bought, measured
+
+Run `41206085907`, 496 scored questions, one model, three arms and one duplicate:
+
+| arm | execution accuracy | 95% Wilson | prompt chars | vs `inline+evidence` | vs `+samples` |
+| --- | --- | --- | --- | --- | --- |
+| `inline+evidence` | 55.6% | [51.2, 60.0] | 2,641 | — | — |
+| `inline+evidence+samples` | **58.5%** | [54.1, 62.7] | 3,209 | **+2.82pp** (13/27, p=0.039, CI [+0.3, +5.3]) | — |
+| `inline+evidence+samples-wide` | **58.5%** | [54.1, 62.7] | 3,795 | **+2.82pp** (14/28, p=0.044, CI [+0.3, +5.4]) | **0.00pp** (20/20, p=1.000, CI [−2.5, +2.5]) |
+
+Every `p` is a McNemar exact test on the cases the two arms disagreed on, and the
+`resolves` figures are 3.6pp for both pairs against the base and 3.6pp between the two
+samplers — the same cases, at 80% power. The A/A duplicate in the same run moved 0.2pp
+(6/7) and could not have resolved anything under 2.0pp, which is the scale all three
+deltas are read against.
+
+Three things in that table are worth more than the accuracy column.
+
+**The instrument predicted the bill to the character.** Prompts grew 2,641 → 3,795, which
+is 1,154 characters — the same 1,154 that `bench:bird:differential` computed from the
+databases and the artifact without a model call. A cost model that lands on the measured
+cost exactly on a 496-case corpus is a cost model that can price the next mechanism before
+anything is spent.
+
+**The information is the lever; their selection rule is not.** Their block and ours carry
+the same kind of content — stored values per column — and swapping one rule for the other
+changed **nothing**: 20 cases each way, p=1.000, delta 0.00pp. Both samplers move the same
++2.82pp net over the card without them, so what the model used was that the card carries
+stored values at all, including a small numeric dictionary and a nullability marker our
+profiler never shows. Their rule spends **+586 characters a case (3,795 vs 3,209, +18.3%)**
+to arrive at exactly the same score.
+
+**Their rule buys nothing for a fifth more prompt.** So the answer to "should we port their
+value examples" is no: porting was necessary to *price* them (the differential needs their
+rule to compute the ceiling), and having priced them, our own sampler is the cheaper carrier
+of the same information.
+
+Two readings keep the numbers honest. The interval on both +2.82pp deltas reaches down to
++0.3pp, so this is one run at the edge of what 496 cases resolve, not a settled effect — the
+honest sentence is "stored values are worth about 2.8pp on this split, and the same run
+cannot separate that from 0.3pp". And 28 gains against 14 losses is not the ceiling's claim:
+the differential bounds only the cases where the block spells a value the base card did not
+(11 failures → 2.22pp), while the arm changes 1,154 characters of everything else the model
+reads and loses 14 cases the base got right. The block explains at most 2.22pp of a net
++2.82pp; the rest is prompt perturbation, and no per-case attribution here supports more.
+
+One process note, because it changed the artifact: the pair `inline+evidence` →
+`inline+evidence+samples` was **not declared** in `COMPARISONS` when the run was made, so
+the artifact reports both samplers only against each other. The row above was computed from
+that run's own case rows with the repository's `compareArms`/`pairedResolution`, not by
+subtracting two accuracies, and the pair is declared now; a test refuses a sampler that has
+no pair against the arm carrying no stored values, because "the two rules tie" is only a
+finding next to "and both beat the plain card".
 
 ## The floor is enforced, not remembered
 

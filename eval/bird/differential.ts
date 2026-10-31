@@ -201,7 +201,7 @@ export async function runDifferential(settings: DifferentialSettings, oracle: Or
   const blockFor = async (db: string): Promise<DbBlock> => {
     const cached = blocks.get(db);
     if (cached !== undefined) return cached;
-    const set = await exampleSetFor(oracle, db, { cacheDir: settings.exampleCache });
+    const set = await exampleSetFor(oracle, db, { cacheDir: settings.layout.exampleCache });
     const byColumn = exampleMapOf(set);
     // The nullability marker is a hint, not an example, and it costs characters like one. It
     // is counted here because the block that would be sent carries it.
@@ -357,7 +357,6 @@ export interface DifferentialSettings {
   readonly layout: BirdLayout;
   readonly arm: string;
   readonly armSpec: Arm;
-  readonly exampleCache: string;
   readonly out: string;
   readonly strict: boolean;
 }
@@ -382,7 +381,6 @@ export function resolveDifferentialSettings(
     layout,
     arm,
     armSpec: spec,
-    exampleCache: join(layout.root, 'eval/.cache/bird/value-examples'),
     out: dirname(layout.out),
     strict: argv.includes('--strict'),
   };

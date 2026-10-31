@@ -9,7 +9,7 @@
  * example, the NULL that is emitted first, and the exact-case type tests that their code
  * has and a tidier port would not.
  */
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -203,6 +203,7 @@ function oracleFailing(predicate: (sql: string) => boolean, inner: Oracle, withM
       predicate(sql)
         ? { ok: false, columns: [], rows: [], ms: 0, ...(withMessage ? { error: 'database is locked' } : {}) }
         : inner.run(db, sql),
+    databaseRoot: inner.databaseRoot,
     close: () => inner.close(),
   };
 }
@@ -309,5 +310,79 @@ describe('one database, read through the oracle', () => {
     const rebuilt = await exampleSetFor(oracle, 'shop', { cacheDir: cache });
     expect(rebuilt.rule).toBe(EXAMPLE_RULE);
     expect(rebuilt.columns.length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * The cache is keyed to the database, not to a name.
+ *
+ * This block exists because the first version was keyed to nothing: an entry was valid as
+ * long as the rule string matched, so a set read from one database was served to a reader
+ * pointing at another with the same id, and a dataset fetched again in place kept its old
+ * values. The local suite passed while CI failed on exactly that — a fixture's three-column
+ * set was still on disk from a run before the fixture grew a fourth column — which is the
+ * "passes here, fails there" drift the shipped cache is not allowed to produce.
+ */
+describe('the cache is keyed to the database it was read from', () => {
+  const dbFile = join(root, 'shop', 'shop.sqlite');
+
+  it('rebuilds when the database has gained rows since the set was read', async () => {
+    const dir = join(cache, 'changed');
+    const first = await exampleSetFor(oracle, 'shop', { cacheDir: dir });
+    expect(exampleMapOf(first).get('orders.memo')).toEqual(['memo']);
+    const more = new DatabaseSync(dbFile);
+    const add = more.prepare('insert into orders values (?, ?, ?)');
+    for (let index = 0; index < 8; index += 1) add.run(`n${String(index)}`, '1', 'note');
+    more.close();
+    // `note` is now the commonest value of a column that had one value, so a served cache is
+    // visible in the answer rather than only in a timestamp: the column gains a value and
+    // changes which one leads.
+    const second = await exampleSetFor(oracle, 'shop', { cacheDir: dir });
+    expect(exampleMapOf(second).get('orders.memo')).toEqual(['note', 'memo']);
+  });
+
+  it('rebuilds when the database was rewritten without changing size', async () => {
+    // Size alone is not a fingerprint: a file restored or rewritten in place can keep it. The
+    // modification time is the second witness, and the cache has to read it too.
+    const dir = join(cache, 'touched');
+    await exampleSetFor(oracle, 'shop', { cacheDir: dir });
+    const file = join(dir, 'shop.json');
+    const marked = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+    writeFileSync(file, JSON.stringify({ ...marked, marker: 'kept' }));
+    const before = readFileSync(dbFile);
+    utimesSync(dbFile, new Date(Date.now() - 60_000), new Date(Date.now() - 60_000));
+    expect(readFileSync(dbFile)).toEqual(before);
+    const rebuilt = await exampleSetFor(oracle, 'shop', { cacheDir: dir });
+    expect((rebuilt as unknown as { marker?: string }).marker).toBeUndefined();
+  });
+
+  it('does not trust a set written before the database was recorded', async () => {
+    // Every entry shipped before this change has no fingerprint, and "no fingerprint" must
+    // read as "not this database" rather than as "nothing changed".
+    const dir = join(cache, 'unrecorded');
+    await exampleSetFor(oracle, 'shop', { cacheDir: dir });
+    const file = join(dir, 'shop.json');
+    const written = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+    expect(written.source).toBeDefined();
+    const { source: _dropped, ...withoutSource } = written;
+    writeFileSync(file, JSON.stringify({ ...withoutSource, marker: 'kept' }));
+    const rebuilt = await exampleSetFor(oracle, 'shop', { cacheDir: dir });
+    expect((rebuilt as unknown as { marker?: string }).marker).toBeUndefined();
+  });
+
+  it('refuses a database it cannot list instead of caching an empty block', async () => {
+    // A missing file used to fall through the listing into an empty set, which was then
+    // written to the cache: a block smaller than theirs, cached, and reported as a stable
+    // measurement of a smaller block.
+    const empty = mkdtempSync(join(tmpdir(), 'nl2charts-nodbs-'));
+    mkdirSync(join(empty, 'shop'), { recursive: true });
+    const absent = createOracle(resolve('eval/bird/oracle.py'), empty);
+    try {
+      await expect(exampleSetFor(absent, 'shop', { cacheDir: join(cache, 'absent') })).rejects.toThrow(
+        'shop could not be asked for its tables',
+      );
+    } finally {
+      await absent.close();
+    }
   });
 });

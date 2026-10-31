@@ -26,17 +26,16 @@
  * - a NULL anywhere in the column is emitted first, because their decompose prompt reads
  *   it as a hint to use `IS NOT NULL`.
  *
- * Two deviations, both deliberate and both stated in the report:
+ * One deviation, deliberate and stated in the report: `NULL` instead of Python's `None`,
+ * because the reader of our card is a SQL model and the card is SQL-shaped.
  *
- * 1. `NULL` instead of Python's `None`, because the reader of our card is a SQL model and
- *    the card is SQL-shaped.
- * 2. `NULL` instead of Python's `None` (above). The query is theirs byte for byte, including
- *    the tie order their `order by count(*) desc` leaves to SQLite: a tie-broken port would
- *    pick different members for a column whose values are all distinct, and on this corpus
- *    that is most columns — 31 of 87 columns disagreed when this file added a tiebreak, all
- *    of them for that reason. A sample that is *theirs* is the whole point, so the order is
- *    reproduced rather than tidied. Cross-checked against their own code over three
- *    databases: 87 columns, 0 disagreements (`eval/bird/macsql-examples.py`).
+ * Nothing else deviates. The query is theirs byte for byte, including the tie order their
+ * `order by count(*) desc` leaves to SQLite: a tie-broken port would pick different members
+ * for a column whose values are all distinct, and on this corpus that is most columns — 31 of
+ * 87 columns disagreed when this file added a tiebreak, all of them for that reason. A sample
+ * that is *theirs* is the whole point, so the order is reproduced rather than tidied.
+ * Cross-checked against their own code over three databases: 87 columns, 0 disagreements
+ * (`eval/bird/macsql-examples.py`).
  *
  * The type tests are exact-case on the declared type, as theirs are: a column declared
  * `varchar(50)` gets neither the numeric cut-off nor the text filters in their code, and a
@@ -44,7 +43,7 @@
  * columns where the difference between exact and loose matching would bite, so the report
  * can say whether the quirk matters instead of assuming either way.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Oracle } from './oracle.js';
 
@@ -84,9 +83,23 @@ export interface ExampleColumn {
   readonly values: readonly string[];
 }
 
+/**
+ * The database file a set was read from, as the filesystem describes it.
+ *
+ * Not a content hash: the file is a database and the point is to notice that the dataset
+ * was replaced or extended under a set that claims to describe it, which the size and the
+ * modification time both witness and neither alone does.
+ */
+export interface ExampleSource {
+  readonly bytes: number;
+  readonly mtimeMs: number;
+}
+
 export interface ExampleSet {
   readonly db: string;
   readonly rule: string;
+  /** The file this set describes; `null` when the file could not be stat-ed. */
+  readonly source: ExampleSource | null;
   readonly columns: readonly ExampleColumn[];
   /** Columns the fetch cap refused, by `table.column`. */
   readonly capped: readonly string[];
@@ -210,11 +223,36 @@ export function consideredColumns(
 }
 
 /**
+ * The file a set would describe, or `null` when there is none to describe.
+ *
+ * The naming is the oracle's — `<root>/<db>/<db>.sqlite` — and the oracle is where it is
+ * read from, so the root travels with it rather than being guessed here.
+ */
+function sourceOf(oracle: Oracle, db: string): ExampleSource | null {
+  const stats = statSync(join(oracle.databaseRoot, db, `${db}.sqlite`), { throwIfNoEntry: false });
+  return stats === undefined ? null : { bytes: stats.size, mtimeMs: Math.round(stats.mtimeMs) };
+}
+
+/**
+ * Whether a cached set describes the database in front of it.
+ *
+ * A missing fingerprint is not a match: every entry written before this guard existed has
+ * none, and "written by an older build" is the same answer as "written from another file".
+ */
+function sameSource(cached: ExampleSource | null | undefined, current: ExampleSource | null): boolean {
+  if (cached == null || current == null) return false;
+  return cached.bytes === current.bytes && cached.mtimeMs === current.mtimeMs;
+}
+
+/**
  * Build one database's example set, or read it from the cache.
  *
- * The cache is keyed by database only and carries the rule's identity inside, so a change
- * to `examplesOf` invalidates every entry instead of silently serving yesterday's rule —
- * the failure mode a name-only cache has, and it reports itself as a stable measurement.
+ * The cache is keyed by rule *and* by the file the set was read from. The rule alone was
+ * not enough: two datasets that name a database alike — a fixture and the corpus, or the
+ * corpus before and after a re-fetch — share a name and a rule, so a rule-only guard served
+ * one's values to the other and reported the result as a stable measurement. The name-only
+ * cache is how a stale fixture entry made this suite pass locally while CI, with no cache,
+ * read four columns where the test expected three.
  */
 export async function exampleSetFor(
   oracle: Oracle,
@@ -234,15 +272,24 @@ export async function exampleSetFor(
   const cap = options.distinctCap ?? EXAMPLE_LIMITS.distinctCap;
   mkdirSync(options.cacheDir, { recursive: true });
   const cacheFile = join(options.cacheDir, `${db}.json`);
+  const source = sourceOf(oracle, db);
   if (options.force !== true && existsSync(cacheFile)) {
     const cached = JSON.parse(readFileSync(cacheFile, 'utf8')) as ExampleSet;
-    if (cached.rule === EXAMPLE_RULE) return cached;
+    if (cached.rule === EXAMPLE_RULE && sameSource(cached.source, source)) return cached;
   }
 
   const tables = await oracle.run(
     db,
     "select name from sqlite_master where type = 'table' and name not like 'sqlite_%' order by name",
   );
+  // A listing that failed is not a database without tables. Iterating the empty result used
+  // to produce an empty set, which was then written to the cache: a block smaller than
+  // theirs, remembered as the answer.
+  if (!tables.ok) {
+    throw new Error(
+      `exampleSetFor: ${db} could not be asked for its tables (${String(tables.error)}), so the block would be smaller than their card`,
+    );
+  }
   const columns: ExampleColumn[] = [];
   const capped: string[] = [];
   let typeQuirks = 0;
@@ -332,7 +379,7 @@ export async function exampleSetFor(
     }
   }
 
-  const set: ExampleSet = { db, rule: EXAMPLE_RULE, columns, capped, typeQuirks };
+  const set: ExampleSet = { db, rule: EXAMPLE_RULE, source, columns, capped, typeQuirks };
   writeFileSync(cacheFile, `${JSON.stringify(set, null, 2)}\n`);
   return set;
 }
