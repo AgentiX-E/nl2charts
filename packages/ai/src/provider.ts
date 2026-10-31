@@ -16,7 +16,7 @@ export interface LlmMessage {
  * raises — which of its calls earned its tokens — and the selector, which answers with one digit
  * to a prompt nobody else reads, is the call whose price is easiest to hide.
  */
-export type CallPurpose = 'generate' | 'retry' | 'select' | 'compare' | 'plan' | 'interpret' | 'synthesize';
+export type CallPurpose = 'generate' | 'retry' | 'select' | 'compare' | 'plan' | 'interpret' | 'synthesize' | 'columns';
 
 /**
  * The bucket a call lands in when it names no purpose.

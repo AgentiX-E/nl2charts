@@ -4,10 +4,10 @@
   "tolerancePp": 0.2,
   "measuredAt": "2026-10-31",
   "totals": {
-    "lines": 99.38,
-    "statements": 99.38,
+    "lines": 99.39,
+    "statements": 99.39,
     "functions": 100,
-    "branches": 97.94
+    "branches": 97.95
   },
   "files": {
     "eval/ablate.ts": {
@@ -46,6 +46,12 @@
       "functions": 100,
       "branches": 99.02
     },
+    "eval/bird/columns.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 100
+    },
     "eval/bird/data.ts": {
       "lines": 100,
       "statements": 100,
@@ -71,10 +77,10 @@
       "branches": 100
     },
     "eval/bird/gap.ts": {
-      "lines": 98.71,
-      "statements": 98.71,
+      "lines": 98.9,
+      "statements": 98.9,
       "functions": 100,
-      "branches": 98.68
+      "branches": 98.96
     },
     "eval/bird/information.ts": {
       "lines": 99.11,
@@ -167,8 +173,8 @@
       "branches": 100
     },
     "eval/bird/run.ts": {
-      "lines": 99.31,
-      "statements": 99.31,
+      "lines": 99.34,
+      "statements": 99.34,
       "functions": 100,
       "branches": 95.31
     },
@@ -203,10 +209,10 @@
       "branches": 97.43
     },
     "eval/bird/strata.ts": {
-      "lines": 98.96,
-      "statements": 98.96,
+      "lines": 99,
+      "statements": 99,
       "functions": 100,
-      "branches": 98.18
+      "branches": 98.24
     },
     "eval/bird/synthesize.ts": {
       "lines": 100,

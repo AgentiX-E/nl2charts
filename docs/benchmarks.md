@@ -3702,6 +3702,41 @@ The competitor harness shares the parser, so `--limit` blank now means the whole
 competitor too, and its subset file is named `minidev-subset-all.json` rather than
 `minidev-subset-undefined.json`. That is the mode the next comparison runs in.
 
+## Who decides which columns
+
+The prompt is mostly schema: 74.1% of it is the card, and 58.4% of the card belongs to
+tables the gold statement never reads. Three instruments here cut it, and all three
+decide *tables* with the same lexical linker — the card measurement prices what the
+card is worth, the join measurement says one hop over the declared foreign keys keeps
+every gold table for 95.2% of cases, and the `select-prune` arm ships that rule and
+loses 1.4pp, because the closure reaches the wrong place on exactly the questions the
+linker already misses.
+
+`inline+evidence+llm-select` is the other mechanism, and the one a competitor
+comparison needs: the model is shown every column with its type and description and
+names the ones the question needs, in one call before the statement. Its reply is read
+as a set — qualified names, bare names when only one table has them, an ambiguous bare
+name resolving to every table that has it — and the card keeps the chosen columns plus
+the keys of any join whose two ends survived. A reply that resolves nothing sends the
+whole card and is reported as `decided: false`, so "the model chose the whole card" and
+"the model chose nothing" stay different numbers.
+
+```bash
+BIRD_ARMS=inline+evidence+inline+evidence+llm-select pnpm bench:bird
+```
+
+Three numbers make the reading admissible, and all three are in the artifact:
+
+- **the call is charged**: `calls.mean` is 2 for the arm and 1 for its parent, and the
+  meter files the choice under `columns`, so the arm's bill splits per kind of call;
+- **the card actually shrank**: `columnSelection.cardShare` is the mean of the
+  per-case `kept / total`, and a run where the choice never removed a column fails the
+  build rather than reporting a null result;
+- **the prompt that was sent is the prompt that was measured**: the report's
+  prompt-size column reads the card the run recorded, not the card the arm would build
+  afterwards. A dry run, which spends no calls, labels its preview
+  `before-column-selection` instead of presenting an unpruned card as the sent prompt.
+
 ## The floor is enforced, not remembered
 
 A benchmark that only produces a report gets read once. The BIRD arms have a

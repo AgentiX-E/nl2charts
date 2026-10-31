@@ -33,6 +33,7 @@ import type { PairedComparison } from '@agentix-e/nl2charts-devkit';
 import { graphForDatabase } from './join-graph.js';
 import { ppPerExtraCall, repairFunnel } from './metrics.js';
 import { pruneSchema } from './prune.js';
+import { applyColumnChoice, buildColumnPrompt, parseColumnChoice } from './columns.js';
 import type { CaseOutcome, MatchReason } from '@agentix-e/nl2charts-devkit';
 import { buildSchema, describeQuestionSet, distinctQuestions, loadDescriptions, loadQuestions, loadTables, stratifiedSample } from './data.js';
 import type { BirdQuestion, QuestionSet } from './data.js';
@@ -230,6 +231,26 @@ export interface Arm {
    * nothing about it, which is the control that prices the information.
    */
   readonly emptyRetry?: 'diagnosed' | 'blind';
+  /**
+   * Let the model name the columns the card keeps, in one call before the statement.
+   *
+   * Every card-cutting instrument this harness has decides *tables*: the card measurement says
+   * how much of the prompt they are, the join measurement says one hop over the declared keys
+   * keeps every gold table, and `prune` ships that rule and loses 1.4pp because the closure
+   * reaches the wrong place for the questions the linker already misses. All three read the
+   * question through the same lexical linker. This lever reads it through the model instead —
+   * MAC-SQL's selector, which is the one mechanism in the competitor reading that no arm here
+   * tests, and therefore the one that can explain a gap that pruning cannot.
+   *
+   * It is a *lever on the card*, not a selector: the arm still generates one statement, and the
+   * call it adds is the price of the choice. Its delta against its parent prices "who decides
+   * relevance", with the answer "the model, at one call" on one side and "nobody, the card is
+   * the card" on the other.
+   *
+   * A reply with no resolvable column sends the whole card and is reported as `decided: false`
+   * — the same doctrine as `prune`'s no-seed branch.
+   */
+  readonly columnSelect?: boolean;
 }
 
 /**
@@ -365,6 +386,11 @@ export const ARMS: readonly Arm[] = [
   // lever from `inline+evidence`, one call, no extra block: the instance knowledge sits on
   // the column line instead of in a list built from the question's wording.
   { name: 'inline+evidence+samples', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', samples: true },
+  // The same prompt with the card cut to the columns the model names, in one call before the
+  // statement. One lever from `inline+evidence`, and the only card-cutting arm here whose rule
+  // is not the lexical linker: `select-prune` prices the join closure and loses 1.4pp, this one
+  // prices the model's own reading of the question. The plan calls it `llm-select`.
+  { name: 'inline+evidence+llm-select', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', columnSelect: true },
   // Retrieved knowledge instead of the dataset's per-question hint: the nearest
   // labelled questions from BIRD's train split, which shares no database with the
   // split under test. The arm exists to test whether the 13.8pp is knowledge or
@@ -565,6 +591,7 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   // inside 2.10pp; `select5` +0.40pp inside 3.33pp for the largest bill in the catalogue.
   vote: 'majority over the same three candidates: the selector control, measured 17:17 against `select` (p = 1) — running it every push re-derives a tie at 2,092 tokens',
   'select-prune': 'the card cut to the join closure: measured −1.4pp, and the loss is the ceiling rather than the selector (1,008 → 980 reachable cases), so it is priced; run it when the card changes',
+  'inline+evidence+llm-select': 'the card cut to the columns the model names: one call before the statement, and the only arm here whose relevance rule is not the lexical linker — dispatched to answer the mechanism question a competitor gap raises, not on every push',
   'select-mixed': 'three decompositions instead of three samples: within its MDE of a single call on this split, and the decomposition question needs the dev split to be answered',
   'select-duo': 'two prompts and a selector: measured −0.60pp against `vote` for the same money, superseded',
   select5: 'five samples and a selector: 4,103 tokens a case, the largest bill in the catalogue, and +0.40pp inside a 3.33pp MDE — the arm whose own measurement says the ceiling is not the sampler',
@@ -808,6 +835,21 @@ export interface CaseRun extends CaseOutcome {
   readonly emptyRetried?: boolean;
   /** True when that turn produced a statement that returned rows. */
   readonly emptyRecovered?: boolean;
+  /**
+   * What the column choice kept, on the one arm that makes a choice.
+   *
+   * `kept` of `total` is the lever's own mechanism made visible per case: an arm whose reply
+   * resolved nothing sends the whole card and is reported as `decided: false`, so "the model
+   * chose the whole card" and "the model chose nothing" stay different numbers instead of both
+   * looking like a card that did not shrink.
+   */
+  readonly columnSelection?: {
+    readonly named: number;
+    readonly unknown: number;
+    readonly kept: number;
+    readonly total: number;
+    readonly decided: boolean;
+  };
   /**
    * Candidates that never arrived, by reason.
    *
@@ -1237,8 +1279,62 @@ export function decompositionFunnel(runs: readonly CaseRun[]): {
   };
 }
 
-/** True when this arm asks any of its candidates to decompose. */
-export function declaresDecomposition(arm: Pick<Arm, 'decompose' | 'mixed'>): boolean {
+/**
+ * What the column choice kept, over the cases that made one.
+ *
+ * `share` is the mean of the per-case `kept / total`, not the ratio of the sums: databases
+ * differ by a factor of ten in column count, and a ratio of sums would let one wide database
+ * decide what "the card shrank" means. `decided` is reported beside it because a reply that
+ * resolved nothing sends the whole card and would otherwise look like a choice that kept
+ * everything.
+ */
+export function columnChoiceFunnel(runs: readonly CaseRun[]): {
+  readonly cases: number;
+  readonly decided: number;
+  readonly decidedShare: number;
+  readonly unknown: number;
+  readonly cardShare: number;
+} | undefined {
+  const chosen = runs.filter((run) => run.columnSelection !== undefined);
+  if (chosen.length === 0) return undefined;
+  const decided = chosen.filter((run) => run.columnSelection?.decided === true).length;
+  const shares = chosen.map((run) => {
+    const record = run.columnSelection as NonNullable<CaseRun['columnSelection']>;
+    return record.total === 0 ? 1 : record.kept / record.total;
+  });
+  return {
+    cases: chosen.length,
+    decided,
+    decidedShare: Number((decided / chosen.length).toFixed(4)),
+    unknown: chosen.reduce((total, run) => total + (run.columnSelection?.unknown ?? 0), 0),
+    cardShare: Number((shares.reduce((total, share) => total + share, 0) / chosen.length).toFixed(4)),
+  };
+}
+
+/**
+ * A column-choosing arm whose choice never removed a column measured nothing.
+ *
+ * The same rule as `assertEmptyRetryFired` and `assertRepairPathFired`: a lever that fires on
+ * every case with a full card is indistinguishable from an arm that spends a call to be told
+ * what it already had, and its delta would be published as "choosing columns does not help".
+ */
+export function assertColumnChoiceRan(armName: string, runs: readonly CaseRun[], minimumSample = 100): void {
+  if (runs.length < minimumSample) return;
+  const chosen = runs.filter((run) => run.columnSelection !== undefined);
+  if (chosen.length === 0) {
+    throw new Error(`arm ${armName}: no case recorded a column choice, so the lever did not run`);
+  }
+  const shrank = chosen.filter((run) => {
+    const record = run.columnSelection as NonNullable<CaseRun['columnSelection']>;
+    return record.decided && record.kept < record.total;
+  });
+  if (shrank.length > 0) return;
+  throw new Error(
+    `arm ${armName}: across ${String(chosen.length)} questions the choice never removed a column — the lever did not run`,
+  );
+}
+
+/** True when this arm asks any of its candidates to decompose. */export function declaresDecomposition(arm: Pick<Arm, 'decompose' | 'mixed'>): boolean {
   return arm.decompose === true || (arm.mixed ?? []).some((source) => parseMixedSource(source).arm === 'decompose');
 }
 
@@ -1834,6 +1930,25 @@ export interface Controls {
 }
 
 /**
+ * The card one case sends, and — on an arm that chooses columns — what the choice kept.
+ *
+ * Returned as one object rather than as a schema plus a side channel, because the artifact's
+ * claim ("the model was shown these columns") and the prompt's content have to be the same
+ * value. `columns` is absent for every arm that does not cut the card, so a reader can tell
+ * "no choice was made" from "a choice kept everything".
+ */
+export interface CardOutcome {
+  readonly schema: readonly SchemaTable[];
+  readonly columns?: {
+    readonly named: number;
+    readonly unknown: number;
+    readonly kept: number;
+    readonly total: number;
+    readonly decided: boolean;
+  };
+}
+
+/**
  * The dataset, the schemas and every input block, gathered before an arm runs.
  *
  * Separated from the arm loop because two of the four things this harness must get right
@@ -1865,6 +1980,24 @@ export interface PreparedRun {
   /** Rendered prompt blocks for one arm and one question. The only builder, so the measured prompt and the sent prompt cannot disagree. */
   readonly blocksFor: (arm: Arm, question: BirdQuestion) => PromptBlocks;
   readonly schemaFor: (arm: Arm, question: BirdQuestion) => readonly SchemaTable[];
+  /**
+   * The card to send for one case, spending the call that a column-choosing arm costs.
+   *
+   * Asynchronous and provider-taking for one reason: the choice is a model call, and a model
+   * call made outside the counter is a cost the arm reports as zero. The caller owns the counter
+   * (`runArm` creates one per case), so the price of the lever lands in the same `calls` field as
+   * the generation it precedes — which is how the selector's own metering bug was caught.
+   */
+  readonly cardFor: (arm: Arm, question: BirdQuestion, provider: LlmProvider) => Promise<CardOutcome>;
+  /**
+   * The card that was sent for this arm and question, from the run's own record.
+   *
+   * A read, not a second decision: the report's prompt-size column and the artifact's per-case
+   * evidence both have to describe the card that was actually rendered, and re-deciding it after
+   * the run would describe a card nobody saw. Before a run — a dry run's prompt preview — it
+   * falls back to the arm's card without a choice, which the preview labels.
+   */
+  readonly cardOf: (arm: Arm, question: BirdQuestion) => CardOutcome;
   /** Per-arm distinct-prompt audit for the arms that declare a candidate set. */
   readonly mixedCandidatePrompts: readonly unknown[];
 }
@@ -2198,6 +2331,47 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
     return pruneSchema({ schema: layered, question: question.question, graph: graphFor(db), hops: arm.prune }).schema;
   };
 
+  /**
+   * What each column-choosing arm actually sent, keyed by arm and question.
+   *
+   * A record rather than a memo: the same arm measured twice (an A/A control) has to spend the
+   * choice twice, or its cost per case describes one run and its accuracy describes two. The last
+   * write wins, which is why `cardOf` is documented as "the card that was sent" and not "the card
+   * this case sent" — for an A/A pair the two are the same card by construction.
+   */
+  const sentCards = new Map<string, CardOutcome>();
+  const cardKey = (arm: Arm, question: BirdQuestion): string => `${arm.name}\u0000${String(question.question_id)}`;
+
+  const cardFor = async (arm: Arm, question: BirdQuestion, provider: LlmProvider): Promise<CardOutcome> => {
+    const base = schemaFor(arm, question);
+    if (arm.columnSelect !== true) return { schema: base };
+    const reply = await provider.complete({
+      messages: [
+        { role: 'system', content: buildColumnPrompt(question.question, base) },
+        { role: 'user', content: question.question },
+      ],
+      temperature: 0,
+      purpose: 'columns',
+    });
+    const choice = parseColumnChoice(reply.text, base);
+    const applied = applyColumnChoice(base, choice);
+    const outcome: CardOutcome = {
+      schema: applied.schema,
+      columns: {
+        named: choice.named.length,
+        unknown: choice.unknown.length,
+        kept: applied.kept,
+        total: applied.total,
+        decided: choice.decided,
+      },
+    };
+    sentCards.set(cardKey(arm, question), outcome);
+    return outcome;
+  };
+
+  const cardOf = (arm: Arm, question: BirdQuestion): CardOutcome =>
+    sentCards.get(cardKey(arm, question)) ?? { schema: schemaFor(arm, question) };
+
   const gold = new Map<number, OracleResult>();
   const unrunnable: UnrunnableGold[] = [];
   for (const question of selected) {
@@ -2386,6 +2560,8 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
     controls,
     blocksFor,
     schemaFor,
+    cardFor,
+    cardOf,
     mixedCandidatePrompts,
   };
 }
@@ -2496,10 +2672,18 @@ export function previewPrompts(prepared: PreparedRun, report: Record<string, unk
     arms: preview.map((arm) => {
       const rendered = buildSqlPrompt(
         question.question,
-        prepared.schemaFor(arm, question),
+        prepared.cardOf(arm, question).schema,
         promptFor(arm, question, prepared.blocksFor(arm, question)),
       );
-      return { arm: arm.name, chars: rendered.length, prompt: rendered };
+      // A dry run spends no calls, so an arm whose card is decided by a model call cannot show
+      // the card it would send. Saying so is the only honest option: a preview presented as the
+      // sent prompt while the sent prompt is smaller is the drift this harness exists to avoid.
+      return {
+        arm: arm.name,
+        chars: rendered.length,
+        prompt: rendered,
+        ...(arm.columnSelect === true ? { card: 'before-column-selection' } : {}),
+      };
     }),
   }));
   report.arms = [];
@@ -2553,11 +2737,14 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
     }
   }
   const runs = await pool(cases, settings.concurrency, async (question): Promise<CaseRun> => {
-    const schema = prepared.schemaFor(arm, question);
     // Counted, not derived: a plan costs two calls, a selector costs one, and a
     // configuration-derived count got both wrong in opposite directions.
     const counter = withCallCounter(provider);
     const secondCounter = secondProvider === undefined ? undefined : withCallCounter(secondProvider);
+    // The card first, through the counter: on a column-choosing arm the choice is a call, and a
+    // card decided by an uncounted provider would report the lever as free.
+    const card = await prepared.cardFor(arm, question, counter.provider);
+    const schema = card.schema;
     // Both models' calls are this case's cost. Summing two counters keeps the number
     // measured on each side instead of estimated from the arm's configuration.
     const callsMade = (): number => counter.calls() + (secondCounter?.calls() ?? 0);
@@ -2922,12 +3109,13 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
         };
       }
     });
-    return { ...scored, ...costOfCase() };
+    return { ...scored, ...costOfCase(), ...(card.columns === undefined ? {} : { columnSelection: card.columns }) };
   });
   // Before any number is printed: an arm that never reached the database has no
   // accuracy, and publishing 0% would hide the provider's message behind a score.
   assertArmProducedResults(name, runs);
   assertFailureRate(name, runs);
+  if (arm.columnSelect === true) assertColumnChoiceRan(name, runs);
   // ...and a candidate that never arrived shrinks the set the ceiling is taken over,
   // which no case-level count can see.
   if (arm.vote !== undefined && arm.vote > 1) assertCandidateSurvival(name, runs, arm.vote);
@@ -3042,7 +3230,9 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
     (question) =>
       buildSqlPrompt(
         question.question,
-        prepared.schemaFor(arm, question),
+        // The card that was sent, not the card the arm would build now: on a column-choosing
+        // arm those differ, and the prompt-size column exists to say what the model read.
+        prepared.cardOf(arm, question).schema,
         promptFor(arm, question, prepared.blocksFor(arm, question)),
       ).length,
   );
@@ -3112,6 +3302,10 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
     // is the arm the numbers exist for.
     ...armDecomposition(runs),
     ...(arm.emptyRetry === undefined ? {} : { emptyRetry: { mode: arm.emptyRetry, ...emptyRetryFunnel(runs) } }),
+    // What the model kept of the card, on the one arm that asks it to choose. Beside the
+    // accuracy rather than inside the sampling spread, for the reason the decomposition funnel
+    // moved out: the instrument belongs to the arm, not to how many candidates it draws.
+    ...(arm.columnSelect === true ? { columnSelection: columnChoiceFunnel(runs) } : {}),
     ...(arm.vote === undefined
       ? {}
       : {

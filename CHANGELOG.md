@@ -8,6 +8,29 @@ cannot be argued with.
 
 ### Added
 
+- **The card can be cut by the model, which is the one card mechanism this repository did not
+  have.** Every card-cutting instrument here decides *tables* through the same lexical linker: the
+  card measurement (74.1% of the prompt is the card, 58.4% of the card belongs to tables the gold
+  statement never reads), the join measurement (one hop keeps every gold table for 95.2% of cases),
+  and `select-prune`, which ships that rule and loses 1.4pp. The competitor reading left exactly
+  one mechanism untested — MAC-SQL's selector puts the columns in front of the model and lets it
+  choose — and that is the mechanism a 6.45pp gap has to be attributed to before anything is
+  changed. `eval/bird/columns.ts` is it: `buildColumnPrompt` renders every `table.column` with its
+  type and comment, `parseColumnChoice` reads a reply as a set of columns (qualified names first,
+  then bare names that are unique, an ambiguous bare name resolving to every table that has it, a
+  qualified name never read a second time as a bare one), and `applyColumnChoice` keeps the chosen
+  columns plus the keys of every join whose two ends survived, and sends the whole card when
+  nothing resolved.
+
+  The arm is `inline+evidence+llm-select`, one lever from `inline+evidence`. The choice is one
+  call, metered under its own `columns` purpose so the arm's bill can be split per kind of call,
+  and `assertColumnChoiceRan` refuses a run whose choice never removed a column — an empty lever is
+  a bug, not a null result. The artifact records `columnSelection` per case and per arm (`decided`,
+  `unknown`, and `cardShare` as the mean of the per-case shares rather than a ratio of sums,
+  because databases differ tenfold in width). A dry run labels the preview
+  `before-column-selection`: it spends no calls and therefore cannot show the card a model would
+  choose, and a preview presented as the sent prompt is the drift this harness exists to prevent.
+
 - **A comparison harness that holds the five coordinates in code, and two competitors pinned under
   it.** The leaderboard section says a number is comparable only if it shares the question set, the
   model, the prompt, the executor and the judge — and then says none of the runs that would share

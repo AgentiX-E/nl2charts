@@ -478,6 +478,9 @@ describe('what an arm row says about itself', () => {
     ({
       cases,
       schemaFor: () => [],
+      // The card that was sent, as the row's prompt-size column reads it. An arm that makes no
+      // choice sends the card `schemaFor` builds, so the read returns the same empty frame.
+      cardOf: () => ({ schema: [] }),
       blocksFor: () => ({}),
     }) as unknown as PreparedRun;
 

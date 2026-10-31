@@ -78,6 +78,13 @@ interface Plan {
    */
   readonly whenValues?: string;
   readonly definitions?: string;
+  /**
+   * The answer to a column-choice prompt, keyed on the question it asks about.
+   *
+   * Absent means an empty reply, which is the arm's own fallback case: nothing resolved, so the
+   * whole card is sent and the artifact says `decided: false`.
+   */
+  readonly columns?: (question: string) => string;
 }
 
 /**
@@ -100,6 +107,12 @@ function replyFor(request: EndpointRequest, plan: Plan): { status?: number; cont
   // The pairwise selector asks a different question over two candidates and reads a
   // different answer, so the same `1` would be counted as an unreadable reply.
   if (prompt.includes('Two statements were written for the same question')) return send('1');
+  // The column choice. Read before the question lookup below, because its prompt carries the
+  // question verbatim and would otherwise be answered with a statement.
+  if (prompt.includes('You choose the columns a SQL query will need')) {
+    const asked = Object.keys(GOLD).find((entry) => prompt.includes(entry));
+    return send(plan.columns?.(asked ?? '') ?? '');
+  }
   const question = Object.keys(GOLD).find((entry) => prompt.includes(entry));
   if (question === undefined) return send(plan.definitions ?? DEFINITIONS);
   // A turn that names what went wrong: the empty-result diagnosis, the blind control, the
@@ -1533,5 +1546,91 @@ describe('a sample of an arm that builds several candidates', () => {
     const mixed = result.report.mixedCandidatePrompts as { arm: string; sampled: boolean; note?: string }[];
     expect(mixed[0]?.sampled).toBe(true);
     expect(mixed[0]?.note).toContain('this run sampled the split');
+  });
+});
+
+/**
+ * The arm that lets the model name the columns, driven through the endpoint.
+ *
+ * Two numbers make this arm admissible and neither can be asserted from a schema object: the
+ * choice is charged as a call (the selector's own metering bug was exactly this, caught by the
+ * gate on the next run), and the prompt the model then reads is the reduced card. The second is
+ * read off the requests the endpoint actually received, because "the card was reduced" is a claim
+ * about text a model saw.
+ */
+describe('an arm where the model chooses the columns', () => {
+  /** The arm rows, as the artifact states them. */
+  interface Row {
+    readonly arm: string;
+    readonly calls: { readonly mean: number };
+    readonly columnSelection?: { readonly cases: number; readonly decided: number; readonly cardShare: number };
+    readonly tokens?: { readonly byPurpose?: Readonly<Record<string, { readonly calls: number }>> };
+  }
+  /** The schema card line a table would have, in the renderer's own format. */
+  const tableLine = (prompt: string, table: string): boolean => new RegExp('^' + table + '\\(', 'm').test(prompt);
+  /** The generation prompts, as opposed to the choice prompts that also carry the question. */
+  const generatePrompts = (requests: readonly EndpointRequest[], question: string): string[] =>
+    requests.map((request) => request.prompt).filter((prompt) => prompt.includes(question) && !prompt.includes('You choose the columns'));
+
+  it('charges the choice as one call and sends the card it produced', async () => {
+    const question = QUESTIONS[0]?.question ?? '';
+    // One arm per run: both arms send the same question, so a shared request log cannot say
+    // which of them sent the prompt that still names `orders`.
+    const lever = await run({
+      plan: { first: correct, columns: () => 'items.price' },
+      env: { BIRD_ARMS: 'inline+evidence+llm-select', BIRD_DEFINITIONS_FORCE: '1' },
+    });
+    expect(lever.code).toBe(0);
+    const row = (lever.report.arms as Row[])[0];
+    // The lever's own call, counted where the generation it precedes is counted.
+    expect(row?.calls.mean).toBe(2);
+    // ...and filed under its own purpose, so the arm's bill can be read per kind of call.
+    expect(row?.tokens?.byPurpose?.columns?.calls).toBe(1);
+    expect(row?.columnSelection).toMatchObject({ cases: QUESTIONS.length, decided: QUESTIONS.length });
+    expect(row?.columnSelection?.cardShare).toBeLessThan(1);
+    // The card the model read is the one the choice produced: `orders` is gone from the prompt.
+    const reduced = generatePrompts(lever.requests, question);
+    expect(reduced.length).toBeGreaterThan(0);
+    expect(reduced.some((prompt) => tableLine(prompt, 'items'))).toBe(true);
+    expect(reduced.some((prompt) => tableLine(prompt, 'orders'))).toBe(false);
+
+    const parent = await run({
+      plan: { first: correct },
+      env: { BIRD_ARMS: 'inline+evidence', BIRD_DEFINITIONS_FORCE: '1' },
+    });
+    const parentRow = (parent.report.arms as Row[])[0];
+    expect(parentRow?.calls.mean).toBe(1);
+    // The same questions on the parent still send both tables, so the reduction above belongs to
+    // the choice rather than to the fixture.
+    expect(generatePrompts(parent.requests, question).some((prompt) => tableLine(prompt, 'orders'))).toBe(true);
+  });
+
+  it('sends the whole card and says so when no name resolves', async () => {
+    const question = QUESTIONS[0]?.question ?? '';
+    const result = await run({
+      plan: { first: correct, columns: () => 'I am not sure, please decide.' },
+      env: { BIRD_ARMS: 'inline+evidence+llm-select', BIRD_DEFINITIONS_FORCE: '1' },
+    });
+    expect(result.code).toBe(0);
+    const row = (result.report.arms as Row[])[0];
+    expect(row?.columnSelection).toMatchObject({ cases: QUESTIONS.length, decided: 0, cardShare: 1 });
+    const prompts = generatePrompts(result.requests, question);
+    expect(prompts.some((prompt) => tableLine(prompt, 'orders'))).toBe(true);
+    // Two calls either way: a reply that resolves nothing is not a call refunded.
+    expect(row?.calls.mean).toBe(2);
+  });
+
+  it('previews the card before the choice, and labels it as such', async () => {
+    // A dry run spends no calls, so it cannot show the card a model would choose. Presenting the
+    // unpruned card as the sent prompt would be the drift the runner exists to prevent.
+    const result = await run({
+      plan: { first: correct },
+      argv: ['--dry-run'],
+      env: { BIRD_ARMS: 'inline+evidence+llm-select' },
+    });
+    expect(result.code).toBe(0);
+    expect(result.requests).toHaveLength(0);
+    const prompts = result.report.prompts as { arms: { arm: string; card?: string }[] }[];
+    expect(prompts[0]?.arms[0]?.card).toBe('before-column-selection');
   });
 });
