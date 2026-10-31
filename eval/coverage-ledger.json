@@ -34,6 +34,12 @@
       "functions": 100,
       "branches": 98.8
     },
+    "eval/bird/agents.ts": {
+      "lines": 99.19,
+      "statements": 99.19,
+      "functions": 100,
+      "branches": 97.45
+    },
     "eval/bird/canonical.ts": {
       "lines": 100,
       "statements": 100,
@@ -125,8 +131,8 @@
       "branches": 96.15
     },
     "eval/bird/oracle.ts": {
-      "lines": 98.11,
-      "statements": 98.11,
+      "lines": 98.14,
+      "statements": 98.14,
       "functions": 100,
       "branches": 96.42
     },

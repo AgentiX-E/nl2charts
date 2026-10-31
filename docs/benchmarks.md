@@ -3864,6 +3864,87 @@ subtracting two accuracies, and the pair is declared now; a test refuses a sampl
 no pair against the arm carrying no stored values, because "the two rules tie" is only a
 finding next to "and both beat the plain card".
 
+## The pipeline, counted before it is copied
+
+`bench:bird:agents` asks a different question from the block differential: not "what does their
+card say" but "when does each of their three agents run". A condition can be counted, and their
+source states each one exactly, so the count needs no model call — only the databases, the
+artifact, and their predicates transcribed (`eval/bird/agents.ts`, pinned to `mac-sql@31a9df5e`).
+
+| agent | when it fires | what it costs | what we have measured |
+| --- | --- | --- | --- |
+| selector | unless `columns // tables ≤ 6 and columns ≤ 30` | 1 call + the pruned card | vocabulary priced (`+samples`: +2.82pp at 3,209 characters a question); the cut itself is `inline+evidence+llm-select`: −5.65pp |
+| decomposer | always | 1 call, 5,643 characters of template — most of it a worked example | shape: `decompose` −1.1pp then −0.85pp, firing 100%; demonstrations: `inline+icl` 41.7% |
+| refiner | the statement threw, returned no rows, or put a NULL in its first five rows | 0.109 calls a case, 4,329 characters a fire | **this file** |
+
+The selector number is the first surprise: `_is_need_prune` **fires on 9 of the 11 Mini-Dev
+databases**, so 426 of 496 questions pay for a selector call. "Two to three calls a question"
+is therefore 3 on 86% of this split, not 2–3 on average. And when it does fire it compresses
+mildly rather than cutting: `drop_all` still keeps a table's first six columns, and a table the
+model chose columns from is padded back to six.
+
+### What a refiner can see, on 496 questions
+
+Their `_is_need_refine` has three conditions, applied in this order, over the 220 failing
+statements the artifact kept (a census — the cap is 2,000 and `truncated` is empty):
+
+| fires on | cases | share of failures | the message it sends |
+| --- | --- | --- | --- |
+| the engine refused the statement | 9 | 4.1% | the engine's own words |
+| the statement returned no rows | 26 | 11.8% | `no data selected` |
+| a NULL in the first five rows | 19 | 8.6% | ``exist None value, you can add `NOT NULL` in SQL`` |
+| — nothing — | **166** | **75.5%** | — |
+
+So the reach is **54 cases, 10.89pp**, and **45 of the 54 fires carry a string that is identical
+for every case**. The third condition is worse than contentless: it tells the model to remove
+rows from a result that was not wrong. Run the same three conditions over the **gold**
+statements, where a fire means a correct answer would be rewritten:
+
+| | cases | share |
+| --- | --- | --- |
+| NULL in the first five rows | **9** | **1.81pp** |
+| everything else | 487 | 98.2% |
+
+Nine is a floor and not the size of the surface — a correct prediction may order its rows
+differently and present another window — but it is not hypothetical. Question 1399 asks *"Did
+Maya Mclean attend the Women's Soccer event?"*; the gold statement answers with
+`CASE WHEN … THEN 'YES' END`, so the correct answer **is NULL** when she did not, and their
+refiner tells the model to add `IS NOT NULL`, which deletes it. Questions 25, 27, 36 and 50 (a
+school's second and third administrators, legitimately absent) and 637 (a post's tags) are the
+same shape.
+
+### What that leaves of the 6.45pp
+
+The three agents are now each priced, and the parts we can render are worth zero or less:
+
+- **selector vocabulary** — +2.82pp measured, at 3,209 characters; their sampling rule adds
+  +586 characters for 0.00pp.
+- **selector cut** — −5.65pp when the model names the columns. Their version keeps six columns a
+  table and never drops one, so the lever they actually pull is the milder one; nothing in the
+  artifact prices a table-level cut.
+- **decomposer** — −1.1pp and −0.85pp for the shape, 41.7% for retrieved demonstrations. Their
+  template bundles a fixed worked example with the decomposition, which is the one half of their
+  prompt we have not put on our card, and the retrieval result says a worked example is not
+  where 6.45pp hides.
+- **refiner** — 10.89pp of reach, of which 1.8pp is already priced at ≈0 (`inline+repair`, twice),
+  5.2pp has a measured yield of 14.3% a fire (+0.75pp) and 3.8pp is a trigger whose instruction
+  is false.
+
+That leaves 166 failures — **33.5pp of cases** — that run cleanly, return rows, and are wrong.
+No agent with an execution trigger can see them: not theirs, not ours. Whatever the gap is, it
+is not a mechanism that reads the engine's answer, and the next work item is aimed at those 166
+rather than at another agent to copy.
+
+### The arm this priced out of a run
+
+`inline+evidence+empty` was written and paired before it was cancelled. The trigger is exact on
+this split — no gold result is empty, so every fire is a wrong answer — but the only place it has
+been measured is `select-mixed+empty` on dev: 63 fires, 32 retries that returned rows, and **9
+cases of accuracy**, which is 14.3% a fire. On 26 fires that is **+0.75pp**, under this harness's
+own A/A movement (2.0pp) on 496 questions and under the dev split's MDE. The arm stays in
+`ON_DEMAND_ARMS` with that arithmetic in its note, because "we wrote it and did not run it"
+is a defensible decision only if the prediction that justified it is written down.
+
 ## The floor is enforced, not remembered
 
 A benchmark that only produces a report gets read once. The BIRD arms have a

@@ -8,6 +8,26 @@ cannot be argued with.
 
 ### Added
 
+- **`pnpm bench:bird:agents`: their three agents' firing conditions, counted from their source with
+  no model call.** `eval/bird/agents.ts` transcribes `_is_need_prune` (fires unless
+  `columns // tables ≤ 6 and columns ≤ 30`), `_is_need_refine` (fires on an error, on zero rows, or
+  on a NULL in the first five rows) and the two diagnostics their refiner writes itself, then
+  applies them to the artifact's failing statements and to the gold statements of the same cases.
+  Two readings come out of it that a pipeline cannot be priced without: **how many questions even
+  reach an agent** (their selector fires on 9 of the 11 Mini-Dev databases, so 426 of 496 questions
+  pay for it) and **whether a fire is a repair** (it is not: `_is_need_refine`'s third condition
+  fires on results that were right).
+
+  Faithfulness is the point of the transcription, so three details are reproduced rather than
+  tidied: the selector's threshold compares `columns // tables` with floor division, so 13 columns
+  over 2 tables is 6 and not 6.5; the NULL scan covers `result[:5]` only, because `_execute_sql`
+  returns five rows; and the two fabricated diagnostics are carried verbatim, because the finding
+  is about those strings. Each is a test.
+
+- **`inline+evidence+empty`**: the turn after a statement returns nothing, on the arm that ships,
+  one lever from `inline+evidence`. Written, paired and **not dispatched** — see Measured for the
+  arithmetic that cancelled the run.
+
 - **The competitor's value-example block, ported from their code and priced without a model call.**
   MAC-SQL's selector reads a card on which every non-key column carries `Value examples: [...]`;
   ours carries stored values for categorical columns only. `eval/bird/value-examples.ts` ports their
@@ -43,6 +63,17 @@ cannot be argued with.
   `inline+evidence` in one run, and the second pair prices the rule rather than the information.
 
 ### Fixed
+
+- **A rendered line that printed one corpus's count for every corpus.** `agentsLines` wrote "the
+  220 statements the artifact kept" — the number from the run it was written against. The fixture
+  that exercises the renderer has four statements and printed 220, which is what a hard-coded
+  count in a report looks like the first time it is run on anything else.
+
+- **One root cause reported as two faults in the new gate.** An artifact without cases for the arm
+  produced both "no agent was counted" and "no gold statement could be read": the second is a
+  consequence of the first, and a reader would go looking for a database problem. The gold problem
+  is now gated on the arm having been found, the same rule `differential.ts` and `information.ts`
+  already follow.
 
 - **The value-example cache was keyed to a database's name, which is not the database.** An entry
   was served as long as the rule string matched, so a set read from one file was returned to a
@@ -278,6 +309,37 @@ cannot be argued with.
   are now printed before the verdict, and a test asserts the line survives that return.
 
 ### Measured
+
+- **Their refiner sees 54 of 496 cases and 166 of the 220 failures are invisible to it.** Applying
+  `_is_need_refine` to the artifact's failing statements (`41206085907`, 496 questions, a census:
+  the failure cap is 2,000 and nothing was truncated): 9 threw, 26 returned no rows, 19 exposed a
+  NULL in their first five rows, and **166 fired nothing** — 75.5% of the failures, 33.5pp of the
+  cases. The reach is therefore **10.89pp**, and 45 of the 54 fires carry a string that is the same
+  for every case (`no data selected`; ``exist None value, you can add `NOT NULL` in SQL``).
+
+- **The third condition fires on correct answers, and its instruction is false.** Run over the gold
+  statements of the same 496 cases, 9 expose a NULL in their first five rows — **1.81pp** of
+  correct answers that their refiner would rewrite, told to add `IS NOT NULL`. Question 1399 answers
+  *"Did Maya Mclean attend the Women's Soccer event?"* with `CASE WHEN … THEN 'YES' END`, so the
+  right answer **is NULL** when she did not attend; 25, 27, 36 and 50 report a school's second and
+  third administrators, which are legitimately absent. Nine is a floor, not the size of the surface:
+  a correct prediction can order its rows differently and present another window.
+
+- **The empty turn's yield is 14.3% a fire, so `inline+evidence+empty` was cancelled.** The trigger
+  is exact on this split — no gold result is empty, so all 26 fires are wrong answers — but the one
+  measurement of what it buys is `select-mixed+empty` on dev: 63 fires, 32 retries that returned
+  rows, and **9 cases**. A 50.8% row recovery is not a 50.8% accuracy recovery, and pricing the arm
+  from the first number would have predicted +2.6pp where the evidence supports **+0.75pp** — under
+  the harness's own 2.0pp A/A movement on 496 questions and under the dev split's MDE. The arm is
+  declared, paired and filed on demand with that arithmetic in its note.
+
+- **The attribution of the 6.45pp is closed, and it does not land on an agent.** Selector
+  vocabulary: +2.82pp measured, and their sampling rule adds +586 characters for 0.00pp. Selector
+  cut: −5.65pp when the model names the columns, and their version keeps six columns a table.
+  Decomposer: −1.1pp then −0.85pp for the shape with the firing confirmed at 100%, 41.7% for
+  retrieved demonstrations. Refiner: 1.8pp of its reach priced at ≈0 twice, 5.2pp with a measured
+  yield of 14.3% and 3.8pp carrying a false instruction. What is left is 166 failures that run
+  cleanly, return rows and are wrong, which no execution-triggered refiner can see.
 
 - **The competitor's block, priced before it was run and then run: +2.82pp, of which the block
   explains at most 2.22pp and their selection rule explains 0.00pp.** `41206085907`, 496 scored

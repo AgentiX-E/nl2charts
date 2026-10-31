@@ -399,6 +399,12 @@ export const ARMS: readonly Arm[] = [
   // NULL first when the column stores one. It exists to put the block MAC-SQL's selector reads
   // on our card, so the 6.45pp can be attributed to a block and not to "their pipeline".
   { name: 'inline+evidence+samples-wide', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', samples: 'example' },
+  // The empty-result turn on the arm this repository ships, which is not the arm it was
+  // measured on: `select-mixed+empty` priced the message against a four-call parent whose
+  // statements are chosen from three samples, and a trigger that fires on 5.2% of a single
+  // call's answers has to be priced on that call. One lever from `inline+evidence`, and the
+  // only one of their refiner's three triggers whose diagnostic is both true and ours.
+  { name: 'inline+evidence+empty', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', emptyRetry: 'diagnosed' },
   // The same prompt with the card cut to the columns the model names, in one call before the
   // statement. One lever from `inline+evidence`, and the only card-cutting arm here whose rule
   // is not the lexical linker: `select-prune` prices the join closure and loses 1.4pp, this one
@@ -612,6 +618,15 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   // Its note is a question until the run that answers it lands. Saying "measured" here before
   // the number exists is how an arm acquires a verdict it never earned.
   'inline+evidence+samples-wide': "the same lever with MAC-SQL's rule instead of ours: six most-frequent values of every non-key column, a small numeric dictionary included, a date collapsed to one, NULL first — dispatched to price the competitor's block on our cases, and until that artifact exists this note is the question rather than the verdict",
+  // The condition rather than the block, and the one trigger of their refiner's three that is both
+  // true and ours. `agents.ts` counts it firing on 26 of the 496 answers (5.2%) and on no gold
+  // statement, so here it is exact: every fire is a wrong answer. Its size, though, comes from the
+  // one place it has been measured — 63 fires under `select-mixed+empty` returned rows 32 times and
+  // bought 9 cases, so 14.3% a fire, which on 26 fires is +0.75pp. That is below the 2.0pp this
+  // harness moves by itself on 496 questions and below the dev split's MDE, so the arm is written
+  // and paired and deliberately not dispatched: an experiment that cannot resolve its own effect
+  // spends 496 calls to report noise.
+  'inline+evidence+empty': "the turn after a statement returns nothing, on the arm that ships: 5.2% of answers fire it and every fire is a wrong answer, but the measured yield is 9 cases in 63 fires, so +0.75pp on 496 questions — under this harness's own 2.0pp noise and under the dev split's MDE, which is why it is written, paired and not dispatched",
   definitions: 'structural semantics built from keys: superseded by inline placement, kept as the parent of definitions+evidence',
   'dataset-subset': 'isolates coverage from author, run when a definition arm moves',
   'definitions+evidence': 'second lever of the semantics chain, not a candidate for the chain itself',
@@ -668,6 +683,7 @@ export const COMPARISONS: readonly (readonly [string, string, string])[] = [
   ['inline+evidence', 'inline+evidence+samples', 'stored values on the card, sampled by our profiler: the information, before any question of which values'],
   ['inline+evidence', 'inline+evidence+samples-wide', "the competitor's value examples on our card: the block MAC-SQL's selector reads, priced against the card without it"],
   ['inline+evidence+samples', 'inline+evidence+samples-wide', 'the same lever under two samplers: which columns are shown and what a shown column says'],
+  ['inline+evidence', 'inline+evidence+empty', 'the turn after a statement returns nothing: the one refiner trigger whose message carries something true, priced on the arm the empty trigger actually fires on'],
   ['inline+evidence', 'metadata+evidence', 'generated definitions on the column line versus 798 curated notes'],
   ['inline+evidence', 'select-mixed', 'three decompositions and a selector versus a single sample: four calls instead of one'],
   ['select', 'select-duo', 'two prompts and a selector versus three samples of one prompt: three calls instead of four'],
