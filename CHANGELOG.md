@@ -65,6 +65,17 @@ cannot be argued with.
   The artifact now carries `idMap` (or `null`) and `ledger.renumbered`, so a score read through a
   different numbering is not the same artifact as one read by id.
 
+  The second dispatch proved the renumbering (the batch now iterates 25 rows instead of `0it`) and
+  failed on the next thing that was theirs: `core/agents.py` normalises its database root with
+  `data_path.strip('/')`, which strips the leading separator as well as the trailing one, so the
+  runner's absolute root became relative and all twenty-five questions raised
+  `sqlite3.OperationalError: unable to open database file` — caught per question by `run.py`, slept
+  twenty seconds on, and turned into an empty output. The adapter's fourth hunk turns it into
+  `rstrip('/\\')` and `core/agents.py` joins the pin's `probe` list. That dispatch also exposed a
+  reporting defect on our side: the `PROBLEM` line explaining the empty file was printed after the
+  accuracy, so the early return that says `no accuracy: nothing was judged` swallowed it. Problems
+  are now printed before the verdict, and a test asserts the line survives that return.
+
 ### Measured
 
 - **The chain's bill, and the five arms that were paying it for no verdict.** Nobody had added up

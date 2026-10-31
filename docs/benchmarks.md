@@ -3323,7 +3323,15 @@ and an empty file was written. `score.ts` then scored that empty file as **0% on
 reported a **60pp gap as significant** (p = 6.1e-05) — the exact failure this section exists to
 prevent, produced by this repository's own tool on its own first run.
 
-Three fixes, all of them on the reading side rather than the blame side:
+That first dispatch is worth reading twice, because the second one failed differently and for a reason
+that is theirs: with the batch no longer filtered empty, all twenty-five questions raised
+`sqlite3.OperationalError: unable to open database file`. Their `core/agents.py` normalises the
+database root with `data_path.strip('/')`, which removes the **leading** separator as well as the
+trailing one — so the runner's absolute root became a relative path, every `sqlite3.connect` resolved
+against the working directory, and `run.py` caught the exception per question, slept twenty seconds,
+and wrote an empty output. A green pipeline that measured nothing, for the third time.
+
+Four fixes, three of them on the reading side and one on theirs:
 
 1. **A file with no records is missing input, not a measurement of zero.** It stops the run with
    `holds no records at all` and exits non-zero. The same check covers the other two ways a file can
@@ -3339,8 +3347,13 @@ Three fixes, all of them on the reading side rather than the blame side:
    the pairing depend on which ids are small, so one file would pair differently against a different
    subset.
 3. **The adapter patch's third hunk renumbers at their I/O boundary**, keeping the original id under
-   `bird_question_id`. The selector, the decomposer, the refiner, the prompts and the sampling counts
+   `bird_question_id`, and its fourth turns `strip('/')` into `rstrip('/\\')` so an absolute database
+   root stays absolute. The selector, the decomposer, the refiner, the prompts and the sampling counts
    are untouched, which is what makes the run still their method.
+4. **Problems are printed before the verdict, not after the accuracy.** The second dispatch's own
+   output printed `no accuracy: nothing was judged` with no line saying that every question had failed
+   to open its database, because the problems were only printed on the way out of the happy path. An
+   explanation that only appears when nothing went wrong is an explanation that is never read.
 
 No accuracy has been published from it yet, and the reason is the discipline that retired five arms:
 a number from a half-installed pipeline is a number about an install, and a number from an empty file

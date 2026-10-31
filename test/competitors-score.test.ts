@@ -293,6 +293,10 @@ describe('a file that holds nothing is missing input, not a zero', () => {
     ]);
     const lines = scoreLines(outcome);
     expect(lines.some((line) => line.includes('unreadable file: is empty'))).toBe(true);
+    // The reason has to survive the early return. The second `full` dispatch printed "nothing was
+    // judged" and nothing else, because the problems were only printed on the way out of the happy
+    // path — so the one line that explained it was the one line that never appeared.
+    expect(lines.some((line) => line.includes(`PROBLEM  ${path} holds no records at all`))).toBe(true);
     expect(lines.some((line) => line.includes('no accuracy: nothing was judged'))).toBe(true);
     const code = await main(
       [

@@ -1,6 +1,6 @@
 # Adapter for wbbeyourself/MAC-SQL @ 31a9df5e0d520be4769be57a4b9022e5e34a14f4.
 #
-# Three hunks, none of them about the method under test.
+# Four hunks, none of them about the method under test.
 #
 # The first two are about how a request is spelled: their config hard-codes `openai.api_type =
 # "azure"` and passes the deployment name as `engine`, which an OpenAI-compatible endpoint does not
@@ -14,6 +14,14 @@
 # `0it [00:00, ?it/s]` is written where the statements should have been. Renumbering the row at
 # that boundary is plumbing, not method: the original id is kept beside it and the scorer maps the
 # position back through the same input file (`--id-map`).
+#
+# The fourth is a path normalisation that only breaks on absolute roots, which is why it survived
+# the second dispatch and not the first: `data_path.strip('/')` removes *both* ends, so the runner's
+# `/home/runner/...` root becomes `home/runner/...`, every `f"{self.data_path}/{db_id}/{db_id}.sqlite"`
+# resolves against the working directory, and all twenty-five questions fail with
+# `sqlite3.OperationalError: unable to open database file`. Their `run.py` catches that, sleeps
+# twenty seconds, and writes an empty output — a green pipeline that measured nothing. `rstrip` is
+# the operation the line wanted, and it is the constructor's business, not the selector's.
 #
 diff --git a/core/api_config.py b/core/api_config.py
 index 63754d3..56f30bb 100644
@@ -80,3 +88,21 @@ diff --git a/run.py b/run.py
  
      # skip some json data
      excluded_db_ids = []
+diff --git a/core/agents.py b/core/agents.py
+--- a/core/agents.py
++++ b/core/agents.py
+@@ -49,7 +49,13 @@
+     def __init__(self, data_path: str, tables_json_path: str, model_name: str, dataset_name:str, lazy: bool = False, without_selector: bool = False):
+         super().__init__()
+-        self.data_path = data_path.strip('/').strip('\\')
++        # `strip` removes both ends, so an absolute root loses its leading separator and every
++        # `f"{self.data_path}/{db_id}/{db_id}.sqlite"` below resolves against the working directory
++        # instead of the filesystem root: `sqlite3.OperationalError: unable to open database file`
++        # for every question, which `run.py` catches, sleeps twenty seconds on, and turns into an
++        # empty output. `rstrip` is the operation this line wants: drop a trailing separator, keep
++        # the root. Plumbing at the constructor, not the selector.
++        self.data_path = data_path.rstrip('/\\')
+         self.tables_json_path = tables_json_path
+         self.model_name = model_name
+         self.dataset_name = dataset_name
+         self.db2infos = {}  # summary of db (stay in the memory during generating prompt)

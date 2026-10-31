@@ -34,6 +34,7 @@
     "patch": "eval/competitors/patches/mac-sql-deepseek.patch",
     "modelHook": "core/api_config.py",
     "probe": [
+      "core/agents.py",
       "core/llm.py",
       "core/chat_manager.py",
       "evaluation/evaluation_bird_ex.py"
@@ -42,6 +43,7 @@
     "numbering": "position",
     "notes": [
       "Three agents — a selector, a decomposer and a refiner — over a light dependency set (openai 0.28, no torch), which makes it the cheapest of the pinned pipelines to run: two or three calls a question rather than forty.",
+      "`core/agents.py` normalises its database root with `strip('/')`, which removes the leading separator too: an absolute root becomes a relative one and every `sqlite3.connect` fails, so the adapter's fourth hunk turns it into `rstrip` and `run.py` swallows the resulting exception into an empty output.",
       "`core/api_config.py` hard-codes `openai.api_type = \"azure\"`, so the adapter is three lines: the type, the base and the model name, all from the environment.",
       "No LICENSE file in the tree, which means no licence to redistribute: the workflow clones it at a pinned sha and never vendors it.",
       "It writes both shapes of predictions the parser reads, so the same file supports either."

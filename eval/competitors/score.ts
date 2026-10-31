@@ -186,13 +186,12 @@ export function armOutcomes(
 /**
  * Why nothing landed on a question, when nothing did.
  *
- * Three different failures look identical in every count a score is built from: no answer, no blank
- * answers, every question missing, and an accuracy of zero over the whole set. They are not the same
- * finding. A file that was never written is a missing input; a file numbered differently from the
- * question set is a declaration that was not passed; a file whose records name questions this split
- * does not hold is a question-set disagreement. Only one of the three is a measurement, and it is not
- * one of these — a run that *answered* blank has an entry per question and is scored as the zero it
- * is, which is why `empty` being non-empty ends this check.
+ * A file with no records, a file whose statements are numbered outside the question set, and a file
+ * whose records name questions this split does not hold all read the same in every count a score is
+ * built from: no answer, no blank answer, every question missing, an accuracy of zero over the whole
+ * set. They are not the same finding and none of them is a measurement. Only one zero is: the run
+ * that *answered* blank, which has an entry per question — which is why a non-empty `empty` ends this
+ * check rather than raising it.
  *
  * The first `full` dispatch of `competitors.yml` published the first of these as a rate: a green job,
  * a zero-byte predictions file and a sixty-point gap read as significant (p = 6.1e-05).
@@ -368,6 +367,11 @@ export function scoreLines(outcome: ScoreOutcome): readonly string[] {
     lines.push(`  declared database disagrees with the question on ${String(ledger.databaseMismatch.length)} cases (${sample})`);
   }
   for (const drop of ledger.drops.slice(0, 5)) lines.push(`  unreadable ${drop.where}: ${drop.why}`);
+  // Problems are printed before the verdict, not after the accuracy. Every branch below can return
+  // early, and a problem that is only printed on the way out of the happy path is a problem the
+  // reader never sees: the second `full` dispatch printed "nothing was judged" with no line saying
+  // that all twenty-five questions had failed to open their database.
+  for (const problem of outcome.problems) lines.push(`  PROBLEM  ${problem}`);
   if (!outcome.comparable) {
     lines.push('', '  no accuracy: the coordinates above do not hold, and a rate from this run would be a rate about something else.');
     return lines;
@@ -392,7 +396,6 @@ export function scoreLines(outcome: ScoreOutcome): readonly string[] {
       ? `  this delta is outside the design's resolution, so it has a size: ${(Math.abs(paired.delta) * 100).toFixed(2)}pp`
       : `  inside the MDE: this run reads a sign, not a size — resolving ${(paired.mde * 100).toFixed(2)}pp at this discordance needs ${String(paired.needed)} questions, and it has ${String(execution.judged)}`,
   );
-  for (const problem of outcome.problems) lines.push(`  PROBLEM  ${problem}`);
   return lines;
 }
 
