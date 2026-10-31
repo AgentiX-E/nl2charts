@@ -17,13 +17,20 @@ import { dirname, join } from 'node:path';
 import { runIfEntry } from '../entry.js';
 import { describeQuestionSet, distinctQuestions, loadQuestions, stratifiedSample } from '../bird/data.js';
 import type { QuestionSet } from '../bird/data.js';
-import { parseLimit, resolveLayout } from '../bird/run.js';
+import { parseLimit, resolveLayout, resolveLimit } from '../bird/run.js';
 import type { BirdLayout } from '../bird/run.js';
 import { questionSetHash } from './coordinates.js';
 
 export interface SubsetSettings {
   readonly questions: string;
-  readonly limit: number;
+  /**
+   * The declared sample size, or `undefined` for the whole split.
+   *
+   * Kept unresolved here for the same reason the runner does: the number is checked against the
+   * questions file in `writeSubset`, where both are in hand, and a declared size larger than the
+   * split is a typo that throws instead of being silently clamped (`resolveLimit`).
+   */
+  readonly limit: number | undefined;
   readonly out: string;
   readonly layout: BirdLayout;
 }
@@ -51,7 +58,7 @@ export function resolveSubsetSettings(
   if (at !== -1 && argv[at + 1] === undefined) throw new Error('--limit needs a number');
   const layout = resolveLayout(env, root);
   const raw = at === -1 ? env.BIRD_LIMIT : argv[at + 1];
-  const limit = parseLimit(raw, layout.split);
+  const limit = parseLimit(raw);
   const outAt = argv.indexOf('--out');
   if (outAt !== -1 && argv[outAt + 1] === undefined) throw new Error('--out needs a path');
   return {
@@ -59,7 +66,7 @@ export function resolveSubsetSettings(
     limit,
     out:
       outAt === -1
-        ? join(root, 'eval/out/competitors', `${layout.split}-subset-${String(limit)}.json`)
+        ? join(root, 'eval/out/competitors', `${layout.split}-subset-${limit === undefined ? 'all' : String(limit)}.json`)
         : (argv[outAt + 1] as string),
     layout,
   };
@@ -72,7 +79,10 @@ export function writeSubset(settings: SubsetSettings): Subset {
   // answered, and a subset of 500 rows for 498 questions would hand a competitor a question it
   // was asked twice and a reader that cannot resolve it.
   const shape = distinctQuestions(loadQuestions(settings.questions));
-  const selected = stratifiedSample(shape.questions, settings.limit);
+  // Resolved against the file, so a blank `--limit` means the whole split and a declared size
+  // larger than it fails here rather than producing a file that claims to hold more questions
+  // than the split has — the defect that made every Mini-Dev run declare 500 of 498.
+  const selected = stratifiedSample(shape.questions, resolveLimit(settings.limit, shape.questions.length));
   mkdirSync(dirname(settings.out), { recursive: true });
   writeFileSync(settings.out, `${JSON.stringify(selected, null, 2)}\n`);
   const ids = selected.map((question) => question.question_id);

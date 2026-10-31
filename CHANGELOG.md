@@ -43,6 +43,29 @@ cannot be argued with.
 
 ### Fixed
 
+- **The default sample size was still the row count, so every push declared a request the split
+  could not satisfy.** `selection.available` became a count of question ids in the round above,
+  while `parseLimit` kept answering `500` for Mini-Dev — a row count standing where a question
+  count belongs. The artifact then carried `requested: 500` against `available: 498`, and the floor
+  gate, whose job is to notice a shrunken sample, failed `ci` run `41169457147` at *Accuracy floor (a
+  regression fails the build)* on a run whose arms had all scored normally. The gate was right.
+
+  The constant is gone rather than corrected: `parseLimit` returns `undefined` when no size is
+  declared — "whatever the file holds" — and throws on anything that is not a whole number of
+  questions, instead of substituting the split's size for `0`, `-5`, `abc` or `12.9`. The new
+  `resolveLimit(limit, available)` meets the split's own count where both are known and refuses a
+  declaration larger than the split rather than clamping it, because clamping would publish a
+  smaller sample under the number the caller declared. `selection.requested` is now that resolved
+  number; `eval/baseline/bird.json` records `scoredBySplit.minidev: 496`, the pool a rate is
+  computed over, instead of 500.
+
+  `subset.ts` shares the parser, so a competitor's `--limit` blank now means the whole split and
+  its file is named `minidev-subset-all.json`. Coverage of the change: `parseLimit`/`resolveLimit`
+  contract tests, a `resolveSettings` test that asserts the size stays undecided, and an end-to-end
+  dry run over a dataset that carries three rows for two questions — Mini-Dev's shape in
+  miniature — asserting `rows: 3, available: 2, requested: 2, sampled: false`, plus the same run
+  with `BIRD_LIMIT=500` throwing. Before the fix that assertion read `requested: 500`.
+
 - **The split was read as 500 rows, so one question was asked, weighted and scored twice.** Mini-Dev
   carries 500 rows and **498 question ids**: ids 137 and 138 each appear twice, byte for byte, at
   positions 484/487 and 485/488. The harness read the file as a list of rows, so every published rate

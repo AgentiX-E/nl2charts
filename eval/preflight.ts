@@ -1,7 +1,7 @@
 /**
  * One call, before the job.
  *
- * A full BIRD arm is 500 calls, and a provider that refuses all of them is discovered
+ * A full BIRD arm is 498 calls, and a provider that refuses all of them is discovered
  * five minutes into an arm that then has to be thrown away. This does the discovery in
  * one call: it prints the endpoint, the model and the status, and exits non-zero with
  * the provider's own message.

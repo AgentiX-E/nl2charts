@@ -40,13 +40,24 @@ describe('the subset a competitor is given', () => {
     expect(written.every((question) => question.SQL.length > 0)).toBe(true);
   });
 
-  it('is the whole split when the limit is larger than it, or blank', () => {
+  it('is the whole split when the limit is blank', () => {
     const dir = mkdtempSync(join(tmpdir(), 'subset-'));
     writeMiniBirdDataset(dir);
-    const all = writeSubset(resolveSubsetSettings(envFor(dir), ['--limit', '40'], dir));
-    expect(all.ids).toHaveLength(7);
     const blank = writeSubset(resolveSubsetSettings(envFor(dir, { BIRD_LIMIT: '' }), [], dir));
     expect(blank.ids).toHaveLength(7);
+    const unset = writeSubset(resolveSubsetSettings(envFor(dir), [], dir));
+    expect(unset.ids).toHaveLength(7);
+  });
+
+  it('refuses a limit larger than the split instead of handing over a file that claims one', () => {
+    // 40 of 7 used to mean "all 7" — the same substitution that let a default of 500 stand for
+    // a 498-question split and failed the floor gate on every push (run 41169457147). A subset
+    // of 40 questions written out of a 7-question split is a file a competitor cannot answer.
+    const dir = mkdtempSync(join(tmpdir(), 'subset-'));
+    writeMiniBirdDataset(dir);
+    expect(() => writeSubset(resolveSubsetSettings(envFor(dir), ['--limit', '40'], dir))).toThrow(
+      /more questions than this split holds \(7\)/,
+    );
   });
 
   it('reads the limit from the environment, so one variable drives both runs', () => {
@@ -61,6 +72,8 @@ describe('the subset a competitor is given', () => {
     writeMiniBirdDataset(dir);
     const settings = resolveSubsetSettings(envFor(dir), ['--limit', '5'], ROOT);
     expect(settings.out.endsWith('eval/out/competitors/minidev-subset-5.json')).toBe(true);
+    const all = resolveSubsetSettings(envFor(dir, { BIRD_LIMIT: '' }), [], ROOT);
+    expect(all.out.endsWith('eval/out/competitors/minidev-subset-all.json')).toBe(true);
   });
 
   it('refuses a flag with no value rather than falling back to the whole split', () => {
@@ -155,7 +168,7 @@ describe('a split that names one question twice', () => {
 
   it('is cut one row per question, so a position names exactly one question', () => {
     const dir = withDuplicate();
-    const subset = writeSubset(resolveSubsetSettings(envFor(dir), ['--limit', '40'], dir));
+    const subset = writeSubset(resolveSubsetSettings(envFor(dir), [], dir));
     expect(subset.shape.rows).toBe(8);
     expect(subset.ids).toHaveLength(7);
     expect(new Set(subset.ids).size).toBe(7);
@@ -168,7 +181,7 @@ describe('a split that names one question twice', () => {
     const printed: string[] = [];
     const log = vi.spyOn(console, 'log').mockImplementation((line: unknown) => printed.push(String(line)));
     try {
-      expect(main(['--limit', '40', '--out', join(dir, 'subset.json')], dir, envFor(dir))).toBe(0);
+      expect(main(['--out', join(dir, 'subset.json')], dir, envFor(dir))).toBe(0);
     } finally {
       log.mockRestore();
     }
@@ -181,7 +194,7 @@ describe('a split that names one question twice', () => {
     const file = join(dir, 'mini_dev_sqlite.json');
     const rows = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>[];
     writeFileSync(file, JSON.stringify([...rows, { ...(rows[0] as Record<string, unknown>), SQL: 'select 1' }]));
-    expect(() => writeSubset(resolveSubsetSettings(envFor(dir), ['--limit', '40'], dir))).toThrow(
+    expect(() => writeSubset(resolveSubsetSettings(envFor(dir), [], dir))).toThrow(
       /question 1 appears at rows 0 and 8 with different content \(SQL\)/,
     );
   });

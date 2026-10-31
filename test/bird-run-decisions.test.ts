@@ -87,24 +87,28 @@ describe('which databases a run covers', () => {
 describe('what a run was told to do', () => {
   it('reads the arm chain, the A/A duplicate and the sample size', () => {
     const settings = resolveSettings(
-      { BIRD_ARMS: 'names, metadata', BIRD_AA: 'names', BIRD_LIMIT: '12.7', BIRD_CONCURRENCY: '3' },
+      { BIRD_ARMS: 'names, metadata', BIRD_AA: 'names', BIRD_LIMIT: '12', BIRD_CONCURRENCY: '3' },
       ['--dry-run'],
       '/repo',
     );
     // The duplicate is appended under `#2` so it keeps its own row: the parser is the only
     // thing standing between a typo and an arm that silently runs twice for nothing.
     expect(settings.arms).toEqual(['names', 'metadata', 'names#2']);
-    // `12.7` is floored, not rounded: a limit is a count of questions.
     expect(settings.limit).toBe(12);
     expect(settings.dryRun).toBe(true);
     expect(settings.concurrency).toBe(3);
   });
 
-  it('falls back to the split\'s published size when the limit is missing or nonsense', () => {
-    expect(resolveSettings({}, [], '/repo').limit).toBe(500);
-    expect(resolveSettings({ BIRD_SPLIT: 'dev' }, [], '/repo').limit).toBe(1534);
-    expect(resolveSettings({ BIRD_LIMIT: '0' }, [], '/repo').limit).toBe(500);
-    expect(resolveSettings({ BIRD_LIMIT: 'lots' }, [], '/repo').limit).toBe(500);
+  it('leaves the sample size undecided when nothing asks for one, instead of copying the split', () => {
+    // The copy was a row count (500 for Mini-Dev's 498 questions) and every default run declared
+    // a request the split could not satisfy; `resolveLimit` decides against the file it reads.
+    expect(resolveSettings({}, [], '/repo').limit).toBeUndefined();
+    expect(resolveSettings({ BIRD_SPLIT: 'dev' }, [], '/repo').limit).toBeUndefined();
+  });
+
+  it('refuses a sample size that is not a whole number of questions', () => {
+    expect(() => resolveSettings({ BIRD_LIMIT: '0' }, [], '/repo')).toThrow(/not a question count/);
+    expect(() => resolveSettings({ BIRD_LIMIT: 'lots' }, [], '/repo')).toThrow(/not a question count/);
   });
 
   it('carries the harness knobs a difference between two runs could come from', () => {

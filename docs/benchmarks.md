@@ -3646,6 +3646,62 @@ not run is a floor nothing will notice, and the gate says so out loud. Their mea
 table above, and a dispatch of `BIRD_ARMS=select5` re-measures against a fresh reading rather than
 against a number from a chain that no longer runs it.
 
+## The default sample size was still a row count, and the gate said so
+
+The round that made `selection.available` a count of questions left the runner's *default* asking
+for 500 of them. On a split whose file carries 500 rows for 498 questions that is a request the
+resource cannot satisfy, and the floor gate — the one check whose job is to notice a shrunken
+sample — refused it:
+
+```
+BIRD1: the run asked for 500 questions and split minidev has 498
+```
+
+which failed `ci` run `41169457147` at the step named *Accuracy floor (a regression fails the
+build)* while every arm in the same run had scored normally (`names` 36.9%, `select` 56.5%,
+`metadata+evidence` 59.3%). The gate was right and the runner was wrong: the artifact declared a
+sample the split does not contain.
+
+The root cause is the shape of the mistake this document has now recorded three times. A number
+that describes the split lived in two places — the file and a constant in `parseLimit` — and only
+one of them could be corrected. `500` was a *row* count, copied into a *question* count's slot, and
+nothing about the two numbers looked different.
+
+The fix removes the copy instead of correcting it:
+
+| before | after |
+| --- | --- |
+| no limit → `500` (minidev) / `1534` (dev), both row counts | no limit → `undefined`, meaning "whatever the file holds" |
+| `BIRD_LIMIT=abc` → the split's size, silently | throws: `BIRD_LIMIT="abc" is not a question count` |
+| `BIRD_LIMIT=12.9` → `12`, silently | throws, for the same reason |
+| a limit larger than the split → the split's size | `resolveLimit` throws with both numbers |
+| `selection.requested` = the unresolved declaration | `selection.requested` = the declared size, resolved against the file |
+
+`resolveLimit(limit, available)` is where the two coordinates meet, and it is the only place that
+knows both. A declared size larger than the split is refused rather than clamped: clamping would
+publish a smaller sample under the number the caller declared, and `selection.requested` is meant to
+be read as a declaration. That rule is what turned a silent substitution into a red build, and it is
+worth keeping for exactly that reason.
+
+`eval/baseline/bird.json` moved with it: `scoredBySplit.minidev` is now **496** — the pool a rate is
+computed over, after the two questions whose gold statements the executor refuses — rather than 500,
+which was a row count standing where the denominator belongs. The 95% floor that reads it is
+therefore 471 rather than 475; both are far below any run that scores the split.
+
+Three tests hold the new contract, and the third is the one that would have caught this:
+
+1. `parseLimit` returns `undefined` for a blank value and throws for anything that is not a whole
+   number of questions;
+2. `resolveLimit` returns the split's size when nothing was declared and throws on a declaration
+   larger than it;
+3. a dataset built with three rows and two questions — Mini-Dev's shape in miniature, a byte-for-byte
+   repeat included — must produce `rows: 3, available: 2, requested: 2, sampled: false`, and the same
+   run with `BIRD_LIMIT=500` must throw. Before the fix the first assertion read `requested: 500`.
+
+The competitor harness shares the parser, so `--limit` blank now means the whole split for a
+competitor too, and its subset file is named `minidev-subset-all.json` rather than
+`minidev-subset-undefined.json`. That is the mode the next comparison runs in.
+
 ## The floor is enforced, not remembered
 
 A benchmark that only produces a report gets read once. The BIRD arms have a

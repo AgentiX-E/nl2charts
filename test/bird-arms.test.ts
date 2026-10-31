@@ -35,6 +35,7 @@ import {
   candidateCeiling,
   parseArms,
   parseLimit,
+  resolveLimit,
   parseMixedSource,
   promptFor,
   readPinnedDefinitions,
@@ -396,25 +397,45 @@ describe('A/A pairs', () => {
 });
 
 describe('sample size', () => {
-  it('scores the whole split when nothing is asked for', () => {
-    // `workflow_dispatch` passes an empty string for a blank input, and Number('')
-    // is 0: the dev workflow would have scored nothing and divided by it.
-    expect(parseLimit(undefined, 'minidev')).toBe(500);
-    expect(parseLimit('', 'minidev')).toBe(500);
-    expect(parseLimit('   ', 'minidev')).toBe(500);
-    expect(parseLimit(undefined, 'dev')).toBe(1534);
-    expect(parseLimit('', 'dev')).toBe(1534);
+  it('scores the whole split when nothing is asked for, by declaring no size at all', () => {
+    // `workflow_dispatch` passes an empty string for a blank input, and Number('') is 0: the dev
+    // workflow would have scored nothing and divided by it. The answer used to be a copy of the
+    // split's published size, and that copy was a row count — 500 for Mini-Dev's 498 questions —
+    // so every push declared a request for two questions that do not exist and the floor gate
+    // read it as a changed sample (run 41169457147). "All of it" is the absence of a number.
+    expect(parseLimit(undefined)).toBeUndefined();
+    expect(parseLimit('')).toBeUndefined();
+    expect(parseLimit('   ')).toBeUndefined();
   });
 
-  it('treats a nonsensical cap as no cap instead of as zero questions', () => {
-    expect(parseLimit('0', 'minidev')).toBe(500);
-    expect(parseLimit('-5', 'minidev')).toBe(500);
-    expect(parseLimit('abc', 'dev')).toBe(1534);
+  it('refuses a value that is not a whole number of questions', () => {
+    // A silent fallback is the same defect in a quieter form: the run publishes a sample size
+    // nobody chose, under a flag that says it chose one.
+    expect(() => parseLimit('0')).toThrow(/not a question count/);
+    expect(() => parseLimit('-5')).toThrow(/not a question count/);
+    expect(() => parseLimit('abc')).toThrow(/not a question count/);
+    expect(() => parseLimit('12.9')).toThrow(/not a question count/);
   });
 
   it('honours a real cap', () => {
-    expect(parseLimit('120', 'minidev')).toBe(120);
-    expect(parseLimit('12.9', 'dev')).toBe(12);
+    expect(parseLimit('120')).toBe(120);
+  });
+});
+
+describe('the sample size a split can hold', () => {
+  it('takes every question of the split when no size was declared', () => {
+    expect(resolveLimit(undefined, 498)).toBe(498);
+  });
+
+  it('keeps a declared size that the split can hold', () => {
+    expect(resolveLimit(25, 498)).toBe(25);
+    expect(resolveLimit(498, 498)).toBe(498);
+  });
+
+  it('refuses a declaration larger than the split rather than clamping it', () => {
+    // Clamping would publish a smaller sample under the number the caller declared, and
+    // `selection.requested` is meant to be readable as a declaration.
+    expect(() => resolveLimit(500, 498)).toThrow(/more questions than this split holds \(498\)/);
   });
 });
 

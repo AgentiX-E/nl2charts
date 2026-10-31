@@ -1368,12 +1368,47 @@ export function parseArms(requested: string | undefined, aa: string | undefined,
   return trimmed === '' ? names : [...names, `${trimmed}#2`];
 }
 
-export function parseLimit(raw: string | undefined, split: 'minidev' | 'dev'): number {
-  const fallback = split === 'dev' ? 1534 : 500;
-  if (raw === undefined || raw.trim() === '') return fallback;
-  const value = Number(raw);
-  if (!Number.isFinite(value) || value <= 0) return fallback;
-  return Math.floor(value);
+/**
+ * How many questions a run was asked to score, or `undefined` for "whatever the split holds".
+ *
+ * The default used to be the split's published size — 500 for Mini-Dev, 1534 for dev — and that
+ * number was a *row* count. Once `selection.available` became a count of question ids (Mini-Dev's
+ * file carries 500 rows for 498 ids, because 137 and 138 each appear twice), the default asked for
+ * two questions that do not exist: every push declared `requested: 500` against `available: 498`
+ * and the floor gate failed the build with "the run asked for 500 questions and split minidev has
+ * 498" (run 41169457147). The size of a split is a property of its file, so the value that means
+ * "all of it" is the absence of a number rather than a second copy of the number that can drift.
+ *
+ * A value that is not a positive whole number of questions throws rather than falling back:
+ * `BIRD_LIMIT=abc` quietly scoring the whole split is the same defect in a quieter form — a
+ * published number whose sample nobody chose.
+ */
+export function parseLimit(raw: string | undefined): number | undefined {
+  const trimmed = raw?.trim() ?? '';
+  if (trimmed === '') return undefined;
+  const value = Number(trimmed);
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`BIRD_LIMIT=${JSON.stringify(raw)} is not a question count; leave it unset to score the whole split`);
+  }
+  return value;
+}
+
+/**
+ * The sample size a run will use, given how many questions the split actually holds.
+ *
+ * Asking for more questions than exist is a typo, not a subset, so this throws with both numbers
+ * instead of clamping: a clamp would publish a smaller sample under the number the caller declared,
+ * and `selection.requested` is meant to be readable as a declaration rather than as a wish.
+ */
+export function resolveLimit(limit: number | undefined, available: number): number {
+  if (limit === undefined) return available;
+  if (limit > available) {
+    throw new Error(
+      `BIRD_LIMIT=${String(limit)} asks for more questions than this split holds (${String(available)}); ` +
+        'leave it unset to score all of them',
+    );
+  }
+  return limit;
 }
 
 /**
@@ -1391,7 +1426,7 @@ export type BirdSplit = 'minidev' | 'dev';
 export interface BirdLayout {
   readonly root: string;
   /**
-   * `minidev` is the 500-question subset CI runs on every commit. `dev` is the
+   * `minidev` is the 498-question subset (500 rows) CI runs on every commit. `dev` is the
    * 1,534-question split the published leaderboards report, kept for on-demand runs
    * because a full sweep costs a model call per question per arm.
    */
@@ -1485,7 +1520,12 @@ export function databasesFromQuestions(questionsFile: string): string[] {
 export interface BirdSettings {
   readonly layout: BirdLayout;
   readonly dryRun: boolean;
-  readonly limit: number;
+  /**
+   * The sample size the caller named, or `undefined` for the whole split. A number here is a
+   * declaration, so it is checked against the split that was read (`resolveLimit`) rather than
+   * being carried into the artifact as if the split had that many questions.
+   */
+  readonly limit: number | undefined;
   readonly concurrency: number;
   readonly dbs: readonly string[];
   readonly arms: readonly string[];
@@ -1519,7 +1559,7 @@ export function resolveSettings(
   return {
     layout,
     dryRun: argv.includes('--dry-run'),
-    limit: parseLimit(env.BIRD_LIMIT, layout.split),
+    limit: parseLimit(env.BIRD_LIMIT),
     concurrency: Number(env.BIRD_CONCURRENCY ?? 8),
     dbs: databaseList
       .split(',')
@@ -1796,6 +1836,12 @@ export interface PreparedRun {
    */
   readonly shape: QuestionSet;
   readonly questions: readonly BirdQuestion[];
+  /**
+   * How many questions this run set out to score: the declared limit, or every question of the
+   * split when none was declared. It is resolved once, against the file that was read, because the
+   * artifact's `selection.requested` is a statement about this run and not about the split.
+   */
+  readonly limit: number;
   readonly selected: readonly BirdQuestion[];
   readonly cases: readonly BirdQuestion[];
   readonly schemas: ReadonlyMap<string, readonly SchemaTable[]>;
@@ -1843,7 +1889,10 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
     throw new Error(`no questions for ${settings.dbs.join(',')}; run node eval/bird/fetch.mjs first`);
   }
   const tables = loadTables(layout.tablesFile);
-  const selected = stratifiedSample(questions, settings.limit);
+  // Resolved here, where both numbers are known, and not in `resolveSettings`, where only the
+  // caller's wish is: the split's size belongs to the file and is read from it once.
+  const limit = resolveLimit(settings.limit, questions.length);
+  const selected = stratifiedSample(questions, limit);
   // The training split is external knowledge, not a held-out answer: it shares no
   // database with the split under test, which is asserted in the run controls.
   let retrievalIndex: ReturnType<typeof buildIndex> | undefined;
@@ -2314,6 +2363,7 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
     settings,
     shape,
     questions,
+    limit,
     selected,
     cases,
     schemas,
@@ -2343,7 +2393,7 @@ export function judgeModelName(
 
 /** The report before any arm runs: everything the inputs alone can say. */
 export function baseReport(prepared: PreparedRun): Record<string, unknown> {
-  const { settings, shape, questions, selected, cases, unrunnable, controls } = prepared;
+  const { settings, shape, questions, limit: preparedLimit, selected, cases, unrunnable, controls } = prepared;
   const layout = settings.layout;
   return {
     dataset: 'bird-mini-dev',
@@ -2383,7 +2433,11 @@ export function baseReport(prepared: PreparedRun): Record<string, unknown> {
       rows: shape.rows,
       available: questions.length,
       repeats: shape.repeats.map((repeat) => repeat.id),
-      requested: settings.limit,
+      // What the run asked for, resolved against the file it read: equal to `available` when the
+      // caller named no size. It used to be the unresolved declaration — which the default made
+      // 500 on a 498-question split, so every push declared a request for two questions that do
+      // not exist and the floor gate read that as a changed sample (run 41169457147).
+      requested: preparedLimit,
       split: layout.split,
       scored: cases.length,
       // Whether the pool was sampled or scored whole. The two facts `scored < available` confuses —

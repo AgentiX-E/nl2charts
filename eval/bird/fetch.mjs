@@ -18,7 +18,7 @@ import { execFileSync } from 'node:child_process';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
 /**
- * Three archives live in the same bucket. `minidev` is the 500 questions CI runs on
+ * Three archives live in the same bucket. `minidev` is the 498 questions (500 rows) CI runs on
  * every commit; `dev` is the 1,534-question split the published leaderboards report;
  * `train` is 9,428 labelled questions over 69 databases and shares no database with
  * either, so it is knowledge rather than answers for the split under test.

@@ -21,8 +21,8 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { afterAll, describe, expect, it, vi } from 'vitest';
-import { MINI_GOLD, MINI_QUESTIONS, writeMiniBirdDataset } from './helpers/bird-dataset.js';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { MINI_DB, MINI_GOLD, MINI_QUESTIONS, writeMiniBirdDataset } from './helpers/bird-dataset.js';
 import { startEndpoint } from './helpers/endpoint.js';
 import type { EndpointRequest } from './helpers/endpoint.js';
 import { assertSecondModel, judgeModelName, main, resolveSettings } from '../eval/bird/run.js';
@@ -208,6 +208,67 @@ describe('a dry run', () => {
     expect(
       result.printed.some((line) => line.startsWith(`dry run: gold runnable ${QUESTIONS.length}/${QUESTIONS.length}`)),
     ).toBe(true);
+  });
+});
+
+/**
+ * Mini-Dev's own shape, at three rows: a file that carries more rows than questions.
+ *
+ * The benchmark file holds 500 rows for 498 ids (137 and 138 appear twice, byte for byte), and
+ * the runner's sample size used to be the *row* count. Once `available` became a question count,
+ * every default run declared `requested: 500` against `available: 498`, and the floor gate — whose
+ * job is to notice a shrunken sample — failed the build on a sample that had not shrunk
+ * (run 41169457147). Three rows and two questions put that arithmetic in a test.
+ */
+describe('a split whose file repeats a question', () => {
+  const dir = join(root, 'REPEAT');
+  writeMiniBirdDataset(dir);
+  const [only, repeated] = MINI_QUESTIONS;
+  if (only === undefined || repeated === undefined) throw new Error('the fixture needs two questions to repeat one');
+
+  beforeAll(() => {
+    // The same record twice, which is what a byte-for-byte repeat is: a file that names one
+    // question twice with *different* content is refused by `distinctQuestions` instead.
+    const record = (entry: typeof only): Record<string, unknown> => ({
+      question_id: entry.id,
+      db_id: MINI_DB,
+      question: entry.question,
+      evidence: '',
+      SQL: entry.sql,
+      difficulty: entry.difficulty,
+    });
+    writeFileSync(join(dir, 'mini_dev_sqlite.json'), JSON.stringify([record(only), record(repeated), record(repeated)]));
+  });
+
+  it('asks for as many questions as the file holds, not as many rows as it carries', async () => {
+    // One arm: the chain's default includes a retrieval arm, and a dry run of an input the
+    // fixture does not have would fail for a reason that has nothing to do with the sample size.
+    const result = await run({ plan: {}, argv: ['--dry-run'], env: { BIRD_DATA: dir, BIRD_ARMS: 'names' } });
+    expect(result.code).toBe(0);
+    const selection = result.report.selection as {
+      rows: number;
+      available: number;
+      requested: number;
+      sampled: boolean;
+      repeats: number[];
+      scored: number;
+    };
+    expect(selection.rows).toBe(3);
+    expect(selection.available).toBe(2);
+    // The declaration equals the pool: nothing was asked for, and the split decides.
+    expect(selection.requested).toBe(2);
+    expect(selection.sampled).toBe(false);
+    expect(selection.repeats).toEqual([repeated.id]);
+  });
+
+  it('refuses a declared sample larger than the split instead of publishing it', async () => {
+    // 500 on this split is the shape of the defect itself: a number copied from somewhere other
+    // than the file, carried into the artifact as a claim about a pool that does not exist.
+    await expect(
+      run({ plan: {}, argv: ['--dry-run'], env: { BIRD_DATA: dir, BIRD_ARMS: 'names', BIRD_LIMIT: '500' } }),
+    ).rejects.toThrow(
+      /more questions than this split holds \(2\)/,
+    );
   });
 });
 

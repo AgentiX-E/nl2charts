@@ -2,7 +2,7 @@ name: bird-dev
 
 # The public split, on demand.
 #
-# `ci.yml` runs Mini-Dev (500 questions) on every push because that is what a
+# `ci.yml` runs Mini-Dev (498 questions, 500 rows) on every push because that is what a
 # per-commit budget allows. This workflow runs the 1,534-question dev split — the
 # one published leaderboards report — so a comparison with another system is a
 # matter of running this, not of arguing about samples.
