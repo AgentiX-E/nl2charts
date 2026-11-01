@@ -3358,7 +3358,12 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
           attempts: arm.vote + (retried ? 1 : 0),
           agreement: majority.agreement,
           candidateRecall: verdicts.some((verdict) => verdict.correct),
-          ...(verdicts.length < 2 ? {} : { candidates: verdicts }),
+          // Recorded even when only one candidate survived: the case where two of three samples
+          // died is exactly the case whose pool was smallest, and omitting its record made it
+          // invisible to every reading of the artifact — `bench:bird:pool` counted seven dev
+          // questions as passed with no correct candidate and reported them as a hole. A record
+          // of one is still a record.
+          ...(verdicts.length === 0 ? {} : { candidates: verdicts }),
           ...(selectedByModel === undefined ? {} : { selectedByModel }),
           ...(firstShape === undefined ? {} : { shape: firstShape }),
           ...(arm.mixed === undefined ? {} : { winnerSource: winner.source }),

@@ -482,6 +482,15 @@ effect it would have to detect is 1.21pp at a 9.4% discordance (5,040 questions)
 window that clears one point is three quarters of the split. The defaults follow from that
 measurement rather than from taste.
 
+The instrument that followed prices the other half of the same object. Every arm here sends one
+request or several, and its score is the size of the candidate set it kept times the rate at which
+the selector converted it; `bench:bird:pool` separates those two factors from `cases[].candidates`
+and `cases[].passed`, with no model call. It reports a ceiling per pool, the union over every pool
+in the artifact, which questions only one pool answers, and a greedy path with the price of each
+step. The dev reading is that the pool is closed as a lever — the best second call adds 1.31pp
+against a 2.30pp resolution — and the useful part of that answer is where it points: a generator
+that differs in method rather than in prompt or in draw.
+
 ## Design decisions worth knowing
 
 - **No UI framework adapter.** The library exposes promises and async iterables;
@@ -498,3 +507,10 @@ measurement rather than from taste.
   question, the instrument asks whether anything the rule can read separates the outcomes — and
   answers held out by database, because a rule fitted and scored on one corpus has already read
   the answer.
+- **A score is a product, and the two factors are measured apart.** Candidate ceiling times
+  selector conversion; `bench:bird:pool` reads both from one artifact so that a proposal to spend a
+  call is priced against the ceiling it adds, not against the score it hopes for. On the dev split
+  the widest pool reaches 65.66% and the union of all four reaches 67.49%, while the best single
+  call after the first adds 1.31pp — under the 2.30pp the split can resolve. The pool is therefore
+  closed as a lever at this model, and the decision that follows is about generators, not about
+  selectors or routers.

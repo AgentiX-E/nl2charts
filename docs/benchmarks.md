@@ -4542,6 +4542,83 @@ to. Here it belongs to the values, which is where the next iteration goes — an
 `select-mixed`'s +1.37pp is a **purchase** (+1.37pp for 3 extra calls) rather than evidence that
 routing would work.
 
+## What one more candidate buys
+
+The routing section ended by naming a defect in its own census and pointing at the values. Before
+buying a generation call to chase them, though, there is arithmetic worth doing first, because an
+arm's score is a **product**: the size of its candidate set times the rate at which the selector
+converts it. Only one of those two factors has ever been measured on its own, and the other one has
+been treated as the lever by default. `bench:bird:pool` reads both off an artifact the run already
+wrote — the ceiling from `cases[].candidates`, the conversion from `cases[].passed` — and costs no
+model call and no oracle query.
+
+Five arms on the dev split (`41296610389`, 1,532 scored questions), and the three that send one
+request are not pools at all (one candidate each, so their ceiling *is* their score):
+
+| arm | sources | ceiling | scored | lost to the selector | calls |
+| --- | --- | --- | --- | --- | --- |
+| `select` | 1 prompt × 3 draws | 65.66% | 60.97% | **4.69pp** | 3.99 |
+| `select-mixed` | 3 prompts × 1 draw | 63.84% | 62.34% | **1.50pp** | 3.99 |
+
+| pool | recall | questions no other pool answers |
+| --- | --- | --- |
+| `select` (three draws of `inline+evidence`) | 65.66% | 56 |
+| `select-mixed/inline+evidence` | 61.16% | 3 |
+| `select-mixed/metadata+evidence` | 61.16% | 2 |
+| `select-mixed/values` | 60.97% | 14 |
+
+The union of all four pools is **67.49%** (1,034 questions), against 62.34% for the arm that ships
+and 65.66% for the widest single pool. Two cross-checks that this is the right number rather than a
+plausible one: the union over the *answers* of all five arms is 69.06% (1,058), and 1,532 − 1,058 =
+474 is exactly the count of questions every arm failed that the routing section reported; and the
+union over the three one-call cards alone is 67.62% (1,036), which is the figure that section used as
+its oracle. Two independent readings of the same ceiling land within two questions of each other.
+
+**The purchase, priced one call at a time.** A ceiling is not an option you can buy in aggregate, so
+the harness adds pools greedily by the questions they cover that nothing before them did:
+
+| step | cumulative ceiling | this call buys | price |
+| --- | --- | --- | --- |
+| `select` (3 draws) | 65.66% | — | 3.99 calls a question |
+| `+ select-mixed/values` | 66.97% | +1.31pp (20 questions) | +1 call |
+| `+ select-mixed/inline+evidence` | 67.36% | +0.39pp (6 questions) | +1 call |
+| `+ select-mixed/metadata+evidence` | 67.49% | +0.13pp (2 questions) | +1 call |
+
+The criterion is stated before the reading and is the split's own resolution: an extra candidate
+earns its call only if it adds at least **2.30pp** of ceiling, because below that the difference
+cannot be told from the draw. Nothing clears it. The best second call buys 1.31pp, so it does not
+ship — and, more usefully, no arrangement of *these* prompts does, which is the reading that decides
+where the next run goes.
+
+Three things follow, in order of how much they constrain the plan:
+
+1. **The pool is not the bottleneck, but it is not free either.** 5.15pp of headroom exists across
+   all four pools, and it is reachable only by spending three calls to add 0.39 and 0.13 points on
+   top of a first one worth 1.31. That is a purchase with a poor exchange rate, not a lever. The
+   single most valuable pool is also the least clever: three draws of one prompt beat three
+   different prompts by 1.82pp, which is a statement about sampling, not about knowledge.
+2. **The conversion is not uniform, and its variation is the interesting part.** The same selector
+   prompt, on the same model, in the same run, gives up 4.69pp of a 65.66% ceiling for `select` and
+   1.50pp of a 63.84% ceiling for `select-mixed` — 7.1% of the ceiling against 2.3%. The difference
+   is what the pool looks like: `select`'s three candidates agree with each other 92.9% of the time
+   and differ in wording, while `select-mixed`'s three are different prompts and differ in content.
+   A selector handed three near-identical statements has almost nothing to discriminate on, and the
+   free selector does no better on that pool (modal result voting tied the model on Mini-Dev,
+   17:17, p = 1). The loss is not a bad prompt for the selector; it is that on the questions where
+   the draws disagree, the right answer is the minority and nothing cheap can find it.
+3. **So the next lever has to raise the ceiling, not widen the pool.** At 67.49% union and a 97.6%
+   conversion — the rate `select-mixed` actually achieves — the best score this generation family
+   can produce is 65.9%, which is +3.6pp over where the product stands and three calls dearer. The
+   only way past it is a candidate that differs in *method* rather than in prompt or in draw, which
+   is what the decomposition and plan arms were supposed to be and what their measurements say they
+   are not (−7.2pp for `plan`, and `select-mixed+dc` inside its own MDE on Mini-Dev).
+
+One defect found while building this, and fixed in the same commit: a case whose candidate set was
+reduced to a single survivor recorded no `candidates` array at all, so seven dev questions were
+passed with no correct candidate in their record. Those are exactly the questions where two of three
+samples died — the smallest pools — and every reading above would have silently dropped them. The
+runner now records a set of one, and the harness prints the count instead of absorbing it.
+
 ## Reproducing
 
 ```bash

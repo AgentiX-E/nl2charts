@@ -8,6 +8,35 @@ cannot be argued with.
 
 ### Added
 
+- **A score is a product, so the candidate pool is priced separately from the selector — and closed
+  as a lever.** `bench:bird:pool` reads `cases[].candidates` and `cases[].passed` out of an existing
+  artifact and reports, per arm, the ceiling its pool offered and the share of it the selector
+  collected; per pool, its recall and how many questions no other pool answers; the union over every
+  pool; and a greedy path with the price of each further call. Zero model calls, zero oracle queries.
+
+  On dev (1,532 questions, `41296610389`): `select` keeps three draws of one prompt worth **65.66%**
+  and scores 60.97% (**4.69pp** lost), while `select-mixed` keeps three different prompts worth
+  **63.84%** and scores 62.34% (**1.50pp** lost). The union of all four pools is **67.49%**, and the
+  best single call after the first buys **+1.31pp** (20 questions) — under the split's **2.30pp**
+  resolution, so it does not ship. Widening the pool is closed at this model, and the reading that
+  closes it also says where to go: the ceiling has to rise, which means a generator that differs in
+  method rather than in prompt or in draw.
+
+  Two cross-checks are printed with the numbers: the union over all five arms' answers is 69.06%
+  (1,058), leaving exactly the 474 questions the routing instrument reported every arm failing, and
+  the union over the three one-call cards is 67.62% (1,036) — the figure that instrument used as its
+  oracle. Two independent readings of one ceiling, two questions apart.
+
+  The harness found a defect in the artifact while being written: a case whose candidate set was cut
+  to a single survivor recorded **no** `candidates` array, so seven dev questions were passed with no
+  correct candidate in their record — exactly the cases where two of three samples died, i.e. the
+  smallest pools. `run.ts` now records a set of one, and the harness prints the count for artifacts
+  written before the fix.
+
+  `eval/bird/pool.ts` at **100 / 98.58 / 100 / 100**, `test/bird-pool.test.ts` at 38 cases including
+  both controls — a bank whose two pools answer disjoint halves, which must read as "widen it", and
+  one whose second pool adds nothing, which must read as unresolvable.
+
 - **A router is priced and declined, and the reason is what the failures are made of.**
   `bench:bird:route` asks the question the cold-start experiment left open: if a global strategy
   switch cannot move at deployment scale, can a rule read *this* question and pick the better card?
@@ -246,6 +275,14 @@ cannot be argued with.
   consulting it — instead of being five lines of shell nobody can test.
 
 ### Fixed
+
+- **A candidate set of one was recorded as no candidate set.** `run.ts` spread `candidates` only
+  when the verdict list held two or more members, so a case where two of three samples died kept no
+  per-candidate record at all — and those are exactly the questions where the pool was smallest. On
+  the dev artifact this made seven passed questions look like passes with no correct candidate, which
+  every reading built on `cases[].candidates` would have absorbed silently. The record is now written
+  for one candidate as well, and `bench:bird:pool` prints the count for artifacts written before the
+  fix rather than allowing the hole to be mistaken for an empty pool.
 
 - **The scope job's first run failed on its own output format.** The tool printed the reason and
   the `models=` key on one stream, the workflow piped both into `$GITHUB_OUTPUT`, and the run went

@@ -399,3 +399,20 @@ never seen.
 a router is only worth building if it picks **within one call**, because choosing a four-call
 strategy is a purchase rather than a routing decision — and the measurement that would justify one
 (`bench:bird:route`) says the disagreements it would have to read are a coin flip.
+
+**Candidate pool** — Every statement an arm kept for one question, before the selector chose among
+them. Its size and variety are the only things that can raise an arm's ceiling; the selector can
+only decide how much of that ceiling is collected.
+
+**Ceiling (of a pool)** — The share of questions on which at least one statement in the pool is
+correct. An arm cannot score above its own ceiling, so the number is a bound rather than a result,
+and `bench:bird:pool` prints it beside the score so the two are never read as one.
+
+**Selection loss** — Ceiling minus score: the questions the pool answered and the selector did not
+collect. On the dev split it is 4.69pp for three draws of one prompt and 1.50pp for three different
+prompts, which is why the loss is read as a property of the pool's *variety* rather than of the
+selector's prompt.
+
+**Marginal candidate** — What one more generation call buys, measured as the questions it covers
+that nothing already bought covers. A pool earns its call only if that number clears the split's
+minimum detectable effect; on the dev split the best second pool buys 1.31pp against a 2.30pp line.

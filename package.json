@@ -34,6 +34,7 @@
     "bench:bird:stability": "tsx eval/bird/stability.ts",
     "bench:bird:adapt": "tsx eval/bird/adapt.ts",
     "bench:bird:route": "tsx eval/bird/route.ts",
+    "bench:bird:pool": "tsx eval/bird/pool.ts",
     "bench:adversarial": "tsx eval/adversarial/run.ts",
     "bench:adversarial:dry": "tsx eval/adversarial/run.ts --dry-run",
     "gate:secrets": "node tools/check-secrets.mjs && node tools/check-secrets.mjs --self-test",
