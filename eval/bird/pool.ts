@@ -311,6 +311,21 @@ export interface PoolSettings {
 export const DEFAULT_MARGIN_PP = 2.3;
 
 export function resolvePoolSettings(argv: readonly string[], _root: string): PoolSettings {
+  // An argument this harness does not know is refused rather than ignored, and refused *first*,
+  // because the first version ignored them: CI ran `bench:bird:pool eval/out/bird-eval.json`, the
+  // path was read as nothing, the harness said "--artifact is required", and the step failed with a
+  // message about a flag the caller had clearly meant to supply. A silent drop turns one mistake
+  // into a hunt for a second one; naming the token ends it in the sentence that already exists.
+  const takesValue = new Set(['--artifact', '--margin']);
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index] as string;
+    if (token === '--json') continue;
+    if (takesValue.has(token)) {
+      index += 1;
+      continue;
+    }
+    throw new Error(`unrecognized argument ${token}: this harness takes --artifact <path>, --margin <pp> and --json`);
+  }
   const flag = (name: string): string | undefined => {
     const at = argv.indexOf(name);
     return at === -1 ? undefined : argv[at + 1];

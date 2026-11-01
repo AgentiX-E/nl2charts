@@ -338,6 +338,14 @@ describe('settings', () => {
   it('reads the json flag', () => {
     expect(resolvePoolSettings(['--artifact', 'a.json', '--json'], '/tmp').json).toBe(true);
   });
+
+  it('refuses an argument it does not know instead of dropping it', () => {
+    // The regression: CI called `bench:bird:pool eval/out/bird-eval.json`, the harness ignored the
+    // path, and the step failed saying the flag was missing — a message about the caller's clear
+    // intent rather than about their mistake.
+    expect(() => resolvePoolSettings(['eval/out/bird-eval.json'], '/tmp')).toThrow(/unrecognized argument eval\/out\/bird-eval\.json/);
+    expect(() => resolvePoolSettings(['--artifact', 'a.json', '--strct'], '/tmp')).toThrow(/unrecognized argument --strct/);
+  });
 });
 
 describe('entry points', () => {

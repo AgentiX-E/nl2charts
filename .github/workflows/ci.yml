@@ -435,7 +435,7 @@ jobs:
       # calls, and no floor: the number it prints is a claim about where the next call is
       # worth spending, so the reading is the finding.
       - name: What one more candidate would buy
-        run: pnpm bench:bird:pool eval/out/bird-eval.json
+        run: pnpm bench:bird:pool --artifact eval/out/bird-eval.json
       - name: Noise floor (same cases, three repeats)
         run: pnpm bench:bird:stability
       - name: Adversarial gold, widths and controls without a model

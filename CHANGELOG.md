@@ -33,9 +33,16 @@ cannot be argued with.
   smallest pools. `run.ts` now records a set of one, and the harness prints the count for artifacts
   written before the fix.
 
-  `eval/bird/pool.ts` at **100 / 98.58 / 100 / 100**, `test/bird-pool.test.ts` at 38 cases including
+  `eval/bird/pool.ts` at **100 / 98.63 / 100 / 100**, `test/bird-pool.test.ts` at 39 cases including
   both controls — a bank whose two pools answer disjoint halves, which must read as "widen it", and
   one whose second pool adds nothing, which must read as unresolvable.
+
+  The first CI run of the step failed on the invocation, not on the reading: `bench:bird:pool
+  eval/out/bird-eval.json` passed the path positionally, the harness ignored it, and the error said
+  `--artifact is required` — a sentence about a flag the caller had plainly meant to supply. Two
+  fixes, in that order: the workflows name the flag, and the harness now refuses any argument it does
+  not recognise, by name, before it complains about a missing one. A dropped token costs a 40-minute
+  run to discover; naming it costs one line.
 
 - **A router is priced and declined, and the reason is what the failures are made of.**
   `bench:bird:route` asks the question the cold-start experiment left open: if a global strategy
