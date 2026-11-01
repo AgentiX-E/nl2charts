@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import {
   buildSchema,
+  datasetName,
   describeQuestionSet,
   distinctQuestions,
   loadDescriptions,
@@ -424,5 +425,31 @@ describe('one row per question', () => {
     expect(describeQuestionSet(set, 'minidev')).toBe(
       'minidev: 4 row(s), 2 question(s) — 1, 2 repeat byte-for-byte and are counted once',
     );
+  });
+});
+
+
+/**
+ * The corpus name an artifact carries is a function of the split, not a literal beside it.
+ *
+ * `baseReport` wrote `'bird-mini-dev'` unconditionally, so a full 1,534-question sweep produced
+ * an artifact whose top-level `dataset` said Mini-Dev while its own `split` said `dev` — and
+ * `tools/live-summary.mjs` prints that field, so the summary named the wrong corpus. The two
+ * names are the whole mapping: anything else would be a third invention.
+ */
+describe('the dataset name an artifact carries', () => {
+  it('names the public split when the run covered it', () => {
+    expect(datasetName('dev')).toBe('bird-dev');
+  });
+
+  it('names the per-commit subset otherwise', () => {
+    // The default, and what every artifact before this change said regardless of its split.
+    expect(datasetName('minidev')).toBe('bird-mini-dev');
+  });
+
+  it('does not invent a third name for a split it has not seen', () => {
+    // A typo in `BIRD_SPLIT` already fails earlier, at the question file. Reaching this line
+    // means the caller wants the subset name, not that the name should become the input.
+    expect(datasetName('anything-else')).toBe('bird-mini-dev');
   });
 });

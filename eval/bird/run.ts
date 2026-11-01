@@ -35,7 +35,7 @@ import { ppPerExtraCall, repairFunnel } from './metrics.js';
 import { pruneSchema } from './prune.js';
 import { applyColumnChoice, buildColumnPrompt, parseColumnChoice } from './columns.js';
 import type { CaseOutcome, MatchReason } from '@agentix-e/nl2charts-devkit';
-import { buildSchema, describeQuestionSet, distinctQuestions, loadDescriptions, loadQuestions, loadTables, stratifiedSample } from './data.js';
+import { buildSchema, datasetName, describeQuestionSet, distinctQuestions, loadDescriptions, loadQuestions, loadTables, stratifiedSample } from './data.js';
 import type { BirdQuestion, QuestionSet } from './data.js';
 import { createOracle } from './oracle.js';
 import { canonicalSql } from './canonical.js';
@@ -2780,7 +2780,8 @@ export function baseReport(prepared: PreparedRun): Record<string, unknown> {
   const { settings, shape, questions, limit: preparedLimit, selected, cases, unrunnable, controls } = prepared;
   const layout = settings.layout;
   return {
-    dataset: 'bird-mini-dev',
+    // Derived, never written: a name that can disagree with the field it names will.
+    dataset: datasetName(layout.split),
     // Derived from the split actually loaded. It was the literal `mini_dev_sqlite`, so every
     // dev artifact said mini_dev_sqlite at the top level and `dev` inside `selection`, and
     // nothing read the duplicate field so nothing noticed. The gate now compares the two.

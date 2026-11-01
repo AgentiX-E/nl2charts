@@ -61,6 +61,24 @@ cannot be argued with.
 
 ### Fixed
 
+- **A dev artifact that named itself after the per-commit subset.** `baseReport` wrote the literal
+  `'bird-mini-dev'` whatever the split, so every artifact from the 1,532-question sweep announced
+  Mini-Dev at the top level while its own `split` said `dev` — and `tools/live-summary.mjs` prints
+  that field, so the summary a reader saw named the wrong corpus. `stability.ts` had derived the
+  name correctly the whole time, which is what a duplicated expression buys: one copy right, one
+  copy wrong, and nothing comparing them. `data.ts` now owns `datasetName(split)`, both writers use
+  it, and `check-bird-baseline` fails a report whose `dataset` disagrees with its `split` — the same
+  check it already ran on the two `split` fields, one field over. Three unit cases and two gate
+  self-tests pin the mapping in both directions.
+
+- **The dev section reported a sign backwards.** *The dev split, asked once* said Mini-Dev puts
+  `metadata+evidence` 2.54pp above `select` and "dev puts it 0.39pp above". Re-reading the artifact
+  against its own table: `metadata+evidence` is 942/1,532 (61.49%) and `select` is 948/1,532
+  (61.88%), so dev puts it 0.39pp **below**. The two splits do not agree on which arm leads. The
+  weaker reading — "the gap shrank" — is the one the paragraph carried, and it hides the strongest
+  fact on the page: an arm ordering that flips between splits is a sample, not a result.
+
+
 - **Two gates that measured a build they could not trust.** The audit turn passed the API snapshot
   locally and failed it in CI (`41255435708`, three `A4: ai exports … without a snapshot update`),
   and the same stale `dist` then passed the bundle budget by 735 B and failed that in the next run

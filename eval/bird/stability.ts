@@ -23,7 +23,7 @@ import { createHttpProvider, createPipeline, renderDefinitions } from '@agentix-
 import type { LlmProvider, PromptOptions, SchemaTable } from '@agentix-e/nl2charts-ai';
 import { judgeOfficial } from '@agentix-e/nl2charts-devkit';
 import { describeError } from '../errors.js';
-import { buildSchema, distinctQuestions, loadDescriptions, loadQuestions, loadTables, stratifiedSample } from './data.js';
+import { buildSchema, datasetName, distinctQuestions, loadDescriptions, loadQuestions, loadTables, stratifiedSample } from './data.js';
 import { createOracle } from './oracle.js';
 import type { Oracle } from './oracle.js';
 import { ARMS, pool, promptFor, resolveLayout } from './run.js';
@@ -192,7 +192,7 @@ export function stabilityReport(
   const errors = runs.reduce((total, run) => total + run.outages.length, 0);
   const engineFailures = runs.reduce((total, run) => total + run.engineFailures, 0);
   return {
-    dataset: settings.layout.split === 'dev' ? 'bird-dev' : 'bird-mini-dev',
+    dataset: datasetName(settings.layout.split),
     arm: settings.arm.name,
     model: settings.model,
     cases: runs.length,

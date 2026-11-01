@@ -3222,10 +3222,14 @@ Three things this settles, and one it does not.
    margin, z = (0.39 + 2) / 0.82 = 2.91, p ≈ 0.002 — and 0.002 survives a Bonferroni floor of
    0.0167 for the three pairs in the table.
 3. **The 2.5pp gap did not reproduce; the 1.5pp cost of the pruned card did.** Mini-Dev's three
-   runs put `metadata+evidence` 2.54pp above `select` on average; dev puts it 0.39pp above. The
-   pruned card, by contrast, is −1.54pp on Mini-Dev (three-run mean) and −1.50pp here — the same
-   number on both splits and in five runs. A comparison that moves 2.5 → 0.4 between splits is a
-   sample, an arm that lands on −1.5 twice is a cost.
+   runs put `metadata+evidence` 2.54pp above `select` on average; dev puts it **0.39pp below** —
+   the two splits do not even agree on which arm leads. This paragraph said "above" until the
+   artifact was re-read against its own table, which is the quietest way for a document to lose the
+   finding it exists to report: a sign that flips between splits is the strongest statement here,
+   and "the gap shrank" is a weaker one that happens to look reasonable. The pruned card, by
+   contrast, is −1.54pp on Mini-Dev (three-run mean) and −1.50pp here — the same number on both
+   splits and in five runs. **A comparison that flips sign between splits is a sample; an arm that
+   lands on −1.5 five times is a cost.**
 
 What it does not settle is whether the selector pays at all, because the answer depends on the
 generator: the three-candidate ceiling here is 65.8%, the selector returns 94.0% of it (948 of

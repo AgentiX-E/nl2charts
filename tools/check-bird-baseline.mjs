@@ -62,6 +62,18 @@ export function compare(report, baseline) {
   if (report?.split !== undefined && report.split !== split) {
     issues.push(`BIRD1: the report says split ${String(report.split)} at the top level and ${split} in selection; one of them is wrong`);
   }
+  // The same disagreement one field over, and it outlived the first fix. `baseReport` wrote the
+  // literal `'bird-mini-dev'` whatever the split, so every artifact from a full 1,532-question
+  // sweep announced the per-commit subset — and `tools/live-summary.mjs` prints this field, so
+  // the summary a reader saw named the wrong corpus. The name is derived from the split now;
+  // this is what stops a literal creeping back. The mapping is repeated rather than imported
+  // because the gate is plain JavaScript and has to run before any build.
+  if (report?.dataset !== undefined) {
+    const expected = split === 'dev' ? 'bird-dev' : 'bird-mini-dev';
+    if (report.dataset !== expected) {
+      issues.push(`BIRD1: the report names dataset ${String(report.dataset)} but its split is ${split}; the name is derived, so a disagreement means one of them was written by hand`);
+    }
+  }
 
   // Which questions a run set out to score is a fourth coordinate of a floor, after split,
   // arms and model — and it was the missing one. `bird-model.yml` took a 300-question slice
@@ -653,6 +665,18 @@ function selfTest() {
     issues.push('BIRD1 accepts a report whose two split fields disagree');
   }
 
+  // The same disagreement one field over. Both directions, because the failure that produced
+  // this check was the quiet one: an artifact from a 1,532-question sweep whose `dataset` said
+  // `bird-mini-dev`, read by `live-summary` and printed into the summary.
+  const wrongName = compare({ ...report([arm('names', 42), arm('inline', 51)]), dataset: 'bird-dev' }, baseline);
+  if (!wrongName.issues.some((issue) => issue.includes('written by hand'))) {
+    issues.push('BIRD1 accepts a report whose dataset name disagrees with its split');
+  }
+  const rightName = compare({ ...report([arm('names', 42), arm('inline', 51)]), dataset: 'bird-mini-dev' }, baseline);
+  if (rightName.issues.some((issue) => issue.includes('written by hand'))) {
+    issues.push('BIRD1 rejects a report whose dataset name matches its split');
+  }
+
   // A floor is a claim about (split, arms, model). A cross-model run must be measured
   // rather than failed — but only the accuracy floor is skipped, not the rest.
   const otherModel = compare(report([arm('names', 30), arm('inline', 20)], 100, 'minidev', 'glm-4.5'), baseline);
@@ -1143,7 +1167,7 @@ if (process.argv[2] === '--self-test') {
   const issues = selfTest();
   for (const issue of issues) console.error(issue);
   if (issues.length > 0) process.exit(1);
-  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, a dev run measured against its own sample, two split fields that disagree, other split, other model, unfloored arm, empty lever, a funnel that does not add up, a split-specific arm list, an uncounted selector call, a majority vote that spends exactly its samples, a repair count without a loop, an unpriced arm, an unnamed model, floors from an unnamed model and a cross-model arm with no second model named, a judge swap with no judge named, an arm with harness errors, a candidate set that lost a third of itself to an endpoint, a failure corpus that stopped at a cap without saying so, an empty-result lever with no funnel or an impossible yield or nothing behind it, a decomposition arm whose prompt the model ignored, an unrecorded instrument, a samples arm with no values behind it, a truncated schema card, a prompt with no table in it, a declared arm subset, a declared arm whose row was dropped, an undeclared row, an empty declaration and a floor that a declaration does not weaken, a declared sample subset, a subset that cannot clear a floor, a sample that shrank undeclared, an impossible declaration and a row count above the request, a cross-arm floor with a matching second model, a swapped one and an unattributed one, and a ceiling that held, a ceiling that fell while the score held, a ceiling inside the noise threshold, a sampling arm with no ceiling at all, a ceiling whose two fields disagree, a ceiling floor on an arm the split does not run, a score that fell while the ceiling held and a ceiling with no floor yet all behave');
+  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, a dev run measured against its own sample, two split fields that disagree, a dataset name that disagrees with the split, other split, other model, unfloored arm, empty lever, a funnel that does not add up, a split-specific arm list, an uncounted selector call, a majority vote that spends exactly its samples, a repair count without a loop, an unpriced arm, an unnamed model, floors from an unnamed model and a cross-model arm with no second model named, a judge swap with no judge named, an arm with harness errors, a candidate set that lost a third of itself to an endpoint, a failure corpus that stopped at a cap without saying so, an empty-result lever with no funnel or an impossible yield or nothing behind it, a decomposition arm whose prompt the model ignored, an unrecorded instrument, a samples arm with no values behind it, a truncated schema card, a prompt with no table in it, a declared arm subset, a declared arm whose row was dropped, an undeclared row, an empty declaration and a floor that a declaration does not weaken, a declared sample subset, a subset that cannot clear a floor, a sample that shrank undeclared, an impossible declaration and a row count above the request, a cross-arm floor with a matching second model, a swapped one and an unattributed one, and a ceiling that held, a ceiling that fell while the score held, a ceiling inside the noise threshold, a sampling arm with no ceiling at all, a ceiling whose two fields disagree, a ceiling floor on an arm the split does not run, a score that fell while the ceiling held and a ceiling with no floor yet all behave');
 } else {
   const reportPath = resolve(ROOT, 'eval/out/bird-eval.json');
   const baseline = JSON.parse(readFileSync(resolve(ROOT, 'eval/baseline/bird.json'), 'utf8'));

@@ -199,6 +199,23 @@ export function describeQuestionSet(set: QuestionSet, split: string): string {
   );
 }
 
+/**
+ * The corpus name an artifact carries, derived from the split rather than written beside it.
+ *
+ * `baseReport` used the literal `'bird-mini-dev'`, so a full 1,534-question sweep wrote an
+ * artifact whose top-level `dataset` said Mini-Dev while its own `split` said `dev` — and
+ * `tools/live-summary.mjs` prints that field, so the summary a reader saw named the wrong
+ * corpus. `stability.ts` had derived it correctly the whole time, which is what a duplicated
+ * expression buys: one copy right, one copy wrong, and nothing comparing them.
+ *
+ * The parameter is a plain string on purpose. `BirdSplit` lives in the runner, and importing
+ * it here would make the data layer depend on the thing that drives it; the mapping below is
+ * the entire contract, and it answers for any split rather than refusing one it has not seen.
+ */
+export function datasetName(split: string): string {
+  return split === 'dev' ? 'bird-dev' : 'bird-mini-dev';
+}
+
 /** A question file read as a pool: rows in, one row per question id out. */
 export function loadQuestionSet(file: string): QuestionSet {
   return distinctQuestions(loadQuestions(file));

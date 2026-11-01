@@ -353,7 +353,10 @@ function selfTest() {
   const issues = [];
   const script = fileURLToPath(import.meta.url);
   const base = {
-    dataset: 'bird-mini-dev',
+    // The fixture copies a real artifact, and the one it copied carried the literal this
+    // repository has just stopped writing: a dev run whose `dataset` said Mini-Dev. Corrected
+    // here so the self-test does not teach the shape it exists to catch.
+    dataset: 'bird-dev',
     split: 'dev',
     dialect: 'SQLite',
     model: 'deepseek-chat',
