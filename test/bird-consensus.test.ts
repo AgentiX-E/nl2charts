@@ -318,9 +318,15 @@ describe('the report', () => {
     expect(row).toContain('—');
   });
 
-  it('accepts the selector when no call-free rule comes within the split resolution', () => {
+  it('refuses to call a 10pp lead established when two discordant pairs produced it', () => {
     // Seventeen questions every rule answers, two the selector alone answered (its record names no
     // correct candidate, which is the point), and one nobody answered: a 10pp gap on twenty.
+    //
+    // This bank used to assert "the fourth call is earning its price", and that assertion was the
+    // defect: the gap rests on two discordant pairs, the artifact resolves 19.80pp from them, and
+    // a 10pp difference inside a 19.80pp resolution is not a difference this run measured. The
+    // margin (2.30pp) is not the binding number here, and printing it as one is what made a
+    // 600-question sample quotable against a 1,532-question threshold.
     const body = {
       split: 'dev',
       cases: [
@@ -330,14 +336,36 @@ describe('the report', () => {
         one('select-mixed', 20, false, ['a:no:SELECT 1:121', 'b:no:SELECT 22:131', 'c:no:SELECT 333:141']),
       ],
     };
-    expect(run(body).join('\n')).toContain('the fourth call is earning its price');
-    // A margin above the 10pp gap says the same gap is under what a split of this size resolves.
-    expect(run(body, ['--margin', '12']).join('\n')).toContain('the fourth call buys less than the split can resolve');
+    const lines = run(body).join('\n');
+    expect(lines).toContain('first is 10.00pp behind the selector on select-mixed');
+    expect(lines).toContain('this artifact resolves only 19.81pp');
+    expect(lines).toContain('the size of that lead is not measured by this run');
+    expect(lines).not.toContain('earning its price');
+    // A margin above the 10pp gap says the same gap is inside the caller's line — and the third
+    // sentence appears only when the stated margin is also finer than the evidence.
+    expect(run(body, ['--margin', '12']).join('\n')).toContain('the stated margin is finer than the evidence');
+  });
+
+  it('accepts the selector when a gap inside the margin is also inside the resolution', () => {
+    // 200 questions, the selector 20 ahead, 20 discordant pairs: the artifact resolves 6.26pp, so a
+    // 25pp margin is coarser than both the gap (20pp) and the resolution, and the call it buys is
+    // measurably worthless.
+    const cases = [
+      ...Array.from({ length: 160 }, (_, index) => one('select-mixed', index + 1, true, ['a:yes:SELECT 1:111', 'b:no:SELECT 22:222'])),
+      ...Array.from({ length: 20 }, (_, index) => one('select-mixed', 161 + index, true, ['a:no:SELECT 1:444', 'b:no:SELECT 22:555'])),
+      ...Array.from({ length: 20 }, (_, index) => one('select-mixed', 181 + index, false, ['a:no:SELECT 1:777', 'b:no:SELECT 22:888'])),
+    ];
+    expect(run({ split: 'dev', cases }, ['--margin', '25']).join('\n')).toContain('the fourth call buys less than the split can resolve');
+    // And at the pre-registered 2.30pp the same bank earns its price, because the gap clears both
+    // numbers: 20pp observed against a 6.26pp resolution.
+    expect(run({ split: 'dev', cases }).join('\n')).toContain('beyond the 6.26pp this artifact resolves — the fourth call is earning its price');
   });
 
   it('says when a free rule is ahead, rather than printing a negative gap', () => {
     // Two questions where the first candidate was right and the selector took another one: an
-    // artifact can improve by deleting a call, and the sentence has to be able to say so.
+    // artifact can improve by deleting a call, and the sentence has to be able to say so. Two
+    // questions cannot resolve anything — one discordant pair is a 100pp resolution — and the
+    // verdict says that too rather than letting "50pp ahead" stand on its own.
     const body = {
       split: 'dev',
       cases: [
@@ -345,7 +373,9 @@ describe('the report', () => {
         one('select-mixed', 2, true, ['a:yes:SELECT 1:444', 'b:no:SELECT 22:555', 'c:no:SELECT 333:666']),
       ],
     };
-    expect(run(body).join('\n')).toContain('first is within 2.30pp of the selector on select-mixed (50.00pp ahead of it)');
+    const lines = run(body).join('\n');
+    expect(lines).toContain('50.00pp ahead of it');
+    expect(lines).toContain('this artifact resolves only 100.00pp');
   });
 
   it('spends no call on three of the five rules', () => {
@@ -366,6 +396,40 @@ describe('the report', () => {
   it('reports agreement it could not measure instead of a zero', () => {
     const lines = run({ split: 'dev', cases: [one('select-mixed', 1, true, ['a:yes', 'b:no'])] });
     expect(lines.join('\n')).toContain('agreement unmeasured on 1 question(s)');
+  });
+
+  it('counts the questions where agreement is undefined, so the arithmetic closes', () => {
+    // A question with one candidate is neither unanimous nor divided. `41356370371`'s dev artifact
+    // had 5 of them on `select-mixed`, and they were simply absent from the column: a reader
+    // adding `unanimous`, `unmeasured` and the divided rows could not reach the case count.
+    const cases = [
+      one('select-mixed', 1, true, ['a:yes:SELECT 1:111']),
+      one('select-mixed', 2, true, []),
+      one('select-mixed', 3, true, ['a:yes:SELECT 1:111', 'b:yes:SELECT 22:111']),
+      one('select-mixed', 4, true, ['a:yes', 'b:no']),
+      one('select-mixed', 5, true, ['a:no:SELECT 1:111', 'b:yes:SELECT 22:222']),
+    ];
+    const arm = (readCorpus({ split: 'dev', cases }).reading[0] as NonNullable<ReturnType<typeof readCorpus>['reading'][number]>);
+    expect(arm.cases).toBe(5);
+    expect(arm.agreementSkipped).toBe(2);
+    expect(arm.unmeasured).toBe(1);
+    expect(arm.unanimous).toBe(1);
+    expect(arm.unanimous + arm.unmeasured + arm.agreementSkipped).toBeLessThanOrEqual(arm.cases);
+    const lines = run({ split: 'dev', cases }).join('\n');
+    expect(lines).toContain('agreement not applicable on 2 question(s): fewer than two candidates');
+  });
+
+  it('prints the resolution its own pairing supports beside the stated margin', () => {
+    // The margin is the caller's number and the resolution is the artifact's, and the report says
+    // both: a criterion line that printed only the first made a 600-question sample look like it
+    // had been judged at the 1,532-question threshold.
+    const cases = [
+      ...Array.from({ length: 160 }, (_, index) => one('select-mixed', index + 1, true, ['a:yes:SELECT 1:111', 'b:no:SELECT 22:222'])),
+      ...Array.from({ length: 20 }, (_, index) => one('select-mixed', 161 + index, true, ['a:no:SELECT 1:444', 'b:no:SELECT 22:555'])),
+      ...Array.from({ length: 20 }, (_, index) => one('select-mixed', 181 + index, false, ['a:no:SELECT 1:777', 'b:no:SELECT 22:888'])),
+    ];
+    const lines = run({ split: 'dev', cases }).join('\n');
+    expect(lines).toContain("criterion: a call-free rule replaces the selector when it scores within 2.30pp of it (this artifact's own pairing on select-mixed resolves 6.26pp)");
   });
 
   it('limits itself to the arm it was asked for', () => {

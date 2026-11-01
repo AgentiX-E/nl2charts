@@ -38,6 +38,10 @@
  * - It does not price a rule it cannot see the input for. When the artifact carries no
  *   fingerprint at all, the modal column is a dash with the reason, not a zero: an artifact
  *   written before this field existed would otherwise read as "consensus loses 62 points".
+ * - It does not decide what counts as a difference. The margin is the caller's, and the
+ *   resolution is the artifact's — computed from the discordant pairs of the very pairing the
+ *   verdict is about. Both are printed, and the verdict says which one binds, because a
+ *   threshold finer than the evidence turns a finding into an open question without saying so.
  *
  * The aggregate that matters most is not in the rule columns: `unanimous` counts the questions
  * where every candidate returned the same result set, and how many of those are wrong. A set
@@ -46,7 +50,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { mcnemarExact } from '@agentix-e/nl2charts-devkit';
+import { mcnemarExact, pairedResolution } from '@agentix-e/nl2charts-devkit';
 
 /** The artifact fields this harness reads. Anything else is ignored, so older artifacts join. */
 export interface ConsensusArtifact {
@@ -203,6 +207,16 @@ export interface ArmReading {
   readonly unanimous: number;
   /** How many of those the arm answered wrongly — the correlated-error count. */
   readonly unanimousWrong: number;
+  /**
+   * Questions whose candidate set holds fewer than two records, so agreement is undefined.
+   *
+   * These sat outside the unanimity column without a count of their own: a one-candidate
+   * question is neither unanimous nor divided, and a reader reconciling `unanimous` against the
+   * arm's case count found a hole with no number in it. The count is printed so the arithmetic
+   * closes — `unanimous + unmeasured + agreementSkipped` is every case, and the remainder is
+   * the divided ones.
+   */
+  readonly agreementSkipped: number;
   /** Questions whose candidates carry no fingerprint, so agreement is unknown rather than zero. */
   readonly unmeasured: number;
   /**
@@ -311,6 +325,7 @@ export function readCorpus(artifact: ConsensusArtifact): Corpus {
       let unanimous = 0;
       let unanimousWrong = 0;
       let unmeasured = 0;
+      let agreementSkipped = 0;
       let unrecorded = 0;
       for (const row of rows) {
         for (const candidate of row.candidates) {
@@ -319,7 +334,10 @@ export function readCorpus(artifact: ConsensusArtifact): Corpus {
           if (candidate.fingerprint !== undefined) fingerprints += 1;
         }
         if (row.passed && !row.candidates.some((candidate) => candidate.correct)) unrecorded += 1;
-        if (row.candidates.length < 2) continue;
+        if (row.candidates.length < 2) {
+          agreementSkipped += 1;
+          continue;
+        }
         const prints = row.candidates.map((candidate) => candidate.fingerprint);
         if (prints.some((value) => value === undefined)) {
           unmeasured += 1;
@@ -330,7 +348,7 @@ export function readCorpus(artifact: ConsensusArtifact): Corpus {
           if (!row.passed && !row.candidates.some((candidate) => candidate.correct)) unanimousWrong += 1;
         }
       }
-      return { arm, cases: rows.length, scores, against, unanimous, unanimousWrong, unmeasured, unrecorded };
+      return { arm, cases: rows.length, scores, against, unanimous, unanimousWrong, unmeasured, agreementSkipped, unrecorded };
     })
     .sort((left, right) => left.arm.localeCompare(right.arm));
   return { reading, ids, single, statements, fingerprints, records };
@@ -338,16 +356,23 @@ export function readCorpus(artifact: ConsensusArtifact): Corpus {
 
 export interface ConsensusSettings {
   readonly artifact: string;
-  /** The smallest difference the split can resolve, in percentage points. */
+  /** The smallest difference the caller is willing to call a difference, in percentage points. */
   readonly margin: number;
   /** Restrict the reading to one arm. */
   readonly arm?: string;
   readonly json: boolean;
 }
 
-/** The dev split's published MDE, used when a caller does not state one. */
+/**
+ * The dev split's published MDE, used when a caller does not state one.
+ *
+ * It is a *pre-registered* number, and the artifact does not know it: 2.30pp is what the full
+ * 1,532-question dev split resolves, so a 600-question sample judged against it is judged by a
+ * threshold twice as fine as its own. The report therefore prints the resolution the artifact
+ * computes from its own discordant pairs beside this line, and the verdict says which of the two
+ * is binding rather than quietly taking the smaller one.
+ */
 export const DEFAULT_MARGIN_PP = 2.3;
-
 export function resolveConsensusSettings(argv: readonly string[]): ConsensusSettings {
   // Unknown arguments are refused, and refused *first*, for the reason `pool.ts` records: CI ran
   // that harness with the path as a bare positional, the flag was dropped, and the step failed
@@ -447,9 +472,16 @@ export function reportLines(corpus: Corpus, settings: ConsensusSettings, artifac
     if (arm.unmeasured > 0) {
       lines.push(`    agreement unmeasured on ${String(arm.unmeasured)} question(s): a candidate there carries no fingerprint`);
     }
+    if (arm.agreementSkipped > 0) {
+      // Printed because the unanimity column is read against the arm's case count, and a question
+      // with one candidate is neither unanimous nor divided: without this line the difference is a
+      // hole a reader has to guess at. `bird-dev`'s 600-case artifact had 5 of them on `select-mixed`.
+      lines.push(
+        `    agreement not applicable on ${String(arm.agreementSkipped)} question(s): fewer than two candidates, so there is nothing to agree`,
+      );
+    }
   }
   lines.push('');
-  lines.push(`  criterion: a call-free rule replaces the selector when it scores within ${settings.margin.toFixed(2)}pp of it`);
   const ranked = corpus.reading
     .flatMap((arm) => {
       const model = (arm.scores.find((entry) => entry.rule === 'model') as RuleScore).correct;
@@ -467,11 +499,34 @@ export function reportLines(corpus: Corpus, settings: ConsensusSettings, artifac
   // sentence: the sign is stated rather than assumed, because the artifact this was first run on
   // put `first` in front of the selector on `select`.
   const standing = gap >= 0 ? `${gap.toFixed(2)}pp behind` : `${Math.abs(gap).toFixed(2)}pp ahead of`;
+  // What this artifact can resolve, from its own discordant pairs on the very pairing the verdict
+  // is about. The two filters above and in `readCorpus` are the same one — a rule whose input is
+  // missing on every question — so a rule the ranking named always has a pairing here.
+  const bestArm = corpus.reading.find((arm) => arm.arm === best.arm) as ArmReading;
+  const bestPairing = bestArm.against.find((entry) => entry.rule === best.rule) as Pairing;
+  const resolution = pairedResolution(bestPairing.wins, bestPairing.losses, total).mde * 100;
+  // The margin is stated by the caller and the resolution is computed by the artifact, and until
+  // the second was printed beside the first, a 600-case dev sample was judged against a 2.30pp
+  // line derived from 1,532 questions. The verdict now says which of the two is binding: a margin
+  // finer than the evidence turns the sentence from a finding into an open question, in both
+  // directions — the artifact cannot say the call is worthless, and cannot say it is worth it.
   lines.push(
-    gap <= settings.margin
-      ? `  verdict: ${best.rule} is within ${settings.margin.toFixed(2)}pp of the selector on ${best.arm} (${standing} it) — the fourth call buys less than the split can resolve`
-      : `  verdict: ${best.rule} is ${standing} the selector on ${best.arm} — the fourth call is earning its price`,
+    `  criterion: a call-free rule replaces the selector when it scores within ${settings.margin.toFixed(2)}pp of it` +
+      ` (this artifact's own pairing on ${best.arm} resolves ${resolution.toFixed(2)}pp)`,
   );
+  if (gap <= settings.margin) {
+    lines.push(
+      resolution <= settings.margin
+        ? `  verdict: ${best.rule} is within ${settings.margin.toFixed(2)}pp of the selector on ${best.arm} (${standing} it), and ${resolution.toFixed(2)}pp is what this artifact resolves — the fourth call buys less than the split can resolve`
+        : `  verdict: ${best.rule} is inside the ${settings.margin.toFixed(2)}pp line on ${best.arm} (${standing} it), but this artifact resolves only ${resolution.toFixed(2)}pp — the stated margin is finer than the evidence, so this run does not measure what the call is worth`,
+    );
+  } else {
+    lines.push(
+      resolution <= gap
+        ? `  verdict: ${best.rule} is ${standing} the selector on ${best.arm}, beyond the ${resolution.toFixed(2)}pp this artifact resolves — the fourth call is earning its price`
+        : `  verdict: ${best.rule} is ${standing} the selector on ${best.arm} by more than the ${settings.margin.toFixed(2)}pp line, but this artifact resolves only ${resolution.toFixed(2)}pp — the size of that lead is not measured by this run`,
+    );
+  }
   return lines;
 }
 

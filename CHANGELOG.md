@@ -8,6 +8,31 @@ cannot be argued with.
 
 ### Added
 
+- **A reasoning model in one of three slots: the ceiling moves and the conversion eats it.** Run
+  `41356370371` ran `select-mixed,select-cross` over 600 stratified dev questions with
+  `deepseek-reasoner` in the `inline+evidence@second` slot. Criteria were written before the reading;
+  neither is met:
+
+  | arm | score | ceiling | conversion | `first` | `shortest` | `modal` | selector |
+  | --- | --- | --- | --- | --- | --- | --- | --- |
+  | `select-mixed` | **63.67%** | 65.50% | 97.20% | 62.67% | 63.00% | 62.50% | 63.67% |
+  | `select-cross` | 62.50% | **68.33%** | **91.46%** | 60.00% | **63.17%** | 63.00% | 62.50% |
+
+  The ceiling gains **+2.83pp** — 22 questions where only the reasoner is right, 5 where it displaced
+  a right answer, net +17 — and the selector converts 16 of the 22, then loses 35 of the 410 it could
+  have had. Net **−1.17pp** (25 won / 18 lost, p=0.3604), so the union is 68.33% against a 70% bar and
+  the pairing is behind rather than ahead. On the 22 questions the reasoner adds, the correct answer
+  is a **lone dissenting slot in 20**: the two chat candidates agree and are both wrong. A vote cannot
+  take those; the model selector takes 73% of them, which is why it beats `first` there
+  (11 won / 26 lost, p=0.0201) while still scoring *below* zero-call `shortest` (63.17% vs 62.50%).
+  The lever is conversion, not generation, and `select-balanced` is the symmetry test that separates
+  "the reasoner is better" from "the reasoner is different".
+
+- **`unanimous` now counts what it cannot judge.** A question with fewer than two candidates is
+  neither unanimous nor divided, and those questions were absent from the column with no count of
+  their own — 5 on `select-mixed`, 1 on `select-cross` in the run above. Printed now, so
+  `unanimous + unmeasured + skipped` is every case.
+
 - **The other factor of the score, priced without a call: which selection rule kept the answer.**
   A per-candidate `correct` records that a loss happened and cannot say which rule would have
   avoided it, so every candidate selection rule cost a run. Each artifact candidate now carries its
@@ -320,6 +345,27 @@ cannot be argued with.
   consulting it — instead of being five lines of shell nobody can test.
 
 ### Fixed
+
+- **`bird-dev.yml` priced an arm nobody ran.** The workflow gained an `arms` input; five analysis
+  steps below it kept the literal `--arm select`. Run `41356370371` dispatched
+  `select-mixed,select-cross`, finished its evaluation, passed its floor, and then failed four steps
+  later with `eval/out/bird-eval.json has no arm select; it holds select-cross, select-mixed` — and
+  the other four steps would have said the same, because they were all reading a name that belonged
+  to a different dispatch. The steps now substitute `tools/bird-arm.mjs`, which answers with the
+  first arm the run's own `BIRD_ARMS` asked for that the artifact holds, else the largest population
+  (ties alphabetical), prints nothing but that name on stdout, and fails rather than printing an
+  empty one. Tested for both edges and for the stdout contract, and the workflow is pinned to have
+  no literal arm left on any `run:` line.
+
+- **A margin finer than the evidence was published as a finding.** The criterion line printed the
+  caller's margin and nothing else, so `bench:bird:consensus` judged a 600-question dev artifact
+  against 2.30pp — the resolution of the full 1,532-question split — and called a 10pp gap resting on
+  two discordant pairs "earning its price". The margin is now what the caller states and the
+  resolution is what the artifact computes from the discordant pairs of the pairing the verdict is
+  about, both printed, with four verdicts instead of two: a gap inside both numbers leaves the call
+  measurably worthless, one that clears both has earned its price, and the two mixed cases say this
+  run measured neither. The 20-question bank that asserted "earning its price" now asserts that it
+  does not — the assertion was the defect.
 
 - **A candidate set of one was recorded as no candidate set.** `run.ts` spread `candidates` only
   when the verdict list held two or more members, so a case where two of three samples died kept no

@@ -4695,6 +4695,89 @@ in the rules, and both are the kind that produce a plausible table:
 Both were found by reading the output against the arithmetic, not by a test — which is why the
 regression banks were added after the fix rather than before it.
 
+**A third, found by pointing the instrument at a 600-question sample.** The criterion line printed
+the caller's margin and nothing else, so a 600-question dev artifact was judged against 2.30pp —
+the resolution of the full 1,532-question split — and a 10pp gap resting on two discordant pairs
+was called "earning its price". The margin is the caller's number; the resolution is the
+artifact's, computed from the discordant pairs of the very pairing the verdict is about
+(`pairedResolution`, the same function `bird-summary` uses). The report now prints both and the
+verdict says which binds:
+
+```
+criterion: a call-free rule replaces the selector when it scores within 2.30pp of it (this artifact's own pairing on select-cross resolves 3.17pp)
+verdict: shortest is inside the 2.30pp line on select-cross (0.67pp ahead of it), but this artifact resolves only 3.17pp — the stated margin is finer than the evidence, so this run does not measure what the call is worth
+```
+
+Four verdicts, not two, because a gap inside the margin and a resolution coarser than the margin are
+independent: *buys less than the split can resolve* needs both to hold, *earning its price* needs the
+gap to clear both, and the other two cases say plainly that this run measured neither. The old
+20-question bank that asserted "earning its price" now asserts that it does not — the assertion was
+the defect, not the rule.
+
+### A reasoning model in one slot, and what the selector does with it
+
+The instrument above was built to answer a question that costs no calls. The question it was built
+*for* costs them: does a fourth call change anything when the candidate that differs is a reasoning
+model rather than the same prompt rephrased? Run `41356370371` dispatched `select-mixed,select-cross`
+over 600 stratified dev questions with `deepseek-reasoner` in the `inline+evidence@second` slot, and
+the criteria were written before the reading: a union of at least 70% inside the same four-call
+budget, and a paired difference of at least 2.30pp against `select-mixed` on the same questions.
+
+| arm | score | ceiling | conversion | selector loss |
+| --- | --- | --- | --- | --- |
+| `select-mixed` — three `deepseek-chat` prompts | 63.67% (382/600) | 65.50% (393) | 97.20% | 1.83pp |
+| `select-cross` — two chat, one `deepseek-reasoner` | 62.50% (375/600) | **68.33%** (410) | **91.46%** | 5.83pp |
+
+Neither criterion is met. The union is 68.33%, 1.67pp short of 70%; the paired difference is
+**−1.17pp** (25 won / 18 lost, p=0.3604), so the cross arm is behind rather than ahead. What moved is
+the ceiling: **+2.83pp**, the largest single lever on that factor any arm in this project has
+produced. The reason it did not reach the score is the other factor, and the decomposition is exact:
+
+| | questions | converted by the selector |
+| --- | --- | --- |
+| the reasoner adds a correct candidate the chat arm never had | 22 | 16 |
+| the reasoner displaces a correct candidate the chat arm had | 5 | 0 |
+| net ceiling | **+17** | 16 |
+
+The reasoner alone is right on 60.00% — below each of the two chat candidates (63.19% and 63.30%) —
+and it is the *only* correct slot on 23 questions, of which the selector kept 16. On the 22 questions
+where it adds an answer, the correct result is a **lone minority of one slot in 20 of them**: the two
+chat candidates agree with each other and are both wrong, and only the third candidate dissents
+correctly. A three-way vote cannot take those, and the recorded selector takes 73% of them because it
+reads the statements rather than the vote.
+
+The same instrument then asks the question the run was not designed to answer, and answers it:
+
+| arm | `first` | `shortest` | `modal` | `model` | `oracle` | unanimous (wrong) |
+| --- | --- | --- | --- | --- | --- | --- |
+| `select-cross` | 60.00% | **63.17%** | 63.00% | 62.50% | 68.33% | 463 (29.59%) |
+| `select-mixed` | 62.67% | 63.00% | 62.50% | 63.67% | 65.50% | 539 (33.40%) |
+
+On the cross arm, **the shortest statement scores higher than the selector** — 63.17% against
+62.50%, 25 won / 21 lost, p=0.6587 — so the fourth call is worth less than nothing on that pool while
+it is worth 0.67pp (also unresolvable) on the mixed one. The selector beats `first` there (11 won /
+26 lost, p=0.0201), so it is doing something; it is simply not doing enough to hold a pool whose
+third candidate dissents. On this sample the resolution is 3.17pp against a stated margin of 2.30pp,
+and the verdict says so: this run does not measure what the call is worth, in either arm.
+
+That is the next lever, and it is not generation. Two things follow from the same table:
+
+1. **A pool with a dissenting slot needs a selector, and the selector needs to be told that
+   agreement is evidence rather than proof.** The 20-of-22 shape is exactly the correlated-error case
+   the `unanimous` column counts from the other side: unanimous sets are 77.2% of the cross arm and
+   29.59% of them are wrong, against 89.8% and 33.40% on the mixed arm — a dissenting slot buys away
+   a third of the correlated-error mass for 2.83pp of ceiling.
+2. **`select-balanced` is the symmetry test, not a rerun.** Two reasoner slots and one chat slot make
+   the dissent the majority, which separates "the reasoner is better" from "the reasoner is
+   different": if the ceiling moves again while the conversion stays at 91%, the loss is the
+   selector's; if the ceiling falls, the reasoner's value was dissent itself and it needs one slot.
+
+The `unanimous` arithmetic closes too, which it did not before: a question with fewer than two
+candidates is neither unanimous nor divided, and those questions were absent from the column without a
+count — 5 on `select-mixed` and 1 on `select-cross`. Printed now, so `unanimous + unmeasured +
+skipped` is every case and the divided rows (56 and 136 here) are what remains.
+
+
 ### What the fingerprint is for, on the run after this one
 
 The `modal` rule is the cheapest consensus there is and the one every reader assumes is already in

@@ -526,3 +526,22 @@ that differs in method rather than in prompt or in draw.
   on `select-mixed` (13:30, p=0.0137). Choosing is guessing when the candidates are draws of one
   prompt and deciding when they differ in content — the same mechanism the ceiling was measured to
   assume.
+- **A threshold finer than the evidence is not a finding.** Every verdict in `eval/bird` compares a
+  difference against a margin, and the margin was a constant: 2.30pp, the resolution of the full dev
+  split. That constant then judged a 600-question sample, where the same design resolves 3.17pp, and
+  a 10pp gap resting on two discordant pairs was published as "earning its price". The margin is now
+  what the caller states and the resolution is what the artifact computes from the discordant pairs of
+  the very pairing the verdict is about (`pairedResolution`), and both are printed. The four resulting
+  sentences say which number binds: a gap inside the margin *and* inside the resolution leaves the
+  call measurably worthless; a gap that clears both has earned its price; the two mixed cases say this
+  run measured neither, in the direction it failed to measure. The rule generalises past this
+  instrument — an artifact that carries its own sample size can price its own claims, and one that
+  does not should not be quoted at someone else's resolution.
+- **A step that names an arm may be naming an arm nobody ran.** `bird-dev.yml` gained an `arms` input
+  and five analysis steps below it kept the literal `--arm select`, which is an arm the Mini-Dev chain
+  always runs and a dev dispatch runs only on request: run `41356370371` finished its evaluation,
+  passed its floor, and then failed four steps later with "has no arm select; it holds select-cross,
+  select-mixed". The fix is not a default and not a shell prefix match — the first is wrong for every
+  dispatch but one and the second is a rule no test can hold — but `tools/bird-arm.mjs`, which answers
+  with the first arm the run's own `BIRD_ARMS` asked for that the artifact holds, else the largest
+  population, and is tested for both edges plus the contract that it prints nothing else on stdout.

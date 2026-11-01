@@ -71,10 +71,10 @@
       "branches": 96.62
     },
     "eval/bird/consensus.ts": {
-      "lines": 99.66,
-      "statements": 99.66,
+      "lines": 99.68,
+      "statements": 99.68,
       "functions": 100,
-      "branches": 98.28
+      "branches": 98.38
     },
     "eval/bird/data.ts": {
       "lines": 100,

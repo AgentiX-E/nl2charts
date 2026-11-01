@@ -236,6 +236,20 @@ so it is printed beside every p-value — a p-value answers whether a difference
 zero, never whether the run was able to see it. `casesForClaim` is the inverse
 question: how many cases a given delta would need.
 
+**Pre-registered margin** — The difference a caller says counts, stated before the
+reading. It is not the same number as the Resolution and must not be finer than it:
+a margin of 2.30pp applied to a 600-question sample resolves nothing at that width,
+so the verdict names the binding number instead of taking the smaller one. The
+margin is chosen; the resolution is measured.
+
+**Dissenting candidate** — The one slot whose result differs from the others on a
+question. A pool of draws from one prompt produces dissent that is nearly free of
+information (the statements differ by wording), while a pool with a different model
+in one slot produces dissent that is worth a ceiling: on `select-cross` the correct
+answer was a lone dissenter on 20 of the 22 questions the second model added. A
+three-way vote cannot take those questions, which is why conversion — not ceiling —
+is the factor that decides a cross-model pool.
+
 **Candidate independence** — Whether the prompts an arm declares are actually
 distinct for a question. An arm that names three prompts and sends two identical
 ones is not the arm its label says it is; the artifact counts those questions
