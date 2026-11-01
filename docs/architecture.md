@@ -397,7 +397,8 @@ packages/          8 packages, one responsibility each
 eval/              golden set, deterministic fixture, baseline, ablations
 tools/             gates: layering, platform, exports, budgets, coverage, summary
 test/              cross-package public-surface snapshot
-.github/workflows/ ci.yml (quality + benchmark)
+.github/workflows/ ci.yml (four jobs: changes, quality, benchmark, and the two
+                   model-measuring jobs gated on the first)
 ```
 
 ## Quality gates
@@ -414,6 +415,19 @@ test/              cross-package public-surface snapshot
 | `pnpm gate:budgets` | a package exceeded its gzip ceiling |
 | `pnpm gate:eval-coverage` | an `eval/` file dropped below its recorded coverage |
 | `pnpm bench` | a control broke (oracle ≠ 100% or empty ≠ 0%) |
+
+### What a push has to measure
+
+Two of `ci.yml`'s jobs spend model calls: the BIRD Mini-Dev job sends thirteen arms over
+496 questions (~6,400 completions) and the live job sends three passes over 210 cases. The
+first job in the workflow, `changes`, decides whether they run, using
+`tools/ci-scope.mjs` — a file whose own name ends in `.md` cannot reach a prompt, so a push
+that only edits Markdown does not buy a completion. A dispatched run always measures, and
+two edges resolve towards measuring rather than towards saving: a change set the API could
+not describe, and a list of 300 or more files (the commit endpoint's page size, which is
+where a list may have been cut). The rule is unit-tested in `test/ci-scope.test.ts`,
+including both edges, because a filter written as five lines of shell is a filter nobody
+can test.
 
 ## Design decisions worth knowing
 

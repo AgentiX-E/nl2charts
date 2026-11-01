@@ -1,0 +1,146 @@
+/**
+ * A documentation commit must not buy a model call.
+ *
+ * `ci.yml` measures on every push to master: thirteen arms over 496 questions (~6,400
+ * completions) and three passes over 210 live cases. Round 36 pushed twice in one round,
+ * the second time for `benchmarks.md` and a `CHANGELOG` entry, and both pushes re-priced
+ * the whole chain — 12,800 completions to learn nothing. Nothing in a Markdown file is
+ * read by a prompt at runtime, so the file name is the whole rule.
+ *
+ * The tests below pin the rule and its two conservative edges, and then pin that the
+ * workflow actually consults it: a filter nobody calls is a comment with a shebang.
+ */
+import { describe, expect, it } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { needsModel, render, isDocumentation, TRUNCATED_AT } from '../tools/ci-scope.mjs';
+
+describe('a change set that only edits documentation', () => {
+  it('does not need a model call', () => {
+    const result = needsModel(['docs/benchmarks.md', 'CHANGELOG.md', 'README.md']);
+    expect(result.measure).toBe(false);
+    expect(result.reason).toContain('Markdown');
+    expect(result.files).toBeUndefined();
+  });
+
+  it('treats the suffixes Markdown is written with as Markdown', () => {
+    // `README.MD` on a case-insensitive filesystem and `notes.markdown` are the same
+    // statement about what a prompt can read.
+    expect(isDocumentation('README.MD')).toBe(true);
+    expect(isDocumentation('docs/notes.markdown')).toBe(true);
+    expect(isDocumentation('docs/notes.txt')).toBe(false);
+  });
+
+  it('reads the last segment, not the whole path', () => {
+    // A directory called `docs.md` holding a `.txt` is a change to a text file; a reader
+    // that matched on the path would skip it.
+    expect(isDocumentation('docs.md/notes.txt')).toBe(false);
+    expect(isDocumentation('docs.md/notes.md')).toBe(true);
+  });
+
+  it('ignores blank lines, which is how a here-doc ends', () => {
+    expect(needsModel(['docs/guide.md', '', '  ']).measure).toBe(false);
+  });
+});
+
+describe('a change set with code in it', () => {
+  it('names the files that forced the measurement', () => {
+    const result = needsModel(['docs/guide.md', 'packages/ai/src/prompt.ts', 'test/a.test.ts']);
+    expect(result.measure).toBe(true);
+    expect(result.files).toEqual(['packages/ai/src/prompt.ts', 'test/a.test.ts']);
+    expect(result.reason).toContain('2 of 3');
+  });
+
+  it('counts a workflow edit as code', () => {
+    // A change to `ci.yml` is not read by a prompt either, but it decides what the run
+    // does, and a filter that skipped it could skip the run that proves the edit works.
+    expect(needsModel(['.github/workflows/ci.yml']).measure).toBe(true);
+  });
+});
+
+describe('the two edges where the list cannot be trusted', () => {
+  it('measures a push it cannot describe', () => {
+    // "No files reported" is a reporting failure, not a statement that nothing changed.
+    const result = needsModel([]);
+    expect(result.measure).toBe(true);
+    expect(result.reason).toContain('undescribed');
+  });
+
+  it('measures a list long enough to have been truncated', () => {
+    // The commit endpoint stops at 300 files without saying so; the count is the only
+    // signal that the list may be missing the one file that matters.
+    const docs = Array.from({ length: TRUNCATED_AT }, (_, index) => `docs/page-${index}.md`);
+    const result = needsModel(docs);
+    expect(result.measure).toBe(true);
+    expect(result.reason).toContain(`${TRUNCATED_AT}`);
+    // One fewer is a complete list, and a complete list of Markdown is still Markdown.
+    expect(needsModel(docs.slice(1)).measure).toBe(false);
+  });
+});
+
+describe('what the workflow appends to $GITHUB_OUTPUT', () => {
+  it('emits the key the job reads, and the reason a human reads', () => {
+    const lines = render(needsModel(['docs/a.md'])).split('\n');
+    expect(lines.at(-1)).toBe('models=false');
+    expect(lines[0]).toContain('Markdown');
+  });
+
+  it('prints at most five files, and says how many it hid', () => {
+    // The step log is the only place a reader learns why a run measured, and a hundred
+    // stacked paths push the reason off the visible part of the panel.
+    const files = Array.from({ length: 8 }, (_, index) => `packages/a${index}.ts`);
+    const lines = render(needsModel(files)).split('\n');
+    expect(lines.filter((line) => line.startsWith('  packages/'))).toHaveLength(5);
+    expect(lines).toContain('  … and 3 more');
+    expect(lines.at(-1)).toBe('models=true');
+  });
+});
+
+describe('the command the workflow calls', () => {
+  const run = (files: string[]): string =>
+    execFileSync(process.execPath, [resolve(process.cwd(), 'tools/ci-scope.mjs')], {
+      input: files.join('\n'),
+      encoding: 'utf8',
+    });
+
+  it('reads the file list from stdin and prints one output line', () => {
+    expect(run(['docs/benchmarks.md', 'CHANGELOG.md']).trim().endsWith('models=false')).toBe(true);
+    expect(run(['eval/bird/run.ts']).trim().endsWith('models=true')).toBe(true);
+  });
+});
+
+describe('ci.yml consults the filter', () => {
+  const text = readFileSync(resolve(process.cwd(), '.github/workflows/ci.yml'), 'utf8');
+  const jobsSection = text.slice(text.indexOf('\njobs:\n') + '\njobs:\n'.length);
+  const block = (id: string): string => {
+    const start = jobsSection.indexOf(`\n  ${id}:\n`);
+    expect(start, id).toBeGreaterThan(-1);
+    const rest = jobsSection.slice(start + 1);
+    const next = rest.slice(1).search(/\n {2}[a-z][\w-]*:\n/);
+    return next === -1 ? rest : rest.slice(0, next + 1);
+  };
+
+  it('has a job that reports whether the push touches code', () => {
+    const changes = block('changes');
+    expect(changes).toContain('outputs:');
+    expect(changes).toContain('models: ${{ steps.scope.outputs.models }}');
+    expect(changes).toContain('node tools/ci-scope.mjs');
+  });
+
+  it('gates both jobs that spend a model call on it', () => {
+    for (const id of ['bird-eval', 'live-eval']) {
+      const body = block(id);
+      expect(body, id).toContain('needs: [quality, changes]');
+      expect(body, id).toContain("needs.changes.outputs.models == 'true'");
+    }
+  });
+
+  it('leaves the jobs that spend no model call alone', () => {
+    // `quality` and `benchmark` are the two jobs whose cost is a runner minute. Gating
+    // them would make a documentation fix wait for a decision it cannot affect.
+    for (const id of ['quality', 'benchmark']) {
+      expect(block(id), id).not.toContain('needs.changes.outputs.models');
+    }
+  });
+});

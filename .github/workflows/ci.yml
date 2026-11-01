@@ -21,6 +21,53 @@ permissions:
   contents: read
 
 jobs:
+  # What this push has to measure.
+  #
+  # Two of the four jobs below spend model calls — `bird-eval` sends thirteen arms over 496
+  # questions, `live-eval` sends three passes over 210 cases — and neither number can depend
+  # on a word in `docs/`. Round 36 pushed a `benchmarks.md` section and a `CHANGELOG` entry
+  # and re-priced the whole chain anyway: ~12,800 completions to learn nothing, which is the
+  # kind of spend that does not show up in a budget because it is called CI.
+  #
+  # The rule lives in `tools/ci-scope.mjs` and is tested there, not here: a filter written
+  # as five lines of shell is a filter nobody can test, and this one has two edges (an empty
+  # file list, and a list long enough for the commit endpoint to have truncated it) that
+  # both resolve towards measuring.
+  changes:
+    name: does this push touch anything a prompt reads
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      models: ${{ steps.scope.outputs.models }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          # A dispatch is an instruction to measure, and it never reaches the API: someone
+          # pressed the button on a number they wanted.
+          if [ "$EVENT" != "push" ]; then
+            echo "models=true" >> "$GITHUB_OUTPUT"
+            echo "dispatched run: measuring regardless of what the tree contains" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if ! files=$(gh api "repos/$REPO/commits/$SHA" --jq '.files[].filename'); then
+            # A filter that cannot read the change set must not become a filter that skips
+            # the run: the failure mode of measuring is a bill, the failure mode of not
+            # measuring is a publishable number that was never produced.
+            echo "models=true" >> "$GITHUB_OUTPUT"
+            echo "the commit endpoint could not be read, so this push is measured" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          printf '%s\n' "$files" | node tools/ci-scope.mjs | tee -a "$GITHUB_STEP_SUMMARY" >> "$GITHUB_OUTPUT"
+
   quality:
     name: quality gates
     runs-on: ubuntu-latest
@@ -179,8 +226,11 @@ jobs:
 
   live-eval:
     name: live NL to SQL evaluation
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/master')
-    needs: quality
+    if: >-
+      needs.quality.result == 'success' &&
+      needs.changes.outputs.models == 'true' &&
+      (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/master'))
+    needs: [quality, changes]
     runs-on: ubuntu-latest
     timeout-minutes: 45
     concurrency:
@@ -220,8 +270,11 @@ jobs:
 
   bird-eval:
     name: BIRD Mini-Dev external evaluation
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/master')
-    needs: quality
+    if: >-
+      needs.quality.result == 'success' &&
+      needs.changes.outputs.models == 'true' &&
+      (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/master'))
+    needs: [quality, changes]
     runs-on: ubuntu-latest
     timeout-minutes: 120
     concurrency:

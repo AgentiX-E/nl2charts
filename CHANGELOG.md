@@ -121,6 +121,30 @@ cannot be argued with.
   cannot overwrite each other. What it produces is the first complete attribution of the corpus:
   of 220 failures, 211 readable and 210 named, and **`grain`, `scale` and `window` are all zero**.
 
+### Changed
+
+- **A documentation commit no longer buys a model call.** `ci.yml` measured on every push to
+  master: thirteen BIRD arms over 496 questions (~6,400 completions) and three passes over 210
+  live cases. Round 36 pushed twice — the second time for a `benchmarks.md` section, a
+  `CHANGELOG` entry and a comment — and both pushes re-priced the whole chain, ~12,800
+  completions to learn nothing, because a change to Markdown cannot change what a prompt says or
+  what a model answers.
+
+  The workflow now starts with a `changes` job that asks `tools/ci-scope.mjs` whether any changed
+  file is something a prompt reads, and gates the two model-measuring jobs on the answer. The
+  rule is a property of the file name — a path whose last segment ends in `.md` or `.markdown` is
+  documentation — rather than a list of directories that drifts the first time someone adds a
+  document under `packages/`. A dispatched run always measures: pressing the button is an
+  instruction about a number someone wanted.
+
+  Two edges resolve towards measuring, because the two failure modes are not symmetric (a wasted
+  run is a bill, a skipped run is a number that was never produced and will still be quoted): a
+  change set the commit API could not describe is measured, and so is a list of 300 or more files,
+  which is the endpoint's page size and therefore the length at which it may have been cut. The
+  filter is unit-tested in `test/ci-scope.test.ts` — 14 cases covering both edges, the suffix
+  casing, a directory named `docs.md`, the `$GITHUB_OUTPUT` line, and the workflow actually
+  consulting it — instead of being five lines of shell nobody can test.
+
 ### Fixed
 
 - **The temperature was zero and could not be anything else, so a reasoning model could not be
