@@ -389,3 +389,13 @@ questions the calibration never saw, minus what the chosen one earned on them.
 question. It is a ceiling, not a target: no single strategy can reach it, which is why the gap
 between the oracle and the best fixed strategy is the size of the prize for routing rather than for
 calibration.
+
+**Leave-one-database-out** — A holdout that removes a whole database rather than a random slice of
+questions. A random fold lets a rule recognise the corpus it was fitted on; leaving the database out
+asks the question a deployment actually asks, which is whether a rule transfers to a schema it has
+never seen.
+
+**Router** — A rule that picks a strategy per question instead of once per deployment. In this engine
+a router is only worth building if it picks **within one call**, because choosing a four-call
+strategy is a purchase rather than a routing decision — and the measurement that would justify one
+(`bench:bird:route`) says the disagreements it would have to read are a coin flip.

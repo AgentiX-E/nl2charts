@@ -4,8 +4,8 @@
   "tolerancePp": 0.2,
   "measuredAt": "2026-11-01",
   "totals": {
-    "lines": 99.4,
-    "statements": 99.4,
+    "lines": 99.41,
+    "statements": 99.41,
     "functions": 100,
     "branches": 98.01
   },
@@ -202,6 +202,12 @@
       "functions": 100,
       "branches": 100
     },
+    "eval/bird/route.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 97.17
+    },
     "eval/bird/run.ts": {
       "lines": 99.37,
       "statements": 99.37,
@@ -236,7 +242,7 @@
       "lines": 98.73,
       "statements": 98.73,
       "functions": 100,
-      "branches": 97.46
+      "branches": 97.48
     },
     "eval/bird/strata.ts": {
       "lines": 99,

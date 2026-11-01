@@ -8,6 +8,28 @@ cannot be argued with.
 
 ### Added
 
+- **A router is priced and declined, and the reason is what the failures are made of.**
+  `bench:bird:route` asks the question the cold-start experiment left open: if a global strategy
+  switch cannot move at deployment scale, can a rule read *this* question and pick the better card?
+  It joins an existing artifact against the questions file, fits one-feature one-threshold rules in
+  both orientations over the arms that cost the same call, and scores them **leave-one-database-out**.
+
+  On dev (1,532 cases) every pair finds a rule that wins in sample — **+0.72pp**, **+0.39pp**,
+  **+0.07pp** — and every one of them **loses** out of fold: **−0.98pp**, **−0.98pp**, **−0.46pp**. The
+  two evidence cards disagree **66 : 65** (exact sign test **p = 1.0000**), which is what noise looks
+  like, and the census explains the rest: all five arms fail on 474 cases and **364 of them (76.8%)
+  are `values`** — the statement ran, with the right width, and returned the wrong number. **None**
+  are engine refusals. A router can only recover a case some arm passed, and on three quarters of
+  what is left no arm passed at all.
+
+  So no router ships, and `select-mixed`'s +1.37pp is recorded as a purchase rather than as evidence
+  that routing works. The harness stays because it is what makes the next claim falsifiable: any
+  future router can be priced in three seconds against a fresh artifact, for zero model calls.
+
+  `eval/bird/route.ts` at **100 / 97.17 / 100 / 100**, `test/bird-route.test.ts` at 45 cases
+  including both controls — a bank a rule *can* solve, which the holdout must recover, and a bank it
+  cannot, which the holdout must report as no gain.
+
 - **Adaptation for a model nobody has benchmarked, and the measurement that says not to
   calibrate.** Swapping the backbone keeps the code and loses the calibration, and re-running the
   benchmark is 1,532 questions times four calls — not something a deployment can do.

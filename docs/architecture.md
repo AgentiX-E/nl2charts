@@ -466,6 +466,15 @@ Nothing here rewrites a prompt. The measurable surface a compiler could optimize
 prompt and already parametrised; editing it at runtime would make every number in
 [`benchmarks.md`](./benchmarks.md) unattributable and every deployment unreproducible.
 
+The same instrument then asked the next question, which is per-question rather than per-deployment:
+if a global switch cannot move, can a rule read *this* question and pick the better card? It cannot.
+`bench:bird:route` fits one-feature, one-threshold rules — both orientations — over the arms that cost
+the same call, and scores them leave-one-database-out: every pair finds a rule worth +0.07 to +0.72
+points in sample, and every one of them loses 0.46 to 0.98 points on the database it was not fitted
+on. The two evidence cards disagree **66 : 65** (sign test p = 1.0000), and 76.8% of the cases every
+arm failed are wrong *values* rather than wrong structure. A router would have to read a coin flip;
+the gap belongs to the values, not to the choice.
+
 What the harness found is that layer ③ will not move at deployment scale, and the harness is what
 says so: `bench:bird:adapt` replays an existing `bench:bird` artifact, calibrates on the first N
 questions and scores the verdict on the rest. Regret is 1.1-1.6pp at every window below 200, the
@@ -485,3 +494,7 @@ measurement rather than from taste.
 - **Adaptation chooses a configuration, never a prompt.** A bounded `Strategy` can be diffed,
   pinned and rolled back; a rewritten prompt cannot, and it would make the benchmark table
   describe a prompt that no longer exists.
+- **A router is a claim about predictability, not about mechanism.** Before a rule picks per
+  question, the instrument asks whether anything the rule can read separates the outcomes — and
+  answers held out by database, because a rule fitted and scored on one corpus has already read
+  the answer.

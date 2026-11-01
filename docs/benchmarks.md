@@ -4480,6 +4480,59 @@ Two readings follow, and both are useful:
    already does for window and ratio shapes — is a bigger lever than the choice between these four
    arms has ever been, and the next iteration prices it.
 
+## Routing, and why the per-question oracle is a ceiling
+
+The previous section ended on a column rather than a conclusion: a per-question oracle sat **6.1-6.6pp**
+above the best fixed strategy at every calibration window, and that gap does not shrink when you
+calibrate harder, because no single strategy can reach it. The obvious next move is a router that
+reads the question and picks a strategy. `bench:bird:route` prices that move before anyone builds it,
+off the artifact the run already wrote and without spending a model call.
+
+The constraint is that a router has to cost the same. Choosing `aimed-3` over `single-full` is not a
+routing decision, it is a purchase of three more calls; the honest question is whether a rule can
+choose **within one call**, among the three cards that all send a single request. On dev those three
+earn 61.16% together, and a per-question oracle over them earns 67.62% — so **6.46pp** is the entire
+prize for routing, before anything is known about whether it is readable.
+
+`41296610389` (dev, 1,532 scored questions), three pairs, each a router's natural target:
+
+| pair | fixed best | oracle | headroom | best rule, in sample | held out | gain |
+| --- | --- | --- | --- | --- | --- | --- |
+| `metadata+evidence` vs `inline+evidence` (1 + 1 calls) | 61.16% | 65.40% | 4.24pp | `words >= 9` → metadata (61.88%) | 60.18% | **−0.98pp** |
+| `metadata+evidence` vs `select-mixed` (1 + 4 calls) | 62.34% | 66.45% | 4.11pp | `schemaColumns >= 16` → mixed (62.73%) | 61.36% | **−0.98pp** |
+| `names` vs `metadata+evidence` (1 + 1 calls) | 61.16% | 65.01% | 3.85pp | `quoted >= 2` → names (61.23%) | 60.70% | **−0.46pp** |
+
+The rule family is deliberately the small honest one — one feature, one threshold, either
+orientation — and the held-out column is **leave-one-database-out**: fit on ten databases, predict the
+eleventh. A random fold would let a rule recognise the corpus rather than read the question, and
+BIRD's dev split is ordered by database, with accuracy ranging from 45.3% (`debit_card_specializing`)
+to 82.9% (`superhero`) on the same arm.
+
+Three readings, and the first is the one that decides the experiment:
+
+1. **The in-sample optimum is a mirage, and its size is stable.** Every pair finds a rule that beats
+   the fixed arm *on the data it was fitted to* — by +0.72, +0.39 and +0.07 points — and every one of
+   them **loses** half a point to a point on the database it was not fitted to. That gap between
+   +0.72 in sample and −0.98 out of fold is not a modelling failure to be tuned away; it is the
+   selection effect, measured on the same axes as the gain it pretends to be.
+2. **The two evidence cards disagree like a coin.** They differ on 131 of 1,532 questions, 66 one way
+   and 65 the other — an exact two-sided sign test returns **p = 1.0000**. Two cards that carry the
+   same information and flip the answer equally often in both directions are not a signal a rule can
+   read; they are the model's own instability, and the 4.24pp headroom is that instability counted as
+   an opportunity.
+3. **The failures are not choice failures.** All five arms fail on 474 cases, and the judge files
+   **364 of them (76.8%) under `values`** — the statement ran, with the right number of columns, and
+   returned a different number. Another 110 (23.2%) are `column-count`, and **none** are engine
+   refusals: the SQL always executes. A router can only recover a case on which *some* arm passed; on
+   three quarters of what is left, no arm passed and the choice was never the problem.
+
+So no router ships. This is the same shape of answer as the cold-start experiment, reached a
+different way: the oracle columns in this document are ceilings that describe what is *unreachable by
+the mechanism on offer*, and the useful question is always which mechanism the gap actually belongs
+to. Here it belongs to the values, which is where the next iteration goes — and it explains why
+`select-mixed`'s +1.37pp is a **purchase** (+1.37pp for 3 extra calls) rather than evidence that
+routing would work.
+
 ## Reproducing
 
 ```bash
