@@ -8,6 +8,29 @@ cannot be argued with.
 
 ### Added
 
+- **The format contract: a reply's shape is measured, because it is the one thing a new model
+  breaks without an error.** `packages/ai/src/format.ts` reads four dimensions off a reply that
+  every reader in this layer already depends on — fenced or bare, nothing but a decorated choice
+  or not, step lines written, omissions named — and `formatProfile` aggregates a sample into
+  `always`/`sometimes`/`never` per dimension. A verdict needs three replies, and `always` needs
+  nine in ten; below either, the honest reading of the evidence is `sometimes`, because a
+  selector that answers three times in four looks healthy in aggregate while a quarter of the
+  cases are still decided by candidate order.
+
+  The instrument exists for the deployment this repository cannot benchmark. Every reader here
+  was calibrated on one backbone; a user who swaps it keeps the code and loses the calibration,
+  and the loss is silent — a selector reply of "Option 2" is not an error, it is an unanswered
+  call, and the arm scores lower for a reason that reads as a worse statement. `replyShape` costs
+  no call and needs no label, so it is the only reading available on the first request a
+  deployment makes; `AskResult.shape` carries it, every artifact carries the arm-level `format`,
+  and `assertReportComplete` refuses a row that answered cases without one. An arm that failed
+  every case carries it too, through the error's `lastShape` — the all-prose run is exactly the
+  run with no successful result to read a shape from, and exactly the run the profile is for.
+
+  It is not a scoring change and cannot be mistaken for one: the selector already answered in
+  495 of 496 cases on the measured arms, so the widest this instrument can move an existing
+  number is one case. Budget `ai` 43,000 → 45,000 (measured 42,735 → 43,997 B gzip).
+
 - **`inline+evidence+audit`: one turn that asks the model what its own statement left out.**
   `packages/ai/src/audit.ts` builds a turn — the statement as the assistant reply, then the
   question and the instruction to list every condition the statement failed to express as
@@ -60,6 +83,17 @@ cannot be argued with.
   of 220 failures, 211 readable and 210 named, and **`grain`, `scale` and `window` are all zero**.
 
 ### Fixed
+
+- **Three readers required the literal characters of a label they asked for.** `parseSelection`
+  matched a closed label list and a bare number; the step line required `STEP` at the start of a
+  line after list punctuation; the omission line required `MISSING:` exactly. A model that wrote
+  `Option 2`, `1. STEP 1: …`, or `- **MISSING:** …` had followed the instruction and was read as
+  having ignored it — the first as `decided: false`, the last two as zero steps and zero
+  omissions, which are the numbers an arm gets when its mechanism never ran. The three now accept
+  the decoration and still reject prose: the whole reply has to reduce to the label, so
+  `The answer is 2 because…` and `SELECT … LIMIT 2` remain unreadable by design. `parseChoiceToken`
+  is exported so a format profile can ask whether a reply is a bare choice without inventing a
+  candidate count to ask it with.
 
 - **A dev artifact that named itself after the per-commit subset.** `baseReport` wrote the literal
   `'bird-mini-dev'` whatever the split, so every artifact from the 1,532-question sweep announced

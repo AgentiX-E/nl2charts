@@ -16,6 +16,8 @@ export { buildEmptyResultFeedback, EMPTY_BLIND_MESSAGE, emptyRetryMessages } fro
 export { auditMessages, buildConditionAuditFeedback, countNamedConditions } from './audit.js';
 export { classifyFailure, diagnoseFailure, readEngineError, resolveAliases } from './diagnose.js';
 export type { Diagnosis, EngineErrorFields, FailureClass } from './diagnose.js';
-export { applySelection, buildPairwisePrompt, buildSelectionPrompt, chooseCandidate, chooseCandidatePairwise, parsePairwise, parseSelection, toCandidate } from './select.js';
+export { applySelection, buildPairwisePrompt, buildSelectionPrompt, chooseCandidate, chooseCandidatePairwise, parseChoiceToken, parsePairwise, parseSelection, toCandidate } from './select.js';
 export type { Candidate, ExecutedCandidate, SelectionDecision } from './select.js';
+export { formatProfile, replyShape } from './format.js';
+export type { Compliance, FormatProfile, ReplyShape } from './format.js';
 export type { AskMessagesInput, AskRequest, AskResult, PipelineOptions, PromptOptions, PromptProfile } from './pipeline.js';

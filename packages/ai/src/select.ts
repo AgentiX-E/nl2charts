@@ -74,6 +74,40 @@ export function buildSelectionPrompt(question: string, candidates: readonly Cand
 }
 
 /**
+ * The label a reply may put in front of its choice, as one alternative.
+ *
+ * Every word here was observed in a real reply from a model this repository has not been
+ * benchmarked on: the selector prompt asks for a number, and a model that answers
+ * "Option 2" has followed the instruction as it read it. The list is closed on purpose —
+ * an open prefix would eventually accept "the second option", and deciding which ordinal
+ * word means which candidate is a parser for English, not for an index.
+ */
+const CHOICE_LABEL = '(?:candidates?|options?|choices?|answers?|selections?|picks?|index)';
+
+/**
+ * A reply that is nothing but a decorated choice — markdown emphasis, a label, a full stop.
+ *
+ * The shape is what stays strict: the whole reply has to reduce to the label and the number.
+ * "The answer is 2 because..." and "SELECT ... LIMIT 2" both still fail, which is the
+ * property the caller depends on, because a model that ignored the instruction must not be
+ * counted as a model that chose.
+ */
+const CHOICE_ONLY = new RegExp(`^(?:${CHOICE_LABEL}\\s*[:#.\\-–—]?\\s*)?(\\d{1,2})$`, 'i');
+
+/**
+ * The number a reply names as its choice, or null when it names none.
+ *
+ * Split out from `parseSelection` because a format profile wants to know whether a reply is
+ * a bare choice at all, and that is a property of the text — it does not need, and must not
+ * invent, the size of a candidate list to say so.
+ */
+export function parseChoiceToken(text: string): number | null {
+  const cleaned = text.trim().replace(/^[*_`#\s]+|[*_`#\s.]+$/g, '');
+  const match = CHOICE_ONLY.exec(cleaned);
+  return match === null ? null : Number(match[1]);
+}
+
+/**
  * Read the chosen index back.
  *
  * Returns `-1` rather than a default when the reply carries no usable index: the
@@ -81,16 +115,12 @@ export function buildSelectionPrompt(question: string, candidates: readonly Cand
  * would make "the selector agreed" and "the selector did not answer" the same number.
  */
 export function parseSelection(text: string, count: number): number {
-  // Deliberately strict. "The answer is 2 because..." and "SELECT ... LIMIT 2" both
-  // contain a number, and reading that number as a choice would make a model that
-  // ignored the instruction look like a model that chose. Prose fails to parse, and
-  // the caller reports it instead of guessing.
-  const cleaned = text
-    .trim()
-    .replace(/^[*_`\s]+|[*_`\s.]+$/g, '');
-  const match = /^(?:candidates?\s*[:#-]?\s*)?(\d{1,2})$/i.exec(cleaned);
-  if (match === null) return -1;
-  const index = Number(match[1]) - 1;
+  // Decoration is tolerated, prose is not: see `CHOICE_ONLY`. Widening the decoration is
+  // how a model nobody has benchmarked yet gets read correctly on its first day; it does
+  // not move the measured arms, where the selector already answered in 495 of 496 cases.
+  const token = parseChoiceToken(text);
+  if (token === null) return -1;
+  const index = token - 1;
   if (!Number.isInteger(index) || index < 0 || index >= count) return -1;
   return index;
 }

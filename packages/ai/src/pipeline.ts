@@ -8,6 +8,8 @@ import { buildPlanPrompt, parsePlan } from './plan.js';
 import { DECOMPOSE_RULES, parseDecomposed } from './decompose.js';
 import { emptyRetryMessages } from './empty.js';
 import { auditMessages, countNamedConditions } from './audit.js';
+import { replyShape } from './format.js';
+import type { ReplyShape } from './format.js';
 import { linkSchema, renderSchemaCard } from './linking.js';
 import type { LinkedColumn, Recaller, SchemaCardOptions, SchemaTable } from './linking.js';
 
@@ -209,6 +211,16 @@ export interface AskResult {
    * indistinguishable in the artifact.
    */
   readonly decomposedSteps?: number;
+  /**
+   * The shape of the reply the prompt produced, read at the moment the guard accepted it.
+   *
+   * Reported for the same reason `decomposedSteps` is, one level up: an arm is a prompt, and
+   * a prompt's first failure on an unfamiliar model is not a wrong statement but an unreadable
+   * one. Reading the shape here — before any execution, before the audit and the empty-result
+   * turn — keeps the profile a property of this arm's prompt rather than of every lever the
+   * arm also carries.
+   */
+  readonly shape?: ReplyShape;
 }
 
 const SQL_FENCE = /```(?:sql)?\s*([\s\S]*?)```/i;
@@ -292,13 +304,17 @@ function exhausted(
   sql: string,
   failures: readonly FailureClass[],
   diagnoses: readonly string[],
+  shape: ReplyShape | undefined,
 ): Error {
   const code = diagnosis.failureClass === 'guard' || diagnosis.failureClass === 'permission' ? 'NL2C_E_GUARD_REJECTED' : 'NL2C_E_ENGINE_FAILED';
   return toNl2ChartsError(
     code,
     diagnosis.failureClass === 'guard' ? 'model could not produce a safe statement' : 'model could not produce an executable statement',
     undefined,
-    { attempts, lastError: diagnosis.summary, lastSql: sql, failureClasses: failures, diagnoses },
+    // The shape travels with the failure, not only with the success: an arm where every reply
+    // was unreadable is the case a profile is most needed for, and it is the one a caller can
+    // otherwise only report as a zero.
+    { attempts, lastError: diagnosis.summary, lastSql: sql, failureClasses: failures, diagnoses, ...(shape === undefined ? {} : { lastShape: shape }) },
   );
 }
 
@@ -421,6 +437,10 @@ export function createPipeline(options: PipelineOptions): {  ask(request: AskReq
       let attempts = 0;
       const failures: FailureClass[] = [];
       const diagnoses: string[] = [];
+      // The first reply, kept across repair turns: the profile describes what the prompt
+      // produced before any feedback was in front of the model, and the same reading is taken
+      // for a sampling arm, so an arm's profile does not depend on how many turns it spent.
+      let firstShape: ReplyShape | undefined;
       // One reader for every reply, including repairs and the empty-result turn: a
       // statement written under the decomposition prompt is read from its last block each
       // time, so a repair cannot silently fall back to reading step one.
@@ -437,10 +457,16 @@ export function createPipeline(options: PipelineOptions): {  ask(request: AskReq
           purpose: attempts === 1 ? 'generate' : 'retry',
         });
         const read = readReply(response.text);
+        if (firstShape === undefined) firstShape = replyShape(response.text);
         const sql = read.sql;
         const steps = options.decompose === true ? { decomposedSteps: read.steps } : {};
         const verdict = inspectSql(sql);
         if (verdict.ok) {
+          // Read once, where the guard says yes: this is the reply the arm's own prompt
+          // produced, and the turns appended below belong to levers the arm may or may not
+          // carry. A profile that included them would make `inline+evidence` and
+          // `inline+evidence+audit` differ on a dimension neither of them changed.
+          const shape = firstShape === undefined ? {} : { shape: firstShape };
           // The audit turn, when the arm asked for it: the statement the guard accepted goes
           // back in front of the model with the question, and the statement it writes next is
           // the one executed. It runs *before* any execution on purpose — the failure class it
@@ -464,7 +490,7 @@ export function createPipeline(options: PipelineOptions): {  ask(request: AskReq
             audited === undefined
               ? {}
               : { audit: { fired: true, named: audited.named, rewritten: stated !== sql } };
-          if (!options.execute) return { sql: stated, attempts: spent, linked, failures, diagnoses, ...audit, ...steps };
+          if (!options.execute) return { sql: stated, attempts: spent, linked, failures, diagnoses, ...audit, ...steps, ...shape };
           try {
             const outcome = await options.execute(stated);
             const rows = rowCountOf(outcome);
@@ -479,9 +505,10 @@ export function createPipeline(options: PipelineOptions): {  ask(request: AskReq
                 emptyRetry: { fired: true, recovered: retried.recovered },
                 ...audit,
                 ...steps,
+                ...shape,
               };
             }
-            return { sql: stated, attempts: spent, linked, failures, diagnoses, ...audit, ...steps };
+            return { sql: stated, attempts: spent, linked, failures, diagnoses, ...audit, ...steps, ...shape };
           } catch (error) {
             const diagnosis = diagnoseFailure({
               sql: stated,
@@ -492,7 +519,7 @@ export function createPipeline(options: PipelineOptions): {  ask(request: AskReq
             });
             failures.push(diagnosis.failureClass);
             diagnoses.push(diagnosis.summary);
-            if (attempts > maxRepairs) throw exhausted(diagnosis, attempts, stated, failures, diagnoses);
+            if (attempts > maxRepairs) throw exhausted(diagnosis, attempts, stated, failures, diagnoses, firstShape);
             messages.push({ role: 'assistant', content: response.text });
             messages.push({ role: 'user', content: diagnosis.feedback });
             continue;
@@ -506,7 +533,7 @@ export function createPipeline(options: PipelineOptions): {  ask(request: AskReq
         });
         failures.push(diagnosis.failureClass);
         diagnoses.push(diagnosis.summary);
-        if (attempts > maxRepairs) throw exhausted(diagnosis, attempts, sql, failures, diagnoses);
+        if (attempts > maxRepairs) throw exhausted(diagnosis, attempts, sql, failures, diagnoses, firstShape);
         messages.push({ role: 'assistant', content: response.text });
         messages.push({ role: 'user', content: diagnosis.feedback });
       }

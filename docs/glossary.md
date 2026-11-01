@@ -54,6 +54,21 @@ carried in at −7.2pp, because it anchored the statement it was meant to prepar
 The answer is read from the last block, and `decomposedSteps` reports how many
 steps the model actually wrote, so an ignored instruction is visible.
 
+**Decoration tolerance** — What a reader accepts around a label without changing what it
+infers from the reply. `**2**`, `2.`, `Option 2` and `Choice: 2.` all read as the second
+candidate; `The answer is 2 because…` still reads as no answer at all. The tolerance exists
+because a model nobody benchmarked decorates a label it was told to write, and requiring the
+literal characters would have made "the reply could not be read" and "the reply was wrong"
+the same number in a score.
+
+**Format profile** — The four dimensions of a reply's *shape* — fenced, a bare choice, step
+lines, named omissions — aggregated over a sample into `always` / `sometimes` / `never` per
+dimension. Read by `replyShape`/`formatProfile` and carried per arm as `format` in every
+artifact. It is the only instrument here that reads a reply before any result exists, so it
+is the only one that can predict a collapse on an uncalibrated model instead of reporting it
+as a lower score. Three replies are needed before any verdict, and a dimension must hold in
+nine of ten to be called `always`.
+
 **Empty-result turn** — One extra model call, made only when a statement the
 engine accepted returned no rows. Separate from *repair*, which answers a
 statement the engine refused: the two failures have different causes and

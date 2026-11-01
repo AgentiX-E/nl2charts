@@ -306,7 +306,7 @@ describe('a full run', () => {
   it('scores each arm, pairs them, and passes its own gate', async () => {
     const result = await run({ plan: { first: correct }, env: { BIRD_ARMS: 'names,metadata' } });
     expect(result.code).toBe(0);
-    const arms = result.report.arms as { arm: string; passed: number; total: number; accuracy: number; calls: { mean: number } }[];
+    const arms = result.report.arms as { arm: string; passed: number; total: number; accuracy: number; calls: { mean: number }; format?: { replies: number; fenced: string } }[];
     expect(arms.map((entry) => entry.arm)).toEqual(['names', 'metadata']);
     // Every gold statement is answerable from the schema, so a correct model scores all of them.
     for (const arm of arms) {
@@ -314,6 +314,12 @@ describe('a full run', () => {
       expect(arm.total).toBe(QUESTIONS.length);
       expect(arm.accuracy).toBe(1);
       expect(arm.calls.mean).toBe(1);
+    }
+    // The shape every reply had, aggregated per arm. The fixture answers in a fenced block, so
+    // the dimension that a different backbone would move first is reported as held — and the
+    // row is refused by `assertReportComplete` if it is not carried at all.
+    for (const arm of arms) {
+      expect(arm.format).toEqual({ replies: QUESTIONS.length, fenced: 'always', index: 'never', steps: 'never', named: 'never' });
     }
     // One lever apart, so the pair is an ablation and not a comparison of levels.
     const ablations = result.report.ablations as Record<string, { delta: number; cost: { extraCallsPerCase: number } }>;

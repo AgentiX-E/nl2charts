@@ -24,11 +24,18 @@ export const DECOMPOSE_RULES: readonly string[] = [
 ];
 
 /**
- * A step line, allowing the decoration models put around a label — list markers, bold,
- * a heading hash — and either case. Everything before `STEP` is punctuation; a column
- * named `step` is not at the start of a line.
+ * A step line, allowing the decoration models put around a label — list markers, an
+ * ordered-list number, bold, a heading hash — and either case. Everything before `STEP`
+ * is punctuation; a column named `step` is not at the start of a line.
+ *
+ * The ordered-list form matters for the same reason the choice label does: a model that
+ * has never been benchmarked here answers "1. STEP 1: ..." when told "one line per step",
+ * and a reader that requires the label in column zero would report zero steps for a reply
+ * that wrote four. Zero steps is not a neutral reading — it is the number an arm gets when
+ * its instruction was ignored, so counting decoration as a violation would have made the
+ * two indistinguishable.
  */
-const STEP_LINE = /^[\s>*_#-]*STEP\s*\d+\s*:/gim;
+const STEP_LINE = /^[\s>*_#–—-]*(?:\d+[.)]\s*)?STEP\s*\d+\s*\*{0,2}\s*:/gim;
 
 /** How many steps a reply wrote. Zero means the model ignored the format. */
 export function countSteps(text: string): number {

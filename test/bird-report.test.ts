@@ -15,8 +15,16 @@
  * written, so a dropped instrument names itself instead of being renamed by a reader.
  */
 import { describe, expect, it } from 'vitest';
-import { armDecomposition, assertReportComplete } from '../eval/bird/run.js';
+import { armDecomposition, armFormat, assertReportComplete } from '../eval/bird/run.js';
 import type { CaseRun } from '../eval/bird/run.js';
+
+/**
+ * The profile a healthy run reports on the models this repository benchmarks.
+ *
+ * Every dimension held, which is the state the existing arms are in and the state a new
+ * backbone has to reach before its accuracy is worth comparing with theirs.
+ */
+const FORMAT = { replies: 1532, fenced: 'always', index: 'always', steps: 'always', named: 'never' } as const;
 
 /**
  * A scored case with every field the type requires.
@@ -111,23 +119,44 @@ describe('report completeness', () => {
     expect(() =>
       assertReportComplete({
         arms: [
-          { arm: 'names', total: 1532 },
-          { arm: 'decompose', total: 1532, decomposition: { asked: 1532, fired: 1400, share: 0.91, meanSteps: 2.4 } },
-          { arm: 'select-dc', total: 1532, candidateRecall: 0.67, decomposition: { asked: 1532, fired: 1400, share: 0.91, meanSteps: 2.4 } },
+          { arm: 'names', total: 1532, format: FORMAT },
+          { arm: 'decompose', total: 1532, decomposition: { asked: 1532, fired: 1400, share: 0.91, meanSteps: 2.4 }, format: FORMAT },
+          { arm: 'select-dc', total: 1532, candidateRecall: 0.67, decomposition: { asked: 1532, fired: 1400, share: 0.91, meanSteps: 2.4 }, format: FORMAT },
           {
             arm: 'select-mixed+empty',
             total: 1532,
             candidateRecall: 0.656,
             emptyRetry: { mode: 'diagnosed', dropped: 12, fired: 3, recovered: 1 },
+            format: FORMAT,
           },
           {
             arm: 'inline+evidence+audit',
             total: 1532,
             audit: { fired: 1532, named: 411, rewritten: 980, extraCallsPerCase: 1 },
+            format: FORMAT,
           },
         ],
       }),
     ).not.toThrow();
+  });
+
+  it('reports the shape an arm\'s replies had, aggregated over its cases', () => {
+    const shape = { fenced: true, index: false, steps: 0, named: 0 };
+    expect(armFormat([run({ shape }), run({ shape }), run({ shape })])).toEqual({
+      format: { replies: 3, fenced: 'always', index: 'never', steps: 'never', named: 'never' },
+    });
+  });
+
+  it('carries no profile when no case recorded a shape, which is the dry run', () => {
+    // A profile over zero replies would be a verdict about a model that was never called.
+    expect(armFormat([run(), run()])).toEqual({});
+  });
+
+  it('refuses a row that answered cases and dropped the shape of every reply', () => {
+    // The profile is the only reading that predicts a collapse on a model nobody calibrated,
+    // and it is read on every case. A row without one is an artifact whose most portable
+    // instrument was collected and thrown away.
+    expect(() => assertReportComplete({ arms: [{ arm: 'names', total: 1532 }] })).toThrow(/no format profile/);
   });
 
   it('names an arm the build does not know instead of skipping it', () => {

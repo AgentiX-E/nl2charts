@@ -305,6 +305,55 @@ nothing at all. Every harness entry now writes an artifact carrying its own verd
 code. A measurement that cannot be read back is not a measurement; a green artifact left behind
 by a red run is worse than no artifact.
 
+## The format contract
+
+Every reader in the natural-language layer assumes something about the *shape* of a reply
+rather than its content: `extractSql` looks for a fenced block, `parseDecomposed` counts
+`STEP <n>:` lines and takes the last block, `applySelection` wants a reply that reduces to a
+single choice, `countNamedConditions` wants `MISSING:` lines. Those assumptions are the only
+part of the pipeline that a different model can break without producing an error.
+
+The failure is silent in a way that matters. A selector that answers "Option 2" has followed
+the instruction as it read it; `parseSelection` returns `-1`; the caller falls back to the
+first candidate and reports `decided: false`. The arm then scores lower for a reason that
+looks like a worse statement. Nothing in the result says which of the two happened, and the
+score is the only thing a reader sees.
+
+So the shape is measured rather than assumed. `replyShape` reads four dimensions off one
+reply — fenced or not, a bare choice or not, how many step lines, how many omissions named —
+and costs nothing: it is a pass over text that was going to be parsed anyway.
+`formatProfile` aggregates a sample of shapes into `always` / `sometimes` / `never` per
+dimension, with a floor of three replies and a nine-in-ten threshold. The floor and the
+threshold are the two places where the instrument could lie: with two replies "always" and
+"sometimes" differ by one case, and a selector that answers three times in four looks
+healthy in aggregate while a quarter of the cases are still decided by candidate order.
+
+The reader side of the same contract is decoration tolerance. A label a model bolds, bullets,
+numbers, or writes with a full-width colon is still the label the prompt asked for, so the
+three strict readers accept it:
+
+| Reader | Accepts | Still rejects |
+| --- | --- | --- |
+| `parseChoiceToken` | `2`, `**2**`, `2.`, `Option 2`, `choice #3`, `Answer - 4` | `The answer is 2 because…`, `SELECT … LIMIT 2` |
+| step line | `STEP 1:` , `**STEP 1:**` , `1. STEP 1:` , `- STEP 1:` | a numbered line with no label |
+| omission line | `MISSING: x`, `- **MISSING:** x`, `MISSING：x` | the word inside a fenced statement |
+
+What stays strict is the shape of the whole reply: it must reduce to the label and nothing
+else. That is the property the callers depend on — a model that ignored the instruction must
+not be counted as a model that chose — and it is why the tolerance above widens what a reader
+*accepts* without widening what it *infers*.
+
+The window is small on the models this repository benchmarks, and that is the point: the
+selector already answered in 495 of 496 cases, so the relaxation can move at most one case
+and cannot be mistaken for a scoring change. On a model nobody has calibrated, the same
+window is the difference between "the reply could not be read" and "the reply was wrong".
+
+Every artifact now carries the profile per arm (`format`), and a report whose arm answered
+cases without one is refused by `assertReportComplete`. An arm that failed every case
+carries it too, through the error's `lastShape`: the case where the model wrote prose for all
+496 questions is the case the profile exists for, and it is exactly the case that has no
+successful result to read a shape from.
+
 ## Value model
 
 Rows are `Record<string, CanonicalValue>`. Before a row leaves the runtime:

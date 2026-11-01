@@ -22,8 +22,8 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHttpProvider } from '@agentix-e/nl2charts-ai';
 import type { LlmProvider, PromptOptions, SchemaTable } from '@agentix-e/nl2charts-ai';
-import { applySelection, attachDefinitions, buildAskMessages, buildSelectionPrompt, chooseCandidatePairwise, buildSqlPrompt, choosePromptProfile, createPipeline, emptyRetryMessages, extractSql, renderDefinitions, renderEvidence, renderSchemaCard, withCallCounter } from '@agentix-e/nl2charts-ai';
-import type { PurposeUsage } from '@agentix-e/nl2charts-ai';
+import { applySelection, attachDefinitions, buildAskMessages, buildSelectionPrompt, chooseCandidatePairwise, buildSqlPrompt, choosePromptProfile, createPipeline, emptyRetryMessages, extractSql, formatProfile, renderDefinitions, renderEvidence, renderSchemaCard, withCallCounter } from '@agentix-e/nl2charts-ai';
+import type { FormatProfile, PurposeUsage, ReplyShape } from '@agentix-e/nl2charts-ai';
 // The retry turn writes a statement outside the pipeline, so it goes through the same
 // guard the pipeline applies. Skipping it here would let the one arm that retries be the
 // one arm that can execute DDL.
@@ -906,6 +906,18 @@ export interface CaseRun extends CaseOutcome {
    * separable after the fact, without a second field to drift out of step with the order.
    */
   readonly candidates?: readonly { readonly source: string; readonly correct: boolean }[];
+  /**
+   * The shape of the first reply this arm's prompt produced on this case.
+   *
+   * Recorded per case rather than per arm because the aggregation is the report's job and the
+   * reading is the case's: a profile built here would be a second definition of the same
+   * concept, and the arm-level field below is derived from these in one place.
+   *
+   * The *first* reply, for a sampling arm, is the only one the prompt alone produced — the
+   * later draws are the same prompt at a non-zero temperature, and folding them in would make
+   * a three-sample arm's profile look more stable than its first call is.
+   */
+  readonly shape?: ReplyShape;
   /** Candidates the selector was not offered because their result was empty. */
   readonly emptyDropped?: number;
   /** True when the winner returned nothing and one more turn was spent. */
@@ -1017,6 +1029,15 @@ export interface ArmReportRow {
    * suggests the trigger is half-right.
    */
   readonly audit?: { readonly fired: number; readonly named: number; readonly rewritten: number; readonly extraCallsPerCase: number };
+  /**
+   * The shape of the replies this arm's prompt produced.
+   *
+   * The first reading that moves when a model nobody has calibrated is substituted for the one
+   * this repository benchmarked, and the only one available before any result exists: a reply
+   * that cannot be read is not a wrong answer, it is an unanswered call, and the profile says
+   * which reader stopped working.
+   */
+  readonly format?: FormatProfile;
   /**
    * What the arm spent per case, and — when the meter split it — how much of that each kind of
    * call was. The split is what turns "the selector should earn its tokens" into a column.
@@ -1364,6 +1385,23 @@ export function auditFunnel(runs: readonly CaseRun[]): {
 }
 
 /**
+ * The shape the arm's replies had, aggregated over the cases that recorded one.
+ *
+ * Beside the accuracy rather than inside it, for the reason the contract exists: a score is
+ * a claim about statements, and this is a claim about the channel that carries them. On the
+ * models measured in this repository every dimension reads `always` — the number is written
+ * here so that the first arm measured on a model nobody has calibrated shows where the
+ * collapse would start, instead of reporting a lower accuracy with no address.
+ *
+ * Absent when no case recorded a shape, which is the dry run: a profile over zero replies
+ * would be a verdict about a model that was never called.
+ */
+export function armFormat(runs: readonly CaseRun[]): { readonly format: FormatProfile } | Record<string, never> {
+  const shapes = runs.flatMap((run) => (run.shape === undefined ? [] : [run.shape]));
+  return shapes.length === 0 ? {} : { format: formatProfile(shapes) };
+}
+
+/**
  * An audit arm whose audit never fired is a single-call arm with a longer name.
  *
  * The same failure the empty-result lever had: written, wired, paired and silently absent,
@@ -1527,6 +1565,12 @@ export function assertReportComplete(report: { readonly arms?: readonly ArmRepor
     }
     if (arm.emptyRetry !== undefined && row.emptyRetry === undefined) {
       throw new Error(`arm ${row.arm} runs the empty-result lever and its row carries no empty-result funnel, so the call cannot be priced`);
+    }
+    if (row.total > 0 && row.format === undefined) {
+      throw new Error(
+        `arm ${row.arm} answered ${String(row.total)} cases and its row carries no format profile: ` +
+          'the shape of every reply was read and then dropped, so the one reading that predicts a collapse on an uncalibrated model is missing',
+      );
     }
   }
 }
@@ -3056,6 +3100,9 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
         // produced, not whether the engine liked it.
         let decomposedCandidates = 0;
         let decomposedSteps = 0;
+        // The first reply of the set, kept because it is the only one the prompt alone
+        // produced: the later draws are the same prompt at a non-zero temperature.
+        let firstShape: ReplyShape | undefined;
         for (let sample = 0; sample < arm.vote; sample += 1) {
           try {
             // A mixed arm draws each candidate from a different decomposition. The
@@ -3068,6 +3115,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
             drawn.generated += 1;
             const sampler = sources === undefined ? pipeline : pipelineFor(resolveArm(spec.arm) as Arm, spec.provider);
             const askedSample = await sampler.ask({ question: question.question, schema });
+            if (firstShape === undefined && askedSample.shape !== undefined) firstShape = askedSample.shape;
             // The mechanism has to be observable, not declared: a prompt that asks for
             // steps and gets none is the plain generator with a longer instruction, and
             // the two arms would then differ by wording rather than by method.
@@ -3121,6 +3169,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
             // for, and it is the one the success path cannot write.
             ...(Object.keys(survival).length === 0 ? {} : { candidateSurvival: survival }),
             ...(decomposedCandidates === 0 ? {} : { decomposition: { candidates: decomposedCandidates, steps: decomposedSteps } }),
+            ...(firstShape === undefined ? {} : { shape: firstShape }),
             calls: callsMade(),
           };
         }
@@ -3229,6 +3278,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
           candidateRecall: verdicts.some((verdict) => verdict.correct),
           ...(verdicts.length < 2 ? {} : { candidates: verdicts }),
           ...(selectedByModel === undefined ? {} : { selectedByModel }),
+          ...(firstShape === undefined ? {} : { shape: firstShape }),
           ...(arm.mixed === undefined ? {} : { winnerSource: winner.source }),
           ...(arm.emptyRetry === undefined
             ? {}
@@ -3241,6 +3291,10 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
       }
       try {
         const asked = await pipeline.ask({ question: question.question, schema });
+        // Read once and spread into both returns below: a case that executed and a case the
+        // engine refused are the same prompt behaving the same way, and a profile that only
+        // counted the successes would describe the failures as a different model.
+        const shape = asked.shape === undefined ? {} : { shape: asked.shape };
         const predicted = await oracle.run(question.db_id, asked.sql);
         if (!predicted.ok) {
           return {
@@ -3257,6 +3311,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
             errorKind: 'execution',
             calls: callsMade(),
             ...(asked.decomposedSteps === undefined ? {} : { decomposition: { candidates: 1, steps: asked.decomposedSteps } }),
+            ...shape,
             error: `execution: ${predicted.error ?? 'unknown'}`,
           };
         }
@@ -3272,6 +3327,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
           failures: asked.failures,
           ...(asked.audit === undefined ? {} : { audit: asked.audit }),
           ...(asked.decomposedSteps === undefined ? {} : { decomposition: { candidates: 1, steps: asked.decomposedSteps } }),
+          ...shape,
         };
       } catch (error) {
         // A repair arm reports the statement it gave up on, so a failure is
@@ -3279,6 +3335,10 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
         const details = (error as { details?: Record<string, unknown> }).details ?? {};
         const lastError = typeof details.lastError === 'string' ? details.lastError : undefined;
         const failureClasses = Array.isArray(details.failureClasses) ? (details.failureClasses as string[]) : undefined;
+        // The shape the guard kept refusing. An arm that failed every case has no `asked`
+        // result to read, and this is the reading that says whether it failed the question or
+        // failed the channel — without it the artifact reports a zero with no address.
+        const lastShape = details.lastShape as ReplyShape | undefined;
         const message = error instanceof Error ? error.message : String(error);
         const code = (error as { code?: string }).code ?? '';
         return {
@@ -3290,6 +3350,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
           attempts: arm.repairs + 1,
           calls: callsMade(),
           ...(failureClasses === undefined ? {} : { failures: failureClasses }),
+          ...(lastShape === undefined ? {} : { shape: lastShape }),
           error: lastError === undefined ? message : `${message}: ${lastError}`,
           // A shape failure ends with a statement that runs, so calling it `execution`
           // would say the engine rejected something it never saw.
@@ -3501,6 +3562,7 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
     // inside the sampling-arm spread and therefore absent from `decompose` itself, which
     // is the arm the numbers exist for.
     ...armDecomposition(runs),
+    ...armFormat(runs),
     ...(arm.emptyRetry === undefined ? {} : { emptyRetry: { mode: arm.emptyRetry, ...emptyRetryFunnel(runs) } }),
     ...(arm.audit === undefined ? {} : { audit: auditFunnel(runs) }),
     // What the model kept of the card, on the one arm that asks it to choose. Beside the

@@ -57,6 +57,16 @@ export function auditMessages(question: string, statement: string, previous: str
  * prefix only, so a statement that happens to contain the word MISSING inside a fence does
  * not count, and `MISSING: none` — which is the model saying nothing is wrong — counts zero.
  */
+/**
+ * One reported omission, with the decoration a model adds to a line it was told to prefix.
+ *
+ * A bullet, bold, and a full-width colon are all still the prefix the prompt asked for: the
+ * instruction says "each line starts with `MISSING: `", and a model that writes
+ * `- **MISSING:**` has followed it. Requiring the literal five characters would have made
+ * the mechanism's reach on an unmeasured model look like the mechanism's reach on ours.
+ */
+const MISSING_LINE = /^\s*(?:[-*+>]\s*)?\*{0,2}\s*MISSING\s*\*{0,2}\s*[:：]\s*(.*)$/i;
+
 export function countNamedConditions(text: string): number {
   let named = 0;
   // A fenced block is the statement, not the audit: a column called `missing_reason` or a
@@ -68,9 +78,12 @@ export function countNamedConditions(text: string): number {
       continue;
     }
     if (fenced) continue;
-    const match = /^\s*MISSING\s*:\s*(.*)$/i.exec(line);
+    const match = MISSING_LINE.exec(line);
     if (match === null) continue;
-    const body = (match[1] ?? '').trim();
+    // Emphasis around the body is decoration, not content: `**MISSING:** **none**` is the
+    // model saying there is nothing to report, and reading it as one omission would make the
+    // reach of the mechanism a function of how the model was taught to bold text.
+    const body = (match[1] ?? '').replace(/^\*+|[*\s]+$/g, '').trim();
     if (body === '' || /^none\b/i.test(body)) continue;
     named += 1;
   }
