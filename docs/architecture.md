@@ -429,6 +429,15 @@ where a list may have been cut). The rule is unit-tested in `test/ci-scope.test.
 including both edges, because a filter written as five lines of shell is a filter nobody
 can test.
 
+The rule is about file names, not about content, and one push showed the width of that
+gap: `9ccf30d` changed a comment string in `eval/bird/run.ts` and therefore measured
+thirteen arms, ~6,400 completions, for a sentence no prompt reads. That is the accepted
+cost of the choice. The alternative — parsing each diff to decide whether a `.ts` change
+is semantic — is a second rule with its own false negatives, and its failure mode is the
+expensive one: a real change classified as prose, and a number that then gets quoted
+without ever being produced. Between paying for a comment and quoting a measurement that
+does not exist, the guard pays.
+
 ## Design decisions worth knowing
 
 - **No UI framework adapter.** The library exposes promises and async iterables;
