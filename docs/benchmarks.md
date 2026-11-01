@@ -4091,6 +4091,60 @@ the failure count, which is the model's variance and not the instrument's. So th
 constraint audit would attack is a range, **16.1–18.8pp**, not a point — reported as a range here
 so that a reader who reruns it does not conclude the instrument drifted.
 
+## The audit turn: the model cannot see the filters it left out
+
+`bench:bird:conditions` established the population — in 36-43% of failures, a column the gold
+filters on never appears in the statement — and the obvious mechanism follows from it: put the
+statement back in front of the model with the question and ask which conditions it failed to
+write. `inline+evidence+audit` is exactly that, one lever, one call, and it does not work here.
+The reasons it does not are worth more than the delta.
+
+| | `inline+evidence` | `+audit` |
+|---|---|---|
+| correct | 275 / 496 | **280 / 496** |
+| accuracy | 55.44% | 56.45% |
+| calls a case | 1.00 | 2.00 |
+| characters a case | 2,864 | **6,850** (+139%) |
+
+Paired on the same 496 questions: **+1.01pp, 4 cases gained against 9 lost, p = 0.27,
+CI [-0.42, +2.43], MDE 2.04pp.** The delta is smaller than the minimum effect the split can
+resolve and nowhere near the 1% bar, so the arm is not adopted. The A/A duplicate of the parent
+in the same run moved 2 cases (0.40pp), which is the scale the delta has to be read against.
+
+The funnel is where the mechanism explains itself:
+
+| | count | share of fired |
+|---|---|---|
+| turns spent | 488 | 100% |
+| conditions named as missing | **24** | — |
+| statements actually rewritten | 19 | 3.9% |
+
+Asked to check its own statement, **the model reported nothing missing on 96% of the turns.**
+It is not that the prompt was ignored — the replies are in the requested shape, with
+`MISSING: none` where there was nothing to report. The model believes the statement it wrote is
+complete, and the census agrees with the model about the other 58%: most failures really are
+complete, and the missing-filter cases are exactly the ones where the model's own reading of the
+question already went wrong.
+
+The same instrument that defined the population measures what the turn did to it. On the same
+corpus:
+
+| | failures | missing a condition | conditions in total |
+|---|---|---|---|
+| `inline+evidence` | 221 | 93 (42.1%) | 151 |
+| `inline+evidence+audit` | 216 | 90 (41.7%) | **150** |
+
+**One condition out of 151, for 488 calls.** The turn reaches the right population and moves it
+by 0.7%; the 19 rewrites it made are not the 93 that needed one. That is a different finding from
+"the prompt was weak": a self-check cannot supply information the model did not have when it wrote
+the statement, and this corpus is made of cases where it did not have it.
+
+It also rhymes with the refiner that preceded it — 45 of its 54 diagnoses were the same sentence,
+and the NULL rule was false on 1.81pp of correct answers. Both mechanisms assume that pointing at
+a statement makes the mistake visible to the model that made it. On this split they are both wrong,
+and the audit turn is the cleaner experiment: same model, same prompt, one question, and the answer
+is "nothing missing".
+
 ## The floor is enforced, not remembered
 
 A benchmark that only produces a report gets read once. The BIRD arms have a

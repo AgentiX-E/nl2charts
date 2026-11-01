@@ -8,6 +8,24 @@ cannot be argued with.
 
 ### Added
 
+- **`inline+evidence+audit`: one turn that asks the model what its own statement left out.**
+  `packages/ai/src/audit.ts` builds a turn — the statement as the assistant reply, then the
+  question and the instruction to list every condition the statement failed to express as
+  `MISSING:` lines, then one fenced statement — and the pipeline keeps what comes back when it is
+  a safe statement. It fires on the statement the guard accepted, before execution, because the
+  failure class it targets is the one that runs and returns rows (16.1-18.8pp of Mini-Dev where a
+  gold filter's column is absent, `bench:bird:conditions`). The reply is read for two numbers:
+  `named`, the conditions the model says are missing, and `rewritten`, whether the statement
+  changed. Neither is inferred from a delta, and `assertAuditFired` refuses to publish an arm whose
+  turn never fired over a real sample.
+
+  The result is a negative one and the round's most useful reading, in `docs/benchmarks.md`: 280 of
+  496 against the parent's 275, +1.01pp with 4 gained and 9 lost, **p = 0.27, below the split's
+  2.04pp MDE**, for **+139% characters a case**. The funnel says why: 488 turns, **24 conditions
+  named, 19 statements rewritten** — the model reports nothing missing on 96% of turns — and the
+  census that defined the population moves from 151 missing conditions to 150. The turn reaches the
+  right cases and does not see what is missing in them.
+
 - **`pnpm bench:bird:width`: the answer's width, and whether the extra columns are the mistake.**
   `eval/bird/width.ts` reads the arm's `column-count` cases, takes both widths from the executed
   result sets (`select *` is one item and three columns), and then prices the one edit the bucket
@@ -42,6 +60,21 @@ cannot be argued with.
   of 220 failures, 211 readable and 210 named, and **`grain`, `scale` and `window` are all zero**.
 
 ### Fixed
+
+- **Two gates that measured a build they could not trust.** The audit turn passed the API snapshot
+  locally and failed it in CI (`41255435708`, three `A4: ai exports … without a snapshot update`),
+  and the same stale `dist` then passed the bundle budget by 735 B and failed that in the next run
+  (`41257338754`). Both gates read `dist` and both printed a pass over files that could not contain
+  the change — the failure mode is a measurement, not a build. `tools/stale-build.mjs` now compares
+  each package's built `index.d.ts` against the newest source in that package, nested modules
+  included, and both callers stop with `A0` before reading anything. Four cases on a temporary tree
+  pin it: built after its sources, built before a nested source, never built, and no sources.
+
+- **A tool the typecheck could not see.** `test/surface.test.ts` imported `staleBuild` from plain
+  JavaScript, which the project typecheck refuses (TS7016, run `41256505036`). The declaration sits
+  beside the tool the way `eval/bird/fetch.d.mts` sits beside its fetch helpers, and both modules
+  now run `main()` only when they are the entry point, so a test can import them without executing
+  the gate.
 
 - **A counter that could not move: `otherBucket`.** `values-gap` declared it, printed it
   ("0 in the column-count bucket") and never incremented it, so the exclusion the tool documents at
@@ -364,6 +397,16 @@ cannot be argued with.
   are now printed before the verdict, and a test asserts the line survives that return.
 
 ### Measured
+
+- **The audit turn moves 1 condition out of 151, and says "nothing missing" on 96% of turns.**
+  `41258117038`, 496 questions, both arms and the parent's A/A duplicate in one run: parent 275
+  (55.44%), audit 280 (56.45%), A/A 277. Paired: +1.01pp, 4 gained, 9 lost, p = 0.27, CI [-0.42,
+  +2.43], MDE 2.04pp, one extra call a case and 2,864 -> 6,850 characters (+139%), of which the
+  audit turn itself is 3,986. The funnel: **488 turns fired, 24 conditions named, 19 statements
+  rewritten (3.9%)** — the model believes its statement is complete, and on 58% of failures it is
+  right. `bench:bird:conditions` on the same corpus: 93 of 221 failures missing a condition (151
+  conditions) before, 90 of 216 (150) after. Not adopted: the mechanism reaches the population and
+  cannot see inside it.
 
 - **The projection is not the finding: 2.22pp for an oracle, at or below this harness's noise.**
   The 52 `column-count` failures at `41206085907` split 37 wide / 15 narrow, and the smallest
