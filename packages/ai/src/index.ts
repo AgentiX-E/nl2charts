@@ -20,4 +20,6 @@ export { applySelection, buildPairwisePrompt, buildSelectionPrompt, chooseCandid
 export type { Candidate, ExecutedCandidate, SelectionDecision } from './select.js';
 export { formatProfile, replyShape } from './format.js';
 export type { Compliance, FormatProfile, ReplyShape } from './format.js';
+export { DEFAULT_STRATEGY, MIN_OBSERVATIONS, STRATEGIES, admissible, chooseStrategy, createObserver, probeProtocol, strategy, wilson } from './adapt.js';
+export type { Answer, Decision, DecisionOptions, FirstContact, Interval, Observer, ObserverOptions, ProtocolStep, ProtocolVerdict, Refusal, Strategy, StrategyName, Tally } from './adapt.js';
 export type { AskMessagesInput, AskRequest, AskResult, PipelineOptions, PromptOptions, PromptProfile } from './pipeline.js';

@@ -375,3 +375,17 @@ second engine, with the failure taxonomy. Not an accuracy number: it answers
 **Reference driver** — The engine implementation the benchmark's own judge uses
 (Python `sqlite3` for BIRD). Benchmarks execute through it so the judge compares
 tuples, including duplicate column names and duplicate rows.
+
+**Strategy** — One of four fixed ways to run a question, priced in calls: `single-lean` (one call,
+card without notes), `single-full` (one call, card with notes; the default), `repeat-3` (three
+samples, decided by their result sets), `aimed-3` (three candidates from three angles plus a
+selector). A strategy is a value, so it can be printed, pinned, diffed and rolled back.
+
+**Cold start** — The cost of choosing a strategy from the first few questions a deployment sees
+rather than from a benchmark. Measured as *regret*: what the best strategy would have earned on the
+questions the calibration never saw, minus what the chosen one earned on them.
+
+**Oracle, in a strategy comparison** — The accuracy of a router that picks the right strategy per
+question. It is a ceiling, not a target: no single strategy can reach it, which is why the gap
+between the oracle and the best fixed strategy is the size of the prize for routing rather than for
+calibration.

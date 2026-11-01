@@ -4408,6 +4408,78 @@ Three details make the gate mean something:
   that plants a passing run, a noisy run, a 10pp regression, a missing arm and a
   shrunken sample. A gate nobody has seen fail is a gate nobody should trust.
 
+## What a cold start costs, and why this engine declines to calibrate
+
+Every number above was taken on one backbone. A deployment that swaps it keeps the code and
+loses the calibration, and the instinct — re-run the benchmark — is 1,532 questions times four
+calls, which no deployment can do. `packages/ai/src/adapt.ts` answers the smaller question
+instead: of four bounded strategies, which one should this model run? It decides in three layers
+that cost nothing, nothing, and one call, and the last layer only fires when two Wilson intervals
+separate.
+
+That rule is untested until someone prices the way it can be wrong, which is what
+`bench:bird:adapt` does. The four strategies map onto the four arms of the dev split — the same
+run, the same anchor, so the cost of a cold start is a subtraction rather than another benchmark:
+
+| strategy | arm | calls |
+| --- | --- | --- |
+| `single-lean` | `names` | 1 |
+| `single-full` | `metadata+evidence` | 1 |
+| `repeat-3` | `select` | 3 |
+| `aimed-3` | `select-mixed` | 4 |
+
+The harness calibrates on the first N questions, freezes the verdict, and scores it on the rest.
+Three numbers, and the difference between them is the whole point: **chosen** is what a
+deployment gets, **best fixed** is what the best strategy would have earned had the split been
+known in advance, and **oracle** is a per-question router no fixed strategy can reach.
+
+`41296610389` (dev, 1,532 scored questions, deepseek-chat), with the split's own order and with a
+deterministic shuffle as a control:
+
+| window | chosen | accuracy | best fixed | accuracy | oracle | regret | regret (shuffled) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 12 | `single-full` | 60.9% | `aimed-3` | 62.1% | 68.6% | 1.18pp | 1.12pp |
+| 24 | `single-full` | 61.0% | `aimed-3` | 62.3% | 68.7% | **1.33pp** | **1.13pp** |
+| 48 | `single-full` | 61.4% | `aimed-3` | 62.7% | 69.1% | 1.28pp | 1.28pp |
+| 96 | `single-full` | 61.9% | `aimed-3` | 63.5% | 69.5% | 1.60pp | 1.25pp |
+| 192 | `single-full` | 62.3% | `aimed-3` | 63.7% | 69.5% | 1.42pp | 1.57pp |
+| 1,200 | `single-full` | 62.3% | `repeat-3` | 63.0% | 69.6% | — | 0.60pp |
+
+**The pre-registered criterion fails.** It said regret below one point at a window of 24; the
+reading is 1.33pp on the split's own order and 1.13pp on the shuffle. The failure is not noise —
+it survives the shuffle, which removes the split's ordering as an explanation — and it is not a
+tuning problem either: at every window up to 192 the interval rule keeps `single-full`, and the
+only window that clears one point is 1,200 questions, which is three quarters of the split and
+therefore the thing the engine exists to avoid.
+
+The reason is arithmetic rather than implementation. The two arms differ by **1.21pp** and
+disagree on **9.4%** of cases; resolving that difference at 80% power needs
+
+```
+n = (1.96 + 0.8416)^2 · 0.094 / 0.0121^2 = 5,040 questions
+```
+
+— more than three dev splits. A rule that switches only when the intervals separate can therefore
+never switch to the arm that is 1.2pp better, at any sample size a deployment will see. The
+regret in the table is exactly that gap: the cost of never switching, not the cost of switching
+wrongly. `single-full` was the right choice at every window, and it was right for a reason the
+intervals can state.
+
+Two readings follow, and both are useful:
+
+1. **The engine ships as layers ① and ②, with layer ③ held as a last resort.** `probeProtocol`
+   turns a 400 into one retry without a temperature field, and `admissible` stops a four-call
+   strategy from being chosen on a model that never writes a parseable choice. Those two are free
+   and they are exact. `chooseStrategy` stays in the build because it is the only thing that can
+   ever justify leaving the default, and because its floor (`MIN_OBSERVATIONS = 8`) is what makes
+   the honest answer to seven observations "seven observations". What it must not be sold as is a
+   calibrator: at deployment scale it will not move.
+2. **The leverage is per question, not per deployment.** Oracle is **6.1-6.6pp** above the best
+   fixed strategy on every window, and that gap does not shrink with calibration because no fixed
+   strategy can reach it. A router that reads the question — the same reading `choosePromptProfile`
+   already does for window and ratio shapes — is a bigger lever than the choice between these four
+   arms has ever been, and the next iteration prices it.
+
 ## Reproducing
 
 ```bash

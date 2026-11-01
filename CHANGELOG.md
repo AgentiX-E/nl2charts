@@ -8,6 +8,27 @@ cannot be argued with.
 
 ### Added
 
+- **Adaptation for a model nobody has benchmarked, and the measurement that says not to
+  calibrate.** Swapping the backbone keeps the code and loses the calibration, and re-running the
+  benchmark is 1,532 questions times four calls — not something a deployment can do.
+  `packages/ai/src/adapt.ts` reduces the problem to a choice among four bounded strategies
+  (`single-lean` / `single-full` / `repeat-3` / `aimed-3`), decided in three layers that get more
+  expensive in that order: `probeProtocol` reads a refusal's status and the first reply's shape,
+  `admissible` drops the four-call strategy when a model never writes a parseable choice, and
+  `chooseStrategy` / `createObserver` switch only when two Wilson intervals separate, after eight
+  observations.
+
+  The layer is worth its 2.9 KB only if someone prices how it can be wrong, so `bench:bird:adapt`
+  replays an existing artifact: the four strategies are the four arms of the dev split, calibrated
+  on the first N questions and scored on the rest. The pre-registered criterion — regret below one
+  point at a window of 24 — **fails at 1.33pp** (1.13pp on a deterministic shuffle, which rules out
+  the split's ordering as the explanation). The reason is arithmetic: the arms differ by 1.21pp and
+  disagree on 9.4% of cases, so separating them needs 5,040 questions, and no deployment-scale
+  window will ever see that. What ships is layers ① and ②, which are free and exact, plus layer ③
+  as the only thing that could ever justify leaving the default — and the next lever is not a
+  better global strategy but a per-question one: the per-case oracle sits 6.1-6.6pp above the best
+  fixed strategy at every window.
+
 - **The two information sources on one card, which they have never been on.** `metadata+evidence`
   is the strongest single-call arm in the corpus (58.9-59.2% on Mini-Dev) and carries 798 curated
   column notes; `values` carries the literals the question names, looked up in the database, and is

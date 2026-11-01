@@ -438,6 +438,41 @@ expensive one: a real change classified as prose, and a number that then gets qu
 without ever being produced. Between paying for a comment and quoting a measurement that
 does not exist, the guard pays.
 
+### Adaptation without a benchmark
+
+A deployment that swaps the backbone loses the calibration and keeps the code. The layer that
+handles this is `packages/ai/src/adapt.ts`, and its unit of change is a `Strategy` — one of four
+fixed configurations, each a value a caller can print, pin, diff and roll back:
+
+| strategy | calls | what it spends the calls on |
+| --- | --- | --- |
+| `single-lean` | 1 | the card without curated notes |
+| `single-full` | 1 | the card with notes, which is the default |
+| `repeat-3` | 3 | three samples, decided by their result sets |
+| `aimed-3` | 4 | three candidates from three angles, plus a selector |
+
+Three layers choose among them, cheapest first, and each one can stop the search:
+
+1. `probeProtocol` reads the first contact. A 400 or a 422 is a statement about the *request* —
+   usually a temperature field a reasoning model will not accept — and costs one retry with the
+   field omitted. An answer is a statement about the model, and its shape is free evidence.
+2. `admissible` drops `aimed-3` when the model's replies never parse as a choice: a selector
+   spends a call asking for a label, and prose is not a label.
+3. `chooseStrategy` (and its online form, `createObserver`) switches only when two Wilson
+   intervals separate, after at least eight observations. The same interval the report uses, so
+   the runtime decision and the published number cannot disagree about what "better" means.
+
+Nothing here rewrites a prompt. The measurable surface a compiler could optimize is 7.1% of the
+prompt and already parametrised; editing it at runtime would make every number in
+[`benchmarks.md`](./benchmarks.md) unattributable and every deployment unreproducible.
+
+What the harness found is that layer ③ will not move at deployment scale, and the harness is what
+says so: `bench:bird:adapt` replays an existing `bench:bird` artifact, calibrates on the first N
+questions and scores the verdict on the rest. Regret is 1.1-1.6pp at every window below 200, the
+effect it would have to detect is 1.21pp at a 9.4% discordance (5,040 questions), and the only
+window that clears one point is three quarters of the split. The defaults follow from that
+measurement rather than from taste.
+
 ## Design decisions worth knowing
 
 - **No UI framework adapter.** The library exposes promises and async iterables;
@@ -447,3 +482,6 @@ does not exist, the guard pays.
   recorded responses, so the code path is identical to production.
 - **Benchmarks have controls.** A number without a positive and a negative
   control is not a measurement.
+- **Adaptation chooses a configuration, never a prompt.** A bounded `Strategy` can be diffed,
+  pinned and rolled back; a rewritten prompt cannot, and it would make the benchmark table
+  describe a prompt that no longer exists.
