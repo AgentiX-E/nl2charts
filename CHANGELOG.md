@@ -8,6 +8,44 @@ cannot be argued with.
 
 ### Added
 
+- **The other factor of the score, priced without a call: which selection rule kept the answer.**
+  A per-candidate `correct` records that a loss happened and cannot say which rule would have
+  avoided it, so every candidate selection rule cost a run. Each artifact candidate now carries its
+  statement and a **result fingerprint**, and the fingerprint is the judge's own identity hashed:
+  `resultKey` is new in `@agentix-e/nl2charts-devkit` as the canonical key of a result set, and
+  `judgeOfficial` was rewritten to compare two keys. Two candidates share a fingerprint **iff** the
+  official judge calls their results a match, so agreement is measured with the benchmark's
+  definition rather than with a second one. `bench:bird:consensus` replays `first`, `shortest`, modal
+  agreement, the arm's own answer and the ceiling over one artifact — no model call, no oracle
+  query, no database.
+
+  On the dev artifact the previous round used (`41296610389`, 1,532 questions, and written **before**
+  the two fields existed, which is the case the harness has to survive):
+
+  | arm | `first` | `model` (the selector) | `oracle` | paired |
+  | --- | --- | --- | --- | --- |
+  | `select` (3 draws of one prompt) | **61.29%** | 60.97% | 65.34% | 40 won / 35 lost, p=0.6445 |
+  | `select-mixed` (3 prompts) | 61.23% | **62.34%** | 63.71% | 13 won / 30 lost, p=0.0137 |
+
+  So the fourth call's value depends on whether the candidates differ in content: on three draws of
+  one prompt, taking candidate one ties the selector and 1.22pp of the arm's 4.37pp "selection loss"
+  is recoverable by *deleting* a call; on three different prompts the selector wins thirty questions
+  no fixed slot would have. `shortest` and `modal` print a dash with the reason on this artifact
+  (no statements, no fingerprints), and `unanimous` reads *unmeasured* rather than zero — the column
+  the next run is spent to fill.
+
+  `oracle` plus the `unrecorded` count reproduces `bench:bird:pool`'s ceiling exactly (65.34 + 5 =
+  65.66, 63.71 + 2 = 63.84), which is the arithmetic that says the two instruments are still reading
+  one corpus rather than two.
+
+  `eval/bird/consensus.ts` at **99.66 / 99.66 / 100 / 98.28**, `test/bird-consensus.test.ts` at 50
+  cases. Two defects in the instrument were found and fixed before publication, both in the report
+  rather than in the rules: each column had its own denominator (1,507 against 1,532), so the printed
+  difference (0.10pp, a tie) disagreed in **sign** with the paired test on the same rows (13:30,
+  p=0.0137) — every rule now answers every question, and the questions it had no input for are
+  printed beside the column; and a rule that was *ahead* of the selector was printed as
+  "−0.33pp behind", which is not a sentence. Regression banks were added for both after the fix.
+
 - **A score is a product, so the candidate pool is priced separately from the selector — and closed
   as a lever.** `bench:bird:pool` reads `cases[].candidates` and `cases[].passed` out of an existing
   artifact and reports, per arm, the ceiling its pool offered and the share of it the selector

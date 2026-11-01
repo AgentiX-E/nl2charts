@@ -62,16 +62,34 @@ function shapeDiffers(gold: readonly Tuple[], predicted: readonly Tuple[]): Matc
 }
 
 /**
+ * The canonical key of a result set: equal keys exactly when the official judge says `match`.
+ *
+ * This exists because two different questions are asked of the same rows. The judge asks whether
+ * *these two* result sets are the same; an artifact wants a value it can store per candidate and
+ * compare later, across cases, without keeping the rows. A fingerprint built from a second
+ * definition of equality would be a second opinion: two statements could share a fingerprint the
+ * judge does not call a match, and every reading that counted agreement would then be measuring
+ * the fingerprint's rule rather than the benchmark's.
+ *
+ * So the identity is written once here and both callers go through it. The pieces, in order:
+ * column width (observable only through a row, so an empty result carries the shared key `∅`),
+ * then the order-free, duplicate-free set of row keys. That is precisely `shapeDiffers` plus the
+ * `set()` comparison in `judgeOfficial`, which now derives its answer from this function.
+ */
+export function resultKey(rows: readonly Tuple[]): string {
+  if (rows.length === 0) return '\u2205';
+  const width = (rows[0] as Tuple).length;
+  const unique = new Set(rows.map(keyOf));
+  return `${String(width)}\u0002${[...unique].sort().join('\u0003')}`;
+}
+
+/**
  * BIRD official execution accuracy: `set(...)` on both sides.
  */
 export function judgeOfficial(gold: readonly Tuple[], predicted: readonly Tuple[]): MatchReason {
   const shape = shapeDiffers(gold, predicted);
   if (shape !== undefined) return shape;
-  const goldSet = new Set(gold.map(keyOf));
-  const predictedSet = new Set(predicted.map(keyOf));
-  if (goldSet.size !== predictedSet.size) return 'values';
-  for (const key of goldSet) if (!predictedSet.has(key)) return 'values';
-  return 'match';
+  return resultKey(gold) === resultKey(predicted) ? 'match' : 'values';
 }
 
 /**

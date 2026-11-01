@@ -514,3 +514,15 @@ that differs in method rather than in prompt or in draw.
   call after the first adds 1.31pp — under the 2.30pp the split can resolve. The pool is therefore
   closed as a lever at this model, and the decision that follows is about generators, not about
   selectors or routers.
+- **A verdict is not a record; the statement and the result travel with it.** A per-candidate
+  `correct` says a loss happened and cannot say which rule would have avoided it, so every
+  selection rule used to cost a run. Each artifact candidate now carries its `sql` and a
+  `fingerprint`, and the fingerprint is the judge's own identity hashed — `resultKey` is the
+  canonical key of a result set and `judgeOfficial` compares two of them, so "same fingerprint"
+  means `match` rather than resembling it. `bench:bird:consensus` replays `first`, `shortest` and
+  modal agreement from the file at zero calls; a rule whose input the artifact lacks is printed as a
+  dash with the reason, never as a zero. On the dev artifact this already separates two arms that
+  looked alike: taking candidate one ties the selector on `select` (40:35, p=0.64) and loses to it
+  on `select-mixed` (13:30, p=0.0137). Choosing is guessing when the candidates are draws of one
+  prompt and deciding when they differ in content — the same mechanism the ceiling was measured to
+  assume.

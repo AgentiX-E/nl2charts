@@ -4,8 +4,8 @@
   "tolerancePp": 0.2,
   "measuredAt": "2026-11-01",
   "totals": {
-    "lines": 99.42,
-    "statements": 99.42,
+    "lines": 99.43,
+    "statements": 99.43,
     "functions": 100,
     "branches": 98.01
   },
@@ -69,6 +69,12 @@
       "statements": 99.09,
       "functions": 100,
       "branches": 96.62
+    },
+    "eval/bird/consensus.ts": {
+      "lines": 99.66,
+      "statements": 99.66,
+      "functions": 100,
+      "branches": 98.28
     },
     "eval/bird/data.ts": {
       "lines": 100,
@@ -158,7 +164,7 @@
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 98.63
+      "branches": 98.64
     },
     "eval/bird/position.ts": {
       "lines": 98.82,
@@ -215,10 +221,10 @@
       "branches": 97.17
     },
     "eval/bird/run.ts": {
-      "lines": 99.37,
-      "statements": 99.37,
+      "lines": 99.38,
+      "statements": 99.38,
       "functions": 100,
-      "branches": 95.36
+      "branches": 95.39
     },
     "eval/bird/samples.ts": {
       "lines": 100,

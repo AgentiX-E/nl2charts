@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assertCandidateSurvival, candidateFailureTotals, candidateSurvivalBySource, classifyCandidateFailure } from '../eval/bird/run.js';
+import { CANDIDATE_SQL_CAP, assertCandidateSurvival, candidateFailureTotals, candidateSurvivalBySource, candidateVerdicts, classifyCandidateFailure } from '../eval/bird/run.js';
 
 /**
  * Three ways a candidate fails to exist, and three different repairs.
@@ -113,5 +113,54 @@ describe('reading the mechanism off the error code', () => {
     expect(classifyCandidateFailure('NL2C_E_LLM_INVALID_RESPONSE')).toBe('unparsed');
     expect(classifyCandidateFailure(undefined)).toBe('unparsed');
     expect(classifyCandidateFailure('NL2C_E_SOMETHING_NEW')).toBe('unparsed');
+  });
+});
+
+/**
+ * What a candidate record has to carry for the next instrument to read it.
+ *
+ * `bench:bird:consensus` prices selection rules from the artifact, which is only possible if the
+ * record holds the statement and a fingerprint of the result. Both were added here, and both have
+ * a failure mode that is silent rather than loud: a fingerprint computed from a second definition
+ * of equality would let two candidates "agree" whose results the judge calls different, and a
+ * statement truncated without saying so cannot be re-executed even though it looks as if it can.
+ */
+describe('the candidate record', () => {
+  const rows = [[1]];
+  const expected = [[1]];
+
+  it('carries the statement, the verdict and a fingerprint of the result', () => {
+    const [verdict] = candidateVerdicts([{ sql: 'SELECT 1', rows, source: 'values' }], expected);
+    expect(verdict).toMatchObject({ source: 'values', correct: true, sql: 'SELECT 1' });
+    expect(verdict?.fingerprint).toMatch(/^[0-9a-f]{16}$/u);
+  });
+
+  it('gives two statements with the same result the same fingerprint, and different results different ones', () => {
+    const verdicts = candidateVerdicts(
+      [
+        { sql: 'SELECT 1', rows: [[1]], source: 'a' },
+        { sql: 'select 1 as x', rows: [[1]], source: 'b' },
+        { sql: 'SELECT 2', rows: [[2]], source: 'c' },
+      ],
+      expected,
+    );
+    expect(verdicts[0]?.fingerprint).toBe(verdicts[1]?.fingerprint);
+    expect(verdicts[0]?.fingerprint).not.toBe(verdicts[2]?.fingerprint);
+    // ...and it follows the judge, not the text: the third statement is a mismatch, so the entry
+    // is the reason the arm can tell "the candidates agreed" from "the candidates agreed on a
+    // wrong answer".
+    expect(verdicts.map((verdict) => verdict.correct)).toEqual([true, true, false]);
+  });
+
+  it('says when it had to truncate the statement', () => {
+    const long = `SELECT '${'x'.repeat(CANDIDATE_SQL_CAP)}'`;
+    const [verdict] = candidateVerdicts([{ sql: long, rows, source: 'a' }], expected);
+    expect(verdict?.sql).toHaveLength(CANDIDATE_SQL_CAP);
+    expect(verdict?.sqlClipped).toBe(true);
+  });
+
+  it('leaves a statement under the cap alone and does not claim truncation', () => {
+    const [verdict] = candidateVerdicts([{ sql: 'SELECT 1', rows, source: 'a' }], expected);
+    expect(verdict?.sqlClipped).toBeUndefined();
   });
 });

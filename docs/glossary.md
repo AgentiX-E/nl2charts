@@ -416,3 +416,20 @@ selector's prompt.
 **Marginal candidate** — What one more generation call buys, measured as the questions it covers
 that nothing already bought covers. A pool earns its call only if that number clears the split's
 minimum detectable effect; on the dev split the best second pool buys 1.31pp against a 2.30pp line.
+
+**Result fingerprint** — A sixteen-hex-character digest of `resultKey`, the canonical key of a
+result set. Two candidates share a fingerprint exactly when the official judge calls their results a
+match, because `judgeOfficial` compares two keys rather than re-deriving equality: a digest over a
+second definition would make "the candidates agreed" a claim about the fingerprint's rule instead of
+about the benchmark's.
+
+**Selection rule** — A rule that picks one candidate out of the set the arm kept, priced without
+running anything. `first` takes the earliest slot, `shortest` the fewest characters of SQL, `modal`
+the result set the most candidates agree on, `model` whatever the arm returned (the only one that
+spends a call), and `oracle` any correct candidate — the ceiling rather than a rule.
+`bench:bird:consensus` scores all five from one artifact.
+
+**Unanimity** — The questions on which every candidate returned the same result, and therefore the
+share of the corpus no selection rule can move: if the set agrees and is wrong, choosing cannot
+help. It is the boundary between selection workmanship and generation work, and the column is
+printed as *unmeasured* rather than zero on artifacts written before fingerprints existed.

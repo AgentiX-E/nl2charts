@@ -148,6 +148,11 @@ jobs:
       # neither is on 496 questions.
       - name: What one more candidate would buy
         run: pnpm bench:bird:pool --artifact eval/out/bird-eval.json
+      # The other factor of the same product, priced on the split that can resolve it. Selection
+      # losses here are 23 questions on `select-mixed` against 72 on `select`, so a rule that
+      # converts one arm and not the other is only visible at this size.
+      - name: Which selection rule kept the answer
+        run: pnpm bench:bird:consensus --artifact eval/out/bird-eval.json
       # The run that fails is the run whose numbers matter most, and these two steps used to
       # run only on success: `40534288883` failed the floor gate and the artifact — the only
       # copy of the per-case rows and the McNemar p-values — was never uploaded, so the run

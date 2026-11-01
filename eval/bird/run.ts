@@ -18,6 +18,7 @@
  *   pnpm bench:bird               # full run against the configured provider
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHttpProvider } from '@agentix-e/nl2charts-ai';
@@ -28,7 +29,7 @@ import type { FormatProfile, PurposeUsage, ReplyShape } from '@agentix-e/nl2char
 // guard the pipeline applies. Skipping it here would let the one arm that retries be the
 // one arm that can execute DDL.
 import { inspectSql } from '@agentix-e/nl2charts-core';
-import { casesForEffect, compareArms, judgeOfficial, judgeStrict, majorityResult, mcnemarExact, pairedResolution, summarise, wilsonInterval } from '@agentix-e/nl2charts-devkit';
+import { casesForEffect, compareArms, judgeOfficial, judgeStrict, majorityResult, mcnemarExact, pairedResolution, resultKey, summarise, wilsonInterval } from '@agentix-e/nl2charts-devkit';
 import type { PairedComparison } from '@agentix-e/nl2charts-devkit';
 import { graphForDatabase } from './join-graph.js';
 import { ppPerExtraCall, repairFunnel } from './metrics.js';
@@ -959,8 +960,20 @@ export interface CaseRun extends CaseOutcome {
    * prompt, so `source` crossed with the index says both who wrote the candidate and where it
    * was offered. That is what makes "52.6% for the author" and "52.6% for slot zero"
    * separable after the fact, without a second field to drift out of step with the order.
+   *
+   * `sql` and `fingerprint` are what turn this from a verdict into a *replayable* one: a
+   * fingerprint equal to another candidate's means the two result sets are the same under the
+   * benchmark's own judge (`resultKey`), so a rule that reads agreement can be scored from the
+   * file instead of from a new run. `sqlClipped` says the recorded text is truncated and cannot
+   * be re-executed as it stands.
    */
-  readonly candidates?: readonly { readonly source: string; readonly correct: boolean }[];
+  readonly candidates?: readonly {
+    readonly source: string;
+    readonly correct: boolean;
+    readonly sql?: string;
+    readonly fingerprint?: string;
+    readonly sqlClipped?: boolean;
+  }[];
   /**
    * The shape of the first reply this arm's prompt produced on this case.
    *
@@ -1994,6 +2007,22 @@ export function offeredCandidates<T extends { readonly rows: readonly unknown[] 
   return { offered: nonEmpty, dropped: candidates.length - nonEmpty.length };
 }
 
+/** How much of a candidate's statement an artifact keeps. BIRD's statements are well under it. */
+export const CANDIDATE_SQL_CAP = 2000;
+
+/**
+ * A short, stable name for a result set: the official judge's identity, hashed.
+ *
+ * Sixteen hex characters of SHA-256 rather than a counter or a 32-bit hash: the fingerprint is
+ * compared across a whole split (thousands of result sets, tens of thousands of comparisons),
+ * and a 32-bit space would produce a birthday collision inside one run — which would read as
+ * "two candidates agreed" on a question where they did not, and inflate every consensus number
+ * silently. The digest is of `resultKey`, so the equality being hashed is the benchmark's.
+ */
+export function resultFingerprint(rows: readonly (readonly unknown[])[]): string {
+  return createHash('sha256').update(resultKey(rows)).digest('hex').slice(0, 16);
+}
+
 /**
  * The candidate set, in the order the selector saw it, with the truth for each member.
  *
@@ -2002,13 +2031,37 @@ export function offeredCandidates<T extends { readonly rows: readonly unknown[] 
  * ("which member held it") — so the second cannot drift from the first. Judging each
  * candidate twice would let a loss be attributed to a candidate the recall count never
  * counted.
+ *
+ * The statement and a fingerprint of its result travel with the verdict, and both are there to
+ * make a *different* measurement possible from the same artifact. A verdict alone says which
+ * candidate held the answer; it cannot say whether two candidates agreed, so every selection
+ * rule that reads agreement — modal result, the cheapest consensus, "keep the one the others
+ * imply" — needed a fresh run to be priced, at one call per question per rule. With the
+ * statement and the fingerprint recorded, those rules replay offline for nothing, and the
+ * fingerprint is `resultKey` hashed rather than a second definition of equality, so "same
+ * fingerprint" is the official judge's `match` and not a claim about text.
  */
 export function candidateVerdicts(
-  candidates: readonly { readonly rows: readonly (readonly unknown[])[]; readonly source: string }[],
+  candidates: readonly { readonly sql: string; readonly rows: readonly (readonly unknown[])[]; readonly source: string }[],
   expected: readonly (readonly unknown[])[],
-): readonly { readonly source: string; readonly correct: boolean }[] {
-  return candidates.map((candidate) => ({ source: candidate.source, correct: judgeOfficial(expected, candidate.rows) === 'match' }));
+): readonly { readonly source: string; readonly correct: boolean; readonly sql: string; readonly fingerprint: string; readonly sqlClipped?: boolean }[] {
+  return candidates.map((candidate) => {
+    const clipped = candidate.sql.length > CANDIDATE_SQL_CAP;
+    return {
+      source: candidate.source,
+      correct: judgeOfficial(expected, candidate.rows) === 'match',
+      // The text, capped: a statement is what a reader needs to see *why* a candidate was wrong,
+      // and every artifact so far threw it away unless the whole case failed. Truncation is
+      // recorded rather than silent, because a clipped statement cannot be re-executed and a
+      // reader who assumed it could would get an engine error they would blame on the harness.
+      sql: clipped ? candidate.sql.slice(0, CANDIDATE_SQL_CAP) : candidate.sql,
+      ...(clipped ? { sqlClipped: true } : {}),
+      fingerprint: resultFingerprint(candidate.rows),
+    };
+  });
 }
+
+
 
 /**
  * The candidate set as the selector will read it.

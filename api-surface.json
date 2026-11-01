@@ -391,6 +391,7 @@
     "pairByOccurrence",
     "pairedResolution",
     "recordCase",
+    "resultKey",
     "runContractSuite",
     "sameResult",
     "sameRows",

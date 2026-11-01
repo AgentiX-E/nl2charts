@@ -491,7 +491,7 @@ describe('a sampling arm', () => {
     const pen = cases.find((row) => row.id === '7');
     // The record is the set that survived: two sources, both of them correct, so the case is
     // decided by the candidates that arrived rather than by the one that did not.
-    expect(pen?.candidates).toEqual([
+    expect((pen?.candidates ?? []).map(({ source, correct }) => ({ source, correct }))).toEqual([
       { source: 'inline+evidence', correct: true },
       { source: 'metadata+evidence', correct: true },
     ]);
@@ -876,11 +876,22 @@ describe('the same candidates in one SQL style', () => {
       expect(cases.every((row) => row.passed)).toBe(true);
       // The candidate record still describes the set, because the winner is taken by index
       // from the untouched set rather than from the copy the judge read.
-      expect(first?.candidates).toEqual([
+      const firstCandidates = (first?.candidates ?? []) as { source: string; correct: boolean; sql?: string; fingerprint?: string }[];
+      expect(firstCandidates.map(({ source, correct }) => ({ source, correct }))).toEqual([
         { source: 'inline+evidence@second', correct: true },
         { source: 'metadata+evidence', correct: true },
         { source: 'values', correct: true },
       ]);
+      // And it carries what each candidate said and what it returned. Both are load-bearing for
+      // a different instrument: without the statement a verdict cannot be re-read, and without
+      // the fingerprint two candidates that agreed look exactly like two that did not, so
+      // `bench:bird:consensus` would have nothing to count. Pinned here so that narrowing the
+      // record has to break a test rather than silently unprice a harness.
+      expect(firstCandidates.every((candidate) => (candidate.sql ?? '').length > 0)).toBe(true);
+      expect(firstCandidates.every((candidate) => /^[0-9a-f]{16}$/u.test(candidate.fingerprint ?? ''))).toBe(true);
+      // Three candidates that returned the same thing share a fingerprint; this bank answers
+      // every question with one statement, so agreement is total and the set is unanimous.
+      expect(new Set(firstCandidates.map((candidate) => candidate.fingerprint)).size).toBe(1);
     } finally {
       await second.close();
     }

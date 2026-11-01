@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { judgeOfficial, judgeOfficialResult, judgeStrict, judgeStrictResult, toTuples } from '../src/index.js';
+import { judgeOfficial, judgeOfficialResult, judgeStrict, judgeStrictResult, resultKey, toTuples } from '../src/index.js';
 
 const t = (...rows: unknown[][]): unknown[][] => rows;
 
@@ -98,5 +98,49 @@ describe('blob comparison', () => {
 
   it('treats a hex string from the DuckDB adapter as text, not as bytes', () => {
     expect(judgeOfficial(t(['0x00ff']), t([new Uint8Array([0, 255])]))).toBe('values');
+  });
+});
+
+describe('the canonical key of a result set', () => {
+  it('agrees with the judge on every pair it can be asked about', () => {
+    // The property, not a table: a fingerprint is only allowed to differ where the judge says
+    // `match` differs, and a case a table forgot would be the one a reader quotes.
+    const banks = [
+      t([1, 'a'], [2, 'b']),
+      t([2, 'b'], [1, 'a']),
+      t([1, 'a'], [2, 'b'], [1, 'a']),
+      t([1, 'a']),
+      t([1]),
+      t(['a', 1]),
+      t(),
+      t([null]),
+      t([undefined]),
+      t([Number.NaN]),
+      t([true]),
+      t([1]),
+    ];
+    for (const left of banks) {
+      for (const right of banks) {
+        expect(resultKey(left) === resultKey(right)).toBe(judgeOfficial(left, right) === 'match');
+      }
+    }
+  });
+
+  it('collapses duplicate rows, because the official judge does', () => {
+    expect(resultKey(t([1], [1], [2]))).toBe(resultKey(t([2], [1])));
+  });
+
+  it('keeps rows in a different order equal and rows of a different width apart', () => {
+    expect(resultKey(t([1, 2]))).toBe(resultKey(t([1, 2])));
+    expect(resultKey(t([1, 2]))).not.toBe(resultKey(t([2, 1])));
+    expect(resultKey(t([1]))).not.toBe(resultKey(t([1, 2])));
+  });
+
+  it('gives every empty result the same key, whatever its columns would have been', () => {
+    expect(resultKey(t())).toBe(resultKey([]));
+  });
+
+  it('distinguishes a null from the string that spells it', () => {
+    expect(resultKey(t([null]))).not.toBe(resultKey(t(['null'])));
   });
 });

@@ -4,7 +4,7 @@ export { compareArms, pairByOccurrence, sameResult, sameRows, summarise } from '
 export type { AlignedPair, ArmResult, CaseOutcome, PairedComparison, Pairing, ResultSet } from './bench.js';
 export { casesForEffect, mcnemarExact, pairedResolution, wilsonInterval } from './stats.js';
 export type { Interval, PairedResolution } from './stats.js';
-export { judgeOfficial, judgeOfficialResult, judgeStrict, judgeStrictResult, toTuples } from './judge.js';
+export { judgeOfficial, judgeOfficialResult, judgeStrict, judgeStrictResult, resultKey, toTuples } from './judge.js';
 export type { MatchReason, SqlResultSet, Tuple } from './judge.js';
 export { majorityResult } from './vote.js';
 export type { Majority } from './vote.js';

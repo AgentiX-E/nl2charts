@@ -119,6 +119,8 @@ pnpm bench:bird:diagnose <report.json>   # classify the failures a run kept; no 
 pnpm bench:bird:strata --arm A --against B   # split a pair by candidate independence; no model
 pnpm bench:bird:losses --arm A               # attribute every selection loss to a source; no model
 pnpm bench:bird:position --arm A             # stratify a shuffle arm by candidate slot, with intervals; no model
+pnpm bench:bird:pool --artifact <report.json>      # the ceiling each candidate set offers; no model
+pnpm bench:bird:consensus --artifact <report.json> # which selection rule kept the answer; no model
 ```
 
 Scope: **all 11 databases, all 500 Mini-Dev questions** (498 scorable: two gold
@@ -4618,6 +4620,95 @@ reduced to a single survivor recorded no `candidates` array at all, so seven dev
 passed with no correct candidate in their record. Those are exactly the questions where two of three
 samples died — the smallest pools — and every reading above would have silently dropped them. The
 runner now records a set of one, and the harness prints the count instead of absorbing it.
+
+## Which selection rule kept the answer
+
+The pool section ended with a sentence it could not act on: the ceiling is 67.49%, the conversion is
+97.6%, and the factor that was never priced is the conversion. It could not be priced because the
+artifact recorded only *whether* each candidate was right — enough to count a loss, not enough to say
+which rule would have kept it. Every candidate rule therefore cost a run: three generations plus a
+selector is four calls, and a fifth arm to try a different fourth call is another 1,532 questions.
+
+Two fields close that. Each candidate record now carries its statement and a **result fingerprint**,
+and the fingerprint is not a second definition of equality: `resultKey` was added to the devkit as
+the canonical key of a result set, and `judgeOfficial` was rewritten to compare two keys. The
+property that follows is exact rather than approximate — two candidates share a fingerprint **iff**
+the benchmark's own judge calls their results a match — so a rule that reads agreement is reading the
+score's definition and not a proxy for it. `test/devkit`-side pins the property over every pair of a
+twelve-bank corpus rather than over a table of cases a reader could have forgotten.
+
+`pnpm bench:bird:consensus --artifact <report.json>` replays five rules over one artifact, with no
+model call, no oracle query and no database:
+
+| rule | what it picks | spends a call |
+| --- | --- | --- |
+| `first` | the candidate the prompt offered first | no |
+| `shortest` | the fewest characters of SQL | no |
+| `modal` | the result set the most candidates agree on | no |
+| `model` | what the arm actually returned | **yes** |
+| `oracle` | any candidate correct — the ceiling, not a rule | no |
+
+**The reading, on the dev artifact the previous section used** (`41296610389`, 1,532 questions). It
+was written before the two fields existed, which is the case the harness has to survive: the three
+one-call arms are named as unreadable, `shortest` and `modal` print a dash with the reason, and
+`first` still works, because a position needs nothing but the order the set was already in.
+
+| arm | cases | `first` | `model` | `oracle` | `first` vs the selector |
+| --- | --- | --- | --- | --- | --- |
+| `select` — 3 draws of one prompt | 1,532 | **61.29%** | 60.97% | 65.34% | 40 won / 35 lost, p = 0.6445 |
+| `select-mixed` — 3 prompts | 1,532 | 61.23% | **62.34%** | 63.71% | 13 won / 30 lost, p = 0.0137 |
+
+Read the two rows against the pool section and the same number changes meaning twice:
+
+- **On three draws of one prompt, choosing is guessing.** Taking candidate one scores 0.33pp
+  *ahead* of the selector, and the paired test says the two are indistinguishable (40:35, p=0.64).
+  The 4.37pp that this arm "loses to its selector" is therefore not all selection loss: 1.22pp of it
+  is recoverable by deleting the fourth call, and the rest is the ceiling's.
+- **On three different prompts, the call decides.** The selector wins thirty questions that no fixed
+  slot would have won, against thirteen the other way (p=0.0137), and the totals agree this time
+  (62.34% against 61.23%). The difference between the rows is not the selector; it is whether the
+  candidates *differ in content*. Handed three near-identical statements the selector has nothing to
+  discriminate on, which is the mechanism the pool section named at 7.1% versus 2.3% conversion and
+  this table now prices from the other end.
+
+Two cross-checks, because an instrument that agrees with itself is not evidence. `oracle` plus the
+`unrecorded` count equals `bench:bird:pool`'s ceiling on the same rows — 65.34 + 5 = 65.66 and
+63.71 + 2 = 63.84 — which is what it should be, since `pool.ts` repairs those holes by source and
+this harness refuses to. And the `unanimous` column is empty here for a reason rather than by
+accident: 1,510 and 1,507 questions carry no fingerprint at all, so agreement is *unmeasured*, not
+zero, and the column says so instead of printing a rate.
+
+**Two defects in the instrument, found before it was published.** Both were in the report rather than
+in the rules, and both are the kind that produce a plausible table:
+
+1. *Each column had its own denominator.* A rule that could not pick was excluded from its own share
+   but counted as a miss in the pairing, so `first` was 62.24% of the 1,507 questions that produced a
+   candidate while the selector was 62.34% of the 1,532 the arm ran — and the printed difference
+   (0.10pp, a tie) disagreed in *sign* with the paired test on the same rows (13:30, p=0.0137). Every
+   rule now answers every question; the count of questions it had no input for is printed beside the
+   column instead of shrinking it. The bank in `test/bird-consensus.test.ts` that pins this exists
+   because the first version passed all its other tests while printing two incomparable numbers.
+2. *A negative gap was printed as "behind".* `first` was ahead on `select` and the verdict line said
+   "−0.33pp behind", which is not a sentence and reads as a loss. The sign is now stated: 0.33pp
+   ahead of it.
+
+Both were found by reading the output against the arithmetic, not by a test — which is why the
+regression banks were added after the fix rather than before it.
+
+### What the fingerprint is for, on the run after this one
+
+The `modal` rule is the cheapest consensus there is and the one every reader assumes is already in
+place: when candidates agree, take the agreement. It has been measured once, as an arm — `vote-mixed`
+against `select-mixed`, 61.5% against 63.3%, −1.76pp (49 won / 22 lost, p=0.0018) — and that
+measurement cost a full dev run because the artifact could not count agreement. On the next artifact
+it is a reading. The two are not the same rule even then: `vote-mixed` reruns the vote *inside* the
+arm, while `modal` replays it over the set the arm kept, including the questions where the arm's own
+selector had already removed a candidate.
+
+The column that matters more is `unanimous`: how often every candidate returns the same result, and
+how often that shared result is wrong. A set that agrees and is wrong is the correlated-error case,
+and no selection rule on any list reaches it — that is the boundary between this instrument and
+generation work, and it is the number the next run is being spent to read.
 
 ## Reproducing
 

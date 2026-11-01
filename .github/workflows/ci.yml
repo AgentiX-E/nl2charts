@@ -436,6 +436,13 @@ jobs:
       # worth spending, so the reading is the finding.
       - name: What one more candidate would buy
         run: pnpm bench:bird:pool --artifact eval/out/bird-eval.json
+      # The other half. The pool step prices the ceiling; this prices the rules that convert it,
+      # from the same rows — `first`, `shortest` and modal agreement are functions of what the
+      # artifact now records per candidate, so a rule costs a reading instead of a run. A rule
+      # whose input the artifact does not carry is named as unavailable rather than scored zero,
+      # which is what makes this safe to run on an artifact written before the fields existed.
+      - name: Which selection rule kept the answer
+        run: pnpm bench:bird:consensus --artifact eval/out/bird-eval.json
       - name: Noise floor (same cases, three repeats)
         run: pnpm bench:bird:stability
       - name: Adversarial gold, widths and controls without a model
