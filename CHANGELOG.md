@@ -20,7 +20,16 @@ cannot be argued with.
 
   The ceiling gains **+2.83pp** — 22 questions where only the reasoner is right, 5 where it displaced
   a right answer, net +17 — and the selector converts 16 of the 22, then loses 35 of the 410 it could
-  have had. Net **−1.17pp** (25 won / 18 lost, p=0.3604), so the union is 68.33% against a 70% bar and
+  have had. It is not the highest ceiling in this project (`vote-cross` reached 69.6% with one GLM
+  statement and two DeepSeek ones), and the pair is the finding: **conversion is a property of the
+  pool's shape, not of the aggregator** — 90.2% for `vote-cross`'s modal vote and 91.46% for
+  `select-cross`'s model selector, against 96–97% for single-author pools.
+
+  The one combination that needs no new generation is now priced in the same report: the vote and the
+  selector, whichever is right, reach **66.33%** on `select-cross` (+3.83pp over the selector, 23
+  questions only the vote gets and 20 only the selector gets) and 64.50% on `select-mixed` (+0.83pp).
+  The sample resolves 3.17pp, so the first is a measurable room and the second is not — the difference
+  is whether the pool holds a dissenting slot. Net **−1.17pp** (25 won / 18 lost, p=0.3604), so the union is 68.33% against a 70% bar and
   the pairing is behind rather than ahead. On the 22 questions the reasoner adds, the correct answer
   is a **lone dissenting slot in 20**: the two chat candidates agree and are both wrong. A vote cannot
   take those; the model selector takes 73% of them, which is why it beats `first` there

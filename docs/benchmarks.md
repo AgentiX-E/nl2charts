@@ -4730,8 +4730,10 @@ budget, and a paired difference of at least 2.30pp against `select-mixed` on the
 
 Neither criterion is met. The union is 68.33%, 1.67pp short of 70%; the paired difference is
 **−1.17pp** (25 won / 18 lost, p=0.3604), so the cross arm is behind rather than ahead. What moved is
-the ceiling: **+2.83pp**, the largest single lever on that factor any arm in this project has
-produced. The reason it did not reach the score is the other factor, and the decomposition is exact:
+the ceiling: **+2.83pp** on this sample. That is not the highest ceiling this project has measured —
+`vote-cross` reached 69.6% with one GLM statement and two DeepSeek ones — but the two are the same
+move measured against different references, and the pair is worth more than either. The reason the
+ceiling did not reach the score is the other factor, and the decomposition is exact:
 
 | | questions | converted by the selector |
 | --- | --- | --- |
@@ -4740,7 +4742,17 @@ produced. The reason it did not reach the score is the other factor, and the dec
 | net ceiling | **+17** | 16 |
 
 The reasoner alone is right on 60.00% — below each of the two chat candidates (63.19% and 63.30%) —
-and it is the *only* correct slot on 23 questions, of which the selector kept 16. On the 22 questions
+and it is the *only* correct slot on 23 questions, of which the selector kept 16.
+
+**Conversion is a property of the pool's shape, not of the aggregator.** `vote-cross` — one GLM
+statement and two DeepSeek ones, aggregated by modal vote, run `40409600418` — converts 90.2% of its
+69.6% ceiling; `select-cross` — two chat candidates and one reasoner, aggregated by a model selector
+— converts 91.46% of its 68.33%. Two different second models, two different aggregators, the same
+one-call-missing number, against 96–97% for pools whose candidates come from one author. Modal voting
+converted 14 of the 65 questions `vote-cross` alone held (21.5%); the model selector converted 16 of
+the 22 `select-cross` alone held (72.7%). The aggregator matters for *which* questions, and barely at
+all for *how many*: what costs the points is that a 2+1 pool has a minority whose answer is often the
+right one, and every aggregator on the list resolves that the same way — badly. On the 22 questions
 where it adds an answer, the correct result is a **lone minority of one slot in 20 of them**: the two
 chat candidates agree with each other and are both wrong, and only the third candidate dissents
 correctly. A three-way vote cannot take those, and the recorded selector takes 73% of them because it
@@ -4755,7 +4767,21 @@ The same instrument then asks the question the run was not designed to answer, a
 
 On the cross arm, **the shortest statement scores higher than the selector** — 63.17% against
 62.50%, 25 won / 21 lost, p=0.6587 — so the fourth call is worth less than nothing on that pool while
-it is worth 0.67pp (also unresolvable) on the mixed one. The selector beats `first` there (11 won /
+it is worth 0.67pp (also unresolvable) on the mixed one.
+
+The same table prices the one combination that needs no new generation, because both halves are
+already built: **the vote or the selector, whichever is right**. Six hundred questions, one column of
+questions only the vote gets and one of questions only the selector gets:
+
+| arm | selector | vote (zero calls) | either | only the vote | only the selector | room |
+| --- | --- | --- | --- | --- | --- | --- |
+| `select-cross` | 62.50% | 63.00% | **66.33%** | 23 | 20 | **+3.83pp** |
+| `select-mixed` | **63.67%** | 62.50% | 64.50% | 5 | 12 | +0.83pp |
+
++3.83pp on a sample that resolves 3.17pp, and +0.83pp on the same sample where the pool has no
+dissenting slot. That is the strongest form the next step can take: not "make the selector smarter",
+but "arbitrate between an aggregator that cannot see statements and one that cannot count votes",
+with a pre-registered ceiling and every input already in the file. The selector beats `first` there (11 won /
 26 lost, p=0.0201), so it is doing something; it is simply not doing enough to hold a pool whose
 third candidate dissents. On this sample the resolution is 3.17pp against a stated margin of 2.30pp,
 and the verdict says so: this run does not measure what the call is worth, in either arm.

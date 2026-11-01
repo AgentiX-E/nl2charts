@@ -398,6 +398,62 @@ describe('the report', () => {
     expect(lines.join('\n')).toContain('agreement unmeasured on 1 question(s)');
   });
 
+  it('names an arm whose candidates were never kept, instead of pricing it as an arm that failed', () => {
+    // Two arms, one of which kept no candidate set at all. The unreadable arm is named in the report
+    // rather than being scored as a rule that lost every question.
+    const cases = [
+      one('select-mixed', 1, true, ['a:yes:SELECT 1:111', 'b:no:SELECT 22:222']),
+      one('one-call', 1, true, []),
+      one('one-call', 2, false, []),
+    ];
+    const lines = run({ split: 'dev', cases }).join('\n');
+    expect(lines).toContain('1 arm(s) kept one candidate and cannot be read here: one-call');
+    expect(lines).toContain('select-mixed');
+  });
+
+  it('prices the two aggregators that already exist against each other', () => {
+    // Four questions, one per way the vote and the selector can disagree: the vote keeps one the
+    // selector loses, the selector keeps one the vote loses, both, and neither. Two writers of the
+    // same answer makes the vote right; a third, wrong answer leaves the singleton as the vote.
+    const cases = [
+      // vote right (two agree on the correct result), selector took the dissenter
+      one('select-mixed', 1, false, ['a:yes:SELECT 1:111', 'b:yes:SELECT 22:111', 'c:no:SELECT 333:333']),
+      // selector right, vote wrong (the two agreeing candidates are both wrong)
+      one('select-mixed', 2, true, ['a:no:SELECT 1:111', 'b:no:SELECT 22:111', 'c:yes:SELECT 333:333']),
+      // both right
+      one('select-mixed', 3, true, ['a:yes:SELECT 1:111', 'b:yes:SELECT 22:111', 'c:yes:SELECT 333:111']),
+      // neither
+      one('select-mixed', 4, false, ['a:no:SELECT 1:111', 'b:no:SELECT 22:222', 'c:no:SELECT 333:333']),
+    ];
+    const arm = readCorpus({ split: 'dev', cases }).reading[0];
+    expect(arm?.arbitration).toEqual({ either: 3, both: 1, onlySelector: 1, onlyVote: 1, vote: 2 });
+    const lines = run({ split: 'dev', cases }).join('\n');
+    expect(lines).toContain('vote or selector: 75.00%');
+    expect(lines).toContain('the vote keeps 1 question(s) the selector loses, the selector keeps 1 the vote loses (+25.00pp against the selector, both 1)');
+  });
+
+  it('does not credit the vote with questions it cannot read', () => {
+    // No fingerprint means no agreement to count: the union is the selector's own answer, and the
+    // line still prints rather than disappearing behind a rule that cannot run.
+    const cases = [
+      one('select-mixed', 1, true, ['a:yes', 'b:no']),
+      one('select-mixed', 2, false, ['a:no', 'b:no']),
+    ];
+    const arm = readCorpus({ split: 'dev', cases }).reading[0];
+    expect(arm?.arbitration).toEqual({ either: 1, both: 0, onlySelector: 1, onlyVote: 0, vote: 0 });
+    expect(run({ split: 'dev', cases }).join('\n')).toContain('vote or selector: 50.00%');
+  });
+
+  it('counts a one-candidate question in the union, though not as agreement', () => {
+    // The arbitration is counted before the agreement skips, because a set of one still has a vote:
+    // itself. Counting it after would understate the union by exactly the questions the agreement
+    // column already refuses to judge.
+    const cases = [one('select-mixed', 1, false, ['a:yes:SELECT 1:111'])];
+    const arm = readCorpus({ split: 'dev', cases }).reading[0];
+    expect(arm?.agreementSkipped).toBe(1);
+    expect(arm?.arbitration.onlyVote).toBe(1);
+  });
+
   it('counts the questions where agreement is undefined, so the arithmetic closes', () => {
     // A question with one candidate is neither unanimous nor divided. `41356370371`'s dev artifact
     // had 5 of them on `select-mixed`, and they were simply absent from the column: a reader

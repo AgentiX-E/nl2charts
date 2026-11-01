@@ -139,7 +139,10 @@ export function pick(rule: RuleName, candidates: readonly Recorded[]): number {
   let bestCount = 0;
   candidates.forEach((candidate, index) => {
     if (candidate.fingerprint === undefined) return;
-    const count = counts.get(candidate.fingerprint) ?? 0;
+    // `counts` was built from every candidate above, so this lookup cannot miss: the cast says that
+    // rather than a `?? 0` no input could reach, which is a branch that would sit in the file
+    // forever and never run.
+    const count = counts.get(candidate.fingerprint) as number;
     if (count > bestCount) {
       bestCount = count;
       best = index;
@@ -196,6 +199,20 @@ export function pair(left: readonly boolean[], right: readonly boolean[]): Pairi
   return { wins, losses, both, p: mcnemarExact(wins, losses) };
 }
 
+/** What the two available aggregators answer between them. */
+export interface Arbitration {
+  /** Questions either the vote or the selector answered correctly. */
+  readonly either: number;
+  /** Both, which is the only overlap the other two counts do not cover. */
+  readonly both: number;
+  /** Questions the selector answered and the vote did not — the selector's own contribution. */
+  readonly onlySelector: number;
+  /** Questions the vote answered and the selector did not. */
+  readonly onlyVote: number;
+  /** Questions the vote answered correctly at all: the zero-call reference. */
+  readonly vote: number;
+}
+
 /** Everything one arm's artifact rows support. */
 export interface ArmReading {
   readonly arm: string;
@@ -228,6 +245,18 @@ export interface ArmReading {
    * count is printed and the two instruments can be reconciled by reading it.
    */
   readonly unrecorded: number;
+  /**
+   * The union of the two aggregators that could be built today: the vote and the selector.
+   *
+   * Not a rule and not a ceiling — it is the room a *combination* of the two would have, and it is
+   * the upper bound of the cheapest idea on the list, because both halves already exist. On
+   * `select-cross` the vote is right on 23 questions the selector loses and the selector is right on
+   * 20 the vote loses (66.33% against 62.50% and 63.00%), which is +3.83pp — above that sample's
+   * 3.17pp resolution. On `select-mixed` the same union is worth +0.83pp, under it. The difference
+   * is not the aggregators: it is whether the pool holds a dissenting slot for them to disagree
+   * about.
+   */
+  readonly arbitration: Arbitration;
 }
 
 /** The corpus: every arm that kept a candidate set, over the questions they share. */
@@ -327,6 +356,7 @@ export function readCorpus(artifact: ConsensusArtifact): Corpus {
       let unmeasured = 0;
       let agreementSkipped = 0;
       let unrecorded = 0;
+      const arbitration = { either: 0, both: 0, onlySelector: 0, onlyVote: 0, vote: 0 };
       for (const row of rows) {
         for (const candidate of row.candidates) {
           records += 1;
@@ -334,6 +364,18 @@ export function readCorpus(artifact: ConsensusArtifact): Corpus {
           if (candidate.fingerprint !== undefined) fingerprints += 1;
         }
         if (row.passed && !row.candidates.some((candidate) => candidate.correct)) unrecorded += 1;
+        // The vote is `pick('modal')`, the same function the column is scored with, so the two
+        // aggregators are compared on one definition of agreement rather than two. Counted before
+        // the agreement skips below, because a one-candidate set still has a vote: itself.
+        const voteAt = pick('modal', row.candidates);
+        const voteOk = voteAt === -1 ? false : (row.candidates[voteAt] as Recorded).correct;
+        if (voteOk) arbitration.vote += 1;
+        if (voteOk || row.passed) {
+          arbitration.either += 1;
+          if (voteOk && row.passed) arbitration.both += 1;
+          else if (row.passed) arbitration.onlySelector += 1;
+          else arbitration.onlyVote += 1;
+        }
         if (row.candidates.length < 2) {
           agreementSkipped += 1;
           continue;
@@ -348,7 +390,7 @@ export function readCorpus(artifact: ConsensusArtifact): Corpus {
           if (!row.passed && !row.candidates.some((candidate) => candidate.correct)) unanimousWrong += 1;
         }
       }
-      return { arm, cases: rows.length, scores, against, unanimous, unanimousWrong, unmeasured, agreementSkipped, unrecorded };
+      return { arm, cases: rows.length, scores, against, unanimous, unanimousWrong, unmeasured, agreementSkipped, unrecorded, arbitration };
     })
     .sort((left, right) => left.arm.localeCompare(right.arm));
   return { reading, ids, single, statements, fingerprints, records };
@@ -472,6 +514,16 @@ export function reportLines(corpus: Corpus, settings: ConsensusSettings, artifac
     if (arm.unmeasured > 0) {
       lines.push(`    agreement unmeasured on ${String(arm.unmeasured)} question(s): a candidate there carries no fingerprint`);
     }
+    // The two aggregators that exist today, on the questions only one of them gets. This is the
+    // cheapest idea on the list — both halves are already built and paid for — so its ceiling is
+    // printed with the gap against the selector rather than left to be recomputed by hand.
+    // The union holds the selector's own answers by construction, so this gap cannot be negative and
+    // the sign is written rather than branched on.
+    const room = ((arm.arbitration.either - (arm.scores.find((entry) => entry.rule === 'model') as RuleScore).correct) / Math.max(1, total)) * 100;
+    lines.push(
+      `    vote or selector: ${share(arm.arbitration.either)} — the vote keeps ${String(arm.arbitration.onlyVote)} question(s) the selector loses, ` +
+        `the selector keeps ${String(arm.arbitration.onlySelector)} the vote loses (+${room.toFixed(2)}pp against the selector, both ${String(arm.arbitration.both)})`,
+    );
     if (arm.agreementSkipped > 0) {
       // Printed because the unanimity column is read against the arm's case count, and a question
       // with one candidate is neither unanimous nor divided: without this line the difference is a
