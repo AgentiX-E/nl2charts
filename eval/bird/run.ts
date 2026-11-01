@@ -668,7 +668,13 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   // above `metadata+evidence`, or they are substitutes and it lands within noise, which would say
   // that the 166 failures left in the corpus are knowledge the card already carries and the model
   // is not using — a different next lever from "the prompt lacks a literal".
-  'metadata+evidence+values': "the curated notes and the value block on the same card — dispatched to separate 'the two information sources are complements' from 'the value block was only ever worth what the generated definitions were missing', and until that artifact exists this note is the question rather than the verdict",
+  // Measured on `41302183201` with an exact A/A (291 / 291, 5:5, delta 0.00pp): the pair is
+  // 291 against 297, +1.21pp at 6:12, p=0.2379, MDE 2.40pp. So the answer is the second branch the
+  // note was dispatched to separate: once the curated notes are on the card, the value block adds
+  // nothing measurable, and the +2.82pp `values` is worth against a card with neither source was
+  // filling the gap the notes fill as well. The block costs +7 prompt tokens a question, so this is
+  // not a lever that fired and was too dear — it fired and did nothing.
+  'metadata+evidence+values': "the curated notes and the value block on the same card — measured on `41302183201` at 297/496 against the parent's 291 (+1.21pp, 6:12, p=0.2379, MDE 2.40pp) with an exact A/A, so the two sources are substitutes rather than complements and the 166 remaining failures are knowledge the card already carries; kept as the ablation reference for 'more text on the prompt', not as a candidate",
   'inline+evidence+llm-select-dense': "the same reply applied their way: a table the model named nothing in keeps its first six columns instead of vanishing, which is what MAC-SQL's `drop_all` does — measured 261/496 against the column rule's 253 and the parent's 278 (`41290647076`), so it recovers 1.61pp of the 5.04pp loss (p=0.416, unresolved at 14.9% discordance) and still loses 3.43pp to the parent (p=0.0241); the card lever is closed at both granularities",
   'select-mixed': 'three decompositions instead of three samples: within its MDE of a single call on this split, and the decomposition question needs the dev split to be answered',
   'select-duo': 'two prompts and a selector: measured −0.60pp against `vote` for the same money, superseded',

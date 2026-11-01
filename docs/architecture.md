@@ -397,8 +397,8 @@ packages/          8 packages, one responsibility each
 eval/              golden set, deterministic fixture, baseline, ablations
 tools/             gates: layering, platform, exports, budgets, coverage, summary
 test/              cross-package public-surface snapshot
-.github/workflows/ ci.yml (four jobs: changes, quality, benchmark, and the two
-                   model-measuring jobs gated on the first)
+.github/workflows/ ci.yml (five jobs: changes, quality, benchmark, and the two
+                   model-measuring jobs that the first gates)
 ```
 
 ## Quality gates

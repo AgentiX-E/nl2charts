@@ -142,6 +142,22 @@ cannot be argued with.
 
 ### Changed
 
+- **The curated notes and the value block are substitutes, and the pair says so.** `41302183201` ran
+  `metadata+evidence` against `metadata+evidence+values` with an A/A on the 496 scored questions:
+  291, 297, and 291 for the duplicate. Paired, the block is **+1.21pp (6:12, p=0.2379, MDE
+  2.40pp)** — inside its own resolution, which is the second of the two pre-registered outcomes.
+
+  So the **+2.82pp** that `values` is worth against a card with *neither* source was filling the gap
+  the curated notes fill as well, and the sentence the arm was dispatched to test survives in its
+  negative form: the 166 remaining failures are knowledge the card already carries and the model is
+  not using. More text on the prompt is not the next lever; how the card is read is.
+
+  Two details make the null informative rather than empty: the block costs **+7 prompt tokens and
+  +31 characters a question**, because it only spells the literals the question names, so this is
+  not a case of a lever that was too expensive to fire; and the A/A is exact — the same arm twice
+  scored the same 291 cases, a zero noise floor on the count and a 1.79pp MDE on the difference.
+
+
 - **The dev coordinate table, in one run.** The five arms the dev workflow runs had never been
   measured together: `41085194983` ran three of them, so two comparisons borrowed their anchor from
   a different run, which is how a paired test stops being paired. `41296610389` runs all five on

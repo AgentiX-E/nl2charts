@@ -262,6 +262,15 @@ describe('the chain that actually runs', () => {
     expect(changedLevers(parent, arm)).toEqual(['values']);
   });
 
+  it('carries the measurement, not the question, in its on-demand note', () => {
+    // An arm whose note still reads like a question is an arm nobody has measured, and the next
+    // reader will treat the question as the verdict. `41302183201` answered it: substitutes.
+    const note = ON_DEMAND_ARMS['metadata+evidence+values'] ?? '';
+    expect(note).toContain('41302183201');
+    expect(note).toMatch(/substitutes rather than complements/u);
+    expect(note).not.toMatch(/until that artifact exists/u);
+  });
+
   it('refuses a repair arm on which the repair path never fired', () => {
     // A switch that is on and never fires produces its parent's number under its own
     // name — the failure the retrieval arm already had once.

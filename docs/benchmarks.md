@@ -614,9 +614,36 @@ It is the arm that separates two very different next moves:
 BIRD_ARMS=metadata+evidence+metadata+evidence+values pnpm bench:bird   # Mini-Dev, ~1,000 calls
 ```
 
-The prediction is written in the arm's on-demand note before the dispatch, and the number is
-written here when the artifact lands; until then this section states the rule, the two outcomes and
-the command.
+### The measurement: the two sources are substitutes, not complements
+
+`41302183201` ran the pair and the A/A on the 496 scored questions, one call an arm:
+
+| arm | passed | accuracy | prompt tokens | card |
+| --- | --- | --- | --- | --- |
+| `metadata+evidence` | 291/496 | 58.67% | 1,718 | 6,974 chars |
+| `metadata+evidence+values` | 297/496 | **59.88%** | 1,725 | 7,005 chars |
+| `metadata+evidence` (A/A) | 291/496 | 58.67% | 1,718 | 6,974 chars |
+
+| pair | delta | discordant | p | MDE | 95% CI |
+| --- | --- | --- | --- | --- | --- |
+| parent → parent + value block | **+1.21pp** | 6:12 | **0.2379** | 2.40pp | [−0.47, +2.89] |
+| parent → parent | 0.00pp | 5:5 | 1.0 | 1.79pp | [−1.25, +1.25] |
+
+**+1.21pp, six cases one way and twelve the other, inside a 2.40pp MDE.** The second of the two
+pre-registered outcomes is the one that happened: the value block adds nothing measurable once the
+curated notes are on the card, so the +2.82pp that `values` is worth against a card with *neither*
+source was filling the gap the notes also fill.
+
+Two details keep this from being a wash. The block is cheap — **+7 prompt tokens and +31 characters
+a question**, because it only spells the literals the question itself names — so the null is not a
+cost story, and the arm did render the block (the rendered prompt is 31 characters longer on
+average, and the wiring test pins that both blocks reach one prompt). And the A/A is exact this
+time: the same arm twice scored the same 291 cases, which is a noise floor of zero on the count and
+a 1.79pp MDE on the difference — the cleanest control this harness has produced.
+
+What survives is the sentence the prediction attached to this branch: **the 166 remaining failures
+are knowledge the card already carries and the model is not using.** More text on the prompt is not
+the next lever, and the lever that is left is how the card is read.
 
 ### A model-written reading of the question buys nothing
 
@@ -3345,14 +3372,21 @@ of them with ours.
 | OpenSearch-SQL | 69.3% | GPT-4o | multi-agent, no fine-tune | the split |
 | RSL-SQL | 65.51% | DeepSeek-v2 | no | the split, and a sibling model |
 | MSL-SQL | 64.00% | DeepSeek-V2.5 | partial | the split, and a sibling model |
-| **this harness, `select`** | **61.88%** | deepseek-chat | no | — |
-| **this harness, `metadata+evidence`** | 61.49% | deepseek-chat | no | — |
+| **this harness, `select-mixed`** | **62.34%** | deepseek-chat | no | — |
+| **this harness, `metadata+evidence`** | 61.16% | deepseek-chat | no | — |
+| **this harness, `inline+evidence`** | 61.10% | deepseek-chat | no | — |
+| **this harness, `select`** | 60.97% | deepseek-chat | no | — |
+| this harness, `names` | 41.91% | deepseek-chat | no | — |
 
-Read the last column first. It is empty for every row but ours, and that is the finding. Three
+Read the last column first. It is empty for every row but ours, and that is the finding. Our five
+rows now come from one run (the section above), which is what makes them comparable to each other:
+the same arm on two runs has moved 0.66pp (`select-mixed`, 63.0 → 62.34) and 0.91pp (`select`,
+61.88 → 60.97) across this project's history, so a cross-run difference under a point is not a
+reading and every number in this table would otherwise be a cross-run difference. Three
 differences used to be reported from this table — 11.3pp, 2.1–3.6pp, 5.5pp — and not one of them is
 a claim about the pipeline. The honest version of each is narrower:
 
-- **11.3pp to the leaderboard's top** (61.88 → 73.2) is a difference in model and training, not in
+- **10.9pp to the leaderboard's top** (62.34 → 73.2) is a difference in model and training, not in
   method. The top five rows run backbones this harness cannot call, and four of them were trained on
   the task. A pipeline that is 11pp behind a trained Qwen3-8B policy has learned nothing about its
   own prompts.
