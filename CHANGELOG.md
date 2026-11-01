@@ -142,6 +142,21 @@ cannot be argued with.
 
 ### Changed
 
+- **The dev coordinate table, in one run.** The five arms the dev workflow runs had never been
+  measured together: `41085194983` ran three of them, so two comparisons borrowed their anchor from
+  a different run, which is how a paired test stops being paired. `41296610389` runs all five on
+  1,532 questions: `names` 41.91%, `inline+evidence` 61.10%, `metadata+evidence` 61.16%, `select`
+  60.97%, **`select-mixed` 62.34%**.
+
+  Three of its four readings change what the next round should do. The card and the hint are worth
+  **+19.19pp** (45:339). The curated notes and the generated definition block are the same thing on
+  this split (+0.07pp, p=1.0) — the −0.8pp Mini-Dev reported was noise, so the product claim now has
+  a power test behind it. And **four samples of one prompt buy nothing** while four *aimed*
+  candidates do: `select` is −0.13pp against a single call (p=0.911), `select-mixed` is +1.37pp over
+  `select` (p=0.0295), and the selector's loss falls 72 → 23. What the fourth call buys is
+  different candidates, not more of them.
+
+
 - **A documentation commit no longer buys a model call.** `ci.yml` measured on every push to
   master: thirteen BIRD arms over 496 questions (~6,400 completions) and three passes over 210
   live cases. Round 36 pushed twice — the second time for a `benchmarks.md` section, a

@@ -528,6 +528,63 @@ without documentation can be brought to the accuracy of a database with it, by
 generating definitions once per database and attaching them to the columns. What
 it cannot do is replace the per-question hint: that is still worth +14.1pp.
 
+### The dev coordinate table, and what four calls buy
+
+The five arms the dev workflow runs had never been measured in one run. `41085194983` ran three of
+them, so every comparison against the other two borrowed an anchor from a different run — which is
+how a paired test stops being paired. `41296610389` runs all five on the 1,532 scored questions of
+the public split, with `deepseek-chat` at concurrency 8, in about an hour:
+
+| arm | passed | accuracy | calls | prompt tokens | selector loss |
+| --- | --- | --- | --- | --- | --- |
+| `names` | 642/1,532 | 41.91% | 1 | 522 | — |
+| `inline+evidence` | 936/1,532 | 61.10% | 1 | 676 | — |
+| `metadata+evidence` | 937/1,532 | **61.16%** | 1 | 1,778 | — |
+| `select` | 934/1,532 | 60.97% | 3.99 | 2,443 | 72 |
+| `select-mixed` | 955/1,532 | **62.34%** | 3.99 | 2,447 | **23** |
+
+| pair | delta | discordant | p | MDE | 95% CI |
+| --- | --- | --- | --- | --- | --- |
+| `names` → `inline+evidence` | **+19.19pp** | 45:339 | <0.0001 | 3.58pp | [16.68, 21.70] |
+| `inline+evidence` → `metadata+evidence` | **+0.07pp** | 65:66 | 1.0000 | 2.09pp | [−1.40, 1.53] |
+| `inline+evidence` → `select` | **−0.13pp** | 41:39 | 0.9111 | 1.64pp | [−1.27, 1.01] |
+| `metadata+evidence` → `select` | **−0.20pp** | 75:72 | 0.8690 | 2.22pp | [−1.75, 1.36] |
+| `select` → `select-mixed` | **+1.37pp** | 32:53 | **0.0295** | 1.69pp | [0.19, 2.55] |
+| `inline+evidence` → `select-mixed` | **+1.24pp** | 14:33 | **0.0079** | 1.25pp | [0.36, 2.12] |
+| `metadata+evidence` → `select-mixed` | +1.17pp | 63:81 | 0.1563 | 2.19pp | [−0.36, 2.71] |
+
+Four readings, and none of them needs a second opinion:
+
+1. **The card and the hint are worth 19.19pp.** `names` sends the column names with no types, no
+   keys and no hint; adding them moves 339 cases one way and 45 the other. It is the largest lever
+   in this repository and the third independent run to measure it, this time on a split that can
+   resolve it (MDE 3.58pp).
+2. **The curated notes and the generated definition block are the same thing here too.** +0.07pp,
+   65:66, p=1.0, on a split whose MDE is 2.09pp. The −0.8pp that Mini-Dev reported was noise. The
+   product claim — a database with no documentation can be brought to the accuracy of one that has
+   it — now has a power test behind it instead of a null result.
+3. **Four samples of one prompt buy nothing.** `select` sends the same prompt three times and then
+   pays a fourth call to choose; on dev that is −0.13pp against a single call (p=0.911) and
+   −0.20pp against the curated card, for 3.6 times the tokens. The four-call tier's *sampling* is
+   pure cost.
+4. **Four aimed candidates do buy something.** `select-mixed` sends three different prompts and
+   pays the same fourth call: +1.37pp over `select` (p=0.0295, CI excluding zero) and +1.24pp over
+   a single call. The mechanism is in the last column: **the selector's loss falls from 72 to 23**
+   when the candidates come from different angles. What the fourth call buys is not more candidates
+   but different ones.
+
+The one comparison that does not reach its criterion is `metadata+evidence` → `select-mixed`, at
++1.17pp (63:81, p=0.156, MDE 2.19pp): it compares the strongest single call with the strongest
+four-call arm, and those two disagree on 9.4% of the split, three times the discordance of the
+`select` → `select-mixed` pair (5.5%) and four times the `inline+evidence` pair (3.1%). Resolving
+1.17pp at that rate needs more questions, not a different split.
+
+Where that leaves the published number: **62.34% on BIRD dev**, which is this repository's highest
+reading and the coordinate the leaderboard table compares. The earlier dev figure quoted for the
+same arm — 63.0% — is 0.66pp above this run, inside the harness's own A/A movement; the difference
+between two runs of one arm is not a reading, which is the reason the five arms were finally put in
+one run.
+
 ### The two information sources, on one card for the first time
 
 Two blocks on this corpus have been priced separately and never together:
