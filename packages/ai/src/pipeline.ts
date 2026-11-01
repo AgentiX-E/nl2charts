@@ -1,6 +1,7 @@
 import { inspectSql } from '@agentix-e/nl2charts-core';
 import { toNl2ChartsError } from '@agentix-e/nl2charts-spec';
 import type { LlmMessage, LlmProvider } from './provider.js';
+import { turnTemperature } from './provider.js';
 import { buildInterpretationPrompt, parseInterpretation } from './interpret.js';
 import { diagnoseFailure } from './diagnose.js';
 import type { Diagnosis, FailureClass } from './diagnose.js';
@@ -128,8 +129,20 @@ export interface PipelineOptions {
    * into a pipeline whose prompt asks for steps and whose reader takes step one.
    */
   readonly decompose?: boolean;
-  /** Sampling temperature for the SQL call. Above zero enables self-consistency. */
-  readonly temperature?: number;
+  /**
+   * Sampling temperature for every call this pipeline makes.
+   *
+   * `undefined` sends zero — the value every reading in `docs/benchmarks.md` was taken at, and
+   * above zero enables self-consistency when the caller draws more than one sample. `null`
+   * sends no temperature at all, for an endpoint that refuses the field instead of ignoring
+   * it: a reasoning model that only accepts its own default answers a `temperature: 0` with a
+   * 400, and before this the failure arrived as "the endpoint is unreachable".
+   *
+   * It reaches every turn, not just the statement — the repair turn, the audit turn, the
+   * empty-result turn and the selector all go to the same endpoint, and a policy that stopped
+   * at the first would fail on the turn a weak model depends on most.
+   */
+  readonly temperature?: number | null;
   /** When provided, a candidate is executed before it is accepted; failures
    *  become repair turns (syntax and binding errors, not wrong answers). Returning
    *  a row count opts the pipeline into the empty-result turn; returning nothing
@@ -377,7 +390,8 @@ export function buildAskMessages(input: AskMessagesInput): {
  * Question -> guarded SQL. The guard is applied to every candidate, including
  * repairs: a model that "fixes" a query by dropping a table is refused.
  */
-export function createPipeline(options: PipelineOptions): {  ask(request: AskRequest): Promise<AskResult>;
+export function createPipeline(options: PipelineOptions): {
+  ask(request: AskRequest): Promise<AskResult>;
 } {
   // Three, not two. Two is MAC-SQL's and CHASE-SQL's choice, but both stop after a
   // second failure and ours did so with a single generic sentence; with a diagnosis
@@ -385,6 +399,10 @@ export function createPipeline(options: PipelineOptions): {  ask(request: AskReq
   // The value is configurable because a caller with a slow endpoint pays for it.
   const maxRepairs = options.maxRepairs ?? 3;
   const topK = options.topK ?? 12;
+  // Resolved once, so every turn sends the same answer and `null` survives: `??` would
+  // turn "do not name a value" into "hold the model at zero" and the endpoint that refuses
+  // the field would still refuse it.
+  const temperature = turnTemperature(options.temperature);
 
   return {
     async ask(request) {
@@ -397,7 +415,7 @@ export function createPipeline(options: PipelineOptions): {  ask(request: AskReq
             { role: 'system', content: buildInterpretationPrompt(request.question, request.schema) },
             { role: 'user', content: request.question },
           ],
-          temperature: 0,
+          temperature,
           // Named for the meter: this call exists only on an arm that asked for a reading, and
           // a cost table that folded it into generation would make it look like part of the
           // statement's price.
@@ -412,7 +430,7 @@ export function createPipeline(options: PipelineOptions): {  ask(request: AskReq
       if (options.plan === true) {
         const planned = await options.provider.complete({
           messages: [{ role: 'user', content: buildPlanPrompt(request.question, request.schema) }],
-          temperature: 0,
+          temperature,
           purpose: 'plan',
         });
         const parsed = parsePlan(planned.text);
@@ -450,7 +468,7 @@ export function createPipeline(options: PipelineOptions): {  ask(request: AskReq
         attempts += 1;
         const response = await options.provider.complete({
           messages,
-          temperature: options.temperature ?? 0,
+          temperature,
           // The first turn is the statement the arm is named for; every later turn is a repair,
           // and a repair's price is the thing a repair arm is judged on. One label would make
           // "three attempts cost three times one attempt" an assumption instead of a column.
@@ -480,7 +498,7 @@ export function createPipeline(options: PipelineOptions): {  ask(request: AskReq
                   messages,
                   previous: response.text,
                   statement: sql,
-                  temperature: options.temperature ?? 0,
+                  temperature,
                   read: (text: string) => readReply(text).sql,
                 })
               : undefined;
@@ -495,7 +513,7 @@ export function createPipeline(options: PipelineOptions): {  ask(request: AskReq
             const outcome = await options.execute(stated);
             const rows = rowCountOf(outcome);
             if (rows === 0 && options.emptyRetry !== undefined) {
-              const retried = await retryEmpty({ provider: options.provider, mode: options.emptyRetry, execute: options.execute, messages, previous: response.text, sql: stated, temperature: options.temperature ?? 0, read: (text: string) => readReply(text).sql });
+              const retried = await retryEmpty({ provider: options.provider, mode: options.emptyRetry, execute: options.execute, messages, previous: response.text, sql: stated, temperature, read: (text: string) => readReply(text).sql });
               return {
                 sql: retried.sql,
                 attempts: spent + 1,
@@ -573,7 +591,7 @@ async function auditStatement(input: {
   readonly messages: readonly LlmMessage[];
   readonly previous: string;
   readonly statement: string;
-  readonly temperature: number;
+  readonly temperature: number | null;
   readonly read: (text: string) => string;
 }): Promise<{ readonly sql: string; readonly named: number }> {
   const response = await input.provider.complete({
@@ -604,7 +622,7 @@ async function retryEmpty(input: {
   readonly messages: readonly LlmMessage[];
   readonly previous: string;
   readonly sql: string;
-  readonly temperature: number;
+  readonly temperature: number | null;
   /** How a reply is read: the last block under a decomposition, the first otherwise. */
   readonly read: (text: string) => string;
 }): Promise<{ readonly sql: string; readonly recovered: boolean }> {

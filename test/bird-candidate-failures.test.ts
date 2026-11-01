@@ -94,6 +94,13 @@ describe('reading the mechanism off the error code', () => {
     expect(classifyCandidateFailure('NL2C_E_LLM_UNAVAILABLE')).toBe('llm');
   });
 
+  it('calls a refused request an endpoint failure too, because no statement was written', () => {
+    // A batch that scores zero because a model name is wrong must not read as a model that
+    // writes bad statements: nothing about the model's output was measured, because the call
+    // never ran. This is the opposite of INVALID_RESPONSE, where the endpoint did answer.
+    expect(classifyCandidateFailure('NL2C_E_LLM_REJECTED')).toBe('llm');
+  });
+
   it('calls a statement that must not run an engine failure', () => {
     expect(classifyCandidateFailure('NL2C_E_GUARD_REJECTED')).toBe('engine');
     expect(classifyCandidateFailure('NL2C_E_ENGINE_FAILED')).toBe('engine');

@@ -1265,15 +1265,20 @@ export function candidateSurvivalBySource(
  * The error codes already distinguish them, and the distinction is exactly the repair:
  *
  *   `NL2C_E_TIMEOUT` / `NL2C_E_LLM_UNAVAILABLE`  the endpoint did not answer      -> llm
+ *   `NL2C_E_LLM_REJECTED`  the endpoint refused the request (model name, key, a field it
+ *                          will not accept)                                    -> llm
  *   `NL2C_E_GUARD_REJECTED` / `NL2C_E_ENGINE_FAILED`  a statement that must not run -> engine
  *   `NL2C_E_LLM_INVALID_RESPONSE` and everything else  no usable statement         -> unparsed
  *
  * `INVALID_RESPONSE` is deliberately *not* `llm`: the endpoint answered, the answer was unusable,
  * which is output quality and not an outage. Counting it as an outage would let a prompt that
- * produces unparseable replies fail the run with "the endpoint is down".
+ * produces unparseable replies fail the run with "the endpoint is down". `REJECTED` is the
+ * opposite case and belongs with the outage: nothing about the model's output was measured,
+ * because the call never ran, and a batch that scores zero because a model name is wrong must
+ * not read as a model that writes bad statements.
  */
 export function classifyCandidateFailure(code: string | undefined): keyof CandidateFailures {
-  if (code === 'NL2C_E_TIMEOUT' || code === 'NL2C_E_LLM_UNAVAILABLE') return 'llm';
+  if (code === 'NL2C_E_TIMEOUT' || code === 'NL2C_E_LLM_UNAVAILABLE' || code === 'NL2C_E_LLM_REJECTED') return 'llm';
   if (code === 'NL2C_E_GUARD_REJECTED' || code === 'NL2C_E_ENGINE_FAILED') return 'engine';
   return 'unparsed';
 }

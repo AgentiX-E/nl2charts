@@ -101,7 +101,7 @@ describe('pipeline with interpretation', () => {
   });
 
   it('passes the sampling temperature through, so a caller can sample', async () => {
-    const temperatures: (number | undefined)[] = [];
+    const temperatures: (number | null | undefined)[] = [];
     const provider: LlmProvider = {
       id: 'thermometer',
       model: 'fixture',
@@ -115,6 +115,24 @@ describe('pipeline with interpretation', () => {
     temperatures.length = 0;
     await createPipeline({ provider }).ask({ question: 'q', schema });
     expect(temperatures).toEqual([0]);
+  });
+
+  it('sends no temperature at all when the deployment says the endpoint refuses the field', async () => {
+    // A reasoning model that only accepts its own default answers `temperature: 0` with a 400,
+    // and before this the 400 arrived as "the endpoint is unreachable". `null` is the deployment
+    // saying the field must not be named; it has to survive every turn, because the repair turn
+    // is the one a weak model depends on.
+    const temperatures: (number | null | undefined)[] = [];
+    const provider: LlmProvider = {
+      id: 'thermometer',
+      model: 'fixture',
+      async complete(request) {
+        temperatures.push(request.temperature);
+        return { text: 'SELECT 1', model: 'fixture', usage: { promptTokens: 0, completionTokens: 0 } };
+      },
+    };
+    await createPipeline({ provider, temperature: null }).ask({ question: 'q', schema });
+    expect(temperatures).toEqual([null]);
   });
 
   it('costs one call and no interpretation line when the stage is off', async () => {

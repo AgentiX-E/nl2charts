@@ -121,6 +121,12 @@ every expected column appears in the top *k*. The pipeline uses k = 3.
 **Reciprocal Rank Fusion (RRF)** — Combining several ranked lists by summing
 `1 / (60 + rank)`. Used to fuse the name, alias and value recallers.
 
+**Refusal** — A 4xx the endpoint will repeat: a model name it does not serve, a key it
+rejects, a field it will not accept. `NL2C_E_LLM_REJECTED`, as opposed to
+`NL2C_E_LLM_UNAVAILABLE` for the failures worth retrying (network, 408, 429, 5xx). The two
+were one code until a reasoning model's `temperature: 0` came back as 400 and read as "the
+endpoint is unreachable". Carries the endpoint's own sentence in `details.detail`.
+
 **Replay provider** — A first-class LLM provider that returns recorded responses
 by matching the prompt. Used in CI so the real pipeline runs deterministically.
 
@@ -138,6 +144,12 @@ throwing hook cannot fail the query.
 
 **Truncated** — True when the engine returned more rows than the cap. Detected by
 fetching `limit + 1` rows, not by a second count query.
+
+**Turn temperature** — The sampling temperature one call is sent at, resolved once by
+`turnTemperature`. `undefined` sends zero — the value every published reading was taken at —
+and `null` sends no field at all, for an endpoint that refuses to be told. The distinction is
+the whole function: `??` anywhere on that path collapses `null` into zero and the endpoint
+that refused the field goes on refusing it.
 
 **Value profiler** — The recaller that matches sample values from a column
 (`north` → `region`). Worth 28pp of recall@3 on the benchmark fixture.

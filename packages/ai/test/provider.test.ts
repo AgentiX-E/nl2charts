@@ -2,12 +2,14 @@ import { createServer } from 'node:http';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { isNl2ChartsError } from '@agentix-e/nl2charts-spec';
-import { createHttpProvider, withCallCounter } from '../src/provider.js';
+import { createHttpProvider, turnTemperature, withCallCounter } from '../src/provider.js';
 
 let server: Server;
 let baseUrl: string;
 let lastBody: Record<string, unknown> = {};
 let lastAuth: string | undefined;
+/** Requests the server actually received on the refusal path, for the no-retry assertion. */
+let hits = 0;
 
 function listen(handler: (request: IncomingMessage, response: ServerResponse) => void): Promise<{ server: Server; url: string }> {
   return new Promise((resolve) => {
@@ -35,6 +37,71 @@ beforeAll(async () => {
           response.writeHead(200, { 'content-type': 'application/json' });
           response.end(JSON.stringify({ model: 'slow', choices: [{ message: { content: 'late' } }] }));
         }, 300);
+        return;
+      }
+      if (url.includes('/refuse400')) {
+        hits += 1;
+        response.writeHead(400, { 'content-type': 'application/json' });
+        response.end(
+          JSON.stringify({
+            error: {
+              message: "Unsupported value: 'temperature' does not support 0 with this model. Only the default (1) value is supported.",
+              type: 'invalid_request_error',
+              code: 'unsupported_value',
+            },
+          }),
+        );
+        return;
+      }
+      if (url.includes('/refuse401')) {
+        response.writeHead(401, { 'content-type': 'application/json' });
+        response.end('{"error":"invalid api key"}');
+        return;
+      }
+      if (url.includes('/refuse403')) {
+        response.writeHead(403, { 'content-type': 'text/html' });
+        response.end('<html>\n  <body>Forbidden</body>\n</html>');
+        return;
+      }
+      if (url.includes('/refuse404')) {
+        response.writeHead(404, { 'content-type': 'application/json' });
+        response.end();
+        return;
+      }
+      if (url.includes('/refuseblank')) {
+        response.writeHead(418, { 'content-type': 'application/json' });
+        response.end('   \n  ');
+        return;
+      }
+      if (url.includes('/refusewhite')) {
+        // A gateway that answers with the shape but no sentence: the reason exists and is empty.
+        response.writeHead(400, { 'content-type': 'application/json' });
+        response.end('{"error":{"message":"   "}}');
+        return;
+      }
+      if (url.includes('/nullbody')) {
+        response.writeHead(200, { 'content-type': 'application/json' });
+        response.end('null');
+        return;
+      }
+      if (url.includes('/scalarbody')) {
+        response.writeHead(200, { 'content-type': 'application/json' });
+        response.end('42');
+        return;
+      }
+      if (url.includes('/refuselong')) {
+        response.writeHead(422, { 'content-type': 'application/json' });
+        response.end(JSON.stringify({ message: 'x'.repeat(400) }));
+        return;
+      }
+      if (url.includes('/boom')) {
+        response.writeHead(500, { 'content-type': 'application/json' });
+        response.end('{"message":"upstream exploded"}');
+        return;
+      }
+      if (url.includes('/gatewaytimeout')) {
+        response.writeHead(408, { 'content-type': 'text/plain' });
+        response.end('slow down');
         return;
       }
       if (url.includes('/error')) {
@@ -539,5 +606,147 @@ describe('transport failures', () => {
     const provider = createHttpProvider({ baseUrl: 'https://example.test/v1', model: 'm', fetchImpl, retries: 3, retryDelayMs: 1, sleep: async () => {} });
     await expect(provider.complete({ messages: [{ role: 'user', content: 'q' }] })).rejects.toThrow(/not JSON/);
     expect(attempt).toBe(1);
+  });
+});
+
+describe('a request the endpoint refuses', () => {
+  const refusal = (path: string): ReturnType<typeof createHttpProvider> =>
+    createHttpProvider({ baseUrl: `${baseUrl}${path}`, model: 'm' });
+
+  it('is a rejection, not an outage, and carries what the endpoint said', async () => {
+    // One code for both made "the model name is wrong" read as "the endpoint is unreachable",
+    // and every question that follows from that reading sends the reader at the network when
+    // the answer is in the request.
+    await expect(refusal('/refuse400').complete({ messages: [] })).rejects.toSatisfy(
+      (error: unknown) =>
+        isNl2ChartsError(error) &&
+        error.code === 'NL2C_E_LLM_REJECTED' &&
+        error.details.status === 400 &&
+        typeof error.details.detail === 'string' &&
+        error.details.detail.includes("does not support 0"),
+    );
+  });
+
+  it('does not retry a rejection, because the same request will be refused again', async () => {
+    hits = 0;
+    await expect(
+      createHttpProvider({ baseUrl: `${baseUrl}/refuse400`, model: 'm', retries: 3 }).complete({ messages: [] }),
+    ).rejects.toSatisfy((error: unknown) => isNl2ChartsError(error) && error.code === 'NL2C_E_LLM_REJECTED');
+    expect(hits).toBe(1);
+  });
+
+  it('reads a string error body without unwrapping a missing object', async () => {
+    await expect(refusal('/refuse401').complete({ messages: [] })).rejects.toSatisfy(
+      (error: unknown) => isNl2ChartsError(error) && error.details.detail === 'invalid api key',
+    );
+  });
+
+  it('collapses a body that is not json into one line', async () => {
+    await expect(refusal('/refuse403').complete({ messages: [] })).rejects.toSatisfy(
+      (error: unknown) => isNl2ChartsError(error) && error.details.detail === '<html> <body>Forbidden</body> </html>',
+    );
+  });
+
+  it('carries no detail when the refusal body is empty, rather than an empty sentence', async () => {
+    await expect(refusal('/refuse404').complete({ messages: [] })).rejects.toSatisfy(
+      (error: unknown) => isNl2ChartsError(error) && error.code === 'NL2C_E_LLM_REJECTED' && !('detail' in error.details),
+    );
+  });
+
+  it('truncates a long reason instead of pasting a page into the error', async () => {
+    await expect(refusal('/refuselong').complete({ messages: [] })).rejects.toSatisfy(
+      (error: unknown) =>
+        isNl2ChartsError(error) && typeof error.details.detail === 'string' && error.details.detail.length === 200,
+    );
+  });
+
+  it('keeps a server failure on LLM_UNAVAILABLE, because the same request may work later', async () => {
+    await expect(refusal('/boom').complete({ messages: [] })).rejects.toSatisfy(
+      (error: unknown) => isNl2ChartsError(error) && error.code === 'NL2C_E_LLM_UNAVAILABLE' && error.details.status === 500,
+    );
+  });
+
+  it('keeps 408 on LLM_UNAVAILABLE, because it is the caller running out of time', async () => {
+    await expect(refusal('/gatewaytimeout').complete({ messages: [] })).rejects.toSatisfy(
+      (error: unknown) => isNl2ChartsError(error) && error.code === 'NL2C_E_LLM_UNAVAILABLE' && error.details.status === 408,
+    );
+  });
+});
+
+describe('the temperature a deployment may withhold', () => {
+  it('omits the field entirely when the deployment passes null', async () => {
+    const provider = createHttpProvider({ baseUrl, model: 'test-model' });
+    await provider.complete({ messages: [], temperature: null });
+    expect(lastBody).not.toHaveProperty('temperature');
+    expect(lastBody).toMatchObject({ model: 'test-model' });
+  });
+
+  it('still sends zero when nothing is configured, so published readings stay comparable', async () => {
+    const provider = createHttpProvider({ baseUrl, model: 'test-model' });
+    await provider.complete({ messages: [] });
+    expect(lastBody).toHaveProperty('temperature', 0);
+  });
+});
+
+describe('the temperature policy, written once', () => {
+  it('holds the measured default when nothing is configured', () => {
+    expect(turnTemperature(undefined)).toBe(0);
+  });
+
+  it('passes a configured value through unchanged', () => {
+    expect(turnTemperature(0.7)).toBe(0.7);
+    expect(turnTemperature(0)).toBe(0);
+  });
+
+  it('keeps null meaning "do not name a value", which is not the same as zero', () => {
+    // A `??` anywhere on this path would collapse the two, and the endpoint that refuses the
+    // field would still refuse it — which is the whole reason this function exists.
+    expect(turnTemperature(null)).toBeNull();
+  });
+});
+
+describe('a body that is not a completion', () => {
+  it('rejects a body that parses to null, instead of throwing on its first property', async () => {
+    // `null` is valid JSON. Without the object check the read below throws a TypeError, and a
+    // caller that handles `Nl2ChartsError` sees an exception it has no code for.
+    const provider = createHttpProvider({ baseUrl: `${baseUrl}/nullbody`, model: 'm' });
+    await expect(provider.complete({ messages: [] })).rejects.toSatisfy(
+      (error: unknown) => isNl2ChartsError(error) && error.code === 'NL2C_E_LLM_INVALID_RESPONSE',
+    );
+  });
+
+  it('rejects a body that parses to a scalar for the same reason', async () => {
+    const provider = createHttpProvider({ baseUrl: `${baseUrl}/scalarbody`, model: 'm' });
+    await expect(provider.complete({ messages: [] })).rejects.toSatisfy(
+      (error: unknown) => isNl2ChartsError(error) && error.code === 'NL2C_E_LLM_INVALID_RESPONSE',
+    );
+  });
+});
+
+describe('a refusal this layer cannot read', () => {
+  it('carries no detail when the body is only whitespace', async () => {
+    const provider = createHttpProvider({ baseUrl: `${baseUrl}/refuseblank`, model: 'm' });
+    await expect(provider.complete({ messages: [] })).rejects.toSatisfy(
+      (error: unknown) => isNl2ChartsError(error) && error.code === 'NL2C_E_LLM_REJECTED' && !('detail' in error.details),
+    );
+  });
+
+  it('carries no detail when the reason is present but empty', async () => {
+    const provider = createHttpProvider({ baseUrl: `${baseUrl}/refusewhite`, model: 'm' });
+    await expect(provider.complete({ messages: [] })).rejects.toSatisfy(
+      (error: unknown) => isNl2ChartsError(error) && error.code === 'NL2C_E_LLM_REJECTED' && !('detail' in error.details),
+    );
+  });
+
+  it('survives a body that cannot be read at all, rather than stacking a second failure', async () => {
+    // A connection that dies mid-body, or an implementation that hands back a consumed
+    // Response. The refusal is already the diagnosis; failing to read its sentence is a
+    // missing sentence, not a new error.
+    const consumed = new Response('{"error":{"message":"too late"}}', { status: 400 });
+    await consumed.text();
+    const provider = createHttpProvider({ baseUrl, model: 'm', fetchImpl: async () => consumed });
+    await expect(provider.complete({ messages: [] })).rejects.toSatisfy(
+      (error: unknown) => isNl2ChartsError(error) && error.code === 'NL2C_E_LLM_REJECTED' && !('detail' in error.details),
+    );
   });
 });

@@ -84,6 +84,38 @@ cannot be argued with.
 
 ### Fixed
 
+- **The temperature was zero and could not be anything else, so a reasoning model could not be
+  used at all.** `pipeline` sent `temperature: 0` from three places — the interpretation turn,
+  the plan turn, and the statement turn through `?? 0` — and the provider defaulted it again.
+  A model that only accepts its own default answers that with a 400, which means the library was
+  unusable on that endpoint rather than merely less accurate. `PipelineOptions.temperature` and
+  `LlmRequest.temperature` now take `number | null`, and `turnTemperature` resolves the three
+  states once: absent sends zero (the value every published reading was taken at, so nothing in
+  `docs/benchmarks.md` moves), a number is sent as given, and `null` omits the field entirely.
+  `null` reaches every turn — the repair, audit and empty-result turns and the selector, which
+  all go to the same endpoint, and a policy that stopped at the first would fail on the turn a
+  weak model depends on most. `chooseCandidate` and `chooseCandidatePairwise` take it as an
+  optional fourth argument.
+
+- **Every 4xx was reported as an outage, which is the one diagnosis that points at the wrong
+  thing.** `NL2C_E_LLM_UNAVAILABLE` covered network failures, timeouts, 429, 5xx and also 400 —
+  so a wrong model name, a rejected key, or a field the endpoint will not accept all arrived as
+  "llm returned 400" next to "the endpoint is unreachable", and every question that follows from
+  that reading sends the reader at the network when the answer is in the request. The two are now
+  separate: `NL2C_E_LLM_REJECTED` for a 4xx that the same request will meet again, and
+  `NL2C_E_LLM_UNAVAILABLE` for the ones worth retrying (network, 408, 429, 5xx). A rejection
+  carries the endpoint's own sentence in `details.detail` — unwrapped from `{error:{message}}`,
+  `{error:"…"}` or `{message:"…"}`, collapsed to one line, capped at 200 characters, and omitted
+  rather than replaced with an empty string when the body has no readable reason. The harness
+  files `REJECTED` with the endpoint failures, not with the unparsed ones: nothing about the
+  model's output was measured, because the call never ran.
+
+- **A body that parsed to `null` threw a `TypeError` instead of a contract error.**
+  `JSON.parse` is typed `any`, so `null` — which is valid JSON — became the body and the first
+  property read on it threw outside the error surface a consumer branches on. A body that parses
+  to anything other than an object is now `NL2C_E_LLM_INVALID_RESPONSE`, which is what the
+  caller was promised.
+
 - **Three readers required the literal characters of a label they asked for.** `parseSelection`
   matched a closed label list and a bare number; the step line required `STEP` at the start of a
   line after list punctuation; the omission line required `MISSING:` exactly. A model that wrote

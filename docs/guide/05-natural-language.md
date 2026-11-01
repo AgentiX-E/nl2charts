@@ -21,12 +21,72 @@ const provider = createHttpProvider({
 > **Never put a vendor URL and a key in browser code.** `baseUrl` must point at
 > your own proxy. The library cannot enforce this; your build pipeline must.
 
-The provider maps failures onto contract codes:
+The provider maps failures onto contract codes. The split that matters is
+whether the same request could work later: an outage is worth retrying and a
+refusal is not.
 
 | Situation | Code |
 | --- | --- |
-| Network error, timeout, non-2xx | `NL2C_E_LLM_UNAVAILABLE` |
-| Body is not JSON, or has no content | `NL2C_E_LLM_INVALID_RESPONSE` |
+| Network error, timeout, 408, 429, 5xx | `NL2C_E_LLM_UNAVAILABLE` |
+| 4xx the endpoint will refuse again — wrong model name, bad key, a field it does not accept | `NL2C_E_LLM_REJECTED` |
+| Body is not JSON, or parses to something that is not an object, or has no content | `NL2C_E_LLM_INVALID_RESPONSE` |
+
+A `NL2C_E_LLM_REJECTED` carries the endpoint's own sentence in
+`details.detail` when the body had one, so the error reads
+`llm refused the request with 400: Unsupported value: 'temperature' does not
+support 0 with this model` rather than `llm returned 400`.
+
+## Running on a model we did not benchmark
+
+Every reading in the benchmark table was taken on one backbone. If you point
+this library at a different model, here is what is measured, what is not, and
+what you have to decide.
+
+**What still works without configuration.** The repair loop — execute, diagnose
+the engine's error, send the diagnosis back — is not tuned to a model. On
+`glm-4-flash`, which writes far more invalid SQL, three diagnosed repairs were
+worth **+6.4pp** (30.1% → 36.5%, sixteen cases won and none lost, p<0.0001) at
+0.63 extra calls per case. The weaker the model, the more the loop is worth:
+on DeepSeek only 12 of 498 first statements fail to execute, so its entire
+repair ceiling is 2.4pp.
+
+**What costs accuracy.** Two things, and neither is the vendor:
+
+1. *Levers selected for a stronger model.* Adding the dataset hint to
+   `glm-4-flash` made its execution failures **worse**, 20.9% → 36.5%. More
+   context is not more capability. If a model binds columns badly, a longer
+   prompt is a longer wrong prompt.
+2. *A candidate the prompts were not written for.* Feeding a second model's
+   statement into the selector raised the ceiling by 2.7pp and lost 1.11pp,
+   because the selector threw away 75 of the 1,018 winnable cases instead of
+   17.
+
+**What breaks silently.** Readers, not accuracy. `parseSelection` returns `-1`
+when a reply is not a bare choice, and the caller keeps candidate one; the
+decomposition reader counts zero steps; the audit reader counts zero omissions.
+Each of those is "the mechanism did not run", which reports as a lower score
+rather than an error. `replyShape` and `formatProfile` read that off the replies
+themselves and every run's artifact carries the aggregate:
+
+```ts
+const { report } = await runBird({ /* … */ });
+report.arms[0].format; // { replies: 496, fenced: 'always', index: 'sometimes', … }
+```
+
+`index: 'never'` means the selector cannot read this model — stop paying for it
+before you read its score as a verdict on the model.
+
+**What you may have to tell us.** A reasoning model that only accepts its own
+default answers `temperature: 0` with a 400. Pass `null` and the field is not
+sent at all; that is different from `undefined`, which sends zero:
+
+```ts
+const pipeline = createPipeline({ provider, temperature: null });
+```
+
+`retries` and `retryDelayMs` on the provider are worth raising for a model with
+a tight rate limit — a 429 retried inside the provider is a call, and a 429
+returned to the caller is a failed case.
 
 ## Schema linking
 

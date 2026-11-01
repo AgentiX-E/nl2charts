@@ -1,4 +1,5 @@
 import type { LlmProvider } from './provider.js';
+import { turnTemperature } from './provider.js';
 
 /** A candidate statement together with the shape of what it returned. */
 export interface Candidate {
@@ -163,11 +164,17 @@ export function toCandidate(executed: ExecutedCandidate, previewRows = 3, maxCha
  * false when the reply carried no usable index. Callers decide what an undecided
  * answer means — the pipeline's own default is to keep the first candidate, which is
  * what a single-sample run would have returned anyway.
+ *
+ * `temperature` is the deployment's, passed through rather than fixed at zero: this call
+ * goes to the same endpoint as the statement, so a model that refuses to be told a value
+ * refuses this one too, and a selector that failed on a 400 would take down an arm whose
+ * statements were all fine.
  */
 export async function chooseCandidate(
   provider: LlmProvider,
   question: string,
   executed: readonly ExecutedCandidate[],
+  temperature?: number | null,
 ): Promise<SelectionDecision & { readonly sql: string }> {
   if (executed.length === 0) throw new Error('chooseCandidate needs at least one executed candidate');
   if (executed.length === 1) return { index: 0, decided: true, sql: (executed[0] as ExecutedCandidate).sql };
@@ -177,7 +184,7 @@ export async function chooseCandidate(
       { role: 'system', content: buildSelectionPrompt(question, offered) },
       { role: 'user', content: question },
     ],
-    temperature: 0,
+    temperature: turnTemperature(temperature),
     purpose: 'select',
   });
   const decision = applySelection(reply.text, offered);
@@ -186,6 +193,9 @@ export async function chooseCandidate(
 
 /**
  * Compare two candidates instead of ranking many.
+ *
+ * `temperature` behaves as in `chooseCandidate`: absent means zero, `null` means the field is
+ * not sent.
  *
  * The absolute-index prompt asks the model to hold every candidate in mind and emit one
  * number, and on this harness it kept 94.8% of what the candidate set contained — the
@@ -231,6 +241,7 @@ export async function chooseCandidatePairwise(
   provider: LlmProvider,
   question: string,
   executed: readonly ExecutedCandidate[],
+  temperature?: number | null,
 ): Promise<SelectionDecision & { readonly sql: string }> {
   if (executed.length === 0) throw new Error('chooseCandidatePairwise needs at least one executed candidate');
   const offered = executed.map((candidate) => toCandidate(candidate));
@@ -242,7 +253,7 @@ export async function chooseCandidatePairwise(
         { role: 'system', content: buildPairwisePrompt(question, offered[best] as Candidate, offered[challenger] as Candidate) },
         { role: 'user', content: question },
       ],
-      temperature: 0,
+      temperature: turnTemperature(temperature),
       purpose: 'compare',
     });
     const choice = parsePairwise(reply.text);

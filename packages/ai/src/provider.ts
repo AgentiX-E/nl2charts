@@ -38,7 +38,20 @@ export interface PurposeUsage {
 
 export interface LlmRequest {
   readonly messages: readonly LlmMessage[];
-  readonly temperature?: number;
+  /**
+   * Sampling temperature, or `null` to send no temperature at all.
+   *
+   * The two absences are different answers to different questions. `undefined` means "use
+   * this repository's default", which is zero — the value every reading in `docs/benchmarks.md`
+   * was taken at, and changing it silently would make those readings incomparable with a run
+   * made today. `null` means "do not name a value", for an endpoint that refuses the field
+   * instead of ignoring it: a reasoning model that only accepts its own default answers a
+   * `temperature: 0` with a 400, and the 400 used to arrive as "the endpoint is unreachable".
+   *
+   * A caller that does not know which of the two it needs should pass `undefined`; `null` is
+   * a deployment decision, and `turnTemperature` documents the mapping.
+   */
+  readonly temperature?: number | null;
   readonly maxTokens?: number;
   readonly json?: boolean;
   /**
@@ -50,6 +63,22 @@ export interface LlmRequest {
    * instead of being absorbed.
    */
   readonly purpose?: CallPurpose;
+}
+
+/**
+ * The temperature a turn is sent at, from whatever the deployment configured.
+ *
+ * A single function because the pipeline makes five kinds of call — the statement, the repair
+ * turn, the audit turn, the empty-result turn and the selector — and they all go to the same
+ * endpoint. A policy that reached only the statement call would still fail on the first model
+ * that rejects the field, and it would fail in the repair turn, which is the turn a weak model
+ * depends on most.
+ *
+ * `undefined` is this repository's default (zero, the value every published reading was taken
+ * at); `null` is a deployment saying the endpoint must not be told.
+ */
+export function turnTemperature(configured: number | null | undefined): number | null {
+  return configured === undefined ? 0 : configured;
 }
 
 export interface LlmUsage {
@@ -101,6 +130,44 @@ function retryAfterMs(response: Response, fallback: number): number {
   return Number.isFinite(seconds) && seconds >= 0 ? Math.round(seconds * 1000) : fallback;
 }
 
+/**
+ * What a refused request said about itself, in as few characters as carry the reason.
+ *
+ * Vendors disagree on the shape — `{error: {message}}`, `{error: "..."}`, `{message: "..."}`,
+ * or an HTML page from a proxy that never reached the model — and the one thing they agree on
+ * is that the reason is in the body. Reading it is what turns a 400 into an instruction: the
+ * field the endpoint refused, or the model name it does not serve.
+ *
+ * Never throws and never costs a retry. The body is read only on the refusal path, where the
+ * response is about to be discarded, so a consumed or truncated body is a missing sentence
+ * rather than a second failure stacked on the first.
+ */
+async function refusalDetail(response: Response): Promise<string | undefined> {
+  let text: string;
+  try {
+    text = await response.text();
+  } catch {
+    return undefined;
+  }
+  const body = text.trim();
+  if (body === '') return undefined;
+  let reason = body;
+  try {
+    const parsed = JSON.parse(body) as { readonly error?: unknown; readonly message?: unknown };
+    const error: unknown = parsed.error;
+    if (typeof error === 'string') reason = error;
+    else if (error !== null && typeof error === 'object' && 'message' in error) {
+      const nested = (error as { readonly message?: unknown }).message;
+      if (typeof nested === 'string') reason = nested;
+    } else if (typeof parsed.message === 'string') reason = parsed.message;
+  } catch {
+    // Not JSON: a proxy's HTML, or a vendor's plain sentence. Both are still the reason.
+  }
+  const collapsed = reason.replace(/\s+/g, ' ').trim();
+  if (collapsed === '') return undefined;
+  return collapsed.length > 200 ? `${collapsed.slice(0, 199)}…` : collapsed;
+}
+
 interface CompletionBody {
   readonly model?: unknown;
   readonly choices?: readonly {
@@ -135,8 +202,10 @@ export function createHttpProvider(options: HttpProviderOptions): LlmProvider {
       const body: Record<string, unknown> = {
         model: options.model,
         messages: request.messages,
-        temperature: request.temperature ?? 0,
       };
+      // Omitted rather than defaulted, so that `null` can mean what it says. The field is
+      // written only when the deployment has an opinion about it.
+      if (request.temperature !== null) body.temperature = request.temperature ?? 0;
       if (request.maxTokens !== undefined) body.max_tokens = request.maxTokens;
       if (request.json === true) body.response_format = { type: 'json_object' };
 
@@ -166,7 +235,12 @@ export function createHttpProvider(options: HttpProviderOptions): LlmProvider {
               // answer is wrong. That one is diagnosed, not retried.
               const text = await response.text();
               try {
-                payload = JSON.parse(text) as CompletionBody;
+                // `JSON.parse` is typed `any`, so `null` — which is valid JSON — would arrive as
+                // a body and make the `payload.choices` read below throw a TypeError instead of
+                // the error this layer promises. A body that parses to something other than an
+                // object is not a completion, whatever it parses to.
+                const parsed: unknown = JSON.parse(text);
+                payload = parsed !== null && typeof parsed === 'object' ? (parsed as CompletionBody) : undefined;
               } catch (error) {
                 throw toNl2ChartsError('NL2C_E_LLM_INVALID_RESPONSE', 'llm response is not JSON', error, { attempts });
               }
@@ -202,8 +276,27 @@ export function createHttpProvider(options: HttpProviderOptions): LlmProvider {
       }
 
       if (response === undefined || !response.ok) {
-        throw toNl2ChartsError('NL2C_E_LLM_UNAVAILABLE', `llm returned ${response?.status ?? 'nothing'}`, transport, {
-          ...(response === undefined ? {} : { status: response.status }),
+        const status = response?.status;
+        // A 4xx that is not a rate limit is the endpoint refusing the request, which is a
+        // different fault from the endpoint being absent — and it is the fault a deployment
+        // meets first, because the request carries the model name, the key and the sampling
+        // parameters. One code for both made "the model name is wrong" read as "the endpoint
+        // is unreachable", and every question that follows from that reading sends the reader
+        // at the network when the answer is in the request. 408 and 429 stay unavailable:
+        // both mean the same request may work later.
+        const refused =
+          status !== undefined && status >= 400 && status < 500 && status !== 408 && !RETRYABLE.has(status);
+        const detail = refused && response !== undefined ? await refusalDetail(response) : undefined;
+        if (refused) {
+          throw toNl2ChartsError(
+            'NL2C_E_LLM_REJECTED',
+            `llm refused the request with ${String(status)}${detail === undefined ? '' : `: ${detail}`}`,
+            undefined,
+            { status, endpoint, attempts, ...(detail === undefined ? {} : { detail }) },
+          );
+        }
+        throw toNl2ChartsError('NL2C_E_LLM_UNAVAILABLE', `llm returned ${status ?? 'nothing'}`, transport, {
+          ...(status === undefined ? {} : { status }),
           attempts,
         });
       }

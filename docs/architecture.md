@@ -380,7 +380,8 @@ One class, closed code list, data payload:
 | `NL2C_E_TIMEOUT` | runner timeout or caller abort |
 | `NL2C_E_INVALID_IR` | contract parse |
 | `NL2C_E_INVALID_INPUT` | bad arguments |
-| `NL2C_E_LLM_UNAVAILABLE` | provider network/timeout/non-2xx |
+| `NL2C_E_LLM_UNAVAILABLE` | provider network/timeout/429/5xx/408 |
+| `NL2C_E_LLM_REJECTED` | provider refused the request (4xx that is not 408/429) |
 | `NL2C_E_LLM_INVALID_RESPONSE` | provider body |
 | `NL2C_E_CONTRACT_VIOLATION` | consumer misuse |
 | `NL2C_E_NOT_SUPPORTED` | capability negotiation |

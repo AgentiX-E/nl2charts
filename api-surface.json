@@ -202,6 +202,7 @@
     "singularize",
     "toCandidate",
     "tokenizeQuestion",
+    "turnTemperature",
     "type AskMessagesInput",
     "type AskRequest",
     "type AskResult",
@@ -244,6 +245,7 @@
   "ai/llm": [
     "UNLABELLED",
     "createHttpProvider",
+    "turnTemperature",
     "type CallPurpose",
     "type HttpProviderOptions",
     "type LlmMessage",

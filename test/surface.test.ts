@@ -33,6 +33,7 @@ const SURFACE: Record<string, readonly string[]> = {
     'parseChoiceToken',
     'recordProvider',
     'replyShape',
+    'turnTemperature',
   ],
   node: ['createDuckDbEngine', 'createFileCache'],
   chart: ['compileToECharts', 'enumerateCandidates', 'isRenderable', 'lint', 'profileRows'],

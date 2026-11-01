@@ -243,3 +243,46 @@ describe('candidate source labels', () => {
     expect(prompt).not.toContain('1. [');
   });
 });
+
+describe('the selector sends the deployment\'s temperature, not its own', () => {
+  const recorder = (): { readonly provider: LlmProvider; readonly seen: (number | null | undefined)[] } => {
+    const seen: (number | null | undefined)[] = [];
+    return {
+      seen,
+      provider: {
+        id: 'thermometer',
+        model: 'fixture',
+        async complete(request) {
+          seen.push(request.temperature);
+          return { text: '1', model: 'fixture', usage: { promptTokens: 0, completionTokens: 0 } };
+        },
+      },
+    };
+  };
+  const executed = [
+    { sql: candidates[0]?.sql ?? '', rows: [[500]] },
+    { sql: candidates[1]?.sql ?? '', rows: [[120]] },
+    { sql: candidates[2]?.sql ?? '', rows: [[1], [2], [3]] },
+  ];
+
+  it('omits the field when the deployment withholds it', async () => {
+    // The selector goes to the same endpoint as the statement. A model that refuses to be told
+    // a value refuses this call too, and a selector that failed on a 400 would take down an arm
+    // whose statements were all fine.
+    const { provider, seen } = recorder();
+    await chooseCandidate(provider, 'q', executed.slice(0, 2), null);
+    expect(seen).toEqual([null]);
+  });
+
+  it('sends zero when the caller says nothing, so the reading is unchanged', async () => {
+    const { provider, seen } = recorder();
+    await chooseCandidate(provider, 'q', executed.slice(0, 2));
+    expect(seen).toEqual([0]);
+  });
+
+  it('carries the same answer into every pairwise comparison', async () => {
+    const { provider, seen } = recorder();
+    await chooseCandidatePairwise(provider, 'q', executed, null);
+    expect(seen).toEqual([null, null]);
+  });
+});
