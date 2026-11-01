@@ -23,7 +23,8 @@ cannot be argued with.
   have had. It is not the highest ceiling in this project (`vote-cross` reached 69.6% with one GLM
   statement and two DeepSeek ones), and the pair is the finding: **conversion is a property of the
   pool's shape, not of the aggregator** — 90.2% for `vote-cross`'s modal vote and 91.46% for
-  `select-cross`'s model selector, against 96–97% for single-author pools.
+  `select-cross`'s model selector, against 94.1% (`vote-mixed`) and 97.20% (`select-mixed`) for
+  single-author pools.
 
   The one combination that needs no new generation is now priced in the same report: the vote and the
   selector, whichever is right, reach **66.33%** on `select-cross` (+3.83pp over the selector, 23

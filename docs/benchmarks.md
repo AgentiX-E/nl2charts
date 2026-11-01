@@ -4748,7 +4748,8 @@ and it is the *only* correct slot on 23 questions, of which the selector kept 16
 statement and two DeepSeek ones, aggregated by modal vote, run `40409600418` — converts 90.2% of its
 69.6% ceiling; `select-cross` — two chat candidates and one reasoner, aggregated by a model selector
 — converts 91.46% of its 68.33%. Two different second models, two different aggregators, the same
-one-call-missing number, against 96–97% for pools whose candidates come from one author. Modal voting
+one-call-missing number, against 94.1% (`vote-mixed`) and 97.20% (`select-mixed`) for pools whose
+candidates come from one author. Modal voting
 converted 14 of the 65 questions `vote-cross` alone held (21.5%); the model selector converted 16 of
 the 22 `select-cross` alone held (72.7%). The aggregator matters for *which* questions, and barely at
 all for *how many*: what costs the points is that a 2+1 pool has a minority whose answer is often the
