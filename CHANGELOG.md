@@ -33,9 +33,19 @@ cannot be argued with.
   marker, so `important_keys` degrades to the declared foreign keys — the half of their rule the
   card can express. And their `keep_all` fallback is unreachable here, because our prompt asks for
   a list of columns rather than a decision per table; an unmentioned table is read as `drop_all`,
-  which is the aggressive reading and the one that differs from the column rule. The measurement
-  is dispatched, not claimed: the section in `docs/benchmarks.md` states the rule, the two
-  predictions and the command, and says the number is outstanding.
+  which is the aggressive reading and the one that differs from the column rule.
+
+  Measured on `41290647076`, three arms and one A/A in one run on 496 scored questions:
+  parent 278/496, column rule 253/496, their rule 261/496, A/A 275/496 (−0.60pp, p=0.508). So the
+  floor recovers **+1.61pp** of the 5.04pp loss — inside a 4.86pp MDE (p=0.416) — and the arm
+  still loses **3.43pp** to its grandparent (34:17, p=0.0241, CI [−6.25, −0.61]). The sign of the
+  earlier reading survives the correction and the magnitude does not: deleting tables is worth at
+  most the CI's upper end of +5.01pp, and separating 1.6pp at this pair's 14.9% discordance needs
+  **4,518 cases**, three times the dev split. Their cut is milder in the card (generation prompt
+  2,641 → 1,535 characters, kept share 11.1% → 56.9%, 14,052 columns put back) and dearer in
+  tokens (+69.2% prompt tokens a question against the column rule's +39.5%), because the choice
+  call costs more than the cut saves. The card lever is closed at two granularities, and the
+  6.45pp between their pipeline and `metadata+evidence` is not this cut.
 
 - **The format contract: a reply's shape is measured, because it is the one thing a new model
   breaks without an error.** `packages/ai/src/format.ts` reads four dimensions off a reply that

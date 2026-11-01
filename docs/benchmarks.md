@@ -3809,9 +3809,57 @@ Pre-registered before the dispatch, in the form the pair can falsify:
   selector lever is closed on the strength of two granularities instead of one.
 
 Neither outcome needs the dev split to read: 496 questions resolve 4.99pp at 80% power,
-and the pair differs by a rule rather than by a mechanism. The number is written here
-when the dispatch that measures it lands; until then this section states the rule, the
-prediction and the command, and says that the measurement is outstanding.
+and the pair differs by a rule rather than by a mechanism.
+
+### The measurement: both predictions were right and neither one wins
+
+`41290647076` ran three arms and one A/A on the 496 scored questions with `deepseek-chat` at
+concurrency 8, and the file it wrote is the first artifact in this repository with two card
+granularities measured against the same parent in the same run:
+
+| arm | passed | accuracy | calls | generation prompt | all prompt tokens | card kept |
+| --- | --- | --- | --- | --- | --- | --- |
+| `inline+evidence` | 278/496 | **56.05%** | 1 | 2,641 chars | 698 | 100% |
+| `inline+evidence+llm-select` | 253/496 | 51.01% | 2 | 683 chars | 974 (+39.5%) | 11.1% |
+| `inline+evidence+llm-select-dense` | 261/496 | 52.62% | 2 | 1,535 chars | 1,181 (+69.2%) | 56.9% |
+| `inline+evidence` (A/A) | 275/496 | 55.44% | 1 | 2,641 chars | 698 | 100% |
+
+Three paired tests, computed from the run's own case rows with `compareArms` / `mcnemarExact` /
+`pairedResolution`:
+
+| pair | delta | discordant | p | MDE | 95% CI |
+| --- | --- | --- | --- | --- | --- |
+| parent → column rule | **−5.04pp** | 50:25 | 0.0052 | 4.89pp | [−8.46, −1.62] |
+| column rule → their rule | **+1.61pp** | 33:41 | 0.416 | 4.86pp | [−1.79, +5.01] |
+| parent → their rule | **−3.43pp** | 34:17 | 0.0241 | 4.03pp | [−6.25, −0.61] |
+| parent → parent | −0.60pp | 6:3 | 0.508 | 1.69pp | [−1.79, +0.58] |
+
+**The sign survives the correction, and only the sign.** Applying their rule — which never
+removes a table and puts back 14,052 columns across the split, 28.3 a question, lifting the kept
+share from 11.1% to 56.9% — moves the arm from −5.04pp to **−3.43pp against the parent, still a
+loss, at p=0.0241 and outside the paired interval**. So the sentence "the selector lever is worth
+−5.65pp" was too harsh by about 1.6pp and right about its direction, and their selector is not
+worth copying onto our card at either granularity.
+
+**How much of the loss was table deletion cannot be answered, by this run or by any split here.**
+The +1.61pp that the floor recovers is inside a 4.86pp MDE (p=0.416), and the pair ran at 14.9%
+discordance — the discordance is what sets the resolution, not the accuracy. Resolving 1.6pp at
+that rate needs **4,518 cases** (`casesForEffect`), which is three times the dev split; even on
+dev's 1,532 questions the same discordance resolves only 2.76pp. The honest statement is a bound
+rather than a split: **deleting tables is worth at most +5.01pp** (the CI's upper end) and the
+point estimate is 1.61pp. A design that cannot separate 1.6pp should not be run to try.
+
+**Their cut is milder in the card and dearer in tokens.** The generation prompt falls 42% (2,641 →
+1,535 characters) but the choice call costs 778 prompt tokens of its own, so the arm pays **+69%
+prompt tokens a question** to arrive at a card that scores 3.43pp worse than the one it replaced.
+On the column rule the same arithmetic reads +39.5%. That is the shape of the competitor's
+trade as well: their selector pays a call on 426 of 496 questions to compress a card whose
+compression is worth less than the call.
+
+So the 6.45pp between their pipeline and `metadata+evidence` is not their selector cut, at either
+granularity, and the accounting of I-50 closes here: vocabulary +2.82pp, cut −3.43pp at best,
+decomposer −1.1pp / −0.85pp, refiner 10.89pp of reach of which 1.8pp is priced at ≈0 and 3.8pp's
+instruction is false. What is left is the 166 failures that run cleanly and return the wrong rows.
 
 ## The competitor's block, priced before it is run
 

@@ -644,13 +644,14 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   vote: 'majority over the same three candidates: the selector control, measured 17:17 against `select` (p = 1) — running it every push re-derives a tie at 2,092 tokens',
   'select-prune': 'the card cut to the join closure: measured −1.4pp, and the loss is the ceiling rather than the selector (1,008 → 980 reachable cases), so it is priced; run it when the card changes',
   'inline+evidence+llm-select': 'the card cut to the columns the model names: measured −5.65pp against its parent (53:25, p = 0.0020, MDE 4.99pp) on 496 questions at `41190457163`, with the choice deciding 495 of 496 cases and keeping 10.8% of the columns for +39% prompt tokens — the mechanism fires and is a net loss, so it is kept as the ablation reference for relevance-by-model rather than run on every push',
-  // The same call and the same prompt as the line above, applied at the granularity their selector
-  // uses. Its note is a question until the dispatch that answers it lands: the prediction is that
-  // keeping six columns of a table the model did not name recovers part of the 53:25 loss, because
-  // the column rule's mistake is deleting a table whose only trace of existence is the foreign key
-  // rendered under it. Writing the number before the run is how an arm acquires a verdict it has
-  // not earned.
-  'inline+evidence+llm-select-dense': "the same reply applied their way: a table the model named nothing in keeps its first six columns instead of vanishing, which is what MAC-SQL's `drop_all` does — dispatched to separate 'the model cannot choose' from 'dropping the table was the mistake', and until that artifact exists this note is the question rather than the verdict",
+  // Measured on `41290647076` in the same run as its parent and the column arm, so the three
+  // numbers share one A/A: parent 278/496, column rule 253/496, this rule 261/496. Applied their
+  // way the arm still loses 3.43pp to its grandparent (34:17, p=0.0241, MDE 4.03pp), and the
+  // +1.61pp it recovers from the column rule is inside a 4.86pp MDE — the discordance (14.9%) is
+  // what resolves, and separating 1.6pp at that rate needs 4,518 cases. So the verdict is the
+  // sign of the earlier one with a corrected magnitude, and the card lever is closed at two
+  // granularities rather than one.
+  'inline+evidence+llm-select-dense': "the same reply applied their way: a table the model named nothing in keeps its first six columns instead of vanishing, which is what MAC-SQL's `drop_all` does — measured 261/496 against the column rule's 253 and the parent's 278 (`41290647076`), so it recovers 1.61pp of the 5.04pp loss (p=0.416, unresolved at 14.9% discordance) and still loses 3.43pp to the parent (p=0.0241); the card lever is closed at both granularities",
   'select-mixed': 'three decompositions instead of three samples: within its MDE of a single call on this split, and the decomposition question needs the dev split to be answered',
   'select-duo': 'two prompts and a selector: measured −0.60pp against `vote` for the same money, superseded',
   select5: 'five samples and a selector: 4,103 tokens a case, the largest bill in the catalogue, and +0.40pp inside a 3.33pp MDE — the arm whose own measurement says the ceiling is not the sampler',

@@ -188,9 +188,13 @@ describe('the pair is one lever', () => {
     expect(PAIRS).toContainEqual(['inline+evidence+llm-select', 'inline+evidence+llm-select-dense']);
   });
 
-  it('is registered as an on-demand arm with a note that names its prediction', () => {
+  it('is registered as an on-demand arm whose note carries the measurement, not a promise', () => {
     expect(ARMS.map((arm) => arm.name)).toContain('inline+evidence+llm-select-dense');
-    expect(ON_DEMAND_ARMS['inline+evidence+llm-select-dense']).toMatch(/question rather than the verdict/u);
+    const note = ON_DEMAND_ARMS['inline+evidence+llm-select-dense'] ?? '';
+    // The run that priced the pair, and the verdict it produced. An arm whose note still reads
+    // like a question is an arm nobody has measured; this one has been.
+    expect(note).toContain('41290647076');
+    expect(note).toMatch(/closed at both granularities/u);
   });
 });
 
