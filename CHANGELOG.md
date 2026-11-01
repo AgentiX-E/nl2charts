@@ -18,9 +18,16 @@ cannot be argued with.
   **+0.07pp** — and every one of them **loses** out of fold: **−0.98pp**, **−0.98pp**, **−0.46pp**. The
   two evidence cards disagree **66 : 65** (exact sign test **p = 1.0000**), which is what noise looks
   like, and the census explains the rest: all five arms fail on 474 cases and **364 of them (76.8%)
-  are `values`** — the statement ran, with the right width, and returned the wrong number. **None**
-  are engine refusals. A router can only recover a case some arm passed, and on three quarters of
-  what is left no arm passed at all.
+  are `values`** — the right width, a different number. A router can only recover a case some arm
+  passed, and on three quarters of what is left no arm passed at all.
+
+  The `values` bucket has a boundary the census cannot see: the judge files a statement that never
+  executed there too, because a crash returns no values to compare. The arms record 13 / 26 / 17
+  execution errors on the three single-call cards and 10 / 21 cases on the selectors where no sample
+  survived guard and execution, so a small share of the 364 is "no number" rather than "wrong
+  number". Separating them is a defect in the **census**, and it is what the next instrument fixes:
+  a repair that cannot tell a crash from a miscalculation cannot choose between a retry and a
+  re-derivation.
 
   So no router ships, and `select-mixed`'s +1.37pp is recorded as a purchase rather than as evidence
   that routing works. The harness stays because it is what makes the next claim falsifiable: any

@@ -4521,10 +4521,19 @@ Three readings, and the first is the one that decides the experiment:
    read; they are the model's own instability, and the 4.24pp headroom is that instability counted as
    an opportunity.
 3. **The failures are not choice failures.** All five arms fail on 474 cases, and the judge files
-   **364 of them (76.8%) under `values`** — the statement ran, with the right number of columns, and
-   returned a different number. Another 110 (23.2%) are `column-count`, and **none** are engine
-   refusals: the SQL always executes. A router can only recover a case on which *some* arm passed; on
+   **364 of them (76.8%) under `values`** — the right number of columns, a different number. Another
+   110 (23.2%) are `column-count`. A router can only recover a case on which *some* arm passed; on
    three quarters of what is left, no arm passed and the choice was never the problem.
+
+   One boundary on that bucket, because the first draft of this paragraph overstated it: the judge
+   has no way to file "it did not run". A statement that never executed returns no values, so it
+   lands in `values` as well. The arms record the difference even though the census cannot attribute
+   it — **13** execution errors on `names`, **26** on `inline+evidence`, **17** on
+   `metadata+evidence`, and 10 / 21 cases on the two selector arms where no sample survived guard and
+   execution. So a small share of those 364 is not "wrong number" but "no number", and separating the
+   two is a defect **in the census**, not a finding about the corpus. It is the first thing the next
+   instrument fixes, because a repair that cannot tell a crash from a miscalculation cannot choose
+   between a retry and a re-derivation.
 
 So no router ships. This is the same shape of answer as the cold-start experiment, reached a
 different way: the oracle columns in this document are ceilings that describe what is *unreachable by
