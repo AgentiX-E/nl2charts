@@ -1,4 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterAll, describe, expect, it } from 'vitest';
+import { staleBuild } from '../tools/check-exports.mjs';
 import * as spec from '@agentix-e/nl2charts-spec';
 import * as core from '@agentix-e/nl2charts-core';
 import * as ai from '@agentix-e/nl2charts-ai';
@@ -15,7 +19,18 @@ import * as devkit from '@agentix-e/nl2charts-devkit';
 const SURFACE: Record<string, readonly string[]> = {
   spec: ['CONTRACT_VERSION', 'Nl2ChartsError', 'chartIrJsonSchema', 'isNl2ChartsError', 'parseChartIR', 'safeParseChartIR'],
   core: ['canonicalRow', 'canonicalValue', 'createCapabilities', 'createRunner', 'hashRows', 'inspectSql', 'negotiate', 'resultSetsEqual', 'withRowLimit'],
-  ai: ['buildSqlPrompt', 'createHttpProvider', 'createPipeline', 'createReplayProvider', 'extractSql', 'linkSchema', 'recordProvider'],
+  ai: [
+    'auditMessages',
+    'buildConditionAuditFeedback',
+    'buildSqlPrompt',
+    'countNamedConditions',
+    'createHttpProvider',
+    'createPipeline',
+    'createReplayProvider',
+    'extractSql',
+    'linkSchema',
+    'recordProvider',
+  ],
   node: ['createDuckDbEngine', 'createFileCache'],
   chart: ['compileToECharts', 'enumerateCandidates', 'isRenderable', 'lint', 'profileRows'],
   mcp: ['attachStreams', 'createMcpServer', 'encodeMessage'],
@@ -48,5 +63,58 @@ describe('package surface', () => {
     expect(typeof llm.createHttpProvider).toBe('function');
     expect(typeof duckdb.createDuckDbEngine).toBe('function');
     expect(typeof cache.createFileCache).toBe('function');
+  });
+});
+
+/**
+ * The snapshot check reads `dist`, which is why it used to be able to say "no drift" about a
+ * change that was not built: run 41255435708 failed in CI on three exports that had passed
+ * this gate locally minutes earlier, because the local `dist` predated the module. `staleBuild`
+ * is the guard that makes the difference visible before the push.
+ */
+describe('the snapshot refuses to read a build it cannot trust', () => {
+  const root = mkdtempSync(join(tmpdir(), 'nl2charts-api-'));
+  afterAll(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  const build = (name: string, options: { readonly built?: boolean; readonly builtAt?: number; readonly srcAt?: number }): void => {
+    mkdirSync(join(root, 'packages', name, 'src', 'nested'), { recursive: true });
+    mkdirSync(join(root, 'packages', name, 'dist'), { recursive: true });
+    writeFileSync(join(root, 'packages', name, 'src', 'index.ts'), 'export const a = 1;\n');
+    writeFileSync(join(root, 'packages', name, 'src', 'nested', 'module.ts'), 'export const b = 2;\n');
+    if (options.built !== false) {
+      const file = join(root, 'packages', name, 'dist', 'index.d.ts');
+      writeFileSync(file, 'export declare const a: number;\n');
+      utimesSync(file, new Date(options.builtAt ?? 1_000_000), new Date(options.builtAt ?? 1_000_000));
+    }
+    if (options.srcAt !== undefined) {
+      for (const source of ['index.ts', join('nested', 'module.ts')]) {
+        utimesSync(join(root, 'packages', name, 'src', source), new Date(options.srcAt), new Date(options.srcAt));
+      }
+    }
+  };
+
+  it('says a build that is newer than every source is usable', () => {
+    build('fresh', { builtAt: 2_000_000, srcAt: 1_000_000 });
+    expect(staleBuild(root, 'fresh')).toBeUndefined();
+  });
+
+  it('names a build older than a source it should contain', () => {
+    // The nested file is the point: a check that only compares `src/index.ts` would miss the
+    // module that was added, which is the exact shape of the failure this guard exists for.
+    build('old', { builtAt: 1_000_000, srcAt: 2_000_000 });
+    expect(staleBuild(root, 'old')).toBe('stale');
+  });
+
+  it('names a package that was never built at all', () => {
+    build('unbuilt', { built: false });
+    expect(staleBuild(root, 'unbuilt')).toBe('missing');
+  });
+
+  it('does not invent a verdict for a package with no sources', () => {
+    mkdirSync(join(root, 'packages', 'empty', 'dist'), { recursive: true });
+    writeFileSync(join(root, 'packages', 'empty', 'dist', 'index.d.ts'), 'export declare const a: number;\n');
+    expect(staleBuild(root, 'empty')).toBeUndefined();
   });
 });
