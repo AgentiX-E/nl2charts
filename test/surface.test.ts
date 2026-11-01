@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { staleBuild } from '../tools/check-exports.mjs';
+import { assertBuilt, staleBuild } from '../tools/stale-build.mjs';
 import * as spec from '@agentix-e/nl2charts-spec';
 import * as core from '@agentix-e/nl2charts-core';
 import * as ai from '@agentix-e/nl2charts-ai';
@@ -110,6 +110,15 @@ describe('the snapshot refuses to read a build it cannot trust', () => {
   it('names a package that was never built at all', () => {
     build('unbuilt', { built: false });
     expect(staleBuild(root, 'unbuilt')).toBe('missing');
+  });
+
+  it('lists every package whose build cannot be trusted, in the order it was asked', () => {
+    // The two gates share this line, so the order is the caller's list and not a sort: a build
+    // log is read top to bottom, and the package that must be rebuilt first should print first.
+    expect(assertBuilt(root, ['fresh', 'old', 'unbuilt'])).toEqual([
+      'A0: packages/old/dist is stale; run `pnpm build` before this check',
+      'A0: packages/unbuilt/dist is missing; run `pnpm build` before this check',
+    ]);
   });
 
   it('does not invent a verdict for a package with no sources', () => {

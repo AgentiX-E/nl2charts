@@ -3,10 +3,15 @@
  * Bundle budget gate. Sizes are gzip bytes of every shipped JavaScript file in
  * dist/. A budget that is exceeded fails the build; raising it requires a
  * reviewed change to budgets.json.
+ *
+ * It reads `dist`, so it can measure the previous build as though it were this one: the audit
+ * turn passed this gate locally by 735 B on a stale build and failed it in CI. `assertBuilt`
+ * is the same guard the snapshot check uses, for the same reason.
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
 import { join, resolve } from 'node:path';
+import { assertBuilt } from './stale-build.mjs';
 
 const ROOT = resolve(new URL('..', import.meta.url).pathname);
 const BUDGETS = JSON.parse(readFileSync(join(ROOT, 'budgets.json'), 'utf8'));
@@ -28,6 +33,12 @@ function distJavaScript(dir) {
   };
   walk(dir);
   return files;
+}
+
+const unbuilt = assertBuilt(ROOT, PACKAGES);
+if (unbuilt.length > 0) {
+  for (const problem of unbuilt) console.error(problem);
+  process.exit(1);
 }
 
 let failed = false;
