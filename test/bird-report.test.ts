@@ -92,6 +92,15 @@ describe('report completeness', () => {
     );
   });
 
+  it('refuses an audit arm whose row carries no funnel', () => {
+    // The turn is one call on every question, so a row without its funnel is a report in which
+    // the mechanism's price and its reach are both unreadable — the same refusal the
+    // empty-result lever gets, for the same reason.
+    expect(() => assertReportComplete({ arms: [{ arm: 'inline+evidence+audit', total: 1532 }] })).toThrow(
+      /inline\+evidence\+audit.*no audit funnel/,
+    );
+  });
+
   it('refuses an arm that runs the empty-result lever and carries no funnel', () => {
     expect(() => assertReportComplete({ arms: [{ arm: 'select-mixed+empty', total: 1532, candidateRecall: 0.65 }] })).toThrow(
       /select-mixed\+empty.*no empty-result funnel/,
@@ -110,6 +119,11 @@ describe('report completeness', () => {
             total: 1532,
             candidateRecall: 0.656,
             emptyRetry: { mode: 'diagnosed', dropped: 12, fired: 3, recovered: 1 },
+          },
+          {
+            arm: 'inline+evidence+audit',
+            total: 1532,
+            audit: { fired: 1532, named: 411, rewritten: 980, extraCallsPerCase: 1 },
           },
         ],
       }),

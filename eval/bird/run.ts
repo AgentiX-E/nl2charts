@@ -240,6 +240,15 @@ export interface Arm {
    */
   readonly emptyRetry?: 'diagnosed' | 'blind';
   /**
+   * Ask the model what its own statement left out, one call, then keep what it writes.
+   *
+   * The population is the one nothing else can see: statements that run, return rows and are
+   * wrong because a column the question filters on never appears in them (16.1-18.8pp on
+   * Mini-Dev, `bench:bird:conditions`). No result-based trigger fires on those, so the only
+   * truthful trigger is the question itself.
+   */
+  readonly audit?: 'conditions';
+  /**
    * Let the model name the columns the card keeps, in one call before the statement.
    *
    * Every card-cutting instrument this harness has decides *tables*: the card measurement says
@@ -405,6 +414,11 @@ export const ARMS: readonly Arm[] = [
   // call's answers has to be priced on that call. One lever from `inline+evidence`, and the
   // only one of their refiner's three triggers whose diagnostic is both true and ours.
   { name: 'inline+evidence+empty', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', emptyRetry: 'diagnosed' },
+  // The only mechanism here that reads no result at all: the statement is put back in front of
+  // the model with the question, and the reply names the conditions the statement failed to
+  // write before it writes one that expresses them. One lever, one call, aimed at the largest
+  // failure class the ladder found — 16.1-18.8pp where a gold filter's column is absent.
+  { name: 'inline+evidence+audit', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', audit: 'conditions' },
   // The same prompt with the card cut to the columns the model names, in one call before the
   // statement. One lever from `inline+evidence`, and the only card-cutting arm here whose rule
   // is not the lexical linker: `select-prune` prices the join closure and loses 1.4pp, this one
@@ -570,6 +584,10 @@ export const DEFAULT_ARMS: readonly string[] = [
   'inline+icl',
   'inline+repair',
   'inline+repair-raw',
+  // The chain's only arm whose trigger is the question rather than the result. It is here
+  // because the failure class it targets is the largest one left (16.1-18.8pp) and it is
+  // invisible to every other trigger on this page.
+  'inline+evidence+audit',
   'values',
   'metadata+evidence',
   // The only multi-call arm left in the chain, and it is here to keep the path alive rather
@@ -719,6 +737,10 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   // only card pair in this table whose rule is not the lexical linker, which is what makes it
   // the pair that can price relevance-by-model against relevance-by-graph.
   ['inline+evidence', 'inline+evidence+llm-select'],
+  // One lever from the plain single call: the turn that reads the question instead of the
+  // result, one extra call, same prompt and same hints. The only pair in this table whose
+  // mechanism fires before anything is executed.
+  ['inline+evidence', 'inline+evidence+audit'],
   ['vote', 'select'],
   // Where the candidates come from, held against how many there are: same count, same
   // selector, different prompts.
@@ -858,6 +880,14 @@ export interface CaseRun extends CaseOutcome {
    */
   readonly winnerSource?: string;
   /**
+   * What the audit turn found and did, on the arm that spends the call.
+   *
+   * `named` is the reach and `rewritten` the yield: an audit that names nothing on most cases
+   * says the model believes the statement is complete, which is a finding about where the
+   * missing filter is decided, not a mechanism that failed to run.
+   */
+  readonly audit?: { readonly fired: boolean; readonly named: number; readonly rewritten: boolean };
+  /**
    * The candidate set, in the order the selector saw it, with the truth for each.
    *
    * `candidateRecall` says whether the set held an answer; it cannot say *which* candidate
@@ -979,6 +1009,14 @@ export interface ArmReportRow {
   readonly decomposition?: { readonly asked: number; readonly fired: number; readonly share: number; readonly meanSteps: number };
   readonly candidateRecall?: number;
   readonly emptyRetry?: { readonly mode: string; readonly dropped: number; readonly fired: number; readonly recovered: number };
+  /**
+   * The audit turn's reach and yield, plus what it cost in calls.
+   *
+   * `named` is summed rather than averaged: "3.1 conditions named per case" hides whether the
+   * arm named three on a tenth of the cases or one on a third, and the second is the shape that
+   * suggests the trigger is half-right.
+   */
+  readonly audit?: { readonly fired: number; readonly named: number; readonly rewritten: number; readonly extraCallsPerCase: number };
   /**
    * What the arm spent per case, and — when the meter split it — how much of that each kind of
    * call was. The split is what turns "the selector should earn its tokens" into a column.
@@ -1302,6 +1340,45 @@ export function assertEmptyRetryFired(
 }
 
 /**
+ * The audit turn's reach and yield, over the cases the arm ran.
+ *
+ * `extraCallsPerCase` is the price of the mechanism stated in the one unit the arms are
+ * compared in: a single-call arm that audits spends two calls on every question, so a delta
+ * has to be read against a doubled bill and not against "one more call sometimes".
+ */
+export function auditFunnel(runs: readonly CaseRun[]): {
+  readonly fired: number;
+  readonly named: number;
+  readonly rewritten: number;
+  readonly extraCallsPerCase: number;
+} {
+  const fired = runs.filter((run) => run.audit?.fired === true).length;
+  const named = runs.reduce((total, run) => total + (run.audit?.named ?? 0), 0);
+  const rewritten = runs.filter((run) => run.audit?.rewritten === true).length;
+  return {
+    fired,
+    named,
+    rewritten,
+    extraCallsPerCase: runs.length === 0 ? 0 : Number((fired / runs.length).toFixed(2)),
+  };
+}
+
+/**
+ * An audit arm whose audit never fired is a single-call arm with a longer name.
+ *
+ * The same failure the empty-result lever had: written, wired, paired and silently absent,
+ * with an accuracy next to the parent's that reads as "the mechanism did nothing" rather than
+ * "the mechanism never ran". The threshold is the sample size the other asserts use.
+ */
+export function assertAuditFired(armName: string, runs: readonly CaseRun[], minimumSample = 100): void {
+  if (runs.length < minimumSample) return;
+  if (runs.some((run) => run.audit?.fired === true)) return;
+  throw new Error(
+    `arm ${armName}: across ${String(runs.length)} questions the audit turn never fired, so the arm is its parent with a longer prompt — the lever did not run`,
+  );
+}
+
+/**
  * What the decomposition produced, over the cases that asked for one.
  *
  * `asked` is the denominator the share needs: an arm whose fourth candidate failed to
@@ -1444,6 +1521,9 @@ export function assertReportComplete(report: { readonly arms?: readonly ArmRepor
     }
     if ((arm.vote ?? 1) > 1 && row.candidateRecall === undefined) {
       throw new Error(`arm ${row.arm} samples ${String(arm.vote)} candidates and its row carries no candidate ceiling, so its accuracy cannot be read`);
+    }
+    if (arm.audit !== undefined && row.audit === undefined) {
+      throw new Error(`arm ${row.arm} runs the audit turn and its row carries no audit funnel, so the call cannot be priced`);
     }
     if (arm.emptyRetry !== undefined && row.emptyRetry === undefined) {
       throw new Error(`arm ${row.arm} runs the empty-result lever and its row carries no empty-result funnel, so the call cannot be priced`);
@@ -2922,6 +3002,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
           plan: target.plan === true,
           decompose: target.decompose === true,
           ...(target.repairFeedback === undefined ? {} : { repairFeedback: target.repairFeedback }),
+          ...(target.audit === undefined ? {} : { audit: target.audit }),
           temperature: target.vote === undefined ? 0 : 0.7,
           prompt: promptFor(target, question, prepared.blocksFor(target, question)),
           ...(target.repairs === 0
@@ -3188,6 +3269,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
           attempts: asked.attempts,
           calls: callsMade(),
           failures: asked.failures,
+          ...(asked.audit === undefined ? {} : { audit: asked.audit }),
           ...(asked.decomposedSteps === undefined ? {} : { decomposition: { candidates: 1, steps: asked.decomposedSteps } }),
         };
       } catch (error) {
@@ -3243,6 +3325,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
   assertHarnessClean(name, runs);
   if (arm.repairs > 0) assertRepairPathFired(name, runs);
   if (arm.emptyRetry !== undefined) assertEmptyRetryFired(name, runs);
+  if (arm.audit !== undefined) assertAuditFired(name, runs);
   // ...and an arm that asks for samples and gets none is its parent under another name.
   if (arm.samples !== undefined) assertSamplesRan(name, prepared.sampledFor(arm));
   // ...and a format the model ignored is not a prompt that did not help.
@@ -3418,6 +3501,7 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
     // is the arm the numbers exist for.
     ...armDecomposition(runs),
     ...(arm.emptyRetry === undefined ? {} : { emptyRetry: { mode: arm.emptyRetry, ...emptyRetryFunnel(runs) } }),
+    ...(arm.audit === undefined ? {} : { audit: auditFunnel(runs) }),
     // What the model kept of the card, on the one arm that asks it to choose. Beside the
     // accuracy rather than inside the sampling spread, for the reason the decomposition funnel
     // moved out: the instrument belongs to the arm, not to how many candidates it draws.

@@ -330,6 +330,15 @@ jobs:
       # joins in so the reading is per bucket.
       - name: Which condition the statement never wrote
         run: pnpm bench:bird:conditions eval/out/bird-eval.json --arm select --ladder eval/out/values-gap-select-all.json --strict
+      # The same census on the pair the audit arm was built for: the arm it was added to, and the
+      # arm with the turn. The population is defined by the first reading (a gold filter whose
+      # column is absent) and the second is the only number that says whether the turn closed
+      # any of it. No ladder here: both arms generate once per case, so the bucket a failure
+      # falls in is the ladder's `select` reading rather than its own.
+      - name: The same census on the arm the audit was added to
+        run: pnpm bench:bird:conditions eval/out/bird-eval.json --arm inline+evidence --strict
+      - name: The same census after the audit turn
+        run: pnpm bench:bird:conditions eval/out/bird-eval.json --arm inline+evidence+audit --strict
       # Where the prompt's characters go, and what a smaller card could save. The card is
       # three quarters of every call and one case in six had a linker that named nothing at
       # all, so the two numbers that matter are the oracle ceiling and the coverage of the

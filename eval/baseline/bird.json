@@ -16,6 +16,7 @@
   "inline+icl",
   "inline+repair",
   "inline+repair-raw",
+  "inline+evidence+audit",
   "values",
   "metadata+evidence",
   "select"

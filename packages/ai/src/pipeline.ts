@@ -7,6 +7,7 @@ import type { Diagnosis, FailureClass } from './diagnose.js';
 import { buildPlanPrompt, parsePlan } from './plan.js';
 import { DECOMPOSE_RULES, parseDecomposed } from './decompose.js';
 import { emptyRetryMessages } from './empty.js';
+import { auditMessages, countNamedConditions } from './audit.js';
 import { linkSchema, renderSchemaCard } from './linking.js';
 import type { LinkedColumn, Recaller, SchemaCardOptions, SchemaTable } from './linking.js';
 
@@ -152,6 +153,17 @@ export interface PipelineOptions {
    * is to run both on the same cases.
    */
   readonly repairFeedback?: 'diagnosed' | 'raw';
+  /**
+   * One more turn after a statement is accepted: ask the model which of the question's
+   * conditions it failed to write, and keep the statement it writes next.
+   *
+   * This is aimed at the failure class no result-based trigger can see — the statement runs,
+   * returns rows and is still wrong because a filter is missing (16.1-18.8pp of Mini-Dev).
+   * The turn fires on the accepted statement, before any execution: a mechanism that waited
+   * for the engine to complain would be blind to exactly the cases it exists for. It costs
+   * one call and re-sends the conversation, which is what `audit` in the meter prices.
+   */
+  readonly audit?: 'conditions';
 }
 
 export interface AskRequest {
@@ -180,6 +192,15 @@ export interface AskResult {
    * reports the first without the second cannot say whether the call was worth it.
    */
   readonly emptyRetry?: { readonly fired: boolean; readonly recovered: boolean };
+  /**
+   * What the audit turn found and did.
+   *
+   * `named` is the reach — how many conditions the model said were missing — and
+   * `rewritten` is the yield. An arm whose audit names nothing on most cases is not a
+   * mechanism that failed; it is evidence about where the missing filters are decided,
+   * and without the count the two readings look the same.
+   */
+  readonly audit?: { readonly fired: boolean; readonly named: number; readonly rewritten: boolean };
   /**
    * How many sub-statements the reply wrote, when the pipeline asked for a decomposition.
    *
@@ -420,26 +441,50 @@ export function createPipeline(options: PipelineOptions): {  ask(request: AskReq
         const steps = options.decompose === true ? { decomposedSteps: read.steps } : {};
         const verdict = inspectSql(sql);
         if (verdict.ok) {
-          if (!options.execute) return { sql, attempts, linked, failures, diagnoses, ...steps };
+          // The audit turn, when the arm asked for it: the statement the guard accepted goes
+          // back in front of the model with the question, and the statement it writes next is
+          // the one executed. It runs *before* any execution on purpose — the failure class it
+          // targets is the one that runs and returns rows, so a trigger keyed on the engine's
+          // answer would never fire on it.
+          const audited =
+            options.audit === 'conditions'
+              ? await auditStatement({
+                  provider: options.provider,
+                  question: request.question,
+                  messages,
+                  previous: response.text,
+                  statement: sql,
+                  temperature: options.temperature ?? 0,
+                  read: (text: string) => readReply(text).sql,
+                })
+              : undefined;
+          const stated = audited === undefined ? sql : audited.sql;
+          const spent = audited === undefined ? attempts : attempts + 1;
+          const audit =
+            audited === undefined
+              ? {}
+              : { audit: { fired: true, named: audited.named, rewritten: stated !== sql } };
+          if (!options.execute) return { sql: stated, attempts: spent, linked, failures, diagnoses, ...audit, ...steps };
           try {
-            const outcome = await options.execute(sql);
+            const outcome = await options.execute(stated);
             const rows = rowCountOf(outcome);
             if (rows === 0 && options.emptyRetry !== undefined) {
-              const retried = await retryEmpty({ provider: options.provider, mode: options.emptyRetry, execute: options.execute, messages, previous: response.text, sql, temperature: options.temperature ?? 0, read: (text: string) => readReply(text).sql });
+              const retried = await retryEmpty({ provider: options.provider, mode: options.emptyRetry, execute: options.execute, messages, previous: response.text, sql: stated, temperature: options.temperature ?? 0, read: (text: string) => readReply(text).sql });
               return {
                 sql: retried.sql,
-                attempts: attempts + 1,
+                attempts: spent + 1,
                 linked,
                 failures,
                 diagnoses,
                 emptyRetry: { fired: true, recovered: retried.recovered },
+                ...audit,
                 ...steps,
               };
             }
-            return { sql, attempts, linked, failures, diagnoses, ...steps };
+            return { sql: stated, attempts: spent, linked, failures, diagnoses, ...audit, ...steps };
           } catch (error) {
             const diagnosis = diagnoseFailure({
-              sql,
+              sql: stated,
               schema: request.schema,
               ...(options.prompt?.dialect === undefined ? {} : { dialect: options.prompt.dialect }),
               ...(options.repairFeedback === undefined ? {} : { mode: options.repairFeedback }),
@@ -447,7 +492,7 @@ export function createPipeline(options: PipelineOptions): {  ask(request: AskReq
             });
             failures.push(diagnosis.failureClass);
             diagnoses.push(diagnosis.summary);
-            if (attempts > maxRepairs) throw exhausted(diagnosis, attempts, sql, failures, diagnoses);
+            if (attempts > maxRepairs) throw exhausted(diagnosis, attempts, stated, failures, diagnoses);
             messages.push({ role: 'assistant', content: response.text });
             messages.push({ role: 'user', content: diagnosis.feedback });
             continue;
@@ -479,6 +524,42 @@ export function createPipeline(options: PipelineOptions): {  ask(request: AskReq
 function rowCountOf(outcome: { readonly rows: number } | void): number | undefined {
   if (outcome === undefined || outcome === null || typeof outcome !== 'object') return undefined;
   return typeof outcome.rows === 'number' ? outcome.rows : undefined;
+}
+
+/**
+ * One extra call that asks the model what its own statement left out.
+ *
+ * The turn is not a retry: it never sees a result, and the statement it is given was already
+ * accepted by the guard. What it adds is a comparison the model did not make — the question's
+ * conditions against the ones the statement wrote — and the reply is read for both halves,
+ * the count of conditions it names (`named`) and the statement it writes (`sql`).
+ *
+ * A reply whose statement fails the guard is discarded and the original kept, for the same
+ * reason a failed repair is discarded: the first statement is known to be safe, and a
+ * second one that is not cannot be executed at all. The count still stands — the model did
+ * say what it thought was missing, and dropping that reading because the statement was bad
+ * would lose the only part of the turn that is evidence.
+ */
+async function auditStatement(input: {
+  readonly provider: LlmProvider;
+  readonly question: string;
+  readonly messages: readonly LlmMessage[];
+  readonly previous: string;
+  readonly statement: string;
+  readonly temperature: number;
+  readonly read: (text: string) => string;
+}): Promise<{ readonly sql: string; readonly named: number }> {
+  const response = await input.provider.complete({
+    messages: [...input.messages, ...auditMessages(input.question, input.statement, input.previous)],
+    temperature: input.temperature,
+    // Its own purpose, so the price table can say what the check cost rather than folding it
+    // into generation: on a one-call arm this turn doubles the characters billed.
+    purpose: 'audit',
+  });
+  const named = countNamedConditions(response.text);
+  const candidate = input.read(response.text);
+  if (!inspectSql(candidate).ok) return { sql: input.statement, named };
+  return { sql: candidate, named };
 }
 
 /**

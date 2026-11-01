@@ -31,6 +31,8 @@ import {
   declaresDecomposition,
   DC_SOURCES,
   MIXED_DC_SOURCES,
+  auditFunnel,
+  assertAuditFired,
   emptyRetryFunnel,
   offeredCandidates,
   candidateCeiling,
@@ -53,7 +55,7 @@ import type { BirdQuestion } from '../eval/bird/data.js';
  * delta cannot be attributed to anything else. A future edit that adds a second
  * change to a pair turns this red before it turns the benchmark unreadable.
  */
-const LEVERS = ['notes', 'evidence', 'repairs', 'linking', 'profile', 'definitions', 'focus', 'interpret', 'vote', 'demonstrations', 'select', 'values', 'plan', 'repairFeedback', 'shapeGuard', 'mixed', 'pairwise', 'sourcesVisible', 'judge', 'emptyRetry', 'decompose', 'samples', 'canonical', 'shuffle', 'prune', 'columnSelect'] as const;
+const LEVERS = ['notes', 'evidence', 'repairs', 'linking', 'profile', 'definitions', 'focus', 'interpret', 'vote', 'demonstrations', 'select', 'values', 'plan', 'repairFeedback', 'shapeGuard', 'mixed', 'pairwise', 'sourcesVisible', 'judge', 'emptyRetry', 'audit', 'decompose', 'samples', 'canonical', 'shuffle', 'prune', 'columnSelect'] as const;
 
 function changedLevers(left: Arm, right: Arm): string[] {
   const levers = LEVERS.filter((lever) => left[lever] !== right[lever]);
@@ -205,15 +207,16 @@ describe('the chain that actually runs', () => {
     // grew one arm at a time to sixteen — 23,840 prompt tokens a question, 11.9M a run. The
     // cut that took it to eleven was justified by measurement (`vote` +0.00pp against `select`
     // at 17:17, `select-duo` −0.60pp, `select5` +0.40pp inside a 3.33pp MDE) and this line is
-    // what keeps the next arm from being added without that argument: fourteen nominal calls
-    // today and a ceiling of fifteen, so one single-call rung fits and a four-call variant
-    // does not.
+    // what keeps the next arm from being added without that argument: fifteen nominal calls
+    // today against a ceiling of fifteen, so the chain is full. The fifteenth rung is the
+    // audit arm — one call, aimed at the largest failure class left — and the next arm has to
+    // displace one rather than extend the bill.
     const nominal = DEFAULT_ARMS.reduce((total, name) => {
       const arm = ARMS.find((entry) => entry.name === name) as Arm;
       return total + (arm.vote ?? 1) + (arm.select === true ? 1 : 0);
     }, 0);
     expect(nominal).toBeLessThanOrEqual(15);
-    expect(nominal).toBe(14);
+    expect(nominal).toBe(15);
   });
 
   it('gives the demonstration arm statements and the textual arm only text', () => {
@@ -300,6 +303,60 @@ describe('the chain that actually runs', () => {
     ];
     const funnel = emptyRetryFunnel(runs as never);
     expect(funnel).toEqual({ dropped: 3, fired: 1, recovered: 1, extraCallsPerCase: Number((1 / 3).toFixed(4)) });
+  });
+
+  it('prices the audit turn by its reach, its yield and its calls', () => {
+    const runs = [
+      { audit: { fired: true, named: 2, rewritten: true } },
+      { audit: { fired: true, named: 0, rewritten: false } },
+      { audit: { fired: true, named: 1, rewritten: false } },
+    ];
+    expect(auditFunnel(runs as never)).toEqual({ fired: 3, named: 3, rewritten: 1, extraCallsPerCase: 1 });
+  });
+
+  it('reports an audit that never ran as zeros rather than as an average', () => {
+    // A case list with no audit record is an arm that did not spend the call. Reading that as
+    // "0 conditions named per case" would make a broken arm look like a complete audit.
+    expect(auditFunnel([])).toEqual({ fired: 0, named: 0, rewritten: 0, extraCallsPerCase: 0 });
+    expect(auditFunnel([{ audit: undefined }, { audit: undefined }] as never)).toEqual({
+      fired: 0,
+      named: 0,
+      rewritten: 0,
+      extraCallsPerCase: 0,
+    });
+  });
+
+  it('rounds the per-case call count to two places', () => {
+    const runs = Array.from({ length: 3 }, (_, index) => ({ audit: { fired: index < 1, named: 0, rewritten: false } }));
+    expect(auditFunnel(runs as never).extraCallsPerCase).toBe(0.33);
+  });
+
+  it('refuses an audit arm whose turn never fired over a real sample', () => {
+    const runs = Array.from({ length: 100 }, () => ({ audit: undefined }));
+    expect(() => assertAuditFired('inline+evidence+audit', runs as never)).toThrow(/never fired.*lever did not run/);
+  });
+
+  it('accepts a sample too small to say anything about', () => {
+    // The same threshold the other asserts use: a three-case smoke run cannot say a mechanism
+    // is absent, and refusing it would make every local experiment fail for the wrong reason.
+    expect(() => assertAuditFired('inline+evidence+audit', [] as never)).not.toThrow();
+  });
+
+  it('accepts an audit arm whose turn fired at least once', () => {
+    const runs = [
+      { audit: { fired: false, named: 0, rewritten: false } },
+      { audit: { fired: true, named: 0, rewritten: false } },
+    ];
+    expect(() => assertAuditFired('inline+evidence+audit', runs as never, 2)).not.toThrow();
+  });
+
+  it('keeps the audit pair one lever apart', () => {
+    const parent = ARMS.find((arm) => arm.name === 'inline+evidence') as Arm;
+    const audit = ARMS.find((arm) => arm.name === 'inline+evidence+audit') as Arm;
+    expect(parent.audit).toBeUndefined();
+    expect(audit.audit).toBe('conditions');
+    expect({ ...audit, audit: undefined, name: parent.name }).toEqual(parent);
+    expect(PAIRS).toContainEqual(['inline+evidence', 'inline+evidence+audit']);
   });
 
   it('keeps the empty-result pair one lever apart, in both directions', () => {

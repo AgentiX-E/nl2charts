@@ -85,6 +85,13 @@ interface Plan {
    * whole card is sent and the artifact says `decided: false`.
    */
   readonly columns?: (question: string) => string;
+  /**
+   * The answer to the audit turn: what the statement left out, then a statement.
+   *
+   * Absent means the model reports nothing missing and repeats the gold statement, which is
+   * the mechanism's null case — it spent the call and changed nothing.
+   */
+  readonly audit?: (question: string) => string;
 }
 
 /**
@@ -112,6 +119,16 @@ function replyFor(request: EndpointRequest, plan: Plan): { status?: number; cont
   if (prompt.includes('You choose the columns a SQL query will need')) {
     const asked = Object.keys(GOLD).find((entry) => prompt.includes(entry));
     return send(plan.columns?.(asked ?? '') ?? '');
+  }
+  // The audit turn. Read before the statement branches because its prompt carries the
+  // question verbatim and would otherwise be answered as a first attempt.
+  if (prompt.includes('Check it against the question before rewriting')) {
+    const audited = Object.keys(GOLD).find((entry) => prompt.includes(entry)) ?? '';
+    // Without a plan the audit reports nothing missing and repeats the statement it was
+    // handed, which the prompt quotes verbatim: the turn costs its call and changes nothing,
+    // and that is the null case the control case has to be measurable against.
+    const given = /The statement being checked: ([\s\S]*)$/.exec(prompt)?.[1]?.trim() ?? 'select 1';
+    return send(plan.audit?.(audited) ?? `MISSING: none\n${fenced(given)}`);
   }
   const question = Object.keys(GOLD).find((entry) => prompt.includes(entry));
   if (question === undefined) return send(plan.definitions ?? DEFINITIONS);
@@ -525,6 +542,76 @@ describe('a sampling arm', () => {
     // At least the one question that names a stored literal, which is the whole reason the
     // trio is allowed to call itself three prompts.
     expect(mixed[0]?.withAllDistinct).toBeGreaterThan(0);
+  });
+});
+
+describe('the audit arm', () => {
+  it('names what the statement left out, rewrites it, and reports the call it spent', async () => {
+    const result = await run({
+      plan: {
+        first: () => wrong(),
+        // One named condition per case, and the gold statement as the rewrite: the reply shape
+        // the prompt asks for, answered the way a model that found the mistake would.
+        audit: (question) =>
+          `MISSING: the question filters on a column the statement never mentions\n${fenced(GOLD[question] ?? 'select 1')}`,
+      },
+      env: { BIRD_ARMS: 'inline+evidence,inline+evidence+audit' },
+    });
+    expect(result.code).toBe(0);
+    const arms = result.report.arms as {
+      arm: string;
+      passed: number;
+      audit?: { fired: number; named: number; rewritten: number; extraCallsPerCase: number };
+      tokens?: { byPurpose?: Record<string, { calls: number }> };
+    }[];
+    const parent = arms.find((arm) => arm.arm === 'inline+evidence');
+    const audit = arms.find((arm) => arm.arm === 'inline+evidence+audit');
+    // The parent answered nothing correctly; the audited arm answered everything, because the
+    // rewrite it was handed is the statement that answers the question.
+    expect(parent?.passed).toBe(0);
+    expect(audit?.passed).toBe(QUESTIONS.length);
+    // The funnel is the measurement: the turn fired on every question, named one condition
+    // each, and changed the statement every time.
+    expect(audit?.audit).toEqual({
+      fired: QUESTIONS.length,
+      named: QUESTIONS.length,
+      rewritten: QUESTIONS.length,
+      extraCallsPerCase: 1,
+    });
+    // The price is a column, not a guess: the audit call is billed under its own purpose, at
+    // one call a case (the report divides the run's calls by its cases).
+    expect(audit?.tokens?.byPurpose?.audit?.calls).toBe(1);
+    expect(parent?.tokens?.byPurpose?.audit).toBeUndefined();
+  });
+
+  it('keeps the statement when the audit names nothing, and says it changed nothing', async () => {
+    // The control the reading needs: the same call on the same cases with a reply that reports
+    // no omission. Accuracy must not move, or the gain would be the second draw rather than
+    // the audit.
+    // One question answered correctly, so the run has a signal to publish: a pair where both
+    // arms answered nothing is refused by the harness before any lever can be read.
+    const first = Object.keys(GOLD)[0] ?? '';
+    const result = await run({
+      plan: { first: (question) => (question === first ? GOLD[question] : wrong()) },
+      env: { BIRD_ARMS: 'inline+evidence,inline+evidence+audit' },
+    });
+    expect(result.code).toBe(0);
+    const arms = result.report.arms as {
+      arm: string;
+      passed: number;
+      audit?: { fired: number; named: number; rewritten: number; extraCallsPerCase: number };
+    }[];
+    const parent = arms.find((arm) => arm.arm === 'inline+evidence');
+    const audit = arms.find((arm) => arm.arm === 'inline+evidence+audit');
+    // The call was spent and nothing moved: same accuracy as the parent, because the reply
+    // reported no omission and repeated the statement it was given.
+    expect(audit?.passed).toBe(parent?.passed);
+    expect(audit?.audit).toEqual({
+      fired: QUESTIONS.length,
+      named: 0,
+      rewritten: 0,
+      extraCallsPerCase: 1,
+    });
   });
 });
 
