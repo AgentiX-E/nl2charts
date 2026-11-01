@@ -12,9 +12,10 @@
  */
 import { describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-import { needsModel, render, isDocumentation, TRUNCATED_AT } from '../tools/ci-scope.mjs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { needsModel, explain, summary, publish, isDocumentation, TRUNCATED_AT } from '../tools/ci-scope.mjs';
 
 describe('a change set that only edits documentation', () => {
   it('does not need a model call', () => {
@@ -79,34 +80,77 @@ describe('the two edges where the list cannot be trusted', () => {
   });
 });
 
-describe('what the workflow appends to $GITHUB_OUTPUT', () => {
-  it('emits the key the job reads, and the reason a human reads', () => {
-    const lines = render(needsModel(['docs/a.md'])).split('\n');
-    expect(lines.at(-1)).toBe('models=false');
-    expect(lines[0]).toContain('Markdown');
+describe('the two files the step needs', () => {
+  it('keeps the reason out of $GITHUB_OUTPUT, which parses nothing but key=value', () => {
+    // `41397606408` failed this job with `Invalid format '3 of 5 changed file(s) are not
+    // Markdown'`: the tool printed the reason and the key on one stream, the workflow piped
+    // both into the output file, and the run went red before it could measure anything. A
+    // sentence in that file is not a formatting preference — the parser rejects the step.
+    const directory = mkdtempSync(join(tmpdir(), 'ci-scope-'));
+    try {
+      const output = join(directory, 'output');
+      const summaryFile = join(directory, 'summary');
+      writeFileSync(output, 'other=kept\n');
+      writeFileSync(summaryFile, '');
+      publish(needsModel(['docs/a.md', 'packages/a.ts']), { output, summary: summaryFile });
+      const written = readFileSync(output, 'utf8');
+      expect(written).toBe('other=kept\nmodels=true\n');
+      for (const line of written.split('\n').filter((entry) => entry.length > 0)) {
+        expect(line).toMatch(/^[a-z_]+=[^\n]*$/u);
+      }
+      // The summary is the other half: Markdown, and it carries the sentence.
+      expect(readFileSync(summaryFile, 'utf8')).toContain('not Markdown');
+      expect(readFileSync(summaryFile, 'utf8')).toContain('packages/a.ts');
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
-  it('prints at most five files, and says how many it hid', () => {
+  it('writes nothing it was not given a path for', () => {
+    // Both targets are optional so the tool is usable from a shell without a run around it.
+    expect(() => publish(needsModel(['docs/a.md']), {})).not.toThrow();
+  });
+
+  it('describes at most five files, and says how many it hid', () => {
     // The step log is the only place a reader learns why a run measured, and a hundred
     // stacked paths push the reason off the visible part of the panel.
     const files = Array.from({ length: 8 }, (_, index) => `packages/a${index}.ts`);
-    const lines = render(needsModel(files)).split('\n');
+    const lines = explain(needsModel(files));
     expect(lines.filter((line) => line.startsWith('  packages/'))).toHaveLength(5);
     expect(lines).toContain('  … and 3 more');
-    expect(lines.at(-1)).toBe('models=true');
+    expect(lines[0]).toContain('8 of 8');
+  });
+
+  it('heads the summary so a skipped run explains itself', () => {
+    const text = summary(needsModel(['docs/a.md']));
+    expect(text.startsWith('### did this push touch anything a prompt reads')).toBe(true);
+    expect(text).toContain('Markdown');
   });
 });
 
 describe('the command the workflow calls', () => {
-  const run = (files: string[]): string =>
-    execFileSync(process.execPath, [resolve(process.cwd(), 'tools/ci-scope.mjs')], {
+  const run = (files: string[], args: string[] = []): string =>
+    execFileSync(process.execPath, [resolve(process.cwd(), 'tools/ci-scope.mjs'), ...args], {
       input: files.join('\n'),
       encoding: 'utf8',
     });
 
-  it('reads the file list from stdin and prints one output line', () => {
-    expect(run(['docs/benchmarks.md', 'CHANGELOG.md']).trim().endsWith('models=false')).toBe(true);
-    expect(run(['eval/bird/run.ts']).trim().endsWith('models=true')).toBe(true);
+  it('reads the file list from stdin and answers on every stream', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'ci-scope-cli-'));
+    try {
+      const output = join(directory, 'output');
+      const summaryFile = join(directory, 'summary');
+      const log = run(['docs/benchmarks.md', 'CHANGELOG.md'], ['--output', output, '--summary', summaryFile]);
+      expect(readFileSync(output, 'utf8')).toBe('models=false\n');
+      expect(log).toContain('Markdown');
+      // The summary is appended, not overwritten: a job has one summary and several steps.
+      writeFileSync(summaryFile, 'earlier\n');
+      run(['eval/bird/run.ts'], ['--output', output, '--summary', summaryFile]);
+      expect(readFileSync(summaryFile, 'utf8').startsWith('earlier\n')).toBe(true);
+      expect(readFileSync(output, 'utf8')).toBe('models=false\nmodels=true\n');
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });
 
@@ -126,6 +170,12 @@ describe('ci.yml consults the filter', () => {
     expect(changes).toContain('outputs:');
     expect(changes).toContain('models: ${{ steps.scope.outputs.models }}');
     expect(changes).toContain('node tools/ci-scope.mjs');
+    // The paths come in as flags, so the only thing that reaches `$GITHUB_OUTPUT` is the key:
+    // piping the tool's stdout there is the bug that turned this job red on its first run.
+    const call = changes.split('\n').find((line) => line.includes('node tools/ci-scope.mjs')) ?? '';
+    expect(call).toContain('--output \"$GITHUB_OUTPUT\"');
+    expect(call).toContain('--summary \"$GITHUB_STEP_SUMMARY\"');
+    expect(call).not.toContain('>>');
   });
 
   it('gates both jobs that spend a model call on it', () => {

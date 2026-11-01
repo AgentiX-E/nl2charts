@@ -8,6 +8,25 @@ cannot be argued with.
 
 ### Added
 
+- **The two information sources on one card, which they have never been on.** `metadata+evidence`
+  is the strongest single-call arm in the corpus (58.9-59.2% on Mini-Dev) and carries 798 curated
+  column notes; `values` carries the literals the question names, looked up in the database, and is
+  worth +2.82pp over a card with neither source (p=0.039). `metadata+evidence+values` is the pair
+  that has never been run: a note says what a column *means*, the block says which literal string
+  it *holds*, and the largest remaining bucket in the corpus is statements that run cleanly, return
+  rows and answer the wrong question.
+
+  The prediction is pre-registered in the arm's on-demand note rather than inferred after the fact:
+  if the two are complements the arm lands above `metadata+evidence` and the corpus has a lever it
+  has not pulled; if they are substitutes it lands within noise, and that is a statement about the
+  166 remaining failures — they are knowledge the card already carries, not a literal it lacks,
+  which makes the next lever something other than "put more text on the prompt".
+
+  `test/bird-arms.test.ts` pins that the arm renders both blocks and that the pair differs by
+  exactly one lever (`values`), because an arm whose `descriptions` fell through to `undefined`
+  would measure the value block against a card with neither source while wearing the name of the
+  comparison.
+
 - **The competitor's card rule, at the granularity their selector actually uses.**
   `eval/bird/dense.ts` applies the reply of the *same* column-choice call the way
   `macsql_agents.py::_get_db_desc_str` applies their selector's: a table the model named nothing
@@ -144,6 +163,21 @@ cannot be argued with.
   filter is unit-tested in `test/ci-scope.test.ts` — 14 cases covering both edges, the suffix
   casing, a directory named `docs.md`, the `$GITHUB_OUTPUT` line, and the workflow actually
   consulting it — instead of being five lines of shell nobody can test.
+
+### Fixed
+
+- **The scope job's first run failed on its own output format.** The tool printed the reason and
+  the `models=` key on one stream, the workflow piped both into `$GITHUB_OUTPUT`, and the run went
+  red before it could measure anything: `##[error]Invalid format '3 of 5 changed file(s) are not
+  Markdown'`. GitHub's output file is a `key=value` list and its parser rejects the step on
+  anything else — a sentence in that file is not a formatting preference.
+
+  The split is now part of the tool's contract instead of a shell pipeline: `publish(result,
+  {output, summary})` appends the one key to the output file and the Markdown reading to the step
+  summary, and the step passes both paths as flags. The test writes to real files and asserts every
+  line of the output file matches `key=value`, because a rule that lives in a pipe is a rule no
+  test can hold. `describe` was also renamed `explain`: it collided with the test framework's own
+  `describe`, which is how the suite failed to collect at all.
 
 ### Fixed
 

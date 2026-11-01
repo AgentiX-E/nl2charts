@@ -570,6 +570,16 @@ export const ARMS: readonly Arm[] = [
   // gold statement never reads — so the lever that removed 12.6% of `select`'s prompt has more
   // to remove here, and the arm it acts on has no selector call to dilute the saving.
   { name: 'metadata+evidence+prune', notes: true, evidence: 'dataset', repairs: 0, linking: true, prune: 1 },
+  // The two information levers on one card. Curated notes and stored values have each been
+  // priced alone — the notes against a generated definition block (not separable, −0.8pp) and
+  // the value block against a card with neither (+2.82pp, p=0.039) — and they have never been
+  // on the same prompt. They are not the same information: a note says what a column means, the
+  // block says which literal string it holds, and the largest remaining bucket of failures is
+  // statements that run cleanly and answer the wrong question with the right shape. If the two
+  // sources are complementary this is the arm that finds out; if they are redundant it prices
+  // `values` on the strongest card instead of on the weakest one, which is the comparison the
+  // +2.82pp has never had.
+  { name: 'metadata+evidence+values', notes: true, evidence: 'dataset', repairs: 0, linking: true, values: true },
   { name: 'adaptive', notes: true, evidence: 'dataset', repairs: 0, linking: true, profile: 'adaptive' },
   // Available on demand (BIRD_ARMS=...,no-linking,repair). Both measured null in
   // the previous round and are kept instead of deleted, so a change that should
@@ -651,6 +661,14 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   // what resolves, and separating 1.6pp at that rate needs 4,518 cases. So the verdict is the
   // sign of the earlier one with a corrected magnitude, and the card lever is closed at two
   // granularities rather than one.
+  // Pre-registered before the dispatch, because an arm that runs without a prediction acquires a
+  // verdict it did not earn. The value block was worth +2.82pp over a card with neither source;
+  // the notes and a generated definition block were not separable (−0.8pp, four cases). So the
+  // prediction is the interesting one of the two: the sources are complements and the arm lands
+  // above `metadata+evidence`, or they are substitutes and it lands within noise, which would say
+  // that the 166 failures left in the corpus are knowledge the card already carries and the model
+  // is not using — a different next lever from "the prompt lacks a literal".
+  'metadata+evidence+values': "the curated notes and the value block on the same card — dispatched to separate 'the two information sources are complements' from 'the value block was only ever worth what the generated definitions were missing', and until that artifact exists this note is the question rather than the verdict",
   'inline+evidence+llm-select-dense': "the same reply applied their way: a table the model named nothing in keeps its first six columns instead of vanishing, which is what MAC-SQL's `drop_all` does — measured 261/496 against the column rule's 253 and the parent's 278 (`41290647076`), so it recovers 1.61pp of the 5.04pp loss (p=0.416, unresolved at 14.9% discordance) and still loses 3.43pp to the parent (p=0.0241); the card lever is closed at both granularities",
   'select-mixed': 'three decompositions instead of three samples: within its MDE of a single call on this split, and the decomposition question needs the dev split to be answered',
   'select-duo': 'two prompts and a selector: measured −0.60pp against `vote` for the same money, superseded',
@@ -764,6 +782,10 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   // — the dense arm keeps six columns of every table the model did not name, so the pair separates
   // the price of asking the model from the price of deleting the tables it did not name.
   ['inline+evidence+llm-select', 'inline+evidence+llm-select-dense'],
+  // One lever from the strongest single-call arm: the value block. Same notes, same hint, same
+  // prompt skeleton — the only difference is whether the literals the question names are spelled
+  // beside the columns that hold them, which is what `values` adds and nothing else does.
+  ['metadata+evidence', 'metadata+evidence+values'],
   // One lever from the plain single call: the turn that reads the question instead of the
   // result, one extra call, same prompt and same hints. The only pair in this table whose
   // mechanism fires before anything is executed.

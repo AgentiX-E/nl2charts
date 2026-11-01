@@ -243,6 +243,25 @@ describe('the chain that actually runs', () => {
     );
   });
 
+  it('carries the curated notes and the value block on one prompt', () => {
+    // Two information levers that were each priced alone: a note says what a column means, the
+    // block says which literal it holds. The pair is only one lever if the arm renders both —
+    // an arm whose `descriptions` fell through to undefined would measure the value block
+    // against a card with neither source and wear the name of the comparison.
+    const arm = ARMS.find((entry) => entry.name === 'metadata+evidence+values') as Arm;
+    const parent = ARMS.find((entry) => entry.name === 'metadata+evidence') as Arm;
+    const card = [{ table: 'orders', columns: [{ name: 'status', type: 'TEXT', comment: 'one of the three shipping states' }] }];
+    const text = buildSqlPrompt(question.question, card, promptFor(arm, question, { values: "- orders.status stores 'shipped'" }));
+    expect(text).toContain('one of the three shipping states');
+    expect(text).toContain('Values in this database named by the question:');
+    expect(text).toContain("stores 'shipped'");
+    // The parent keeps the note and has no block, so the pair is the block and nothing else.
+    const without = buildSqlPrompt(question.question, card, promptFor(parent, question, { values: "- orders.status stores 'shipped'" }));
+    expect(without).toContain('one of the three shipping states');
+    expect(without).not.toContain('Values in this database');
+    expect(changedLevers(parent, arm)).toEqual(['values']);
+  });
+
   it('refuses a repair arm on which the repair path never fired', () => {
     // A switch that is on and never fires produces its parent's number under its own
     // name — the failure the retrieval arm already had once.

@@ -528,6 +528,39 @@ without documentation can be brought to the accuracy of a database with it, by
 generating definitions once per database and attaching them to the columns. What
 it cannot do is replace the per-question hint: that is still worth +14.1pp.
 
+### The two information sources, on one card for the first time
+
+Two blocks on this corpus have been priced separately and never together:
+
+- **what a column means** — 798 curated notes, or a generated definition block. The two are not
+  separable from each other (−0.8pp, four cases), and the generated one is what ships because it
+  is a third of the prompt.
+- **which literal a column holds** — `values`, the strings the question names looked up in the
+  database. Worth **+2.82pp** (p=0.039) over a card with neither source.
+
+`metadata+evidence+values` is those two on one prompt: the notes stay on the column lines and the
+value block is appended, so the pair against `metadata+evidence` is one lever — the block — on the
+strongest single-call card in the corpus (58.9-59.2% on Mini-Dev, 61.5% on dev).
+
+It is the arm that separates two very different next moves:
+
+- **complements** — the arm lands above `metadata+evidence`, and the largest remaining bucket (the
+  166 failures that run cleanly, return rows and answer the wrong question) contains statements
+  whose literal was on the card and whose *meaning* was the problem, which is a prompt-content
+  finding to keep working on;
+- **substitutes** — the arm lands within noise, and the +2.82pp `values` bought was the gap the
+  generated definition block also filled. That would say the 166 are knowledge the card already
+  carries and the model is not using, which points at the reading of the card rather than at more
+  text on it.
+
+```bash
+BIRD_ARMS=metadata+evidence+metadata+evidence+values pnpm bench:bird   # Mini-Dev, ~1,000 calls
+```
+
+The prediction is written in the arm's on-demand note before the dispatch, and the number is
+written here when the artifact lands; until then this section states the rule, the two outcomes and
+the command.
+
 ### A model-written reading of the question buys nothing
 
 Asking the model to restate what the question computes — measure, rows counted,

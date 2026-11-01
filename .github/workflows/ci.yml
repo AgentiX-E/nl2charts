@@ -66,7 +66,10 @@ jobs:
             echo "the commit endpoint could not be read, so this push is measured" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          printf '%s\n' "$files" | node tools/ci-scope.mjs | tee -a "$GITHUB_STEP_SUMMARY" >> "$GITHUB_OUTPUT"
+          # The tool writes the two files itself. Piping its stdout into `$GITHUB_OUTPUT`
+          # is what turned this job red on its first run: the parser accepts `key=value`
+          # lines and nothing else, and rejected the sentence explaining the decision.
+          printf '%s\n' "$files" | node tools/ci-scope.mjs --output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
 
   quality:
     name: quality gates
