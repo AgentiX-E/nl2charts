@@ -34,6 +34,8 @@ import { graphForDatabase } from './join-graph.js';
 import { ppPerExtraCall, repairFunnel } from './metrics.js';
 import { pruneSchema } from './prune.js';
 import { applyColumnChoice, buildColumnPrompt, parseColumnChoice } from './columns.js';
+import type { ColumnApplication } from './columns.js';
+import { applyDenseChoice } from './dense.js';
 import type { CaseOutcome, MatchReason } from '@agentix-e/nl2charts-devkit';
 import { buildSchema, datasetName, describeQuestionSet, distinctQuestions, loadDescriptions, loadQuestions, loadTables, stratifiedSample } from './data.js';
 import type { BirdQuestion, QuestionSet } from './data.js';
@@ -266,8 +268,16 @@ export interface Arm {
    *
    * A reply with no resolvable column sends the whole card and is reported as `decided: false`
    * — the same doctrine as `prune`'s no-seed branch.
+   *
+   * `'dense'` is the same call and the same prompt with the competitor's *application* rule
+   * instead of ours (`dense.ts`): a table the model named nothing in keeps its first six columns
+   * rather than disappearing, so the two arms differ in what is done with the reply and in
+   * nothing else. The pair is the single-lever test of I-50d — `columns` is the column-level cut
+   * that measured −5.65pp, `dense` is the table-level granularity their selector actually uses,
+   * and the delta between them is the price of dropping tables rather than the price of asking
+   * the model at all.
    */
-  readonly columnSelect?: boolean;
+  readonly columnSelect?: 'columns' | 'dense';
 }
 
 /**
@@ -423,7 +433,12 @@ export const ARMS: readonly Arm[] = [
   // statement. One lever from `inline+evidence`, and the only card-cutting arm here whose rule
   // is not the lexical linker: `select-prune` prices the join closure and loses 1.4pp, this one
   // prices the model's own reading of the question. The plan calls it `llm-select`.
-  { name: 'inline+evidence+llm-select', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', columnSelect: true },
+  { name: 'inline+evidence+llm-select', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', columnSelect: 'columns' },
+  // The same prompt, the same call and the same one-line reply, applied the way the competitor
+  // applies it: a table with no named column keeps its first six columns instead of vanishing.
+  // One lever from `inline+evidence+llm-select` — the application rule — so the pair separates
+  // "the model cannot choose" from "dropping the table was the mistake".
+  { name: 'inline+evidence+llm-select-dense', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', columnSelect: 'dense' },
   // Retrieved knowledge instead of the dataset's per-question hint: the nearest
   // labelled questions from BIRD's train split, which shares no database with the
   // split under test. The arm exists to test whether the 13.8pp is knowledge or
@@ -629,6 +644,13 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   vote: 'majority over the same three candidates: the selector control, measured 17:17 against `select` (p = 1) — running it every push re-derives a tie at 2,092 tokens',
   'select-prune': 'the card cut to the join closure: measured −1.4pp, and the loss is the ceiling rather than the selector (1,008 → 980 reachable cases), so it is priced; run it when the card changes',
   'inline+evidence+llm-select': 'the card cut to the columns the model names: measured −5.65pp against its parent (53:25, p = 0.0020, MDE 4.99pp) on 496 questions at `41190457163`, with the choice deciding 495 of 496 cases and keeping 10.8% of the columns for +39% prompt tokens — the mechanism fires and is a net loss, so it is kept as the ablation reference for relevance-by-model rather than run on every push',
+  // The same call and the same prompt as the line above, applied at the granularity their selector
+  // uses. Its note is a question until the dispatch that answers it lands: the prediction is that
+  // keeping six columns of a table the model did not name recovers part of the 53:25 loss, because
+  // the column rule's mistake is deleting a table whose only trace of existence is the foreign key
+  // rendered under it. Writing the number before the run is how an arm acquires a verdict it has
+  // not earned.
+  'inline+evidence+llm-select-dense': "the same reply applied their way: a table the model named nothing in keeps its first six columns instead of vanishing, which is what MAC-SQL's `drop_all` does — dispatched to separate 'the model cannot choose' from 'dropping the table was the mistake', and until that artifact exists this note is the question rather than the verdict",
   'select-mixed': 'three decompositions instead of three samples: within its MDE of a single call on this split, and the decomposition question needs the dev split to be answered',
   'select-duo': 'two prompts and a selector: measured −0.60pp against `vote` for the same money, superseded',
   select5: 'five samples and a selector: 4,103 tokens a case, the largest bill in the catalogue, and +0.40pp inside a 3.33pp MDE — the arm whose own measurement says the ceiling is not the sampler',
@@ -737,6 +759,10 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   // only card pair in this table whose rule is not the lexical linker, which is what makes it
   // the pair that can price relevance-by-model against relevance-by-graph.
   ['inline+evidence', 'inline+evidence+llm-select'],
+  // One lever: the application rule for the same reply. Same prompt, same call, same temperature
+  // — the dense arm keeps six columns of every table the model did not name, so the pair separates
+  // the price of asking the model from the price of deleting the tables it did not name.
+  ['inline+evidence+llm-select', 'inline+evidence+llm-select-dense'],
   // One lever from the plain single call: the turn that reads the question instead of the
   // result, one extra call, same prompt and same hints. The only pair in this table whose
   // mechanism fires before anything is executed.
@@ -938,6 +964,8 @@ export interface CaseRun extends CaseOutcome {
     readonly kept: number;
     readonly total: number;
     readonly decided: boolean;
+    /** Columns the six-column floor and the declared keys kept beyond the names (dense only). */
+    readonly restored?: number;
   };
   /**
    * Candidates that never arrived, by reason.
@@ -1454,6 +1482,11 @@ export function decompositionFunnel(runs: readonly CaseRun[]): {
  * decide what "the card shrank" means. `decided` is reported beside it because a reply that
  * resolved nothing sends the whole card and would otherwise look like a choice that kept
  * everything.
+ *
+ * `restored` is the dense rule's own size — the columns the six-column floor and the declared
+ * keys kept that the model never named — and it is reported only by an arm that has a floor.
+ * Zero is a finding: it means the application rule added nothing to the parent and the pair's
+ * delta is noise dressed as a lever.
  */
 export function columnChoiceFunnel(runs: readonly CaseRun[]): {
   readonly cases: number;
@@ -1461,6 +1494,7 @@ export function columnChoiceFunnel(runs: readonly CaseRun[]): {
   readonly decidedShare: number;
   readonly unknown: number;
   readonly cardShare: number;
+  readonly restored?: number;
 } | undefined {
   const chosen = runs.filter((run) => run.columnSelection !== undefined);
   if (chosen.length === 0) return undefined;
@@ -1469,12 +1503,15 @@ export function columnChoiceFunnel(runs: readonly CaseRun[]): {
     const record = run.columnSelection as NonNullable<CaseRun['columnSelection']>;
     return record.total === 0 ? 1 : record.kept / record.total;
   });
+  const restored = chosen.reduce((total, run) => total + (run.columnSelection?.restored ?? 0), 0);
+  const floored = chosen.some((run) => run.columnSelection?.restored !== undefined);
   return {
     cases: chosen.length,
     decided,
     decidedShare: Number((decided / chosen.length).toFixed(4)),
     unknown: chosen.reduce((total, run) => total + (run.columnSelection?.unknown ?? 0), 0),
     cardShare: Number((shares.reduce((total, share) => total + share, 0) / chosen.length).toFixed(4)),
+    ...(floored ? { restored } : {}),
   };
 }
 
@@ -2154,6 +2191,8 @@ export interface CardOutcome {
     readonly kept: number;
     readonly total: number;
     readonly decided: boolean;
+    /** Columns the dense rule put back that the model did not name (dense arms only). */
+    readonly restored?: number;
   };
 }
 
@@ -2574,7 +2613,8 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
 
   const cardFor = async (arm: Arm, question: BirdQuestion, provider: LlmProvider): Promise<CardOutcome> => {
     const base = schemaFor(arm, question);
-    if (arm.columnSelect !== true) return { schema: base };
+    const mode = arm.columnSelect;
+    if (mode === undefined) return { schema: base };
     const reply = await provider.complete({
       messages: [
         { role: 'system', content: buildColumnPrompt(question.question, base) },
@@ -2584,7 +2624,14 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
       purpose: 'columns',
     });
     const choice = parseColumnChoice(reply.text, base);
-    const applied = applyColumnChoice(base, choice);
+    // The two rules are not a parameter of one function: they disagree about whether a table the
+    // model did not name exists at all, and a flag threaded through both would make the pair's
+    // single lever a claim about the flag rather than about the rule. The widened annotation is
+    // what lets one card be built from either result: only the dense rule reports a safety net,
+    // so the field is present exactly when there was one — a zero would otherwise be
+    // indistinguishable from "this arm has no floor".
+    const applied: ColumnApplication & { readonly restored?: number } =
+      mode === 'dense' ? applyDenseChoice(base, choice) : applyColumnChoice(base, choice);
     const outcome: CardOutcome = {
       schema: applied.schema,
       columns: {
@@ -2593,6 +2640,7 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
         kept: applied.kept,
         total: applied.total,
         decided: choice.decided,
+        ...(applied.restored === undefined ? {} : { restored: applied.restored }),
       },
     };
     sentCards.set(cardKey(arm, question), outcome);
@@ -2926,7 +2974,7 @@ export function previewPrompts(prepared: PreparedRun, report: Record<string, unk
         arm: arm.name,
         chars: rendered.length,
         prompt: rendered,
-        ...(arm.columnSelect === true ? { card: 'before-column-selection' } : {}),
+        ...(arm.columnSelect === undefined ? {} : { card: 'before-column-selection' }),
       };
     }),
   }));
@@ -3378,7 +3426,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
   // accuracy, and publishing 0% would hide the provider's message behind a score.
   assertArmProducedResults(name, runs);
   assertFailureRate(name, runs);
-  if (arm.columnSelect === true) assertColumnChoiceRan(name, runs);
+  if (arm.columnSelect !== undefined) assertColumnChoiceRan(name, runs);
   // ...and a candidate that never arrived shrinks the set the ceiling is taken over,
   // which no case-level count can see.
   if (arm.vote !== undefined && arm.vote > 1) assertCandidateSurvival(name, runs, arm.vote);
@@ -3573,7 +3621,7 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
     // What the model kept of the card, on the one arm that asks it to choose. Beside the
     // accuracy rather than inside the sampling spread, for the reason the decomposition funnel
     // moved out: the instrument belongs to the arm, not to how many candidates it draws.
-    ...(arm.columnSelect === true ? { columnSelection: columnChoiceFunnel(runs) } : {}),
+    ...(arm.columnSelect === undefined ? {} : { columnSelection: columnChoiceFunnel(runs) }),
     ...(arm.vote === undefined
       ? {}
       : {

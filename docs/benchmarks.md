@@ -3750,6 +3750,69 @@ names removes columns the statement needs, so the arm is kept as the ablation
 reference for relevance-by-model and the graph closure (`select-prune`, −1.4pp) stays
 the card lever that ships.
 
+### The same reply, applied the way their selector applies it
+
+That −5.65pp is a statement about *this repository's* application rule, not about their
+selector. MAC-SQL's selector does not decide per column; it decides per table, and the
+decision `drop_all` **keeps a table's first six columns**. Their card is therefore
+never missing a table, and the column rule's characteristic mistake — deleting a table
+whose only trace in the prompt was the foreign key rendered under it, leaving a join
+the model cannot see it can make — is a mistake their rule cannot make.
+
+`eval/bird/dense.ts` is that rule, transcribed from `macsql_agents.py::_get_db_desc_str`
+at the same pinned sha as the value-example port, and the two arms share everything
+else: one prompt, one call, one reply, parsed by one parser.
+
+| the model named | `columnSelect: 'columns'` | `columnSelect: 'dense'` |
+| --- | --- | --- |
+| at least one column of the table | those columns, plus the keys of joins whose two ends survived | those columns, plus the table's declared keys, padded back to six in declared order when the table is wider than six |
+| no column of the table | **the table is dropped** | **the table keeps its first six columns** |
+| the reply resolved nothing | the whole card, `decided: false` | the whole card, `decided: false` |
+
+Three details of their code are load-bearing and none is a quirk to tidy:
+
+1. **Six is a floor, not a target.** `columns[:6]` on a table narrower than six is the
+   whole table, and the pad loop stops at six, so the rule only ever compresses wide
+   tables. A five-column table loses nothing at `drop_all` and a table the model named
+   one column of is padded back up to six — which means the arm can still remove a
+   column from a narrow table, because the *named* branch is not floored the same way.
+2. **`important_keys` is `primary keys + foreign keys`, and this table cannot carry the
+   first half.** The schema card is built from `PRAGMA table_info` without the `pk`
+   flag, so the keys the rule always keeps here are the declared foreign keys. That is
+   the half the card can express, and a card with no foreign keys gets no key retention
+   at all rather than a silent approximation.
+3. **Their fallback is `keep_all` and ours is not reachable.** `extracted_schema.get(table,
+   '')` lands on the `keep_all` branch, but our prompt asks for a list of columns rather
+   than a decision per table, so "this table is irrelevant" is only expressible as
+   "none of its columns were named". The arm reads that as `drop_all`, which is the
+   aggressive reading and the one that differs from the column rule. The alternative —
+   treating an unmentioned table as `keep_all` — would have made the arm the parent with
+   extra steps.
+
+The mechanism has its own number, because a rule that never fires and a rule that fires
+uselessly both look like a null result: `columnSelection.restored` counts the columns
+kept that the model never named — the floor and the keys together. Zero on a full split
+means the arm measured the column rule over again, and the funnel reports it only for an
+arm that has a floor, so the field's absence is itself a statement.
+
+```bash
+BIRD_ARMS=inline+evidence+llm-select+inline+evidence+llm-select-dense pnpm bench:bird
+```
+
+Pre-registered before the dispatch, in the form the pair can falsify:
+
+- **if the loss was table deletion**, `dense` recovers most of the 5.65pp, because the
+  only columns it still removes are the ones past position six of a table the model
+  named nothing in, and `restored` reports how many columns were put back;
+- **if the loss was the choice itself** — the model naming the wrong columns rather than
+  too few tables — `dense` lands within noise of `columns`, `restored` is large, and the
+  selector lever is closed on the strength of two granularities instead of one.
+
+Neither outcome needs the dev split to read: 496 questions resolve 4.99pp at 80% power,
+and the pair differs by a rule rather than by a mechanism. The number is written here
+when the dispatch that measures it lands; until then this section states the rule, the
+prediction and the command, and says that the measurement is outstanding.
+
 ## The competitor's block, priced before it is run
 
 MAC-SQL leads this repository on the split both are measured on: 65.73% against our
@@ -3877,7 +3940,7 @@ artifact, and their predicates transcribed (`eval/bird/agents.ts`, pinned to `ma
 
 | agent | when it fires | what it costs | what we have measured |
 | --- | --- | --- | --- |
-| selector | unless `columns // tables ≤ 6 and columns ≤ 30` | 1 call + the pruned card | vocabulary priced (`+samples`: +2.82pp at 3,209 characters a question); the cut itself is `inline+evidence+llm-select`: −5.65pp |
+| selector | unless `columns // tables ≤ 6 and columns ≤ 30` | 1 call + the pruned card | vocabulary priced (`+samples`: +2.82pp at 3,209 characters a question); the cut itself is `inline+evidence+llm-select`: −5.65pp, and at their own granularity `inline+evidence+llm-select-dense` |
 | decomposer | always | 1 call, 5,643 characters of template — most of it a worked example | shape: `decompose` −1.1pp then −0.85pp, firing 100%; demonstrations: `inline+icl` 41.7% |
 | refiner | the statement threw, returned no rows, or put a NULL in its first five rows | 0.109 calls a case, 4,329 characters a fire | **this file** |
 
@@ -3924,8 +3987,9 @@ The three agents are now each priced, and the parts we can render are worth zero
 - **selector vocabulary** — +2.82pp measured, at 3,209 characters; their sampling rule adds
   +586 characters for 0.00pp.
 - **selector cut** — −5.65pp when the model names the columns. Their version keeps six columns a
-  table and never drops one, so the lever they actually pull is the milder one; nothing in the
-  artifact prices a table-level cut.
+  table and never drops one, so the lever they actually pull is the milder one; that granularity
+  is `inline+evidence+llm-select-dense` (the section above), written as one lever from the column
+  arm rather than inferred from it.
 - **decomposer** — −1.1pp and −0.85pp for the shape, 41.7% for retrieved demonstrations. Their
   template bundles a fixed worked example with the decomposition, which is the one half of their
   prompt we have not put on our card, and the retrieval result says a worked example is not

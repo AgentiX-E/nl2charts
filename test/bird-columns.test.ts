@@ -215,7 +215,7 @@ describe('the arm that makes the choice', () => {
     expect(lever).toBeDefined();
     const { columnSelect, name, ...rest } = lever as NonNullable<ReturnType<typeof resolveArm>>;
     const { name: parentName, ...parentRest } = parent as NonNullable<ReturnType<typeof resolveArm>>;
-    expect(columnSelect).toBe(true);
+    expect(columnSelect).toBe('columns');
     expect(name).toBe('inline+evidence+llm-select');
     expect(parentName).toBe('inline+evidence');
     // One lever: same evidence, same card, same call count before the choice, same repairs.
@@ -228,8 +228,14 @@ describe('the arm that makes the choice', () => {
     expect(ON_DEMAND_ARMS['inline+evidence+llm-select']).toContain('model names');
   });
 
-  it('is the only arm that cuts the card with a model call', () => {
-    expect(ARMS.filter((arm) => arm.columnSelect === true).map((arm) => arm.name)).toEqual(['inline+evidence+llm-select']);
+  it('is the only arm that cuts the card with a model call, at two granularities', () => {
+    // Two arms and one call: `columns` applies the reply by deleting every table the model did not
+    // name, `dense` keeps six columns of it. Anything else with a column choice in it would make
+    // the pair in `PAIRS` a comparison of three things.
+    expect(ARMS.filter((arm) => arm.columnSelect !== undefined).map((arm) => arm.name)).toEqual([
+      'inline+evidence+llm-select',
+      'inline+evidence+llm-select-dense',
+    ]);
   });
 });
 

@@ -1656,7 +1656,12 @@ describe('an arm where the model chooses the columns', () => {
   interface Row {
     readonly arm: string;
     readonly calls: { readonly mean: number };
-    readonly columnSelection?: { readonly cases: number; readonly decided: number; readonly cardShare: number };
+    readonly columnSelection?: {
+      readonly cases: number;
+      readonly decided: number;
+      readonly cardShare: number;
+      readonly restored?: number;
+    };
     readonly tokens?: { readonly byPurpose?: Readonly<Record<string, { readonly calls: number }>> };
   }
   /** The schema card line a table would have, in the renderer's own format. */
@@ -1711,6 +1716,25 @@ describe('an arm where the model chooses the columns', () => {
     expect(prompts.some((prompt) => tableLine(prompt, 'orders'))).toBe(true);
     // Two calls either way: a reply that resolves nothing is not a call refunded.
     expect(row?.calls.mean).toBe(2);
+  });
+
+  it('keeps the table the same reply deletes above, and reports the columns it put back', async () => {
+    const question = QUESTIONS[0]?.question ?? '';
+    // The same reply, the same call: only the application rule differs, which is the whole claim
+    // the pair makes. `items.price` above removed `orders` from the prompt; here it keeps it.
+    const result = await run({
+      plan: { first: correct, columns: () => 'items.price' },
+      env: { BIRD_ARMS: 'inline+evidence+llm-select-dense', BIRD_DEFINITIONS_FORCE: '1' },
+    });
+    expect(result.code).toBe(0);
+    const row = (result.report.arms as Row[])[0];
+    expect(generatePrompts(result.requests, question).some((prompt) => tableLine(prompt, 'orders'))).toBe(true);
+    expect(row?.calls.mean).toBe(2);
+    expect(row?.columnSelection?.cardShare).toBeLessThan(1);
+    // Three columns of `orders` on each of seven questions: the safety net is counted, not asserted
+    // to exist. The fixture's tables are all narrower than the floor, so this number is the
+    // dropped-table half of the rule and the pad loop is priced by the unit cases instead.
+    expect(row?.columnSelection?.restored).toBe(3 * QUESTIONS.length);
   });
 
   it('previews the card before the choice, and labels it as such', async () => {

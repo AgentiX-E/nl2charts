@@ -8,6 +8,35 @@ cannot be argued with.
 
 ### Added
 
+- **The competitor's card rule, at the granularity their selector actually uses.**
+  `eval/bird/dense.ts` applies the reply of the *same* column-choice call the way
+  `macsql_agents.py::_get_db_desc_str` applies their selector's: a table the model named nothing
+  in keeps its first six columns instead of being deleted, a table it named one column of keeps
+  that column plus the table's declared keys and is padded back to six in declared order, and no
+  table ever leaves the card. One prompt, one call, one parser, one difference — which is what
+  makes `inline+evidence+llm-select-dense` a single lever from `inline+evidence+llm-select` and
+  therefore a measurement of the *application rule* rather than of "asking the model".
+
+  The lever this repository had measured was the harsher one. `inline+evidence+llm-select` cuts
+  to the named columns and deletes every other table (250/496 against 278/496, −5.65pp, p=0.0020),
+  and the sentence "the selector lever is worth −5.65pp" was a statement about our rule that read
+  like a statement about theirs. Their card can never be missing a table, so the failure their
+  rule cannot make is the one our rule's loss is most plausibly made of.
+
+  The mechanism is counted rather than asserted: `columnSelection.restored` reports the columns
+  kept that the model never named — the floor and the keys together — because a rule that never
+  fires and a rule that fires uselessly both look like a null result on a scored run. The funnel
+  reports the field only for an arm that has a floor, so its absence from the other arm's row is
+  a statement and not a zero.
+
+  Two limits are written into the module rather than papered over. Our card carries no primary-key
+  marker, so `important_keys` degrades to the declared foreign keys — the half of their rule the
+  card can express. And their `keep_all` fallback is unreachable here, because our prompt asks for
+  a list of columns rather than a decision per table; an unmentioned table is read as `drop_all`,
+  which is the aggressive reading and the one that differs from the column rule. The measurement
+  is dispatched, not claimed: the section in `docs/benchmarks.md` states the rule, the two
+  predictions and the command, and says the number is outstanding.
+
 - **The format contract: a reply's shape is measured, because it is the one thing a new model
   breaks without an error.** `packages/ai/src/format.ts` reads four dimensions off a reply that
   every reader in this layer already depends on — fenced or bare, nothing but a decorated choice
