@@ -78,6 +78,16 @@ cannot be argued with.
 
 ### Fixed
 
+- **A test whose input the repository does not carry passes on one machine and fails in CI.** The
+  first version of the diversity instrument's suite pinned the published numbers by reading
+  `eval/out/bird-eval-41453395203.json` — a git-ignored artifact that exists only where the run was
+  downloaded. It was green locally and red in `41505415484` (`1 failed | 2865 passed`). The fix is
+  not an `existsSync` guard: a skipped test that reads as a pass is the shape D56 forbids. The
+  artifact-level reading moved to where the artifact exists — the `bench:bird:diversity` step in
+  `bird-dev.yml` — and the unit suite keeps the arithmetic and the two control banks. Removing it
+  first *raised* branch coverage to 96.36% (smaller denominator), and two new cases for rows that
+  belong to the arm but not to its pool brought it to 98.24%.
+
 - **A step that had nothing to say failed the dispatch, and starved six readings behind it.**
   `41492586751` published its three scores and then went red at step 12: `bench:bird:gap` threw on an
   artifact holding no `candidateRecall`, and the six zero-cost instruments queued behind it — census,

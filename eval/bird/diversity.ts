@@ -145,6 +145,13 @@ export function largestPool(report: DiversityArtifact): string | undefined {
  * candidates, because the reader's next move is to point the flag at one of them.
  */
 export function candidateCases(report: DiversityArtifact, arm: string, source: string): CaseRun[] {
+  // An artifact with no case list is the first absence, and it is checked before the arm is:
+  // "you named an arm this run did not score" is a true sentence about an artifact that holds no
+  // cases at all, and it would send the reader looking for a typo in a flag that was correct.
+  const cases = report.cases;
+  if (cases === undefined || cases.length === 0) {
+    throw new Error(`${source} carries no cases at all, so no pool can be read from it`);
+  }
   const scored = scoredArms(report);
   if (!scored.includes(arm)) {
     throw new Error(`${source} has no arm ${arm}; it holds ${scored.join(', ')}`);
@@ -158,7 +165,7 @@ export function candidateCases(report: DiversityArtifact, arm: string, source: s
     );
   }
   const rows: CaseRun[] = [];
-  for (const row of report.cases ?? []) {
+  for (const row of cases) {
     // A row with no candidate array is not a case of this pool: it is a case the arm scored after
     // the pool had been read, and counting it would put a question into the denominator that no
     // candidate ever answered. `Array.isArray` is also what narrows the optional field.

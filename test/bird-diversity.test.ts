@@ -11,9 +11,11 @@
  * - **the refusals**, because an arm with no candidate record is a mistake in the step that named
  *   it and must not print a table of zeros that reads as "the pool is redundant".
  *
- * The numbers in the branch bank are the published dev artifact's, so a change in the instrument
- * shows up as a diff against a reading that was argued about in writing rather than as a diff
- * against itself.
+ * The branches are synthetic on purpose. An earlier version of this file asserted the published
+ * dev artifact's numbers by reading `eval/out/bird-eval-41453395203.json`, which the repository does
+ * not carry: it passed here and failed in CI, which is the shape of a test that only runs on one
+ * machine. The artifact-level reading belongs where the artifact exists — the `bench:bird:diversity`
+ * step in `bird-dev.yml` prints it on every dispatched run — and this file keeps the arithmetic.
  */
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -197,6 +199,32 @@ describe('malformed records, which are refused rather than read', () => {
     const large = cleared();
     expect(largestPool({ cases: [small, ...large] })).toBe('select-cross');
     expect(largestPool({ cases: [...large, small] })).toBe('select-cross');
+  });
+});
+
+describe('rows that belong to the arm but not to the pool', () => {
+  it('skips a row with no candidate array or an empty one, and says so when there are only those', () => {
+    // A pooled arm can score a case after the pool was read; counting it would put a question in
+    // the denominator that no candidate ever answered. Both shapes are skipped, and an arm whose
+    // every row is one of them has no pool rather than an empty one.
+    const rows: DiversityArtifact['cases'] = [
+      ...bank(10),
+      { id: 'no-array', arm: 'select-cross', candidates: undefined },
+      { id: 'empty', arm: 'select-cross', candidates: [] },
+    ];
+    expect(candidateCases({ cases: rows }, 'select-cross', 'artifact.json')).toHaveLength(10);
+    const onlyEmpty: DiversityArtifact['cases'] = [{ id: 'empty', arm: 'select-cross', candidates: [] }];
+    // And with no row carrying candidates anywhere, the artifact has no pools rather than one
+    // empty pool — a sentence about the artifact, not about the arm.
+    expect(() => candidateCases({ cases: onlyEmpty }, 'select-cross', 'artifact.json')).toThrow(
+      /artifact\.json keeps no candidate record at all, so no pool can be read from it/,
+    );
+  });
+
+  it('refuses an artifact with no case list before it blames the flag', () => {
+    // The order of the two refusals is the point: an artifact holding nothing is not a mistyped arm.
+    expect(() => candidateCases({}, 'select-cross', 'artifact.json')).toThrow(/carries no cases at all, so no pool can be read from it/);
+    expect(() => candidateCases({ cases: [] }, 'select-cross', 'artifact.json')).toThrow(/carries no cases at all/);
   });
 });
 
@@ -415,27 +443,6 @@ describe('the entry, run the way a workflow runs it', () => {
     // The guard compares against the module's own URL, so this is the branch a real run takes.
     expect(code).toBe(0);
     expect(printed.join('\n')).toContain('arm select-cross');
-  });
-});
-
-describe('the reading on the published dev artifact', () => {
-  it('agrees with the numbers the decision was argued from', () => {
-    // The 600-case dev artifact behind `41453395203`: union ceiling 69.17%, best single source
-    // 63.00%, and the second model's candidate carrying 4.00pp of ceiling alone. If this test
-    // changes, the instrument changed — the artifact is fixed on disk and the shares are not.
-    const report = JSON.parse(
-      readFileSync(join(process.cwd(), 'eval/out/bird-eval-41453395203.json'), 'utf8'),
-    ) as DiversityArtifact;
-    const read = diversityRead(report, 'select-cross-pooled-vote');
-    expect(read.cases).toBe(600);
-    expect(read.ceiling).toBe(415);
-    expect(read.sources.map((source) => [source.source, source.sole])).toEqual([
-      ['inline+evidence@second', 24],
-      ['metadata+evidence', 6],
-      ['values', 8],
-    ]);
-    expect(read.distinct.unanimous).toBe(447);
-    expect(read.correlated).toEqual({ cases: 185, unanimous: 121 });
   });
 });
 
