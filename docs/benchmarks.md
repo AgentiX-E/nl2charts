@@ -5748,7 +5748,8 @@ Measured on the 500-question Mini-Dev split, per case, with the same renderer th
 per-case distribution is what makes the second row affordable rather than merely smaller: median
 +0.0%, p90 +8.5%, max +25.6%. A block that costs 1.4% of the card on average cannot be blamed for
 a prompt budget, and the three rounds of "the prompt grew 22.9% and bought nothing" were measuring
-a block that was 27 times larger than the one a rule would send.
+a block that was 27 times larger than the one a rule would send — 568 characters a case
+against 20, both measured on the same card.
 
 The by-database spread is the other half of the reading, because it says where the family can and
 cannot reach at all:
@@ -5798,7 +5799,9 @@ get sampled" and not "did this rule reach these cases". The row now carries `sam
 sampleBlock: { cases, withValues, columns, empty }
 ```
 
-`empty` is the count of cases the rule reached nothing on — a statement with no condition has no
+A rule declared without a sampler is refused one level earlier, at the arm: `assertSampleRule`
+rejects `sampleColumns` with no `samples`, because the pair is one lever and the second half alone is
+a switch nothing reads. `empty` is the count of cases the rule reached nothing on — a statement with no condition has no
 column to narrow to — and it is D56 in its counting form: "the rule kept nothing" and "the rule was
 not measured" are the same number and opposite findings. `assertSampleBlockFired` refuses to publish
 a narrowed arm whose `withValues` is zero, because that arm is its parent with a longer name and its

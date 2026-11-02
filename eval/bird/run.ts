@@ -1596,6 +1596,21 @@ export function readPinnedDefinitions(path: string): Map<string, string> | undef
   return new Map(Object.entries(definitions));
 }
 
+/**
+ * A column rule with no sampler under it is a declaration nothing reads.
+ *
+ * `samples` decides whether stored values are shown; `sampleColumns` decides which columns carry
+ * them. The second without the first sends the plain card and reports a delta of zero for a lever
+ * that never existed — the same shape as a samples arm with an empty block, one field further
+ * along, and the same rule: refuse it at the declaration rather than after a run.
+ */
+export function assertSampleRule(arm: Pick<Arm, 'name' | 'samples' | 'sampleColumns'>): void {
+  if (arm.sampleColumns === undefined || arm.samples !== undefined) return;
+  throw new Error(
+    `arm ${arm.name} narrows which columns carry stored values and declares no sampler, so the rule would never run`,
+  );
+}
+
 export function resolveArm(name: string): Arm | undefined {
   const base = name.includes('#') ? name.slice(0, name.indexOf('#')) : name;
   return ARMS.find((arm) => arm.name === base);
@@ -4038,6 +4053,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
   const { oracle, provider, second: secondProvider } = io;
   const arm = resolveArm(name);
   if (arm === undefined) throw new Error(`unknown arm ${name}`);
+  assertSampleRule(arm);
   /** What this arm drew per case, in the shape a pooled arm reads. */
   const collected = new Map<string, readonly PooledCandidate[]>();
   // A mixed arm runs three configurations under one label; if one of them repairs or

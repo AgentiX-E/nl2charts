@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { DatabaseProfile, SchemaTable } from '@agentix-e/nl2charts-ai';
 import { attachSamples, narrowSamples, sampleValuesOf } from '../eval/bird/samples.js';
+import { ARMS, assertSampleRule } from '../eval/bird/run.js';
 
 /**
  * The card-level half of value grounding.
@@ -144,5 +145,36 @@ describe('narrowSamples', () => {
     // The values themselves are shared, not copied: the narrowing is about which columns are
     // shown, and reordering the bracket here would be a second, unmeasured lever.
     expect(narrowed.get('orders.status')).toBe(values.get('orders.status'));
+  });
+});
+
+/**
+ * The other half of the narrowing: a rule with no sampler under it.
+ *
+ * `samples` decides *whether* stored values are shown, `sampleColumns` decides *which* columns
+ * carry them. An arm holding the second without the first sends the plain card, reports a delta of
+ * zero, and reads as "the columns do not help" — the shape `assertSamplesRan` was written against,
+ * one field further along. It is refused at the arm rather than after 1,534 cases, and it is a
+ * named function for the same reason `assertMixedSources` is: a declaration is checkable without a
+ * database, a model or a run.
+ */
+describe('a column rule with nothing under it', () => {
+  it('refuses the narrowing when the arm declares no sampler', () => {
+    expect(() => assertSampleRule({ name: 'x', sampleColumns: 'gold' })).toThrow(/declares no sampler/);
+  });
+
+  it('accepts a sampler with no rule, and a rule with a sampler', () => {
+    // Both halves are optional on their own; only the pair in the wrong order is a defect.
+    expect(() => assertSampleRule({ name: 'x', samples: 'profile' })).not.toThrow();
+    expect(() => assertSampleRule({ name: 'x', samples: 'profile', sampleColumns: 'gold' })).not.toThrow();
+  });
+
+  it('holds for every arm in the catalogue', () => {
+    // The rule is worth its own test because the catalogue is where the mistake is cheap to make:
+    // adding a narrowed arm and forgetting `samples` costs one dispatch to discover otherwise.
+    for (const arm of ARMS) {
+      if (arm.sampleColumns === undefined) continue;
+      expect(arm.samples, arm.name).toBeDefined();
+    }
   });
 });

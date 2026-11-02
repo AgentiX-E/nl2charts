@@ -48,6 +48,11 @@ cannot be argued with.
   reached nothing on — a statement with no condition has no column to narrow to, so the two numbers
   are D56 in counting form. The guard refuses to publish an arm whose rule kept nothing anywhere:
   that arm is its parent with a longer name.
+- **`assertSampleRule`: a column rule with no sampler under it is refused at the declaration.** The
+  two halves are one lever — `samples` decides whether values are shown, `sampleColumns` which
+  columns carry them — and the second without the first sends the plain card and publishes a delta
+  of zero for a rule that never ran. Checked per arm, with the catalogue's own arms asserted too, so
+  the mistake costs a test rather than a dispatch.
 - **The condition census on the split that decides adoption.** `bird-dev.yml` now runs
   `bench:bird:conditions` on the dispatched artifact — two statements and the gold the run already
   holds, zero queries and zero model calls — so the population the next lever targets is measured on
