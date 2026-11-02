@@ -329,6 +329,16 @@ modal group from `select-cross`'s candidates in zero calls, and `select-cross-po
 same pool with the agreement marks. Both are one lever from `select-cross-pooled`, the A/A
 instrument: the same candidates, the same rows, the same order, so the delta is the decision.
 
+The third arm on that pool changes the answer format rather than the ranking.
+`select-cross-pooled-reconcile` shows the model the *result groups* — the partition the agreement
+marks already define, one group per distinct result — and asks it to write the statement to run.
+The reply is executed and, if it runs, becomes the answer; a statement the engine refuses leaves the
+modal result standing, and a turn that never came back is recorded as an outage. The reason to ask
+for a statement instead of an index is arithmetic: on this pool 70.5% of cases hold a matching
+statement and the arms score 64.0%, so the 39 cases in between contain a correct answer that no
+index can name. An arm whose replies only restate a candidate is not measured as a reconcile arm at
+all — `assertReconcileFired` refuses it, because its score would belong to the selector.
+
 The instrument's two rules are worth stating because both are places where a plausible number could
 have been invented: a case with no candidate is counted apart instead of scored as an opinion the
 count got wrong, and the tie-break is taken from the drawing order, which is what `majorityResult`
