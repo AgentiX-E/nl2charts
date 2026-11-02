@@ -4870,8 +4870,10 @@ what the model can *judge*, not what it is told.
 
 The cost is exact and small: the block adds 373 characters to the `select-cross` selector prompt
 (1,631 → 2,004, +22.9%) and 387 to `select-mixed`'s (1,601 → 1,988, +24.2%), at the same four calls
-per case. A 22% longer selector prompt bought nothing measurable, so the marks stay an arm and stay
-out of every default path.
+per case. Per *case* the bill grows by 74 prompt tokens (2,476 → 2,550, +3.0%), because the selector
+is one of four calls — which is the number that matters for a deployment and the one a prompt-length
+reading would overstate by eight times. A 22% longer selector prompt bought nothing measurable, so
+the marks stay an arm and stay out of every default path.
 
 Two things this run settled that the last one could not:
 
