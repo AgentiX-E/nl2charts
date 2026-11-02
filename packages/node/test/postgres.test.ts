@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Client } from 'pg';
 import { createPostgresEngine, driverUnavailable, messageOf } from '../src/postgres.js';
 import { fromPostgresValue } from '../src/postgres.js';
@@ -93,6 +93,31 @@ describe.skipIf(url === undefined)('postgres engine (real server)', () => {
     await expect(engine.run('select * from missing_table')).rejects.toMatchObject({ code: 'NL2C_E_ENGINE_FAILED' });
   });
 
+  it('passes a caller\'s signal down to the driver and still returns rows', async () => {
+    // The abort case is checked below, and it returns before a query is ever sent — so the
+    // branch that attaches the signal to the request had never run. A signal that is live is
+    // the only way to reach it.
+    const controller = new AbortController();
+    const result = await engine.run('select 41 + 1 as answer', { signal: controller.signal });
+    expect(result.rows[0]?.answer).toBe(42);
+  });
+
+  it('does not pretend to cancel a statement the driver will not stop', async () => {
+    // The engine forwards a caller's signal to `pg`, and `pg` does not cancel a statement it has
+    // already sent: aborting during `pg_sleep` returns the row after the sleep, five seconds
+    // later, exactly as if no signal had been given. Measured, not assumed. The contract this
+    // engine can actually keep is the one above it — a signal that is already aborted never
+    // reaches the server — and the gap is registered rather than papered over with an assertion
+    // that would pass on a driver that behaves differently.
+    const controller = new AbortController();
+    const started = Date.now();
+    const running = engine.run('select pg_sleep(1)', { signal: controller.signal });
+    controller.abort();
+    const result = await running;
+    expect(result.rows).toHaveLength(1);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(900);
+  });
+
   it('can be opened read-write when a caller explicitly asks', async () => {
     const writer = await createPostgresEngine({ connectionString: url as string, readOnly: false });
     await writer.run("insert into orders values (10, 'west', 1.00, '2024-04-01', true, null)");
@@ -115,6 +140,18 @@ describe.skipIf(url === undefined)('postgres engine (real server)', () => {
     await impatient.close();
   });
 
+  it('honours a pool size, which is the one option no other case sets', async () => {
+    // `poolSize` defaulted to four and nothing ever asked for another number, so the branch
+    // that reads the option was the only uncovered line in this file. The assertion is that
+    // the engine still answers under a smaller pool, which is the property a caller who sets
+    // it is buying.
+    const small = await createPostgresEngine({ connectionString: url as string, poolSize: 1 });
+    const first = await small.run('select 1 as one');
+    const second = await small.run('select 2 as two');
+    expect([first.rows[0]?.one, second.rows[0]?.two]).toEqual([1, 2]);
+    await small.close();
+  });
+
   it('closes cleanly even when no query ever ran', async () => {
     const idle = await createPostgresEngine({ connectionString: url as string });
     await idle.close();
@@ -125,6 +162,31 @@ describe.skipIf(url === undefined)('postgres engine (real server)', () => {
     const temporary = await createPostgresEngine({ connectionString: url as string });
     await temporary.close();
     await expect(temporary.run('select 1')).rejects.toMatchObject({ code: 'NL2C_E_ENGINE_UNAVAILABLE' });
+  });
+});
+
+/**
+ * The one path a server cannot test: the driver not being installed.
+ *
+ * `pg` is an optional peer, so a deployment that installs the connector without it must get a
+ * typed error rather than a module crash. The condition is an environment fact, not a behaviour
+ * of our code, and the only way to produce it inside a process that already imported `pg` is to
+ * make the next resolution fail — which is what the mock does, and all it does. Everything the
+ * code decides after the throw is real and is asserted below.
+ */
+describe('a driver that is not installed', () => {
+  it('reports a typed engine error instead of crashing the import', async () => {
+    vi.doMock('pg', () => {
+      throw new Error("Cannot find package 'pg'");
+    });
+    try {
+      const fresh = await import('../src/postgres.js');
+      await expect(fresh.createPostgresEngine({ connectionString: 'postgres://analyst@127.0.0.1:1/none' })).rejects.toMatchObject({
+        code: 'NL2C_E_ENGINE_UNAVAILABLE',
+      });
+    } finally {
+      vi.doUnmock('pg');
+    }
   });
 });
 

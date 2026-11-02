@@ -7,7 +7,7 @@
     "lines": 99.45,
     "statements": 99.45,
     "functions": 100,
-    "branches": 98.05
+    "branches": 98.06
   },
   "files": {
     "eval/ablate.ts": {
@@ -81,6 +81,12 @@
       "statements": 100,
       "functions": 100,
       "branches": 98.62
+    },
+    "eval/bird/decision.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 98.63
     },
     "eval/bird/dense.ts": {
       "lines": 100,
@@ -221,10 +227,10 @@
       "branches": 97.17
     },
     "eval/bird/run.ts": {
-      "lines": 99.43,
-      "statements": 99.43,
+      "lines": 99.44,
+      "statements": 99.44,
       "functions": 100,
-      "branches": 95.77
+      "branches": 95.8
     },
     "eval/bird/samples.ts": {
       "lines": 100,

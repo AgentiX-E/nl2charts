@@ -885,6 +885,61 @@ describe('a pooled arm reads the pool instead of drawing one', () => {
   });
 });
 
+/**
+ * Who decides, on a pool nobody in the comparison drew.
+ *
+ * The pair `select-cross` / `vote-cross` asked this and could not answer it: both arms draw
+ * their own candidates, and the pool's own displacement at 600 questions (measured twice,
+ * 1.3 to 3.3pp) is the size of the effect being chased. On a shared pool the candidates, the
+ * rows and the order are the same objects, so the only thing that can differ is the decision.
+ *
+ * The scenario is built to make the two decisions disagree, which is the only way the
+ * measurement can be wrong and be seen to be wrong: the second model writes a statement that
+ * runs and is wrong, the two primary prompts write the gold one, and the selector is answered
+ * with `1` — the slot the second model holds. The modal group is therefore right and the
+ * selector wrong on every case, and an arm that reported otherwise would be reading a
+ * different pool than it names.
+ */
+describe('the decision, with the pool held fixed', () => {
+  it('takes the modal result in no calls, where the selector takes the first slot in one', async () => {
+    const second = await startEndpoint({ reply: (request) => replyFor(request, { first: wrong }) });
+    try {
+      const result = await run({
+        plan: { first: correct },
+        env: {
+          BIRD_ARMS: 'select-cross,select-cross-pooled,select-cross-pooled-vote,select-cross-pooled-agree',
+          BIRD_SECOND_MODEL: 'second-model',
+          BIRD_SECOND_BASE_URL: second.url,
+          BIRD_SECOND_API_KEY: 'second-key',
+        },
+      });
+      expect(result.code).toBe(0);
+      const arms = result.report.arms as { arm: string; calls: { mean: number }; passed: number; total: number; candidateRecall?: number }[];
+      const byName = new Map(arms.map((entry) => [entry.arm, entry]));
+      const pooled = byName.get('select-cross-pooled');
+      const vote = byName.get('select-cross-pooled-vote');
+      expect(pooled?.passed).toBe(0);
+      expect(vote?.passed).toBe(vote?.total);
+      // Both arms read the same set, so the ceiling cannot be what separates them.
+      expect(vote?.candidateRecall).toBe(pooled?.candidateRecall);
+      // The count costs nothing: it reads rows that were already computed.
+      expect(pooled?.calls.mean).toBe(1);
+      expect(vote?.calls.mean).toBe(0);
+      // The agreeing pair is the fact the selector was never given, and it has to reach the
+      // prompt — a mark computed and dropped is the defect `agreesWith` was added to fix.
+      const selections = result.requests.filter((request) => request.prompt.includes('which candidate statement answers the question'));
+      const marked = selections.find((request) => request.prompt.includes('same result as candidate'));
+      expect(marked?.prompt).toContain('returned 2 distinct results');
+      expect(marked?.prompt).toContain('same result as candidate 2');
+      // The arms that did not ask for the marks keep the prompt they were measured with: the
+      // delta between the pair has to be the marks and nothing else.
+      expect(selections.some((request) => !request.prompt.includes('distinct results'))).toBe(true);
+    } finally {
+      await second.close();
+    }
+  });
+});
+
 describe('the second model as a judge', () => {
   it('falls back to the primary endpoint when the second model has no endpoint of its own', async () => {
     // A provider pair can be two keys against one gateway, which is what a run does when

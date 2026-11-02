@@ -628,6 +628,24 @@ export const ARMS: readonly Arm[] = [
   // in what format, so the delta is attributable by construction. One lever from
   // `select-cross-pooled` (who judges).
   { name: 'select-cross-pooled-judge-reasoning', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: CROSS_SOURCES, pool: 'select-cross', judge: 'second', judgeFormat: 'capability' },
+  // The same pool, decided by the count instead of by the model. Zero calls per case: the
+  // candidates are read from `select-cross`, the official judge groups them by result, and the
+  // modal group wins — which is what a voting arm does, on a pool no arm in this pair drew.
+  //
+  // This is the arm `bench:bird:decision` was written to ask for: across two archived readings
+  // (41392023902 and 41380616205) the selector was right on 22 disputed cases where the modal
+  // group was wrong and wrong on 53 where it was right (exact McNemar p = 4.5e-4). Those two
+  // readings compared arms that drew their own pools, so the 2.58pp they imply is not yet a
+  // measurement. Here it is one: same candidates, same rows, only the decision differs.
+  { name: 'select-cross-pooled-vote', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, mixed: CROSS_SOURCES, pool: 'select-cross' },
+  // The same pool with the agreement marks the selector has never been given on this arm.
+  //
+  // Of 600 `select-cross` cases, 149 had candidates that returned different results — the only
+  // cases where a choice exists — and the selector was told each candidate's row count but not
+  // which of them matched. Two candidates that agree are one opinion counted twice, and a model
+  // reading three truncated previews cannot compute that. One lever from `select-cross-pooled`,
+  // so the pair prices the information and not the prompt template.
+  { name: 'select-cross-pooled-agree', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: CROSS_SOURCES, pool: 'select-cross', agreement: true },
   { name: 'select-cross-canon', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: CROSS_SOURCES, canonical: true },
   // ...and the same canonical text read by the second model, which is where the style channel was
   // measured: the 128-case loss group belongs to that judge, so closing the channel has to be
@@ -852,6 +870,8 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'select-cross-repair-all': 'the cross set where all three candidates may spend two repair turns: measured against `select-cross` for the loop and against `select-cross-repair-second` for whether the weaker models benefit as much',
   'select-cross-pooled': 'the cross set read from `select-cross`\'s own pool instead of generating one: one call per case instead of four, and the pair must read exactly 0.0pp — it is the instrument that says whether two arms on this harness can be compared at all, so run it in the same dispatch as `select-cross` and before any pooled comparison',
   'select-cross-pooled-judge-reasoning': 'the reasoning model judging the chat model\'s candidates, in the format it can answer: needs the second model and a second key, one call per case, and is measured against `select-cross-pooled` on the same pool — the only judge-swap delta with no generation noise in it',
+  'select-cross-pooled-vote': 'the same pool decided by the modal result instead of by a model: zero calls per case, and the only reading of "is the selector worth its call" whose candidates are shared — the archived artifacts say the count wins 53 disputed cases to 22 (p = 4.5e-4), and this arm is what turns that into a measurement instead of a re-reading',
+  'select-cross-pooled-agree': 'the same pool with the agreement marks the selector was never given: 149 of 600 cases had more than one distinct result, and which of three candidates returned the same rows is the one fact two truncated previews cannot yield; one lever from `select-cross-pooled`, one call per case',
   'select-tagged': 'the cross arm with each candidate labelled by its source: needs the second model too, and is measured against `select-cross`',
   'vote-mixed': 'three prompts aggregated by modal result instead of by a model: 63% would make the selector call unnecessary, and below that it prices what the model adds',
   'vote-cross': 'the cross-model candidate set aggregated by modal result: needs the second model too',
@@ -997,6 +1017,15 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   // One lever: who judges, on a pool neither arm generated. This is the pair the two previous
   // judge-swap arms could not be, and the only one whose delta has no generation noise in it.
   ['select-cross-pooled', 'select-cross-pooled-judge-reasoning'],
+  // One lever: who decides on a pool neither arm drew — the model or the count. `vote-cross`
+  // asked this across two pools and could not answer it; here the candidates, the rows and the
+  // order are identical, so the delta is the decision and nothing else. It is also a call the
+  // arm stops paying, which makes a positive delta a cost reduction rather than a trade.
+  ['select-cross-pooled', 'select-cross-pooled-vote'],
+  // One lever: whether the selector is told which candidates returned the same rows, on a pool
+  // where 24.8% of the cases have more than one distinct result. The fact is not recoverable
+  // from three truncated previews, which is what makes it information rather than emphasis.
+  ['select-cross-pooled', 'select-cross-pooled-agree'],
   // One lever: the same candidates and the same selector, told which of them returned the same
   // rows. The fact a 2+1 pool turns on is the one fact the selector could not compute from two
   // truncated previews, and the pair prices the information rather than a rewrite.

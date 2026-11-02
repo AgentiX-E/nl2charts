@@ -112,13 +112,17 @@ describe('the arms that show the marks', () => {
     // ablation: the pairing is what states which single lever the delta belongs to.
     expect(PAIRS).toContainEqual(['select-mixed', 'select-mixed+agree']);
     expect(PAIRS).toContainEqual(['select-cross', 'select-cross-agree']);
+    // The pooled pair is the one that prices the information rather than the template: the
+    // parent is the same candidates with the same judge, so nothing but the marks can differ.
+    expect(PAIRS).toContainEqual(['select-cross-pooled', 'select-cross-pooled-agree']);
   });
 
   it('leaves every other selecting arm unmarked', () => {
     // The blast radius of a flag read in the wrong place: an arm whose selector prompt grows
-    // the block would stop being comparable with the reading it was measured at.
+    // the block would stop being comparable with the reading it was measured at. Three arms
+    // carry it, and each has a parent to be read against.
     const marked = ARMS.filter((arm) => arm.agreement === true).map((arm) => arm.name);
-    expect(marked).toEqual(['select-mixed+agree', 'select-cross-agree']);
+    expect(marked).toEqual(['select-cross-pooled-agree', 'select-mixed+agree', 'select-cross-agree']);
   });
 });
 

@@ -57,6 +57,7 @@
     "bench:bird:width": "tsx eval/bird/width.ts",
     "bench:bird:conditions": "tsx eval/bird/conditions.ts",
     "bench:bird:repair": "tsx eval/bird/repair.ts",
+    "bench:bird:decision": "tsx eval/bird/decision.ts",
     "bench:bird:info": "tsx eval/bird/information.ts",
     "bench:bird:differential": "tsx eval/bird/differential.ts",
     "bench:bird:agents": "tsx eval/bird/agents.ts",
