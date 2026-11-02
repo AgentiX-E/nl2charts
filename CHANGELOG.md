@@ -8,6 +8,14 @@ cannot be argued with.
 
 ### Fixed
 
+- **A pool guard that refused the harness's honest behaviour.** `reusePool` demanded that a pooled
+  arm's pool hold as many candidates as the arm declares, on the reasoning that the two arms must be
+  compared at the same candidate count. `41389454128` died at case 60 of 600 on it: nine cases held
+  one candidate in a three-candidate arm because two statements had failed to execute, and a
+  candidate the engine refuses does not exist. The rule now refuses only an absent pool (the source
+  never ran the case — an ordering bug) and an empty one (the source ran it and produced nothing);
+  a pool of one is a pool. Revert-tested: restoring the size check turns both end-to-end cases red.
+
 - **A declared family took one field of its row and left the rest at the chat defaults.**
   `capabilitiesOf` chose the base row from the model *name* and then overwrote `family` from the
   declaration, so a deployment that declared its endpoint on a name the heuristic cannot read — the
@@ -49,6 +57,23 @@ cannot be argued with.
   which is the same defect as the retry above, one layer up.
 
 ### Added
+
+- **The engine's refusal can be handed back to the model that wrote the statement, per source.**
+  `select-cross` is declared `repairs: 0`, so a candidate the engine refuses is executed once,
+  dropped, and no model is ever told why — the ceiling falls by one in silence. That matters most
+  for the arm this round is arguing about: the reasoning model's slot reads 61.94% against 63.82%
+  and 63.19% for two chat slots, and the arm containing it scores 63.67% against 64.33% for the
+  all-chat arm. Against that pipeline the honest reading is not "the strong model is weaker" but
+  "the strong model was never given the loop it is better at", because execution feedback is the
+  largest single-model gain reported on BIRD (ExCoT-DPO, 57.37% → 68.51%) and the same work's
+  negative control is that zero-shot chain-of-thought buys almost nothing. On a mixed arm the
+  pipeline is built from the *resolved source's* `Arm`, so the mixed arm's own `repairs` field is
+  decoration; `sourceRepairs` is the field that reaches the generator, resolved once where the
+  execute hook is attached from the same number. Two arms price it: `select-cross-repair-second`
+  (two turns, reasoning model only) and `select-cross-repair-all` (two turns, all three), whose
+  difference is what a stronger model does with feedback the weaker ones were also given. The loop
+  is nearly free — a repair fires only on a refusal, and candidates reached the engine 598, 596 and
+  595 times out of 600.
 
 - **An arm can read another arm's candidate pool instead of drawing its own, because at 600
   questions the pool's noise is the size of the effect.** Every arm in the harness generates its

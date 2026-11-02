@@ -2122,3 +2122,87 @@ describe('the agreement the selector cannot compute', () => {
     expect(Object.keys(row?.tokens?.byPurpose ?? {}).sort()).toEqual(['generate', 'select']);
   });
 });
+
+/**
+ * The engine's answer, delivered to the model that wrote the statement.
+ *
+ * `select-cross` executes each candidate after the fact, so a statement the engine refuses is
+ * dropped and the ceiling falls by one without any model being told why. `sourceRepairs` is the
+ * channel that closes that loop, and it is per source because the whole question behind it is
+ * whether a stronger model does more with the same feedback than a weaker one. A declaration is
+ * not a mechanism, so the assertion is not "the arm carries the field" but "the retry request
+ * arrived at one endpoint and not the other".
+ */
+describe('the repair turn, granted per source', () => {
+  const target = QUESTIONS[0]?.question ?? '';
+  const brokenSql = 'select count(*) from itemz';
+
+  /** An endpoint that writes a statement the engine refuses, then the gold one when told why. */
+  const replyingSecond = async (): Promise<Awaited<ReturnType<typeof startEndpoint>>> =>
+    startEndpoint({
+      reply: (request) => {
+        if (request.prompt.includes('which candidate statement answers the question')) return '1';
+        // A turn that names the engine's message: the repair. Answering it correctly is what
+        // makes the correction visible in the score rather than only in the request count.
+        if (request.prompt.includes('no such table')) {
+          const asked = Object.keys(GOLD).find((entry) => request.prompt.includes(entry)) ?? '';
+          return fenced(GOLD[asked] ?? 'select 1');
+        }
+        const asked = Object.keys(GOLD).find((entry) => request.prompt.includes(entry));
+        if (asked === undefined) return DEFINITIONS;
+        return fenced(asked === target ? brokenSql : (GOLD[asked] ?? 'select 1'));
+      },
+    });
+
+  it('sends the retry to the reasoning model and to no other candidate', async () => {
+    const second = await replyingSecond();
+    try {
+      const result = await run({
+        plan: { first: correct },
+        env: {
+          BIRD_ARMS: 'select-cross-repair-second',
+          BIRD_SECOND_MODEL: 'second-model',
+          BIRD_SECOND_BASE_URL: second.url,
+          BIRD_SECOND_API_KEY: 'second-key',
+        },
+      });
+      expect(result.code).toBe(0);
+      // One repair in the whole run, and it went to the endpoint whose source was named.
+      const repairsHere = second.requests.filter((request) => request.prompt.includes('no such table'));
+      const repairsThere = result.requests.filter((request) => request.prompt.includes('no such table'));
+      expect(repairsHere).toHaveLength(1);
+      expect(repairsThere).toHaveLength(0);
+      // The candidate survived because it was rewritten, not because the first statement ran:
+      // the arm's ceiling is what a repair is worth, and it can only rise if the retry landed.
+      const arms = result.report.arms as { arm: string; candidateRecall: number }[];
+      expect(arms[0]?.candidateRecall).toBe(QUESTIONS.length);
+    } finally {
+      await second.close();
+    }
+  });
+
+  it('reaches the other two candidates when the arm grants it to all of them', async () => {
+    // The same failure with a wider grant: two primary-endpoint candidates now also see the
+    // engine's message. Without this case, a `sourceRepairs` lookup that only matched the second
+    // endpoint would look identical to a working one.
+    const second = await replyingSecond();
+    try {
+      const result = await run({
+        plan: { first: () => brokenSql },
+        env: {
+          BIRD_ARMS: 'select-cross-repair-all',
+          BIRD_SECOND_MODEL: 'second-model',
+          BIRD_SECOND_BASE_URL: second.url,
+          BIRD_SECOND_API_KEY: 'second-key',
+        },
+      });
+      expect(result.code).toBe(0);
+      const repairsThere = result.requests.filter((request) => request.prompt.includes('no such table'));
+      // Two primary sources fail on every question, so the primary endpoint must have been told
+      // why on at least one of them — and the count is per question, not per arm.
+      expect(repairsThere.length).toBeGreaterThanOrEqual(QUESTIONS.length);
+    } finally {
+      await second.close();
+    }
+  });
+});

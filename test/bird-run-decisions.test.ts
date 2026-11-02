@@ -778,20 +778,27 @@ describe('what a pooled arm is allowed to read', () => {
 
   it('hands back the pool it was given, unchanged', () => {
     const pool = [candidate('a'), candidate('b'), candidate('c')];
-    expect(reusePool('pooled', 'source', 3, pool, '7')).toBe(pool);
+    expect(reusePool('pooled', 'source', pool, '7')).toBe(pool);
+  });
+
+  it('accepts a pool of one, because a candidate the engine refused does not exist', () => {
+    // This is the reading that cost a real run: the first version demanded the pool hold as many
+    // candidates as the arm declares, and `41389454128` refused 9 of 600 cases on it, because a
+    // three-candidate arm legitimately keeps one candidate where two statements failed to execute.
+    // The size of the pool is a fact about the run, not a property of the declaration.
+    const pool = [candidate('a')];
+    expect(reusePool('pooled', 'source', pool, '7')).toBe(pool);
   });
 
   it('refuses a case its source never produced', () => {
-    // A pooled arm answering a case its pool has no candidates for would report an accuracy over
-    // a sample its source does not describe.
-    expect(() => reusePool('pooled', 'source', 3, undefined, '7')).toThrow(/produced nothing for case 7/);
+    // A pooled arm answering a case its pool has no entry for would report an accuracy over a
+    // sample its source does not describe, and `undefined` is the ordering bug that produces it.
+    expect(() => reusePool('pooled', 'source', undefined, '7')).toThrow(/holds no entry for case 7/);
   });
 
-  it('refuses a pool whose size is not the count the arm declares', () => {
-    // The two arms would then be compared at different candidate counts, which is the difference
-    // between a judge swap and a subset.
-    expect(() => reusePool('pooled', 'source', 3, [candidate('a'), candidate('b')], '7')).toThrow(
-      /declares 3 candidates but the pool of source holds 2/,
-    );
+  it('refuses a pool that ran and produced nothing', () => {
+    // Different from the case above: the source saw this question and every statement in it died,
+    // so the pooled arm has nothing to read and must not report that emptiness as its own answer.
+    expect(() => reusePool('pooled', 'source', [], '7')).toThrow(/produced nothing for case 7/);
   });
 });

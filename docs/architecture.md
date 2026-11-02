@@ -620,3 +620,31 @@ that differs in method rather than in prompt or in draw.
   that fails loudly through `assertPoolShared` if the pool was not in fact shared. The general rule
   is the one this project keeps rediscovering: before pricing a lever, make sure the instrument can
   see it, and if two arms cannot share their randomness, measure the noise they do not share.
+- **A lever that is off on the main arm is not a reading about the model.** `select-cross` is
+  declared `repairs: 0`, so a candidate the engine refuses is executed once, dropped, and never
+  shown to the model that wrote it: the ceiling falls by one and nobody is told why. Against that
+  pipeline, a reasoning model's slot read 61.94% while two chat slots read 63.82% and 63.19%, and
+  the arm holding it scored 63.67% against 64.33% for the all-chat arm — a result that invites the
+  conclusion "on BIRD a reasoning model is differently wrong". The conclusion is not available from
+  that experiment, because the loop that a reasoning model is actually better at was switched off:
+  execution feedback is the largest single-model gain reported on BIRD (ExCoT-DPO, 57.37% → 68.51%),
+  and the same work's negative control is that zero-shot chain-of-thought buys almost nothing. A
+  one-shot prompt asks a thinking model to think with nothing to think about.
+- **A mixed arm's own `repairs` field never reaches the generator, so the grant has to be keyed by
+  source.** `runArm` resolves each source to its own `Arm` and builds the pipeline from that arm,
+  which means the mixed arm's field is decoration — a silent trap, because the arm's declaration
+  looks authoritative and the number it names is never read. `sourceRepairs` is resolved where the
+  pipeline is built, and the execute hook is attached from the same resolved number: raising
+  `maxRepairs` without attaching the hook arms a loop that cannot hear the engine, which is exactly
+  the defect `emptyRetry` had. Keying by source is what makes "which model gets the feedback" a
+  measurable question rather than an arm-wide constant, and the loop is nearly free — a repair turn
+  fires only on a refusal, and candidates reached the engine 598, 596 and 595 times out of 600.
+- **A guard's premise can be wrong in a way only a real run reveals.** The shared-pool guard
+  required a pooled arm's pool to hold as many candidates as the arm declares, on the reasoning
+  that the two arms must be compared at the same candidate count. `41389454128` refused nine of six
+  hundred cases on it: a three-candidate arm legitimately holds one candidate where two statements
+  failed to execute, because a candidate the engine refuses does not exist. The guard now refuses
+  only an absent pool (an ordering bug) and an empty one (the source ran the case and produced
+  nothing). The general lesson is the one this file keeps relearning: a guard that fires on the
+  harness's honest behaviour is worse than no guard, because it turns a measurement into an
+  incident and the fix is then applied to the guard rather than to the question.

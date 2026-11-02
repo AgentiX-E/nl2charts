@@ -5019,3 +5019,68 @@ and must reproduce its score exactly — an exact-zero A/A that `assertPoolShare
 if the pool was not shared — and `select-cross-pooled-judge-reasoning` swaps only the judge on that
 same pool. On it the judge-format comparison has no generation noise in it, and the two levers above
 become decidable at 600 questions rather than needing 1,532.
+
+#### The stronger model was not wrong to be weaker: the pipeline never gave it the loop it is good at
+
+The reading that forced this section is a three-way comparison on one product, stable across three
+runs: the reasoning model's own slot answers 61.94% of `select-cross`'s questions correctly, while
+the two chat-authored slots answer 63.82% and 63.19%, and the arm that contains it scores 63.67%
+against 64.33% for the all-chat arm. The tempting conclusion is a claim about models — "on BIRD a
+reasoning model is not stronger, it is differently wrong". That conclusion is wrong, and the code
+says why.
+
+**The main arm never ran the loop that makes a reasoning model worth its price.** `select-cross` is
+declared `repairs: 0`. Its candidates are generated, handed back to the harness, executed once, and
+a statement the engine refuses is dropped — the ceiling falls by one and no model is ever told what
+went wrong. The largest single-model gain reported on BIRD in the current literature comes from
+exactly the loop that was switched off: ExCoT-DPO reports 57.37% → 68.51% (+11.1pp) from execution
+feedback alone, and the same paper's negative result is the one that explains this section's
+headline — *zero-shot chain-of-thought offers minimal gains*. A reasoning model given a one-shot
+prompt is being asked to think with nothing to think about; its advantage appears when it can read
+an engine's error and write a corrected statement, which is inference rather than recall.
+
+So the comparison above measures a model inside a pipeline built for the other kind of model, and
+the honest description of the result is not "the strong model is weaker" but "the strong model was
+never given the one channel where it is stronger". Two things follow, and both are now built.
+
+**One: the loop is per source, and a mixed arm could not previously ask for it.** On a mixed arm the
+pipeline is built from the *resolved source's* `Arm`, so the mixed arm's own `repairs` field never
+reaches the generator — it is decoration. `sourceRepairs` is the field that does reach it, keyed by
+source, so the reasoning model can be granted two repair turns while the chat candidates keep none,
+and the delta between those two arms belongs to the model rather than to the arm. The loop costs
+nothing on a case that already ran, because a repair turn fires only on a guard rejection or an
+engine refusal: measured on the last 600-question run, candidates reach the engine 598, 596 and 595
+times out of 600, so the whole mechanism is priced in the low single digits of calls per hundred.
+
+**Two: the arms now exist to price it.**
+
+| arm | what it grants | calls/case | the question it answers |
+| --- | --- | --- | --- |
+| `select-cross` | nothing | 4 | the baseline as it has always been measured |
+| `select-cross-repair-second` | two repair turns, reasoning model only | 4 + ε | does the strong model do more with the engine's words than without them? |
+| `select-cross-repair-all` | two repair turns, all three candidates | 4 + ε | do the weaker models gain as much from the same feedback? |
+
+The third row is the one that decides the argument. If the gap between `select-cross-repair-all`
+and `select-cross-repair-second` is smaller than the gap between `select-cross-repair-second` and
+`select-cross`, then the loop is worth more per unit of model strength, and "a stronger model scores
+higher" becomes a property of the pipeline rather than a hope. If it is larger, the loop is a
+levelling mechanism — it helps the weak more than the strong — and that is a finding worth
+publishing, not a failure to hide.
+
+**A caveat that must travel with every number above.** Three runs of the same arm on the same 600
+questions produced 63.67%, 60.33% and 62.70% (`41366778872`, `41380616205`, `41389454128`). The
+spread of a control is 3.3pp, which is larger than several effects this document has reported. Any
+comparison between two arms that each draw their own candidates is therefore read against that
+floor, and a slot-level reading — the same slot, before and after — is the one to trust when the
+two are available. `select-cross-pooled` exists to remove the floor for judge comparisons; the
+repair arms cannot share a pool, because a repair changes the candidates themselves, so their
+deltas are read on the slot and on the ceiling rather than on the arm's total alone.
+
+**A defect the experiment found before it could produce a number.** The first evidence run for
+the shared pool (`41389454128`) died at case 60 of 600: the pool guard demanded that a pooled arm's
+pool hold as many candidates as the arm declares, and refused nine cases where two of three
+statements had failed to execute. The premise was wrong — a candidate the engine refuses does not
+exist, so a three-candidate arm legitimately holds one — and the guard would have made pooling
+unmeasurable on any arm with a realistic failure rate. It now refuses only an absent pool (the
+source never ran the case, an ordering bug) and an empty one (the source ran it and produced
+nothing); a pool of one is a pool.

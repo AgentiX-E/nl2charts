@@ -338,6 +338,23 @@ export interface Arm {
    * belongs to the hint and not to a shorter prompt.
    */
   readonly sourceLinking?: Readonly<Record<string, boolean>>;
+  /**
+   * Per-source overrides for the repair turns a candidate may spend.
+   *
+   * On a mixed arm this is the *only* place a repair count can be set: `runArm` resolves each
+   * source to its own `Arm` and builds the pipeline from that arm's `repairs`, so the mixed arm's
+   * own field never reaches the generator. That is a trap worth naming rather than fixing — the
+   * field is read where it is honoured, and a mixed arm's `repairs` is decoration.
+   *
+   * Why a repair count is a lever at all: a repair turn fires only when the guard rejects the
+   * statement or the engine refuses it, so it costs nothing on a case that already ran. ExCoT-DPO
+   * (ACL 2025) reports the largest single-model gain on BIRD from exactly this loop — execution
+   * feedback, 57.37% to 68.51% — and the loop is where a reasoning model's advantage should
+   * appear, because reading an engine's error message and writing a corrected statement is
+   * inference rather than recall. Keyed by source so the two models can be given different
+   * amounts of it and the difference belongs to the model rather than to the arm.
+   */
+  readonly sourceRepairs?: Readonly<Record<string, number>>;
 }
 
 /**
@@ -585,6 +602,14 @@ export const ARMS: readonly Arm[] = [
   // The hypothesis is not "less prompt is better"; it is that the hint anchors a model that would
   // otherwise deliberate, and the arm exists to price that anchor with zero extra calls.
   { name: 'select-cross-unhinted', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: CROSS_SOURCES, sourceLinking: { 'inline+evidence@second': false } },
+
+  // The execution-feedback loop, granted to one model at a time. `select-cross` has none: its
+  // candidates are executed by the harness after the fact, so a statement the engine refuses is
+  // dropped and the ceiling falls by one without anyone ever being told why. These two arms put
+  // the engine's message back in front of the model that wrote the statement, and they differ in
+  // *which* model gets it — the question the capability contract exists to answer.
+  { name: 'select-cross-repair-second', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: CROSS_SOURCES, sourceRepairs: { 'inline+evidence@second': 2 } },
+  { name: 'select-cross-repair-all', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: CROSS_SOURCES, sourceRepairs: { 'inline+evidence@second': 2, 'metadata+evidence': 2, 'values': 2 } },
   // The same pool as `select-cross`, read by the same judge with the same instruction.
   //
   // By construction this arm must score exactly what `select-cross` scores: it generates nothing,
@@ -823,6 +848,8 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'select-cross-judge-reasoning': 'the cross set judged by the reasoning model, asked in the shape a reasoning model can answer: needs the second model and a second key, and is measured against `select-cross`; the pair `select-cross-judge` -> this arm prices the format, this arm -> `select-cross` prices the judge',
   'select-cross-empty': 'the cross set with one turn spent on an empty result, sent to the model that wrote the statement: needs the second model, and is measured against `select-cross`',
   'select-cross-unhinted': 'the cross set with the linker hint removed from the reasoning model\'s prompt only: needs the second model, no extra call, and is measured against `select-cross`',
+  'select-cross-repair-second': 'the cross set where only the reasoning model may spend two repair turns on an engine error: the loop costs nothing on a case that already ran, and the delta is what a strong model does with feedback',
+  'select-cross-repair-all': 'the cross set where all three candidates may spend two repair turns: measured against `select-cross` for the loop and against `select-cross-repair-second` for whether the weaker models benefit as much',
   'select-cross-pooled': 'the cross set read from `select-cross`\'s own pool instead of generating one: one call per case instead of four, and the pair must read exactly 0.0pp — it is the instrument that says whether two arms on this harness can be compared at all, so run it in the same dispatch as `select-cross` and before any pooled comparison',
   'select-cross-pooled-judge-reasoning': 'the reasoning model judging the chat model\'s candidates, in the format it can answer: needs the second model and a second key, one call per case, and is measured against `select-cross-pooled` on the same pool — the only judge-swap delta with no generation noise in it',
   'select-tagged': 'the cross arm with each candidate labelled by its source: needs the second model too, and is measured against `select-cross`',
@@ -954,6 +981,13 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   // One lever: whether the reasoning model's prompt carries our linker's answer in front of it.
   // Zero extra calls, so the delta is the anchor and not a budget.
   ['select-cross', 'select-cross-unhinted'],
+  // One lever each: the same three prompts, the same endpoints, and an engine that answers back.
+  ['select-cross', 'select-cross-repair-second'],
+  ['select-cross', 'select-cross-repair-all'],
+  // Prices the *model* rather than the loop: both arms repair, one only on the reasoning
+  // model's candidate, so the difference is what the stronger model does with feedback the
+  // weaker ones were also given.
+  ['select-cross-repair-second', 'select-cross-repair-all'],
   // One lever: whether the arm generates its candidates or reads the ones `select-cross` already
   // drew. This pair is an instrument, not a hypothesis — the delta must be exactly zero, because
   // the pooled arm chose among the parent's own candidate objects with the parent's own judge. A
@@ -1630,29 +1664,35 @@ export function assertPoolShared(
 }
 
 /**
- * The candidates a pooled arm reads, checked against what that arm declares.
+ * The candidates a pooled arm reads, checked against the pool it names.
  *
- * Pure and exported because both failure modes are configuration errors a test can construct and
- * a run cannot: inside `runArm` the pool always exists (the ordering guard in `runBird` ran first)
- * and always holds the declared count (every pooled arm names the same sources as its source), so
- * the two sentences below would be branches no test could reach — a claim the reader has to verify
- * rather than a guard. Here they are three lines a case can choose between.
+ * Pure and exported because the failures are ones a test can construct and a run mostly cannot:
+ * inside `runArm` the pool exists (the ordering guard in `runBird` ran first), so the sentences
+ * below would be branches no test could reach — a claim the reader has to verify rather than a
+ * guard. Here they are lines a case can choose between.
+ *
+ * The size check this function used to carry was wrong, and a real run is what showed it: a
+ * candidate the engine refuses is a candidate that does not exist, so a three-candidate arm
+ * legitimately holds one candidate on a case where two statements failed to execute. It refused
+ * nine of six hundred cases in `41389454128` — a guard firing on the harness's honest behaviour,
+ * which is how a pool arm would have become unmeasurable. What must be refused is a pool that is
+ * absent (`undefined`, meaning the source never ran this case, an ordering bug) or empty (the
+ * source ran it and produced nothing). Both are errors; a pool of one is a pool.
  */
 export function reusePool(
   armName: string,
   source: string,
-  declared: number,
   reused: readonly PooledCandidate[] | undefined,
   caseId: string,
 ): readonly PooledCandidate[] {
   if (reused === undefined) {
     throw new Error(
-      `arm ${armName} reuses the pool of ${source}, which produced nothing for case ${caseId} — the pooled arm would answer a case its source never saw`,
+      `arm ${armName} reuses the pool of ${source}, which has not run yet in this run and holds no entry for case ${caseId} — the pooled arm would answer a case its source never saw`,
     );
   }
-  if (reused.length !== declared) {
+  if (reused.length === 0) {
     throw new Error(
-      `arm ${armName} declares ${String(declared)} candidates but the pool of ${source} holds ${String(reused.length)}; the two arms would be compared at different candidate counts`,
+      `arm ${armName} reuses the pool of ${source}, which produced nothing for case ${caseId} — the pooled arm has nothing to read and would report the pool's emptiness as its own answer`,
     );
   }
   return reused;
@@ -3506,12 +3546,15 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
       const pipelineFor = (
         target: Arm,
         which: 'primary' | 'second' = 'primary',
-        linkingOverride?: boolean,
+        overrides: { readonly linking?: boolean; readonly repairs?: number } = {},
       ): ReturnType<typeof createPipeline> =>
         createPipeline({
           provider: which === 'second' && secondCounter !== undefined ? secondCounter.provider : counter.provider,
-          maxRepairs: target.repairs,
-          linking: linkingOverride ?? target.linking,
+          // The repair count is resolved here, once, because the execute hook is attached from the
+          // same number: an override that raised `maxRepairs` without attaching the hook would arm
+          // a loop that can never hear the engine, which is the defect `emptyRetry` had.
+          maxRepairs: overrides.repairs ?? target.repairs,
+          linking: overrides.linking ?? target.linking,
           interpret: target.interpret === true,
           plan: target.plan === true,
           decompose: target.decompose === true,
@@ -3528,7 +3571,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
           // turn. The hook used to be attached only when `repairs > 0`, so `inline+evidence+empty`
           // — an arm whose entire lever is that turn — never saw a row count and never fired. The
           // guard on the arm instead of on the hook is what made a published arm a no-op.
-          ...(target.repairs === 0 && target.emptyRetry === undefined
+          ...((overrides.repairs ?? target.repairs) === 0 && target.emptyRetry === undefined
             ? {}
             : {
                 execute: async (sql: string) => {
@@ -3590,14 +3633,12 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
         // so that "the pool was not there" is a sentence rather than an empty set — an arm that
         // quietly generated its own candidates would be its parent under a new name, and its
         // delta would be the pool's noise wearing the label of a lever.
-        const declared = arm.vote;
         const reused =
           arm.pool === undefined
             ? undefined
             : reusePool(
                 name,
                 arm.pool,
-                declared,
                 io.poolFor?.(arm.pool, String(question.question_id)),
                 String(question.question_id),
               );
@@ -3621,7 +3662,14 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
             // sources can share one prompt shape and differ in whether the linker's answer is in
             // front of the model, and keying by arm would silently apply the override to both.
             const hinted = arm.sourceLinking?.[source];
-            const sampler = sources === undefined ? pipeline : pipelineFor(resolveArm(spec.arm) as Arm, spec.provider, hinted);
+            const repairs = arm.sourceRepairs?.[source];
+            // The pre-built pipeline is only good for the case nothing about this source was
+            // overridden; once either override is present the pipeline is built for it, because a
+            // reused pipeline would apply the parent's count to a source that asked for another.
+            const sampler =
+              sources === undefined && hinted === undefined && repairs === undefined
+                ? pipeline
+                : pipelineFor(resolveArm(spec.arm) as Arm, spec.provider, { linking: hinted, repairs });
             const askedSample = await sampler.ask({ question: question.question, schema });
             if (firstShape === undefined && askedSample.shape !== undefined) firstShape = askedSample.shape;
             // The mechanism has to be observable, not declared: a prompt that asks for
