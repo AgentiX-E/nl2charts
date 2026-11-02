@@ -5724,3 +5724,117 @@ the criterion registered before it runs:
 | ③ the corrections pay for the call | `reconcile-novel − vote ≥ 0` | 63.33% for no calls is the bar every paid arm on this pool has now failed to clear three times |
 | ④ the flip set is positive | more `vote`-lost to `novel`-won than the reverse on the disputed cases (McNemar) | a net delta can hide two large opposite movements, and the disputed stratum is where the decision is |
 
+
+## Pricing the value block at the width it would be built at
+
+The block that shows stored values on the card has been carried for three rounds on two readings
+that are both about the sampler rather than about the information: a 2.22pp ceiling from the width
+audit, and +1.31pp at p = 0.052 on 500 questions, which is 6.5 cases against a design that needed
+18. The second reading was retired as "not significant", and that is the wrong reading of it — a
+lever that lands at a third of its own ceiling and stops is a lever that was measured too small,
+not one that does not work.
+
+What was never priced is the size the block would be built at. Bisecting the two readings needs no
+model and no database write, only the profiler cache and the gold statements, and the answer is
+the reason the family is still open:
+
+| rule | characters a case | vs the plain card | cases it touches |
+| --- | --- | --- | --- |
+| no block (the card) | 1,479 | — | 0 |
+| every profiled column (`samples`) | 2,047 | **+38.4%** | 500 / 500 |
+| the columns a gold statement filters on | 1,499 | **+1.4%** | **185 / 500 (37.0%)** |
+
+Measured on the 500-question Mini-Dev split, per case, with the same renderer the arms use. The
+per-case distribution is what makes the second row affordable rather than merely smaller: median
++0.0%, p90 +8.5%, max +25.6%. A block that costs 1.4% of the card on average cannot be blamed for
+a prompt budget, and the three rounds of "the prompt grew 22.9% and bought nothing" were measuring
+a block that was 27 times larger than the one a rule would send.
+
+The by-database spread is the other half of the reading, because it says where the family can and
+cannot reach at all:
+
+| database | cases | touched | characters added |
+| --- | --- | --- | --- |
+| card_games | 52 | 25 | +2,424 |
+| student_club | 48 | 22 | +1,883 |
+| superhero | 52 | 21 | +1,302 |
+| european_football_2 | 51 | 15 | +1,307 |
+| financial | 32 | 24 | +895 |
+| debit_card_specializing | 30 | 19 | +878 |
+| thrombosis_prediction | 50 | 19 | +443 |
+| toxicology | 40 | 25 | +319 |
+| california_schools | 30 | 10 | +286 |
+| formula_1 | 66 | 5 | +310 |
+| codebase_community | 49 | **0** | 0 |
+
+`codebase_community` is not a bug: its gold statements filter on `id`-like and text columns the
+profiler keeps no dictionary for, so no rule of this family has a column to show there. That is a
+**property of the corpus**, and it belongs in the reading before a delta is attributed to it —
+0% of 49 questions is not "the block did not help", it is "the block was never built".
+
+### The arm, and why it is an oracle
+
+`inline+evidence+samples-gold` is the same sampler, over the same values, in the same order, with
+the same call count, and only the columns the gold statement's conditions name. It reads the
+answer, which is exactly what makes it worth one dispatch: no realizable rule can beat a rule that
+knows the answer, so its delta closes the question in one direction.
+
+- If the block buys **nothing** while being shown exactly the right columns, no rule that guesses
+  them can buy anything either, and the samples family is finished — not "underpowered", finished.
+- If it does buy something, the delta is the **budget** a realizable rule has to be judged
+  against. A rule that captures a third of it is a rule worth building; one that captures a tenth
+  is not, and that comparison is impossible without a ceiling taken at the right width.
+
+The arm is declared on demand, never in a chain, and its catalogue note says it is an oracle. That
+is the difference between an experiment and a candidate: the oracle can be run twice and gives the
+same number, and it can never be shipped.
+
+### The funnel it needs, and the guard that makes it readable
+
+`controls.sampledColumns` is a total over every database a run touched, so it answers "did anything
+get sampled" and not "did this rule reach these cases". The row now carries `sampleBlock`:
+
+```
+sampleBlock: { cases, withValues, columns, empty }
+```
+
+`empty` is the count of cases the rule reached nothing on — a statement with no condition has no
+column to narrow to — and it is D56 in its counting form: "the rule kept nothing" and "the rule was
+not measured" are the same number and opposite findings. `assertSampleBlockFired` refuses to publish
+a narrowed arm whose `withValues` is zero, because that arm is its parent with a longer name and its
+zero delta would be read as "the columns that matter do not help".
+
+### The defect the end-to-end run found on the way
+
+The first end-to-end case for the narrowing read a card built from **another fixture's schema**. The
+profile cache was one directory for every dataset, keyed by database name: the chain fixture and the
+mini fixture both name their database `shop`, so whichever profile was written first answered for
+both. The failure mode is the one this repository has already paid for once — it is the reason
+`.value-examples` lives inside the dataset — and the sentence in that comment applies verbatim: *a
+fixture and the corpus can name a database alike, and a single directory let a test's `shop` be
+served to whatever read `shop` next.*
+
+The profile is now cached at `<data>/.profiles`, the layout test names the path, and the adversarial
+runner follows the same rule. The cost is one recomputation per split after the change, paid once
+and then cached with the dataset it describes.
+
+### What the dispatch has to be able to say
+
+`bird-dev`, three arms, 1,532 questions, one call a case:
+
+| criterion | threshold | why this number |
+|---|---|---|
+| ① the ceiling is worth having | `samples-gold ≥ +1.5pp` over `inline+evidence` at **p < 0.01** | below it, no realizable rule can clear the 1.5pp the plan asks for |
+| ② the narrowing is not the loss | `samples-gold ≥ samples` | if the narrow block is *worse* than the wide one, the columns were never the cost and the family's premise is wrong |
+| ③ the block stays affordable | `samples-gold` prompt characters within **5%** of the parent's | a lever that buys a point with a third of the prompt is a different lever |
+| ④ the rule reaches cases | `sampleBlock.empty` below the parent's `cases` | a rule that touched nothing anywhere would pass ① at 0.0pp and mean nothing |
+
+Criteria ② and ④ are what this round adds: ① alone cannot separate "the columns were right" from
+"the block was smaller", and the artifact now carries the count that separates them.
+
+**The staging is part of the registration.** The plan's criterion for this lever is written on
+`select-mixed` (≥ +1.5pp, p < 0.01) and `select-cross` (≥ +1.0pp), and both are four-call arms. This
+dispatch is the first stage at one call a case, and it exists because composing a block that has
+never been priced at its own width with a four-call arm would spend 6,128 completions to learn the
+same thing the 4,596 above can say. Stage B — the block on every candidate of the adopted arm — is
+run only if stage A clears ①, and it is then the arm the plan's criterion is written about.

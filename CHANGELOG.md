@@ -32,6 +32,37 @@ cannot be argued with.
 
 ### Added
 
+- **`inline+evidence+samples-gold`: the value block priced at the width it would be built at.** The
+  block has been carried for three rounds on +1.31pp at p = 0.052 and a 2.22pp ceiling, and both
+  readings are about the sampler. Bisected with no model on the 500-question Mini-Dev split: every
+  profiled column costs **+38.4%** of the card's characters a case, the columns a gold statement
+  filters on cost **+1.4%** and touch **37.0%** of the questions (`codebase_community` 0 of 49, and
+  that is a property of the corpus rather than a bug). The new arm keeps the sampler, the values,
+  the order and the call count and narrows only the set of columns, which makes it an oracle: no
+  realizable rule can beat a rule that reads the answer, so a flat delta closes the family and a
+  positive one is the budget a realizable rule has to be judged against. Declared on demand, and its
+  catalogue note says which of the two it is.
+- **`sampleBlock` and `assertSampleBlockFired`: the count that makes a narrowed arm readable.** A row
+  carries `{ cases, withValues, columns, empty }`, because `controls.sampledColumns` is a run-wide
+  total and cannot say whether *this* rule reached *these* cases. `empty` counts the cases the rule
+  reached nothing on — a statement with no condition has no column to narrow to, so the two numbers
+  are D56 in counting form. The guard refuses to publish an arm whose rule kept nothing anywhere:
+  that arm is its parent with a longer name.
+- **The condition census on the split that decides adoption.** `bird-dev.yml` now runs
+  `bench:bird:conditions` on the dispatched artifact — two statements and the gold the run already
+  holds, zero queries and zero model calls — so the population the next lever targets is measured on
+  1,532 questions instead of inheriting a 498-question reading. No `--strict`: the share is the
+  finding, and the failures it can catch are the ones the Mini-Dev gate already fails on.
+
+### Fixed
+
+- **The profile cache was one directory for every dataset, keyed by database name.** Two fixtures
+  that both name their database `shop` read each other's schema, and the end-to-end case for the
+  narrowed block rendered a card from the mini fixture's tables on the chain fixture's questions —
+  the failure the `.value-examples` comment already describes, in a cache that had not been moved.
+  Profiles are now written to `<data>/.profiles`, the layout test names the path, and the adversarial
+  runner follows the same rule. Cost: one recomputation per split, then cached with the dataset.
+
 - **`bench:bird:reconcile`: what a policy is worth, case by case.** The arm-level funnel says how
   many replies were statements nobody wrote; it cannot say which cases, and a pair of arms is tested
   on the second. The tool cuts an artifact by the policy's own per-case records and checks the two

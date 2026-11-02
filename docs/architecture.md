@@ -784,3 +784,20 @@ that differs in method rather than in prompt or in draw.
   between candidates' results* rather than to syntax is the next lever, and it is the first one
   where the strong model should win outright, because deciding which of two result sets answers the
   question is inference rather than recall.
+- **A cost that is a property of the rule has to be measured on the rule, not on its family.** The
+  value block was rejected three times on a 22.9% prompt growth, and that number belongs to the
+  sampler it was built with: every profiled column. The block a column rule would actually send is
+  1.4% of the card on Mini-Dev, and the difference between the two — 27× — is larger than every
+  effect the family was ever read against. **A family priced at the wrong width is not a priced
+  family**, and the cheapest fix is a bisection with no model in it: render both cards, count the
+  characters, look at which cases each one touches. The generalisation is uncomfortable because it
+  applies to levers this repository has already closed for cost reasons: the reading that closes a
+  family has to name the width it was taken at, or it closes a different family.
+- **A cache keyed by a name is keyed by nothing until the name is unique.** The profile cache was
+  one directory for every dataset, keyed by database name, and two fixtures that both called their
+  database `shop` read each other's schema — a card rendered from another dataset, on every case,
+  with no instrument able to see it. The comment that already existed on `.value-examples` says why:
+  *a profile is a description of these files*, so it belongs beside them. The reading that finds
+  this is not a unit test of the cache; it is a run whose fixture had a schema the assertion did not
+  expect. **A shared cache is a shared opinion about what the inputs are**, and the only safe key is
+  the input itself.
