@@ -740,6 +740,18 @@ that differs in method rather than in prompt or in draw.
   pool it names, or the candidates were drawn twice. Two shapes, two rules, and the reason a guard
   refuses is checked as carefully as the refusal — a reader will go looking for whatever the message
   names.
+- **Removing the suspected cause is how a negative result becomes a finding.** The reconcile arm lost
+  3.5pp to a free count, and the funnel said the loss was on paraphrases: 514 of 600 replies restated
+  a candidate. That diagnosis was turned into a lever rather than an explanation — a policy that hands
+  restatements back — and the policy was worth +9 cases (`41462471819`, 354 -> 363). It was also not
+  the whole loss. With the adoption rule removed as a cause, the residual is 16 cases short of the
+  count, and the `bench:bird:reconcile` cut puts all 16 on the 82 cases where the model wrote a
+  statement nobody had written (the count is right 34 times there, the arm 18). That is a different
+  sentence than "the lever does not work": the pipeline around the lever is now measured and
+  exonerated, and what remains is the model's writing. A round that improves an arm and still closes
+  its line is worth more than one that improves an arm and declares victory, because the second
+  leaves the next round looking in the same place.
+
 - **One column of a funnel can be a constant, and a constant cannot be argued with.** The reconcile
   arm's funnel published `executable` and `adopted` and the two were equal by construction, because
   the arm adopted every statement the engine ran — so the column that says "the model's correction

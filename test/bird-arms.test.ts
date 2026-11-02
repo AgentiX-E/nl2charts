@@ -901,6 +901,53 @@ describe('mixed arms declare their own sources', () => {
 });
 
 /**
+ * A lever that no code reads is a lever that did not run.
+ *
+ * `reconcileAdopt` was written as a field, an arm and a pair before anything read it: the arm would
+ * have run, its row would have looked right, its funnel plausible, and the only difference between it
+ * and its parent would have been the name. Nothing else in this file can see that. TypeScript cannot
+ * (the field is optional and the file compiles), `changes exactly one lever per pair` cannot (the two
+ * arms genuinely differ), and the end-to-end suite cannot (both arms are self-consistent — the wrong
+ * one is simply its parent).
+ *
+ * So the catalogue and the runner are read as text and asked a narrow question: is every field of an
+ * arm referenced somewhere outside its own declaration? Narrow on purpose — a lever referenced only
+ * by the report builder passes here, and the behavioural guarantee is the policy case in
+ * `bird-run-e2e` — but it is the state the field was in when it was written, and it is the state a
+ * copy-paste of an arm produces.
+ */
+describe('the catalogue and the runner agree about levers', () => {
+  // The identity of an arm, not a lever: two arms whose names differ are not "one lever apart", and
+  // `changedLevers` must not think they are. Everything else a reader can set on an arm is a lever.
+  const NOT_LEVERS = new Set(['name']);
+  const runner = readFileSync(resolve(process.cwd(), 'eval/bird/run.ts'), 'utf8');
+  const declared = /export interface Arm \{([\s\S]*?)\n\}/.exec(runner);
+  if (declared === null || declared.index === undefined) throw new Error('the Arm interface is not where this test reads it, so the test is blind');
+  const inner = declared[1];
+  if (inner === undefined) throw new Error('the Arm interface has no body this test can read, so the test is blind');
+  const fields = [...inner.matchAll(/readonly (\w+)\??:/g)].map((match) => match[1] as string);
+  // Everything outside the declaration itself, so a field's own line cannot count as a read of it.
+  const body = runner.slice(0, declared.index) + runner.slice(declared.index + declared[0].length);
+  const levers = fields.filter((field) => !NOT_LEVERS.has(field));
+
+  it('lists every field of an arm as a lever, so a pair cannot hide a second change', () => {
+    expect(levers.slice().sort()).toEqual([...LEVERS].sort());
+  });
+
+  it('names only fields the interface has, so `changedLevers` can see each of them', () => {
+    const unknown = [...LEVERS].filter((lever) => !fields.includes(lever));
+    expect(unknown, `LEVERS names ${unknown.join(', ')} and the Arm interface does not`).toEqual([]);
+  });
+
+  it('reads every lever somewhere in the runner', () => {
+    // A member read, not a mention: `arm.notes`, `sourceArm.linking` and `target.shapeGuard` all
+    // count, and the field's declaration (removed above) does not.
+    const unread = levers.filter((lever) => !new RegExp(`\\.${lever}\\b`).test(body));
+    expect(unread, `${unread.join(', ')} can be set on an arm and no code reads it`).toEqual([]);
+  });
+});
+
+/**
  * The stratum join is a tool, and a tool that silently joins nothing would report an
  * empty table as a finding. Its self-test runs in CI; this pins the contract the report
  * has to satisfy for it to work at all.

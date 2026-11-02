@@ -6,7 +6,39 @@ cannot be argued with.
 
 ## Unreleased
 
+### Changed
+
+- **The reconcile line is closed, and the reason is measured rather than argued.** The sixth dispatch
+  (`41462471819`, 600 dev questions) ran the five-arm reading the policy was built for:
+  `select-cross` 62.50%, `-pooled` 62.33%, `-vote` **63.17%**, `-reconcile` 59.00%,
+  `-reconcile-novel` 60.50%. Handing the restatements back is worth **+9 cases** (354 -> 363), which
+  confirms the fifth dispatch's diagnosis, and it is not enough: the arm is still 16 short of the
+  free count. Cutting the artifact by the arm's own records shows where those 16 live — on its 82
+  novel cases the count is right 34 times and the arm 18, and its 518 declined cases are identical to
+  the vote case for case. So the pipeline around the lever is exonerated and the remaining gap is the
+  model's own writing, which no prompt or policy in this repository changes. The next lever has to
+  change what the candidates are (I-45, I-77), not what is done with them.
+
 ### Added
+
+- **`bench:bird:reconcile`: what a policy is worth, case by case.** The arm-level funnel says how
+  many replies were statements nobody wrote; it cannot say which cases, and a pair of arms is tested
+  on the second. The tool cuts an artifact by the policy's own per-case records and checks the two
+  invariants that make the cut readable — a declined statement leaves the vote's verdict standing
+  case for case, and on a novel statement the two arms agree because they adopt the same reply — then
+  prices the paraphrases (where the two arms differ) against the statements nobody wrote. An
+  artifact with no per-case record says so and exits non-zero rather than printing zeroes, because a
+  zero reads as "the lever moved nothing" and an absent record is not that.
+
+- **A lever nothing reads fails the suite.** `reconcileAdopt` was written as a field, an arm and a
+  pair before anything consumed it: the arm would have run, its row would have looked right, and the
+  only difference from its parent would have been the name. TypeScript cannot see it (the field is
+  optional and the file compiles), the one-lever-per-pair test cannot (the two arms genuinely
+  differ), and the end-to-end suite cannot (both arms are self-consistent — the broken one is simply
+  its parent). The catalogue and the runner are now read as text and asked whether every field of an
+  `Arm` is referenced outside its own declaration, and whether `LEVERS` and the interface name the
+  same set. `name` is the one field that is not a lever: two arms with different names are not one
+  lever apart.
 
 - **`select-cross-pooled-reconcile-novel`: the same call, with the paraphrases handed back.** The
   first reconcile arm adopted every statement the engine would run, and `41453395203` priced that
@@ -105,6 +137,16 @@ cannot be argued with.
   `MINIMUM_INSTRUMENT_SAMPLE`, which is also what decides when `poolRead` is published.
 
 ### Fixed
+
+- **A table's columns were attributed to the wrong comparator.** `bench:bird:decision` prints, per
+  arm, that arm's own selector against its own modal count over the same candidates. The first draft
+  of the fifth-dispatch section read the four columns as "against `select-cross`", which is a
+  comparison the tool does not make. Every number was right and the attribution was wrong, which is
+  why it survived review: nothing in it contradicted anything else. Corrected, and the correction
+  added two measurements nobody had taken — the full sample (the vote wins 37 cases the reconcile arm
+  loses and loses 16, net 21, p = 0.0055) and the split of those 37 (28 on the 153 disputed cases, 9
+  on the 447 where all three candidates already agreed, which cannot be paraphrases at all since a
+  restatement there returns the same rows).
 
 - **A funnel column that the code made constant could not be argued with.** `adopted` was defined as
   "the statement ran", which on the only arm that published it was the same number as `executable`

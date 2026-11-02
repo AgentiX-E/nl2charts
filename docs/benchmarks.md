@@ -5570,6 +5570,59 @@ group rather than one line per candidate), and `packages/ai` sits at 53,270 B gz
 54,500 B budget. The next prompt that lands there needs a budget line of its own, priced the way
 `packages/node`'s was, rather than a quiet absorption.
 
+## The sixth dispatch: the policy bought back nine cases, and the rest is the model
+
+`41462471819` ran the five arms on the same 600 dev questions with `deepseek-reasoner` as the second
+model. Same pool, so the ceiling is shared again; the new arm differs from `-reconcile` by the
+adoption policy and by nothing else.
+
+| arm | score | calls/case | funnel |
+|---|---|---|---|
+| `select-cross` | 375/600 = 62.50% | 4 | — |
+| `select-cross-pooled` | 374/600 = 62.33% | 1 | pool read 600/600 |
+| `select-cross-pooled-vote` | **379/600 = 63.17%** | 0 | — |
+| `select-cross-pooled-reconcile` | 354/600 = 59.00% | 1 | `always`, `novel 88, executable 595, adopted 595` |
+| `select-cross-pooled-reconcile-novel` | 363/600 = 60.50% | 1 | `novel`, `novel 88, executable 594, adopted 82` |
+
+The criterion registered before the dispatch:
+
+| criterion | threshold | reading | verdict |
+|---|---|---|---|
+| ① the policy took effect | `adopted < executable` and `adopted ≤ novel` | 82 < 594, and 82 ≤ 88 | **holds** |
+| ② the paraphrases were the loss | `reconcile-novel > reconcile`, strictly | 363 > 354, +9 cases (+1.50pp), p = 0.253 | **holds** |
+| ③ the corrections pay for the call | `reconcile-novel − vote ≥ 0` | 363 − 379 = −16 cases (−2.67pp), p = 0.0015 | **fails** |
+| ④ the flip set is positive | more `vote`-lost to `novel`-won than the reverse, on the disputed cases | vote 8, novel 3 on the 150 disputed cases, p = 0.227 | **fails** |
+
+So the policy hypothesis was right and it was not enough. Handing the restatements back is worth
+**+9 cases** — the damage the fifth dispatch attributed to paraphrases was real, and ② confirms it on
+an arm that differs from its parent by nothing else. On the disputed stratum the same change cuts the
+count's advantage from 14 cases to 5 (`bench:bird:decision`: `-reconcile` 20/34, p = 0.076;
+`-reconcile-novel` 3/8, p = 0.227).
+
+What is left is not a policy. `bench:bird:reconcile` cuts the artifact by the arm's own records:
+
+```
+stratum          n     vote  policy  flips (policy/vote)  p
+novel            82    34    18         4/20            0.0015
+declined         518   345   345        0/0             1.0000
+paraphrased      0     0     0          0/0             1.0000
+```
+
+Two facts, and the first one closes the line: the declined stratum is **identical to the vote, case
+for case** (the invariant holds, 518 of 518), and on the 82 novel cases the vote is right 34 times
+against the arm's 18. That deficit is exactly the arm's whole deficit — 379 − 16 = 363 — so after the
+adoption rule is removed as a cause, **every remaining case of the gap is a statement the model wrote
+and got wrong**. The lever's ceiling on this pool is the model's own writing, not the pipeline around
+it, and no prompt or policy change in this repository moves it. On the 518 paraphrases the policy wins
+28 cases against the adopting arm's 17, which is the +11 that the nine-point total is made of, minus
+two cases the two arms read differently because each asks the model itself.
+
+**Line closed.** Result-level reconciliation on the 2+1 pool is not a lever worth another dispatch:
+two rounds priced it (3.50pp of loss, 1.50pp recovered) and the residual is model capability. The
+next lever has to change what the candidates are, not what is done with them — `I-45` (the columns a
+question needs, named by the split's differential) and `I-77` (candidate diversity) are the two that
+remain on that axis.
+
 ## The fifth dispatch: eighty-six statements nobody wrote, and 514 paraphrases
 
 `41453395203` ran the five arms on 600 dev questions with `deepseek-reasoner` as the second model.
@@ -5593,10 +5646,25 @@ The criterion registered above, read against its own dispatch:
 | ③ it does not lose the cases the vote wins | `reconcile − vote ≥ 0`, and ≤ 1pp of the 39 reachable cases lost | 359 − 380 = −21 cases = −3.50pp | **fails** |
 | ④ it is not the selector in disguise | `novel ≥ 10%` of cases | 14.33% | **holds** |
 
-`bench:bird:decision` states the same thing on the disputed cases, which is the only stratum where a
-decision exists at all: against `select-cross`'s 153 disputed cases the pool decides +2 (p = 0.864),
-the vote +3 (p = 0.743), the agreement marks −6 (p = 0.430) and reconcile −13 (p = 0.066). The
-format lever is the only one on this pool with a sign that is not noise, and the sign is negative.
+`bench:bird:decision` states the same thing, on the 153 cases whose three candidates do not agree —
+the only stratum where a decision exists at all. Its columns are each arm's own selector against its
+own modal count over the same candidates, not against `select-cross`:
+
+| arm | only the selector right | only the count right | count − selector | p |
+|---|---|---|---|---|
+| `select-cross` | 16 | 18 | +2 (0.33pp) | 0.864 |
+| `select-cross-pooled` | 17 | 20 | +3 (0.50pp) | 0.743 |
+| `select-cross-pooled-agree` | 17 | 23 | +6 (1.00pp) | 0.430 |
+| `select-cross-pooled-reconcile` | 15 | 28 | **+13 (2.17pp)** | 0.066 |
+
+Read that way the reconcile turn is not "3.5pp worse than the vote" in the abstract: on the stratum
+where a decision exists it loses 13 cases to a rule that costs nothing, and the two arms are the same
+candidates with the same pool. The full sample is blunter still — the vote wins 37 cases the arm
+loses and the arm wins 16 the vote loses, net 21, p = 0.0055 — so the loss is not noise, and the
+split of those 37 says where it comes from: 28 on the disputed cases above, and 9 on the 447 where
+all three candidates already agreed. A restatement on an agreed case cannot change the rows, so the
+nine are statements *nobody* wrote — the paraphrase story explains 28, and the other nine are the
+price of the turn writing something of its own.
 
 ### Where the twenty-one cases went
 
@@ -5619,6 +5687,16 @@ fifth artifact alone the two terms are not recoverable: it says 16 gains and 37 
 not which of those cases were paraphrases, so the policy's score is bounded and not predicted —
 `[380 − 37, 380 + 16] = [343, 396]`, i.e. 57.2% to 66.0%. A band that wide is not a measurement, and
 the reason it is wide is a missing field rather than a missing experiment.
+
+### The tool the next reading is taken with
+
+`bench:bird:reconcile` cuts an artifact by the policy's own per-case records and checks the two
+invariants that make the cut readable: a declined statement must leave the vote's verdict standing
+case for case, and on a novel statement the two arms must agree (they adopt the same reply). It also
+names the third state — an arm that says it scores only novel statements and scored a paraphrase —
+because that is the arm failing to run the lever it is named for. On an artifact with no per-case
+record it says so and exits non-zero rather than printing zeroes: `41453395203` is exactly that
+artifact, and a zero there would read as "the policy moved nothing".
 
 ### What the next dispatch has to be able to say
 
