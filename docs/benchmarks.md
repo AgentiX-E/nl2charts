@@ -5350,8 +5350,10 @@ Read against the five criteria the round was dispatched with:
    ±0.67pp floor under every selector comparison this repository has published.
 2. **Heterogeneous pool, free aggregator at least even:** 380 against 379, +0.17pp. The vote is not
    worse, and it costs nothing.
-3. **Homogeneous pool:** not measured. The `select-mixed-pooled` pair is the arm that would, and it
-   was not in this dispatch — the criterion stays unread rather than inferred.
+3. **Homogeneous pool:** not measured in this dispatch, and the criterion stays unread rather than
+   inferred. `select-mixed-pooled` and `select-mixed-pooled-vote` are the pair that reads it, and
+   they are in the next one: the same two levers the cross pool was measured with, on a pool where
+   three prompts from one author disagree on 8.3% of cases instead of 23–26%.
 4. **The agreement marks are worth +1.17pp** at the same price, which is the one positive reading of
    the run: what the selector was missing is *structure* — which of the three candidates returned the
    same rows — and not adjudication.

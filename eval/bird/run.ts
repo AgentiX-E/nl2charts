@@ -646,6 +646,17 @@ export const ARMS: readonly Arm[] = [
   // reading three truncated previews cannot compute that. One lever from `select-cross-pooled`,
   // so the pair prices the information and not the prompt template.
   { name: 'select-cross-pooled-agree', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: CROSS_SOURCES, pool: 'select-cross', agreement: true },
+  // The same two arms on the *homogeneous* pool, which is the other half of the shape claim.
+  //
+  // `select-cross-pooled-vote` asked whether a free count is at least even where the candidates come
+  // from two authors; it came back +0.17pp on 600 questions, which is a tie. The claim being tested
+  // is not "the count is as good as the model" but "the model's value falls as the pool gets more
+  // heterogeneous", and it is only tested by running the same pair where the pool is one author's
+  // three prompts: there the candidates disagree less (8.3% of cases against 23-26%), a model has
+  // more to notice, and the selector should win. Without this pair the reading has one pool and a
+  // conclusion about shape drawn from it.
+  { name: 'select-mixed-pooled', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: MIXED_SOURCES, pool: 'select-mixed' },
+  { name: 'select-mixed-pooled-vote', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, mixed: MIXED_SOURCES, pool: 'select-mixed' },
   { name: 'select-cross-canon', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: CROSS_SOURCES, canonical: true },
   // ...and the same canonical text read by the second model, which is where the style channel was
   // measured: the 128-case loss group belongs to that judge, so closing the channel has to be
@@ -872,6 +883,8 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'select-cross-pooled-judge-reasoning': 'the reasoning model judging the chat model\'s candidates, in the format it can answer: needs the second model and a second key, one call per case, and is measured against `select-cross-pooled` on the same pool — the only judge-swap delta with no generation noise in it',
   'select-cross-pooled-vote': 'the same pool decided by the modal result instead of by a model: zero calls per case, and the only reading of "is the selector worth its call" whose candidates are shared — the archived artifacts say the count wins 53 disputed cases to 22 (p = 4.5e-4), and this arm is what turns that into a measurement instead of a re-reading',
   'select-cross-pooled-agree': 'the same pool with the agreement marks the selector was never given: 149 of 600 cases had more than one distinct result, and which of three candidates returned the same rows is the one fact two truncated previews cannot yield; one lever from `select-cross-pooled`, one call per case',
+  'select-mixed-pooled': 'the homogeneous pool (`select-mixed`) read without generating anything: one call per case, and the A/A instrument for the shape claim — it must read exactly what `select-mixed` read, because the delta from it to `select-mixed-pooled-vote` is the one number that says whether a model is worth more where the candidates agree more',
+  'select-mixed-pooled-vote': 'the homogeneous pool decided by the modal result: zero calls per case, and the other half of the shape claim — the selector should win here, which is the prediction a "the selector is bad" explanation does not make',
   'select-tagged': 'the cross arm with each candidate labelled by its source: needs the second model too, and is measured against `select-cross`',
   'vote-mixed': 'three prompts aggregated by modal result instead of by a model: 63% would make the selector call unnecessary, and below that it prices what the model adds',
   'vote-cross': 'the cross-model candidate set aggregated by modal result: needs the second model too',
@@ -1016,6 +1029,12 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   ['select-cross', 'select-cross-pooled'],
   // One lever: who judges, on a pool neither arm generated. This is the pair the two previous
   // judge-swap arms could not be, and the only one whose delta has no generation noise in it.
+  // The same pair on the homogeneous pool, which is where the shape claim makes the opposite
+  // prediction: three prompts from one author disagree on 8.3% of cases, not 23-26%, so the model
+  // has less to notice and the free count has less to gain. A pair that reads the same sign on both
+  // pools would say the shape claim is wrong.
+  ['select-mixed', 'select-mixed-pooled'],
+  ['select-mixed-pooled', 'select-mixed-pooled-vote'],
   ['select-cross-pooled', 'select-cross-pooled-judge-reasoning'],
   // One lever: who decides on a pool neither arm drew — the model or the count. `vote-cross`
   // asked this across two pools and could not answer it; here the candidates, the rows and the

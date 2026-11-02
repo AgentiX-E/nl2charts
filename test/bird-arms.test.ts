@@ -859,7 +859,7 @@ describe('mixed arms declare their own sources', () => {
   const mixed = ARMS.filter((arm) => arm.mixed !== undefined);
 
   it('has at least the two arms under test', () => {
-    expect(mixed.map((arm) => arm.name).sort()).toEqual(['select-balanced', 'select-cross', 'select-cross-agree', 'select-cross-canon', 'select-cross-empty', 'select-cross-judge', 'select-cross-judge-canon', 'select-cross-judge-reasoning', 'select-cross-pooled', 'select-cross-pooled-agree', 'select-cross-pooled-judge-reasoning', 'select-cross-pooled-vote', 'select-cross-repair-all', 'select-cross-repair-second', 'select-cross-shuffled', 'select-cross-unhinted', 'select-dc', 'select-duo', 'select-mixed', 'select-mixed+agree', 'select-mixed+dc', 'select-mixed+empty', 'select-mixed+empty-blind', 'select-tagged', 'vote-cross', 'vote-mixed']);
+    expect(mixed.map((arm) => arm.name).sort()).toEqual(['select-balanced', 'select-cross', 'select-cross-agree', 'select-cross-canon', 'select-cross-empty', 'select-cross-judge', 'select-cross-judge-canon', 'select-cross-judge-reasoning', 'select-cross-pooled', 'select-cross-pooled-agree', 'select-cross-pooled-judge-reasoning', 'select-cross-pooled-vote', 'select-cross-repair-all', 'select-cross-repair-second', 'select-cross-shuffled', 'select-cross-unhinted', 'select-dc', 'select-duo', 'select-mixed', 'select-mixed+agree', 'select-mixed+dc', 'select-mixed+empty', 'select-mixed+empty-blind', 'select-mixed-pooled', 'select-mixed-pooled-vote', 'select-tagged', 'vote-cross', 'vote-mixed']);
   });
 
   it.each(mixed.map((arm) => [arm.name, arm] as const))('%s: candidates equal sources, and every source generates once', (name, arm) => {
