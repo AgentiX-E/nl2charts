@@ -6,6 +6,50 @@ cannot be argued with.
 
 ## Unreleased
 
+### Fixed
+
+- **An arm whose switch never reached the mechanism was a label, not a lever.** `inline+evidence+empty`
+  has been declared, paired and filed on demand since the empty-result turn was written, and the turn
+  could not fire: `createPipeline` was never given `emptyRetry`, the execution hook was attached only
+  when `repairs > 0`, and the hook returned `void`, so `rowCountOf` had no row count to read. Three
+  separate breaks on one path, each invisible because the arm was never dispatched. The hook now
+  returns `{ rows }`, the switch is passed to the pipeline, and the single-candidate return path
+  records the funnel — an earlier version ran the turn and still reported `fired: 0`. The new
+  end-to-end test fails against any one of the three reverts, which is how the three were found.
+
+- **The empty-result turn on a cross arm was spent by the wrong model.** `select-cross-empty`'s turn
+  was sent to the primary provider unconditionally, so the reasoning model's empty statement was
+  rewritten by the chat model — a lever that silently downgraded the arm it was attached to, and one
+  whose tokens were charged to the other counter. The turn now follows `winnerSource`, and the test
+  asserts the retry prompt reached the second endpoint and never the first.
+
+- **A parameter the endpoint ignores was reported as one it honoured.** `deepseek-reasoner` accepts
+  `temperature` and discards it (its own documentation says so); the harness sent `0`, got a 200,
+  and every report printed a sampling regime that never happened. `ModelCapabilities` now declares
+  what an endpoint does with a request, `adaptRequest` removes a field the endpoint ignores instead of
+  sending it, and the removal is counted per call and per arm (`samplingOmitted`). A chat request is
+  byte-identical to the one every published reading was taken with.
+
+- **The metered provider dropped the capability declaration.** `withCallCounter` returned `{id, model,
+  complete}`, so a reasoning judge read through the meter looked like an endpoint whose protocol
+  nobody knows — and was handed the chat instruction. The wrapper now carries `capabilities` through,
+  which is the same defect as the retry above, one layer up.
+
+### Added
+
+- **The judge's format is part of the judge.** A reasoning model told "answer with the number and
+  nothing else" either ignores it (its prose was read as an undecided vote) or obeys it and gives up
+  the deliberation it was chosen for. `buildSelectionPrompt` has a second instruction — think, then
+  put the number alone on the final line — and `parseReasonedChoice` reads the final line only, and
+  only on an arm that asked for that instruction. `select-cross-judge-reasoning` puts the reasoning
+  model in the judge's seat, which has never been measured: the only judge swap on record used
+  `glm-4-flash` and cost 6pp for a reason that is about that model, not about swapping judges.
+- **`select-cross-unhinted`** removes `Likely columns` from the reasoning model's prompt and from
+  nothing else: the hint is our linker's answer to the question that model was bought to answer, and
+  the arm prices the anchor at zero extra calls.
+- **`select-cross-empty`** prices the retry-author fix: same candidates, same count, one turn on an
+  empty result, sent to the model that wrote the statement.
+
 ### Measured
 
 - **The agreement mark is a null, and the null closes an explanation.** Four arms over 600 stratified

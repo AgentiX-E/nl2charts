@@ -1,0 +1,171 @@
+/**
+ * What a model can do, as a value the request builder can read.
+ *
+ * The contract this file exists for: a deployment may swap the backbone, and a swap used to
+ * change the answer without changing anything the pipeline could see. Two models were sent the
+ * same `temperature: 0`; one honoured it and one silently dropped it, and the harness recorded
+ * both as "sampled at zero". The refusal case is already handled (`probeProtocol` retries
+ * without the field), which covers the models that say no. It does not cover the vendors that
+ * say yes and mean nothing — DeepSeek's thinking-mode documentation states that `temperature`,
+ * `top_p`, `presence_penalty` and `frequency_penalty` are accepted for compatibility and have no
+ * effect. A parameter the pipeline cannot observe is indistinguishable from one it never sent.
+ *
+ * So a provider declares its capabilities, the request builder reads them, and every parameter
+ * that was dropped is reported rather than assumed. Nothing here is a guess about quality: the
+ * capabilities say what the endpoint does with a request, not how well it answers one.
+ */
+import { toNl2ChartsError } from '@agentix-e/nl2charts-spec';
+import type { LlmRequest } from './provider.js';
+
+/**
+ * The two shapes a chat-completions endpoint serves today.
+ *
+ * `reasoning` is not "better"; it is a different protocol. The model writes a chain of thought
+ * before its answer, the sampling parameters do not apply to it, and the answer arrives in a
+ * field beside the reasoning rather than inside it.
+ */
+export type ModelFamily = 'chat' | 'reasoning';
+
+/** Whether the endpoint honours the sampling parameters the request carries. */
+export type SamplingSupport = 'honoured' | 'ignored';
+
+export interface ModelCapabilities {
+  readonly family: ModelFamily;
+  /**
+   * `ignored` is the vendor's documented behaviour, not a suspicion. It changes the request:
+   * a field that has no effect is removed, and its removal is reported.
+   */
+  readonly sampling: SamplingSupport;
+  /** Whether `response_format: {type: 'json_object'}` is served. Reasoning endpoints often are not. */
+  readonly jsonMode: boolean;
+  /**
+   * The cap on the *answer*, in tokens.
+   *
+   * For a reasoning model this is the final response only — the chain of thought has its own
+   * budget and does not count against it. It is declared here because the endpoint's default is
+   * a number the pipeline never chose and cannot see.
+   */
+  readonly maxOutputTokens: number;
+  /**
+   * Whether the prompt may ask for reasoning before the answer.
+   *
+   * A reasoning model that is told "answer with the number and nothing else" either ignores the
+   * instruction (and produces prose a strict reader rejects) or obeys it and gives up the
+   * deliberation it was chosen for. Both are the pipeline's fault, not the model's.
+   */
+  readonly thinksAloud: boolean;
+}
+
+/** A chat endpoint: sampling applies, JSON mode is served, the answer cap is the vendor's usual 4K. */
+export const CHAT_CAPABILITIES: ModelCapabilities = {
+  family: 'chat',
+  sampling: 'honoured',
+  jsonMode: true,
+  maxOutputTokens: 4096,
+  thinksAloud: false,
+};
+
+/**
+ * A reasoning endpoint, as documented by the vendors that serve one.
+ *
+ * 8,192 is DeepSeek's documented ceiling for the final answer of `deepseek-reasoner`; OpenAI's
+ * o-series accepts more, and a deployment that knows its own ceiling should say so. The value
+ * here is the conservative one that is valid for the endpoint this repository benchmarks.
+ */
+export const REASONING_CAPABILITIES: ModelCapabilities = {
+  family: 'reasoning',
+  sampling: 'ignored',
+  jsonMode: false,
+  maxOutputTokens: 8192,
+  thinksAloud: true,
+};
+
+/**
+ * The names that mean "this endpoint thinks before it answers".
+ *
+ * Deliberately narrow. A wrong guess in the `chat` direction sends a parameter that is ignored
+ * (the status quo, harmless); a wrong guess in the `reasoning` direction removes a parameter the
+ * endpoint would have honoured and refuses a JSON mode it serves. The pattern therefore matches
+ * only families whose protocol is documented, and anything else must be declared by the
+ * deployment through `capabilitiesOf`'s overrides.
+ */
+const REASONING_NAME = /(?:^|[-_/])(?:reasoner|thinking|r1|qwq|magistral|o[1-9])(?:$|[-_/])/i;
+
+/** A capability declaration: the family's defaults, with any field the deployment overrides. */
+export function capabilitiesOf(model: string, overrides?: Partial<ModelCapabilities>): ModelCapabilities {
+  const base = REASONING_NAME.test(model) ? REASONING_CAPABILITIES : CHAT_CAPABILITIES;
+  if (overrides === undefined) return base;
+  const merged: ModelCapabilities = { ...base, ...overrides };
+  // One inconsistency worth refusing: a caller that says "reasoning" but leaves `sampling` at
+  // the chat default would get the parameter back, which is the defect this file removes.
+  if (merged.family === 'reasoning' && overrides.sampling === undefined) {
+    return { ...merged, sampling: 'ignored', thinksAloud: overrides.thinksAloud ?? true };
+  }
+  return merged;
+}
+
+/** A request together with what the endpoint will actually do with it. */
+export interface AdaptedRequest {
+  readonly request: LlmRequest;
+  /** Parameters the request carried that this endpoint does not honour. Empty on a chat model. */
+  readonly ignored: readonly string[];
+  readonly capabilities: ModelCapabilities;
+}
+
+/**
+ * Rewrite a request into the shape the endpoint serves, and say what was removed.
+ *
+ * Four rules, each with a reason:
+ *
+ * 1. A sampling parameter the endpoint ignores is removed, because sending it makes the meter
+ *    lie. `temperature: null` is already absent by contract and is not reported.
+ * 2. A reasoning endpoint is given an answer budget when the caller named none. The vendor's
+ *    default is not a decision this repository made, and a truncated answer reads as a wrong
+ *    one (`finish_reason=length` with empty content is diagnosed in `provider.ts`).
+ * 3. JSON mode on an endpoint that does not serve it is refused here, with the feature named,
+ *    rather than sent and answered with a 400 that reads as a bad key.
+ * 4. Nothing else is touched. In particular a chat request is returned byte-identical, so every
+ *    published reading taken before this file existed remains reproducible.
+ */
+export function adaptRequest(request: LlmRequest, capabilities: ModelCapabilities): AdaptedRequest {
+  if (request.json === true && !capabilities.jsonMode) {
+    throw toNl2ChartsError(
+      'NL2C_E_NOT_SUPPORTED',
+      `this endpoint does not serve JSON mode (model family: ${capabilities.family})`,
+      undefined,
+      { family: capabilities.family },
+    );
+  }
+  const ignored: string[] = [];
+  const next: {
+    messages: LlmRequest['messages'];
+    temperature?: number | null;
+    maxTokens?: number;
+    json?: boolean;
+    purpose?: LlmRequest['purpose'];
+  } = { messages: request.messages };
+
+  if (capabilities.sampling === 'ignored') {
+    // Dropped, and counted only when the request actually carried a value. `null` is already
+    // absent by contract and is not a parameter that was taken away; it is kept so the caller
+    // can still see the difference between "this deployment said nothing" and "it said send
+    // nothing", which is the distinction `turnTemperature` documents.
+    if (request.temperature === null) next.temperature = null;
+    else if (request.temperature !== undefined) ignored.push('temperature');
+  } else if (request.temperature === null) {
+    // Explicitly absent stays absent; it is not a parameter that was dropped.
+    next.temperature = null;
+  } else {
+    // The repository's default, unchanged: an unconfigured call samples at zero, which is the
+    // value every published reading was taken at.
+    next.temperature = request.temperature ?? 0;
+  }
+
+  if (request.maxTokens !== undefined) next.maxTokens = request.maxTokens;
+  else if (capabilities.family === 'reasoning') next.maxTokens = capabilities.maxOutputTokens;
+
+  if (request.json !== undefined) next.json = request.json;
+  if (request.purpose !== undefined) next.purpose = request.purpose;
+
+  return { request: next, ignored, capabilities };
+}

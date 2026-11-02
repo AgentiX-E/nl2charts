@@ -565,3 +565,33 @@ that differs in method rather than in prompt or in draw.
   matters: an information deficit would be fixed by a prompt, a recognition deficit is fixed only by
   changing what the model can judge. It also puts a price on the habit of explaining a null by
   "the model could not know" — here it was told, at 373 characters a call, and it chose the same way.
+
+- **A parameter the endpoint ignores is not a parameter the pipeline sent.** The reasoning endpoint
+  this repository benchmarks accepts `temperature`, `top_p`, `presence_penalty` and
+  `frequency_penalty` and discards all four; its documentation says the fields are accepted for
+  compatibility and have no effect. The harness sent `temperature: 0`, read a 200, and printed the
+  sampling regime in every report, because the only refusal path in the code was a 400/422
+  (`probeProtocol`) and a vendor that says yes and means nothing never enters it. The correction is
+  not a retry: it is a declaration. `ModelCapabilities` states what an endpoint does with a request,
+  `adaptRequest` removes a field the endpoint ignores rather than sending it, and the removal is
+  counted — per call in the meter, per arm in the artifact — so "sampled at zero" is a claim the
+  report can support. The chat path is byte-identical, which is what lets the old readings stay
+  comparable while the new ones stop being false.
+- **The judge is part of the measurement, and its format is part of the judge.** A selector prompt
+  that ends "answer with the number and nothing else" is written for a model that answers in one
+  token. A reasoning judge either ignores it — and its prose is read as an undecided vote, which the
+  artifact reports as a broken prompt — or obeys it and gives up the deliberation it was bought for.
+  Both failure modes have the same root: the format was a property of the caller's memory rather than
+  of the endpoint. `buildSelectionPrompt` now takes the capability, asks a thinking judge to think and
+  to end on the number, and `parseReasonedChoice` reads the final line only when that instruction was
+  sent. The default is unchanged and byte-identical, so every published selector reading keeps the
+  instruction it was measured with; the two formats are separated by an arm, not by a release.
+- **An arm whose switch never reaches the mechanism is a label, not a lever.** `inline+evidence+empty`
+  was declared, paired and filed on demand, and the mechanism it is named for could not run: the
+  pipeline never received `emptyRetry`, the execution hook was attached only when `repairs > 0`, and
+  the hook returned `void`, so the row count the turn triggers on did not exist. Three independent
+  breaks, and none of them produced an error — the arm simply spent no call and reported no funnel,
+  which the run guard would have refused had the arm ever been dispatched. The general lesson is not
+  "test more": it is that a lever crossing three layers needs one test that asserts it crossed all
+  three, and that the artifact must carry the mechanism's own count. Both are now in place, and the
+  test fails against any one of the three reverts.

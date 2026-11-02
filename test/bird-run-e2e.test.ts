@@ -508,6 +508,62 @@ describe('a sampling arm', () => {
     expect(cases.every((row) => row.candidates === undefined)).toBe(true);
   });
 
+  it('spends the empty-result turn on the model that wrote the statement, not on the primary', async () => {
+    // The defect this covers was silent: on a cross arm the turn was always sent to the primary
+    // provider, so the reasoning model's empty result was rewritten by the chat model. Nothing
+    // failed and the arm's score moved, which is worse than an error. The reply below writes an
+    // empty statement on the second endpoint and the correct one on the retry, so `recovered`
+    // can only reach every case if the retry reached *that* endpoint.
+    const second = await startEndpoint({
+      reply: (request) => {
+        if (request.prompt.includes('which candidate statement answers the question')) return '1';
+        if (request.prompt.includes('ran without error and returned no rows')) {
+          const asked = Object.keys(GOLD).find((entry) => request.prompt.includes(entry)) ?? '';
+          return fenced(correct(asked) ?? empty());
+        }
+        return fenced(empty());
+      },
+    });
+    try {
+      const result = await run({
+        plan: { first: () => empty() },
+        env: {
+          BIRD_ARMS: 'select-cross-empty',
+          BIRD_SECOND_MODEL: 'second-model',
+          BIRD_SECOND_BASE_URL: second.url,
+          BIRD_SECOND_API_KEY: 'second-key',
+        },
+      });
+      expect(result.code).toBe(0);
+      const retriedOnSecond = second.requests.filter((request) => request.prompt.includes('ran without error and returned no rows'));
+      expect(retriedOnSecond.length).toBe(QUESTIONS.length);
+      const retriedOnPrimary = result.requests.filter((request) => request.prompt.includes('ran without error and returned no rows'));
+      expect(retriedOnPrimary).toHaveLength(0);
+      const arms = result.report.arms as { arm: string; emptyRetry: { fired: number; recovered: number } }[];
+      expect(arms[0]?.arm).toBe('select-cross-empty');
+      expect(arms[0]?.emptyRetry.fired).toBe(QUESTIONS.length);
+      expect(arms[0]?.emptyRetry.recovered).toBe(QUESTIONS.length);
+    } finally {
+      await second.close();
+    }
+  });
+
+  it('spends the turn on an arm that generates once, where there is no source to inherit', async () => {
+    // The author of the statement is the arm itself on a single-candidate arm: there is no
+    // second source to parse and no hint override to look up. The branch is one line, and the
+    // version of this fix that only worked on mixed arms would have passed every other test.
+    const result = await run({
+      plan: { first: () => empty() },
+      env: { BIRD_ARMS: 'inline+evidence,inline+evidence+empty' },
+    });
+    expect(result.code, result.printed.join('\n')).toBe(0);
+    const arms = result.report.arms as { arm: string; emptyRetry?: { mode: string; fired: number; recovered: number } }[];
+    const retried = arms.find((arm) => arm.arm === 'inline+evidence+empty');
+    expect(retried?.emptyRetry?.mode).toBe('diagnosed');
+    expect(retried?.emptyRetry?.fired).toBe(QUESTIONS.length);
+    expect(retried?.emptyRetry?.recovered).toBe(QUESTIONS.length);
+  });
+
   it('spends one turn on a candidate set that came back empty, and adopts the answer', async () => {
     const result = await run({ plan: { first: () => empty() }, env: { BIRD_ARMS: 'select-mixed+empty' } });
     expect(result.code).toBe(0);
@@ -807,6 +863,106 @@ describe('the second model as a judge', () => {
       expect(arms[0]?.selectorDecided).toBe(QUESTIONS.length);
       expect(arms[0]?.selectorTotal).toBe(QUESTIONS.length);
       expect(second.requests.some((request) => request.prompt.includes('which candidate statement answers the question'))).toBe(true);
+    } finally {
+      await second.close();
+    }
+  });
+
+  it('asks a reasoning judge in the shape it can answer, and reads the number from the last line', async () => {
+    // The instruction a chat judge gets — "the number and nothing else" — is the one a reasoning
+    // endpoint either ignores (its prose used to be an undecided vote) or obeys at the cost of the
+    // deliberation it was bought for. This arm asks it to think and fixes where the answer ends,
+    // and the reply below is the shape that instruction produces: a sentence of reasoning, then
+    // the number alone. `selectorDecided` is the assertion that the reader found it.
+    const second = await startEndpoint({
+      reply: (request) => {
+        if (request.prompt.includes('which candidate statement answers the question')) {
+          return 'Candidate 1 groups by the column the question asks about; candidate 2 does not.\n1';
+        }
+        return replyFor(request, { first: correct });
+      },
+    });
+    try {
+      const result = await run({
+        plan: { first: correct },
+        env: {
+          BIRD_ARMS: 'select-cross-judge-reasoning',
+          BIRD_SECOND_MODEL: 'deepseek-reasoner',
+          BIRD_SECOND_BASE_URL: second.url,
+          BIRD_SECOND_API_KEY: 'second-key',
+        },
+      });
+      expect(result.code).toBe(0);
+      const judged = second.requests.filter((request) => request.prompt.includes('which candidate statement answers the question'));
+      expect(judged.length).toBe(QUESTIONS.length);
+      expect(judged[0]?.prompt).toContain('alone on the final line');
+      expect(judged[0]?.prompt).not.toContain('and nothing else');
+      const arms = result.report.arms as {
+        arm: string;
+        selectorDecided?: number;
+        selectorTotal?: number;
+        samplingOmitted?: Record<string, number>;
+      }[];
+      expect(arms[0]?.arm).toBe('select-cross-judge-reasoning');
+      // Every reply was read: the format change is what makes the judge's answer count.
+      expect(arms[0]?.selectorDecided).toBe(QUESTIONS.length);
+      expect(arms[0]?.selectorTotal).toBe(QUESTIONS.length);
+      // The endpoint did not honour the sampling field, and the artifact says so rather than
+      // printing a temperature the judge never sampled at.
+      expect(arms[0]?.samplingOmitted).toEqual({ temperature: expect.any(Number) });
+    } finally {
+      await second.close();
+    }
+  });
+
+  it('leaves the chat judge on the instruction it was measured with', async () => {
+    const second = await startEndpoint({ reply: (request) => replyFor(request, { first: correct }) });
+    try {
+      const result = await run({
+        plan: { first: correct },
+        env: {
+          BIRD_ARMS: 'select-cross-judge',
+          BIRD_SECOND_MODEL: 'chat-judge',
+          BIRD_SECOND_BASE_URL: second.url,
+          BIRD_SECOND_API_KEY: 'second-key',
+        },
+      });
+      expect(result.code).toBe(0);
+      const judged = second.requests.filter((request) => request.prompt.includes('which candidate statement answers the question'));
+      expect(judged[0]?.prompt).toContain('and nothing else');
+      expect(judged[0]?.prompt).not.toContain('final line');
+      const arms = result.report.arms as { samplingOmitted?: Record<string, number> }[];
+      expect(arms[0]?.samplingOmitted).toBeUndefined();
+    } finally {
+      await second.close();
+    }
+  });
+
+  it('removes the linker hint from one source and leaves the other prompts alone', async () => {
+    // `Likely columns` is our linker's answer to "which columns matter", printed in front of a
+    // model that was bought to answer exactly that. The arm removes it from the second model's
+    // prompt only; the two primary candidates keep theirs, which is what makes the delta the
+    // hint rather than a shorter prompt.
+    const second = await startEndpoint({ reply: (request) => replyFor(request, { first: correct }) });
+    try {
+      const result = await run({
+        plan: { first: correct },
+        env: {
+          BIRD_ARMS: 'select-cross-unhinted',
+          BIRD_SECOND_MODEL: 'second-model',
+          BIRD_SECOND_BASE_URL: second.url,
+          BIRD_SECOND_API_KEY: 'second-key',
+        },
+      });
+      expect(result.code).toBe(0);
+      const secondDraws = second.requests.filter((request) => request.prompt.includes('You translate questions into one read-only SQL statement'));
+      expect(secondDraws.length).toBe(QUESTIONS.length);
+      expect(secondDraws.every((request) => !request.prompt.includes('Likely columns'))).toBe(true);
+      const primaryDraws = result.requests.filter(
+        (request) =>
+          request.authorization === 'Bearer test-key' && request.prompt.includes('You translate questions into one read-only SQL statement'),
+      );
+      expect(primaryDraws.some((request) => request.prompt.includes('Likely columns'))).toBe(true);
     } finally {
       await second.close();
     }

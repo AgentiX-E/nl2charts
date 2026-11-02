@@ -455,3 +455,24 @@ Marks only point backwards, which makes them a partition: each group has one unm
 number of distinct results is the number of unmarked candidates plus those pointed at. The selector
 is shown a mark as `same result as candidate 1` and is told, in one rule, that agreement is evidence
 and not proof — the sentence the 2+1 pool turns on.
+
+**Model capability** — What an endpoint does with a request, as a value: the family (`chat` or
+`reasoning`), whether the sampling parameters are honoured, whether JSON mode is served, the cap on
+the final answer in tokens, and whether the prompt may ask for reasoning before the answer. Derived
+from the model name where the family is documented, and declarable through
+`BIRD_SECOND_CAPABILITIES` (or the provider's own `capabilities` option) where it is not. A
+capability is a protocol fact, never a quality claim: it says `deepseek-reasoner` discards
+`temperature`, not that it answers better.
+
+**Sampling omitted** — The parameters a request carried that the endpoint did not honour, counted
+per call by the meter and per arm in the artifact (`samplingOmitted`). It exists because a
+reasoning endpoint accepts `temperature` for compatibility and ignores it: the request succeeds, the
+report prints "temperature 0", and nothing ran at zero. The count is the difference between a
+sampling regime the pipeline chose and one it merely asked for.
+
+**Judge format** — The instruction a selector is given, which is part of the judge rather than of
+the caller. A chat judge is asked for the number and nothing else; a reasoning judge is asked to
+think and to put the number alone on the final line, and its reply is read from that line only. The
+two formats are selected by the endpoint's declared capability on an arm that opts in
+(`judgeFormat: 'capability'`), so every published selector reading keeps the instruction it was
+measured with and the format can be priced against the model it belongs to.

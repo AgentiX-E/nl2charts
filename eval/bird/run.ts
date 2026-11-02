@@ -24,7 +24,7 @@ import { pathToFileURL } from 'node:url';
 import { createHttpProvider } from '@agentix-e/nl2charts-ai';
 import type { LlmProvider, PromptOptions, SchemaTable } from '@agentix-e/nl2charts-ai';
 import { applySelection, attachDefinitions, buildAskMessages, buildSelectionPrompt, chooseCandidatePairwise, buildSqlPrompt, choosePromptProfile, createPipeline, emptyRetryMessages, extractSql, formatProfile, renderDefinitions, renderEvidence, renderSchemaCard, withCallCounter } from '@agentix-e/nl2charts-ai';
-import type { FormatProfile, PurposeUsage, ReplyShape } from '@agentix-e/nl2charts-ai';
+import type { FormatProfile, ModelCapabilities, PurposeUsage, ReplyShape } from '@agentix-e/nl2charts-ai';
 // The retry turn writes a statement outside the pipeline, so it goes through the same
 // guard the pipeline applies. Skipping it here would let the one arm that retries be the
 // one arm that can execute DDL.
@@ -196,6 +196,20 @@ export interface Arm {
    */
   readonly judge?: 'second';
   /**
+   * How the judge's reply is asked for and read.
+   *
+   * `strict` is the instruction every published selector reading was taken with: one number and
+   * nothing else. `capability` asks the judge's provider what it is, and a reasoning judge is
+   * asked to think and to end on the number instead — the model either ignores "nothing else"
+   * (and its prose used to be counted as an undecided vote) or obeys it and gives up the
+   * deliberation it was chosen for.
+   *
+   * The default is `strict`, not `capability`, so that an arm name keeps the reading it was
+   * published with. The pair `select-cross-judge` / `select-cross-judge-reasoning` separates the
+   * model change from the format change, which is the only way either delta is attributable.
+   */
+  readonly judgeFormat?: 'strict' | 'capability';
+  /**
    * Rewrite every candidate into one SQL style before the selector reads it.
    *
    * The judge swap answered *whose* preference it is and left the *channel* open: the same
@@ -295,6 +309,17 @@ export interface Arm {
    * the model at all.
    */
   readonly columnSelect?: 'columns' | 'dense';
+  /**
+   * Per-source overrides for the schema hint the prompt carries.
+   *
+   * The hint (`Likely columns: ...`) is computed by our linker and is useful to a model that
+   * cannot afford to read the whole card. For a reasoning model it is a pre-computed answer
+   * placed in front of the work: the model was chosen to decide which columns matter, and the
+   * one decision it would have made for itself has already been made for it. This map removes
+   * the hint from a named source and leaves every other source byte-identical, so the delta
+   * belongs to the hint and not to a shorter prompt.
+   */
+  readonly sourceLinking?: Readonly<Record<string, boolean>>;
 }
 
 /**
@@ -517,6 +542,31 @@ export const ARMS: readonly Arm[] = [
   // signatures removed. The judge swap showed the asymmetry is authorship; a judge recognises
   // authorship from formatting, so removing formatting is the test of whether the 6pp was
   // readability or taste.
+  // The empty-result turn on the cross set, spent by the model that wrote the statement.
+  //
+  // The turn used to be sent to the primary provider unconditionally, so on a cross arm the
+  // reasoning model's empty result was rewritten by the chat model — a lever that silently
+  // downgraded the arm it was attached to. This arm is the affordable test of the fix: it fires
+  // only when the selected candidate returned nothing, and the artifact records which endpoint
+  // answered the retry (`byPurpose.retry` moves between the two counters).
+  { name: 'select-cross-empty', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: CROSS_SOURCES, emptyRetry: 'diagnosed' },
+  // The reasoning model in the judge's seat, asked in the shape it can answer.
+  //
+  // `select-cross`'s selector is the primary chat model reading a set whose dissenting member it
+  // did not write. The measured asymmetry — the second model's correct statement returned 47% of
+  // the time when only its set held the answer, against 87% for the primary's — has two readings,
+  // and the judge swap is what separates them. The historical swap used the second model of that
+  // day (`glm-4-flash`), which cost 6pp because it could not read SQL; this arm puts the
+  // reasoning model there and asks it in the format it can follow. One lever from `select-cross`
+  // (who judges), plus the format the capability contract says that judge needs.
+  { name: 'select-cross-judge-reasoning', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: CROSS_SOURCES, judge: 'second', judgeFormat: 'capability' },
+  // The hint removed from the reasoning model's prompt and nothing else.
+  //
+  // On `select-cross`, the second model's slot is `inline+evidence`, whose user message ends with
+  // `Likely columns: ...` — our linker's answer to the question this model was bought to answer.
+  // The hypothesis is not "less prompt is better"; it is that the hint anchors a model that would
+  // otherwise deliberate, and the arm exists to price that anchor with zero extra calls.
+  { name: 'select-cross-unhinted', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: CROSS_SOURCES, sourceLinking: { 'inline+evidence@second': false } },
   { name: 'select-cross-canon', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: CROSS_SOURCES, canonical: true },
   // ...and the same canonical text read by the second model, which is where the style channel was
   // measured: the 128-case loss group belongs to that judge, so closing the channel has to be
@@ -734,6 +784,9 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'select-cross': 'the trio with its first candidate from a second model: needs BIRD_SECOND_MODEL and a second key, so it is dispatched rather than run on every push',
   'select-mixed+agree': 'the adopted arm with agreement marked on the candidates: one lever, four calls, and the selector prompt differs by a line per agreeing candidate — run it against `select-mixed` when the pool question is conversion and not generation',
   'select-cross-agree': 'the cross arm with the marks: needs the second model, and is measured against `select-cross`, which is where a dissenting slot made agreement ambiguous',
+  'select-cross-judge-reasoning': 'the cross set judged by the reasoning model, asked in the shape a reasoning model can answer: needs the second model and a second key, and is measured against `select-cross`; the pair `select-cross-judge` -> this arm prices the format, this arm -> `select-cross` prices the judge',
+  'select-cross-empty': 'the cross set with one turn spent on an empty result, sent to the model that wrote the statement: needs the second model, and is measured against `select-cross`',
+  'select-cross-unhinted': 'the cross set with the linker hint removed from the reasoning model\'s prompt only: needs the second model, no extra call, and is measured against `select-cross`',
   'select-tagged': 'the cross arm with each candidate labelled by its source: needs the second model too, and is measured against `select-cross`',
   'vote-mixed': 'three prompts aggregated by modal result instead of by a model: 63% would make the selector call unnecessary, and below that it prices what the model adds',
   'vote-cross': 'the cross-model candidate set aggregated by modal result: needs the second model too',
@@ -852,6 +905,17 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   // One lever: where the authors sit, holding the majority and the prompts fixed. The pair
   // that can say whether the 52.6% belongs to the author or to slot zero.
   ['select-cross', 'select-cross-shuffled'],
+  // One lever: who judges the same three candidates, with the format that judge needs. The
+  // historical judge swap (glm-4-flash, -6pp) conflated "a weaker model cannot read SQL" with
+  // "a different model is not the answer"; this pair separates the model from the format.
+  ['select-cross', 'select-cross-judge-reasoning'],
+  ['select-cross-judge', 'select-cross-judge-reasoning'],
+  // One lever: whether the empty-result turn is sent to the statement's author or to the primary
+  // model. The pair is what prices the fix; before it, the retry on a cross arm was a downgrade.
+  ['select-cross', 'select-cross-empty'],
+  // One lever: whether the reasoning model's prompt carries our linker's answer in front of it.
+  // Zero extra calls, so the delta is the anchor and not a budget.
+  ['select-cross', 'select-cross-unhinted'],
   // One lever: the same candidates and the same selector, told which of them returned the same
   // rows. The fact a 2+1 pool turns on is the one fact the selector could not compute from two
   // truncated previews, and the pair prices the information rather than a rewrite.
@@ -961,6 +1025,15 @@ export interface CaseRun extends CaseOutcome {
    * refused instead of published as a saving.
    */
   readonly tokens?: CaseTokens;
+  /**
+   * Parameters the endpoint dropped on this case, and how many calls carried each.
+   *
+   * A reasoning endpoint accepts `temperature` and ignores it. The request is not wrong and the
+   * answer is not an error, so nothing else in this artifact would show that the arm did not
+   * sample at the temperature it printed. Absent when nothing was dropped, which is the state of
+   * every arm run on the chat model.
+   */
+  readonly samplingOmitted?: Readonly<Record<string, number>>;
   /**
    * Which decomposition the returned statement came from, on a mixed arm.
    *
@@ -1963,7 +2036,20 @@ export interface BirdSettings {
   readonly model: string;
   readonly baseUrl: string;
   readonly apiKey: string;
-  readonly second: { readonly model: string; readonly baseUrl: string; readonly apiKey: string };
+  readonly second: {
+    readonly model: string;
+    readonly baseUrl: string;
+    readonly apiKey: string;
+    /**
+     * What the second endpoint does with a request, when its name does not say.
+     *
+     * Absent means "the name decides" (`capabilitiesOf`), which is the right default for
+     * `deepseek-reasoner` and wrong for a private deployment whose model is called `prod-a`. A
+     * wrong guess here is not cosmetic: it decides whether `temperature` is sent and whether the
+     * selector is asked for prose or for a number.
+     */
+    readonly capabilities?: Partial<ModelCapabilities>;
+  };
   /**
    * The harness's own knobs, carried as values because a report that omits them cannot
    * say whether a difference between two runs is the pipeline or the instrument. A
@@ -1974,6 +2060,35 @@ export interface BirdSettings {
   readonly retryDelayMs: number;
   readonly valuesForce: boolean;
   readonly definitionsForce: boolean;
+}
+
+/**
+ * A capability declaration from the environment, validated where it is read.
+ *
+ * Two fields decide a request's shape, so a typo in either is refused rather than ignored: a
+ * `family` of `"reason"` would fall back to the chat default and send a parameter the endpoint
+ * discards, which is precisely the failure this contract exists to make impossible. The rest of
+ * the object is passed through: an unknown key is a deployment's own extension, not an error.
+ */
+export function parseCapabilityOverrides(raw: string | undefined, name: string): Partial<ModelCapabilities> | undefined {
+  if (raw === undefined || raw.trim() === '') return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    throw new Error(`${name} is not JSON: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`${name} must be a JSON object, not ${Array.isArray(parsed) ? 'an array' : typeof parsed}`);
+  }
+  const value = parsed as Record<string, unknown>;
+  if (value.family !== undefined && value.family !== 'chat' && value.family !== 'reasoning') {
+    throw new Error(`${name}.family must be "chat" or "reasoning", not ${JSON.stringify(value.family)}`);
+  }
+  if (value.sampling !== undefined && value.sampling !== 'honoured' && value.sampling !== 'ignored') {
+    throw new Error(`${name}.sampling must be "honoured" or "ignored", not ${JSON.stringify(value.sampling)}`);
+  }
+  return value as Partial<ModelCapabilities>;
 }
 
 export function resolveSettings(
@@ -2013,6 +2128,10 @@ export function resolveSettings(
       model: env.BIRD_SECOND_MODEL ?? '',
       baseUrl: env.BIRD_SECOND_BASE_URL ?? '',
       apiKey: env.BIRD_SECOND_API_KEY ?? env.ZHIPU_API_KEY ?? '',
+      ...(() => {
+        const declared = parseCapabilityOverrides(env.BIRD_SECOND_CAPABILITIES, 'BIRD_SECOND_CAPABILITIES');
+        return declared === undefined ? {} : { capabilities: declared };
+      })(),
     },
     timeoutMs: Number(env.BIRD_LLM_TIMEOUT_MS ?? 60000),
     retries: Number(env.BIRD_LLM_RETRIES ?? 3),
@@ -3184,10 +3303,15 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
     // Both models' usage is this case's cost, for the same reason both counters are. Added on
     // the way out rather than at each of the eleven return sites in this function, because a
     // cost that has to be remembered per branch is a cost that will be missing from one.
-    const costOfCase = (): Pick<CaseRun, 'tokens'> => {
+    const costOfCase = (): Pick<CaseRun, 'tokens'> & { readonly samplingOmitted?: Readonly<Record<string, number>> } => {
       const primary = counter.usage();
       const second = secondCounter?.usage();
+      const dropped = new Map<string, number>();
+      for (const ledger of [counter.omitted(), secondCounter?.omitted() ?? new Map<string, number>()]) {
+        for (const [parameter, count] of ledger) dropped.set(parameter, (dropped.get(parameter) ?? 0) + count);
+      }
       return {
+        ...(dropped.size === 0 ? {} : { samplingOmitted: Object.fromEntries(dropped) }),
         tokens: {
           prompt: primary.promptTokens + (second?.promptTokens ?? 0),
           completion: primary.completionTokens + (second?.completionTokens ?? 0),
@@ -3232,19 +3356,32 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
       // The execute hook exists for repairs only: without repairs it would turn an
       // execution failure into a thrown pipeline error and hide the statement that
       // failed, which is the one thing a diagnosis needs.
-      const pipelineFor = (target: Arm, which: 'primary' | 'second' = 'primary'): ReturnType<typeof createPipeline> =>
+      const pipelineFor = (
+        target: Arm,
+        which: 'primary' | 'second' = 'primary',
+        linkingOverride?: boolean,
+      ): ReturnType<typeof createPipeline> =>
         createPipeline({
           provider: which === 'second' && secondCounter !== undefined ? secondCounter.provider : counter.provider,
           maxRepairs: target.repairs,
-          linking: target.linking,
+          linking: linkingOverride ?? target.linking,
           interpret: target.interpret === true,
           plan: target.plan === true,
           decompose: target.decompose === true,
           ...(target.repairFeedback === undefined ? {} : { repairFeedback: target.repairFeedback }),
           ...(target.audit === undefined ? {} : { audit: target.audit }),
+          // The pipeline owns the turn on a single-candidate arm, so the arm's switch has to reach
+          // it. It did not: `emptyRetry` was read by the harness's own sampling branch and never
+          // passed to `createPipeline`, which meant `inline+evidence+empty` — the arm the mechanism
+          // was measured on — spent no call and reported no funnel.
+          ...(target.emptyRetry === undefined ? {} : { emptyRetry: target.emptyRetry }),
           temperature: target.vote === undefined ? 0 : 0.7,
           prompt: promptFor(target, question, prepared.blocksFor(target, question)),
-          ...(target.repairs === 0
+          // Two mechanisms need the engine's answer, not one: the repair loop and the empty-result
+          // turn. The hook used to be attached only when `repairs > 0`, so `inline+evidence+empty`
+          // — an arm whose entire lever is that turn — never saw a row count and never fired. The
+          // guard on the arm instead of on the hook is what made a published arm a no-op.
+          ...(target.repairs === 0 && target.emptyRetry === undefined
             ? {}
             : {
                 execute: async (sql: string) => {
@@ -3255,7 +3392,11 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
                     if (target.shapeGuard === true && shapeMismatch(question.question, result.rows)) {
                       throw new Error(shapeFailure(result.rows));
                     }
-                    return;
+                    // The row count is the return value, not a side channel: the empty-result turn
+                    // reads it, and a hook that returns nothing makes "returned no rows" a state
+                    // the pipeline can never observe. On a repair-only arm the value is unused,
+                    // which is why the defect survived — `inline+evidence+empty` spent no call.
+                    return { rows: result.rows.length };
                   }
                   // The driver's own words, not a summary of them: the repair reads
                   // `details.engineError` to decide what to tell the model.
@@ -3307,7 +3448,11 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
             const spec = parseMixedSource(source);
             const drawn = (survival[source] ??= { generated: 0, survived: 0 });
             drawn.generated += 1;
-            const sampler = sources === undefined ? pipeline : pipelineFor(resolveArm(spec.arm) as Arm, spec.provider);
+            // The hint override is keyed by the *source*, not by the arm that resolves it: two
+            // sources can share one prompt shape and differ in whether the linker's answer is in
+            // front of the model, and keying by arm would silently apply the override to both.
+            const hinted = arm.sourceLinking?.[source];
+            const sampler = sources === undefined ? pipeline : pipelineFor(resolveArm(spec.arm) as Arm, spec.provider, hinted);
             const askedSample = await sampler.ask({ question: question.question, schema });
             if (firstShape === undefined && askedSample.shape !== undefined) firstShape = askedSample.shape;
             // The mechanism has to be observable, not declared: a prompt that asks for
@@ -3407,19 +3552,24 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
           // the first version of this counter left it out — which the gate caught on the
           // very next run ("select samples 3 times and reports 3 calls per case").
           const judge = arm.judge === 'second' && secondCounter !== undefined ? secondCounter.provider : counter.provider;
+          // The instruction and the reader follow the judge's declared capability, and only on an
+          // arm that asked for it: `judgeFormat` defaults to `strict`, which is what every
+          // published selector reading was taken with, so an arm name cannot silently change the
+          // question it answers between one run and the next.
+          const judgeReasoning = arm.judgeFormat === 'capability' && judge.capabilities?.thinksAloud === true;
           const decision =
             arm.pairwise === true
               ? await chooseCandidatePairwise(judge, question.question, readable)
               : await (async () => {
                   const reply = await judge.complete({
                     messages: [
-                      { role: 'system', content: buildSelectionPrompt(question.question, offered) },
+                      { role: 'system', content: buildSelectionPrompt(question.question, offered, { reasoning: judgeReasoning }) },
                       { role: 'user', content: question.question },
                     ],
                     temperature: 0,
                     purpose: 'select',
                   });
-                  const applied = applySelection(reply.text, offered);
+                  const applied = applySelection(reply.text, offered, { reasoning: judgeReasoning });
                   return { index: applied.index, decided: applied.decided, sql: (offered[applied.index] as { sql: string }).sql };
                 })();
           winner = ordered[decision.index] as typeof winner;
@@ -3433,14 +3583,21 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
         let retried = false;
         if (arm.emptyRetry !== undefined && winner.rows.length === 0) {
           retried = true;
-          const sourceArm = arm.mixed === undefined ? arm : (resolveArm(parseMixedSource(winner.source).arm) as Arm);
+          // The turn belongs to the model that wrote the statement it replaces. It used to be
+          // sent to the primary provider unconditionally, which on a cross arm meant the
+          // reasoning model's empty result was rewritten by the chat model — a lever that
+          // silently downgraded the arm it was attached to, and one whose cost was charged to
+          // the wrong counter.
+          const winnerSpec = arm.mixed === undefined ? { arm: arm.name, provider: 'primary' as const } : parseMixedSource(winner.source);
+          const sourceArm = arm.mixed === undefined ? arm : (resolveArm(winnerSpec.arm) as Arm);
+          const retryProvider = winnerSpec.provider === 'second' && secondCounter !== undefined ? secondCounter.provider : counter.provider;
           const retryPrompt = buildAskMessages({
             question: question.question,
             schema,
             prompt: promptFor(sourceArm, question, prepared.blocksFor(sourceArm, question)),
-            linking: sourceArm.linking,
+            linking: arm.sourceLinking?.[winner.source] ?? sourceArm.linking,
           });
-          const reply = await counter.provider.complete({
+          const reply = await retryProvider.complete({
             messages: [...retryPrompt.messages, ...emptyRetryMessages(arm.emptyRetry, winner.sql, winner.sql)],
             // The arm samples above zero, so a blind turn is a different draw and not a
             // copy of the statement it replaces. Both modes use the same temperature:
@@ -3530,6 +3687,12 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
           calls: callsMade(),
           failures: asked.failures,
           ...(asked.audit === undefined ? {} : { audit: asked.audit }),
+          // The pipeline's own funnel, on the return path the sampling branch never takes. It was
+          // absent here, so an arm whose lever is this turn reported `fired: 0` even after it ran
+          // — the mechanism was observable in the pipeline and invisible in the artifact.
+          ...(asked.emptyRetry === undefined
+            ? {}
+            : { emptyRetried: asked.emptyRetry.fired, emptyRecovered: asked.emptyRetry.recovered }),
           ...(asked.decomposedSteps === undefined ? {} : { decomposition: { candidates: 1, steps: asked.decomposedSteps } }),
           ...shape,
         };
@@ -3767,6 +3930,24 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
     // is the arm the numbers exist for.
     ...armDecomposition(runs),
     ...armFormat(runs),
+    // What this arm's endpoint refused to honour, summed over the cases that carried a dropped
+    // parameter. Printed beside the accuracy because it qualifies the sampling claim: an arm
+    // that says "temperature 0" while the endpoint ignored the field did not sample at zero,
+    // and a report without this count cannot tell that state from the one every published
+    // reading was taken in.
+    ...(runs.some((run) => run.samplingOmitted !== undefined)
+      ? {
+          samplingOmitted: (() => {
+            const totals: Record<string, number> = {};
+            for (const run of runs) {
+              for (const [parameter, count] of Object.entries(run.samplingOmitted ?? {})) {
+                totals[parameter] = (totals[parameter] ?? 0) + count;
+              }
+            }
+            return totals;
+          })(),
+        }
+      : {}),
     ...(arm.emptyRetry === undefined ? {} : { emptyRetry: { mode: arm.emptyRetry, ...emptyRetryFunnel(runs) } }),
     ...(arm.audit === undefined ? {} : { audit: auditFunnel(runs) }),
     // What the model kept of the card, on the one arm that asks it to choose. Beside the
@@ -4120,6 +4301,7 @@ export function createProviders(settings: BirdSettings): {
     baseUrl: settings.second.baseUrl === '' ? settings.baseUrl : settings.second.baseUrl,
     apiKey: settings.second.apiKey,
     model: settings.second.model,
+    ...(settings.second.capabilities === undefined ? {} : { capabilities: settings.second.capabilities }),
     retries: settings.retries,
     retryDelayMs: settings.retryDelayMs,
     timeoutMs: settings.timeoutMs,

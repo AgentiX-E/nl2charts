@@ -115,7 +115,24 @@ function renderCandidate(candidate: Candidate, label: string): string {
     .join('\n');
 }
 
-export function buildSelectionPrompt(question: string, candidates: readonly Candidate[]): string {
+export interface SelectionPromptOptions {
+  /**
+   * Ask for the deliberation the model was chosen for, and read the answer from the last line.
+   *
+   * A reasoning model that is told "nothing else" either ignores the instruction — and writes
+   * prose the strict reader rejects, which the harness records as "the selector did not answer"
+   * — or obeys it and drops the reasoning that is the only reason to pay for this model. The
+   * two failure modes point in opposite directions and have the same cause: one instruction
+   * written for a model that answers in one token.
+   */
+  readonly reasoning?: boolean;
+}
+
+export function buildSelectionPrompt(
+  question: string,
+  candidates: readonly Candidate[],
+  options: SelectionPromptOptions = {},
+): string {
   // The agreement block is opt-in and its absence is byte-identical to the prompt every arm
   // before this one was measured with: a caller that does not compute marks gets the prompt it
   // has always had, so the delta between marked and unmarked is the marks and nothing else.
@@ -129,7 +146,12 @@ export function buildSelectionPrompt(question: string, candidates: readonly Cand
     ...RULES,
     '- If two candidates are equivalent, choose the one whose rows are more consistent with the question.',
     ...(marked ? [AGREEMENT_RULE] : []),
-    'Answer with the number of the chosen candidate and nothing else.',
+    // The default is byte-identical to the instruction every published reading was taken with.
+    // The reasoning branch is a different instruction, not a longer one: it asks for the work
+    // and fixes where the answer has to end, so the reader can still be strict about the answer.
+    options.reasoning === true
+      ? 'Think about which candidate answers the question, then write the number of your choice alone on the final line.'
+      : 'Answer with the number of the chosen candidate and nothing else.',
     '',
     `Question: ${question}`,
     'Candidates:',
@@ -178,11 +200,11 @@ export function parseChoiceToken(text: string): number | null {
  * caller decides what an unreadable answer means, and a silent fallback to candidate 1
  * would make "the selector agreed" and "the selector did not answer" the same number.
  */
-export function parseSelection(text: string, count: number): number {
+export function parseSelection(text: string, count: number, options: SelectionPromptOptions = {}): number {
   // Decoration is tolerated, prose is not: see `CHOICE_ONLY`. Widening the decoration is
   // how a model nobody has benchmarked yet gets read correctly on its first day; it does
   // not move the measured arms, where the selector already answered in 495 of 496 cases.
-  const token = parseChoiceToken(text);
+  const token = options.reasoning === true ? parseReasonedChoice(text) : parseChoiceToken(text);
   if (token === null) return -1;
   const index = token - 1;
   if (!Number.isInteger(index) || index < 0 || index >= count) return -1;
@@ -195,11 +217,33 @@ export function parseSelection(text: string, count: number): number {
  * `decided: false` is a fact worth reporting: it counts how often the selector failed
  * to answer, which is the difference between a null result and a broken prompt.
  */
+/**
+ * The number a reasoning model names, read from the end of its reply.
+ *
+ * Strict first: a reply that is nothing but a choice is read exactly as before, so a model that
+ * follows the instruction is not treated differently from one that needed the looser branch.
+ * Only when the whole reply is not a choice does the reader look at the final line, which is
+ * where a reply written under the reasoning instruction puts its answer. Prose in the middle is
+ * still not a choice: a reply whose last line is not a number returns null, which the caller
+ * reports as undecided rather than counting as a vote.
+ */
+export function parseReasonedChoice(text: string): number | null {
+  const strict = parseChoiceToken(text);
+  if (strict !== null) return strict;
+  const lines = text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  const last = lines[lines.length - 1];
+  return last === undefined ? null : parseChoiceToken(last);
+}
+
 export function applySelection(
   text: string,
   candidates: readonly Candidate[],
+  options: SelectionPromptOptions = {},
 ): SelectionDecision {
-  const index = parseSelection(text, candidates.length);
+  const index = parseSelection(text, candidates.length, options);
   return { index: index === -1 ? 0 : index, decided: index !== -1 };
 }
 
@@ -242,15 +286,19 @@ export async function chooseCandidate(
   if (executed.length === 0) throw new Error('chooseCandidate needs at least one executed candidate');
   if (executed.length === 1) return { index: 0, decided: true, sql: (executed[0] as ExecutedCandidate).sql };
   const offered = executed.map((candidate) => toCandidate(candidate));
+  // What this endpoint can do decides the instruction and the reader, not the caller: a
+  // deployment that swaps the selector's backbone should not also have to remember to swap the
+  // format contract, and a selector that answered in prose would be reported as undecided.
+  const reasoning = provider.capabilities?.thinksAloud === true;
   const reply = await provider.complete({
     messages: [
-      { role: 'system', content: buildSelectionPrompt(question, offered) },
+      { role: 'system', content: buildSelectionPrompt(question, offered, { reasoning }) },
       { role: 'user', content: question },
     ],
     temperature: turnTemperature(temperature),
     purpose: 'select',
   });
-  const decision = applySelection(reply.text, offered);
+  const decision = applySelection(reply.text, offered, { reasoning });
   return { ...decision, sql: (offered[decision.index] as Candidate).sql };
 }
 

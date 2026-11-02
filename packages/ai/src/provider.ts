@@ -1,4 +1,6 @@
 import { isNl2ChartsError, toNl2ChartsError } from '@agentix-e/nl2charts-spec';
+import { adaptRequest, capabilitiesOf } from './capability.js';
+import type { ModelCapabilities } from './capability.js';
 
 export type Role = 'system' | 'user' | 'assistant';
 
@@ -90,11 +92,27 @@ export interface LlmResponse {
   readonly text: string;
   readonly model: string;
   readonly usage?: LlmUsage;
+  /**
+   * Parameters the request carried that this endpoint does not honour.
+   *
+   * Present only when something was dropped, because an empty list and an absent list would be
+   * two spellings of "nothing", and the field exists to make a non-empty answer visible. A
+   * caller that never reads it is not misled; a report that never prints it is.
+   */
+  readonly ignored?: readonly string[];
 }
 
 export interface LlmProvider {
   readonly id: string;
   readonly model: string;
+  /**
+   * What this endpoint does with a request, when the provider knows.
+   *
+   * Optional so that a hand-written provider in a test or a deployment keeps compiling: an
+   * absent declaration means "unknown", and the pipeline then sends the request as it always
+   * has. A provider built by `createHttpProvider` always declares it.
+   */
+  readonly capabilities?: ModelCapabilities;
   complete(request: LlmRequest, options?: { signal?: AbortSignal }): Promise<LlmResponse>;
 }
 
@@ -118,6 +136,14 @@ export interface HttpProviderOptions {
   readonly retryDelayMs?: number;
   /** Injection point for tests; defaults to a real timer. */
   readonly sleep?: (ms: number) => Promise<void>;
+  /**
+   * What the endpoint does with a request. Defaults to what the model name implies.
+   *
+   * Declared here rather than derived at the call site because the provider is the only layer
+   * that knows which endpoint it is talking to, and because a deployment with a private model
+   * name has no other way to say "this one thinks before it answers".
+   */
+  readonly capabilities?: Partial<ModelCapabilities>;
 }
 
 /** Statuses that mean "try again", as opposed to "the request is wrong". */
@@ -184,10 +210,12 @@ export function createHttpProvider(options: HttpProviderOptions): LlmProvider {
   const retryDelayMs = options.retryDelayMs ?? 500;
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const endpoint = `${options.baseUrl.replace(/\/$/, '')}/chat/completions`;
+  const capabilities = capabilitiesOf(options.model, options.capabilities);
 
   return {
     id: 'http',
     model: options.model,
+    capabilities,
     async complete(request, callOptions) {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(new Error('timeout')), timeoutMs);
@@ -199,15 +227,21 @@ export function createHttpProvider(options: HttpProviderOptions): LlmProvider {
       }
       const headers: Record<string, string> = { 'content-type': 'application/json' };
       if (options.apiKey !== undefined) headers.authorization = `Bearer ${options.apiKey}`;
+      // The request as this endpoint will read it. A parameter the endpoint ignores is removed
+      // here rather than sent and forgotten: the meter reports what was asked for, and a field
+      // that never took effect would make that report false. On a chat model this is a no-op.
+      const adapted = adaptRequest(request, capabilities);
       const body: Record<string, unknown> = {
         model: options.model,
-        messages: request.messages,
+        messages: adapted.request.messages,
       };
       // Omitted rather than defaulted, so that `null` can mean what it says. The field is
-      // written only when the deployment has an opinion about it.
-      if (request.temperature !== null) body.temperature = request.temperature ?? 0;
-      if (request.maxTokens !== undefined) body.max_tokens = request.maxTokens;
-      if (request.json === true) body.response_format = { type: 'json_object' };
+      // written only when the deployment has an opinion about it and the endpoint honours it.
+      if (adapted.request.temperature !== null && adapted.request.temperature !== undefined) {
+        body.temperature = adapted.request.temperature;
+      }
+      if (adapted.request.maxTokens !== undefined) body.max_tokens = adapted.request.maxTokens;
+      if (adapted.request.json === true) body.response_format = { type: 'json_object' };
 
       let payload: CompletionBody | undefined;
       let response: Response | undefined;
@@ -326,6 +360,7 @@ export function createHttpProvider(options: HttpProviderOptions): LlmProvider {
         text: content,
         model,
         usage: { promptTokens: Number.isFinite(promptTokens) ? promptTokens : 0, completionTokens: Number.isFinite(completionTokens) ? completionTokens : 0 },
+        ...(adapted.ignored.length === 0 ? {} : { ignored: adapted.ignored }),
       };
     },
   };
@@ -375,6 +410,15 @@ export function withCallCounter(provider: LlmProvider): {
   readonly byPurpose: () => ReadonlyMap<CallPurpose | typeof UNLABELLED, PurposeUsage>;
   /** Calls that named no purpose. Zero on a harness that labels every call it measures. */
   readonly unlabelled: () => number;
+  /**
+   * Parameters the endpoint dropped, and how many calls carried one.
+   *
+   * The counterpart of `unbilled`, one layer up: a run that sent `temperature: 0` to an endpoint
+   * that ignores it has not sampled at zero, and a report that prints "temperature 0" without
+   * this count asserts something the endpoint never did. Empty on a provider that honours every
+   * field, which is the state this repository's published readings were taken in.
+   */
+  readonly omitted: () => ReadonlyMap<string, number>;
 } {
   type Meter = { calls: number; promptTokens: number; completionTokens: number; chars: number; unbilled: number };
   const zero = (): Meter => ({ calls: 0, promptTokens: 0, completionTokens: 0, chars: 0, unbilled: 0 });
@@ -383,10 +427,16 @@ export function withCallCounter(provider: LlmProvider): {
   // the buckets add up to the total. Recounting would be a second implementation of the same sum.
   const totals = zero();
   const purposes = new Map<CallPurpose | typeof UNLABELLED, Meter>();
+  const dropped = new Map<string, number>();
   return {
     provider: {
       id: provider.id,
       model: provider.model,
+      // A wrapper that drops the declaration is the same defect one layer up: the pipeline reads
+      // `capabilities` off whatever provider it is handed, and a metered provider without one
+      // silently looked like an endpoint whose protocol nobody knows — which is how a reasoning
+      // judge was asked for a bare number and answered in prose.
+      ...(provider.capabilities === undefined ? {} : { capabilities: provider.capabilities }),
       complete: async (request, options) => {
         const key = request.purpose ?? UNLABELLED;
         const meter = purposes.get(key) ?? zero();
@@ -402,6 +452,7 @@ export function withCallCounter(provider: LlmProvider): {
           totals.chars += message.content.length;
         }
         const response = await provider.complete(request, options);
+        for (const parameter of response.ignored ?? []) dropped.set(parameter, (dropped.get(parameter) ?? 0) + 1);
         // Read per answer rather than per arm: an endpoint that reports usage on some answers and
         // not others is a state that exists, and summing only what arrived would hide it.
         if (response.usage === undefined) {
@@ -420,5 +471,6 @@ export function withCallCounter(provider: LlmProvider): {
     usage: () => ({ promptTokens: totals.promptTokens, completionTokens: totals.completionTokens, chars: totals.chars, unbilled: totals.unbilled }),
     byPurpose: () => new Map(purposes),
     unlabelled: () => purposes.get(UNLABELLED)?.calls ?? 0,
+    omitted: () => new Map(dropped),
   };
 }

@@ -55,7 +55,7 @@ import type { BirdQuestion } from '../eval/bird/data.js';
  * delta cannot be attributed to anything else. A future edit that adds a second
  * change to a pair turns this red before it turns the benchmark unreadable.
  */
-const LEVERS = ['notes', 'evidence', 'repairs', 'linking', 'profile', 'definitions', 'focus', 'interpret', 'vote', 'demonstrations', 'select', 'values', 'plan', 'repairFeedback', 'shapeGuard', 'mixed', 'pairwise', 'sourcesVisible', 'judge', 'emptyRetry', 'audit', 'decompose', 'samples', 'canonical', 'shuffle', 'prune', 'columnSelect', 'agreement'] as const;
+const LEVERS = ['notes', 'evidence', 'repairs', 'linking', 'profile', 'definitions', 'focus', 'interpret', 'vote', 'demonstrations', 'select', 'values', 'plan', 'repairFeedback', 'shapeGuard', 'mixed', 'pairwise', 'sourcesVisible', 'judge', 'judgeFormat', 'emptyRetry', 'audit', 'decompose', 'samples', 'canonical', 'shuffle', 'prune', 'columnSelect', 'agreement', 'sourceLinking'] as const;
 
 function changedLevers(left: Arm, right: Arm): string[] {
   const levers = LEVERS.filter((lever) => left[lever] !== right[lever]);
@@ -63,7 +63,12 @@ function changedLevers(left: Arm, right: Arm): string[] {
   // suite checks that equality on every mixed arm. Counting both would make every change
   // of candidate set look like a two-lever comparison, which is the shape this test
   // exists to refuse.
-  return left.mixed !== undefined && right.mixed !== undefined ? levers.filter((lever) => lever !== 'vote') : levers;
+  // The format a judge is asked in is part of *who judges*, not a second change: an arm that
+  // swaps the judge necessarily states its format, and counting both would make every judge
+  // swap look like a two-lever comparison. The format is its own lever only when the judge is
+  // the same on both sides, which is exactly the pair that prices it.
+  const single = left.judge === right.judge ? levers : levers.filter((lever) => lever !== 'judgeFormat');
+  return left.mixed !== undefined && right.mixed !== undefined ? single.filter((lever) => lever !== 'vote') : single;
 }
 
 const question = {
@@ -839,7 +844,7 @@ describe('mixed arms declare their own sources', () => {
   const mixed = ARMS.filter((arm) => arm.mixed !== undefined);
 
   it('has at least the two arms under test', () => {
-    expect(mixed.map((arm) => arm.name).sort()).toEqual(['select-balanced', 'select-cross', 'select-cross-agree', 'select-cross-canon', 'select-cross-judge', 'select-cross-judge-canon', 'select-cross-shuffled', 'select-dc', 'select-duo', 'select-mixed', 'select-mixed+agree', 'select-mixed+dc', 'select-mixed+empty', 'select-mixed+empty-blind', 'select-tagged', 'vote-cross', 'vote-mixed']);
+    expect(mixed.map((arm) => arm.name).sort()).toEqual(['select-balanced', 'select-cross', 'select-cross-agree', 'select-cross-canon', 'select-cross-empty', 'select-cross-judge', 'select-cross-judge-canon', 'select-cross-judge-reasoning', 'select-cross-shuffled', 'select-cross-unhinted', 'select-dc', 'select-duo', 'select-mixed', 'select-mixed+agree', 'select-mixed+dc', 'select-mixed+empty', 'select-mixed+empty-blind', 'select-tagged', 'vote-cross', 'vote-mixed']);
   });
 
   it.each(mixed.map((arm) => [arm.name, arm] as const))('%s: candidates equal sources, and every source generates once', (name, arm) => {

@@ -4901,3 +4901,64 @@ cat eval/out/ablation.json
 The fixture is `eval/fixtures.sql`; the questions are `eval/golden.jsonl`. Both
 are reviewed like code: a new case needs a gold query that is unambiguous and
 deterministic.
+
+### A stronger model scored lower, and the reason was the pipeline
+
+Three readings now point the same way. On 298 questions `deepseek-reasoner` and `deepseek-chat`
+scored 153 and 153 at the same prompt; on 600 stratified dev questions the reasoner's single slot
+scores 61.94% (371/599) against 63.59% (379/596) for the chat slot at the same prompt, and the arm
+that contains it scores 63.67% against the all-chat arm's 64.33%. Read as a statement about models
+that is confusing; read as a statement about a pipeline it is exact, and the decomposition is
+already in the artifact all three readings came from (`41366778872`):
+
+| | `select-cross` (2 chat + 1 reasoner) | `select-mixed` (3 chat) | difference |
+| --- | --- | --- | --- |
+| ceiling (a correct candidate exists) | **69.83%** (419) | 65.50% (393) | **+4.33pp** |
+| conversion (the selector returns it) | **91.17%** | 98.22% | **−7.05pp** |
+| score | 63.67% (382) | 64.33% (386) | −0.66pp |
+
+The stronger model raises the ceiling and lowers the conversion, and the second number is larger.
+That is not the model's doing. Four mechanisms in this harness were suppressing a reasoning model,
+and one of them was not a model question at all:
+
+1. **A parameter the endpoint ignores was reported as one it honoured.** `temperature: 0` was sent,
+   accepted and discarded (`api-docs.deepseek.com/guides/thinking_mode`: the four sampling fields are
+   accepted for compatibility and have no effect). No error, no retry, and a report that printed a
+   sampling regime nobody ran.
+2. **The judge was the model that wrote two of the three candidates.** The reasoner's correct
+   statement was returned 47% of the time when only its set held the answer, against 87% for the
+   primary's — the asymmetry is measured, and the arms that would separate preference from
+   recognisability have never been run with this judge. The one judge swap on record used
+   `glm-4-flash` and lost 6pp, which is a fact about that model's SQL reading, not about swapping.
+3. **The judge's instruction was written for a model that answers in one token.** "Answer with the
+   number of the chosen candidate and nothing else" is either ignored by a reasoning model (its
+   prose is then read as an undecided vote) or obeyed at the cost of the deliberation it was chosen
+   for.
+4. **An arm whose switch never reached the mechanism.** `inline+evidence+empty` was declared, paired
+   and filed on demand, and its turn could not fire: the pipeline never received the switch, the
+   execution hook existed only on repair arms, and the hook returned nothing, so the row count the
+   trigger reads did not exist. Three independent breaks; none produced an error.
+
+Two arms were added and one defect was priced by a third. They are dispatched together, and the
+criteria are written here before the reading:
+
+| arm | one lever | criterion (600-question sample) |
+| --- | --- | --- |
+| `select-cross-judge-reasoning` | who judges, plus the format that judge can answer | ≥ +1.5pp against `select-cross`, paired p<0.05, and `selectorDecided` ≥ 99% |
+| `select-cross-unhinted` | `Likely columns` removed from the reasoner's prompt only | the reasoner slot ≥ +1.0pp, arm ≥ +0.5pp, zero extra calls |
+| `select-cross-empty` | the empty-result turn sent to the statement's author | funnel `fired` > 0 on every case that reaches it; accuracy is a null result at this base rate |
+
+The resolution of that sample is 3.17pp, so a +1.5pp criterion is deliberately below it: the first
+question is whether the mechanism moves at all, and a confirmed movement is re-run at 1,532 questions
+(MDE 2.30pp) before it is quoted as a gain. The arms are two levers out of six the artifact makes
+visible — the other four (a difficulty-aware allocation of the reasoning slot, a two-sample
+self-consistency for it, an arbitration between the vote and the selector, and a schema hint written
+for a model that reads the whole card) are registered in the plan and not yet built.
+
+What this section does not say: that a stronger model must score higher on the same prompt. On BIRD
+the reasoning model is not uniformly stronger — it is differently wrong, and at 600 questions the
+1.65pp gap between its slot and the chat slot is inside the noise (42 discordant for chat, 33 for
+the reasoner, exact McNemar p=0.356). What a
+pipeline owes a deployment is not that promise; it is that the stronger model's ceiling is usable,
+that the role it is paid for is the role it is measured in, and that the number reported is the
+number that ran.
