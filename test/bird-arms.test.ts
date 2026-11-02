@@ -55,7 +55,7 @@ import type { BirdQuestion } from '../eval/bird/data.js';
  * delta cannot be attributed to anything else. A future edit that adds a second
  * change to a pair turns this red before it turns the benchmark unreadable.
  */
-const LEVERS = ['notes', 'evidence', 'repairs', 'linking', 'profile', 'definitions', 'focus', 'interpret', 'vote', 'demonstrations', 'select', 'values', 'plan', 'repairFeedback', 'shapeGuard', 'mixed', 'pool', 'pairwise', 'sourcesVisible', 'judge', 'judgeFormat', 'emptyRetry', 'audit', 'decompose', 'samples', 'canonical', 'shuffle', 'prune', 'columnSelect', 'agreement', 'sourceLinking', 'sourceRepairs', 'reconcile'] as const;
+const LEVERS = ['notes', 'evidence', 'repairs', 'linking', 'profile', 'definitions', 'focus', 'interpret', 'vote', 'demonstrations', 'select', 'values', 'plan', 'repairFeedback', 'shapeGuard', 'mixed', 'pool', 'pairwise', 'sourcesVisible', 'judge', 'judgeFormat', 'emptyRetry', 'audit', 'decompose', 'samples', 'canonical', 'shuffle', 'prune', 'columnSelect', 'agreement', 'sourceLinking', 'sourceRepairs', 'reconcile', 'reconcileAdopt'] as const;
 
 function changedLevers(left: Arm, right: Arm): string[] {
   const levers = LEVERS.filter((lever) => left[lever] !== right[lever]);
@@ -135,6 +135,31 @@ describe('ablation arms', () => {
       const after = ARMS.find((arm) => arm.name === right) as Arm;
       expect(changedLevers(before, after), `${left} -> ${right}`).toHaveLength(1);
     }
+  });
+
+  it('states the reconcile policy on the arm whose name carries it, and on no other', () => {
+    // A `-novel` arm that forgot the field is its parent under another name, and the pair would
+    // then publish a delta of exactly zero with the authority of a measurement — the failure this
+    // project has paid for twice: a lever that did not run, and a guard that read its absence as a
+    // null result. The other direction matters as much: an arm that adopts only novel statements
+    // without saying so in its name is a reading nobody can find.
+    for (const arm of ARMS) {
+      if (arm.name.endsWith('-novel')) expect(arm.reconcileAdopt, arm.name).toBe('novel');
+      else expect(arm.reconcileAdopt, arm.name).toBeUndefined();
+    }
+  });
+
+  it('keeps the two reconcile arms on one prompt, one pool and one call', () => {
+    // The pairing rule above says one lever differs; this says the lever is the *only* difference a
+    // reader would have to hold in mind — the candidates, the sources and the price are shared.
+    const always = ARMS.find((arm) => arm.name === 'select-cross-pooled-reconcile') as Arm;
+    const novel = ARMS.find((arm) => arm.name === 'select-cross-pooled-reconcile-novel') as Arm;
+    expect(novel.reconcile).toBe(always.reconcile);
+    expect(novel.pool).toBe(always.pool);
+    expect(novel.mixed).toEqual(always.mixed);
+    expect(novel.vote).toBe(always.vote);
+    expect(novel.select).toBe(always.select);
+    expect(novel.judge).toBe(always.judge);
   });
 
   it('forms a chain rather than a set of unrelated arms', () => {
@@ -859,7 +884,7 @@ describe('mixed arms declare their own sources', () => {
   const mixed = ARMS.filter((arm) => arm.mixed !== undefined);
 
   it('has at least the two arms under test', () => {
-    expect(mixed.map((arm) => arm.name).sort()).toEqual(['select-balanced', 'select-cross', 'select-cross-agree', 'select-cross-canon', 'select-cross-empty', 'select-cross-judge', 'select-cross-judge-canon', 'select-cross-judge-reasoning', 'select-cross-pooled', 'select-cross-pooled-agree', 'select-cross-pooled-judge-reasoning', 'select-cross-pooled-reconcile', 'select-cross-pooled-vote', 'select-cross-repair-all', 'select-cross-repair-second', 'select-cross-shuffled', 'select-cross-unhinted', 'select-dc', 'select-duo', 'select-mixed', 'select-mixed+agree', 'select-mixed+dc', 'select-mixed+empty', 'select-mixed+empty-blind', 'select-mixed-pooled', 'select-mixed-pooled-vote', 'select-tagged', 'vote-cross', 'vote-mixed']);
+    expect(mixed.map((arm) => arm.name).sort()).toEqual(['select-balanced', 'select-cross', 'select-cross-agree', 'select-cross-canon', 'select-cross-empty', 'select-cross-judge', 'select-cross-judge-canon', 'select-cross-judge-reasoning', 'select-cross-pooled', 'select-cross-pooled-agree', 'select-cross-pooled-judge-reasoning', 'select-cross-pooled-reconcile', 'select-cross-pooled-reconcile-novel', 'select-cross-pooled-vote', 'select-cross-repair-all', 'select-cross-repair-second', 'select-cross-shuffled', 'select-cross-unhinted', 'select-dc', 'select-duo', 'select-mixed', 'select-mixed+agree', 'select-mixed+dc', 'select-mixed+empty', 'select-mixed+empty-blind', 'select-mixed-pooled', 'select-mixed-pooled-vote', 'select-tagged', 'vote-cross', 'vote-mixed']);
   });
 
   it.each(mixed.map((arm) => [arm.name, arm] as const))('%s: candidates equal sources, and every source generates once', (name, arm) => {

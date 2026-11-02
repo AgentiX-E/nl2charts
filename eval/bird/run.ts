@@ -308,6 +308,20 @@ export interface Arm {
    */
   readonly reconcile?: 'groups';
   /**
+   * What a reconcile arm does with a reply that restates a candidate.
+   *
+   * `'always'` — the default, and what `select-cross-pooled-reconcile` measured — adopts every
+   * statement the engine runs, including the 514 of 600 replies that were a candidate rewritten in
+   * other words. That arm scored 359 of 600 against the free vote's 380 (`41453395203`), and the
+   * arithmetic of the loss points at the rewrites rather than at the corrections: a case whose
+   * answer was already in hand was overwritten by a paraphrase of it.
+   *
+   * `'novel'` therefore hands the restatements back to the vote and adopts only statements nobody
+   * wrote. It is the same prompt and the same call — the difference is what the arm does with a
+   * reply that adds nothing — and it isolates `novel` cases as the only ones the lever can move.
+   */
+  readonly reconcileAdopt?: 'always' | 'novel';
+  /**
    * Ask the model what its own statement left out, one call, then keep what it writes.
    *
    * The population is the one nothing else can see: statements that run, return rows and are
@@ -671,6 +685,7 @@ export const ARMS: readonly Arm[] = [
   // write the statement to run, which can be a correction no candidate contains. Same candidates,
   // same judge, same temperature, same single call; the difference is the question it answers.
   { name: 'select-cross-pooled-reconcile', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: CROSS_SOURCES, pool: 'select-cross', reconcile: 'groups' },
+  { name: 'select-cross-pooled-reconcile-novel', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: CROSS_SOURCES, pool: 'select-cross', reconcile: 'groups', reconcileAdopt: 'novel' },
   // The same two arms on the *homogeneous* pool, which is the other half of the shape claim.
   //
   // `select-cross-pooled-vote` asked whether a free count is at least even where the candidates come
@@ -909,6 +924,7 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'select-cross-pooled-vote': 'the same pool decided by the modal result instead of by a model: zero calls per case, and the only reading of "is the selector worth its call" whose candidates are shared — the archived artifacts say the count wins 53 disputed cases to 22 (p = 4.5e-4), and this arm is what turns that into a measurement instead of a re-reading',
   'select-cross-pooled-agree': 'the same pool with the agreement marks the selector was never given: 149 of 600 cases had more than one distinct result, and which of three candidates returned the same rows is the one fact two truncated previews cannot yield; one lever from `select-cross-pooled`, one call per case',
   'select-cross-pooled-reconcile': 'the same pool and the same one call, asked for a statement instead of an index: an index cannot name an answer none of the candidates contains, and on this pool the correct statement is in the set on 70.5% of cases while the arm scores 64% — the 6.5pp the decision misses is the population this arm exists to reach; the funnel counts how often the reply is a statement nobody wrote, because an arm that restates a candidate is a selector with a longer prompt',
+  'select-cross-pooled-reconcile-novel': 'the same prompt and the same call as `select-cross-pooled-reconcile`, with one policy difference: a reply that restates a candidate hands the decision back to the vote instead of overwriting it — the arm that measured 59.8% against the vote\'s 63.3% adopted every one of the 595 replies it could run while only 86 of its 600 replies were statements nobody wrote, so the rewrites are the population this arm stops paying for; run it against `select-cross-pooled-vote` to price the novel statements alone',
   'select-mixed-pooled': 'the homogeneous pool (`select-mixed`) read without generating anything: one call per case, and the A/A instrument for the shape claim — it must read exactly what `select-mixed` read, because the delta from it to `select-mixed-pooled-vote` is the one number that says whether a model is worth more where the candidates agree more',
   'select-mixed-pooled-vote': 'the homogeneous pool decided by the modal result: zero calls per case, and the other half of the shape claim — the selector should win here, which is the prediction a "the selector is bad" explanation does not make',
   'select-tagged': 'the cross arm with each candidate labelled by its source: needs the second model too, and is measured against `select-cross`',
@@ -1075,6 +1091,11 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   // statement. The pair is what prices "can the model write the correction" against "can it pick
   // it", and neither side of it generates a candidate of its own.
   ['select-cross-pooled', 'select-cross-pooled-reconcile'],
+  // One lever, and the second time this project has had to state one as a policy rather than as a
+  // prompt: the same statement, the same single call, and a different rule for what a reply is
+  // worth. The pair prices the statements nobody wrote, because the arm that adopts every reply
+  // spends its call on 514 paraphrases and cannot say what the 86 corrections came to.
+  ['select-cross-pooled-reconcile', 'select-cross-pooled-reconcile-novel'],
   // One lever: the same candidates and the same selector, told which of them returned the same
   // rows. The fact a 2+1 pool turns on is the one fact the selector could not compute from two
   // truncated previews, and the pair prices the information rather than a rewrite.
@@ -1162,7 +1183,9 @@ export interface CaseRun extends CaseOutcome {
   readonly strict: boolean;
   /** Share of samples that agreed with the answer the arm returned. */
   readonly agreement?: number;
-  /** True when the selector returned a usable index; absent for the modal arm. */
+  /** True when the selector returned a usable index; absent for the modal arm. On a reconcile arm
+   * it means the reply carried a statement the engine ran, and `reconcile.adopted` says whether the
+   * arm scored it — a restatement handed back by policy is a usable reply the arm declined. */
   readonly selectedByModel?: boolean;
   /**
    * Why the adjudicating call did not happen, on the cases where it did not.
@@ -1404,24 +1427,38 @@ export interface ArmReportRow {
    */
   readonly poolRead?: { readonly shared: number; readonly unrecorded: number; readonly cases: number };
   /**
-   * What the lever cost this arm, case by case, on the arms that generate nothing of their own.
+   * What the decision cost this arm, case by case, on every arm whose selector is the model.
    *
    * `asked` is the number of cases that reached a decision and `priced` the number of those that
-   * spent a counted call. The pair exists because the rule that prices a generating arm — more
-   * calls than samples, since the selector is one call on top of the candidates — says the opposite
-   * of the truth on a pooled arm: a pooled arm draws nothing, so one call per case *is* its correct
-   * bill, and `41440646002` was refused for reporting exactly that on four arms (I-81). A mean
-   * cannot separate "the selector was counted" from "the selector was not", and a count can.
+   * spent a counted call. The pair exists because a mean cannot answer the question the gate asks:
+   * on a pooled arm the rule that prices a generating arm — more calls than samples, since the
+   * selector is one call on top of the candidates — says the opposite of the truth, because a pooled
+   * arm draws nothing and one call per case *is* its bill (`41440646002` was refused for reporting
+   * exactly that on four arms: I-81). And on either shape, a case that fails before the selector
+   * lowers `calls.mean` for a legitimate reason, so `0.995` and `1.000` are the same number to a
+   * reader and opposite facts to an auditor.
+   *
+   * Published for every arm that decides with the model rather than only for pooled ones, because
+   * the invariant is the same in both shapes: a decision that ran spends one call, so
+   * `priced === asked` is what a correctly priced arm reports and `priced < asked` is a selector
+   * missing from the bill.
    */
-  readonly poolSpend?: { readonly asked: number; readonly priced: number };
+  readonly spend?: { readonly asked: number; readonly priced: number };
   /**
    * What the reconcile turn did across the arm's cases, on the arm that asks for a statement.
    *
    * The `novel` column is the one that decides whether the lever ran: an arm whose replies restate
    * a candidate on every case is a selector with a longer prompt, and publishing its accuracy as a
    * reconcile reading would attribute a choice to a correction nobody wrote.
+   *
+   * `policy` travels with the counts because the relationship between `executable` and `adopted`
+   * depends on it — equal under `'always'`, nested under `'novel'` — and a reader who has only the
+   * numbers cannot tell a policy at work from a funnel that counted something twice. The gate reads
+   * it for the same reason: a row whose rule depends on the arm's name would be a rule a renamed arm
+   * escapes. This is the field `emptyRetry.mode` already carries for the same class of reason.
    */
   readonly reconcile?: {
+    readonly policy: 'always' | 'novel';
     readonly asked: number;
     readonly returned: number;
     readonly novel: number;
@@ -1770,9 +1807,14 @@ export function emptyRetryFunnel(runs: readonly CaseRun[]): {
  * Four columns and not one, because the four failures behind "the arm scored 64%" are different
  * problems with different repairs: a turn that never came back (`asked` − `returned`), a turn that
  * only restated a candidate (`returned` − `novel`), a statement the engine refused
- * (`novel` − `executable`), and a statement that ran and was wrong (`executable` − `adopted` is
- * empty by construction: an executable statement is the answer). The second column is the one that
- * decides whether the lever is a lever at all.
+ * (`returned` − `executable`), and a statement the policy declined to score (`executable −
+ * adopted`). The second column is the one that decides whether the lever is a lever at all.
+ *
+ * `executable − adopted` is empty on an arm that adopts every statement it can run, which is what
+ * the first reconcile reading was taken with, and it is the restatement population on an arm whose
+ * `reconcileAdopt` is `'novel'`. That is why the column is published as a count of its own rather
+ * than derived: the same funnel then reads the same way on both policies, and a reader can tell
+ * "the arm had nothing to correct" from "the arm had corrections and dropped them".
  */
 export function reconcileFunnel(runs: readonly CaseRun[]): {
   readonly asked: number;
@@ -1804,6 +1846,12 @@ export function reconcileFunnel(runs: readonly CaseRun[]): {
  * The count is published whether or not it fires (`reconcile` in the row), because a share of
  * novel statements is what a reader needs to weigh the delta; the guard only refuses the case
  * where the answer is zero across a whole sample.
+ *
+ * The last branch is the one the policy added: an arm can write statements of its own and still
+ * decide nothing with them, either because none of them ran or because every one that ran was a
+ * restatement and the policy handed it back. That arm measured the vote as surely as the one whose
+ * replies were all paraphrases, and it would otherwise publish a delta of zero with the date of a
+ * measurement attached.
  */
 export function assertReconcileFired(armName: string, runs: readonly CaseRun[], minimumSample = MINIMUM_INSTRUMENT_SAMPLE): void {
   if (runs.length < minimumSample) return;
@@ -1821,6 +1869,11 @@ export function assertReconcileFired(armName: string, runs: readonly CaseRun[], 
   if (funnel.novel === 0) {
     throw new Error(
       `arm ${armName}: all ${String(funnel.returned)} reconcile replies restated a candidate verbatim, which is a selector with a longer prompt — the lever did not run`,
+    );
+  }
+  if (funnel.adopted === 0) {
+    throw new Error(
+      `arm ${armName}: ${String(funnel.novel)} of ${String(funnel.returned)} reconcile replies wrote a statement of their own and none of them was scored (${String(funnel.executable)} ran, ${String(funnel.adopted)} adopted), so the arm measured the vote`,
     );
   }
 }
@@ -1988,19 +2041,20 @@ export function poolReadOf(
 }
 
 /**
- * How many of a pooled arm's decisions carry a counted call.
+ * How many of an arm's decisions carry a counted call.
  *
- * The one number a pooled arm's cost cannot be inferred from. Its `calls.mean` is a mean over cases
- * that did not all decide — a case whose pool was empty returns before the selector and spends
- * nothing — so the same mean supports two opposite readings: 0.995 is "three cases never reached
- * the selector" on a correct arm and "the selector is not priced" on a broken one. Counting the
- * decisions instead of averaging them is the only way to tell those apart, because the counter runs
- * before the call (`withCallCounter`) and therefore includes the selector turns that threw.
+ * The one number its cost cannot be inferred from. `calls.mean` is a mean over cases that did not
+ * all decide — a case whose candidate set came back empty, or whose pool was empty, returns before
+ * the selector and spends nothing — so the same mean supports two opposite readings: 0.995 is "three
+ * cases never reached the selector" on a correct arm and "the selector is not priced" on a broken
+ * one. Counting the decisions instead of averaging them is the only way to tell those apart, because
+ * the counter runs before the call (`withCallCounter`) and therefore includes the selector turns
+ * that threw.
  *
  * No instrument floor: this is a reconciliation of two counts over the same cases, not a share, so
  * a seven-question fixture says as much as a six-hundred-question run.
  */
-export function poolSpendOf(runs: readonly CaseRun[]): ArmReportRow['poolSpend'] {
+export function spendOf(runs: readonly CaseRun[]): ArmReportRow['spend'] {
   const decided = runs.filter((run) => run.selectedByModel !== undefined);
   return { asked: decided.length, priced: decided.filter((run) => run.calls >= 1).length };
 }
@@ -2258,13 +2312,13 @@ export function assertReportComplete(report: { readonly arms?: readonly ArmRepor
         `arm ${row.arm} reads the pool of ${arm.pool} and its row carries no pool verification, so the delta it publishes rests on an unstated number of shared cases`,
       );
     }
-    if (arm.pool !== undefined && arm.select === true && row.poolSpend === undefined && row.total >= MINIMUM_INSTRUMENT_SAMPLE) {
-      // A pooled arm's entire bill is the call it spends on its lever, so the row has to say how many
-      // decisions carried one. The gate cannot read that off `calls.mean`: a case whose pool was empty
-      // returns before the selector, which makes 1.0 and 0.99 the same number to a mean and opposite
-      // facts to a reader — one arm priced its selector, the other never reached it.
+    if (arm.select === true && row.spend === undefined && row.total >= MINIMUM_INSTRUMENT_SAMPLE) {
+      // The row has to say how many decisions carried a counted call, on either shape. The gate cannot
+      // read that off `calls.mean`: a case that fails before the selector returns and spends nothing,
+      // which makes 1.0 and 0.99 the same number to a mean and opposite facts to a reader — one arm
+      // priced its selector, the other never reached it.
       throw new Error(
-        `arm ${row.arm} reads a pool and decides with the model, and its row does not say how many of those decisions were priced: the selector call is the whole bill and a mean cannot show it`,
+        `arm ${row.arm} decides with the model and its row does not say how many of those decisions were priced: the selector call is one per decision and a mean cannot show it`,
       );
     }
     if (row.total > 0 && row.format === undefined && row.pool === undefined) {
@@ -4201,6 +4255,16 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
             // arms is the output format and nothing else. The reply is adopted when the engine runs
             // it, whatever it says: scoring a statement the model wrote and then ignored would be
             // measuring the vote under the arm's name.
+            //
+            // `reconcileAdopt` is the one policy this branch cannot infer from the reply, and the
+            // fifth dispatch (`41453395203`) is why it exists: `select-cross-pooled-reconcile`
+            // adopted every reply it could run, and 514 of its 600 replies restated a candidate in
+            // other words. It scored 359 against the free count's 380, and the loss is where those
+            // restatements are: cases the vote had already answered were overwritten by a
+            // paraphrase of the answer. An arm that adopts everywhere therefore cannot say what the
+            // 86 statements nobody wrote were worth, which is the only population a reconcile turn
+            // reaches and a selector cannot. This policy hands the restatements back and keeps the
+            // corrections, at the same prompt and the same one call.
             const groups = resultGroups(offered);
             let reply: { text: string } | undefined;
             try {
@@ -4222,20 +4286,35 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
               selectionFailed = escapeKind(error);
             }
             const written = reply === undefined ? '' : extractSql(reply.text);
+            // A restatement is a reply that says what a candidate already said, compared on the
+            // statement as the engine reads it: whitespace is not authorship.
+            const novel = written.length > 0 && !readable.some((candidate) => candidate.sql.trim() === written.trim());
+            // The policy, and the only thing `reconcileAdopt` changes. A `'novel'` arm scores what
+            // the vote already decided on a restatement; an `'always'` arm scores the paraphrase.
+            const keep = arm.reconcileAdopt !== 'novel' || novel;
             let executed = false;
             if (written.length > 0 && inspectSql(written).ok) {
+              // Run even a reply the policy will hand back, because `executable` is a property of
+              // the statement and not of the policy: two arms whose funnels are read column by
+              // column must agree on the columns the policy does not govern. The query costs no
+              // tokens, and the alternative — skipping it — would make the restatement population
+              // unmeasurable in the one artifact that is supposed to measure it.
               const run = await oracle.run(question.db_id, written);
               if (run.ok) {
-                winner = { sql: written, rows: run.rows, source: 'reconcile' };
                 executed = true;
+                if (keep) winner = { sql: written, rows: run.rows, source: 'reconcile' };
               }
             }
             reconciled = {
               returned: written.length > 0,
-              novel: written.length > 0 && !readable.some((candidate) => candidate.sql.trim() === written.trim()),
+              novel,
               executable: executed,
-              adopted: executed,
+              adopted: executed && keep,
             };
+            // The turn produced something runnable, which is what `selectedByModel` has always
+            // meant. Whether the policy scored it is `reconcile.adopted`: an arm that hands a
+            // restatement back still had a usable reply, and folding the policy into this flag
+            // would make two arms' `selectorDecided` differ for a reason that is not the model.
             selectedByModel = executed;
           } else {
           let decision: { index: number; decided: boolean; sql: string };
@@ -4615,9 +4694,9 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
     passed: summary.passed,
     total: summary.total,
     ...(arm.pool === undefined ? {} : { pool: arm.pool }),
-    // Beside the pool it read, because the two are the same question asked of the sample and of the
-    // bill: a pooled arm's candidates come from another arm and its calls belong to its own lever.
-    ...(arm.pool === undefined || arm.select !== true ? {} : { poolSpend: poolSpendOf(runs) }),
+    // What the decision cost, on every arm whose selector is the model. Beside the call mean it
+    // qualifies, because the mean is the one number that cannot say whether the selector was priced.
+    ...(arm.select !== true ? {} : { spend: spendOf(runs) }),
     accuracy: summary.accuracy,
     wilson: wilsonInterval(summary.passed, summary.total),
     strictPassed,
@@ -4673,7 +4752,7 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
         }
       : {}),
     ...(arm.emptyRetry === undefined ? {} : { emptyRetry: { mode: arm.emptyRetry, ...emptyRetryFunnel(runs) } }),
-    ...(arm.reconcile === undefined ? {} : { reconcile: reconcileFunnel(runs) }),
+    ...(arm.reconcile === undefined ? {} : { reconcile: { policy: arm.reconcileAdopt ?? 'always', ...reconcileFunnel(runs) } }),
     ...(arm.audit === undefined ? {} : { audit: auditFunnel(runs) }),
     // What the model kept of the card, on the one arm that asks it to choose. Beside the
     // accuracy rather than inside the sampling spread, for the reason the decomposition funnel
@@ -4889,6 +4968,12 @@ export function caseRows(outcomes: ReadonlyMap<string, readonly CaseRun[]>): Rec
       ...(run.candidates === undefined ? {} : { candidates: run.candidates }),
       ...(run.candidateSurvival === undefined ? {} : { candidateSurvival: run.candidateSurvival }),
       ...(run.winnerSource === undefined ? {} : { winnerSource: run.winnerSource }),
+      // What the reconcile turn did on this case. The fifth dispatch published the arm-level
+      // funnel and not the per-case record, so the loss could be attributed to the restatements in
+      // arithmetic and not in evidence: 514 replies restated a candidate, and the archive could not
+      // name the cases where adopting one turned a right answer wrong. A funnel says how many; a
+      // row says which, and a pair of arms is tested on the second.
+      ...(run.reconcile === undefined ? {} : { reconcile: run.reconcile }),
       // Why this case has no candidate, when it has none.
       //
       // `select-mixed` cost 3 calls on two of 120 questions while `select-cross` cost 4,

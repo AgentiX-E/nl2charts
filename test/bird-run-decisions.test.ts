@@ -18,7 +18,7 @@ import {
   assertSelectorAnswered,
   reusePool,
   poolReadOf,
-  poolSpendOf,
+  spendOf,
   assertReconcileFired,
   reconcileFunnel,
   caseRows,
@@ -717,6 +717,27 @@ describe('the per-case rows an artifact carries', () => {
     expect(rows[1]).not.toHaveProperty('candidateRecall');
     expect(rows.map((row) => row.arm)).toEqual(['select-mixed', 'select-mixed']);
   });
+
+  it('carries what the reconcile turn did, so a paired reading names the cases and not just the count', () => {
+    // The fifth dispatch published the funnel and not the record, so "514 replies restated a
+    // candidate" could not be turned into "these are the cases a paraphrase cost us": a share
+    // describes the arm, a row describes the case, and a pair of arms is tested on the second.
+    const rows = caseRows(
+      new Map<string, readonly CaseRun[]>([
+        [
+          'select-cross-pooled-reconcile-novel',
+          [
+            bare({ reconcile: { returned: true, novel: true, executable: true, adopted: true } }),
+            bare({ id: '2', reconcile: { returned: true, novel: false, executable: true, adopted: false } }),
+          ],
+        ],
+      ]),
+    );
+    expect(rows[0]?.reconcile).toEqual({ returned: true, novel: true, executable: true, adopted: true });
+    expect(rows[1]?.reconcile).toEqual({ returned: true, novel: false, executable: true, adopted: false });
+    // An arm with no reconcile turn carries no record: an absent turn is not a turn that failed.
+    expect(caseRows(new Map<string, readonly CaseRun[]>([['select-cross', [bare()]]]))[0]).not.toHaveProperty('reconcile');
+  });
 });
 
 /**
@@ -897,7 +918,7 @@ describe('how much of the pool a pooled arm could verify', () => {
  * because the cases that never reached the selector lower the mean for a legitimate reason. Counting
  * the decisions instead of averaging over them separates the two states.
  */
-describe('how many of a pooled arm’s decisions carry a call', () => {
+describe('how many of an arm’s decisions carry a call', () => {
   const decided = (id: string, calls: number, selectedByModel: boolean | undefined): CaseRun => ({
     id,
     passed: true,
@@ -913,7 +934,7 @@ describe('how many of a pooled arm’s decisions carry a call', () => {
     const runs = Array.from({ length: 120 }, (_unused, index) => decided(String(index), 1, true));
     // 1.0 calls per case, which the old rule read as "three candidates were free and the selector
     // was never counted" — the arithmetic was right and the premise was wrong.
-    expect(poolSpendOf(runs)).toEqual({ asked: 120, priced: 120 });
+    expect(spendOf(runs)).toEqual({ asked: 120, priced: 120 });
   });
 
   it('leaves out the cases that never reached a decision, which is why the mean is not 1', () => {
@@ -924,7 +945,7 @@ describe('how many of a pooled arm’s decisions carry a call', () => {
       ...Array.from({ length: 117 }, (_unused, index) => decided(String(index), 1, true)),
       ...Array.from({ length: 3 }, (_unused, index) => decided(`empty-${String(index)}`, 0, undefined)),
     ];
-    expect(poolSpendOf(runs)).toEqual({ asked: 117, priced: 117 });
+    expect(spendOf(runs)).toEqual({ asked: 117, priced: 117 });
     expect(meanCalls(runs)).toBeCloseTo(0.975, 3);
   });
 
@@ -932,22 +953,22 @@ describe('how many of a pooled arm’s decisions carry a call', () => {
     // A turn that failed is still a turn: `withCallCounter` increments first, so the only way to
     // reach zero calls on a decided case is for the call to have gone unrecorded.
     const runs = [decided('a', 1, false), decided('b', 1, true)];
-    expect(poolSpendOf(runs)).toEqual({ asked: 2, priced: 2 });
+    expect(spendOf(runs)).toEqual({ asked: 2, priced: 2 });
   });
 
   it('separates an arm whose selector was never counted from one that skipped it', () => {
     // The defect the field is for: every decision was made and none of them cost anything, which
     // can only mean the selector call is missing from the arm's price.
     const runs = [decided('a', 0, true), decided('b', 0, true)];
-    expect(poolSpendOf(runs)).toEqual({ asked: 2, priced: 0 });
+    expect(spendOf(runs)).toEqual({ asked: 2, priced: 0 });
   });
 
   it('says nothing about a sample that decided nothing at all', () => {
     // A pooled majority vote never asks the model, and an arm whose pool was empty everywhere never
     // decided. Both are `asked: 0`, and the gate reads that as "there is nothing to price" rather
     // than as a failure — the same distinction D56 asks for between a missing count and a zero.
-    expect(poolSpendOf([])).toEqual({ asked: 0, priced: 0 });
-    expect(poolSpendOf([decided('a', 0, undefined)])).toEqual({ asked: 0, priced: 0 });
+    expect(spendOf([])).toEqual({ asked: 0, priced: 0 });
+    expect(spendOf([decided('a', 0, undefined)])).toEqual({ asked: 0, priced: 0 });
   });
 });
 
@@ -1038,14 +1059,14 @@ describe('what a pooled arm is allowed to read', () => {
 /**
  * The reconcile funnel, and the guard that decides whether the lever ran at all.
  *
- * An arm asked for a statement can fail in four ways that all look like a wrong answer: the turn
- * never came back, the reply restated a candidate, the engine refused the statement, or the
- * statement ran and was wrong. Only the first two are fatal to the reading — the third is the
- * model's output quality and the fourth is the lever doing its job badly — so the funnel is
- * counted apart and exactly one column (`novel`) is guarded.
+ * An arm asked for a statement can fail in five ways that all look like a wrong answer: the turn
+ * never came back, the reply restated a candidate, the engine refused the statement, the policy
+ * handed a runnable statement back to the vote, or the statement ran and was wrong. Only the first
+ * three and the fourth are fatal to the reading — the last is the lever doing its job badly — so
+ * the funnel counts them apart and the guard refuses the states where nothing was scored.
  */
 describe('what a reconcile turn produced', () => {
-  const record = (novel: boolean, executable = novel, returned = true): CaseRun => ({
+  const record = (novel: boolean, executable = novel, returned = true, adopted = executable): CaseRun => ({
     id: '1',
     passed: executable,
     predicted: '',
@@ -1053,7 +1074,7 @@ describe('what a reconcile turn produced', () => {
     strict: false,
     attempts: 1,
     calls: 1,
-    reconcile: { returned, novel, executable, adopted: executable },
+    reconcile: { returned, novel, executable, adopted },
   });
   const sample = (count: number, make: (index: number) => CaseRun): CaseRun[] =>
     Array.from({ length: count }, (_unused, index) => ({ ...make(index), id: String(index) }));
@@ -1071,6 +1092,20 @@ describe('what a reconcile turn produced', () => {
     expect(reconcileFunnel([{ ...record(true), reconcile: undefined }])).toEqual({ asked: 0, returned: 0, novel: 0, executable: 0, adopted: 0 });
   });
 
+  it('separates a statement that ran from a statement the policy scored', () => {
+    // The column the `-novel` policy needs and the reason it is published as a count of its own:
+    // on an arm that adopts everything these two are equal by construction, so a funnel that
+    // derived `adopted` from `executable` could not say that an arm ran nine statements and scored
+    // none of them — which is a policy reading, not a broken engine.
+    expect(reconcileFunnel([record(false, true, true, false), record(false, true, true, true)])).toEqual({
+      asked: 2,
+      returned: 2,
+      novel: 0,
+      executable: 2,
+      adopted: 1,
+    });
+  });
+
   it('refuses an arm whose replies only restate a candidate', () => {
     // This is the whole risk of the lever: a model that echoes candidate 1 has produced a selector
     // with a longer prompt, and its accuracy belongs to the selector.
@@ -1080,6 +1115,18 @@ describe('what a reconcile turn produced', () => {
   it('refuses a turn that was paid for and produced nothing, and one that never ran', () => {
     expect(() => assertReconcileFired('reconcile', sample(120, () => record(false, false, false)))).toThrow(/carried a statement/);
     expect(() => assertReconcileFired('reconcile', sample(120, () => ({ ...record(true), reconcile: undefined })))).toThrow(/the reconcile turn never ran/);
+  });
+
+  it('refuses an arm that wrote a statement of its own and scored none of them', () => {
+    // The state the policy made possible, and the one that would otherwise publish a delta of zero
+    // with the authority of a measurement: one novel statement in a hundred and twenty, every one
+    // of them handed back. The counts travel with the refusal, because "none was scored" is a
+    // different finding on one novel reply than on a hundred.
+    const runs = sample(120, (index) => record(index === 0, true, true, false));
+    expect(() => assertReconcileFired('reconcile-novel', runs)).toThrow(/1 of 120 reconcile replies wrote a statement of their own and none of them was scored \(120 ran, 0 adopted\)/);
+    // One adopted reply is enough to licence the reading, on the same rule as `novel`: the guard
+    // asks whether the mechanism exists, not whether it fires often.
+    expect(() => assertReconcileFired('reconcile-novel', sample(120, (index) => record(index === 0, true, true, index === 0)))).not.toThrow();
   });
 
   it('accepts one novel statement in a hundred, because a lever that fires once did run', () => {

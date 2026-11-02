@@ -735,11 +735,23 @@ that differs in method rather than in prompt or in draw.
   The false refusal carried a real gap inside it: `calls.mean` cannot separate "three cases never
   reached the selector" (an empty pool returns before the decision) from "the selector was never
   counted", because both read 0.995. The artifact now carries the two counts instead —
-  `poolSpend: { asked, priced }` — and the gate reads `priced === asked` in place of the mean, plus
+  `spend: { asked, priced }` — and the gate reads `priced === asked` in place of the mean, plus
   the one rule a mean *can* enforce: a pooled arm must spend strictly fewer calls than the arm whose
   pool it names, or the candidates were drawn twice. Two shapes, two rules, and the reason a guard
   refuses is checked as carefully as the refusal — a reader will go looking for whatever the message
   names.
+- **One column of a funnel can be a constant, and a constant cannot be argued with.** The reconcile
+  arm's funnel published `executable` and `adopted` and the two were equal by construction, because
+  the arm adopted every statement the engine ran — so the column that says "the model's correction
+  was scored" could not distinguish a correction from a candidate rewritten in other words.
+  `41453395203` adopted 595 of 600 and 514 of those replies were paraphrases; the score fell 3.5pp
+  against a free rule and the artifact could not say which cases it fell on. A count that the code
+  makes equal to another count is not a measurement, and the fix is not a better column name: the
+  policy that decides what `adopted` means is now a lever of its own (`reconcileAdopt`), it travels
+  with the counts in the row (`reconcile.policy`), the gate asserts the relationship each policy
+  implies rather than one relationship for both, and the per-case record is published so a paired
+  reading can cut the deltas by it. The same rule as `emptyRetry.mode`: a funnel whose last column
+  depends on a declaration has to carry the declaration.
 - **A mechanism that fires three times cannot explain a delta of eighteen wins, and the check is
   arithmetic rather than statistical.** The repair loop fires only on a guard rejection or an engine
   refusal: 3 times on `-repair-second` and 11 on `-repair-all` in 600 questions, while the same arms

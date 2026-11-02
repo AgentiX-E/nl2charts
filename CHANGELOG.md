@@ -8,6 +8,29 @@ cannot be argued with.
 
 ### Added
 
+- **`select-cross-pooled-reconcile-novel`: the same call, with the paraphrases handed back.** The
+  first reconcile arm adopted every statement the engine would run, and `41453395203` priced that
+  policy: 359 of 600 against the free count's 380, on a pool where the ceiling is 415. The funnel
+  says where the loss is — 595 replies ran and only 86 were a statement nobody wrote, so 514 were a
+  candidate rewritten in other words, and the arm overwrote the vote's answer with a paraphrase on
+  every one of them. The new arm is one lever from it (`reconcileAdopt: 'novel'`, against
+  `'always'`): same pool, same prompt, same single call, and a restatement hands the decision back
+  to the vote. A declined restatement is still executed, because `executable` is a property of the
+  statement and not of the policy — two funnels read column by column have to agree on the columns
+  the policy does not govern, and the query costs no tokens. Registered before the dispatch: the arm
+  must beat the adopting arm strictly (nothing else changed, so if handing restatements back does
+  not raise the score, the losses were not the paraphrases), and must clear the free rule's 63.33%,
+  which every paid arm on this pool has now failed three times.
+
+- **`reconcile.policy` on the row, and `cases[].reconcile` per case.** A funnel whose last column
+  depends on a declaration has to carry the declaration: `executable === adopted` is true of the
+  adopting policy and false of the other by design, so the row now says which policy produced its
+  `adopted` column and the gate asserts the relationship each one implies (equal under `'always'`,
+  nested under `'novel'`, four nested counts either way). `emptyRetry.mode` is the precedent. The
+  per-case record is published for the reason an arm-level funnel is not enough: the fifth artifact
+  could say "16 gains and 37 losses" and not which of them were paraphrases, so the policy's score
+  was bounded — `[343, 396]`, 57.2% to 66.0% — rather than predicted.
+
 - **The pool read four ways, and the price of each.** `select-cross` writes three candidates
   (`deepseek-chat` twice, `deepseek-reasoner` once); `select-cross-pooled` reads that pool and asks
   the same question; `-vote` returns the modal group for no call at all; `-agree` shows the selector
@@ -83,6 +106,17 @@ cannot be argued with.
 
 ### Fixed
 
+- **A funnel column that the code made constant could not be argued with.** `adopted` was defined as
+  "the statement ran", which on the only arm that published it was the same number as `executable`
+  on every case: the column that was supposed to say "the model's correction was scored" could not
+  tell a correction from a candidate restated in other words. `41453395203` read 595 and 595, and the
+  3.5pp it lost to a free rule could not be attributed to the 514 paraphrases except by arithmetic
+  about a sample the artifact did not carry. The runner now refuses a reconcile arm whose replies
+  produced nothing to score — a fourth branch on `assertReconcileFired`, distinguished from "the turn
+  never ran", "no reply carried a statement" and "every reply restated a candidate", because a reader
+  who is refused needs to know which of the four happened — and the gate reads the funnel's nesting
+  under the policy the row declares.
+
 - **A pooled arm was refused for reporting the price it was built to report.** `41440646002` ran
   eight arms to completion and then failed its own gate on four of them: `select-cross-pooled`,
   `-agree`, `-judge-reasoning` and `select-mixed-pooled` each reported one call per case, and the rule
@@ -92,7 +126,7 @@ cannot be argued with.
   bill. The gate now prices the two shapes separately, and the gap the false alarm exposed is closed
   the same way: a mean cannot separate "three cases never reached the selector" from "the selector is
   not counted", because 0.995 and 1.000 are the same number to a reader and opposite facts to an
-  auditor. `poolSpend: { asked, priced }` counts the decisions and the ones that carried a call, the
+  auditor. `spend: { asked, priced }` counts the decisions and the ones that carried a call, the
   runner refuses to publish a pooled select arm without it, and the gate reads `priced === asked` in
   place of the mean — plus one rule a mean *can* enforce, that a pooled arm must spend strictly fewer
   calls than the arm whose pool it names.

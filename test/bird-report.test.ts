@@ -121,11 +121,12 @@ describe('report completeness', () => {
         arms: [
           { arm: 'names', total: 1532, format: FORMAT },
           { arm: 'decompose', total: 1532, decomposition: { asked: 1532, fired: 1400, share: 0.91, meanSteps: 2.4 }, format: FORMAT },
-          { arm: 'select-dc', total: 1532, candidateRecall: 0.67, decomposition: { asked: 1532, fired: 1400, share: 0.91, meanSteps: 2.4 }, format: FORMAT },
+          { arm: 'select-dc', total: 1532, candidateRecall: 0.67, spend: { asked: 1532, priced: 1532 }, decomposition: { asked: 1532, fired: 1400, share: 0.91, meanSteps: 2.4 }, format: FORMAT },
           {
             arm: 'select-mixed+empty',
             total: 1532,
             candidateRecall: 0.656,
+            spend: { asked: 1532, priced: 1532 },
             emptyRetry: { mode: 'diagnosed', dropped: 12, fired: 3, recovered: 1 },
             format: FORMAT,
           },
@@ -159,7 +160,7 @@ describe('report completeness', () => {
             pool: 'select-cross',
             candidateRecall: 0.697,
             poolRead: { shared: 598, unrecorded: 2, cases: 600 },
-            poolSpend: { asked: 598, priced: 598 },
+            spend: { asked: 598, priced: 598 },
           },
         ],
       }),
@@ -220,8 +221,13 @@ describe('report completeness', () => {
             pool: 'select-cross',
             candidateRecall: 0.705,
             poolRead: { shared: 600, unrecorded: 0, cases: 600 },
-            poolSpend: { asked: 600, priced: 600 },
-            reconcile: { asked: 600, returned: 600, novel: 214, executable: 605, adopted: 380 },
+            spend: { asked: 600, priced: 600 },
+            // The fifth dispatch's own funnel: 600 replies, 86 of them statements nobody wrote, 595
+            // runnable, and — under the policy that arm was run with — all 595 scored. The policy
+            // travels with the counts because `executable === adopted` is a fact about the arm, not
+            // about the turn, and the gate reads it to tell a policy from a funnel that counted
+            // something twice.
+            reconcile: { policy: 'always', asked: 600, returned: 600, novel: 86, executable: 595, adopted: 595 },
           },
         ],
       }),

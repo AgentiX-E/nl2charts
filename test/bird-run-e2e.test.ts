@@ -221,6 +221,13 @@ const wrong = (): string => 'select 1';
 const empty = (): string => 'select * from items where id > 100';
 /** Every question answered with a statement the engine refuses once. */
 const broken = (): string => 'select count(*) from itemz';
+/**
+ * A statement that runs, returns rows, and answers no question in the fixture.
+ *
+ * `select 1` would be right on any question whose gold counts a single row, which makes it useless
+ * as the "one wrong candidate" a mixed set is built around. `-1` is not a count, a sum, or a name.
+ */
+const IMPOSSIBLE = 'select -1 as impossible';
 
 describe('a dry run', () => {
   it('previews the arms it was asked for and calls no model', async () => {
@@ -448,7 +455,7 @@ describe('a sampling arm', () => {
     // copied three times, and it is the shape the cross-vendor run needed: 75 losses whose
     // address the artifact could not name.
     const result = await run({
-      plan: { whenValues: 'select -1 as impossible' },
+      plan: { whenValues: IMPOSSIBLE },
       env: { BIRD_ARMS: 'select-mixed' },
     });
     const cases = result.report.cases as {
@@ -864,7 +871,7 @@ describe('a pooled arm reads the pool instead of drawing one', () => {
         passed: number;
         total: number;
         candidateRecall?: number;
-        poolSpend?: { asked: number; priced: number };
+        spend?: { asked: number; priced: number };
       }[];
       const parent = arms.find((entry) => entry.arm === 'select-cross');
       const pooled = arms.find((entry) => entry.arm === 'select-cross-pooled');
@@ -879,8 +886,10 @@ describe('a pooled arm reads the pool instead of drawing one', () => {
       // never counted a selector and never reached one, so the pair of counts is what makes the
       // number a price rather than an arithmetic coincidence (I-81: four pooled rows were refused by
       // the gate for reporting this exact figure).
-      expect(pooled?.poolSpend).toEqual({ asked: QUESTIONS.length, priced: QUESTIONS.length });
-      expect(parent?.poolSpend).toBeUndefined();
+      expect(pooled?.spend).toEqual({ asked: QUESTIONS.length, priced: QUESTIONS.length });
+      // The generating arm reports the same pair over the same cases: its four calls per case are the
+      // three candidates and one decision, and every decision was priced.
+      expect(parent?.spend).toEqual({ asked: QUESTIONS.length, priced: QUESTIONS.length });
       // The second endpoint answered exactly the parent's one cross candidate per case and not
       // one more: a pooled arm that drew its own would double this count.
       expect(second.requests).toHaveLength(QUESTIONS.length);
@@ -2514,7 +2523,7 @@ describe('the reconcile arm', () => {
       );
       const arm = byName.get('select-cross-pooled-reconcile');
       // Seven cases, seven statements written, seven of them new, all seven executed and adopted.
-      expect(arm?.reconcile).toEqual({ asked: QUESTIONS.length, returned: QUESTIONS.length, novel: QUESTIONS.length, executable: QUESTIONS.length, adopted: QUESTIONS.length });
+      expect(arm?.reconcile).toEqual({ policy: 'always', asked: QUESTIONS.length, returned: QUESTIONS.length, novel: QUESTIONS.length, executable: QUESTIONS.length, adopted: QUESTIONS.length });
       // One call per case: the same price as the selector it replaces, which is what makes the pair
       // a comparison of output formats rather than of budgets.
       expect(arm?.calls.mean).toBe(1);
@@ -2547,7 +2556,7 @@ describe('the reconcile arm', () => {
         (result.report.arms as { arm: string; passed: number; reconcile?: Record<string, number>; errors?: { execution: number } }[]).map((entry) => [entry.arm, entry]),
       );
       const arm = byName.get('select-cross-pooled-reconcile');
-      expect(arm?.reconcile).toEqual({ asked: QUESTIONS.length, returned: QUESTIONS.length, novel: QUESTIONS.length, executable: 0, adopted: 0 });
+      expect(arm?.reconcile).toEqual({ policy: 'always', asked: QUESTIONS.length, returned: QUESTIONS.length, novel: QUESTIONS.length, executable: 0, adopted: 0 });
       // The candidates were all correct, so the vote still answers every case: the fallback is not
       // a penalty, it is the free rule standing in for a statement that could not be run.
       expect(arm?.passed).toBe(QUESTIONS.length);
@@ -2582,11 +2591,75 @@ describe('the reconcile arm', () => {
       expect(result.code).toBe(0);
       const arms2 = result.report.arms as { arm: string; passed: number; reconcile?: Record<string, number> }[];
       const arm = arms2.find((entry) => entry.arm === 'select-cross-pooled-reconcile');
-      expect(arm?.reconcile).toEqual({ asked: QUESTIONS.length, returned: 0, novel: 0, executable: 0, adopted: 0 });
+      expect(arm?.reconcile).toEqual({ policy: 'always', asked: QUESTIONS.length, returned: 0, novel: 0, executable: 0, adopted: 0 });
       // The outage is the endpoint's, and the arm says so in the column that exists for it: every
       // case still answered (by the vote), and every paid turn reported as one that did not run.
       expect(result.printed.some((line) => line.startsWith('select-cross-pooled-reconcile') && line.includes(`select-failed ${String(QUESTIONS.length)}`))).toBe(true);
       expect(arm?.passed).toBe(QUESTIONS.length);
+    } finally {
+      await second.close();
+    }
+  });
+
+  it('hands a restatement back to the vote, and prices the statements nobody wrote', async () => {
+    // The fifth dispatch's loss, staged on seven cases: the second model's candidate is wrong, the
+    // vote answers with the primary's two, and the reconcile turn restates the wrong one. An arm
+    // that adopts whatever it can run replaces a correct answer with a paraphrase of a candidate it
+    // had already outvoted — which is what `41453395203` read as 359 of 600 against the free
+    // count's 380, with 514 of its 600 replies restating a candidate. The `-novel` arm is the same
+    // prompt and the same call with the restatements handed back, so the distance between the two
+    // rows is the policy and nothing else.
+    const plan = { first: correct, reconcile: () => IMPOSSIBLE };
+    const second = await startEndpoint({ reply: (request) => replyFor(request, { first: () => IMPOSSIBLE }) });
+    try {
+      const result = await run({
+        plan,
+        env: {
+          BIRD_ARMS: `${arms},select-cross-pooled-reconcile-novel`,
+          BIRD_SECOND_MODEL: 'second-model',
+          BIRD_SECOND_BASE_URL: second.url,
+          BIRD_SECOND_API_KEY: 'second-key',
+          BIRD_CONCURRENCY: '1',
+        },
+      });
+      expect(result.code, result.printed.join('\n')).toBe(0);
+      const byName = new Map(
+        (
+          result.report.arms as {
+            arm: string;
+            passed: number;
+            spend?: Record<string, number>;
+            sources?: Record<string, number>;
+            reconcile?: Record<string, number>;
+          }[]
+        ).map((entry) => [entry.arm, entry]),
+      );
+      const always = byName.get('select-cross-pooled-reconcile');
+      const novel = byName.get('select-cross-pooled-reconcile-novel');
+      // Neither arm wrote a statement of its own — every reply restated the second model's
+      // candidate — so the two funnels differ in exactly one column.
+      const restated = { asked: QUESTIONS.length, returned: QUESTIONS.length, novel: 0, executable: QUESTIONS.length };
+      expect(always?.reconcile, 'the adopting arm scores every reply it can run').toEqual({ ...restated, policy: 'always', adopted: QUESTIONS.length });
+      expect(novel?.reconcile, 'the handing-back arm scores none of them').toEqual({ ...restated, policy: 'novel', adopted: 0 });
+      // The policy is the whole difference in the score: the adopting arm overwrites seven correct
+      // answers, the handing-back arm keeps them, and no candidate, prompt or call changed.
+      expect(always?.passed).toBe(0);
+      expect(novel?.passed).toBe(QUESTIONS.length);
+      expect(always?.sources?.['reconcile']).toBe(QUESTIONS.length);
+      expect(novel?.sources?.['reconcile']).toBe(0);
+      // A handed-back reply is still a call that was spent: the bill must not follow the policy, or
+      // the arm would look cheaper for having wasted the turn.
+      expect(novel?.spend).toEqual({ asked: QUESTIONS.length, priced: QUESTIONS.length });
+      // And the per-case rows say which cases, because a funnel can only say how many — the archive
+      // is what a later reading needs to pair a case's outcome with the reply that produced it.
+      const rows = (result.report.cases as { arm: string; id: string; passed: boolean; reconcile?: Record<string, boolean> }[]).filter(
+        (row) => row.arm === 'select-cross-pooled-reconcile-novel',
+      );
+      expect(rows).toHaveLength(QUESTIONS.length);
+      for (const row of rows) {
+        expect(row.reconcile).toEqual({ returned: true, novel: false, executable: true, adopted: false });
+        expect(row.passed).toBe(true);
+      }
     } finally {
       await second.close();
     }

@@ -5513,13 +5513,16 @@ The rejection still pointed at a real gap. `calls.mean` cannot separate the two 
 can be in: a case whose pool came back empty returns before the selector and spends nothing, so
 `0.995` is "three cases never reached the decision" on a correct arm and "the selector is not counted"
 on a broken one. The mean is the same number in both readings. The artifact now carries the counts
-instead (`poolSpend: { asked, priced }`), the runner refuses to publish a pooled select arm without
+instead (`spend: { asked, priced }`, published for every arm that decides with the model, because the
+same interval opens on a generating arm: `mean > samples` passes with 3.5 calls on 3 samples), the
+runner refuses to publish a select arm without
 them, and the gate reads them in place of the mean:
 
-- pooled and `selector: 'model'` → `priced === asked > 0`, else "the selector call is not counted";
-- pooled → `mean` must be strictly below its source arm's, else "the candidates were drawn twice",
-  which is the failure pooling exists to prevent and the one a mean can catch;
-- everything else keeps the rule written for generating arms.
+- any arm with `selector: 'model'` → `priced === asked > 0`, else "the selector call is not counted";
+- a pooled arm → `mean` must be strictly below its source arm's, else "the candidates were drawn
+  twice", which is the failure pooling exists to prevent and the one a mean can catch;
+- a generating arm keeps the level check as well (`mean > samples`), because the candidates have to be
+  paid for on top of the decision.
 
 Fixing the tool rather than the number is the point of the exercise, and it is worth stating plainly
 because the opposite move is always available: the four rows could have been "fixed" by adding a call
@@ -5566,3 +5569,80 @@ One cost note: the reconcile prompt is longer than the selector's (it carries on
 group rather than one line per candidate), and `packages/ai` sits at 53,270 B gzip against a
 54,500 B budget. The next prompt that lands there needs a budget line of its own, priced the way
 `packages/node`'s was, rather than a quiet absorption.
+
+## The fifth dispatch: eighty-six statements nobody wrote, and 514 paraphrases
+
+`41453395203` ran the five arms on 600 dev questions with `deepseek-reasoner` as the second model.
+All five read the same pool — the ceiling is 415/600 = 69.17% on every row — so every delta below
+is a decision and not a candidate set.
+
+| arm | score | calls/case | funnel |
+|---|---|---|---|
+| `select-cross` | 378/600 = 63.00% | 4 | — |
+| `select-cross-pooled` | 377/600 = 62.83% | 1 | pool read 600/600 |
+| `select-cross-pooled-vote` | **380/600 = 63.33%** | 0 | — |
+| `select-cross-pooled-agree` | 374/600 = 62.33% | 1 | — |
+| `select-cross-pooled-reconcile` | 359/600 = 59.83% | 1 | `asked 600, returned 600, novel 86, executable 595, adopted 595` |
+
+The criterion registered above, read against its own dispatch:
+
+| criterion | threshold | reading | verdict |
+|---|---|---|---|
+| ① the lever ran | `novel > 0` on the sample | 86 of 600 replies (14.33%) were a statement nobody wrote | **holds** |
+| ② it beats the free rule where the free rule is weakest | more than the vote's share of the disputed cases | reconcile wins 16 of the cases the vote loses and loses 37 of the cases the vote wins | **fails** |
+| ③ it does not lose the cases the vote wins | `reconcile − vote ≥ 0`, and ≤ 1pp of the 39 reachable cases lost | 359 − 380 = −21 cases = −3.50pp | **fails** |
+| ④ it is not the selector in disguise | `novel ≥ 10%` of cases | 14.33% | **holds** |
+
+`bench:bird:decision` states the same thing on the disputed cases, which is the only stratum where a
+decision exists at all: against `select-cross`'s 153 disputed cases the pool decides +2 (p = 0.864),
+the vote +3 (p = 0.743), the agreement marks −6 (p = 0.430) and reconcile −13 (p = 0.066). The
+format lever is the only one on this pool with a sign that is not noise, and the sign is negative.
+
+### Where the twenty-one cases went
+
+The funnel says it: 595 of 600 replies ran, and only 86 of the 600 were a statement no candidate
+contained. The other 514 restated a candidate — the model read the result groups and wrote back one
+of the statements it had been shown, paraphrased. An arm that adopts whatever the engine runs
+therefore replaces the vote's answer with that paraphrase on 514 cases, and 37 of those were cases
+the vote had won.
+
+That is arithmetic the artifact supports exactly, and it is worth stating as an identity rather than
+a story. Write `R` for the restatement cases and `N` for the novel ones, `v` and `r` for who was
+right, and a policy that hands restatements back returns
+
+```
+score_policy = v_R + r_N  =  vote + (r_N − v_N)
+```
+
+so the whole difference between the policy and the free rule is the novel population. With the
+fifth artifact alone the two terms are not recoverable: it says 16 gains and 37 losses overall but
+not which of those cases were paraphrases, so the policy's score is bounded and not predicted —
+`[380 − 37, 380 + 16] = [343, 396]`, i.e. 57.2% to 66.0%. A band that wide is not a measurement, and
+the reason it is wide is a missing field rather than a missing experiment.
+
+### What the next dispatch has to be able to say
+
+Two changes, both to the artifact rather than to the prompt, because the prompt is not what was
+wrong:
+
+- **`reconcile.policy` travels with the counts.** `executable === adopted` was a fact about the arm,
+  not about the turn, and a reader with only the numbers cannot tell a policy at work from a funnel
+  that counted one reply twice. The row now says which policy produced its `adopted` column, and the
+  gate reads it: equal under `'always'`, nested under `'novel'` (`adopted ≤ novel`), four nested
+  counts either way. `emptyRetry.mode` is the precedent.
+- **The per-case record is published.** `cases[].reconcile` carries `{ returned, novel, executable,
+  adopted }` per case, because a funnel says how many and a pair of arms is tested on which. The
+  16-and-37 above are per-case outcomes; being able to cut them by `novel` is the difference between
+  a hypothesis and a reading.
+
+With those in place, `select-cross-pooled-reconcile-novel` — the same prompt, the same call, the same
+pool, and restatements handed back to the vote — is one lever from the arm that just read 59.83%, and
+the criterion registered before it runs:
+
+| criterion | threshold | why this number |
+|---|---|---|
+| ① the policy took effect | `adopted < executable` on the sample **and** `adopted ≤ novel` | an arm named for a policy that did not change what it scored is its parent under another name |
+| ② the paraphrases were the loss | `reconcile-novel > reconcile`, strictly | nothing else changed between the two arms; if handing the restatements back does not raise the score, the 37 losses were not the paraphrases and the premise of this lever is wrong |
+| ③ the corrections pay for the call | `reconcile-novel − vote ≥ 0` | 63.33% for no calls is the bar every paid arm on this pool has now failed to clear three times |
+| ④ the flip set is positive | more `vote`-lost to `novel`-won than the reverse on the disputed cases (McNemar) | a net delta can hide two large opposite movements, and the disputed stratum is where the decision is |
+
