@@ -446,6 +446,41 @@ test/              cross-package public-surface snapshot
 | `pnpm gate:eval-coverage` | an `eval/` file dropped below its recorded coverage |
 | `pnpm bench` | a control broke (oracle ≠ 100% or empty ≠ 0%) |
 
+### Running the gates on a machine that has no service containers
+
+`ci.yml` starts PostgreSQL 16 and MySQL 8.4 as services and exports `PG_TEST_URL` and
+`MYSQL_TEST_URL`. Without them the two connector suites are **skipped**, not failed — and
+`packages/node` then reports 85.83% on lines, which is a measurement of the environment rather
+than of the code. The four dimensions of all eight packages reach 95% only when the servers are
+there: 99.59% lines and 98.23% branches for `packages/node`, 2,751 tests passing and none skipped.
+
+On Debian/Ubuntu the whole setup is six commands:
+
+```bash
+rm -rf /var/lib/postgresql/16/main
+su postgres -c "/usr/lib/postgresql/16/bin/initdb -D /var/lib/postgresql/16/main -A trust -U postgres"
+su postgres -c "/usr/lib/postgresql/16/bin/pg_ctl -D /var/lib/postgresql/16/main -l /tmp/pg.log \
+  -o '-k /tmp -p 5432 -h 127.0.0.1' -w start"
+psql -h 127.0.0.1 -U postgres -c 'create database nl2charts_test'
+
+mariadbd --user=mysql --datadir=/var/lib/mysql --socket=/tmp/mysql.sock --port=3306 \
+  --bind-address=127.0.0.1 &
+mysql --socket=/tmp/mysql.sock -uroot -e "create database nl2charts_test; \
+  create user 'analyst'@'%' identified by 's3cret'; \
+  grant all on nl2charts_test.* to 'analyst'@'%';"
+
+export PG_TEST_URL='postgres://postgres:postgres@127.0.0.1:5432/nl2charts_test'
+export MYSQL_TEST_URL='mysql://analyst:s3cret@127.0.0.1:3306/nl2charts_test'
+```
+
+MariaDB stands in for MySQL 8.4 in the connector suite; every assertion in it passes against
+both. One behaviour is worth knowing before trusting an `AbortSignal` on this engine: the
+postgres connector forwards the signal to `pg`, and `pg` does not cancel a statement it has
+already sent. Aborting during `select pg_sleep(1)` returns the row a second later, exactly as if
+no signal had been given. The contract the engine can keep is the one it tests — an
+already-aborted signal never reaches the server — and the gap is registered rather than papered
+over.
+
 ### What a push has to measure
 
 Two of `ci.yml`'s jobs spend model calls: the BIRD Mini-Dev job sends thirteen arms over
