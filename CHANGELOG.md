@@ -8,6 +8,17 @@ cannot be argued with.
 
 ### Changed
 
+- **A push whose only code is tests no longer buys thirteen arms over the split.** The scope filter
+  that decides whether a push is measured (`tools/ci-scope.mjs`) knew one inert class — Markdown — so
+  a commit that added tests and a changelog line re-priced the whole BIRD chain, roughly 6,400
+  completions, to learn nothing. The red step of a TDD round is written before the implementation
+  exists and is exactly the push that should cost nothing: the number comes from `eval/` and
+  `packages/`, and `test/` is run by the `quality` job, which is never skipped. The two suites the
+  repository has are named rather than pattern-matched (`test/` at the root and
+  `packages/<name>/test/`, plus a colocated `*.test.ts`), so `eval/test/…` is still measured and a
+  directory nobody argued for cannot buy a skip; the two conservative edges are unchanged — an
+  undescribed list and a truncated one both measure.
+
 - **The reconcile line is closed, and the reason is measured rather than argued.** The sixth dispatch
   (`41462471819`, 600 dev questions) ran the five-arm reading the policy was built for:
   `select-cross` 62.50%, `-pooled` 62.33%, `-vote` **63.17%**, `-reconcile` 59.00%,

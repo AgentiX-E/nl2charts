@@ -15,6 +15,13 @@
  * property of the file name rather than a list of directories that drifts — one
  * `docs/*.md` added to `packages/` would break a list and not a suffix.
  *
+ * Tests are the second such class. The number comes from `eval/` and `packages/`, and
+ * `test/` is run by the `quality` job, which is never skipped; a push whose only code is a
+ * test file therefore cannot move a number, and the red step of a TDD round — the commit
+ * written before the implementation exists — is exactly the push that should cost nothing.
+ * The two roots are named rather than pattern-matched, so a new directory has to be argued
+ * for instead of inherited.
+ *
  * Two polities make the rule conservative in the direction that costs money:
  *
  * - **An empty list measures.** A push nobody could describe is a push to measure, and a
@@ -41,6 +48,26 @@ export function isDocumentation(file) {
 }
 
 /**
+ * A test is a file the `quality` job runs, and no prompt and no benchmark reads.
+ *
+ * The change set that most needs to be cheap is the red step of a TDD round — the one
+ * written before the code exists — and until this rule existed it bought thirteen arms over
+ * the whole split. Two roots are named rather than matched: `test/` at the repository root
+ * and `packages/<name>/test/`, which is where every suite lives. `eval/test/…` is *not* a
+ * test, because `eval/` holds the instrument and the corpora it reads, and a rule written as
+ * "any segment called `test`" would let a directory nobody argued for buy a skip.
+ *
+ * The suffix covers a test colocated with its source, which is how a new package arrives.
+ * It is anchored on the dot so `latest/`, `contest.ts` and `attestation.ts` stay source.
+ */
+export function isTest(file) {
+  const segments = file.split('/');
+  if (segments[0] === 'test') return true;
+  if (segments[0] === 'packages' && segments[2] === 'test') return true;
+  return /\.test\.(?:ts|tsx|mts)$/i.test(file);
+}
+
+/**
  * Whether a change set has to be measured, and why.
  *
  * The reason is returned rather than logged because it is what the workflow prints: a
@@ -58,13 +85,19 @@ export function needsModel(files) {
       reason: `the list holds ${paths.length} files and the commit endpoint stops at ${TRUNCATED_AT}, so the .ts may be in the part that was cut`,
     };
   }
-  const code = paths.filter((path) => !isDocumentation(path));
+  const code = paths.filter((path) => !isDocumentation(path) && !isTest(path));
   if (code.length === 0) {
-    return { measure: false, reason: `all ${paths.length} changed file(s) are Markdown, which no prompt reads` };
+    const markdown = paths.every((path) => isDocumentation(path));
+    return {
+      measure: false,
+      reason: markdown
+        ? `all ${paths.length} changed file(s) are Markdown, which no prompt reads`
+        : `all ${paths.length} changed file(s) are Markdown or tests, and neither is read by a prompt`,
+    };
   }
   return {
     measure: true,
-    reason: `${code.length} of ${paths.length} changed file(s) are not Markdown`,
+    reason: `${code.length} of ${paths.length} changed file(s) are neither Markdown nor tests`,
     files: code,
   };
 }

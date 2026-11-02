@@ -15,7 +15,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { needsModel, explain, summary, publish, isDocumentation, TRUNCATED_AT } from '../tools/ci-scope.mjs';
+import { needsModel, explain, summary, publish, isDocumentation, isTest, TRUNCATED_AT } from '../tools/ci-scope.mjs';
 
 describe('a change set that only edits documentation', () => {
   it('does not need a model call', () => {
@@ -47,9 +47,9 @@ describe('a change set that only edits documentation', () => {
 
 describe('a change set with code in it', () => {
   it('names the files that forced the measurement', () => {
-    const result = needsModel(['docs/guide.md', 'packages/ai/src/prompt.ts', 'test/a.test.ts']);
+    const result = needsModel(['docs/guide.md', 'packages/ai/src/prompt.ts', 'eval/bird/run.ts']);
     expect(result.measure).toBe(true);
-    expect(result.files).toEqual(['packages/ai/src/prompt.ts', 'test/a.test.ts']);
+    expect(result.files).toEqual(['packages/ai/src/prompt.ts', 'eval/bird/run.ts']);
     expect(result.reason).toContain('2 of 3');
   });
 
@@ -57,6 +57,42 @@ describe('a change set with code in it', () => {
     // A change to `ci.yml` is not read by a prompt either, but it decides what the run
     // does, and a filter that skipped it could skip the run that proves the edit works.
     expect(needsModel(['.github/workflows/ci.yml']).measure).toBe(true);
+  });
+});
+
+describe('a change set that only edits tests', () => {
+  it('does not need a model call', () => {
+    // The published number is produced by `eval/` and `packages/`; `test/` is run by the
+    // `quality` job, which never skips. So a red TDD step — the push that most needs to be
+    // cheap, and the one written before the code exists — buys no measurement.
+    const result = needsModel(['test/bird-arms.test.ts', 'packages/ai/test/prompt.test.ts', 'CHANGELOG.md']);
+    expect(result.measure).toBe(false);
+    expect(result.reason).toContain('tests');
+    expect(result.files).toBeUndefined();
+  });
+
+  it('recognises a test by its directory or by its suffix', () => {
+    expect(isTest('test/ci-scope.test.ts')).toBe(true);
+    expect(isTest('packages/ai/test/prompt.test.ts')).toBe(true);
+    // A test colocated with its source is the convention a new package would arrive with.
+    expect(isTest('packages/ai/src/prompt.test.ts')).toBe(true);
+  });
+
+  it('does not mistake a word that ends in test for a test directory', () => {
+    // `latest/`, `contest.ts` and `attestation.ts` are source. A rule written as a
+    // substring match would skip the run that measures them.
+    expect(isTest('packages/ai/src/latest/prompt.ts')).toBe(false);
+    expect(isTest('packages/ai/src/contest.ts')).toBe(false);
+    expect(isTest('packages/ai/src/attestation.ts')).toBe(false);
+  });
+
+  it('still measures the harness and every corpus beside it', () => {
+    // `eval/` holds the instrument and the data it reads, and `test` appears in that tree
+    // only if someone puts it there; the directory rule names the two roots that exist so
+    // that a new one has to be argued for rather than inherited.
+    expect(needsModel(['eval/bird/run.ts']).measure).toBe(true);
+    expect(needsModel(['eval/test/fixtures/cases.json']).measure).toBe(true);
+    expect(isTest('eval/test/fixtures/cases.json')).toBe(false);
   });
 });
 
@@ -99,7 +135,7 @@ describe('the two files the step needs', () => {
         expect(line).toMatch(/^[a-z_]+=[^\n]*$/u);
       }
       // The summary is the other half: Markdown, and it carries the sentence.
-      expect(readFileSync(summaryFile, 'utf8')).toContain('not Markdown');
+      expect(readFileSync(summaryFile, 'utf8')).toContain('neither Markdown nor tests');
       expect(readFileSync(summaryFile, 'utf8')).toContain('packages/a.ts');
     } finally {
       rmSync(directory, { recursive: true, force: true });

@@ -10,6 +10,14 @@ export const TRUNCATED_AT: number;
 
 export function isDocumentation(file: string): boolean;
 
+/**
+ * A file the `quality` job runs and no prompt or benchmark reads.
+ *
+ * Named for the two suites that exist — `test/` at the root and `packages/<name>/test/` — plus a
+ * test colocated with its source, so a directory nobody argued for cannot buy a skipped run.
+ */
+export function isTest(file: string): boolean;
+
 export interface ScopeResult {
   /** Whether the push has to be measured. */
   readonly measure: boolean;
