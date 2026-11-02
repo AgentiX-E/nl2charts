@@ -168,6 +168,13 @@ jobs:
       # neither is on 496 questions.
       - name: What one more candidate would buy
         run: pnpm bench:bird:pool --artifact eval/out/bird-eval.json
+      # The question underneath the previous one, and the one this repository can answer for free:
+      # a pool of three candidates that return the same result three times costs three calls and
+      # carries one opinion. `pool` prices the union; this prices its independence — how many
+      # distinct results a case actually holds, which source carries cases alone, and how much of
+      # the lost ceiling is a loss *the candidates agreed on*, which no selector can reach.
+      - name: How many opinions the pool holds
+        run: pnpm bench:bird:diversity eval/out/bird-eval.json
       # The other factor of the same product, priced on the split that can resolve it. Selection
       # losses here are 23 questions on `select-mixed` against 72 on `select`, so a rule that
       # converts one arm and not the other is only visible at this size.

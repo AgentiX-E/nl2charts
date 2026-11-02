@@ -31,6 +31,23 @@ cannot be argued with.
   change what the candidates are (I-45, I-77), not what is done with them.
 
 ### Added
+- **`bench:bird:diversity`: how many opinions the pool actually holds.** `bench:bird:pool` prices the
+  union — what one more call buys — and cannot see the thing underneath it: a pool of three
+  candidates that return the same rows three times costs three calls and carries one opinion, and
+  its union is indistinguishable from three genuinely different attempts. The new instrument reads
+  the candidate records the runner already writes and prints three numbers a union cannot: distinct
+  results per case, the cases where a source is *solely* right (its marginal value, which is not its
+  hit rate), and the ceiling loss the candidates **agreed on** — the part no selector can reach.
+  On the 600-case dev artifact behind `41453395203`: ceiling 69.17%, best single source 63.00%,
+  **1.28 distinct results per case**, **447 of 600 cases unanimous (74.50%) and right 72.93% of the
+  time**, and the second model's candidate carrying **4.00pp of ceiling alone** against 1.00pp and
+  1.33pp for the two prompt-varied sources; **121 of the 185 ceiling losses are unanimous** (65.41%),
+  so two thirds of what the pool misses is a loss it agreed on. That is the registration for I-77:
+  the external anchor is XiYan-SQL's ablation (one generator, −4.04pp) and MCS-SQL's (five prompts
+  +1.3pp against twenty samples of one prompt +2.1pp), and this instrument is what makes the same
+  purchase measurable here. Wired into `bird-dev.yml` as a zero-cost step, refusals included: an arm
+  the run never scored, an arm scored without candidates, and a share below the sample floor are
+  three different sentences rather than one table of zeros.
 
 - **`inline+evidence+samples-gold`: the value block priced at the width it would be built at.** The
   block has been carried for three rounds on +1.31pp at p = 0.052 and a 2.22pp ceiling, and both

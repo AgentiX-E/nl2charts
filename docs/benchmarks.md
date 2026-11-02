@@ -5841,3 +5841,66 @@ dispatch is the first stage at one call a case, and it exists because composing 
 never been priced at its own width with a four-call arm would spend 6,128 completions to learn the
 same thing the 4,596 above can say. Stage B — the block on every candidate of the adopted arm — is
 run only if stage A clears ①, and it is then the arm the plan's criterion is written about.
+
+## What the pool's three candidates are worth, one opinion at a time
+
+Every candidate-side reading in this file has priced a **union**: take the candidates an arm kept,
+ask which questions any of them answers, and the difference between two unions is what one more
+call buys. `bench:bird:pool` prints exactly that, and it is honest about the thing it cannot see —
+a pool of three candidates that return the same rows three times costs three calls and carries one
+opinion, and its union looks identical to three genuinely different attempts.
+
+`bench:bird:diversity` reads the other half. It costs no model call and no oracle query, because it
+reads `cases[].candidates`, which the runner already writes: each candidate carries its source, its
+verdict and a fingerprint of its result set.
+
+**Three numbers that a union cannot produce.**
+
+| reading | on the 600-question dev artifact (`41453395203`) |
+|---|---|
+| ceiling (any candidate correct) | 415 / 600 = **69.17%** |
+| distinct results per case | **1.28** mean, 3 max |
+| unanimous cases | **447 = 74.50%**, right 326 = **72.93%** |
+| cases with no correct candidate | 185 = 30.83%, of which **121 (65.41%) the candidates agreed on** |
+
+The fourth row is the point of the instrument. A ceiling loss that the candidates *agreed* on
+cannot be reached by any selector: the pool did not fail to find the answer, it converged on the
+wrong one. Two thirds of what this pool misses is that kind, and it is the only part a lever on the
+*candidates* can move — a lever on the *selector* moves the other third, which this file has
+already priced three times and found worth at most a point.
+
+**A hit rate is not a value.** Per source, on the same artifact:
+
+| source | generated | correct | solely correct | ceiling without it |
+|---|---|---|---|---|
+| `inline+evidence@second` | 599 | 362 (60.33%) | **24 (4.00%)** | 65.17% |
+| `values` | 594 | 377 (62.83%) | 8 (1.33%) | 67.83% |
+| `metadata+evidence` | 594 | **378 (63.00%)** | 6 (1.00%) | 68.17% |
+
+The best single source by hit rate is the *least* valuable by marginal ceiling, and the worst by
+hit rate is the most valuable: the second model's candidate carries 24 questions alone that
+neither prompt-varied source answers. This is the shape the literature describes from the other
+direction — XiYan-SQL's end-to-end ablation loses **4.04pp** of execution accuracy when its multiple
+generators collapse to one (73.34% → 69.30% on BIRD dev), and MCS-SQL prices five prompts at
+**+1.3pp** against twenty samples of a single prompt at **+2.1pp**. Both say what this table says:
+*more opinions* and *different opinions* are separate purchases, and only one of them is being
+priced by a union.
+
+**The registration for the next lever, written before the dispatch.** The reading above is
+zero-cost and comes from an artifact that is already paid for, so it decides the next paid arm
+rather than following one:
+
+1. **The lever acts on the 121.** An arm that spends a call only where the candidates agree must
+   convert at least **2.00pp of the 600** (12 of the 121 unanimous losses) before it is worth its
+   price; below that, the extra call is indistinguishable from the split's own resolution.
+2. **The gain is placed where the lever claims to act.** On the 447 unanimous cases the arm must
+   beat the vote by at least +1.5pp, and on the 153 non-unanimous cases it must stay within
+   ±1.0pp. An arm that gains uniformly has not changed the candidates; it has changed the model.
+3. **The ceiling moves, not just the score.** `candidateRecall` strictly rises against
+   `select-cross-pooled-vote`: a lever that only re-ranks converts a ceiling that already existed.
+4. **The price is stated per case.** Extra calls per case are printed on the row; a conditional
+   call that fires on 74.5% of cases costs 0.745 and must be read that way, not as "one more call".
+
+Until 1–4 are read, the honest statement about this factor is the one the table above supports:
+**our pool carries 1.28 opinions per case, three quarters of its cases are unanimous, and two thirds
+of its losses are unanimous** — so the ceiling is limited by *agreement*, not by *selection*.

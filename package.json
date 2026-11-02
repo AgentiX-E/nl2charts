@@ -35,6 +35,7 @@
     "bench:bird:adapt": "tsx eval/bird/adapt.ts",
     "bench:bird:route": "tsx eval/bird/route.ts",
     "bench:bird:pool": "tsx eval/bird/pool.ts",
+    "bench:bird:diversity": "tsx eval/bird/diversity.ts",
     "bench:bird:consensus": "tsx eval/bird/consensus.ts",
     "bench:adversarial": "tsx eval/adversarial/run.ts",
     "bench:adversarial:dry": "tsx eval/adversarial/run.ts --dry-run",

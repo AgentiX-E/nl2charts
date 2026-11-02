@@ -65,10 +65,10 @@
       "branches": 100
     },
     "eval/bird/conditions.ts": {
-      "lines": 99.09,
-      "statements": 99.09,
+      "lines": 99.17,
+      "statements": 99.17,
       "functions": 100,
-      "branches": 96.62
+      "branches": 97.02
     },
     "eval/bird/consensus.ts": {
       "lines": 100,
@@ -106,6 +106,12 @@
       "functions": 100,
       "branches": 99.21
     },
+    "eval/bird/diversity.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 97.29
+    },
     "eval/bird/failure-shape.ts": {
       "lines": 100,
       "statements": 100,
@@ -119,10 +125,10 @@
       "branches": 100
     },
     "eval/bird/gap.ts": {
-      "lines": 98.9,
-      "statements": 98.9,
+      "lines": 98.97,
+      "statements": 98.97,
       "functions": 100,
-      "branches": 98.96
+      "branches": 99.03
     },
     "eval/bird/information.ts": {
       "lines": 99.11,
