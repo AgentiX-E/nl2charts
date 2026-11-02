@@ -8,6 +8,16 @@ cannot be argued with.
 
 ### Added
 
+- **The one fact the selector had to guess: which candidates returned the same rows.** The selector
+  is shown each candidate's statement, row count, column count and the first three rows, which
+  cannot establish that two result sets are equal — so the fact a 2+1 pool turns on (two of three
+  answering identically) was counted exactly by the vote and left implicit for the selector.
+  `agreementMarks` partitions the candidate list by `resultKey`, each candidate pointing at the
+  earliest candidate it matches, and `select-mixed+agree` / `select-cross-agree` render one line per
+  duplicate plus one rule: *agreement is evidence, not proof*. One lever from each parent — same
+  candidates, same count, same four calls, 544 B gzip in `packages/ai` — and the block is emitted
+  only when marks are supplied, so every earlier arm keeps a byte-identical prompt.
+
 - **A reasoning model in one of three slots: the ceiling moves and the conversion eats it.** Run
   `41356370371` ran `select-mixed,select-cross` over 600 stratified dev questions with
   `deepseek-reasoner` in the `inline+evidence@second` slot. Criteria were written before the reading;

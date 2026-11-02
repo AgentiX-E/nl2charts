@@ -1329,10 +1329,19 @@ describe('pinned definitions', () => {
   });
 
   it('refuses a pinned file that has no entry for a database under test', async () => {
-    writeFileSync(pinnedFile, JSON.stringify({ definitions: { other: '- a sentence for a database nobody runs' } }));
-    await expect(run({ plan: { first: correct }, env: { BIRD_ARMS: 'inline-definitions' } })).rejects.toThrow(
-      /pinned definitions have no entry for shop/,
-    );
+    // The clobbered pin is restored before the test ends. It was not, and the next test in this
+    // file that needed synthesis — several describes later — failed with "no entry for shop",
+    // which reads as a defect in the runner rather than in the fixture. A test that mutates a
+    // file the rest of the file reads is a test whose isolation is an accident of ordering.
+    const previous = readFileSync(pinnedFile, 'utf8');
+    try {
+      writeFileSync(pinnedFile, JSON.stringify({ definitions: { other: '- a sentence for a database nobody runs' } }));
+      await expect(run({ plan: { first: correct }, env: { BIRD_ARMS: 'inline-definitions' } })).rejects.toThrow(
+        /pinned definitions have no entry for shop/,
+      );
+    } finally {
+      writeFileSync(pinnedFile, previous);
+    }
   });
 
   it('regenerates them when the run is told to, and reaches the model for it', async () => {
@@ -1833,5 +1842,60 @@ describe('an arm whose card carries the competitor\'s value examples', () => {
     // nothing and costs the characters of a bracket.
     expect(() => assertSamplesRan('inline+evidence+samples', { columns: 3, values: 0 })).toThrow('its parent renamed');
     expect(() => assertSamplesRan('inline+evidence+samples', { columns: 3, values: 9 })).not.toThrow();
+  });
+});
+
+describe('the agreement the selector cannot compute', () => {
+  /** The selector's requests, identified by the sentence only it is asked. */
+  const selectorPrompts = (requests: readonly EndpointRequest[]): string[] =>
+    requests.map((request) => request.prompt).filter((prompt) => prompt.includes('which candidate statement answers the question'));
+
+  it('marks the duplicate on the arm that shows it and leaves its parent untouched', async () => {
+    // Every source answers correctly, so all three candidates return the same rows: the shape
+    // in which the universe of marks is "1 distinct result". The parent is run against the same
+    // plan for the same reason — the claim is that the prompts differ by the marks and by
+    // nothing else, which needs both prompts in the same test.
+    const marked = await run({ plan: { first: correct }, env: { BIRD_ARMS: 'select-mixed+agree' } });
+    const plain = await run({ plan: { first: correct }, env: { BIRD_ARMS: 'select-mixed' } });
+    expect(marked.code).toBe(0);
+    expect(plain.code).toBe(0);
+
+    const withMarks = selectorPrompts(marked.requests);
+    const without = selectorPrompts(plain.requests);
+    expect(withMarks).toHaveLength(QUESTIONS.length);
+    expect(without).toHaveLength(QUESTIONS.length);
+
+    // The header counts the distinct results, the duplicate is pointed at the candidate it
+    // duplicates, and the third candidate carries no mark — the absence is half the signal.
+    expect(withMarks[0]).toContain('These 3 candidates returned 1 distinct results; identical results are marked.');
+    expect(withMarks[0]).toContain('same result as candidate 1');
+    expect(withMarks[0]).not.toContain('same result as candidate 2');
+    expect(withMarks[0]).toContain('Agreement is evidence, not proof');
+
+    // The parent is the control: same candidates, same count, same calls, no marks. If this
+    // ever prints the block, the arm is no longer one lever from `select-mixed`.
+    expect(without[0]).not.toContain('distinct results');
+    expect(without[0]).not.toContain('Agreement is evidence');
+  });
+
+  it('spends no call on the marks and keeps the same four-call price', async () => {
+    const result = await run({ plan: { first: correct }, env: { BIRD_ARMS: 'select-mixed+agree' } });
+    expect(result.code).toBe(0);
+    const arms = result.report.arms as {
+      arm: string;
+      total: number;
+      tokens?: { byPurpose?: Record<string, { calls: number }> };
+    }[];
+    const row = arms[0];
+    expect(row?.arm).toBe('select-mixed+agree');
+    // Three generations and one selector per case, and no third kind of call: the marks are
+    // computed from rows the arm had already executed. An arm that charges for them would be
+    // charging for reading its own artifact.
+    expect(row?.total).toBe(QUESTIONS.length);
+    // Three generations and one selector per case, and no third kind of call: the marks are
+    // computed from rows the arm had already executed. An arm that charged for them would be
+    // charging for reading its own artifact.
+    expect(row?.tokens?.byPurpose).toMatchObject({ generate: { calls: 3 }, select: { calls: 1 } });
+    expect(Object.keys(row?.tokens?.byPurpose ?? {}).sort()).toEqual(['generate', 'select']);
   });
 });

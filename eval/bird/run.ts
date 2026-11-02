@@ -243,6 +243,22 @@ export interface Arm {
    */
   readonly emptyRetry?: 'diagnosed' | 'blind';
   /**
+   * Tell the selector which candidates returned identical rows.
+   *
+   * The selector is shown each candidate's statement, row count, column count and the first
+   * three rows. It is not shown that candidate 1 and candidate 2 returned *exactly* the same
+   * thing, because equality is the judge's and the previews are truncated: three hundred
+   * characters of a wide table cannot establish that two result sets are the same set. So the
+   * one fact a 2+1 pool is built on is the one fact the selector has to guess.
+   *
+   * One lever from its parent: same candidates, same count, same four calls, and the marks cost
+   * no tokens beyond a line per agreeing candidate. What it prices is whether the selector can
+   * use "these two agree" as evidence — 20 of the 22 questions `select-cross`'s reasoner slot
+   * added to the ceiling had the correct answer in the dissenting slot, which is a hole a
+   * three-way vote cannot see and a selector might be able to.
+   */
+  readonly agreement?: boolean;
+  /**
    * Ask the model what its own statement left out, one call, then keep what it writes.
    *
    * The population is the one nothing else can see: statements that run, return rows and are
@@ -519,6 +535,16 @@ export const ARMS: readonly Arm[] = [
   // permutes the order per question id and changes nothing else — same candidates, same
   // prompts, same four calls — so the per-candidate `winnerSource` decides between them.
   { name: 'select-cross-shuffled', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: CROSS_SOURCES, shuffle: true },
+  // The adopted arm with the one fact its selector cannot see: which candidates returned the
+  // same rows. Three hundred characters of a wide result cannot establish equality, so the
+  // agreement a 2+1 pool turns on is left to be guessed. One lever from `select-mixed` — same
+  // candidates, same prompts, same four calls — and the pair prices the information instead of
+  // the model.
+  { name: 'select-mixed+agree', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: MIXED_SOURCES, agreement: true },
+  // ...and the same marks on the pool where they matter: `select-cross` is the arm whose
+  // ceiling a dissenting slot raised and whose conversion fell, and 20 of the 22 questions the
+  // slot added had the correct answer in the minority. Same candidates, same four calls.
+  { name: 'select-cross-agree', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: CROSS_SOURCES, agreement: true },
   // ...and the same aggregator on the cross-model set, where the candidates disagree by
   // model as well as by prompt.
   { name: 'vote-cross', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, mixed: CROSS_SOURCES },
@@ -706,6 +732,8 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'no-linking': 'removes the schema linker: the arm that prices linking, run when linking changes',
   repair: 'the original repair arm (dataset notes, two attempts, one generic sentence): superseded by inline+repair, which is one lever from inline+evidence and reports a funnel',
   'select-cross': 'the trio with its first candidate from a second model: needs BIRD_SECOND_MODEL and a second key, so it is dispatched rather than run on every push',
+  'select-mixed+agree': 'the adopted arm with agreement marked on the candidates: one lever, four calls, and the selector prompt differs by a line per agreeing candidate — run it against `select-mixed` when the pool question is conversion and not generation',
+  'select-cross-agree': 'the cross arm with the marks: needs the second model, and is measured against `select-cross`, which is where a dissenting slot made agreement ambiguous',
   'select-tagged': 'the cross arm with each candidate labelled by its source: needs the second model too, and is measured against `select-cross`',
   'vote-mixed': 'three prompts aggregated by modal result instead of by a model: 63% would make the selector call unnecessary, and below that it prices what the model adds',
   'vote-cross': 'the cross-model candidate set aggregated by modal result: needs the second model too',
@@ -2024,6 +2052,32 @@ export function resultFingerprint(rows: readonly (readonly unknown[])[]): string
 }
 
 /**
+ * For each candidate, the 1-based number of the earliest candidate that returned the same rows.
+ *
+ * The same equality the judge uses — `resultKey`, not a fingerprint comparison — so "the
+ * selector was told these two agree" and "these two are the same answer" are one definition
+ * rather than two that can drift. A mark only ever points backwards, which is what makes the
+ * marks a partition of the candidate list: each group has exactly one member without a mark,
+ * and the count of those is the number of distinct results.
+ *
+ * One pass over a `Map` rather than pairwise comparison: three candidates would make the
+ * difference invisible, but a five-sample arm under the same function would not, and the
+ * selector prompt is on the hot path of every case.
+ */
+export function agreementMarks(results: readonly (readonly (readonly unknown[])[])[]): (number | undefined)[] {
+  const firstSeen = new Map<string, number>();
+  return results.map((rows, index) => {
+    const key = resultKey(rows);
+    const earlier = firstSeen.get(key);
+    if (earlier === undefined) {
+      firstSeen.set(key, index + 1);
+      return undefined;
+    }
+    return earlier;
+  });
+}
+
+/**
  * The candidate set, in the order the selector saw it, with the truth for each member.
  *
  * One pass of the official judge over the set answers both questions the report asks of
@@ -3332,12 +3386,17 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
           // The model sees what the vote cannot: the shape of each result. A statement
           // that answers a "how many" with 500 rows is wrong for a reason no majority
           // of identical mistakes will reveal.
-          const offered = readable.map((candidate) => ({
+          // Which candidates returned the same rows, computed only for the arm that shows it.
+          // Every other arm passes no marks, so its prompt stays byte-identical to the one it
+          // was measured with and the delta between the pair is the marks and nothing else.
+          const marks = arm.agreement === true ? agreementMarks(readable.map((candidate) => candidate.rows)) : [];
+          const offered = readable.map((candidate, index) => ({
             sql: candidate.sql,
             rows: candidate.rows.length,
             columns: candidate.rows[0]?.length ?? 0,
             preview: JSON.stringify(candidate.rows.slice(0, 3)).slice(0, 300),
             ...(arm.sourcesVisible === true ? { source: candidate.source } : {}),
+            ...(marks[index] === undefined ? {} : { agreesWith: marks[index] }),
           }));
           // `counter.provider`, not `provider`: this call is part of the arm's price, and
           // the first version of this counter left it out — which the gate caught on the

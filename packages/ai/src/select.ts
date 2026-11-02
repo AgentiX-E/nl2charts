@@ -16,6 +16,40 @@ export interface Candidate {
    * value-grounded statement from a notes-grounded one is choosing on style alone.
    */
   readonly source?: string;
+  /**
+   * The 1-based number of the earliest candidate that returned exactly the same rows.
+   *
+   * Absent when this candidate's result is unique. The caller computes it, because equality
+   * of two result sets is the benchmark's judge and not this package's — and because a
+   * selector told "these two agree" is a different experiment from one left to infer it from
+   * two truncated previews, which is what it has to do today.
+   *
+   * An empty result is the one case where the mark is true and uninformative: `resultKey` maps
+   * every empty result to the same symbol, so two candidates that both returned nothing are
+   * marked as agreeing. The row count beside the mark says so, and on BIRD an empty result is
+   * wrong on every question — the arms that drop empties before asking never produce the mark,
+   * and the arms that keep them are telling the truth about two candidates that agree.
+   */
+  readonly agreesWith?: number;
+}
+
+/**
+ * How many distinct result sets the candidates produced, given their agreement marks.
+ *
+ * Each candidate reduces to its representative — itself when it is unique, the earlier
+ * candidate it matches otherwise — and the representatives are the distinct results. The
+ * mark is defined to point at the *earliest* member of a group, which is what makes that
+ * reduction a partition rather than a chain: a mark that pointed at a middle member would
+ * split one group into two here and report more distinct results than there are.
+ */
+function distinctResults(candidates: readonly Candidate[]): number {
+  const representatives = candidates.map((candidate, index) => candidate.agreesWith ?? index + 1);
+  return new Set(representatives).size;
+}
+
+/** True when any candidate carries an agreement mark, i.e. when the prompt should say so. */
+function marksAgreement(candidates: readonly Candidate[]): boolean {
+  return candidates.some((candidate) => candidate.agreesWith !== undefined);
 }
 
 export interface SelectionDecision {
@@ -47,25 +81,54 @@ const RULES: readonly string[] = [
   '- A candidate that groups or filters on a column the question never mentions is suspect unless the question implies it.',
 ];
 
-/** One candidate, as the selector reads it: statement, shape, first rows. */
-function renderCandidate(candidate: Candidate, label?: string): string {
+/**
+ * The rule a marked candidate set adds, and the whole of the arbitration hypothesis.
+ *
+ * Two candidates that returned identical rows are one opinion counted twice when they come
+ * from the same prompt, and one opinion counted twice *plus* a second author's agreement when
+ * they do not — and the selector cannot tell which, because the rows it is shown are truncated
+ * previews. Saying so changes the question from "which of these three looks right" to "is the
+ * agreement here evidence", which is the distinction the 2+1 pool turned on: on `select-cross`,
+ * 20 of the 22 questions the second model added to the ceiling had the correct answer in the
+ * dissenting slot, and the two agreeing candidates were both wrong.
+ */
+const AGREEMENT_RULE =
+  '- Candidates marked as returning the same result are not independent opinions: they may share one mistake. Agreement is evidence, not proof — when the question asks for something the agreeing candidates do not provide, the dissenting candidate is the answer.';
+
+/**
+ * One candidate, as the selector reads it: statement, shape, first rows, agreement.
+ *
+ * `label` is required rather than optional. It was optional, and no caller omitted it — every
+ * prompt this file builds numbers its candidates, because a reply has to name one — so the
+ * unnamed arm of the ternary was code no input could reach.
+ */
+function renderCandidate(candidate: Candidate, label: string): string {
   const tag = candidate.source === undefined ? '' : `[${candidate.source}] `;
-  const head = label === undefined ? `${tag}${candidate.sql}` : `${label}. ${tag}${candidate.sql}`;
+  const head = `${label}. ${tag}${candidate.sql}`;
   return [
     head,
     `   result: ${String(candidate.rows)} rows, ${String(candidate.columns)} columns`,
     candidate.preview.length === 0 ? '' : `   first rows: ${candidate.preview}`,
+    candidate.agreesWith === undefined ? '' : `   same result as candidate ${String(candidate.agreesWith)}`,
   ]
     .filter((line) => line.length > 0)
     .join('\n');
 }
 
 export function buildSelectionPrompt(question: string, candidates: readonly Candidate[]): string {
+  // The agreement block is opt-in and its absence is byte-identical to the prompt every arm
+  // before this one was measured with: a caller that does not compute marks gets the prompt it
+  // has always had, so the delta between marked and unmarked is the marks and nothing else.
+  const marked = marksAgreement(candidates);
   return [
     'You choose which candidate statement answers the question. Every candidate has already been executed.',
+    ...(marked
+      ? [`These ${String(candidates.length)} candidates returned ${String(distinctResults(candidates))} distinct results; identical results are marked.`]
+      : []),
     'Rules:',
     ...RULES,
     '- If two candidates are equivalent, choose the one whose rows are more consistent with the question.',
+    ...(marked ? [AGREEMENT_RULE] : []),
     'Answer with the number of the chosen candidate and nothing else.',
     '',
     `Question: ${question}`,

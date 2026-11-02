@@ -43,6 +43,73 @@ describe('selection prompt', () => {
   });
 });
 
+describe('collapsing a result for the selector', () => {
+  it('reads an empty result as zero columns rather than as no candidate', () => {
+    // The one shape a result-based rule has to survive: a statement that ran and returned
+    // nothing. It has no first row to take a width from, and `0 columns` beside `0 rows` is
+    // what tells the selector the candidate is empty rather than narrow.
+    expect(toCandidate({ sql: 'SELECT 1 WHERE 0', rows: [] })).toEqual({
+      sql: 'SELECT 1 WHERE 0',
+      rows: 0,
+      columns: 0,
+      preview: '[]',
+    });
+  });
+
+  it('keeps three rows of preview and clips the rest', () => {
+    const rows = [[1], [2], [3], [4], [5]];
+    const candidate = toCandidate({ sql: 'SELECT id FROM orders', rows });
+    expect(candidate.rows).toBe(5);
+    expect(candidate.columns).toBe(1);
+    expect(candidate.preview).toBe('[[1],[2],[3]]');
+  });
+});
+
+describe('agreement, when the caller measured it', () => {
+  const marked: Candidate[] = [
+    { sql: 'SELECT COUNT(*) FROM orders', rows: 500, columns: 1, preview: '[[500]]' },
+    { sql: 'SELECT COUNT(*) FROM orders WHERE status = "completed"', rows: 500, columns: 1, preview: '[[500]]', agreesWith: 1 },
+    { sql: 'SELECT id FROM orders', rows: 12, columns: 1, preview: '[[1], [2], [3]]' },
+  ];
+
+  it('says nothing about agreement when no candidate carries a mark', () => {
+    // The property the ablation depends on: an unmarked list gets the prompt every arm
+    // before this one was measured with, byte for byte. A prompt that changed when the
+    // marks were absent would price the marks against a different experiment.
+    const prompt = buildSelectionPrompt('How many completed orders are there?', candidates);
+    expect(prompt).not.toContain('distinct results');
+    expect(prompt).not.toContain('same result as candidate');
+    expect(prompt).not.toContain('not independent opinions');
+  });
+
+  it('marks the agreeing candidate and counts the distinct results', () => {
+    const prompt = buildSelectionPrompt('How many orders?', marked);
+    expect(prompt).toContain('These 3 candidates returned 2 distinct results; identical results are marked.');
+    expect(prompt).toContain('2. SELECT COUNT(*) FROM orders WHERE status = "completed"\n   result: 500 rows, 1 columns\n   first rows: [[500]]\n   same result as candidate 1');
+    // The two unique candidates carry no line: a mark is a fact about a pair, and printing
+    // "same result as candidate 2" over a candidate that matches nothing would be a lie the
+    // model cannot check.
+    expect(prompt.match(/same result as candidate/g)).toHaveLength(1);
+  });
+
+  it('states the rule that makes the mark worth reading', () => {
+    // Without this line the mark is trivia; with it the selector is asked the question the
+    // 2+1 pool turns on — whether agreement here is evidence or a shared mistake.
+    expect(buildSelectionPrompt('q', marked)).toContain(
+      'Candidates marked as returning the same result are not independent opinions: they may share one mistake. Agreement is evidence, not proof',
+    );
+  });
+
+  it('counts a three-way agreement as one distinct result, not two', () => {
+    const all: Candidate[] = [
+      { sql: 'SELECT 1', rows: 1, columns: 1, preview: '[[1]]' },
+      { sql: 'SELECT 2', rows: 1, columns: 1, preview: '[[1]]', agreesWith: 1 },
+      { sql: 'SELECT 3', rows: 1, columns: 1, preview: '[[1]]', agreesWith: 1 },
+    ];
+    expect(buildSelectionPrompt('q', all)).toContain('These 3 candidates returned 1 distinct results');
+  });
+});
+
 describe('reading the answer', () => {
   it('accepts the forms a model actually writes', () => {
     expect(parseSelection('2', 3)).toBe(1);

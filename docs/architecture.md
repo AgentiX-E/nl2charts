@@ -545,3 +545,14 @@ that differs in method rather than in prompt or in draw.
   dispatch but one and the second is a rule no test can hold — but `tools/bird-arm.mjs`, which answers
   with the first arm the run's own `BIRD_ARMS` asked for that the artifact holds, else the largest
   population, and is tested for both edges plus the contract that it prints nothing else on stdout.
+- **Agreement is a partition, and the selector was never handed it.** The selector receives each
+  candidate's statement, row count, column count and the first three rows — and three hundred
+  characters of a wide result cannot establish that two result sets are the same set. So the one
+  fact a 2+1 pool turns on, that two of the three returned exactly the same thing, was the one fact
+  the selector had to guess, while the vote counted it exactly. `agreementMarks` computes the
+  partition in one pass over `resultKey` — each candidate points at the earliest candidate it
+  matches, so groups have exactly one unmarked member and the number of distinct results is
+  countable from the marks alone — and `select-mixed+agree` / `select-cross-agree` hand it to the
+  prompt as a line per duplicate plus one rule: agreement is evidence, not proof. The block is
+  opt-in, so every arm measured before it keeps a byte-identical prompt and the pair prices the
+  information rather than a rewrite; the marks cost no call, because the rows were already executed.

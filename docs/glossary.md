@@ -447,3 +447,11 @@ spends a call), and `oracle` any correct candidate — the ceiling rather than a
 share of the corpus no selection rule can move: if the set agrees and is wrong, choosing cannot
 help. It is the boundary between selection workmanship and generation work, and the column is
 printed as *unmeasured* rather than zero on artifacts written before fingerprints existed.
+
+**Agreement mark** — The one-based number of the earliest candidate that returned exactly the same
+rows, attached to every later member of that group and to no other candidate. The relation is
+`resultKey` equality, the judge's own, so a mark means the judge would call the two results a match.
+Marks only point backwards, which makes them a partition: each group has one unmarked member and the
+number of distinct results is the number of unmarked candidates plus those pointed at. The selector
+is shown a mark as `same result as candidate 1` and is told, in one rule, that agreement is evidence
+and not proof — the sentence the 2+1 pool turns on.
