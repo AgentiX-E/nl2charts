@@ -170,6 +170,28 @@ describe('report completeness', () => {
     ).not.toThrow();
   });
 
+  it('refuses a reconcile arm that does not say what the turn produced', () => {
+    // Without the funnel the row cannot separate "it reconciled and was wrong" from "it restated
+    // candidate 1 on every case", and the second reading belongs to the selector.
+    expect(() =>
+      assertReportComplete({ arms: [{ arm: 'select-cross-pooled-reconcile', total: 600, pool: 'select-cross', candidateRecall: 0.705 }] }),
+    ).toThrow(/select-cross-pooled-reconcile.*no reconcile funnel/);
+    expect(() =>
+      assertReportComplete({
+        arms: [
+          {
+            arm: 'select-cross-pooled-reconcile',
+            total: 600,
+            pool: 'select-cross',
+            candidateRecall: 0.705,
+            poolRead: { shared: 600, unrecorded: 0, cases: 600 },
+            reconcile: { asked: 600, returned: 600, novel: 214, executable: 605, adopted: 380 },
+          },
+        ],
+      }),
+    ).not.toThrow();
+  });
+
   it('reports the shape an arm\'s replies had, aggregated over its cases', () => {
     const shape = { fenced: true, index: false, steps: 0, named: 0 };
     expect(armFormat([run({ shape }), run({ shape }), run({ shape })])).toEqual({

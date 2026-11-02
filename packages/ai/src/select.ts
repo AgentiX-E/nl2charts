@@ -376,3 +376,95 @@ export async function chooseCandidatePairwise(
   }
   return { index: best, decided, sql: (offered[best] as Candidate).sql };
 }
+
+/**
+ * One group of candidates that returned the same rows, as a reconciler reads it.
+ *
+ * `members` are the 1-based numbers of the candidates in the group, in the order the model was
+ * shown them; `sql` is the statement of the earliest member, because a group's identity is its
+ * result and any member of it produced that result. `rows` and `columns` describe the shared
+ * result, and `preview` is the same truncated JSON the selector sees.
+ */
+export interface ResultGroup {
+  readonly members: readonly number[];
+  readonly sql: string;
+  readonly rows: number;
+  readonly columns: number;
+  readonly preview: string;
+}
+
+/**
+ * Partition executed candidates into the distinct results they returned.
+ *
+ * The partition is read off the agreement marks, so it is exactly the grouping the marked
+ * selector prompt states in prose: each candidate reduces to its representative — itself when it
+ * is unique, the earlier candidate it matches otherwise — and one group is built per
+ * representative. Computing it here rather than in the caller keeps the two readings of the same
+ * fact (the marks in a prompt, the groups in a reconcile prompt) from drifting apart.
+ */
+export function resultGroups(candidates: readonly Candidate[]): ResultGroup[] {
+  const groups = new Map<number, { members: number[]; first: number }>();
+  for (const [index, candidate] of candidates.entries()) {
+    const representative = candidate.agreesWith ?? index + 1;
+    const existing = groups.get(representative);
+    if (existing === undefined) groups.set(representative, { members: [index + 1], first: index });
+    else existing.members.push(index + 1);
+  }
+  // Ordered by the representative's own slot, which is the order the model read them in.
+  return [...groups.entries()]
+    .sort((left, right) => left[1].first - right[1].first)
+    .map(([, group]) => {
+      const candidate = candidates[group.first] as Candidate;
+      return { members: group.members, sql: candidate.sql, rows: candidate.rows, columns: candidate.columns, preview: candidate.preview };
+    });
+}
+
+/**
+ * Reconcile instead of choose: read the results, then write the statement to run.
+ *
+ * This is the lever the two readings pointed at. A selector asked "which of these three" answers
+ * with an index, and an index cannot express the answer to a question whose three candidates each
+ * got part of it right — the modal result is worth one call less and the model's choice is worth
+ * the same as counting, measured twice on the heterogeneous pool (+0.17pp, −0.17pp). The
+ * information the model was missing was never the deliberation, it was the *grouping*: two
+ * candidates that returned identical rows are one opinion, and the arm that said so (+1.17pp,
+ * +0.33pp) is the only one that has paid in both runs.
+ *
+ * So this prompt hands over the grouping and asks for a statement rather than a number. The
+ * output format is the whole experiment: a reply that is a group's statement unchanged is a
+ * selector with a longer prompt, and the caller counts it as such (`novel` in the funnel).
+ *
+ * The deliberation is asked for even when the model is a chat model, because the reasoning is
+ * what ties a group's result to the question; the answer is still read from the final fenced
+ * block, so a model that ignores the instruction and answers with a statement is not penalised
+ * for it.
+ */
+export function buildReconcilePrompt(question: string, groups: readonly ResultGroup[]): string {
+  const total = groups.reduce((count, group) => count + group.members.length, 0);
+  return [
+    'Several statements were written for the same question and executed. They returned the results grouped below; statements in one group returned identical rows.',
+    `These ${String(total)} statements produced ${String(groups.length)} distinct result${groups.length === 1 ? '' : 's'}.`,
+    'Your job is not to pick one of them. Write the statement that answers the question.',
+    'Rules:',
+    '- Say what each group\'s result shows and whether it answers the question, one line per group.',
+    ...RULES,
+    '- Then write the statement to run. It may be a group\'s statement unchanged, or a correction that keeps what one group got right and fixes what another got wrong.',
+    '- The statement must run against the schema the question was written for: no invented tables or columns.',
+    'Answer with the statement alone, in a single ```sql block on the final line.',
+    '',
+    `Question: ${question}`,
+    'Groups:',
+    groups
+      .map((group, index) => {
+        const label = group.members.length === 1 ? `statement ${String(group.members[0])}` : `statements ${group.members.join(', ')}`;
+        return [
+          `${String(index + 1)}. ${label} — ${String(group.rows)} rows, ${String(group.columns)} columns`,
+          `   ${group.sql}`,
+          group.preview.length === 0 ? '' : `   first rows: ${group.preview}`,
+        ]
+          .filter((line) => line.length > 0)
+          .join('\n');
+      })
+      .join('\n'),
+  ].join('\n');
+}

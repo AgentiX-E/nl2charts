@@ -51,6 +51,21 @@ cannot be argued with.
   question before and could not answer it: both of its arms drew their own pool, and the pool's
   displacement at 600 questions was measured at 1.3 to 3.3pp, which is the size of the effect.
 
+- **`select-cross-pooled-reconcile`: the same call, asked for a statement instead of an index.**
+  Both readings point at the same wall: on the cross pool the correct statement is in the set on
+  70.5% of cases and the arms score 64%, so 6.5pp of cases contain a right answer the decision
+  misses — and an index cannot name an answer that is not in the set. The arm hands the model the
+  *result groups* (the partition the agreement marks already define, computed by `resultGroups`)
+  and asks for the statement to run (`buildReconcilePrompt`), in one call at the same temperature
+  as the selector it replaces, on the same shared pool. The reply is executed and adopted, so the
+  arm's accuracy is a property of a statement the model wrote; a statement the engine refuses
+  leaves the vote's answer standing, and a turn that never came back is an outage
+  (`selectionFailed`) rather than a disagreement. The funnel (`asked`, `returned`, `novel`,
+  `executable`, `adopted`) is published on the arm's row, and `assertReconcileFired` refuses a run
+  where the model never wrote a statement of its own: an arm that restates candidate 1 is a
+  selector with a longer prompt, and its score would be the selector's. `reconcile` is recorded as
+  a source in the winner tally so the per-source counts still sum to the arm's cases.
+
 - **`poolRead`: how much of the pool a pooled arm could verify.** `assertPoolShared` has returned
   `{ shared, unrecorded }` since the adjudication fix, and the counts were thrown away because
   `unrecorded` was documented as an unreachable state — a case with no candidate record could not

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applySelection, buildPairwisePrompt, buildSelectionPrompt, chooseCandidate, chooseCandidatePairwise, parsePairwise, parseSelection, toCandidate } from '../src/select.js';
+import { applySelection, buildPairwisePrompt, buildReconcilePrompt, buildSelectionPrompt, chooseCandidate, chooseCandidatePairwise, parsePairwise, parseSelection, resultGroups, toCandidate } from '../src/select.js';
 import type { LlmProvider } from '../src/provider.js';
 import type { Candidate } from '../src/select.js';
 
@@ -351,5 +351,66 @@ describe('the selector sends the deployment\'s temperature, not its own', () => 
     const { provider, seen } = recorder();
     await chooseCandidatePairwise(provider, 'q', executed, null);
     expect(seen).toEqual([null, null]);
+  });
+});
+
+/**
+ * The reconcile prompt, which is the one lever whose output format is the experiment.
+ *
+ * A selector answers with an index, and an index cannot express an answer none of the candidates
+ * contains. The two readings that pointed here: the paid selector is level with the free modal
+ * result on a 2+1 pool (+0.17pp, −0.17pp), while the arm that shows the model *which candidates
+ * agree* has paid twice (+1.17pp, +0.33pp). So the grouping is the input and a statement is the
+ * output — and the tests below pin the things that make the comparison honest: the grouping is
+ * the partition the marks already define, and one call is one statement, not three.
+ */
+describe('the reconcile prompt', () => {
+  const marked: Candidate[] = [
+    { sql: 'SELECT COUNT(*) FROM orders', rows: 500, columns: 1, preview: '[[500]]' },
+    { sql: 'SELECT COUNT(*) FROM orders WHERE status = "completed"', rows: 120, columns: 1, preview: '[[120]]' },
+    { sql: 'SELECT COUNT(*) FROM orders o', rows: 500, columns: 1, preview: '[[500]]', agreesWith: 1 },
+  ];
+
+  it('groups the candidates the way the agreement marks already partition them', () => {
+    // Two of three returned the same rows, so the model has two opinions in front of it and not
+    // three. The members are 1-based and the group carries the earliest member's statement,
+    // because a group's identity is its result.
+    expect(resultGroups(marked)).toEqual([
+      { members: [1, 3], sql: 'SELECT COUNT(*) FROM orders', rows: 500, columns: 1, preview: '[[500]]' },
+      { members: [2], sql: 'SELECT COUNT(*) FROM orders WHERE status = "completed"', rows: 120, columns: 1, preview: '[[120]]' },
+    ]);
+  });
+
+  it('keeps every candidate when nothing agrees, and nothing when there is nothing', () => {
+    // Three distinct results is the case the lever exists for: no candidate is the answer, so an
+    // index cannot name one.
+    expect(resultGroups(candidates).map((group) => group.members)).toEqual([[1], [2], [3]]);
+    expect(resultGroups([])).toEqual([]);
+  });
+
+  const prompt = buildReconcilePrompt('How many completed orders are there?', resultGroups(marked));
+
+  it('asks for a statement rather than a choice, and names the group sizes', () => {
+    expect(prompt).toContain('Your job is not to pick one of them. Write the statement that answers the question.');
+    expect(prompt).toContain('These 3 statements produced 2 distinct results.');
+    expect(prompt).toContain('Answer with the statement alone, in a single ```sql block on the final line.');
+    // A one-group set is the degenerate case, and the sentence has to read as English there too.
+    expect(buildReconcilePrompt('q', resultGroups([candidates[0] as Candidate]))).toContain('These 1 statements produced 1 distinct result.');
+  });
+
+  it('shows each group with its statement, its shape and its rows', () => {
+    expect(prompt).toContain('1. statements 1, 3 — 500 rows, 1 columns');
+    expect(prompt).toContain('   SELECT COUNT(*) FROM orders');
+    expect(prompt).toContain('2. statement 2 — 120 rows, 1 columns');
+    expect(prompt).toContain('first rows: [[120]]');
+    expect(prompt).toContain('Question: How many completed orders are there?');
+  });
+
+  it('carries the rules that make a result-based judgement falsifiable', () => {
+    // The same three rules the selector has always had, because the population of wrong-but-running
+    // statements is the same one: a row count that cannot answer the question, and a column the
+    // question never mentions.
+    expect(prompt).toContain('row count that cannot answer the question');
+    expect(prompt).toContain('no invented tables or columns');
   });
 });

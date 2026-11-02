@@ -18,8 +18,8 @@ export { buildEmptyResultFeedback, EMPTY_BLIND_MESSAGE, emptyRetryMessages } fro
 export { auditMessages, buildConditionAuditFeedback, countNamedConditions } from './audit.js';
 export { classifyFailure, diagnoseFailure, readEngineError, resolveAliases } from './diagnose.js';
 export type { Diagnosis, EngineErrorFields, FailureClass } from './diagnose.js';
-export { applySelection, buildPairwisePrompt, buildSelectionPrompt, chooseCandidate, chooseCandidatePairwise, parseChoiceToken, parsePairwise, parseReasonedChoice, parseSelection, toCandidate } from './select.js';
-export type { Candidate, ExecutedCandidate, SelectionDecision, SelectionPromptOptions } from './select.js';
+export { applySelection, buildPairwisePrompt, buildReconcilePrompt, buildSelectionPrompt, chooseCandidate, chooseCandidatePairwise, parseChoiceToken, parsePairwise, parseReasonedChoice, parseSelection, resultGroups, toCandidate } from './select.js';
+export type { Candidate, ExecutedCandidate, ResultGroup, SelectionDecision, SelectionPromptOptions } from './select.js';
 export { formatProfile, replyShape } from './format.js';
 export type { Compliance, FormatProfile, ReplyShape } from './format.js';
 export { DEFAULT_STRATEGY, MIN_OBSERVATIONS, STRATEGIES, admissible, chooseStrategy, createObserver, probeProtocol, strategy, wilson } from './adapt.js';

@@ -86,6 +86,13 @@ interface Plan {
    */
   readonly columns?: (question: string) => string;
   /**
+   * The statement a reconcile arm writes after reading the result groups.
+   *
+   * Absent means the gold statement, which restates a candidate on every case where the model was
+   * right — the null case of the lever, and the one the funnel has to report as `novel: 0`.
+   */
+  readonly reconcile?: (question: string) => string;
+  /**
    * The answer to the audit turn: what the statement left out, then a statement.
    *
    * Absent means the model reports nothing missing and repeats the gold statement, which is
@@ -114,6 +121,12 @@ function replyFor(request: EndpointRequest, plan: Plan): { status?: number; cont
   // The pairwise selector asks a different question over two candidates and reads a
   // different answer, so the same `1` would be counted as an unreadable reply.
   if (prompt.includes('Two statements were written for the same question')) return send('1');
+  // The reconcile turn. Read before the statement branches below, because its prompt carries the
+  // question verbatim and would otherwise be answered as a first attempt.
+  if (prompt.includes('Write the statement that answers the question')) {
+    const asked = Object.keys(GOLD).find((entry) => prompt.includes(entry)) ?? '';
+    return send(fenced(plan.reconcile?.(asked) ?? GOLD[asked] ?? 'select 1'));
+  }
   // The column choice. Read before the question lookup below, because its prompt carries the
   // question verbatim and would otherwise be answered with a statement.
   if (prompt.includes('You choose the columns a SQL query will need')) {
@@ -2444,6 +2457,129 @@ describe('the repair turn, granted per source', () => {
       // Two primary sources fail on every question, so the primary endpoint must have been told
       // why on at least one of them — and the count is per question, not per arm.
       expect(repairsThere.length).toBeGreaterThanOrEqual(QUESTIONS.length);
+    } finally {
+      await second.close();
+    }
+  });
+});
+
+/**
+ * Reconcile: the same pool and the same one call, asked for a statement instead of an index.
+ *
+ * The lever's premise is narrow and testable: an index cannot name an answer none of the candidates
+ * contains, and on this pool the correct statement is in the set on 70.5% of cases while the arm
+ * scores 64%. So the three things the suite has to pin are (1) a statement that runs becomes the
+ * answer, (2) a statement that does not run leaves the vote's answer standing and is reported, and
+ * (3) a turn that never came back is an outage rather than a disagreement — the same three-way
+ * distinction the adjudication fix taught the selector.
+ */
+describe('the reconcile arm', () => {
+  const arms = 'select-cross,select-cross-pooled,select-cross-pooled-reconcile';
+
+  it('answers with the statement the model wrote, and says it was new', async () => {
+    // `count(items.id)` returns the same rows as the gold `count(*)` on this fixture and appears in
+    // none of the candidates, which is exactly the shape the lever exists for: a correct statement
+    // nobody wrote. Counting rows is `judgeOfficial`, so the arm passes on a statement it composed.
+    const second = await startEndpoint({ reply: (request) => replyFor(request, { first: correct }) });
+    try {
+      const result = await run({
+        // Every reply is a statement no candidate wrote and every one runs: the first case is the
+        // shape the lever exists for (a count written another way), and the rest are the gold
+        // statement wrapped in a subquery so the reply is novel without being wrong — a lever
+        // measured on statements that do not answer the question would be measuring nothing.
+        plan: {
+          first: correct,
+          reconcile: (question) => (question === (QUESTIONS[0]?.question ?? '') ? 'select count(items.id) from items' : `select * from (${GOLD[question] ?? 'select 1'}) as reconciled`),
+        },
+        env: {
+          BIRD_ARMS: arms,
+          BIRD_SECOND_MODEL: 'second-model',
+          BIRD_SECOND_BASE_URL: second.url,
+          BIRD_SECOND_API_KEY: 'second-key',
+          BIRD_CONCURRENCY: '1',
+        },
+      });
+      expect(result.code, result.printed.join('\n')).toBe(0);
+      const byName = new Map(
+        (result.report.arms as { arm: string; passed: number; calls: { mean: number }; reconcile?: Record<string, number>; sources?: Record<string, number> }[]).map(
+          (entry) => [entry.arm, entry],
+        ),
+      );
+      const arm = byName.get('select-cross-pooled-reconcile');
+      // Seven cases, seven statements written, seven of them new, all seven executed and adopted.
+      expect(arm?.reconcile).toEqual({ asked: QUESTIONS.length, returned: QUESTIONS.length, novel: QUESTIONS.length, executable: QUESTIONS.length, adopted: QUESTIONS.length });
+      // One call per case: the same price as the selector it replaces, which is what makes the pair
+      // a comparison of output formats rather than of budgets.
+      expect(arm?.calls.mean).toBe(1);
+      // The tally says where the answers came from, and the reconciler is a source in it.
+      expect(arm?.sources?.['reconcile']).toBe(QUESTIONS.length);
+      if (arm !== undefined) expect(arm.passed).toBeGreaterThan(0);
+    } finally {
+      await second.close();
+    }
+  });
+
+  it('keeps the vote\'s answer when the statement it wrote cannot run, and reports the loss', async () => {
+    // A statement the engine refuses is not an answer. Falling back to the modal result is the
+    // honest reading — the arm still answered — but an artifact that showed only the score would
+    // make "reconciled and could not run" indistinguishable from "reconciled, ran, and was wrong".
+    const second = await startEndpoint({ reply: (request) => replyFor(request, { first: correct }) });
+    try {
+      const result = await run({
+        plan: { first: correct, reconcile: broken },
+        env: {
+          BIRD_ARMS: arms,
+          BIRD_SECOND_MODEL: 'second-model',
+          BIRD_SECOND_BASE_URL: second.url,
+          BIRD_SECOND_API_KEY: 'second-key',
+          BIRD_CONCURRENCY: '1',
+        },
+      });
+      expect(result.code).toBe(0);
+      const byName = new Map(
+        (result.report.arms as { arm: string; passed: number; reconcile?: Record<string, number>; errors?: { execution: number } }[]).map((entry) => [entry.arm, entry]),
+      );
+      const arm = byName.get('select-cross-pooled-reconcile');
+      expect(arm?.reconcile).toEqual({ asked: QUESTIONS.length, returned: QUESTIONS.length, novel: QUESTIONS.length, executable: 0, adopted: 0 });
+      // The candidates were all correct, so the vote still answers every case: the fallback is not
+      // a penalty, it is the free rule standing in for a statement that could not be run.
+      expect(arm?.passed).toBe(QUESTIONS.length);
+    } finally {
+      await second.close();
+    }
+  });
+
+  it('counts a reconcile turn that never came back as an outage, not as a disagreement', async () => {
+    // The endpoint refuses the reconcile prompt only. The case is still answered — by the vote, which
+    // is what the arm would have fallen back to anyway — and `selectionFailed` says the paid half of
+    // the arm did not run. Without it, an endpoint that refuses every reconcile call would publish
+    // the free aggregator's accuracy under a lever's name.
+    const second = await startEndpoint({ reply: (request) => replyFor(request, { first: correct }) });
+    try {
+      const result = await run({
+        plan: {
+          first: correct,
+          fail: (request) => (request.prompt.includes('Write the statement that answers the question') ? 503 : undefined),
+        },
+        env: {
+          BIRD_ARMS: arms,
+          BIRD_SECOND_MODEL: 'second-model',
+          BIRD_SECOND_BASE_URL: second.url,
+          BIRD_SECOND_API_KEY: 'second-key',
+          BIRD_CONCURRENCY: '1',
+          // Seven refusals with the provider's backoff cost twenty seconds and measure nothing the
+          // three assertions below need; the retry path has its own suite.
+          BIRD_LLM_RETRIES: '0',
+        },
+      });
+      expect(result.code).toBe(0);
+      const arms2 = result.report.arms as { arm: string; passed: number; reconcile?: Record<string, number> }[];
+      const arm = arms2.find((entry) => entry.arm === 'select-cross-pooled-reconcile');
+      expect(arm?.reconcile).toEqual({ asked: QUESTIONS.length, returned: 0, novel: 0, executable: 0, adopted: 0 });
+      // The outage is the endpoint's, and the arm says so in the column that exists for it: every
+      // case still answered (by the vote), and every paid turn reported as one that did not run.
+      expect(result.printed.some((line) => line.startsWith('select-cross-pooled-reconcile') && line.includes(`select-failed ${String(QUESTIONS.length)}`))).toBe(true);
+      expect(arm?.passed).toBe(QUESTIONS.length);
     } finally {
       await second.close();
     }

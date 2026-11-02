@@ -18,6 +18,8 @@ import {
   assertSelectorAnswered,
   reusePool,
   poolReadOf,
+  assertReconcileFired,
+  reconcileFunnel,
   caseRows,
   databasesFromManifest,
   databasesFromQuestions,
@@ -965,5 +967,66 @@ describe('what a pooled arm is allowed to read', () => {
     // function raised instead: the pool lookup now routes that case to the source's own record
     // (`PoolLookup`), so a refusal here would be a refusal of a state the runner cannot produce.
     expect(reusePool('pooled', 'source', [], '7')).toEqual([]);
+  });
+});
+
+/**
+ * The reconcile funnel, and the guard that decides whether the lever ran at all.
+ *
+ * An arm asked for a statement can fail in four ways that all look like a wrong answer: the turn
+ * never came back, the reply restated a candidate, the engine refused the statement, or the
+ * statement ran and was wrong. Only the first two are fatal to the reading — the third is the
+ * model's output quality and the fourth is the lever doing its job badly — so the funnel is
+ * counted apart and exactly one column (`novel`) is guarded.
+ */
+describe('what a reconcile turn produced', () => {
+  const record = (novel: boolean, executable = novel, returned = true): CaseRun => ({
+    id: '1',
+    passed: executable,
+    predicted: '',
+    reason: 'values',
+    strict: false,
+    attempts: 1,
+    calls: 1,
+    reconcile: { returned, novel, executable, adopted: executable },
+  });
+  const sample = (count: number, make: (index: number) => CaseRun): CaseRun[] =>
+    Array.from({ length: count }, (_unused, index) => ({ ...make(index), id: String(index) }));
+
+  it('counts the four ways a reconcile case can end', () => {
+    expect(reconcileFunnel([record(true), record(false), record(false, false), record(false, false, false)])).toEqual({
+      asked: 4,
+      returned: 3,
+      novel: 1,
+      executable: 1,
+      adopted: 1,
+    });
+    // A case that never reached the turn has no record, and counting it as a turn would inflate
+    // the denominator the share is read against.
+    expect(reconcileFunnel([{ ...record(true), reconcile: undefined }])).toEqual({ asked: 0, returned: 0, novel: 0, executable: 0, adopted: 0 });
+  });
+
+  it('refuses an arm whose replies only restate a candidate', () => {
+    // This is the whole risk of the lever: a model that echoes candidate 1 has produced a selector
+    // with a longer prompt, and its accuracy belongs to the selector.
+    expect(() => assertReconcileFired('reconcile', sample(120, () => record(false)))).toThrow(/restated a candidate verbatim/);
+  });
+
+  it('refuses a turn that was paid for and produced nothing, and one that never ran', () => {
+    expect(() => assertReconcileFired('reconcile', sample(120, () => record(false, false, false)))).toThrow(/carried a statement/);
+    expect(() => assertReconcileFired('reconcile', sample(120, () => ({ ...record(true), reconcile: undefined })))).toThrow(/the reconcile turn never ran/);
+  });
+
+  it('accepts one novel statement in a hundred, because a lever that fires once did run', () => {
+    // The guard is about whether the mechanism exists, not whether it is often useful: the share is
+    // published in the row for a reader to weigh, and refusing a low share would be refusing a
+    // reading the artifact already states.
+    expect(() =>
+      assertReconcileFired('reconcile', sample(120, (index) => (index === 0 ? record(true) : record(false)))),
+    ).not.toThrow();
+  });
+
+  it('says nothing below the sample floor, where a share describes the fixture', () => {
+    expect(() => assertReconcileFired('reconcile', sample(7, () => record(false)))).not.toThrow();
   });
 });
