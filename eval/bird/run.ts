@@ -5141,6 +5141,14 @@ export function caseRows(outcomes: ReadonlyMap<string, readonly CaseRun[]>): Rec
       // name the cases where adopting one turned a right answer wrong. A funnel says how many; a
       // row says which, and a pair of arms is tested on the second.
       ...(run.reconcile === undefined ? {} : { reconcile: run.reconcile }),
+      // What the value block put on this case's card, on an arm that declares a sampler.
+      //
+      // The narrowed arm published its funnel and not its record on its first dispatch, so "the
+      // block reached 511 of 1,532 cases" could not be turned into "and here is what it did on
+      // them": the only way to ask whether the block worked where it fired was to reconstruct its
+      // presence from the per-case prompt tokens, which is a reading of the artifact's shadow
+      // rather than of the artifact. A funnel says how many; a row says which.
+      ...(run.sampleBlock === undefined ? {} : { sampleBlock: run.sampleBlock }),
       // Why this case has no candidate, when it has none.
       //
       // `select-mixed` cost 3 calls on two of 120 questions while `select-cross` cost 4,

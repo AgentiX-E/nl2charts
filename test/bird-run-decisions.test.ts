@@ -725,6 +725,25 @@ describe('the per-case rows an artifact carries', () => {
     expect(rows.map((row) => row.arm)).toEqual(['select-mixed', 'select-mixed']);
   });
 
+  it('carries what the value block put on the card, so a stratum can be cut from the artifact', () => {
+    // The first dispatch of the narrowed block published the arm-level funnel and not the record:
+    // `sampleBlock` said 511 of 1,532 cases carried a value, and the artifact could not say which
+    // 511 — so the only way to ask "did it work where it fired" was to reconstruct the block's
+    // presence from the per-case prompt tokens. That reconstruction worked and it should not have
+    // been necessary: a funnel says how many, a row says which.
+    const rows = caseRows(
+      new Map<string, readonly CaseRun[]>([
+        ['inline+evidence+samples-gold', [bare({ sampleBlock: { columns: 1 } }), bare({ id: '2', sampleBlock: { columns: 0 } })]],
+      ]),
+    );
+    expect(rows[0]?.sampleBlock).toEqual({ columns: 1 });
+    // A zero is a measured zero — the rule ran and kept nothing — so it is published rather than
+    // dropped as falsy.
+    expect(rows[1]?.sampleBlock).toEqual({ columns: 0 });
+    // An arm with no sampler carries no record at all, which is a different claim from a zero.
+    expect(caseRows(new Map<string, readonly CaseRun[]>([['names', [bare()]]]))[0]).not.toHaveProperty('sampleBlock');
+  });
+
   it('carries what the reconcile turn did, so a paired reading names the cases and not just the count', () => {
     // The fifth dispatch published the funnel and not the record, so "514 replies restated a
     // candidate" could not be turned into "these are the cases a paraphrase cost us": a share

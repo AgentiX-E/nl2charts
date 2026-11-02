@@ -302,9 +302,16 @@ export function writeGapArtifact(settings: GapSettings, artifact: GapArtifact): 
  * has) and an arm it scored without a candidate set (it cannot have a no-answer bucket at all,
  * because it never had a choice to make). Both are refused here rather than printed as a table
  * of zeros, which is what an empty filter would have produced.
+ *
+ * The table is typed as non-empty because the second refusal ends by naming the arms that *do*
+ * publish a ceiling, and a sentence like that must never be able to name none. A dispatch whose
+ * artifact publishes no ceiling at all is answered by `runGap` before a row is selected, so the
+ * variant that used to say "holds no arm with a candidate ceiling" here became an unreachable
+ * branch the moment that answer moved earlier — one sentence per fact, at the one place that
+ * knows the fact.
  */
 export function armOrThrow(
-  table: readonly ArmGap[],
+  table: readonly [ArmGap, ...ArmGap[]],
   report: GapReportShape,
   arm: string,
   source: string,
@@ -314,20 +321,41 @@ export function armOrThrow(
   if (row !== undefined) return row;
   const published = samplingArms(report);
   throw new Error(
-    published.length === 0
-      ? `${source} holds no arm with a candidate ceiling, so ${arm} has no no-answer set to diagnose`
-      : `${arm} publishes no candidate ceiling in ${source}, so it has no no-answer set to diagnose; the arms that do are ${published.join(', ')}`,
+    `${arm} publishes no candidate ceiling in ${source}, so it has no no-answer set to diagnose; the arms that do are ${published.join(', ')}`,
   );
 }
 
-export function runGap(settings: GapSettings): { artifact: GapArtifact; problems: string[]; path: string } {
+/**
+ * The table, or the reason there is none.
+ *
+ * `applicable` is a third outcome next to "published" and "refused", and it exists because a
+ * dispatch of single-call arms is a legitimate run of this repository: those arms never had a
+ * candidate set to lose, so there is no no-answer population to classify. That is a fact about the
+ * dispatch and not an instrument losing its input — `assertReportComplete` refuses to publish an
+ * artifact whose sampling row dropped its ceiling, so a published artifact with no ceiling row is
+ * an artifact whose run asked for none.
+ *
+ * It used to throw, and `41492586751` paid for it: the refusal came after the evaluation and after
+ * the floor had passed, and it starved the six zero-cost instruments queued behind it, so a
+ * dispatched dev run published an artifact with no census, no card reading and no repair reading.
+ */
+export function runGap(settings: GapSettings): { artifact: GapArtifact; problems: string[]; path: string; applicable: boolean } {
   const report = JSON.parse(readFileSync(settings.report, 'utf8')) as GapReportShape;
-  const table = gapTable(report);
+  const rows = gapTable(report);
+  const [head, ...rest] = rows;
+  if (head === undefined) {
+    // An arm the artifact never scored is still a mistake in the step that named it: the two
+    // absences stay apart, and only the second one fails.
+    if (settings.arm !== undefined) requireArm(report.cases, settings.arm, settings.report);
+    const artifact = gapArtifact(report, []);
+    return { artifact, problems: [], path: writeGapArtifact(settings, artifact), applicable: false };
+  }
+  const table: [ArmGap, ...ArmGap[]] = [head, ...rest];
   const arms = settings.arm === undefined ? table : [armOrThrow(table, report, settings.arm, settings.report)];
   const problems = gapProblems(arms);
   const artifact = gapArtifact(report, arms);
   const path = writeGapArtifact(settings, artifact);
-  return { artifact, problems, path };
+  return { artifact, problems, path, applicable: true };
 }
 
 /**
@@ -344,7 +372,17 @@ export async function main(
   env: Record<string, string | undefined> = process.env,
 ): Promise<number> {
   const settings = resolveGapSettings(argv, root);
-  const { artifact, problems } = runGap(settings);
+  const { artifact, problems, applicable } = runGap(settings);
+  if (!applicable) {
+    // Printed rather than silent, and printed *here* rather than by a workflow branch: a step that
+    // says nothing when it has nothing to say is indistinguishable from one that did not run.
+    const line = `${settings.report} holds no arm with a candidate ceiling, so this dispatch has no no-answer set to diagnose`;
+    console.log(line);
+    if (env.GITHUB_STEP_SUMMARY !== undefined && env.GITHUB_STEP_SUMMARY !== '') {
+      appendFileSync(env.GITHUB_STEP_SUMMARY, ['', '### Where the candidate set had no answer', '', line, ''].join('\n'));
+    }
+    return 0;
+  }
   const lines = gapLines(artifact);
   for (const line of lines) console.log(line);
   for (const problem of problems) console.error(problem);

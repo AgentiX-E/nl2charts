@@ -61,6 +61,22 @@ cannot be argued with.
 
 ### Fixed
 
+- **A step that had nothing to say failed the dispatch, and starved six readings behind it.**
+  `41492586751` published its three scores and then went red at step 12: `bench:bird:gap` threw on an
+  artifact holding no `candidateRecall`, and the six zero-cost instruments queued behind it — census,
+  card, repair, width, conditions, losses — were skipped with it, so a dispatched dev run published
+  three arms and nothing else. A dispatch whose arms all make one call is a legitimate run of this
+  repository: those arms never had a candidate set to lose, so "no no-answer population" is a fact
+  about the dispatch and not an instrument losing its input. `runGap` now returns
+  `applicable: false`, prints the reason, writes it into the step summary and exits 0 — and the
+  reading is safe to absent because `assertReportComplete` refuses to publish an artifact whose
+  sampling row dropped its ceiling, so a published artifact with no ceiling row is one whose run
+  asked for none. The `--arm` naming mistake is still a failure on that path: the two absences stay
+  apart and only the second one fails. Moving the answer earlier left `armOrThrow`'s own "holds no
+  arm with a candidate ceiling" variant with no way to be reached, so the branch is gone and the
+  table is typed non-empty — the sentence that names the arms which *do* publish a ceiling can now
+  never name none. One sentence per fact, at the one place that knows the fact.
+
 - **The profile cache was one directory for every dataset, keyed by database name.** Two fixtures
   that both name their database `shop` read each other's schema, and the end-to-end case for the
   narrowed block rendered a card from the mini fixture's tables on the chain fixture's questions —

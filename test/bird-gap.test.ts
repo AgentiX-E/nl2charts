@@ -314,12 +314,49 @@ describe('the entry, run the way a workflow runs it', () => {
     expect(resolveGapSettings(['--arm', 'select-cross'], ROOT).report).toBe(join(ROOT, 'eval/out/bird-eval.json'));
   });
 
-  it('refuses an arm when the artifact holds no ceiling at all, and says so once', () => {
-    // No arm publishes a `candidateRecall`: there is no no-answer set anywhere, so naming one
-    // arm cannot produce a table and the message must not claim the arm is the problem.
+  it('says the reading does not apply when the dispatch ran no arm with a candidate set', () => {
+    // No arm publishes a `candidateRecall`: a dispatch of single-call arms never had a candidate
+    // set to lose, so there is no no-answer population to classify. This used to fail the step,
+    // and `41492586751` paid for it — the failure came *after* the evaluation and the floor had
+    // passed, and it starved the six zero-cost instruments queued behind it, so a dispatched dev
+    // run published an artifact with no census, no card reading and no repair reading at all.
+    //
+    // The reading is absent because the population is absent, which is not the same as an
+    // instrument losing its input: `assertReportComplete` refuses to publish an artifact whose
+    // sampling row dropped its ceiling, so a *published* artifact with no ceiling row is a
+    // dispatch that asked for none.
     const { root, report: path } = written({ split: 'dev', arms: [], cases: [hit('names', '1')] });
-    expect(() => runGap(resolveGapSettings([path, '--arm', 'names'], root))).toThrow(
-      /holds no arm with a candidate ceiling, so names has no no-answer set to diagnose/,
+    const outcome = runGap(resolveGapSettings([path, '--arm', 'names'], root));
+    expect(outcome.applicable).toBe(false);
+    expect(outcome.problems).toEqual([]);
+    expect(outcome.artifact.arms).toEqual([]);
+  });
+
+  it('runs that path through the entry and writes it into the step summary', async () => {
+    // The step has to leave a trace in two places: the log, because a step that prints nothing is
+    // indistinguishable from one that did not run, and the summary, because that is the page a
+    // reviewer reads. Both branches of the summary guard are exercised — with the environment
+    // variable and without it — because the second is the local run and the first is CI.
+    const { root, report: path } = written({ split: 'dev', arms: [], cases: [hit('names', '1')] });
+    const summary = join(root, 'summary.md');
+    const printed: string[] = [];
+    const log = vi.spyOn(console, 'log').mockImplementation((line: unknown) => printed.push(String(line)));
+    try {
+      expect(await main([path, '--arm', 'names'], root, { GITHUB_STEP_SUMMARY: summary })).toBe(0);
+      expect(await main([path, '--arm', 'names'], root, {})).toBe(0);
+    } finally {
+      log.mockRestore();
+    }
+    expect(printed.join('\n')).toContain('no no-answer set to diagnose');
+    expect(readFileSync(summary, 'utf8')).toContain('### Where the candidate set had no answer');
+  });
+
+  it('still refuses an arm the artifact never scored, in that same dispatch', () => {
+    // The two absences stay apart: "this dispatch has no no-answer set" is a fact about the run,
+    // "you named an arm nobody ran" is a mistake in the step that named it.
+    const { root, report: path } = written({ split: 'dev', arms: [], cases: [hit('names', '1')] });
+    expect(() => runGap(resolveGapSettings([path, '--arm', 'select-mixed'], root))).toThrow(
+      /has no arm select-mixed; it holds names/,
     );
   });
 
