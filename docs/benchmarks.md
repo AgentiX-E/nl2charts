@@ -5335,11 +5335,17 @@ printed before dying are the reading, and the assertion's failure is a finding o
 
 | arm | passed | acc | strict | recall@3 | Δ vs pooled |
 |---|---|---|---|---|---|
-| `select-cross` | 375/600 | 62.50% | 360 | 69.7% (418) | +0.67pp |
+| `select-cross` | 375/600 | 62.50% | 360 | 69.7% (418) | −0.67pp |
 | `select-cross-pooled` | 379/600 | 63.17% | 364 | 69.7% (418) | — |
 | `select-cross-pooled-vote` | 380/600 | 63.33% | 361 | 69.7% (418) | +0.17pp |
 | `select-cross-pooled-agree` | 386/600 | 64.33% | 370 | 69.7% (418) | +1.17pp |
 | `select-cross-pooled-judge-reasoning` | 374/600 | 62.33% | 357 | 69.2% (415) | −0.83pp |
+
+The first column of Δ is `arm − pooled`, and `select-cross`'s was written as `+0.67pp` in the round
+that produced this table: 375 against 379 is four cases *below*, not above. The sign is corrected
+here rather than quietly, because the direction is the one thing this table is for — the parent arm
+has now come in below the pooled arm in both dispatches (−0.67pp, then −0.83pp), and a sign error in
+the first reading would have made the second look like a reversal.
 
 Read against the five criteria the round was dispatched with:
 
@@ -5385,3 +5391,81 @@ outside the wrapper, so a refused card did end the run. That call is now inside 
 The reading above is therefore provisional in one direction and final in another: the direction is
 worth acting on now (structure pays, adjudication does not, on this pool), and the exact numbers need
 the clean re-dispatch, because `41410112996` wrote no per-case artifact.
+
+## The second dispatch: eight arms, and the guard that mistook a gap for a bug
+
+The clean re-dispatch added the homogeneous pool — `select-mixed`, `select-mixed-pooled`,
+`select-mixed-pooled-vote` — beside the five cross-pool arms, because criterion ③ (the free
+aggregator is not worse than the selector on a pool where the candidates agree) had never been read
+on the pool it was written for. `41430569500` scored six of the eight and then refused to publish.
+The six lines it printed before dying are worth recording, because the run is a counter-example to a
+conclusion the previous section drew too confidently:
+
+| arm | passed | acc | strict | recall@3 | Δ vs pooled |
+|---|---|---|---|---|---|
+| `select-cross` | 379/600 | 63.2% | 363 | 70.5% (lost 44) | −0.83pp |
+| `select-mixed` | 382/600 | 63.7% | 364 | 65.3% (lost 10) | — |
+| `select-cross-pooled` | 384/600 | 64.0% | 368 | 70.5% (lost 39) | — |
+| `select-cross-pooled-vote` | 383/600 | 63.8% | 364 | 70.5% (lost 40) | −0.17pp |
+| `select-cross-pooled-agree` | 386/600 | 64.3% | 370 | 70.5% (lost 37) | +0.33pp |
+| `select-cross-pooled-judge-reasoning` | 383/600 | 63.8% | 368 | 70.5% (lost 40) | −0.17pp |
+
+Three things follow from it and one does not.
+
+The agreement marks are the only lever that has now paid twice: +1.17pp on `41410112996` and +0.33pp
+here. The direction survives a re-draw and the magnitude does not, which is exactly what a ±0.67pp
+selector jitter predicts — read the pair as "+0.75pp ± 0.67", not as +1.17.
+
+**The selector's advantage over the free aggregator does not survive.** On `41410112996` the vote was
+0.17pp *ahead* of the selector on the same pool; here it is 0.17pp *behind*. Both are inside the
+jitter the A/A pair measured, so criterion ② reads "even", twice, which is a stronger statement than
+either run alone: on a pool where two of three candidates come from one author, paying a call to
+choose is worth zero.
+
+**The reasoning judge loses 0.17pp here and 0.83pp there, and it is the same seat.** It also could
+not adjudicate one case of six hundred (`select-failed 1`, which the new column exists to report). Two
+readings with a sign that never flips are the answer to "does the strong model win in the judge's
+chair": no, and the generation seat is where it earns its keep — the ceiling on the cross pool is
+70.5% against 65.3% on the homogeneous one, and the extra author is the reason.
+
+What does *not* follow is criterion ③, and the run did not get to it. `select-mixed-pooled` died on
+its second case: two of six hundred cases in `select-mixed` produced **no candidates at all** — every
+sample died at the engine — and `reusePool` raised a plain `Error` on the empty pool. `escapeKind`
+files a plain error under `harness`, and `assertHarnessClean` refuses to publish a run with a harness
+error, on the correct principle that a `TypeError` inside the runner is a bug rather than a wrong
+answer. Here the principle was right and the diagnosis was not: nothing in this repository was
+broken. The source arm could not answer those two questions and its row said why.
+
+The fix is a distinction rather than a tolerance. A pool lookup now returns either the candidates or
+*the row in which the source recorded its failure*, so the pooled arm writes the same reason under
+the same `errorKind` and the case is scored like any other failure; `reusePool` refuses exactly one
+thing, a case the source never ran, which is the ordering bug the lookup exists for. A gap in the
+sample is now a case, not a dead run — and the run that revealed it had already scored six arms.
+
+That made a state reachable which the call site had documented as unreachable: a pooled case with no
+candidate record. `assertPoolShared` has returned `{ shared, unrecorded }` since the adjudication fix
+and the counts were thrown away; they are now published on the arm's row as
+`poolRead: { shared, unrecorded, cases }`, and `assertReportComplete` refuses a pooled row that names
+its parent and not the denominator. The number a reader needs is not "the pool was shared" but "the
+pool was read on 598 of 600 cases, and the two it could not read are the two the source could not
+fill". Below the instrument floor the field is absent rather than zero, because seven cases cannot
+verify a pool and a zero there would read as a failure.
+
+The lesson is the one D56 named and this round confirms: a guard may only assert what it measured,
+and "missing" has to be a counted, permitted state rather than a synonym for "opposite". The two
+guards that got this wrong — one refusing an empty pool as a harness bug, one calling a silent case a
+disagreement — both failed in the direction of accusing the harness of the data's behaviour.
+
+## Where the eight-arm reading stands
+
+Criterion ③ was dispatched twice and has not yet been read: the first run had no homogeneous pool
+arms at all, the second was refused before reaching them. Everything else the round asked for is
+answered:
+
+| criterion | status | reading |
+|---|---|---|
+| ① `select-cross-pooled` is an exact A/A instrument | met | identical ceilings on one pool; decisions differ by 4 cases in 600 (jitter) |
+| ② heterogeneous pool: `vote − pooled ≥ 0` | even twice | +0.17pp, then −0.17pp, both inside ±0.67pp |
+| ③ homogeneous pool: `vote − pooled ≤ 0` | **unread** | dispatched, refused by I-80, re-dispatched |
+| ④ `agree − pooled ≥ +1.0pp` ⇒ structure is the missing information | met in direction | +1.17pp then +0.33pp |
+| ⑤ `judge-reasoning − pooled ≥ +1.0pp` ⇒ the strong model wins the judge's seat | refuted | −0.83pp then −0.17pp |
