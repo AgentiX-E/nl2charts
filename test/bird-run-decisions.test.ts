@@ -17,6 +17,7 @@ import {
   assertPoolShared,
   assertSelectorAnswered,
   reusePool,
+  poolReadOf,
   caseRows,
   databasesFromManifest,
   databasesFromQuestions,
@@ -835,6 +836,55 @@ describe('a shared pool has to be the same pool', () => {
 });
 
 /**
+ * What a pooled arm's row says beside its score: how much of the pool it could verify.
+ *
+ * `41430569500` produced two cases in six hundred where the source arm wrote no candidates at all,
+ * so the pooled arm had no pool to read (I-80). The run is not broken by that — the pooled arm
+ * writes the source's reason and is counted in `errors` — but the delta it publishes then rests on
+ * 598 shared cases rather than 600, and only the artifact can say which. Before this field the
+ * comment at the call site described the case as unreachable, which is the reading D56 forbids: a
+ * guard may only assert what it measured, and a missing case has to be counted rather than assumed
+ * away.
+ */
+describe('how much of the pool a pooled arm could verify', () => {
+  const row = (id: string, recall: boolean | undefined): CaseRun => ({
+    id,
+    passed: recall === true,
+    predicted: 'select 1',
+    reason: 'values',
+    strict: false,
+    attempts: 1,
+    calls: 1,
+    ...(recall === undefined ? {} : { candidateRecall: recall }),
+  });
+  /** A sample of `count` cases, with the first `gaps` of them recorded by neither arm. */
+  const sample = (count: number, gaps = 0): CaseRun[] =>
+    Array.from({ length: count }, (_unused, index) => row(String(index), index < gaps ? undefined : index % 3 === 0));
+
+  it('publishes the count the check was performed on, and the gap it could not close', () => {
+    expect(poolReadOf('pooled', sample(120), sample(120))).toEqual({ shared: 120, unrecorded: 0, cases: 120 });
+    // Two cases the source never filled: the pooled arm reports them as a gap, and the row says so
+    // instead of dividing by a sample it did not have.
+    expect(poolReadOf('pooled', sample(120, 2), sample(120, 2))).toEqual({ shared: 118, unrecorded: 2, cases: 120 });
+  });
+
+  it('carries nothing below the instrument floor, where a share would describe the fixture', () => {
+    // Seven cases cannot separate "the pool was read" from "the pool was read on the cases that
+    // happened to work", so the field is absent rather than a zero that reads like a failure.
+    expect(poolReadOf('pooled', sample(7), sample(7))).toBeUndefined();
+    expect(poolReadOf('pooled', sample(7, 1), sample(7, 1))).toBeUndefined();
+  });
+
+  it('still refuses a pool that disagrees, so the count cannot be published without the check', () => {
+    // The field is the *result* of the check, not an alternative to it: an arm that re-derived its
+    // candidates is refused at every sample size.
+    const source = sample(120);
+    const pooled = Array.from({ length: 120 }, (_unused, index) => row(String(index), index === 0));
+    expect(() => poolReadOf('pooled', pooled, source)).toThrow(/generated its own candidates/);
+  });
+});
+
+/**
  * A selector that never answered, and the price of publishing its arm anyway.
  *
  * The case is scored by the vote now, so the outage no longer shows up as a wrong answer — which is
@@ -909,9 +959,11 @@ describe('what a pooled arm is allowed to read', () => {
     expect(() => reusePool('pooled', 'source', undefined, '7')).toThrow(/holds no entry for case 7/);
   });
 
-  it('refuses a pool that ran and produced nothing', () => {
-    // Different from the case above: the source saw this question and every statement in it died,
-    // so the pooled arm has nothing to read and must not report that emptiness as its own answer.
-    expect(() => reusePool('pooled', 'source', [], '7')).toThrow(/produced nothing for case 7/);
+  it('hands back an empty pool, because deciding what it means needs the source row', () => {
+    // A source that ran and produced nothing has not failed to be read — it failed the question, and
+    // its row records why. `41430569500` refused a run that had already scored six arms because this
+    // function raised instead: the pool lookup now routes that case to the source's own record
+    // (`PoolLookup`), so a refusal here would be a refusal of a state the runner cannot produce.
+    expect(reusePool('pooled', 'source', [], '7')).toEqual([]);
   });
 });

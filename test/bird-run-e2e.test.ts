@@ -1000,6 +1000,61 @@ describe('the decision, with the pool held fixed', () => {
     }
   });
 
+  it('records a case the source arm could not fill, instead of refusing the run', async () => {
+    // `41430569500` is the run that found this: `select-mixed` produced no candidates for two of six
+    // hundred cases — every sample for those questions died at the engine — and the pooled arm's
+    // guard raised a plain Error, which is filed as a harness bug and refused a measurement of six
+    // arms that had already been scored. A gap in the sample is not a bug in the runner: the pooled
+    // arm has nothing to read, and the honest row is the one the source wrote, under its own kind.
+    const target = QUESTIONS[3]?.question ?? '';
+    // Two of the three candidates come from the primary endpoint and one from the second, so *both*
+    // have to write a statement no engine will run for the pool to be empty. Leaving the primary on
+    // the gold statement was the first version of this test and it proved nothing: two surviving
+    // candidates are a pool of two, the case answered correctly, and the assert passed for a reason
+    // unrelated to the defect.
+    const plan: Plan = { first: (question) => (question === target ? broken() : correct(question)) };
+    const second = await startEndpoint({ reply: (request) => replyFor(request, plan) });
+    try {
+      const result = await run({
+        plan,
+        env: {
+          BIRD_ARMS: 'select-cross,select-cross-pooled,select-cross-pooled-vote',
+          BIRD_SECOND_MODEL: 'second-model',
+          BIRD_SECOND_BASE_URL: second.url,
+          BIRD_SECOND_API_KEY: 'second-key',
+          BIRD_CONCURRENCY: '1',
+        },
+      });
+      expect(result.code).toBe(0);
+      const arms = result.report.arms as {
+        arm: string;
+        passed: number;
+        total: number;
+        firstError?: string;
+        errors?: { other: number; harness: number };
+      }[];
+      const byName = new Map(arms.map((entry) => [entry.arm, entry]));
+      // The source records the question as a failure it could not answer, and does not file it as a
+      // runner bug: the arm still describes a full sample, one case short.
+      expect(byName.get('select-cross')?.errors).toMatchObject({ harness: 0, other: 1 });
+      expect(byName.get('select-cross')?.firstError).toBe('no sample survived guard and execution');
+      expect(byName.get('select-cross')?.passed).toBe(QUESTIONS.length - 1);
+      // The pooled arms read that same case and report the same gap, carrying the source's reason
+      // rather than a reason of their own.
+      for (const name of ['select-cross-pooled', 'select-cross-pooled-vote']) {
+        expect(byName.get(name)?.errors).toMatchObject({ harness: 0, other: 1 });
+        expect(byName.get(name)?.firstError).toContain('pool: select-cross produced no candidates for this case');
+        expect(byName.get(name)?.firstError).toContain('no sample survived guard and execution');
+      }
+      // And the sample is still the whole sample: a pooled arm that dropped the case would be
+      // reporting a rate over a subset it never declared.
+      expect(byName.get('select-cross-pooled')?.total).toBe(QUESTIONS.length);
+      expect(byName.get('select-cross-pooled-vote')?.total).toBe(QUESTIONS.length);
+    } finally {
+      await second.close();
+    }
+  });
+
   it('takes the modal result in no calls, where the selector takes the first slot in one', async () => {
     const second = await startEndpoint({ reply: (request) => replyFor(request, { first: wrong }) });
     try {

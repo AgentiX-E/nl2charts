@@ -140,6 +140,36 @@ describe('report completeness', () => {
     ).not.toThrow();
   });
 
+  it('refuses a pooled arm that does not say how much of the pool it could verify', () => {
+    // The delta a pooled arm publishes is the pool's noise unless the pool was read, and on two of
+    // six hundred cases in `41430569500` it could not be read at all (I-80). A row that names its
+    // parent and not the number of shared cases leaves that denominator unstated.
+    expect(() =>
+      assertReportComplete({ arms: [{ arm: 'select-cross-pooled', total: 600, candidateRecall: 0.697 }] }),
+    ).toThrow(/select-cross-pooled.*no pool verification/);
+  });
+
+  it('accepts a pooled arm that says it, and a short run where there is nothing to say', () => {
+    expect(() =>
+      assertReportComplete({
+        arms: [
+          {
+            arm: 'select-cross-pooled',
+            total: 600,
+            pool: 'select-cross',
+            candidateRecall: 0.697,
+            poolRead: { shared: 598, unrecorded: 2, cases: 600 },
+          },
+        ],
+      }),
+    ).not.toThrow();
+    // Below the instrument floor the field is absent by contract: seven cases cannot verify a pool,
+    // and a zero here would read as a pool that failed rather than a sample that cannot say.
+    expect(() =>
+      assertReportComplete({ arms: [{ arm: 'select-cross-pooled', total: 7, pool: 'select-cross', candidateRecall: 0.857 }] }),
+    ).not.toThrow();
+  });
+
   it('reports the shape an arm\'s replies had, aggregated over its cases', () => {
     const shape = { fenced: true, index: false, steps: 0, named: 0 };
     expect(armFormat([run({ shape }), run({ shape }), run({ shape })])).toEqual({

@@ -51,7 +51,33 @@ cannot be argued with.
   question before and could not answer it: both of its arms drew their own pool, and the pool's
   displacement at 600 questions was measured at 1.3 to 3.3pp, which is the size of the effect.
 
+- **`poolRead`: how much of the pool a pooled arm could verify.** `assertPoolShared` has returned
+  `{ shared, unrecorded }` since the adjudication fix, and the counts were thrown away because
+  `unrecorded` was documented as an unreachable state — a case with no candidate record could not
+  exist. The empty pool above is that state: the source wrote nothing, so the pooled arm had no pool
+  to read. A pooled arm's row now carries `{ shared, unrecorded, cases }`, so the delta it publishes
+  says whether the pool was read on 598 of 600 cases or on all of them, and `assertReportComplete`
+  refuses a pooled row that names its parent and not the denominator. Below the instrument floor the
+  field is absent rather than zero, on the same rule as every other share in this file. The empty-pool
+  row also stopped claiming `candidateRecall: false`: this arm never held a candidate set, so it has
+  no ceiling for that case, and asserting one would have been the same defect in miniature.
+
+- **One name for the sample floor.** `minimumSample = 100` was written out in seven guards, each
+  meaning "below this many cases a share describes the sample". It is one number and now has one name,
+  `MINIMUM_INSTRUMENT_SAMPLE`, which is also what decides when `poolRead` is published.
+
 ### Fixed
+
+- **A case the source arm could not fill was filed as a bug in the runner.** `41430569500` scored six
+  arms on 600 dev questions and then refused to publish: two cases in `select-mixed` produced no
+  candidates at all — every sample for those questions died at the engine — and `reusePool` raised a
+  plain `Error` for the empty pool, which `escapeKind` files under `harness` and `assertHarnessClean`
+  reads as a defect in this repository. Nothing was broken: the source arm could not answer those
+  questions and its row said so. The pool lookup now returns either the candidates or the row in which
+  the source recorded its failure (`PoolLookup`), the pooled arm writes the same reason under the same
+  `errorKind`, and `reusePool` refuses exactly one thing — a case the source never ran, which is the
+  ordering bug the lookup exists for. A gap in the sample is now a scored case with a reason instead
+  of a dead run.
 
 - **`AbortSignal` on the PostgreSQL connector did nothing.** `pg` does not cancel a statement it has
   already sent, so aborting during `select pg_sleep(1)` returned the row a second later, exactly as

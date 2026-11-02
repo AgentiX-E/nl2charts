@@ -1348,6 +1348,21 @@ export interface ArmReportRow {
    * rather than as the instrument it is.
    */
   readonly pool?: string;
+  /**
+   * How much of the pool this arm could verify, and how much of it it could not.
+   *
+   * `unrecorded` was documented as an unreachable state: once the adjudication and the empty-result
+   * turn were caught, a case with no candidate record could not exist, so a "verified on N of M"
+   * line would have described a state the harness could not reach. `41430569500` found the case that
+   * can: the *source* arm produced no candidates at all, so the pooled arm had no pool to read and
+   * wrote the source's reason instead (I-80). That is a gap in the sample rather than a bug, and the
+   * only thing that separates the two for a reader is the count — D56: a missing case has to be
+   * counted and has to be allowed to exist.
+   *
+   * Absent below the verification floor, where the number would describe a sample too small to be
+   * checked rather than a pool that was not shared.
+   */
+  readonly poolRead?: { readonly shared: number; readonly unrecorded: number; readonly cases: number };
   readonly decomposition?: { readonly asked: number; readonly fired: number; readonly share: number; readonly meanSteps: number };
   readonly candidateRecall?: number;
   readonly emptyRetry?: { readonly mode: string; readonly dropped: number; readonly fired: number; readonly recovered: number };
@@ -1545,13 +1560,27 @@ export function assertHarnessClean(armName: string, runs: readonly { errorKind?:
 }
 
 /**
+ * How many cases an instrument needs before its share is a measurement.
+ *
+ * Every guard in this section asks a question of the form "did this mechanism fire often enough to
+ * be read", and every one of them is silent below a hundred cases, where a single case is worth
+ * more than a percentage point and the answer would describe the sample rather than the mechanism.
+ * The number used to be written out in each signature; it is one number, so it has one name.
+ */
+export const MINIMUM_INSTRUMENT_SAMPLE = 100;
+
+/**
  * A repair arm whose repair path never ran is its parent arm with a bigger budget.
  *
  * This is the same failure the retrieval arm had: a switch that is on and never fires
  * still produces a number, and the number is the parent's. With a 40% failure rate on
  * this benchmark the loop must fire; a run where it did not is broken, not efficient.
  */
-export function assertRepairPathFired(armName: string, cases: readonly { attempts: number }[], minimumSample = 100): void {
+export function assertRepairPathFired(
+  armName: string,
+  cases: readonly { attempts: number }[],
+  minimumSample = MINIMUM_INSTRUMENT_SAMPLE,
+): void {
   if (cases.length < minimumSample) return;
   if (cases.some((entry) => entry.attempts > 1)) return;
   throw new Error(
@@ -1680,7 +1709,7 @@ export function emptyRetryFunnel(runs: readonly CaseRun[]): {
 export function assertEmptyRetryFired(
   armName: string,
   runs: readonly CaseRun[],
-  minimumSample = 100,
+  minimumSample = MINIMUM_INSTRUMENT_SAMPLE,
 ): void {
   if (runs.length < minimumSample) return;
   // The lever has two halves and only one of them is unconditional: dropping costs nothing
@@ -1723,7 +1752,7 @@ export function assertPoolShared(
   armName: string,
   pooled: readonly CaseRun[],
   source: readonly CaseRun[],
-  minimumSample = 100,
+  minimumSample = MINIMUM_INSTRUMENT_SAMPLE,
 ): { readonly shared: number; readonly unrecorded: number } {
   if (pooled.length < minimumSample) return { shared: 0, unrecorded: 0 };
   const byId = new Map(source.map((run) => [run.id, run]));
@@ -1784,9 +1813,14 @@ export function assertPoolShared(
  * candidate the engine refuses is a candidate that does not exist, so a three-candidate arm
  * legitimately holds one candidate on a case where two statements failed to execute. It refused
  * nine of six hundred cases in `41389454128` — a guard firing on the harness's honest behaviour,
- * which is how a pool arm would have become unmeasurable. What must be refused is a pool that is
- * absent (`undefined`, meaning the source never ran this case, an ordering bug) or empty (the
- * source ran it and produced nothing). Both are errors; a pool of one is a pool.
+ * which is how a pool arm would have become unmeasurable. A pool of one is a pool.
+ *
+ * The empty pool was the second half of the same mistake, and it took another run to see it: a
+ * source arm that produced *nothing* for a case has not failed to be read, it has failed the
+ * question, and its row records why. That distinction needs both facts at once, so it lives in the
+ * lookup (`PoolLookup`) rather than here — `41430569500` refused a run that had already scored six
+ * arms because `reusePool` raised a plain `Error`, which is filed as a harness bug. This function now
+ * refuses exactly one thing: a case the source never ran.
  */
 export function reusePool(
   armName: string,
@@ -1799,12 +1833,32 @@ export function reusePool(
       `arm ${armName} reuses the pool of ${source}, which has not run yet in this run and holds no entry for case ${caseId} — the pooled arm would answer a case its source never saw`,
     );
   }
-  if (reused.length === 0) {
-    throw new Error(
-      `arm ${armName} reuses the pool of ${source}, which produced nothing for case ${caseId} — the pooled arm has nothing to read and would report the pool's emptiness as its own answer`,
-    );
-  }
   return reused;
+}
+
+/**
+ * What a pooled arm's row says about the pool it read, or `undefined` when it cannot say anything.
+ *
+ * Two facts belong in one field. The first is the check itself (`assertPoolShared`): the candidates
+ * are the ones the named arm drew. The second is how many cases that check *could* be performed on,
+ * and `41430569500` is why it is published rather than assumed: the earlier comment here said a
+ * case with no candidate record was unreachable, and I-80 produced two of them in six hundred — the
+ * source arm wrote no candidates at all, so the pooled arm had nothing to read. A run in which that
+ * happens is not broken; a run in which it happens and the artifact does not say so is unreadable.
+ *
+ * Below the instrument floor there is nothing to check and the field is absent, on the same rule
+ * every other instrument in this file follows: a share over seven cases is a share about seven
+ * cases. Pure and exported because the floor is a branch a test can decide in microseconds and a
+ * real run needs a fixture of a hundred questions to reach.
+ */
+export function poolReadOf(
+  armName: string,
+  pooled: readonly CaseRun[],
+  source: readonly CaseRun[],
+  minimumSample = MINIMUM_INSTRUMENT_SAMPLE,
+): ArmReportRow['poolRead'] {
+  const read = assertPoolShared(armName, pooled, source, minimumSample);
+  return pooled.length < minimumSample ? undefined : { ...read, cases: pooled.length };
 }
 
 /**
@@ -1818,7 +1872,7 @@ export function reusePool(
  * tenth of the cases is an endpoint problem, and a rate measured over it is a rate about the
  * endpoint.
  */
-export function assertSelectorAnswered(armName: string, runs: readonly CaseRun[], maxShare = 0.1, minimumSample = 100): void {
+export function assertSelectorAnswered(armName: string, runs: readonly CaseRun[], maxShare = 0.1, minimumSample = MINIMUM_INSTRUMENT_SAMPLE): void {
   if (runs.length < minimumSample) return;
   const lost = runs.filter((run) => run.selectionFailed !== undefined).length;
   const share = lost / runs.length;
@@ -1877,7 +1931,7 @@ export function armFormat(runs: readonly CaseRun[]): { readonly format: FormatPr
  * with an accuracy next to the parent's that reads as "the mechanism did nothing" rather than
  * "the mechanism never ran". The threshold is the sample size the other asserts use.
  */
-export function assertAuditFired(armName: string, runs: readonly CaseRun[], minimumSample = 100): void {
+export function assertAuditFired(armName: string, runs: readonly CaseRun[], minimumSample = MINIMUM_INSTRUMENT_SAMPLE): void {
   if (runs.length < minimumSample) return;
   if (runs.some((run) => run.audit?.fired === true)) return;
   throw new Error(
@@ -1958,7 +2012,7 @@ export function columnChoiceFunnel(runs: readonly CaseRun[]): {
  * every case with a full card is indistinguishable from an arm that spends a call to be told
  * what it already had, and its delta would be published as "choosing columns does not help".
  */
-export function assertColumnChoiceRan(armName: string, runs: readonly CaseRun[], minimumSample = 100): void {
+export function assertColumnChoiceRan(armName: string, runs: readonly CaseRun[], minimumSample = MINIMUM_INSTRUMENT_SAMPLE): void {
   if (runs.length < minimumSample) return;
   const chosen = runs.filter((run) => run.columnSelection !== undefined);
   if (chosen.length === 0) {
@@ -2044,6 +2098,15 @@ export function assertReportComplete(report: { readonly arms?: readonly ArmRepor
     if (arm.emptyRetry !== undefined && row.emptyRetry === undefined) {
       throw new Error(`arm ${row.arm} runs the empty-result lever and its row carries no empty-result funnel, so the call cannot be priced`);
     }
+    if (arm.pool !== undefined && row.poolRead === undefined && row.total >= MINIMUM_INSTRUMENT_SAMPLE) {
+      // The pooled arm's whole claim is that it read the same candidates as the arm it names, and a
+      // row that does not say how much of that was checkable leaves the reader with a delta whose
+      // denominator is unknown. Below the instrument floor there is nothing to check and the field
+      // is legitimately absent.
+      throw new Error(
+        `arm ${row.arm} reads the pool of ${arm.pool} and its row carries no pool verification, so the delta it publishes rests on an unstated number of shared cases`,
+      );
+    }
     if (row.total > 0 && row.format === undefined && row.pool === undefined) {
       // A pooled arm answered nothing, so there is no reply shape for it to describe: the
       // profile of those replies belongs to the arm that asked for them, and copying it here
@@ -2069,7 +2132,7 @@ export function assertReportComplete(report: { readonly arms?: readonly ArmRepor
  * decomposes some questions and answers others directly, which is the behaviour the
  * mechanism claims to have.
  */
-export function assertDecompositionFired(armName: string, runs: readonly CaseRun[], minimumSample = 100): void {
+export function assertDecompositionFired(armName: string, runs: readonly CaseRun[], minimumSample = MINIMUM_INSTRUMENT_SAMPLE): void {
   if (runs.length < minimumSample) return;
   const funnel = decompositionFunnel(runs);
   if (funnel.asked === 0) {
@@ -3592,8 +3655,20 @@ export interface ArmIo {
    * reuses it runs later: passing the map would freeze it at the moment of the call, and the
    * first version of an experiment like this is always "the map was empty when I read it".
    */
-  readonly poolFor?: (arm: string, caseId: string) => readonly PooledCandidate[] | undefined;
+  readonly poolFor?: (arm: string, caseId: string) => PoolLookup | undefined;
 }
+
+/**
+ * What the pool lookup found: candidates, or the row in which the source arm recorded its failure.
+ *
+ * The second arm of the union is the fix for I-80. `41430569500` refused a run that had already
+ * scored six arms because two of six hundred cases in `select-mixed` produced no candidates at all —
+ * every sample died at the engine — and `reusePool` raised a plain `Error`, which `escapeKind` files
+ * under `harness` and `assertHarnessClean` refuses to publish. The refusal was right (a pooled arm
+ * has nothing to read there) and the diagnosis was wrong: nothing is broken in this repository, the
+ * source arm simply could not answer that question, and its row says so.
+ */
+export type PoolLookup = { readonly pool: readonly PooledCandidate[] } | { readonly cause: CaseRun };
 
 /**
  * One arm over every case.
@@ -3782,15 +3857,31 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
         // so that "the pool was not there" is a sentence rather than an empty set — an arm that
         // quietly generated its own candidates would be its parent under a new name, and its
         // delta would be the pool's noise wearing the label of a lever.
+        const lookup = arm.pool === undefined ? undefined : io.poolFor?.(arm.pool, String(question.question_id));
+        // A case the source arm could not fill is a gap in the *sample*, not a bug here: the pooled
+        // arm has nothing to read, and the honest row is the one the source already wrote, filed under
+        // the same failure kind. Refusing the run instead would throw away every other case it scored
+        // (I-80, found by a real run rather than by reading).
+        if (lookup !== undefined && 'cause' in lookup) {
+          return {
+            id: String(question.question_id),
+            passed: false,
+            predicted: '',
+            reason: 'values',
+            strict: false,
+            attempts: 0,
+            errorKind: lookup.cause.errorKind ?? 'other',
+            error: `pool: ${String(arm.pool)} produced no candidates for this case (${lookup.cause.error ?? 'no reason recorded'})`.slice(0, 400),
+            // No `candidateRecall`: this arm never held a candidate set, so it has no ceiling for
+            // this case. Writing `false` here was the same defect as the one above in miniature —
+            // it would have claimed the arm measured a pool it could not read, and `assertPoolShared`
+            // would have counted the case as verified. The source's row carries the real `false`,
+            // because the source did have an empty set and that is a measurement.
+            calls: callsMade(),
+          };
+        }
         const reused =
-          arm.pool === undefined
-            ? undefined
-            : reusePool(
-                name,
-                arm.pool,
-                io.poolFor?.(arm.pool, String(question.question_id)),
-                String(question.question_id),
-              );
+          arm.pool === undefined ? undefined : reusePool(name, arm.pool, lookup?.pool, String(question.question_id));
         for (const candidate of reused ?? []) {
           candidates.push(candidate);
           const drawn = (survival[candidate.source] ??= { generated: 0, survived: 0 });
@@ -4777,7 +4868,20 @@ export async function runBird(settings: BirdSettings, options: BirdRunOptions = 
       const poolFor =
         arm?.pool === undefined
           ? undefined
-          : (source: string, caseId: string) => pools.get(source)?.get(caseId);
+          : (source: string, caseId: string): PoolLookup | undefined => {
+              const pool = pools.get(source)?.get(caseId);
+              // A pool with no members is not a pool: `select-mixed` produced one for two of six
+              // hundred cases (`41430569500`) because every sample for that question died at the
+              // engine, and a pooled arm asked to choose among zero candidates can only report the
+              // emptiness as its own answer. The source's row already says what happened, so the
+              // empty case is routed to it here rather than at the guard that used to throw.
+              if (pool !== undefined && pool.length > 0) return { pool };
+              // No entry: either the source never reached the vote (a card failure) or it never ran
+              // the case at all (an ordering bug, caught above). Handing back the source's own row is
+              // what turns the first into a recorded gap and leaves the second to `reusePool`.
+              const cause = outcomes.get(source)?.find((run) => run.id === caseId);
+              return cause === undefined ? undefined : { cause };
+            };
       if (arm?.pool !== undefined && !pools.has(arm.pool)) {
         throw new Error(
           `arm ${name} reuses the pool of ${arm.pool}, which is not scheduled before it in this run; add ${arm.pool} to BIRD_ARMS ahead of it`,
@@ -4794,21 +4898,21 @@ export async function runBird(settings: BirdSettings, options: BirdRunOptions = 
       // silently made the pair compare an arm with itself and report `aa: undefined`.
       outcomes.set(name, armRun.runs);
       pools.set(name, armRun.pool);
-      armReports.push(armRun.row);
-      log(armRun.line);
       // A pooled arm is checked against the arm it names, right after it runs: the failure it
       // guards is silent arithmetic, and a delta published from a pool that was not shared is the
-      // pool's noise wearing the label of a lever.
-      if (arm?.pool !== undefined) {
-        const source = outcomes.get(arm.pool);
-        if (source === undefined) throw new Error(`arm ${name} reuses the pool of ${arm.pool}, which produced no runs in this run`);
-        // The counts are returned for the suite, not printed: after the adjudication and the turn
-        // were caught, a case with no record can only be one that failed before it had candidates,
-        // and that arm cannot read the pool at all — so a "verified on N of M" line would describe a
-        // state the harness cannot reach. The row's `errors` already counts the escapes, and a
-        // branch for an unreachable state is a line of coverage nobody can honestly earn.
-        assertPoolShared(name, armRun.runs, source);
-      }
+      // pool's noise wearing the label of a lever. What the check could not read is published with
+      // it — a reader has to be able to tell "the pool was read on 598 of 600 cases and two were
+      // gaps in the sample" from "the pool was read on all 600".
+      const verified =
+        arm?.pool === undefined ? undefined : (() => {
+          const source = outcomes.get(arm.pool);
+          if (source === undefined) {
+            throw new Error(`arm ${name} reuses the pool of ${arm.pool}, which produced no runs in this run`);
+          }
+          return poolReadOf(name, armRun.runs, source);
+        })();
+      armReports.push(verified === undefined ? armRun.row : { ...armRun.row, poolRead: verified });
+      log(armRun.line);
     }
     // Every arm must keep its own row: two rows with the same label would let a
     // duplicate stand in for the arm it duplicates.
