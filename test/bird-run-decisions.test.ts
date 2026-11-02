@@ -14,6 +14,8 @@ import { describe, expect, it } from 'vitest';
 import {
   armReportRow,
   armSummaryLine,
+  assertPoolShared,
+  reusePool,
   caseRows,
   databasesFromManifest,
   databasesFromQuestions,
@@ -709,5 +711,87 @@ describe('the per-case rows an artifact carries', () => {
     expect(rows[0]?.candidateRecall).toBe(true);
     expect(rows[1]).not.toHaveProperty('candidateRecall');
     expect(rows.map((row) => row.arm)).toEqual(['select-mixed', 'select-mixed']);
+  });
+});
+
+/**
+ * A pooled arm that did not read the pool is its parent under another name.
+ *
+ * The failure this guards is arithmetic, not a crash: an arm that quietly generated its own
+ * candidates spends four calls instead of one and reports a pool it never read. The suite could
+ * see that in a delta nobody could attribute, which is how two arms in round 44 came to publish
+ * +2.17pp and +2.50pp against a parent whose pool they had drawn themselves.
+ */
+describe('a shared pool has to be the same pool', () => {
+  const row = (id: string, recall: boolean): CaseRun => ({
+    id,
+    passed: recall,
+    predicted: 'select 1',
+    reason: 'values',
+    strict: false,
+    attempts: 3,
+    calls: 1,
+    candidateRecall: recall,
+  });
+
+  it('accepts two arms that read the same candidates case for case', () => {
+    const source = [row('1', true), row('2', false), row('3', true)];
+    expect(() => assertPoolShared('pooled', source, source, 1)).not.toThrow();
+  });
+
+  it('refuses an arm whose ceiling disagrees with the pool it names', () => {
+    // One case is enough: a shared pool is not a rate, it is an identity.
+    const source = [row('1', true), row('2', false)];
+    const pooled = [row('1', false), row('2', false)];
+    expect(() => assertPoolShared('pooled', pooled, source, 1)).toThrow(/generated its own candidates/);
+  });
+
+  it('refuses a pool that does not describe the same sample', () => {
+    const source = [row('1', true)];
+    const pooled = [row('1', true), row('9', true)];
+    expect(() => assertPoolShared('pooled', pooled, source, 1)).toThrow(/absent from the pool it reuses/);
+  });
+
+  it('says nothing about a sample too small to be a rate', () => {
+    // The same floor the other arm-level guards use: six cases licence the shape of a run, and
+    // a guard that fires on a fixture teaches the suite to work around the guard.
+    const source = [row('1', true)];
+    const pooled = [row('1', false)];
+    expect(() => assertPoolShared('pooled', pooled, source)).not.toThrow();
+  });
+});
+
+/**
+ * What a pooled arm reads, and what it refuses to read.
+ *
+ * Both refusals are configuration errors rather than runtime ones: the ordering guard in
+ * `runBird` makes a missing pool all but impossible inside `runArm`, and every pooled arm names
+ * the same sources as its source. Extracted for the reason the other guards were — a branch inside
+ * a 900-line closure is a sentence nobody can execute, and a guard nobody can execute is a comment.
+ */
+describe('what a pooled arm is allowed to read', () => {
+  const candidate = (source: string): { sql: string; rows: readonly (readonly unknown[])[]; source: string } => ({
+    sql: 'select 1',
+    rows: [[1]],
+    source,
+  });
+
+  it('hands back the pool it was given, unchanged', () => {
+    const pool = [candidate('a'), candidate('b'), candidate('c')];
+    expect(reusePool('pooled', 'source', 3, pool, '7')).toBe(pool);
+  });
+
+  it('refuses a case its source never produced', () => {
+    // A pooled arm answering a case its pool has no candidates for would report an accuracy over
+    // a sample its source does not describe.
+    expect(() => reusePool('pooled', 'source', 3, undefined, '7')).toThrow(/produced nothing for case 7/);
+  });
+
+  it('refuses a pool whose size is not the count the arm declares', () => {
+    // The two arms would then be compared at different candidate counts, which is the difference
+    // between a judge swap and a subset.
+    expect(() => reusePool('pooled', 'source', 3, [candidate('a'), candidate('b')], '7')).toThrow(
+      /declares 3 candidates but the pool of source holds 2/,
+    );
   });
 });

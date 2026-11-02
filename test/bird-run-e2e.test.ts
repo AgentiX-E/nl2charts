@@ -818,6 +818,73 @@ describe('retrieval and the second model, when they are configured', () => {
   });
 });
 
+/**
+ * The pooled arm, which is an instrument rather than a lever.
+ *
+ * Every arm in this file draws its own candidates, so two arms that differ in one lever also
+ * differ in their pool — and at 600 questions the pool's own displacement was measured at 1.3 to
+ * 3.3pp, which is the size of the effects being chased. A pooled arm reads the candidates another
+ * arm already drew, so the only thing that differs between it and its source is what it does with
+ * them. The three assertions below are the whole contract: it generates nothing (one call, not
+ * four), it reads the same set (the same ceiling), and it scores exactly what the source scored
+ * (because with the same judge and the same instruction there is nothing left to differ).
+ */
+describe('a pooled arm reads the pool instead of drawing one', () => {
+  const crossEnv = (secondUrl: string): Record<string, string> => ({
+    BIRD_SECOND_MODEL: 'second-model',
+    BIRD_SECOND_BASE_URL: secondUrl,
+    BIRD_SECOND_API_KEY: 'second-key',
+  });
+
+  it('spends one call per case, draws nothing, and scores exactly what the arm it names scored', async () => {
+    const second = await startEndpoint({ reply: (request) => replyFor(request, { first: correct }) });
+    try {
+      const result = await run({
+        plan: { first: correct },
+        env: { BIRD_ARMS: 'select-cross,select-cross-pooled', ...crossEnv(second.url) },
+      });
+      expect(result.code).toBe(0);
+      const arms = result.report.arms as {
+        arm: string;
+        pool?: string;
+        calls: { mean: number };
+        passed: number;
+        total: number;
+        candidateRecall?: number;
+      }[];
+      const parent = arms.find((entry) => entry.arm === 'select-cross');
+      const pooled = arms.find((entry) => entry.arm === 'select-cross-pooled');
+      expect(parent).toBeDefined();
+      expect(pooled).toBeDefined();
+      // The row says which pool it read: a one-call arm beside a four-call parent reads as a
+      // saving unless the artifact states that the candidates were somebody else's.
+      expect(pooled?.pool).toBe('select-cross');
+      expect(parent?.calls.mean).toBe(4);
+      expect(pooled?.calls.mean).toBe(1);
+      // The second endpoint answered exactly the parent's one cross candidate per case and not
+      // one more: a pooled arm that drew its own would double this count.
+      expect(second.requests).toHaveLength(QUESTIONS.length);
+      // Same pool, same judge, same instruction — so the same score, case for case. If this
+      // equality fails the pooling is broken, and every judge-swap delta taken on a shared pool
+      // would be measuring something other than the judge.
+      expect(pooled?.candidateRecall).toBe(parent?.candidateRecall);
+      expect(pooled?.passed).toBe(parent?.passed);
+      expect(pooled?.total).toBe(parent?.total);
+    } finally {
+      await second.close();
+    }
+  });
+
+  it('refuses to run before the arm whose pool it names', async () => {
+    // The failure mode this replaces is silent: a pooled arm that ran first would find no pool,
+    // and the version of this that generated its own candidates looked entirely healthy while
+    // being its parent under a new name.
+    await expect(
+      run({ plan: { first: correct }, env: { BIRD_ARMS: 'select-cross-pooled,select-cross', ...crossEnv('http://127.0.0.1:1/v1') } }),
+    ).rejects.toThrow(/not scheduled before it/);
+  });
+});
+
 describe('the second model as a judge', () => {
   it('falls back to the primary endpoint when the second model has no endpoint of its own', async () => {
     // A provider pair can be two keys against one gateway, which is what a run does when

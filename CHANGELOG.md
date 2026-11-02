@@ -50,6 +50,22 @@ cannot be argued with.
 
 ### Added
 
+- **An arm can read another arm's candidate pool instead of drawing its own, because at 600
+  questions the pool's noise is the size of the effect.** Every arm in the harness generates its
+  own three candidates, so two arms that differ in one lever also differ in their pool, and the
+  pool's own displacement — measured by running `select-cross` twice on the same 600 questions —
+  is 1.3 to 3.3pp (26:6 discordant, exact McNemar p=5.4e-4). Round 44's two levers read +2.17pp
+  (p=0.035) and +2.50pp (p=0.017) against a parent whose pool they did not share, while the slot
+  the second one targets moved +0.43pp and the same slot moved +1.60pp on an arm that changed no
+  generation at all. `Arm.pool` names another arm and reuses its candidates, its rows and its
+  previews: `select-cross-pooled` spends one call per case instead of four and must score exactly
+  what `select-cross` scored, which makes it an exact-zero A/A instrument rather than a lever;
+  `select-cross-pooled-judge-reasoning` puts the reasoning model in the judge's seat on that same
+  pool, so the only thing that differs from `select-cross-pooled` is who judges and in what
+  format. `assertPoolShared` refuses a run whose pooled arm disagrees with its pool case for case
+  — the failure it guards is silent arithmetic, not a crash — and `secondModelRoles` no longer
+  demands a second key from an arm that draws nothing.
+
 - **The judge's format is part of the judge.** A reasoning model told "answer with the number and
   nothing else" either ignores it (its prose was read as an undecided vote) or obeys it and gives up
   the deliberation it was chosen for. `buildSelectionPrompt` has a second instruction — think, then
@@ -64,6 +80,17 @@ cannot be argued with.
   empty result, sent to the model that wrote the statement.
 
 ### Measured
+
+- **The three arms ran, and the harness cannot decide between them yet.** `41380616205`
+  (`select-cross,select-cross-judge-reasoning,select-cross-unhinted`, second `deepseek-reasoner`,
+  600 of dev's 1,534 questions): 60.33% (362/600) / 62.50% (375/600) / 62.83% (377/600), ceilings
+  68.17% / 69.50% / 69.50%, four calls each, the selector deciding on 99.8% of cases. Both arms
+  clear their arm-level McNemar against the in-run parent — +2.17pp (10:23, p=0.035) and +2.50pp
+  (10:25, p=0.017) — and both fail on attribution: the reasoner slot that `select-cross-unhinted`
+  targets moved +0.43pp, below the +1.0pp registered before the run, and the same slot moved
+  +1.60pp on an arm that changed no generation at all. At this sample size the pool is the noise
+  floor, which is what the shared-pool arms above exist to remove. Not promoted, not rejected:
+  re-measured on a shared pool.
 
 - **The agreement mark is a null, and the null closes an explanation.** Four arms over 600 stratified
   dev questions (`41366778872`): `select-cross` 63.67% → `select-cross-agree` 62.67% (−1.00pp, 15:21,

@@ -164,6 +164,24 @@ export interface Arm {
    */
   readonly mixed?: readonly string[];
   /**
+   * Reuse the candidate pool another arm generated, instead of generating one.
+   *
+   * The reason this exists is a measurement defect, not a cost optimisation. Every arm draws
+   * its own three candidates, so two arms that differ in one lever also differ in their pool —
+   * and the pool's own run-to-run displacement, measured on `select-cross` twice, is ±1.3 to
+   * 3.3pp at 600 questions. Two levers in this round read +2.17pp (p=0.035) and +2.50pp
+   * (p=0.017) against a parent whose pool they did not share, while the *slot* the second one
+   * targets moved +0.43pp and the same slot moved +1.60pp on an arm that changed no generation
+   * at all. An effect and a noise floor of the same size is not a reading.
+   *
+   * On a shared pool the two arms read the same candidates, the same rows and the same
+   * previews, and the only thing that differs is what the arm does with them: a judge swap
+   * costs one call per case and generates nothing, so its delta has no generation noise in it
+   * at all. The arm named here must run earlier in the same run, which the pool lookup enforces
+   * by failing rather than generating.
+   */
+  readonly pool?: string;
+  /**
    * Ask the selector to compare two statements at a time instead of ranking many.
    *
    * The absolute prompt keeps 95% of what a mixed candidate set contained; the missing
@@ -567,6 +585,24 @@ export const ARMS: readonly Arm[] = [
   // The hypothesis is not "less prompt is better"; it is that the hint anchors a model that would
   // otherwise deliberate, and the arm exists to price that anchor with zero extra calls.
   { name: 'select-cross-unhinted', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: CROSS_SOURCES, sourceLinking: { 'inline+evidence@second': false } },
+  // The same pool as `select-cross`, read by the same judge with the same instruction.
+  //
+  // By construction this arm must score exactly what `select-cross` scores: it generates nothing,
+  // so its candidates, rows and previews are the parent's own objects. That makes it an
+  // instrument rather than a lever — an exact-zero A/A on a shared pool. If the two do not agree
+  // case for case, the pooling is broken (and `assertPoolShared` says so), and every judge-swap
+  // delta measured on this pool would be suspect. It costs one call per case against the parent's
+  // four, which is what makes the pair affordable at 600 questions.
+  { name: 'select-cross-pooled', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: CROSS_SOURCES, pool: 'select-cross' },
+  // The judge swap with zero generation noise: same pool, same candidates, different judge.
+  //
+  // `select-cross-judge-reasoning` priced the swap against a parent whose pool it had drawn
+  // itself, and the pool's own displacement at 600 questions (measured twice, ±1.3 to 3.3pp) is
+  // the same size as the +2.17pp it reported. On this arm the reasoning model reads the chat
+  // model's candidates: the only difference between it and `select-cross-pooled` is who judges and
+  // in what format, so the delta is attributable by construction. One lever from
+  // `select-cross-pooled` (who judges).
+  { name: 'select-cross-pooled-judge-reasoning', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: CROSS_SOURCES, pool: 'select-cross', judge: 'second', judgeFormat: 'capability' },
   { name: 'select-cross-canon', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: CROSS_SOURCES, canonical: true },
   // ...and the same canonical text read by the second model, which is where the style channel was
   // measured: the 128-case loss group belongs to that judge, so closing the channel has to be
@@ -787,6 +823,8 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'select-cross-judge-reasoning': 'the cross set judged by the reasoning model, asked in the shape a reasoning model can answer: needs the second model and a second key, and is measured against `select-cross`; the pair `select-cross-judge` -> this arm prices the format, this arm -> `select-cross` prices the judge',
   'select-cross-empty': 'the cross set with one turn spent on an empty result, sent to the model that wrote the statement: needs the second model, and is measured against `select-cross`',
   'select-cross-unhinted': 'the cross set with the linker hint removed from the reasoning model\'s prompt only: needs the second model, no extra call, and is measured against `select-cross`',
+  'select-cross-pooled': 'the cross set read from `select-cross`\'s own pool instead of generating one: one call per case instead of four, and the pair must read exactly 0.0pp — it is the instrument that says whether two arms on this harness can be compared at all, so run it in the same dispatch as `select-cross` and before any pooled comparison',
+  'select-cross-pooled-judge-reasoning': 'the reasoning model judging the chat model\'s candidates, in the format it can answer: needs the second model and a second key, one call per case, and is measured against `select-cross-pooled` on the same pool — the only judge-swap delta with no generation noise in it',
   'select-tagged': 'the cross arm with each candidate labelled by its source: needs the second model too, and is measured against `select-cross`',
   'vote-mixed': 'three prompts aggregated by modal result instead of by a model: 63% would make the selector call unnecessary, and below that it prices what the model adds',
   'vote-cross': 'the cross-model candidate set aggregated by modal result: needs the second model too',
@@ -916,6 +954,15 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   // One lever: whether the reasoning model's prompt carries our linker's answer in front of it.
   // Zero extra calls, so the delta is the anchor and not a budget.
   ['select-cross', 'select-cross-unhinted'],
+  // One lever: whether the arm generates its candidates or reads the ones `select-cross` already
+  // drew. This pair is an instrument, not a hypothesis — the delta must be exactly zero, because
+  // the pooled arm chose among the parent's own candidate objects with the parent's own judge. A
+  // non-zero delta here means the pooling is broken, and no judge-swap reading on this pool can be
+  // trusted until it is fixed.
+  ['select-cross', 'select-cross-pooled'],
+  // One lever: who judges, on a pool neither arm generated. This is the pair the two previous
+  // judge-swap arms could not be, and the only one whose delta has no generation noise in it.
+  ['select-cross-pooled', 'select-cross-pooled-judge-reasoning'],
   // One lever: the same candidates and the same selector, told which of them returned the same
   // rows. The fact a 2+1 pool turns on is the one fact the selector could not compute from two
   // truncated previews, and the pair prices the information rather than a rewrite.
@@ -1194,6 +1241,15 @@ export function mergePurposes(
 export interface ArmReportRow {
   readonly arm: string;
   readonly total: number;
+  /**
+   * The arm whose candidates this arm read instead of generating any.
+   *
+   * Present only on a pooled arm, and the one field that makes its row readable: a four-call
+   * parent and a one-call arm on the same pool are compared exactly as their rows say, and a
+   * reader who did not know the candidates were shared would read the call column as a saving
+   * rather than as the instrument it is.
+   */
+  readonly pool?: string;
   readonly decomposition?: { readonly asked: number; readonly fired: number; readonly share: number; readonly meanSteps: number };
   readonly candidateRecall?: number;
   readonly emptyRetry?: { readonly mode: string; readonly dropped: number; readonly fired: number; readonly recovered: number };
@@ -1542,6 +1598,67 @@ export function assertEmptyRetryFired(
 }
 
 /**
+ * A pooled arm that did not read the pool is its parent under another name.
+ *
+ * The whole value of a shared pool is that the two arms read the same candidates, so the check is
+ * not "did it run" but "did it read the same set": every case's ceiling must agree, and the
+ * candidate authors must agree, or the delta being published is the pool's noise wearing the
+ * label of a lever. This is the `assertSamplesRan`/`assertRepairPathFired` rule applied to the
+ * one instrument whose failure mode is silent arithmetic rather than a missing call — a pooled arm
+ * that generated its own candidates would cost four calls a case and look entirely healthy.
+ */
+export function assertPoolShared(
+  armName: string,
+  pooled: readonly CaseRun[],
+  source: readonly CaseRun[],
+  minimumSample = 100,
+): void {
+  if (pooled.length < minimumSample) return;
+  const byId = new Map(source.map((run) => [run.id, run]));
+  const missing = pooled.filter((run) => !byId.has(run.id));
+  if (missing.length > 0) {
+    throw new Error(
+      `arm ${armName}: ${String(missing.length)} of ${String(pooled.length)} cases are absent from the pool it reuses, so the two arms do not describe the same sample`,
+    );
+  }
+  const disagreed = pooled.filter((run) => (byId.get(run.id)?.candidateRecall === true) !== (run.candidateRecall === true));
+  if (disagreed.length > 0) {
+    throw new Error(
+      `arm ${armName}: ${String(disagreed.length)} cases read a different pool than the arm it names — the shared-pool arm generated its own candidates`,
+    );
+  }
+}
+
+/**
+ * The candidates a pooled arm reads, checked against what that arm declares.
+ *
+ * Pure and exported because both failure modes are configuration errors a test can construct and
+ * a run cannot: inside `runArm` the pool always exists (the ordering guard in `runBird` ran first)
+ * and always holds the declared count (every pooled arm names the same sources as its source), so
+ * the two sentences below would be branches no test could reach — a claim the reader has to verify
+ * rather than a guard. Here they are three lines a case can choose between.
+ */
+export function reusePool(
+  armName: string,
+  source: string,
+  declared: number,
+  reused: readonly PooledCandidate[] | undefined,
+  caseId: string,
+): readonly PooledCandidate[] {
+  if (reused === undefined) {
+    throw new Error(
+      `arm ${armName} reuses the pool of ${source}, which produced nothing for case ${caseId} — the pooled arm would answer a case its source never saw`,
+    );
+  }
+  if (reused.length !== declared) {
+    throw new Error(
+      `arm ${armName} declares ${String(declared)} candidates but the pool of ${source} holds ${String(reused.length)}; the two arms would be compared at different candidate counts`,
+    );
+  }
+  return reused;
+}
+
+/**
  * The audit turn's reach and yield, over the cases the arm ran.
  *
  * `extraCallsPerCase` is the price of the mechanism stated in the one unit the arms are
@@ -1756,7 +1873,12 @@ export function assertReportComplete(report: { readonly arms?: readonly ArmRepor
     if (arm.emptyRetry !== undefined && row.emptyRetry === undefined) {
       throw new Error(`arm ${row.arm} runs the empty-result lever and its row carries no empty-result funnel, so the call cannot be priced`);
     }
-    if (row.total > 0 && row.format === undefined) {
+    if (row.total > 0 && row.format === undefined && row.pool === undefined) {
+      // A pooled arm answered nothing, so there is no reply shape for it to describe: the
+      // profile of those replies belongs to the arm that asked for them, and copying it here
+      // would attribute one model's output to two prompts. The exemption is therefore keyed on
+      // `pool` and not on "the arm is special": a row with neither a format profile nor a pool
+      // is still refused, which is the reading this guard exists for.
       throw new Error(
         `arm ${row.arm} answered ${String(row.total)} cases and its row carries no format profile: ` +
           'the shape of every reply was read and then dropped, so the one reading that predicts a collapse on an uncalibrated model is missing',
@@ -3257,6 +3379,21 @@ export interface ArmRun {
   readonly runs: readonly CaseRun[];
   readonly row: ArmReportRow;
   readonly line: string;
+  /**
+   * The candidates this arm generated per case, for an arm that reuses them.
+   *
+   * In memory and not in the artifact: the selector reads each candidate's first three rows,
+   * and the per-case record deliberately keeps only a fingerprint of them. Sharing a pool is a
+   * within-run instrument, so the pool only has to outlive the run.
+   */
+  readonly pool: ReadonlyMap<string, readonly PooledCandidate[]>;
+}
+
+/** One candidate as the selector reads it: a statement, the rows it returned, and its author. */
+export interface PooledCandidate {
+  readonly sql: string;
+  readonly rows: readonly (readonly unknown[])[];
+  readonly source: string;
 }
 
 /** What `runArm` needs from outside. */
@@ -3264,6 +3401,14 @@ export interface ArmIo {
   readonly oracle: Oracle;
   readonly provider: LlmProvider;
   readonly second?: LlmProvider;
+  /**
+   * The pool another arm already generated for this case, when this arm declares `pool`.
+   *
+   * A function rather than a map because the arm that owns the pool runs first and the one that
+   * reuses it runs later: passing the map would freeze it at the moment of the call, and the
+   * first version of an experiment like this is always "the map was empty when I read it".
+   */
+  readonly poolFor?: (arm: string, caseId: string) => readonly PooledCandidate[] | undefined;
 }
 
 /**
@@ -3278,6 +3423,8 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
   const { oracle, provider, second: secondProvider } = io;
   const arm = resolveArm(name);
   if (arm === undefined) throw new Error(`unknown arm ${name}`);
+  /** What this arm drew per case, in the shape a pooled arm reads. */
+  const collected = new Map<string, readonly PooledCandidate[]>();
   // A mixed arm runs three configurations under one label; if one of them repairs or
   // samples, the reported cost is wrong and the comparison loses its meaning.
   if (arm.mixed !== undefined) {
@@ -3414,7 +3561,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
       const pipeline = pipelineFor(arm);
       const expected = gold.get(question.question_id) as OracleResult;
       if (arm.vote !== undefined && arm.vote > 1) {
-        const candidates: { sql: string; rows: readonly (readonly unknown[])[]; source: string }[] = [];
+        const candidates: PooledCandidate[] = [];
         // Why a sample died matters: a sample the engine refused is a candidate that
         // does not exist, while a sample the endpoint never answered is an outage that
         // used to be counted as "no sample survived guard and execution" — a content
@@ -3438,7 +3585,29 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
         // The first reply of the set, kept because it is the only one the prompt alone
         // produced: the later draws are the same prompt at a non-zero temperature.
         let firstShape: ReplyShape | undefined;
-        for (let sample = 0; sample < arm.vote; sample += 1) {
+        // A pooled arm generates nothing: it reads the candidates another arm already drew for
+        // this case, and spends its one call on what it does with them. The lookup is a function
+        // so that "the pool was not there" is a sentence rather than an empty set — an arm that
+        // quietly generated its own candidates would be its parent under a new name, and its
+        // delta would be the pool's noise wearing the label of a lever.
+        const declared = arm.vote;
+        const reused =
+          arm.pool === undefined
+            ? undefined
+            : reusePool(
+                name,
+                arm.pool,
+                declared,
+                io.poolFor?.(arm.pool, String(question.question_id)),
+                String(question.question_id),
+              );
+        for (const candidate of reused ?? []) {
+          candidates.push(candidate);
+          const drawn = (survival[candidate.source] ??= { generated: 0, survived: 0 });
+          drawn.generated += 1;
+          drawn.survived += 1;
+        }
+        for (let sample = 0; reused === undefined && sample < arm.vote; sample += 1) {
           try {
             // A mixed arm draws each candidate from a different decomposition. The
             // sources repair nothing by contract (asserted in the test suite), so a
@@ -3488,6 +3657,10 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
             lost[kind] += 1;
           }
         }
+        // Recorded before the empty-set branch, so a case whose pool is empty is a pool the next
+        // arm can read as empty rather than a key that is missing: the difference between "this
+        // case produced nothing" and "this arm never ran" is the whole reason the lookup throws.
+        collected.set(String(question.question_id), candidates);
         if (candidates.length === 0) {
           const outage = sampleErrors.length === arm.vote && sampleErrors.every((kind) => kind === 'llm');
           return {
@@ -3759,7 +3932,13 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
   if (arm.samples !== undefined) assertSamplesRan(name, prepared.sampledFor(arm));
   // ...and a format the model ignored is not a prompt that did not help.
   if (declaresDecomposition(arm)) assertDecompositionFired(name, runs);
-  return { name, runs, row: armReportRow(prepared, arm, runs, name), line: armSummaryLine(name, arm, runs) };
+  return {
+    name,
+    runs,
+    row: armReportRow(prepared, arm, runs, name),
+    line: armSummaryLine(name, arm, runs),
+    pool: collected,
+  };
 }
 
 /**
@@ -3894,6 +4073,7 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
     arm: label,
     passed: summary.passed,
     total: summary.total,
+    ...(arm.pool === undefined ? {} : { pool: arm.pool }),
     accuracy: summary.accuracy,
     wilson: wilsonInterval(summary.passed, summary.total),
     strictPassed,
@@ -4262,7 +4442,14 @@ export function evaluateGate(report: Record<string, unknown>): string[] {
  */
 export function secondModelRoles(arms: readonly string[]): { draws: boolean; judges: boolean } {
   return {
-    draws: arms.some((name) => (resolveArm(name)?.mixed ?? []).some((source) => parseMixedSource(source).provider === 'second')),
+    // A pooled arm names the sources of the arm whose candidates it reads, but it draws none of
+    // them: requiring a second key for an arm that spends one call on a pool somebody else
+    // generated would be a requirement about a request that is never sent.
+    draws: arms.some(
+      (name) =>
+        resolveArm(name)?.pool === undefined &&
+        (resolveArm(name)?.mixed ?? []).some((source) => parseMixedSource(source).provider === 'second'),
+    ),
     judges: arms.some((name) => resolveArm(name)?.judge === 'second'),
   };
 }
@@ -4338,14 +4525,42 @@ export async function runBird(settings: BirdSettings, options: BirdRunOptions = 
     }
     const outcomes = new Map<string, readonly CaseRun[]>();
     const armReports: ArmReportRow[] = [];
+    // Pools by the arm *label* that generated them, so a pooled arm names the arm as it appears
+    // in the run (`select-cross`, not its resolved form) and a label that never ran is a failure
+    // rather than an empty lookup.
+    const pools = new Map<string, ReadonlyMap<string, readonly PooledCandidate[]>>();
     for (const name of settings.arms) {
-      const armRun = await runArm(prepared, name, { oracle, provider, ...(second === undefined ? {} : { second }) });
+      const arm = resolveArm(name);
+      const poolFor =
+        arm?.pool === undefined
+          ? undefined
+          : (source: string, caseId: string) => pools.get(source)?.get(caseId);
+      if (arm?.pool !== undefined && !pools.has(arm.pool)) {
+        throw new Error(
+          `arm ${name} reuses the pool of ${arm.pool}, which is not scheduled before it in this run; add ${arm.pool} to BIRD_ARMS ahead of it`,
+        );
+      }
+      const armRun = await runArm(prepared, name, {
+        oracle,
+        provider,
+        ...(second === undefined ? {} : { second }),
+        ...(poolFor === undefined ? {} : { poolFor }),
+      });
       // Keyed by the requested name, not the resolved one: an A/A duplicate resolves to
       // the same Arm, and keying by that overwrote the first run with the second, which
       // silently made the pair compare an arm with itself and report `aa: undefined`.
       outcomes.set(name, armRun.runs);
+      pools.set(name, armRun.pool);
       armReports.push(armRun.row);
       log(armRun.line);
+      // A pooled arm is checked against the arm it names, right after it runs: the failure it
+      // guards is silent arithmetic, and a delta published from a pool that was not shared is the
+      // pool's noise wearing the label of a lever.
+      if (arm?.pool !== undefined) {
+        const source = outcomes.get(arm.pool);
+        if (source === undefined) throw new Error(`arm ${name} reuses the pool of ${arm.pool}, which produced no runs in this run`);
+        assertPoolShared(name, armRun.runs, source);
+      }
     }
     // Every arm must keep its own row: two rows with the same label would let a
     // duplicate stand in for the arm it duplicates.

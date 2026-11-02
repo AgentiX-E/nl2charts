@@ -4962,3 +4962,60 @@ the reasoner, exact McNemar p=0.356). What a
 pipeline owes a deployment is not that promise; it is that the stronger model's ceiling is usable,
 that the role it is paid for is the role it is measured in, and that the number reported is the
 number that ran.
+
+#### The two arms ran, and the measurement could not decide between them
+
+`41380616205` (`select-cross,select-cross-judge-reasoning,select-cross-unhinted`, second
+`deepseek-reasoner`, 600 of dev's 1,534 questions, 4 calls per case):
+
+| arm | passed | ceiling | conversion | calls | `selectorDecided` |
+| --- | --- | --- | --- | --- | --- |
+| `select-cross` | 362/600 = **60.33%** | 409 (68.17%) | 88.51% | 4.0 | 600/600 |
+| `select-cross-judge-reasoning` | 375/600 = **62.50%** | 417 (69.50%) | 89.93% | 4.0 | 599/599 |
+| `select-cross-unhinted` | 377/600 = **62.83%** | 417 (69.50%) | 90.41% | 4.0 | 599/600 |
+
+Both arms clear their **arm-level** criterion against the parent in the same run: +2.17pp
+(10 discordant for the parent, 23 for the arm, exact McNemar p=0.035, CI [0.29, 4.04]pp) and
++2.50pp (10:25, p=0.017, CI [0.57, 4.43]pp), at zero extra calls, with the selector deciding on
+99.8% of cases. Read as a table of scores, that is two wins.
+
+The slot-level criteria say otherwise, and the reason is a property of the harness rather than of
+these two levers. `select-cross-unhinted` exists to move the **reasoner's own slot**, and that slot
+moved 358/598 (59.87%) → 360/597 (60.30%) — **+0.43pp**, below the +1.0pp registered before the run.
+It is also smaller than the same slot's movement on the arm that changes *nothing* about generation:
+`select-cross-judge-reasoning` swaps only the judge, so its three candidate prompts, endpoints and
+parameters are identical to `select-cross`'s, and its reasoner slot read 367/597 (61.47%) — **+1.60pp
+from no intervention at all**.
+
+That is the noise floor, measured in the same run, and it is larger than the effect being claimed.
+Two more readings agree with it:
+
+- **In-run, identical generation configuration.** `select-cross` and `select-cross-judge-reasoning`
+  draw their pools from the same three prompts on the same endpoints, yet their ceilings differ on 22
+  cases (7 for the parent only, 15 for the arm only) — 8 net cases from configuration that is
+  identical.
+- **Cross-run, the same arm twice.** Run `41366778872` and this one scored `select-cross` at 382/600
+  and 362/600 on the same 600 questions: 26 discordant for the old run, 6 for the new, exact McNemar
+  p=5.4e-4. That is a 3.3pp displacement of a control. 474 of the 600 cases had byte-identical
+  `(source, fingerprint, correct)` triples across the two runs, and 24 of the 26 old-only wins came
+  from the 126 cases whose pool *was* re-drawn — so the displacement is generation, not scoring.
+
+One honest caveat on that last number: the two runs are not the same experiment. `select-cross`'s
+requests to the reasoning endpoint changed between them this round — `temperature` is no longer sent
+and `max_tokens` is — so the 3.3pp contains whatever that did, and it is the one place where this
+round's capability contract could have made an arm worse. The vendor documents the field as accepted
+and ineffective; the reading above is not evidence against the documentation, because the field is
+not the only thing that moved. A probe that separates them (the same prompt, repeated, with and
+without the field) is registered.
+
+**What this establishes.** At 600 questions in this configuration, an arm-level McNemar between two
+arms that each generate their own candidate pool is not an attribution test: the pool is re-drawn per
+arm, the pool's own displacement is ±1.3–2.5pp, and a 2pp delta is inside it. Both arms are therefore
+**not promoted, and not rejected** — they are unmeasured, in the sense that matters: the effect and
+the noise are the same size. The fix is structural and now built: an arm that **reuses another arm's pool**
+(`pool: '<arm>'`), so a judge swap generates nothing and the only thing that differs between the two
+arms is the judge. `select-cross-pooled` reads `select-cross`'s three candidates for one call a case
+and must reproduce its score exactly — an exact-zero A/A that `assertPoolShared` refuses to let pass
+if the pool was not shared — and `select-cross-pooled-judge-reasoning` swaps only the judge on that
+same pool. On it the judge-format comparison has no generation noise in it, and the two levers above
+become decidable at 600 questions rather than needing 1,532.

@@ -606,3 +606,17 @@ that differs in method rather than in prompt or in draw.
   declaration is knowledge and a name is a guess, so the guess may not choose what the knowledge is
   merged into. The base now follows the declared family and the name is the fallback; a deployment
   that knows its own ceiling still wins field by field.
+- **Two arms that generate separately cannot be compared at this sample size, and the fix is a
+  shared pool rather than a bigger sample.** Every arm draws its own candidates, so a one-lever
+  pair also differs in its pool, and the pool moves on its own: `select-cross` scored 382/600 and
+  then 362/600 on the same 600 questions (26:6 discordant, p=5.4e-4), with 474 of 600 cases
+  carrying byte-identical candidate sets and 24 of the 26 flips coming from the 126 cases whose
+  pool was re-drawn. In the same run, an arm that changed *no* generation — the judge swap — moved
+  the reasoning model's own slot by +1.60pp, which is larger than the +0.43pp the de-anchoring arm
+  moved the slot it targets. `Arm.pool` makes an arm read another arm's candidates, its rows and
+  its previews, so the only difference between `select-cross-pooled` and
+  `select-cross-pooled-judge-reasoning` is who judges and in what format: one call per case instead
+  of four, zero generation noise, and an exact-zero A/A (`select-cross` → `select-cross-pooled`)
+  that fails loudly through `assertPoolShared` if the pool was not in fact shared. The general rule
+  is the one this project keeps rediscovering: before pricing a lever, make sure the instrument can
+  see it, and if two arms cannot share their randomness, measure the noise they do not share.
