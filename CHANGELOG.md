@@ -149,6 +149,19 @@ cannot be argued with.
 
 ### Fixed
 
+- **The condition census read every artifact against mini-dev, whatever split it was measured on.**
+  `bench:bird:conditions` compares a prediction against the gold of *its artifact's* split, and the
+  split was taken from the environment and defaulted to mini-dev. Run on a 600-case dev artifact it
+  reported 84 failures and then admitted that 136 of the 600 cases "name a question the split does
+  not hold" — and compared the remaining 464 against whatever mini-dev happened to hold at that id.
+  It failed loudly under `--strict`, which is how it was found, but a tool that CI only ever points
+  at mini-dev had no way to notice, and the next reader would have had to already know. The split is
+  now read from the artifact (`dev` or `minidev`, otherwise the old default), the environment still
+  wins when it names one because a reader may want the other file on purpose, and an artifact with
+  no declared split keeps the old behaviour instead of guessing. Three tests: the declared split, the
+  environment's precedence, and three inputs that must not be trusted (a missing file, no `split`
+  field, an unknown one).
+
 - **A table's columns were attributed to the wrong comparator.** `bench:bird:decision` prints, per
   arm, that arm's own selector against its own modal count over the same candidates. The first draft
   of the fifth-dispatch section read the four columns as "against `select-cross`", which is a

@@ -196,7 +196,7 @@ export function resolveConditionSettings(
   const consumed = [...(flag === -1 ? [] : [flag, flag + 1]), ...(ladderFlag === -1 ? [] : [ladderFlag, ladderFlag + 1])];
   const path = argv.find((item, index) => !item.startsWith('--') && !consumed.includes(index));
   if (path === undefined) throw new Error('usage: conditions.ts <report.json> [--arm <name>] [--ladder <values-gap.json>] [--strict]');
-  const layout = resolveLayout(env, root);
+  const layout = resolveLayout(withDeclaredSplit(env, declaredSplitOf(path)), root);
   return {
     report: path,
     layout,
@@ -205,6 +205,34 @@ export function resolveConditionSettings(
     out: dirname(layout.out),
     strict: argv.includes('--strict'),
   };
+}
+
+/**
+ * The split an artifact says it was measured on, when it says one this repository knows.
+ *
+ * The census compares a prediction against the gold of *this* artifact's split, so the split is
+ * an input to read rather than a default to assume. Read against the wrong file the numbers are
+ * not a weaker reading but a different one: a 600-case dev artifact read against mini-dev's 500
+ * questions reported 136 cases that "name a question the split does not hold" and compared the
+ * remaining 464 against whatever mini-dev happened to hold at that id. It failed loudly under
+ * `--strict`, which is how it was found - but a tool that is only ever run on one split in CI had
+ * no way to notice, and the next reader would have had to know that.
+ */
+export function declaredSplitOf(report: string): string | undefined {
+  try {
+    const body = JSON.parse(readFileSync(report, 'utf8')) as { split?: unknown };
+    return body.split === 'dev' || body.split === 'minidev' ? body.split : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The environment wins when it names a split: a reader may want the other file on purpose. */
+function withDeclaredSplit(
+  env: Record<string, string | undefined>,
+  declared: string | undefined,
+): Record<string, string | undefined> {
+  return env.BIRD_SPLIT === undefined && declared !== undefined ? { ...env, BIRD_SPLIT: declared } : env;
 }
 
 export interface ConditionOutcome {

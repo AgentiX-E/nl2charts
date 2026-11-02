@@ -294,6 +294,39 @@ describe('the entry, run the way a workflow runs it', () => {
     expect(() => resolveConditionSettings({}, ['--strict'], ROOT)).toThrow('usage');
   });
 
+  it('reads the split from the artifact when the environment does not name one', () => {
+    // The census compares a prediction against the gold of *this* artifact's split. Defaulting
+    // to mini-dev instead meant a dev artifact was read against a 500-question file: 136 of 600
+    // cases "named a question the split does not hold" and the other 464 were compared against
+    // whatever mini-dev happened to hold at that id. The reading looked like a census and was a
+    // join on the wrong file - so the tool now takes the split the artifact declares.
+    const directory = mkdtempSync(join(tmpdir(), 'cond-split-'));
+    const path = join(directory, 'dev-report.json');
+    writeFileSync(path, JSON.stringify({ ...(body({}) as object), split: 'dev' }));
+    expect(resolveConditionSettings({}, [path], ROOT).layout.split).toBe('dev');
+    expect(resolveConditionSettings({}, [path], ROOT).layout.questionsFile.endsWith('dev.json')).toBe(true);
+  });
+
+  it('lets the environment win, because a reader may want the other file on purpose', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'cond-split-env-'));
+    const path = join(directory, 'dev-report.json');
+    writeFileSync(path, JSON.stringify({ ...(body({}) as object), split: 'dev' }));
+    expect(resolveConditionSettings({ BIRD_SPLIT: 'minidev' }, [path], ROOT).layout.split).toBe('minidev');
+  });
+
+  it('falls back to mini-dev for an artifact it cannot read or that names no split', () => {
+    // A missing file and a body with no `split` are the same statement: nothing told the tool
+    // which questions to load. Both keep the old default rather than guessing.
+    const directory = mkdtempSync(join(tmpdir(), 'cond-split-none-'));
+    const bare = join(directory, 'bare.json');
+    writeFileSync(bare, JSON.stringify(body({})));
+    const absurd = join(directory, 'absurd.json');
+    writeFileSync(absurd, JSON.stringify({ ...(body({}) as object), split: 'train' }));
+    for (const path of [join(directory, 'missing.json'), bare, absurd]) {
+      expect(resolveConditionSettings({}, [path], ROOT).layout.split).toBe('minidev');
+    }
+  });
+
   it('writes one artifact per arm, with a name safe for a path', () => {
     const data = dataset();
     const settings = settingsFor(data, body({ '94': "select name from items where name = 'pen'" }));
