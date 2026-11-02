@@ -556,3 +556,12 @@ that differs in method rather than in prompt or in draw.
   prompt as a line per duplicate plus one rule: agreement is evidence, not proof. The block is
   opt-in, so every arm measured before it keeps a byte-identical prompt and the pair prices the
   information rather than a rewrite; the marks cost no call, because the rows were already executed.
+- **An explanation that does not move the number is still a finding, and it is the one that
+  narrows the next attempt.** Telling the selector which candidates returned the same rows — the
+  fact a 2+1 pool is built on and the only one it could not compute from truncated previews —
+  changed nothing: −1.00pp on the cross pool (15:21, p=0.405) and −0.17pp on the mixed one (5:6,
+  p=1.000), with the minority-correct pick rate unmoved (52.9% → 54.8%). That result rules out the
+  cheap explanation of the 6pp conversion gap rather than leaving it open, and the difference
+  matters: an information deficit would be fixed by a prompt, a recognition deficit is fixed only by
+  changing what the model can judge. It also puts a price on the habit of explaining a null by
+  "the model could not know" — here it was told, at 373 characters a call, and it chose the same way.

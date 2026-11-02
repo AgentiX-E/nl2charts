@@ -4820,6 +4820,72 @@ how often that shared result is wrong. A set that agrees and is wrong is the cor
 and no selection rule on any list reaches it — that is the boundary between this instrument and
 generation work, and it is the number the next run is being spent to read.
 
+### What the selector was told, and what it did with it
+
+The conversion loss on a 2+1 pool had one obvious explanation left: the selector is shown each
+candidate's statement, row count, column count and three preview rows, and none of that establishes
+that two candidates returned *exactly* the same rows — so the one fact a dissent is made of was the
+one fact it had to infer. Run `41366778872` dispatched four arms over 600 stratified dev questions
+with `deepseek-reasoner` in the cross slot, and the marks were priced against the arm that lacks
+them:
+
+| arm | score | ceiling | conversion | lost | `first` | `shortest` | `modal` | vote ∪ selector |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `select-mixed` | **64.33%** | 65.50% | **98.22%** | 7 | 63.17% | 63.33% | 63.17% | 65.17% |
+| `select-mixed+agree` | 64.17% | 66.17% | 96.98% | 12 | 63.50% | 63.67% | 63.33% | 65.17% |
+| `select-cross` | **63.67%** | 69.83% | 91.17% | 37 | 61.83% | **64.33%** | 64.17% | 67.17% |
+| `select-cross-agree` | 62.67% | 69.50% | 90.17% | 41 | 60.33% | 63.67% | 62.50% | 66.33% |
+
+**The marks are a null, and the null is the finding.** On the cross pool the marked arm loses
+1.00pp (15 won / 21 lost, p=0.405); on the mixed pool it loses 0.17pp (5 won / 6 lost, p=1.000).
+Both are inside the resolution of their own pairing — 2.80pp and 1.55pp from the discordant share
+— which is the honest way to say this run could not have detected an effect smaller than that, and
+also that it did not see a large one.
+
+The clean comparison restricts both arms to the cases where *both* pools held a correct candidate,
+which removes the sampling difference between two separately generated candidate sets (the ceilings
+differ by 0.33pp on the cross pair and 0.67pp on the mixed pair for that reason):
+
+| pair | cases both reached | conversion before | after | paired | p | MDE |
+| --- | --- | --- | --- | --- | --- | --- |
+| `select-cross` → `+agree` | 401 | 92.27% | 91.77% | −0.50pp (7:9) | 0.804 | 2.79pp |
+| `select-mixed` → `+agree` | 390 | 98.21% | 97.95% | −0.26pp (2:3) | 1.000 | 1.61pp |
+
+And the mechanism read is the part that matters more than the score. The pool population the rule
+exists for is the one where exactly one candidate is correct and it is the *minority* result. The
+selector's pick rate there:
+
+| arm | minority-correct pools | returned the minority |
+| --- | --- | --- |
+| `select-cross` | 34 | 52.9% |
+| `select-cross-agree` | 42 | 54.8% |
+| `select-mixed` | 14 | 85.7% |
+| `select-mixed+agree` | 17 | 64.7% |
+
+No shift of the shape a working rule would produce: on the cross pool +1.9pp, on the mixed pool
+−21pp on 14 and 17 cases, which is noise in both directions. **The selector was told which
+candidates agree and chose the same way.** The 6pp of conversion on a dissenting pool is therefore
+not an information deficit — it is a recognition deficit, and the next attempt at it has to change
+what the model can *judge*, not what it is told.
+
+The cost is exact and small: the block adds 373 characters to the `select-cross` selector prompt
+(1,631 → 2,004, +22.9%) and 387 to `select-mixed`'s (1,601 → 1,988, +24.2%), at the same four calls
+per case. A 22% longer selector prompt bought nothing measurable, so the marks stay an arm and stay
+out of every default path.
+
+Two things this run settled that the last one could not:
+
+1. **A zero-call rule now beats the call on a dissenting pool, and loses to it on a homogeneous
+   one.** `shortest` scores 64.33% against the selector's 63.67% on `select-cross` (23:19,
+   p=0.644) and `modal` 64.17% against 63.67% (21:18, p=0.749); on `select-mixed` the selector
+   leads both by 1.00 and 1.17pp. The selector's value is a property of the pool's authorship, not
+   of the selector.
+2. **The loss is not where the selector is.** Of the 218 questions `select-cross` answered wrongly,
+   181 never had a correct candidate — and 129 of those are *unanimous*: every candidate returned the
+   same result and that result is wrong. That 21.5% of the corpus is untouched by any aggregator on
+   the list, free rule or model, and it is three and a half times the 6.17pp of conversion loss the
+   last three rounds have been chasing. The next lever has to change what the sources see.
+
 ## Reproducing
 
 ```bash

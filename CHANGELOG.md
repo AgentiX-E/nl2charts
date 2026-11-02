@@ -6,7 +6,24 @@ cannot be argued with.
 
 ## Unreleased
 
-### Added
+### Measured
+
+- **The agreement mark is a null, and the null closes an explanation.** Four arms over 600 stratified
+  dev questions (`41366778872`): `select-cross` 63.67% → `select-cross-agree` 62.67% (−1.00pp, 15:21,
+  p=0.405) and `select-mixed` 64.33% → `select-mixed+agree` 64.17% (−0.17pp, 5:6, p=1.000).
+  Restricted to the cases where both pools held a correct candidate — which removes the sampling
+  difference between two separately generated candidate sets — conversion moves 92.27% → 91.77%
+  (7:9, p=0.804, MDE 2.79pp) and 98.21% → 97.95% (2:3, p=1.000, MDE 1.61pp). The minority-correct
+  pick rate is unmoved (52.9% → 54.8% on the cross pool), so the selector was told which candidates
+  agree and chose the same way: the conversion gap is a recognition deficit, not an information one.
+  The block costs 373–387 characters per selector call (+22.9% / +24.2%), at the same four calls.
+
+  Two readings come with it. On a dissenting pool a zero-call rule now beats the call — `shortest`
+  64.33% and `modal` 64.17% against the selector's 63.67% — while on a homogeneous pool the selector
+  leads both by 1.00 and 1.17pp, so its value is a property of the pool's authorship. And the loss is
+  not where the selector is: of the 218 questions `select-cross` answered wrongly, 181 never had a
+  correct candidate and 129 of those are unanimous — every source returned the same wrong result,
+  21.5% of the corpus that no aggregator can reach.
 
 - **The one fact the selector had to guess: which candidates returned the same rows.** The selector
   is shown each candidate's statement, row count, column count and the first three rows, which
