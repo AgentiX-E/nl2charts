@@ -648,3 +648,23 @@ that differs in method rather than in prompt or in draw.
   nothing). The general lesson is the one this file keeps relearning: a guard that fires on the
   harness's honest behaviour is worse than no guard, because it turns a measurement into an
   incident and the fix is then applied to the guard rather than to the question.
+- **A mechanism that fires three times cannot explain a delta of eighteen wins, and the check is
+  arithmetic rather than statistical.** The repair loop fires only on a guard rejection or an engine
+  refusal: 3 times on `-repair-second` and 11 on `-repair-all` in 600 questions, while the same arms
+  beat their parent on 18 and 24 cases (p=0.0070 for the wider one). Counting the cases where *only*
+  the arm spent a retry bounds the mechanism's possible contribution at 0, 1 and 2 wins; everything
+  above that is the pool being re-drawn, which three runs of the same control priced at 3.3pp. The
+  rule generalises past this round — **a lever's contribution is bounded by the cases in which only
+  it fired, so a paired comparison with more discordant pairs than the bound allows is measuring
+  shared-randomness noise** — and it is useful precisely because it separates two failures that look
+  identical in a table of accuracies: the lever never fired, versus the lever fired and the delta
+  belongs to the pool. It does not rescue a lever that fires everywhere (a prompt change, a judge
+  swap); those still need a shared pool, which is why `select-cross-pooled` exists.
+- **The feedback signal was attached to the rarest failure.** The loop reads the engine's refusal,
+  which happens to 0.5–1.8% of candidates — and the reasoning model has the *fewest* of them (2 in
+  600, against 4 and 5 for the chat prompts), so the one channel the strong model was given is the
+  one it needs least. The errors that cost 39% of the benchmark are statements that execute and
+  return the wrong rows, which no repair turn ever sees. Reconnecting the loop to *disagreement
+  between candidates' results* rather than to syntax is the next lever, and it is the first one
+  where the strong model should win outright, because deciding which of two result sets answers the
+  question is inference rather than recall.

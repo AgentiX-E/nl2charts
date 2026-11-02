@@ -589,17 +589,32 @@ describe('pinned definitions', () => {
  * worth its calls.
  */
 describe('repair accounting', () => {
-  it('counts generations on an arm that repairs', () => {
+  /** A case whose ledger records the retry turn, which is the only honest source for it. */
+  const withRetry = (calls: number): { tokens: { byPurpose: Record<string, { calls: number }> } } => ({
+    tokens: { byPurpose: calls === 0 ? { generate: { calls: 3 } } : { generate: { calls: 3 }, retry: { calls } } },
+  });
+
+  it('counts the cases that spent a retry turn', () => {
     const arm = resolveArm('inline+repair');
     expect(arm).toBeDefined();
-    const runs = [{ attempts: 1 }, { attempts: 3 }, { attempts: 2 }, { attempts: 1 }];
+    const runs = [withRetry(0), withRetry(1), withRetry(2), withRetry(0)];
     expect(repairAccounting(arm as Arm, runs)).toEqual({ repaired: 2 });
+  });
+
+  it('reads the retry turn rather than `attempts` on an arm that also votes', () => {
+    // The defect this covers published `repaired: 0` for an arm that spent eleven retry calls in
+    // one 600-question run, because a voting arm's `attempts` is its sample count and never rises
+    // above the vote. A column that is present and false is worse than a missing one.
+    const arm = resolveArm('select-cross-repair-all');
+    expect(arm).toBeDefined();
+    const runs = [withRetry(1), withRetry(0), withRetry(2)];
+    expect(repairAccounting(arm as Arm, runs)).toEqual({ repaired: 2, samples: 3 });
   });
 
   it('reports samples, and no repair count, on an arm that only samples', () => {
     const arm = resolveArm('select5');
     expect(arm).toBeDefined();
-    const runs = [{ attempts: 5 }, { attempts: 5 }, { attempts: 5 }];
+    const runs = [withRetry(0), withRetry(0), withRetry(0)];
     const accounting = repairAccounting(arm as Arm, runs);
     expect(accounting).toEqual({ samples: 5 });
     // The bug was the key existing, not its value: `repaired: undefined` would still
@@ -610,7 +625,7 @@ describe('repair accounting', () => {
   it('reports nothing at all on a single-shot arm', () => {
     const arm = resolveArm('inline+evidence');
     expect(arm).toBeDefined();
-    const accounting = repairAccounting(arm as Arm, [{ attempts: 1 }, { attempts: 1 }]);
+    const accounting = repairAccounting(arm as Arm, [withRetry(0), withRetry(0)]);
     expect(accounting).toEqual({});
     expect('repaired' in accounting).toBe(false);
     expect('samples' in accounting).toBe(false);
@@ -620,8 +635,8 @@ describe('repair accounting', () => {
     // Every arm that declares a repair loop must be able to produce a repaired count,
     // and every arm that declares votes must produce a sample count.
     for (const arm of ARMS) {
-      const accounting = repairAccounting(arm, [{ attempts: 2 }]);
-      expect('repaired' in accounting, arm.name).toBe(arm.repairs > 0);
+      const accounting = repairAccounting(arm, [withRetry(1)]);
+      expect('repaired' in accounting, arm.name).toBe(arm.repairs > 0 || arm.sourceRepairs !== undefined);
       expect('samples' in accounting, arm.name).toBe((arm.vote ?? 1) > 1);
     }
   });

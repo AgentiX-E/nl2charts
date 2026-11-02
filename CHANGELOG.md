@@ -8,6 +8,14 @@ cannot be argued with.
 
 ### Fixed
 
+- **`repaired` read a number that means something else on the arm it was printed for.** The column
+  came from `attempts > 1`, and on a voting arm `attempts` is the sample count — always the vote. So
+  `select-cross-repair-all`, which spent eleven retry calls in one 600-question run, published
+  `repaired: 0`; worse, the column was absent entirely on any arm whose grant lived in
+  `sourceRepairs`, because the test was `arm.repairs > 0` and on a mixed arm that field never reaches
+  the generator. The count now comes from the token ledger's `retry` purpose, where the turn is
+  recorded, and an arm that declares `sourceRepairs` gets the column.
+
 - **A pool guard that refused the harness's honest behaviour.** `reusePool` demanded that a pooled
   arm's pool hold as many candidates as the arm declares, on the reasoning that the two arms must be
   compared at the same candidate count. `41389454128` died at case 60 of 600 on it: nine cases held
@@ -105,6 +113,21 @@ cannot be argued with.
   empty result, sent to the model that wrote the statement.
 
 ### Measured
+
+- **The repair loop ran, cost 0.5% of a call per case, and could not have paid for the delta it was
+  credited with.** `41392023902`, 600 dev questions: 61.17% (367) / 62.50% (375) / 63.83% (383) for
+  `select-cross` / `-repair-second` / `-repair-all`, ceilings 413 / 416 / 423, calls per case 4.000 /
+  4.005 / 4.018. The wide arm clears its parent at +2.66pp, 8:24, p=0.0070; the narrow one does not
+  (+1.33pp, 10:18, p=0.1849). Neither is attributable: a repair fires only on a refusal, and the
+  ledgers record **3** and **11** retry calls in 600 questions, so at most 0, 1 and 2 of the 18, 24
+  and 18 wins could have come from the loop. The rest is the pool, which three runs of the same
+  control priced at 3.3pp. The rule is now stated where the readings live: a mechanism's
+  contribution is bounded by the cases in which only it fired, and a paired comparison with more
+  discordant pairs than that bound allows is measuring the randomness the arms did not share. The
+  loop is the right idea on the wrong signal — a refusal is rare and the reasoning model has the
+  fewest of them (2 in 600); the errors that cost 39% are statements that run and return the wrong
+  rows, which no repair turn sees. Registered as `I-76`.
+
 
 - **The three arms ran, and the harness cannot decide between them yet.** `41380616205`
   (`select-cross,select-cross-judge-reasoning,select-cross-unhinted`, second `deepseek-reasoner`,

@@ -5084,3 +5084,106 @@ exist, so a three-candidate arm legitimately holds one — and the guard would h
 unmeasurable on any arm with a realistic failure rate. It now refuses only an absent pool (the
 source never ran the case, an ordering bug) and an empty one (the source ran it and produced
 nothing); a pool of one is a pool.
+
+#### Where this sits against the field, and what the gap is made of
+
+BIRD dev, execution accuracy, as reported by the systems themselves. The numbers are not
+comparable one-to-one — this repository scores a 600-question subset of dev with two hosted chat
+models, while every entry below scores the full split with models it trained — but a table with the
+caveat attached is still the only honest way to say where 63.67% sits.
+
+| system | BIRD | what it adds over a prompt |
+| --- | --- | --- |
+| AskData (2025) | 77.14% | GPT-4o with data-analysis agents and automatic metadata extraction |
+| CHASE-SQL (2024) | 76.02% | divide-and-conquer decomposition, plan-based CoT, fine-tuned binary selector |
+| XiYan-SQL (2025) | 75.63% | multi-generator ensemble of fine-tuned models, schema filter, fine-tuned selector |
+| CSC-SQL (2025) | 73.67% | self-consistency plus GRPO-trained generation and merge-revision models |
+| Reasoning-SQL (2025) | 72.78% | RL with SQL-tailored partial rewards |
+| OpenSearch-SQL (2025) | 72.28% | multi-agent with a SQL-Like intermediate language |
+| OmniSQL (2025) | 72.06% | 2.5M synthetic chain-of-thought samples |
+| Distillery (2024) | 71.83% | full schema in context, augmentation, selection, correction |
+| CHESS (2024) | 71.1% | four agents including a unit tester |
+| **this repository** | **63.67%** | prompt-only, un-fine-tuned hosted models, three prompts, one selector |
+
+The gap is 7 to 13pp, and the decomposition that matters is not "which model" but **which parts of
+the pipeline are trained**. XiYan-SQL's own ablation prices three of them: removing the schema
+filter costs 1.24pp, dropping to a single generator costs 4.04pp, and replacing the selector with
+majority vote costs 3.13pp — 8.4pp of their 75.63% comes from structure this repository either has
+in a weaker form or does not have at all. CSC-SQL's 73.67% is built on self-correction, which is the
+loop `sourceRepairs` has just opened here. Three conclusions follow, in the order they are worth
+attacking:
+
+1. **Supervision is the largest single difference, and it is not available to a prompt-only
+   system.** Every system above trained something — a generator, a selector, or both. This
+   repository's selector is a prompted judge; XiYan-SQL's is a fine-tuned binary classifier that
+   "outperforms GPT-4o at SQL correctness". Closing that particular 3pp needs training data, not a
+   better prompt, and is out of scope until the prompt-side levers are exhausted.
+2. **Schema context is the cheapest remaining lever and it is already registered.** 1.24pp for a
+   schema filter, on systems that already send the full card; this repository sends the whole card
+   plus a linker hint, and the next item on the plan (`I-45`) sends only the columns a differential
+   point names.
+3. **Diversity of the candidate set is where the ensemble gain lives, and three prompts from two
+   models is a thin reading of it.** XiYan-SQL's 4.04pp is for *multi-generator* — different
+   fine-tuned models with different generation styles. Three prompt shapes over the same two
+   endpoints is a much narrower sample of the same idea, which is why the ceiling sits at 68-70%
+   where their ensembles sit at 75%+.
+
+What this repository does have and the table does not show: every lever is priced against a
+measured noise floor, a shared-pool instrument for judge comparisons, and an artifact that records
+per-source candidate survival and per-turn token cost. The claim is not that 63.67% is competitive
+with 75.63%; it is that the path from here to there is a list of priced increments rather than a
+different model.
+
+#### The loop ran, cost almost nothing, and could not have paid for the delta
+
+`41392023902`, one run, 600 dev questions, second endpoint `deepseek-reasoner`:
+
+| arm | passed | ceiling | conversion | calls/case | retry calls | `repaired` |
+| --- | --- | --- | --- | --- | --- | --- |
+| `select-cross` | 367/600 = **61.17%** | 413 (68.83%) | 88.86% | 4.000 | 0 | – |
+| `select-cross-repair-second` | 375/600 = **62.50%** | 416 (69.33%) | 90.14% | 4.005 | 3 | 3 |
+| `select-cross-repair-all` | 383/600 = **63.83%** | 423 (70.50%) | 90.54% | 4.018 | 11 | 7 |
+
+Read as a column of scores, `select-cross-repair-all` beats its parent by **+2.66pp** with exact
+McNemar **p=0.0070** (8 discordant for the parent, 24 for the arm), and the ceiling rises 413 → 423.
+The pre-registered criterion for the narrower arm (`-repair-second` ≥ +1.5pp with p<0.05) is **not**
+met: +1.33pp, 10:18, p=0.1849.
+
+**The mechanism cannot be the cause, and the arithmetic that says so is one line per case.** A repair
+turn fires only when the guard rejects a statement or the engine refuses it. Over 600 questions those
+events happened **3 times** on `-repair-second` and **11 times** on `-repair-all` — the arms' token
+ledgers record 3 and 11 retry calls, and a case with no retry call cannot have been affected by the
+loop. So the number of wins attributable to the loop is bounded by the number of cases where **only
+that arm** spent a retry:
+
+| comparison | wins | losses | wins a retry could explain |
+| --- | --- | --- | --- |
+| `-repair-second` vs `select-cross` | 18 | 10 | **0** |
+| `-repair-all` vs `select-cross` | 24 | 8 | **1** |
+| `-repair-all` vs `-repair-second` | 18 | 10 | **2** |
+
+Sixteen of `-repair-all`'s twenty-four wins, and all eighteen of `-repair-second`'s, happened on
+cases where the loop fired nowhere. They are the pool being re-drawn, which three runs of the same
+control already priced at 3.3pp (`63.67% / 60.33% / 62.70%`). The rule this establishes is worth
+more than the reading:
+
+> **A mechanism's contribution is bounded by the cases in which only it fired. When a paired
+> comparison shows more discordant pairs than that bound allows, the remainder is not the mechanism
+> — it is the randomness the two arms did not share.**
+
+Applied retroactively to the arms of rounds 43 and 44 (`select-cross-judge-reasoning` +2.17pp,
+`select-cross-unhinted` +2.50pp), the bound is the same: both change a prompt or a judge and therefore
+fire on every case, so the bound is 600 — which is why neither could be dismissed this way, and why
+they still had to wait for a shared pool. The rule does not rescue them; it tells apart two failures
+that look identical in a table of accuracies: *the lever did not fire* from *the lever fired and the
+delta belongs to the pool*.
+
+**What the reading actually establishes about the strong model.** The loop is the right idea attached
+to the wrong signal. It is wired to the engine's refusal, and a refusal is rare — 0.5% to 1.8% of
+candidates, with the reasoning model the *lowest* of the three (2 losses in 600 against 4 and 5 for
+the chat prompts). The errors that cost 39% of the benchmark are statements that run and return the
+wrong rows, and no repair turn ever sees them. Giving the reasoning model feedback on *the answer*
+rather than on *the syntax* is the next lever, and CSC-SQL's 73.67% is built on exactly that:
+generation, then reconciliation of conflicting candidates, trained with RL. That is registered as
+`I-76`, and it is the first item below that the strong model should win outright, because judging
+which of two result sets answers the question is inference.

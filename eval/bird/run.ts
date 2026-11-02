@@ -1965,12 +1965,25 @@ export function assertDecompositionFired(armName: string, runs: readonly CaseRun
  * reported only where it is true, and a sampling arm states its sample count instead.
  */
 export function repairAccounting(
-  arm: Pick<Arm, 'repairs' | 'vote'>,
-  runs: readonly { attempts: number }[],
+  arm: Pick<Arm, 'repairs' | 'vote' | 'sourceRepairs'>,
+  runs: readonly {
+    readonly tokens?: { readonly byPurpose?: Readonly<Record<string, { readonly calls: number }>> };
+  }[],
 ): { repaired?: number; samples?: number } {
   const sampling = arm.vote !== undefined && arm.vote > 1 ? { samples: arm.vote } : {};
-  if (arm.repairs === 0) return sampling;
-  return { repaired: runs.filter((run) => run.attempts > 1).length, ...sampling };
+  // `repairs > 0` was the whole test, and on a mixed arm that field is never read by the
+  // generator — the grant lives in `sourceRepairs`. An arm that repairs therefore reported no
+  // `repaired` column at all, which is the same defect as reporting zero: the reader cannot tell
+  // "the loop did not run" from "the column is missing".
+  const declaresRepairs = arm.repairs > 0 || arm.sourceRepairs !== undefined;
+  if (!declaresRepairs) return sampling;
+  // The retry turn is read from the token ledger, not from `attempts`. On a voting arm
+  // `attempts` is the sample count — always the vote — so `attempts > 1` reported
+  // `repaired: 0` on an arm that spent eleven retry calls in one 600-question run: the
+  // column was present and false, which is worse than absent.
+  const spentRetry = (run: (typeof runs)[number]): boolean =>
+    (run.tokens?.byPurpose?.['retry']?.calls ?? 0) > 0;
+  return { repaired: runs.filter(spentRetry).length, ...sampling };
 }
 
 /**
