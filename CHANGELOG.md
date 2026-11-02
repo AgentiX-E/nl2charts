@@ -18,6 +18,18 @@ cannot be argued with.
   was wrong and wrong on 53 it was right — 63.33% for the count against 60.75% for the selector,
   p = 4.5e-4 — and the count scored exactly 380 of 600 in both runs while the selector moved 5 cases.
 
+- **A correction written in the round that made the mistake.** The first draft of the entry above
+  read two artifacts and concluded that "the selector loses the cases it exists for". A third
+  archived run (`41366778872`) says otherwise, and it was in the repository the whole time: on that
+  run the cross pool was 18:21 (p = 0.75), and on the *homogeneous* pool (`select-mixed`) the
+  selector won the disputed cases 12 to 5 — the only arm in the table that does. Three cross runs
+  pool to 40:74 (p = 0.0019), but the per-run deltas are +2.17, +3.00 and +0.50pp, so the effect is
+  real in direction and smaller and less stable than a two-run reading implies. The claim that
+  survives is a claim about pool shape: a decision exists four times more often once the candidates
+  come from two authors (23–26% of cases against 8.3%), and that is where the free rule catches up.
+  Both the document and the numbers were rewritten, and the correction is recorded rather than
+  quietly applied.
+
 - **`select-cross-pooled-vote` and `select-cross-pooled-agree`: the same pool, two decisions.**
   The first returns the modal group in zero calls; the second reads the same candidates with the
   agreement marks. Both are one lever from `select-cross-pooled`, which is the A/A instrument, so the

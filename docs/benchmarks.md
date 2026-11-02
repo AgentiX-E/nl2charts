@@ -5208,75 +5208,85 @@ can mean:
 - **Two or more groups.** The candidates disagree, which is the only situation in which a decision
   exists at all. 149 of 600 cases.
 
-Read that way, the premise is not merely unproven. It is reversed.
+Read that way, the premise has a measurable price and a measurable benefit, and the two are not
+what the arms assumed: on three cases in four the call buys nothing, because the choice is not a
+choice. What happens on the fourth is the subject of the next section, and the answer depends on the
+pool in a way the first version of this section got wrong.
 
 ### The two decisions, on the same cases
 
-`bench:bird:decision` prints the split. Two runs of `select-cross`, two hours of dispatch apart, on
-the same 600 stratified dev questions, with `deepseek-chat` as the primary model and
-`deepseek-reasoner` in the cross slot:
+`bench:bird:decision` prints the split. Three runs of `select-cross` on the same 600 stratified
+dev questions, with `deepseek-chat` as the primary model and `deepseek-reasoner` in the cross slot,
+plus the homogeneous pool the same harness ran in the same period:
 
-| | run `41392023902` | run `41380616205` | pooled |
-|---|---:|---:|---:|
-| cases | 600 | 600 | 1,200 |
-| one distinct result — the choice is free | 451 | 457 | 908 |
-| two or more — the choice decides | 149 | 143 | 292 |
-| ...and a correct candidate existed | 90 | 80 | 170 |
-| ...and a 1:1:1 tie broke it | 16 | 16 | 32 |
-| selector and count both right | 30 | 25 | 55 |
-| **only the selector right** | **14** | **8** | **22** |
-| **only the count right** | **27** | **26** | **53** |
-| neither right | 78 | 84 | 162 |
-| exact McNemar | p = 0.060 | p = 0.0029 | **p = 4.5e-4** |
-| selector accuracy | 61.17% | 60.33% | 60.75% |
-| count accuracy | **63.33%** | **63.33%** | **63.33%** |
+| | `41392023902` | `41380616205` | `41366778872` | `select-mixed`, `41366778872` |
+|---|---:|---:|---:|---:|
+| cases | 600 | 600 | 600 | 600 |
+| one distinct result — the choice is free | 451 | 457 | 460 | 546 |
+| two or more — the choice decides | 149 | 143 | 140 | **50** |
+| ...and a correct candidate existed | 90 | 80 | 89 | 29 |
+| **only the selector right** | 14 | 8 | 18 | **12** |
+| **only the count right** | 27 | 26 | 21 | **5** |
+| exact McNemar | p = 0.060 | p = 0.0029 | p = 0.75 | p = 0.14 |
+| net for the count | +2.17pp | +3.00pp | +0.50pp | **−1.17pp** |
+| pooled over the three cross runs | | | **40 : 74, p = 0.0019** | |
 
-Three things in that table are worth separating.
+The fourth column is the reason this section exists in the shape it does. The first two readings
+were written up as "the selector loses the cases it exists for", and that sentence is wrong: on a
+**homogeneous** pool — three prompts to one chat model — the selector wins those cases 12 to 5, and
+it is the only arm in the table that does. What separates the two pools is how often a decision
+exists at all: 8.3% of cases on `select-mixed` and 23–26% on `select-cross`.
 
-**The selector loses the cases it exists for.** On the 292 disputed cases it won 22 and lost 53. On
-the 908 unanimous cases the two rules are the same rule, so 53 minus 22 is the whole of the
-difference: 2.58pp of 1,200 questions, and the sign is the opposite of the one the arms were built
-on.
+So the finding is narrower and more useful than the first reading of it:
 
-**The count is stable and the selector is not.** Both runs score exactly 380 of 600 for the modal
-result, and 367 and 362 for the selector. The count is a function of the rows; the selector is a
-function of the rows, the previews, the prompt and the sampling of a call at temperature 0. A rule
-that moves 0.84pp between runs while its competitor moves not at all is a rule whose deltas need a
-shared pool before they can be read at all, which is the point the next section picks up.
+**The value of a model-decided choice falls as the pool becomes less homogeneous.** On one author's
+three prompts, disagreement is rare (50 cases) and the model resolves it better than the count
+(12:5). On two authors and three prompts it is four times more common, and the count is at least as
+good (40:74 over 1,800 cases, p = 0.0019) — but the three cross readings are themselves
+heterogeneous (+2.17, +3.00, +0.50pp), which is the honest size of the effect: real in direction,
+unstable in magnitude, and smaller than the 2.58pp a two-run reading produced.
 
-**Reachability is not conversion.** 170 of the 292 disputed cases had a correct candidate in the
-pool — that is the ceiling. The count reached 108 of them and the selector 77. Aggregate
-`candidateRecall` for these arms was 413 and 409 of 600, so the conversion loss on disputed cases is
-where the 8-to-9pp gap between ceiling and score lives, and the decision rule is what spends it.
+Two things in the table are worth separating from that.
+
+**The count is stable and the selector is not.** Both of the first two runs score exactly 380 of
+600 for the modal result; the selector scores 367 and 362. The count is a function of the rows; the
+selector is a function of the rows, the previews, the prompt and the sampling of a call at
+temperature 0. A rule that moves between runs while its competitor does not is a rule whose deltas
+need a shared pool before they can be read at all.
+
+**Reachability is not conversion.** On the cross pool 259 of 432 disputed cases had a correct
+candidate — that is the ceiling. The count reached 219 of them and the selector 185. Aggregate
+`candidateRecall` for the three arms was 413, 409 and 419 of 600, so the loss between ceiling and
+score lives on the disputed cases, and the decision rule is one of the things that spends it.
 
 ### Why this is not a rule chosen after the fact
 
-It was chosen after the fact, and saying so is the only honest way to present it. What makes it a
-finding rather than a fitted rule is the replication structure:
+It was chosen after the fact, and the correction above is the proof of what that costs. What
+survives as a finding rather than a fitted rule is a claim about a *shape*, not a claim about a
+number:
 
-1. The direction was the same in the first reading (8 lost / 26 won, run `41380616205`) and in the
-   second (14 / 27, run `41392023902`), dispatched two hours apart with a repair arm added in between
-   — a change to the loop that fires on an engine refusal, which is not the selector.
-2. It was the same on two arms that were not part of the comparison: `select-cross-judge-reasoning`
-   (50 / 53 in the same run as the second reading) and `select-cross-unhinted` (53 / 56). Neither is
-   the parent of the pair, and both sit on the same side.
-3. The mechanism is not a story about this dataset. A model is shown three truncated previews and the
-   row count; the count is shown the rows. On the cases where the rows differ, the count has the one
-   fact the model does not, and the model has a prose question it answers with a single digit.
+1. The direction on the cross pool held in three runs (14 / 27, 8 / 26, 18 / 21), dispatched hours
+   apart, with code changes in between that touched the repair loop and not the selector.
+2. It held on four arms outside the pair as well: `select-cross-repair-second` 18:24,
+   `select-cross-judge-reasoning` 20:23, `select-cross-unhinted` 19:22, `select-cross-agree` 23:22 —
+   all within a case or two of even, none in the selector's favour.
+3. It reversed on the homogeneous pool, which is the prediction a shape claim makes and a
+   "selector is bad" claim does not.
 
-What is *not* established is the size. Both arms drew their own pools, and this harness has measured
-the pool's own displacement at 1.3 to 3.3pp at 600 questions — the same size as the 2.58pp in the
-table. So the reading licensed two arms and one instrument, and no change to any default. The arms
-are the subject of the next section.
+What is *not* established is the size, and the first version of this section got that wrong by
+reading two artifacts and not the third. Both arms draw their own pools, and this harness has
+measured the pool's own displacement at 1.3 to 3.3pp at 600 questions — larger than the +0.50pp the
+third reading found. So the reading licensed two arms and an instrument, and no change to any
+default.
 
 ### Two arms that turn the reading into a measurement
 
 `select-cross-pooled-vote` reads `select-cross`'s candidates and returns the modal group. It
 generates nothing and calls no model, so its price is zero and its candidates are the parent's own
 objects. `select-cross-pooled-agree` reads the same pool with the agreement marks, which is the
-information the selector has never had on this pool: 149 of 600 cases had more than one distinct
-result, and which of three candidates returned the same rows cannot be computed from two truncated
-previews.
+information the selector has never had on this pool: 140 to 155 cases in 600 had more than one
+distinct result, and which of three candidates returned the same rows cannot be computed from two
+truncated previews.
 
 Both are one lever from `select-cross-pooled`, which is the A/A instrument — the arm that generates
 nothing and must score exactly what `select-cross` scored. The chain is therefore:
@@ -5288,9 +5298,15 @@ nothing and must score exactly what `select-cross` scored. The chain is therefor
 - `select-cross-pooled` → `select-cross-pooled-agree`: what the decider is told, at the same price.
 - `select-cross-pooled` → `select-cross-pooled-judge-reasoning`: who decides, with the strong model.
 
+The pair is now a two-sided test rather than a one-sided one. On the homogeneous pool the selector
+should win and the count should lose; on the heterogeneous pool the count should be at least even.
+An arm pair that reports the same sign on both pools would say the shape claim is wrong, which is a
+result worth having.
+
 `select-cross-pooled-vote` is also the first arm in the table whose accuracy has no generation noise
 in it at all. A run that dispatches the five arms spends three generations per case once and then
-reads the same pool four ways, which is what makes a 600-question dispatch affordable enough to repeat.
+reads the same pool four ways, which is what makes a 600-question dispatch affordable enough to
+repeat.
 
 ### The instrument
 

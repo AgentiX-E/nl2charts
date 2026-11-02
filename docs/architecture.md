@@ -315,9 +315,14 @@ decides also differed in what was drawn, and the pool's own displacement at 600 
 `eval/bird/decision.ts` prices it from the artifact instead. A candidate record carries
 `fingerprint`, the hash of the rows its statement returned, so a case reduces to the opinions it
 contains: one group is a case where both decisions return the same statement, and two or more is the
-only case where a decision exists. On two runs of `select-cross` the model won 22 disputed cases and
-lost 53 (exact McNemar p = 4.5e-4), while the modal result scored 380 of 600 in both runs and the
-selector 367 and 362.
+only case where a decision exists. Three runs of `select-cross` put that at 140 to 149 disputed cases
+in 600, and the count was right on 74 of them against the model's 40 (exact McNemar p = 0.0019); the
+modal result scored 380 of 600 in two of the runs while the selector scored 367 and 362.
+
+The homogeneous pool reverses it, which is the part that makes this a claim about shapes rather than
+about selectors: `select-mixed` had 50 disputed cases and the model won 12 of them against the
+count's 5. A decision exists four times more often once the candidates come from two authors, and on
+that pool the free rule is at least as good. Both readings are in `docs/benchmarks.md`.
 
 Two arms make that a measurement rather than a re-reading. `select-cross-pooled-vote` returns the
 modal group from `select-cross`'s candidates in zero calls, and `select-cross-pooled-agree` reads the
