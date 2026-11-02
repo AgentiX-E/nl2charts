@@ -14,7 +14,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildSelectionPrompt } from '@agentix-e/nl2charts-ai';
 import type { Candidate } from '@agentix-e/nl2charts-ai';
-import { ARMS, ON_DEMAND_ARMS, agreementMarks } from '../eval/bird/run.js';
+import { ARMS, ON_DEMAND_ARMS, PAIRS, agreementMarks } from '../eval/bird/run.js';
 import type { Arm } from '../eval/bird/run.js';
 
 /** A result set, as the runner holds it: rows of values, no column names. */
@@ -105,6 +105,13 @@ describe('the arms that show the marks', () => {
     expect(ON_DEMAND_ARMS['select-cross-agree']).toContain('marks');
     expect(ON_DEMAND_ARMS['select-mixed+agree']?.length).toBeGreaterThan(40);
     expect(ON_DEMAND_ARMS['select-cross-agree']?.length).toBeGreaterThan(40);
+  });
+
+  it('is paired with its parent, so the delta has somewhere to appear', () => {
+    // An arm that no pair names is an arm whose measurement is a number in a table and not an
+    // ablation: the pairing is what states which single lever the delta belongs to.
+    expect(PAIRS).toContainEqual(['select-mixed', 'select-mixed+agree']);
+    expect(PAIRS).toContainEqual(['select-cross', 'select-cross-agree']);
   });
 
   it('leaves every other selecting arm unmarked', () => {

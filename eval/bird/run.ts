@@ -852,6 +852,11 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   // One lever: where the authors sit, holding the majority and the prompts fixed. The pair
   // that can say whether the 52.6% belongs to the author or to slot zero.
   ['select-cross', 'select-cross-shuffled'],
+  // One lever: the same candidates and the same selector, told which of them returned the same
+  // rows. The fact a 2+1 pool turns on is the one fact the selector could not compute from two
+  // truncated previews, and the pair prices the information rather than a rewrite.
+  ['select-mixed', 'select-mixed+agree'],
+  ['select-cross', 'select-cross-agree'],
   // One lever: the same candidates and selector, with an empty result treated as a
   // failure — dropped before the vote and retried once when nothing survives.
   ['select-mixed', 'select-mixed+empty'],
