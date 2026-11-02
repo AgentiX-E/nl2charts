@@ -6,7 +6,37 @@ cannot be argued with.
 
 ## Unreleased
 
+### Added
+
+- **`bench:bird:decision`: what the selector costs, read off an artifact.** A candidate record
+  carries `fingerprint`, the hash of the rows its statement returned, so a case splits into the
+  opinions it actually contains: one group means every candidate returned the same rows and the
+  choice is free, two or more means a decision exists. The tool prints that split, the four outcomes
+  of a disputed case, how often a 1:1:1 tie decided it, the exact McNemar test, and the net in cases
+  and in points. It reads any archived artifact in a second and calls no model. On two runs of
+  `select-cross` (600 dev questions each) the model was right on 22 disputed cases the modal result
+  was wrong and wrong on 53 it was right — 63.33% for the count against 60.75% for the selector,
+  p = 4.5e-4 — and the count scored exactly 380 of 600 in both runs while the selector moved 5 cases.
+
+- **`select-cross-pooled-vote` and `select-cross-pooled-agree`: the same pool, two decisions.**
+  The first returns the modal group in zero calls; the second reads the same candidates with the
+  agreement marks. Both are one lever from `select-cross-pooled`, which is the A/A instrument, so the
+  chain prices the decision and the information without generation noise. `vote-cross` asked this
+  question before and could not answer it: both of its arms drew their own pool, and the pool's
+  displacement at 600 questions was measured at 1.3 to 3.3pp, which is the size of the effect.
+
 ### Fixed
+
+- **The coverage gate measured the environment, not the code.** `packages/node` reported 85.83% on
+  lines because `PG_TEST_URL` and `MYSQL_TEST_URL` were unset and every check in two suites was
+  skipped — nothing was untested, a server simply was not there. Started PostgreSQL 16 and MariaDB
+  10.11 and pointed the variables at them: 99.59% lines, 98.23% branches, 2,751 tests passing and
+  none skipped, and the eight-package gate green for the first time on a machine that is not CI.
+  Three paths were reachable only with a server and each is a behaviour: `poolSize` was never set,
+  a live signal never reached the driver, and a running statement is **not** cancellable through
+  `pg` — aborting during `pg_sleep(1)` returns the row a second later, exactly as if no signal had
+  been given. The last one is measured and registered rather than asserted away; the first version of
+  that test asserted a cancellation that does not happen, and the failure was the finding.
 
 - **`repaired` read a number that means something else on the arm it was printed for.** The column
   came from `attempts > 1`, and on a voting arm `attempts` is the sample count — always the vote. So

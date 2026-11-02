@@ -305,6 +305,31 @@ nothing at all. Every harness entry now writes an artifact carrying its own verd
 code. A measurement that cannot be read back is not a measurement; a green artifact left behind
 by a red run is worse than no artifact.
 
+### The decision is a measurement too
+
+Three candidates are drawn and a model names one. That call is the only part of the `select` tier a
+reader never priced, because pricing it needs a pool two arms share: every arm that differed in who
+decides also differed in what was drawn, and the pool's own displacement at 600 questions (1.3 to
+3.3pp) is the size of the effect.
+
+`eval/bird/decision.ts` prices it from the artifact instead. A candidate record carries
+`fingerprint`, the hash of the rows its statement returned, so a case reduces to the opinions it
+contains: one group is a case where both decisions return the same statement, and two or more is the
+only case where a decision exists. On two runs of `select-cross` the model won 22 disputed cases and
+lost 53 (exact McNemar p = 4.5e-4), while the modal result scored 380 of 600 in both runs and the
+selector 367 and 362.
+
+Two arms make that a measurement rather than a re-reading. `select-cross-pooled-vote` returns the
+modal group from `select-cross`'s candidates in zero calls, and `select-cross-pooled-agree` reads the
+same pool with the agreement marks. Both are one lever from `select-cross-pooled`, the A/A
+instrument: the same candidates, the same rows, the same order, so the delta is the decision.
+
+The instrument's two rules are worth stating because both are places where a plausible number could
+have been invented: a case with no candidate is counted apart instead of scored as an opinion the
+count got wrong, and the tie-break is taken from the drawing order, which is what `majorityResult`
+does — 32 of the 292 disputed cases were 1:1:1, and a tie-break that happened to favour one author
+would have looked like a mechanism.
+
 ## The format contract
 
 Every reader in the natural-language layer assumes something about the *shape* of a reply

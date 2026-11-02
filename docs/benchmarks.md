@@ -5187,3 +5187,125 @@ rather than on *the syntax* is the next lever, and CSC-SQL's 73.67% is built on 
 generation, then reconciliation of conflicting candidates, trained with RL. That is registered as
 `I-76`, and it is the first item below that the strong model should win outright, because judging
 which of two result sets answers the question is inference.
+
+## The decision was the expensive part
+
+Every `select` arm in this repository is built on one premise: three candidates are drawn, and a
+model reads them and names the one that answers the question. The premise has a cost of one call per
+question and an assumed benefit over the free alternative — returning the modal result, which is what
+a voting arm does. The two were compared as arms twice (`select` vs `vote`, `select-cross` vs
+`vote-cross`) and both times the delta sat inside the displacement of two pools that had been drawn
+separately.
+
+The artifact can answer it without spending a call, because a candidate record carries `fingerprint`,
+the hash of the rows its statement returned. Grouping a case by fingerprint splits it into the
+opinions it actually contains, and that split decides what a comparison between two selecting rules
+can mean:
+
+- **One group.** Every candidate returned the same rows. The selector and the count return the same
+  statement, so no delta between them is a fact about either — and on 451 of 600 `select-cross` cases
+  this is the situation.
+- **Two or more groups.** The candidates disagree, which is the only situation in which a decision
+  exists at all. 149 of 600 cases.
+
+Read that way, the premise is not merely unproven. It is reversed.
+
+### The two decisions, on the same cases
+
+`bench:bird:decision` prints the split. Two runs of `select-cross`, two hours of dispatch apart, on
+the same 600 stratified dev questions, with `deepseek-chat` as the primary model and
+`deepseek-reasoner` in the cross slot:
+
+| | run `41392023902` | run `41380616205` | pooled |
+|---|---:|---:|---:|
+| cases | 600 | 600 | 1,200 |
+| one distinct result — the choice is free | 451 | 457 | 908 |
+| two or more — the choice decides | 149 | 143 | 292 |
+| ...and a correct candidate existed | 90 | 80 | 170 |
+| ...and a 1:1:1 tie broke it | 16 | 16 | 32 |
+| selector and count both right | 30 | 25 | 55 |
+| **only the selector right** | **14** | **8** | **22** |
+| **only the count right** | **27** | **26** | **53** |
+| neither right | 78 | 84 | 162 |
+| exact McNemar | p = 0.060 | p = 0.0029 | **p = 4.5e-4** |
+| selector accuracy | 61.17% | 60.33% | 60.75% |
+| count accuracy | **63.33%** | **63.33%** | **63.33%** |
+
+Three things in that table are worth separating.
+
+**The selector loses the cases it exists for.** On the 292 disputed cases it won 22 and lost 53. On
+the 908 unanimous cases the two rules are the same rule, so 53 minus 22 is the whole of the
+difference: 2.58pp of 1,200 questions, and the sign is the opposite of the one the arms were built
+on.
+
+**The count is stable and the selector is not.** Both runs score exactly 380 of 600 for the modal
+result, and 367 and 362 for the selector. The count is a function of the rows; the selector is a
+function of the rows, the previews, the prompt and the sampling of a call at temperature 0. A rule
+that moves 0.84pp between runs while its competitor moves not at all is a rule whose deltas need a
+shared pool before they can be read at all, which is the point the next section picks up.
+
+**Reachability is not conversion.** 170 of the 292 disputed cases had a correct candidate in the
+pool — that is the ceiling. The count reached 108 of them and the selector 77. Aggregate
+`candidateRecall` for these arms was 413 and 409 of 600, so the conversion loss on disputed cases is
+where the 8-to-9pp gap between ceiling and score lives, and the decision rule is what spends it.
+
+### Why this is not a rule chosen after the fact
+
+It was chosen after the fact, and saying so is the only honest way to present it. What makes it a
+finding rather than a fitted rule is the replication structure:
+
+1. The direction was the same in the first reading (8 lost / 26 won, run `41380616205`) and in the
+   second (14 / 27, run `41392023902`), dispatched two hours apart with a repair arm added in between
+   — a change to the loop that fires on an engine refusal, which is not the selector.
+2. It was the same on two arms that were not part of the comparison: `select-cross-judge-reasoning`
+   (50 / 53 in the same run as the second reading) and `select-cross-unhinted` (53 / 56). Neither is
+   the parent of the pair, and both sit on the same side.
+3. The mechanism is not a story about this dataset. A model is shown three truncated previews and the
+   row count; the count is shown the rows. On the cases where the rows differ, the count has the one
+   fact the model does not, and the model has a prose question it answers with a single digit.
+
+What is *not* established is the size. Both arms drew their own pools, and this harness has measured
+the pool's own displacement at 1.3 to 3.3pp at 600 questions — the same size as the 2.58pp in the
+table. So the reading licensed two arms and one instrument, and no change to any default. The arms
+are the subject of the next section.
+
+### Two arms that turn the reading into a measurement
+
+`select-cross-pooled-vote` reads `select-cross`'s candidates and returns the modal group. It
+generates nothing and calls no model, so its price is zero and its candidates are the parent's own
+objects. `select-cross-pooled-agree` reads the same pool with the agreement marks, which is the
+information the selector has never had on this pool: 149 of 600 cases had more than one distinct
+result, and which of three candidates returned the same rows cannot be computed from two truncated
+previews.
+
+Both are one lever from `select-cross-pooled`, which is the A/A instrument — the arm that generates
+nothing and must score exactly what `select-cross` scored. The chain is therefore:
+
+- `select-cross` → `select-cross-pooled`: must be 0.0pp. If it is not, pooling is broken and no delta
+  below can be read.
+- `select-cross-pooled` → `select-cross-pooled-vote`: who decides. Same candidates, same rows, same
+  order, one call against zero.
+- `select-cross-pooled` → `select-cross-pooled-agree`: what the decider is told, at the same price.
+- `select-cross-pooled` → `select-cross-pooled-judge-reasoning`: who decides, with the strong model.
+
+`select-cross-pooled-vote` is also the first arm in the table whose accuracy has no generation noise
+in it at all. A run that dispatches the five arms spends three generations per case once and then
+reads the same pool four ways, which is what makes a 600-question dispatch affordable enough to repeat.
+
+### The instrument
+
+```
+pnpm bench:bird:decision eval/out/bird-eval.json --arm select-cross
+```
+
+It reads any archived artifact, needs no key and no database, and prints the table above for one arm
+or for all of them. Two details are deliberate: a case with no candidate is counted apart rather than
+scored as an opinion the count got wrong, and the tie-break is taken from the drawing order, which is
+what `majorityResult` does — a tie-break that happened to favour one author would look like a
+mechanism, and 32 of the 292 disputed cases are ties.
+
+The end-to-end case in `test/bird-run-e2e.test.ts` builds a pool where the two decisions must
+disagree — the second model writes a statement that runs and is wrong, the two primary prompts write
+the gold one, and the selector answers `1`, the slot the second model holds — and asserts that the
+count scores every case, the selector none, and the agreement marks reach the prompt. A pooling bug
+would break all three together, which is why they are one case.
