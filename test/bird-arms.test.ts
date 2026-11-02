@@ -55,7 +55,7 @@ import type { BirdQuestion } from '../eval/bird/data.js';
  * delta cannot be attributed to anything else. A future edit that adds a second
  * change to a pair turns this red before it turns the benchmark unreadable.
  */
-const LEVERS = ['notes', 'evidence', 'repairs', 'linking', 'profile', 'definitions', 'focus', 'interpret', 'vote', 'demonstrations', 'select', 'values', 'plan', 'repairFeedback', 'shapeGuard', 'mixed', 'pool', 'pairwise', 'sourcesVisible', 'judge', 'judgeFormat', 'emptyRetry', 'audit', 'decompose', 'samples', 'canonical', 'shuffle', 'prune', 'columnSelect', 'agreement', 'sourceLinking', 'sourceRepairs', 'reconcile', 'reconcileAdopt'] as const;
+const LEVERS = ['notes', 'evidence', 'repairs', 'linking', 'profile', 'definitions', 'focus', 'interpret', 'vote', 'demonstrations', 'select', 'values', 'plan', 'repairFeedback', 'shapeGuard', 'mixed', 'pool', 'pairwise', 'sourcesVisible', 'judge', 'judgeFormat', 'emptyRetry', 'audit', 'decompose', 'samples', 'canonical', 'shuffle', 'prune', 'columnSelect', 'agreement', 'sourceLinking', 'sourceRepairs', 'reconcile', 'reconcileAdopt', 'sampleColumns'] as const;
 
 function changedLevers(left: Arm, right: Arm): string[] {
   const levers = LEVERS.filter((lever) => left[lever] !== right[lever]);
@@ -122,10 +122,15 @@ describe('ablation arms', () => {
     const samplers = ARMS.filter((arm) => arm.samples !== undefined);
     expect(samplers.length).toBeGreaterThan(0);
     for (const arm of samplers) {
-      const parent = ARMS.find((other) => other.samples === undefined && changedLevers(other, arm).length === 1);
+      // The sampler's own parent: the arm one lever away. For the plain samplers that is the card
+      // with no values at all; for a sampler that narrows *which* columns carry them it is the
+      // sampler, because "which columns" is only a lever on top of "values at all". Requiring the
+      // value-free card here would demand a two-lever pair, which is the thing `PAIRS` refuses.
+      const parent = ARMS.find((other) => other !== arm && changedLevers(other, arm).length === 1);
       expect(parent, arm.name).toBeDefined();
       const name = (parent as Arm).name;
       expect(declared.has(`${name}\u0000${arm.name}`) || declared.has(`${arm.name}\u0000${name}`), arm.name).toBe(true);
+      if (arm.sampleColumns === undefined) expect((parent as Arm).samples, arm.name).toBeUndefined();
     }
   });
 
@@ -772,6 +777,22 @@ describe('mixed candidate sources', () => {
     expect(parent.samples).toBe(false);
     expect(buildSqlPrompt(question.question, withValues, parent)).not.toContain('[Banned|Active]');
     expect(changedLevers(resolveArm('inline+evidence') as Arm, arm)).toEqual(['samples']);
+  });
+
+  it('narrows the block to the columns the gold statement filters on, and says so', () => {
+    // The lever is one field: the sampler stays the profiler's, the values stay the profiler's,
+    // and only the set of columns changes. Anything else would make the pair price two rules.
+    const arm = resolveArm('inline+evidence+samples-gold') as Arm;
+    expect(arm.samples).toBe('profile');
+    expect(arm.sampleColumns).toBe('gold');
+    // Its parent is the sampler, not the card without values. A pair against `inline+evidence`
+    // would change the block's existence and its column set at once, which is how a 38pp
+    // character cost gets attributed to "the block" instead of to "which columns it shows".
+    expect(changedLevers(resolveArm('inline+evidence+samples') as Arm, arm)).toEqual(['sampleColumns']);
+    // An oracle is a ceiling, and the catalogue has to say which one this is: the arm reads the
+    // gold statement, so no realizable rule can be expected to match it, and a reader who took
+    // its delta as an achievable one would plan work that cannot land.
+    expect(ON_DEMAND_ARMS['inline+evidence+samples-gold']).toMatch(/gold/);
   });
 
   it('counts which decomposition won, including the ones that never did', () => {

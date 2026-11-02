@@ -146,6 +146,18 @@ jobs:
       # reading, and a reading is the finding rather than a reason to red the run.
       - name: What the prompt would have had to say
         run: pnpm bench:bird:info eval/out/bird-eval.json --arm "$(node tools/bird-arm.mjs eval/out/bird-eval.json)"
+      # The census the next lever is sized against: of the statements that ran and were wrong, how
+      # many never name a column the gold filters on, and which columns those are. Two statements
+      # and the gold the run already holds — zero queries, zero model calls — which is why it can
+      # run on every dispatched dev run rather than on a sample.
+      #
+      # No `--strict`, for the reason the four steps around it omit it: the share is a reading, and
+      # a reading is the finding rather than a reason to red the run. The two failures it can catch
+      # are the ones the Mini-Dev gate already fails on. Until this step existed, the only census
+      # this repository had was taken on 498 questions, and the split that decides adoption had
+      # never been measured at all.
+      - name: Which filter the statement never wrote
+        run: pnpm bench:bird:conditions eval/out/bird-eval.json --arm "$(node tools/bird-arm.mjs eval/out/bird-eval.json)"
       # 1534 gold statements and 515 no-answer statements through one literal edit, one oracle
       # query each and no model call. No `--strict`: this is where a repair is tried on the
       # split that has room for one, and a reading that says "it recovers two" is the finding.

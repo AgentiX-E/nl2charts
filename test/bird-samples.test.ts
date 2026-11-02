@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DatabaseProfile, SchemaTable } from '@agentix-e/nl2charts-ai';
-import { attachSamples, sampleValuesOf } from '../eval/bird/samples.js';
+import { attachSamples, narrowSamples, sampleValuesOf } from '../eval/bird/samples.js';
 
 /**
  * The card-level half of value grounding.
@@ -84,5 +84,65 @@ describe('attachSamples', () => {
   it('returns the schema unchanged when no values are known', () => {
     const decorated = attachSamples(schema, new Map());
     expect(decorated).toEqual(schema);
+  });
+});
+
+/**
+ * Which columns a narrowed block is allowed to show.
+ *
+ * The block measured +38.4% characters per case when every profiled column carried one, and
+ * +1.4% when only the columns the gold statement filters on do — so the rule that decides the
+ * set is the whole difference between a block that can be afforded and one that cannot. It is
+ * a filter over the profile rather than a second sampler: the values, their order and the
+ * renderer stay the arm's, and only the set of columns changes.
+ */
+describe('narrowSamples', () => {
+  const values = sampleValuesOf(profile);
+
+  it('keeps a column the statement qualifies', () => {
+    // Qualified names are how the schema is keyed and how a normalized statement writes them,
+    // so a match here is exact.
+    const narrowed = narrowSamples(values, ['customers.country']);
+    expect([...narrowed.keys()]).toEqual(['customers.country']);
+  });
+
+  it('keeps every column of that name when the statement does not qualify it', () => {
+    // `where id = 3` on a database where two tables have an `id` is ambiguous in the statement
+    // and unambiguous in the profile: the narrowing cannot resolve which table the writer meant,
+    // and dropping both would turn an ambiguity into a missing block.
+    const twoIds = new Map([
+      ['orders.id', ['1', '2']],
+      ['customers.id', ['3', '4']],
+      ['orders.status', ['Banned', 'Active']],
+    ]);
+    expect([...narrowSamples(twoIds, ['id']).keys()]).toEqual(['orders.id', 'customers.id']);
+  });
+
+  it('is case-insensitive in both directions', () => {
+    // BIRD's gold writes `WHERE`, the schema keeps `County Code`, and the profile keys them
+    // as they are stored; a case-sensitive filter would find nothing and the arm would look
+    // like a rule that selects no columns.
+    expect([...narrowSamples(new Map([['Customers.Country', ['US']]]), ['customers.country']).keys()]).toEqual([
+      'Customers.Country',
+    ]);
+  });
+
+  it('keeps nothing when the statement names no column it can show', () => {
+    // `select count(*) from items` filters on nothing, and a literal that looks like a column
+    // name is not an identifier. Both produce an empty block, which is the parent's card — and
+    // the arm counts those cases rather than pretending the lever fired.
+    expect(narrowSamples(values, []).size).toBe(0);
+    expect(narrowSamples(values, ['nowhere']).size).toBe(0);
+  });
+
+  it('does not mutate the map it is given', () => {
+    // The same map is handed to every case of the arm; a delete would narrow the second case
+    // with the first case's statement, and the arm would measure its own order.
+    const narrowed = narrowSamples(values, ['orders.status']);
+    expect(narrowed.size).toBe(1);
+    expect(values.size).toBe(2);
+    // The values themselves are shared, not copied: the narrowing is about which columns are
+    // shown, and reordering the bracket here would be a second, unmeasured lever.
+    expect(narrowed.get('orders.status')).toBe(values.get('orders.status'));
   });
 });

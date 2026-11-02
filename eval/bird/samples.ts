@@ -45,3 +45,38 @@ export function attachSamples(
     }),
   }));
 }
+
+/**
+ * The same block, restricted to the columns a statement filters on.
+ *
+ * The block was measured at +38.4% characters a case when every profiled column carried one, and
+ * +1.4% when only the columns a gold statement filters on do. That is the whole reason this
+ * function exists: the cost of value grounding is not the bracket, it is the number of columns
+ * that carry a bracket. The sampler, the values and their order are untouched — a rule that also
+ * re-ranked or re-cut the values would be a second lever inside a pair that exists to price one.
+ *
+ * The match is on identifiers, and both sides are folded because the three sources disagree about
+ * case: BIRD's gold writes `WHERE c.Name`, the manifest keeps `County Code`, and the profile keys
+ * a column by the name it was stored under. A statement that does not qualify a column keeps every
+ * table's column of that name: `where id = 3` is ambiguous in the text and unambiguous in the
+ * profile, and dropping both would turn an ambiguity into a missing block.
+ */
+export function narrowSamples(
+  values: ReadonlyMap<string, readonly string[]>,
+  wanted: Iterable<string>,
+): Map<string, readonly string[]> {
+  const qualified = new Set<string>();
+  const bare = new Set<string>();
+  for (const name of wanted) {
+    const folded = name.toLowerCase();
+    if (folded.includes('.')) qualified.add(folded);
+    else bare.add(folded);
+  }
+  const narrowed = new Map<string, readonly string[]>();
+  for (const [key, samples] of values) {
+    const folded = key.toLowerCase();
+    const column = folded.slice(folded.lastIndexOf('.') + 1);
+    if (qualified.has(folded) || bare.has(column)) narrowed.set(key, samples);
+  }
+  return narrowed;
+}

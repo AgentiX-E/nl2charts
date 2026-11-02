@@ -18,6 +18,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   atomIdentifiers,
+  conditionColumns,
   conditionLines,
   conditionPath,
   conditionProblems,
@@ -70,9 +71,48 @@ describe('whether a gold condition has a counterpart', () => {
   });
 });
 
+/**
+ * The columns a gold statement filters on, which is the population this census is about.
+ *
+ * The census counts the cases; this names the columns, and the two consumers have to agree
+ * about what "the columns the gold filters on" means or the arm samples one set while the
+ * instrument reports another. It is the same reader — `conditionsOf` and `atomIdentifiers` —
+ * exposed for the one arm that puts stored values on those columns and nowhere else.
+ */
+describe('the columns a statement filters on', () => {
+  it('names the column of every predicate atom, lowercased and deduplicated', () => {
+    // The statement does not qualify the column, and neither does this: the reader reports what the
+    // statement says. Resolving an unqualified name to a table is the schema's job, which is where
+    // the block is built — and doing it here would make two tables' `status` one column.
+    expect(conditionColumns("SELECT count(*) FROM orders WHERE Status = 'x' AND status = 'y'")).toEqual(['status']);
+  });
+
+  it('resolves an alias to its table, the way the comparison does', () => {
+    // The census rewrites aliases before it compares, so the arm's block has to be keyed the
+    // same way: `c.name` and `cities.name` are one column, and a block built on the alias would
+    // match no profile entry and sample nothing.
+    expect(
+      conditionColumns(
+        "select max(o.qty) from orders o join cities c on c.id = o.city_id where c.name = 'Hangzhou'",
+      ),
+    ).toEqual(['cities.id', 'orders.city_id', 'cities.name']);
+  });
+
+  it('names nothing for a statement with no condition', () => {
+    // `select count(*) from items` filters on nothing: the arm's block is empty on every such
+    // case, and the funnel counts them rather than calling the empty block a firing lever.
+    expect(conditionColumns('select count(*) from items')).toEqual([]);
+  });
+
+  it('does not read a literal as a column', () => {
+    // A value that happens to be spelled like a column is the one confusion this reader exists
+    // to avoid: it is what the statement got wrong, not what it failed to consider.
+    expect(conditionColumns("select * from items where name = 'price'")).toEqual(['name']);
+  });
+});
+
 describe('the conditions a statement never names', () => {
-  it('reads a gold statement written in upper case', () => {
-    // The regression the first run of this file shipped: `WHERE`/`AND` are invisible to a
+  it('reads a gold statement written in upper case', () => {    // The regression the first run of this file shipped: `WHERE`/`AND` are invisible to a
     // splitter that matches lowercase keywords, and an empty gold list is the answer "complete".
     expect(missingConditions("SELECT name FROM t WHERE T1.Segment = 'LAM' AND T1.Currency = 'CZK'", 'select name from t')).toEqual([
       "t1.currency = 'czk'",

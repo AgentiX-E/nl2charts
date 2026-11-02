@@ -22,7 +22,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { MINI_DB, MINI_GOLD, MINI_QUESTIONS, writeMiniBirdDataset } from './helpers/bird-dataset.js';
+import { CHAIN_QUESTIONS, MINI_DB, MINI_GOLD, MINI_QUESTIONS, writeChainBirdDataset, writeMiniBirdDataset } from './helpers/bird-dataset.js';
 import { startEndpoint } from './helpers/endpoint.js';
 import type { EndpointRequest } from './helpers/endpoint.js';
 import { assertSamplesRan, assertSecondModel, judgeModelName, main, resolveSettings } from '../eval/bird/run.js';
@@ -99,6 +99,15 @@ interface Plan {
    * the mechanism's null case — it spent the call and changed nothing.
    */
   readonly audit?: (question: string) => string;
+  /**
+   * The statements to answer with, when the scenario points the runner at another fixture.
+   *
+   * The default map is built from `MINI_QUESTIONS`, and a scenario that writes the chain dataset
+   * asks questions it does not hold. Without this the endpoint says "no gold statement planned",
+   * which is the file being honest about a fixture it was not told about — so the fixture is
+   * announced instead of the map being widened for every scenario.
+   */
+  readonly gold?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -113,6 +122,10 @@ function replyFor(request: EndpointRequest, plan: Plan): { status?: number; cont
   const status = plan.fail?.(request);
   if (status !== undefined) return { status, content: '{"error":"unavailable"}', ...(delayMs === undefined ? {} : { delayMs }) };
   const prompt = request.prompt;
+  // The golds this scenario answers with. A scenario that points the runner at another fixture
+  // brings its own statements; every other scenario reads the module-level map, so this is the
+  // same lookup it always was.
+  const golds: Readonly<Record<string, string>> = plan.gold ?? GOLD;
   const send = (content: string): { content: string; delayMs?: number } =>
     delayMs === undefined ? { content } : { content, delayMs };
   // The selector. Its reply is a bare number by contract (`parseSelection`), so a SQL
@@ -124,26 +137,26 @@ function replyFor(request: EndpointRequest, plan: Plan): { status?: number; cont
   // The reconcile turn. Read before the statement branches below, because its prompt carries the
   // question verbatim and would otherwise be answered as a first attempt.
   if (prompt.includes('Write the statement that answers the question')) {
-    const asked = Object.keys(GOLD).find((entry) => prompt.includes(entry)) ?? '';
-    return send(fenced(plan.reconcile?.(asked) ?? GOLD[asked] ?? 'select 1'));
+    const asked = Object.keys(golds).find((entry) => prompt.includes(entry)) ?? '';
+    return send(fenced(plan.reconcile?.(asked) ?? golds[asked] ?? 'select 1'));
   }
   // The column choice. Read before the question lookup below, because its prompt carries the
   // question verbatim and would otherwise be answered with a statement.
   if (prompt.includes('You choose the columns a SQL query will need')) {
-    const asked = Object.keys(GOLD).find((entry) => prompt.includes(entry));
+    const asked = Object.keys(golds).find((entry) => prompt.includes(entry));
     return send(plan.columns?.(asked ?? '') ?? '');
   }
   // The audit turn. Read before the statement branches because its prompt carries the
   // question verbatim and would otherwise be answered as a first attempt.
   if (prompt.includes('Check it against the question before rewriting')) {
-    const audited = Object.keys(GOLD).find((entry) => prompt.includes(entry)) ?? '';
+    const audited = Object.keys(golds).find((entry) => prompt.includes(entry)) ?? '';
     // Without a plan the audit reports nothing missing and repeats the statement it was
     // handed, which the prompt quotes verbatim: the turn costs its call and changes nothing,
     // and that is the null case the control case has to be measurable against.
     const given = /The statement being checked: ([\s\S]*)$/.exec(prompt)?.[1]?.trim() ?? 'select 1';
     return send(plan.audit?.(audited) ?? `MISSING: none\n${fenced(given)}`);
   }
-  const question = Object.keys(GOLD).find((entry) => prompt.includes(entry));
+  const question = Object.keys(golds).find((entry) => prompt.includes(entry));
   if (question === undefined) return send(plan.definitions ?? DEFINITIONS);
   // A turn that names what went wrong: the empty-result diagnosis, the blind control, the
   // engine's own message, or the shape guard's. All of them are second attempts.
@@ -155,7 +168,7 @@ function replyFor(request: EndpointRequest, plan: Plan): { status?: number; cont
   if (plan.whenValues !== undefined && prompt.includes('Values in this database named by the question:')) {
     return send(fenced(plan.whenValues));
   }
-  const gold = GOLD[question];
+  const gold = golds[question];
   // `GOLD` is built from `QUESTIONS`, so a question without an entry is a defect in this
   // file and not a case to handle: failing here keeps the fixture honest.
   if (gold === undefined) throw new Error(`no gold statement planned for ${question}`);
@@ -2665,3 +2678,76 @@ describe('the reconcile arm', () => {
     }
   });
 });
+
+/**
+ * The value block narrowed to the columns the gold statement filters on.
+ *
+ * The block measured +38.4% characters a case when every profiled column carried one and +1.4%
+ * when only the filtered columns do, so the rule that decides the set is the difference between a
+ * block that can be afforded and one that cannot. Two claims need a real run: that the narrowed
+ * card carries the bracket on the filtered column and on no other, and that the artifact counts
+ * the cases where the rule kept nothing — a statement with no condition has no column to narrow
+ * to, and an arm that reported its accuracy without that count could not be told from one whose
+ * rule selected nothing anywhere.
+ *
+ * The chain fixture is the one that can show it: its third question filters `cities.name` to a
+ * stored spelling, so the block has a column to reach, and its first two questions filter on
+ * nothing, so the empty case is populated by the same run.
+ */
+describe('a value block narrowed to the columns the statement filters on', () => {
+  const chainRoot = mkdtempSync(join(tmpdir(), 'bird-samples-gold-'));
+  afterAll(() => {
+    rmSync(chainRoot, { recursive: true, force: true });
+  });
+  const chainData = writeChainBirdDataset(chainRoot);
+  const chainGold: Readonly<Record<string, string>> = Object.fromEntries(
+    CHAIN_QUESTIONS.map((entry) => [entry.question, entry.sql]),
+  );
+  /** The line a table occupies on the card, in the renderer's own format. */
+  const tableLineOf = (prompt: string, table: string): string | undefined =>
+    prompt.split('\n').find((line) => line.startsWith(`${table}(`));
+
+  it('keeps the bracket on the filtered column and drops it from the rest', async () => {
+    const result = await run({
+      plan: { gold: chainGold },
+      env: {
+        BIRD_DATA: chainData,
+        BIRD_ARMS: 'inline+evidence+samples,inline+evidence+samples-gold',
+        BIRD_DEFINITIONS_FORCE: '1',
+      },
+    });
+    expect(result.code).toBe(0);
+    const asked = CHAIN_QUESTIONS[2]?.question as string;
+    // One prompt per arm for that question: the parent sends every profiled column's values, the
+    // narrowed arm only the one its statement filters on.
+    const prompts = result.requests.map((request) => request.prompt).filter((prompt) => prompt.includes(asked));
+    const items = prompts.map((prompt) => tableLineOf(prompt, 'items')).filter((line): line is string => line !== undefined);
+    const cities = prompts.map((prompt) => tableLineOf(prompt, 'cities')).filter((line): line is string => line !== undefined);
+    expect(items.length).toBeGreaterThan(0);
+    expect(cities.length).toBeGreaterThan(0);
+    // `cities.name` is the filtered column, so both cards show it: the lever is the *set*, not
+    // the bracket, and an arm that also narrowed this column away would be measuring nothing.
+    expect(cities.every((line) => line.includes('name VARCHAR ['))).toBe(true);
+    // `items.name` is profiled and not filtered. The parent shows it, the narrowed arm does not —
+    // read as "one card carries the bracket and one does not" rather than as a value list, because
+    // the claim is about which columns carry a bracket and not about the order inside it.
+    expect(items.some((line) => line.includes('name VARCHAR ['))).toBe(true);
+    expect(items.some((line) => !line.includes('name VARCHAR ['))).toBe(true);
+
+    const rows = result.report.arms as {
+      readonly arm: string;
+      readonly sampleBlock?: { readonly cases: number; readonly withValues: number; readonly columns: number; readonly empty: number };
+    }[];
+    const byName = new Map(rows.map((row) => [row.arm, row]));
+    // Every case of the run is counted, and the two with no condition are the empty column — the
+    // count D56 asks for, because "the rule kept nothing" and "the rule was not measured" are the
+    // same number and opposite findings.
+    expect(byName.get('inline+evidence+samples-gold')?.sampleBlock).toEqual({ cases: 3, withValues: 1, columns: 1, empty: 2 });
+    // The parent's block is the same sampler over every profiled column: the two rows differ in
+    // one number, and it is the one the cost claim is about.
+    const parent = byName.get('inline+evidence+samples')?.sampleBlock;
+    expect(parent?.cases).toBe(3);
+    expect(parent?.columns ?? 0).toBeGreaterThan(1);
+  });
+});
+

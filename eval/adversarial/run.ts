@@ -117,7 +117,9 @@ export function resolveAdversarialSettings(
     data,
     databases: env.BIRD_DATABASES ?? join(data, 'dev_databases'),
     out: env.ADVERSARIAL_OUT ?? join(root, 'eval/out/adversarial.json'),
-    profileCache: env.BIRD_PROFILE_CACHE ?? join(root, 'eval/.cache/bird/profiles'),
+    // The same rule the BIRD runner follows: a profile describes one dataset's files, so it is
+    // cached beside them rather than in a directory every dataset writes to.
+    profileCache: env.BIRD_PROFILE_CACHE ?? join(data, '.profiles'),
     dryRun: argv.includes('--dry-run'),
     concurrency: positive(env.BIRD_CONCURRENCY, 6, 'BIRD_CONCURRENCY'),
     model: env.LLM_MODEL ?? 'deepseek-chat',

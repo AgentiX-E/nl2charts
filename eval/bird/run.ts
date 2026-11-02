@@ -47,7 +47,8 @@ import { FAILURE_SAMPLE, failureCorpus } from './failures.js';
 import type { Oracle, OracleResult } from './oracle.js';
 import { profileDatabase } from './profile.js';
 import { BIRD_SCHEMA_LINES } from './prompt-shape.js';
-import { attachSamples, sampleValuesOf } from './samples.js';
+import { attachSamples, narrowSamples, sampleValuesOf } from './samples.js';
+import { conditionColumns } from './conditions.js';
 import { exampleMapOf, exampleSetFor } from './value-examples.js';
 import { buildIndex, renderDemonstrations, renderRetrieved, retrieve } from './retrieval.js';
 import { deserializeIndex, findValues, indexCells, renderValues, serializeIndex } from './values.js';
@@ -129,6 +130,28 @@ export interface Arm {
    * invented filters — which is why it is a lever and not a default.
    */
   readonly samples?: 'profile' | 'example';
+  /**
+   * Which columns carry the block, when `samples` is set.
+   *
+   * `'gold'` keeps the columns the gold statement filters on and nothing else. It is an oracle, and
+   * it exists for one reason: the block's cost is the number of columns that carry a bracket, not
+   * the bracket itself. Measured on the 500-question Mini-Dev split, the sampler over every
+   * profiled column costs **+38.4%** characters a case and the same sampler over the filtered
+   * columns costs **+1.4%**, touching 185 of 500 cases. So the family "show stored values where a
+   * condition needs one" has to be priced at the price it would actually be built at, and this arm
+   * is the ceiling of that family: no realizable column rule can beat a rule that reads the answer.
+   *
+   * A ceiling is worth running because it closes the question in one direction. If the block buys
+   * nothing when it is shown exactly the right columns, then no rule that guesses the columns can
+   * buy anything either, and the samples family is finished rather than "underpowered" — which is
+   * the reading that kept it alive for three rounds on a 2.22pp ceiling and +1.31pp at p = 0.052.
+   * If it does buy something, the delta is the budget a realizable rule has to be judged against.
+   *
+   * Deliberately not a list of column names: the set is a property of the case, the same way
+   * `prune` is a property of the question, and an arm that carried a per-database allow-list would
+   * be fitted on the split it is measured on.
+   */
+  readonly sampleColumns?: 'gold';
   /**
    * Ask for a query plan (scan, filter, join, group, answer) before the statement.
    * CHASE-SQL's second generator; one lever from `inline+evidence`.
@@ -526,6 +549,17 @@ export const ARMS: readonly Arm[] = [
   // NULL first when the column stores one. It exists to put the block MAC-SQL's selector reads
   // on our card, so the 6.45pp can be attributed to a block and not to "their pipeline".
   { name: 'inline+evidence+samples-wide', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', samples: 'example' },
+  // The same profiler on the columns the gold statement filters on, and on no other. An oracle
+  // arm: it reads the answer, so it cannot be adopted, and it exists to bound the family.
+  //
+  // The block is priced by its width, not by its bracket: every profiled column costs +38.4% of
+  // the card's characters on Mini-Dev, the filtered columns cost +1.4% and touch 37% of the
+  // questions. So "show the stored values a condition needs" has to be measured at the size it
+  // would actually be built, and this arm is that size. If it buys nothing while being shown
+  // exactly the right columns, no rule that guesses them can either — and `samples` has been kept
+  // alive for three rounds on a 2.22pp ceiling and +1.31pp at p = 0.052, which is the reading a
+  // ceiling is supposed to settle rather than prolong.
+  { name: 'inline+evidence+samples-gold', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', samples: 'profile', sampleColumns: 'gold' },
   // The empty-result turn on the arm this repository ships, which is not the arm it was
   // measured on: `select-mixed+empty` priced the message against a four-call parent whose
   // statements are chosen from three samples, and a trigger that fires on 5.2% of a single
@@ -889,6 +923,7 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'inline+evidence+samples': "the same prompt with each categorical column's stored values on its card line: one lever, one call, and the untested half of value grounding",
   // Its note is a question until the run that answers it lands. Saying "measured" here before
   // the number exists is how an arm acquires a verdict it never earned.
+  'inline+evidence+samples-gold': 'the same sampler narrowed to the columns the gold statement filters on: an oracle, so its delta is a ceiling for the family and not an achievable one — run it when a column rule is proposed, never as a candidate',
   'inline+evidence+samples-wide': "the same lever with MAC-SQL's rule instead of ours: six most-frequent values of every non-key column, a small numeric dictionary included, a date collapsed to one, NULL first — dispatched to price the competitor's block on our cases, and until that artifact exists this note is the question rather than the verdict",
   // The condition rather than the block, and the one trigger of their refiner's three that is both
   // true and ours. `agents.ts` counts it firing on 26 of the 496 answers (5.2%) and on no gold
@@ -970,6 +1005,10 @@ export const COMPARISONS: readonly (readonly [string, string, string])[] = [
   ['inline+evidence', 'inline+evidence+samples', 'stored values on the card, sampled by our profiler: the information, before any question of which values'],
   ['inline+evidence', 'inline+evidence+samples-wide', "the competitor's value examples on our card: the block MAC-SQL's selector reads, priced against the card without it"],
   ['inline+evidence+samples', 'inline+evidence+samples-wide', 'the same lever under two samplers: which columns are shown and what a shown column says'],
+  // The block's width, which is the whole of its cost. The pair keeps the sampler, the values, the
+  // order and the call count, and changes only which columns carry a bracket — so the delta is the
+  // price of narrowing, and the character column beside it is the price of not narrowing.
+  ['inline+evidence+samples', 'inline+evidence+samples-gold', 'the same sampler on every profiled column versus on the columns the gold statement filters on: an oracle for what a column rule could be worth'],
   ['inline+evidence', 'inline+evidence+empty', 'the turn after a statement returns nothing: the one refiner trigger whose message carries something true, priced on the arm the empty trigger actually fires on'],
   ['inline+evidence', 'metadata+evidence', 'generated definitions on the column line versus 798 curated notes'],
   ['inline+evidence', 'select-mixed', 'three decompositions and a selector versus a single sample: four calls instead of one'],
@@ -1314,6 +1353,16 @@ export interface CaseRun extends CaseOutcome {
     readonly restored?: number;
   };
   /**
+   * How many columns of this case's card carried stored values.
+   *
+   * Recorded only on arms that declare a sampler, so its absence means "no block" rather than
+   * "no block measured". The arm that narrows the block needs it per case: on a statement with no
+   * condition the block is empty by construction, and a run-wide count cannot separate that case
+   * from a rule that selected nothing on every case — the two are the same number and opposite
+   * findings, which is D56 in its counting form.
+   */
+  readonly sampleBlock?: { readonly columns: number };
+  /**
    * Candidates that never arrived, by reason.
    *
    * A sampling arm's ceiling is a property of its candidate set, and a candidate the
@@ -1476,6 +1525,20 @@ export interface ArmReportRow {
    * suggests the trigger is half-right.
    */
   readonly audit?: { readonly fired: number; readonly named: number; readonly rewritten: number; readonly extraCallsPerCase: number };
+  /**
+   * What the value block carried, on the arm that declares a sampler.
+   *
+   * `cases` is the denominator, `withValues` the cases the rule reached and `empty` the cases it
+   * did not — a statement that filters on nothing has no column to show. The arm that narrows the
+   * block to the filtered columns is the reason this is a funnel and not a total: its whole claim
+   * is that a smaller block buys the same information, and the ratio is that claim.
+   */
+  readonly sampleBlock?: {
+    readonly cases: number;
+    readonly withValues: number;
+    readonly columns: number;
+    readonly empty: number;
+  };
   /**
    * The shape of the replies this arm's prompt produced.
    *
@@ -2227,6 +2290,42 @@ export function assertColumnChoiceRan(armName: string, runs: readonly CaseRun[],
 }
 
 /**
+ * What the value block carried, over the cases an arm ran.
+ *
+ * `columns` is the sum and `withValues` the number of cases that carried any: the two answer
+ * different questions. A sum alone cannot tell a block on every case from the same total spread
+ * over a third of them, and the arm that narrows the block changes exactly that ratio. `empty` is
+ * the D56 count — the cases the rule reached nothing on — and it is the number that separates "the
+ * block was shown and ignored" from "the rule selected nothing".
+ */
+export function sampleBlockFunnel(
+  runs: readonly CaseRun[],
+): { readonly cases: number; readonly withValues: number; readonly columns: number; readonly empty: number } | undefined {
+  const counted = runs.filter((run) => run.sampleBlock !== undefined);
+  if (counted.length === 0) return undefined;
+  const columns = counted.reduce((total, run) => total + (run.sampleBlock?.columns ?? 0), 0);
+  const withValues = counted.filter((run) => (run.sampleBlock?.columns ?? 0) > 0).length;
+  return { cases: counted.length, withValues, columns, empty: counted.length - withValues };
+}
+
+/**
+ * A narrowed block that keeps nothing anywhere is its parent under another name.
+ *
+ * The rule the other levers follow: a rule that fires on no case publishes a delta of zero with
+ * the authority of a measurement, and the reader takes it as "the columns that matter do not help".
+ * `assertSamplesRan` cannot catch this one — it reads the profile, which has values on databases
+ * this rule selects nothing from — so the count has to be the arm's own per-case one.
+ */
+export function assertSampleBlockFired(armName: string, runs: readonly CaseRun[], minimumSample = MINIMUM_INSTRUMENT_SAMPLE): void {
+  if (runs.length < minimumSample) return;
+  const funnel = sampleBlockFunnel(runs);
+  if (funnel !== undefined && funnel.withValues > 0) return;
+  throw new Error(
+    `arm ${armName}: across ${String(runs.length)} questions no case carried a stored value, so the column rule selected nothing and the arm is its parent renamed`,
+  );
+}
+
+/**
  * An arm that asks for samples and shows none is its parent under another name.
  *
  * `check-bird-baseline.mjs` already refuses a samples arm with no values behind it, and it is
@@ -2299,6 +2398,11 @@ export function assertReportComplete(report: { readonly arms?: readonly ArmRepor
     }
     if (arm.audit !== undefined && row.audit === undefined) {
       throw new Error(`arm ${row.arm} runs the audit turn and its row carries no audit funnel, so the call cannot be priced`);
+    }
+    if (arm.samples !== undefined && row.sampleBlock === undefined) {
+      // The block is the arm's only cost, and its width is the lever on the one arm that narrows it.
+      // A row without the count reports an accuracy difference with no statement of what was shown.
+      throw new Error(`arm ${row.arm} carries stored values and its row carries no block funnel, so its prompt cannot be priced`);
     }
     if (arm.emptyRetry !== undefined && row.emptyRetry === undefined) {
       throw new Error(`arm ${row.arm} runs the empty-result lever and its row carries no empty-result funnel, so the call cannot be priced`);
@@ -2550,7 +2654,11 @@ export function resolveLayout(env: Readonly<Record<string, string | undefined>>,
     descriptionsRoot: join(data, 'dev_databases'),
     trainFile: join(root, 'eval/.cache/bird/train/train.json'),
     valueCache: join(root, 'eval/.cache/bird/values'),
-    profileCache: join(root, 'eval/.cache/bird/profiles'),
+    // Inside the dataset, for the reason `.value-examples` is: a profile is a description of
+    // *these files*, and one directory for every dataset let a fixture's `shop` answer for the
+    // corpus's — the card rendered from another schema, on every case of the database, with no
+    // instrument able to see it. Written into the dataset, it is fetched and evicted with it.
+    profileCache: join(data, '.profiles'),
     // The competitor-rule sampler caches separately from the profiler: same column names,
     // different rule, and sharing a directory would serve one rule's answer under the other's
     // name. Old entries are rejected by the rule field they carry.
@@ -3028,6 +3136,15 @@ export interface Controls {
  */
 export interface CardOutcome {
   readonly schema: readonly SchemaTable[];
+  /**
+   * How many columns of the card carried stored values, on an arm that asks for any.
+   *
+   * The count is per case because the block is: an arm that narrows the block to the columns a
+   * statement filters on has no column to show on a statement that filters on nothing, and the
+   * run-wide `controls.sampledColumns` cannot tell that case from a rule that selected nothing
+   * everywhere. Present only on arms with a sampler, so a zero is always a measured zero.
+   */
+  readonly samples?: { readonly columns: number };
   readonly columns?: {
     readonly named: number;
     readonly unknown: number;
@@ -3257,9 +3374,17 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
     exampleValues.set(db, byColumn);
   }
 
-  const withSamples = (schema: readonly SchemaTable[], db: string, rule: 'profile' | 'example'): readonly SchemaTable[] => {
+  const withSamples = (
+    schema: readonly SchemaTable[],
+    db: string,
+    rule: 'profile' | 'example',
+    wanted?: readonly string[],
+  ): readonly SchemaTable[] => {
     const values = (rule === 'example' ? exampleValues : sampleValues).get(db);
-    return values === undefined ? schema : attachSamples(schema, values);
+    if (values === undefined) return schema;
+    // The narrowing is a filter over the profile rather than a second sampler, so the value order,
+    // the rule and the bracket stay the arm's and only the set of columns changes.
+    return attachSamples(schema, wanted === undefined ? values : narrowSamples(values, wanted));
   };
 
   // Value grounding: the literals the question names, looked up in this database.
@@ -3438,7 +3563,12 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
           : (schemas.get(db) as SchemaTable[]);
     // Samples are layered on whatever the arm resolved to, not on the plain schema: an arm
     // can ask for both, and silently dropping one is a two-lever comparison nobody wrote.
-    const layered = arm.samples === undefined ? base : withSamples(base, db, arm.samples);
+    //
+    // The gold's own conditions decide the columns on the one arm that narrows the block. Read
+    // from the question rather than from an artifact on purpose: an allow-list fitted on the split
+    // would price the fit, and this arm's whole claim is the ceiling of the family.
+    const wanted = arm.sampleColumns === 'gold' ? conditionColumns(question.SQL) : undefined;
+    const layered = arm.samples === undefined ? base : withSamples(base, db, arm.samples, wanted);
     if (arm.prune === undefined) return layered;
     return pruneSchema({ schema: layered, question: question.question, graph: graphFor(db), hops: arm.prune }).schema;
   };
@@ -3454,10 +3584,21 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
   const sentCards = new Map<string, CardOutcome>();
   const cardKey = (arm: Arm, question: BirdQuestion): string => `${arm.name}\u0000${String(question.question_id)}`;
 
+  /**
+   * The columns of a card that carry a bracket, counted the way the renderer reads them.
+   *
+   * `length > 0` is the renderer's test, and an entry with an empty array would print `[]` — a
+   * bracket that says "this column is empty". The count uses the same test so the number and the
+   * prompt cannot disagree.
+   */
+  const samplesOn = (schema: readonly SchemaTable[]): number =>
+    schema.reduce((total, table) => total + table.columns.filter((column) => (column.samples?.length ?? 0) > 0).length, 0);
+
   const cardFor = async (arm: Arm, question: BirdQuestion, provider: LlmProvider): Promise<CardOutcome> => {
     const base = schemaFor(arm, question);
+    const samples = arm.samples === undefined ? {} : { samples: { columns: samplesOn(base) } };
     const mode = arm.columnSelect;
-    if (mode === undefined) return { schema: base };
+    if (mode === undefined) return { schema: base, ...samples };
     const reply = await provider.complete({
       messages: [
         { role: 'system', content: buildColumnPrompt(question.question, base) },
@@ -3477,6 +3618,7 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
       mode === 'dense' ? applyDenseChoice(base, choice) : applyColumnChoice(base, choice);
     const outcome: CardOutcome = {
       schema: applied.schema,
+      ...(arm.samples === undefined ? {} : { samples: { columns: samplesOn(applied.schema) } }),
       columns: {
         named: choice.named.length,
         unknown: choice.unknown.length,
@@ -4516,7 +4658,12 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
         };
       }
     });
-    return { ...scored, ...costOfCase(), ...(card?.columns === undefined ? {} : { columnSelection: card.columns }) };
+    return {
+      ...scored,
+      ...costOfCase(),
+      ...(card?.columns === undefined ? {} : { columnSelection: card.columns }),
+      ...(card?.samples === undefined ? {} : { sampleBlock: card.samples }),
+    };
   });
   // Before any number is printed: an arm that never reached the database has no
   // accuracy, and publishing 0% would hide the provider's message behind a score.
@@ -4545,6 +4692,9 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
   if (arm.audit !== undefined) assertAuditFired(name, runs);
   // ...and an arm that asks for samples and gets none is its parent under another name.
   if (arm.samples !== undefined) assertSamplesRan(name, prepared.sampledFor(arm));
+  // ...and the same rule one level down: a rule that decides *which* columns carry the block can
+  // keep none of them on every case while the profile it reads is full of values.
+  if (arm.sampleColumns !== undefined) assertSampleBlockFired(name, runs);
   // ...and a format the model ignored is not a prompt that did not help.
   if (declaresDecomposition(arm)) assertDecompositionFired(name, runs);
   return {
@@ -4754,6 +4904,7 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
     ...(arm.emptyRetry === undefined ? {} : { emptyRetry: { mode: arm.emptyRetry, ...emptyRetryFunnel(runs) } }),
     ...(arm.reconcile === undefined ? {} : { reconcile: { policy: arm.reconcileAdopt ?? 'always', ...reconcileFunnel(runs) } }),
     ...(arm.audit === undefined ? {} : { audit: auditFunnel(runs) }),
+    ...(arm.samples === undefined ? {} : { sampleBlock: sampleBlockFunnel(runs) }),
     // What the model kept of the card, on the one arm that asks it to choose. Beside the
     // accuracy rather than inside the sampling spread, for the reason the decomposition funnel
     // moved out: the instrument belongs to the arm, not to how many candidates it draws.

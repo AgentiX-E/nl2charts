@@ -20,7 +20,9 @@ import {
   poolReadOf,
   spendOf,
   assertReconcileFired,
+  assertSampleBlockFired,
   reconcileFunnel,
+  sampleBlockFunnel,
   caseRows,
   databasesFromManifest,
   databasesFromQuestions,
@@ -46,6 +48,11 @@ describe('where a run points', () => {
     // which is why it is a separate field rather than a join at each call site.
     expect(mini.descriptionsRoot).toBe('/repo/eval/.cache/bird/minidev/MINIDEV/dev_databases');
     expect(mini.out).toBe('/repo/eval/out/bird-eval.json');
+    // The profile cache lives *inside* the dataset, for the reason the value-examples cache does:
+    // it is a description of these files. One directory for every dataset let a test fixture's
+    // `shop` answer for the corpus's, and the reading that came back was the fixture's schema
+    // rendered onto a question it never had — a wrong card, published green.
+    expect(mini.profileCache).toBe('/repo/eval/.cache/bird/minidev/MINIDEV/.profiles');
 
     // The dev split renames the question file and moves the directory; everything else in
     // the layout is the same shape.
@@ -1140,5 +1147,51 @@ describe('what a reconcile turn produced', () => {
 
   it('says nothing below the sample floor, where a share describes the fixture', () => {
     expect(() => assertReconcileFired('reconcile', sample(7, () => record(false)))).not.toThrow();
+  });
+});
+
+/**
+ * What the block of stored values actually carried, on the arm that narrows it.
+ *
+ * `controls.sampledColumns` is a total over every database the run touched, so it cannot say
+ * whether *this* arm's rule put anything on *these* cases. The arm that shows values only on the
+ * columns the gold statement filters is the one that needs the per-case count: on a statement
+ * with no condition the block is empty by construction, and an arm that reports its accuracy
+ * without that count cannot be told from one whose rule selected nothing anywhere.
+ */
+describe('what the value block put on the card', () => {
+  const run = (columns: number | undefined): CaseRun => ({
+    id: '1',
+    passed: true,
+    predicted: 'select 1',
+    reason: 'match',
+    strict: true,
+    attempts: 1,
+    calls: 1,
+    ...(columns === undefined ? {} : { sampleBlock: { columns } }),
+  });
+  const sample = (count: number, columns: (index: number) => number): CaseRun[] =>
+    Array.from({ length: count }, (_unused, index) => ({ ...run(columns(index)), id: String(index) }));
+
+  it('reports nothing for an arm that carries no block', () => {
+    expect(sampleBlockFunnel([run(undefined)])).toBeUndefined();
+  });
+
+  it('counts the cases the rule reached and the cases it left empty', () => {
+    // Three cases: two carry a block, one has no condition to name. `empty` is the D56 count —
+    // a case the lever did not reach has to be counted, or the share describes the fixture.
+    expect(sampleBlockFunnel([run(2), run(1), run(0)])).toEqual({ cases: 3, withValues: 2, columns: 3, empty: 1 });
+  });
+
+  it('refuses an arm whose rule kept nothing on any case', () => {
+    // An oracle rule that selects no column is the parent arm with a longer name, and a delta of
+    // zero from it would be published as "the block does not help".
+    expect(() => assertSampleBlockFired('samples-gold', sample(120, () => 0))).toThrow(/no case carried a stored value/);
+    expect(() => assertSampleBlockFired('samples-gold', sample(120, () => 2))).not.toThrow();
+  });
+
+  it('says nothing below the sample floor, where a share describes the fixture', () => {
+    // The floor is the one the other levers use: below it a share describes the fixture.
+    expect(() => assertSampleBlockFired('samples-gold', sample(7, () => 0))).not.toThrow();
   });
 });

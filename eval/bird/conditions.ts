@@ -126,6 +126,26 @@ export function missingConditions(gold: string, predicted: string): string[] {
   return conditionsOf(gold).filter((atom) => !hasCounterpart(atom, written));
 }
 
+/**
+ * The columns a statement filters on, lowercased and deduplicated in statement order.
+ *
+ * The census counts the cases; this names the columns. Two consumers read the same population and
+ * they have to agree about what it is, which is why this is the same reader the census uses rather
+ * than a second one: the arm that shows stored values on the filtered columns and the instrument
+ * that reports how many statements never mention one would otherwise be describing two sets, and
+ * a delta priced against one of them would be attributed to the other.
+ *
+ * Identifiers only. A literal is what a statement got wrong; a column is what it never
+ * considered — and BIRD's gold spells values that look like column names.
+ */
+export function conditionColumns(sql: string): string[] {
+  const found = new Set<string>();
+  for (const atom of conditionsOf(sql)) {
+    for (const token of atomIdentifiers(atom)) found.add(token.toLowerCase());
+  }
+  return [...found];
+}
+
 /** One case's reading. */
 export interface ConditionRow {
   readonly id: string;
