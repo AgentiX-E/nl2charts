@@ -474,12 +474,16 @@ export MYSQL_TEST_URL='mysql://analyst:s3cret@127.0.0.1:3306/nl2charts_test'
 ```
 
 MariaDB stands in for MySQL 8.4 in the connector suite; every assertion in it passes against
-both. One behaviour is worth knowing before trusting an `AbortSignal` on this engine: the
-postgres connector forwards the signal to `pg`, and `pg` does not cancel a statement it has
-already sent. Aborting during `select pg_sleep(1)` returns the row a second later, exactly as if
-no signal had been given. The contract the engine can keep is the one it tests — an
-already-aborted signal never reaches the server — and the gap is registered rather than papered
-over.
+both. One behaviour is worth knowing before trusting an `AbortSignal` on this engine: `pg` does not
+cancel a statement it has already sent, so forwarding the signal to the driver was a comment that
+looked like a guarantee — aborting during `select pg_sleep(1)` returned the row a second later,
+exactly as if no signal had been given. The connector now stops the statement where it can: on
+abort it looks up the connection's `pg_backend_pid()` once per physical connection, asks the server
+to `pg_cancel_backend` it on a connection of its own, destroys that connection rather than
+returning a half-read protocol to the pool, and reports the case as `NL2C_E_TIMEOUT`. A
+`statement_timeout` on the server produces the same SQLSTATE (`57014`) and is reported the same
+way, because to everything above the connector both mean one thing: the statement ran out of
+time.
 
 ### What a push has to measure
 

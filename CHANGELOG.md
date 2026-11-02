@@ -53,6 +53,19 @@ cannot be argued with.
 
 ### Fixed
 
+- **`AbortSignal` on the PostgreSQL connector did nothing.** `pg` does not cancel a statement it has
+  already sent, so aborting during `select pg_sleep(1)` returned the row a second later, exactly as
+  if no signal had been given — a forward that looked like a guarantee and was registered as a defect
+  rather than papered over. The connector now stops the statement at the server: it learns the
+  connection's `pg_backend_pid()` once per physical connection, asks the server to
+  `pg_cancel_backend` it on a connection of its own (the pool has none free — the statement being
+  cancelled is holding one), destroys that connection instead of returning a half-read protocol to
+  the pool, and reports `NL2C_E_TIMEOUT`. Server-side `statement_timeout` produces the same SQLSTATE
+  (`57014`) and is reported the same way, because both mean the statement ran out of time and neither
+  is something a repair loop should try to fix. The suite that documented the old behaviour now
+  measures the new one, and it runs in 0.5s instead of 11s because the sleeps are actually
+  interrupted.
+
 - **A case whose adjudication never came back lost the evidence about the pool.** The selector call
   was the one call in the vote branch with no catch: a refusal escaped the per-case worker, which
   returns a row with no candidate record, so a case whose pool *did* hold the answer reported nothing

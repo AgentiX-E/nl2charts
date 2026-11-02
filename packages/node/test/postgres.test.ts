@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Client } from 'pg';
-import { createPostgresEngine, driverUnavailable, messageOf } from '../src/postgres.js';
+import { backendCanceller, createPostgresEngine, driverUnavailable, messageOf } from '../src/postgres.js';
 import { fromPostgresValue } from '../src/postgres.js';
 
 /**
@@ -12,6 +12,101 @@ import { fromPostgresValue } from '../src/postgres.js';
  * test is the server's, not ours.
  */
 const url = process.env.PG_TEST_URL;
+
+/**
+ * The cancellation connection, on a fake driver.
+ *
+ * A real server cannot show these branches: they are the ones where the cancellation itself fails,
+ * and a working server is exactly the case where it does not. The contract they carry is that a
+ * failure to cancel adds nothing to the query's own error — one event, one message.
+ */
+describe('the cancellation connection', () => {
+  interface Call {
+    readonly text: string;
+    readonly values?: readonly unknown[];
+  }
+
+  it('asks the server to cancel the pid it was given, on a connection of its own', async () => {
+    const calls: Call[] = [];
+    const opened: string[] = [];
+    const cancel = backendCanceller(
+      class {
+        constructor(config: Record<string, unknown>) {
+          opened.push(String(config.connectionString));
+        }
+        async connect(): Promise<void> {}
+        async query(config: Call): Promise<unknown> {
+          calls.push(config);
+          return { rows: [{ pg_cancel_backend: true }] };
+        }
+        async end(): Promise<void> {}
+      },
+      'postgres://example/db',
+    );
+    await cancel(4_242);
+    expect(opened).toEqual(['postgres://example/db']);
+    expect(calls).toEqual([{ text: 'select pg_cancel_backend($1)', values: [4_242] }]);
+  });
+
+  it('stays quiet when the cancellation cannot be sent', async () => {
+    // The caller's query is already rejecting for its own reason; a throw here would replace that
+    // reason with "the cancellation failed", which is the less useful of the two.
+    const cancel = backendCanceller(
+      class {
+        async connect(): Promise<void> {
+          throw new Error('could not connect');
+        }
+        async query(): Promise<unknown> {
+          return {};
+        }
+        async end(): Promise<void> {}
+      },
+      'postgres://example/db',
+    );
+    await expect(cancel(7)).resolves.toBeUndefined();
+  });
+
+  it('closes the connection even when the statement could not be sent', async () => {
+    // A leaked connection per timeout is a pool exhaustion bug that only appears under the load
+    // that produces timeouts in the first place.
+    let closed = 0;
+    const cancel = backendCanceller(
+      class {
+        async connect(): Promise<void> {}
+        async query(): Promise<unknown> {
+          throw new Error('cancel refused');
+        }
+        async end(): Promise<void> {
+          closed += 1;
+        }
+      },
+      'postgres://example/db',
+    );
+    await cancel(7);
+    expect(closed).toBe(1);
+  });
+
+  it('does nothing for a pid it never learned', async () => {
+    // The pid lookup is a query of its own; if it returned nothing, there is no backend to name and
+    // opening a connection to cancel pid 0 would target the server's own state.
+    let opened = 0;
+    const cancel = backendCanceller(
+      class {
+        constructor() {
+          opened += 1;
+        }
+        async connect(): Promise<void> {}
+        async query(): Promise<unknown> {
+          return {};
+        }
+        async end(): Promise<void> {}
+      },
+      'postgres://example/db',
+    );
+    await cancel(0);
+    expect(opened).toBe(0);
+  });
+});
 
 describe.skipIf(url === undefined)('postgres engine (real server)', () => {
   let admin: Client;
@@ -102,20 +197,45 @@ describe.skipIf(url === undefined)('postgres engine (real server)', () => {
     expect(result.rows[0]?.answer).toBe(42);
   });
 
-  it('does not pretend to cancel a statement the driver will not stop', async () => {
-    // The engine forwards a caller's signal to `pg`, and `pg` does not cancel a statement it has
-    // already sent: aborting during `pg_sleep` returns the row after the sleep, five seconds
-    // later, exactly as if no signal had been given. Measured, not assumed. The contract this
-    // engine can actually keep is the one above it — a signal that is already aborted never
-    // reaches the server — and the gap is registered rather than papered over with an assertion
-    // that would pass on a driver that behaves differently.
+  it('stops the statement at the server when the caller aborts', async () => {
+    // The gap this closes was measured rather than assumed: `pg` does not cancel a statement it has
+    // already sent, so aborting during `pg_sleep` returned the row a second later, exactly as if no
+    // signal had been given. Forwarding the signal was therefore a comment that looked like a
+    // guarantee. The engine now asks the server to cancel the backend on a connection of its own,
+    // and the case ends as a deadline — which is what a caller who aborted asked for.
     const controller = new AbortController();
     const started = Date.now();
-    const running = engine.run('select pg_sleep(1)', { signal: controller.signal });
-    controller.abort();
-    const result = await running;
-    expect(result.rows).toHaveLength(1);
-    expect(Date.now() - started).toBeGreaterThanOrEqual(900);
+    const running = engine.run('select pg_sleep(5)', { signal: controller.signal });
+    // After the query is in flight, so the cancellation is exercised rather than the pre-check.
+    setTimeout(() => controller.abort(), 100);
+    await expect(running).rejects.toMatchObject({ code: 'NL2C_E_TIMEOUT' });
+    const elapsed = Date.now() - started;
+    expect(elapsed).toBeLessThan(1_500);
+  });
+
+  it('is usable again after a cancelled statement', async () => {
+    // The cancelled connection is destroyed rather than returned to the pool: the driver still has
+    // an open result stream on it, and recycling it would hand the next query a half-read protocol.
+    // The cost is one connection; the alternative is a pool that fails intermittently afterwards,
+    // which is the failure mode that takes a day to diagnose.
+    const controller = new AbortController();
+    const running = engine.run('select pg_sleep(5)', { signal: controller.signal });
+    setTimeout(() => controller.abort(), 100);
+    await expect(running).rejects.toMatchObject({ code: 'NL2C_E_TIMEOUT' });
+    const after = await engine.run('select 1 as one');
+    expect(after.rows).toEqual([{ one: 1 }]);
+  });
+
+  it('reports a statement the server cancelled on its own as a deadline, not a failure', async () => {
+    // `statement_timeout` produces the same SQLSTATE as `pg_cancel_backend`, and a repair loop must
+    // not try to fix either: a statement that ran out of time is not a statement with a syntax
+    // error. This is the path a caller who never aborts still reaches.
+    const impatient = await createPostgresEngine({ connectionString: url as string, statementTimeoutMs: 150 });
+    try {
+      await expect(impatient.run('select pg_sleep(5)')).rejects.toMatchObject({ code: 'NL2C_E_TIMEOUT' });
+    } finally {
+      await impatient.close();
+    }
   });
 
   it('can be opened read-write when a caller explicitly asks', async () => {
