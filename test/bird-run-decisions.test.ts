@@ -576,6 +576,35 @@ describe('what an arm row says about itself', () => {
     expect(row.tokens?.byPurpose?.select).toMatchObject({ calls: 1, prompt: 30, completion: 2 });
   });
 
+  it('publishes a metered cost with no purpose breakdown, and keeps the breakdown absent', () => {
+    // The two halves of the same column. `byPurpose` was only ever read on an artifact that
+    // had one — `byPurpose: { generate, select }` was in every test ever written for this row
+    // — so the case the branch exists for was the one nobody exercised: a provider that
+    // reports a usage block and no purpose split. That is the older artifact and the plain
+    // endpoint both, and reporting `byPurpose: {}` there would claim a breakdown of nothing.
+    const flat: CaseRun = {
+      ...outcome('1', true),
+      tokens: { prompt: 100, completion: 10, chars: 400, unbilled: 0 },
+    };
+    const row = armReportRow(preparedWith([question(1, 'simple')]), resolveArm('names') as Arm, [flat], 'names');
+    expect(row.tokens).toMatchObject({ prompt: 100, completion: 10, chars: 400 });
+    expect(row.tokens?.byPurpose).toBeUndefined();
+  });
+
+  it('sums what the endpoint dropped over the cases that carried one, and only those', () => {
+    // A mixed run: one case was charged for a `temperature` the endpoint accepted and ignored,
+    // the other asked for no sampling at all and therefore reported nothing. Summing over
+    // every run would need a zero for the second, which is a claim about a request that never
+    // named the parameter; the field is absent on that case for the same reason it is absent
+    // from a report where no case carried one.
+    const charged: CaseRun = { ...outcome('1', true), samplingOmitted: { temperature: 1 } };
+    const plain: CaseRun = outcome('2', true);
+    const row = armReportRow(preparedWith([question(1, 'simple')]), resolveArm('names') as Arm, [charged, plain], 'names');
+    expect(row.samplingOmitted).toEqual({ temperature: 1 });
+    const clean = armReportRow(preparedWith([question(1, 'simple')]), resolveArm('names') as Arm, [plain], 'names');
+    expect(clean.samplingOmitted).toBeUndefined();
+  });
+
   it('refuses to publish a cost whose calls do not say what they were for', () => {
     // An unattributed call is a cost with no owner: it inflates the total and belongs to no
     // row of the table the total is read against. The run fails rather than publishing a

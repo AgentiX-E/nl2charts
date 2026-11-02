@@ -7,7 +7,7 @@
     "lines": 99.44,
     "statements": 99.44,
     "functions": 100,
-    "branches": 98.03
+    "branches": 98.04
   },
   "files": {
     "eval/ablate.ts": {
@@ -224,7 +224,7 @@
       "lines": 99.4,
       "statements": 99.4,
       "functions": 100,
-      "branches": 95.39
+      "branches": 95.61
     },
     "eval/bird/samples.ts": {
       "lines": 100,
@@ -376,19 +376,5 @@
       "functions": 100,
       "branches": 97.95
     }
-  },
-  "regressions": [
-    {
-      "at": "2026-11-02",
-      "reason": "eval/bird/run.ts 95.39 -> 95.08 branches: the capability contract and the empty-turn fixes add ~200 branch sites in the runner, and eight of them are the single-candidate x voting x empty-result combinations that no declared arm reaches; every dimension is still above the 95% floor (lines 99.44, statements 99.44, functions 100.00), and the two new end-to-end tests cover the paths the fixes created",
-      "drops": [
-        {
-          "file": "eval/bird/run.ts",
-          "dimension": "branches",
-          "before": 95.39,
-          "after": 95.08
-        }
-      ]
-    }
-  ]
+  }
 }

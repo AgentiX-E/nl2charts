@@ -595,3 +595,14 @@ that differs in method rather than in prompt or in draw.
   "test more": it is that a lever crossing three layers needs one test that asserts it crossed all
   three, and that the artifact must carry the mechanism's own count. Both are now in place, and the
   test fails against any one of the three reverts.
+- **A declaration is read before a name, and the row is read whole.** `capabilitiesOf` picked its
+  base row from the model *name* and then overwrote `family` from the deployment's declaration. On
+  the only endpoints that have to declare anything — self-hosted ones, whose names say nothing — the
+  result contradicted itself: `family: 'reasoning'` beside `thinksAloud: false` (the chat judge
+  format), `jsonMode: true` (a JSON mode the endpoint does not serve, answered with a 400 that reads
+  as a bad key) and a 4,096-token answer budget against the 8,192 the vendor documents, where a
+  truncated answer scores as a wrong one. Declaring both fields, which is the natural way to write
+  it, was worse than declaring one. The rule is the same one the contract already states: a
+  declaration is knowledge and a name is a guess, so the guess may not choose what the knowledge is
+  merged into. The base now follows the declared family and the name is the fallback; a deployment
+  that knows its own ceiling still wins field by field.

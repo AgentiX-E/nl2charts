@@ -8,6 +8,19 @@ cannot be argued with.
 
 ### Fixed
 
+- **A declared family took one field of its row and left the rest at the chat defaults.**
+  `capabilitiesOf` chose the base row from the model *name* and then overwrote `family` from the
+  declaration, so a deployment that declared its endpoint on a name the heuristic cannot read — the
+  only kind of endpoint that has to declare anything — got a record that contradicted itself. With
+  `{"family":"reasoning","sampling":"ignored"}` on `private-prod-a`: `thinksAloud: false` (the chat
+  judge format, the defect fixed two entries below), `jsonMode: true` (a JSON mode a reasoning
+  endpoint does not serve, refused with a 400 that reads as a bad key), and `maxOutputTokens: 4096`
+  (half DeepSeek's documented 8,192 for the final answer, where a truncated answer scores as a wrong
+  one). Declaring *less* was strictly better than declaring *more*. The base now follows the declared
+  family and the name is the fallback it was meant to be; a deployment that names its own ceiling
+  still wins field by field. Found by writing the test that asks whether the declaration reaches the
+  provider `createProviders` builds, which nothing in the suite asked before.
+
 - **An arm whose switch never reached the mechanism was a label, not a lever.** `inline+evidence+empty`
   has been declared, paired and filed on demand since the empty-result turn was written, and the turn
   could not fire: `createPipeline` was never given `emptyRetry`, the execution hook was attached only

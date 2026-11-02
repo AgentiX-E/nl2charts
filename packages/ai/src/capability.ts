@@ -91,17 +91,26 @@ export const REASONING_CAPABILITIES: ModelCapabilities = {
  */
 const REASONING_NAME = /(?:^|[-_/])(?:reasoner|thinking|r1|qwq|magistral|o[1-9])(?:$|[-_/])/i;
 
-/** A capability declaration: the family's defaults, with any field the deployment overrides. */
+/**
+ * A capability declaration: the family's defaults, with any field the deployment overrides.
+ *
+ * The base is chosen by the *declared* family, not by the name. The name is a guess and a
+ * declaration is not, so the two must not be consulted in that order: picking the base from the
+ * name and then overwriting `family` produced records that contradicted themselves, and the more
+ * completely a deployment declared its endpoint the worse they got. On a model whose name says
+ * nothing — `private-prod-a`, which is what a self-hosted reasoning endpoint is called — declaring
+ * `{family: 'reasoning', sampling: 'ignored'}` produced `thinksAloud: false` (the chat judge
+ * format) beside `jsonMode: true` (a JSON mode the endpoint does not serve) and a 4,096-token
+ * answer budget against a documented 8,192. Declaring less was strictly better than declaring
+ * more, which is the shape of a merge that reads the wrong source.
+ */
 export function capabilitiesOf(model: string, overrides?: Partial<ModelCapabilities>): ModelCapabilities {
-  const base = REASONING_NAME.test(model) ? REASONING_CAPABILITIES : CHAT_CAPABILITIES;
-  if (overrides === undefined) return base;
-  const merged: ModelCapabilities = { ...base, ...overrides };
-  // One inconsistency worth refusing: a caller that says "reasoning" but leaves `sampling` at
-  // the chat default would get the parameter back, which is the defect this file removes.
-  if (merged.family === 'reasoning' && overrides.sampling === undefined) {
-    return { ...merged, sampling: 'ignored', thinksAloud: overrides.thinksAloud ?? true };
-  }
-  return merged;
+  const family: ModelFamily = overrides?.family ?? (REASONING_NAME.test(model) ? 'reasoning' : 'chat');
+  const base = family === 'reasoning' ? REASONING_CAPABILITIES : CHAT_CAPABILITIES;
+  // `family` last so the record's own field agrees with the base it was derived from; every other
+  // field keeps the caller's value, including one that deliberately contradicts the family — a
+  // chat endpoint that ignores sampling is a documented vendor behaviour, not a mistake.
+  return overrides === undefined ? base : { ...base, ...overrides, family };
 }
 
 /** A request together with what the endpoint will actually do with it. */

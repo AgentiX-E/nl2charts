@@ -25,7 +25,7 @@ import {
   withCallCounter,
 } from '@agentix-e/nl2charts-ai';
 import type { Candidate } from '@agentix-e/nl2charts-ai';
-import { parseCapabilityOverrides } from '../eval/bird/run.js';
+import { createProviders, parseCapabilityOverrides, resolveSettings } from '../eval/bird/run.js';
 import { startEndpoint } from './helpers/endpoint.js';
 import type { Endpoint } from './helpers/endpoint.js';
 
@@ -64,6 +64,34 @@ describe('capabilitiesOf', () => {
     // which is the whole defect. The derived fields follow the family.
     expect(declared.sampling).toBe('ignored');
     expect(declared.thinksAloud).toBe(true);
+    // And so do the two fields that are not covered by the sentence above, which is how they
+    // came to be wrong: the record said `family: reasoning` while carrying the chat endpoint's
+    // JSON mode and half its documented answer budget. A declaration that names the family has
+    // to take the family's whole row, not one field of it.
+    expect(declared.jsonMode).toBe(false);
+    expect(declared.maxOutputTokens).toBe(REASONING_CAPABILITIES.maxOutputTokens);
+  });
+
+  it('derives the rest of the row from the declared family even when the name says nothing', () => {
+    // The declaration is the only thing a self-hosted endpoint has: `private-prod-a` cannot be
+    // read by name, and the two-field declaration below is the natural way to write it. Before
+    // this case existed it produced `thinksAloud: false` beside `jsonMode: true` — the chat
+    // judge format and a JSON mode the endpoint does not serve — so declaring more was worse
+    // than declaring less.
+    const declared = capabilitiesOf('private-prod-a', { family: 'reasoning', sampling: 'ignored' });
+    expect(declared).toEqual(REASONING_CAPABILITIES);
+    // A deployment that knows its own ceiling still wins over the family default.
+    expect(capabilitiesOf('private-prod-a', { family: 'reasoning', maxOutputTokens: 32768 }).maxOutputTokens).toBe(32768);
+  });
+
+  it('reads a chat family declared over a reasoning-looking name as chat', () => {
+    // The name heuristic is a guess and the declaration is not; when they disagree the
+    // declaration is the one that was meant. `deepseek-reasoner` served behind a chat-shaped
+    // proxy is the case: sampling applies there, and the answer budget is the proxy's.
+    const declared = capabilitiesOf('deepseek-reasoner', { family: 'chat' });
+    expect(declared.family).toBe('chat');
+    expect(declared.jsonMode).toBe(true);
+    expect(declared.thinksAloud).toBe(false);
   });
 
   it('keeps an explicit sampling declaration even on a reasoning family', () => {
@@ -219,5 +247,43 @@ describe('parseCapabilityOverrides', () => {
 
   it('passes a well-formed declaration through, including fields it does not own', () => {
     expect(parseCapabilityOverrides('{"family":"reasoning","vendor":"acme"}', 'X')).toEqual({ family: 'reasoning', vendor: 'acme' });
+  });
+});
+
+/**
+ * The declaration has to reach the provider the run actually builds.
+ *
+ * Everything above tests a provider handed to a function by a test. Production builds it in
+ * `createProviders` from `resolveSettings`, and until this block existed nothing asserted that
+ * those two steps carried `capabilities` across. A contract that is honoured in a test and
+ * dropped at the one call site that matters is exactly the failure this round is about: the
+ * declaration is a property of the endpoint, and an endpoint assembled without it is the
+ * pipeline this round set out to fix.
+ */
+describe('the declaration the run hands its second provider', () => {
+  const SECOND = { BIRD_SECOND_MODEL: 'glm-5', BIRD_SECOND_API_KEY: 'k', BIRD_SECOND_BASE_URL: 'http://127.0.0.1:1/v1' };
+
+  it('carries a declared family from the environment onto the provider', () => {
+    const settings = resolveSettings(
+      { ...SECOND, BIRD_SECOND_CAPABILITIES: '{"family":"reasoning","sampling":"ignored"}' },
+      [],
+      '/repo',
+    );
+    expect(settings.second.capabilities).toEqual({ family: 'reasoning', sampling: 'ignored' });
+    // The whole row, not the two fields that were typed: the provider is what `adaptRequest`
+    // reads, and reading `family` off a record that also says `jsonMode: true` is how a request
+    // to a reasoning endpoint came to carry a JSON mode it does not serve.
+    expect(createProviders(settings).second?.capabilities).toEqual(REASONING_CAPABILITIES);
+  });
+
+  it('falls back to the model name when nothing was declared, and says nothing it was not told', () => {
+    // Absent in the settings is "the deployment did not say"; the provider still declares a row,
+    // because a request that was sent has a shape. Which row it is comes from the name — the
+    // documented guess — and the settings object must not invent one of its own.
+    const named = resolveSettings({ ...SECOND, BIRD_SECOND_MODEL: 'deepseek-reasoner' }, [], '/repo');
+    expect(named.second.capabilities).toBeUndefined();
+    expect(createProviders(named).second?.capabilities).toEqual(REASONING_CAPABILITIES);
+    const plain = resolveSettings({ ...SECOND, BIRD_SECOND_MODEL: 'some-chat-model' }, [], '/repo');
+    expect(createProviders(plain).second?.capabilities).toEqual(CHAT_CAPABILITIES);
   });
 });
