@@ -5469,3 +5469,45 @@ answered:
 | ③ homogeneous pool: `vote − pooled ≤ 0` | **unread** | dispatched, refused by I-80, re-dispatched |
 | ④ `agree − pooled ≥ +1.0pp` ⇒ structure is the missing information | met in direction | +1.17pp then +0.33pp |
 | ⑤ `judge-reasoning − pooled ≥ +1.0pp` ⇒ the strong model wins the judge's seat | refuted | −0.83pp then −0.17pp |
+
+## The reconcile arm, and the criterion it is dispatched against
+
+The two readings on the shared pool leave one lever standing and close another. Closed: paying a
+model to pick among three candidates on the 2+1 pool is worth nothing (+0.17pp, then −0.17pp, both
+inside the ±0.67pp jitter the A/A pair measured). Standing: telling the model *which candidates
+returned the same rows* has paid twice (+1.17pp, +0.33pp) — structure, not adjudication.
+
+The arithmetic that points to the next lever is the gap between the ceiling and the score. On the
+cross pool 70.5% of cases (423/600) hold a statement that matches the gold result, and the arm
+scores 64.0% (384/600). Thirty-nine cases contain a correct answer the decision does not return.
+An index cannot fix those: an index names a member of the set, and the reading that wins is "the
+members are not the answer".
+
+`select-cross-pooled-reconcile` is therefore one lever from `select-cross-pooled` — same
+candidates, same shared pool, same single call at temperature 0 — with a different answer format.
+It hands over the *result groups* (`resultGroups`: the partition the agreement marks already
+define, one group per distinct result) and asks for the statement to run
+(`buildReconcilePrompt`). The reply is executed against the case's database and, if it runs,
+becomes the answer. Two fallbacks are named rather than silent: a statement the engine refuses
+leaves the vote's answer standing, and a turn that never came back is an outage recorded in
+`selectionFailed`.
+
+The funnel the arm publishes is `asked / returned / novel / executable / adopted`, and the
+guarded column is `novel`. The criterion, registered before the dispatch:
+
+| criterion | threshold | why this number |
+|---|---|---|
+| ① the lever ran | `novel > 0` on the sample, and the funnel appears in the artifact | an arm whose every reply restates a candidate is a selector with a longer prompt; `assertReconcileFired` refuses the run otherwise |
+| ② it beats the free rule where the free rule is weakest | on disputed cases (`select-cross-pooled` vs `select-cross-pooled-vote` disagree), more than the vote's share | the vote scores 63.3% for no calls at all; a paid lever that cannot beat it on the cases where a decision exists has not bought anything |
+| ③ it does not lose the cases the vote wins | overall `reconcile − vote ≥ 0`, and no more than 1pp of the 39 reachable cases lost | a statement the model writes can be worse than any candidate it was shown; that is a cost, and it has to be smaller than the gain |
+| ④ it is not the selector in disguise | `novel` share ≥ 10% of cases | below that, the delta belongs to the selector and the arm's name is wrong |
+
+Dispatch: `select-cross, select-cross-pooled, select-cross-pooled-vote,
+select-cross-pooled-agree, select-cross-pooled-reconcile` on 600 dev questions, second model
+`deepseek-reasoner`. The pooled arms must run after `select-cross` in the same dispatch, because
+the pool is what makes the comparison free of generation noise.
+
+One cost note: the reconcile prompt is longer than the selector's (it carries one statement per
+group rather than one line per candidate), and `packages/ai` sits at 53,270 B gzip against a
+54,500 B budget. The next prompt that lands there needs a budget line of its own, priced the way
+`packages/node`'s was, rather than a quiet absorption.
