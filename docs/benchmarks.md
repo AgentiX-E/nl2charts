@@ -5458,17 +5458,72 @@ disagreement — both failed in the direction of accusing the harness of the dat
 
 ## Where the eight-arm reading stands
 
-Criterion ③ was dispatched twice and has not yet been read: the first run had no homogeneous pool
-arms at all, the second was refused before reaching them. Everything else the round asked for is
-answered:
+Three dispatches, and the third one finally read criterion ③ — the first run had no homogeneous pool
+arms at all, the second was refused before reaching them (I-80), and the third ran to completion on
+all eight (`41440646002`, 600 questions, `deepseek-chat` with `deepseek-reasoner` writing the
+`@second` candidates):
+
+| arm | score | ceiling | calls |
+|---|---|---|---|
+| `select-cross` | 382 (63.7%) | 70.0% | 4 |
+| `select-mixed` | 384 (64.0%) | 66.5% | 4 |
+| `select-cross-pooled` | 383 (63.8%) | 70.0% | 1 |
+| `select-cross-pooled-vote` | 381 (63.5%) | 70.0% | 0 |
+| `select-cross-pooled-agree` | 386 (64.3%) | 70.0% | 1 |
+| `select-cross-pooled-judge-reasoning` | 380 (63.3%) | 70.0% | 1 |
+| `select-mixed-pooled` | 385 (64.2%) | 66.5% | 1 |
+| `select-mixed-pooled-vote` | 381 (63.5%) | 66.5% | 0 |
 
 | criterion | status | reading |
 |---|---|---|
-| ① `select-cross-pooled` is an exact A/A instrument | met | identical ceilings on one pool; decisions differ by 4 cases in 600 (jitter) |
-| ② heterogeneous pool: `vote − pooled ≥ 0` | even twice | +0.17pp, then −0.17pp, both inside ±0.67pp |
-| ③ homogeneous pool: `vote − pooled ≤ 0` | **unread** | dispatched, refused by I-80, re-dispatched |
-| ④ `agree − pooled ≥ +1.0pp` ⇒ structure is the missing information | met in direction | +1.17pp then +0.33pp |
-| ⑤ `judge-reasoning − pooled ≥ +1.0pp` ⇒ the strong model wins the judge's seat | refuted | −0.83pp then −0.17pp |
+| ① `select-cross-pooled` is an exact A/A instrument | met | identical ceilings on one pool; decisions differ by 1–4 cases in 600 (jitter) |
+| ② heterogeneous pool: `vote − pooled ≥ 0` | even three times | +0.17pp, −0.17pp, −0.33pp — all inside ±0.67pp, so the vote neither gains nor loses on this pool |
+| ③ homogeneous pool: `vote − pooled ≤ 0` | **met** | `381 − 385 = −0.67pp`, exactly one jitter unit — the selector converts where the vote cannot |
+| ④ `agree − pooled ≥ +1.0pp` ⇒ structure is the missing information | met in direction | +1.17pp, +0.33pp, +0.50pp; the mean of three is +0.67pp, below the bar it was registered against |
+| ⑤ `judge-reasoning − pooled ≥ +1.0pp` ⇒ the strong model wins the judge's seat | refuted | −0.83pp, −0.17pp, −0.50pp — three readings, one sign |
+
+Two of the five criteria are now settled and they settle each other. ② and ③ are the same comparison
+on two pools that differ only in whether the candidates were aimed: on the cross pool the three
+candidates disagree often, the vote and the selector tie, and a paid decision buys nothing; on the
+mixed pool the candidates largely agree, and the selector beats the vote by exactly the jitter it was
+measured against. That is the shape hypothesis the pair was built to test, and it holds in the
+direction predicted — **selection pays where the candidate set is redundant and does not where it is
+already diverse**. It also reframes the reconcile arm: it is dispatched on the *cross* pool, which is
+the one pool on which a model reading the candidates cannot beat a count, so a reconcile win there
+would not be a better selector wearing a new name — it would be the only lever that has converted on
+that pool at all.
+
+## The third dispatch, and the guard that priced a free candidate set
+
+`41440646002` finished all eight arms and then failed its gate — on four rows, all of them pooled:
+
+```
+BIRD1: select-cross-pooled samples 3 times, selects with the model, and reports 1 calls per case;
+       the selector call is not counted
+```
+
+The rows were right and the tool was wrong, which is the more dangerous of the two errors: a gate that
+refuses a correct row teaches its reader to skim. The rule it applied is sound for the arm it was
+written for — a generating arm that samples three times and selects with a model spends four calls,
+and three means the selector went unbilled — but a pooled arm does not sample. Its candidates are the
+ones its source arm already paid for, so one call per case *is* its price, and the four rows were
+reporting precisely the number they exist to report (I-81).
+
+The rejection still pointed at a real gap. `calls.mean` cannot separate the two states a pooled arm
+can be in: a case whose pool came back empty returns before the selector and spends nothing, so
+`0.995` is "three cases never reached the decision" on a correct arm and "the selector is not counted"
+on a broken one. The mean is the same number in both readings. The artifact now carries the counts
+instead (`poolSpend: { asked, priced }`), the runner refuses to publish a pooled select arm without
+them, and the gate reads them in place of the mean:
+
+- pooled and `selector: 'model'` → `priced === asked > 0`, else "the selector call is not counted";
+- pooled → `mean` must be strictly below its source arm's, else "the candidates were drawn twice",
+  which is the failure pooling exists to prevent and the one a mean can catch;
+- everything else keeps the rule written for generating arms.
+
+Fixing the tool rather than the number is the point of the exercise, and it is worth stating plainly
+because the opposite move is always available: the four rows could have been "fixed" by adding a call
+that never happened.
 
 ## The reconcile arm, and the criterion it is dispatched against
 

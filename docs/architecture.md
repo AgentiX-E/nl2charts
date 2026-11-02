@@ -727,6 +727,19 @@ that differs in method rather than in prompt or in draw.
   nothing). The general lesson is the one this file keeps relearning: a guard that fires on the
   harness's honest behaviour is worse than no guard, because it turns a measurement into an
   incident and the fix is then applied to the guard rather than to the question.
+- **A pooled arm pays for a decision and for no candidates, so a mean cannot state its price.** The
+  cost rule — an arm that samples three times and selects with a model spends four calls, and three
+  means the selector went unbilled — is right about the arms it was written for and wrong about the
+  one case it had never met. `41440646002` ran eight arms to completion and the gate refused four
+  pooled rows for reporting exactly one call per case, which is what a pooled arm is built to report.
+  The false refusal carried a real gap inside it: `calls.mean` cannot separate "three cases never
+  reached the selector" (an empty pool returns before the decision) from "the selector was never
+  counted", because both read 0.995. The artifact now carries the two counts instead —
+  `poolSpend: { asked, priced }` — and the gate reads `priced === asked` in place of the mean, plus
+  the one rule a mean *can* enforce: a pooled arm must spend strictly fewer calls than the arm whose
+  pool it names, or the candidates were drawn twice. Two shapes, two rules, and the reason a guard
+  refuses is checked as carefully as the refusal — a reader will go looking for whatever the message
+  names.
 - **A mechanism that fires three times cannot explain a delta of eighteen wins, and the check is
   arithmetic rather than statistical.** The repair loop fires only on a guard rejection or an engine
   refusal: 3 times on `-repair-second` and 11 on `-repair-all` in 600 questions, while the same arms

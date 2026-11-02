@@ -1404,6 +1404,17 @@ export interface ArmReportRow {
    */
   readonly poolRead?: { readonly shared: number; readonly unrecorded: number; readonly cases: number };
   /**
+   * What the lever cost this arm, case by case, on the arms that generate nothing of their own.
+   *
+   * `asked` is the number of cases that reached a decision and `priced` the number of those that
+   * spent a counted call. The pair exists because the rule that prices a generating arm — more
+   * calls than samples, since the selector is one call on top of the candidates — says the opposite
+   * of the truth on a pooled arm: a pooled arm draws nothing, so one call per case *is* its correct
+   * bill, and `41440646002` was refused for reporting exactly that on four arms (I-81). A mean
+   * cannot separate "the selector was counted" from "the selector was not", and a count can.
+   */
+  readonly poolSpend?: { readonly asked: number; readonly priced: number };
+  /**
    * What the reconcile turn did across the arm's cases, on the arm that asks for a statement.
    *
    * The `novel` column is the one that decides whether the lever ran: an arm whose replies restate
@@ -1977,6 +1988,24 @@ export function poolReadOf(
 }
 
 /**
+ * How many of a pooled arm's decisions carry a counted call.
+ *
+ * The one number a pooled arm's cost cannot be inferred from. Its `calls.mean` is a mean over cases
+ * that did not all decide — a case whose pool was empty returns before the selector and spends
+ * nothing — so the same mean supports two opposite readings: 0.995 is "three cases never reached
+ * the selector" on a correct arm and "the selector is not priced" on a broken one. Counting the
+ * decisions instead of averaging them is the only way to tell those apart, because the counter runs
+ * before the call (`withCallCounter`) and therefore includes the selector turns that threw.
+ *
+ * No instrument floor: this is a reconciliation of two counts over the same cases, not a share, so
+ * a seven-question fixture says as much as a six-hundred-question run.
+ */
+export function poolSpendOf(runs: readonly CaseRun[]): ArmReportRow['poolSpend'] {
+  const decided = runs.filter((run) => run.selectedByModel !== undefined);
+  return { asked: decided.length, priced: decided.filter((run) => run.calls >= 1).length };
+}
+
+/**
  * A selector that never answered is not a selector that chose badly.
  *
  * The call used to escape, which refused the run at the failure-share gate — loud, but for the
@@ -2227,6 +2256,15 @@ export function assertReportComplete(report: { readonly arms?: readonly ArmRepor
       // is legitimately absent.
       throw new Error(
         `arm ${row.arm} reads the pool of ${arm.pool} and its row carries no pool verification, so the delta it publishes rests on an unstated number of shared cases`,
+      );
+    }
+    if (arm.pool !== undefined && arm.select === true && row.poolSpend === undefined && row.total >= MINIMUM_INSTRUMENT_SAMPLE) {
+      // A pooled arm's entire bill is the call it spends on its lever, so the row has to say how many
+      // decisions carried one. The gate cannot read that off `calls.mean`: a case whose pool was empty
+      // returns before the selector, which makes 1.0 and 0.99 the same number to a mean and opposite
+      // facts to a reader — one arm priced its selector, the other never reached it.
+      throw new Error(
+        `arm ${row.arm} reads a pool and decides with the model, and its row does not say how many of those decisions were priced: the selector call is the whole bill and a mean cannot show it`,
       );
     }
     if (row.total > 0 && row.format === undefined && row.pool === undefined) {
@@ -4577,6 +4615,9 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
     passed: summary.passed,
     total: summary.total,
     ...(arm.pool === undefined ? {} : { pool: arm.pool }),
+    // Beside the pool it read, because the two are the same question asked of the sample and of the
+    // bill: a pooled arm's candidates come from another arm and its calls belong to its own lever.
+    ...(arm.pool === undefined || arm.select !== true ? {} : { poolSpend: poolSpendOf(runs) }),
     accuracy: summary.accuracy,
     wilson: wilsonInterval(summary.passed, summary.total),
     strictPassed,

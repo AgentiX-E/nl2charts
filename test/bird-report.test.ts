@@ -159,6 +159,7 @@ describe('report completeness', () => {
             pool: 'select-cross',
             candidateRecall: 0.697,
             poolRead: { shared: 598, unrecorded: 2, cases: 600 },
+            poolSpend: { asked: 598, priced: 598 },
           },
         ],
       }),
@@ -167,6 +168,40 @@ describe('report completeness', () => {
     // and a zero here would read as a pool that failed rather than a sample that cannot say.
     expect(() =>
       assertReportComplete({ arms: [{ arm: 'select-cross-pooled', total: 7, pool: 'select-cross', candidateRecall: 0.857 }] }),
+    ).not.toThrow();
+  });
+
+  it('refuses a pooled arm that selects and does not say how many decisions it priced', () => {
+    // A pooled arm's whole bill is one call per decision, and the gate cannot read that off its
+    // mean: 1.0 and 0.97 are the same line to a reader and opposite facts to an auditor — one arm
+    // priced its selector, the other never reached it on three cases (I-81).
+    expect(() =>
+      assertReportComplete({
+        arms: [
+          {
+            arm: 'select-cross-pooled',
+            total: 600,
+            pool: 'select-cross',
+            candidateRecall: 0.697,
+            poolRead: { shared: 600, unrecorded: 0, cases: 600 },
+          },
+        ],
+      }),
+    ).toThrow(/select-cross-pooled.*does not say how many of those decisions were priced/);
+    // A pooled majority vote never asks the model, so there is no decision to price and the row
+    // carries no such count: the rule is keyed on the selector, not on the pool.
+    expect(() =>
+      assertReportComplete({
+        arms: [
+          {
+            arm: 'select-mixed-pooled-vote',
+            total: 600,
+            pool: 'select-mixed',
+            candidateRecall: 0.665,
+            poolRead: { shared: 600, unrecorded: 0, cases: 600 },
+          },
+        ],
+      }),
     ).not.toThrow();
   });
 
@@ -185,6 +220,7 @@ describe('report completeness', () => {
             pool: 'select-cross',
             candidateRecall: 0.705,
             poolRead: { shared: 600, unrecorded: 0, cases: 600 },
+            poolSpend: { asked: 600, priced: 600 },
             reconcile: { asked: 600, returned: 600, novel: 214, executable: 605, adopted: 380 },
           },
         ],

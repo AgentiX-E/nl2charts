@@ -83,6 +83,20 @@ cannot be argued with.
 
 ### Fixed
 
+- **A pooled arm was refused for reporting the price it was built to report.** `41440646002` ran
+  eight arms to completion and then failed its own gate on four of them: `select-cross-pooled`,
+  `-agree`, `-judge-reasoning` and `select-mixed-pooled` each reported one call per case, and the rule
+  that prices a sampling arm — more calls than samples, because the selector is one on top of the
+  candidates — read that as a selector that went unbilled. The rule is right about the arm it was
+  written for and wrong about these: a pooled arm samples nothing, so one call per case *is* its
+  bill. The gate now prices the two shapes separately, and the gap the false alarm exposed is closed
+  the same way: a mean cannot separate "three cases never reached the selector" from "the selector is
+  not counted", because 0.995 and 1.000 are the same number to a reader and opposite facts to an
+  auditor. `poolSpend: { asked, priced }` counts the decisions and the ones that carried a call, the
+  runner refuses to publish a pooled select arm without it, and the gate reads `priced === asked` in
+  place of the mean — plus one rule a mean *can* enforce, that a pooled arm must spend strictly fewer
+  calls than the arm whose pool it names.
+
 - **A case the source arm could not fill was filed as a bug in the runner.** `41430569500` scored six
   arms on 600 dev questions and then refused to publish: two cases in `select-mixed` produced no
   candidates at all — every sample for those questions died at the engine — and `reusePool` raised a

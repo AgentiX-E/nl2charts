@@ -351,14 +351,45 @@ export function compare(report, baseline) {
       issues.push(`BIRD1: ${item.arm} reports no calls per case, so its delta cannot be priced`);
       continue;
     }
+    const pooled = typeof item.pool === 'string';
+    // A pooled arm draws nothing: its candidates are the ones the arm it names already paid for, so
+    // `calls == 1` — the decision — is its correct price, and the rule below says the opposite of the
+    // truth about it. `41440646002` ran eight arms to completion and this tool refused four of them
+    // for reporting one call per case, which was the number they were built to report (I-81). The
+    // selector call is checked where it is visible instead: the arm has to say how many decisions it
+    // made and how many of those carried a counted call, and the two have to be the same count.
+    if (pooled && item.selector === 'model') {
+      const spend = item.poolSpend;
+      if (spend === undefined) {
+        issues.push(
+          `BIRD1: ${item.arm} reads the pool of ${item.pool} and decides with the model, and does not say how many of its decisions were priced; the selector is its whole bill, so an uncounted one is indistinguishable from a free one`,
+        );
+      } else if (!(spend.asked > 0) || spend.priced < spend.asked) {
+        issues.push(
+          `BIRD1: ${item.arm} needed a decision on ${String(spend.asked)} cases and priced ${String(spend.priced)} of them; the selector call is not counted`,
+        );
+      }
+    }
+    // ...and the pool was read rather than drawn a second time. An arm that regenerates its
+    // candidates spends what its parent spends, which is the one thing a shared pool exists to
+    // avoid — and it would do it while reporting the parent's candidates as its own reading.
+    if (pooled) {
+      const sourceMean = (report.arms ?? []).find((row) => row.arm === item.pool)?.calls?.mean;
+      if (typeof sourceMean === 'number' && !(mean < sourceMean)) {
+        issues.push(
+          `BIRD1: ${item.arm} reuses the pool of ${item.pool} and spends ${String(mean)} calls per case against its ${String(sourceMean)}; the candidates were drawn twice, so the pair measures the pool's noise rather than the lever`,
+        );
+      }
+    }
     // Only an arm whose selector is the model must spend a call on it. A majority vote
     // reads the same candidates with no model, so `calls == samples` is its correct
     // price — the first version of this check could not tell the two apart and would
-    // have failed an arm that was right.
-    if (samples !== undefined && item.selector === 'model' && mean <= samples) {
+    // have failed an arm that was right. A pooled arm is exempt for the reason above: it
+    // pays for one decision and for no candidates at all.
+    if (!pooled && samples !== undefined && item.selector === 'model' && mean <= samples) {
       issues.push(`BIRD1: ${item.arm} samples ${String(samples)} times, selects with the model, and reports ${String(mean)} calls per case; the selector call is not counted`);
     }
-    if (samples === undefined && mean < 1) {
+    if (!pooled && samples === undefined && mean < 1) {
       issues.push(`BIRD1: ${item.arm} reports ${String(mean)} calls per case, fewer than the one call every arm makes`);
     }
     // A repair arm always reports its funnel, so a `repaired` count without one is a
@@ -832,6 +863,59 @@ function selfTest() {
   if (majorityPriced.issues.length !== 0) {
     issues.push(`BIRD1 accuses a majority-vote arm of hiding a selector call (${majorityPriced.issues.join('; ')})`);
   }
+  // The third shape, and the one `41440646002` was refused for: a pooled arm pays for its decision
+  // and for no candidates at all, so one call per case is its price rather than its defect. The pair
+  // of rows below is what the eight-arm run produced on four arms, and the rule that prices a
+  // sampling arm rejected every one of them.
+  const pooledArm = (overrides) => ({
+    arm: 'select-cross-pooled',
+    passed: 60,
+    total: 100,
+    vote: 3,
+    selector: 'model',
+    pool: 'select-cross',
+    calls: { mean: 1, max: 1 },
+    poolSpend: { asked: 100, priced: 100 },
+    ...overrides,
+  });
+  const pooledReport = (row) => ({
+    selection: { scored: 100, split: 'minidev' },
+    model: 'deepseek-chat',
+    run,
+    arms: [arm('select-cross', 60, 100, { vote: 3, selector: 'model', calls: { mean: 4, max: 4 } }), row],
+  });
+  const pooledPriced = compare(pooledReport(pooledArm({})), { ...baseline, expectedArms: ['select-cross', 'select-cross-pooled'] });
+  if (pooledPriced.issues.length !== 0) {
+    issues.push(`BIRD1 refuses a pooled arm for reporting the one call it makes (${pooledPriced.issues.join('; ')})`);
+  }
+  // A pooled arm whose decisions are not all priced is the defect the mean cannot see: 0.99 is
+  // "three cases never reached the selector" on one arm and "the selector is not counted" on another.
+  const pooledUnpriced = compare(pooledReport(pooledArm({ calls: { mean: 0.97, max: 1 }, poolSpend: { asked: 100, priced: 97 } })), {
+    ...baseline,
+    expectedArms: ['select-cross', 'select-cross-pooled'],
+  });
+  if (!pooledUnpriced.issues.some((issue) => issue.includes('selector call is not counted'))) {
+    issues.push('BIRD1 does not notice a pooled arm that leaves some of its decisions unpriced');
+  }
+  const pooledSilent = compare(pooledReport(pooledArm({ poolSpend: undefined })), { ...baseline, expectedArms: ['select-cross', 'select-cross-pooled'] });
+  if (!pooledSilent.issues.some((issue) => issue.includes('does not say how many of its decisions were priced'))) {
+    issues.push('BIRD1 accepts a pooled arm that never says whether its selector was counted');
+  }
+  // ...and the failure the whole pooling exists to avoid: an arm that regenerates its candidates and
+  // reports the parent's pool as its own reading.
+  const pooledRedrawn = compare(pooledReport(pooledArm({ calls: { mean: 4, max: 4 } })), { ...baseline, expectedArms: ['select-cross', 'select-cross-pooled'] });
+  if (!pooledRedrawn.issues.some((issue) => issue.includes('candidates were drawn twice'))) {
+    issues.push('BIRD1 accepts a pooled arm that spends as many calls as the arm whose pool it claims to share');
+  }
+  // A pooled arm with no decision to make — a majority vote over a shared pool — is free, and the
+  // rule above must not demand a spent call from it.
+  const pooledFree = compare(pooledReport(pooledArm({ selector: 'majority', calls: { mean: 0, max: 0 }, poolSpend: undefined })), {
+    ...baseline,
+    expectedArms: ['select-cross', 'select-cross-pooled'],
+  });
+  if (pooledFree.issues.length !== 0) {
+    issues.push(`BIRD1 demands a spent call from a pooled majority vote (${pooledFree.issues.join('; ')})`);
+  }
   const harnessBroken = compare(
     { selection: { scored: 100, split: 'minidev' }, model: 'deepseek-chat', run, arms: [arm('names', 42, 100, { errors: { harness: 3, llm: 0 } })] },
     { ...baseline, expectedArms: ['names'] },
@@ -1167,7 +1251,7 @@ if (process.argv[2] === '--self-test') {
   const issues = selfTest();
   for (const issue of issues) console.error(issue);
   if (issues.length > 0) process.exit(1);
-  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, a dev run measured against its own sample, two split fields that disagree, a dataset name that disagrees with the split, other split, other model, unfloored arm, empty lever, a funnel that does not add up, a split-specific arm list, an uncounted selector call, a majority vote that spends exactly its samples, a repair count without a loop, an unpriced arm, an unnamed model, floors from an unnamed model and a cross-model arm with no second model named, a judge swap with no judge named, an arm with harness errors, a candidate set that lost a third of itself to an endpoint, a failure corpus that stopped at a cap without saying so, an empty-result lever with no funnel or an impossible yield or nothing behind it, a decomposition arm whose prompt the model ignored, an unrecorded instrument, a samples arm with no values behind it, a truncated schema card, a prompt with no table in it, a declared arm subset, a declared arm whose row was dropped, an undeclared row, an empty declaration and a floor that a declaration does not weaken, a declared sample subset, a subset that cannot clear a floor, a sample that shrank undeclared, an impossible declaration and a row count above the request, a cross-arm floor with a matching second model, a swapped one and an unattributed one, and a ceiling that held, a ceiling that fell while the score held, a ceiling inside the noise threshold, a sampling arm with no ceiling at all, a ceiling whose two fields disagree, a ceiling floor on an arm the split does not run, a score that fell while the ceiling held and a ceiling with no floor yet all behave');
+  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, a dev run measured against its own sample, two split fields that disagree, a dataset name that disagrees with the split, other split, other model, unfloored arm, empty lever, a funnel that does not add up, a split-specific arm list, an uncounted selector call, a majority vote that spends exactly its samples, a pooled arm that pays for its decision and for no candidates, one that leaves a decision unpriced, one that never says whether its selector was counted, one that redrew the pool it claims to share and a pooled majority vote that costs nothing, a repair count without a loop, an unpriced arm, an unnamed model, floors from an unnamed model and a cross-model arm with no second model named, a judge swap with no judge named, an arm with harness errors, a candidate set that lost a third of itself to an endpoint, a failure corpus that stopped at a cap without saying so, an empty-result lever with no funnel or an impossible yield or nothing behind it, a decomposition arm whose prompt the model ignored, an unrecorded instrument, a samples arm with no values behind it, a truncated schema card, a prompt with no table in it, a declared arm subset, a declared arm whose row was dropped, an undeclared row, an empty declaration and a floor that a declaration does not weaken, a declared sample subset, a subset that cannot clear a floor, a sample that shrank undeclared, an impossible declaration and a row count above the request, a cross-arm floor with a matching second model, a swapped one and an unattributed one, and a ceiling that held, a ceiling that fell while the score held, a ceiling inside the noise threshold, a sampling arm with no ceiling at all, a ceiling whose two fields disagree, a ceiling floor on an arm the split does not run, a score that fell while the ceiling held and a ceiling with no floor yet all behave');
 } else {
   const reportPath = resolve(ROOT, 'eval/out/bird-eval.json');
   const baseline = JSON.parse(readFileSync(resolve(ROOT, 'eval/baseline/bird.json'), 'utf8'));

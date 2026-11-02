@@ -18,6 +18,7 @@ import {
   assertSelectorAnswered,
   reusePool,
   poolReadOf,
+  poolSpendOf,
   assertReconcileFired,
   reconcileFunnel,
   caseRows,
@@ -883,6 +884,70 @@ describe('how much of the pool a pooled arm could verify', () => {
     const source = sample(120);
     const pooled = Array.from({ length: 120 }, (_unused, index) => row(String(index), index === 0));
     expect(() => poolReadOf('pooled', pooled, source)).toThrow(/generated its own candidates/);
+  });
+});
+
+/**
+ * The one number a pooled arm's bill cannot be inferred from.
+ *
+ * `41440646002` ran eight arms to completion and the gate refused the four pooled ones for reporting
+ * one call per case — which is exactly what a pooled arm should report, since it draws no candidates
+ * and spends one call on the decision. The rejection was the tool's arithmetic, but it pointed at a
+ * real gap: `calls.mean` cannot distinguish "the selector was counted" from "the selector was not",
+ * because the cases that never reached the selector lower the mean for a legitimate reason. Counting
+ * the decisions instead of averaging over them separates the two states.
+ */
+describe('how many of a pooled arm’s decisions carry a call', () => {
+  const decided = (id: string, calls: number, selectedByModel: boolean | undefined): CaseRun => ({
+    id,
+    passed: true,
+    predicted: 'select 1',
+    reason: 'match',
+    strict: true,
+    attempts: 1,
+    calls,
+    ...(selectedByModel === undefined ? {} : { selectedByModel }),
+  });
+
+  it('counts the decisions, not the cases, and prices every one of them', () => {
+    const runs = Array.from({ length: 120 }, (_unused, index) => decided(String(index), 1, true));
+    // 1.0 calls per case, which the old rule read as "three candidates were free and the selector
+    // was never counted" — the arithmetic was right and the premise was wrong.
+    expect(poolSpendOf(runs)).toEqual({ asked: 120, priced: 120 });
+  });
+
+  it('leaves out the cases that never reached a decision, which is why the mean is not 1', () => {
+    // Three cases whose pool came back empty: the arm returned before the selector and spent
+    // nothing. `calls.mean` reads 0.99 over this sample, and the funnel reads "117 of 117" — the
+    // difference between a mean and a count is the whole reason the field exists.
+    const runs = [
+      ...Array.from({ length: 117 }, (_unused, index) => decided(String(index), 1, true)),
+      ...Array.from({ length: 3 }, (_unused, index) => decided(`empty-${String(index)}`, 0, undefined)),
+    ];
+    expect(poolSpendOf(runs)).toEqual({ asked: 117, priced: 117 });
+    expect(meanCalls(runs)).toBeCloseTo(0.975, 3);
+  });
+
+  it('counts a decision whose selector threw, because the counter runs before the call', () => {
+    // A turn that failed is still a turn: `withCallCounter` increments first, so the only way to
+    // reach zero calls on a decided case is for the call to have gone unrecorded.
+    const runs = [decided('a', 1, false), decided('b', 1, true)];
+    expect(poolSpendOf(runs)).toEqual({ asked: 2, priced: 2 });
+  });
+
+  it('separates an arm whose selector was never counted from one that skipped it', () => {
+    // The defect the field is for: every decision was made and none of them cost anything, which
+    // can only mean the selector call is missing from the arm's price.
+    const runs = [decided('a', 0, true), decided('b', 0, true)];
+    expect(poolSpendOf(runs)).toEqual({ asked: 2, priced: 0 });
+  });
+
+  it('says nothing about a sample that decided nothing at all', () => {
+    // A pooled majority vote never asks the model, and an arm whose pool was empty everywhere never
+    // decided. Both are `asked: 0`, and the gate reads that as "there is nothing to price" rather
+    // than as a failure — the same distinction D56 asks for between a missing count and a zero.
+    expect(poolSpendOf([])).toEqual({ asked: 0, priced: 0 });
+    expect(poolSpendOf([decided('a', 0, undefined)])).toEqual({ asked: 0, priced: 0 });
   });
 });
 

@@ -864,6 +864,7 @@ describe('a pooled arm reads the pool instead of drawing one', () => {
         passed: number;
         total: number;
         candidateRecall?: number;
+        poolSpend?: { asked: number; priced: number };
       }[];
       const parent = arms.find((entry) => entry.arm === 'select-cross');
       const pooled = arms.find((entry) => entry.arm === 'select-cross-pooled');
@@ -874,6 +875,12 @@ describe('a pooled arm reads the pool instead of drawing one', () => {
       expect(pooled?.pool).toBe('select-cross');
       expect(parent?.calls.mean).toBe(4);
       expect(pooled?.calls.mean).toBe(1);
+      // ...and the decision carried that call. `calls.mean` of 1 is also what an arm reports when it
+      // never counted a selector and never reached one, so the pair of counts is what makes the
+      // number a price rather than an arithmetic coincidence (I-81: four pooled rows were refused by
+      // the gate for reporting this exact figure).
+      expect(pooled?.poolSpend).toEqual({ asked: QUESTIONS.length, priced: QUESTIONS.length });
+      expect(parent?.poolSpend).toBeUndefined();
       // The second endpoint answered exactly the parent's one cross candidate per case and not
       // one more: a pooled arm that drew its own would double this count.
       expect(second.requests).toHaveLength(QUESTIONS.length);
