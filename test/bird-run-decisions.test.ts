@@ -15,6 +15,7 @@ import {
   armReportRow,
   armSummaryLine,
   assertPoolShared,
+  assertSelectorAnswered,
   reusePool,
   caseRows,
   databasesFromManifest,
@@ -746,6 +747,78 @@ describe('a shared pool has to be the same pool', () => {
     expect(() => assertPoolShared('pooled', pooled, source, 1)).toThrow(/generated its own candidates/);
   });
 
+  it('names the cases that disagree, so the reader can open them', () => {
+    // The count alone cannot separate a pool that was regenerated from a pool that was read and
+    // then half-lost. `41410112996` died on three cases and the message named none of them.
+    const source = [row('1', true), row('2', false)];
+    const pooled = [row('1', false), row('2', false)];
+    expect(() => assertPoolShared('pooled', pooled, source, 1)).toThrow(/1 \(true vs false\)/);
+  });
+
+  it('does not read a case with no record as a case that read another pool', () => {
+    // What a real run cost: three of six hundred cases in the reasoning-judge arm had no candidate
+    // record, because the judge's call escaped the vote branch and the wrapper returns a row with
+    // no ceiling. The first version called that "the shared-pool arm generated its own candidates",
+    // which is the opposite diagnosis — and refused an arm that had read the pool faithfully.
+    const source = [row('1', true), row('2', true), row('3', true)];
+    const pooled = [{ ...row('1', true), candidateRecall: undefined }, row('2', true), row('3', true)];
+    expect(() => assertPoolShared('pooled', pooled, source, 1)).not.toThrow();
+    expect(assertPoolShared('pooled', pooled, source, 1)).toEqual({ shared: 2, unrecorded: 1 });
+  });
+
+  it('excludes a case the source never decided, for the same reason', () => {
+    // Silence on one side is not disagreement on both: a case whose card call failed in the parent
+    // has no ceiling to compare against, and the pooled arm's answer is all there is.
+    const source = [{ ...row('1', true), candidateRecall: undefined }, row('2', false)];
+    const pooled = [row('1', true), row('2', false)];
+    expect(() => assertPoolShared('pooled', pooled, source, 1)).not.toThrow();
+  });
+
+  it('refuses a pool it cannot check at all', () => {
+    // Nothing to compare is not a pass. An arm whose every case lost its record would otherwise
+    // report a shared pool on the strength of zero comparisons.
+    const source = [row('1', true)];
+    const pooled = [{ ...row('1', true), candidateRecall: undefined }];
+    expect(() => assertPoolShared('pooled', pooled, source, 1)).toThrow(/none of its 1 cases carry a candidate record/);
+  });
+
+  it('refuses two sets that agree on the ceiling but not on the statements', () => {
+    // The ceiling agreeing is weak evidence on a case where both sets found the answer: three
+    // different statements can all be right. The texts are the identity, and the artifact already
+    // carries them.
+    const withSql = (id: string, recall: boolean, sqls: readonly string[]): CaseRun => ({
+      ...row(id, recall),
+      candidates: sqls.map((sql, index) => ({ source: `s${String(index)}`, correct: recall, sql, fingerprint: sql })),
+    });
+    const source = [withSql('1', true, ['select a', 'select b'])];
+    const pooled = [withSql('1', true, ['select a', 'select c'])];
+    expect(() => assertPoolShared('pooled', pooled, source, 1)).toThrow(/same number of candidates but not the same statements/);
+  });
+
+  it('accepts the same statements in another order, because a shuffle is a shared pool', () => {
+    // Order is the property `shuffle` is allowed to change; a set that differs only in sequence is
+    // still the pool the parent drew.
+    const withSql = (id: string, sqls: readonly string[]): CaseRun => ({
+      ...row(id, true),
+      candidates: sqls.map((sql, index) => ({ source: `s${String(index)}`, correct: true, sql, fingerprint: sql })),
+    });
+    const source = [withSql('1', ['select a', 'select b'])];
+    const pooled = [withSql('1', ['select b', 'select a'])];
+    expect(() => assertPoolShared('pooled', pooled, source, 1)).not.toThrow();
+  });
+
+  it('says nothing about the statements when one side kept fewer of them', () => {
+    // A pooled arm with the empty-result lever drops a candidate the parent kept, which changes the
+    // set by design. The ceiling still has to agree; the texts are not comparable.
+    const withSql = (id: string, sqls: readonly string[]): CaseRun => ({
+      ...row(id, true),
+      candidates: sqls.map((sql, index) => ({ source: `s${String(index)}`, correct: true, sql, fingerprint: sql })),
+    });
+    const source = [withSql('1', ['select a', 'select b'])];
+    const pooled = [withSql('1', ['select a'])];
+    expect(() => assertPoolShared('pooled', pooled, source, 1)).not.toThrow();
+  });
+
   it('refuses a pool that does not describe the same sample', () => {
     const source = [row('1', true)];
     const pooled = [row('1', true), row('9', true)];
@@ -758,6 +831,46 @@ describe('a shared pool has to be the same pool', () => {
     const source = [row('1', true)];
     const pooled = [row('1', false)];
     expect(() => assertPoolShared('pooled', pooled, source)).not.toThrow();
+  });
+});
+
+/**
+ * A selector that never answered, and the price of publishing its arm anyway.
+ *
+ * The case is scored by the vote now, so the outage no longer shows up as a wrong answer — which is
+ * exactly why it needs a guard of its own: the accuracy of an arm whose adjudications all failed is
+ * the free aggregator's, published under the selector's name.
+ */
+describe('a selector that never answered', () => {
+  const row = (id: string, failed: boolean): CaseRun => ({
+    id,
+    passed: true,
+    predicted: 'select 1',
+    reason: 'values',
+    strict: false,
+    attempts: 3,
+    calls: 1,
+    candidateRecall: true,
+    selectedByModel: !failed,
+    ...(failed ? { selectionFailed: 'llm' as const } : {}),
+  });
+  const rows = (total: number, failed: number): CaseRun[] =>
+    Array.from({ length: total }, (_, index) => row(String(index), index < failed));
+
+  it('refuses an arm whose adjudications were an outage', () => {
+    // Fifteen of a hundred: above the same share the candidate-survival guard uses, because it is
+    // the same claim — the endpoint, not the prompt, decided this arm.
+    expect(() => assertSelectorAnswered('select', rows(100, 15))).toThrow(/15 of 100 cases \(15\.0%\) never reached the selector/);
+  });
+
+  it('accepts a share at the threshold, because a threshold is a boundary and not a direction', () => {
+    expect(() => assertSelectorAnswered('select', rows(100, 10))).not.toThrow();
+  });
+
+  it('says nothing about a sample too small to be a share', () => {
+    // The floor the other arm-level guards use. Three of seven is what a fixture can show, and a
+    // guard that fires on a fixture teaches the suite to work around the guard.
+    expect(() => assertSelectorAnswered('select', rows(7, 3))).not.toThrow();
   });
 });
 

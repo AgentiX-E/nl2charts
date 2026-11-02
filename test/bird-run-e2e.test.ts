@@ -901,6 +901,105 @@ describe('a pooled arm reads the pool instead of drawing one', () => {
  * different pool than it names.
  */
 describe('the decision, with the pool held fixed', () => {
+  it('keeps the candidate record when the selector call never comes back', async () => {
+    // The defect `41410112996` exposed by accident: the adjudication was the one call in the vote
+    // branch with no catch, so a refusal from the endpoint erased the whole case — including the
+    // ceiling — and the shared-pool assertion read that silence as "this arm generated its own
+    // candidates". The vote had already decided the case; the arm has to be scored by it, with the
+    // failed call counted, so the artifact says "the lever did not run here" and not "the pool was
+    // different".
+    const target = QUESTIONS[2]?.question ?? '';
+    const second = await startEndpoint({ reply: (request) => replyFor(request, { first: correct }) });
+    try {
+      const result = await run({
+        plan: {
+          first: correct,
+          // Only the first question's first adjudication fails: on `select-cross` that is the source
+          // arm, and the pooled arm behind it reads the same pool with a live endpoint.
+          fail: (request) =>
+            request.prompt.includes(target) && request.prompt.includes('which candidate statement answers the question') ? 500 : undefined,
+        },
+        env: {
+          BIRD_ARMS: 'select-cross,select-cross-pooled',
+          BIRD_SECOND_MODEL: 'second-model',
+          BIRD_SECOND_BASE_URL: second.url,
+          BIRD_SECOND_API_KEY: 'second-key',
+          BIRD_LLM_RETRIES: '1',
+          BIRD_CONCURRENCY: '1',
+        },
+      });
+      expect(result.code).toBe(0);
+      const arms = result.report.arms as {
+        arm: string;
+        passed: number;
+        total: number;
+        candidateRecall?: number;
+        selectorDecided?: number;
+        selectorTotal?: number;
+        selectorFailed?: number;
+      }[];
+      const [cross, pooled] = arms;
+      expect(cross?.selectorFailed).toBe(1);
+      // Every case still carries a decision: one of them came from the vote.
+      expect(cross?.selectorTotal).toBe(QUESTIONS.length);
+      expect(cross?.selectorDecided).toBe(QUESTIONS.length - 1);
+      // The pool held the answer on every question, and the failed adjudication does not change it.
+      expect(cross?.candidateRecall).toBe(QUESTIONS.length);
+      expect(pooled?.candidateRecall).toBe(cross?.candidateRecall);
+      // Scored by the statement the vote chose, so a lever that did not run is not charged as a
+      // wrong answer: the candidates were right on every case.
+      expect(cross?.passed).toBe(cross?.total);
+      // And the line an operator reads says it, next to the accuracy it qualifies.
+      expect(result.printed.some((line) => line.includes('select-failed 1'))).toBe(true);
+    } finally {
+      await second.close();
+    }
+  });
+
+  it('keeps it when the empty-result turn never comes back either', async () => {
+    // The same bare call one line later: the turn is optional by construction, so a refusal from
+    // the endpoint is a lever that did not run — the original statement stands, and the ceiling the
+    // arm is judged on survives. There is no pool to blame here, but the case is just as lost.
+    const target = QUESTIONS[2]?.question ?? '';
+    const refused = (request: EndpointRequest): boolean =>
+      request.prompt.includes(target) && request.prompt.includes('returned no rows');
+    // The empty result belongs to the second model's candidate on this fixture, so the turn it pays
+    // for is sent to that endpoint: both have to refuse for the lever's call to be the failing one.
+    const second = await startEndpoint({
+      reply: (request) => (refused(request) ? { status: 500, content: '{"error":"unavailable"}' } : replyFor(request, { first: empty })),
+    });
+    try {
+      const result = await run({
+        plan: { first: empty, fail: (request) => (refused(request) ? 500 : undefined) },
+        env: {
+          BIRD_ARMS: 'select-cross-empty',
+          BIRD_SECOND_MODEL: 'second-model',
+          BIRD_SECOND_BASE_URL: second.url,
+          BIRD_SECOND_API_KEY: 'second-key',
+          BIRD_LLM_RETRIES: '1',
+          BIRD_CONCURRENCY: '1',
+        },
+      });
+      expect(result.code).toBe(0);
+      const arms = result.report.arms as {
+        retryFailed?: number;
+        candidateRecall?: number;
+        emptyRetry?: { fired: number; recovered: number };
+      }[];
+      // One turn refused out of seven. The turn was attempted on every case and recovered on the
+      // other six, so the funnel and the new counter have to survive side by side or the lever
+      // reads as untried rather than as one call that did not arrive.
+      expect(arms[0]?.retryFailed).toBe(1);
+      expect(arms[0]?.emptyRetry?.fired).toBe(QUESTIONS.length);
+      expect(arms[0]?.emptyRetry?.recovered).toBe(QUESTIONS.length - 1);
+      // Every candidate returned nothing, so the ceiling is zero — and it is recorded rather than
+      // lost, which is the whole point of catching the turn.
+      expect(arms[0]?.candidateRecall).toBe(0);
+    } finally {
+      await second.close();
+    }
+  });
+
   it('takes the modal result in no calls, where the selector takes the first slot in one', async () => {
     const second = await startEndpoint({ reply: (request) => replyFor(request, { first: wrong }) });
     try {
@@ -1504,26 +1603,60 @@ describe('levers that need their input to be present', () => {
 });
 
 describe('an endpoint that is down for one kind of request', () => {
-  it('records a selector call that never answered as the arm\'s own failure, not as a wrong answer', async () => {
-    // Everything else works: only the selector is refused, and only on the first three
-    // questions. A run where *every* case failed is refused earlier, by the guard whose
-    // sentence is "this is not an accuracy of zero; it is a run that did not happen".
+  it('scores an unanswerable selector by the vote, and keeps the ceiling it could not use', async () => {
+    // Everything else works: only the selector is refused, and only on the first three questions.
+    // This used to escape the vote branch, which erased the case — including the record of what the
+    // candidates held — and refused the run at the failure-share gate. The vote had already decided
+    // those cases, so they are scored by it and counted separately: an outage is a fact about the
+    // endpoint, and a case is a fact about the question, and only one of them was lost.
+    const result = await run({
+      plan: {
+        first: correct,
+        fail: (request) =>
+          request.prompt.includes('which candidate statement answers the question') &&
+          QUESTIONS.slice(0, 3).some((entry) => request.prompt.includes(entry.question))
+            ? 500
+            : undefined,
+      },
+      env: { BIRD_ARMS: 'select', BIRD_LLM_RETRIES: '1', BIRD_CONCURRENCY: '1' },
+    });
+    expect(result.code).toBe(0);
+    const arms = result.report.arms as {
+      passed: number;
+      total: number;
+      candidateRecall?: number;
+      selectorDecided?: number;
+      selectorTotal?: number;
+      selectorFailed?: number;
+    }[];
+    expect(arms[0]?.selectorFailed).toBe(3);
+    expect(arms[0]?.selectorDecided).toBe(QUESTIONS.length - 3);
+    // The record survives, which is the point: the ceiling is a property of the candidate set, not
+    // of the call that failed to read it.
+    expect(arms[0]?.candidateRecall).toBe(QUESTIONS.length);
+    expect(arms[0]?.passed).toBe(QUESTIONS.length);
+    // ...and the line says how much of the accuracy the lever was absent for.
+    expect(result.printed.some((line) => line.includes('select-failed 3'))).toBe(true);
+  });
+
+  it('records a case whose card never arrived as a failure, not as a crash', async () => {
+    // The card is the first call an arm makes, and it was built *outside* the wrapper whose whole
+    // job is "one case cannot take the run down" — so a refused card escaped the per-case worker and
+    // ended the run with a provider stack trace. It is inside the wrapper now, which means the case
+    // is a recorded `llm` failure and the share guard decides what to do with it: on a seven-case
+    // fixture one failure is 14.3%, above the 10% this harness treats as an outage, so the arm is
+    // refused with the guard's own sentence instead of the provider's.
+    const target = QUESTIONS[1]?.question ?? '';
     await expect(
       run({
         plan: {
           first: correct,
-          fail: (request) =>
-            request.prompt.includes('which candidate statement answers the question') &&
-            QUESTIONS.slice(0, 3).some((entry) => request.prompt.includes(entry.question))
-              ? 500
-              : undefined,
+          columns: () => 'items.price',
+          fail: (request) => (request.prompt.includes('You choose the columns') && request.prompt.includes(target) ? 500 : undefined),
         },
-        env: { BIRD_ARMS: 'select', BIRD_LLM_RETRIES: '1' },
+        env: { BIRD_ARMS: 'inline+evidence+llm-select', BIRD_DEFINITIONS_FORCE: '1', BIRD_LLM_RETRIES: '1', BIRD_CONCURRENCY: '1' },
       }),
-      // The escaped error became a recorded `llm` failure, and the failure-share guard then
-      // refuses the arm at 10% rather than at 100%: three cases out of seven is an endpoint
-      // that was busy, and the accuracy would be a function of when it was measured.
-    ).rejects.toThrow(/3 of 7 calls \(42\.9%\) failed at the model, above the 10%/);
+    ).rejects.toThrow(/arm inline\+evidence\+llm-select: 1 of 7 calls \(14\.3%\) failed at the model, above the 10%/);
   });
 
   it('refuses a voting arm whose every sample failed at the model', async () => {

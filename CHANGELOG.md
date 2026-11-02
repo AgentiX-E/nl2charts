@@ -8,6 +8,20 @@ cannot be argued with.
 
 ### Added
 
+- **The pool read four ways, and the price of each.** `select-cross` writes three candidates
+  (`deepseek-chat` twice, `deepseek-reasoner` once); `select-cross-pooled` reads that pool and asks
+  the same question; `-vote` returns the modal group for no call at all; `-agree` shows the selector
+  which candidates returned the same rows; `-judge-reasoning` puts the reasoning model in the chair.
+  On 600 dev questions (`41410112996`): 62.50%, 63.17%, 63.33%, **64.33%**, 62.33%. The ceiling is
+  identical on the first four (418/600), so the deltas are decisions and not pools, and the one that
+  pays is information: the marks are worth +1.17pp at the same price. The reasoning judge loses
+  0.83pp — at most 0.33pp once the three cases it could not adjudicate are scored charitably — which
+  answers "does the strong model win" negatively for the adjudication seat and positively for the
+  generation seat, where its candidate is the reason the ceiling is 69.7% and not 65%. The same run
+  measures the selector's own jitter: `select-cross` and `select-cross-pooled` read one pool, send
+  one prompt and answer differently on four cases, which is a floor of ±0.67pp under every selector
+  delta this repository has published.
+
 - **`bench:bird:decision`: what the selector costs, read off an artifact.** A candidate record
   carries `fingerprint`, the hash of the rows its statement returned, so a case splits into the
   opinions it actually contains: one group means every candidate returned the same rows and the
@@ -38,6 +52,26 @@ cannot be argued with.
   displacement at 600 questions was measured at 1.3 to 3.3pp, which is the size of the effect.
 
 ### Fixed
+
+- **A case whose adjudication never came back lost the evidence about the pool.** The selector call
+  was the one call in the vote branch with no catch: a refusal escaped the per-case worker, which
+  returns a row with no candidate record, so a case whose pool *did* hold the answer reported nothing
+  about it — and `assertPoolShared` compared that silence against a present ceiling and named the
+  wrong bug. Three of six hundred cases did this in `41410112996`, which is why that run refused to
+  publish a five-arm reading it had already scored. The adjudication and the empty-result turn are
+  now caught where they happen, the case is scored by the vote it already had, and
+  `selectionFailed` / `retryFailed` say that the lever did not run; `assertSelectorAnswered` refuses
+  an arm whose adjudications were an outage above the same 10% share the candidate-survival guard
+  uses, because a selector that never answered would otherwise publish the free aggregator's
+  accuracy under its own name.
+
+- **The wrapper that promises "one case cannot take the run down" did not cover the first call.**
+  The schema card was built one line above the wrapper's definition, so a refused card escaped the
+  per-case worker and ended the run with a provider stack trace — the exact failure the wrapper was
+  added for, on 1,532-question runs. It is built inside the wrapper now: the case becomes a recorded
+  `llm` failure and the failure-share guard decides what to do with it. The test that found this was
+  written to reach the wrapper at all, because catching the selector and the turn removed the only
+  path that had been reaching it.
 
 - **The coverage gate measured the environment, not the code.** `packages/node` reported 85.83% on
   lines because `PG_TEST_URL` and `MYSQL_TEST_URL` were unset and every check in two suites was

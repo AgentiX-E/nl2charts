@@ -1116,6 +1116,22 @@ export interface CaseRun extends CaseOutcome {
   /** True when the selector returned a usable index; absent for the modal arm. */
   readonly selectedByModel?: boolean;
   /**
+   * Why the adjudicating call did not happen, on the cases where it did not.
+   *
+   * The selector used to be the one call in the vote branch with no catch around it: a refusal
+   * from the endpoint escaped to the per-case wrapper, which returns a row with no candidate
+   * record at all. That row says nothing about what the pool held — and `41410112996` fired the
+   * shared-pool assertion on three such cases, reading "the selector's call failed" as "this arm
+   * generated its own candidates". The two are opposite diagnoses, so the case is now scored by
+   * the vote it already had and the failure is recorded here instead of erasing the evidence.
+   */
+  readonly selectionFailed?: 'llm' | 'harness';
+  /**
+   * The same, for the empty-result turn: a rewrite that never arrived is a lever that did not
+   * run, not a case without a candidate set.
+   */
+  readonly retryFailed?: 'llm' | 'harness';
+  /**
    * True when at least one candidate answered the question correctly, whether or not
    * the arm returned that candidate. Absent for an arm that generates once.
    *
@@ -1664,19 +1680,33 @@ export function assertEmptyRetryFired(
  * A pooled arm that did not read the pool is its parent under another name.
  *
  * The whole value of a shared pool is that the two arms read the same candidates, so the check is
- * not "did it run" but "did it read the same set": every case's ceiling must agree, and the
- * candidate authors must agree, or the delta being published is the pool's noise wearing the
- * label of a lever. This is the `assertSamplesRan`/`assertRepairPathFired` rule applied to the
- * one instrument whose failure mode is silent arithmetic rather than a missing call — a pooled arm
- * that generated its own candidates would cost four calls a case and look entirely healthy.
+ * not "did it run" but "did it read the same set": every case's ceiling must agree, and — when
+ * both sides recorded them — the statements handed back must be the same ones, or the delta being
+ * published is the pool's noise wearing the label of a lever. This is the
+ * `assertSamplesRan`/`assertRepairPathFired` rule applied to the one instrument whose failure mode
+ * is silent arithmetic rather than a missing call — a pooled arm that generated its own candidates
+ * would cost four calls a case and look entirely healthy.
+ *
+ * The first version compared `candidateRecall` on every pooled case and read a missing record as a
+ * disagreement. `41410112996` is what that cost: three of six hundred cases in the reasoning-judge
+ * arm had no record at all, because the judge's call escaped and the per-case wrapper returns a row
+ * without a candidate set, and the run died on a sentence that named the wrong bug — "the
+ * shared-pool arm generated its own candidates" for an arm that had read the pool and then failed
+ * to adjudicate it. So a case with no record on either side is not evidence of anything: it is
+ * excluded from the comparison, counted, and returned, because an instrument that cannot check a
+ * case has to say so rather than accuse it.
+ *
+ * Statements are compared as a multiset rather than in order: a shuffled arm shows the selector the
+ * same set in another sequence, and a set that differs only in order is a shared pool. Order is
+ * already the property `shuffle` is allowed to change.
  */
 export function assertPoolShared(
   armName: string,
   pooled: readonly CaseRun[],
   source: readonly CaseRun[],
   minimumSample = 100,
-): void {
-  if (pooled.length < minimumSample) return;
+): { readonly shared: number; readonly unrecorded: number } {
+  if (pooled.length < minimumSample) return { shared: 0, unrecorded: 0 };
   const byId = new Map(source.map((run) => [run.id, run]));
   const missing = pooled.filter((run) => !byId.has(run.id));
   if (missing.length > 0) {
@@ -1684,12 +1714,43 @@ export function assertPoolShared(
       `arm ${armName}: ${String(missing.length)} of ${String(pooled.length)} cases are absent from the pool it reuses, so the two arms do not describe the same sample`,
     );
   }
-  const disagreed = pooled.filter((run) => (byId.get(run.id)?.candidateRecall === true) !== (run.candidateRecall === true));
-  if (disagreed.length > 0) {
+  // Both sides have to have recorded a ceiling for the comparison to mean anything. A case the
+  // source never decided and a case the pooled arm never decided are equally silent, and silence
+  // is not disagreement.
+  const comparable = pooled.filter((run) => byId.get(run.id)?.candidateRecall !== undefined && run.candidateRecall !== undefined);
+  if (comparable.length === 0) {
     throw new Error(
-      `arm ${armName}: ${String(disagreed.length)} cases read a different pool than the arm it names — the shared-pool arm generated its own candidates`,
+      `arm ${armName}: none of its ${String(pooled.length)} cases carry a candidate record, so whether it read the pool it names cannot be checked — the arm's ceiling is unverified`,
     );
   }
+  const disagreed = comparable.filter((run) => (byId.get(run.id)?.candidateRecall === true) !== (run.candidateRecall === true));
+  if (disagreed.length > 0) {
+    // Named by case, because the count alone cannot tell a pool that was regenerated from a pool
+    // that was read and then half-lost: the reader has to be able to open the two cases.
+    const sample = disagreed
+      .slice(0, 3)
+      .map((run) => `${run.id} (${String(byId.get(run.id)?.candidateRecall)} vs ${String(run.candidateRecall)})`)
+      .join(', ');
+    throw new Error(
+      `arm ${armName}: ${String(disagreed.length)} cases read a different pool than the arm it names — the shared-pool arm generated its own candidates (${sample})`,
+    );
+  }
+  // The ceiling agreeing is necessary and, on a case where both arms found the answer, weak: two
+  // different sets can both hold one. The statements are the stronger identity and the artifact
+  // already carries them, so a case whose texts differ in any slot is a pool that was not shared.
+  const rewritten = comparable.filter((run) => {
+    const expected = byId.get(run.id)?.candidates;
+    const actual = run.candidates;
+    if (expected === undefined || actual === undefined) return false;
+    if (expected.length !== actual.length) return false;
+    return expected.map((entry) => entry.sql).sort().join('\u0000') !== actual.map((entry) => entry.sql).sort().join('\u0000');
+  });
+  if (rewritten.length > 0) {
+    throw new Error(
+      `arm ${armName}: ${String(rewritten.length)} cases read the same number of candidates but not the same statements (first: case ${rewritten[0]?.id ?? '?'}) — the pool was re-derived rather than reused`,
+    );
+  }
+  return { shared: comparable.length, unrecorded: pooled.length - comparable.length };
 }
 
 /**
@@ -1725,6 +1786,28 @@ export function reusePool(
     );
   }
   return reused;
+}
+
+/**
+ * A selector that never answered is not a selector that chose badly.
+ *
+ * The call used to escape, which refused the run at the failure-share gate — loud, but for the
+ * wrong reason and at the cost of the case's ceiling. Now the case is scored by the vote it already
+ * had, so the outage needs its own guard: without one, an endpoint that refuses every adjudication
+ * produces an arm whose accuracy is the free aggregator's, published under the selector's name.
+ * Same share as the candidate-survival guard, for the same reason: a lever that did not run on a
+ * tenth of the cases is an endpoint problem, and a rate measured over it is a rate about the
+ * endpoint.
+ */
+export function assertSelectorAnswered(armName: string, runs: readonly CaseRun[], maxShare = 0.1, minimumSample = 100): void {
+  if (runs.length < minimumSample) return;
+  const lost = runs.filter((run) => run.selectionFailed !== undefined).length;
+  const share = lost / runs.length;
+  if (share <= maxShare) return;
+  throw new Error(
+    `arm ${armName}: ${String(lost)} of ${String(runs.length)} cases (${(share * 100).toFixed(1)}%) never reached the selector, ` +
+      `above the ${(maxShare * 100).toFixed(0)}% this harness treats as an outage — those cases were scored by the vote, so the accuracy is the aggregator's, not the selector's`,
+  );
 }
 
 /**
@@ -3522,10 +3605,11 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
     // configuration-derived count got both wrong in opposite directions.
     const counter = withCallCounter(provider);
     const secondCounter = secondProvider === undefined ? undefined : withCallCounter(secondProvider);
-    // The card first, through the counter: on a column-choosing arm the choice is a call, and a
-    // card decided by an uncounted provider would report the lever as free.
-    const card = await prepared.cardFor(arm, question, counter.provider);
-    const schema = card.schema;
+    // The card this case was given. Assigned inside the wrapper below rather than here: the card is
+    // the first call an arm makes, so building it outside made it the one call that could still take
+    // a whole run down — which is exactly what the wrapper above this line exists to prevent, and
+    // what a refused card did to a run until a test asked for one.
+    let card: ReturnType<PreparedRun['cardOf']> | undefined;
     // Both models' calls are this case's cost. Summing two counters keeps the number
     // measured on each side instead of estimated from the arm's configuration.
     const callsMade = (): number => counter.calls() + (secondCounter?.calls() ?? 0);
@@ -3580,6 +3664,10 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
       }
     };
     const scored = await guarded(async (): Promise<CaseRun> => {
+      // The card first, through the counter: on a column-choosing arm the choice is a call, and a
+      // card decided by an uncounted provider would report the lever as free.
+      card = await prepared.cardFor(arm, question, counter.provider);
+      const schema = card.schema;
       // A pipeline is a prompt plus a budget, so building one per configuration costs
       // nothing and lets a mixed arm ask the same question three different ways.
       // The execute hook exists for repairs only: without repairs it would turn an
@@ -3786,6 +3874,8 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
         const majority = majorityResult(choosable, (left, right) => judgeOfficial(left.rows, right.rows) === 'match');
         let winner = majority.winner as { sql: string; rows: readonly (readonly unknown[])[]; source: string };
         let selectedByModel: boolean | undefined;
+        let selectionFailed: 'llm' | 'harness' | undefined;
+        let retryFailed: 'llm' | 'harness' | undefined;
         // The order the selector will read, which is the raw order unless the arm permutes it.
         // The vote above deliberately ran on the unpermuted set, so a tie it breaks is broken the
         // same way in both arms; only the selector's information changes. `ordered` is what the
@@ -3820,21 +3910,38 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
           // published selector reading was taken with, so an arm name cannot silently change the
           // question it answers between one run and the next.
           const judgeReasoning = arm.judgeFormat === 'capability' && judge.capabilities?.thinksAloud === true;
-          const decision =
-            arm.pairwise === true
-              ? await chooseCandidatePairwise(judge, question.question, readable)
-              : await (async () => {
-                  const reply = await judge.complete({
-                    messages: [
-                      { role: 'system', content: buildSelectionPrompt(question.question, offered, { reasoning: judgeReasoning }) },
-                      { role: 'user', content: question.question },
-                    ],
-                    temperature: 0,
-                    purpose: 'select',
-                  });
-                  const applied = applySelection(reply.text, offered, { reasoning: judgeReasoning });
-                  return { index: applied.index, decided: applied.decided, sql: (offered[applied.index] as { sql: string }).sql };
-                })();
+          // The adjudication is the one call in this branch that used to be bare, and the failure
+          // it produced was misread by every reader downstream: an escaped error returns a row
+          // with no candidate record, so the ceiling of a case the pool *did* answer disappeared
+          // and `assertPoolShared` reported it as a pool that was never shared. The vote above
+          // already decided this case; a selector that could not answer leaves that decision
+          // standing and is counted, which is the difference between a lever that did not run and
+          // a case that was answered wrong.
+          let decision: { index: number; decided: boolean; sql: string };
+          try {
+            decision =
+              arm.pairwise === true
+                ? await chooseCandidatePairwise(judge, question.question, readable)
+                : await (async () => {
+                    const reply = await judge.complete({
+                      messages: [
+                        { role: 'system', content: buildSelectionPrompt(question.question, offered, { reasoning: judgeReasoning }) },
+                        { role: 'user', content: question.question },
+                      ],
+                      temperature: 0,
+                      purpose: 'select',
+                    });
+                    const applied = applySelection(reply.text, offered, { reasoning: judgeReasoning });
+                    return { index: applied.index, decided: applied.decided, sql: (offered[applied.index] as { sql: string }).sql };
+                  })();
+          } catch (error) {
+            selectionFailed = escapeKind(error);
+            // The vote's own winner, found in the order the selector was shown: the identity is
+            // the candidate object, and a shuffle permutes references rather than copying them.
+            // `Math.max` rather than a guard, because "the winner is not in the set" cannot happen
+            // and a branch for it would be a line of coverage nobody could honestly earn.
+            decision = { index: Math.max(0, ordered.indexOf(majority.winner as (typeof ordered)[number])), decided: false, sql: '' };
+          }
           winner = ordered[decision.index] as typeof winner;
           selectedByModel = decision.decided;
         }
@@ -3860,15 +3967,23 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
             prompt: promptFor(sourceArm, question, prepared.blocksFor(sourceArm, question)),
             linking: arm.sourceLinking?.[winner.source] ?? sourceArm.linking,
           });
-          const reply = await retryProvider.complete({
-            messages: [...retryPrompt.messages, ...emptyRetryMessages(arm.emptyRetry, winner.sql, winner.sql)],
-            // The arm samples above zero, so a blind turn is a different draw and not a
-            // copy of the statement it replaces. Both modes use the same temperature:
-            // the pair differs by the words, and by nothing else.
-            temperature: 0.7,
-            purpose: 'retry',
-          });
-          const candidate = extractSql(reply.text);
+          // The same bare call as the selector's, one line later: a rewrite that never arrived
+          // used to erase the whole case, including the ceiling this arm is judged on. The turn is
+          // optional by construction, so its absence is recorded and the original statement stands.
+          let reply: { text: string } | undefined;
+          try {
+            reply = await retryProvider.complete({
+              messages: [...retryPrompt.messages, ...emptyRetryMessages(arm.emptyRetry, winner.sql, winner.sql)],
+              // The arm samples above zero, so a blind turn is a different draw and not a
+              // copy of the statement it replaces. Both modes use the same temperature:
+              // the pair differs by the words, and by nothing else.
+              temperature: 0.7,
+              purpose: 'retry',
+            });
+          } catch (error) {
+            retryFailed = escapeKind(error);
+          }
+          const candidate = reply === undefined ? '' : extractSql(reply.text);
           if (inspectSql(candidate).ok) {
             const executed = await oracle.run(question.db_id, candidate);
             // A replacement that returns rows is adopted; one that also returns nothing
@@ -3902,6 +4017,8 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
           // of one is still a record.
           ...(verdicts.length === 0 ? {} : { candidates: verdicts }),
           ...(selectedByModel === undefined ? {} : { selectedByModel }),
+          ...(selectionFailed === undefined ? {} : { selectionFailed }),
+          ...(retryFailed === undefined ? {} : { retryFailed }),
           ...(firstShape === undefined ? {} : { shape: firstShape }),
           ...(arm.mixed === undefined ? {} : { winnerSource: winner.source }),
           ...(arm.emptyRetry === undefined
@@ -3997,7 +4114,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
         };
       }
     });
-    return { ...scored, ...costOfCase(), ...(card.columns === undefined ? {} : { columnSelection: card.columns }) };
+    return { ...scored, ...costOfCase(), ...(card?.columns === undefined ? {} : { columnSelection: card.columns }) };
   });
   // Before any number is printed: an arm that never reached the database has no
   // accuracy, and publishing 0% would hide the provider's message behind a score.
@@ -4007,6 +4124,10 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
   // ...and a candidate that never arrived shrinks the set the ceiling is taken over,
   // which no case-level count can see.
   if (arm.vote !== undefined && arm.vote > 1) assertCandidateSurvival(name, runs, arm.vote);
+  // The other half of the same outage, one call later: the candidates arrived and the adjudication
+  // did not. Counted apart from the failures above because the case still has an answer, which is
+  // exactly what makes an unguarded selector outage invisible in the accuracy.
+  if (arm.select === true) assertSelectorAnswered(name, runs);
   // `engine` refusals are deliberately *not* guarded here: a statement that will not run is the
   // model's output quality, which is what the arm is measuring. The endpoint rule above is an
   // infrastructure verdict and belongs in a guard; this one belongs in the report. A run whose
@@ -4041,11 +4162,16 @@ export function armSummaryLine(label: string, arm: Arm, runs: readonly CaseRun[]
   const summary = summarise(label, runs);
   const printed = repairAccounting(arm, runs);
   const vote = arm.vote;
+  // Printed only when it happened, and next to the accuracy it affects: a selector whose calls
+  // failed is scored by the vote on those cases, and a reader comparing it against a parent has to
+  // see how much of the arm's answer the lever was not present for.
+  const failed = runs.filter((run) => run.selectionFailed !== undefined).length;
   return (
     `${label.padEnd(9)} ${summary.passed}/${summary.total}  ${(summary.accuracy * 100).toFixed(1)}%  ` +
     `strict ${runs.filter((run) => run.strict).length}` +
     `${printed.repaired === undefined ? '' : `  repaired ${String(printed.repaired)}`}` +
     `${printed.samples === undefined ? '' : `  samples ${String(printed.samples)}`}` +
+    `${failed === 0 ? '' : `  select-failed ${String(failed)}`}` +
     `${vote === undefined ? '' : ceilingColumn(vote, candidateCeiling(runs))}`
   );
 }
@@ -4261,6 +4387,14 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
             ? {
                 selectorDecided: runs.filter((run) => run.selectedByModel === true).length,
                 selectorTotal: runs.filter((run) => run.selectedByModel !== undefined).length,
+                // The calls that never came back, which `selectorDecided` alone cannot separate:
+                // an index the reader could not find and a refusal from the endpoint are the same
+                // number in that column and different findings. These cases are scored by the vote
+                // they already had, so the arm's accuracy holds a lever that did not run on them.
+                selectorFailed: runs.filter((run) => run.selectionFailed !== undefined).length,
+                ...(runs.some((run) => run.retryFailed !== undefined)
+                  ? { retryFailed: runs.filter((run) => run.retryFailed !== undefined).length }
+                  : {}),
               }
             : {}),
         }),
@@ -4649,6 +4783,11 @@ export async function runBird(settings: BirdSettings, options: BirdRunOptions = 
       if (arm?.pool !== undefined) {
         const source = outcomes.get(arm.pool);
         if (source === undefined) throw new Error(`arm ${name} reuses the pool of ${arm.pool}, which produced no runs in this run`);
+        // The counts are returned for the suite, not printed: after the adjudication and the turn
+        // were caught, a case with no record can only be one that failed before it had candidates,
+        // and that arm cannot read the pool at all — so a "verified on N of M" line would describe a
+        // state the harness cannot reach. The row's `errors` already counts the escapes, and a
+        // branch for an unreachable state is a line of coverage nobody can honestly earn.
         assertPoolShared(name, armRun.runs, source);
       }
     }

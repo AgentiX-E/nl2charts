@@ -5325,3 +5325,61 @@ disagree — the second model writes a statement that runs and is wrong, the two
 the gold one, and the selector answers `1`, the slot the second model holds — and asserts that the
 count scores every case, the selector none, and the agreement marks reach the prompt. A pooling bug
 would break all three together, which is why they are one case.
+
+## The five-arm reading, and the two defects that were in the way
+
+`41410112996` dispatched the five arms on 600 dev questions — `deepseek-chat` writing two of the
+three candidates, `deepseek-reasoner` the third, and the pool read four ways. It scored every arm and
+then refused to publish: `assertPoolShared` fired on the reasoning-judge arm. The per-arm lines it
+printed before dying are the reading, and the assertion's failure is a finding of its own.
+
+| arm | passed | acc | strict | recall@3 | Δ vs pooled |
+|---|---|---|---|---|---|
+| `select-cross` | 375/600 | 62.50% | 360 | 69.7% (418) | +0.67pp |
+| `select-cross-pooled` | 379/600 | 63.17% | 364 | 69.7% (418) | — |
+| `select-cross-pooled-vote` | 380/600 | 63.33% | 361 | 69.7% (418) | +0.17pp |
+| `select-cross-pooled-agree` | 386/600 | 64.33% | 370 | 69.7% (418) | +1.17pp |
+| `select-cross-pooled-judge-reasoning` | 374/600 | 62.33% | 357 | 69.2% (415) | −0.83pp |
+
+Read against the five criteria the round was dispatched with:
+
+1. **The instrument holds at the ceiling and not at the decision.** Both arms read the same pool and
+   both report 418/600, which is the identity the pooling was built to prove. The decisions differ by
+   four cases. Those four are the selector's own jitter: same candidates, same prompt, same
+   temperature, four different answers. That is a number the previous rounds did not have — a
+   ±0.67pp floor under every selector comparison this repository has published.
+2. **Heterogeneous pool, free aggregator at least even:** 380 against 379, +0.17pp. The vote is not
+   worse, and it costs nothing.
+3. **Homogeneous pool:** not measured. The `select-mixed-pooled` pair is the arm that would, and it
+   was not in this dispatch — the criterion stays unread rather than inferred.
+4. **The agreement marks are worth +1.17pp** at the same price, which is the one positive reading of
+   the run: what the selector was missing is *structure* — which of the three candidates returned the
+   same rows — and not adjudication.
+5. **The reasoning model in the judge's seat loses 0.83pp.** Even with the three unrecorded cases
+   scored charitably, the arm cannot exceed 377/600 (62.83%) and stays behind the vote. The seat that
+   pays is the generation seat; the adjudication seat does not. That is the answer to "does the strong
+   model win", and it is negative for this lever.
+
+The three unrecorded cases are the second defect, and it was not in the assertion. The selector call
+was the one call in the vote branch with no catch: a refusal from the endpoint escaped to the
+per-case wrapper, which returns a row with no candidate record, so a case whose pool *did* hold the
+answer reported nothing about it. `assertPoolShared` then compared a missing ceiling against a
+present one and named the wrong bug — "the shared-pool arm generated its own candidates" for an arm
+that had read the pool and failed to adjudicate it. Three changes followed, each from a test that
+failed first:
+
+- the adjudication and the empty-result turn are caught where they happen, the case is scored by the
+  vote it already had, and `selectionFailed` / `retryFailed` record that the lever did not run;
+- `assertPoolShared` excludes a case either side never decided, counts it, and proves the shared pool
+  from the statements the arm handed back as well as from its ceiling;
+- `assertSelectorAnswered` refuses an arm whose adjudications were an outage above the same 10% share
+  the candidate-survival guard uses — without it, an endpoint that refuses every adjudication
+  publishes the free aggregator's accuracy under the selector's name.
+
+The first of those removed the only test that reached the wrapper whose job is "one case cannot take
+the run down". Reaching it again found that the card — the first call an arm makes — was built
+outside the wrapper, so a refused card did end the run. That call is now inside it.
+
+The reading above is therefore provisional in one direction and final in another: the direction is
+worth acting on now (structure pays, adjudication does not, on this pool), and the exact numbers need
+the clean re-dispatch, because `41410112996` wrote no per-case artifact.
