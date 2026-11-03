@@ -51,6 +51,27 @@ cannot be argued with.
   change what the candidates are (I-45, I-77), not what is done with them.
 
 ### Added
+- **The schema is masked out of the worked examples, which is DAIL-SQL's masked variant and the answer
+  to `I-83`'s failure table.** `eval/bird/mask.ts` replaces every name that belongs to another schema
+  with `table_1`, `column_1`, … and rewrites the MySQL and T-SQL spellings into the dialect the harness
+  executes; `MASKED_PREAMBLE` says what a placeholder is, because `table_1` is a valid table name and
+  the cheapest thing to do with an example is copy it. The arm `metadata+evidence+icl-masked` is one
+  lever from `metadata+evidence+icl`: same retrieval, same `k`, same card, **same number of examples**
+  — the masked block is cut to the raw block's width because a masked example is shorter, and the pair
+  would otherwise differ in count as well as in text. Measured on Mini-Dev's 500 gold statements, the
+  mask leaves **0** of them carrying a word that is a table or column name in its own schema.
+- **The mask has its own instrument, because a text transform fails silently.** A masker that matches
+  nothing sends the parent's prompt and publishes the parent's accuracy as the lever's reading. So
+  `demonstrationsFunnel` now publishes `rewritten` beside `examples`, `assertMaskingFired` refuses a
+  bank of a hundred cases in which nothing was rewritten, `assertReportComplete` refuses a masked row
+  whose funnel carries no count, and `assertMaskingRule` refuses at the declaration an arm that names
+  the mask and carries no examples.
+- **Four defects in the masker, found while writing it, all of one class.** `1.` is a number and the
+  dot after it is not a qualifier (`select 1. from t` came out as `select 1. column_1 table_1`);
+  `extract(year from d)` contains the word `from` and had `d` masked as a table; `with t as (` bound
+  the name at neither end; and a keyword set cannot tell `interval 30 day`'s unit from
+  `formula_1.races`'s column, which leaked four statements of Mini-Dev's 500 until the rule was
+  rewritten to read position instead of membership.
 - **The one component of CHASE-SQL's pipeline never stacked on this repository's strongest arm, and
   the guard the last unguarded lever was missing.** `metadata+evidence+icl` and `inline+evidence+icl`
   put retrieved worked examples *on top of* the dataset's per-question hint; `inline+icl` had only

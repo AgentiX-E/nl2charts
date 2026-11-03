@@ -6193,3 +6193,128 @@ known". The registration, written here before the dispatch:
 A gain below +1.0pp would say the shape lesson *depends* on the copied identifiers, which would be a
 different and more interesting finding: that the block helps by giving the model column names from
 somewhere rather than by showing it a shape.
+
+### The mask, and what building it turned up (I-84)
+
+`eval/bird/mask.ts` is two edits and one sentence. `maskIdentifiers` replaces every name that belongs
+to another schema with `table_1`, `column_1`, …; `canonicaliseDialect` rewrites the MySQL and T-SQL
+spellings into the dialect the harness executes; `MASKED_PREAMBLE` tells the model what a placeholder
+is, because `table_1` is a valid table name and the cheapest thing to do with an example is copy it.
+
+**What survives the mask is the part that transfers.** Keywords, functions, operators, numbers and
+string literals are untouched; the names the statement binds itself — table aliases, column aliases,
+cast types, CTEs — are kept, because they are not schema and because renaming one end of them
+produces an example that does not run. So
+
+```
+SELECT T1.CustomerID FROM customers AS T1 JOIN yearmonth AS T2 ON T1.CustomerID = T2.CustomerID
+WHERE T1.Segment = 'LAM' AND SUBSTR(T2.Date, 1, 4) = '2012'
+```
+
+becomes
+
+```
+SELECT T1.column_1 FROM table_1 AS T1 JOIN table_2 AS T2 ON T1.column_1 = T2.column_1
+WHERE T1.column_2 = 'LAM' AND SUBSTR(T2.column_3, 1, 4) = '2012'
+```
+
+which still teaches the join, the direction, the aggregate and the date predicate, and names nothing
+that the database under test would have to have. `CustomerID` is the *same* placeholder on both sides
+of the equality, because the map is per statement: a mask that renumbered each occurrence would
+destroy the one thing the example is there to show.
+
+**Measured on Mini-Dev's 500 gold statements:** masking leaves **0 of them** carrying a word that is a
+table or column name in its own schema. The four statements that still spell `date` are calling
+SQLite's `date()` function, not reading the column of the same name.
+
+**The placeholders cost 47 tokens a case** — the sentence, not the statements, which get shorter — inside
+criterion ④'s +25% with room to spare.
+
+**Four defects surfaced while building it, and every one is the same class: a rule that reads text
+correctly until the text is a little less regular than the rule assumed.**
+
+1. **A decimal point that ends a number is not a qualifier.** `select 1. from t` came out as
+   `select 1. column_1 table_1`: `1.` was lexed as `1` plus a `.`, the dot became the qualifier of
+   `from`, the keyword was masked as a column, and the table behind it as another one. SQLite accepts
+   `1.` as a number, so the tokenizer now takes it as one — with a rule that a masker which reads
+   punctuation as syntax has to get the lexical layer right first.
+2. **`extract(year from d)` contains the word `from`.** The table scan read `d` as a table and gave it
+   a `table_N` placeholder in a position where a column belongs. The scan now tracks which call each
+   open parenthesis belongs to and skips a `from` inside `extract`, `trim`, `substring` and `position`
+   — the four spellings in SQL that put one there.
+3. **`with t as (` bound `t` at neither end.** The CTE check wanted a `select` behind the parenthesis,
+   so a statement whose body is missing kept `t` at the definition and masked it at the reference —
+   the exact inconsistency that makes a masked example fail to run. `name as (` is a CTE and nothing
+   else in SQL is, so the body is no longer read.
+4. **A keyword set cannot tell a time unit from a column.** `year` is `interval 30 day`'s neighbour, and
+   `year` is also `formula_1.races`'s column, which Mini-Dev's gold statements read. Holding the units
+   in the keyword set leaked that column on four statements; masking them produced examples that do not
+   parse. The units are now kept only where the statement is using them as units — after a number or
+   `interval`, or followed by `from` inside an `extract` parenthesis — and `select year from races` is
+   masked like any other name.
+
+**The arm is one lever, and the count is what makes it one.** `metadata+evidence+icl-masked` runs the
+same retrieval, the same `k`, the same card and the *same number of examples* as
+`metadata+evidence+icl`: a masked example is shorter, so the renderer's 2,200-character budget would
+otherwise have fitted more of them, and the pair would differ in the number of examples as well as in
+their text. The masked block is cut to the raw block's width for that reason.
+
+The instrument the lever needs is a count, because the failure it can suffer is silent: a transform
+that matches nothing sends the parent's prompt and reports the parent's accuracy as "masking does not
+help". So `demonstrationsFunnel` publishes `rewritten` beside `examples`, `assertMaskingFired` refuses
+a bank of a hundred cases in which the masker changed nothing, `assertReportComplete` refuses a masked
+row whose funnel does not carry the number, and `assertMaskingRule` refuses at the declaration an arm
+that names the mask and carries no examples.
+
+**The dispatch** is `41599208436`: `metadata+evidence+icl,metadata+evidence+icl-masked` on dev, 1,532
+questions, `deepseek-chat`, temperature 0. The parent is re-run in the same artifact so the delta is
+paired case by case, on the same day, against the same endpoint — the reading against
+`41584873572`'s parent would be a comparison across two runs, and this repository has already paid
+for that lesson twice.
+
+**The reading (`41599208436`, dev 1,532, both arms in one run).** `metadata+evidence+icl` **939 =
+61.29%**, `metadata+evidence+icl-masked` **928 = 60.57%** — **−11 cases, −0.72pp**, 39 up and 50 down,
+exact McNemar **p = 0.2891**. Criterion ① **fails**, with the sign the criteria did not expect;
+② **fails** (`errors.execution` 30 against the 16 it needed, and the parent ran 27 in the same run);
+③ **passes** (**105** wrong-width statements, the lowest any arm has recorded and seven below the
+parent's 112); ④ **passes** (`calls.mean` 1.00, tokens 2,184 → 2,263 = **+3.6%**, which is the
+preamble and nothing else).
+
+**It is a real null rather than an inert lever.** `rewritten` is **4,553**, equal to `examples`; the
+blocks landed on 1,522 of 1,532 cases in both arms and carried the same 4,553 examples. A Δ of ~0
+after the instrument reads full is a reading about the mechanism; a Δ of ~0 with the instrument at
+zero is a reading about the instrument.
+
+**The mechanism verdict falsifies I-83's causal story.** The masked prompt contains, by construction,
+no identifier from another schema and no foreign function — all 4,553 examples were rewritten — and
+the execution errors went **27 → 30** anyway:
+
+| kind | parent | masked |
+|---|---|---|
+| `no such function` | 8 | **8** |
+| `no such column`, dotted (`T2.Diagnosis`, `e.link_to_event`) | 7 | **10** |
+| `no such column`, bare (`APTT`, `SC170`) | 6 | 7 |
+| other (`interrupted`, `near "order"`, `ambiguous`) | 6 | 5 |
+| **same question as a parent failure** | — | **17 of 30** |
+
+The function count is identical and the prompt does not contain `YEAR(`: **the model wrote it anyway.**
+The column errors are `alias.column` pairs whose column exists in the schema and whose alias does not
+own it — **binding errors**, not vocabulary. `I-83` inferred causation from the one thing that had
+changed, and the control it lacked is exactly this arm. The block did not teach those errors; removing
+every name from the block leaves them in place.
+
+**Two further readings came for free.** The endpoint's run-to-run drift is **12 cases**: the same
+configuration, temperature 0 and the same split put this parent at 939 where `41584873572` put it at
+951 (−0.78pp), which is the scale on which `I-83`'s +0.91pp (p = 0.2684) and the 62.34/63.17 pair have
+to be read. And `bench:bird:card`, `join` and `info` each printed `1532 unrenderable arm`: the two
+most expensive arms in the catalogue cannot be priced by the three cheapest instruments, because the
+artifact does not keep the block. That is a design question, not a defect, and it is recorded as one.
+
+**The next lever.** Three readings in the same direction — +0.91pp, −0.72pp, both inside the drift —
+close the demonstrations block, and every other information lever has already read null (`notes` −0.8,
+`definitions`, `samples`, `values`, `audit` +1.01). The gap is in the **candidate ceiling**: the pool
+reaches **68.93%**, `select-mixed` converts **90.4%** of it, and CHASE-SQL's end-to-end is **76.02%**
+— **7.1pp of the 13.7pp is above what any selector could reach**. So the next dispatch is not a new
+mechanism but a registered ceiling that was never run: `inline+evidence+samples-gold`, whose criteria
+①②③ are written above, aimed at this run's census of **183 cases** (filter-wide 92, literal-missing
+83, literal-case 8). If the oracle cannot reach +1.5pp, the `samples` family closes on criterion ①.

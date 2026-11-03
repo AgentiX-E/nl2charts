@@ -1215,6 +1215,11 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   ['select-cross', 'vote-cross'],
   // One lever: which model judges the same three candidates.
   ['select-cross', 'select-cross-judge'],
+  // One lever: the schema. Same retrieval, same k, same card, same number of examples — the only
+  // difference is that one block's statements name the source schema and the other's do not, which
+  // is what `I-83`'s failure table separated (30 fewer wrong-width statements, 15 more execution
+  // errors) and what `I-84` prices.
+  ['metadata+evidence+icl', 'metadata+evidence+icl-masked'],
   // One lever: the same candidates in one SQL style, so the selector cannot see who wrote them.
   ['select-cross', 'select-cross-canon'],
   // One lever on the judge that used the channel: the same canonical text, read by its author.

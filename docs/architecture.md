@@ -345,6 +345,47 @@ count got wrong, and the tie-break is taken from the drawing order, which is wha
 does — 32 of the 292 disputed cases were 1:1:1, and a tie-break that happened to favour one author
 would have looked like a mechanism.
 
+### A text transform needs its own instrument
+
+The masked variant of the worked examples (`eval/bird/mask.ts`) is the first lever in this repository
+whose mechanism is a *string rewrite* rather than a call, a block or a rule over candidates, and it
+failed in the way that class fails: silently. A masker that matches nothing sends the parent's prompt,
+spends the parent's tokens and publishes the parent's accuracy as the lever's reading. Nothing throws,
+nothing is missing, and the delta of ~0 reads as "masking the schema does not help" — which is a real
+finding about the mechanism being tested, attributed to a transform that never ran.
+
+So the count is the instrument. `demonstrationsFunnel` publishes `rewritten` beside `examples`,
+`assertMaskingFired` refuses a bank of a hundred cases in which the masker changed nothing, and the
+count is measured against the *raw* block rather than assumed from the fact that a masker exists. The
+three other levers whose mechanism lives in text — the synthesized hint, the value block, the
+canonical statement — are each read through a funnel for the same reason.
+
+Four defects surfaced while the masker was being written, and they share one shape: a rule that reads
+text correctly until the text is less regular than the rule assumed.
+
+- **`1.` is a number, and a dot after it is not a qualifier.** Lexing the number as `1` plus `.` made
+  `select 1. from t` come out as `select 1. column_1 table_1` — the keyword that opens the table list
+  masked as a column, and the table behind it masked as another one. A transform over punctuation has
+  to get the lexical layer right before its rules mean anything.
+- **`extract(year from d)` contains the word `from`.** The table scan read `d` as a table. The scan now
+  records which call each open parenthesis belongs to and skips a `from` inside `extract`, `trim`,
+  `substring` and `position`.
+- **`with t as (` bound the name at neither end.** Requiring a `select` behind the parenthesis meant a
+  truncated statement kept the name at its definition and masked it at its reference, which is the one
+  outcome a masked example cannot survive.
+- **A keyword set cannot tell a time unit from a column name.** `year` follows `interval` in one
+  statement and names `formula_1.races`'s column in another. Keeping the units as keywords leaked four
+  statements of Mini-Dev's 500; masking them produced examples that do not parse. The units are kept
+  only in the two spellings that make them units.
+
+The general form of that last one is worth carrying forward: a set of words is the wrong shape for a
+distinction that is about *position*, and the rule that replaces it has to state the positions.
+
+The arm is one lever only because the count is held fixed. A masked example is shorter than the raw
+one, so the renderer's character budget fits more of them — the masked block is cut to the raw block's
+width, or the pair would differ in how many examples it carried as well as in their text, and the
+delta would price two things.
+
 ## The format contract
 
 Every reader in the natural-language layer assumes something about the *shape* of a reply
