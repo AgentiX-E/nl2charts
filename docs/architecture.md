@@ -854,3 +854,11 @@ that differs in method rather than in prompt or in draw.
   the reading would have blamed the arm for an arithmetic slip in its own registration. The oracle is
   an offline fact about the parent's artifact, available for free while the arm is still running: take
   it first, then write the number, or publish both and say which one decides.
+- **Two prompts that disagree are not necessarily two opinions.** The pool was built on the
+  literature's premise that different wordings see different things, and the probe that tested it cost
+  960 completions: three samples of one prompt at temperature 0.7 carry **1.15** distinct results per
+  case, three different prompts carry **1.12**. The mechanisms are the same dice either way, so
+  "diversity" in the pool was sampling variance wearing the name of heterogeneity — and 82% of the
+  losses are cases where every candidate agreed on the same wrong rows, which is a knowledge failure
+  that neither sampling nor re-wording touches. **A factor nobody measured will be named after the
+  thing it was supposed to be**, and the name survives every reading that does not separate them.

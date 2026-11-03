@@ -5998,6 +5998,39 @@ written before the dispatch:
 4. the comparison costs **≈ 0.065 calls a case** and its own funnel publishes `asked` and
    `choseDissent`, because a comparison that never fired is a bill with no measurement behind it.
 
+### Rewriting the prompt buys no more opinions than re-rolling it (I-74, `41566622986`)
+
+`I-74` asks a question the candidate side never separated: how much of a pool's disagreement is
+**sampling variance** and how much is **heterogeneity** (different wordings seeing different things).
+It needs an arm that draws the same prompt more than once, which the dev chain has (`vote`: three
+draws at temperature 0.7) and a mixed arm to compare against (`vote-mixed`: three prompts, one draw
+each). The probe ran both on the same 160 questions — **960 completions, no selector call** — and the
+fingerprints are what make the comparison possible:
+
+| arm | cases | 1 opinion | 2 | 3 | unanimous | ceiling | losses | **agreed-on losses** |
+|---|---|---|---|---|---|---|---|---|
+| `vote` — same prompt ×3 | 160 | 140 | 16 | 4 | **87.50%** | 109 = **68.13%** | 51 | **42 = 82.35%** |
+| `vote-mixed` — 3 prompts ×1 | 158 | 141 | 15 | 2 | **89.24%** | 110 = **69.62%** | 48 | **41 = 85.42%** |
+
+**Distinct results per case: 1.15 for three samples of one prompt, 1.12 for three different
+prompts.** Rewriting the question three ways produced *no more independent opinions* than re-rolling
+it — and if anything slightly fewer, though the difference is inside the noise at this sample size.
+The pool's disagreement is therefore **sampling variance**, not heterogeneity: on this pipeline the
+three "sources" are three dice, not three perspectives.
+
+Two consequences, both of which the earlier readings had only inferred:
+
+1. **The candidate side has no diversity lever left.** XiYan-SQL's 4.04pp and MCS-SQL's +1.3pp
+   depend on the generators *knowing* different things; here they sample differently and know the
+   same. That is why the fourth opinion (a genuinely different method) added 22 to 27 ceiling pieces
+   and was still the weakest of the four candidates.
+2. **What caps the ceiling is agreement on wrong answers**: 82% and 85% of the losses are cases where
+   every candidate returned the same wrong rows. No selector reaches those, no extra sample moves
+   them, and no re-wording has moved them either — they are *knowledge* failures.
+
+So the lever that remains is the one that changes what the model can recall, not how it samples — and
+`vote-mixed`'s 1.12 is the baseline any such lever has to beat on the same instrument.
+
 **What the comparison can reach, computed before the reading arrives.** The arm was registered on
 `41551887197`'s artifact, and that artifact already holds both statements the comparison will choose
 between — so the oracle of the *pairwise* selector is an offline fact about the 100 disagreement

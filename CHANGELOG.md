@@ -7,6 +7,16 @@ cannot be argued with.
 ## Unreleased
 
 ### Changed
+- **Three prompts carry no more independent opinions than three samples of one prompt.** `I-74` ran
+  the separation the candidate side never made — `vote` (three draws of one prompt at 0.7) against
+  `vote-mixed` (three prompts, one draw each) on the same 160 questions, 960 completions and no
+  selector call. **Distinct results per case: 1.15 against 1.12**, unanimity 87.50% against 89.24%,
+  ceilings 68.13% against 69.62% — the same dice either way. So the pool's disagreement is sampling
+  variance, not heterogeneity, and **82% to 85% of the losses are cases where every candidate agreed
+  on the same wrong rows**: a knowledge failure that neither an extra sample nor a new wording moves.
+  This is why the fourth opinion added 22 to 27 ceiling pieces and was still the weakest candidate,
+  and it is the baseline (`1.12`) that any lever claiming to add knowledge has to beat.
+
 - **The candidate side closes negative, and the measurement that closes it is a contingency table.**
   The pairwise arm (`41561960657`, dev 1,532) scored 941 against its parent's 940 — +1 case, 5 up and
   4 down — with 102 comparisons of which it overturned 10: **0 of the 20 where overturning would have
