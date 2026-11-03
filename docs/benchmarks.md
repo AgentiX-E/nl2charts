@@ -5936,3 +5936,40 @@ renamed, and an arm whose every call came back unrunnable is an outage; both sto
 own sentence, because they call for opposite fixes. `distinct: 0` is *not* refused — "the extra
 opinion always agreed with the pool" is a measurement, and it is the one that says the extra call is
 a fourth vote.
+
+**The reading, and the arm it registered.** `41551887197` (dev 1,532 questions, `deepseek-chat` with
+`deepseek-reasoner` as the second model) returned a clean negative with a clean mechanism:
+
+| arm | passed | score | ceiling | calls/case | `dissent` |
+|---|---|---|---|---|---|
+| `select-cross` (pool) | 936 | 61.10% | 1,023 | 3.998 | — |
+| `select-cross-pooled` (parent) | 942 | **61.49%** | 1,023 | 0.998 | — |
+| `+dissent` | 941 | 61.42% | **1,050** | 1.722 | `{asked 1109, arrived 1101, distinct 100, adopted 21}` |
+
+Criterion ③ passed — the ceiling rose **1,023 → 1,050 (+1.76pp), 27 cases up and none down** — and
+criterion ④ passed at **0.724 extra calls a case** against the 0.745 registered. Criterion ① failed
+(−0.07pp, 6:5, p = 1.0000) and criterion ② failed on strength (+0.00pp on the 1,109 cases the
+condition held) while passing on *placement*: the 423 cases it did not fire on have **token-identical
+prompts (423/423)** and moved −0.24pp, which is the noise floor.
+
+**Only 9.1% of the arrivals disagreed** (100 of 1,101), and on those 100 the per-candidate accuracy
+was `inline+evidence@second` 38, `metadata+evidence` 38, `values` 37, **`decompose` 27**. The bought
+opinion is the weakest of the four exactly where it is the only one that can speak — and it was right
+on 27 cases the pool had all answered wrongly, which is why the ceiling rose and nothing fell.
+
+**The information was in the set and the question could not reach it.** Conversion went from 92.08%
+to 89.62%, the oracle over the same four candidates is 68.54% (7.1pp above the arm), and the selector
+adopted the bought statement 21 times and was right 5 times. Pricing "adopt it whenever it disagrees"
+off the same artifact gives **−0.72pp**, so that rule is dead without another dispatch.
+
+**So the next arm changes the question, not the candidate**: `select-cross-pooled-dissent-pair` keeps
+the parent's three-candidate prompt byte for byte and spends one comparison call **only** on the 100
+disagreements — the shape `select-pair` already has, applied to the one pair that matters. Its price
+is 1 selection + 0.724 generation + 0.065 comparison ≈ **1.79 calls a case**, and the criteria were
+written before the dispatch:
+
+1. the whole split gains **≥ 1.0pp** (16 cases);
+2. the gain sits on the disagreements (**≥ 8 of the 100**), and the rest stays within ±0.5pp;
+3. the ceiling is unchanged (the candidate set is unchanged) and **conversion returns above 92%**;
+4. the comparison costs **≈ 0.065 calls a case** and its own funnel publishes `asked` and
+   `choseDissent`, because a comparison that never fired is a bill with no measurement behind it.

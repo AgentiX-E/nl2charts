@@ -31,6 +31,17 @@ cannot be argued with.
   change what the candidates are (I-45, I-77), not what is done with them.
 
 ### Added
+- **The bought opinion is now put to the selector instead of in front of it.**
+  `41551887197` gave the conditional-dissent arm a clean negative with a clean mechanism: the ceiling
+  rose 1,023 → 1,050 with nothing falling, and the four-candidate prompt converted none of it —
+  conversion 92.08% → 89.62%, 21 adoptions of which 5 were right while the bought statement was
+  right 27 times, and the oracle over the same four candidates is 68.54%. Only 9.1% of arrivals
+  disagreed, and on those the bought opinion was the *weakest* of the four (27 against 38/38/37).
+  `select-cross-pooled-dissent-pair` keeps the parent's three-candidate prompt byte for byte and
+  spends one comparison call only where the bought statement disagrees — the `select-pair` shape on
+  the one pair that matters, at 0.065 comparison calls a case. Its funnel publishes `pairwise:
+  { asked, choseDissent }` and `assertDissentFired` refuses an arm that pays for a comparison and
+  asks it on no case.
 - **A fourth opinion, bought only where the pool agreed with itself.** `bench:bird:diversity` priced
   the candidate set this repository has been reading for six rounds: 74.50% of its cases are
   unanimous and two thirds of its ceiling losses are losses the candidates *agreed* on — a

@@ -227,6 +227,23 @@ export interface Arm {
    */
   readonly dissent?: string;
   /**
+   * Put the bought opinion to the selector, instead of putting it in front of the selector.
+   *
+   * `41551887197` priced the first form and returned a clean negative with a clean mechanism: the
+   * conditional call raised the ceiling by 27 cases and fell none, and the four-candidate prompt
+   * converted **none** of them — the selector adopted the bought statement 21 times and was right
+   * 5 times, while that statement alone was right 27 times. Conversion fell from 92.08% to 89.62%,
+   * and the oracle over the same four candidates was 68.54%: **the information was in the set and
+   * the question could not reach it.**
+   *
+   * So this flag keeps the parent's prompt exactly — three candidates, one selection call, byte for
+   * byte — and spends one more call **only** when the bought statement disagrees, on a comparison
+   * between the pool's answer and it. That is the shape this repository has already priced as its
+   * best selector (`select-pair`), applied to the one pair that matters, at 6.5% of the cases the
+   * conditional call fires on.
+   */
+  readonly dissentVerify?: 'pairwise';
+  /**
    * Ask the selector to compare two statements at a time instead of ranking many.
    *
    * The absolute prompt keeps 95% of what a mixed candidate set contained; the missing
@@ -748,6 +765,26 @@ export const ARMS: readonly Arm[] = [
   // — 0.745 calls a case, not one. The parent is `select-cross-pooled`: same pool, same selector,
   // same one selection call, and the only difference is the candidate the condition paid for.
   { name: 'select-cross-pooled-dissent', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: CROSS_SOURCES, pool: 'select-cross', dissent: 'decompose' },
+  // ...and the same bought opinion, put to the selector instead of in front of it.
+  //
+  // The first form returned a clean negative with a clean mechanism (`41551887197`): the ceiling
+  // rose 1,023 → 1,050 and fell nowhere, and the four-candidate prompt converted none of it —
+  // conversion 92.08% → 89.62%, 21 adoptions of which 5 were right, while the bought statement was
+  // right 27 times. The oracle over the same four candidates is 68.54%, so the information was in
+  // the set and the question could not reach it.
+  //
+  // This arm keeps the parent's prompt exactly — three candidates, one selection call — and spends
+  // one more call only on the 100 cases where the bought statement disagrees: a comparison of the
+  // pool's answer against it, which is the shape this repository's best selector already has
+  // (`select-pair`) applied to the one pair that matters. Its price is 1 select + 0.724 generation
+  // + 0.065 comparison ≈ 1.79 calls a case, 6.5% above the arm that bought the call and wasted it.
+  //
+  // The criteria are written in `docs/benchmarks.md` before the dispatch: the whole split must gain
+  // at least 1.0pp (16 cases), the gain must sit on the 100 disagreements (at least 8 of them), the
+  // rest of the split must stay within ±0.5pp, the ceiling must be unchanged at this arm's own
+  // 1,050 (the candidate set did not change), conversion must return above 92%, and the comparison
+  // costs 0.065 calls a case.
+  { name: 'select-cross-pooled-dissent-pair', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: CROSS_SOURCES, pool: 'select-cross', dissent: 'decompose', dissentVerify: 'pairwise' },
   // The same pool with the agreement marks the selector has never been given on this arm.
   //
   // Of 600 `select-cross` cases, 149 had candidates that returned different results — the only
@@ -1003,6 +1040,7 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'select-cross-pooled-judge-reasoning': 'the reasoning model judging the chat model\'s candidates, in the format it can answer: needs the second model and a second key, one call per case, and is measured against `select-cross-pooled` on the same pool — the only judge-swap delta with no generation noise in it',
   'select-cross-pooled-vote': 'the same pool decided by the modal result instead of by a model: zero calls per case, and the only reading of "is the selector worth its call" whose candidates are shared — the archived artifacts say the count wins 53 disputed cases to 22 (p = 4.5e-4), and this arm is what turns that into a measurement instead of a re-reading',
   'select-cross-pooled-dissent': 'the same pool and the same selector with one decomposition bought only where the three agreed: 4 calls per case on the 74.5% of cases the diversity reading found unanimous and 3.0 on the rest, and it must be dispatched after `select-cross` because it reads that pool — the pair against `select-cross-pooled` is the whole lever, so run those two and no others',
+  'select-cross-pooled-dissent-pair': 'the same bought opinion, compared against the pool\'s answer on the cases where it disagrees instead of shown to the selector as a fourth candidate: one comparison call on 6.5% of cases, and it must be dispatched after `select-cross` because it reads that pool — the pair against `select-cross-pooled-dissent` is the whole lever, so run those two and no others',
   'select-cross-pooled-agree': 'the same pool with the agreement marks the selector was never given: 149 of 600 cases had more than one distinct result, and which of three candidates returned the same rows is the one fact two truncated previews cannot yield; one lever from `select-cross-pooled`, one call per case',
   'select-cross-pooled-reconcile': 'the same pool and the same one call, asked for a statement instead of an index: an index cannot name an answer none of the candidates contains, and on this pool the correct statement is in the set on 70.5% of cases while the arm scores 64% — the 6.5pp the decision misses is the population this arm exists to reach; the funnel counts how often the reply is a statement nobody wrote, because an arm that restates a candidate is a selector with a longer prompt',
   'select-cross-pooled-reconcile-novel': 'the same prompt and the same call as `select-cross-pooled-reconcile`, with one policy difference: a reply that restates a candidate hands the decision back to the vote instead of overwriting it — the arm that measured 59.8% against the vote\'s 63.3% adopted every one of the 595 replies it could run while only 86 of its 600 replies were statements nobody wrote, so the rewrites are the population this arm stops paying for; run it against `select-cross-pooled-vote` to price the novel statements alone',
@@ -1073,6 +1111,10 @@ export const COMPARISONS: readonly (readonly [string, string, string])[] = [
   // call on the 74.5% of cases where the pool agreed with itself and nothing on the rest, so its
   // delta is placed on a population that the pair states rather than assumes.
   ['select-cross-pooled', 'select-cross-pooled-dissent', 'the same pool and selector with one more opinion bought only where the three agreed: 0.745 calls a case, against the 30.83pp of ceiling the candidates agreed away'],
+  // The question rather than the candidate: the same bought opinion, put to the selector on the
+  // cases where it disagrees instead of added to the list it reads. One comparison call on 6.5% of
+  // the split, against the four-candidate prompt that was read and not used.
+  ['select-cross-pooled-dissent', 'select-cross-pooled-dissent-pair', 'the same bought opinion verified one-pair-at-a-time instead of offered in a longer list: 0.065 comparison calls a case against the conversion the longer prompt lost'],
 ];
 
 export const PAIRS: readonly (readonly [string, string])[] = [
@@ -1355,6 +1397,10 @@ export interface CaseRun extends CaseOutcome {
    * was offered. That is what makes "52.6% for the author" and "52.6% for slot zero"
    * separable after the fact, without a second field to drift out of step with the order.
    *
+   * On an arm that verifies a bought opinion (`dissentVerify`), the set is four and the selector
+   * was shown three: the fourth entry is the candidate the conditional call paid for, and it is
+   * here because the ceiling has to describe the set the arm held rather than the prompt it read.
+   *
    * `sql` and `fingerprint` are what turn this from a verdict into a *replayable* one: a
    * fingerprint equal to another candidate's means the two result sets are the same under the
    * benchmark's own judge (`resultKey`), so a rule that reads agreement can be scored from the
@@ -1428,7 +1474,23 @@ export interface CaseRun extends CaseOutcome {
    * the pool was not unanimous. A run-wide rate cannot separate "the lever fired on 74.5% of
    * cases" from "the lever fired on none and the sampling read 0", because both publish 0.745.
    */
-  readonly dissent?: { readonly asked: boolean; readonly arrived: boolean; readonly distinct: boolean; readonly adopted: boolean };
+  readonly dissent?: {
+    readonly asked: boolean;
+    readonly arrived: boolean;
+    readonly distinct: boolean;
+    readonly adopted: boolean;
+    /**
+     * The verification turn, on an arm that puts the bought opinion to the selector.
+     *
+     * `asked` is the same condition as `distinct` — it is restated rather than inferred because a
+     * reader who has to derive one field from another one has to know this file, and `choseDissent`
+     * is the outcome: the selector compared the pool's answer against the bought statement and
+     * preferred the bought one. A verifying arm whose `asked` is zero everywhere never fired, and a
+     * verifying arm whose `choseDissent` is zero everywhere bought a turn that changed nothing —
+     * two different sentences, which is why both are counted.
+     */
+    readonly pairwise?: { readonly asked: boolean; readonly choseDissent: boolean };
+  };
   /**
    * Candidates that never arrived, by reason.
    *
@@ -2436,14 +2498,34 @@ export function assertSampleBlockFired(armName: string, runs: readonly CaseRun[]
  */
 export function dissentFunnel(
   runs: readonly CaseRun[],
-): { readonly asked: number; readonly arrived: number; readonly distinct: number; readonly adopted: number } | undefined {
+):
+  | {
+      readonly asked: number;
+      readonly arrived: number;
+      readonly distinct: number;
+      readonly adopted: number;
+      readonly pairwise?: { readonly asked: number; readonly choseDissent: number };
+    }
+  | undefined {
   const counted = runs.filter((run) => run.dissent !== undefined);
   if (counted.length === 0) return undefined;
+  // The verification turn is published only when some case carries it: an arm that does not
+  // verify has no such turn, and a zero there would read as "it fired on nothing" rather than as
+  // "it does not exist". Same rule as the block funnel's absent field.
+  const verified = counted.filter((run) => run.dissent?.pairwise !== undefined);
   return {
     asked: counted.filter((run) => run.dissent?.asked === true).length,
     arrived: counted.filter((run) => run.dissent?.arrived === true).length,
     distinct: counted.filter((run) => run.dissent?.distinct === true).length,
     adopted: counted.filter((run) => run.dissent?.adopted === true).length,
+    ...(verified.length === 0
+      ? {}
+      : {
+          pairwise: {
+            asked: verified.filter((run) => run.dissent?.pairwise?.asked === true).length,
+            choseDissent: verified.filter((run) => run.dissent?.pairwise?.choseDissent === true).length,
+          },
+        }),
   };
 }
 
@@ -2457,11 +2539,26 @@ export function dissentFunnel(
  * "the fourth opinion always returned the answer the pool already had" is a measurement, and a
  * measurement of zero is published, not thrown away — the whole reason the funnel counts it.
  */
-export function assertDissentFired(armName: string, runs: readonly CaseRun[], minimumSample = MINIMUM_INSTRUMENT_SAMPLE): void {
+export function assertDissentFired(
+  armName: string,
+  runs: readonly CaseRun[],
+  minimumSample = MINIMUM_INSTRUMENT_SAMPLE,
+  verify?: 'pairwise',
+): void {
   if (runs.length < minimumSample) return;
   const funnel = dissentFunnel(runs);
   if (funnel === undefined) {
     throw new Error(`arm ${armName}: declares a dissent source and no case carries a dissent record, so the call cannot be priced`);
+  }
+  if (verify !== undefined && funnel.pairwise === undefined) {
+    throw new Error(
+      `arm ${armName}: declares a verification turn and no case carries one, so the arm is its parent plus an unmeasured call`,
+    );
+  }
+  if (verify !== undefined && funnel.pairwise?.asked === 0) {
+    throw new Error(
+      `arm ${armName}: across ${String(runs.length)} questions the bought opinion never disagreed, so the verification turn the arm pays for never fired`,
+    );
   }
   if (funnel.asked === 0) {
     throw new Error(
@@ -2483,7 +2580,13 @@ export function assertDissentFired(armName: string, runs: readonly CaseRun[], mi
  * independent opinion. Refused at the declaration, before any call is spent, which is the same
  * place `assertSampleRule` refuses a column rule with no sampler.
  */
-export function assertDissentRule(arm: Pick<Arm, 'name' | 'dissent' | 'vote' | 'mixed'>): void {
+export function assertDissentRule(arm: Pick<Arm, 'name' | 'dissent' | 'dissentVerify' | 'vote' | 'mixed' | 'select'>): void {
+  if (arm.dissentVerify !== undefined && arm.dissent === undefined) {
+    throw new Error(`arm ${arm.name} verifies a dissent it never buys, so the turn it pays for has nothing to verify`);
+  }
+  if (arm.dissentVerify !== undefined && arm.select !== true) {
+    throw new Error(`arm ${arm.name} verifies a dissent without a selector, so the comparison has no answer to compare against`);
+  }
   if (arm.dissent === undefined) return;
   if ((arm.vote ?? 1) < 2) {
     throw new Error(
@@ -4533,7 +4636,9 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
         // the condition is about and because the set the vote decides over is the set the selector
         // then reads: a candidate added after the decision would move the ceiling without moving
         // the answer, and the two have to be moved by the same set or neither reading is the arm's.
-        let dissentRecord: { asked: boolean; arrived: boolean; distinct: boolean; adopted: boolean } | undefined;
+        let dissentRecord:
+          | { asked: boolean; arrived: boolean; distinct: boolean; adopted: boolean; pairwise?: { asked: boolean; choseDissent: boolean } }
+          | undefined;
         let dissentCandidate: PooledCandidate | undefined;
         if (arm.dissent !== undefined) {
           // A pool of one agreed vacuously, and the case for a fourth opinion is a case about
@@ -4575,7 +4680,12 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
             }
           }
         }
-        const considered: typeof candidates = dissentCandidate === undefined ? choosable : [...choosable, dissentCandidate];
+        // A verifying arm does not put the bought candidate in front of the selector: the whole
+        // point of `41551887197` is that a fourth candidate in the list is read and not used. The
+        // candidate is still part of what this arm holds — the ceiling counts it, and the verdict
+        // record carries it — but the prompt the selector reads is its parent's, byte for byte.
+        const considered: typeof candidates =
+          dissentCandidate === undefined || arm.dissentVerify === 'pairwise' ? choosable : [...choosable, dissentCandidate];
         const majority = majorityResult(considered, sameResult);
         let winner = majority.winner as { sql: string; rows: readonly (readonly unknown[])[]; source: string };
         let selectedByModel: boolean | undefined;
@@ -4725,6 +4835,30 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
           }
           winner = ordered[decision.index] as typeof winner;
           selectedByModel = decision.decided;
+          // The verification turn: the parent's answer, the bought statement, one question. It runs
+          // only when the bought statement disagreed, because that is the only state in which there
+          // is something to decide between — on the 90.9% of arrivals that restate the pool's
+          // answer, a comparison would ask the selector to choose between two identical results.
+          if (arm.dissentVerify === 'pairwise' && dissentRecord !== undefined) {
+            const verified = { asked: dissentCandidate !== undefined, choseDissent: false };
+            dissentRecord.pairwise = verified;
+            if (dissentCandidate !== undefined) {
+              try {
+                const turn = await chooseCandidatePairwise(judge, question.question, [winner, dissentCandidate]);
+                // Index 0 is the pool's answer and index 1 is the bought one, in the order the
+                // prompt shows them; `decided: false` is an unreadable reply and leaves the pool's
+                // answer standing, which is the same rule the selector itself follows.
+                if (turn.decided && turn.index === 1) {
+                  winner = dissentCandidate;
+                  verified.choseDissent = true;
+                }
+              } catch (error) {
+                // An outage on this turn is not a disagreement: the pool's answer stands and the
+                // failure is counted where it happened, exactly as the selector's own failure is.
+                selectionFailed = selectionFailed ?? escapeKind(error);
+              }
+            }
+          }
           }
         }
         // The last thing this arm can learn for free: the winner ran and produced
@@ -4788,7 +4922,14 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
         // Judged once here and read twice below: the ceiling and the per-candidate record
         // are the same pass, so a loss cannot be attributed to a member the ceiling count
         // never saw.
-        const verdicts = candidateVerdicts(ordered, expected.rows);
+        // What the arm holds, which is not always what the selector read: a verifying arm's
+        // selector sees the pool's three candidates and the record carries four, because the
+        // ceiling has to say whether the *set* held the answer — that is the reading the pair of
+        // arms is about, and it is the same 1,050 on both of them. Only the order is the
+        // selector's, and on this arm the fourth slot is not one it was shown.
+        const judgedSet =
+          arm.dissentVerify === 'pairwise' && dissentCandidate !== undefined ? [...ordered, dissentCandidate] : ordered;
+        const verdicts = candidateVerdicts(judgedSet, expected.rows);
         return {
           id: String(question.question_id),
           passed: reason === 'match',
@@ -4946,7 +5087,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
   if (arm.sampleColumns !== undefined) assertSampleBlockFired(name, runs);
   // ...and a conditional call has to be seen firing, and seen arriving: the two failures produce
   // the same published accuracy and call for opposite fixes.
-  if (arm.dissent !== undefined) assertDissentFired(name, runs);
+  if (arm.dissent !== undefined) assertDissentFired(name, runs, MINIMUM_INSTRUMENT_SAMPLE, arm.dissentVerify);
   // ...and a format the model ignored is not a prompt that did not help.
   if (declaresDecomposition(arm)) assertDecompositionFired(name, runs);
   return {

@@ -110,6 +110,14 @@ interface Plan {
    */
   readonly selectIndex?: (question: string) => number;
   /**
+   * Which of the two statements the pairwise turn picks, keyed on the question.
+   *
+   * `1` keeps the pool's answer and `2` takes the challenger. A verifying arm asks this question
+   * only on the cases where the bought opinion disagrees, so the number says whether the turn
+   * changed the answer — the reading its funnel reports as `choseDissent`.
+   */
+  readonly pairPick?: (question: string) => number;
+  /**
    * The answer to the audit turn: what the statement left out, then a statement.
    *
    * Absent means the model reports nothing missing and repeats the gold statement, which is
@@ -153,7 +161,10 @@ function replyFor(request: EndpointRequest, plan: Plan): { status?: number; cont
   }
   // The pairwise selector asks a different question over two candidates and reads a
   // different answer, so the same `1` would be counted as an unreadable reply.
-  if (prompt.includes('Two statements were written for the same question')) return send('1');
+  if (prompt.includes('Two statements were written for the same question')) {
+    const asked = Object.keys(golds).find((entry) => prompt.includes(entry)) ?? '';
+    return send(String(plan.pairPick?.(asked) ?? 1));
+  }
   // The reconcile turn. Read before the statement branches below, because its prompt carries the
   // question verbatim and would otherwise be answered as a first attempt.
   if (prompt.includes('Write the statement that answers the question')) {
@@ -2909,5 +2920,70 @@ describe('a dissent call that never lands', () => {
     const child2 = rows.find((row) => row.arm === 'select-cross-pooled-dissent');
     expect(child2?.passed).toBe(child2?.total);
     expect(child2?.total).toBe(7);
+  });
+});
+
+describe('the bought opinion put to the selector instead of in front of it', () => {
+  it('asks one comparison only where the bought statement disagrees, and can take it', async () => {
+    // `41551887197` showed the four-candidate prompt reading the bought opinion and not using it:
+    // conversion fell 2.5 points while the ceiling rose 27 cases. This arm keeps the parent's
+    // three-candidate prompt byte for byte and spends one more call only on the disagreements, so
+    // the record has to say three things — that the comparison was asked, that it fired only where
+    // there was something to decide, and that it sometimes changed the answer.
+    const wrongEverywhere = QUESTIONS[4]?.question as string;
+    const second = await startEndpoint({
+      reply: (request) => {
+        const asked = Object.keys(GOLD).find((entry) => request.prompt.includes(entry));
+        return fenced(asked === wrongEverywhere ? 'select 1' : (GOLD[asked ?? ''] ?? 'select 1'));
+      },
+    });
+    try {
+      const result = await run({
+        plan: {
+          // The pool agrees with itself everywhere, and on one case it agrees on the wrong answer.
+          first: (question) => (question === wrongEverywhere ? 'select 1' : (GOLD[question] as string)),
+          // The bought opinion: holds the answer where the pool was wrong, and says something else
+          // everywhere else — so `distinct` is true on every case and the comparison is asked on all
+          // of them, which is the branch the funnel has to survive.
+          // `select 99` rather than `select 2`: the fixture's smallest count is 2, and a challenger
+          // that happens to return the pool's rows would make `distinct` false on that case — which
+          // is a real state, and not the one this scenario is about.
+          decompose: (question) => (question === wrongEverywhere ? (GOLD[question] as string) : 'select 99'),
+          // The comparison takes the challenger only where the challenger is right.
+          pairPick: (question) => (question === wrongEverywhere ? 2 : 1),
+        },
+        env: {
+          BIRD_ARMS: 'select-cross,select-cross-pooled,select-cross-pooled-dissent-pair',
+          BIRD_SECOND_MODEL: 'second-model',
+          BIRD_SECOND_BASE_URL: second.url,
+          BIRD_SECOND_API_KEY: 'second-key',
+        },
+      });
+      expect(result.code, result.printed.join('\n')).toBe(0);
+      const rows = result.report.arms as {
+        readonly arm: string;
+        readonly passed: number;
+        readonly dissent?: {
+          readonly asked: number;
+          readonly arrived: number;
+          readonly distinct: number;
+          readonly adopted: number;
+          readonly pairwise?: { readonly asked: number; readonly choseDissent: number };
+        };
+      }[];
+      const child = rows.find((row) => row.arm === 'select-cross-pooled-dissent-pair');
+      expect(child?.dissent).toEqual({ asked: 7, arrived: 7, distinct: 7, adopted: 1, pairwise: { asked: 7, choseDissent: 1 } });
+      // The arm is one case better than the parent it shares a prompt with, and the case is the one
+      // where the bought opinion was right: the comparison turn is the whole difference.
+      const parent = rows.find((row) => row.arm === 'select-cross-pooled');
+      expect(parent?.passed).toBe(QUESTIONS.length - 1);
+      expect(child?.passed).toBe(QUESTIONS.length);
+      // The selector read three candidates: four prompts per case on the arm that showed it four,
+      // three here — plus exactly one comparison per disagreement and nothing else.
+      const comparisons = result.requests.filter((request) => request.prompt.includes('Two statements were written for the same question'));
+      expect(comparisons).toHaveLength(QUESTIONS.length);
+    } finally {
+      await second.close();
+    }
   });
 });

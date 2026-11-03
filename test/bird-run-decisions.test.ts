@@ -1345,3 +1345,59 @@ describe('the conditional fourth opinion', () => {
     expect(() => assertDissentRule({ name: 'child', vote: 3 })).not.toThrow();
   });
 });
+
+describe('the verification turn on a bought opinion', () => {
+  const run = (dissent?: CaseRun['dissent']): CaseRun => ({
+    id: '1',
+    passed: true,
+    predicted: 'select 1',
+    reason: 'match',
+    strict: true,
+    attempts: 3,
+    calls: 4,
+    ...(dissent === undefined ? {} : { dissent }),
+  });
+  const plain = { asked: true, arrived: true, distinct: true, adopted: false } as const;
+  const bank = (count: number, shape: (index: number) => CaseRun['dissent']): CaseRun[] =>
+    Array.from({ length: count }, (_unused, index) => ({ ...run(shape(index)), id: String(index) }));
+
+  it('counts the comparison apart from the purchase, and only when a case carries one', () => {
+    // The two turns have two prices and two failure modes: a purchase that never fired and a
+    // comparison that never fired are different sentences, and folding them into one counter
+    // would let either stand in for the other.
+    expect(dissentFunnel([run(plain)])).toEqual({ asked: 1, arrived: 1, distinct: 1, adopted: 0 });
+    expect(dissentFunnel([run({ ...plain, pairwise: { asked: true, choseDissent: true } })])).toEqual({
+      asked: 1,
+      arrived: 1,
+      distinct: 1,
+      adopted: 0,
+      pairwise: { asked: 1, choseDissent: 1 },
+    });
+  });
+
+  it('refuses a verifying arm whose comparison never fired, or whose record is missing', () => {
+    // An arm that pays for a comparison and asks it on no case is its parent plus a bill. Both
+    // sentences name the population, because 0 comparisons out of 1,532 cases and 0 out of 0 are
+    // the same number and opposite findings.
+    const neverDisagreed = bank(120, () => ({ ...plain, distinct: false, pairwise: { asked: false, choseDissent: false } }));
+    expect(() => assertDissentFired('pair', neverDisagreed, 100, 'pairwise')).toThrow(/never fired/);
+    const noRecord = bank(120, () => plain);
+    expect(() => assertDissentFired('pair', noRecord, 100, 'pairwise')).toThrow(/no case carries one/);
+    const fired = bank(120, () => ({ ...plain, pairwise: { asked: true, choseDissent: false } }));
+    expect(() => assertDissentFired('pair', fired, 100, 'pairwise')).not.toThrow();
+  });
+
+  it('refuses a comparison that has nothing to compare against', () => {
+    // A verification without a purchase has no challenger, and one without a selector has no
+    // answer to defend: both are declarations whose mechanism cannot run.
+    expect(() => assertDissentRule({ name: 'pair', dissentVerify: 'pairwise', vote: 3, mixed: ['a', 'b', 'c'], select: true })).toThrow(
+      /verifies a dissent it never buys/,
+    );
+    expect(() => assertDissentRule({ name: 'pair', dissent: 'decompose', dissentVerify: 'pairwise', vote: 3, mixed: ['a', 'b', 'c'] })).toThrow(
+      /without a selector/,
+    );
+    expect(() =>
+      assertDissentRule({ name: 'pair', dissent: 'decompose', dissentVerify: 'pairwise', vote: 3, mixed: ['a', 'b', 'c'], select: true }),
+    ).not.toThrow();
+  });
+});
