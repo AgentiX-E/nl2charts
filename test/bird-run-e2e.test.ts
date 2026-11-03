@@ -2873,6 +2873,79 @@ describe('a value block narrowed to the columns the statement filters on', () =>
 });
 
 /**
+ * A mixed candidate set draws its blocks from its sources, not from the arm list.
+ *
+ * `select-samples` takes its third candidate from `inline+evidence+samples`, and the run's block
+ * loaders used to ask `BIRD_ARMS` which blocks to build. No arm in that list declares `samples`,
+ * so the profile's value lists were never attached, the third prompt came out byte-identical to
+ * the first, and `assertMixedFeasible` refused the whole run on 1,532 questions for an arm that
+ * was in fact three prompts. The narrow question was the defect; this scenario is the reading
+ * that catches it, because it needs the third prompt to carry a bracket it can only get from a
+ * block that was loaded.
+ *
+ * The chain fixture is the one with a stored spelling on a profiled column: `items.name` and
+ * `cities.name` both carry one, so every question in it can show the third prompt.
+ */
+describe('a mixed set whose third source carries a block of its own', () => {
+  const mixedRoot = mkdtempSync(join(tmpdir(), 'bird-mixed-blocks-'));
+  afterAll(() => {
+    rmSync(mixedRoot, { recursive: true, force: true });
+  });
+  const mixedData = writeChainBirdDataset(mixedRoot);
+  const mixedGold: Readonly<Record<string, string>> = Object.fromEntries(
+    CHAIN_QUESTIONS.map((entry) => [entry.question, entry.sql]),
+  );
+
+  it('sends each candidate on the card of its own source, which is what the arm claims', async () => {
+    // The failure this pairs with: `select-mixed` called itself three prompts while the run built
+    // one card and printed all three on it, so `metadata+evidence` — descriptions as a block, joins
+    // listed — arrived as a copy of `inline+evidence`. The card is the difference, and it is
+    // visible in the prompt: the inline card carries its descriptions on the column line, the
+    // plain card carries joins underneath.
+    // The mini fixture rather than the chain one: `select-mixed`'s third source is the value index,
+    // which only differs on a question that names a literal, and this fixture has one (`pen`).
+    const result = await run({ plan: { gold: GOLD }, env: { BIRD_ARMS: 'select-mixed' } });
+    expect(result.code).toBe(0);
+    const asked = QUESTIONS[0]?.question as string;
+    const prompts = result.requests.filter((request) => request.prompt.includes(asked)).map((request) => request.prompt);
+    expect(prompts.some((prompt) => prompt.includes('name VARCHAR -- '))).toBe(true);
+    expect(prompts.some((prompt) => prompt.includes('join: orders.item_id = items.id'))).toBe(true);
+  });
+
+  it('loads the block its source asks for, so three sources are three prompts', async () => {
+    const result = await run({
+      plan: { gold: mixedGold },
+      env: { BIRD_DATA: mixedData, BIRD_ARMS: 'select-samples', BIRD_DEFINITIONS_FORCE: '1' },
+    });
+    expect(result.code).toBe(0);
+    const mixed = result.report.mixedCandidatePrompts as {
+      arm: string;
+      sources: readonly string[];
+      questions: number;
+      withAllDistinct: number;
+      degenerate: number;
+    }[];
+    expect(mixed[0]?.arm).toBe('select-samples');
+    expect(mixed[0]?.sources).toContain('inline+evidence+samples');
+    // Three prompts, three distinct, on every case: a share below the case count here is the
+    // symptom the loader produced, and the guard above it only fires at zero.
+    expect(mixed[0]?.withAllDistinct).toBe(CHAIN_QUESTIONS.length);
+    expect(mixed[0]?.degenerate).toBe(0);
+    // The bracket is what a loaded block looks like in a prompt, and only one of the three
+    // sources can put it there: a card printed without it is the two-prompt arm.
+    const bracketed = result.requests.filter((request) => request.prompt.includes('name VARCHAR ['));
+    expect(bracketed.length).toBeGreaterThanOrEqual(CHAIN_QUESTIONS.length);
+    expect(bracketed.length).toBeLessThan(result.requests.length);
+    // The block reached the case through one of three candidates, which is what the
+    // pre-registered criterion for this arm reads: `withValues` counts cases, `columns` the
+    // widest candidate's bracket.
+    const rows = result.report.arms as { readonly arm: string; readonly sampleBlock?: { readonly cases: number; readonly withValues: number } }[];
+    expect(rows[0]?.sampleBlock?.cases).toBe(CHAIN_QUESTIONS.length);
+    expect(rows[0]?.sampleBlock?.withValues).toBe(CHAIN_QUESTIONS.length);
+  });
+});
+
+/**
  * One more opinion, bought only where the pool agreed with itself.
  *
  * The lever's price is a share, not a call, so the reading needs two facts that no accuracy can

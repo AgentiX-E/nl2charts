@@ -71,6 +71,29 @@ cannot be argued with.
   model's own writing, which no prompt or policy in this repository changes. The next lever has to
   change what the candidates are (I-45, I-77), not what is done with them.
 
+### Fixed
+- **A mixed arm sent one card to all of its candidates while its guard measured one card per
+  candidate.** `select-mixed` calls itself three prompts; the run built the arm's card once per case
+  and printed every candidate on it, so `metadata+evidence` — descriptions as a block, joins listed —
+  arrived as a byte-for-byte copy of `inline+evidence`. `distinctShare` computed each prompt with its
+  *source's* card, so the two ends disagreed about what the arm was, and the disagreement was
+  invisible because no existing source declared a card-level lever of its own. `select-samples` is
+  the first that does, and it failed on its first dispatch: `arm select-samples builds no question
+  with 3 distinct prompts … it would pay 3 times for one opinion on every case`, on all 1,532 cases.
+  A candidate is now sent on its source's card, which is what the arm's name has always claimed and
+  what the guard has always measured.
+- **The block loaders asked `BIRD_ARMS` instead of the arms the run reads.** A mixed arm names its
+  sources only in `mixed`, so `samples`, `samples: 'example'`, worked examples, synthesized
+  definitions and the training split were all decided from a list that did not contain them:
+  `select-samples`' third source carries the sampled block, no *arm* in the list declared a sampler,
+  the profile's value lists were never attached, and three prompts were two. `armsInEffect` answers
+  the question once — the arm list plus every source those arms draw from, each named arm counted
+  once — and the four loaders and `armsNeedRetrieval` all read it.
+- **A mixed arm published no `sampleBlock`.** The block rides on one candidate, so the arm's own card
+  has none and the funnel was dropped. It is now counted per case as the widest candidate's bracket,
+  which is what the pre-registered criterion for `select-samples` reads; a pooled arm, which draws
+  nothing, still publishes none rather than a zero.
+
 ### Added
 - **The third candidate slot priced as a swap rather than a purchase.** `select-samples` is
   `select-mixed` with one field changed — `mixed` — so both arms cost four calls. The slot it takes

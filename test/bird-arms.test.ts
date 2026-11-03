@@ -17,6 +17,7 @@ import {
   DEV_ARMS,
   ON_DEMAND_ARMS,
   PAIRS,
+  armsInEffect,
   armsNeedRetrieval,
   assertArmProducedResults,
   assertFailureRate,
@@ -1374,6 +1375,46 @@ describe('the adaptive profile arm', () => {
     // descriptions switch is part of that placement rather than a second lever.
     const subset = promptFor({ ...(resolveArm('names') as Arm), definitions: 'dataset-subset' }, question, {});
     expect(subset.descriptions).toBe(true);
+  });
+});
+
+describe('the arms a run actually reads', () => {
+  it('counts a mixed arm\'s sources, because it sends their prompts and not its own', () => {
+    // The defect this exists for: the block loaders asked `BIRD_ARMS`, a mixed arm names its
+    // sources only in `mixed`, and a source's block was therefore never loaded. `select-samples`
+    // failed on its first real dispatch with three prompts that were two — the guard refusing the
+    // run was correct, and the loader had asked the narrower question.
+    const names = armsInEffect(['select-samples']).map((arm) => arm.name);
+    expect(names).toContain('select-samples');
+    expect(names).toContain('inline+evidence');
+    expect(names).toContain('metadata+evidence');
+    expect(names).toContain('inline+evidence+samples');
+    // And the block is real: the source declares the sampler the arm does not.
+    expect(resolveArm('select-samples')?.samples).toBeUndefined();
+    expect(resolveArm('inline+evidence+samples')?.samples).toBe('profile');
+  });
+
+  it('names each arm once, however many times it is drawn on', () => {
+    // `select-cross` draws one source twice (primary and second provider for the same arm), and a
+    // duplicate would make the loaders do the same work twice while the report said two opinions.
+    const names = armsInEffect(['select-cross']).map((arm) => arm.name);
+    expect(new Set(names).size).toBe(names.length);
+    expect(names.filter((name) => name === 'inline+evidence')).toHaveLength(1);
+    // An A/A duplicate is one arm read twice, so it adds nothing to the effect.
+    expect(armsInEffect(['select-mixed', 'select-mixed']).map((arm) => arm.name)).toEqual(armsInEffect(['select-mixed']).map((arm) => arm.name));
+  });
+
+  it('ignores a name that resolves to nothing, the way every other reader does', () => {
+    expect(armsInEffect(['not-an-arm'])).toEqual([]);
+    expect(armsInEffect(['not-an-arm', 'names']).map((arm) => arm.name)).toEqual(['names']);
+  });
+
+  it('is what the training-split question reads, so a mixed arm cannot hide a retrieval', () => {
+    // No mixed arm retrieves today. The assertion is about the wiring rather than the catalogue:
+    // the workflow's answer comes from the same set, so an arm that later mixes `inline+retrieval`
+    // cannot be dispatched against a node with no `train.json`.
+    expect(armsNeedRetrieval(['select-samples'])).toBe(false);
+    expect(armsInEffect(['select-samples']).some((arm) => arm.demonstrations === true || arm.evidence === 'retrieved')).toBe(false);
   });
 });
 

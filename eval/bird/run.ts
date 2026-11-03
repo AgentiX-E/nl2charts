@@ -592,10 +592,37 @@ export function parseMixedSource(source: string): { arm: string; provider: 'prim
  * about which arms exist — the failure mode `DEV_ARMS` already has a test for.
  */
 export function armsNeedRetrieval(names: readonly string[]): boolean {
-  return names.some((name) => {
+  return armsInEffect(names).some((arm) => arm.evidence === 'retrieved' || arm.demonstrations === true);
+}
+
+/**
+ * Every arm whose prompt this run will send.
+ *
+ * A mixed arm does not send a prompt of its own: it sends one per source, and those sources are
+ * other arms. So "which arms does this run read" is not the arm list — it is the arm list plus
+ * every source those arms name — and it is the question the block loaders have to ask, because a
+ * block that nothing loaded is not an error anywhere; it is a prompt that silently equals another
+ * prompt.
+ *
+ * `select-samples` is the arm that found this. Its third source is `inline+evidence+samples`, no
+ * *arm* in `BIRD_ARMS` declared `samples`, so the profile's value lists were never attached, all
+ * three prompts collapsed to two, and `assertMixedFeasible` refused the run on all 1,532 questions
+ * with "builds no question with 3 distinct prompts". The guard was right and the loader had asked
+ * the narrower question. One function now answers both ends, and `armsNeedRetrieval` reads it too:
+ * the workflow decides whether to fetch 8.5 GB of `train.json` from the same set.
+ */
+export function armsInEffect(names: readonly string[]): Arm[] {
+  const resolved: Arm[] = [];
+  const seen = new Set<string>();
+  const add = (name: string): void => {
     const arm = resolveArm(name);
-    return arm?.evidence === 'retrieved' || arm?.demonstrations === true;
-  });
+    if (arm === undefined || seen.has(arm.name)) return;
+    seen.add(arm.name);
+    resolved.push(arm);
+    for (const source of arm.mixed ?? []) add(parseMixedSource(source).arm);
+  };
+  for (const name of names) add(name);
+  return resolved;
 }
 
 export function assertMixedSources(sources: readonly string[] = MIXED_SOURCES): void {
@@ -3677,6 +3704,14 @@ export interface PreparedRun {
   readonly blocksFor: (arm: Arm, question: BirdQuestion) => PromptBlocks;
   readonly schemaFor: (arm: Arm, question: BirdQuestion) => readonly SchemaTable[];
   /**
+   * The card one candidate of a mixed set is sent on: the arm's card with the source's own
+   * card-level levers overlaid. Same function for the prompt the guard measures and the prompt
+   * the run sends, which is the whole point of it being here rather than in either caller.
+   */
+  readonly schemaForSource: (source: Arm, question: BirdQuestion) => readonly SchemaTable[];
+  /** How many columns of a card carry stored values, counted the way the renderer reads them. */
+  readonly samplesOn: (schema: readonly SchemaTable[]) => number;
+  /**
    * How many columns this arm's sampler put on a card, over the databases the run covers.
    *
    * The gate below reads it. `controls.sampledColumns` reports the same total for the run, which
@@ -3798,9 +3833,12 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
       readonly rewritten: number;
     }
   >();
+  // Every arm whose prompt this run sends, which is not `settings.arms`: a mixed arm sends one
+  // prompt per source, so the blocks to load are decided by the sources too.
+  const inEffect = armsInEffect(settings.arms);
   // The masked block is only built when an arm asks for it: it costs a string transform per
   // example, and a run of five plain arms should not pay for a prompt none of them sends.
-  const needsMasking = settings.arms.some((name) => resolveArm(name)?.masked === true);
+  const needsMasking = inEffect.some((arm) => arm.masked === true);
   for (const question of selected) {
     if (retrievalIndex === undefined) break;
     const textHits = retrieve(retrievalIndex, question.question, { k: 3 });
@@ -3899,8 +3937,8 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
   const sampleValues = new Map<string, Map<string, readonly string[]>>();
   const exampleValues = new Map<string, Map<string, readonly string[]>>();
   const sampled = { columns: 0, values: 0 };
-  const widen = settings.arms.some((name) => resolveArm(name)?.samples === 'example');
-  if (settings.arms.some((name) => resolveArm(name)?.samples === 'profile')) {
+  const widen = inEffect.some((arm) => arm.samples === 'example');
+  if (inEffect.some((arm) => arm.samples === 'profile')) {
     for (const [db, profile] of profiles) {
       const byColumn = sampleValuesOf(profile);
       sampled.columns += byColumn.size;
@@ -3979,10 +4017,7 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
   const synthesizedDefinitions = new Map<string, string>();
   /** Provenance per database: the prompt hash and whether the model was called. */
   const definitionsProvenance: Record<string, { hash: string; cached: boolean; source: string }> = {};
-  const needsSynthesis = settings.arms.some((name) => {
-    const source = resolveArm(name)?.definitions;
-    return source === 'synthesized' || source === 'inline';
-  });
+  const needsSynthesis = inEffect.some((arm) => arm.definitions === 'synthesized' || arm.definitions === 'inline');
   // Retries live in the provider, not in the loop below: a throttled call is the
   // endpoint's answer, not a property of this arm.
   // Definitions are pinned rather than regenerated; see `BirdLayout.definitionsFile`.
@@ -4117,6 +4152,25 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
     if (arm.prune === undefined) return layered;
     return pruneSchema({ schema: layered, question: question.question, graph: graphFor(db), hops: arm.prune }).schema;
   };
+
+  /**
+   * The card one candidate of a mixed set is sent on: the source's own card.
+   *
+   * A mixed arm draws each candidate from another arm and describes itself as that many prompts.
+   * The harness built one card per case — the parent's — and handed it to all three, so a source
+   * whose card differs arrived as a copy of the first candidate. `distinctShare` counted the
+   * prompts with each source's own card, which means the guard and the run disagreed about what
+   * the arm was: the guard reported three distinct prompts for `select-mixed` while the run sent
+   * two, because `metadata+evidence`'s card (descriptions as a block, joins listed) collapsed into
+   * `inline+evidence`'s when it was printed on the inline card.
+   *
+   * `select-samples` is what made the disagreement visible. Its third source carries a card-level
+   * lever of its own — the sampled block — and on the parent's card there is nothing for that lever
+   * to act on: the three prompts became two, on every one of the 1,532 cases, and
+   * `assertMixedFeasible` refused the run. The guard was reading the right thing and the run the
+   * wrong one, so the run now reads what the guard reads: one card per candidate, from its source.
+   */
+  const schemaForSource = (source: Arm, question: BirdQuestion): readonly SchemaTable[] => schemaFor(source, question);
 
   /**
    * What each column-choosing arm actually sent, keyed by arm and question.
@@ -4324,8 +4378,16 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
       // cost of exactly the arm that exists to test model diversity.
       const built = sources.map((source) => {
         const spec = parseMixedSource(source);
-        const arm = resolveArm(spec.arm) as Arm;
-        const prompt = buildSqlPrompt(question.question, schemaFor(arm, question), promptFor(arm, question, blocksFor(arm, question)));
+        const sourceArm = resolveArm(spec.arm) as Arm;
+        // The source's card, not the arm's: the run sends each candidate on the card its own
+        // source asks for, and a guard that counted a different card would be measuring a
+        // prompt nobody sends — which is how `select-samples` produced three distinct prompts
+        // here and two in the run.
+        const prompt = buildSqlPrompt(
+          question.question,
+          schemaForSource(sourceArm, question),
+          promptFor(sourceArm, question, blocksFor(sourceArm, question)),
+        );
         return `${spec.provider}\u0000${prompt}`;
       });
       (new Set(built).size === sources.length ? distinct : degenerate).push(String(question.question_id));
@@ -4387,6 +4449,8 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
       }
       return { columns, values };
     },
+    schemaForSource,
+    samplesOn,
     cardFor,
     cardOf,
     mixedCandidatePrompts,
@@ -4839,6 +4903,13 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
     // a whole run down — which is exactly what the wrapper above this line exists to prevent, and
     // what a refused card did to a run until a test asked for one.
     let card: ReturnType<PreparedRun['cardOf']> | undefined;
+    // The most columns carrying stored values across this case's candidates. A mixed arm sends one
+    // opinion per source, and the lever under test may ride on only one of them, so the block is a
+    // property of the *set* and the pre-registered criterion for `select-samples` reads this.
+    let candidateColumns = 0;
+    // Whether this case drew its candidates here. A pooled arm reads another arm's, so it has no
+    // card of its own to report and a zero would read as "the block reached nothing".
+    let drewCandidates = false;
     // Both models' calls are this case's cost. Summing two counters keeps the number
     // measured on each side instead of estimated from the arm's configuration.
     const callsMade = (): number => counter.calls() + (secondCounter?.calls() ?? 0);
@@ -5024,6 +5095,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
           drawn.survived += 1;
         }
         for (let sample = 0; reused === undefined && sample < arm.vote; sample += 1) {
+          drewCandidates = true;
           try {
             // A mixed arm draws each candidate from a different decomposition. The
             // sources repair nothing by contract (asserted in the test suite), so a
@@ -5045,7 +5117,10 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
               sources === undefined && hinted === undefined && repairs === undefined
                 ? pipeline
                 : pipelineFor(resolveArm(spec.arm) as Arm, spec.provider, { linking: hinted, repairs });
-            const askedSample = await sampler.ask({ question: question.question, schema });
+            const candidateSchema =
+              sources === undefined ? schema : prepared.schemaForSource(resolveArm(spec.arm) as Arm, question);
+            candidateColumns = Math.max(candidateColumns, prepared.samplesOn(candidateSchema));
+            const askedSample = await sampler.ask({ question: question.question, schema: candidateSchema });
             if (firstShape === undefined && askedSample.shape !== undefined) firstShape = askedSample.shape;
             // The mechanism has to be observable, not declared: a prompt that asks for
             // steps and gets none is the plain generator with a longer instruction, and
@@ -5548,7 +5623,11 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
       ...scored,
       ...costOfCase(),
       ...(card?.columns === undefined ? {} : { columnSelection: card.columns }),
-      ...(card?.samples === undefined ? {} : { sampleBlock: card.samples }),
+      ...(card?.samples === undefined
+        ? arm.mixed === undefined || !drewCandidates
+          ? {}
+          : { sampleBlock: { columns: candidateColumns } }
+        : { sampleBlock: card.samples }),
     };
   });
   // Before any number is printed: an arm that never reached the database has no
@@ -5777,7 +5856,10 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
     ...(arm.emptyRetry === undefined ? {} : { emptyRetry: { mode: arm.emptyRetry, ...emptyRetryFunnel(runs) } }),
     ...(arm.reconcile === undefined ? {} : { reconcile: { policy: arm.reconcileAdopt ?? 'always', ...reconcileFunnel(runs) } }),
     ...(arm.audit === undefined ? {} : { audit: auditFunnel(runs) }),
-    ...(arm.samples === undefined ? {} : { sampleBlock: sampleBlockFunnel(runs) }),
+    // A mixed arm's block lives on one of its candidates, so the funnel is the arm's to publish
+    // even though the arm itself declares no sampler: `select-samples`' whole claim is that its
+    // third opinion rides a card with values on it.
+    ...(arm.samples === undefined && arm.mixed === undefined ? {} : { sampleBlock: sampleBlockFunnel(runs) }),
     // What the examples cost and what they reached: the arm's whole claim is that the block carries
     // knowledge the hint does not, and a delta with no statement of how many cases carried one is a
     // reading about whichever subset of the split happened to retrieve a neighbour.

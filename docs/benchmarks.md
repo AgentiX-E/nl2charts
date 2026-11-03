@@ -6458,3 +6458,67 @@ what its union covers; if the sampled card is right on cases the other two are a
 score can still rise through selection while the ceiling — the thing that stands between this
 repository's 68.93% and CHASE-SQL's 76.02% — does not move at all. `bench:bird:pool` reads that
 directly, with no call spent, from the same artifact.
+
+## The third slot's first dispatch returned a defect instead of a reading
+
+`41644040097` ran `select-mixed,select-samples` on dev and stopped in the first step that reads the
+split, before a single call:
+
+```
+Error: arm select-samples builds no question with 3 distinct prompts from inline+evidence,
+metadata+evidence, inline+evidence+samples; it would pay 3 times for one opinion on every case
+```
+
+The guard is `assertMixedFeasible`, and it was right. Three defects had to line up for it to say so
+on all 1,532 cases rather than on the one question where the third source has nothing to add.
+
+**One: the block loaders asked the wrong population.** The sampled block is built only when an arm
+asks for it — `settings.arms.some((name) => resolveArm(name)?.samples === 'profile')` — and a mixed
+arm names its sources in `mixed`, never in the arm list. `select-samples` itself declares no sampler;
+its third source does. So `sampleValues` stayed empty, `withSamples` returned the card unchanged, and
+the third prompt was a byte-for-byte copy of the first. The same question was being asked of
+`BIRD_ARMS` by four other loaders — the example sampler, worked examples, synthesized definitions,
+and the training-split fetch in the workflow — so the defect was one expression written five times,
+each copy wrong in the same way.
+
+**Two: the run built one card and printed every candidate on it.** `cardFor(arm, …)` was called once
+per case with the *arm*, and every source was asked with that schema. `select-mixed` therefore sent
+`metadata+evidence` — which in its own arm carries descriptions as a separate block and lists joins
+under each table — on the inline card, where both differences vanish: the two prompts came out at
+**508 characters each, identical**. The arm's own doc comment says it draws "three candidates from
+three decompositions"; it drew two prompts and one restatement.
+
+**Three: the guard measured a prompt nobody sent.** `distinctShare` built each prompt with
+`schemaFor(sourceArm)`, which is the card the source's own arm sends — so it reported three distinct
+prompts for `select-mixed` while the run sent two. The number in every artifact's
+`mixedCandidatePrompts.withAllDistinct` was therefore an upper bound on the arm's diversity, not a
+measurement of it, and the row that said `degenerate: 0` was describing a comparison that never
+happened.
+
+**What this costs the published table.** `select-mixed`'s **62.34%** was measured under one-card
+semantics: two distinct prompts (the value index adds a third only on the 599 questions that name a
+stored literal) and three votes. `select-mixed` is now a genuinely three-prompt arm, and a score from
+it is a score for a different configuration. It is not comparable to the old one across runs — that
+is what the 33-case drift in the previous section already forbids — so the re-dispatch measures the
+corrected arm and `select-samples` in one artifact, and the number it produces replaces 62.34% as the
+baseline rather than being compared to it.
+
+**The fix is three lines of meaning and one of structure.** A candidate is sent on its source's card
+(`schemaForSource`), `distinctShare` calls the same function, and `armsInEffect` answers "which arms
+does this run read" once — the arm list plus every source, each arm once — for all five loaders and
+for `armsNeedRetrieval`. A mixed arm also publishes a `sampleBlock` now: the block rides on one
+candidate, so the arm's own card has none, and the funnel counts the widest candidate's bracket per
+case. That is the number criterion ④ was written to read.
+
+**The criteria do not move.** They were registered before the dispatch and the dispatch did not
+produce a reading, so they stand: ① `select-samples` ≥ `select-mixed` + 1.0pp, ② the sampled source
+sole-correct on ≥ 36 cases beyond the other two, ③ `calls.mean` 4.00 on both arms, ④
+`sampleBlock.withValues` ≥ 1,300 in the new arm.
+
+**A cheaper question was available and was not taken.** The one-card semantics could be kept as a
+control arm (`card: 'parent'`) so the fix's contribution could be priced in the same artifact. It
+costs 6,132 calls and the regression rule says a change that costs accuracy must be reverted on
+evidence — but it is only worth buying if the corrected arm loses. The re-dispatch answers that
+first: if the corrected `select-mixed` is within drift of the two-prompt version's neighbourhood, the
+control is a curiosity; if it is not, the control is the next dispatch and the fix is priced rather
+than asserted.

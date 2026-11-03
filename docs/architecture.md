@@ -938,3 +938,32 @@ that differs in method rather than in prompt or in draw.
   borrowed dialect (`YEAR`, `MONTH`, `DATEDIFF`). A block that arrives from another schema carries
   shape *and* vocabulary, and no single accuracy number can separate them — which is why the next
   lever masks the vocabulary rather than adding more examples.
+
+## A guard and the code it guards have to compute the same thing
+
+`assertMixedFeasible` refuses a mixed arm whose sources cannot differ, because three prompts that
+are two is a three-call bill for one opinion. It ran on every dispatch, it had a test, and it
+reported three distinct prompts for `select-mixed` on every case of the dev split. It was wrong, and
+the way it was wrong is worth naming: **it built the prompt itself** — `buildSqlPrompt(question,
+schemaFor(sourceArm), promptFor(sourceArm))` — while the run built the prompt somewhere else —
+`cardFor(arm)` once per case, then `pipelineFor(sourceArm)` for each candidate. Two constructions of
+the same object, one used to check the other. They agreed for as long as every mixed source happened
+to share its parent's card, which is to say they agreed for reasons unrelated to being the same.
+
+The rule that comes out of it: a guard may read a *record* of what happened, or it may call the
+function that produces the thing — never a second implementation of that function. `drift.ts` is the
+same rule from the other side: it refuses to attribute a verdict flip unless the prompt sizes say the
+prompt did not move, because "it must be the endpoint" is a second implementation of a question the
+artifact can answer.
+
+Two corollaries, both found in the same afternoon:
+
+- **A block that nothing loads is not an error, it is a duplicate.** Five loaders asked
+  `settings.arms` whether they were needed. A mixed arm names its sources in a different field, so
+  all five answered "no" and the prompts silently collapsed. The question "which arms does this run
+  read" now has one answer — `armsInEffect` — and the loaders and the workflow's 8.5 GB decision all
+  read it, so a future lever cannot be added to a source and forgotten by a loader.
+- **An arm's name is a claim the harness must be able to falsify.** `select-mixed` says "three
+  decompositions". Nothing checked that the run sent three different cards, only that three prompt
+  *strings* differed, and a string can differ while the card underneath it is the same. The check
+  now reads the card the candidate is sent on, which is the thing the name is about.
