@@ -50,7 +50,7 @@ import { BIRD_SCHEMA_LINES } from './prompt-shape.js';
 import { attachSamples, narrowSamples, sampleValuesOf } from './samples.js';
 import { conditionColumns } from './conditions.js';
 import { exampleMapOf, exampleSetFor } from './value-examples.js';
-import { buildIndex, renderDemonstrations, renderRetrieved, retrieve } from './retrieval.js';
+import { buildIndex, renderDemonstrationBlocks, renderRetrieved, retrieve } from './retrieval.js';
 import { deserializeIndex, findValues, indexCells, renderValues, serializeIndex } from './values.js';
 import type { ValueIndex } from './values.js';
 import { synthesizeRecord } from './synthesize.js';
@@ -556,6 +556,21 @@ export function parseMixedSource(source: string): { arm: string; provider: 'prim
     : { arm: source, provider: 'primary' };
 }
 
+/**
+ * Whether any of these arms reads the BIRD training split.
+ *
+ * Two levers do: retrieved evidence (`inline+retrieval`) and worked examples (`inline+icl` and the
+ * arms that stack them on the hint). The workflow needs the same answer to decide whether it has to
+ * fetch 8.5 GB for `train.json`, and a second copy of the rule in YAML would be a second opinion
+ * about which arms exist — the failure mode `DEV_ARMS` already has a test for.
+ */
+export function armsNeedRetrieval(names: readonly string[]): boolean {
+  return names.some((name) => {
+    const arm = resolveArm(name);
+    return arm?.evidence === 'retrieved' || arm?.demonstrations === true;
+  });
+}
+
 export function assertMixedSources(sources: readonly string[] = MIXED_SOURCES): void {
   if (sources.length < 2) throw new Error(`a mixed candidate set needs at least two sources, not ${String(sources.length)}`);
   for (const source of sources) {
@@ -888,6 +903,16 @@ export const ARMS: readonly Arm[] = [
   { name: 'synthetic', notes: true, evidence: 'synthetic', repairs: 0, linking: true },
   { name: 'synthetic+focus', notes: true, evidence: 'synthetic', repairs: 0, linking: true, focus: true },
   { name: 'metadata+evidence', notes: true, evidence: 'dataset', repairs: 0, linking: true },
+  // The dataset's hint *and* worked examples from the training split on the same card: the one
+  // component of CHASE-SQL's pipeline that this repository has never stacked on its strongest arm.
+  // `inline+icl` replaced the hint with retrieval, so it priced retrieval *instead of* the hint
+  // (41-42% on Mini-Dev); this prices it *on top of* it, which is the configuration their paper
+  // describes and the only one whose gain would show up as a higher ceiling.
+  { name: 'metadata+evidence+icl', notes: true, evidence: 'dataset', repairs: 0, linking: true, demonstrations: true },
+  // The same stacking with the definitions on the column line: the pair prices the card's
+  // placement under the examples, which is the interaction `inline+icl` never measured because it
+  // had no hint to interact with.
+  { name: 'inline+evidence+icl', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', demonstrations: true },
   // The cheapest arm on the frontier with its card cut to the join closure. The card measurement
   // points at it: 90.5% of that prompt is the card, and 53.5% of the card belongs to tables the
   // gold statement never reads — so the lever that removed 12.6% of `select`'s prompt has more
@@ -1022,6 +1047,8 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'synth-definitions+evidence': 'combines two levers already measured separately',
   interpret: 'one extra call per question; measured null, kept for re-testing',
   metadata: 'no definitions at all: parent of metadata+evidence, run only to re-derive the parent',
+  'metadata+evidence+icl': "the dataset hint and worked examples from the training split on the same card: the one component of CHASE-SQL's pipeline never stacked on this repository's strongest arm, and the arm the ceiling criterion (>= +4pp) is registered against — it needs the training split, an 8.5 GB archive from which only `train.json` is kept, so it is dispatched rather than run on every push",
+  'inline+evidence+icl': 'the same stacking on the inline card: the pair against `metadata+evidence+icl` prices the card placement under the examples, and it carries the same fetch cost',
   'metadata+evidence+prune': 'one lever from metadata+evidence, on the arm where the card is 90.5% of the prompt: priced on the card measurement first, then dispatched, because the closure costs 33 of the 496 cases a gold table',
   synthetic: 'profiles as evidence: measured null',
   'synthetic+focus': 'profile plus a focus instruction: measured null',
@@ -1460,6 +1487,14 @@ export interface CaseRun extends CaseOutcome {
    */
   readonly sampleBlock?: { readonly columns: number };
   /**
+   * How many worked examples this case's prompt carried, on the arms that ask for them.
+   *
+   * Absent rather than zero on every other arm, because "no block was attached" and "the block was
+   * attached with nothing in it" are the two states the guard distinguishes, and a zero on an arm
+   * that never asked would be the first one wearing the second one's name.
+   */
+  readonly examples?: number;
+  /**
    * What the conditional fourth opinion did on this case.
    *
    * Four facts, because four different failures all read as "the extra opinion did not help":
@@ -1667,6 +1702,19 @@ export interface ArmReportRow {
     readonly withValues: number;
     readonly columns: number;
     readonly empty: number;
+  };
+  /**
+   * What the worked examples reached, on the arms that ask for them.
+   *
+   * `cases` is the denominator, `blocks` the cases that carried at least one example and `examples`
+   * the width of what arrived. Published rather than assumed because the block is retrieved per
+   * question: an arm whose neighbours arrived on a third of the split is a blend of two prompts, and
+   * its accuracy is a number about neither.
+   */
+  readonly demonstrations?: {
+    readonly cases: number;
+    readonly blocks: number;
+    readonly examples: number;
   };
   /**
    * The shape of the replies this arm's prompt produced.
@@ -2624,6 +2672,47 @@ export function assertSamplesRan(
   );
 }
 
+/**
+ * The worked examples an arm's prompts carried, as a funnel rather than a total.
+ *
+ * `cases` is the denominator and `blocks` the cases that carried at least one example: an arm that
+ * retrieved neighbours for a third of the split is a blend of two prompts, and its accuracy is a
+ * number about neither. `examples` is the width of what arrived — one example and three are
+ * different prompts — and it is the count `assertDemonstrationsFired` refuses on.
+ */
+export function demonstrationsFunnel(
+  runs: readonly CaseRun[],
+): { readonly cases: number; readonly blocks: number; readonly examples: number } {
+  const blocks = runs.filter((run) => (run.examples ?? 0) > 0).length;
+  return { cases: runs.length, blocks, examples: runs.reduce((total, run) => total + (run.examples ?? 0), 0) };
+}
+
+/**
+ * An arm that asks for worked examples and receives none is its parent under another name.
+ *
+ * Three failures produce exactly that, and all three are infrastructure rather than readings: the
+ * training split built an index in which no neighbour carries a statement (`requires: 'sql'` drops
+ * them), the renderer's character budget is consumed by the first example, or the arm declares the
+ * block while the run built none. The arm's whole claim is that the examples carry knowledge the
+ * per-question hint does not, and a zero funnel publishes it as "examples do not help".
+ *
+ * The count is per case and per arm for the reason `assertSamplesRan` reads the arm's own sampler:
+ * `controls.demonstrationBlocks` is a fact about the run, and a run with one examples arm and one
+ * plain arm reports a positive total however the examples arm fared.
+ */
+export function assertDemonstrationsFired(
+  armName: string,
+  runs: readonly CaseRun[],
+  minimumSample = MINIMUM_INSTRUMENT_SAMPLE,
+): void {
+  if (runs.length < minimumSample) return;
+  const funnel = demonstrationsFunnel(runs);
+  if (funnel.examples > 0) return;
+  throw new Error(
+    `arm ${armName}: worked examples were asked for and ${String(funnel.blocks)} of ${String(funnel.cases)} cases carried one, so the arm is its parent renamed`,
+  );
+}
+
 /** True when this arm asks any of its candidates to decompose. */
 export function declaresDecomposition(arm: Pick<Arm, 'decompose' | 'mixed'>): boolean {
   return arm.decompose === true || (arm.mixed ?? []).some((source) => parseMixedSource(source).arm === 'decompose');
@@ -2681,6 +2770,12 @@ export function assertReportComplete(report: { readonly arms?: readonly ArmRepor
       // The block is the arm's only cost, and its width is the lever on the one arm that narrows it.
       // A row without the count reports an accuracy difference with no statement of what was shown.
       throw new Error(`arm ${row.arm} carries stored values and its row carries no block funnel, so its prompt cannot be priced`);
+    }
+    if (arm.demonstrations === true && row.demonstrations === undefined) {
+      // The row's whole claim is that the block carries knowledge the hint does not. Without the
+      // funnel, "the examples did not help" and "the examples arrived on a tenth of the cases" are
+      // the same number.
+      throw new Error(`arm ${row.arm} carries worked examples and its row carries no demonstration funnel, so the delta cannot be placed on the cases that read one`);
     }
     if (arm.emptyRetry !== undefined && row.emptyRetry === undefined) {
       throw new Error(`arm ${row.arm} runs the empty-result lever and its row carries no empty-result funnel, so the call cannot be priced`);
@@ -3482,6 +3577,16 @@ export interface PreparedRun {
    */
   readonly sampledFor: (arm: Arm) => { readonly columns: number; readonly values: number };
   /**
+   * The worked examples this question's prompt can carry: the rendered block, and how many examples
+   * it holds.
+   *
+   * On the prepared run rather than read off `controls.demonstrationBlocks`, for the reason
+   * `sampledFor` exists beside `sampledColumns`: with a plain arm and an examples arm in the same
+   * run the control is positive whether or not *this* arm attached a block, so an arm that asked for
+   * examples and received none would publish as its parent under another name with every gate green.
+   */
+  readonly demonstrationsFor: (question: BirdQuestion) => { readonly text: string; readonly examples: number } | undefined;
+  /**
    * The card to send for one case, spending the call that a column-choosing arm costs.
    *
    * Asynchronous and provider-taking for one reason: the choice is a model call, and a model
@@ -3551,10 +3656,7 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
   } catch {
     retrievalIndex = undefined;
   }
-  const needsRetrieval = settings.arms.some((name) => {
-    const arm = resolveArm(name);
-    return arm?.evidence === 'retrieved' || arm?.demonstrations === true;
-  });
+  const needsRetrieval = armsNeedRetrieval(settings.arms);
   if (needsRetrieval && retrievalIndex === undefined) {
     // An arm whose lever has no input is the parent arm with a different name: it ran
     // once, scored 44.4% against its parent's 43.6%, and the near-equality was read as
@@ -3567,7 +3669,10 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
   // Built once per selected question rather than once per arm: the blocks are inputs,
   // and recomputing them per arm made an empty result indistinguishable from a slow one.
   const retrievedByQuestion = new Map<number, string>();
-  const demonstrationsByQuestion = new Map<number, string>();
+  // The rendered block *and* how many examples it holds. The count exists because the arm that
+  // stacks examples on the dataset's hint is priced by both: one example and three are different
+  // prompts at the same size column, and a joined string cannot be counted without re-parsing it.
+  const demonstrationsByQuestion = new Map<number, { readonly text: string; readonly examples: number }>();
   for (const question of selected) {
     if (retrievalIndex === undefined) break;
     const textHits = retrieve(retrievalIndex, question.question, { k: 3 });
@@ -3575,11 +3680,13 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
     if (text.length > 0) retrievedByQuestion.set(question.question_id, text);
     // Same corpus, same ranking, same k: the only difference from the evidence block
     // is that each neighbour arrives with its statement.
-    const worked = renderDemonstrations(retrieve(retrievalIndex, question.question, { k: 3, requires: 'sql' }));
-    if (worked.length > 0) demonstrationsByQuestion.set(question.question_id, worked);
+    const worked = renderDemonstrationBlocks(retrieve(retrievalIndex, question.question, { k: 3, requires: 'sql' }));
+    if (worked.length > 0) {
+      demonstrationsByQuestion.set(question.question_id, { text: worked.join('\n\n'), examples: worked.length });
+    }
   }
   const retrievedFor = (question: BirdQuestion): string | undefined => retrievedByQuestion.get(question.question_id);
-  const demonstrationsFor = (question: BirdQuestion): string | undefined =>
+  const demonstrationsFor = (question: BirdQuestion): { readonly text: string; readonly examples: number } | undefined =>
     demonstrationsByQuestion.get(question.question_id);
 
   const schemas = new Map<string, SchemaTable[]>();
@@ -3976,7 +4083,7 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
     ...(evidenceFor(arm, question) === undefined ? {} : { synthesized: evidenceFor(arm, question) }),
     ...(definitionsFor(arm, question.db_id) === undefined ? {} : { definitions: definitionsFor(arm, question.db_id) }),
     ...(retrievedFor(question) === undefined ? {} : { retrieved: retrievedFor(question) }),
-    ...(demonstrationsFor(question) === undefined ? {} : { demonstrations: demonstrationsFor(question) }),
+    ...(demonstrationsFor(question) === undefined ? {} : { demonstrations: demonstrationsFor(question)?.text }),
     ...(valuesFor(question) === undefined ? {} : { values: valuesFor(question) }),
   });
 
@@ -4109,6 +4216,7 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
     schemaFor,
     // Summed over the databases the run covers rather than read off the first one: a run can
     // mix a database with dictionaries and one without, and the first is not the run.
+    demonstrationsFor,
     sampledFor: (arm: Arm) => {
       const maps = arm.samples === 'example' ? exampleValues : sampleValues;
       let columns = 0;
@@ -4457,6 +4565,20 @@ export const MECHANISMS: readonly Mechanism[] = [
     quiet: () => quietBank({ sampleBlock: { columns: 0 } }),
   },
   {
+    lever: 'demonstrations',
+    declares: (arm) => arm.demonstrations === true,
+    // An arm that asks for worked examples and receives none is its parent renamed. The count is
+    // per case, not `controls.demonstrationBlocks`: with a plain arm in the same run the control is
+    // positive whether or not this arm attached a block.
+    guard: ({ armName, runs }) => assertDemonstrationsFired(armName, runs),
+    records: 'demonstrations',
+    scenarios: ['attaches worked examples to the prompt, and counts the cases that carried one'],
+    // A bank in which the arm exists and no prompt carried an example: the three ways that happens
+    // (no neighbour with a statement, the budget consumed by the first example, a block the run
+    // never built) all leave this bank behind.
+    quiet: () => quietBank({}),
+  },
+  {
     lever: 'dissent',
     declares: (arm) => arm.dissent !== undefined,
     // A conditional call has to be seen firing *and* seen arriving: the two failures produce the
@@ -4517,6 +4639,16 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
       );
     }
   }
+  /**
+   * The worked examples this case's prompt carries.
+   *
+   * One expression for all three return paths, because the block is decided by the arm and the
+   * prepared run rather than by how the case ended: a case whose statement the engine refused still
+   * read the examples, and a guard that counted only successful cases would read an outage as a
+   * lever that never fired.
+   */
+  const examplesFor = (question: BirdQuestion): number =>
+    arm.demonstrations === true ? (prepared.demonstrationsFor(question)?.examples ?? 0) : 0;
   const runs = await pool(cases, settings.concurrency, async (question): Promise<CaseRun> => {
     // Counted, not derived: a plan costs two calls, a selector costs one, and a
     // configuration-derived count got both wrong in opposite directions.
@@ -5165,6 +5297,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
             errorKind: 'execution',
             calls: callsMade(),
             ...(asked.decomposedSteps === undefined ? {} : { decomposition: { candidates: 1, steps: asked.decomposedSteps } }),
+            ...(examplesFor(question) === 0 ? {} : { examples: examplesFor(question) }),
             ...shape,
             error: `execution: ${predicted.error ?? 'unknown'}`,
           };
@@ -5187,6 +5320,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
             ? {}
             : { emptyRetried: asked.emptyRetry.fired, emptyRecovered: asked.emptyRetry.recovered }),
           ...(asked.decomposedSteps === undefined ? {} : { decomposition: { candidates: 1, steps: asked.decomposedSteps } }),
+          ...(examplesFor(question) === 0 ? {} : { examples: examplesFor(question) }),
           ...shape,
         };
       } catch (error) {
@@ -5211,6 +5345,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
           calls: callsMade(),
           ...(failureClasses === undefined ? {} : { failures: failureClasses }),
           ...(lastShape === undefined ? {} : { shape: lastShape }),
+          ...(examplesFor(question) === 0 ? {} : { examples: examplesFor(question) }),
           error: lastError === undefined ? message : `${message}: ${lastError}`,
           // A shape failure ends with a statement that runs, so calling it `execution`
           // would say the engine rejected something it never saw.
@@ -5461,6 +5596,10 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
     ...(arm.reconcile === undefined ? {} : { reconcile: { policy: arm.reconcileAdopt ?? 'always', ...reconcileFunnel(runs) } }),
     ...(arm.audit === undefined ? {} : { audit: auditFunnel(runs) }),
     ...(arm.samples === undefined ? {} : { sampleBlock: sampleBlockFunnel(runs) }),
+    // What the examples cost and what they reached: the arm's whole claim is that the block carries
+    // knowledge the hint does not, and a delta with no statement of how many cases carried one is a
+    // reading about whichever subset of the split happened to retrieve a neighbour.
+    ...(arm.demonstrations === true ? { demonstrations: demonstrationsFunnel(runs) } : {}),
     // The conditional call's whole price and its whole effect, on the arm that pays for it. On
     // this arm the accuracy is the same number as its parent's only when the selector never
     // adopts the bought candidate, so the funnel is what says whether the call carried anything.
@@ -5698,6 +5837,10 @@ export function caseRows(outcomes: ReadonlyMap<string, readonly CaseRun[]>): Rec
       // opinion help" needs to know which. `asked: false` is a measurement — the pool was not
       // unanimous here — and dropping it would make the arm's population look like the whole split.
       ...(run.dissent === undefined ? {} : { dissent: run.dissent }),
+      // How many worked examples this case's prompt carried, when the arm asks for them: the
+      // funnel says how many cases, and every reading of "did the examples help where they
+      // arrived" needs which — the same reason the block above is per case.
+      ...(run.examples === undefined ? {} : { examples: run.examples }),
       // Why this case has no candidate, when it has none.
       //
       // `select-mixed` cost 3 calls on two of 120 questions while `select-cross` cost 4,

@@ -861,6 +861,52 @@ describe('retrieval and the second model, when they are configured', () => {
     expect(prompts[0]?.prompt).toContain('How many items are there in total?');
   });
 
+  it('attaches worked examples to the prompt, and counts the cases that carried one', async () => {
+    // The examples arrive *on top of* the dataset's hint, which is the configuration CHASE-SQL
+    // describes and the one `inline+icl` (retrieval instead of the hint) never measured. The
+    // artifact has to say how many of the cases carried a block: an arm whose neighbours landed on
+    // a third of the split is a blend of two prompts, and its accuracy is a number about neither.
+    mkdirSync(join(root, 'eval', '.cache', 'bird', 'train'), { recursive: true });
+    writeFileSync(
+      trainFile,
+      JSON.stringify([
+        { db_id: 'other', question: 'How many items are there in total?', evidence: 'count of items', SQL: 'select count(*) from items' },
+        { db_id: 'other', question: 'What is the average item price?', evidence: 'mean of price', SQL: 'select avg(price) from items' },
+      ]),
+    );
+    const result = await run({ plan: { first: correct }, env: { BIRD_ARMS: 'metadata+evidence+icl' } });
+    expect(result.code).toBe(0);
+    const arms = result.report.arms as { arm: string; demonstrations?: { cases: number; blocks: number; examples: number } }[];
+    const funnel = arms[0]?.demonstrations;
+    expect(funnel?.cases).toBe(QUESTIONS.length);
+    expect(funnel?.blocks).toBeGreaterThan(0);
+    // The examples and the card's own join lines are in the same prompt: this is the stacking, not
+    // the replacement `inline+icl` priced.
+    const prompt = result.requests.find((request) => request.prompt.includes(QUESTIONS[0]?.question ?? ''))?.prompt ?? '';
+    expect(prompt).toContain('select count(*) from items');
+    expect(prompt).toContain('join:');
+  });
+
+  it('publishes an examples arm whose blocks never arrived as a zero funnel', async () => {
+    // The training split is there and none of its rows carries a statement, so `requires: 'sql'`
+    // drops every neighbour: the arm is its parent with a longer prompt. The guard refuses this on
+    // a bank of a hundred cases; here the split has seven, the guard is silent by its own floor, and
+    // what the artifact must still say is the zero — `blocks: 0` beside `cases: 7` is the reading
+    // that stops "the examples did not help" from being inferred from a prompt that never carried
+    // one. BIRD's train split really does hold rows with no SQL.
+    mkdirSync(join(root, 'eval', '.cache', 'bird', 'train'), { recursive: true });
+    writeFileSync(
+      trainFile,
+      JSON.stringify([{ db_id: 'other', question: 'How many items are there in total?', evidence: 'count of items' }]),
+    );
+    const result = await run({ plan: { first: correct }, env: { BIRD_ARMS: 'metadata+evidence+icl' } });
+    expect(result.code).toBe(0);
+    const arms = result.report.arms as { arm: string; demonstrations?: { cases: number; blocks: number; examples: number } }[];
+    expect(arms[0]?.demonstrations).toEqual({ cases: QUESTIONS.length, blocks: 0, examples: 0 });
+    const prompt = result.requests.find((request) => request.prompt.includes(QUESTIONS[0]?.question ?? ''))?.prompt ?? '';
+    expect(prompt).not.toContain('Question: How many items are there in total?');
+  });
+
   it('draws a candidate from the second endpoint and labels each candidate with its source', async () => {
     const second = await startEndpoint({ reply: (request) => replyFor(request, { first: correct }) });
     try {

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { buildSqlPrompt } from '@agentix-e/nl2charts-ai';
+import { entryExit, isEntry, main, needsTrainingSplit, requestedArms } from '../eval/bird/needs-train.js';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -16,6 +17,7 @@ import {
   DEV_ARMS,
   ON_DEMAND_ARMS,
   PAIRS,
+  armsNeedRetrieval,
   assertArmProducedResults,
   assertFailureRate,
   assertHarnessClean,
@@ -1337,5 +1339,65 @@ describe('the adaptive profile arm', () => {
     // descriptions switch is part of that placement rather than a second lever.
     const subset = promptFor({ ...(resolveArm('names') as Arm), definitions: 'dataset-subset' }, question, {});
     expect(subset.descriptions).toBe(true);
+  });
+});
+
+describe('which arms need the training split', () => {
+  it('answers from the arm table, for the dispatches that read it and the ones that do not', () => {
+    // The workflow asks this before it downloads 8.5 GB, and the answer has to be the arm table's —
+    // a second copy of "which arms retrieve" in YAML is a second opinion about which arms exist.
+    expect(armsNeedRetrieval(['names', 'inline+evidence', 'metadata+evidence'])).toBe(false);
+    expect(armsNeedRetrieval(['inline+retrieval'])).toBe(true);
+    expect(armsNeedRetrieval(['inline+icl'])).toBe(true);
+    // The stacked arms are the ones this round's ceiling criterion is registered against, and they
+    // are exactly the case a hand-written condition forgets: `evidence: 'dataset'` reads the hint,
+    // so nothing about the evidence block says the training split is needed too.
+    expect(armsNeedRetrieval(['metadata+evidence+icl'])).toBe(true);
+    expect(armsNeedRetrieval(['inline+evidence+icl'])).toBe(true);
+    expect(resolveArm('metadata+evidence+icl')?.evidence).toBe('dataset');
+    // A name that resolves to nothing is not a `no`: the caller refuses rather than skipping.
+    expect(armsNeedRetrieval(['not-an-arm'])).toBe(false);
+    expect(resolveArm('not-an-arm')).toBeUndefined();
+  });
+});
+
+describe('the workflow\'s one question before it fetches 8.5 GB', () => {
+  it('answers from the arm table, including the chain a blank request resolves to', () => {
+    // `pnpm bench:bird` with no `BIRD_ARMS` runs the chain, and the chain has read the training split
+    // since `inline+icl` joined it. A blank answer here is the difference between a dispatch that
+    // fetches and one that dies inside the harness an hour later.
+    expect(requestedArms(undefined)).toEqual(DEFAULT_ARMS);
+    expect(needsTrainingSplit(requestedArms(undefined))).toBe('yes');
+    expect(needsTrainingSplit(requestedArms('names,metadata+evidence'))).toBe('no');
+    expect(needsTrainingSplit(requestedArms('metadata+evidence,metadata+evidence+icl'))).toBe('yes');
+  });
+
+  it('refuses a name that is not an arm instead of answering `no`', () => {
+    // A typo that skipped the fetch would surface as "need the BIRD training split" after the
+    // minutes this step saves, which reads as a harness bug rather than as a misspelling.
+    expect(() => needsTrainingSplit(['metadata+evidance+icl'])).toThrow(/is not an arm/);
+  });
+
+  it('writes one line, and nothing else, to the stream the workflow reads', () => {
+    const lines: string[] = [];
+    expect(main((line) => lines.push(line), { BIRD_ARMS: 'names' })).toBe(0);
+    expect(lines).toEqual(['no']);
+    // The caller substitutes this into `[ "$(...)" = "yes" ]`, so a second line would be a bug the
+    // shell reports as a mismatch rather than as a stray line.
+    expect(main((line) => lines.push(line), { BIRD_ARMS: 'inline+evidence+icl' })).toBe(0);
+    expect(lines).toEqual(['no', 'yes']);
+  });
+
+  it('knows when it is the entry point, and only then does it exit with a code', () => {
+    expect(isEntry(undefined, 'file:///x.ts')).toBe(false);
+    expect(isEntry('/x.ts', 'file:///x.ts')).toBe(true);
+    expect(isEntry('/y.ts', 'file:///x.ts')).toBe(false);
+    // Imported: no exit code, so an unrelated runner keeps its own. Run: the code this module's
+    // step turns into `success` or `failure`, and one line on the stream the shell reads.
+    const lines: string[] = [];
+    expect(entryExit('/y.ts', 'file:///x.ts', (line) => lines.push(line), { BIRD_ARMS: 'names' })).toBeUndefined();
+    expect(lines).toEqual([]);
+    expect(entryExit('/x.ts', 'file:///x.ts', (line) => lines.push(line), { BIRD_ARMS: 'names' })).toBe(0);
+    expect(lines).toEqual(['no']);
   });
 });

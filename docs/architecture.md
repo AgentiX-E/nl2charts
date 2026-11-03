@@ -862,3 +862,19 @@ that differs in method rather than in prompt or in draw.
   losses are cases where every candidate agreed on the same wrong rows, which is a knowledge failure
   that neither sampling nor re-wording touches. **A factor nobody measured will be named after the
   thing it was supposed to be**, and the name survives every reading that does not separate them.
+- **A lever that only edits a prompt has no natural failure signal; the absence of its input is the
+  only one.** Every other mechanism in this repository fails loudly when it breaks — a candidate
+  that never arrives, a selector that answers nothing, an engine that refuses every statement. A
+  prompt block that never arrives fails silently: the prompt is valid, the model answers, the arm
+  scores, and the number reads as "worked examples do not help". `demonstrations` was the last
+  runtime lever without a guard, and the reason is structural rather than careless — nothing in the
+  pipeline ever asked whether the block was there. The guard therefore counts the input per case,
+  refuses a zero on any bank large enough to be a reading, and publishes the share beside the score:
+  **a block that arrives on a third of the split is a blend of two prompts, and the mean belongs to
+  neither.**
+- **A conditional download decided by a name list belongs beside the list.** The training split is
+  an 8.5 GB archive that most dispatches never read, so the workflow has to ask before it fetches —
+  and the first version of that question is always a YAML `contains('+icl')`, which is a second
+  opinion about which arms exist and drifts the first time an arm is renamed. `bench:bird:needs-train`
+  resolves the same arm table the runner resolves and prints one word. The workflow asks it; the
+  table answers; a new arm that reads the split is fetched for by being declared.

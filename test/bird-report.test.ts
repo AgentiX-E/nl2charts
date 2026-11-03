@@ -115,6 +115,20 @@ describe('report completeness', () => {
     ).not.toThrow();
   });
 
+  it('refuses an examples arm whose funnel the artifact dropped', () => {
+    // The block is retrieved per question, so "the examples did not help" and "the examples arrived
+    // on a tenth of the split" are the same accuracy and opposite findings. The funnel is the only
+    // field that separates them, and a row without it publishes a delta with no population.
+    expect(() => assertReportComplete({ arms: [{ arm: 'metadata+evidence+icl', total: 1532, format: FORMAT }] })).toThrow(
+      /carries worked examples and its row carries no demonstration funnel/,
+    );
+    expect(() =>
+      assertReportComplete({
+        arms: [{ arm: 'metadata+evidence+icl', total: 1532, demonstrations: { cases: 1532, blocks: 1520, examples: 4460 }, format: FORMAT }],
+      }),
+    ).not.toThrow();
+  });
+
   it('refuses a sampling arm without its ceiling', () => {
     // `candidateRecall` is the only number that separates a weak generator from a weak
     // selector, and a sampling row without it cannot be read at all.

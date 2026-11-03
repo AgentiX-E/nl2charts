@@ -2,7 +2,7 @@
   "note": "Per-file eval coverage. Enforced by tools/check-eval-coverage.mjs: a number may rise freely and may only fall with an explicit, reviewed edit. `target` is the standard every file must reach before eval/ joins the main gate.",
   "target": 95,
   "tolerancePp": 0.2,
-  "measuredAt": "2026-11-02",
+  "measuredAt": "2026-11-03",
   "totals": {
     "lines": 99.45,
     "statements": 99.45,
@@ -110,7 +110,7 @@
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 98.24
+      "branches": 98.37
     },
     "eval/bird/failure-shape.ts": {
       "lines": 100,
@@ -165,6 +165,12 @@
       "statements": 100,
       "functions": 100,
       "branches": 96.15
+    },
+    "eval/bird/needs-train.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 100
     },
     "eval/bird/oracle.ts": {
       "lines": 98.14,

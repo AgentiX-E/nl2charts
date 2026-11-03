@@ -51,6 +51,28 @@ cannot be argued with.
   change what the candidates are (I-45, I-77), not what is done with them.
 
 ### Added
+- **The one component of CHASE-SQL's pipeline never stacked on this repository's strongest arm, and
+  the guard the last unguarded lever was missing.** `metadata+evidence+icl` and `inline+evidence+icl`
+  put retrieved worked examples *on top of* the dataset's per-question hint; `inline+icl` had only
+  ever put them *instead of* it, so retrieval was priced as a replacement (41-42% on Mini-Dev) and
+  never as an addition. The criteria are registered before the dispatch: the stacked arm must reach
+  **+4.0pp** over `metadata+evidence` (61.03% → ≥65.03%), the block must land on **≥50%** of cases
+  with `examples` published beside it, `calls.mean` must stay exactly 1.00 with **≤+40%** prompt
+  tokens, and a gain below +1.0pp closes retrieval-based knowledge as a lever — the next mechanism
+  would then have to *synthesise* examples rather than retrieve them.
+- **`demonstrations` is now a guarded mechanism.** It was the last lever that acts at runtime with no
+  check that it acted: an arm that declares the block and receives none — no neighbour carrying a
+  statement, the renderer's budget eaten by its first example, a run that built nothing — published
+  as "the prompt with worked examples scored X". The block is counted per case (`examples`), refused
+  at zero on any bank of a hundred cases, and published as `demonstrations: {cases, blocks,
+  examples}` — a funnel rather than a total, because a block that arrives on a third of the split is
+  a blend of two prompts whose mean belongs to neither.
+- **`bench:bird:needs-train`, so the 8.5 GB training archive is fetched when an arm reads it.** The
+  workflow asks the arm table rather than keeping its own copy of "which arms retrieve": a name that
+  resolves to nothing is refused instead of answered `no`, and the answer for a blank `BIRD_ARMS` is
+  the chain's own list, which has read the split since `inline+icl` joined it. Only `train.json`
+  (4.2 MB) is kept, and a warm cache skips the download entirely.
+
 - **The pairwise arm's third criterion is unreachable, and the oracle that shows it is free.** The arm
   was registered with "conversion returns above 92%", written before anyone computed what a perfect
   two-way comparison could reach. Its parent's artifact already holds both statements the comparison

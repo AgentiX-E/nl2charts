@@ -93,6 +93,27 @@ jobs:
           key: bird-dev-20240627-${{ runner.os }}
       - name: Fetch dev (no-op when the cache is warm)
         run: pnpm bench:bird:fetch
+      # Worked examples and retrieved evidence read BIRD's *training* split: 9,428 labelled questions
+      # over 69 databases that share none with the dev split, so they are knowledge rather than
+      # answers. The archive is 8.5 GB and only `train.json` is kept (4.2 MB), so fetching it on every
+      # dev run would add minutes to the runs that never read it, and skipping it on a run that does
+      # fails an hour later inside the harness with "need the BIRD training split".
+      #
+      # The question is answered by the arm table, not by this file: `bench:bird:needs-train` resolves
+      # `BIRD_ARMS` with the same function the runner uses, so a new arm that reads the split is
+      # fetched for by being declared and not by someone remembering to edit a condition here.
+      - name: Cache the training split
+        uses: actions/cache@v4
+        with:
+          path: eval/.cache/bird/train
+          key: bird-train-20240627-${{ runner.os }}
+      - name: Fetch the training split when an arm reads it
+        run: |
+          if [ "$(pnpm --silent bench:bird:needs-train)" = "yes" ]; then
+            BIRD_SPLIT=train pnpm bench:bird:fetch
+          else
+            echo "no arm in this dispatch reads the training split"
+          fi
       # One call per endpoint before 1,534 questions. This workflow is the only one that can
       # name a second model, and it was the only one without a preflight: run `40792849132`
       # dispatched `second_model=glm-4.5`, drew 120 of 360 candidates — every `@second`

@@ -20,9 +20,11 @@ import {
   poolReadOf,
   spendOf,
   assertReconcileFired,
+  assertDemonstrationsFired,
   assertDissentFired,
   assertDissentRule,
   assertSampleBlockFired,
+  demonstrationsFunnel,
   dissentFunnel,
   reconcileFunnel,
   sampleBlockFunnel,
@@ -1399,5 +1401,47 @@ describe('the verification turn on a bought opinion', () => {
     expect(() =>
       assertDissentRule({ name: 'pair', dissent: 'decompose', dissentVerify: 'pairwise', vote: 3, mixed: ['a', 'b', 'c'], select: true }),
     ).not.toThrow();
+  });
+});
+
+describe('the worked examples on a prompt', () => {
+  const run = (examples?: number): CaseRun => ({
+    id: '1',
+    passed: true,
+    predicted: 'select 1',
+    reason: 'match',
+    strict: true,
+    attempts: 1,
+    calls: 1,
+    ...(examples === undefined ? {} : { examples }),
+  });
+  const bank = (count: number, examples: (index: number) => number): CaseRun[] =>
+    Array.from({ length: count }, (_unused, index) => ({ ...run(examples(index)), id: String(index) }));
+
+  it('counts the cases that carried a block apart from the examples those cases held', () => {
+    // Two facts, because they answer two questions: `blocks`/`cases` is the share of the split the
+    // lever could act on, and `examples` is the width of what arrived. An arm whose neighbours
+    // landed on a third of the split is a blend of two prompts at either width.
+    const cases = [run(3), run(1), run(2), run(undefined)];
+    expect(demonstrationsFunnel(cases)).toEqual({ cases: 4, blocks: 3, examples: 6 });
+  });
+
+  it('publishes a zero rather than nothing when the block never arrived', () => {
+    // The arm exists, ran, and read no example: that is a measurement of the retrieval, not an
+    // absent instrument, so the funnel is a zero and not `undefined`. The guard below is what
+    // refuses it on a split large enough to be a reading.
+    expect(demonstrationsFunnel([run(undefined), run(undefined)])).toEqual({ cases: 2, blocks: 0, examples: 0 });
+  });
+
+  it('refuses an arm whose examples never arrived, and stays silent below the floor', () => {
+    expect(() => assertDemonstrationsFired('icl', bank(120, () => 0))).toThrow(
+      /worked examples were asked for and 0 of 120 cases carried one, so the arm is its parent renamed/,
+    );
+    // One example on one case is not a reading either, but the guard's question is whether the
+    // mechanism acted at all; the funnel is what publishes how thinly.
+    expect(() => assertDemonstrationsFired('icl', bank(120, (index) => (index === 0 ? 1 : 0)))).not.toThrow();
+    // Below the instrument floor there is nothing to refuse: a seven-question smoke run has seven
+    // cases and the same funnel would say nothing about the split.
+    expect(() => assertDemonstrationsFired('icl', bank(7, () => 0))).not.toThrow();
   });
 });

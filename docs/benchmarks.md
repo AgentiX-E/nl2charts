@@ -6100,3 +6100,50 @@ them raised the ceiling by **+22 to +27**. The pool's own ceiling on this run is
 set lands 7.1pp below the competitor.* The selection side has +1.31pp of headroom left; the gap is
 7.1pp before selection starts. `I-77` and the candidate side close negative, and the next lever has to
 raise the ceiling — with the ceiling as its criterion (**≥ +4pp**), not the score.
+
+### The lever that raises the ceiling, and the instrument that had no guard (I-83)
+
+Three readings have now closed the candidate side: the fourth opinion raised the ceiling by 22 to 27
+cases and converted none of them (`I-77`), the pairwise comparison overturned zero of the twenty
+cases where overturning would have paid, and three prompts carried **1.12** distinct results a case
+against **1.15** for three samples of one prompt (`I-74`). The pool's own ceiling on the last dev run
+is **68.93%** and CHASE-SQL's *end-to-end* number is **76.02%**, so a perfect selector over this
+candidate set lands 7.1pp below the competitor. **The next lever has to raise the ceiling**, and its
+criterion has to be the ceiling.
+
+The mechanism is the one component of CHASE-SQL's pipeline this repository has never stacked:
+**instance-aware worked examples**. `inline+icl` retrieves neighbours from BIRD's training split and
+puts their statements in the prompt *instead of* the dataset's per-question hint, which priced
+retrieval as a replacement (41-42% on Mini-Dev); `metadata+evidence+icl` puts the same block *on top
+of* the hint, which is the configuration their paper describes and the only one whose gain can show
+up as a higher ceiling rather than a reshuffled prompt.
+
+**The lever had no guard, and that is a finding in its own right.** `demonstrations` is the last
+mechanism in the table that acts at runtime without one: an arm that declares it and receives no
+block — no neighbour carrying a statement, the renderer's budget eaten by its first example, a run
+that built nothing — published as "the prompt with worked examples scored X". The block is now
+counted per case (`examples`), refused at zero on any bank of a hundred cases, and published as a
+funnel `{cases, blocks, examples}` beside the accuracy. A funnel and not a total, because the block
+is retrieved per question: an arm whose neighbours landed on a third of the split is a blend of two
+prompts, and its accuracy is a number about neither.
+
+**The criteria, written before the dispatch (dev, 1,532 questions).**
+
+1. **`metadata+evidence+icl` ≥ `metadata+evidence` + 4.0pp** — 61.03% → **≥ 65.03%**, a paired
+   McNemar over the same questions. This is the ceiling criterion, and it is the one that decides
+   whether retrieval is worth 8.5 GB of archive.
+2. **The block lands**: `demonstrations.blocks / cases ≥ 0.50` and `examples` published. A gain with
+   the block on a tenth of the split is a gain on a tenth of the split.
+3. **No new calls and a bounded prompt**: `calls.mean = 1.00` exactly, and **≤ +40% prompt tokens**
+   against the parent. Three worked examples are 600-2,200 characters; a +4pp that costs +80% of the
+   prompt is a different product.
+4. **The falsifier**: if the gain is **< +1.0pp**, retrieval-based knowledge is closed as a lever on
+   this pipeline and the next mechanism must *synthesise* the examples with the model rather than
+   retrieve them — CHASE-SQL's generator, not its retriever. That is a different arm with a
+   different cost, and saying so now is what stops a second retrieval arm from being tried instead.
+
+**Why the fetch is conditional.** The training split is an 8.5 GB archive of which only `train.json`
+(4.2 MB) is kept, and 95% of dev dispatches never read it. `bench:bird:needs-train` resolves
+`BIRD_ARMS` with the same function the runner uses and answers `yes`/`no`, so an arm that reads the
+split is fetched for **by being declared** rather than by someone editing a YAML condition — the same
+rule that keeps `DEV_ARMS` and the baseline from becoming two opinions.

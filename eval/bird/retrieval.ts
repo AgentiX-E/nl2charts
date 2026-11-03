@@ -202,7 +202,7 @@ export function renderRetrieved(hits: readonly Hit[], maxChars = 700): string {
  * enough is exactly what the `inline+icl` arm measures — DAIL-SQL masks
  * schema-specific tokens instead, which is a candidate lever once this one is known.
  */
-export function renderDemonstrations(hits: readonly Hit[], maxChars = 2200): string {
+export function renderDemonstrationBlocks(hits: readonly Hit[], maxChars = 2200): readonly string[] {
   const blocks: string[] = [];
   let used = 0;
   for (const hit of hits) {
@@ -215,5 +215,18 @@ export function renderDemonstrations(hits: readonly Hit[], maxChars = 2200): str
     blocks.push(block);
     used += block.length + 2;
   }
-  return blocks.join('\n\n');
+  return blocks;
+}
+
+/**
+ * The same blocks, joined.
+ *
+ * Split from the renderer so the count survives: an arm priced by "the prompt carried worked
+ * examples" has to publish *how many*, and a string can only be counted by re-parsing it. The two
+ * functions were one until the arm that stacks examples on the dataset's hint needed the number —
+ * and an arm whose block arrived with one example is a different reading from one that arrived with
+ * three, at the same prompt-size column.
+ */
+export function renderDemonstrations(hits: readonly Hit[], maxChars = 2200): string {
+  return renderDemonstrationBlocks(hits, maxChars).join('\n\n');
 }
