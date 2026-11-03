@@ -46,6 +46,12 @@
       "functions": 100,
       "branches": 97.45
     },
+    "eval/bird/artifact.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 100
+    },
     "eval/bird/canonical.ts": {
       "lines": 100,
       "statements": 100,
@@ -74,7 +80,7 @@
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 99.49
+      "branches": 99.5
     },
     "eval/bird/data.ts": {
       "lines": 100,
@@ -110,7 +116,7 @@
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 98.37
+      "branches": 98.4
     },
     "eval/bird/failure-shape.ts": {
       "lines": 100,
@@ -182,7 +188,7 @@
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 98.64
+      "branches": 99.32
     },
     "eval/bird/position.ts": {
       "lines": 98.82,

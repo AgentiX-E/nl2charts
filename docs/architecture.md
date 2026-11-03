@@ -878,3 +878,22 @@ that differs in method rather than in prompt or in draw.
   opinion about which arms exist and drifts the first time an arm is renamed. `bench:bird:needs-train`
   resolves the same arm table the runner resolves and prints one word. The workflow asks it; the
   table answers; a new arm that reads the split is fetched for by being declared.
+- **A refusal written when every dispatch looked alike becomes a false alarm the first time one does
+  not.** Three instruments (`pool`, `diversity`, `consensus`) each refused an artifact with no
+  candidate record, because for a year every dev dispatch sampled three candidates. The round the
+  ceiling lever became a single call turned all three into false alarms on an artifact that was
+  exactly what the dispatch asked for: the dev run **passed** its evaluation and its accuracy floor,
+  then died at the first instrument, skipped the two readings behind it, and went red. The missing
+  distinction was between two absences — *no arm draws more than one candidate* (a reading, printed in
+  one sentence, exit 0) and *an arm publishes a ceiling with no candidates under it* (an artifact that
+  lost records, refused). `eval/bird/artifact.ts` holds the one predicate all three now share, and
+  `scoredQuestions` exists because the first version of the sentence said "no pool to price (0
+  questions)" about a run that had just scored 1,532: **a sentence that states a number has to state
+  the run's number**, and the denominator had been taken from the rows that were missing.
+- **A retrieval block is two things at once, and the two have opposite signs.** The worked examples
+  moved one failure class by thirty cases (column-count, 136 → 106, the largest any prompt lever has
+  produced here) and cost sixteen in exchange: eight value failures and eight execution errors. Every
+  new execution error was a borrowed identifier (`APTT`, `T-BIL`, `SC170`, `T1.Diagnosis`) or a
+  borrowed dialect (`YEAR`, `MONTH`, `DATEDIFF`). A block that arrives from another schema carries
+  shape *and* vocabulary, and no single accuracy number can separate them — which is why the next
+  lever masks the vocabulary rather than adding more examples.

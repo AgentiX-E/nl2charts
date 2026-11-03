@@ -369,9 +369,25 @@ describe('entry points', () => {
     expect(parsed.steps[0]?.name).toBe('select');
   });
 
-  it('refuses an artifact with no candidate set instead of printing an empty table', () => {
-    const file = scratch('bird-eval.json', { cases: [one('names', 1, true)] });
-    expect(() => main(['--artifact', file], '/tmp', () => undefined)).toThrow(/keeps no candidate set/);
+  it('prints that there is nothing to pool when no arm draws more than one candidate', () => {
+    // A dispatch of single-call arms is a legal artifact — the ceiling lever this round is one call,
+    // measured on 1,532 questions — and the dev workflow used to die here *after* the evaluation and
+    // the floor had passed, skipping its two remaining readings and reddening a build whose numbers
+    // were exactly what the dispatch asked for. "Nothing to pool" is a reading, not a broken harness.
+    const file = scratch('bird-eval.json', { cases: [one('names', 1, true)], arms: [{ arm: 'names', calls: { mean: 1 } }] });
+    const printed: string[] = [];
+    expect(main(['--artifact', file], '/tmp', (line) => printed.push(line))).toBe(0);
+    expect(printed).toEqual(['no arm in this artifact draws more than one candidate, so there is no pool to price (1 questions)']);
+  });
+
+  it('refuses a ceiling with no candidates under it, which is an artifact that lost records', () => {
+    // The other absence, and it is the opposite finding: the row publishes the ceiling it was read
+    // against, so candidates existed and are gone. `assertReportComplete` fails the run that writes
+    // one; this is the instrument's own second line of defence.
+    const file = scratch('bird-eval.json', { cases: [one('names', 1, true)], arms: [{ arm: 'names', candidateRecall: 0.7 }] });
+    expect(() => main(['--artifact', file], '/tmp', () => undefined)).toThrow(
+      /publishes a candidate ceiling and none of its cases carries a candidate, so the artifact lost records/,
+    );
   });
 
   it('runs only when it is the entry point', () => {

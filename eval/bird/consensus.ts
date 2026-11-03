@@ -49,6 +49,7 @@
  * reach it — which is the boundary between this instrument and generation work.
  */
 import { readFileSync } from 'node:fs';
+import { declaresCandidateSet, scoredQuestions } from './artifact.js';
 import { pathToFileURL } from 'node:url';
 import { mcnemarExact, pairedResolution } from '@agentix-e/nl2charts-devkit';
 
@@ -69,6 +70,13 @@ export interface ConsensusArtifact {
       readonly fingerprint?: unknown;
     }[];
   }[];
+  /**
+   * One row per arm, and the ceiling the row is read against.
+   *
+   * `candidateRecall` is present only on a row that sampled more than one candidate, so it is how an
+   * instrument tells "this dispatch ran single-call arms" from "this artifact lost its candidates".
+   */
+  readonly arms?: readonly { readonly arm?: unknown; readonly candidateRecall?: unknown }[];
 }
 
 /** One candidate as this harness needs it: what it said, what it returned, and whether it won. */
@@ -595,11 +603,20 @@ export function main(argv: readonly string[], _root: string, log: (line: string)
       ? corpus
       : { ...corpus, reading: corpus.reading.filter((entry) => entry.arm === settings.arm) };
   if (reading.reading.length === 0) {
-    throw new Error(
-      settings.arm === undefined
-        ? 'this artifact keeps no candidate set, so there is no selection rule to price'
-        : `this artifact has no candidate set for arm ${settings.arm}`,
+    // A named arm with no candidates is a request the artifact cannot meet, and stays a refusal.
+    // No arm at all with candidates is a single-call dispatch: nothing to price, and that is the
+    // reading rather than a broken harness.
+    if (settings.arm !== undefined || declaresCandidateSet(artifact.arms)) {
+      throw new Error(
+        settings.arm === undefined
+          ? 'this artifact publishes a candidate ceiling on an arm whose cases carry no candidates, so there is no selection rule to price'
+          : `this artifact has no candidate set for arm ${settings.arm}`,
+      );
+    }
+    log(
+      `no arm in this artifact draws more than one candidate, so there is no selection rule to price (${String(scoredQuestions(artifact.cases))} questions)`,
     );
+    return 0;
   }
   const lines = reportLines(reading, settings, artifact);
   if (settings.json) {

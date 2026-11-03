@@ -6147,3 +6147,49 @@ prompts, and its accuracy is a number about neither.
 `BIRD_ARMS` with the same function the runner uses and answers `yes`/`no`, so an arm that reads the
 split is fetched for **by being declared** rather than by someone editing a YAML condition — the same
 rule that keeps `DEV_ARMS` and the baseline from becoming two opinions.
+
+**The reading (`41584873572`, dev 1,532).** `metadata+evidence` **937 = 61.16%**, `metadata+evidence+icl`
+**951 = 62.08%** — **+0.91pp**, 76 up and 62 down, exact McNemar **p = 0.2684**. Criterion ① **fails**:
++4.0pp needed a net 61 cases and the net is 14, and it is not merely missed — the 95% interval on the
+difference is **[−0.59, +2.41]pp**, whose upper bound is 2.4pp, so a four-point effect is *excluded*
+rather than unresolved. ② **passes**: the block landed on **1,522 of 1,532 cases (99.3%)** with 4,553
+examples (2.99 a case) and the ten cases without a block score **8 against 8**, an accidental control.
+③ **passes**: `calls.mean` is exactly **1.00** and prompt tokens go 1,778 → 2,184 (**+22.8%**). ④ fires
+as registered: below +1.0pp closes retrieval-based knowledge as a lever.
+
+**What the block actually did, and it is not what the lever was bought for.** The failure classes move
+in opposite directions:
+
+| class | `metadata+evidence` | `…+icl` | change |
+|---|---|---|---|
+| column-count | 136 | **106** | **−30** |
+| values | 444 | 452 | +8 |
+| execution errors | 15 | 23 | +8 |
+
+**The examples teach output shape and leak identifiers.** Thirty cases stop failing on the number of
+columns — the largest single-class movement any prompt lever has produced here — and sixteen cases get
+worse in exchange. Fifteen of the twenty-three execution errors are new, and they are all of two kinds:
+`no such column: APTT`, `T-BIL`, `SC170`, `expense.link_to_event`, `T1.alignment`, `T3.time`,
+`T1.Diagnosis` — identifiers that belong to *other* databases' schemas — and `no such function: YEAR`,
+`MONTH`, `DATEDIFF` — functions that belong to the dialect the training split was written in. The
+parent, given the same question and the same hint, ran those statements. The block is the only new
+text in the prompt, and `retrieval.ts` predicted exactly this in the comment it has carried since the
+arm was written: *a demonstration from another schema is useful as a shape and harmful as an
+identifier source*. It is now measured rather than predicted.
+
+**So the next lever is the one that removes the leak, not the one that adds more examples.** Mask the
+schema-specific tokens in the demonstrations and canonicalise their dialect to the one under test —
+DAIL-SQL's masked variant, which that comment already named as "a candidate lever once this one is
+known". The registration, written here before the dispatch:
+
+1. **`≥ +1.5pp` over `metadata+evidence+icl`** (≥ 23 net cases on 1,532) — recovering the 15 leaked
+   statements while keeping most of the 30 shape wins lands at +30 net, so +1.5pp is the conservative
+   half of what the mechanism can reach.
+2. **`errors.execution` ≤ 16** against this run's 23, and no new `no such column` naming a table the
+   schema does not hold.
+3. **`column-count` ≤ 112** against 106, so the shape lesson survives the masking.
+4. **`calls.mean = 1.00`, prompt tokens ≤ +25%** against this run's 2,184.
+
+A gain below +1.0pp would say the shape lesson *depends* on the copied identifiers, which would be a
+different and more interesting finding: that the block helps by giving the model column names from
+somewhere rather than by showing it a shape.

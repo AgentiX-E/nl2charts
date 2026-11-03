@@ -176,6 +176,18 @@ cannot be argued with.
   finding, and the failures it can catch are the ones the Mini-Dev gate already fails on.
 
 ### Fixed
+- **Three instruments refused an artifact that was exactly what the dispatch asked for.** `pool`,
+  `diversity` and `consensus` each raised "keeps no candidate set" on a run with no candidate records,
+  because every dev dispatch had sampled three candidates since they were written. The round the
+  ceiling lever became a single call turned all three into false alarms: the dev run (`41584873572`)
+  passed its evaluation and its accuracy floor, then died at the first instrument and skipped the two
+  readings behind it. The distinction that was missing is between *no arm draws more than one
+  candidate* — a reading, printed in one sentence, exit 0 — and *an arm publishes a ceiling with no
+  candidates under it* — an artifact that lost records, still refused. `eval/bird/artifact.ts` holds
+  the predicate all three share, plus `scoredQuestions`, because the first version of the sentence
+  said "no pool to price (0 questions)" about a run that had just scored 1,532: the denominator had
+  been taken from the rows that were missing.
+
 
 - **The diversity instrument printed the arm's own configuration as its strongest possible
   measurement.** A candidate's fingerprint is what makes "one opinion" a fact, and an artifact that

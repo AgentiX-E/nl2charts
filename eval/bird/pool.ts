@@ -44,6 +44,7 @@
  *   measurable and an arm that samples five times is not the same purchase.
  */
 import { readFileSync } from 'node:fs';
+import { declaresCandidateSet, scoredQuestions } from './artifact.js';
 import { pathToFileURL } from 'node:url';
 
 /** The artifact fields this harness reads. Anything else is ignored, so older artifacts join. */
@@ -57,7 +58,12 @@ export interface PoolArtifact {
     readonly winnerSource?: unknown;
     readonly candidates?: readonly { readonly source?: unknown; readonly correct?: unknown }[];
   }[];
-  readonly arms?: readonly { readonly arm?: unknown; readonly calls?: { readonly mean?: unknown } }[];
+  readonly arms?: readonly {
+    readonly arm?: unknown;
+    readonly calls?: { readonly mean?: unknown };
+    /** Present only on a row that sampled more than one candidate: the ceiling it is read against. */
+    readonly candidateRecall?: unknown;
+  }[];
 }
 
 /**
@@ -414,7 +420,18 @@ export function main(argv: readonly string[], root: string, log: (line: string) 
   const settings = resolvePoolSettings(argv, root);
   const artifact = readJson<PoolArtifact>(settings.artifact);
   const corpus = readPools(artifact);
-  if (corpus.pools.length === 0) throw new Error('this artifact keeps no candidate set, so there is no pool to price');
+  if (corpus.pools.length === 0) {
+    // Two absences, one sentence each. A dispatch of single-call arms is a legal artifact and the
+    // reading is that there is nothing to pool; an arm that publishes a ceiling with no candidates
+    // beside it lost records it had, and is refused.
+    if (declaresCandidateSet(artifact.arms)) {
+      throw new Error('an arm in this artifact publishes a candidate ceiling and none of its cases carries a candidate, so the artifact lost records it had');
+    }
+    log(
+      `no arm in this artifact draws more than one candidate, so there is no pool to price (${String(scoredQuestions(artifact.cases))} questions)`,
+    );
+    return 0;
+  }
   const lines = reportLines(corpus, settings, artifact);
   if (settings.json) {
     log(JSON.stringify({ cases: corpus.ids.length, pools: corpus.pools.map((pool) => pool.name), union: coveredBy(corpus.pools, corpus.ids), steps: greedy(corpus), lines }, null, 2));

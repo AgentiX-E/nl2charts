@@ -32,6 +32,7 @@
  * *more opinions* and *different opinions* are separate purchases.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
+import { declaresCandidateSet, scoredQuestions } from './artifact.js';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -53,6 +54,13 @@ export interface DiversityArtifact {
       readonly fingerprint?: unknown;
     }[];
   }[];
+  /**
+   * One row per arm, and the ceiling the row is read against.
+   *
+   * `candidateRecall` is present only on a row that sampled more than one candidate, so it is how an
+   * instrument tells "this dispatch ran single-call arms" from "this artifact lost its candidates".
+   */
+  readonly arms?: readonly { readonly arm?: unknown; readonly candidateRecall?: unknown }[];
 }
 
 interface Candidate {
@@ -349,7 +357,18 @@ export function main(
   const settings = resolveDiversitySettings(argv, root);
   const report = readJson<DiversityArtifact>(settings.report);
   const arm = settings.arm ?? largestPool(report);
-  if (arm === undefined) throw new Error(`${settings.report} keeps no candidate record at all, so no pool can be read from it`);
+  if (arm === undefined) {
+    // The same two absences the pool instrument reads: a single-call dispatch has no pool of
+    // opinions to measure, which is a reading; an arm that claims a ceiling and carries no
+    // candidates lost records, which is a refusal.
+    if (declaresCandidateSet(report.arms)) {
+      throw new Error(`${settings.report} publishes a candidate ceiling on an arm whose cases carry no candidates, so no pool can be read from it`);
+    }
+    log(
+      `no arm in ${settings.report} draws more than one candidate, so there is no pool of opinions to measure (${String(scoredQuestions(report.cases))} questions)`,
+    );
+    return 0;
+  }
   const read = diversityRead(report, arm, settings.report);
   const lines = diversityLines(read);
   if (settings.json) log(JSON.stringify(read, null, 2));

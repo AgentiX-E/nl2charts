@@ -386,10 +386,13 @@ describe('the entry, run the way a workflow runs it', () => {
     for (const path of written.splice(0)) expect(() => readFileSync(path)).not.toThrow();
   });
 
-  function artifact(rows: readonly Row[]): { root: string; path: string } {
+  function artifact(rows: readonly Row[], arms?: readonly { readonly arm: string; readonly candidateRecall?: number }[]): {
+    root: string;
+    path: string;
+  } {
     const root = mkdtempSync(join(tmpdir(), 'nl2charts-diversity-'));
     const path = join(root, 'bird-eval.json');
-    writeFileSync(path, JSON.stringify({ split: 'dev', cases: rows }, null, 2));
+    writeFileSync(path, JSON.stringify({ split: 'dev', cases: rows, ...(arms === undefined ? {} : { arms }) }, null, 2));
     written.push(path);
     return { root, path };
   }
@@ -430,9 +433,22 @@ describe('the entry, run the way a workflow runs it', () => {
     expect(() => resolveDiversitySettings(['--wat'], ROOT)).toThrow(/unknown flag --wat/);
   });
 
-  it('says which arms can be read when the artifact keeps no pool', () => {
+  it('says there is nothing to measure when no arm draws more than one candidate', () => {
+    // The third of the three instruments that read a pool, and the same distinction: a single-call
+    // dispatch is a reading, an artifact that lost the candidates it claims is a refusal.
     const { root, path } = artifact([run('0', [], 'inline+evidence')]);
-    expect(() => main([path], root, () => undefined)).toThrow(/keeps no candidate record at all, so no pool can be read from it/);
+    const printed: string[] = [];
+    expect(main([path], root, (line) => printed.push(line))).toBe(0);
+    expect(printed).toEqual([
+      `no arm in ${path} draws more than one candidate, so there is no pool of opinions to measure (1 questions)`,
+    ]);
+  });
+
+  it('refuses a ceiling with no candidates under it', () => {
+    const { root, path } = artifact([run('0', [], 'inline+evidence')], [{ arm: 'inline+evidence', candidateRecall: 0.7 }]);
+    expect(() => main([path], root, () => undefined)).toThrow(
+      /publishes a candidate ceiling on an arm whose cases carry no candidates, so no pool can be read from it/,
+    );
   });
 
   it('exits one and prints the sentence rather than a stack trace', () => {

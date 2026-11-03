@@ -507,8 +507,24 @@ describe('the report', () => {
     );
   });
 
-  it('refuses an artifact that keeps no candidate set', () => {
-    expect(() => run({ split: 'dev', cases: [one('names', 1, true)] })).toThrow(/keeps no candidate set/);
+  it('prints that there is nothing to price when no arm draws more than one candidate', () => {
+    // A single-call dispatch is a legal artifact; the instrument says so and exits successfully, the
+    // way its two siblings do. Before this branch existed the dev workflow failed here on an
+    // artifact that was exactly what the dispatch asked for.
+    expect(run({ split: 'dev', cases: [one('names', 1, true)], arms: [{ arm: 'names', calls: { mean: 1 } }] })).toEqual([
+      'no arm in this artifact draws more than one candidate, so there is no selection rule to price (1 questions)',
+    ]);
+  });
+
+  it('refuses a ceiling whose candidates are gone, and a named arm that was never run', () => {
+    // The two refusals that survive: an artifact that lost records it had, and a request the artifact
+    // cannot meet. Neither is "this run was single-call".
+    expect(() => run({ split: 'dev', cases: [one('names', 1, true)], arms: [{ arm: 'names', candidateRecall: 0.7 }] })).toThrow(
+      /publishes a candidate ceiling on an arm whose cases carry no candidates/,
+    );
+    expect(() => run({ split: 'dev', cases: [one('names', 1, true)] }, ['--arm', 'select-cross'])).toThrow(
+      /no candidate set for arm select-cross/,
+    );
   });
 
   it('prints machine-readable output when asked', () => {

@@ -4642,10 +4642,10 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
   /**
    * The worked examples this case's prompt carries.
    *
-   * One expression for all three return paths, because the block is decided by the arm and the
-   * prepared run rather than by how the case ended: a case whose statement the engine refused still
-   * read the examples, and a guard that counted only successful cases would read an outage as a
-   * lever that never fired.
+   * One expression for both paths that built a prompt, because the block is decided by the arm and
+   * the prepared run rather than by how the case ended: a case whose statement the engine refused
+   * still read the examples, and a guard that counted only successful cases would read an engine
+   * outage as a lever that never fired.
    */
   const examplesFor = (question: BirdQuestion): number =>
     arm.demonstrations === true ? (prepared.demonstrationsFor(question)?.examples ?? 0) : 0;
@@ -5345,7 +5345,9 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
           calls: callsMade(),
           ...(failureClasses === undefined ? {} : { failures: failureClasses }),
           ...(lastShape === undefined ? {} : { shape: lastShape }),
-          ...(examplesFor(question) === 0 ? {} : { examples: examplesFor(question) }),
+          // No `examples` here, unlike the two paths above: this one can fail *before* a prompt was
+          // built (a card the linker could not draw, a guard that refused the question), and a case
+          // that never read a prompt must not be counted as one that read the block.
           error: lastError === undefined ? message : `${message}: ${lastError}`,
           // A shape failure ends with a statement that runs, so calling it `execution`
           // would say the engine rejected something it never saw.
