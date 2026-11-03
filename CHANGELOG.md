@@ -7,6 +7,16 @@ cannot be argued with.
 ## Unreleased
 
 ### Changed
+- **The candidate side closes negative, and the measurement that closes it is a contingency table.**
+  The pairwise arm (`41561960657`, dev 1,532) scored 941 against its parent's 940 — +1 case, 5 up and
+  4 down — with 102 comparisons of which it overturned 10: **0 of the 20 where overturning would have
+  paid** and 8 of the 40 where it could not. The bought opinion is right on 21.6% of the disagreements
+  against the incumbent's 41.2%, so any judge that ranks by "which looks more correct" keeps the
+  incumbent; that is prior dominance, not position bias. With the fourth opinion's ceiling at 1,056
+  (68.93%) and CHASE-SQL's end-to-end at 76.02%, a perfect selector would land 7.1pp below the
+  competitor: the gap is above the candidate set, so the next lever is generation, and its criterion
+  is the ceiling (≥ +4pp) rather than the score.
+
 
 - **A push whose only code is tests no longer buys thirteen arms over the split.** The scope filter
   that decides whether a push is measured (`tools/ci-scope.mjs`) knew one inert class — Markdown — so

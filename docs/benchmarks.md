@@ -6030,3 +6030,40 @@ the dispatch:
 The general lesson is the one this file keeps recording from the other side: **a criterion phrased as
 a share of a ceiling has to be checked against the oracle of the mechanism it prices**, or it
 measures the registration rather than the arm.
+
+**The reading (`41561960657`, dev 1,532, success).** `select-cross` **939 = 61.29%** (ceiling 1,034),
+`select-cross-pooled` **940 = 61.36%**, `select-cross-pooled-dissent-pair` **941 = 61.42%** (ceiling
+**1,056**) — **+1 case**, 5 up and 4 down. The funnel: `asked 1104 / arrived 1095 / distinct 102 /
+adopted 10`, `pairwise { asked: 102, choseDissent: 10 }`. Criterion ① fails (+0.07pp), ② fails (no
+net gain on the disagreements), ③ fails at 89.11% — and this run's own pairwise oracle is **91.0%**,
+so ③ could not have passed even with a perfect comparison, ③′ (≥91.0%) included. ④ passes at
+**0.0666 comparisons a case**.
+
+**The contingency table is the verdict.** Of the 102 disagreements:
+
+| incumbent | bought opinion | overturned | cases |
+|---|---|---|---|
+| wrong | wrong | no | 32 |
+| wrong | wrong | **yes** | 8 |
+| wrong | **right** | no | **20** |
+| **right** | wrong | no | 40 |
+| right | right | yes | 2 |
+
+**It overturned on 0 of the 20 cases where overturning would have paid, and on 8 of the 40 where it
+could not pay.** Ten flips, of which two were on cases both answers got right and eight on cases
+neither did — a net gain of exactly zero. The other extreme is negative too: pricing "adopt it
+whenever it disagrees" off this artifact gives **921, twenty cases below the arm (−1.31pp)**.
+
+**Why no question converts.** The bought opinion is right on **21.6%** of the disagreements (22 of
+102) against the incumbent's **41.2%** (42 of 102). A judge asked "which of these two answers the
+question" prefers the incumbent because the incumbent is *better*, and it is better by a factor of
+two. This is not position bias; it is **prior dominance**, and it is the same shape the 4-way reading
+produced last round (27 against 38/38/37).
+
+**So the route closes, and the gap moves above the ceiling.** Three selector shapes — four-way,
+pairwise, adopt-everything — converted **≈0** across two hundred disagreement cases while each of
+them raised the ceiling by **+22 to +27**. The pool's own ceiling on this run is **1,056 / 1,532 =
+68.93%**, and CHASE-SQL's **end-to-end** number is **76.02%**: *a perfect selector over this candidate
+set lands 7.1pp below the competitor.* The selection side has +1.31pp of headroom left; the gap is
+7.1pp before selection starts. `I-77` and the candidate side close negative, and the next lever has to
+raise the ceiling — with the ceiling as its criterion (**≥ +4pp**), not the score.
