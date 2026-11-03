@@ -801,3 +801,19 @@ that differs in method rather than in prompt or in draw.
   this is not a unit test of the cache; it is a run whose fixture had a schema the assertion did not
   expect. **A shared cache is a shared opinion about what the inputs are**, and the only safe key is
   the input itself.
+- **A call bought on a condition has to publish the condition, or its price is a fiction.** The
+  conditional-dissent arm spends a generation on the 74.5% of cases where the candidate set agreed
+  and nothing on the rest, so its `calls.mean` is 0.745 — a number that is arithmetically identical
+  to an unconditional extra call on three quarters of a split, and to a call that never fired. The
+  funnel is what makes them different sentences: `asked` is the condition holding, `arrived` is the
+  call surviving, `distinct` is the call carrying information, `adopted` is it changing the answer.
+  The general rule is the one every other instrument here follows, and it bites hardest on the
+  cheapest lever: **a lever priced by a mean has to publish the population the mean is over.**
+- **A check that skips the cases a lever acted on is weakest where it matters.** The shared-pool
+  identity compares a pooled arm's candidate statements against the arm it read, slot by slot. An
+  arm that buys one extra candidate therefore fails the length comparison on exactly the cases its
+  lever fired on — and the first version of the check treated a length mismatch as "not comparable"
+  and skipped it. The guard would have been silent on the population the arm was built for, while
+  still passing on every case it did nothing on, which reads in a summary as a verified pool. The
+  fix is to exclude the bought candidate *by source* — the one field that says who wrote it — so
+  everything the pool supplied is still compared, and the exclusion cannot hide a regeneration.

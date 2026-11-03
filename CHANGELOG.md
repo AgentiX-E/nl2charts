@@ -31,6 +31,28 @@ cannot be argued with.
   change what the candidates are (I-45, I-77), not what is done with them.
 
 ### Added
+- **A fourth opinion, bought only where the pool agreed with itself.** `bench:bird:diversity` priced
+  the candidate set this repository has been reading for six rounds: 74.50% of its cases are
+  unanimous and two thirds of its ceiling losses are losses the candidates *agreed* on — a
+  population no selector can reach, because there is nothing to choose between. The new arm
+  `select-cross-pooled-dissent` is `select-cross-pooled` plus one `decompose` generation on exactly
+  those cases: same pool, same selector, same selection call, **0.745 calls a case** instead of one.
+  Each case now carries `dissent: { asked, arrived, distinct, adopted }` — the condition holding,
+  the call surviving, the statement saying something new, and it becoming the answer — because on
+  this arm the score can be identical to the parent's and still have bought nothing. Two refusals
+  come with it: an arm whose condition never held is its parent renamed, and an arm whose every
+  call came back unrunnable is an outage. `distinct: 0` is published rather than refused: "the
+  fourth opinion always agreed" is the finding that the extra call is a fourth vote.
+  `assertDissentRule` refuses a dissent source that is already one of the arm's candidates, because
+  that purchase is a fourth vote by construction.
+- **A pooled arm's pool check no longer skips the cases its lever acted on.**
+  `assertPoolShared` compares the candidate statements slot by slot, so an arm holding one bought
+  candidate failed the length comparison on exactly the cases the conditional call fired on — and
+  the check treated a length mismatch as "not comparable". It would have been silent on the
+  population the arm exists for while passing everywhere the arm did nothing, which reads as a
+  verified pool. The bought candidate is now excluded by source, so everything the pool supplied is
+  still compared; the ceiling comparison does the same, because comparing the arm's four-candidate
+  recall against the pool's three-candidate one would report the lever's success as a broken pool.
 - **`bench:bird:diversity`: how many opinions the pool actually holds.** `bench:bird:pool` prices the
   union — what one more call buys — and cannot see the thing underneath it: a pool of three
   candidates that return the same rows three times costs three calls and carries one opinion, and

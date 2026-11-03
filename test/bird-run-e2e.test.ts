@@ -93,6 +93,23 @@ interface Plan {
    */
   readonly reconcile?: (question: string) => string;
   /**
+   * The statement the decomposition prompt is answered with.
+   *
+   * Absent means the gold statement, which is the lever's null case: the fourth opinion arrives,
+   * is correct, and agrees with the pool it was bought for. Answering *differently* is what makes
+   * `distinct` observable, and answering correctly where the pool was wrong is the only way the
+   * ceiling can be seen rising.
+   */
+  readonly decompose?: (question: string) => string;
+  /**
+   * Which candidate slot the selector returns, keyed on the question.
+   *
+   * `1` is what every other scenario uses. A dissent arm can hold a fourth candidate, so a slot
+   * number above three is what says whether the bought opinion was ever adopted — a reading the
+   * funnel would otherwise report as a permanent zero with nothing behind it.
+   */
+  readonly selectIndex?: (question: string) => number;
+  /**
    * The answer to the audit turn: what the statement left out, then a statement.
    *
    * Absent means the model reports nothing missing and repeats the gold statement, which is
@@ -130,7 +147,10 @@ function replyFor(request: EndpointRequest, plan: Plan): { status?: number; cont
     delayMs === undefined ? { content } : { content, delayMs };
   // The selector. Its reply is a bare number by contract (`parseSelection`), so a SQL
   // block here would be counted as "the selector did not answer".
-  if (prompt.includes('which candidate statement answers the question')) return send('1');
+  if (prompt.includes('which candidate statement answers the question')) {
+    const asked = Object.keys(golds).find((entry) => prompt.includes(entry)) ?? '';
+    return send(String(plan.selectIndex?.(asked) ?? 1));
+  }
   // The pairwise selector asks a different question over two candidates and reads a
   // different answer, so the same `1` would be counted as an unreadable reply.
   if (prompt.includes('Two statements were written for the same question')) return send('1');
@@ -176,7 +196,14 @@ function replyFor(request: EndpointRequest, plan: Plan): { status?: number; cont
     const stubborn = plan.stubborn?.includes(question) === true;
     return send(fenced(stubborn ? (plan.first?.(question) ?? gold) : gold));
   }
-  const answer = plan.first?.(question) ?? gold;
+  // The decomposition prompt asks the same question by a different method, so its answer is a
+  // separate plan entry rather than a separate branch: it still goes through the STEP prefix and
+  // the guard bookkeeping below, which is where the two decomposition readings come from. A
+  // scenario without the entry answers as it always did, which is the lever's null case — the
+  // fourth opinion arrives and agrees with the pool it was bought for.
+  const answer = (plan.decompose !== undefined && prompt.includes('Work in two parts.')
+    ? plan.decompose(question)
+    : undefined) ?? plan.first?.(question) ?? gold;
   const body = plan.steps === true ? `STEP 1: ${answer}\nSTEP 2: select 1\n\n` + fenced(answer) : fenced(answer);
   return send(body);
 }
@@ -2751,3 +2778,136 @@ describe('a value block narrowed to the columns the statement filters on', () =>
   });
 });
 
+/**
+ * One more opinion, bought only where the pool agreed with itself.
+ *
+ * The lever's price is a share, not a call, so the reading needs two facts that no accuracy can
+ * carry: which cases the condition held on, and whether the bought statement said anything the
+ * pool did not. Both are per case in the artifact; this scenario makes them both nonzero and both
+ * zero on purpose.
+ */
+describe('a fourth opinion bought only on the cases the pool agreed', () => {
+  const unanimousButWrong = QUESTIONS[3]?.question as string; // "What is the largest quantity…"
+  const correct = (question: string): string => GOLD[question] as string;
+
+  it('spends the call where the three agree, and lifts the ceiling where they agree and are wrong', async () => {
+    // The second model is wrong on one question and right on the rest, so `select-cross` draws a
+    // pool that is unanimous on six cases and split on one. On the split one no call is spent; on
+    // the six the decompose prompt is asked; and on the one where every candidate is wrong the
+    // decomposition is the only statement holding the answer — the state the ceiling test is about.
+    const second = await startEndpoint({
+      reply: (request) => {
+        const asked = Object.keys(GOLD).find((entry) => request.prompt.includes(entry));
+        return fenced(asked === unanimousButWrong ? 'select 1' : correct(asked ?? ''));
+      },
+    });
+    try {
+      const result = await run({
+        plan: {
+          // Both primary-model candidates follow this, so the pool is unanimous on every case.
+          first: (question) => (question === unanimousButWrong ? 'select 1' : correct(question)),
+          // The fourth opinion: right where the pool was wrong, and a runnable but different
+          // statement everywhere else — the only way `distinct` can be nonzero on every case.
+          decompose: (question) => (question === unanimousButWrong ? correct(question) : 'select 1'),
+          // One case adopts it — the case it was right about — so `adopted` is a measured one
+          // rather than a zero with no path, and the adoption is not a deliberate regression the
+          // run's own gate would refuse to publish.
+          selectIndex: (question) => (question === unanimousButWrong ? 4 : 1),
+        },
+        env: {
+          BIRD_ARMS: 'select-cross,select-cross-pooled,select-cross-pooled-dissent',
+          BIRD_SECOND_MODEL: 'second-model',
+          BIRD_SECOND_BASE_URL: second.url,
+          BIRD_SECOND_API_KEY: 'second-key',
+        },
+      });
+      expect(result.code, result.printed.join('\n')).toBe(0);
+
+      const rows = result.report.arms as {
+        readonly arm: string;
+        readonly dissent?: { readonly asked: number; readonly arrived: number; readonly distinct: number; readonly adopted: number };
+      }[];
+      const byName = new Map(rows.map((row) => [row.arm, row]));
+      // Every case was unanimous, so the condition held on all of them; six are cases where the
+      // dissent differed from a right pool and one where it differed from a wrong one.
+      expect(byName.get('select-cross-pooled-dissent')?.dissent).toEqual({ asked: 7, arrived: 7, distinct: 7, adopted: 1 });
+      // The parent buys nothing, so it publishes no funnel: an absent field is "no call was
+      // possible", which is a different statement from a funnel of zeros.
+      expect(byName.get('select-cross-pooled')).not.toHaveProperty('dissent');
+
+      // The decomposition was asked once per case — the price of the lever is the `asked` share,
+      // and on a fixture where the pool is unanimous everywhere that share is one call a case.
+      const decompositions = second.requests.filter((request) => request.prompt.includes('Work in two parts.'));
+      const onPrimary = result.requests.filter((request) => request.prompt.includes('Work in two parts.'));
+      expect(onPrimary).toHaveLength(QUESTIONS.length);
+      expect(decompositions).toHaveLength(0);
+
+      // The ceiling: the case where all three agreed on a wrong answer holds a right one only
+      // after the fourth opinion arrived. This is the whole reason the lever exists, and it is a
+      // per-case fact rather than a share.
+      const cases = result.report.cases as { arm: string; id: string; candidateRecall?: boolean; dissent?: { adopted: boolean } }[];
+      const recallOf = (arm: string, id: string): boolean | undefined =>
+        cases.find((entry) => entry.arm === arm && entry.id === id)?.candidateRecall;
+      const wrongIndex = String(QUESTIONS.findIndex((entry) => entry.question === unanimousButWrong) + 1);
+      expect(recallOf('select-cross-pooled', wrongIndex)).toBe(false);
+      expect(recallOf('select-cross-pooled-dissent', wrongIndex)).toBe(true);
+      // ...and the case that adopted the fourth opinion is the one the selector was told to take.
+      expect(cases.find((entry) => entry.arm === 'select-cross-pooled-dissent' && entry.id === wrongIndex)?.dissent?.adopted).toBe(true);
+    } finally {
+      await second.close();
+    }
+  });
+});
+
+describe('a dissent call that never lands', () => {
+  it('counts an outage and an engine refusal apart, and leaves the pool answering', async () => {
+    // Two ways the bought call can fail, and they are different facts: the endpoint refused to
+    // answer one, and the engine refused to run the other. Both leave the pool's decision standing
+    // — a case must not be lost because its *fourth* opinion failed — and both are counted where
+    // they happened rather than read afterwards as a lever that did nothing.
+    const unreachable = QUESTIONS[1]?.question as string;
+    const unrunnable = QUESTIONS[2]?.question as string;
+    // The second model answers correctly on every case, so the pool is unanimous everywhere and
+    // the only thing that can fail is the call this scenario is about.
+    const second = await startEndpoint({
+      reply: (request) => fenced(GOLD[Object.keys(GOLD).find((entry) => request.prompt.includes(entry)) ?? ''] ?? 'select 1'),
+    });
+    let result: ScenarioResult;
+    try {
+      result = await run({
+        plan: {
+          first: (question) => GOLD[question] as string,
+          decompose: (question) => (question === unrunnable ? 'select * from no_such_table' : (GOLD[question] as string)),
+          fail: (request) => (request.prompt.includes('Work in two parts.') && request.prompt.includes(unreachable) ? 500 : undefined),
+        },
+        env: {
+          BIRD_ARMS: 'select-cross,select-cross-pooled-dissent',
+          BIRD_SECOND_MODEL: 'second-model',
+          BIRD_SECOND_BASE_URL: second.url,
+          BIRD_SECOND_API_KEY: 'second-key',
+          BIRD_LLM_RETRIES: '1',
+        },
+      });
+    } finally {
+      await second.close();
+    }
+    expect(result.code, result.printed.join('\n')).toBe(0);
+    const rows = result.report.arms as {
+      readonly arm: string;
+      readonly dissent?: { readonly asked: number; readonly arrived: number; readonly distinct: number; readonly adopted: number };
+      readonly candidateFailures?: { readonly llm: number; readonly engine: number };
+      readonly passed: number;
+      readonly total: number;
+    }[];
+    const child = rows.find((row) => row.arm === 'select-cross-pooled-dissent');
+    // Every case was unanimous, so every case paid for the call; five of the seven came back
+    // runnable, and none of them said anything the pool had not already said.
+    expect(child?.dissent).toEqual({ asked: 7, arrived: 5, distinct: 0, adopted: 0 });
+    expect(child?.candidateFailures?.llm).toBe(1);
+    expect(child?.candidateFailures?.engine).toBe(1);
+    // The pool still answered every case: a failed fourth opinion is not a failed question.
+    const child2 = rows.find((row) => row.arm === 'select-cross-pooled-dissent');
+    expect(child2?.passed).toBe(child2?.total);
+    expect(child2?.total).toBe(7);
+  });
+});

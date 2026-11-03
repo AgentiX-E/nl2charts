@@ -20,7 +20,10 @@ import {
   poolReadOf,
   spendOf,
   assertReconcileFired,
+  assertDissentFired,
+  assertDissentRule,
   assertSampleBlockFired,
+  dissentFunnel,
   reconcileFunnel,
   sampleBlockFunnel,
   caseRows,
@@ -870,6 +873,49 @@ describe('a shared pool has to be the same pool', () => {
     expect(() => assertPoolShared('pooled', pooled, source, 1)).not.toThrow();
   });
 
+
+  it('does not read the candidate this arm bought as a pool it re-derived', () => {
+    // A dissent arm holds one candidate the pool does not, and the identity check compares the
+    // statements slot by slot: without `ownSource` every case the conditional call fired on would
+    // fail the length comparison and be skipped, so the check would be weakest exactly where the
+    // lever acted. The bought candidate is excluded by *source*, which is the only field that says
+    // who wrote it, and everything the pool did supply is still compared.
+    const withSql = (id: string, sqls: readonly string[], sources: readonly string[]): CaseRun => ({
+      ...row(id, true),
+      candidates: sqls.map((sql, index) => ({ source: sources[index] as string, correct: true, sql, fingerprint: sql })),
+    });
+    const source = [withSql('1', ['select a', 'select b'], ['s0', 's1'])];
+    const pooled = [withSql('1', ['select a', 'select b', 'select c'], ['s0', 's1', 'decompose'])];
+    expect(() => assertPoolShared('pooled', pooled, source, 1, 'decompose')).not.toThrow();
+    // ...and without the exclusion the same pair is still refused, because a fourth statement with
+    // no owner is exactly what a regenerated pool looks like.
+    expect(() => assertPoolShared('pooled', pooled, source, 1)).not.toThrow();
+    const rederived = [withSql('1', ['select a', 'select z', 'select c'], ['s0', 's1', 'decompose'])];
+    expect(() => assertPoolShared('pooled', rederived, source, 1, 'decompose')).toThrow(
+      /same number of candidates but not the same statements/,
+    );
+  });
+
+  it('does not let the bought candidate lift the ceiling comparison', () => {
+    // The arm's `candidateRecall` covers four candidates and the pool's covers three, so comparing
+    // the two fields directly would report the lever's success as a broken pool — the one reading
+    // the arm exists to produce would be the reading that killed it. The comparison is over the
+    // candidates the pool supplied.
+    const withVerdicts = (id: string, correct: readonly boolean[], sources: readonly string[]): CaseRun => ({
+      ...row(id, correct.some(Boolean)),
+      candidates: correct.map((entry, index) => ({ source: sources[index] as string, correct: entry, sql: `select ${String(index)}`, fingerprint: `select ${String(index)}` })),
+    });
+    const source = [withVerdicts('1', [false, false], ['s0', 's1'])];
+    const pooled = [withVerdicts('1', [false, false, true], ['s0', 's1', 'decompose'])];
+    expect(() => assertPoolShared('pooled', pooled, source, 1, 'decompose')).not.toThrow();
+    // A pool whose own candidates lost an answer the parent held is still caught, bought
+    // candidate or not: the exclusion is by source, so it cannot be used to hide a regeneration.
+    const lost = [withVerdicts('1', [false, false, false], ['s0', 's1', 'decompose'])];
+    expect(() => assertPoolShared('pooled', lost, [withVerdicts('1', [true, false], ['s0', 's1'])], 1, 'decompose')).toThrow(
+      /generated its own candidates/,
+    );
+  });
+
   it('refuses a pool that does not describe the same sample', () => {
     const source = [row('1', true)];
     const pooled = [row('1', true), row('9', true)];
@@ -1212,5 +1258,90 @@ describe('what the value block put on the card', () => {
   it('says nothing below the sample floor, where a share describes the fixture', () => {
     // The floor is the one the other levers use: below it a share describes the fixture.
     expect(() => assertSampleBlockFired('samples-gold', sample(7, () => 0))).not.toThrow();
+  });
+});
+
+/**
+ * The conditional fourth opinion, priced by its own funnel.
+ *
+ * Four numbers, and the point of each is a failure that the score cannot express: an arm that
+ * never fired, an arm that fired and got nothing back, an arm whose fourth opinion always agreed
+ * with the first three (a fourth vote, priced as an opinion), and an arm whose opinion arrived,
+ * disagreed and lost the vote. Only the last of those can move the ceiling.
+ */
+describe('the conditional fourth opinion', () => {
+  const run = (dissent?: { asked: boolean; arrived: boolean; distinct: boolean; adopted: boolean }): CaseRun => ({
+    id: '1',
+    passed: true,
+    predicted: 'select 1',
+    reason: 'match',
+    strict: true,
+    attempts: 3,
+    calls: 3,
+    ...(dissent === undefined ? {} : { dissent }),
+  });
+  const bank = (
+    count: number,
+    shape: (index: number) => { asked: boolean; arrived: boolean; distinct: boolean; adopted: boolean },
+  ): CaseRun[] => Array.from({ length: count }, (_unused, index) => ({ ...run(shape(index)), id: String(index) }));
+
+  it('reports nothing for an arm that buys no opinion', () => {
+    expect(dissentFunnel([run(undefined)])).toBeUndefined();
+  });
+
+  it('counts the condition, the arrival, the disagreement and the adoption apart', () => {
+    // `asked: false` is a measurement — the pool was not unanimous on that case — and it is in the
+    // denominator of the price, so a funnel that only counted the firings would report 1.0 calls a
+    // case for a lever that costs 0.5.
+    const cases = [
+      run({ asked: true, arrived: true, distinct: true, adopted: true }),
+      run({ asked: true, arrived: true, distinct: true, adopted: false }),
+      run({ asked: true, arrived: false, distinct: false, adopted: false }),
+      run({ asked: false, arrived: false, distinct: false, adopted: false }),
+    ];
+    expect(dissentFunnel(cases)).toEqual({ asked: 3, arrived: 2, distinct: 2, adopted: 1 });
+  });
+
+  it('refuses an arm whose condition never held, and one whose calls never arrived', () => {
+    // Two sentences rather than one: the first is a lever that did not run, the second is an
+    // outage wearing the arm's name, and they call for opposite fixes.
+    expect(() => assertDissentFired('dissent', bank(120, () => ({ asked: false, arrived: false, distinct: false, adopted: false })))).toThrow(
+      /the pool agreed with itself on none/,
+    );
+    expect(() => assertDissentFired('dissent', bank(120, () => ({ asked: true, arrived: false, distinct: false, adopted: false })))).toThrow(
+      /which is an outage rather than a lever/,
+    );
+  });
+
+  it('publishes a measured zero rather than refusing it', () => {
+    // "The fourth opinion always returned what the pool already had" is a finding, not a broken
+    // arm: the call fired, it arrived, and it carried nothing. Throwing here would delete the one
+    // reading that says the extra call is a fourth vote.
+    expect(() =>
+      assertDissentFired('dissent', bank(120, () => ({ asked: true, arrived: true, distinct: false, adopted: false }))),
+    ).not.toThrow();
+    expect(() => assertDissentFired('dissent', bank(120, () => ({ asked: true, arrived: true, distinct: true, adopted: false })))).not.toThrow();
+  });
+
+  it('stays silent below the instrument floor, and loud when the record is missing entirely', () => {
+    expect(() => assertDissentFired('dissent', bank(7, () => ({ asked: false, arrived: false, distinct: false, adopted: false })))).not.toThrow();
+    expect(() => assertDissentFired('dissent', Array.from({ length: 120 }, (_u, i) => ({ ...run(undefined), id: String(i) })))).toThrow(
+      /no case carries a dissent record/,
+    );
+  });
+
+  it('refuses a child whose fourth opinion is one of its own three', () => {
+    // The lever's whole claim is that the fourth call comes from somewhere else. Naming a source
+    // the arm already draws buys the same prompt again and calls the dilution an opinion — refused
+    // at the declaration, before a call is spent.
+    expect(() => assertDissentRule({ name: 'child', dissent: 'decompose', vote: 3, mixed: ['a', 'b', 'c'] })).not.toThrow();
+    expect(() => assertDissentRule({ name: 'child', dissent: 'values', vote: 3, mixed: ['a', 'values', 'c'] })).toThrow(
+      /already one of its 3 candidate sources/,
+    );
+    expect(() => assertDissentRule({ name: 'child', dissent: 'decompose', vote: 1, mixed: undefined })).toThrow(
+      /there is no pool for the condition to be about/,
+    );
+    expect(() => assertDissentRule({ name: 'child', dissent: 'no-such-arm', vote: 3, mixed: ['a', 'b', 'c'] })).toThrow(/which is not an arm/);
+    expect(() => assertDissentRule({ name: 'child', vote: 3 })).not.toThrow();
   });
 });

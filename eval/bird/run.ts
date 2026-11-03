@@ -205,6 +205,28 @@ export interface Arm {
    */
   readonly pool?: string;
   /**
+   * Buy one more opinion, but only where the pool already agrees with itself.
+   *
+   * `bench:bird:diversity` priced the candidate set this repository has been reading for six
+   * rounds: three quarters of its cases are unanimous, and two thirds of its ceiling losses are
+   * losses the candidates *agreed* on. A selector cannot reach a loss the set agreed on — there
+   * is nothing to select — so the only lever left on that side of the equation is a candidate
+   * nobody wrote, bought exactly on the cases where the three agree.
+   *
+   * The condition is the lever. An unconditional fourth candidate is a fourth draw from the same
+   * three opinions, which the diversity reading says carries almost nothing; a conditional one
+   * costs 0.745 calls a case at the 74.5% unanimity this pool actually has, and its price is the
+   * number the arm has to publish. The source named here must not already be in the arm's
+   * candidate set — a fourth opinion that is one of the three is a fourth vote for it, not an
+   * opinion — and `assertDissentRule` refuses that at the declaration.
+   *
+   * The arm's *answer* policy is deliberate and is written in `applyDissent`: the vote keeps the
+   * pool's decision, and the dissent is recorded with its verdict so that every adoption rule can
+   * be priced offline from one artifact. An arm that adopted the dissent on arrival would publish
+   * one number and hide the fact that its value depends entirely on which rule you choose.
+   */
+  readonly dissent?: string;
+  /**
    * Ask the selector to compare two statements at a time instead of ranking many.
    *
    * The absolute prompt keeps 95% of what a mixed candidate set contained; the missing
@@ -703,6 +725,29 @@ export const ARMS: readonly Arm[] = [
   // readings compared arms that drew their own pools, so the 2.58pp they imply is not yet a
   // measurement. Here it is one: same candidates, same rows, only the decision differs.
   { name: 'select-cross-pooled-vote', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, mixed: CROSS_SOURCES, pool: 'select-cross' },
+  // Buy a fourth opinion, but only where the three already agree.
+  //
+  // `bench:bird:diversity` read this pool off the published artifact: 1.28 distinct results per
+  // case, 447 of 600 cases unanimous, and 121 of the 185 ceiling losses *unanimous*. A selector
+  // cannot reach a loss the set agreed on — there is nothing to choose between — so the only
+  // lever left on the candidate side is a candidate nobody wrote, bought on the 74.5% of cases
+  // where a fourth vote would otherwise be a wasted call.
+  //
+  // The source is `decompose`, and the choice is the registration: the pool's three opinions are
+  // two prompts of the primary model and one prompt of the second model, so a fourth *prompt* on
+  // the primary model would share a model with two of them. A decomposition is the one generator
+  // in this repository that answers by a different method rather than by different wording, which
+  // is the property XiYan-SQL's ensemble ablation prices at 4.04pp and MCS-SQL's at 1.3pp for five
+  // prompts against 2.1pp for twenty samples of one. It is also not in `CROSS_SOURCES`, which the
+  // suite enforces rather than trusts.
+  //
+  // The population is the unanimity the diversity reading found, and the criteria are written in
+  // `docs/benchmarks.md` before the dispatch: the selector must convert at least 2.00pp of the
+  // 600, the gain must sit on the unanimous cases (+1.5pp) and be absent on the others (±1.0pp),
+  // `candidateRecall` must rise rather than re-rank, and the price is the funnel's `asked` share
+  // — 0.745 calls a case, not one. The parent is `select-cross-pooled`: same pool, same selector,
+  // same one selection call, and the only difference is the candidate the condition paid for.
+  { name: 'select-cross-pooled-dissent', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: CROSS_SOURCES, pool: 'select-cross', dissent: 'decompose' },
   // The same pool with the agreement marks the selector has never been given on this arm.
   //
   // Of 600 `select-cross` cases, 149 had candidates that returned different results — the only
@@ -957,6 +1002,7 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'select-cross-pooled': 'the cross set read from `select-cross`\'s own pool instead of generating one: one call per case instead of four, and the pair must read exactly 0.0pp — it is the instrument that says whether two arms on this harness can be compared at all, so run it in the same dispatch as `select-cross` and before any pooled comparison',
   'select-cross-pooled-judge-reasoning': 'the reasoning model judging the chat model\'s candidates, in the format it can answer: needs the second model and a second key, one call per case, and is measured against `select-cross-pooled` on the same pool — the only judge-swap delta with no generation noise in it',
   'select-cross-pooled-vote': 'the same pool decided by the modal result instead of by a model: zero calls per case, and the only reading of "is the selector worth its call" whose candidates are shared — the archived artifacts say the count wins 53 disputed cases to 22 (p = 4.5e-4), and this arm is what turns that into a measurement instead of a re-reading',
+  'select-cross-pooled-dissent': 'the same pool and the same selector with one decomposition bought only where the three agreed: 4 calls per case on the 74.5% of cases the diversity reading found unanimous and 3.0 on the rest, and it must be dispatched after `select-cross` because it reads that pool — the pair against `select-cross-pooled` is the whole lever, so run those two and no others',
   'select-cross-pooled-agree': 'the same pool with the agreement marks the selector was never given: 149 of 600 cases had more than one distinct result, and which of three candidates returned the same rows is the one fact two truncated previews cannot yield; one lever from `select-cross-pooled`, one call per case',
   'select-cross-pooled-reconcile': 'the same pool and the same one call, asked for a statement instead of an index: an index cannot name an answer none of the candidates contains, and on this pool the correct statement is in the set on 70.5% of cases while the arm scores 64% — the 6.5pp the decision misses is the population this arm exists to reach; the funnel counts how often the reply is a statement nobody wrote, because an arm that restates a candidate is a selector with a longer prompt',
   'select-cross-pooled-reconcile-novel': 'the same prompt and the same call as `select-cross-pooled-reconcile`, with one policy difference: a reply that restates a candidate hands the decision back to the vote instead of overwriting it — the arm that measured 59.8% against the vote\'s 63.3% adopted every one of the 595 replies it could run while only 86 of its 600 replies were statements nobody wrote, so the rewrites are the population this arm stops paying for; run it against `select-cross-pooled-vote` to price the novel statements alone',
@@ -1022,6 +1068,11 @@ export const COMPARISONS: readonly (readonly [string, string, string])[] = [
   ['metadata+evidence', 'select', 'one prompt carrying 798 curated notes against three samples and a selector: three stack levels and 3.6 times the tokens'],
   ['metadata+evidence', 'select-prune', 'the same single prompt against the pruned card: the cheapest multi-call arm, priced against the cheapest arm'],
   ['metadata+evidence', 'select-mixed', 'the same single prompt against three decompositions and a selector: what the fourth call buys when the candidates are aimed'],
+  // The conditional fourth opinion, against the same pool with the same selector and no extra
+  // call. This is the one comparison in this file whose cost is a *share*: the child spends the
+  // call on the 74.5% of cases where the pool agreed with itself and nothing on the rest, so its
+  // delta is placed on a population that the pair states rather than assumes.
+  ['select-cross-pooled', 'select-cross-pooled-dissent', 'the same pool and selector with one more opinion bought only where the three agreed: 0.745 calls a case, against the 30.83pp of ceiling the candidates agreed away'],
 ];
 
 export const PAIRS: readonly (readonly [string, string])[] = [
@@ -1362,6 +1413,22 @@ export interface CaseRun extends CaseOutcome {
    * findings, which is D56 in its counting form.
    */
   readonly sampleBlock?: { readonly columns: number };
+  /**
+   * What the conditional fourth opinion did on this case.
+   *
+   * Four facts, because four different failures all read as "the extra opinion did not help":
+   * `asked` (the pool agreed with itself, so the arm spent the call), `arrived` (the endpoint
+   * answered *and* the engine ran the statement), `distinct` (its rows differ from the pool's
+   * answer — the only state in which an extra opinion carries information rather than being a
+   * fourth vote for an answer that already had three), and `adopted` (it became this case's
+   * answer, which on this arm only happens under an adoption policy the arm does not hold).
+   *
+   * Absent on arms that buy no dissent, which is D56's shape: the field's presence is the
+   * statement "this arm could have bought one", and its `asked: false` is the measurement that
+   * the pool was not unanimous. A run-wide rate cannot separate "the lever fired on 74.5% of
+   * cases" from "the lever fired on none and the sampling read 0", because both publish 0.745.
+   */
+  readonly dissent?: { readonly asked: boolean; readonly arrived: boolean; readonly distinct: boolean; readonly adopted: boolean };
   /**
    * Candidates that never arrived, by reason.
    *
@@ -2010,6 +2077,16 @@ export function assertPoolShared(
   pooled: readonly CaseRun[],
   source: readonly CaseRun[],
   minimumSample = MINIMUM_INSTRUMENT_SAMPLE,
+  /**
+   * The source whose candidate this arm bought itself, if any.
+   *
+   * A dissent arm holds one candidate the pool does not, and the identity check below compares
+   * the *statements* slot by slot. Without this, every case the conditional call fired on would
+   * fail the length comparison and be silently skipped — the check would be weakest exactly where
+   * the arm's lever acted, which is the failure mode the check exists to prevent. Everything the
+   * arm did *not* buy is still compared, so a pool that was regenerated is still caught.
+   */
+  ownSource?: string,
 ): { readonly shared: number; readonly unrecorded: number } {
   if (pooled.length < minimumSample) return { shared: 0, unrecorded: 0 };
   const byId = new Map(source.map((run) => [run.id, run]));
@@ -2028,7 +2105,14 @@ export function assertPoolShared(
       `arm ${armName}: none of its ${String(pooled.length)} cases carry a candidate record, so whether it read the pool it names cannot be checked — the arm's ceiling is unverified`,
     );
   }
-  const disagreed = comparable.filter((run) => (byId.get(run.id)?.candidateRecall === true) !== (run.candidateRecall === true));
+  // The ceiling is compared over the candidates the pool supplied, not over everything the arm
+  // holds: a dissent arm's ceiling may legitimately be higher than its pool's, and folding the
+  // bought candidate into this comparison would report the lever's success as a broken pool.
+  const ceilingOf = (run: CaseRun, except?: string): boolean =>
+    except === undefined || run.candidates === undefined
+      ? run.candidateRecall === true
+      : run.candidates.filter((entry) => entry.source !== except).some((entry) => entry.correct);
+  const disagreed = comparable.filter((run) => ceilingOf(byId.get(run.id) as CaseRun) !== ceilingOf(run, ownSource));
   if (disagreed.length > 0) {
     // Named by case, because the count alone cannot tell a pool that was regenerated from a pool
     // that was read and then half-lost: the reader has to be able to open the two cases.
@@ -2045,7 +2129,7 @@ export function assertPoolShared(
   // already carries them, so a case whose texts differ in any slot is a pool that was not shared.
   const rewritten = comparable.filter((run) => {
     const expected = byId.get(run.id)?.candidates;
-    const actual = run.candidates;
+    const actual = ownSource === undefined ? run.candidates : run.candidates?.filter((entry) => entry.source !== ownSource);
     if (expected === undefined || actual === undefined) return false;
     if (expected.length !== actual.length) return false;
     return expected.map((entry) => entry.sql).sort().join('\u0000') !== actual.map((entry) => entry.sql).sort().join('\u0000');
@@ -2113,8 +2197,9 @@ export function poolReadOf(
   pooled: readonly CaseRun[],
   source: readonly CaseRun[],
   minimumSample = MINIMUM_INSTRUMENT_SAMPLE,
+  ownSource?: string,
 ): ArmReportRow['poolRead'] {
-  const read = assertPoolShared(armName, pooled, source, minimumSample);
+  const read = assertPoolShared(armName, pooled, source, minimumSample, ownSource);
   return pooled.length < minimumSample ? undefined : { ...read, cases: pooled.length };
 }
 
@@ -2341,6 +2426,81 @@ export function assertSampleBlockFired(armName: string, runs: readonly CaseRun[]
 }
 
 /**
+ * What the conditional fourth opinion did, over the cases an arm ran.
+ *
+ * `asked` is the number of cases whose pool agreed with itself, which is the only population the
+ * lever acts on; the other three are the funnel below it. A hit rate cannot say any of this: an
+ * arm that spent 1,140 calls and an arm that spent none publish the same accuracy when the vote
+ * keeps its decision either way, and the difference between "the dissents were all the answer we
+ * already had" and "the dissents were different and wrong" is the whole reading.
+ */
+export function dissentFunnel(
+  runs: readonly CaseRun[],
+): { readonly asked: number; readonly arrived: number; readonly distinct: number; readonly adopted: number } | undefined {
+  const counted = runs.filter((run) => run.dissent !== undefined);
+  if (counted.length === 0) return undefined;
+  return {
+    asked: counted.filter((run) => run.dissent?.asked === true).length,
+    arrived: counted.filter((run) => run.dissent?.arrived === true).length,
+    distinct: counted.filter((run) => run.dissent?.distinct === true).length,
+    adopted: counted.filter((run) => run.dissent?.adopted === true).length,
+  };
+}
+
+/**
+ * A conditional call that never fires, or never arrives, is not a reading.
+ *
+ * Two sentences rather than one, because the two states call for opposite fixes: `asked === 0`
+ * means the condition was never true on this population (a lever that did not run, which is the
+ * shape every other guard in this file refuses), and `arrived === 0` means it ran and nothing came
+ * back, which is an outage wearing the arm's name. `distinct === 0` is deliberately *not* refused:
+ * "the fourth opinion always returned the answer the pool already had" is a measurement, and a
+ * measurement of zero is published, not thrown away — the whole reason the funnel counts it.
+ */
+export function assertDissentFired(armName: string, runs: readonly CaseRun[], minimumSample = MINIMUM_INSTRUMENT_SAMPLE): void {
+  if (runs.length < minimumSample) return;
+  const funnel = dissentFunnel(runs);
+  if (funnel === undefined) {
+    throw new Error(`arm ${armName}: declares a dissent source and no case carries a dissent record, so the call cannot be priced`);
+  }
+  if (funnel.asked === 0) {
+    throw new Error(
+      `arm ${armName}: across ${String(runs.length)} questions the pool agreed with itself on none, so the conditional call never fired and the arm is its parent renamed`,
+    );
+  }
+  if (funnel.arrived === 0) {
+    throw new Error(
+      `arm ${armName}: the dissent call was made on ${String(funnel.asked)} questions and none of them produced a runnable statement, which is an outage rather than a lever`,
+    );
+  }
+}
+
+/**
+ * A dissent source that is already one of the candidates is a fourth vote, not an opinion.
+ *
+ * The lever's entire claim is that the fourth call comes from somewhere else; naming a source the
+ * arm already draws would buy the same prompt again and publish a dilution of the pool as an
+ * independent opinion. Refused at the declaration, before any call is spent, which is the same
+ * place `assertSampleRule` refuses a column rule with no sampler.
+ */
+export function assertDissentRule(arm: Pick<Arm, 'name' | 'dissent' | 'vote' | 'mixed'>): void {
+  if (arm.dissent === undefined) return;
+  if ((arm.vote ?? 1) < 2) {
+    throw new Error(
+      `arm ${arm.name} buys a dissent and draws ${String(arm.vote ?? 1)} candidate, so there is no pool for the condition to be about`,
+    );
+  }
+  if (arm.mixed?.includes(arm.dissent) === true) {
+    throw new Error(
+      `arm ${arm.name} buys a dissent from ${arm.dissent}, which is already one of its ${String(arm.mixed.length)} candidate sources, so the fourth opinion would be a fourth vote`,
+    );
+  }
+  if (resolveArm(parseMixedSource(arm.dissent).arm) === undefined) {
+    throw new Error(`arm ${arm.name} buys a dissent from ${arm.dissent}, which is not an arm`);
+  }
+}
+
+/**
  * An arm that asks for samples and shows none is its parent under another name.
  *
  * `check-bird-baseline.mjs` already refuses a samples arm with no values behind it, and it is
@@ -2421,6 +2581,12 @@ export function assertReportComplete(report: { readonly arms?: readonly ArmRepor
     }
     if (arm.emptyRetry !== undefined && row.emptyRetry === undefined) {
       throw new Error(`arm ${row.arm} runs the empty-result lever and its row carries no empty-result funnel, so the call cannot be priced`);
+    }
+    if (arm.dissent !== undefined && row.dissent === undefined) {
+      // The arm buys a call on a condition, so the row must publish how often the condition held
+      // and what came back: without it, 0.745 calls a case is indistinguishable from 0.745 of a
+      // case, and the delta cannot be placed on the population the lever claims to act on.
+      throw new Error(`arm ${row.arm} buys a conditional dissent and its row carries no dissent funnel, so the call cannot be priced`);
     }
     if (arm.pool !== undefined && row.poolRead === undefined && row.total >= MINIMUM_INSTRUMENT_SAMPLE) {
       // The pooled arm's whole claim is that it read the same candidates as the arm it names, and a
@@ -4054,6 +4220,9 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
   const arm = resolveArm(name);
   if (arm === undefined) throw new Error(`unknown arm ${name}`);
   assertSampleRule(arm);
+  // ...and a dissent that names one of the arm's own sources is a fourth vote, refused before a
+  // single call is spent on it.
+  assertDissentRule(arm);
   /** What this arm drew per case, in the shape a pooled arm reads. */
   const collected = new Map<string, readonly PooledCandidate[]>();
   // A mixed arm runs three configurations under one label; if one of them repairs or
@@ -4353,7 +4522,61 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
         // one thing left to spend.
         const choice = offeredCandidates(candidates, arm.emptyRetry !== undefined);
         const choosable = choice.offered as typeof candidates;
-        const majority = majorityResult(choosable, (left, right) => judgeOfficial(left.rows, right.rows) === 'match');
+        // One definition of equality for the vote, for the unanimity the condition reads and for
+        // the dissent's own `distinct` flag. Three comparisons that must agree about what "the
+        // same answer" means, or the lever's condition and the reading of its effect would be
+        // describing two different sets — and `resultKey` is already the official judge's
+        // equality, which is why it is reused instead of compared as text.
+        const sameResult = (left: { readonly rows: readonly (readonly unknown[])[] }, right: { readonly rows: readonly (readonly unknown[])[] }): boolean =>
+          judgeOfficial(left.rows, right.rows) === 'match';
+        // The conditional fourth opinion. Bought here, before the vote, because the vote is what
+        // the condition is about and because the set the vote decides over is the set the selector
+        // then reads: a candidate added after the decision would move the ceiling without moving
+        // the answer, and the two have to be moved by the same set or neither reading is the arm's.
+        let dissentRecord: { asked: boolean; arrived: boolean; distinct: boolean; adopted: boolean } | undefined;
+        let dissentCandidate: PooledCandidate | undefined;
+        if (arm.dissent !== undefined) {
+          // A pool of one agreed vacuously, and the case for a fourth opinion is a case about
+          // three opinions that agreed. The population is therefore the cases where at least two
+          // candidates survived *and* they returned the same rows.
+          const poolVote = majorityResult(choosable, sameResult);
+          const asked = choosable.length > 1 && poolVote.groups === 1;
+          const record = { asked, arrived: false, distinct: false, adopted: false };
+          dissentRecord = record;
+          if (asked) {
+            const spec = parseMixedSource(arm.dissent);
+            const drawn = (survival[arm.dissent] ??= { generated: 0, survived: 0 });
+            drawn.generated += 1;
+            try {
+              const sampler = pipelineFor(resolveArm(spec.arm) as Arm, spec.provider);
+              const reply = await sampler.ask({ question: question.question, schema });
+              const executed = await oracle.run(question.db_id, reply.sql);
+              if (executed.ok) {
+                drawn.survived += 1;
+                record.arrived = true;
+                const bought = { sql: reply.sql, rows: executed.rows, source: arm.dissent };
+                // `distinct` is the only state in which the call bought information: a fourth
+                // statement that returns the pool's own answer is a fourth vote for it. This is
+                // the number that separates "the extra opinion agreed" from "the extra opinion
+                // disagreed and lost the vote", which the score cannot tell apart at all.
+                record.distinct = !sameResult(bought, poolVote.winner as PooledCandidate);
+                if (record.distinct) dissentCandidate = bought;
+              } else {
+                // The same accounting as a candidate that never arrived during generation: the
+                // engine refused it, so the set has no such member and the loss is counted where
+                // it happened rather than read afterwards as a lower ceiling.
+                sampleErrors.push(undefined);
+                lost.engine += 1;
+              }
+            } catch (error) {
+              const kind = classifyCandidateFailure((error as { code?: string }).code);
+              sampleErrors.push(kind === 'llm' ? 'llm' : undefined);
+              lost[kind] += 1;
+            }
+          }
+        }
+        const considered: typeof candidates = dissentCandidate === undefined ? choosable : [...choosable, dissentCandidate];
+        const majority = majorityResult(considered, sameResult);
         let winner = majority.winner as { sql: string; rows: readonly (readonly unknown[])[]; source: string };
         let selectedByModel: boolean | undefined;
         let selectionFailed: 'llm' | 'harness' | undefined;
@@ -4366,7 +4589,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
         // same way in both arms; only the selector's information changes. `ordered` is what the
         // per-candidate record below is written from, because a verdict is only attributable if
         // it is filed under the slot the judge actually saw.
-        const ordered = arm.shuffle === true ? shuffleByCase(choosable, question.question_id) : choosable;
+        const ordered = arm.shuffle === true ? shuffleByCase(considered, question.question_id) : considered;
         if (arm.select === true) {
           // What the selector reads, as opposed to what the arm runs: on a canonical arm the
           // text carries no author signature, and `winner` below still comes from the raw set.
@@ -4556,6 +4779,12 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
           }
         }
         const reason = judgeOfficial(expected.rows, winner.rows);
+        // Whether the bought opinion became the answer, which is a different question from
+        // whether the selector was shown it: `selectedByModel` says a decision was made, and this
+        // says the decision went to the candidate the extra call paid for. Read after every branch
+        // has run, because on a vote-only arm nothing can become the answer and the record has to
+        // publish that zero rather than omit the field.
+        if (dissentRecord !== undefined) dissentRecord.adopted = winner.source === arm.dissent;
         // Judged once here and read twice below: the ceiling and the per-candidate record
         // are the same pass, so a loss cannot be attributed to a member the ceiling count
         // never saw.
@@ -4566,9 +4795,13 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
           predicted: winner.sql,
           reason,
           strict: judgeStrict(expected.rows, winner.rows) === 'match',
-          attempts: arm.vote + (retried ? 1 : 0),
+          // The generations this case actually paid for: the vote's draws, the empty-result turn
+          // when it fired, and the conditional dissent when the pool was unanimous. A count that
+          // left the dissent out would price the lever at zero on the very cases it acted on.
+          attempts: arm.vote + (retried ? 1 : 0) + (dissentCandidate === undefined ? 0 : 1),
           agreement: majority.agreement,
           candidateRecall: verdicts.some((verdict) => verdict.correct),
+          ...(dissentRecord === undefined ? {} : { dissent: dissentRecord }),
           // Recorded even when only one candidate survived: the case where two of three samples
           // died is exactly the case whose pool was smallest, and omitting its record made it
           // invisible to every reading of the artifact — `bench:bird:pool` counted seven dev
@@ -4711,6 +4944,9 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
   // ...and the same rule one level down: a rule that decides *which* columns carry the block can
   // keep none of them on every case while the profile it reads is full of values.
   if (arm.sampleColumns !== undefined) assertSampleBlockFired(name, runs);
+  // ...and a conditional call has to be seen firing, and seen arriving: the two failures produce
+  // the same published accuracy and call for opposite fixes.
+  if (arm.dissent !== undefined) assertDissentFired(name, runs);
   // ...and a format the model ignored is not a prompt that did not help.
   if (declaresDecomposition(arm)) assertDecompositionFired(name, runs);
   return {
@@ -4921,6 +5157,10 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
     ...(arm.reconcile === undefined ? {} : { reconcile: { policy: arm.reconcileAdopt ?? 'always', ...reconcileFunnel(runs) } }),
     ...(arm.audit === undefined ? {} : { audit: auditFunnel(runs) }),
     ...(arm.samples === undefined ? {} : { sampleBlock: sampleBlockFunnel(runs) }),
+    // The conditional call's whole price and its whole effect, on the arm that pays for it. On
+    // this arm the accuracy is the same number as its parent's only when the selector never
+    // adopts the bought candidate, so the funnel is what says whether the call carried anything.
+    ...(arm.dissent === undefined ? {} : { dissent: dissentFunnel(runs) }),
     // What the model kept of the card, on the one arm that asks it to choose. Beside the
     // accuracy rather than inside the sampling spread, for the reason the decomposition funnel
     // moved out: the instrument belongs to the arm, not to how many candidates it draws.
@@ -5149,6 +5389,11 @@ export function caseRows(outcomes: ReadonlyMap<string, readonly CaseRun[]>): Rec
       // presence from the per-case prompt tokens, which is a reading of the artifact's shadow
       // rather than of the artifact. A funnel says how many; a row says which.
       ...(run.sampleBlock === undefined ? {} : { sampleBlock: run.sampleBlock }),
+      // The stratum the conditional call acted on, published per case for the same reason the
+      // block is: a run-wide `asked` says how many, and every reading of "where did the extra
+      // opinion help" needs to know which. `asked: false` is a measurement — the pool was not
+      // unanimous here — and dropping it would make the arm's population look like the whole split.
+      ...(run.dissent === undefined ? {} : { dissent: run.dissent }),
       // Why this case has no candidate, when it has none.
       //
       // `select-mixed` cost 3 calls on two of 120 questions while `select-cross` cost 4,
@@ -5391,7 +5636,7 @@ export async function runBird(settings: BirdSettings, options: BirdRunOptions = 
           if (source === undefined) {
             throw new Error(`arm ${name} reuses the pool of ${arm.pool}, which produced no runs in this run`);
           }
-          return poolReadOf(name, armRun.runs, source);
+          return poolReadOf(name, armRun.runs, source, MINIMUM_INSTRUMENT_SAMPLE, arm.dissent);
         })();
       armReports.push(verified === undefined ? armRun.row : { ...armRun.row, poolRead: verified });
       log(armRun.line);

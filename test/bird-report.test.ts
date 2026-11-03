@@ -92,6 +92,29 @@ describe('report completeness', () => {
     );
   });
 
+  it('refuses a conditional-dissent arm whose funnel the artifact dropped', () => {
+    // The arm's price is a share, and the share is the funnel: a row without it reports an
+    // accuracy beside a cost that 0.745 calls a case and 0.745 of a case describe equally well.
+    expect(() =>
+      assertReportComplete({ arms: [{ arm: 'select-cross-pooled-dissent', total: 1532, candidateRecall: 0.72 }] }),
+    ).toThrow(/buys a conditional dissent and its row carries no dissent funnel/);
+    expect(() =>
+      assertReportComplete({
+        arms: [
+          {
+            arm: 'select-cross-pooled-dissent',
+            total: 1532,
+            candidateRecall: 0.72,
+            poolRead: { shared: 1532, unrecorded: 0, cases: 1532 },
+            spend: { asked: 1532, priced: 1532 },
+            dissent: { asked: 1140, arrived: 1140, distinct: 402, adopted: 88 },
+            format: FORMAT,
+          },
+        ],
+      }),
+    ).not.toThrow();
+  });
+
   it('refuses a sampling arm without its ceiling', () => {
     // `candidateRecall` is the only number that separates a weak generator from a weak
     // selector, and a sampling row without it cannot be read at all.

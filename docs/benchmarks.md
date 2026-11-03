@@ -5904,3 +5904,35 @@ rather than following one:
 Until 1–4 are read, the honest statement about this factor is the one the table above supports:
 **our pool carries 1.28 opinions per case, three quarters of its cases are unanimous, and two thirds
 of its losses are unanimous** — so the ceiling is limited by *agreement*, not by *selection*.
+
+**The arm that spends it.** `select-cross-pooled-dissent` is `select-cross-pooled` — same pool, same
+selector, same one selection call — plus one generation bought on the cases where the three
+candidates returned the same rows. Four numbers travel with each case, and each of them is a
+failure the accuracy cannot express:
+
+| per case | what it means | what a zero means |
+|---|---|---|
+| `asked` | the pool agreed with itself, so the call was made | the condition never held here |
+| `arrived` | the endpoint answered *and* the engine ran the statement | an outage wore the arm's name |
+| `distinct` | its rows differ from the pool's answer | a fourth vote for an answer that had three |
+| `adopted` | it became this case's answer | the selector preferred a candidate it already had |
+
+`asked` is the price. On the published pool it fires on 74.5% of cases, so the arm costs **0.745
+calls a case**, and a row that published only `calls.mean` would make that indistinguishable from
+"one more call on every case". `distinct` is the value: a fourth opinion that returns the pool's own
+answer was bought and carried nothing, which is exactly the reading a score cannot give — the vote
+keeps its decision either way.
+
+**The source is the registration.** The pool's three opinions are two prompts of the primary model
+and one of the second model, so a fourth *prompt* of the primary model would share a model with two
+of them. `decompose` is the one generator here that answers by a different **method** rather than by
+different wording, which is the property the literature prices: XiYan-SQL's ensemble ablation loses
+4.04pp when its generators collapse to one, and MCS-SQL reads five prompts at +1.3pp against twenty
+samples of one at +2.1pp. A source already in the pool is refused at the declaration
+(`assertDissentRule`) rather than measured, because that purchase is a fourth vote by construction.
+
+**Two failures are refused, one is published.** An arm whose condition never held is its parent
+renamed, and an arm whose every call came back unrunnable is an outage; both stop the run with their
+own sentence, because they call for opposite fixes. `distinct: 0` is *not* refused — "the extra
+opinion always agreed with the pool" is a measurement, and it is the one that says the extra call is
+a fourth vote.
