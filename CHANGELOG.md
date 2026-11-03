@@ -71,7 +71,27 @@ cannot be argued with.
   model's own writing, which no prompt or policy in this repository changes. The next lever has to
   change what the candidates are (I-45, I-77), not what is done with them.
 
+### Changed
+- **The third slot answers its question: it does not matter.** `41673950028` ran the corrected
+  `select-mixed` and `select-samples` in one artifact on dev's 1,532 cases — **958 = 62.53%** against
+  **969 = 63.25%**, +0.72pp, 30 up / 19 down, exact McNemar p = 0.1524 — and two of the four
+  pre-registered criteria fail: ① the gain is under the +1.0pp that separates a lever from a
+  preference, and ② the sampled source is sole-correct on **32** cases against the **36** dev needs
+  before a source can move the ceiling. ③ (3.992 / 3.993 calls) and ④ (1,347 cases with values,
+  16,109 columns) pass. So `values` keeps the slot, and the `samples` family closes twice over: as a
+  column rule and as a candidate source.
+- **The card fix is neutral, and that is the round's cleanest negative.** `select-mixed` as three
+  genuinely different prompts scores 958 against the 955 that the one-card semantics produced. The
+  difference is a cross-run comparison, which the 33-case drift forbids reading as a delta — so it
+  is a neighbourhood, and the neighbourhood says **prompt diversity was not the binding constraint
+  either**: a more diverse candidate set moved nothing in a set the selector converts at 90.4%.
+
 ### Fixed
+- **The cost column priced the arm's card, not the candidates it sent.** `promptChars` reported
+  **2,568 mean characters for both** `select-mixed` and `select-samples`, because it built the prompt
+  from `cardOf(arm, …)` — the parent's card — while one of `select-samples`' three calls carries
+  16,109 columns of stored values. A mixed arm's size is now the **widest candidate's**, which is
+  what the model read; the arm's real bill is roughly +15% prompt characters over its parent.
 - **A mixed arm sent one card to all of its candidates while its guard measured one card per
   candidate.** `select-mixed` calls itself three prompts; the run built the arm's card once per case
   and printed every candidate on it, so `metadata+evidence` — descriptions as a block, joins listed —

@@ -2939,9 +2939,19 @@ describe('a mixed set whose third source carries a block of its own', () => {
     // The block reached the case through one of three candidates, which is what the
     // pre-registered criterion for this arm reads: `withValues` counts cases, `columns` the
     // widest candidate's bracket.
-    const rows = result.report.arms as { readonly arm: string; readonly sampleBlock?: { readonly cases: number; readonly withValues: number } }[];
+    const rows = result.report.arms as {
+      readonly arm: string;
+      readonly sampleBlock?: { readonly cases: number; readonly withValues: number };
+      readonly promptChars: { readonly mean: number };
+    }[];
     expect(rows[0]?.sampleBlock?.cases).toBe(CHAIN_QUESTIONS.length);
     expect(rows[0]?.sampleBlock?.withValues).toBe(CHAIN_QUESTIONS.length);
+    // The cost column reads the widest candidate, not the arm's own card: the sampled prompt is
+    // longer by its brackets, and a column that priced the parent's card would report the two arms
+    // as equally expensive while one of them sends values on a third of its calls.
+    const plain = await run({ plan: { gold: mixedGold }, env: { BIRD_DATA: mixedData, BIRD_ARMS: 'inline+evidence', BIRD_DEFINITIONS_FORCE: '1' } });
+    const plainRow = (plain.report.arms as { readonly promptChars: { readonly mean: number } }[])[0];
+    expect(rows[0]?.promptChars.mean ?? 0).toBeGreaterThan(plainRow?.promptChars.mean ?? 0);
   });
 });
 

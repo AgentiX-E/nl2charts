@@ -6522,3 +6522,71 @@ evidence — but it is only worth buying if the corrected arm loses. The re-disp
 first: if the corrected `select-mixed` is within drift of the two-prompt version's neighbourhood, the
 control is a curiosity; if it is not, the control is the next dispatch and the fix is priced rather
 than asserted.
+
+## The third slot answers its question, and the answer is that the slot does not matter
+
+`41673950028` is the re-dispatch on the fixed code — one artifact, dev's 1,532 cases, two arms,
+`deepseek-chat`. It is the first reading in this file where every candidate is the prompt its own
+source sends.
+
+| arm | passed | accuracy | calls.mean | recall@3 |
+|---|---|---|---|---|
+| `select-mixed` (three real prompts) | 958 | **62.53%** | 3.992 | 67.17% |
+| `select-samples` (third slot sampled) | **969** | **63.25%** | 3.993 | **67.75%** |
+
+**+0.72pp, 30 up / 19 down, exact McNemar p = 0.1524.**
+
+| criterion | threshold | measured | verdict |
+|---|---|---|---|
+| ① the slot is worth a decision | ≥ **+1.0pp** | **+0.72pp**, p = 0.1524 | **fails** |
+| ② the third candidate is not a restatement | sampled source sole-correct on ≥ **36** cases | **32** | **fails** |
+| ③ the cost is a swap and not a purchase | `calls.mean` **4.00** both | 3.992 / 3.993 | passes |
+| ④ the block is still the block | `sampleBlock.withValues` ≥ **1,300** | **1,347**, 16,109 columns | passes |
+
+**The two criteria that fail are the two that decide it.** Criterion ① was written to separate a
+lever from a preference, and +0.72pp at p = 0.15 is a preference: it is inside the 33-case run-to-run
+drift this file spent a section on. Criterion ② is the one a score cannot express, and it fails in
+the same direction — the sampled source is the only right answer on 32 cases, against the 36 that dev
+needs before a source can move the ceiling.
+
+**Where the three opinions are actually worth something.**
+
+| arm | `inline+evidence` | `metadata+evidence` | third source |
+|---|---|---|---|
+| `select-mixed` | 15 | **63** | `values` **17** |
+| `select-samples` | 15 | 43 | `inline+evidence+samples` **32** |
+
+Two things fall out of that table. The first is that **`values` is the weakest purchase in the
+catalogue** — 17 cases where it is the only correct candidate, against `metadata+evidence`'s 63. The
+second is that replacing it with a source worth almost twice as many sole-correct cases (32 against
+17) buys **+0.58pp of pool ceiling** (67.17 → 67.75) and +0.72pp of score. Both are real, both are
+smaller than the instrument that reads them.
+
+**What the corrected card did to `select-mixed`, and what it did not.** The fix in the previous
+section made the trio three genuinely different prompts — `metadata+evidence` now arrives with its
+descriptions as a block and its joins listed, instead of as a byte-for-byte copy of
+`inline+evidence`. The arm scored **958 = 62.53%**; under the one-card semantics it scored
+**955 = 62.34%**. The two are three cases apart — a comparison across runs, which the drift above
+forbids reading as a delta, so it is a neighbourhood and not a measurement — and it is the cleanest
+negative this line of work has produced: **prompt diversity was not the binding constraint
+either.** Making the candidate set more diverse did not move a set that the selector converts at
+90.4%.
+
+**The bill.** One of the three calls now carries the bracketed card, and that card measured +43.8%
+characters on its own arm — so `select-samples` costs roughly **+15% prompt characters** over its
+parent for **+0.72pp at p = 0.15**. The artifact does not print that number: it reports 2,568 mean
+characters for both arms, because the cost column read the *arm's* card rather than the widest
+candidate's. That is a defect in the instrument, found by this reading, fixed in the same round —
+`promptChars` now takes the maximum over the candidates a mixed arm sends, which is what the model
+actually read.
+
+**Verdict.** Criterion ① fails, so the swap is a preference and `values` keeps the slot. The
+`samples` family closes twice over — as a **column rule** (§71.4: the oracle lost to the heuristic)
+and now as a **candidate source** (32 sole-correct against a 36 threshold). Nothing in this family
+is worth another dispatch.
+
+**What is left is the ceiling, and both arms say so.** `recall@3` is 67.17% and 67.75%: the pool
+itself is what stands between 62–63% and CHASE-SQL's 76.02%, and a third source worth 32 sole-correct
+cases moved it by 0.58pp. A source that could move it by 2pp would have to be right on ~150 cases the
+other two miss. That is the number the next lever has to be designed against, and it is why the IR
+candidate is the only item in P1 that can change the ceiling rather than redistribute it.

@@ -5755,16 +5755,25 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
               },
             ]),
         );
-  const promptSizes = cases.map(
-    (question) =>
+  // What the model read, per case. A mixed arm reads one prompt per candidate and the candidates
+  // are not the same size — the sampled one carries bracket values — so the number is the widest
+  // of them: a column that reported the arm's own card would price a prompt nobody sent, which is
+  // how `select-samples` and `select-mixed` both came to publish 2,568 mean characters while one
+  // of them was sending 16,109 columns of stored values on a third of every case's calls.
+  const promptSizeOf = (question: (typeof cases)[number]): number => {
+    const sources = arm.mixed;
+    const sizeFor = (target: Arm): number =>
       buildSqlPrompt(
         question.question,
         // The card that was sent, not the card the arm would build now: on a column-choosing
         // arm those differ, and the prompt-size column exists to say what the model read.
-        prepared.cardOf(arm, question).schema,
-        promptFor(arm, question, prepared.blocksFor(arm, question)),
-      ).length,
-  );
+        sources === undefined ? prepared.cardOf(arm, question).schema : prepared.schemaForSource(target, question),
+        promptFor(target, question, prepared.blocksFor(target, question)),
+      ).length;
+    if (sources === undefined) return sizeFor(arm);
+    return Math.max(...sources.map((source) => sizeFor(resolveArm(parseMixedSource(source).arm) as Arm)));
+  };
+  const promptSizes = cases.map(promptSizeOf);
   // A repair arm is priced by its funnel, not only by its accuracy: an arm that
   // fixes 30 cases and breaks 25 has the same accuracy as one that does nothing.
   const repair =

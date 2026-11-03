@@ -503,6 +503,9 @@ describe('what an arm row says about itself', () => {
       // The card that was sent, as the row's prompt-size column reads it. An arm that makes no
       // choice sends the card `schemaFor` builds, so the read returns the same empty frame.
       cardOf: () => ({ schema: [] }),
+      // A mixed arm reads one card per candidate; this fixture has no sources, so the row's
+      // size column never calls it and the stub only has to exist.
+      schemaForSource: () => [],
       blocksFor: () => ({}),
     }) as unknown as PreparedRun;
 
