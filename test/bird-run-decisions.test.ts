@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  ARMS,
   armReportRow,
   armSummaryLine,
   assertPoolShared,
@@ -21,6 +22,8 @@ import {
   spendOf,
   assertReconcileFired,
   assertDemonstrationsFired,
+  assertMaskingFired,
+  assertMaskingRule,
   assertDissentFired,
   assertDissentRule,
   assertSampleBlockFired,
@@ -1405,7 +1408,7 @@ describe('the verification turn on a bought opinion', () => {
 });
 
 describe('the worked examples on a prompt', () => {
-  const run = (examples?: number): CaseRun => ({
+  const run = (examples?: number, masked?: number): CaseRun => ({
     id: '1',
     passed: true,
     predicted: 'select 1',
@@ -1414,23 +1417,31 @@ describe('the worked examples on a prompt', () => {
     attempts: 1,
     calls: 1,
     ...(examples === undefined ? {} : { examples }),
+    ...(masked === undefined ? {} : { masked }),
   });
   const bank = (count: number, examples: (index: number) => number): CaseRun[] =>
     Array.from({ length: count }, (_unused, index) => ({ ...run(examples(index)), id: String(index) }));
+  const maskedBank = (count: number, rewritten: (index: number) => number): CaseRun[] =>
+    Array.from({ length: count }, (_unused, index) => ({ ...run(2, rewritten(index)), id: String(index) }));
 
   it('counts the cases that carried a block apart from the examples those cases held', () => {
     // Two facts, because they answer two questions: `blocks`/`cases` is the share of the split the
     // lever could act on, and `examples` is the width of what arrived. An arm whose neighbours
     // landed on a third of the split is a blend of two prompts at either width.
     const cases = [run(3), run(1), run(2), run(undefined)];
-    expect(demonstrationsFunnel(cases)).toEqual({ cases: 4, blocks: 3, examples: 6 });
+    expect(demonstrationsFunnel(cases)).toEqual({ cases: 4, blocks: 3, examples: 6, rewritten: 0 });
   });
 
   it('publishes a zero rather than nothing when the block never arrived', () => {
     // The arm exists, ran, and read no example: that is a measurement of the retrieval, not an
     // absent instrument, so the funnel is a zero and not `undefined`. The guard below is what
     // refuses it on a split large enough to be a reading.
-    expect(demonstrationsFunnel([run(undefined), run(undefined)])).toEqual({ cases: 2, blocks: 0, examples: 0 });
+    expect(demonstrationsFunnel([run(undefined), run(undefined)])).toEqual({
+      cases: 2,
+      blocks: 0,
+      examples: 0,
+      rewritten: 0,
+    });
   });
 
   it('refuses an arm whose examples never arrived, and stays silent below the floor', () => {
@@ -1443,5 +1454,47 @@ describe('the worked examples on a prompt', () => {
     // Below the instrument floor there is nothing to refuse: a seven-question smoke run has seven
     // cases and the same funnel would say nothing about the split.
     expect(() => assertDemonstrationsFired('icl', bank(7, () => 0))).not.toThrow();
+  });
+
+  it('counts the examples the masker rewrote, separately from the ones that arrived', () => {
+    // The masked arm's row is its parent's row plus a sentence unless this count is on it, so it is
+    // part of the funnel and not a footnote: three examples and zero rewrites is an arm that sent
+    // the unmasked prompt.
+    const cases = [run(3, 3), run(2, 1), run(undefined, undefined)];
+    expect(demonstrationsFunnel(cases)).toEqual({ cases: 3, blocks: 2, examples: 5, rewritten: 4 });
+  });
+
+  it('refuses a mask that rewrote nothing, and stays silent below the floor', () => {
+    // Every failure that leaves the mask inert produces this bank: a split whose statements carry
+    // no name the masker recognises, a transform that stopped matching, a block built without one.
+    // The published accuracy is the parent's and nothing else in the row says why.
+    expect(() => assertMaskingFired('masked', maskedBank(120, () => 0))).toThrow(
+      /the mask was applied to 240 example\(s\) across 120 cases and rewrote none, so the arm is its parent renamed/,
+    );
+    expect(() => assertMaskingFired('masked', maskedBank(120, (index) => (index === 0 ? 1 : 0)))).not.toThrow();
+    expect(() => assertMaskingFired('masked', maskedBank(7, () => 0))).not.toThrow();
+  });
+});
+
+describe('a mask declared with nothing to mask', () => {
+  it('refuses it at the declaration, before a call is spent', () => {
+    // The masker only ever sees a statement out of a demonstration block. An arm that declares the
+    // mask without the examples sends its parent's prompt and publishes the difference as a reading
+    // about masking, which is `assertSampleRule`'s shape one lever along.
+    expect(() => assertMaskingRule({ name: 'x', masked: true })).toThrow(/carries none, so the mask would never run/);
+  });
+
+  it('accepts examples without a mask, and the pair together', () => {
+    expect(() => assertMaskingRule({ name: 'x', demonstrations: true })).not.toThrow();
+    expect(() => assertMaskingRule({ name: 'x', demonstrations: true, masked: true })).not.toThrow();
+  });
+
+  it('holds for every arm in the catalogue', () => {
+    // The catalogue is where the mistake is cheap to make and a dispatch is where it is expensive
+    // to find: one arm that names the mask and forgets the block costs a paid run.
+    for (const arm of ARMS) {
+      if (arm.masked !== true) continue;
+      expect(arm.demonstrations, arm.name).toBe(true);
+    }
   });
 });

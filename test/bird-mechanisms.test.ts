@@ -51,6 +51,7 @@ const NOT_A_MECHANISM: Readonly<Record<string, string>> = {
   assertMixedSources: 'declaration-time: every named source must resolve to an arm',
   assertDissentRule: 'declaration-time: a fourth opinion must come from somewhere else',
   assertSampleRule: 'declaration-time: a column rule needs a sampler to read',
+  assertMaskingRule: 'declaration-time: a mask needs worked examples to act on',
   assertSecondModel: 'declaration-time: an arm that needs a second endpoint has to have one',
   assertUniqueArmLabels: 'the artifact: two rows must not wear the same label',
   assertPoolShared: 'the artifact: a pooled arm must be shown reading the pool it names',

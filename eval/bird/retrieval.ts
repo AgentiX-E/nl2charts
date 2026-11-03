@@ -199,17 +199,35 @@ export function renderRetrieved(hits: readonly Hit[], maxChars = 700): string {
  * The heading says out loud that the tables are not the ones above: a demonstration
  * from another schema is useful as a shape (which aggregate, which join direction,
  * how a ratio is guarded) and harmful as an identifier source. Whether saying so is
- * enough is exactly what the `inline+icl` arm measures — DAIL-SQL masks
- * schema-specific tokens instead, which is a candidate lever once this one is known.
+ * enough is what `inline+icl` measured — +0.91pp, with 30 fewer wrong-width statements
+ * and fifteen new execution errors naming columns and functions of the source schema.
+ *
+ * `statement` is the answer to that reading: DAIL-SQL's masked variant, which rewrites
+ * each statement before it is rendered so the shape arrives without the word list.
  */
-export function renderDemonstrationBlocks(hits: readonly Hit[], maxChars = 2200): readonly string[] {
+export interface DemonstrationOptions {
+  /** Overall budget for the rendered blocks, in characters. */
+  readonly maxChars?: number;
+  /**
+   * A rewrite applied to each statement before it is rendered.
+   *
+   * A function rather than a flag, so this file does not have to know what masking is: the
+   * renderer's job is the block, and `mask.ts` is where the decision about identifiers and
+   * dialect lives.
+   */
+  readonly statement?: (sql: string) => string;
+}
+
+export function renderDemonstrationBlocks(hits: readonly Hit[], options: DemonstrationOptions = {}): readonly string[] {
+  const maxChars = options.maxChars ?? 2200;
   const blocks: string[] = [];
   let used = 0;
   for (const hit of hits) {
     if (hit.sql.length === 0) continue;
     const lines = [`Question: ${hit.question.trim()}`];
     if (hit.evidence.length > 0) lines.push(`Evidence: ${hit.evidence}`);
-    lines.push(`SQL: ${hit.sql}`);
+    const sql = options.statement === undefined ? hit.sql : options.statement(hit.sql);
+    lines.push(`SQL: ${sql}`);
     const block = lines.join('\n');
     if (used + block.length + 2 > maxChars) break;
     blocks.push(block);
@@ -227,6 +245,6 @@ export function renderDemonstrationBlocks(hits: readonly Hit[], maxChars = 2200)
  * and an arm whose block arrived with one example is a different reading from one that arrived with
  * three, at the same prompt-size column.
  */
-export function renderDemonstrations(hits: readonly Hit[], maxChars = 2200): string {
-  return renderDemonstrationBlocks(hits, maxChars).join('\n\n');
+export function renderDemonstrations(hits: readonly Hit[], options: DemonstrationOptions = {}): string {
+  return renderDemonstrationBlocks(hits, options).join('\n\n');
 }

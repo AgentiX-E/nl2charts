@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildIndex, renderDemonstrations, renderRetrieved, retrieve, tokenize } from '../eval/bird/retrieval.js';
+import { buildIndex, renderDemonstrationBlocks, renderDemonstrations, renderRetrieved, retrieve, tokenize } from '../eval/bird/retrieval.js';
 import type { TrainingRow } from '../eval/bird/retrieval.js';
 
 const corpus: TrainingRow[] = [
@@ -203,9 +203,19 @@ describe('statements as demonstrations', () => {
     const firstBlock = full.split('\n\n')[0] as string;
     // A budget that fits the first block plus its separator, and nothing after:
     // the second example is dropped, not cut.
-    const trimmed = renderDemonstrations(hits, firstBlock.length + 2);
+    const trimmed = renderDemonstrations(hits, { maxChars: firstBlock.length + 2 });
     expect(trimmed).toBe(firstBlock);
     expect(trimmed).not.toContain('...');
+  });
+
+  it('rewrites each statement through the transform it is given, and counts the blocks', () => {
+    // The masked arm is the same block with a different statement in it: the count, the question
+    // and the evidence line are unchanged, which is what makes the pair one lever.
+    const hits = retrieve(index, 'ratio of orders paid in USD to EUR', { k: 2, requires: 'sql' });
+    const masked = renderDemonstrationBlocks(hits, { statement: (sql) => sql.replace(/orders/gi, 'table_1') });
+    expect(masked).toHaveLength(2);
+    expect(masked.every((block) => !/orders/i.test(block.split('SQL:')[1] as string))).toBe(true);
+    expect(masked[0]).toContain('Question:');
   });
 
   it('keeps the textual block free of statements', () => {

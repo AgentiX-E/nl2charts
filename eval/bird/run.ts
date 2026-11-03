@@ -51,6 +51,7 @@ import { attachSamples, narrowSamples, sampleValuesOf } from './samples.js';
 import { conditionColumns } from './conditions.js';
 import { exampleMapOf, exampleSetFor } from './value-examples.js';
 import { buildIndex, renderDemonstrationBlocks, renderRetrieved, retrieve } from './retrieval.js';
+import { MASKED_PREAMBLE, maskStatement } from './mask.js';
 import { deserializeIndex, findValues, indexCells, renderValues, serializeIndex } from './values.js';
 import type { ValueIndex } from './values.js';
 import { synthesizeRecord } from './synthesize.js';
@@ -86,6 +87,19 @@ export interface Arm {
    * switch away from `inline+retrieval`, which supplies the same neighbours as text.
    */
   readonly demonstrations?: boolean;
+  /**
+   * Mask the schema-specific names in the worked examples and canonicalise their dialect.
+   *
+   * `I-83` read the stacked examples as two-sided: `column-count` fell 136 → 106, the largest
+   * single-class move any prompt lever here has produced, and fifteen execution errors appeared
+   * naming either a column of the source schema or a function SQLite does not have. This is
+   * DAIL-SQL's masked variant, which keeps the construction and drops both.
+   *
+   * Requires `demonstrations`: the mask only acts through the examples, and an arm that declares it
+   * without them would be its parent with a name that claims otherwise. `assertMaskingRule` refuses
+   * that at the declaration.
+   */
+  readonly masked?: boolean;
   /**
    * Who chooses among the samples: the modal executed result (default) or the model
    * reading the candidates. Same samples, same count — one lever.
@@ -913,6 +927,11 @@ export const ARMS: readonly Arm[] = [
   // placement under the examples, which is the interaction `inline+icl` never measured because it
   // had no hint to interact with.
   { name: 'inline+evidence+icl', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', demonstrations: true },
+  // The same stacking with the schema masked out of the examples and their dialect canonicalised —
+  // DAIL-SQL's masked variant. One lever from `metadata+evidence+icl`, which `I-83` read as a
+  // two-sided move: 30 fewer wrong-width statements and fifteen new execution errors naming another
+  // schema's columns and functions. Paired with it in one run, so the delta prices the mask.
+  { name: 'metadata+evidence+icl-masked', notes: true, evidence: 'dataset', repairs: 0, linking: true, demonstrations: true, masked: true },
   // The cheapest arm on the frontier with its card cut to the join closure. The card measurement
   // points at it: 90.5% of that prompt is the card, and 53.5% of the card belongs to tables the
   // gold statement never reads — so the lever that removed 12.6% of `select`'s prompt has more
@@ -1049,6 +1068,7 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   metadata: 'no definitions at all: parent of metadata+evidence, run only to re-derive the parent',
   'metadata+evidence+icl': "the dataset hint and worked examples from the training split on the same card: the one component of CHASE-SQL's pipeline never stacked on this repository's strongest arm, and the arm the ceiling criterion (>= +4pp) is registered against — it needs the training split, an 8.5 GB archive from which only `train.json` is kept, so it is dispatched rather than run on every push",
   'inline+evidence+icl': 'the same stacking on the inline card: the pair against `metadata+evidence+icl` prices the card placement under the examples, and it carries the same fetch cost',
+  'metadata+evidence+icl-masked': 'the stacked examples with the schema masked out and the dialect canonicalised (DAIL-SQL\'s masked variant): one lever from `metadata+evidence+icl`, dispatched with it so the delta prices the mask, and carrying the same training-split fetch',
   'metadata+evidence+prune': 'one lever from metadata+evidence, on the arm where the card is 90.5% of the prompt: priced on the card measurement first, then dispatched, because the closure costs 33 of the 496 cases a gold table',
   synthetic: 'profiles as evidence: measured null',
   'synthetic+focus': 'profile plus a focus instruction: measured null',
@@ -1495,6 +1515,15 @@ export interface CaseRun extends CaseOutcome {
    */
   readonly examples?: number;
   /**
+   * How many of those examples the masker rewrote, on the arms that ask for it.
+   *
+   * The masked arm's whole claim is that the block is the same block with the schema taken out, and
+   * a masker that matches nothing produces the parent's prompt at the parent's accuracy. That state
+   * is invisible in every other field — the examples still arrived, the calls are the same, the
+   * tokens moved by the length of one sentence — so the count is the arm's own instrument.
+   */
+  readonly masked?: number;
+  /**
    * What the conditional fourth opinion did on this case.
    *
    * Four facts, because four different failures all read as "the extra opinion did not help":
@@ -1715,6 +1744,8 @@ export interface ArmReportRow {
     readonly cases: number;
     readonly blocks: number;
     readonly examples: number;
+    /** How many of those examples the masker rewrote. Zero on every arm that does not mask. */
+    readonly rewritten: number;
   };
   /**
    * The shape of the replies this arm's prompt produced.
@@ -1785,6 +1816,21 @@ export function assertSampleRule(arm: Pick<Arm, 'name' | 'samples' | 'sampleColu
   if (arm.sampleColumns === undefined || arm.samples !== undefined) return;
   throw new Error(
     `arm ${arm.name} narrows which columns carry stored values and declares no sampler, so the rule would never run`,
+  );
+}
+
+/**
+ * A mask on a prompt that carries no examples is a name for the parent arm.
+ *
+ * The masker only ever sees a statement from a demonstration block, so an arm that declares
+ * `masked` without `demonstrations` sends the prompt it started from and reports the difference as
+ * a reading about masking. Refused at the declaration, next to `assertSampleRule` and for its
+ * reason: the alternative is a paid run that measures nothing.
+ */
+export function assertMaskingRule(arm: Pick<Arm, 'name' | 'masked' | 'demonstrations'>): void {
+  if (arm.masked !== true || arm.demonstrations === true) return;
+  throw new Error(
+    `arm ${arm.name} masks the names in its worked examples and carries none, so the mask would never run`,
   );
 }
 
@@ -2678,13 +2724,19 @@ export function assertSamplesRan(
  * `cases` is the denominator and `blocks` the cases that carried at least one example: an arm that
  * retrieved neighbours for a third of the split is a blend of two prompts, and its accuracy is a
  * number about neither. `examples` is the width of what arrived — one example and three are
- * different prompts — and it is the count `assertDemonstrationsFired` refuses on.
+ * different prompts — and it is the count `assertDemonstrationsFired` refuses on. `rewritten` is
+ * how many of those examples the masker changed, which is zero on every arm that does not mask.
  */
 export function demonstrationsFunnel(
   runs: readonly CaseRun[],
-): { readonly cases: number; readonly blocks: number; readonly examples: number } {
+): { readonly cases: number; readonly blocks: number; readonly examples: number; readonly rewritten: number } {
   const blocks = runs.filter((run) => (run.examples ?? 0) > 0).length;
-  return { cases: runs.length, blocks, examples: runs.reduce((total, run) => total + (run.examples ?? 0), 0) };
+  return {
+    cases: runs.length,
+    blocks,
+    examples: runs.reduce((total, run) => total + (run.examples ?? 0), 0),
+    rewritten: runs.reduce((total, run) => total + (run.masked ?? 0), 0),
+  };
 }
 
 /**
@@ -2710,6 +2762,31 @@ export function assertDemonstrationsFired(
   if (funnel.examples > 0) return;
   throw new Error(
     `arm ${armName}: worked examples were asked for and ${String(funnel.blocks)} of ${String(funnel.cases)} cases carried one, so the arm is its parent renamed`,
+  );
+}
+
+/**
+ * A masked arm whose examples came through the masker unchanged is its parent renamed.
+ *
+ * The mask is a text transform over statements this repository does not author, so it can stop
+ * matching for reasons no type system sees: the training split's dialect changes, a statement is
+ * written in a style the tokenizer reads as one string, an arm retrieves neighbours with no names
+ * to replace. All of those leave the accuracy where the parent's is and publish a delta of ~0 as
+ * "masking the schema does not help", which is the wrong finding from the right number.
+ *
+ * The threshold is "any example changed", not a share: `I-84`'s judgement criteria carry the
+ * reading, and this is the guard that has to hold before there is a reading at all.
+ */
+export function assertMaskingFired(
+  armName: string,
+  runs: readonly CaseRun[],
+  minimumSample = MINIMUM_INSTRUMENT_SAMPLE,
+): void {
+  if (runs.length < minimumSample) return;
+  const funnel = demonstrationsFunnel(runs);
+  if (funnel.rewritten > 0) return;
+  throw new Error(
+    `arm ${armName}: the mask was applied to ${String(funnel.examples)} example(s) across ${String(funnel.cases)} cases and rewrote none, so the arm is its parent renamed`,
   );
 }
 
@@ -2776,6 +2853,14 @@ export function assertReportComplete(report: { readonly arms?: readonly ArmRepor
       // funnel, "the examples did not help" and "the examples arrived on a tenth of the cases" are
       // the same number.
       throw new Error(`arm ${row.arm} carries worked examples and its row carries no demonstration funnel, so the delta cannot be placed on the cases that read one`);
+    }
+    if (arm.masked === true && row.demonstrations?.rewritten === undefined) {
+      // The masked arm's row is the parent's row with a sentence of preamble added unless the funnel
+      // says how many examples the masker changed. `assertMaskingFired` refuses the all-zero case at
+      // run time; this refuses the row that does not carry the number at all.
+      throw new Error(
+        `arm ${row.arm} masks the names in its examples and its funnel carries no rewritten count, so the mask cannot be told from a preamble`,
+      );
     }
     if (arm.emptyRetry !== undefined && row.emptyRetry === undefined) {
       throw new Error(`arm ${row.arm} runs the empty-result lever and its row carries no empty-result funnel, so the call cannot be priced`);
@@ -3584,8 +3669,15 @@ export interface PreparedRun {
    * `sampledFor` exists beside `sampledColumns`: with a plain arm and an examples arm in the same
    * run the control is positive whether or not *this* arm attached a block, so an arm that asked for
    * examples and received none would publish as its parent under another name with every gate green.
+   *
+   * `masked` asks for the block whose statements went through `maskStatement`. `rewritten` is how
+   * many of its examples the masker actually changed: a mask that matches nothing on a statement is
+   * a mask that published the parent arm's prompt, and the funnel has to be able to say so.
    */
-  readonly demonstrationsFor: (question: BirdQuestion) => { readonly text: string; readonly examples: number } | undefined;
+  readonly demonstrationsFor: (
+    question: BirdQuestion,
+    options?: { readonly masked?: boolean },
+  ) => { readonly text: string; readonly examples: number; readonly rewritten: number } | undefined;
   /**
    * The card to send for one case, spending the call that a column-choosing arm costs.
    *
@@ -3672,7 +3764,19 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
   // The rendered block *and* how many examples it holds. The count exists because the arm that
   // stacks examples on the dataset's hint is priced by both: one example and three are different
   // prompts at the same size column, and a joined string cannot be counted without re-parsing it.
-  const demonstrationsByQuestion = new Map<number, { readonly text: string; readonly examples: number }>();
+  const demonstrationsByQuestion = new Map<
+    number,
+    {
+      readonly text: string;
+      readonly examples: number;
+      readonly masked: string;
+      readonly maskedExamples: number;
+      readonly rewritten: number;
+    }
+  >();
+  // The masked block is only built when an arm asks for it: it costs a string transform per
+  // example, and a run of five plain arms should not pay for a prompt none of them sends.
+  const needsMasking = settings.arms.some((name) => resolveArm(name)?.masked === true);
   for (const question of selected) {
     if (retrievalIndex === undefined) break;
     const textHits = retrieve(retrievalIndex, question.question, { k: 3 });
@@ -3680,14 +3784,40 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
     if (text.length > 0) retrievedByQuestion.set(question.question_id, text);
     // Same corpus, same ranking, same k: the only difference from the evidence block
     // is that each neighbour arrives with its statement.
-    const worked = renderDemonstrationBlocks(retrieve(retrievalIndex, question.question, { k: 3, requires: 'sql' }));
-    if (worked.length > 0) {
-      demonstrationsByQuestion.set(question.question_id, { text: worked.join('\n\n'), examples: worked.length });
-    }
+    const hits = retrieve(retrievalIndex, question.question, { k: 3, requires: 'sql' });
+    const worked = renderDemonstrationBlocks(hits);
+    if (worked.length === 0) continue;
+    // Cut to the raw block's width, not the budget's: a masked example is shorter, so the same
+    // 2,200 characters would carry *more* of them and the pair would differ in the number of
+    // examples as well as in their text. `I-84` is one lever, and the count is half of it.
+    const maskedBlocks = needsMasking
+      ? renderDemonstrationBlocks(hits, { statement: maskStatement }).slice(0, worked.length)
+      : [];
+    // Counted against the raw block rather than assumed: the masker is a text transform that can
+    // stop matching, and "it rewrote nothing" is exactly the state that makes a masked arm its
+    // parent under another name.
+    const rewritten = maskedBlocks.filter((block, at) => block !== worked[at]).length;
+    demonstrationsByQuestion.set(question.question_id, {
+      text: worked.join('\n\n'),
+      examples: worked.length,
+      masked: maskedBlocks.length === 0 ? '' : `${MASKED_PREAMBLE}\n\n${maskedBlocks.join('\n\n')}`,
+      maskedExamples: maskedBlocks.length,
+      rewritten,
+    });
   }
   const retrievedFor = (question: BirdQuestion): string | undefined => retrievedByQuestion.get(question.question_id);
-  const demonstrationsFor = (question: BirdQuestion): { readonly text: string; readonly examples: number } | undefined =>
-    demonstrationsByQuestion.get(question.question_id);
+  const demonstrationsFor = (
+    question: BirdQuestion,
+    options: { readonly masked?: boolean } = {},
+  ): { readonly text: string; readonly examples: number; readonly rewritten: number } | undefined => {
+    const found = demonstrationsByQuestion.get(question.question_id);
+    if (found === undefined) return undefined;
+    // An arm that asks for the masked block and finds it missing has nothing to send: falling back
+    // to the raw text would publish the parent's prompt as the masked arm's reading.
+    if (options.masked !== true) return { text: found.text, examples: found.examples, rewritten: 0 };
+    if (found.masked.length === 0) return undefined;
+    return { text: found.masked, examples: found.maskedExamples, rewritten: found.rewritten };
+  };
 
   const schemas = new Map<string, SchemaTable[]>();
   for (const db of settings.dbs) {
@@ -4083,7 +4213,12 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
     ...(evidenceFor(arm, question) === undefined ? {} : { synthesized: evidenceFor(arm, question) }),
     ...(definitionsFor(arm, question.db_id) === undefined ? {} : { definitions: definitionsFor(arm, question.db_id) }),
     ...(retrievedFor(question) === undefined ? {} : { retrieved: retrievedFor(question) }),
-    ...(demonstrationsFor(question) === undefined ? {} : { demonstrations: demonstrationsFor(question)?.text }),
+    // The arm decides which block it sends, the mask decides what is in it: the pair is one lever
+    // only if the same retrieval produced both, which is why the choice is a parameter here rather
+    // than a second preparation.
+    ...(demonstrationsFor(question, { masked: arm.masked === true }) === undefined
+      ? {}
+      : { demonstrations: demonstrationsFor(question, { masked: arm.masked === true })?.text }),
     ...(valuesFor(question) === undefined ? {} : { values: valuesFor(question) }),
   });
 
@@ -4579,6 +4714,18 @@ export const MECHANISMS: readonly Mechanism[] = [
     quiet: () => quietBank({}),
   },
   {
+    lever: 'masked',
+    declares: (arm) => arm.masked === true,
+    // The mask is a text transform, and a transform that matches nothing produces the parent's
+    // prompt at the parent's accuracy. Its half of a one-lever pair is one field.
+    guard: ({ armName, runs }) => assertMaskingFired(armName, runs),
+    records: 'demonstrations',
+    scenarios: ['masks the schema out of the worked examples, and counts the ones it rewrote'],
+    // Examples that arrived and came through the masker intact: the bank the register exists for,
+    // because that arm's accuracy is its parent's and nothing else in the row says so.
+    quiet: () => quietBank({ examples: 3, masked: 0 }),
+  },
+  {
     lever: 'dissent',
     declares: (arm) => arm.dissent !== undefined,
     // A conditional call has to be seen firing *and* seen arriving: the two failures produce the
@@ -4624,6 +4771,8 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
   const arm = resolveArm(name);
   if (arm === undefined) throw new Error(`unknown arm ${name}`);
   assertSampleRule(arm);
+  // ...and a mask with no examples under it is a name for the parent arm.
+  assertMaskingRule(arm);
   // ...and a dissent that names one of the arm's own sources is a fourth vote, refused before a
   // single call is spent on it.
   assertDissentRule(arm);
@@ -4640,15 +4789,22 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
     }
   }
   /**
-   * The worked examples this case's prompt carries.
+   * What this case's prompt carried of the worked examples, when it carried any.
    *
    * One expression for both paths that built a prompt, because the block is decided by the arm and
    * the prepared run rather than by how the case ended: a case whose statement the engine refused
    * still read the examples, and a guard that counted only successful cases would read an engine
    * outage as a lever that never fired.
+   *
+   * `rewritten` rides beside `examples` because masking is a text transform: an arm whose examples
+   * arrived intact has published its parent's prompt, and that state is invisible in an accuracy.
    */
-  const examplesFor = (question: BirdQuestion): number =>
-    arm.demonstrations === true ? (prepared.demonstrationsFor(question)?.examples ?? 0) : 0;
+  const demonstrationsOf = (question: BirdQuestion): Pick<CaseRun, 'examples' | 'masked'> => {
+    if (arm.demonstrations !== true) return {};
+    const block = prepared.demonstrationsFor(question, { masked: arm.masked === true });
+    if (block === undefined) return {};
+    return { examples: block.examples, ...(arm.masked === true ? { masked: block.rewritten } : {}) };
+  };
   const runs = await pool(cases, settings.concurrency, async (question): Promise<CaseRun> => {
     // Counted, not derived: a plan costs two calls, a selector costs one, and a
     // configuration-derived count got both wrong in opposite directions.
@@ -5297,7 +5453,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
             errorKind: 'execution',
             calls: callsMade(),
             ...(asked.decomposedSteps === undefined ? {} : { decomposition: { candidates: 1, steps: asked.decomposedSteps } }),
-            ...(examplesFor(question) === 0 ? {} : { examples: examplesFor(question) }),
+            ...demonstrationsOf(question),
             ...shape,
             error: `execution: ${predicted.error ?? 'unknown'}`,
           };
@@ -5320,7 +5476,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
             ? {}
             : { emptyRetried: asked.emptyRetry.fired, emptyRecovered: asked.emptyRetry.recovered }),
           ...(asked.decomposedSteps === undefined ? {} : { decomposition: { candidates: 1, steps: asked.decomposedSteps } }),
-          ...(examplesFor(question) === 0 ? {} : { examples: examplesFor(question) }),
+          ...demonstrationsOf(question),
           ...shape,
         };
       } catch (error) {

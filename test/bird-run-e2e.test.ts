@@ -902,9 +902,46 @@ describe('retrieval and the second model, when they are configured', () => {
     const result = await run({ plan: { first: correct }, env: { BIRD_ARMS: 'metadata+evidence+icl' } });
     expect(result.code).toBe(0);
     const arms = result.report.arms as { arm: string; demonstrations?: { cases: number; blocks: number; examples: number } }[];
-    expect(arms[0]?.demonstrations).toEqual({ cases: QUESTIONS.length, blocks: 0, examples: 0 });
+    expect(arms[0]?.demonstrations).toEqual({ cases: QUESTIONS.length, blocks: 0, examples: 0, rewritten: 0 });
     const prompt = result.requests.find((request) => request.prompt.includes(QUESTIONS[0]?.question ?? ''))?.prompt ?? '';
     expect(prompt).not.toContain('Question: How many items are there in total?');
+  });
+
+  it('masks the schema out of the worked examples, and counts the ones it rewrote', async () => {
+    // `I-83` read the stacked examples as two-sided: 30 fewer wrong-width statements and fifteen
+    // new execution errors naming another schema's columns and functions. The masked arm is the
+    // answer, and it is one lever only if the same retrieval produced the same examples — so the
+    // artifact has to publish how many of them the masker actually changed. A transform that
+    // matches nothing sends the parent's prompt and reports the parent's accuracy.
+    mkdirSync(join(root, 'eval', '.cache', 'bird', 'train'), { recursive: true });
+    writeFileSync(
+      trainFile,
+      JSON.stringify([
+        { db_id: 'other', question: 'How many items are there in total?', evidence: 'count of items', SQL: 'select count(*) from items' },
+        { db_id: 'another', question: 'When was each item published?', evidence: 'year of publishing', SQL: 'select YEAR(published) from items' },
+      ]),
+    );
+    const result = await run({ plan: { first: correct }, env: { BIRD_ARMS: 'metadata+evidence+icl-masked' } });
+    expect(result.code).toBe(0);
+    const arms = result.report.arms as {
+      arm: string;
+      demonstrations?: { cases: number; blocks: number; examples: number; rewritten: number };
+    }[];
+    const funnel = arms[0]?.demonstrations;
+    expect(funnel?.blocks).toBeGreaterThan(0);
+    // Every example that arrived was rewritten, because every example carries a name to replace.
+    expect(funnel?.rewritten).toBe(funnel?.examples);
+    const prompt = result.requests.find((request) => request.prompt.includes(QUESTIONS[0]?.question ?? ''))?.prompt ?? '';
+    // Both halves of the `I-83` failure table: the name that does not exist here, and the function
+    // this engine does not have.
+    expect(prompt).toContain('SQL: select count(*) from table_1');
+    expect(prompt).toContain("strftime('%Y', column_1)");
+    expect(prompt).not.toContain('from items');
+    expect(prompt).not.toContain('YEAR(');
+    // ...and the block says what a placeholder is, because `table_1` is a valid table name and the
+    // cheapest thing to do with an example is copy it.
+    expect(prompt).toContain('renamed to table_1');
+    expect(prompt).toContain('join:');
   });
 
   it('draws a candidate from the second endpoint and labels each candidate with its source', async () => {

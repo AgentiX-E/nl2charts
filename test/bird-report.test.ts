@@ -124,13 +124,47 @@ describe('report completeness', () => {
     );
     expect(() =>
       assertReportComplete({
-        arms: [{ arm: 'metadata+evidence+icl', total: 1532, demonstrations: { cases: 1532, blocks: 1520, examples: 4460 }, format: FORMAT }],
+        arms: [{ arm: 'metadata+evidence+icl', total: 1532, demonstrations: { cases: 1532, blocks: 1520, examples: 4460, rewritten: 0 }, format: FORMAT }],
       }),
     ).not.toThrow();
   });
 
-  it('refuses a sampling arm without its ceiling', () => {
-    // `candidateRecall` is the only number that separates a weak generator from a weak
+  it('refuses a masked arm whose funnel carries no rewritten count', () => {
+    // The masked arm's row is its parent's row plus a sentence of preamble unless the funnel says
+    // how many examples the masker changed: without the number, "the mask did nothing" and "the
+    // mask worked and the examples still did not help" publish as the same accuracy.
+    expect(() =>
+      assertReportComplete({
+        arms: [
+          {
+            arm: 'metadata+evidence+icl-masked',
+            total: 1532,
+            demonstrations: { cases: 1532, blocks: 1520, examples: 4460 } as unknown as {
+              cases: number;
+              blocks: number;
+              examples: number;
+              rewritten: number;
+            },
+            format: FORMAT,
+          },
+        ],
+      }),
+    ).toThrow(/masks the names in its examples and its funnel carries no rewritten count/);
+    expect(() =>
+      assertReportComplete({
+        arms: [
+          {
+            arm: 'metadata+evidence+icl-masked',
+            total: 1532,
+            demonstrations: { cases: 1532, blocks: 1520, examples: 4460, rewritten: 4460 },
+            format: FORMAT,
+          },
+        ],
+      }),
+    ).not.toThrow();
+  });
+
+  it('refuses a sampling arm without its ceiling', () => {    // `candidateRecall` is the only number that separates a weak generator from a weak
     // selector, and a sampling row without it cannot be read at all.
     expect(() => assertReportComplete({ arms: [{ arm: 'select-mixed', total: 1532 }] })).toThrow(
       /select-mixed.*no candidate ceiling/,

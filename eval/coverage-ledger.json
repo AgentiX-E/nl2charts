@@ -4,10 +4,10 @@
   "tolerancePp": 0.2,
   "measuredAt": "2026-11-03",
   "totals": {
-    "lines": 99.45,
-    "statements": 99.45,
+    "lines": 99.46,
+    "statements": 99.46,
     "functions": 100,
-    "branches": 98.06
+    "branches": 98.07
   },
   "files": {
     "eval/ablate.ts": {
@@ -166,6 +166,12 @@
       "functions": 100,
       "branches": 98.64
     },
+    "eval/bird/mask.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 100
+    },
     "eval/bird/metrics.ts": {
       "lines": 100,
       "statements": 100,
@@ -248,7 +254,7 @@
       "lines": 99.44,
       "statements": 99.44,
       "functions": 100,
-      "branches": 95.8
+      "branches": 95.83
     },
     "eval/bird/samples.ts": {
       "lines": 100,
