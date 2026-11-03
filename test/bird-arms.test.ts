@@ -33,6 +33,7 @@ import {
   declaresDecomposition,
   DC_SOURCES,
   MIXED_DC_SOURCES,
+  SAMPLED_SOURCES,
   auditFunnel,
   assertAuditFired,
   emptyRetryFunnel,
@@ -817,6 +818,40 @@ describe('mixed candidate sources', () => {
  * measured, not assumed — an instruction is one paragraph among many and a model that
  * skips it leaves an arm that is the parent with a longer prompt.
  */
+/**
+ * The third slot, and what a third opinion is worth when it stops being a restatement.
+ *
+ * Two things have to hold for this arm's delta to mean anything: it must cost what its parent
+ * costs — a swap is a reading, a purchase is not — and the source it adds must be the one the
+ * split measured, not a second copy of a prompt already in the set.
+ */
+describe('the third slot', () => {
+  it('swaps one source and keeps the count, so the comparison is a swap and not a purchase', () => {
+    const parent = resolveArm('select-mixed') as Arm;
+    const child = resolveArm('select-samples') as Arm;
+    expect(child.vote).toBe(parent.vote);
+    expect(SAMPLED_SOURCES.slice(0, 2)).toEqual(MIXED_SOURCES.slice(0, 2));
+    expect(SAMPLED_SOURCES).toContain('inline+evidence+samples');
+    expect(SAMPLED_SOURCES).not.toContain('values');
+    expect(changedLevers(parent, child)).toEqual(['mixed']);
+  });
+
+  it('keeps every source a single statement, so each candidate costs one call', () => {
+    expect(() => assertMixedSources(SAMPLED_SOURCES)).not.toThrow();
+    expect(SAMPLED_SOURCES.length).toBe(MIXED_SOURCES.length);
+  });
+
+  it('is offered on demand rather than in the chain, because one slot is a hypothesis', () => {
+    expect(ON_DEMAND_ARMS['select-samples']).toContain('third slot');
+    expect(DEFAULT_ARMS).not.toContain('select-samples');
+    expect(DEV_ARMS).not.toContain('select-samples');
+  });
+
+  it('is registered as a pair against the arm it swaps a slot with', () => {
+    expect(PAIRS.some(([left, right]) => left === 'select-mixed' && right === 'select-samples')).toBe(true);
+  });
+});
+
 describe('the decomposition lever', () => {
   it('keeps the trio and adds one fourth source, so the comparison stays a superset', () => {
     expect(MIXED_DC_SOURCES.slice(0, MIXED_SOURCES.length)).toEqual(MIXED_SOURCES);
@@ -907,7 +942,7 @@ describe('mixed arms declare their own sources', () => {
   const mixed = ARMS.filter((arm) => arm.mixed !== undefined);
 
   it('has at least the two arms under test', () => {
-    expect(mixed.map((arm) => arm.name).sort()).toEqual(['select-balanced', 'select-cross', 'select-cross-agree', 'select-cross-canon', 'select-cross-empty', 'select-cross-judge', 'select-cross-judge-canon', 'select-cross-judge-reasoning', 'select-cross-pooled', 'select-cross-pooled-agree', 'select-cross-pooled-dissent', 'select-cross-pooled-dissent-pair', 'select-cross-pooled-judge-reasoning', 'select-cross-pooled-reconcile', 'select-cross-pooled-reconcile-novel', 'select-cross-pooled-vote', 'select-cross-repair-all', 'select-cross-repair-second', 'select-cross-shuffled', 'select-cross-unhinted', 'select-dc', 'select-duo', 'select-mixed', 'select-mixed+agree', 'select-mixed+dc', 'select-mixed+empty', 'select-mixed+empty-blind', 'select-mixed-pooled', 'select-mixed-pooled-vote', 'select-tagged', 'vote-cross', 'vote-mixed']);
+    expect(mixed.map((arm) => arm.name).sort()).toEqual(['select-balanced', 'select-cross', 'select-cross-agree', 'select-cross-canon', 'select-cross-empty', 'select-cross-judge', 'select-cross-judge-canon', 'select-cross-judge-reasoning', 'select-cross-pooled', 'select-cross-pooled-agree', 'select-cross-pooled-dissent', 'select-cross-pooled-dissent-pair', 'select-cross-pooled-judge-reasoning', 'select-cross-pooled-reconcile', 'select-cross-pooled-reconcile-novel', 'select-cross-pooled-vote', 'select-cross-repair-all', 'select-cross-repair-second', 'select-cross-shuffled', 'select-cross-unhinted', 'select-dc', 'select-duo', 'select-mixed', 'select-mixed+agree', 'select-mixed+dc', 'select-mixed+empty', 'select-mixed+empty-blind', 'select-mixed-pooled', 'select-mixed-pooled-vote', 'select-samples', 'select-tagged', 'vote-cross', 'vote-mixed']);
   });
 
   it.each(mixed.map((arm) => [arm.name, arm] as const))('%s: candidates equal sources, and every source generates once', (name, arm) => {

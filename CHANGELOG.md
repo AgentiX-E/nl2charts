@@ -7,6 +7,27 @@ cannot be argued with.
 ## Unreleased
 
 ### Changed
+- **The samples family closes, and it closes against the oracle.** `41620796848` ran the three arms in
+  one artifact on dev's 1,532 cases: `inline+evidence` **933 = 60.90%**, `+samples` **952 = 62.14%**
+  (+1.24pp, 61 up / 42 down, p = 0.0756), `+samples-gold` **944 = 61.62%** (+0.72pp, 36 up / 25 down,
+  p = 0.2000). Criterion ① fails (**+0.72pp** against the +1.5pp it had to clear) and ② fails with the
+  sign that matters: **the oracle is 0.52pp worse than the wide sampler**, 36 up and 44 down,
+  p = 0.4340. The funnel says why. The gold block carries 644 columns on **511** of 1,532 cases —
+  on 1,021 of them the gold statement filters on no profiled column, so there is nothing to narrow
+  to — and it is worth **+1.76pp where it lands** (24 up, 15 down) and +0.20pp where it does not. The
+  wide sampler reaches 1,347 cases with 16,109 columns for +1.24pp. Knowing which columns matter is
+  therefore worth about a point and a half on a third of the split, and **no realizable rule can
+  occupy the space between +1.24 and +1.5**. The wide block survives the verdict as a *candidate
+  source* rather than a column rule, because +1.24pp at p = 0.0756 is underpowered (dev MDE 2.30pp),
+  not null, and a source raises the pool's 68.93% where a sampler only converts it.
+- **Two runs of one arm, two hours apart, differ by 33 cases.** `inline+evidence` scored **900 = 58.7%**
+  on `41605217563` and **933 = 60.90%** on `41620796848` with the same arm, split, model and
+  temperature. The earlier run sat inside the window in which the third arm lost 12.1% of its calls
+  to 503s, so part of the 2.2pp is an outage and part is re-sampling, and the artifact cannot
+  separate them: a refused call and a wrong answer are one row each. That is now the largest number
+  in `docs/benchmarks.md`, larger than every delta it published this week, and it is the argument for
+  the instrument added below.
+
 - **Three prompts carry no more independent opinions than three samples of one prompt.** `I-74` ran
   the separation the candidate side never made — `vote` (three draws of one prompt at 0.7) against
   `vote-mixed` (three prompts, one draw each) on the same 160 questions, 960 completions and no
@@ -51,7 +72,25 @@ cannot be argued with.
   change what the candidates are (I-45, I-77), not what is done with them.
 
 ### Added
+- **The third candidate slot priced as a swap rather than a purchase.** `select-samples` is
+  `select-mixed` with one field changed — `mixed` — so both arms cost four calls. The slot it takes
+  from `values` is the weakest purchase in the catalogue: the value index is empty on **933 of 1,532**
+  dev questions (60.9%), while the sampled card lands on **1,347**. Criteria are registered before
+  the run (`41638466376`): ≥ +1.0pp, the sampled source sole-correct on ≥ 36 cases beyond the other
+  two, `calls.mean` 4.00 on both, and `sampleBlock.withValues` ≥ 1,300 in the new arm.
+- **A run-to-run drift instrument that splits the endpoint's re-sampling from a change on this side.**
+  `pnpm bench:bird:drift <left.json> <right.json> [--arm <name>] [--strict]` pairs two artifacts case
+  by case and publishes, per arm, the move, the discordant pairs with exact McNemar, how often a case
+  changed its verdict, and **whether the prompt was the same** — `prompt` tokens *and* `chars`, because
+  a token count is the tokenizer's view and a character count is the prompt's, and `I-84`'s pair had
+  every token identical on 1,532 cases while 42 statements changed. A flip under an identical prompt
+  is the noise floor; a flip under a moved prompt is this side; a flip whose prompt size one artifact
+  never recorded is `unknown` and is not attributed. Four refusals (a file against itself, two splits,
+  no shared arm, a case carried twice) and five printed problems (a different model, judge, dialect,
+  moved prompts, unrecorded sizes) keep a comparable pair from being read as an A/A. Offline, no call
+  spent; 33 tests, 98.85 / 98.85 / 100.00 / 99.00 across the four dimensions.
 - **The schema is masked out of the worked examples, which is DAIL-SQL's masked variant and the answer
+, which is DAIL-SQL's masked variant and the answer
   to `I-83`'s failure table.** `eval/bird/mask.ts` replaces every name that belongs to another schema
   with `table_1`, `column_1`, … and rewrites the MySQL and T-SQL spellings into the dialect the harness
   executes; `MASKED_PREAMBLE` says what a placeholder is, because `table_1` is a valid table name and

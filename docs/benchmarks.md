@@ -6318,3 +6318,133 @@ reaches **68.93%**, `select-mixed` converts **90.4%** of it, and CHASE-SQL's end
 mechanism but a registered ceiling that was never run: `inline+evidence+samples-gold`, whose criteria
 ①②③ are written above, aimed at this run's census of **183 cases** (filter-wide 92, literal-missing
 83, literal-case 8). If the oracle cannot reach +1.5pp, the `samples` family closes on criterion ①.
+
+## The samples family closes: the oracle is worse than the block it was meant to justify
+
+The previous section ended by naming the next dispatch rather than a mechanism: `inline+evidence`,
+`inline+evidence+samples` and `inline+evidence+samples-gold` in one run, so the ceiling and both of
+its comparators would be paired case by case. The criteria were written before the run. They are now
+answered.
+
+**One dispatch is missing from the record.** `41605217563` ran the same three arms and died on the
+third: `185 of 1532 calls (12.1%) failed at the model … (first error: llm returned 503)`, above the
+10% this harness treats as an outage, so `assertFailureRate` refused to publish an accuracy that
+would have been a function of how busy the endpoint was. It is a real refusal and it produced no
+reading at all — the artifact it uploaded is 3 KB. `41620796848` is the re-dispatch, and it is
+successful.
+
+**The reading (`41620796848`, dev 1,532, three arms in one run, `deepseek-chat`).**
+
+| arm | passed | accuracy | vs `inline+evidence` |
+|---|---|---|---|
+| `inline+evidence` | 933 | **60.90%** | — |
+| `inline+evidence+samples` | 952 | **62.14%** | **+1.24pp**, 61 up / 42 down, p = 0.0756 |
+| `inline+evidence+samples-gold` | 944 | **61.62%** | **+0.72pp**, 36 up / 25 down, p = 0.2000 |
+
+| criterion | threshold | measured | verdict |
+|---|---|---|---|
+| ① the ceiling is worth having | gold ≥ +1.5pp over the parent at p < 0.01 | **+0.72pp, p = 0.2000** | **fails** |
+| ② the narrowing is not the loss | gold ≥ samples | **−0.52pp** (36 up / 44 down, p = 0.4340) | **fails** |
+| ③ the block stays affordable | within 5% of the parent's characters | 2,568 → **2,586** (+0.7%) | passes |
+| ④ the rule reaches cases | `empty` below the parent's `cases` | **1,021 of 1,532** empty, 644 columns | passes |
+
+**Criterion ② is the one that decides the family, and the reason is in the funnel.** The oracle block
+carries 644 columns and lands on **511** of 1,532 cases, because on 1,021 of them the gold statement
+filters on no column this profiler keeps — there is nothing to narrow to. Where it lands it works:
+**+1.76pp** (24 up, 15 down). Where it does not, **+0.20pp** (12 up, 10 down), which is the same case
+count as noise. The wide sampler reaches **1,347** cases with **16,109** columns and reads +1.24pp
+overall.
+
+So the honest statement of what this family is worth is not "the columns were the cost" — it is the
+opposite. **Knowing exactly which columns matter buys +1.76pp on the cases where the answer's own
+statement filters on a profiled column, and that is a third of the split.** A rule that reaches the
+other two thirds cannot know more than the wide block already shows, and the wide block's own reading
+is +1.24pp. There is no room between +1.24 and +1.5 for a realizable column rule to occupy, which is
+what criterion ① was written to detect.
+
+**The family closes on ①, and the wide block does not close with it.** +1.24pp at p = 0.0756 on 1,532
+cases is the largest single-call reading on dev since `notes`, and it is underpowered rather than
+null: dev's MDE is 2.30pp, and 61 up against 42 down needs roughly 2,900 cases to clear p < 0.01 at
+that effect size. What that licenses is **not** another sampler — the oracle just showed that no
+column-selection rule can beat the wide block — but the wide block as a **candidate source**: a
+fourth prompt in `select-mixed`, where it would have to raise the pool's 68.93% rather than convert it.
+That is a new lever with its own criteria; it is not this one.
+
+**Two runs of one arm differ by 33 cases, and that is now the largest number in this file.** The
+`inline+evidence` arm scored **900 = 58.7%** on `41605217563` and **933 = 60.90%** on `41620796848`:
+same arm, same split, same model, temperature 0, two hours apart. The earlier run was inside the
+window in which the third arm lost 12.1% of its calls to 503s, so part of the gap is an outage that
+this arm's own failure rate did not exceed and part of it is re-sampling; **the two cannot be
+separated from the artifacts, because a failed call and a wrong answer are one row each.** That is
+the whole argument for `bench:bird:drift`, below: 2.2pp of run-to-run movement is larger than every
+delta this file has published this week, and until it is measured per case and split by whether the
+prompt changed, every reading here is a reading with an unstated error bar.
+
+## An instrument for the number that was being assumed: `bench:bird:drift`
+
+Everything above reads a *within-run* pair, because a cross-run pair is two samples of an endpoint.
+That rule was arrived at by observation, twice, and it has never had a measurement behind it: the A/A
+jitter of ±0.67pp in the earlier sections is quoted from a pair of runs on a different split, and the
+12-case and 33-case differences above are the same phenomenon at two scales.
+
+`pnpm bench:bird:drift <left.json> <right.json> [--arm <name>] [--strict]` is the measurement. It
+reads two artifacts, pairs them case by case on the shared arms, and publishes four things per arm:
+the move, the discordant pairs with exact McNemar, how often one case changed its verdict, and — the
+part that makes the rest readable — **whether the prompt was the same**.
+
+The distinction is the instrument's whole point:
+
+| prompt in the two runs | what a flipped verdict means |
+|---|---|
+| identical (`prompt` tokens **and** `chars`) | the endpoint re-sampled. This is the noise floor. |
+| different | something on this side changed, and the pair is not an A/A |
+| absent in one artifact | nothing. The flip cannot be attributed, and the row says so. |
+
+Both numbers are compared, not one: a token count is the tokenizer's view and a character count is
+the prompt's, and the run above shows why that matters — **every prompt token was identical on all
+1,532 cases of `metadata+evidence+icl` across two runs**, while 42 statements changed. A tool that
+compared only tokens would have called that pair a pure endpoint effect; it is, but only because the
+characters agreed too.
+
+Four refusals keep the pair from being read as something it is not: a file compared with itself, two
+splits, two artifacts with no arm in common, and an artifact that carries a case twice. Three
+*problems* — printed, and fatal under `--strict`, not refusing — name the pairs that can be compared
+but whose disagreement has a cause other than drift: a different model, a different judge, a different
+dialect, prompts that moved, or prompt sizes one side never recorded.
+
+The tool is offline and costs no call. It is registered in the same file as the readings it makes
+defensible, and like every other instrument here it has its own suite: 33 cases, four dimensions at
+98.85 / 98.85 / 100.00 / 99.00, including one that runs it as a script, because a guard that never
+fires is a CLI nobody has run.
+
+## The third slot, priced before it is read
+
+The closure above leaves one thing standing: the wide block is +1.24pp on its own, and a block that
+good is either a source or it is nothing. It cannot be a column rule — the oracle showed that — so
+the only place it can act is the candidate set. That makes it a question about a *slot*.
+
+`select-mixed` holds three candidates: `inline+evidence`, `metadata+evidence`, and `values`. The third
+one is the weakest purchase in the catalogue, and the arithmetic is not close: the value index builds
+a block only when the question names a literal, so it is **empty on 933 of 1,532 dev questions
+(60.9%)** and the third vote on those is a restatement of one of the other two. The sampled card
+lands on **1,347 of 1,532 (87.9%)** and is the largest single-call reading this split has produced
+since `notes`.
+
+`select-samples` is that swap and nothing else: the same two prompts, the same three candidates, the
+same four calls, the third slot given to `inline+evidence+samples` instead of to the value index.
+`changedLevers` reports exactly one field, `mixed`, which is the pair's whole claim.
+
+**The criteria, written before the run** — `41638466376`, `bird-dev`, both arms in one artifact:
+
+| criterion | threshold | what it decides |
+|---|---|---|
+| ① the slot is worth a decision | `select-samples` ≥ `select-mixed` **+1.0pp** | a swap that moves less than a point is a preference, not a lever |
+| ② the third candidate is not a restatement | the sampled source is **sole-correct on ≥ 36 cases** (dev's MDE) beyond the other two sources | a source that is never the only right answer cannot move the ceiling, whatever its own arm scores |
+| ③ the cost is a swap and not a purchase | `calls.mean` **4.00** on both arms | a third opinion bought with a fifth call is a different question |
+| ④ the block is still the block | `sampleBlock.withValues` ≥ 1,300 in the new arm | the arm must carry the block on the cases its own source reached, or the swap silently reverted to the parent |
+
+Criterion ② is the one that matters and the one a score cannot express. A candidate set is only worth
+what its union covers; if the sampled card is right on cases the other two are also right on, the
+score can still rise through selection while the ceiling — the thing that stands between this
+repository's 68.93% and CHASE-SQL's 76.02% — does not move at all. `bench:bird:pool` reads that
+directly, with no call spent, from the same artifact.

@@ -523,6 +523,19 @@ export const MIXED_DC_SOURCES: readonly string[] = [...MIXED_SOURCES, 'decompose
 export const DC_SOURCES: readonly string[] = ['inline+evidence', 'metadata+evidence', 'decompose'];
 
 /**
+ * The trio with its third slot given to the sampled card instead of to the value index.
+ *
+ * `MIXED_SOURCES`' third candidate is the value index, and its block is empty on 933 of the 1,532
+ * dev questions (60.9%) — the question names no literal, so the third vote is a restatement of one
+ * of the other two. `inline+evidence+samples` costs the same one call, its block lands on 1,347 of
+ * 1,532, and it is the largest single-call reading on this split since `notes` (+1.24pp over its
+ * parent, 61 up and 42 down, p = 0.0756). The question this arm asks is the one `select-dc` asked
+ * about decomposition — which prompt earns the third slot — at four calls either way, so the
+ * comparison is a swap and not a purchase.
+ */
+export const SAMPLED_SOURCES: readonly string[] = ['inline+evidence', 'metadata+evidence', 'inline+evidence+samples'];
+
+/**
  * The two prompts that are always distinct.
  *
  * Measured on the dry run, not assumed: `values` only builds a block when the question
@@ -840,6 +853,7 @@ export const ARMS: readonly Arm[] = [
   // three prompts: there the candidates disagree less (8.3% of cases against 23-26%), a model has
   // more to notice, and the selector should win. Without this pair the reading has one pool and a
   // conclusion about shape drawn from it.
+  { name: 'select-samples', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: SAMPLED_SOURCES },
   { name: 'select-mixed-pooled', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: MIXED_SOURCES, pool: 'select-mixed' },
   { name: 'select-mixed-pooled-vote', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, mixed: MIXED_SOURCES, pool: 'select-mixed' },
   { name: 'select-cross-canon', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: CROSS_SOURCES, canonical: true },
@@ -1044,6 +1058,7 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'metadata+evidence+values': "the curated notes and the value block on the same card — measured on `41302183201` at 297/496 against the parent's 291 (+1.21pp, 6:12, p=0.2379, MDE 2.40pp) with an exact A/A, so the two sources are substitutes rather than complements and the 166 remaining failures are knowledge the card already carries; kept as the ablation reference for 'more text on the prompt', not as a candidate",
   'inline+evidence+llm-select-dense': "the same reply applied their way: a table the model named nothing in keeps its first six columns instead of vanishing, which is what MAC-SQL's `drop_all` does — measured 261/496 against the column rule's 253 and the parent's 278 (`41290647076`), so it recovers 1.61pp of the 5.04pp loss (p=0.416, unresolved at 14.9% discordance) and still loses 3.43pp to the parent (p=0.0241); the card lever is closed at both granularities",
   'select-mixed': 'three decompositions instead of three samples: within its MDE of a single call on this split, and the decomposition question needs the dev split to be answered',
+  'select-samples': "the trio's third slot given to the sampled card rather than the value index: the same four calls, and the block it replaces is empty on 60.9% of the split",
   'select-duo': 'two prompts and a selector: measured −0.60pp against `vote` for the same money, superseded',
   select5: 'five samples and a selector: 4,103 tokens a case, the largest bill in the catalogue, and +0.40pp inside a 3.33pp MDE — the arm whose own measurement says the ceiling is not the sampler',
   'inline+evidence+samples': "the same prompt with each categorical column's stored values on its card line: one lever, one call, and the untested half of value grounding",
@@ -1215,6 +1230,10 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   ['select-cross', 'vote-cross'],
   // One lever: which model judges the same three candidates.
   ['select-cross', 'select-cross-judge'],
+  // One lever: which prompt holds the third candidate, at the same call count. The value index it
+  // replaces is empty on 60.9% of the split, so the pair is also the only reading of what a third
+  // opinion is worth when the third slot stops being a restatement.
+  ['select-mixed', 'select-samples'],
   // One lever: the schema. Same retrieval, same k, same card, same number of examples — the only
   // difference is that one block's statements name the source schema and the other's do not, which
   // is what `I-83`'s failure table separated (30 fewer wrong-width statements, 15 more execution
