@@ -5886,6 +5886,30 @@ generators collapse to one (73.34% → 69.30% on BIRD dev), and MCS-SQL prices f
 *more opinions* and *different opinions* are separate purchases, and only one of them is being
 priced by a union.
 
+**A denominator is part of the reading, and an invented field is not a reading.** The fingerprint
+is what makes "one opinion" a fact rather than a claim, so an artifact that carries none cannot say
+how many opinions a pool held. The first version of this harness answered anyway, by naming each
+missing fingerprint after its source — which made every uncomparable case exactly as diverse as the
+arm has sources. Read against a 2026-11-01 artifact written before the field existed, `select-mixed`
+printed **3.00 mean, 0% unanimous**: the strongest possible statement of independence, on every one
+of its cases, computed entirely from the arm's own configuration. The number a reader takes as the
+measurement was the one number already known from the flags.
+
+The case is now excluded from the mean and the population is printed beside it — `1.26 mean, 3 max
+over 600 of 600 cases that carry a fingerprint` — and the artifact that produced the flattering 3.00
+is refused instead:
+
+```
+select-mixed carries no result fingerprint on any of its 1507 cases, so the artifact cannot say
+how many opinions the pool held — the number it would print is the length of the source list
+```
+
+Two refusals rather than one, because the two absences call for different fixes: nothing
+fingerprinted at all is an artifact older than the instrument, and fewer than a hundred fingerprinted
+cases is a share of the draw. `correlated` takes the same treatment, with `measurable` as the
+denominator of "the losses the candidates agreed on" — agreement is precisely what a missing
+fingerprint cannot report.
+
 **The registration for the next lever, written before the dispatch.** The reading above is
 zero-cost and comes from an artifact that is already paid for, so it decides the next paid arm
 rather than following one:

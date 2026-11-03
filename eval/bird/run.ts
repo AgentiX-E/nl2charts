@@ -4311,6 +4311,185 @@ export interface ArmIo {
 export type PoolLookup = { readonly pool: readonly PooledCandidate[] } | { readonly cause: CaseRun };
 
 /**
+ * What a guard is given when the runner reaches the arm-level checks.
+ *
+ * The arguments used to be written at each call site, which is how the register and the guard
+ * stayed in step only as long as whoever added a lever remembered both. One context object means a
+ * row here can be a guard *and* its own test: everything the guard reads is in one place.
+ */
+export interface MechanismContext {
+  readonly armName: string;
+  readonly arm: Arm;
+  readonly runs: readonly CaseRun[];
+  readonly sampledFor: (arm: Arm) => { readonly columns: number; readonly values: number };
+}
+
+/**
+ * One row per lever that acts at runtime, and the guard that decides whether it acted.
+ *
+ * The guards used to be an if-chain inside `runArm`, and the chain is the defect this table
+ * retires: the arms are data, so a lever can be declared, paired, documented and *unwired* — and
+ * nothing forces the guard to exist, because the only proof a mechanism runs end to end is a paid
+ * artifact. Two of the four levers added this month were published for a round before anyone
+ * noticed their funnel was zero.
+ *
+ * Four fields make a row a claim rather than a label. `records` is the artifact field the mechanism
+ * writes when it acts, `scenarios` are the end-to-end titles that prove the wiring with a real run
+ * behind them, and `quiet` is a bank of cases in which the mechanism did not act: the guard has to
+ * refuse it, or the row is a guard that cannot fail. `test/bird-mechanisms.test.ts` reads all four,
+ * and `runArm` reads `mechanismsOf`, so this table is the only place a mechanism can be added.
+ */
+export interface Mechanism {
+  readonly lever: keyof Arm & string;
+  readonly declares: (arm: Arm) => boolean;
+  readonly guard: (context: MechanismContext) => void;
+  readonly records: string;
+  readonly scenarios: readonly string[];
+  readonly quiet: () => readonly CaseRun[];
+}
+
+/**
+ * A bank of cases in which one mechanism never acted.
+ *
+ * `attempts: 1` is the base case of a run that needed no repair, which is what most cases in a real
+ * run look like; every other field a guard reads is supplied by the row. The cast is the cost of
+ * numbering the fields once: a guard reads one or two of them, and a factory that filled the whole
+ * `CaseRun` would be a second copy of the type.
+ */
+function quietBank(overrides: Record<string, unknown>): readonly CaseRun[] {
+  return Array.from(
+    { length: MINIMUM_INSTRUMENT_SAMPLE },
+    (_unused, index) => ({ id: String(index), attempts: 1, calls: 1, ...overrides }) as unknown as CaseRun,
+  );
+}
+
+/** Every lever that acts at runtime. A lever not in this table is not guarded, so it is not a lever. */
+export const MECHANISMS: readonly Mechanism[] = [
+  {
+    lever: 'columnSelect',
+    declares: (arm) => arm.columnSelect !== undefined,
+    // A choice that never removed a column is an arm that spends a call to be told what it had.
+    guard: ({ armName, runs }) => assertColumnChoiceRan(armName, runs),
+    records: 'columnSelection',
+    scenarios: ['an arm where the model chooses the columns'],
+    quiet: () => quietBank({ columnSelection: { named: 4, unknown: 0, kept: 4, total: 4, decided: true } }),
+  },
+  {
+    lever: 'vote',
+    declares: (arm) => arm.vote !== undefined && arm.vote > 1,
+    // A candidate that never arrived shrinks the set the ceiling is taken over, which no
+    // case-level count can see.
+    guard: ({ armName, arm, runs }) => assertCandidateSurvival(armName, runs, arm.vote as number),
+    records: 'candidateFailures',
+    scenarios: ['records the candidates that never arrived beside the ceiling they shrank'],
+    quiet: () => quietBank({ candidateFailures: { llm: 1, engine: 0, unparsed: 0 } }),
+  },
+  {
+    lever: 'select',
+    declares: (arm) => arm.select === true,
+    // The other half of the same outage, one call later: the candidates arrived and the
+    // adjudication did not. Counted apart from the failures above because the case still has an
+    // answer, which is exactly what makes an unguarded selector outage invisible in the accuracy.
+    guard: ({ armName, runs }) => assertSelectorAnswered(armName, runs),
+    records: 'selectorFailed',
+    scenarios: ['scores an unanswerable selector by the vote, and keeps the ceiling it could not use'],
+    quiet: () => quietBank({ selectionFailed: 'llm' }),
+  },
+  {
+    lever: 'reconcile',
+    declares: (arm) => arm.reconcile !== undefined,
+    // A reconcile turn that only echoed a candidate is a selector with a longer prompt.
+    guard: ({ armName, runs }) => assertReconcileFired(armName, runs),
+    records: 'reconcile',
+    scenarios: ['the reconcile arm'],
+    quiet: () => quietBank({ reconcile: { returned: true, novel: false, executable: false, adopted: false } }),
+  },
+  {
+    lever: 'repairs',
+    declares: (arm) => arm.repairs > 0,
+    // On a split where the parent arm fails 40% of the cases, a repair path that never ran is the
+    // parent arm with a bigger budget.
+    guard: ({ armName, runs }) => assertRepairPathFired(armName, runs),
+    // The row's funnel rather than the case's `attempts`: the artifact publishes the repair record,
+    // and a scenario that reads a field the artifact does not carry proves nothing.
+    records: 'repair',
+    scenarios: ['a repair arm'],
+    quiet: () => quietBank({ attempts: 1 }),
+  },
+  {
+    lever: 'emptyRetry',
+    declares: (arm) => arm.emptyRetry !== undefined,
+    // Two halves and only one of them unconditional: the drop costs nothing, the turn needs every
+    // candidate to come back empty, so the refusal is "neither happened".
+    guard: ({ armName, runs }) => assertEmptyRetryFired(armName, runs),
+    records: 'emptyRetry',
+    scenarios: ['spends one turn on a candidate set that came back empty, and adopts the answer'],
+    quiet: () => quietBank({ emptyRetried: false, emptyDropped: 0 }),
+  },
+  {
+    lever: 'audit',
+    declares: (arm) => arm.audit !== undefined,
+    // An audit arm whose audit never fired is a single-call arm with a longer name.
+    guard: ({ armName, runs }) => assertAuditFired(armName, runs),
+    records: 'audit',
+    scenarios: ['the audit arm'],
+    quiet: () => quietBank({ audit: { fired: false, named: 0, rewritten: false } }),
+  },
+  {
+    lever: 'samples',
+    declares: (arm) => arm.samples !== undefined,
+    // An arm that asks for samples and gets none is its parent under another name.
+    guard: ({ armName, arm, sampledFor }) => assertSamplesRan(armName, sampledFor(arm)),
+    // The control the runner takes, not the row's block funnel: the samples arm is priced by how
+    // many columns carried values, and the scenario reads exactly that count.
+    records: 'sampledColumns',
+    scenarios: ['puts the stored values of bounded columns on the card, and counts what it put there'],
+    quiet: () => quietBank({}),
+  },
+  {
+    lever: 'sampleColumns',
+    declares: (arm) => arm.sampleColumns !== undefined,
+    // The same rule one level down: a rule that decides *which* columns carry the block can keep
+    // none of them on every case while the profile it reads is full of values.
+    guard: ({ armName, runs }) => assertSampleBlockFired(armName, runs),
+    records: 'sampleBlock',
+    scenarios: ['a value block narrowed to the columns the statement filters on'],
+    quiet: () => quietBank({ sampleBlock: { columns: 0 } }),
+  },
+  {
+    lever: 'dissent',
+    declares: (arm) => arm.dissent !== undefined,
+    // A conditional call has to be seen firing *and* seen arriving: the two failures produce the
+    // same published accuracy and call for opposite fixes. The verification turn is the same call
+    // one step later, so it is read here rather than given a row that would run the guard twice.
+    guard: ({ armName, arm, runs }) => assertDissentFired(armName, runs, MINIMUM_INSTRUMENT_SAMPLE, arm.dissentVerify),
+    records: 'dissent',
+    scenarios: [
+      'a fourth opinion bought only on the cases the pool agreed',
+      'the bought opinion put to the selector instead of in front of it',
+    ],
+    quiet: () => quietBank({ dissent: { asked: false, arrived: false, distinct: false, adopted: false } }),
+  },
+  {
+    lever: 'decompose',
+    declares: (arm) => declaresDecomposition(arm),
+    // A format the model ignored is not a prompt that did not help.
+    guard: ({ armName, runs }) => assertDecompositionFired(armName, runs),
+    records: 'decomposition',
+    scenarios: [
+      'counts the steps of a decomposed candidate inside a sampling arm',
+      'counts the steps a decomposed reply wrote, not the instruction it was given',
+    ],
+    quiet: () => quietBank({ decomposition: { candidates: 1, steps: 0 } }),
+  },
+];
+
+/** The mechanisms an arm declares, in the order their guards run. */
+export function mechanismsOf(arm: Arm): readonly Mechanism[] {
+  return MECHANISMS.filter((mechanism) => mechanism.declares(arm));
+}
+
+/**
  * One arm over every case.
  *
  * The arm-level guards run here, before any number leaves this function: an arm that never
@@ -5059,37 +5238,21 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
   // accuracy, and publishing 0% would hide the provider's message behind a score.
   assertArmProducedResults(name, runs);
   assertFailureRate(name, runs);
-  if (arm.columnSelect !== undefined) assertColumnChoiceRan(name, runs);
-  // ...and a candidate that never arrived shrinks the set the ceiling is taken over,
-  // which no case-level count can see.
-  if (arm.vote !== undefined && arm.vote > 1) assertCandidateSurvival(name, runs, arm.vote);
-  // The other half of the same outage, one call later: the candidates arrived and the adjudication
-  // did not. Counted apart from the failures above because the case still has an answer, which is
-  // exactly what makes an unguarded selector outage invisible in the accuracy.
-  if (arm.select === true) assertSelectorAnswered(name, runs);
-  // ...and a reconcile turn that only echoed a candidate is a selector with a longer prompt.
-  if (arm.reconcile !== undefined) assertReconcileFired(name, runs);
-  // `engine` refusals are deliberately *not* guarded here: a statement that will not run is the
-  // model's output quality, which is what the arm is measuring. The endpoint rule above is an
-  // infrastructure verdict and belongs in a guard; this one belongs in the report. A run whose
-  // every candidate the engine refused (a read-only database and a prompt that writes INSERTs)
-  // is a 0% reading, not a broken harness -- the first version of this split failed that case
-  // and the suite said so.
+  // `engine` refusals are deliberately *not* guarded in this block: a statement that will not run
+  // is the model's output quality, which is what the arm is measuring. The endpoint rule above is
+  // an infrastructure verdict and belongs in a guard; this one belongs in the report. A run whose
+  // every candidate the engine refused (a read-only database and a prompt that writes INSERTs) is
+  // a 0% reading, not a broken harness -- the first version of this split failed that case and the
+  // suite said so.
   // ...and a bug in the runner is not a wrong answer: it fails the arm outright.
   assertHarnessClean(name, runs);
-  if (arm.repairs > 0) assertRepairPathFired(name, runs);
-  if (arm.emptyRetry !== undefined) assertEmptyRetryFired(name, runs);
-  if (arm.audit !== undefined) assertAuditFired(name, runs);
-  // ...and an arm that asks for samples and gets none is its parent under another name.
-  if (arm.samples !== undefined) assertSamplesRan(name, prepared.sampledFor(arm));
-  // ...and the same rule one level down: a rule that decides *which* columns carry the block can
-  // keep none of them on every case while the profile it reads is full of values.
-  if (arm.sampleColumns !== undefined) assertSampleBlockFired(name, runs);
-  // ...and a conditional call has to be seen firing, and seen arriving: the two failures produce
-  // the same published accuracy and call for opposite fixes.
-  if (arm.dissent !== undefined) assertDissentFired(name, runs, MINIMUM_INSTRUMENT_SAMPLE, arm.dissentVerify);
-  // ...and a format the model ignored is not a prompt that did not help.
-  if (declaresDecomposition(arm)) assertDecompositionFired(name, runs);
+  // ...then every lever this arm declares, from the one table that says which levers exist. The
+  // chain that used to live here could be widened by adding an arm and forgetting a guard; a loop
+  // over `MECHANISMS` cannot, and `test/bird-mechanisms.test.ts` proves each row's guard still
+  // refuses a bank in which its mechanism never acted.
+  for (const mechanism of mechanismsOf(arm)) {
+    mechanism.guard({ armName: name, arm, runs, sampledFor: prepared.sampledFor });
+  }
   return {
     name,
     runs,

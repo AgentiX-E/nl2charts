@@ -272,13 +272,17 @@ describe('what the reading counts', () => {
 
   it('splits the ceiling loss into correlated and selection failures', () => {
     // Two cases have no correct candidate; on one the three agree, on the other they disagree.
-    expect(read.correlated).toEqual({ cases: 22, unanimous: 11 });
+    // `measurable` is the denominator of the share: every loss here carries fingerprints, so the
+    // share is over all of them and the field says so rather than leaving it to be inferred.
+    expect(read.correlated).toEqual({ cases: 22, measurable: 22, unanimous: 11 });
   });
 
-  it('treats a record with no fingerprint as its own opinion rather than dropping it', () => {
-    // A missing fingerprint is a record that cannot be compared. Counting it as "the same as
-    // everything else" would make a pool look redundant; dropping it would make the pool look
-    // smaller than it is. It is therefore one opinion, named after its source.
+  it('leaves a case with no fingerprint out of the mean, and says how many it left out', () => {
+    // The first rule named the uncomparable case after its source, which made every such case as
+    // diverse as the arm has sources: an artifact written before candidates carried fingerprints
+    // printed `3.00 distinct, 0% unanimous` — perfect independence, on every case, computed from
+    // the configuration. A case that cannot be compared is now unread, and the mean is over the
+    // cases that can be: the reading neither flatters the pool nor silently shrinks it.
     const rows = [
       ...cleared(),
       run('unfingerprinted', [
@@ -288,8 +292,41 @@ describe('what the reading counts', () => {
       ]),
     ];
     const read = diversityRead({ cases: rows }, 'select-cross');
+    expect(read.fingerprinted).toEqual({ cases: 110, of: 111 });
     expect(read.distinct.unanimous).toBe(55);
-    expect(read.distinct.mean).toBeCloseTo((1.9 * 110 + 3) / 111, 6);
+    expect(read.distinct.mean).toBeCloseTo(1.9, 6);
+    // The unread case is still a case of the arm: the ceiling is over all of them.
+    expect(read.cases).toBe(111);
+    expect(diversityLines(read).join('\n')).toContain('over 110 of 111 cases that carry a fingerprint');
+  });
+
+  it('refuses to print a pool as maximally diverse when nothing in it can be compared', () => {
+    // The whole reading is a claim about how many opinions the pool held, and the only evidence for
+    // it is the fingerprint. Without one, the number is the length of the source list — the one
+    // thing a reader already knows and the most flattering value it could take.
+    const rows = Array.from({ length: MINIMUM_INSTRUMENT_SAMPLE }, (_unused, index) =>
+      run(String(index), [
+        { source: 'a', correct: true },
+        { source: 'b', correct: true },
+        { source: 'c', correct: true },
+      ]),
+    );
+    expect(() => diversityRead({ cases: rows }, 'select-cross')).toThrow(
+      /carries no result fingerprint on any of its 100 cases.*the number it would print is the length of the source list/s,
+    );
+    // ...and a handful of comparable cases is a share of the draw, not a reading.
+    const few = rows.map((row, index) =>
+      index === 0
+        ? run(String(index), [
+            { source: 'a', correct: true, fingerprint: 'x' },
+            { source: 'b', correct: true, fingerprint: 'y' },
+            { source: 'c', correct: true, fingerprint: 'z' },
+          ])
+        : row,
+    );
+    expect(() => diversityRead({ cases: few }, 'select-cross')).toThrow(
+      /carries a result fingerprint on 1 of its 100 cases, under the 100 this instrument needs/,
+    );
   });
 
   it('prints a table whose numbers agree with the reading', () => {
@@ -321,7 +358,7 @@ describe('the controls, which are what make the reading mean something', () => {
     expect(read.sources.map((source) => source.sole)).toEqual([0, 0, 0]);
     expect(read.marginals.map((row) => row.lost)).toEqual([0, 0, 0]);
     // And the loss is entirely correlated: the pool agrees on its way to being wrong.
-    expect(read.correlated).toEqual({ cases: 90, unanimous: 90 });
+    expect(read.correlated).toEqual({ cases: 90, measurable: 90, unanimous: 90 });
   });
 
   it('reports the opposite when the pool is three genuinely different attempts', () => {
@@ -338,7 +375,7 @@ describe('the controls, which are what make the reading mean something', () => {
     expect(read.ceiling).toBe(120);
     expect(read.distinct.unanimous).toBe(0);
     expect(read.distinct.mean).toBe(3);
-    expect(read.correlated).toEqual({ cases: 0, unanimous: 0 });
+    expect(read.correlated).toEqual({ cases: 0, measurable: 0, unanimous: 0 });
     expect(read.sources.map((source) => source.sole)).toEqual([40, 40, 40]);
   });
 });
@@ -450,9 +487,11 @@ describe('the entry, run the way a workflow runs it', () => {
 describe('the shape later steps read', () => {
   it('keeps every field a downstream cut names', () => {
     const read = diversityRead({ cases: cleared() }, 'select-cross');
-    expect(Object.keys(read).sort()).toEqual(['arm', 'cases', 'ceiling', 'correlated', 'distinct', 'marginals', 'sources']);
+    // The denominator of every share travels with the share: `fingerprinted` is the population the
+    // distinct mean is over, and `correlated.measurable` is the population its share is over.
+    expect(Object.keys(read).sort()).toEqual(['arm', 'cases', 'ceiling', 'correlated', 'distinct', 'fingerprinted', 'marginals', 'sources']);
     expect(Object.keys(read.distinct).sort()).toEqual(['max', 'mean', 'unanimous', 'unanimousCorrect']);
-    expect(Object.keys(read.correlated).sort()).toEqual(['cases', 'unanimous']);
+    expect(Object.keys(read.correlated).sort()).toEqual(['cases', 'measurable', 'unanimous']);
     expect(Object.keys(read.sources[0] ?? {}).sort()).toEqual(['correct', 'generated', 'sole', 'source']);
   });
 });

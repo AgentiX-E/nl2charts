@@ -817,3 +817,33 @@ that differs in method rather than in prompt or in draw.
   still passing on every case it did nothing on, which reads in a summary as a verified pool. The
   fix is to exclude the bought candidate *by source* — the one field that says who wrote it — so
   everything the pool supplied is still compared, and the exclusion cannot hide a regeneration.
+- **A mechanism that lives only in an if-chain is a mechanism nothing forces you to guard.** Every
+  lever that acts at runtime used to be guarded by its own line in `runArm`, which meant the arms'
+  table could declare a mechanism, the pair table could price it, the dispatch comment could explain
+  it, and the guard could simply not exist — the only proof a mechanism runs end to end is a paid
+  artifact, and three levers have now been published for a round with a zero funnel. The chain is a
+  loop over `MECHANISMS`, one row per lever carrying its predicate, its guard, the artifact field it
+  writes, the end-to-end scenario that proves the wiring and a bank of cases in which it did not act.
+  The register is then checkable in four directions at once: every `assert*Fired`/`Ran`/`Answered`
+  the runner exports must appear in it, every row must be declared by an arm that exists, every row's
+  guard must refuse its quiet bank, and every row must name a scenario whose body reads the field it
+  writes. **The naming convention is load-bearing** — a guard that dodges the suffix has to be added
+  to an exemption table with a reason, so that adding a mechanism can never be a silent act.
+- **A test whose deadline races the machine measures the machine.** Two cancellation cases aborted a
+  hundred milliseconds after the query returned, on a five-second `pg_sleep`, and asserted the
+  rejection. On an idle machine the timer wins; under a coverage run with a hundred and twenty test
+  files in flight it lost, the statement finished on its own, and the suite failed with "promise
+  resolved instead of rejecting" — the same code, green here and red there. The contract is about a
+  statement that is *running*, so the test now asks the server: it polls `pg_stat_activity` until the
+  sleeping backend is visible, then aborts. It is faster (281ms against 464ms), and a broken
+  cancellation still fails. The general rule: **a timeout in a test is an assumption about the
+  machine; an observation is a fact about the system.**
+- **A missing record must be excluded and counted, never given a value.** The diversity harness
+  answered "how many opinions did this pool hold" for an artifact that carried no fingerprints by
+  naming each missing one after its source — which makes every uncomparable case as diverse as the
+  arm has sources, and printed `3.00, 0% unanimous` on all 1,507 cases of a pool that could not be
+  compared at all. The invented value was the configuration's own number, which is the one thing the
+  reading was supposed to discover. Missing records are now dropped from the mean with the population
+  printed beside it, and an artifact below the floor is refused rather than summarised. It is the same
+  rule as `0 is a measured 0`, one step earlier: **an absent field is a population of zero, and a
+  population of zero has no mean.**

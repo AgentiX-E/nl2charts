@@ -130,6 +130,29 @@ describe.skipIf(url === undefined)('postgres engine (real server)', () => {
     await admin?.end();
   });
 
+  /**
+   * Block until the server itself reports the sleeping statement, then return.
+   *
+   * Both cancellation cases aborted a hundred milliseconds after `run` returned, which is not a fact
+   * about the statement but about the machine. Under a coverage run with a hundred and twenty test
+   * files in flight the timer slipped past the five-second query, the statement finished on its own,
+   * and the suite failed with "promise resolved instead of rejecting" — the same code, green on an
+   * idle machine and red on a loaded one. Polling `pg_stat_activity` puts the abort where the
+   * contract lives: after the statement is running at the server and before it has finished, so a
+   * broken cancellation still fails, and a slow machine cannot make it look broken.
+   */
+  async function waitForSleepingStatement(): Promise<void> {
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline) {
+      const seen = await admin.query<{ n: number }>(
+        "select count(*)::int as n from pg_stat_activity where state = 'active' and query like 'select pg_sleep%'",
+      );
+      if ((seen.rows[0]?.n ?? 0) > 0) return;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error('the sleeping statement never reached the server, so the cancellation was never exercised');
+  }
+
   it('returns columns in select order and normalised values', async () => {
     const result = await engine.run('select id, region, total, placed_on, paid, note from orders order by id');
     expect(result.columns).toEqual(['id', 'region', 'total', 'placed_on', 'paid', 'note']);
@@ -207,7 +230,8 @@ describe.skipIf(url === undefined)('postgres engine (real server)', () => {
     const started = Date.now();
     const running = engine.run('select pg_sleep(5)', { signal: controller.signal });
     // After the query is in flight, so the cancellation is exercised rather than the pre-check.
-    setTimeout(() => controller.abort(), 100);
+    await waitForSleepingStatement();
+    controller.abort();
     await expect(running).rejects.toMatchObject({ code: 'NL2C_E_TIMEOUT' });
     const elapsed = Date.now() - started;
     expect(elapsed).toBeLessThan(1_500);
@@ -220,7 +244,8 @@ describe.skipIf(url === undefined)('postgres engine (real server)', () => {
     // which is the failure mode that takes a day to diagnose.
     const controller = new AbortController();
     const running = engine.run('select pg_sleep(5)', { signal: controller.signal });
-    setTimeout(() => controller.abort(), 100);
+    await waitForSleepingStatement();
+    controller.abort();
     await expect(running).rejects.toMatchObject({ code: 'NL2C_E_TIMEOUT' });
     const after = await engine.run('select 1 as one');
     expect(after.rows).toEqual([{ one: 1 }]);

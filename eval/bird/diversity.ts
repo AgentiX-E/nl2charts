@@ -58,7 +58,16 @@ export interface DiversityArtifact {
 interface Candidate {
   readonly source: string;
   readonly correct: boolean;
-  readonly fingerprint: string;
+  /**
+   * The judge's identity for this candidate's result set, absent on a record written before
+   * candidates carried one.
+   *
+   * Absent is not a fingerprint: a case whose candidates cannot be compared is *excluded* from the
+   * distinct read rather than counted, because counting it invents a value — and the value it
+   * invents is the number of sources, which is the most diverse a pool can look and the one number
+   * that is already known from the configuration.
+   */
+  readonly fingerprint: string | undefined;
 }
 
 interface CaseRun {
@@ -82,7 +91,15 @@ export interface DiversityRead {
   /** What the ceiling loses when a source is removed — its marginal value, not its hit rate. */
   readonly marginals: readonly { readonly source: string; readonly without: number; readonly lost: number }[];
   /** Cases with no correct candidate, and how many of those the candidates agreed on anyway. */
-  readonly correlated: { readonly cases: number; readonly unanimous: number };
+  readonly correlated: { readonly cases: number; readonly measurable: number; readonly unanimous: number };
+  /**
+   * How many cases could be compared at all, and over how many.
+   *
+   * The distinct read has this as its denominator: a mean over the cases that carry a fingerprint
+   * and a share over every case in the arm are two different numbers, and the second one is what a
+   * reader assumes when only the first is printed.
+   */
+  readonly fingerprinted: { readonly cases: number; readonly of: number };
 }
 
 export interface DiversitySettings {
@@ -175,11 +192,12 @@ export function candidateCases(report: DiversityArtifact, arm: string, source: s
       candidates: row.candidates.map((candidate) => ({
         source: stringField(candidate.source, 'candidate source'),
         correct: candidate.correct === true,
-        // A missing fingerprint is not "the same result as everything else": it is a record that
-        // cannot be compared, so it is given a name of its own and counted as its own opinion.
-        // The alternative — dropping it — would silently make the pool look more diverse than it
-        // is, and merging it would make the pool look more redundant than it is.
-        fingerprint: typeof candidate.fingerprint === 'string' ? candidate.fingerprint : `unfingerprinted:${String(candidate.source)}`,
+        // Carried as it is, absence included. The value used to be invented from the source name,
+        // which turned every uncomparable case into as many opinions as the arm has sources: an
+        // artifact written before candidates carried fingerprints printed `3.00 distinct, 0%
+        // unanimous` — a perfectly independent pool — on every case. That is a constant computed
+        // from the configuration, and it reads as the strongest possible measurement.
+        fingerprint: typeof candidate.fingerprint === 'string' ? candidate.fingerprint : undefined,
       })),
     });
   }
@@ -195,8 +213,19 @@ export function diversityRead(report: DiversityArtifact, arm: string, source = '
   }
   const sources = [...new Set(rows.flatMap((row) => row.candidates.map((candidate) => candidate.source)))].sort();
   const ceiling = rows.filter((row) => row.candidates.some((candidate) => candidate.correct)).length;
-  const distinct = rows.map((row) => new Set(row.candidates.map((candidate) => candidate.fingerprint)).size);
-  const unanimousRows = rows.filter((_, index) => distinct[index] === 1);
+  // The population the mean is over: cases whose candidates can all be compared. A case with one
+  // uncomparable candidate is not "one opinion" and not "three" — it is unread, and unread cases
+  // belong in the denominator of the arm, not in the numerator of the reading.
+  const measured = rows.filter((row) => row.candidates.every((candidate) => candidate.fingerprint !== undefined));
+  if (measured.length < MINIMUM_INSTRUMENT_SAMPLE) {
+    throw new Error(
+      measured.length === 0
+        ? `${arm} carries no result fingerprint on any of its ${String(rows.length)} cases, so ${source} cannot say how many opinions the pool held — the number it would print is the length of the source list`
+        : `${arm} carries a result fingerprint on ${String(measured.length)} of its ${String(rows.length)} cases, under the ${String(MINIMUM_INSTRUMENT_SAMPLE)} this instrument needs; a share of ${String(measured.length)} is a share of the draw`,
+    );
+  }
+  const distinct = measured.map((row) => new Set(row.candidates.map((candidate) => candidate.fingerprint)).size);
+  const unanimousRows = measured.filter((_, index) => distinct[index] === 1);
   const sourceReads = sources.map((name) => {
     const hit = rows.filter((row) => row.candidates.some((candidate) => candidate.source === name && candidate.correct));
     const sole = hit.filter(
@@ -221,7 +250,7 @@ export function diversityRead(report: DiversityArtifact, arm: string, source = '
     cases: rows.length,
     ceiling,
     distinct: {
-      mean: distinct.reduce((sum, value) => sum + value, 0) / rows.length,
+      mean: distinct.reduce((sum, value) => sum + value, 0) / measured.length,
       max: Math.max(...distinct),
       unanimous: unanimousRows.length,
       unanimousCorrect: unanimousRows.filter((row) => row.candidates[0]?.correct === true).length,
@@ -230,8 +259,16 @@ export function diversityRead(report: DiversityArtifact, arm: string, source = '
     marginals,
     correlated: {
       cases: losses.length,
-      unanimous: losses.filter((row) => new Set(row.candidates.map((candidate) => candidate.fingerprint)).size === 1).length,
+      // Of the losses, the ones the artifact can say anything about. A correlated loss is a loss
+      // the pool agreed on, and agreement is what a missing fingerprint cannot report.
+      measurable: losses.filter((row) => row.candidates.every((candidate) => candidate.fingerprint !== undefined)).length,
+      unanimous: losses.filter(
+        (row) =>
+          row.candidates.every((candidate) => candidate.fingerprint !== undefined) &&
+          new Set(row.candidates.map((candidate) => candidate.fingerprint)).size === 1,
+      ).length,
     },
+    fingerprinted: { cases: measured.length, of: rows.length },
   };
 }
 
@@ -242,9 +279,12 @@ export function diversityLines(read: DiversityRead): string[] {
   lines.push(`arm ${read.arm}: ${String(read.cases)} cases with a candidate record`);
   lines.push('');
   lines.push(`  ceiling (any candidate correct)   ${String(read.ceiling).padStart(4)}  ${percent(read.ceiling, read.cases)}`);
-  lines.push(`  distinct results per case         ${read.distinct.mean.toFixed(2)} mean, ${String(read.distinct.max)} max`);
   lines.push(
-    `  unanimous cases                   ${String(read.distinct.unanimous).padStart(4)}  ${percent(read.distinct.unanimous, read.cases)}` +
+    `  distinct results per case         ${read.distinct.mean.toFixed(2)} mean, ${String(read.distinct.max)} max` +
+      `   over ${String(read.fingerprinted.cases)} of ${String(read.fingerprinted.of)} cases that carry a fingerprint`,
+  );
+  lines.push(
+    `  unanimous cases                   ${String(read.distinct.unanimous).padStart(4)}  ${percent(read.distinct.unanimous, read.fingerprinted.cases)}` +
       `   correct ${String(read.distinct.unanimousCorrect)} (${percent(read.distinct.unanimousCorrect, read.distinct.unanimous)})`,
   );
   lines.push('');
@@ -269,7 +309,8 @@ export function diversityLines(read: DiversityRead): string[] {
   lines.push('');
   lines.push(
     `  cases with no correct candidate    ${String(read.correlated.cases).padStart(4)}  ${percent(read.correlated.cases, read.cases)}` +
-      `   of which the candidates agreed ${String(read.correlated.unanimous)} (${percent(read.correlated.unanimous, read.correlated.cases)})`,
+      `   of which the candidates agreed ${String(read.correlated.unanimous)} (${percent(read.correlated.unanimous, read.correlated.measurable)})` +
+      ` of the ${String(read.correlated.measurable)} that can be compared`,
   );
   return lines;
 }

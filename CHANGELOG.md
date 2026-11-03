@@ -31,6 +31,19 @@ cannot be argued with.
   change what the candidates are (I-45, I-77), not what is done with them.
 
 ### Added
+- **Every lever that acts at runtime is now one row in one table, and the table is checkable in four
+  directions.** The guards used to be an if-chain inside `runArm`, which let a lever be declared in
+  the arms table, priced in the pairs table, explained in the dispatch comment and never guarded —
+  the only proof a mechanism runs end to end being a paid artifact, and three levers having been
+  published for a round with a zero funnel. `MECHANISMS` carries, per lever, its predicate, its
+  guard, the artifact field it writes, the end-to-end scenarios that prove the wiring and a bank of
+  cases in which it did not act; `runArm` loops over `mechanismsOf(arm)` rather than listing them.
+  `test/bird-mechanisms.test.ts` pins the four directions the register can be wrong in: every
+  `assert*Fired`/`Ran`/`Answered` the runner exports must be registered (the naming convention is
+  load-bearing, and a guard that dodges the suffix has to be given a documented exemption), every row
+  must be declared by an arm that exists, every row's guard must refuse its quiet bank, and every
+  row must name a scenario whose body reads the field it writes.
+
 - **The bought opinion is now put to the selector instead of in front of it.**
   `41551887197` gave the conditional-dissent arm a clean negative with a clean mechanism: the ceiling
   rose 1,023 → 1,050 with nothing falling, and the four-candidate prompt converted none of it —
@@ -110,6 +123,27 @@ cannot be argued with.
   finding, and the failures it can catch are the ones the Mini-Dev gate already fails on.
 
 ### Fixed
+
+- **The diversity instrument printed the arm's own configuration as its strongest possible
+  measurement.** A candidate's fingerprint is what makes "one opinion" a fact, and an artifact that
+  carries none cannot say how many opinions a pool held — the harness answered anyway by naming each
+  missing fingerprint after its source, which makes every uncomparable case as diverse as the arm has
+  sources. Against a 2026-11-01 artifact written before the field existed, `select-mixed` printed
+  **3.00 mean, 0% unanimous** on all 1,507 cases: perfect independence, computed entirely from the
+  flags, and exactly the number the reading was supposed to discover. Uncomparable cases are now
+  dropped from the mean with the population printed beside it (`1.26 mean, 3 max over 600 of 600
+  cases that carry a fingerprint`), and an artifact below the floor is refused with one of two
+  sentences — nothing fingerprinted at all is an artifact older than the instrument, fewer than a
+  hundred is a share of the draw. `correlated` gains `measurable` as its denominator for the same
+  reason.
+
+- **A cancellation test measured the machine rather than the contract.** Two cases in the Postgres
+  suite aborted a hundred milliseconds after the query returned, on a five-second `pg_sleep`, and
+  asserted the rejection: on an idle machine the timer wins, and under a coverage run with a hundred
+  and twenty test files in flight it lost — the statement finished on its own and the suite failed
+  with `promise resolved instead of rejecting` on code nothing had changed. The contract is about a
+  statement that is *running*, so the tests now poll `pg_stat_activity` until the sleeping backend is
+  visible and abort there. Faster (281ms against 464ms), and a broken cancellation still fails.
 
 - **A test whose input the repository does not carry passes on one machine and fails in CI.** The
   first version of the diversity instrument's suite pinned the published numbers by reading
