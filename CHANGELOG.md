@@ -31,6 +31,17 @@ cannot be argued with.
   change what the candidates are (I-45, I-77), not what is done with them.
 
 ### Added
+- **The pairwise arm's third criterion is unreachable, and the oracle that shows it is free.** The arm
+  was registered with "conversion returns above 92%", written before anyone computed what a perfect
+  two-way comparison could reach. Its parent's artifact already holds both statements the comparison
+  chooses between, so the oracle is offline arithmetic: on the 100 disagreements the pool's winner is
+  right 38 times, the bought opinion 27, **both 5**, so **either is right 60** and the arm's ceiling is
+  `941 − 38 + 60 = 963` — **62.86%, +1.44pp**, which is **91.71%** of the 1,050-case candidate
+  ceiling. 92% is 966 cases: **three above the maximum**. Criterion ③ therefore stands as written
+  with its expected verdict *unreachable by construction*, and the criterion that can decide is ③′
+  at **≥91.0%** (≥956). Criterion ① needs 73% of the 22 available cases, so failing it while passing
+  ② (which needs 36%) is the shape a two-way comparison of a weak candidate should produce.
+
 - **Every lever that acts at runtime is now one row in one table, and the table is checkable in four
   directions.** The guards used to be an if-chain inside `runArm`, which let a lever be declared in
   the arms table, priced in the pairs table, explained in the dispatch comment and never guarded —

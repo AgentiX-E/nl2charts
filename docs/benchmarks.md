@@ -5997,3 +5997,36 @@ written before the dispatch:
 3. the ceiling is unchanged (the candidate set is unchanged) and **conversion returns above 92%**;
 4. the comparison costs **≈ 0.065 calls a case** and its own funnel publishes `asked` and
    `choseDissent`, because a comparison that never fired is a bill with no measurement behind it.
+
+**What the comparison can reach, computed before the reading arrives.** The arm was registered on
+`41551887197`'s artifact, and that artifact already holds both statements the comparison will choose
+between — so the oracle of the *pairwise* selector is an offline fact about the 100 disagreement
+cases, taken at zero cost while the run was still in flight:
+
+| on the 100 disagreements | cases |
+|---|---|
+| the pool's winner is right | 38 |
+| the bought opinion is right | 27 |
+| both are right | 5 |
+| **either is right (the pairwise oracle)** | **60** |
+| neither is right | 40 |
+
+So the arm's ceiling is `941 − 38 + 60 = **963 / 1,532 = 62.86%**`, which is **+1.44pp (+22 cases)**
+over the child and +1.37pp over the parent. Read against the four criteria that were written before
+the dispatch:
+
+- **① ≥1.0pp (16 cases) needs 73% of the 22 available.** The comparison has to convert nearly three
+  quarters of everything it could possibly reach.
+- **② ≥8 of the 100 needs 36%** — the arm can fail ① while passing ②, which is exactly the shape a
+  two-way comparison of a weak candidate should produce.
+- **③ 无法达成（结构上不可能）**: 92% of the ceiling is 966 cases and the oracle is 963. The
+  criterion was written before this table existed and it sits **three cases above the maximum**. It
+  cannot pass, and reporting it as a failure would blame the arm for an arithmetic error in its own
+  registration. It is therefore recorded here, before the read, in two parts: ③ stands as written
+  and its expected verdict is *unreachable by construction*; **③′** — the criterion that can decide —
+  is `conversion ≥ 91.0%` (≥ 956 of 1,050), which is 78% of the way from the child's 89.62% to the
+  91.71% oracle.
+
+The general lesson is the one this file keeps recording from the other side: **a criterion phrased as
+a share of a ceiling has to be checked against the oracle of the mechanism it prices**, or it
+measures the registration rather than the arm.

@@ -847,3 +847,10 @@ that differs in method rather than in prompt or in draw.
   printed beside it, and an artifact below the floor is refused rather than summarised. It is the same
   rule as `0 is a measured 0`, one step earlier: **an absent field is a population of zero, and a
   population of zero has no mean.**
+- **A criterion phrased as a share of a ceiling has to be checked against the oracle of the
+  mechanism it prices.** The pairwise arm was registered with "conversion returns above 92%", written
+  before anyone had computed what a *perfect* two-way comparison could reach. It can reach 963 of
+  1,050 cases — 91.71% — so the criterion sat three cases above the maximum and could never pass, and
+  the reading would have blamed the arm for an arithmetic slip in its own registration. The oracle is
+  an offline fact about the parent's artifact, available for free while the arm is still running: take
+  it first, then write the number, or publish both and say which one decides.
