@@ -6417,6 +6417,16 @@ defensible, and like every other instrument here it has its own suite: 33 cases,
 98.85 / 98.85 / 100.00 / 99.00, including one that runs it as a script, because a guard that never
 fires is a CLI nobody has run.
 
+**The same instrument ran on this artifact, and it moved two buckets.** `bench:bird:gap:values` on
+`inline+evidence+samples` reads `filter-wide` **99**, `predicate` **84**, `literal-missing` **74**,
+`filter-narrow` **71**, `tables` **69**, `aggregate` **20**, `projection` **12**, `literal-case`
+**11**, `window` **2**, `grain` and `scale` **0** — and `bench:bird:conditions` reads **235 = 39.2%**
+of the failures carrying no condition on a column the gold filters. Against `I-84`'s census on
+`metadata+evidence+icl` the literal bucket fell (83 → 74) and the condition buckets rose (wide 92 →
+99, predicate 73 → 84). That is an arm-to-arm difference and not a controlled one — the two cards
+differ in three places — but the direction is the one that matters for what comes next: **the block
+moves a few literal misses and leaves the condition population untouched at ~41% of the bucket.**
+
 ## The third slot, priced before it is read
 
 The closure above leaves one thing standing: the wide block is +1.24pp on its own, and a block that
