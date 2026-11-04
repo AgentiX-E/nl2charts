@@ -138,10 +138,23 @@ describe('a filter is a column, an operator and a value', () => {
     }
   });
 
+  it('renders a range as one predicate with two bounds, and refuses any other number of them', () => {
+    expect(render({ column: 'a', op: 'between', value: [1, 10] })).toContain('WHERE a BETWEEN 1 AND 10');
+    expect(render({ column: 'a', op: 'not between', value: ['2020-01-01', '2020-12-31'] })).toContain(
+      "WHERE a NOT BETWEEN '2020-01-01' AND '2020-12-31'",
+    );
+    for (const value of [[1], [1, 2, 3], 5]) {
+      expect(compileIntent({ ...MINIMAL, where: [{ column: 'a', op: 'between', value }] })).toMatchObject({
+        ok: false,
+        reason: 'bad-value',
+      });
+    }
+  });
+
   it('refuses an operator outside the list, and names it in the message', () => {
-    const refused = compileIntent({ ...MINIMAL, where: [{ column: 'a', op: 'between', value: [1, 2] }] });
+    const refused = compileIntent({ ...MINIMAL, where: [{ column: 'a', op: 'glob', value: 'x*' }] });
     expect(refused).toMatchObject({ ok: false, reason: 'bad-operator' });
-    expect(refused.ok ? '' : refused.detail).toContain('between');
+    expect(refused.ok ? '' : refused.detail).toContain('glob');
   });
 
   it('refuses a filter that is not an object, and a value that is not a value', () => {    expect(compileIntent({ ...MINIMAL, where: [5] })).toMatchObject({ ok: false, reason: 'bad-expression' });
@@ -219,6 +232,39 @@ describe('an expression is parsed against a closed grammar', () => {
     expect(compileIntent({ ...MINIMAL, select: [{ expr: ')a' }] })).toMatchObject({ ok: false, reason: 'bad-expression' });
     expect(compileIntent({ ...MINIMAL, select: [{ expr: '(a, b)' }] })).toMatchObject({ ok: false, reason: 'bad-expression' });
     expect(compileIntent({ ...MINIMAL, select: [{ expr: '(a' }] })).toMatchObject({ ok: false, reason: 'bad-expression' });
+  });
+
+  it('renders a comparison, a conjunction and a concatenation in source order', () => {
+    expect(renderIntentExpression('a > 1')).toBe('a > 1');
+    expect(renderIntentExpression('a >= 1 and b <> 2')).toBe('a >= 1 and b <> 2');
+    expect(renderIntentExpression('a = 1 or b = 2')).toBe('a = 1 or b = 2');
+    expect(renderIntentExpression("a || ' ' || b")).toBe("a || ' ' || b");
+    expect(renderIntentExpression('a != 1')).toBe('a <> 1');
+  });
+
+  it('renders a searched case and a simple case, with the branches in order', () => {
+    expect(renderIntentExpression("case when a > 1 then 'big' else 'small' end")).toBe(
+      "case when a > 1 then 'big' else 'small' end",
+    );
+    expect(renderIntentExpression("case a when 1 then 'one' when 2 then 'two' end")).toBe(
+      "case a when 1 then 'one' when 2 then 'two' end",
+    );
+    expect(renderIntentExpression("case when a = 1 and b = 2 then 'x' end")).toBe(
+      "case when a = 1 and b = 2 then 'x' end",
+    );
+  });
+
+  it('refuses a case that is missing its branches, its then or its end', () => {
+    for (const expr of ['case end', 'case when a then', 'case when a then 1', 'case when 1 then 2 else 3', 'case when a else 1 end']) {
+      expect(compileIntent({ ...MINIMAL, select: [{ expr }] })).toMatchObject({ ok: false, reason: 'bad-expression' });
+    }
+  });
+
+  it('refuses a comparison chain, because its associativity is the engine\'s decision and not ours', () => {
+    expect(compileIntent({ ...MINIMAL, select: [{ expr: 'a = b = c' }] })).toMatchObject({
+      ok: false,
+      reason: 'bad-expression',
+    });
   });
 
   it('renders an order key through the same reader, so the two cannot disagree', () => {
@@ -418,6 +464,8 @@ describe('the two closed lists are the contract, and they are readable', () => {
       'not like',
       'in',
       'not in',
+      'between',
+      'not between',
       'is null',
       'is not null',
     ]);

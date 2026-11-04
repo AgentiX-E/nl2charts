@@ -39,8 +39,8 @@ import { toNl2ChartsError } from '@agentix-e/nl2charts-spec';
  *   intents that mean the same thing produce the same text.
  */
 
-/** Comparison operators a filter may name. `between` is absent: it is two filters, and one shape. */
-export const INTENT_OPERATORS = ['=', '<>', '!=', '>', '>=', '<', '<=', 'like', 'not like', 'in', 'not in', 'is null', 'is not null'] as const;
+/** Comparison operators a filter may name. `between` is here because a range is one shape, not two. */
+export const INTENT_OPERATORS = ['=', '<>', '!=', '>', '>=', '<', '<=', 'like', 'not like', 'in', 'not in', 'between', 'not between', 'is null', 'is not null'] as const;
 
 export type IntentOperator = (typeof INTENT_OPERATORS)[number];
 
@@ -246,6 +246,15 @@ function filterAt(value: unknown): IntentFilter {
     for (const entry of values) scalar(entry, `${operator} entry`);
     return { column: object.column as string, op: operator, value: [...values] };
   }
+  // A range is two bounds and one predicate, and it is the only operator that takes exactly two:
+  // an `in` of two values is a different question, and a model that writes three bounds has
+  // misunderstood the operator rather than the schema.
+  if (operator === 'between' || operator === 'not between') {
+    const bounds = arrayAt(object.value, `${operator} value`, 'bad-value');
+    if (bounds.length !== 2) refuse('bad-value', `${operator} needs exactly two bounds`);
+    for (const entry of bounds) scalar(entry, `${operator} bound`);
+    return { column: object.column as string, op: operator, value: [...bounds] };
+  }
   scalar(object.value, `${operator} value`);
   return { column: object.column as string, op: operator, value: object.value };
 }
@@ -373,8 +382,16 @@ function tokenize(expr: string): Token[] {
       continue;
     }
     const character = rest[0] as string;
+    // Two characters before one, or `>=` would tokenise as `>` then a stray `=` and a comparison
+    // would be refused for a reason that has nothing to do with the question.
+    const pair = rest.slice(0, 2);
+    if (pair === '>=' || pair === '<=' || pair === '<>' || pair === '!=' || pair === '||') {
+      tokens.push({ kind: 'op', text: pair === '!=' ? '<>' : pair });
+      index += 2;
+      continue;
+    }
     if (character === '*') tokens.push({ kind: 'star', text: '*' });
-    else if ('+-/'.includes(character)) tokens.push({ kind: 'op', text: character });
+    else if ('+-/=<>'.includes(character)) tokens.push({ kind: 'op', text: character });
     else if ('(),'.includes(character)) tokens.push({ kind: 'punct', text: character });
     else refuse('bad-expression', `expression ${JSON.stringify(expr)} contains ${JSON.stringify(character)}`);
     index += 1;
@@ -407,18 +424,54 @@ class ExprReader {
   }
 
   parse(): string {
-    const rendered = this.sum();
+    const rendered = this.disjunction();
     if (this.at !== this.tokens.length) {
       refuse('bad-expression', `expression ${JSON.stringify(this.source)} has trailing ${JSON.stringify((this.peek() as Token).text)}`);
     }
     return rendered;
   }
 
+  /** `or` binds loosest, which is why a `case when a = 1 or b = 2` condition parses as one. */
+  private disjunction(): string {
+    let left = this.conjunction();
+    while (this.isKeyword(this.peek(), 'or')) {
+      this.at += 1;
+      left = `${left} or ${this.conjunction()}`;
+    }
+    return left;
+  }
+
+  private conjunction(): string {
+    let left = this.comparison();
+    while (this.isKeyword(this.peek(), 'and')) {
+      this.at += 1;
+      left = `${left} and ${this.comparison()}`;
+    }
+    return left;
+  }
+
+  /**
+   * One comparison, not a chain.
+   *
+   * `a = b = c` is a different question in every engine that allows it, and a model that writes it
+   * has misunderstood the question rather than the schema. Refusing the chain keeps the rendering a
+   * reformatting rather than a decision about associativity.
+   */
+  private comparison(): string {
+    const left = this.sum();
+    const token = this.peek();
+    // Every operator that can still be here is a comparison: `sum` and `product` have consumed
+    // their own, so there is no second set to check and no branch that cannot be reached.
+    if (token === undefined || token.kind !== 'op') return left;
+    this.at += 1;
+    return `${left} ${token.text} ${this.sum()}`;
+  }
+
   private sum(): string {
     let left = this.product();
     for (;;) {
       const token = this.peek();
-      if (token === undefined || token.kind !== 'op' || (token.text !== '+' && token.text !== '-')) return left;
+      if (token === undefined || token.kind !== 'op' || (token.text !== '+' && token.text !== '-' && token.text !== '||')) return left;
       this.at += 1;
       left = `${left} ${token.text} ${this.product()}`;
     }
@@ -435,13 +488,52 @@ class ExprReader {
     }
   }
 
+  private isKeyword(token: Token | undefined, word: string): boolean {
+    return token !== undefined && token.kind === 'name' && token.text.toLowerCase() === word;
+  }
+
+  /**
+   * `case [operand] when ... then ... [else ...] end`, searched or simple.
+   *
+   * It is in the grammar because it is how a question says "if this then that" without a table to
+   * look the answer up in, and because leaving it out refused 5 of 40 replies in the first probe —
+   * the largest single refusal bucket, and a construct the corpus uses constantly.
+   */
+  private caseExpression(): string {
+    const parts: string[] = ['case'];
+    if (!this.isKeyword(this.peek(), 'when')) parts.push(this.disjunction());
+    let branches = 0;
+    while (this.isKeyword(this.peek(), 'when')) {
+      this.at += 1;
+      parts.push('when', this.disjunction());
+      if (!this.isKeyword(this.peek(), 'then')) {
+        refuse('bad-expression', `expression ${JSON.stringify(this.source)} has a when without a then`);
+      }
+      this.at += 1;
+      parts.push('then', this.disjunction());
+      branches += 1;
+    }
+    if (branches === 0) refuse('bad-expression', `expression ${JSON.stringify(this.source)} has a case without a when`);
+    if (this.isKeyword(this.peek(), 'else')) {
+      this.at += 1;
+      parts.push('else', this.disjunction());
+    }
+    if (!this.isKeyword(this.peek(), 'end')) {
+      refuse('bad-expression', `expression ${JSON.stringify(this.source)} has a case without an end`);
+    }
+    this.at += 1;
+    parts.push('end');
+    return parts.join(' ');
+  }
+
   private primary(): string {
     const token = this.take();
+    if (this.isKeyword(token, 'case')) return this.caseExpression();
     if (token.kind === 'number') return token.text;
     if (token.kind === 'string') return `'${token.text.replace(/'/g, "''")}'`;
     if (token.kind === 'star') return '*';
     if (token.kind === 'punct' && token.text === '(') {
-      const inner = this.sum();
+      const inner = this.disjunction();
       this.expectPunct(')');
       return `(${inner})`;
     }
@@ -470,7 +562,7 @@ class ExprReader {
         return 'count(*)';
       }
       for (;;) {
-        args.push(this.sum());
+        args.push(this.disjunction());
         const separator = this.peek();
         if (separator !== undefined && separator.kind === 'punct' && separator.text === ',') {
           this.at += 1;
@@ -506,6 +598,10 @@ function renderFilter(filter: IntentFilter): string {
   if (filter.op === 'in' || filter.op === 'not in') {
     const values = (filter.value as readonly unknown[]).map(literal).join(', ');
     return `${column} ${filter.op.toUpperCase()} (${values})`;
+  }
+  if (filter.op === 'between' || filter.op === 'not between') {
+    const bounds = (filter.value as readonly unknown[]).map(literal);
+    return `${column} ${filter.op.toUpperCase()} ${bounds[0] as string} AND ${bounds[1] as string}`;
   }
   const operator = filter.op === '!=' ? '<>' : filter.op.toUpperCase();
   return `${column} ${operator} ${literal(filter.value)}`;

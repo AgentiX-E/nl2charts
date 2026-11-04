@@ -40,7 +40,7 @@ export const INTENT_RULE = [  'Instead of a statement, reply with one JSON objec
   // The list is generated from the compiler's own set rather than typed twice: a prompt that
   // promises `median` and a renderer that refuses it would spend candidates on a rule the model
   // could have read, and the disagreement would be invisible in every number the run prints.
-  `Only \`from\` and \`select\` are required. Every condition the question states is one \`where\` entry with its column, its operator and its value; an expression may use columns, numbers, 'string literals', + - * /, parentheses and these functions: ${INTENT_RULE_FUNCTIONS}. Reply with the object and nothing else.`,
+  `Only \`from\` and \`select\` are required. Every condition the question states is one \`where\` entry with its column, its operator and its value; an expression may use columns, numbers, 'string literals', + - * / ||, comparisons, CASE WHEN ... THEN ... ELSE ... END, parentheses and these functions: ${INTENT_RULE_FUNCTIONS}. Reply with the object and nothing else.`,
 ].join(' ');
 
 /**
@@ -121,6 +121,16 @@ export interface IntentRecord {
   readonly read: 'ok' | IntentReadReason;
   /** The rendered statement, on the cases that produced one. */
   readonly sql?: string;
+  /**
+   * The sentence the refusal came with, clipped.
+   *
+   * The histogram says *which* construct is missing; this says which expression. The first probe
+   * refused 10 of 40 replies and the names alone could not distinguish "the grammar has no `case`"
+   * from "the model wrote a function we do not have" — two findings with two different fixes. The
+   * clip is the artifact's, not the reader's: a refusal detail quotes the reply, and a reply can be
+   * long.
+   */
+  readonly detail?: string;
 }
 
 export interface IntentFunnel {

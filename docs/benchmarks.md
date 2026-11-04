@@ -6590,3 +6590,72 @@ itself is what stands between 62–63% and CHASE-SQL's 76.02%, and a third sourc
 cases moved it by 0.58pp. A source that could move it by 2pp would have to be right on ~150 cases the
 other two miss. That is the number the next lever has to be designed against, and it is why the IR
 candidate is the only item in P1 that can change the ceiling rather than redistribute it.
+
+## The fourth candidate is a grammar, and the ceiling is the only number it can move
+
+The last three rounds closed the third slot twice and the selector four times. What is left is a
+number with a ceiling on it: `select-mixed` answers **62.53%** and reaches **67.17%** (`recall@3`,
+1,029 of 1,532), `select-samples` reaches 67.75%; the best published system on this split is at
+76.02%. Nine tenths of the selection side is spent (93.4% conversion), so the only lever that can
+still move the score is a candidate nobody wrote — and a fourth candidate raises the ceiling without
+touching the conversion.
+
+**The arithmetic, corrected.** An earlier section on this page says a source worth 2pp "would have to
+be right on ~150 cases the other two miss". That is wrong by a factor of five: 2pp of 1,532 is **31
+cases**, and 150 is what closing the whole candidate-side gap (8.27pp) would take. Both numbers are
+useful and they are not the same number, so the pre-registration below is written against 31: a
+source that is sole-correct on 31 cases the trio misses takes the ceiling from 67.75% to 69.75%. It
+is a large ask — `values` is sole-correct on **17** and the sampled card on **32** — and it is the
+only ask on the board.
+
+**Why a grammar rather than another prompt.** Every lever this repository has priced changes what the
+model *knows* when it writes: the card, the evidence, the definitions, the worked examples, the
+literals. Every one of them has been worth between −0.1 and +2.8pp, and the pool still fails to
+contain an answer on 32% of the split. A large part of that is not knowledge: it is text. The
+diagnostics name the classes — `filter-wide` 99, `predicate` 84, `literal-missing` 74,
+`filter-narrow` 71, `tables` 69, `literal-case` 11 out of 600 compared conditions — and of those,
+the last is purely a spelling, while the join-shaped and alias-shaped failures are pure layout. A
+model that *describes* a query cannot write any of them.
+
+So the fourth source answers with a JSON object, and `renderIntent` writes the statement:
+`from`, `joins` as `{table, on: [{left, right}]}`, `select` as expressions with optional aliases,
+`where` and `having` as `(column, op, value)` triples, `groupBy`, `orderBy`, `limit`, `distinct`. Ten
+keys, one function set, sixteen refusal names. Three rules keep the closed grammar from being merely
+small:
+
+| rule | why it is the rule |
+|---|---|
+| identifiers are validated (`[A-Za-z_][A-Za-z0-9_]*`, one dot) and **never quoted** | a double-quoted token that names no column is read as a *string literal* by SQLite, so quoting turns a misspelling into a comparison against a constant and returns a clean, wrong answer |
+| literals are rendered from **values** | a string is quoted here and its quotes doubled, an integer stays an integer, `true` is `1`; the `literal-case` and `literal-missing` classes cannot survive that |
+| expressions are **parsed** against a closed grammar | an expression is the one string in the contract where injection could hide; it renders in one canonical form, so two descriptions that mean the same thing produce the same text |
+
+**The refusals are the instrument.** Sixteen names, and they split into two families with opposite
+fixes: `no-object` and `not-json` say the format instruction was not followed (a prompt problem),
+while `unsupported-function`, `bad-identifier`, `bad-expression`, `missing-from` and the rest say the
+vocabulary could not express the question (a grammar decision). Over a split, the histogram **is** the
+ordered list of what to add next, which is a question no amount of reading SQL can answer. A refusal
+is therefore a reading and not a defect: the only state the harness refuses to publish is the one
+where *nothing* renders, and `assertIntentFired` says so in two separate sentences — never asked (a
+wiring break) and never rendered (a format break).
+
+**What the arm is, exactly.** `select-intent` = `['inline+evidence', 'metadata+evidence', 'values',
+'intent']`: the shipped trio plus one more candidate, at four generations and one selection per case
+rather than three and one. The prompt is **not** rebuilt — the arm's own notes gain one rule line, so
+the card, the evidence and the shape notes stay byte-identical to `inline+evidence`'s and an
+end-to-end scenario asserts that removing the line gives the parent prompt back byte for byte. The arm
+cannot be dispatched alone: `assertIntentRule` refuses it, because a JSON reply read by the statement
+reader would publish a wiring mistake as a weak prompt.
+
+**Pre-registration** (written before the dispatch, on dev's 1,532 cases, `deepseek-chat`):
+
+| # | criterion | bar | why this bar |
+|---|---|---|---|
+| ① | pool ceiling of `select-intent` minus `select-mixed`'s, **same run** | **≥ +2.0pp** (≥ 31 sole-correct cases beyond the trio) | a fourth candidate can only raise the ceiling, so the ceiling decides whether the vocabulary is a lever; the score cannot (MDE 2.30pp) |
+| ② | conversion rate | **≥ 91.4%** (drop ≤ 2pp from 93.4%) | four candidates and a selector that reads four: the price is paid in selection, and a lever that buys ceiling by making selection harder has not been priced yet |
+| ③ | the intent source's own conversion | **≥ 70%** of cases rendered | below that the vocabulary is rejecting the corpus rather than answering it, and the histogram says which construct |
+| ④ | cost, published | `calls.mean` = 5.00, `promptChars` from the **widest** candidate | the corrected cost column, not the parent's card |
+| ⑤ | sole-correct, published | as a number, against the 31 the bar implies and the 17/32 the two previous sources scored | the only number that says *which* cases the new source owns |
+
+Fail ① ⇒ revert the lever and keep the instrument (the grammar survives as a refusal histogram,
+which is what a negative reading leaves behind). Pass ① ⇒ the ceiling has moved for the first time
+since `select-mixed`, and the next round prices `select-intent` as the arm to beat.

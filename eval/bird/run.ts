@@ -5312,7 +5312,9 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
                     // Written before the refusal throws: a candidate that never became a statement
                     // is the case the report needs a reason for, and the catch below only knows
                     // that *something* did not arrive.
-                    intentRecord = read.ok ? { read: 'ok', sql: read.sql } : { read: read.reason as IntentRecord['read'] };
+                    intentRecord = read.ok
+                      ? { read: 'ok', sql: read.sql }
+                      : { read: read.reason as IntentRecord['read'], detail: read.detail.slice(0, 160) };
                     if (!read.ok) throw Object.assign(new Error(read.detail), { code: 'NL2C_E_LLM_INVALID_RESPONSE' });
                     return { sql: read.sql };
                   })()
