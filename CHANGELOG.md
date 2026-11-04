@@ -30,7 +30,36 @@ cannot be argued with.
   an artifact from a run where a source returned nothing would have been scored under the wrong
   rule. The blank case is now a refusal in both implementations.
 
+- **The benchmark workflow sent the second provider's key to the first provider's endpoint.**
+  `41791956315` dispatched `select-balanced` with `second_provider=deepseek` and no endpoint, so
+  `BIRD_SECOND_API_KEY` became DeepSeek's secret while `BIRD_SECOND_BASE_URL` stayed on the
+  workflow's default — Zhipu's host. Preflight answered `401 令牌已过期或验证不正确` and the run
+  never reached a question: a valid key, a right model name, an endpoint belonging to another
+  vendor. The message blames an expired token, which is the one thing that was not wrong. Only one
+  of the two inputs keeps a default now: the endpoint is derived from the provider, and the input
+  that overrides it starts empty, so the pair cannot disagree unless the caller spells both. Two
+  tests read the workflow and fail on the old wiring, verified by restoring it.
+
 ### Changed
+- **A stronger author raises the ceiling by 2.83pp and the selector gives back 6.10pp of conversion.**
+  `41795505400` ran `select-mixed` against `select-balanced` (two `deepseek-reasoner` slots and one
+  `deepseek-chat`) on dev's 600 questions, both arms in one artifact: **382 = 63.67%** against
+  **372 = 62.00%** (21 up / 31 down, p = 0.2116), with the pool ceiling **408 = 68.00%** against
+  **425 = 70.83%** (**+2.83pp**, 29 up / 12 down, p = 0.0115) and conversion **93.63% → 87.53%**. The
+  instruction was that a reasoning model would produce better candidates, and it does. What the
+  reading adds is *why*: both reasoning slots are individually worse than the chat slots they
+  replaced — 61.7% and 59.8% against 63.0% and 62.1% — and the pool is still 2.83pp higher, because
+  their errors do not overlap with the chat author's. A weaker author that errs elsewhere is worth
+  more than a stronger one that errs in the same place, which is `I-74`'s finding read from the
+  other side: changing the *author* buys independence, changing the *wording* does not.
+  Conversion now has three readings in one direction — 93.63% on three chat candidates, 90.45% on
+  four, 87.53% on two reasoning plus one — so the better the candidate set, the less of it the
+  selector converts. Read from the same artifact at zero calls, `shortest` scores **384 = 64.00%**
+  on the strong pool against the selector's 372 (38 up / 26 down, p = 0.1686) and 372 against 382 on
+  the weak one (14 up / 24 down, p = 0.1433): the two rules trade places with the pool, neither
+  difference is significant, and the rule costs 3.00 calls instead of 4.00. The best number in this
+  document is therefore produced by spending one call fewer, which is the clearest statement yet
+  that the fourth call was never the thing being bought.
 - **The samples family closes, and it closes against the oracle.** `41620796848` ran the three arms in
   one artifact on dev's 1,532 cases: `inline+evidence` **933 = 60.90%**, `+samples` **952 = 62.14%**
   (+1.24pp, 61 up / 42 down, p = 0.0756), `+samples-gold` **944 = 61.62%** (+0.72pp, 36 up / 25 down,

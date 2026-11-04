@@ -6915,3 +6915,101 @@ The candidate side therefore remains the only axis with room, and the two number
 both on this page: **474 questions with no correct candidate**, of which **218 are four-way
 agreement on a wrong answer**. A fifth homogeneous prompt cannot reach either. What can is a
 candidate written by a model that reasons before it writes, which is the next pre-registration.
+
+## A stronger author raises the ceiling and the conversion falls again
+
+The partition above says a fifth homogeneous prompt cannot reach the 218 questions where four
+candidates agree on a wrong answer. The next candidate therefore has to come from an author that
+does not share the error, and the catalogue already had one: `select-balanced` draws two of its
+three candidates from a second model. It had only ever been run on 600 questions with one reasoning
+slot and a `glm-4.5` second endpoint; `41795505400` is the first run with **two** reasoning slots
+and a second endpoint in the same vendor, so the comparison isolates the *model* rather than the
+vendor.
+
+dev, 600 questions, both arms in one artifact, `deepseek-chat` primary and `deepseek-reasoner`
+second:
+
+| | `select-mixed` | `select-balanced` | delta |
+|---|---|---|---|
+| score | 382 = **63.67%** | 372 = **62.00%** | **−1.67pp** (21 up / 31 down, p = 0.2116) |
+| pool ceiling | 408 = **68.00%** | 425 = **70.83%** | **+2.83pp** (29 up / 12 down, **p = 0.0115**) |
+| conversion | **93.63%** | **87.53%** | **−6.10pp** |
+| `calls.mean` | 3.995 | 4.000 | — |
+| `promptChars` | 7,302 / 14,554 | 7,302 / 14,554 | — |
+
+| # | criterion | bar | read |
+|---|---|---|---|
+| ① | ceiling delta | ≥ +1.5pp | **pass**, +2.83pp, p = 0.0115 |
+| ② | score | ≥ +1.0pp and paired p < 0.05 | **fail**, −1.67pp, p = 0.2116 |
+| ③ | conversion | ≥ 88% | **fail**, 87.53% — 0.47pp short |
+| ④ | cost published | 4.00 calls, widest candidate | **pass** |
+
+### The author is worth more than its own accuracy
+
+The reading that matters is not the ceiling: it is where the ceiling came from.
+
+| arm | `inline+evidence` | `metadata+evidence` | `values` | pool ceiling |
+|---|---|---|---|---|
+| `select-mixed` (all `deepseek-chat`) | 374/594 = **63.0%** | 369/594 = **62.1%** | 377/595 = **63.4%** | 68.00% |
+| `select-balanced` (two `deepseek-reasoner`) | 369/598 = **61.7%** | 358/599 = **59.8%** | 376/594 = **63.3%** | **70.83%** |
+
+**Every reasoning slot is individually worse than the chat slot it replaced, and the pool is
+better.** 61.7% and 59.8% against 63.0% and 62.1%, yet +2.83pp of ceiling at p = 0.0115. A weaker
+candidate that is wrong on *different* questions is worth more than a stronger one that is wrong on
+the same ones — which is the same arithmetic `I-74` produced in the other direction, where three
+prompts of one model carried no more independent opinions than three samples of one prompt (1.15
+against 1.12 distinct results). **Changing the author buys independence; changing the wording does
+not.** That is now measured twice, once per direction.
+
+### And the selection side eats it, for the third time
+
+| configuration | candidates | conversion | score |
+|---|---|---|---|
+| `select-mixed` | 3 chat | **93.63%** | 63.67% |
+| `select-intent` (1,532 questions) | 4 chat | **90.45%** | 62.47% |
+| `select-balanced` | 2 reasoning + 1 chat | **87.53%** | 62.00% |
+
+Three configurations, three conversions, one direction: **the more the candidate set is worth, the
+less of it the selector converts.** The mechanism is in the partitions above — a stronger pool has
+more questions where every candidate is right and more where several look right, and the selector
+was never better than counting on a disagreeing partition.
+
+### The free rule on the strong pool, and what it is worth
+
+Read from the same artifact, no model call:
+
+| arm | `first` | `shortest` | `modal` | selector | ceiling |
+|---|---|---|---|---|---|
+| `select-mixed` | 375 = 62.50% | 372 = 62.00% | 377 = 62.83% | **382 = 63.67%** | 68.00% |
+| `select-balanced` | 370 = 61.67% | **384 = 64.00%** | 375 = 62.50% | 372 = 62.00% | 70.83% |
+
+`shortest` beats the selector by **+12 cases (38 up / 26 down, p = 0.1686)** on the strong pool and
+loses to it by 10 on the weak one (14 up / 24 down, p = 0.1433) — the two rules trade places with
+the pool and neither difference is significant. What is not a trade is the price: the rule is
+**3.00 calls against 4.00**, which is 25% of the run, and it produces the best score any
+configuration in this document has reached, **64.00%**, against the 63.67% of the arm to beat — a
+difference of two cases.
+
+So the free rule is not adopted as a lever either. It is the *cheapest configuration that scores
+what the expensive one scores*, which is what `chooseCandidateByRule` exists to let a deployment
+choose — and the fact that the best number on this page comes from spending one call fewer is the
+clearest statement yet that the second call was never the thing being bought.
+
+### Verdict
+
+**The strong-model lever is a ceiling lever and not a score lever** — the same verdict
+`select-intent` received, with a larger ceiling (+2.83pp) and a larger conversion loss (−6.10pp).
+`select-balanced` stays in the catalogue; `select-mixed` stays the arm to beat on the score, and its
+68.00% ceiling is now the *lower* of two pools on the same questions.
+
+The conversion rate is the structural bottleneck, and it is now measured as a function of the pool:
+93.63 → 90.45 → 87.53 as the candidates improve. No candidate-side lever can be collected until
+something converts a better pool better, and three rounds of selector work (prompt, marks,
+reconcile, pairwise) have not moved it.
+
+One workflow defect was fixed to get this reading. The first dispatch (`41791956315`) sent a valid
+DeepSeek key to Zhipu's endpoint, because `second_provider` chose the secret while `second_base_url`
+kept an independent default: preflight answered `401 令牌已过期或验证不正确` and the run never reached a
+question. The endpoint is now derived from the provider and the overriding input starts empty, so the
+pair cannot disagree unless the caller spells both; two tests read the workflow and fail on the old
+wiring.
