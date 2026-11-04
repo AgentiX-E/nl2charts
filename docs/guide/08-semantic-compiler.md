@@ -176,8 +176,8 @@ are required, `joins`, `where`, `groupBy`, `having`, `orderBy`, `limit` and `dis
 Filters are `(column, op, value)` triples rather than SQL fragments, so a value is a *value* — a
 string is quoted and its quotes doubled here, an integer stays an integer, `true` is `1` because that
 is what SQLite stores. Expressions inside `select`, `orderBy` and `having` are strings, and they are
-parsed rather than pasted: columns, numbers, `'string literals'`, `+ - * /`, parentheses, and a named
-function set (`INTENT_FUNCTIONS`).
+parsed rather than pasted: columns, numbers, `'string literals'`, `+ - * /` and `||`, comparisons,
+`CASE WHEN … THEN … ELSE … END`, parentheses, and a named function set (`INTENT_FUNCTIONS`).
 
 What it costs is expressiveness, and the cost is priced in names rather than exceptions:
 
@@ -186,22 +186,37 @@ const compiled = compileIntent(value);   // never throws
 if (compiled.ok) await db.query(compiled.sql);
 else console.warn(compiled.reason, compiled.detail);
 // 'not-an-object' | 'unknown-key' | 'missing-from' | 'missing-select' | 'empty-select'
-// 'bad-identifier' | 'bad-operator' | 'missing-value' | 'unexpected-value' | 'bad-value'
-// 'bad-limit' | 'bad-expression' | 'bad-join' | 'bad-order' | 'bad-direction'
-// 'unsupported-function'
+// 'bad-identifier' | 'unknown-identifier' | 'bad-operator' | 'missing-value'
+// 'unexpected-value' | 'bad-value' | 'bad-limit' | 'bad-expression' | 'bad-join'
+// 'bad-order' | 'bad-direction' | 'unsupported-function'
 ```
 
-The split between those names is the useful part: `unsupported-function` and `bad-expression` mean
-the vocabulary was too narrow for the question, while `unknown-key` and `missing-from` mean the reply
-did not follow the shape at all. They call for opposite changes, so they are separate values rather
-than one `INVALID`.
+The split between those names is the useful part: `unsupported-function`, `bad-expression` and
+`unknown-identifier` mean the vocabulary or the schema was not enough for the question, while
+`unknown-key` and `missing-from` mean the reply did not follow the shape at all. They call for
+opposite changes, so they are separate values rather than one `INVALID`.
 
 Three behaviours are worth knowing before you build on it:
 
-- **Identifiers are validated, never quoted.** A table or column must match `[A-Za-z_][A-Za-z0-9_]*`
-  with at most one dot. That is deliberate on SQLite: a double-quoted name that matches no column is
-  read as a *string literal*, so a quoted identifier that is merely misspelled turns into a
-  comparison against a constant and returns a wrong answer instead of an error.
+- **Names are checked, then quoted when the spelling needs it.** A name is a table or a column with at
+  most one dot; it may not carry a control character, a semicolon or a comment marker. Everything else
+  is allowed, and a name that is not a bare word is double-quoted on the way out — because real
+  databases do not spell every column with word characters. BIRD's `california_schools` holds
+  `County Name` and `Charter School (Y/N)`, and 4.6% of the columns in that dataset cannot be written
+  as a bare word at all.
+  Quoting is what makes the schema load-bearing: SQLite reads a double-quoted name that matches no
+  column as a *string literal*, so `"County Nam" = 1` compares a column to a constant and returns a
+  clean wrong answer instead of an error. Pass the columns you know and the compiler refuses the
+  name instead:
+
+  ```ts
+  compileIntent(value, { columns: ['frpm.CDSCode', 'frpm.County Name'] });
+  // { ok: false, reason: 'unknown-identifier', detail: 'query intent: column "frpm.County Nam" is not in the schema' }
+  ```
+
+  The list is matched without case and accepts both `table.column` and `column`. Without it, the
+  renderer can still guarantee the *shape* of a statement and nothing about its meaning — a trade
+  worth making explicit, which is why the harness always passes the card's columns.
 - **An unknown key is refused, not ignored.** A dropped `having` is a silently different query, and a
   query that answers a slightly different question is the failure mode this renderer exists to
   remove.

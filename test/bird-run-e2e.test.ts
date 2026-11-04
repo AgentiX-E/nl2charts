@@ -3015,7 +3015,13 @@ describe('the fourth candidate is a query object, rendered into a statement', ()
     expect(result.code).toBe(0);
     const row = (result.report.arms as {
       readonly arm: string;
-      readonly intent?: { readonly asked: number; readonly rendered: number; readonly share: number; readonly refused: Record<string, number> };
+      readonly intent?: {
+        readonly asked: number;
+        readonly rendered: number;
+        readonly share: number;
+        readonly refused: Record<string, number>;
+        readonly refusedCases?: readonly { readonly case: string; readonly read: string; readonly detail: string }[];
+      };
       readonly calls: { readonly mean: number };
       readonly sources?: readonly { readonly source: string; readonly selected: number }[];
       readonly candidateSurvival?: Record<string, { readonly generated: number; readonly survived: number }>;
@@ -3027,6 +3033,12 @@ describe('the fourth candidate is a query object, rendered into a statement', ()
     expect(row?.intent?.rendered).toBe(QUESTIONS.length - 1);
     expect(row?.intent?.share).toBeCloseTo((QUESTIONS.length - 1) / QUESTIONS.length, 10);
     expect(row?.intent?.refused).toEqual({ 'unsupported-function': 1 });
+    // The histogram named the family and the sentence names the construct, and the case id is what
+    // makes the sentence actionable: a reader can open that reply, and a run whose refusals are all
+    // `bad-identifier` is a different week of work from one whose refusals are all `bad-expression`.
+    expect(row?.intent?.refusedCases).toEqual([
+      { case: String(QUESTIONS[5]?.id), read: 'unsupported-function', detail: expect.stringContaining('median') as unknown as string },
+    ]);
     // The call the fourth candidate costs is published with the arm, not inferred: four
     // generations and one selection, on every case.
     expect(row?.calls.mean ?? 0).toBeGreaterThan(4.9);

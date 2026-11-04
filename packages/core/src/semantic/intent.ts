@@ -24,11 +24,20 @@ import { toNl2ChartsError } from '@agentix-e/nl2charts-spec';
  *
  * Three rules the renderer keeps, each of which is a way the closed grammar stays safe:
  *
- * - **Identifiers are validated, never escaped.** A name matches `[A-Za-z_][A-Za-z0-9_]*`, with at
- *   most one dot for a qualifier, so nothing that reaches the output can be anything but a name.
- *   Quoting was the alternative and it is worse than useless on SQLite: a double-quoted token that
- *   names no column is read as a *string literal*, so `"customer_id"` in a database that spells it
- *   `CustomerID` compares a column to a constant and returns a clean, wrong answer.
+ * - **Identifiers are checked, then quoted when they need it.** A name is a table or a column, at
+ *   most one dot for a qualifier, and it may not carry a control character, a quote, a semicolon or
+ *   a comment marker; anything else is refused with a name. Names that are not bare words are
+ *   double-quoted on the way out, because the corpus does not spell every column with word
+ *   characters: BIRD's `california_schools` stores `County Name` and `Charter School (Y/N)`, and a
+ *   grammar that only accepted `[A-Za-z_][A-Za-z0-9_]*` could not name 4.6% of the columns in the
+ *   benchmark's own databases — a vocabulary gap that reads, in a refusal histogram, as a model
+ *   that cannot spell.
+ *
+ *   Quoting is also what makes the *schema* mandatory: SQLite reads a double-quoted token that
+ *   names no column as a **string literal**, so `"County Nam"` compares a column to a constant and
+ *   returns a clean, wrong answer. `compileIntent` therefore takes the column list when it has one
+ *   and refuses a name that is not in it, and the harness always passes it — a renderer that cannot
+ *   see the schema can guarantee shape, not meaning.
  * - **Literals are rendered from values, not copied from text.** A string is quoted and its quotes
  *   doubled here, an integer stays an integer, `null` is `NULL`. This is the class of failure the
  *   diagnostics named `literal-case` and `literal-missing`, removed at the source.
@@ -120,6 +129,7 @@ export type IntentRefusal =
   | 'missing-select'
   | 'empty-select'
   | 'bad-identifier'
+  | 'unknown-identifier'
   | 'bad-operator'
   | 'missing-value'
   | 'unexpected-value'
@@ -137,18 +147,71 @@ export type IntentCompilation =
 
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
-/** One optional `alias.` prefix, which is how a join or a `from` alias is referenced. */
-function isColumnRef(value: unknown): value is string {
-  if (typeof value !== 'string') return false;
+/**
+ * The characters a name may hold, once quoting is allowed to carry the rest.
+ *
+ * Deliberately not a whitelist of "word characters plus space": the point of the rule is that no
+ * name can end a statement or start a comment, and a blacklist of the characters that do that is
+ * both shorter and easier to check than an enumeration of every punctuation a real schema uses.
+ * Quotes are *not* on it: a name that holds one is written quoted with the quote doubled, which is
+ * the escape the identifier syntax has, and refusing it would fail on a column the corpus has.
+ */
+const NAME_PART = /^[^\u0000-\u001f;`]+$/;
+
+/** Why a single name part cannot be rendered, or `undefined` when it can. */
+function nameProblem(part: string): string | undefined {
+  if (part.length === 0) return 'is empty';
+  if (part.trim() !== part) return 'has a leading or trailing space';
+  if (part.length > 128) return 'is longer than 128 characters';
+  if (!NAME_PART.test(part)) return 'holds a character a name cannot carry';
+  if (part.includes('--') || part.includes('/*') || part.includes('*/')) return 'holds a comment marker';
+  return undefined;
+}
+
+/**
+ * A name the way the model wrote it, with the quoting a schema's own spelling invites removed.
+ *
+ * `"County Name"` and `County Name` are the same column, and a model that has just read a card
+ * showing the first will write it that way. Accepting only the unquoted form would put a correct
+ * answer in the `bad-identifier` bucket — a refusal about our lexer that reads, in the histogram,
+ * as a refusal about the corpus.
+ */
+function unquote(part: string): string {
+  return part.length >= 2 && part.startsWith('"') && part.endsWith('"') ? part.slice(1, -1).replace(/""/g, '"') : part;
+}
+
+/** The canonical form of a column reference, or `undefined` when it cannot be one. */
+function refAt(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
   const parts = value.split('.');
   // Two at most: `table.column` is the qualifier a join needs, and a third part would be a schema
   // name — which is a different database than the one this renders against.
-  if (parts.length > 2) return false;
-  return parts.every((part) => IDENTIFIER.test(part));
+  if (parts.length > 2) return undefined;
+  const bare = parts.map(unquote);
+  return bare.every((part) => nameProblem(part) === undefined) ? bare.join('.') : undefined;
 }
 
-function isName(value: unknown): value is string {
-  return typeof value === 'string' && IDENTIFIER.test(value);
+/** The canonical form of a table or an alias, or `undefined` when it cannot be one. */
+function nameAt(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const bare = unquote(value);
+  if (bare.includes('.')) return undefined;
+  return nameProblem(bare) === undefined ? bare : undefined;
+}
+
+/**
+ * Write one name part out, quoting it only when a bare word would not survive the round trip.
+ *
+ * `"County Name"` and `County Name` are the same column to this renderer; the second cannot be
+ * written to SQLite unquoted, and the first cannot be *read* as a name by a lexer that treats `"` as
+ * the start of a string. Both spellings are accepted from the model and one form reaches the engine.
+ */
+function renderName(part: string): string {
+  return IDENTIFIER.test(part) ? part : `"${part.replace(/"/g, '""')}"`;
+}
+
+function renderColumnRef(reference: string): string {
+  return reference.split('.').map(renderName).join('.');
 }
 
 function refuse(reason: IntentRefusal, detail: string): never {
@@ -164,6 +227,7 @@ function reasonOf(error: unknown): IntentRefusal {
     'missing-select',
     'empty-select',
     'bad-identifier',
+    'unknown-identifier',
     'bad-operator',
     'missing-value',
     'unexpected-value',
@@ -227,7 +291,8 @@ function scalar(value: unknown, what: string): void {
 function filterAt(value: unknown): IntentFilter {
   const object = objectAt(value, 'filter');
   onlyKeys(object, FILTER_KEYS, 'filter', 'unknown-key');
-  if (!isColumnRef(object.column)) refuse('bad-identifier', `filter column ${JSON.stringify(object.column)} is not a name`);
+  const column = refAt(object.column);
+  if (column === undefined) refuse('bad-identifier', `filter column ${JSON.stringify(object.column)} is not a name`);
   const op = object.op;
   if (typeof op !== 'string' || !(INTENT_OPERATORS as readonly string[]).includes(op)) {
     refuse('bad-operator', `filter operator ${JSON.stringify(op)} is not one of ${INTENT_OPERATORS.join(' ')}`);
@@ -236,7 +301,7 @@ function filterAt(value: unknown): IntentFilter {
   const nullary = operator === 'is null' || operator === 'is not null';
   if (nullary) {
     if (object.value !== undefined) refuse('unexpected-value', `${operator} takes no value`);
-    return { column: object.column as string, op: operator };
+    return { column, op: operator };
   }
   if (object.value === undefined) refuse('missing-value', `${operator} needs a value`);
   const list = operator === 'in' || operator === 'not in';
@@ -244,7 +309,7 @@ function filterAt(value: unknown): IntentFilter {
     const values = arrayAt(object.value, `${operator} value`, 'bad-value');
     if (values.length === 0) refuse('bad-value', `${operator} needs at least one value`);
     for (const entry of values) scalar(entry, `${operator} entry`);
-    return { column: object.column as string, op: operator, value: [...values] };
+    return { column, op: operator, value: [...values] };
   }
   // A range is two bounds and one predicate, and it is the only operator that takes exactly two:
   // an `in` of two values is a different question, and a model that writes three bounds has
@@ -253,17 +318,19 @@ function filterAt(value: unknown): IntentFilter {
     const bounds = arrayAt(object.value, `${operator} value`, 'bad-value');
     if (bounds.length !== 2) refuse('bad-value', `${operator} needs exactly two bounds`);
     for (const entry of bounds) scalar(entry, `${operator} bound`);
-    return { column: object.column as string, op: operator, value: [...bounds] };
+    return { column, op: operator, value: [...bounds] };
   }
   scalar(object.value, `${operator} value`);
-  return { column: object.column as string, op: operator, value: object.value };
+  return { column, op: operator, value: object.value };
 }
 
 function joinAt(value: unknown): IntentJoin {
   const object = objectAt(value, 'join');
   onlyKeys(object, JOIN_KEYS, 'join', 'unknown-key');
-  if (!isName(object.table)) refuse('bad-identifier', `join table ${JSON.stringify(object.table)} is not a name`);
-  if (object.alias !== undefined && !isName(object.alias)) refuse('bad-identifier', `join alias ${JSON.stringify(object.alias)} is not a name`);
+  const table = nameAt(object.table);
+  if (table === undefined) refuse('bad-identifier', `join table ${JSON.stringify(object.table)} is not a name`);
+  const alias = object.alias === undefined ? undefined : nameAt(object.alias);
+  if (object.alias !== undefined && alias === undefined) refuse('bad-identifier', `join alias ${JSON.stringify(object.alias)} is not a name`);
   if (object.type !== undefined && object.type !== 'inner' && object.type !== 'left') {
     refuse('bad-join', `join type ${JSON.stringify(object.type)} is not inner or left`);
   }
@@ -272,13 +339,15 @@ function joinAt(value: unknown): IntentJoin {
   const on = pairs.map((pair) => {
     const entry = objectAt(pair, 'join pair');
     onlyKeys(entry, new Set(['left', 'right']), 'join pair', 'unknown-key');
-    if (!isColumnRef(entry.left)) refuse('bad-identifier', `join left ${JSON.stringify(entry.left)} is not a column`);
-    if (!isColumnRef(entry.right)) refuse('bad-identifier', `join right ${JSON.stringify(entry.right)} is not a column`);
-    return { left: entry.left, right: entry.right };
+    const left = refAt(entry.left);
+    const right = refAt(entry.right);
+    if (left === undefined) refuse('bad-identifier', `join left ${JSON.stringify(entry.left)} is not a column`);
+    if (right === undefined) refuse('bad-identifier', `join right ${JSON.stringify(entry.right)} is not a column`);
+    return { left, right };
   });
   return {
-    table: object.table,
-    ...(object.alias === undefined ? {} : { alias: object.alias }),
+    table,
+    ...(alias === undefined ? {} : { alias }),
     ...(object.type === undefined ? {} : { type: object.type }),
     on,
   };
@@ -288,8 +357,9 @@ function selectAt(value: unknown): IntentSelect {
   const object = objectAt(value, 'select item');
   onlyKeys(object, SELECT_KEYS, 'select item', 'unknown-key');
   if (typeof object.expr !== 'string') refuse('bad-expression', 'select item needs an expr string');
-  if (object.alias !== undefined && !isName(object.alias)) refuse('bad-identifier', `alias ${JSON.stringify(object.alias)} is not a name`);
-  return { expr: object.expr, ...(object.alias === undefined ? {} : { alias: object.alias }) };
+  const alias = object.alias === undefined ? undefined : nameAt(object.alias);
+  if (object.alias !== undefined && alias === undefined) refuse('bad-identifier', `alias ${JSON.stringify(object.alias)} is not a name`);
+  return { expr: object.expr, ...(alias === undefined ? {} : { alias }) };
 }
 
 function orderAt(value: unknown): IntentOrder {
@@ -311,8 +381,10 @@ function orderAt(value: unknown): IntentOrder {
 export function parseQueryIntent(value: unknown): QueryIntent {
   const object = objectAt(value, 'intent', 'not-an-object');
   onlyKeys(object, INTENT_KEYS, 'intent', 'unknown-key');
-  if (!isName(object.from)) refuse('missing-from', `from ${JSON.stringify(object.from)} is not a table name`);
-  if (object.alias !== undefined && !isName(object.alias)) refuse('bad-identifier', `from alias ${JSON.stringify(object.alias)} is not a name`);
+  const from = nameAt(object.from);
+  if (from === undefined) refuse('missing-from', `from ${JSON.stringify(object.from)} is not a table name`);
+  const tableAlias = object.alias === undefined ? undefined : nameAt(object.alias);
+  if (object.alias !== undefined && tableAlias === undefined) refuse('bad-identifier', `from alias ${JSON.stringify(object.alias)} is not a name`);
   const items = object.select === undefined ? undefined : arrayAt(object.select, 'select', 'missing-select');
   if (items === undefined) refuse('missing-select', 'intent has no select list');
   if (items.length === 0) refuse('empty-select', 'select list is empty');
@@ -324,8 +396,9 @@ export function parseQueryIntent(value: unknown): QueryIntent {
     object.groupBy === undefined
       ? undefined
       : arrayAt(object.groupBy, 'groupBy', 'bad-identifier').map((entry) => {
-          if (!isColumnRef(entry)) refuse('bad-identifier', `group by ${JSON.stringify(entry)} is not a column`);
-          return entry;
+          const reference = refAt(entry);
+          if (reference === undefined) refuse('bad-identifier', `group by ${JSON.stringify(entry)} is not a column`);
+          return reference;
         });
   const orderBy = object.orderBy === undefined ? undefined : arrayAt(object.orderBy, 'orderBy', 'bad-order').map(orderAt);
   if (object.limit !== undefined) {
@@ -334,8 +407,8 @@ export function parseQueryIntent(value: unknown): QueryIntent {
   }
   if (object.distinct !== undefined && typeof object.distinct !== 'boolean') refuse('bad-value', 'distinct must be true or false');
   return {
-    from: object.from,
-    ...(object.alias === undefined ? {} : { alias: object.alias }),
+    from,
+    ...(tableAlias === undefined ? {} : { alias: tableAlias }),
     ...(joins === undefined ? {} : { joins }),
     select,
     ...(where === undefined ? {} : { where }),
@@ -348,7 +421,7 @@ export function parseQueryIntent(value: unknown): QueryIntent {
 }
 
 interface Token {
-  readonly kind: 'name' | 'number' | 'string' | 'star' | 'op' | 'punct';
+  readonly kind: 'name' | 'quoted' | 'number' | 'string' | 'star' | 'op' | 'punct';
   readonly text: string;
 }
 
@@ -381,6 +454,17 @@ function tokenize(expr: string): Token[] {
       index += name[0].length;
       continue;
     }
+    // A quoted name, which is the only way an expression can mention a column the corpus spells
+    // with a space in it. Double quotes are the identifier syntax in every engine BIRD runs on, so
+    // reading them as names rather than as strings is what makes `"County Name" > 5` expressible;
+    // a model that uses `"..."` for a *string* still gets a working statement out of SQLite, and
+    // with a schema in hand it gets a refusal that says which name it invented.
+    const quoted = /^"((?:[^"]|"")*)"/.exec(rest);
+    if (quoted !== null) {
+      tokens.push({ kind: 'quoted', text: (quoted[1] as string).replace(/""/g, '"') });
+      index += quoted[0].length;
+      continue;
+    }
     const character = rest[0] as string;
     // Two characters before one, or `>=` would tokenise as `>` then a stray `=` and a comparison
     // would be refused for a reason that has nothing to do with the question.
@@ -402,6 +486,15 @@ function tokenize(expr: string): Token[] {
 
 class ExprReader {
   private at = 0;
+
+  /**
+   * Every column this expression names, in the order it names them.
+   *
+   * Collected while parsing rather than recovered by scanning the rendered text: a scan cannot tell
+   * `t.c` in a select item from the same characters inside a string literal, and the schema check
+   * that reads this would then refuse a statement over a value it quoted correctly.
+   */
+  readonly references: string[] = [];
 
   constructor(private readonly tokens: readonly Token[], private readonly source: string) {}
 
@@ -532,6 +625,10 @@ class ExprReader {
     if (token.kind === 'number') return token.text;
     if (token.kind === 'string') return `'${token.text.replace(/'/g, "''")}'`;
     if (token.kind === 'star') return '*';
+    if (token.kind === 'quoted') {
+      this.references.push(token.text);
+      return renderName(token.text);
+    }
     if (token.kind === 'punct' && token.text === '(') {
       const inner = this.disjunction();
       this.expectPunct(')');
@@ -573,13 +670,25 @@ class ExprReader {
       this.expectPunct(')');
       return `${name}(${distinct ? 'distinct ' : ''}${args.join(', ')})`;
     }
-    return token.text;
+    this.references.push(token.text);
+    return renderColumnRef(token.text);
   }
 }
 
 /** Render one expression, or refuse it. Exported because an expression is the unit a test names. */
 export function renderIntentExpression(expr: string): string {
-  return new ExprReader(tokenize(expr), expr).parse();
+  return expressionOf(expr).sql;
+}
+
+/** A rendered expression and the columns it names, which the schema check reads. */
+interface Rendered {
+  readonly sql: string;
+  readonly references: readonly string[];
+}
+
+function expressionOf(expr: string): Rendered {
+  const reader = new ExprReader(tokenize(expr), expr);
+  return { sql: reader.parse(), references: reader.references };
 }
 
 function literal(value: unknown): string {
@@ -593,7 +702,7 @@ function literal(value: unknown): string {
 }
 
 function renderFilter(filter: IntentFilter): string {
-  const column = filter.column;
+  const column = renderColumnRef(filter.column);
   if (filter.op === 'is null' || filter.op === 'is not null') return `${column} ${filter.op.toUpperCase()}`;
   if (filter.op === 'in' || filter.op === 'not in') {
     const values = (filter.value as readonly unknown[]).map(literal).join(', ');
@@ -608,42 +717,99 @@ function renderFilter(filter: IntentFilter): string {
 }
 
 /**
- * Render a validated intent as one statement.
+ * What a caller can tell the renderer about the database it renders against.
  *
- * One line, keywords upper case, identifiers as written: the same intent always produces the same
- * text, which is what makes two candidates comparable and what makes a stored artifact enough to
- * reproduce a run. `INNER` is spelled out rather than implied so a reader can see which side of a
- * join is nullable without holding the schema.
+ * `columns` is the schema, as `table.column` or `column` spellings, and it is not optional in
+ * practice: quoting a name is what lets a corpus column called `County Name` be written at all, and
+ * quoting is also what turns a misspelling into a *string literal* on SQLite — `"County Nam" = 1` is
+ * a clean, wrong answer rather than an error. A renderer that is handed the schema refuses that name
+ * instead; a renderer that is not can guarantee the shape of the statement and nothing about its
+ * meaning, which is the trade this option makes explicit rather than hides.
  */
-export function renderIntent(value: unknown): string {
-  return renderValidated(parseQueryIntent(value));
+export interface IntentOptions {
+  readonly columns?: Iterable<string>;
 }
 
-function renderValidated(intent: QueryIntent): string {
+/**
+ * Render a validated intent as one statement.
+ *
+ * One line, keywords upper case, identifiers as written or quoted where a bare word would not
+ * survive: the same intent always produces the same text, which is what makes two candidates
+ * comparable and what makes a stored artifact enough to reproduce a run. `INNER` is spelled out
+ * rather than implied so a reader can see which side of a join is nullable without holding the
+ * schema.
+ */
+export function renderIntent(value: unknown, options?: IntentOptions): string {
+  return renderValidated(parseQueryIntent(value), options);
+}
+
+/** Every column name a schema entry can be reached by, lower case because SQLite compares that way. */
+function columnSets(columns: Iterable<string>): { readonly names: ReadonlySet<string>; readonly qualified: ReadonlySet<string> } {
+  const names = new Set<string>();
+  const qualified = new Set<string>();
+  for (const entry of columns) {
+    const text = String(entry).toLowerCase();
+    qualified.add(text);
+    const dot = text.lastIndexOf('.');
+    names.add(dot === -1 ? text : text.slice(dot + 1));
+  }
+  return { names, qualified };
+}
+
+/**
+ * Refuse a name the schema does not have.
+ *
+ * Only the column part is looked up, not the qualifier, and that is the honest limit of a flat
+ * column list: `f."County Name"` is checked to name a column, not to name one that `f` has. A
+ * binding error of that kind is left to the engine, which reports it; inventing a column is the
+ * failure this closes, because the engine does not report it.
+ */
+function checkReferences(references: readonly string[], columns: Iterable<string>): void {
+  const known = columnSets(columns);
+  for (const reference of references) {
+    const text = reference.toLowerCase();
+    const dot = text.lastIndexOf('.');
+    const column = dot === -1 ? text : text.slice(dot + 1);
+    if (known.qualified.has(text) || known.names.has(column)) continue;
+    refuse('unknown-identifier', `column ${JSON.stringify(reference)} is not in the schema`);
+  }
+}
+
+function renderValidated(intent: QueryIntent, options?: IntentOptions): string {
+  const references: string[] = [];
   const select = intent.select.map((item) => {
-    const rendered = renderIntentExpression(item.expr);
-    return item.alias === undefined ? rendered : `${rendered} AS ${item.alias}`;
+    const rendered = expressionOf(item.expr);
+    references.push(...rendered.references);
+    return item.alias === undefined ? rendered.sql : `${rendered.sql} AS ${renderName(item.alias)}`;
   });
-  const from = `${intent.from}${intent.alias === undefined ? '' : ` ${intent.alias}`}`;
+  const from = `${renderName(intent.from)}${intent.alias === undefined ? '' : ` ${renderName(intent.alias)}`}`;
   const joins = (intent.joins ?? []).map((join) => {
-    const target = `${join.table}${join.alias === undefined ? '' : ` ${join.alias}`}`;
-    const on = join.on.map((pair) => `${pair.left} = ${pair.right}`).join(' AND ');
+    const target = `${renderName(join.table)}${join.alias === undefined ? '' : ` ${renderName(join.alias)}`}`;
+    const on = join.on
+      .map((pair) => {
+        references.push(pair.left, pair.right);
+        return `${renderColumnRef(pair.left)} = ${renderColumnRef(pair.right)}`;
+      })
+      .join(' AND ');
     return `${join.type === 'left' ? 'LEFT JOIN' : 'INNER JOIN'} ${target} ON ${on}`;
   });
+  const filters = [...(intent.where ?? []), ...(intent.having ?? [])];
+  references.push(...filters.map((filter) => filter.column));
+  references.push(...(intent.groupBy ?? []));
+  // Every expression is read before the schema is checked, because an expression is what names the
+  // columns an order-by clause refers to: checking first would leave the last clause of a statement
+  // the only one whose names are never looked up, which is a hole that shows up as a silent wrong
+  // answer rather than as a gap in a test.
+  const order = (intent.orderBy ?? []).map((item) => {
+    const rendered = expressionOf(item.expr);
+    references.push(...rendered.references);
+    return item.direction === undefined ? rendered.sql : `${rendered.sql} ${item.direction.toUpperCase()}`;
+  });
+  if (options?.columns !== undefined) checkReferences(references, options.columns);
   const where = intent.where === undefined || intent.where.length === 0 ? [] : [`WHERE ${intent.where.map(renderFilter).join(' AND ')}`];
-  const groupBy = intent.groupBy === undefined || intent.groupBy.length === 0 ? [] : [`GROUP BY ${intent.groupBy.join(', ')}`];
+  const groupBy = intent.groupBy === undefined || intent.groupBy.length === 0 ? [] : [`GROUP BY ${intent.groupBy.map(renderColumnRef).join(', ')}`];
   const having = intent.having === undefined || intent.having.length === 0 ? [] : [`HAVING ${intent.having.map(renderFilter).join(' AND ')}`];
-  const orderBy =
-    intent.orderBy === undefined || intent.orderBy.length === 0
-      ? []
-      : [
-          `ORDER BY ${intent.orderBy
-            .map((item) => {
-              const expression = renderIntentExpression(item.expr);
-              return item.direction === undefined ? expression : `${expression} ${item.direction.toUpperCase()}`;
-            })
-            .join(', ')}`,
-        ];
+  const orderBy = order.length === 0 ? [] : [`ORDER BY ${order.join(', ')}`];
   const limit = intent.limit === undefined ? [] : [`LIMIT ${String(intent.limit)}`];
   return [
     `SELECT ${intent.distinct === true ? 'DISTINCT ' : ''}${select.join(', ')}`,
@@ -663,10 +829,10 @@ function renderValidated(intent: QueryIntent): string {
  * The harness needs this shape for one reason — a refused intent is *evidence* about the grammar,
  * not a crash, and a caller that has to catch to count it will eventually count it as zero.
  */
-export function compileIntent(value: unknown): IntentCompilation {
+export function compileIntent(value: unknown, options?: IntentOptions): IntentCompilation {
   try {
     const intent = parseQueryIntent(value);
-    return { ok: true, sql: renderValidated(intent), intent };
+    return { ok: true, sql: renderValidated(intent, options), intent };
   } catch (error) {
     return { ok: false, reason: reasonOf(error), detail: detailOf(error) };
   }

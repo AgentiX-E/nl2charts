@@ -128,9 +128,14 @@ describe('a filter is a column, an operator and a value', () => {
     expect(render({ column: 'a', op: '=', value: false })).toContain('WHERE a = 0');
   });
 
-  it('accepts a qualified column and refuses anything that is not a name', () => {
+  it('accepts a qualified column, quotes a name that needs it, and refuses one that cannot be a name', () => {
     expect(render({ column: 't.a', op: '=', value: 1 })).toContain('WHERE t.a = 1');
-    for (const column of ['a b', 'a;drop', '"a"', 'a.b.c', '', '1a', 'a-b']) {
+    // The corpus does not spell every column with word characters: BIRD's `california_schools` holds
+    // `County Name` and `Charter School (Y/N)`. A grammar that only accepted bare words could not
+    // name them, and the refusal would read as a model that cannot spell.
+    expect(render({ column: 'frpm.County Name', op: '=', value: 'Fresno' })).toContain('WHERE frpm."County Name" = \'Fresno\'');
+    expect(render({ column: 'Charter School (Y/N)', op: '=', value: 1 })).toContain('WHERE "Charter School (Y/N)" = 1');
+    for (const column of ['a;drop', 'a.b.c', '', ' a', 'a ', 'a--b', 'a/*b', 'a`b', 'a\u0000b']) {
       expect(compileIntent({ ...MINIMAL, where: [{ column, op: '=', value: 1 }] })).toMatchObject({
         ok: false,
         reason: 'bad-identifier',
@@ -210,8 +215,17 @@ describe('an expression is parsed against a closed grammar', () => {
     expect(refused.ok ? '' : refused.detail).toContain('json_extract');
   });
 
-  it('refuses a double-quoted token, which SQLite would read as a name and MySQL as a string', () => {
-    expect(compileIntent({ ...MINIMAL, select: [{ expr: '"a"' }] })).toMatchObject({ ok: false, reason: 'bad-expression' });
+  it('reads a double-quoted token as a name, which is the only way an expression can spell one', () => {
+    // The alternative was refusing it, and refusing it made a column the corpus spells `County Name`
+    // unnameable inside any expression at all. Double quotes are the identifier syntax in every
+    // engine BIRD runs on, so `"County Name"` is a column reference and `'County Name'` is a string —
+    // the two spellings mean different things here, exactly as they do to the engine.
+    expect(renderIntentExpression('"County Name"')).toBe('"County Name"');
+    expect(renderIntentExpression("'County Name'")).toBe("'County Name'");
+    expect(renderIntentExpression('lower("County Name")')).toBe('lower("County Name")');
+    expect(renderIntentExpression('"a""b"')).toBe('"a""b"');
+    // An unterminated quote is still not a name, and it is refused where it is read.
+    expect(compileIntent({ ...MINIMAL, select: [{ expr: '"a' }] })).toMatchObject({ ok: false, reason: 'bad-expression' });
   });
 
   it('refuses a statement smuggled into an expression', () => {
@@ -308,28 +322,25 @@ describe('the shape of the object itself', () => {
     });
   });
 
-  it('refuses a join whose table, alias or side of a pair is not a name', () => {
-    expect(compileIntent({ ...MINIMAL, joins: [{ table: 'u v', on: [{ left: 'a', right: 'u.a' }] }] })).toMatchObject({
-      ok: false,
-      reason: 'bad-identifier',
-    });
-    expect(compileIntent({ ...MINIMAL, joins: [{ table: 'u', alias: 'u v', on: [{ left: 'a', right: 'u.a' }] }] })).toMatchObject({
-      ok: false,
-      reason: 'bad-identifier',
-    });
-    expect(compileIntent({ ...MINIMAL, joins: [{ table: 'u', on: [{ left: 'a b', right: 'u.a' }] }] })).toMatchObject({
-      ok: false,
-      reason: 'bad-identifier',
-    });
-    expect(compileIntent({ ...MINIMAL, joins: [{ table: 'u', on: [{ left: 'a', right: 5 }] }] })).toMatchObject({
-      ok: false,
-      reason: 'bad-identifier',
-    });
+  it('quotes a join name that needs it, and refuses one that cannot be a name', () => {
+    expect(renderIntent({ ...MINIMAL, joins: [{ table: 'u v', on: [{ left: 'a', right: 'u.a' }] }] })).toContain('JOIN "u v" ON');
+    expect(renderIntent({ ...MINIMAL, joins: [{ table: 'u', alias: 'u v', on: [{ left: 'a b', right: 'u.a' }] }] })).toContain(
+      'JOIN u "u v" ON "a b" = u.a',
+    );
+    for (const join of [
+      { table: 'u;v', on: [{ left: 'a', right: 'u.a' }] },
+      { table: 'u', alias: 'u`v', on: [{ left: 'a', right: 'u.a' }] },
+      { table: 'u', on: [{ left: 'a--b', right: 'u.a' }] },
+      { table: 'u', on: [{ left: 'a', right: 5 }] },
+    ]) {
+      expect(compileIntent({ ...MINIMAL, joins: [join] })).toMatchObject({ ok: false, reason: 'bad-identifier' });
+    }
     expect(compileIntent({ ...MINIMAL, joins: [{ table: 'u', on: [5] }] })).toMatchObject({ ok: false, reason: 'bad-expression' });
   });
 
-  it('refuses a from alias that is not a name, rather than emitting it', () => {
-    expect(compileIntent({ from: 'orders', alias: 'o x', select: [{ expr: 'a' }] })).toMatchObject({
+  it('quotes a from alias that needs it, and refuses one that cannot be a name', () => {
+    expect(renderIntent({ from: 'orders', alias: 'o x', select: [{ expr: 'a' }] })).toBe('SELECT a FROM orders "o x"');
+    expect(compileIntent({ from: 'orders', alias: 'o;x', select: [{ expr: 'a' }] })).toMatchObject({
       ok: false,
       reason: 'bad-identifier',
     });
@@ -352,8 +363,9 @@ describe('the shape of the object itself', () => {
     });
   });
 
-  it('refuses a group-by key that is not a column reference', () => {
-    expect(compileIntent({ ...MINIMAL, groupBy: ['a b'] })).toMatchObject({ ok: false, reason: 'bad-identifier' });
+  it('quotes a group-by key that needs it, and refuses one that cannot be a column reference', () => {
+    expect(renderIntent({ ...MINIMAL, groupBy: ['a b', 'c'] })).toBe('SELECT count(*) FROM orders GROUP BY "a b", c');
+    expect(compileIntent({ ...MINIMAL, groupBy: ['a;b'] })).toMatchObject({ ok: false, reason: 'bad-identifier' });
     expect(compileIntent({ ...MINIMAL, groupBy: 'a' })).toMatchObject({ ok: false, reason: 'bad-identifier' });
   });
 
@@ -363,7 +375,8 @@ describe('the shape of the object itself', () => {
 
   it('refuses a select item that is not an object, or names an alias that is not one', () => {
     expect(compileIntent({ from: 't', select: ['a'] })).toMatchObject({ ok: false, reason: 'bad-expression' });
-    expect(compileIntent({ from: 't', select: [{ expr: 'a', alias: 'a b' }] })).toMatchObject({ ok: false, reason: 'bad-identifier' });
+    expect(renderIntent({ from: 't', select: [{ expr: 'a', alias: 'a b' }] })).toBe('SELECT a AS "a b" FROM t');
+    expect(compileIntent({ from: 't', select: [{ expr: 'a', alias: 'a;b' }] })).toMatchObject({ ok: false, reason: 'bad-identifier' });
   });
 
   it('refuses an order item without an expression', () => {
@@ -475,5 +488,73 @@ describe('the two closed lists are the contract, and they are readable', () => {
     for (const name of INTENT_FUNCTIONS) {
       expect(renderIntentExpression(`${name}(a)`)).toBe(`${name}(a)`);
     }
+  });
+});
+
+describe('a name is quoted when it needs quoting, and checked against the schema when there is one', () => {
+  const COLUMNS = ['frpm.County Name', 'frpm.CDSCode', 'County Name', 'CDSCode', 'n'];
+
+  it('treats a quoted spelling and a bare spelling as the same name', () => {
+    const bare = { ...MINIMAL, where: [{ column: 'County Name', op: '=', value: 'Fresno' }] };
+    const quoted = { ...MINIMAL, where: [{ column: '"County Name"', op: '=', value: 'Fresno' }] };
+    // The two spellings a model can produce for one column have to reach the engine as one text, or
+    // two candidates that mean the same thing stop being comparable and the pool counts them twice.
+    expect(renderIntent(bare)).toBe(renderIntent(quoted));
+    expect(renderIntent(quoted)).toContain('WHERE "County Name" = \'Fresno\'');
+    // A quote inside a name is doubled, which is the only escape SQLite's identifier syntax has.
+    expect(renderIntent({ ...MINIMAL, where: [{ column: '"a""b"', op: '=', value: 1 }] })).toContain('WHERE "a""b" = 1');
+  });
+
+  it('refuses a column the schema does not have, which quoting would otherwise hide', () => {
+    // The reason this check exists is SQLite's own behaviour: `"County Nam" = 1` is not an error, it
+    // is a column compared to a *string literal*, and it returns a clean wrong answer. A renderer
+    // that quotes has to be handed the schema or it trades a syntax defect for a silent one.
+    const misspelled = { ...MINIMAL, where: [{ column: 'frpm.County Nam', op: '=', value: 1 }] };
+    expect(compileIntent(misspelled, { columns: COLUMNS })).toMatchObject({ ok: false, reason: 'unknown-identifier' });
+    expect(compileIntent(misspelled)).toMatchObject({ ok: true });
+  });
+
+  it('accepts the qualified and the bare spelling of a column it knows', () => {
+    const intent = { ...MINIMAL, where: [{ column: 'frpm.County Name', op: '=', value: 1 }], groupBy: ['frpm.CDSCode'] };
+    expect(compileIntent(intent, { columns: COLUMNS })).toMatchObject({ ok: true });
+    expect(compileIntent({ ...intent, where: [{ column: 'County Name', op: '=', value: 1 }] }, { columns: COLUMNS })).toMatchObject({ ok: true });
+  });
+
+  it('compares names the way the engine does, which is without case', () => {
+    expect(compileIntent({ ...MINIMAL, where: [{ column: 'cdscode', op: '=', value: 1 }] }, { columns: ['CDSCode'] })).toMatchObject({ ok: true });
+  });
+
+  it('checks every clause a name can appear in, not only the select list', () => {
+    const columns = ['orders.id', 'orders.total', 'customers.name'];
+    expect(compileIntent({ from: 'orders', select: [{ expr: 'nope' }] }, { columns })).toMatchObject({ ok: false, reason: 'unknown-identifier' });
+    expect(
+      compileIntent({ from: 'orders', select: [{ expr: 'orders.id' }], where: [{ column: 'orders.nope', op: '=', value: 1 }] }, { columns }),
+    ).toMatchObject({ ok: false, reason: 'unknown-identifier' });
+    expect(
+      compileIntent({ from: 'orders', select: [{ expr: 'orders.id' }], groupBy: ['orders.nope'] }, { columns }),
+    ).toMatchObject({ ok: false, reason: 'unknown-identifier' });
+    expect(
+      compileIntent({ from: 'orders', select: [{ expr: 'orders.id' }], orderBy: [{ expr: 'nope' }] }, { columns }),
+    ).toMatchObject({ ok: false, reason: 'unknown-identifier' });
+    expect(
+      compileIntent(
+        { from: 'orders', select: [{ expr: 'orders.id' }], joins: [{ table: 'customers', on: [{ left: 'orders.id', right: 'customers.nope' }] }] },
+        { columns },
+      ),
+    ).toMatchObject({ ok: false, reason: 'unknown-identifier' });
+    expect(
+      compileIntent({ from: 'orders', select: [{ expr: 'orders.id' }], having: [{ column: 'nope', op: '>', value: 1 }] }, { columns }),
+    ).toMatchObject({ ok: false, reason: 'unknown-identifier' });
+  });
+
+  it('does not refuse a name it cannot resolve because the alias, not the schema, owns it', () => {
+    // `o` is a name this statement invented; the column after the dot is the part the schema owns,
+    // which is the whole of what a flat column list can check without a join graph.
+    expect(
+      compileIntent(
+        { from: 'orders', alias: 'o', select: [{ expr: 'o.id' }], where: [{ column: 'o.total', op: '>', value: 1 }] },
+        { columns: ['orders.id', 'orders.total'] },
+      ),
+    ).toMatchObject({ ok: true });
   });
 });

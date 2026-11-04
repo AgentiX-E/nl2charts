@@ -984,12 +984,20 @@ the case where no model was registered.
 Three rules keep the closed grammar safe rather than merely small, and each one is a decision that
 could have gone the other way:
 
-- **Identifiers are validated, never escaped.** A name must match `[A-Za-z_][A-Za-z0-9_]*` with at
-  most one dot, so nothing that reaches the output can be anything but a name. Quoting was the
-  alternative and it is worse than useless on SQLite: a double-quoted token that names no column is
-  read as a *string literal*, so `"customer_id"` in a database that spells it `CustomerID` compares
-  a column to a constant and returns a clean, wrong answer. An escaping strategy that fails silently
-  on the engine this benchmark runs is not a strategy.
+- **Identifiers are checked, then quoted when the spelling needs it.** A name is a table or a column,
+  at most one dot, and it may not carry a control character, a semicolon or a comment marker. Names
+  that are not bare words are double-quoted on the way out, because a corpus does not spell every
+  column with word characters: BIRD's `california_schools` holds `County Name` and
+  `Charter School (Y/N)`, and a grammar that only accepted `[A-Za-z_][A-Za-z0-9_]*` could not name
+  4.6% of the columns in the benchmark's own databases. The refusal that gap produced was
+  indistinguishable, in the histogram, from a model that cannot spell.
+  Quoting is what then makes the *schema* mandatory rather than optional: SQLite reads a
+  double-quoted token that names no column as a **string literal**, so `"County Nam" = 1` compares a
+  column to a constant and returns a clean, wrong answer instead of an error. `compileIntent`
+  therefore takes the column list when the caller has one and refuses an unknown name as
+  `unknown-identifier`; the harness passes the card's columns on every call. A renderer without the
+  schema can guarantee the shape of a statement and nothing about its meaning, which is a trade worth
+  naming rather than hiding.
 - **Literals are rendered from values, not copied from text.** A string is quoted and its quotes
   doubled here, an integer stays an integer, `null` is `NULL`, `true` is `1` because that is what
   SQLite stores. The `literal-case` and `literal-missing` classes the diagnostics named cannot
@@ -1001,12 +1009,21 @@ could have gone the other way:
   the same text.
 
 The refusals are the part worth reading twice. Every one of them is a *name* (`no-object`,
-`not-json`, `unsupported-function`, `bad-identifier`, `missing-from`, and eleven more), and the names
+`not-json`, `unsupported-function`, `bad-identifier`, `unknown-identifier`, `missing-from`, and
+eleven more), and the names
 split into two families with opposite fixes: a reader failure means the model did not follow the
 format, so the instruction is wrong; a grammar failure means the model answered in a vocabulary the
 renderer does not have, so the grammar is too narrow. Over a split, the histogram of those names *is*
 the ordered list of what to add next — a question ("how wide should the grammar be?") that cannot be
 answered by reading SQL, only by counting what a corpus asked for and the compiler refused.
+
+A name is a family, though, and the family is not the construct. The first probe over 40 dev
+questions published `bad-expression 5` and `bad-identifier 2` and neither number could be acted on:
+the difference between "the grammar has no `case`" and "the model writes `median`" is a week of work
+either way, and the histogram cannot tell them apart. So the funnel also keeps the first few refusals
+of each name with the compiler's own sentence and the case they came from — `refusedCases` in the
+artifact, three per name. That is what turned a five-name histogram into four grammar additions
+(`case`, comparisons, `||`, `between`) in one round instead of five.
 
 The harness half is deliberately thin (`eval/bird/intent.ts`): one rule appended to the prompt an
 existing arm already sends, one reader, one funnel. That split is the same rule as the guard section

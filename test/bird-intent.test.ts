@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { INTENT_FUNCTIONS, INTENT_OPERATORS } from '@agentix-e/nl2charts-core/semantic';
-import { INTENT_RULE, intentFunnel, intentPayload, readIntentReply } from '../eval/bird/intent.js';
+import { INTENT_RULE, INTENT_SAMPLES_PER_REASON, intentFunnel, intentPayload, readIntentReply } from '../eval/bird/intent.js';
 
 /**
  * The reader half of the fourth candidate source.
@@ -116,7 +116,7 @@ describe('a reply becomes a statement or a named refusal', () => {
 
 describe('the funnel separates the two things a refusal can mean', () => {
   it('is zero-shaped on no records, rather than a division by zero', () => {
-    expect(intentFunnel([])).toEqual({ asked: 0, rendered: 0, share: 0, refused: {} });
+    expect(intentFunnel([])).toEqual({ asked: 0, rendered: 0, share: 0, refused: {}, refusedSamples: [] });
   });
 
   it('counts what rendered and shares it over what was asked', () => {
@@ -143,5 +143,69 @@ describe('the funnel separates the two things a refusal can mean', () => {
     expect(Object.keys(funnel.refused)).toEqual(['unsupported-function', 'bad-identifier', 'no-object', 'not-json']);
     expect(funnel.refused['unsupported-function']).toBe(3);
     expect(funnel.share).toBe(0);
+  });
+});
+
+describe('a refusal kept its sentence, not only its name', () => {
+  it('keeps the first few refusals of each name, with where they were', () => {
+    const records = [
+      { read: 'ok' as const },
+      { read: 'bad-expression' as const, detail: 'one' },
+      { read: 'bad-identifier' as const, detail: 'two' },
+      { read: 'bad-expression' as const, detail: 'three' },
+      { read: 'bad-expression' as const, detail: 'four' },
+      { read: 'bad-expression' as const, detail: 'five' },
+    ];
+    const funnel = intentFunnel(records);
+    expect(funnel.refused).toEqual({ 'bad-expression': 4, 'bad-identifier': 1 });
+    // `at` is the position in the record list, which is what lets a caller print the case id: the
+    // histogram said `bad-expression 4` and nothing about which four, and a name is a family.
+    expect(funnel.refusedSamples.map((sample) => [sample.at, sample.read, sample.detail])).toEqual([
+      [1, 'bad-expression', 'one'],
+      [2, 'bad-identifier', 'two'],
+      [3, 'bad-expression', 'three'],
+      [4, 'bad-expression', 'four'],
+    ]);
+    expect(funnel.refusedSamples.filter((sample) => sample.read === 'bad-expression')).toHaveLength(INTENT_SAMPLES_PER_REASON);
+  });
+
+  it('keeps nothing for a run whose every reply rendered', () => {
+    expect(intentFunnel([{ read: 'ok' }, { read: 'ok' }]).refusedSamples).toEqual([]);
+  });
+
+  it('says an empty detail as an empty string rather than as undefined', () => {
+    // The artifact is read by scripts; a missing field and a field holding nothing are different
+    // JSON, and only one of them prints.
+    expect(intentFunnel([{ read: 'no-object' }]).refusedSamples).toEqual([{ at: 0, read: 'no-object', detail: '' }]);
+  });
+});
+
+describe('the schema reaches the reader, which is where a quoted name is safe', () => {
+  const COLUMNS = ['frpm.CDSCode', 'frpm.County Name', 'CDSCode', 'County Name'];
+
+  it('renders the column the corpus spells with a space in it', () => {
+    const reply = JSON.stringify({
+      from: 'frpm',
+      select: [{ expr: '"County Name"' }],
+      where: [{ column: 'CDSCode', op: '=', value: 1 }],
+    });
+    expect(readIntentReply(reply, { columns: COLUMNS })).toEqual({
+      ok: true,
+      sql: 'SELECT "County Name" FROM frpm WHERE CDSCode = 1',
+    });
+  });
+
+  it('refuses a name the schema does not have, by the name of the family it belongs to', () => {
+    const reply = JSON.stringify({ from: 'frpm', select: [{ expr: '"County Nam"' }] });
+    const read = readIntentReply(reply, { columns: COLUMNS });
+    expect(read).toMatchObject({ ok: false, reason: 'unknown-identifier' });
+    expect(read.ok ? '' : read.detail).toContain('County Nam');
+  });
+
+  it('renders without a schema, and says so by rendering rather than by refusing', () => {
+    // The option is what a caller with a catalog passes and a caller with a string does not; the
+    // difference has to be visible in behaviour, or a test could not tell which path ran.
+    const reply = JSON.stringify({ from: 'frpm', select: [{ expr: '"County Nam"' }] });
+    expect(readIntentReply(reply)).toMatchObject({ ok: true, sql: 'SELECT "County Nam" FROM frpm' });
   });
 });

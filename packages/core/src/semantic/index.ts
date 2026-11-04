@@ -43,6 +43,7 @@ export type {
   IntentFilter,
   IntentJoin,
   IntentOperator,
+  IntentOptions,
   IntentOrder,
   IntentRefusal,
   IntentSelect,

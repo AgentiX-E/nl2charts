@@ -487,9 +487,19 @@ which names metrics and dimensions of a registered semantic model; an intent nam
 of a schema it was shown, which is the case where no model exists.
 
 **Intent refusal** — The name a renderer gives a reply it would not turn into SQL, in place of an
-exception: `no-object`, `not-json`, `unsupported-function`, `bad-identifier`, `missing-from` and
-eleven more. The names split into two families that call for opposite fixes — a reader failure means
-the format instruction was not followed, a grammar failure means the vocabulary was too narrow — and
-the histogram of them over a split is the ordered list of what to add to the grammar next. A refusal
-is a reading, not a defect: only the case where *nothing* renders is a wiring bug, which is the one
-state the harness refuses to publish.
+exception: `no-object`, `not-json`, `unsupported-function`, `bad-identifier`, `unknown-identifier`,
+`missing-from` and eleven more. The names split into two families that call for opposite fixes — a
+reader failure means the format instruction was not followed, a grammar failure means the vocabulary
+was too narrow — and the histogram of them over a split is the ordered list of what to add to the
+grammar next. A name is a family rather than a construct, so the harness keeps the first few refusals
+of each name with the compiler's sentence and the case they came from; that is what turns "five
+`bad-expression`" into "the grammar has no `case`". A refusal is a reading, not a defect: only the
+case where *nothing* renders is a wiring bug, which is the one state the harness refuses to publish.
+
+**Identifier quoting** — How `renderIntent` writes a name: unchanged when it is a bare word, double
+quoted with internal quotes doubled when it is not. The second form is not a nicety — a schema spells
+columns `County Name` and `Charter School (Y/N)`, and 4.6% of the columns in BIRD's databases cannot
+be written otherwise. Quoting is also why the renderer wants the schema: SQLite reads a double-quoted
+name that matches no column as a *string literal*, so a misspelling compares a column to a constant
+and returns a clean wrong answer. With `columns` passed, `compileIntent` refuses it as
+`unknown-identifier` instead.

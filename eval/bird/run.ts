@@ -2596,8 +2596,20 @@ export function assertIntentFired(armName: string, runs: readonly CaseRun[], min
 }
 
 /** What the intent source produced: the format's conversion and the grammar's refusals by name. */
-export function intentReport(runs: readonly CaseRun[]): ReturnType<typeof intentFunnel> {
-  return intentFunnel(runs.flatMap((run) => (run.intent === undefined ? [] : [run.intent])));
+export function intentReport(runs: readonly CaseRun[]): ReturnType<typeof intentFunnel> & { readonly refusedCases: readonly { readonly case: string; readonly read: string; readonly detail: string }[] } {
+  // The funnel is computed over the subset that asked, so a record's position is an index into this
+  // array and not into `runs`: publishing the position as a case id would name the wrong question on
+  // every arm whose first case failed before the intent call.
+  const asked = runs.flatMap((run) => (run.intent === undefined ? [] : [{ id: run.id, intent: run.intent }]));
+  const funnel = intentFunnel(asked.map((entry) => entry.intent));
+  return {
+    ...funnel,
+    refusedCases: funnel.refusedSamples.map((sample) => ({
+      case: asked[sample.at]?.id ?? '',
+      read: sample.read,
+      detail: sample.detail,
+    })),
+  };
 }
 
 /**
@@ -3750,7 +3762,28 @@ export async function askIntent(
   // different *vocabulary*, not a different price, and a call counted under another purpose would
   // make the two arms' cost tables disagree about what generation costs.
   const reply = await provider.complete({ messages: built.messages, temperature: 0.7, purpose: 'generate' });
-  return readIntentReply(reply.text);
+  // The card is the schema this renderer is held to. Quoting is what lets a column the corpus spells
+  // `County Name` be written at all, and quoting is also what turns a misspelling into a SQLite
+  // *string literal* — a clean wrong answer instead of an error — so the column list is passed on
+  // every call rather than left to a caller that might forget: a renderer without it can guarantee
+  // the statement's shape and nothing about its meaning.
+  return readIntentReply(reply.text, { columns: schemaColumnNames(request.schema) });
+}
+
+/**
+ * Every column of a card, in the two spellings a name can arrive as.
+ *
+ * Both are listed because the renderer accepts a qualified name and a bare one, and a check that
+ * only held `table.column` would refuse the bare form a grouped query often uses.
+ */
+export function schemaColumnNames(schema: readonly SchemaTable[]): string[] {
+  const names: string[] = [];
+  for (const table of schema) {
+    for (const column of table.columns) {
+      names.push(column.name, `${table.table}.${column.name}`);
+    }
+  }
+  return names;
 }
 
 /** One advertised column the database does not have. */export interface MissingColumn {

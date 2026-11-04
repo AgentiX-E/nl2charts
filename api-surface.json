@@ -134,6 +134,7 @@
     "type IntentFilter",
     "type IntentJoin",
     "type IntentOperator",
+    "type IntentOptions",
     "type IntentOrder",
     "type IntentRefusal",
     "type IntentSelect",

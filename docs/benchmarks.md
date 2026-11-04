@@ -6620,23 +6620,37 @@ model that *describes* a query cannot write any of them.
 So the fourth source answers with a JSON object, and `renderIntent` writes the statement:
 `from`, `joins` as `{table, on: [{left, right}]}`, `select` as expressions with optional aliases,
 `where` and `having` as `(column, op, value)` triples, `groupBy`, `orderBy`, `limit`, `distinct`. Ten
-keys, one function set, sixteen refusal names. Three rules keep the closed grammar from being merely
-small:
+keys, one function set, seventeen refusal names. Three rules keep the closed grammar from being
+merely small:
 
 | rule | why it is the rule |
 |---|---|
-| identifiers are validated (`[A-Za-z_][A-Za-z0-9_]*`, one dot) and **never quoted** | a double-quoted token that names no column is read as a *string literal* by SQLite, so quoting turns a misspelling into a comparison against a constant and returns a clean, wrong answer |
+| identifiers are **checked, then quoted when the spelling needs it** (a control character, a semicolon or a comment marker is refused; everything else is rendered bare or double-quoted) | the corpus does not spell every column with word characters: `County Name` and `Charter School (Y/N)` are 4.6% of the columns in BIRD's own databases, and a bare-word lexer cannot name them at all. Quoting is then what makes the schema load-bearing — SQLite reads a double-quoted token that names no column as a *string literal*, so the compiler takes the column list and refuses `unknown-identifier` |
 | literals are rendered from **values** | a string is quoted here and its quotes doubled, an integer stays an integer, `true` is `1`; the `literal-case` and `literal-missing` classes cannot survive that |
 | expressions are **parsed** against a closed grammar | an expression is the one string in the contract where injection could hide; it renders in one canonical form, so two descriptions that mean the same thing produce the same text |
 
-**The refusals are the instrument.** Sixteen names, and they split into two families with opposite
+**The refusals are the instrument.** Seventeen names, and they split into two families with opposite
 fixes: `no-object` and `not-json` say the format instruction was not followed (a prompt problem),
-while `unsupported-function`, `bad-identifier`, `bad-expression`, `missing-from` and the rest say the
-vocabulary could not express the question (a grammar decision). Over a split, the histogram **is** the
-ordered list of what to add next, which is a question no amount of reading SQL can answer. A refusal
-is therefore a reading and not a defect: the only state the harness refuses to publish is the one
-where *nothing* renders, and `assertIntentFired` says so in two separate sentences — never asked (a
-wiring break) and never rendered (a format break).
+while `unsupported-function`, `bad-identifier`, `unknown-identifier`, `bad-expression`, `missing-from`
+and the rest say the vocabulary could not express the question (a grammar decision). Over a split, the
+histogram **is** the ordered list of what to add next, which is a question no amount of reading SQL can
+answer. A refusal is therefore a reading and not a defect: the only state the harness refuses to
+publish is the one where *nothing* renders, and `assertIntentFired` says so in two separate sentences —
+never asked (a wiring break) and never rendered (a format break).
+
+**What the first probe changed, and why a name was not enough.** `41748908122` ran 40 dev questions:
+the source rendered **30 of 40 = 75%** and refused ten, which put criterion ③ exactly at its floor, and
+the names split `bad-expression` 5, `bad-identifier` 2, `bad-operator` 2, `bad-value` 1. Ten refusals
+in five names is a ranking and not a decision — "the grammar has no `case`" and "the model writes
+`median`" are a week of work each, in opposite directions, and the histogram cannot tell them apart.
+So the funnel now keeps the first three refusals of each name with the compiler's own sentence and the
+case they came from, and that is what turned those numbers into four grammar additions in one round:
+searched and simple `case` (five of the ten), comparisons, `||`, and `between`. The second probe — 120
+questions, same model — renders **91 of 120 = 75.8%** and splits `bad-identifier` 14, `bad-operator` 5,
+`bad-expression` 4, `bad-value` 3, `unexpected-value` 2, `unsupported-function` 1. The largest bucket
+moved from `bad-expression` to `bad-identifier`, and 4.6% of the columns in the benchmark's databases
+cannot be written as a bare word: that is the reading that produced quoting and the schema check, not
+a wider expression grammar.
 
 **What the arm is, exactly.** `select-intent` = `['inline+evidence', 'metadata+evidence', 'values',
 'intent']`: the shipped trio plus one more candidate, at four generations and one selection per case
@@ -6659,3 +6673,24 @@ reader would publish a wiring mistake as a weak prompt.
 Fail ① ⇒ revert the lever and keep the instrument (the grammar survives as a refusal histogram,
 which is what a negative reading leaves behind). Pass ① ⇒ the ceiling has moved for the first time
 since `select-mixed`, and the next round prices `select-intent` as the arm to beat.
+
+**What the 120-question probe says about criterion ①, and the defect it exposes in the criterion.**
+Both arms reached a ceiling of **84 of 120 = 70.00%**; the intent source was sole-correct on **one**
+case (`168`). Two cases were gained (`168`, `1160`) and two were lost (`1001`, `1325`) — inside the
+source's own pool, which is impossible unless the other three candidates moved too. They did: an arm's
+three sources are *sampled separately*, so `select-intent` is not `select-mixed` plus one candidate,
+it is a different draw of three plus one. `I-74` had already measured the size of that: three prompts
+of one prompt differ by enough to move a pool ceiling 1.49pp, which is larger than half the criterion.
+
+So the honest reading of a same-run ceiling difference is "the fourth source plus a redraw", and the
+criterion as written would credit the grammar with a resampling artefact in either direction. The
+number that isolates the source is a conditional one, and the probe has it: of the 36 cases
+`select-mixed` did not reach, the intent source rendered 24 and was right on **1** — 4.2%, against its
+own 63.7% overall (58 of 91 rendered), which is the same 63-65% the three prompts score. A candidate
+that is as good as its siblings and no better *on the cases its siblings missed* adds nothing to a
+pool; it adds a fourth opinion to cases that already had three.
+
+Sizing that against the bar: 31 sole-correct cases out of the ~490 dev cases the trio misses is 6.3%,
+and 4.2% at n = 24 cannot separate 6.3% from 0 (the 95% interval runs from 0.1% to 21%). The verdict
+therefore needs more cases, not a different argument — but the direction is now a measurement rather
+than a guess, and the next dispatch is sized for it.

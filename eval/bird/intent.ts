@@ -1,5 +1,5 @@
 import { INTENT_FUNCTIONS, compileIntent } from '@agentix-e/nl2charts-core/semantic';
-import type { IntentRefusal } from '@agentix-e/nl2charts-core/semantic';
+import type { IntentOptions, IntentRefusal } from '@agentix-e/nl2charts-core/semantic';
 
 /**
  * The fourth candidate, written as a query instead of as a statement.
@@ -101,7 +101,7 @@ function balancedObject(text: string, start: number): string | undefined {
  * Never throws: a candidate that cannot be read is a candidate that never arrived, which the
  * harness already counts (`candidateFailures.unparsed`) and which must not take the case with it.
  */
-export function readIntentReply(text: string): IntentRead {
+export function readIntentReply(text: string, options?: IntentOptions): IntentRead {
   const payload = intentPayload(text);
   if (payload === undefined) return { ok: false, reason: 'no-object', detail: 'reply carried no json object' };
   let value: unknown;
@@ -112,7 +112,7 @@ export function readIntentReply(text: string): IntentRead {
     // reader can act on; a defensive `instanceof` here would be a branch no reply can reach.
     return { ok: false, reason: 'not-json', detail: (error as Error).message };
   }
-  const compiled = compileIntent(value);
+  const compiled = compileIntent(value, options);
   return compiled.ok ? { ok: true, sql: compiled.sql } : { ok: false, reason: compiled.reason, detail: compiled.detail };
 }
 
@@ -141,7 +141,22 @@ export interface IntentFunnel {
   readonly share: number;
   /** Refusals by name, most frequent first. Empty when every reply rendered. */
   readonly refused: Readonly<Record<string, number>>;
+  /**
+   * A few refused replies, by name, with the sentence that says what was wrong.
+   *
+   * The histogram ranks the names and stops there; a name is a family, and the family is not the
+   * construct. The first probe published `bad-expression 5` and `bad-identifier 2` and neither could
+   * be acted on without knowing *which* expression, *which* name — the difference between "the
+   * grammar has no `case`" and "the model writes `median`" is a week of work either way and the
+   * histogram cannot tell them apart. `at` is the record's position, so a caller that holds the case
+   * ids can publish them; the cap is per name, not overall, because a single frequent refusal would
+   * otherwise fill the list.
+   */
+  readonly refusedSamples: readonly { readonly at: number; readonly read: IntentReadReason; readonly detail: string }[];
 }
+
+/** How many refusals of one name are kept. Three is enough to see a pattern and cheap in the artifact. */
+export const INTENT_SAMPLES_PER_REASON = 3;
 
 /**
  * The funnel, from records rather than from guesses.
@@ -153,11 +168,20 @@ export interface IntentFunnel {
  */
 export function intentFunnel(records: readonly IntentRecord[]): IntentFunnel {
   const refused: Record<string, number> = {};
+  const kept: Record<string, number> = {};
+  const refusedSamples: { at: number; read: IntentReadReason; detail: string }[] = [];
   let rendered = 0;
-  for (const record of records) {
-    if (record.read === 'ok') rendered += 1;
-    else refused[record.read] = (refused[record.read] ?? 0) + 1;
-  }
+  records.forEach((record, at) => {
+    if (record.read === 'ok') {
+      rendered += 1;
+      return;
+    }
+    refused[record.read] = (refused[record.read] ?? 0) + 1;
+    const seen = kept[record.read] ?? 0;
+    if (seen >= INTENT_SAMPLES_PER_REASON) return;
+    kept[record.read] = seen + 1;
+    refusedSamples.push({ at, read: record.read, detail: record.detail ?? '' });
+  });
   const ordered = Object.fromEntries(Object.entries(refused).sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0])));
-  return { asked: records.length, rendered, share: records.length === 0 ? 0 : rendered / records.length, refused: ordered };
+  return { asked: records.length, rendered, share: records.length === 0 ? 0 : rendered / records.length, refused: ordered, refusedSamples };
 }

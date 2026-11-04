@@ -135,6 +135,29 @@ cannot be argued with.
   `assertIntentRule` refuses to dispatch the `intent` arm alone — its statement is rendered on the
   candidate-source path, and a JSON reply read by a statement reader would publish a near-zero
   accuracy that looks like a weak prompt instead of a wiring mistake.
+- **The first probe's refusals rewrote the grammar, and the histogram is why it could.** `41748908122`
+  ran 40 dev questions: the intent source rendered **30 of 40 = 75%** and refused 10, which is
+  criterion ③ already at its floor, and the refusal names split `bad-expression` 5, `bad-identifier` 2,
+  `bad-operator` 2, `bad-value` 1. That is a vocabulary reading, not an accuracy reading: five of ten
+  were `case`, so searched and simple `case when .. then .. [else ..] end` is now in the grammar,
+  along with comparisons (`=`, `<>`, `>`, `>=`, `<`, `<=`, one per operand and never a chain), `||`, and
+  `between` / `not between` as the one operator that takes exactly two bounds. The tokenizer reads two
+  characters before one, or `>=` would become `>` and a stray `=` and the refusal would name the wrong
+  cause. `IntentRecord` also publishes `detail` — the compiler's own message, truncated to 160
+  characters — because a name says which family failed and not what to add next, and a histogram of
+  names without details can only rank the families. It reaches the artifact as `intent.refusedCases`:
+  three per name, with the case they came from.
+- **Names are quoted when the corpus spells them with a space, and the schema is what makes that
+  safe.** The second probe's largest refusal bucket was `bad-identifier` (14 of 120), and the reason is
+  the corpus: BIRD's `california_schools` stores `County Name` and `Charter School (Y/N)`, which is
+  4.6% of the columns in the benchmark's own databases and all of them unnameable by a bare-word
+  lexer. Names are now checked for what cannot appear in one (a control character, a semicolon, a
+  comment marker) and rendered double-quoted otherwise — in filters, joins, group-by keys, and inside
+  expressions, where `"County Name"` is a name and `'County Name'` is a string. Quoting is also what
+  makes the column list load-bearing rather than advisory: SQLite reads a double-quoted token that
+  names no column as a string literal, so `compileIntent(value, { columns })` refuses it as
+  `unknown-identifier` (the seventeenth name), and the harness passes the card's columns on every
+  call.
 
 - **The third candidate slot priced as a swap rather than a purchase.** `select-samples` is
   `select-mixed` with one field changed — `mixed` — so both arms cost four calls. The slot it takes
