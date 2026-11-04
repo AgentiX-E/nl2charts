@@ -200,7 +200,10 @@ cannot be argued with.
   card an arm sends. Re-derived by the fixed instrument over the 500 Mini-Dev cases and all eleven
   databases: **1,479 → 2,047 characters (+38.4%)** for the wide block and **1,479 → 1,499 (+1.4%)**
   narrowed to the gold's filtered columns, with 451 of 500 cases carrying a bracket. The quoted
-  number was right; it is now measurable. Ten tests pin it, including the class guard that was
+  number was right; it is now measurable. The block itself is **568 characters a case**; the share
+  depends on the base — on an artifact whose inline arm carries its definitions the same card is
+  2,121.4 characters and the same block is +26.8% — so the characters travel and the percentage
+  does not. Ten tests pin it, including the class guard that was
   missing — **every arm that declares a block must render a card that differs from its parent's**,
   which is the one that would have caught this.
 

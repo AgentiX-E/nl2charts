@@ -7409,7 +7409,10 @@ the only way that is impossible to argue with:
 | `eval/out/card-select.json` | `select` | 2,121.4 |
 | `eval/out/card-inline+evidence+samples-gold.json` | `inline+evidence+samples-gold` | 2,121.4 |
 
-Two arms, two names, one card, to the tenth of a character. A lever the instrument cannot see is a
+Two arms, two names, one card, to the tenth of a character. The two arms' *parents* do share a card
+by construction — `select` is `inline+evidence` plus two samples and a selector — which is what makes
+the identity evidence rather than coincidence: the block should have added **+1.4%** on the arm that
+narrows to the gold's columns, and it added nothing at all. A lever the instrument cannot see is a
 lever it prices at zero, and this repository had already published a ceiling for that lever — the
 `samples` family closed at +0.72pp — so the wrong number was not the verdict, it was the *price*.
 The verdict rests on the accuracy reading, which is measured by the run and not by this instrument.
@@ -7439,7 +7442,14 @@ no model call, no query the run would not have made):
 
 The number the comments quoted is confirmed to the tenth of a percent, and the arithmetic behind the
 family's closure is now reproducible rather than inherited: the wide block costs more than a third of
-the card, and the narrow one is cheap because it is an oracle. The command that reproduces it is a
+the card, and the narrow one is cheap because it is an oracle.
+
+**One denominator note, because the percentage is not portable and the characters are.** The base
+above is the schema card *without* the generated definitions block. On an artifact whose inline arm
+carries them the same card is 2,121.4 characters, so the same 568 characters of block are **+26.8%**
+rather than +38.4%. The block's size is a property of the schema — 568 characters a case, 451 of 500
+cases — and the percentage is a property of whatever else is on the card. Quote the characters when
+the claim has to travel, and the percentage only against the base it was measured on. The command that reproduces it is a
 dispatch carrying both arms — `BIRD_ARMS=inline+evidence,inline+evidence+samples pnpm bench:bird`
 then `pnpm bench:bird:card --arm inline+evidence+samples` — which is why the arms stay in the
 catalogue even though the family is closed.
