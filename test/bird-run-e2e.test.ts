@@ -26,6 +26,7 @@ import { CHAIN_QUESTIONS, MINI_DB, MINI_GOLD, MINI_QUESTIONS, writeChainBirdData
 import { startEndpoint } from './helpers/endpoint.js';
 import type { EndpointRequest } from './helpers/endpoint.js';
 import { assertSamplesRan, assertSecondModel, judgeModelName, main, resolveSettings } from '../eval/bird/run.js';
+import { INTENT_RULE } from '../eval/bird/intent.js';
 
 const root = mkdtempSync(join(tmpdir(), 'nl2charts-bird-run-'));
 afterAll(() => {
@@ -133,6 +134,15 @@ interface Plan {
    * announced instead of the map being widened for every scenario.
    */
   readonly gold?: Readonly<Record<string, string>>;
+  /**
+   * The reply a prompt that asks for a query object gets, keyed on the question.
+   *
+   * Separate from `first` because the intent source is asked with the same question text as the
+   * three prompts beside it and answered in a different vocabulary: one entry for both would make
+   * the pair indistinguishable, and the reading is precisely that the vocabulary — not the question
+   * and not the card — is what changed.
+   */
+  readonly intent?: (question: string) => string;
 }
 
 /**
@@ -186,6 +196,13 @@ function replyFor(request: EndpointRequest, plan: Plan): { status?: number; cont
     // and that is the null case the control case has to be measurable against.
     const given = /The statement being checked: ([\s\S]*)$/.exec(prompt)?.[1]?.trim() ?? 'select 1';
     return send(plan.audit?.(audited) ?? `MISSING: none\n${fenced(given)}`);
+  }
+  // The intent source. Its prompt carries the question verbatim like every other generation
+  // prompt, so it is read before the question lookup below; the marker is the rule itself, which is
+  // the only text in the harness that asks for an object instead of a statement.
+  if (prompt.includes('Instead of a statement, reply with one JSON object')) {
+    const asked = Object.keys(golds).find((entry) => prompt.includes(entry)) ?? '';
+    return send(plan.intent?.(asked) ?? '{"from":"items","select":[{"expr":"count(*)"}]}');
   }
   const question = Object.keys(golds).find((entry) => prompt.includes(entry));
   if (question === undefined) return send(plan.definitions ?? DEFINITIONS);
@@ -2963,6 +2980,107 @@ describe('a mixed set whose third source carries a block of its own', () => {
  * pool did not. Both are per case in the artifact; this scenario makes them both nonzero and both
  * zero on purpose.
  */
+/**
+ * The fourth candidate is a query object, and the runner renders it.
+ *
+ * The lever's claim is narrow and has to be visible end to end or it is a prompt change: the model
+ * is asked for the same query in a closed vocabulary, the statement that reaches the database is
+ * the renderer's, and a reply the vocabulary cannot express is a candidate that never arrived with
+ * a name attached. All three are assertions here, and the third is the one an accuracy could never
+ * show — a refused candidate and a wrong candidate lower the ceiling identically.
+ *
+ * The one-lever claim is also an assertion: the intent prompt is the `inline+evidence` prompt with
+ * one rule line inserted, and removing that line has to give back the parent byte for byte. A
+ * prompt builder that quietly dropped a note or reordered the card would still produce a run, and
+ * the delta would then be about two changes.
+ */
+describe('the fourth candidate is a query object, rendered into a statement', () => {
+  const countable = QUESTIONS[6]?.question as string; // "How many orders are there for the pen?"
+  const unexpressible = QUESTIONS[5]?.question as string; // "What is the average item price?"
+  const MARKER = 'Instead of a statement, reply with one JSON object';
+
+  /** One answer the grammar can express and the renderer must therefore produce. */
+  const expressible = JSON.stringify({ from: 'orders', select: [{ expr: 'count(*)' }], where: [{ column: 'item_id', op: '=', value: 1 }] });
+  /** A call the closed grammar does not have: refused by name, not rendered into something else. */
+  const unexpressibleReply = JSON.stringify({ from: 'items', select: [{ expr: 'median(price)' }] });
+
+  it('renders the fourth candidate from a query object, and counts what the vocabularies asked for', async () => {
+    const result = await run({
+      plan: {
+        first: correct,
+        intent: (question) => (question === countable ? expressible : question === unexpressible ? unexpressibleReply : expressible),
+      },
+      env: { BIRD_ARMS: 'select-intent' },
+    });
+    expect(result.code).toBe(0);
+    const row = (result.report.arms as {
+      readonly arm: string;
+      readonly intent?: { readonly asked: number; readonly rendered: number; readonly share: number; readonly refused: Record<string, number> };
+      readonly calls: { readonly mean: number };
+      readonly sources?: readonly { readonly source: string; readonly selected: number }[];
+      readonly candidateSurvival?: Record<string, { readonly generated: number; readonly survived: number }>;
+    }[])[0];
+    // Seven questions asked, six rendered, one refused and named. The refusal is the reading the
+    // grammar is designed from: a wider grammar is a decision taken from this histogram, not from
+    // reading SQL.
+    expect(row?.intent?.asked).toBe(QUESTIONS.length);
+    expect(row?.intent?.rendered).toBe(QUESTIONS.length - 1);
+    expect(row?.intent?.share).toBeCloseTo((QUESTIONS.length - 1) / QUESTIONS.length, 10);
+    expect(row?.intent?.refused).toEqual({ 'unsupported-function': 1 });
+    // The call the fourth candidate costs is published with the arm, not inferred: four
+    // generations and one selection, on every case.
+    expect(row?.calls.mean ?? 0).toBeGreaterThan(4.9);
+    expect(row?.candidateSurvival?.['intent']).toEqual({
+      generated: QUESTIONS.length,
+      survived: QUESTIONS.length - 1,
+    });
+    // The statement in the artifact is the renderer's text, not the model's: keywords upper case,
+    // one line, no fence. A candidate recorded verbatim would mean the reply was executed.
+    const cases = result.report.cases as readonly {
+      readonly arm?: string;
+      readonly id?: string;
+      readonly winnerSource?: string;
+      readonly candidates?: readonly { readonly source?: string; readonly sql?: string }[];
+    }[];
+    const rendered = cases
+      .filter((entry) => entry.arm === 'select-intent')
+      .flatMap((entry) => entry.candidates ?? [])
+      .filter((candidate) => candidate.source === 'intent')
+      .map((candidate) => candidate.sql);
+    expect(rendered.length).toBe(QUESTIONS.length - 1);
+    expect(rendered).toContain('SELECT count(*) FROM orders WHERE item_id = 1');
+    expect(rendered.every((sql) => sql?.startsWith('SELECT ') === true)).toBe(true);
+  });
+
+  it('sends the parent prompt with one rule line inserted, and nothing else', async () => {
+    const mixed = await run({
+      plan: {
+        first: correct,
+        intent: () => expressible,
+      },
+      env: { BIRD_ARMS: 'select-intent' },
+    });
+    const plain = await run({ plan: { first: correct }, env: { BIRD_ARMS: 'inline+evidence' } });
+    expect(mixed.code).toBe(0);
+    expect(plain.code).toBe(0);
+    // Per question: the intent prompt with the rule removed must equal the parent's prompt. The
+    // rule is one note in the rules block, so the removal is the whole difference.
+    for (const question of Object.keys(GOLD)) {
+      const parent = plain.requests.map((request) => request.prompt).find((prompt) => prompt.includes(question) && !prompt.includes(MARKER));
+      const intent = mixed.requests.map((request) => request.prompt).find((prompt) => prompt.includes(question) && prompt.includes(MARKER));
+      expect(parent, question).toBeDefined();
+      expect(intent, question).toBeDefined();
+      expect(intent?.replace(`${INTENT_RULE}\n`, ''), question).toBe(parent);
+    }
+  });
+
+  it('refuses the arm on its own, because the reader it needs is the candidate path', async () => {
+    // The dispatch that would otherwise publish a JSON reply read by a statement reader: refused
+    // before a single call, with a sentence that names the arm to run instead.
+    await expect(run({ plan: { first: correct }, env: { BIRD_ARMS: 'intent' } })).rejects.toThrow(/candidate-source path/);
+  });
+});
+
 describe('a fourth opinion bought only on the cases the pool agreed', () => {
   const unanimousButWrong = QUESTIONS[3]?.question as string; // "What is the largest quantity…"
   const correct = (question: string): string => GOLD[question] as string;

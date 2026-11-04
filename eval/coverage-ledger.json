@@ -148,6 +148,12 @@
       "functions": 100,
       "branches": 98.09
     },
+    "eval/bird/intent.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 100
+    },
     "eval/bird/join-graph.ts": {
       "lines": 100,
       "statements": 100,

@@ -476,3 +476,20 @@ think and to put the number alone on the final line, and its reply is read from 
 two formats are selected by the endpoint's declared capability on an arm that opts in
 (`judgeFormat: 'capability'`), so every published selector reading keeps the instruction it was
 measured with and the format can be priced against the model it belongs to.
+
+**Query intent** — A query written as data instead of as text: the tables, the join column pairs, the
+filters as `(column, op, value)` triples, the grain, the order. `renderIntent`
+(`@agentix-e/nl2charts-core/semantic`) turns one into a statement, which is the point — a join
+predicate cannot land in the wrong clause, a literal cannot be left unquoted, a function the engine
+does not have cannot be invented. The contract is closed: ten optional keys, one function set, and
+every construct outside them is refused rather than approximated. Distinct from a `MetricQuery`,
+which names metrics and dimensions of a registered semantic model; an intent names tables and columns
+of a schema it was shown, which is the case where no model exists.
+
+**Intent refusal** — The name a renderer gives a reply it would not turn into SQL, in place of an
+exception: `no-object`, `not-json`, `unsupported-function`, `bad-identifier`, `missing-from` and
+eleven more. The names split into two families that call for opposite fixes — a reader failure means
+the format instruction was not followed, a grammar failure means the vocabulary was too narrow — and
+the histogram of them over a split is the ordered list of what to add to the grammar next. A refusal
+is a reading, not a defect: only the case where *nothing* renders is a wiring bug, which is the one
+state the harness refuses to publish.

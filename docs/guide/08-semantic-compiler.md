@@ -143,6 +143,71 @@ compileQuery({ metrics: ['revenue'], dimensions: ['email'] }, model);
 
 Every code is a value in `details`, so a UI can branch without parsing messages.
 
+## When there is no semantic model: a query intent
+
+Everything above needs a `SemanticModel`: metrics, dimensions, declared joins. Most databases do not
+have one, and the honest way to ask a model about such a database is with the schema card — which
+means the model writes SQL text, and some of what comes back is wrong for reasons that have nothing
+to do with the question: a join predicate in the `WHERE` clause of a `LEFT JOIN`, a literal in the
+wrong case, `count(distinct x)` written as `count(x)`, a function the engine does not have.
+
+`renderIntent` takes the other route for the same job. The model describes the query instead of
+writing it, and this package renders the statement:
+
+```ts
+import { compileIntent, renderIntent } from '@agentix-e/nl2charts-core/semantic';
+
+renderIntent({
+  from: 'orders',
+  alias: 'o',
+  joins: [{ table: 'customers', alias: 'c', on: [{ left: 'o.customer_id', right: 'c.id' }] }],
+  select: [{ expr: 'c.name', alias: 'name' }, { expr: 'count(*)', alias: 'n' }],
+  where: [{ column: 'o.status', op: '=', value: "O'Brien" }],
+  groupBy: ['c.name'],
+  orderBy: [{ expr: 'n', direction: 'desc' }],
+  limit: 10,
+});
+// SELECT c.name AS name, count(*) AS n FROM orders o INNER JOIN customers c ON o.customer_id = c.id
+//   WHERE o.status = 'O''Brien' GROUP BY c.name ORDER BY n DESC LIMIT 10
+```
+
+The contract is one object with ten optional keys, and it is closed on purpose: `from` and `select`
+are required, `joins`, `where`, `groupBy`, `having`, `orderBy`, `limit` and `distinct` are not.
+Filters are `(column, op, value)` triples rather than SQL fragments, so a value is a *value* — a
+string is quoted and its quotes doubled here, an integer stays an integer, `true` is `1` because that
+is what SQLite stores. Expressions inside `select`, `orderBy` and `having` are strings, and they are
+parsed rather than pasted: columns, numbers, `'string literals'`, `+ - * /`, parentheses, and a named
+function set (`INTENT_FUNCTIONS`).
+
+What it costs is expressiveness, and the cost is priced in names rather than exceptions:
+
+```ts
+const compiled = compileIntent(value);   // never throws
+if (compiled.ok) await db.query(compiled.sql);
+else console.warn(compiled.reason, compiled.detail);
+// 'not-an-object' | 'unknown-key' | 'missing-from' | 'missing-select' | 'empty-select'
+// 'bad-identifier' | 'bad-operator' | 'missing-value' | 'unexpected-value' | 'bad-value'
+// 'bad-limit' | 'bad-expression' | 'bad-join' | 'bad-order' | 'bad-direction'
+// 'unsupported-function'
+```
+
+The split between those names is the useful part: `unsupported-function` and `bad-expression` mean
+the vocabulary was too narrow for the question, while `unknown-key` and `missing-from` mean the reply
+did not follow the shape at all. They call for opposite changes, so they are separate values rather
+than one `INVALID`.
+
+Three behaviours are worth knowing before you build on it:
+
+- **Identifiers are validated, never quoted.** A table or column must match `[A-Za-z_][A-Za-z0-9_]*`
+  with at most one dot. That is deliberate on SQLite: a double-quoted name that matches no column is
+  read as a *string literal*, so a quoted identifier that is merely misspelled turns into a
+  comparison against a constant and returns a wrong answer instead of an error.
+- **An unknown key is refused, not ignored.** A dropped `having` is a silently different query, and a
+  query that answers a slightly different question is the failure mode this renderer exists to
+  remove.
+- **The statement still goes through the guard** when it is executed by the runner. Rendering removes
+  text defects; it does not make a statement read-only by itself.
+
 ## Determinism and limits
 
 - A query with `limit` is compiled with an `ORDER BY` over all output columns

@@ -37,3 +37,14 @@ export { lowerPlan, renderExpr, renderPredicate, renderSqlPlan } from './render.
 export type { Cte, SqlPlan } from './render.js';
 export { parseMetricExpr, refsOf } from './expr.js';
 export type { ExprAst } from './expr.js';
+export { INTENT_FUNCTIONS, INTENT_OPERATORS, compileIntent, parseQueryIntent, renderIntent, renderIntentExpression } from './intent.js';
+export type {
+  IntentCompilation,
+  IntentFilter,
+  IntentJoin,
+  IntentOperator,
+  IntentOrder,
+  IntentRefusal,
+  IntentSelect,
+  QueryIntent,
+} from './intent.js';

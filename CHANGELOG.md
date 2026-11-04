@@ -115,6 +115,27 @@ cannot be argued with.
   nothing, still publishes none rather than a zero.
 
 ### Added
+- **A query-intent renderer, and a fourth candidate that exists to move the pool's ceiling.**
+  `packages/core/src/semantic/intent.ts` turns a JSON query description — tables, join column pairs,
+  filters as `(column, op, value)` triples, grain, order — into a statement, deterministically. Three
+  rules are the reason it is a compiler rather than a prompt: identifiers are validated and never
+  quoted (a double-quoted token that names no column is read as a *string literal* by SQLite, so an
+  escaping strategy fails silently on the engine this benchmark runs), literals are rendered from
+  values rather than copied from text, and expressions are tokenised and parsed against a closed
+  grammar. Ten optional keys, one function set, and **sixteen refusal names** split into two families
+  that call for opposite fixes — a reader failure (`no-object`, `not-json`) is a format instruction the
+  model ignored, a grammar failure (`unsupported-function`, `bad-identifier`) is a vocabulary that was
+  too narrow. The histogram is the data the grammar is designed from, which is the only way to answer
+  "how wide should it be" without guessing.
+- **`select-intent`: the shipped trio plus one candidate whose statement is rendered.** One lever from
+  `select-mixed` — same three prompts, same card, same selector — and one call more, which the report
+  publishes rather than hides. The pre-registered criterion is the ceiling, because a fourth candidate
+  cannot lower it: `select-mixed` reaches 67.75% of dev, so this arm has to reach **69.75%** (+2.0pp,
+  ~31 sole-correct cases the trio misses) or the lever is reverted and only the instrument stays.
+  `assertIntentRule` refuses to dispatch the `intent` arm alone — its statement is rendered on the
+  candidate-source path, and a JSON reply read by a statement reader would publish a near-zero
+  accuracy that looks like a weak prompt instead of a wiring mistake.
+
 - **The third candidate slot priced as a swap rather than a purchase.** `select-samples` is
   `select-mixed` with one field changed — `mixed` — so both arms cost four calls. The slot it takes
   from `values` is the weakest purchase in the catalogue: the value index is empty on **933 of 1,532**

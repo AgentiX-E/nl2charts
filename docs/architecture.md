@@ -967,3 +967,63 @@ Two corollaries, both found in the same afternoon:
   decompositions". Nothing checked that the run sent three different cards, only that three prompt
   *strings* differed, and a string can differ while the card underneath it is the same. The check
   now reads the card the candidate is sent on, which is the thing the name is about.
+
+## A grammar is a guard, and its refusals are an instrument
+
+`packages/core/src/semantic/intent.ts` renders a statement from a JSON query description: which
+tables, which joins and on which column pairs, which filters as `(column, op, value)` triples, which
+grain, which order. It exists because a large part of what makes a generated statement wrong is
+*text*, and the engine reports none of it. A join predicate in the wrong clause, a literal in the
+wrong case, `count(distinct x)` written as `count(x)`, a function SQLite does not have — four
+different mistakes with four different fixes, and one property in common: none of them is a fact
+about the question. A renderer removes that class by construction, which is why the compiler is
+product surface and not a harness detail. The semantic layer already renders SQL from a `MetricQuery`
+against a model it was given; this renders it from a description against a schema it is shown, for
+the case where no model was registered.
+
+Three rules keep the closed grammar safe rather than merely small, and each one is a decision that
+could have gone the other way:
+
+- **Identifiers are validated, never escaped.** A name must match `[A-Za-z_][A-Za-z0-9_]*` with at
+  most one dot, so nothing that reaches the output can be anything but a name. Quoting was the
+  alternative and it is worse than useless on SQLite: a double-quoted token that names no column is
+  read as a *string literal*, so `"customer_id"` in a database that spells it `CustomerID` compares
+  a column to a constant and returns a clean, wrong answer. An escaping strategy that fails silently
+  on the engine this benchmark runs is not a strategy.
+- **Literals are rendered from values, not copied from text.** A string is quoted and its quotes
+  doubled here, an integer stays an integer, `null` is `NULL`, `true` is `1` because that is what
+  SQLite stores. The `literal-case` and `literal-missing` classes the diagnostics named cannot
+  survive that.
+- **Expressions are parsed, not pasted.** An expression is a string in the contract, which is the one
+  place injection could hide, so it is tokenised and parsed against a closed grammar — columns,
+  literals, `+ - * /`, parentheses, a named function set — and anything else is refused. A string
+  that parses renders in one canonical form, so two descriptions that mean the same thing produce
+  the same text.
+
+The refusals are the part worth reading twice. Every one of them is a *name* (`no-object`,
+`not-json`, `unsupported-function`, `bad-identifier`, `missing-from`, and eleven more), and the names
+split into two families with opposite fixes: a reader failure means the model did not follow the
+format, so the instruction is wrong; a grammar failure means the model answered in a vocabulary the
+renderer does not have, so the grammar is too narrow. Over a split, the histogram of those names *is*
+the ordered list of what to add next — a question ("how wide should the grammar be?") that cannot be
+answered by reading SQL, only by counting what a corpus asked for and the compiler refused.
+
+The harness half is deliberately thin (`eval/bird/intent.ts`): one rule appended to the prompt an
+existing arm already sends, one reader, one funnel. That split is the same rule as the guard section
+above, from the other side. The prompt is not rebuilt — `promptFor` appends the rule to the arm's own
+notes, so the card, the evidence and the notes stay byte-identical to the parent's and the only
+difference in front of the model is one line. A second prompt builder in the harness would be a
+second thing to keep in agreement with the card, and the failure mode of two builders is a run that
+measured a prompt nobody sent.
+
+Two consequences follow, and both are enforced rather than documented:
+
+- **An arm whose answer is rendered on one path cannot be dispatched on another.** `assertIntentRule`
+  refuses a dispatch that names `intent` alone, because the reply would be a JSON object read by the
+  statement reader, refused by the guard, and published as a near-zero accuracy that looks like a
+  weak prompt instead of a wiring mistake. The arm is legal as a candidate source and illegal alone,
+  and that is a property of the *dispatch*, which is where the check lives.
+- **The share is the measurement and the zero is the defect.** `assertIntentFired` refuses a run in
+  which the source was never asked or never rendered anything; it says nothing about a low
+  conversion rate, because a grammar that expresses 60% of a corpus is a finding and not a bug. A
+  guard on the rate would refuse the reading the arm exists to publish.

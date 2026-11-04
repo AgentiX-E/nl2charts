@@ -32,6 +32,8 @@ import { inspectSql } from '@agentix-e/nl2charts-core';
 import { casesForEffect, compareArms, judgeOfficial, judgeStrict, majorityResult, mcnemarExact, pairedResolution, resultKey, summarise, wilsonInterval } from '@agentix-e/nl2charts-devkit';
 import type { PairedComparison } from '@agentix-e/nl2charts-devkit';
 import { graphForDatabase } from './join-graph.js';
+import { INTENT_RULE, intentFunnel, readIntentReply } from './intent.js';
+import type { IntentRecord } from './intent.js';
 import { ppPerExtraCall, repairFunnel } from './metrics.js';
 import { pruneSchema } from './prune.js';
 import { applyColumnChoice, buildColumnPrompt, parseColumnChoice } from './columns.js';
@@ -166,6 +168,24 @@ export interface Arm {
    * be fitted on the split it is measured on.
    */
   readonly sampleColumns?: 'gold';
+  /**
+   * Answer with a query object instead of a statement: which tables, which joins, which filters as
+   * triples, which grain, which order. The statement is rendered by `renderIntent`.
+   *
+   * Every other lever on this page changes what the model *knows* when it writes. This one changes
+   * what it is allowed to *write*, which is the only lever that can remove a failure class rather
+   * than redistribute one: a join predicate cannot land in the wrong clause, a literal cannot be
+   * left unquoted, a function SQLite does not have cannot be invented, and `count(distinct ...)`
+   * cannot come back as `count(...)`. What it costs is expressiveness — the grammar is closed, and
+   * anything outside it is a refusal with a name (`eval/bird/intent.ts`).
+   *
+   * It is a candidate source and not a generator: alone it would answer a different question from
+   * the arm it is one lever away from, so `assertIntentRule` refuses a run that dispatches it as
+   * anything but a source of a mixed arm. Its value is measured where a fourth candidate is
+   * measured — the ceiling of the pool it joins — and its refusals are a histogram, because the
+   * set of constructs the corpus asks for is not a thing that can be read off SQL.
+   */
+  readonly intent?: 'query';
   /**
    * Ask for a query plan (scan, filter, join, group, answer) before the statement.
    * CHASE-SQL's second generator; one lever from `inline+evidence`.
@@ -495,6 +515,20 @@ export interface Arm {
 export const MIXED_SOURCES: readonly string[] = ['inline+evidence', 'metadata+evidence', 'values'];
 
 /**
+ * The shipped trio plus the one candidate whose statement is rendered rather than written.
+ *
+ * `values` was kept in the third slot on the third slot's own verdict (round 44: swapping it for
+ * the sampled card bought +0.72pp at p = 0.15 and 32 sole-correct cases where the bar was 36), so
+ * the trio is the pool a fourth source has to be read against — not a new trio.
+ *
+ * The source is `intent`, and its prompt is the trio's first prompt plus one rule, which is why
+ * the mixed feasibility guard still sees four distinct prompts: the rule is part of the arm's
+ * notes, so `buildSqlPrompt` differs by construction and `distinctShare` measures the difference
+ * it would send rather than a difference it hopes for.
+ */
+export const INTENT_SOURCES: readonly string[] = [...MIXED_SOURCES, 'intent'];
+
+/**
  * The trio plus a fourth candidate written by decomposition.
  *
  * The routing analysis left one question open: not which candidate to pick, but whether a
@@ -722,6 +756,18 @@ export const ARMS: readonly Arm[] = [
   // narrow set. The sources are arms already measured on their own, so the candidate
   // set is a combination of known parts rather than a new invention.
   { name: 'select-mixed', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: MIXED_SOURCES },
+  // The arm this split ships, plus one candidate that is a query description instead of a
+  // statement. One lever from `select-mixed` in the sense that matters — same three prompts, same
+  // card, same selector — and one call more, which the report publishes rather than hides.
+  //
+  // A fourth candidate can only raise the ceiling, so the ceiling is the pre-registered reading:
+  // `select-mixed`'s pool reaches 67.75% on dev, and this arm has to reach 69.75% to be a lever
+  // rather than a cost. The number is not arbitrary. Sources have been priced here three times
+  // and the last one bought +0.58pp of ceiling for 17 sole-correct cases; two points needs a
+  // source that is right on about thirty questions the other three all miss, and "the same
+  // question, answered in a vocabulary that cannot express the wrong join" is the only candidate
+  // left on the board that could be that.
+  { name: 'select-intent', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 4, select: true, mixed: INTENT_SOURCES },
   // The mixed arm without the value-grounded candidate. On Mini-Dev two thirds of the
   // questions name no literal, so the value block is empty and the arm pays three
   // generations for two distinct prompts; this is the same two prompts, always, for one
@@ -945,6 +991,11 @@ export const ARMS: readonly Arm[] = [
   // database. CHASE-SQL's first pipeline stage; here it is one lever from
   // `inline+evidence`, so the delta prices value grounding, not the hint.
   { name: 'values', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', values: true },
+  // The same prompt one rule longer: reply with a query object, not a statement. One lever from
+  // `inline+evidence`, and the only arm here whose output grammar is enforced — `intent.ts` renders
+  // the statement, so what varies between this arm and its parent is what the model was allowed to
+  // write, not what it knew. Run only as `select-intent`'s fourth source (`assertIntentRule`).
+  { name: 'intent', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', intent: 'query' },
   // A plan before the statement: the ordering decisions (scan, filter, join, group,
   // answer) are made explicitly once instead of being encoded in one draft.
   { name: 'plan', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', plan: true },
@@ -1086,6 +1137,8 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'inline+evidence+llm-select-dense': "the same reply applied their way: a table the model named nothing in keeps its first six columns instead of vanishing, which is what MAC-SQL's `drop_all` does — measured 261/496 against the column rule's 253 and the parent's 278 (`41290647076`), so it recovers 1.61pp of the 5.04pp loss (p=0.416, unresolved at 14.9% discordance) and still loses 3.43pp to the parent (p=0.0241); the card lever is closed at both granularities",
   'select-mixed': 'three decompositions instead of three samples: within its MDE of a single call on this split, and the decomposition question needs the dev split to be answered',
   'select-samples': "the trio's third slot given to the sampled card rather than the value index: the same four calls, and the block it replaces is empty on 60.9% of the split",
+  intent: 'the same card one rule longer, answering with a query object the renderer turns into SQL: the only arm whose output grammar is enforced, and the only one that cannot be dispatched alone — its statement is rendered on the candidate-source path, so `assertIntentRule` refuses a run that names it as an arm of its own',
+  'select-intent': 'the shipped trio plus a fourth candidate rendered from a query intent: one call more than `select-mixed`, and the only arm on the board that can raise the pool ceiling rather than redistribute it — its verdict is the ceiling, pre-registered at +2.0pp (67.75 → 69.75) on dev',
   'select-duo': 'two prompts and a selector: measured −0.60pp against `vote` for the same money, superseded',
   select5: 'five samples and a selector: 4,103 tokens a case, the largest bill in the catalogue, and +0.40pp inside a 3.33pp MDE — the arm whose own measurement says the ceiling is not the sampler',
   'inline+evidence+samples': "the same prompt with each categorical column's stored values on its card line: one lever, one call, and the untested half of value grounding",
@@ -1261,6 +1314,10 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   // replaces is empty on 60.9% of the split, so the pair is also the only reading of what a third
   // opinion is worth when the third slot stops being a restatement.
   ['select-mixed', 'select-samples'],
+  // One lever: a fourth candidate whose statement is rendered from a query object instead of
+  // written as text. The only pair in this table where the *grammar* differs rather than the
+  // knowledge, and the only one that can move the pool's ceiling rather than redistribute it.
+  ['select-mixed', 'select-intent'],
   // One lever: the schema. Same retrieval, same k, same card, same number of examples — the only
   // difference is that one block's statements name the source schema and the other's do not, which
   // is what `I-83`'s failure table separated (30 fewer wrong-width statements, 15 more execution
@@ -1557,6 +1614,14 @@ export interface CaseRun extends CaseOutcome {
    * findings, which is D56 in its counting form.
    */
   readonly sampleBlock?: { readonly columns: number };
+  /**
+   * What the intent candidate's reply was read as, on the case that drew it.
+   *
+   * One record per case, not a per-arm count: the refusal reasons are a distribution over a
+   * corpus, and a run that hits `unsupported-function` on every date question has found the next
+   * thing to add to the grammar — a fact that only exists at the case level.
+   */
+  readonly intent?: IntentRecord;
   /**
    * How many worked examples this case's prompt carried, on the arms that ask for them.
    *
@@ -2508,6 +2573,34 @@ export function assertAuditFired(armName: string, runs: readonly CaseRun[], mini
 }
 
 /**
+ * The intent source's one failure mode that is a defect rather than a finding.
+ *
+ * A refusal is a reading: a grammar that cannot express a question is a fact about the corpus, and
+ * the histogram in the report says which construct to add. An arm that was *never asked*, or whose
+ * every reply was refused, is not a reading — it is its parent with a longer prompt and an extra
+ * call, and the accuracy would be published as if the vocabulary had been tested.
+ *
+ * The two zeros are separate sentences because they have separate fixes: no record at all means the
+ * branch never ran (a wiring break), and records that are all refusals mean the rule or the reader
+ * is wrong for the model in front of it (a format break). The share itself is deliberately not
+ * guarded — a low conversion rate is the measurement.
+ */
+export function assertIntentFired(armName: string, runs: readonly CaseRun[], minimumSample = MINIMUM_INSTRUMENT_SAMPLE): void {
+  const asked = runs.filter((run) => run.intent !== undefined);
+  if (asked.length < minimumSample) return;
+  const rendered = asked.filter((run) => run.intent?.read === 'ok').length;
+  if (rendered > 0) return;
+  throw new Error(
+    `arm ${armName}: the intent source was asked on ${String(asked.length)} cases and none of them became a statement, so the vocabulary it exists to test was never read`,
+  );
+}
+
+/** What the intent source produced: the format's conversion and the grammar's refusals by name. */
+export function intentReport(runs: readonly CaseRun[]): ReturnType<typeof intentFunnel> {
+  return intentFunnel(runs.flatMap((run) => (run.intent === undefined ? [] : [run.intent])));
+}
+
+/**
  * What the decomposition produced, over the cases that asked for one.
  *
  * `asked` is the denominator the share needs: an arm whose fourth candidate failed to
@@ -2713,6 +2806,32 @@ export function assertDissentFired(
   if (funnel.arrived === 0) {
     throw new Error(
       `arm ${armName}: the dissent call was made on ${String(funnel.asked)} questions and none of them produced a runnable statement, which is an outage rather than a lever`,
+    );
+  }
+}
+
+/**
+ * An arm that answers with a query object can only be read where a candidate is drawn.
+ *
+ * The statement it produces is rendered by the candidate-source branch, so dispatching it as an arm
+ * of its own would send the intent prompt through the pipeline that reads a *statement* — the reply
+ * would be a JSON object read by `extractSql`, the guard would refuse it, and the arm would publish
+ * a near-zero accuracy that looks like a weak prompt. Refusing the dispatch is the only place this
+ * can be said cheaply: every alternative costs a paid run that produces a number nobody can use.
+ *
+ * The rule is declared here rather than inside the arm because it is a property of the *dispatch*:
+ * the same arm is legal as a source and illegal alone.
+ */
+export function assertIntentRule(dispatch: readonly string[]): void {
+  const drawn = new Set<string>();
+  for (const name of dispatch) {
+    for (const source of resolveArm(name)?.mixed ?? []) drawn.add(parseMixedSource(source).arm);
+  }
+  for (const name of dispatch) {
+    const arm = resolveArm(name);
+    if (arm === undefined || arm.intent === undefined || drawn.has(arm.name)) continue;
+    throw new Error(
+      `arm ${arm.name} answers with a query object, which only the candidate-source path can read; dispatch an arm that names it as a source (e.g. select-intent) instead of this arm alone`,
     );
   }
 }
@@ -3571,6 +3690,10 @@ export function promptFor(arm: Arm, question: BirdQuestion, blocks: PromptBlocks
         : arm.evidence === 'retrieved'
           ? retrieved
           : undefined;
+  // The intent rule joins the arm's own notes rather than replacing them: the notes are the
+  // shape-specific instructions the card was chosen for, and an arm that dropped them would differ
+  // from its parent by two things.
+  const notes = [...(profile?.notes ?? []), ...(arm.intent === 'query' ? [INTENT_RULE] : [])];
   return {
     dialect: 'SQLite',
     // The inline arm is a placement experiment: the same sentences, attached to
@@ -3581,7 +3704,7 @@ export function promptFor(arm: Arm, question: BirdQuestion, blocks: PromptBlocks
     foreignKeys: profile?.foreignKeys ?? arm.notes,
     samples: arm.samples !== undefined,
     schemaLines: BIRD_SCHEMA_LINES,
-    ...(profile === undefined ? {} : { notes: profile.notes }),
+    ...(profile === undefined && arm.intent !== 'query' ? {} : { notes }),
     ...(arm.definitions !== undefined && definitions !== undefined && definitions.length > 0 ? { definitions } : {}),
     ...(evidence === undefined || evidence.length === 0 ? {} : { evidence }),
     ...(arm.demonstrations === true && demonstrations !== undefined && demonstrations.length > 0
@@ -3595,8 +3718,42 @@ export function promptFor(arm: Arm, question: BirdQuestion, blocks: PromptBlocks
   };
 }
 
-/** One advertised column the database does not have. */
-export interface MissingColumn {
+/**
+ * One call in the intent vocabulary, read as a statement.
+ *
+ * The prompt is the arm's own — `promptFor` appends the rule, so the card, the evidence and the
+ * notes are byte-identical to the parent arm's and the only difference in front of the model is
+ * one rule line. That is what makes the pair one lever, and it is why this function builds nothing
+ * of its own: a second prompt builder here would be a second thing to keep in agreement with the
+ * card, and the failure mode of two builders is a run that measured a prompt nobody sent.
+ *
+ * A refusal is returned rather than thrown, because the two callers need different things from it:
+ * the loop counts it as a candidate that never arrived, and the report prints the reason. Both are
+ * the same fact, and throwing would give it to only one of them.
+ */
+export async function askIntent(
+  provider: LlmProvider,
+  request: {
+    readonly question: string;
+    readonly schema: readonly SchemaTable[];
+    readonly prompt: PromptOptions;
+    readonly linking: boolean;
+  },
+): Promise<{ readonly ok: true; readonly sql: string } | { readonly ok: false; readonly reason: string; readonly detail: string }> {
+  const built = buildAskMessages({
+    question: request.question,
+    schema: request.schema,
+    prompt: request.prompt,
+    linking: request.linking,
+  });
+  // The same temperature and the same purpose label the sampling path uses: the intent is a
+  // different *vocabulary*, not a different price, and a call counted under another purpose would
+  // make the two arms' cost tables disagree about what generation costs.
+  const reply = await provider.complete({ messages: built.messages, temperature: 0.7, purpose: 'generate' });
+  return readIntentReply(reply.text);
+}
+
+/** One advertised column the database does not have. */export interface MissingColumn {
   readonly db: string;
   readonly table: string;
   readonly column: string;
@@ -4767,6 +4924,17 @@ export const MECHANISMS: readonly Mechanism[] = [
     quiet: () => quietBank({ audit: { fired: false, named: 0, rewritten: false } }),
   },
   {
+    lever: 'intent',
+    declares: (arm) => arm.intent !== undefined,
+    // Asked and never rendered is the one state in which this arm is its parent plus a rule line
+    // and an extra call. Every other refusal rate is the measurement, so the guard refuses only
+    // the zero — a guard on the *rate* would refuse the reading it exists to publish.
+    guard: ({ armName, runs }) => assertIntentFired(armName, runs),
+    records: 'intent',
+    scenarios: ['renders the fourth candidate from a query object, and counts what the vocabularies asked for'],
+    quiet: () => quietBank({ intent: { read: 'no-object' } }),
+  },
+  {
     lever: 'samples',
     declares: (arm) => arm.samples !== undefined,
     // An arm that asks for samples and gets none is its parent under another name.
@@ -4973,13 +5141,15 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
       // The execute hook exists for repairs only: without repairs it would turn an
       // execution failure into a thrown pipeline error and hide the statement that
       // failed, which is the one thing a diagnosis needs.
+      const providerFor = (which: 'primary' | 'second' = 'primary'): LlmProvider =>
+        which === 'second' && secondCounter !== undefined ? secondCounter.provider : counter.provider;
       const pipelineFor = (
         target: Arm,
         which: 'primary' | 'second' = 'primary',
         overrides: { readonly linking?: boolean; readonly repairs?: number } = {},
       ): ReturnType<typeof createPipeline> =>
         createPipeline({
-          provider: which === 'second' && secondCounter !== undefined ? secondCounter.provider : counter.provider,
+          provider: providerFor(which),
           // The repair count is resolved here, once, because the execute hook is attached from the
           // same number: an override that raised `maxRepairs` without attaching the hook would arm
           // a loop that can never hear the engine, which is the defect `emptyRetry` had.
@@ -5058,6 +5228,11 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
         // The first reply of the set, kept because it is the only one the prompt alone
         // produced: the later draws are the same prompt at a non-zero temperature.
         let firstShape: ReplyShape | undefined;
+        // What the intent source's one reply was read as, on the arm that drew it. Kept as a
+        // record rather than folded into a counter because the *reason* is the instrument: a run
+        // whose refusals are all `no-object` needs a clearer rule, and one whose refusals are
+        // `unsupported-function` needs a wider grammar, and those are opposite next steps.
+        let intentRecord: IntentRecord | undefined;
         // A pooled arm generates nothing: it reads the candidates another arm already drew for
         // this case, and spends its one call on what it does with them. The lookup is a function
         // so that "the pool was not there" is a sentence rather than an empty set — an arm that
@@ -5110,17 +5285,38 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
             // front of the model, and keying by arm would silently apply the override to both.
             const hinted = arm.sourceLinking?.[source];
             const repairs = arm.sourceRepairs?.[source];
+            // Resolved once: the loop reads the source arm four times (sampler, card, prompt,
+            // linker answer) and a second `resolveArm` per read is four chances to disagree.
+            const sourceArm = resolveArm(spec.arm) as Arm;
             // The pre-built pipeline is only good for the case nothing about this source was
             // overridden; once either override is present the pipeline is built for it, because a
             // reused pipeline would apply the parent's count to a source that asked for another.
             const sampler =
               sources === undefined && hinted === undefined && repairs === undefined
                 ? pipeline
-                : pipelineFor(resolveArm(spec.arm) as Arm, spec.provider, { linking: hinted, repairs });
-            const candidateSchema =
-              sources === undefined ? schema : prepared.schemaForSource(resolveArm(spec.arm) as Arm, question);
+                : pipelineFor(sourceArm, spec.provider, { linking: hinted, repairs });
+            const candidateSchema = sources === undefined ? schema : prepared.schemaForSource(sourceArm, question);
             candidateColumns = Math.max(candidateColumns, prepared.samplesOn(candidateSchema));
-            const askedSample = await sampler.ask({ question: question.question, schema: candidateSchema });
+            // The one source whose statement is rendered rather than written. It reads the same
+            // card, the same evidence and the same linker answer, and differs by one rule line, so
+            // the reading it produces is about the vocabulary and not about the context.
+            const askedSample: { sql: string; shape?: ReplyShape; decomposedSteps?: number } =
+              sources !== undefined && sourceArm.intent === 'query'
+                ? await (async () => {
+                    const read = await askIntent(providerFor(spec.provider), {
+                      question: question.question,
+                      schema: candidateSchema,
+                      prompt: promptFor(sourceArm, question, prepared.blocksFor(sourceArm, question)),
+                      linking: hinted ?? sourceArm.linking,
+                    });
+                    // Written before the refusal throws: a candidate that never became a statement
+                    // is the case the report needs a reason for, and the catch below only knows
+                    // that *something* did not arrive.
+                    intentRecord = read.ok ? { read: 'ok', sql: read.sql } : { read: read.reason as IntentRecord['read'] };
+                    if (!read.ok) throw Object.assign(new Error(read.detail), { code: 'NL2C_E_LLM_INVALID_RESPONSE' });
+                    return { sql: read.sql };
+                  })()
+                : await sampler.ask({ question: question.question, schema: candidateSchema });
             if (firstShape === undefined && askedSample.shape !== undefined) firstShape = askedSample.shape;
             // The mechanism has to be observable, not declared: a prompt that asks for
             // steps and gets none is the plain generator with a longer instruction, and
@@ -5180,6 +5376,9 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
             ...(Object.keys(survival).length === 0 ? {} : { candidateSurvival: survival }),
             ...(decomposedCandidates === 0 ? {} : { decomposition: { candidates: decomposedCandidates, steps: decomposedSteps } }),
             ...(firstShape === undefined ? {} : { shape: firstShape }),
+            // The case where every candidate died is the case a refusal reason is most needed for:
+            // an arm whose fourth source was the only one that failed still has to say why.
+            ...(intentRecord === undefined ? {} : { intent: intentRecord }),
             calls: callsMade(),
           };
         }
@@ -5521,6 +5720,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
           ...(retryFailed === undefined ? {} : { retryFailed }),
           ...(firstShape === undefined ? {} : { shape: firstShape }),
           ...(arm.mixed === undefined ? {} : { winnerSource: winner.source }),
+          ...(intentRecord === undefined ? {} : { intent: intentRecord }),
           ...(arm.emptyRetry === undefined
             ? {}
             : { emptyDropped: choice.dropped, emptyRetried: retried, emptyRecovered: recovered }),
@@ -5865,6 +6065,10 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
     ...(arm.emptyRetry === undefined ? {} : { emptyRetry: { mode: arm.emptyRetry, ...emptyRetryFunnel(runs) } }),
     ...(arm.reconcile === undefined ? {} : { reconcile: { policy: arm.reconcileAdopt ?? 'always', ...reconcileFunnel(runs) } }),
     ...(arm.audit === undefined ? {} : { audit: auditFunnel(runs) }),
+    // The fourth candidate's whole mechanism, on the arm that draws it: how often the vocabulary
+    // produced a statement and which refusals it produced when it did not. A mixed arm publishes
+    // it because the lever rides on one of its sources rather than on the arm.
+    ...(runs.some((run) => run.intent !== undefined) ? { intent: intentReport(runs) } : {}),
     // A mixed arm's block lives on one of its candidates, so the funnel is the arm's to publish
     // even though the arm itself declares no sampler: `select-samples`' whole claim is that its
     // third opinion rides a card with values on it.
@@ -6292,6 +6496,11 @@ export async function runBird(settings: BirdSettings, options: BirdRunOptions = 
   const log = options.log ?? ((line: string) => console.log(line));
   const { provider, second } = createProviders(settings);
   assertSecondModel(settings, secondModelRoles(settings.arms));
+  // Before the preflight and before any call: an arm whose statement is rendered on the
+  // candidate-source path cannot be run as an arm of its own, and the failure it would otherwise
+  // produce is not a red test — it is a statement read by the wrong reader and a score that looks
+  // like a weak prompt.
+  assertIntentRule(settings.arms);
   const oracle = createOracle(settings.layout.oracleScript, settings.layout.databaseRoot);
   try {
     const prepared = await prepareRun(settings, { oracle, provider });
