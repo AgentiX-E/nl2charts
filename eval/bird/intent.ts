@@ -40,7 +40,7 @@ export const INTENT_RULE = [  'Instead of a statement, reply with one JSON objec
   // The list is generated from the compiler's own set rather than typed twice: a prompt that
   // promises `median` and a renderer that refuses it would spend candidates on a rule the model
   // could have read, and the disagreement would be invisible in every number the run prints.
-  `Only \`from\` and \`select\` are required. Every condition the question states is one \`where\` entry with its column, its operator and its value; an expression may use columns, numbers, 'string literals', + - * / ||, comparisons, CASE WHEN ... THEN ... ELSE ... END, parentheses and these functions: ${INTENT_RULE_FUNCTIONS}. Reply with the object and nothing else.`,
+  `Only \`from\` and \`select\` are required. Every condition the question states is one \`where\` entry with its column, its operator and its value — or with \`expr\` instead of \`column\` when the left side is an aggregate; a question that asks for distinct rows sets the top-level \`distinct\` key rather than writing DISTINCT inside an expression; an expression may use columns, numbers, 'string literals', + - * / ||, comparisons, CASE WHEN ... THEN ... ELSE ... END, parentheses and these functions: ${INTENT_RULE_FUNCTIONS}. Reply with the object and nothing else.`,
 ].join(' ');
 
 /**

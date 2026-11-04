@@ -158,6 +158,12 @@ cannot be argued with.
   names no column as a string literal, so `compileIntent(value, { columns })` refuses it as
   `unknown-identifier` (the seventeenth name), and the harness passes the card's columns on every
   call.
+- **A numeric spelling of a name is refused, because three engines read it three ways.** Quoting made
+  `1` in a group-by key a *string*, which on SQLite is a constant — `GROUP BY "1"` groups every row
+  into one bucket and answers a different question. In Postgres the same token is a position, in the
+  standard it is a constant, and none of the three is "this column". The contract names columns, so a
+  numeric spelling is `bad-identifier` now; an order item is an expression rather than a name, so a
+  number there stays a number and `ORDER BY 2` keeps meaning what it meant.
 
 - **The third candidate slot priced as a swap rather than a purchase.** `select-samples` is
   `select-mixed` with one field changed — `mixed` — so both arms cost four calls. The slot it takes

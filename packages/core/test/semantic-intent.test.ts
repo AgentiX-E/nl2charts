@@ -107,7 +107,10 @@ describe('a filter is a column, an operator and a value', () => {
       ok: false,
       reason: 'bad-value',
     });
-    expect(compileIntent({ ...MINIMAL, where: [{ column: 'a', op: 'in', value: 'x' }] })).toMatchObject({
+    // A scalar is the one-element list it obviously means: a reply that writes `x in 'a'` has
+    // answered the question and lost nothing by spelling the list without brackets.
+    expect(render({ column: 'a', op: 'in', value: 'x' })).toContain("WHERE a IN ('x')");
+    expect(compileIntent({ ...MINIMAL, where: [{ column: 'a', op: 'in', value: {} }] })).toMatchObject({
       ok: false,
       reason: 'bad-value',
     });
@@ -547,6 +550,17 @@ describe('a name is quoted when it needs quoting, and checked against the schema
     ).toMatchObject({ ok: false, reason: 'unknown-identifier' });
   });
 
+  it('refuses a numeric spelling, which three engines read three ways', () => {
+    // `1` as a group-by key is a position in Postgres, a constant in SQL, and the string '1' once
+    // quoted — three meanings for one token and none of them is "this column". The contract names
+    // columns, so the spelling is refused rather than resolved the wrong way.
+    expect(compileIntent({ ...MINIMAL, groupBy: ['1'] })).toMatchObject({ ok: false, reason: 'bad-identifier' });
+    expect(compileIntent({ ...MINIMAL, where: [{ column: '2', op: '=', value: 1 }] })).toMatchObject({ ok: false, reason: 'bad-identifier' });
+    // An order item is an expression, and a number there is a number: `ORDER BY 2` already means the
+    // constant, and the renderer keeps it as one rather than quoting it into a string.
+    expect(renderIntent({ ...MINIMAL, orderBy: [{ expr: '2' }] })).toBe('SELECT count(*) FROM orders ORDER BY 2');
+  });
+
   it('does not refuse a name it cannot resolve because the alias, not the schema, owns it', () => {
     // `o` is a name this statement invented; the column after the dot is the part the schema owns,
     // which is the whole of what a flat column list can check without a join graph.
@@ -554,6 +568,97 @@ describe('a name is quoted when it needs quoting, and checked against the schema
       compileIntent(
         { from: 'orders', alias: 'o', select: [{ expr: 'o.id' }], where: [{ column: 'o.total', op: '>', value: 1 }] },
         { columns: ['orders.id', 'orders.total'] },
+      ),
+    ).toMatchObject({ ok: true });
+  });
+});
+
+describe('the left side of a condition is a name or an expression, and says which', () => {
+  it('renders an aggregate on the left of a having, under its own key', () => {
+    // `column` cannot carry this: a column name may itself contain a space and a parenthesis, so
+    // nothing about the text tells `Charter School (Y/N)` from `count(p.Id)`. The explicit key is
+    // what keeps both expressible, and the test above keeps the name form working.
+    expect(
+      renderIntent({
+        from: 'orders',
+        select: [{ expr: 'orders.customer_id' }],
+        groupBy: ['orders.customer_id'],
+        having: [{ expr: 'count(orders.id)', op: '>', value: 5 }],
+      }),
+    ).toBe('SELECT orders.customer_id FROM orders GROUP BY orders.customer_id HAVING count(orders.id) > 5');
+  });
+
+  it('refuses a filter that names both forms, or neither', () => {
+    expect(compileIntent({ ...MINIMAL, where: [{ column: 'a', expr: 'b', op: '=', value: 1 }] })).toMatchObject({
+      ok: false,
+      reason: 'bad-identifier',
+    });
+    expect(compileIntent({ ...MINIMAL, where: [{ op: '=', value: 1 }] })).toMatchObject({ ok: false, reason: 'bad-identifier' });
+  });
+
+  it('refuses an expression on the left that the grammar does not have', () => {
+    expect(compileIntent({ ...MINIMAL, having: [{ expr: 'median(a)', op: '>', value: 1 }] })).toMatchObject({
+      ok: false,
+      reason: 'unsupported-function',
+    });
+  });
+
+  it('checks the columns an expression on the left names', () => {
+    expect(
+      compileIntent({ from: 'orders', select: [{ expr: 'orders.id' }], having: [{ expr: 'count(nope)', op: '>', value: 1 }] }, { columns: ['orders.id'] }),
+    ).toMatchObject({ ok: false, reason: 'unknown-identifier' });
+    expect(
+      compileIntent({ from: 'orders', select: [{ expr: 'orders.id' }], having: [{ expr: 'count(orders.id)', op: '>', value: 1 }] }, { columns: ['orders.id'] }),
+    ).toMatchObject({ ok: true });
+  });
+});
+
+describe('a qualified name with a space in it is expressible inside an expression', () => {
+  it('renders f."School Name" as the reference it is', () => {
+    // The mixture of a bare qualifier and a quoted column is not exotic: it is what every join in
+    // BIRD's `california_schools` looks like, and it used to be refused as "contains a dot".
+    expect(renderIntentExpression('f."School Name"')).toBe('f."School Name"');
+    expect(renderIntentExpression('lower(f."School Name")')).toBe('lower(f."School Name")');
+    // Quoting is applied where it is needed and dropped where it is not, so the two spellings of a
+    // name that needs no quoting render to one text — which is what keeps candidates comparable.
+    expect(renderIntentExpression('"a"."b"')).toBe('a.b');
+  });
+
+  it('refuses a qualifier chain that is not two parts', () => {
+    expect(compileIntent({ ...MINIMAL, select: [{ expr: 'a.b.c' }] })).toMatchObject({ ok: false, reason: 'bad-expression' });
+  });
+
+  it('resolves such a name against the schema by its column part', () => {
+    expect(
+      compileIntent({ from: 'frpm', select: [{ expr: 'f."School Name"' }] }, { columns: ['frpm.School Name'] }),
+    ).toMatchObject({ ok: true });
+    expect(
+      compileIntent({ from: 'frpm', select: [{ expr: 'f."School Nam"' }] }, { columns: ['frpm.School Name'] }),
+    ).toMatchObject({ ok: false, reason: 'unknown-identifier' });
+  });
+});
+
+describe('two spellings the corpus uses are read rather than refused', () => {
+  it('matches an operator without case, because `IS NULL` and `is null` are one predicate', () => {
+    expect(renderIntent({ ...MINIMAL, where: [{ column: 'a', op: 'IS NULL' as never }] })).toContain('WHERE a IS NULL');
+    expect(renderIntent({ ...MINIMAL, where: [{ column: 'a', op: 'NOT IN' as never, value: [1] }] })).toContain('WHERE a NOT IN (1)');
+  });
+
+  it('reads a null value on `is null` as "no value", which is what JSON has for that', () => {
+    expect(renderIntent({ ...MINIMAL, where: [{ column: 'a', op: 'is null', value: null }] })).toContain('WHERE a IS NULL');
+    expect(compileIntent({ ...MINIMAL, where: [{ column: 'a', op: 'is null', value: 1 }] })).toMatchObject({
+      ok: false,
+      reason: 'unexpected-value',
+    });
+  });
+
+  it('lets a select alias be used where SQL allows it', () => {
+    // `select: [{expr: 'count(*)', alias: 'n'}]` followed by `having: [{column: 'n'}]` is the shape a
+    // grouped question takes; looking `n` up in the schema refused a statement that is correct.
+    expect(
+      compileIntent(
+        { from: 'orders', select: [{ expr: 'count(*)', alias: 'n' }], having: [{ column: 'n', op: '>', value: 1 }] },
+        { columns: ['orders.id'] },
       ),
     ).toMatchObject({ ok: true });
   });

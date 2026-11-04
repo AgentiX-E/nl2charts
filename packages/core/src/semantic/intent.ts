@@ -79,7 +79,17 @@ export const INTENT_FUNCTIONS = [
 ] as const;
 
 export interface IntentFilter {
+  /** A column name, or — when `expression` is set — an expression over columns. */
   readonly column: string;
+  /**
+   * Marks `column` as an expression rather than a name.
+   *
+   * The two cannot share one field: a name may contain a space and a parenthesis (`Charter School
+   * (Y/N)`), so nothing about the text distinguishes it from `count(p.Id)`. A reply that wants an
+   * aggregate on the left of a condition writes it under `expr`, which is the key the select list
+   * already uses for the same thing.
+   */
+  readonly expression?: boolean;
   readonly op: IntentOperator;
   readonly value?: unknown;
 }
@@ -180,6 +190,17 @@ function unquote(part: string): string {
   return part.length >= 2 && part.startsWith('"') && part.endsWith('"') ? part.slice(1, -1).replace(/""/g, '"') : part;
 }
 
+/**
+ * A name that is a number is not a name.
+ *
+ * `1` in a group-by is a *position* in some engines and a constant in others, and quoting it turns
+ * it into the string `'1'` on SQLite — three behaviours for one token, none of them "this column".
+ * The contract names columns, so a numeric spelling is refused rather than resolved the wrong way.
+ */
+function numeric(part: string): boolean {
+  return /^\d+(?:\.\d+)?$/.test(part);
+}
+
 /** The canonical form of a column reference, or `undefined` when it cannot be one. */
 function refAt(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
@@ -188,6 +209,7 @@ function refAt(value: unknown): string | undefined {
   // name — which is a different database than the one this renders against.
   if (parts.length > 2) return undefined;
   const bare = parts.map(unquote);
+  if (bare.some((part) => numeric(part))) return undefined;
   return bare.every((part) => nameProblem(part) === undefined) ? bare.join('.') : undefined;
 }
 
@@ -246,7 +268,7 @@ function detailOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-const FILTER_KEYS = new Set(['column', 'op', 'value']);
+const FILTER_KEYS = new Set(['column', 'expr', 'op', 'value']);
 const JOIN_KEYS = new Set(['table', 'alias', 'type', 'on']);
 const SELECT_KEYS = new Set(['expr', 'alias']);
 const ORDER_KEYS = new Set(['expr', 'direction']);
@@ -291,25 +313,45 @@ function scalar(value: unknown, what: string): void {
 function filterAt(value: unknown): IntentFilter {
   const object = objectAt(value, 'filter');
   onlyKeys(object, FILTER_KEYS, 'filter', 'unknown-key');
-  const column = refAt(object.column);
-  if (column === undefined) refuse('bad-identifier', `filter column ${JSON.stringify(object.column)} is not a name`);
-  const op = object.op;
+  // `expr` is the explicit form for an aggregate on the left of a condition — `HAVING count(p.Id) > 5`
+  // is the shape a conditional question takes, and `column` cannot carry it because a column name may
+  // itself contain a space and a parenthesis. One of the two keys is required, and exactly one: a
+  // filter with both is a reply that could not decide what it was asking.
+  const expression = object.expr !== undefined;
+  if (expression === (object.column !== undefined)) {
+    refuse('bad-identifier', `filter needs exactly one of column or expr, not both and not neither`);
+  }
+  const column = expression ? object.expr : refAt(object.column);
+  if (typeof column !== 'string' || column.length === 0) {
+    refuse('bad-identifier', `filter ${expression ? 'expr' : 'column'} ${JSON.stringify(expression ? object.expr : object.column)} is not a name`);
+  }
+  if (!expression && refAt(object.column) === undefined) {
+    refuse('bad-identifier', `filter column ${JSON.stringify(object.column)} is not a name`);
+  }
+  // Operators are matched without case. `IS NULL` and `is null` are the same predicate to every
+  // engine BIRD runs on, and a model that writes one has not made a mistake worth a refusal — the
+  // histogram is for vocabulary gaps, not for shouting.
+  const op = typeof object.op === 'string' ? object.op.trim().toLowerCase() : object.op;
   if (typeof op !== 'string' || !(INTENT_OPERATORS as readonly string[]).includes(op)) {
-    refuse('bad-operator', `filter operator ${JSON.stringify(op)} is not one of ${INTENT_OPERATORS.join(' ')}`);
+    refuse('bad-operator', `filter operator ${JSON.stringify(object.op)} is not one of ${INTENT_OPERATORS.join(' ')}`);
   }
   const operator = op as IntentOperator;
   const nullary = operator === 'is null' || operator === 'is not null';
   if (nullary) {
-    if (object.value !== undefined) refuse('unexpected-value', `${operator} takes no value`);
-    return { column, op: operator };
+    // A `null` value here is the model saying "no value" in the only way JSON has: it is the same
+    // predicate, and refusing it spends a candidate on a formality.
+    if (object.value !== undefined && object.value !== null) refuse('unexpected-value', `${operator} takes no value`);
+    return { column, ...(expression ? { expression } : {}), op: operator };
   }
   if (object.value === undefined) refuse('missing-value', `${operator} needs a value`);
   const list = operator === 'in' || operator === 'not in';
   if (list) {
-    const values = arrayAt(object.value, `${operator} value`, 'bad-value');
+    // A scalar is the one-element list it obviously means. `x in ('a')` and `x in 'a'` are the same
+    // question, and a reply that writes the second has answered rather than failed.
+    const values = Array.isArray(object.value) ? object.value : [object.value];
     if (values.length === 0) refuse('bad-value', `${operator} needs at least one value`);
     for (const entry of values) scalar(entry, `${operator} entry`);
-    return { column, op: operator, value: [...values] };
+    return { column, ...(expression ? { expression } : {}), op: operator, value: [...values] };
   }
   // A range is two bounds and one predicate, and it is the only operator that takes exactly two:
   // an `in` of two values is a different question, and a model that writes three bounds has
@@ -318,10 +360,10 @@ function filterAt(value: unknown): IntentFilter {
     const bounds = arrayAt(object.value, `${operator} value`, 'bad-value');
     if (bounds.length !== 2) refuse('bad-value', `${operator} needs exactly two bounds`);
     for (const entry of bounds) scalar(entry, `${operator} bound`);
-    return { column, op: operator, value: [...bounds] };
+    return { column, ...(expression ? { expression } : {}), op: operator, value: [...bounds] };
   }
   scalar(object.value, `${operator} value`);
-  return { column, op: operator, value: object.value };
+  return { column, ...(expression ? { expression } : {}), op: operator, value: object.value };
 }
 
 function joinAt(value: unknown): IntentJoin {
@@ -422,7 +464,10 @@ export function parseQueryIntent(value: unknown): QueryIntent {
 
 interface Token {
   readonly kind: 'name' | 'quoted' | 'number' | 'string' | 'star' | 'op' | 'punct';
+  /** The text to render: bare for a name, already quoted for a name that needed it. */
   readonly text: string;
+  /** The name as the schema spells it, without quoting, for the reference check. */
+  readonly plain?: string;
 }
 
 /** Split an expression into the only token shapes the grammar has. Anything else is a refusal. */
@@ -448,21 +493,27 @@ function tokenize(expr: string): Token[] {
       index += number[0].length;
       continue;
     }
-    const name = /^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?/.exec(rest);
-    if (name !== null) {
-      tokens.push({ kind: 'name', text: name[0] });
-      index += name[0].length;
-      continue;
-    }
-    // A quoted name, which is the only way an expression can mention a column the corpus spells
-    // with a space in it. Double quotes are the identifier syntax in every engine BIRD runs on, so
-    // reading them as names rather than as strings is what makes `"County Name" > 5` expressible;
-    // a model that uses `"..."` for a *string* still gets a working statement out of SQLite, and
-    // with a schema in hand it gets a refusal that says which name it invented.
-    const quoted = /^"((?:[^"]|"")*)"/.exec(rest);
-    if (quoted !== null) {
-      tokens.push({ kind: 'quoted', text: (quoted[1] as string).replace(/""/g, '"') });
-      index += quoted[0].length;
+    // A name, in any of the three spellings an expression can carry it in: bare (`t.a`), quoted
+    // (`"County Name"`), or the mixture a qualified column with a space in it needs
+    // (`f."School Name"`). The mixture is the one that used to be unrepresentable, and it is not an
+    // exotic case — it is what every join in `california_schools` looks like.
+    //
+    // Double quotes are the identifier syntax in every engine BIRD runs on, so reading them as names
+    // rather than as strings is what makes `"County Name" > 5` expressible at all; a model that uses
+    // `"..."` for a *string* still gets a working statement out of SQLite, and with a schema in hand
+    // it gets a refusal that says which name it invented.
+    const part = '(?:[A-Za-z_][A-Za-z0-9_]*|"(?:[^"]|"")*")';
+    const reference = new RegExp(`^(${part})(?:\\.(${part}))?`).exec(rest);
+    if (reference !== null) {
+      const raw = [reference[1], reference[2]].filter((entry): entry is string => entry !== undefined);
+      const plain = raw.map((entry) => (entry.startsWith('"') ? entry.slice(1, -1).replace(/""/g, '"') : entry));
+      const bare = raw.every((entry) => !entry.startsWith('"'));
+      tokens.push({
+        kind: bare ? 'name' : 'quoted',
+        text: bare ? plain.join('.') : plain.map(renderName).join('.'),
+        plain: plain.join('.'),
+      });
+      index += reference[0].length;
       continue;
     }
     const character = rest[0] as string;
@@ -626,8 +677,8 @@ class ExprReader {
     if (token.kind === 'string') return `'${token.text.replace(/'/g, "''")}'`;
     if (token.kind === 'star') return '*';
     if (token.kind === 'quoted') {
-      this.references.push(token.text);
-      return renderName(token.text);
+      this.references.push(token.plain ?? token.text);
+      return token.text;
     }
     if (token.kind === 'punct' && token.text === '(') {
       const inner = this.disjunction();
@@ -701,8 +752,7 @@ function literal(value: unknown): string {
   return `'${String(value).replace(/'/g, "''")}'`;
 }
 
-function renderFilter(filter: IntentFilter): string {
-  const column = renderColumnRef(filter.column);
+function renderFilter(filter: IntentFilter, column: string): string {
   if (filter.op === 'is null' || filter.op === 'is not null') return `${column} ${filter.op.toUpperCase()}`;
   if (filter.op === 'in' || filter.op === 'not in') {
     const values = (filter.value as readonly unknown[]).map(literal).join(', ');
@@ -764,13 +814,13 @@ function columnSets(columns: Iterable<string>): { readonly names: ReadonlySet<st
  * binding error of that kind is left to the engine, which reports it; inventing a column is the
  * failure this closes, because the engine does not report it.
  */
-function checkReferences(references: readonly string[], columns: Iterable<string>): void {
+function checkReferences(references: readonly string[], columns: Iterable<string>, aliases: ReadonlySet<string>): void {
   const known = columnSets(columns);
   for (const reference of references) {
     const text = reference.toLowerCase();
     const dot = text.lastIndexOf('.');
     const column = dot === -1 ? text : text.slice(dot + 1);
-    if (known.qualified.has(text) || known.names.has(column)) continue;
+    if (known.qualified.has(text) || known.names.has(column) || aliases.has(column)) continue;
     refuse('unknown-identifier', `column ${JSON.stringify(reference)} is not in the schema`);
   }
 }
@@ -793,8 +843,24 @@ function renderValidated(intent: QueryIntent, options?: IntentOptions): string {
       .join(' AND ');
     return `${join.type === 'left' ? 'LEFT JOIN' : 'INNER JOIN'} ${target} ON ${on}`;
   });
-  const filters = [...(intent.where ?? []), ...(intent.having ?? [])];
-  references.push(...filters.map((filter) => filter.column));
+  /**
+   * The left side of a filter, rendered, with its columns recorded.
+   *
+   * A name is a name; anything that looks like an expression — a call, a literal quote — goes through
+   * the same parser the select list uses, so `count(p.Id)` is a count and not the column
+   * `"count(p.Id)"`, which is what quoting it would have produced.
+   */
+  const leftOf = (filter: IntentFilter): string => {
+    if (filter.expression !== true) {
+      references.push(filter.column);
+      return renderColumnRef(filter.column);
+    }
+    const rendered = expressionOf(filter.column);
+    references.push(...rendered.references);
+    return rendered.sql;
+  };
+  const whereLeft = (intent.where ?? []).map(leftOf);
+  const havingLeft = (intent.having ?? []).map(leftOf);
   references.push(...(intent.groupBy ?? []));
   // Every expression is read before the schema is checked, because an expression is what names the
   // columns an order-by clause refers to: checking first would leave the last clause of a statement
@@ -805,10 +871,14 @@ function renderValidated(intent: QueryIntent, options?: IntentOptions): string {
     references.push(...rendered.references);
     return item.direction === undefined ? rendered.sql : `${rendered.sql} ${item.direction.toUpperCase()}`;
   });
-  if (options?.columns !== undefined) checkReferences(references, options.columns);
-  const where = intent.where === undefined || intent.where.length === 0 ? [] : [`WHERE ${intent.where.map(renderFilter).join(' AND ')}`];
+  // A select alias is a name this statement invents, and `having` and `orderBy` are exactly where
+  // it is used: `select: [{expr: 'count(*)', alias: 'n'}]` followed by `having: [{column: 'n'}]` is
+  // the shape a grouped question takes, and looking `n` up in the schema refused it.
+  const aliases = new Set(intent.select.flatMap((item) => (item.alias === undefined ? [] : [item.alias.toLowerCase()])));
+  if (options?.columns !== undefined) checkReferences(references, options.columns, aliases);
+  const where = intent.where === undefined || intent.where.length === 0 ? [] : [`WHERE ${intent.where.map((filter, at) => renderFilter(filter, whereLeft[at] as string)).join(' AND ')}`];
   const groupBy = intent.groupBy === undefined || intent.groupBy.length === 0 ? [] : [`GROUP BY ${intent.groupBy.map(renderColumnRef).join(', ')}`];
-  const having = intent.having === undefined || intent.having.length === 0 ? [] : [`HAVING ${intent.having.map(renderFilter).join(' AND ')}`];
+  const having = intent.having === undefined || intent.having.length === 0 ? [] : [`HAVING ${intent.having.map((filter, at) => renderFilter(filter, havingLeft[at] as string)).join(' AND ')}`];
   const orderBy = order.length === 0 ? [] : [`ORDER BY ${order.join(', ')}`];
   const limit = intent.limit === undefined ? [] : [`LIMIT ${String(intent.limit)}`];
   return [
