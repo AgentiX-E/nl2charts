@@ -455,10 +455,35 @@ function statementLength(candidate: ExecutedCandidate): number {
   return trimmed.length === 0 ? Number.POSITIVE_INFINITY : trimmed.length;
 }
 
-function shortestIndex(executed: readonly ExecutedCandidate[]): number {
-  let best = 0;
-  let bestLength = statementLength(executed[0] as ExecutedCandidate);
-  for (let index = 1; index < executed.length; index += 1) {
+/**
+ * The candidates a rule may choose from: the ones that returned something.
+ *
+ * A statement that returned no rows answered nothing, and — unlike every text-level signal in this
+ * file — that is not an opinion about the statement. It is what the engine did. On the dev
+ * artifact (`41767687844`, 1,532 questions) 87 candidates returned the empty result under
+ * `select-mixed` and 76 under `select-intent`, and **none of the 163 was right**; excluding them
+ * lifts the shortest statement from 963 to 975 cases, **63.64% against the selector's 62.79%** for
+ * one call less.
+ *
+ * A question whose true answer is empty makes every candidate empty, so the fallback is the whole
+ * set rather than a refusal: a rule over a candidate set is total. This is the same shape as
+ * `statementLength` ranking a blank statement last — nothing written and nothing returned are the
+ * two ways a candidate can fail to answer, and neither of them is the answer.
+ */
+function eligibleIndices(executed: readonly ExecutedCandidate[]): readonly number[] {
+  const answered: number[] = [];
+  for (const [index, candidate] of executed.entries()) {
+    if (candidate.rows.length > 0) answered.push(index);
+  }
+  // Every candidate empty is a corpus where the answer is empty, and the rule still has to pick.
+  return answered.length === 0 ? executed.map((_candidate, index) => index) : answered;
+}
+
+function shortestIndex(executed: readonly ExecutedCandidate[], eligible: readonly number[]): number {
+  const first = eligible[0] as number;
+  let best = first;
+  let bestLength = statementLength(executed[first] as ExecutedCandidate);
+  for (const index of eligible) {
     const length = statementLength(executed[index] as ExecutedCandidate);
     if (length < bestLength) {
       bestLength = length;
@@ -468,12 +493,12 @@ function shortestIndex(executed: readonly ExecutedCandidate[]): number {
   return best;
 }
 
-function modalIndex(executed: readonly ExecutedCandidate[], keys: readonly string[]): number {
+function modalIndex(keys: readonly string[], eligible: readonly number[]): number {
   const counts = new Map<string, number>();
   for (const key of keys) counts.set(key, (counts.get(key) ?? 0) + 1);
-  let best = 0;
+  let best = eligible[0] as number;
   let bestCount = 0;
-  executed.forEach((_candidate, index) => {
+  for (const index of eligible) {
     // `counts` was built from `keys` above, so this lookup cannot miss: the cast says that rather
     // than a `?? 0` no input could reach, which is a branch that would sit here and never run.
     const count = counts.get(keys[index] as string) as number;
@@ -481,7 +506,7 @@ function modalIndex(executed: readonly ExecutedCandidate[], keys: readonly strin
       bestCount = count;
       best = index;
     }
-  });
+  }
   return best;
 }
 
@@ -491,18 +516,27 @@ function modalIndex(executed: readonly ExecutedCandidate[], keys: readonly strin
  * The counterpart of `chooseCandidate`: the same question, the same answer shape, one fewer
  * generation. `decided` is always true because a rule over a non-empty candidate set is total —
  * the selector is the only chooser that can fail to answer, and that difference is the price.
+ *
+ * Every rule prefers a candidate that returned rows, for the reason `eligibleIndices` gives: the
+ * empty result is the one thing in a candidate set that can be ruled out without reading anything,
+ * and on the dev artifact it was wrong 163 times out of 163. A candidate set where every member is
+ * empty is unaffected, so a question whose answer really is empty still gets an answer.
  */
 export function chooseCandidateByRule(
   rule: SelectionRule,
   executed: readonly ExecutedCandidate[],
 ): SelectionDecision & { readonly sql: string } {
   if (executed.length === 0) throw new Error('chooseCandidateByRule needs at least one executed candidate');
+  const eligible = eligibleIndices(executed);
   const index =
     rule === 'shortest'
-      ? shortestIndex(executed)
+      ? shortestIndex(executed, eligible)
       : rule === 'modal'
-        ? modalIndex(executed, executed.map((candidate) => rowsKey(candidate.rows)))
-        : 0;
+        ? modalIndex(
+            executed.map((candidate) => rowsKey(candidate.rows)),
+            eligible,
+          )
+        : (eligible[0] as number);
   return { index, decided: true, sql: (executed[index] as ExecutedCandidate).sql };
 }
 

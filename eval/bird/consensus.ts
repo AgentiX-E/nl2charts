@@ -52,6 +52,7 @@ import { readFileSync } from 'node:fs';
 import { declaresCandidateSet, scoredQuestions } from './artifact.js';
 import { pathToFileURL } from 'node:url';
 import { mcnemarExact, pairedResolution } from '@agentix-e/nl2charts-devkit';
+import { resultFingerprint } from './run.js';
 
 /** The artifact fields this harness reads. Anything else is ignored, so older artifacts join. */
 export interface ConsensusArtifact {
@@ -116,14 +117,40 @@ export const CALL_FREE: readonly RuleName[] = ['first', 'shortest', 'modal'];
  * and a rule that scores zero are different findings; what changed is that the count annotates
  * the column instead of shrinking its denominator.
  */
+/** The empty result's fingerprint. A constant, because the digest is of `resultKey`, and `resultKey`
+ * of no rows is one string. It is read from `run.ts` rather than written here so that "empty" means
+ * the same thing to the instrument and to the run that produced the artifact. */
+const EMPTY_FINGERPRINT = resultFingerprint([]);
+
+/**
+ * The candidates a free rule may choose from: the ones whose result was not empty.
+ *
+ * A recorded candidate whose fingerprint the artifact did not keep is eligible, because absence of
+ * evidence is not evidence of an empty result — an old artifact must not silently lose candidates
+ * to a field it never wrote.
+ */
+function eligibleIndices(candidates: readonly Recorded[]): readonly number[] {
+  const answered = candidates
+    .map((_candidate, index) => index)
+    .filter((index) => (candidates[index] as Recorded).fingerprint !== EMPTY_FINGERPRINT);
+  return answered.length === 0 ? candidates.map((_candidate, index) => index) : answered;
+}
+
 export function pick(rule: RuleName, candidates: readonly Recorded[]): number {
   if (candidates.length === 0) return -1;
-  if (rule === 'first' || rule === 'model' || rule === 'oracle') return 0;
+  if (rule === 'model' || rule === 'oracle') return 0;
+  // `model` and `oracle` are what happened, not rules, so they are read off the artifact and the
+  // eligibility below does not apply to them. The three free rules all prefer a candidate that
+  // returned something: the empty result is the one member of a candidate set that can be ruled
+  // out without reading anything, and on this artifact it was wrong 163 times out of 163.
+  const eligible = eligibleIndices(candidates);
+  if (rule === 'first') return eligible[0] as number;
   if (rule === 'shortest') {
     if (!candidates.some((candidate) => candidate.sql !== undefined)) return -1;
     let best = -1;
     let bestLength = Number.POSITIVE_INFINITY;
-    candidates.forEach((candidate, index) => {
+    for (const index of eligible) {
+      const candidate = candidates[index] as Recorded;
       // A candidate whose statement the artifact did not keep has no length to compare, and
       // treating it as the longest is the only reading that cannot make it win by absence. A
       // blank statement is the same case for a different reason: an empty string is shorter than
@@ -136,7 +163,7 @@ export function pick(rule: RuleName, candidates: readonly Recorded[]): number {
         bestLength = length;
         best = index;
       }
-    });
+    }
     return best;
   }
   // `modal`: the most common fingerprint, ties to the earliest slot. That tie-break is the one
@@ -150,8 +177,9 @@ export function pick(rule: RuleName, candidates: readonly Recorded[]): number {
   if (counts.size === 0) return -1;
   let best = -1;
   let bestCount = 0;
-  candidates.forEach((candidate, index) => {
-    if (candidate.fingerprint === undefined) return;
+  for (const index of eligible) {
+    const candidate = candidates[index] as Recorded;
+    if (candidate.fingerprint === undefined) continue;
     // `counts` was built from every candidate above, so this lookup cannot miss: the cast says that
     // rather than a `?? 0` no input could reach, which is a branch that would sit in the file
     // forever and never run.
@@ -160,7 +188,7 @@ export function pick(rule: RuleName, candidates: readonly Recorded[]): number {
       bestCount = count;
       best = index;
     }
-  });
+  }
   return best;
 }
 

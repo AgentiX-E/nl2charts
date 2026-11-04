@@ -471,13 +471,51 @@ describe('choosing without a call', () => {
     expect(chooseCandidateByRule('modal', byRows).index).toBe(0);
   });
 
-  it('modal treats two empty results as one answer, because an empty set is one result', () => {
+  it('two empty results are one answer, and neither of them is the answer', () => {
+    // Both halves of this were wrong in the first version of the rule and the second half is the
+    // correction. Two empty results are one result — count them as one group and the majority is
+    // empty, which is how `modal` came to return the candidate that answered nothing. The reading
+    // that produced the fix: on the dev artifact 163 candidates returned the empty result, under
+    // two different arms, and not one of the 163 was right.
     const empties = [
       { sql: 'SELECT a FROM t WHERE 0', rows: [] },
       { sql: 'SELECT 1', rows: [[1]] },
       { sql: 'SELECT b FROM t WHERE 0', rows: [] },
     ];
-    expect(chooseCandidateByRule('modal', empties).index).toBe(0);
+    expect(chooseCandidateByRule('modal', empties)).toEqual({ index: 1, decided: true, sql: 'SELECT 1' });
+    // With every candidate empty the majority is the whole set, and the earliest member is the
+    // answer for the same reason `first` is: a rule over a candidate set is total.
+    expect(chooseCandidateByRule('modal', empties.filter((_candidate, index) => index !== 1)).index).toBe(0);
+  });
+
+  it('every rule prefers a candidate that returned rows', () => {
+    // The rule looks at the rows and at nothing else, so it has to hold whatever the statements
+    // say: here the empty candidate is also the first and the shortest, which is exactly the
+    // combination that made the old `modal` and the old `shortest` pick it.
+    const set = [
+      { sql: 'SELECT 1 WHERE 0', rows: [] },
+      { sql: 'SELECT a FROM t WHERE x = 1', rows: [[1]] },
+      { sql: 'SELECT b FROM t WHERE x = 2', rows: [[2]] },
+    ];
+    for (const rule of SELECTION_RULES) {
+      expect(chooseCandidateByRule(rule, set).sql).not.toBe('SELECT 1 WHERE 0');
+    }
+    expect(chooseCandidateByRule('first', set).index).toBe(1);
+    // A single empty result among rows keeps its place in the index space: the answer is the
+    // original slot, not the slot it holds in the filtered list.
+    expect(chooseCandidateByRule('first', [set[0] as never, set[2] as never]).index).toBe(1);
+  });
+
+  it('nothing returned and nothing written are two refusals, and the second still shortens', () => {
+    // Two different reasons to exclude a candidate, and they compose: the blank statement is
+    // ranked last among the candidates that ran, the empty result is removed before the ranking
+    // starts, so a blank statement that returned rows can still lose to a longer one.
+    const set = [
+      { sql: '', rows: [[1]] },
+      { sql: 'SELECT a FROM t WHERE x = 1', rows: [[1]] },
+      { sql: 'SELECT b FROM t WHERE x = 2', rows: [] },
+    ];
+    expect(chooseCandidateByRule('shortest', set).index).toBe(1);
   });
 
   it('every tie goes to the earliest candidate, so first is the limit of the other two', () => {

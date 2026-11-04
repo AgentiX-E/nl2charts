@@ -39,6 +39,7 @@ import type { ConsensusArtifact, ConsensusSettings, Recorded } from '../eval/bir
 import { readPools } from '../eval/bird/pool.js';
 import { chooseCandidateByRule } from '@agentix-e/nl2charts-ai';
 import { resultKey } from '@agentix-e/nl2charts-devkit';
+import { resultFingerprint } from '../eval/bird/run.js';
 
 type Row = NonNullable<ConsensusArtifact['cases']>[number];
 
@@ -671,4 +672,62 @@ describe('the rule a pipeline runs is the rule the instrument priced', () => {
       expect(pick(rule, recorded())).toBe(chooseCandidateByRule(rule, executed()).index);
     });
   }
+});
+
+/**
+ * The empty result is the one candidate a rule can rule out without reading anything.
+ *
+ * On the dev artifact (`41767687844`) 87 candidates under `select-mixed` and 76 under
+ * `select-intent` returned no rows, and none of the 163 was right. Both implementations now drop
+ * them before ranking, and this holds the two to each other on the case that matters: the empty
+ * candidate is also the earliest, so a harness that skipped the exclusion would print `first` at
+ * 0 and the library would return the slot that answered.
+ */
+describe('an empty result is not a candidate', () => {
+  const empty = resultFingerprint([]);
+  const recorded = (): Recorded[] => [
+    { source: 'a', correct: false, sql: 'SELECT 1 WHERE 0', fingerprint: empty },
+    { source: 'b', correct: true, sql: 'SELECT a FROM t WHERE x = 1', fingerprint: resultKey([[1]]) },
+    { source: 'c', correct: false, sql: 'SELECT b FROM t WHERE x = 2', fingerprint: resultKey([[2]]) },
+  ];
+  const executed = () => [
+    { sql: 'SELECT 1 WHERE 0', rows: [] },
+    { sql: 'SELECT a FROM t WHERE x = 1', rows: [[1]] },
+    { sql: 'SELECT b FROM t WHERE x = 2', rows: [[2]] },
+  ];
+
+  for (const rule of ['first', 'shortest', 'modal'] as const) {
+    it(`${rule} skips it in both implementations`, () => {
+      expect(pick(rule, recorded())).toBe(1);
+      expect(chooseCandidateByRule(rule, executed()).index).toBe(1);
+    });
+  }
+
+  it('leaves the artifact-reading rules alone, because they are what happened', () => {
+    // `model` and `oracle` describe the run rather than a rule, so an empty winner stays the
+    // recorded winner: rewriting it would make the column say a selector chose something it did
+    // not, which is the one thing a reference column cannot do.
+    expect(pick('model', recorded())).toBe(0);
+    expect(pick('oracle', recorded())).toBe(0);
+  });
+
+  it('falls back to the whole set when every candidate is empty', () => {
+    const allEmpty = recorded().map((candidate) => ({ ...candidate, fingerprint: empty, correct: false }));
+    expect(pick('first', allEmpty)).toBe(0);
+    expect(chooseCandidateByRule('first', executed().map((candidate) => ({ ...candidate, rows: [] }))).index).toBe(0);
+  });
+
+  it('keeps a candidate whose fingerprint the artifact never wrote', () => {
+    // Absence of evidence is not evidence of an empty result: an artifact from before this field
+    // existed must not lose candidates to a field it never wrote.
+    const legacy = recorded().map((candidate) => ({ ...candidate, fingerprint: undefined }));
+    expect(pick('first', legacy)).toBe(0);
+  });
+
+  it('reads the same fingerprint the run wrote, not a second definition of empty', () => {
+    // The constant is `resultFingerprint([])` from `run.ts`; a test that recomputed it would agree
+    // with itself and with nothing else.
+    expect(empty).toBe(resultFingerprint([]));
+    expect(empty).not.toBe(resultFingerprint([[null]]));
+  });
 });
