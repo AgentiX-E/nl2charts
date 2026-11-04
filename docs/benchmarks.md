@@ -7111,3 +7111,40 @@ voted on.
 The rule is adopted. The generalisation is not. And the fourth call is now losing to a rule that
 costs three on the arm whose candidates are worth the most, which is the first time the arithmetic
 of "selection is closed" has been contradicted by a reading rather than by an argument.
+
+### The zero-row state, priced before it is built
+
+If the empty result earns its place as a filter, the state it marks is worth pricing before
+anything is built for it. On the 496 questions whose databases are in this checkout — every
+candidate executed against the real engine, zero model calls:
+
+| population | questions | share | selector passed |
+|---|---|---|---|
+| every candidate returned nothing | **19** | **3.83%** | **0** |
+| some candidate returned nothing | 15 | 3.02% | 8 |
+
+Nineteen questions where the whole candidate set is empty, and the selector is right on none of
+them. Extrapolated to 1,532, that is about **59 questions = 3.85pp** — the ceiling of a repair that
+always succeeds, and the largest single deterministically-detectable loss left in the pipeline.
+
+The cost is as bounded as the benefit: a repair triggered only on the zero-row state spends one
+extra call on 3.83% of cases, which is 0.038 calls a case — against the 1.00 call a case the fourth
+candidate costs and never recovers.
+
+That makes the next pre-registration unusually cheap to state:
+
+1. **Trigger.** Every candidate returned no rows. Deterministic, needs no judge, and is false on
+   96.2% of the corpus, so it cannot disturb anything that already works.
+2. **Action.** One rewrite with the zero-row fact, the statement's own literals, and the values
+   that do exist for those columns — the diagnosis `values-gap` names `literal-missing` and
+   `literal-case` is exactly the repair.
+3. **Bar.** Correct on ≥ 25% of the triggered questions, i.e. ≥ +0.96pp on the full split, with
+   no change on the 96.2% that never trigger. A repair that cannot clear that is a call spent for
+   nothing, because the same 3.85pp is available to a filter that simply drops the state and
+   reports it.
+4. **Cost published.** `calls.mean` and `promptChars` for the triggered subset, so the 0.038 is
+   measured rather than assumed.
+
+This is the first lever in the document whose *trigger* is cheaper than its *action*, which is why
+it is worth stating in this form: everything measured so far paid per case to maybe help a case,
+and this pays per broken case only.
