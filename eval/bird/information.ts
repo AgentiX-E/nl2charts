@@ -43,7 +43,9 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { attachDefinitions, buildAskMessages } from '@agentix-e/nl2charts-ai';
+import { attachSamples } from './samples.js';
 import type { SchemaTable } from '@agentix-e/nl2charts-ai';
+import { blockReader } from './card.js';
 import { buildSchema, loadQuestions, loadTables } from './data.js';
 import type { BirdQuestion, BirdTable } from './data.js';
 import type { CaseRecord } from './gap.js';
@@ -299,14 +301,31 @@ export interface InfoReportShape {
  * classes below barely move — the hint lists identifiers, not values — but a file whose header
  * promises the prompt that was sent has to measure the prompt that was sent.
  */
-export function promptForCase(arm: Arm, question: BirdQuestion, definitions: string, tables: BirdTable): string {
+export function promptForCase(
+  arm: Arm,
+  question: BirdQuestion,
+  definitions: string,
+  tables: BirdTable,
+  values?: Map<string, readonly string[]>,
+): string {
   const card = attachDefinitions(buildSchema(tables, new Map(), { withNotes: false }), definitions);
+  // The block, before the prune, exactly as the runner layers it. Without this the arm arrives at
+  // the builder as its parent — the same defect `bench:bird:card` carried for four rounds, at the
+  // second instrument that renders a card.
+  const block =
+    arm.samples === undefined
+      ? (card.schema as SchemaTable[])
+      : values === undefined
+        ? (() => {
+            throw new Error(`arm ${arm.name} carries the stored values on its card and this instrument was given none, so the prompt it would measure is not the one sent`);
+          })()
+        : attachSamples(card.schema as SchemaTable[], values);
   // The same rule the runner applies: an arm that sends the join closure sends it here too, or
   // this instrument would measure the whole card and call it the prompt that was sent.
   const schema =
     arm.prune === undefined
-      ? (card.schema as SchemaTable[])
-      : (pruneSchema({ schema: card.schema as SchemaTable[], question: question.question, graph: graphOf(tables), hops: arm.prune })
+      ? block
+      : (pruneSchema({ schema: block, question: question.question, graph: graphOf(tables), hops: arm.prune })
           .schema as SchemaTable[]);
   const built = buildAskMessages({
     question: question.question,
@@ -322,6 +341,8 @@ export async function runInformation(settings: InfoSettings): Promise<InfoOutcom
   const report = JSON.parse(readFileSync(settings.report, 'utf8')) as InfoReportShape;
 
   const arm = resolveArm(settings.arm);
+  // An arm that carries a block is rendered with it, or this instrument prices its parent.
+  const valuesFor = arm === undefined ? () => undefined : blockReader(arm, settings.layout);
   const questions = loadQuestions(settings.layout.questionsFile);
   const tables = loadTables(settings.layout.tablesFile);
   const byId = new Map(questions.map((question) => [String(question.question_id), question]));
@@ -351,7 +372,7 @@ export async function runInformation(settings: InfoSettings): Promise<InfoOutcom
         drops.definitionGap += 1;
         continue;
       }
-      const prompt = promptForCase(arm, question, text ?? '', table);
+      const prompt = promptForCase(arm, question, text ?? '', table, valuesFor(question.db_id));
       const verdict = classifyInformation(prompt, question.question, question.SQL);
       rows.push({ id, reason: row.reason, cls: verdict.cls, values: verdict.values });
     }

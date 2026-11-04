@@ -7426,8 +7426,9 @@ with the same `conditionColumns` the oracle arm uses. Two refusals keep the fix 
 quieter version of the bug: a cache the run never wrote **throws** — an empty map renders the
 parent's card, which is the defect — and an example set written by another rule than the pinned one
 throws too, because a stale block is not the block the arm would send. `bench:bird:join` reads the
-same block through `blockReader`, so the two instruments cannot come to disagree about which card an
-arm sends, which is the shape of every defect in that file's history.
+same block through `blockReader`, and `bench:bird:info` — which builds its own prompt and had the same
+blind spot in its own renderer — reads it too, so the three instruments cannot come to disagree about
+which card an arm sends, which is the shape of every defect in that file's history.
 
 ### What the block costs, re-derived
 

@@ -259,6 +259,24 @@ describe('rendering the prompt an arm sends', () => {
     expect(prompt).toContain('the label the store sells under');
     expect(settings.arm).toBe('select');
   });
+
+  it('renders the block an arm carries, and refuses to render the arm without it', () => {
+    // The same defect `bench:bird:card` carried for four rounds, at the second instrument that
+    // renders a card: an arm whose lever is the block must not arrive as its parent.
+    const data = dataset();
+    const table = loadTables(join(data, 'dev_tables.json')).get('shop');
+    const question = JSON.parse(readFileSync(join(data, 'mini_dev_sqlite.json'), 'utf8')).find(
+      (entry: { question_id: number }) => entry.question_id === 101,
+    );
+    const block = new Map([['items.name', ['pen', 'cup']]]);
+    const parent = promptForCase(resolveArm('inline+evidence') as never, question, '', table as never);
+    const sampled = promptForCase(resolveArm('inline+evidence+samples') as never, question, '', table as never, block);
+    expect(sampled).toContain('[pen|cup]');
+    expect(sampled).not.toBe(parent);
+    // A block handed to an arm that does not carry one is ignored rather than rendered.
+    expect(promptForCase(resolveArm('inline+evidence') as never, question, '', table as never, block)).toBe(parent);
+    expect(() => promptForCase(resolveArm('inline+evidence+samples') as never, question, '', table as never)).toThrow(/was given none/);
+  });
 });
 
 describe('the measurement over an artifact', () => {

@@ -196,8 +196,9 @@ cannot be argued with.
   example set), `promptOf` layers it on the resolved card **before** the prune — the order the run
   uses — and narrows it with the same `conditionColumns` when the arm asks for the gold's columns;
   a cache the run never wrote throws rather than rendering the parent's card, and `bench:bird:join`
-  reads the same block through `blockReader` so the two instruments cannot disagree about which
-  card an arm sends. Re-derived by the fixed instrument over the 500 Mini-Dev cases and all eleven
+  and `bench:bird:info` read the same block through `blockReader`, so the three instruments cannot
+  disagree about which card an arm sends. `bench:bird:info` had the same blind spot in its own
+  renderer, with the same shape: `buildAskMessages` told to draw brackets, nothing attached. Re-derived by the fixed instrument over the 500 Mini-Dev cases and all eleven
   databases: **1,479 → 2,047 characters (+38.4%)** for the wide block and **1,479 → 1,499 (+1.4%)**
   narrowed to the gold's filtered columns, with 451 of 500 cases carrying a bracket. The quoted
   number was right; it is now measurable. The block itself is **568 characters a case**; the share
