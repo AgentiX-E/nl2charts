@@ -7057,7 +7057,7 @@ against 372, **+3.17pp at p = 0.0163** — *the first call-free rule in this doc
 paid selector by more than the split resolves*, on 3.00 calls instead of 4.00.
 
 It is also the highest score any configuration here has reached, and the conversion rate it implies
-is **92.01%** of a 70.83% ceiling, against the 87.53% the selector got from the same pool.
+is **92.00%** of a 70.83% ceiling, against the 87.53% the selector got from the same pool.
 
 ### Two things this is not
 
@@ -7148,3 +7148,37 @@ That makes the next pre-registration unusually cheap to state:
 This is the first lever in the document whose *trigger* is cheaper than its *action*, which is why
 it is worth stating in this form: everything measured so far paid per case to maybe help a case,
 and this pays per broken case only.
+
+And the cause is locatable without a model. For each of the 19 zero-row questions, every string
+literal its candidates wrote was looked up in every table of the database:
+
+| cause | questions | share |
+|---|---|---|
+| a literal in the candidates does not exist anywhere in the database | **18** | **94.7%** |
+| the literals exist, the combination matches nothing | 1 | 5.3% |
+
+**Eighteen of nineteen wrote a value the database does not contain.** Not a predicate that is too
+narrow — a value that is not there: `'Benalish Knight'` where the column holds
+`Benalish Knight (Fellwar Stone)`, a date written differently, a name with different punctuation.
+That is `literal-missing` and `literal-case` from `values-gap`, arriving here as the *cause of an
+empty result* rather than as one bucket among many.
+
+So the repair's first step costs nothing and does not need a model: take the literals the statement
+used, find the ones the database does not contain, and retrieve the values that do exist for those
+columns. A call is only needed when the retrieved values do not settle which one was meant — which
+is a much narrower question than "rewrite this statement", and it is the reason this lever can be
+priced at 0.038 calls a case rather than 1.00.
+
+The pre-registration above therefore gains a step before its call, and the bar is unchanged
+because the bar is about the outcome rather than the mechanism:
+
+1. detect the zero-row state (free, deterministic);
+2. locate the absent literals and retrieve the values the columns do hold (no model call, one
+   query each — the same retrieval the `values` source already performs for the prompts, which is
+   why "free" here means free of a call and not free of a round trip);
+3. rewrite once with the zero-row fact and the retrieved values (one call, 3.83% of cases);
+4. score against the same judge.
+
+Steps 1 and 2 are the ones `values-gap` has been describing for thirty rounds. What is new is that
+they are now the **cause of a detectable state** instead of a hypothesis about a wrong answer, and
+a hypothesis can be argued with while a zero-row result cannot.
