@@ -125,8 +125,13 @@ export function pick(rule: RuleName, candidates: readonly Recorded[]): number {
     let bestLength = Number.POSITIVE_INFINITY;
     candidates.forEach((candidate, index) => {
       // A candidate whose statement the artifact did not keep has no length to compare, and
-      // treating it as the longest is the only reading that cannot make it win by absence.
-      const length = candidate.sql === undefined ? Number.POSITIVE_INFINITY : candidate.sql.length;
+      // treating it as the longest is the only reading that cannot make it win by absence. A
+      // blank statement is the same case for a different reason: an empty string is shorter than
+      // every real statement, so ranking it by its length made `shortest` pick the candidate that
+      // wrote nothing — a rule agreeing with the library's (`chooseCandidateByRule`) is what
+      // caught it, since the two are otherwise separate implementations of the same three rules.
+      const statement = candidate.sql?.trim() ?? '';
+      const length = statement.length === 0 ? Number.POSITIVE_INFINITY : statement.length;
       if (length < bestLength) {
         bestLength = length;
         best = index;

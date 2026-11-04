@@ -6,6 +6,30 @@ cannot be argued with.
 
 ## Unreleased
 
+### Added
+- **`chooseCandidateByRule`: the cheap side of a selection, as a library function.** `first`,
+  `shortest` and `modal`, returning the same `{index, decided, sql}` the selector returns, with
+  `decided` always true and no generation spent. The readings that justify it are on the dev split
+  (`41767687844`, 1,532 questions, read from the artifact and not from a new run): the selector
+  scored **62.79%** against the shortest statement's **62.86%** on `select-mixed`, and **62.47%**
+  against **63.25%** for the shortest of the three generated candidates on `select-intent` — 969
+  cases from a rule that costs nothing, against 957 from a call per case. Neither difference
+  reaches the split's 2.30pp, which is the point: a deployment that cannot afford a fourth call is
+  not choosing between a better and a worse pipeline, it is choosing how to pay for the same one.
+  The result-set key the modal rule needs mirrors the devkit's `resultKey` rather than importing it
+  (PKG2 forbids a production package from depending on the devkit), and a test asks both the same
+  question over every value type a SQLite result carries, so the mirror cannot become a second
+  definition of equality.
+
+### Fixed
+- **`shortest` ranked the candidate that wrote nothing as the minimal answer.** `consensus.ts` read
+  a statement's length directly, so an empty statement scored zero and won every comparison it
+  entered; the library ranks a blank statement last, and the test that holds the two
+  implementations to the same slot on the same rows is what found it. No published reading moves —
+  the artifact this was measured against carries a statement for all 10,380 candidate records — but
+  an artifact from a run where a source returned nothing would have been scored under the wrong
+  rule. The blank case is now a refusal in both implementations.
+
 ### Changed
 - **The samples family closes, and it closes against the oracle.** `41620796848` ran the three arms in
   one artifact on dev's 1,532 cases: `inline+evidence` **933 = 60.90%**, `+samples` **952 = 62.14%**

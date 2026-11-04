@@ -378,6 +378,135 @@ export async function chooseCandidatePairwise(
 }
 
 /**
+ * Choosing without a call: the rules a deployment runs when it will not pay for a selector.
+ *
+ * The selector costs one generation a case, and on this repository's own dev split it returns
+ * what the candidates already imply. Read from the artifacts rather than from a new run: on
+ * `select-mixed`'s three candidates it scored 62.79% against the shortest statement's 62.86%
+ * (`41767687844`, 1,532 questions), and on `select-intent`'s four it scored 62.47% against
+ * 63.25% for the shortest of the three generated ones. Two pools, the same ordering, neither
+ * difference resolvable at this split's 2.30pp. That is why the rule is a first-class choice
+ * here rather than a footnote: a deployment that has measured its own corpus should be able to
+ * take the cheaper side, and a deployment that cannot afford a fourth call should not have to
+ * ship a worse pipeline because of it.
+ *
+ * Three rules, each a different claim about why a candidate would be right:
+ *
+ * - `first` — the order the prompts were asked in. It is what a pipeline with no selector already
+ *   returns, written down here so that "we did not choose" can be compared instead of assumed.
+ * - `shortest` — the statement that says the least. It is the rule every reader believes they are
+ *   using, and the one that beat the selector on both pools above. A blank statement ranks last
+ *   rather than first: an empty string is shorter than every real statement, and a candidate that
+ *   wrote nothing is not the minimal answer. Leading and trailing whitespace is ignored for the
+ *   same reason — the length being ranked is the statement's, not the formatting's.
+ * - `modal` — the result set most candidates agree on. It needs no statement and no model, and it
+ *   is the only rule that reads the rows. Agreement is not proof — on the dev split an agreed
+ *   result is wrong on 24.1% of the four-candidate questions — but it is the same evidence the
+ *   marked selector prompt states, counted instead of read.
+ *
+ * Ties go to the earliest candidate under every rule, which is what makes `first` the limit of the
+ * other two on a set they cannot separate. Unlike the selector, none of these rules can report
+ * "did not decide": a total function of the candidates always has an answer, and `decided` is
+ * therefore always true — which is exactly the difference in cost that this API exists to expose.
+ */
+export type SelectionRule = 'first' | 'shortest' | 'modal';
+
+export const SELECTION_RULES: readonly SelectionRule[] = ['first', 'shortest', 'modal'];
+
+/**
+ * The key two rows are compared with, by the rule the benchmark's judge uses.
+ *
+ * It mirrors `resultKey` in `@agentix-e/nl2charts-devkit` deliberately rather than importing it:
+ * `PKG2` forbids a production package from depending on the devkit, and the equality that matters
+ * to a caller is the one its own judge applies. A test holds the two to the same answer over a
+ * table of values, which is what keeps a mirror from decaying into a second opinion — two results
+ * could otherwise agree under this key and disagree under the judge, and every count built on it
+ * would be measuring the key rather than the benchmark.
+ */
+function rowsKey(rows: readonly (readonly unknown[])[]): string {
+  if (rows.length === 0) return '\u2205';
+  const width = (rows[0] as readonly unknown[]).length;
+  const unique = new Set(rows.map((row) => row.map(cellKey).join('\u0001')));
+  return `${String(width)}\u0002${[...unique].sort().join('\u0003')}`;
+}
+
+/** One value, tagged by its type so that `1`, `'1'` and `true` are three different answers. */
+function cellKey(value: unknown): string {
+  if (value === null || value === undefined) return '\u0000null';
+  if (typeof value === 'bigint') return `n:${value.toString()}`;
+  if (typeof value === 'number') {
+    if (Number.isNaN(value)) return 'n:NaN';
+    // -0 and 0 are the same value in SQL arithmetic.
+    return `n:${Object.is(value, -0) ? 0 : value}`;
+  }
+  if (typeof value === 'boolean') return `b:${String(value)}`;
+  if (value instanceof Uint8Array) return `x:${Buffer.from(value).toString('hex')}`;
+  const encoded = (value as { $b64?: unknown }).$b64;
+  // The Python oracle encodes blobs as {"$b64": "..."} because JSON has no bytes.
+  if (typeof encoded === 'string') return `x:${encoded}`;
+  return `s:${String(value)}`;
+}
+
+/** How long a statement is, for the purpose of ranking one against another. */
+function statementLength(candidate: ExecutedCandidate): number {
+  const trimmed = candidate.sql.trim();
+  // Infinite rather than zero: a blank statement is the one candidate that cannot be the minimal
+  // answer, and any finite length would make it win every comparison it entered.
+  return trimmed.length === 0 ? Number.POSITIVE_INFINITY : trimmed.length;
+}
+
+function shortestIndex(executed: readonly ExecutedCandidate[]): number {
+  let best = 0;
+  let bestLength = statementLength(executed[0] as ExecutedCandidate);
+  for (let index = 1; index < executed.length; index += 1) {
+    const length = statementLength(executed[index] as ExecutedCandidate);
+    if (length < bestLength) {
+      bestLength = length;
+      best = index;
+    }
+  }
+  return best;
+}
+
+function modalIndex(executed: readonly ExecutedCandidate[], keys: readonly string[]): number {
+  const counts = new Map<string, number>();
+  for (const key of keys) counts.set(key, (counts.get(key) ?? 0) + 1);
+  let best = 0;
+  let bestCount = 0;
+  executed.forEach((_candidate, index) => {
+    // `counts` was built from `keys` above, so this lookup cannot miss: the cast says that rather
+    // than a `?? 0` no input could reach, which is a branch that would sit here and never run.
+    const count = counts.get(keys[index] as string) as number;
+    if (count > bestCount) {
+      bestCount = count;
+      best = index;
+    }
+  });
+  return best;
+}
+
+/**
+ * Pick the candidate a named rule would keep, without a model call.
+ *
+ * The counterpart of `chooseCandidate`: the same question, the same answer shape, one fewer
+ * generation. `decided` is always true because a rule over a non-empty candidate set is total —
+ * the selector is the only chooser that can fail to answer, and that difference is the price.
+ */
+export function chooseCandidateByRule(
+  rule: SelectionRule,
+  executed: readonly ExecutedCandidate[],
+): SelectionDecision & { readonly sql: string } {
+  if (executed.length === 0) throw new Error('chooseCandidateByRule needs at least one executed candidate');
+  const index =
+    rule === 'shortest'
+      ? shortestIndex(executed)
+      : rule === 'modal'
+        ? modalIndex(executed, executed.map((candidate) => rowsKey(candidate.rows)))
+        : 0;
+  return { index, decided: true, sql: (executed[index] as ExecutedCandidate).sql };
+}
+
+/**
  * One group of candidates that returned the same rows, as a reconciler reads it.
  *
  * `members` are the 1-based numbers of the candidates in the group, in the order the model was

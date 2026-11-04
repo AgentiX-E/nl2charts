@@ -6792,3 +6792,126 @@ it is built.
 stays in the catalogue with `select-mixed` as the arm to beat on the pool question, and the next round
 attacks conversion — a selector that reads four candidates as well as it reads three — because that is
 now the only place the +2.22pp can be collected.
+
+## Reading four candidates: the selector does not read them, agreement does
+
+The previous round left one instruction: *attack conversion — a selector that reads four candidates
+as well as it reads three*. Before spending another 7,660 calls on a new selector prompt, the
+artifact that produced that instruction already holds every candidate's statement and result
+fingerprint, so the question can be asked of the file.
+
+`41767687844`, dev's 1,532 cases, both arms in one artifact. Every number below is computed from
+those rows with `bench:bird:consensus` and with the two case fields it reads — `candidates[]` and
+`passed` — and no model call.
+
+### The loss is not in the choosing, it is in the agreeing
+
+Partition the 1,532 questions by the fingerprints their candidates produced, and read what each
+rule scored inside the partition. `sel` is the arm's own selector (one call), the other four columns
+are free.
+
+| fingerprint structure | cases | `sel` | `shortest` | `modal` | `first` | `oracle` |
+|---|---|---|---|---|---|---|
+| four agree (or the only candidate) | 906 | 75.9% | 75.9% | 75.9% | 75.9% | 75.9% |
+| three agree, one differs | 260 | 45.4% | 42.7% | **46.9%** | 44.6% | 67.7% |
+| three candidates agree | 161 | 53.4% | 53.4% | 53.4% | 53.4% | 53.4% |
+| two pairs | 54 | 38.9% | **40.7%** | 31.5% | 31.5% | 64.8% |
+| two agree, two singletons | 68 | 16.2% | **23.5%** | 17.6% | 16.2% | 44.1% |
+| two agree | 47 | 42.6% | **44.7%** | 25.5% | 25.5% | 59.6% |
+| one candidate | 15 | 46.7% | 46.7% | 46.7% | 46.7% | 46.7% |
+| three or four singletons, no candidates, two agreeing candidates | 21 | 28.6% | 28.6% | 23.8% | 23.8% | 38.1% |
+
+**The selector is never better than counting on a partition that disagrees.** On the 260 questions
+with a 3+1 split it scores 45.4% against the modal result's 46.9%; on the 68 with a 2+1+1 split it
+scores 16.2% against the shortest statement's 23.5%. The one place it is ahead is the 906 questions
+where there is nothing to choose, and there it ties by construction — all five columns are the same
+candidate.
+
+**And 24.1% of that 906 is wrong.** 218 of the 906 questions have four candidates that agree and an
+answer that is not the agreed result. No selection rule on any list reaches those: they are one
+opinion counted four times, and the count is the disagreement the candidate side never produced.
+Against the 474 questions the pool does not contain at all, this is the largest single block of
+loss in the corpus — 14.2pp of the split — and it is a generation problem wearing a selection
+problem's clothes.
+
+### Where the conversion rate went
+
+The fourth source's own accuracy is 786/1,316 = 59.7%, below the three prompts (61.9 / 62.1 /
+62.0%), so a selector that treated it as a fourth equal opinion would lose a little. It does
+something worse: on the 1,293 questions that actually carry four candidates, the selector's winner
+is `inline+evidence` on 964 (74.6%), `metadata+evidence` on 120, `intent` on 110 and `values` on 99,
+and the accuracy of those winners is 71.2%, 48.3%, **35.5%** and 55.6%.
+
+So the loss is not "the model was fooled by a plausible-looking statement" in general — it is that
+the 110 cases it took from the fourth source were wrong two times in three. Two hypotheses for why
+were testable on the same rows, and both are now closed:
+
+- **the short-statement preference.** The selection prompt's first rule tells the model not to
+  choose by length, and a rendered statement is short and tidy. It is not what happened: `intent`
+  was the shortest candidate on 258 questions and was chosen on 21 of them (8.1%), and it was not
+  the shortest on 1,035 and was chosen on 89 (8.6%). The rate is the same, so the model was reading
+  content, and reading it wrong.
+- **a post-hoc ban.** Re-running the arm with "if the winner is `intent`, take the first candidate
+  instead" gives 848 against 838 on those 1,293 questions — +10 cases, +0.65pp of the split. That is
+  a rule fitted to this artifact, it has no mechanism behind it, and it is under a third of the
+  split's 2.30pp resolution; it is published as an upper bound on what any source-prior rule could
+  collect, not as a candidate.
+
+### The fourth call is not conditional, either
+
+A conditional dispatch — generate the fourth candidate only when the three prompts disagree — would
+cut the intent call on the 1,058 of 1,293 questions (81.8%) whose three candidates already agree.
+It also throws away 23 questions: on those the three agree, the fourth differs, and the fourth is
+right. 23 cases is 1.5pp of ceiling for 0.82 calls a case, and the reverse condition (generate only
+when they agree) is worse: it discards 66 correct answers.
+
+So the price of the fourth call is 1.00 call a case with no condition that removes it, and the
+benefit is a ceiling 2.22pp higher that the selector then gives back. Both halves are now measured
+rather than argued.
+
+### The rules on the whole split, and the one that beats the selector
+
+`bench:bird:consensus` on the same artifact, 1,532 questions:
+
+| arm | `first` | `shortest` | `modal` | `model` (the selector) | `oracle` |
+|---|---|---|---|---|---|
+| `select-mixed` | 61.36% | **62.86%** | 61.75% | 62.79% | 66.84% |
+| `select-intent` | 61.49% | 62.47% | 61.95% | 62.47% | 69.06% |
+
+Reading `shortest` inside the `select-intent` artifact but **only over the three generated
+candidates** — the fourth source excluded from the ranking — scores **969/1,532 = 63.25%** with no
+selection call at all: +0.78pp over the arm's selector and +0.46pp over the arm to beat. Eight
+questions have no three-candidate set to rank and are counted as misses, so the number is a floor.
+
+That is the only place in this corpus where a free rule beats a paid one by more than noise, and
+even here the difference (0.78pp, 70 discordant cases one way and 58 the other) does not reach the
+split's 2.30pp. It is reported as a direction, not as an adoption.
+
+**Why the rule is now in the library and not only in the harness.** A measurement that says "the
+fourth call buys less than this split can resolve" is worth nothing to a deployment that cannot
+express the cheaper side. `chooseCandidateByRule(rule, executed)` takes `first`, `shortest` or
+`modal` and returns the same decision shape the selector returns, with `decided` always true and no
+generation spent. The three rules are the three columns above, so the instrument and the product
+now price the same thing under the same names — and a test holds the harness's `pick` and the
+library's rule to the same slot on the same rows, because two implementations of one rule that
+drift are worse than one implementation nobody can check.
+
+That test found a defect on its first run: `consensus.ts` ranked an empty statement as length zero,
+so `shortest` picked the candidate that wrote nothing, while the library ranked it last. Neither
+reading had been published against an artifact that carries an empty statement — the harness's own
+`-1` for "no statement kept" made the case look handled — but the two rules disagreed, and the fix
+is in the harness: a blank statement is not the minimal answer in either implementation.
+
+### The verdict, and what is left
+
+**Selection is closed at 93.95% conversion on three candidates and 90.45% on four.** Four levers
+have now been measured on this axis (selector, pairwise, agreement marks, reconcile) and the fifth
+(the fourth candidate) is the only one that ever moved the ceiling; the +2.22pp it added is
+collectable only by a chooser that reads four as well as it reads three, and the partitions above
+say the chooser reads four *worse*, because the extra candidate is a weaker opinion that wins 8.5%
+of the cases and is wrong 64.5% of the time it wins.
+
+The candidate side therefore remains the only axis with room, and the two numbers that bound it are
+both on this page: **474 questions with no correct candidate**, of which **218 are four-way
+agreement on a wrong answer**. A fifth homogeneous prompt cannot reach either. What can is a
+candidate written by a model that reasons before it writes, which is the next pre-registration.

@@ -207,6 +207,44 @@ Four things worth knowing before you turn it on:
   statement 65.6% of the time and it returns 62.9%. That gap is the honest description of
   what this mechanism has not yet solved.
 
+### If you will not pay the fourth call
+
+The selector is one generation a case, and on this repository's dev split it returns
+what the candidates already imply. Read from the artifact of `41767687844` (1,532
+questions, three prompts), a rule that costs nothing scores the same:
+
+| way of choosing | calls | dev split |
+| --- | --- | --- |
+| the first candidate | 0 | 61.36% |
+| the shortest statement | 0 | **62.86%** |
+| the result most candidates returned | 0 | 61.75% |
+| the model selector | 1 | 62.79% |
+
+```ts
+import { chooseCandidateByRule } from '@agentix-e/nl2charts-ai';
+
+// `first` | `shortest` | `modal` — no provider, no call, never undecided.
+const { sql, index } = chooseCandidateByRule('shortest', candidates);
+```
+
+- **`first`** is what a pipeline with no selector already returns, written down so that
+  "we did not choose" can be compared instead of assumed.
+- **`shortest`** is the rule every reader believes they are using. Leading and trailing
+  whitespace is ignored, and a blank statement ranks last: an empty string is shorter
+  than every real statement, and a candidate that wrote nothing is not the minimal answer.
+- **`modal`** keeps the result set most candidates returned, and it is the only rule that
+  reads the rows rather than the text. Two different statements that produced one table
+  are one opinion, which is what makes the rule stronger than it looks — and also what
+  makes it fragile on a corpus where every candidate is wrong in the same way.
+
+Two things the table above does not say. The difference between the selector and the
+shortest statement is **0.07pp on that pool and 0.78pp on a four-candidate pool** — both
+under the 2.30pp the split resolves, so this is a way to pay less for the same pipeline,
+not a way to buy accuracy. And a rule cannot report `decided: false`: it always answers,
+which means a corpus whose candidates are all bad gets a confident wrong answer instead of
+a visible regression. Log which rule ran and what it picked; the selector's `decided` flag
+was doing that job for you.
+
 ## Repairing a rejected statement
 
 The pipeline retries a statement the guard or the engine refused, and **three** times by

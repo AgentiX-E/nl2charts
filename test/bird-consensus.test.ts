@@ -37,6 +37,8 @@ import {
 } from '../eval/bird/consensus.js';
 import type { ConsensusArtifact, ConsensusSettings, Recorded } from '../eval/bird/consensus.js';
 import { readPools } from '../eval/bird/pool.js';
+import { chooseCandidateByRule } from '@agentix-e/nl2charts-ai';
+import { resultKey } from '@agentix-e/nl2charts-devkit';
 
 type Row = NonNullable<ConsensusArtifact['cases']>[number];
 
@@ -630,4 +632,43 @@ describe('the entry point', () => {
     expect(code).toBe(1);
     expect(errors[0]).toBe('a string');
   });
+});
+
+/**
+ * The instrument's rules and the library's rules are the same rules.
+ *
+ * `consensus.ts` prices a rule from an artifact and `chooseCandidateByRule` runs one in a pipeline;
+ * a deployment that reads 62.86% here and ships 61% there has been told two different things by one
+ * name. The two are separate implementations on purpose — one reads a stored fingerprint and a
+ * possibly absent statement, the other reads rows — so the agreement has to be a test rather than a
+ * comment. Fingerprints are built with the judge's own `resultKey`, which is what makes the
+ * comparison a comparison of the rules and not of the keys.
+ */
+describe('the rule a pipeline runs is the rule the instrument priced', () => {
+  const sets: readonly (readonly (readonly unknown[])[])[] = [
+    [[1], [2]],
+    [[2], [1]],
+    [[1], [2], [3]],
+    [['a']],
+    [[1]],
+    [],
+    [[null], [1]],
+    [[1], [1], [2]],
+  ];
+  const statements = ['SELECT 1', 'SELECT 22', '  SELECT 3  ', '', 'SELECT 4 FROM t WHERE x = 1'];
+
+  const recorded = (): Recorded[] =>
+    sets.map((rows, index) => ({
+      source: `s${String(index)}`,
+      correct: false,
+      sql: statements[index] ?? 'SELECT 0',
+      fingerprint: resultKey(rows as never),
+    }));
+  const executed = () => sets.map((rows, index) => ({ sql: statements[index] ?? 'SELECT 0', rows }));
+
+  for (const rule of ['first', 'shortest', 'modal'] as const) {
+    it(`${rule} picks the same slot in both implementations`, () => {
+      expect(pick(rule, recorded())).toBe(chooseCandidateByRule(rule, executed()).index);
+    });
+  }
 });

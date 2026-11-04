@@ -645,7 +645,13 @@ that differs in method rather than in prompt or in draw.
   looked alike: taking candidate one ties the selector on `select` (40:35, p=0.64) and loses to it
   on `select-mixed` (13:30, p=0.0137). Choosing is guessing when the candidates are draws of one
   prompt and deciding when they differ in content — the same mechanism the ceiling was measured to
-  assume.
+  assume. Those three rules are also a **library** (`chooseCandidateByRule`), not only an
+  instrument: a deployment that will not spend a call per case can run the same rule the harness
+  priced, and a test holds the instrument's `pick` and the library's rule to the same slot on the
+  same rows, because two implementations of one rule that drift are worse than one implementation
+  nobody can check. That test is what found the blank-statement defect: the harness ranked an empty
+  statement as length zero, the library ranked it last, and the published artifact carries a
+  statement for all 10,380 candidate records, so the disagreement had never shown up in a table.
 - **A threshold finer than the evidence is not a finding.** Every verdict in `eval/bird` compares a
   difference against a margin, and the margin was a constant: 2.30pp, the resolution of the full dev
   split. That constant then judged a 600-question sample, where the same design resolves 3.17pp, and

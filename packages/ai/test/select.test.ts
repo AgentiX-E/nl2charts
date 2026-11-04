@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { applySelection, buildPairwisePrompt, buildReconcilePrompt, buildSelectionPrompt, chooseCandidate, chooseCandidatePairwise, parsePairwise, parseSelection, resultGroups, toCandidate } from '../src/select.js';
+import { applySelection, buildPairwisePrompt, buildReconcilePrompt, buildSelectionPrompt, chooseCandidate, chooseCandidateByRule, chooseCandidatePairwise, parsePairwise, parseSelection, resultGroups, SELECTION_RULES, toCandidate } from '../src/select.js';
 import type { LlmProvider } from '../src/provider.js';
 import type { Candidate } from '../src/select.js';
+import { judgeOfficial } from '@agentix-e/nl2charts-devkit';
 
 /**
  * The selector is the only part of the harness that decides between complete
@@ -412,5 +413,158 @@ describe('the reconcile prompt', () => {
     // question never mentions.
     expect(prompt).toContain('row count that cannot answer the question');
     expect(prompt).toContain('no invented tables or columns');
+  });
+});
+
+/**
+ * The free rules: the same question the selector answers, answered by a function of the
+ * candidates. Every expectation below is a property of the rule rather than of a corpus, because
+ * the corpus readings live in `eval/bird/consensus.ts` — what a library test has to fix is that the
+ * rule means one thing, and that its result-set equality is the judge's equality and not a second
+ * definition of it.
+ */
+describe('choosing without a call', () => {
+  const executed = [
+    { sql: 'SELECT a FROM t WHERE z IS NOT NULL', rows: [[1], [2], [3]] },
+    { sql: '  SELECT b FROM t WHERE x = 1  ', rows: [[1], [2], [3]] },
+    { sql: 'SELECT c FROM t WHERE x = 1 AND y = 2', rows: [] },
+  ];
+
+  it('offers exactly the three rules the readings were taken with', () => {
+    expect(SELECTION_RULES).toEqual(['first', 'shortest', 'modal']);
+  });
+
+  it('first is the order the prompts were asked in', () => {
+    expect(chooseCandidateByRule('first', executed)).toEqual({ index: 0, decided: true, sql: 'SELECT a FROM t WHERE z IS NOT NULL' });
+  });
+
+  it('shortest ignores the whitespace a model wrapped the statement in', () => {
+    // 31 characters with the padding, 27 without, against 35 for the first and 38 for the third:
+    // the padded statement is the shorter one and has to win, which it cannot do if the ranking
+    // reads the padding.
+    expect(chooseCandidateByRule('shortest', executed)).toEqual({ index: 1, decided: true, sql: '  SELECT b FROM t WHERE x = 1  ' });
+    const paddedFirst = [
+      { sql: '   SELECT 1   ', rows: [] },
+      { sql: 'SELECT 1234', rows: [] },
+    ];
+    expect(chooseCandidateByRule('shortest', paddedFirst).index).toBe(0);
+  });
+
+  it('a blank statement is never the minimal answer', () => {
+    const blank = [
+      { sql: '', rows: [] },
+      { sql: '   ', rows: [] },
+      { sql: 'SELECT 1', rows: [] },
+    ];
+    expect(chooseCandidateByRule('shortest', blank).index).toBe(2);
+    // Every statement blank is the one set where the rule has nothing to rank, and the earliest
+    // candidate is the answer rather than an exception: a rule over a candidate set is total.
+    expect(chooseCandidateByRule('shortest', blank.slice(0, 2)).index).toBe(0);
+  });
+
+  it('modal keeps the result most candidates returned, and counts the rows not the text', () => {
+    const byRows = [
+      { sql: 'SELECT DISTINCT a FROM t', rows: [[1], [2]] },
+      { sql: 'SELECT b FROM t', rows: [[2], [1]] },
+      { sql: 'SELECT c FROM t', rows: [[9]] },
+    ];
+    expect(chooseCandidateByRule('modal', byRows).index).toBe(0);
+  });
+
+  it('modal treats two empty results as one answer, because an empty set is one result', () => {
+    const empties = [
+      { sql: 'SELECT a FROM t WHERE 0', rows: [] },
+      { sql: 'SELECT 1', rows: [[1]] },
+      { sql: 'SELECT b FROM t WHERE 0', rows: [] },
+    ];
+    expect(chooseCandidateByRule('modal', empties).index).toBe(0);
+  });
+
+  it('every tie goes to the earliest candidate, so first is the limit of the other two', () => {
+    const tie = [
+      { sql: 'SELECT 1', rows: [[1]] },
+      { sql: 'SELECT 2', rows: [[2]] },
+    ];
+    expect(chooseCandidateByRule('modal', tie).index).toBe(0);
+    const sameLength = [
+      { sql: 'SELECT 1', rows: [[1]] },
+      { sql: 'SELECT 2', rows: [[2]] },
+    ];
+    expect(chooseCandidateByRule('shortest', sameLength).index).toBe(0);
+  });
+
+  it('a rule always decided, which is the difference in price from the selector', () => {
+    for (const rule of SELECTION_RULES) {
+      expect(chooseCandidateByRule(rule, executed).decided).toBe(true);
+    }
+  });
+
+  it('one candidate is the answer under every rule, and none is a refusal', () => {
+    const single = [{ sql: 'SELECT 1', rows: [[1]] }];
+    for (const rule of SELECTION_RULES) {
+      expect(chooseCandidateByRule(rule, single)).toEqual({ index: 0, decided: true, sql: 'SELECT 1' });
+    }
+    expect(() => chooseCandidateByRule('first', [])).toThrow('chooseCandidateByRule needs at least one executed candidate');
+  });
+
+  it('tells apart the values that only look alike, and folds the ones that are equal', () => {
+    // A result set is a set of tuples, and the judge's equality is not JavaScript's: `1` and `1.0`
+    // are one number, `1` and `'1'` are two answers, and `null` is not the string 'null'. Every
+    // type a SQLite result can carry is exercised here, because a key that collapsed two of them
+    // would make `modal` count a disagreement as agreement on those cases alone.
+    const sameResult = (left: readonly (readonly unknown[])[], right: readonly (readonly unknown[])[]) =>
+      chooseCandidateByRule('modal', [
+        { sql: 'X', rows: [[Symbol.for('distinct')]] },
+        { sql: 'L', rows: left },
+        { sql: 'R', rows: right },
+      ]).index === 1;
+    expect(sameResult([[1]], [[1.0]])).toBe(true);
+    expect(sameResult([[0]], [[-0]])).toBe(true);
+    expect(sameResult([[1]], [['1']])).toBe(false);
+    expect(sameResult([[1]], [[true]])).toBe(false);
+    expect(sameResult([[null]], [['null']])).toBe(false);
+    expect(sameResult([[Number.NaN]], [['n:NaN']])).toBe(false);
+    expect(sameResult([[BigInt(1)]], [[1]])).toBe(true);
+    expect(sameResult([[BigInt(2) ** BigInt(70)]], [['2']])).toBe(false);
+    // A blob arrives as a byte array from most drivers and as the oracle's base64 wrapper from the
+    // JSON one; both are the same value, which is the only reason `x:` is a prefix rather than a
+    // hex string emitted in two places.
+    expect(sameResult([[new Uint8Array([1, 2])]], [[{ $b64: '0102' }]])).toBe(true);
+    expect(sameResult([[new Uint8Array([1, 2])]], [[new Uint8Array([1, 3])]])).toBe(false);
+  });
+
+  it('agrees with the judge about which results are the same result', () => {
+    // The mirror in `select.ts` exists because a production package may not depend on the devkit
+    // (PKG2). A mirror that is not held to the original is a second opinion, so the two are asked
+    // the same question here: for every pair, "same key" has to mean "the official judge says
+    // match". Values are the ones a SQLite result set actually carries.
+    const values = [
+      [[1]],
+      [[1.0]],
+      [[1], [2]],
+      [[2], [1]],
+      [[1], [1]],
+      [['1']],
+      [[true]],
+      [[0]],
+      [[-0]],
+      [[null]],
+      [[]],
+      [['a b'], [null]],
+    ] as const;
+    // A pair on its own cannot answer this: with two candidates and no agreement the tie goes to
+    // the first, so `modal` returns index 0 whether or not the two results are equal. A third
+    // candidate that matches neither separates the cases — index 1 exactly when the first two
+    // agree, index 0 exactly when all three are distinct.
+    for (const left of values) {
+      for (const right of values) {
+        const agreed = chooseCandidateByRule('modal', [
+          { sql: 'X', rows: [[Symbol.for('distinct')]] },
+          { sql: 'L', rows: left },
+          { sql: 'R', rows: right },
+        ]).index === 1;
+        expect([left, right, agreed]).toEqual([left, right, judgeOfficial(left as never, right as never) === 'match']);
+      }
+    }
   });
 });

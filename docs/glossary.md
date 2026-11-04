@@ -263,6 +263,26 @@ whole room a better selector has, and it is bounded by the candidate set — an 
 that loses nothing cannot be improved by choosing better, and an arm that loses a
 lot cannot be improved by generating more.
 
+**Selection rule** — A way of keeping one candidate that is a function of the
+candidates alone: `first` (the order the prompts were asked in), `shortest` (the
+statement that says the least, with a blank statement ranked last), `modal` (the
+result set most candidates returned). A rule costs no generation and can never
+fail to decide, which is the whole difference in price from the selector. The
+three are not equivalent to each other: on the dev split `modal` is worth 0.5pp
+over `first` and `shortest` is worth 0.07pp over the selector on one pool and
+0.78pp on another, and neither difference is resolvable at that split's 2.30pp.
+`chooseCandidateByRule` runs them; `pnpm bench:bird:consensus` prices them from an
+artifact, using the same three names.
+
+**Result-set key** — The canonical form of a result set: its column width plus the
+order-free, duplicate-free set of its rows, so that two results share a key exactly
+when the benchmark's judge calls them a match. `modal` counts keys, which means
+agreement is a property of what the statements returned rather than of how they
+were written — two different statements that produced one table are one opinion.
+`resultKey` in the devkit is the authority; the library carries a mirror because a
+production package may not depend on the devkit, and a test holds the mirror to
+the authority over every value type a SQLite result can carry.
+
 **Candidate record** — Per case, the candidate set with the judge's verdict on each
 member, and which member the arm returned (`cases[].candidates`,
 `cases[].winnerSource`). Without it a loss has a size but no address: "the selector
