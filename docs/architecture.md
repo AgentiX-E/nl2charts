@@ -652,6 +652,18 @@ that differs in method rather than in prompt or in draw.
   nobody can check. That test is what found the blank-statement defect: the harness ranked an empty
   statement as length zero, the library ranked it last, and the published artifact carries a
   statement for all 10,380 candidate records, so the disagreement had never shown up in a table.
+- **A candidate that returned nothing is not a candidate.** Of every signal these rules read, this is
+  the only one that is a fact about the run rather than an opinion about the statement: a result set
+  with no rows is equal to another empty result and to nothing else, so an empty candidate can only
+  be right when the true answer is empty. 586 empty results across four arms, and not one of them
+  was right — and removing them ahead of the ranking is what took `shortest` from
+  963 to 975 cases on 1,532 questions and from 384 to 391 on the strong 600, where it now beats the
+  selector by 3.17pp at p = 0.0163. The generalisation does not hold and is recorded next to it: a
+  shape predicted from the question's wording ("how many" ⇒ one number) agreed with the truth on
+  61% of the candidates it rejected, which is worse than not looking. What makes the empty result
+  different is that it was *observed*, not inferred from the sentence — and the two refusals stay
+  distinct, because a blank statement is a text fact that ranks last while an empty result is
+  removed from the ranking entirely.
 - **A threshold finer than the evidence is not a finding.** Every verdict in `eval/bird` compares a
   difference against a margin, and the margin was a constant: 2.30pp, the resolution of the full dev
   split. That constant then judged a 600-question sample, where the same design resolves 3.17pp, and

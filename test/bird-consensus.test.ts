@@ -677,8 +677,8 @@ describe('the rule a pipeline runs is the rule the instrument priced', () => {
 /**
  * The empty result is the one candidate a rule can rule out without reading anything.
  *
- * On the dev artifact (`41767687844`) 87 candidates under `select-mixed` and 76 under
- * `select-intent` returned no rows, and none of the 163 was right. Both implementations now drop
+ * On the dev artifact (`41767687844`) 223 candidates under `select-mixed` and 287 under
+ * `select-intent` returned no rows, and none of the 510 was right. Both implementations now drop
  * them before ranking, and this holds the two to each other on the case that matters: the empty
  * candidate is also the earliest, so a harness that skipped the exclusion would print `first` at
  * 0 and the library would return the slot that answered.

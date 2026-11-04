@@ -211,14 +211,19 @@ Four things worth knowing before you turn it on:
 
 The selector is one generation a case, and on this repository's dev split it returns
 what the candidates already imply. Read from the artifact of `41767687844` (1,532
-questions, three prompts), a rule that costs nothing scores the same:
+questions, three prompts), a rule that costs nothing scores at least as much:
 
-| way of choosing | calls | dev split |
-| --- | --- | --- |
-| the first candidate | 0 | 61.36% |
-| the shortest statement | 0 | **62.86%** |
-| the result most candidates returned | 0 | 61.75% |
-| the model selector | 1 | 62.79% |
+| way of choosing | calls | dev split | strong-600 |
+| --- | --- | --- | --- |
+| the first candidate | 0 | 61.88% | 62.17% |
+| the shortest statement | 0 | **63.64%** | **65.17%** |
+| the result most candidates returned | 0 | 62.40% | 63.33% |
+| the model selector | 1 | 62.79% | 62.00% |
+
+The second column is the 1,532-question split; the third is `select-balanced` on 600
+questions, whose candidates come from two reasoning slots and are worth more. On that
+pool the shortest statement beats the selector by **+3.17pp at p = 0.0163** — the one
+comparison in this repository where a free rule wins by more than the split resolves.
 
 ```ts
 import { chooseCandidateByRule } from '@agentix-e/nl2charts-ai';
@@ -237,13 +242,21 @@ const { sql, index } = chooseCandidateByRule('shortest', candidates);
   are one opinion, which is what makes the rule stronger than it looks — and also what
   makes it fragile on a corpus where every candidate is wrong in the same way.
 
+**All three skip a candidate that returned no rows**, and that is worth more than the choice
+of rule. 586 empty results across four arms were all wrong: a result with no rows equals
+another empty result and nothing else, so an empty candidate can only be right when the true
+answer is empty. If every candidate is empty the rules fall back to the whole set, so a
+question whose answer really is empty is unaffected. Nothing else about a result is used —
+reading the shape out of the question ("how many" ⇒ one number) was tested against 146
+rejected candidates and agreed with the truth 61% of the time, which is worse than not
+looking.
+
 Two things the table above does not say. The difference between the selector and the
-shortest statement is **0.07pp on that pool and 0.78pp on a four-candidate pool** — both
-under the 2.30pp the split resolves, so this is a way to pay less for the same pipeline,
-not a way to buy accuracy. And a rule cannot report `decided: false`: it always answers,
-which means a corpus whose candidates are all bad gets a confident wrong answer instead of
-a visible regression. Log which rule ran and what it picked; the selector's `decided` flag
-was doing that job for you.
+shortest statement is **0.85pp on the 1,532-question split and 3.17pp on the strong 600** —
+the first is under the 2.30pp the split resolves, the second is not. And a rule cannot report
+`decided: false`: it always answers, which means a corpus whose candidates are all bad gets a
+confident wrong answer instead of a visible regression. Log which rule ran and what it picked;
+the selector's `decided` flag was doing that job for you.
 
 ## Repairing a rejected statement
 

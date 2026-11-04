@@ -263,17 +263,6 @@ whole room a better selector has, and it is bounded by the candidate set — an 
 that loses nothing cannot be improved by choosing better, and an arm that loses a
 lot cannot be improved by generating more.
 
-**Selection rule** — A way of keeping one candidate that is a function of the
-candidates alone: `first` (the order the prompts were asked in), `shortest` (the
-statement that says the least, with a blank statement ranked last), `modal` (the
-result set most candidates returned). A rule costs no generation and can never
-fail to decide, which is the whole difference in price from the selector. The
-three are not equivalent to each other: on the dev split `modal` is worth 0.5pp
-over `first` and `shortest` is worth 0.07pp over the selector on one pool and
-0.78pp on another, and neither difference is resolvable at that split's 2.30pp.
-`chooseCandidateByRule` runs them; `pnpm bench:bird:consensus` prices them from an
-artifact, using the same three names.
-
 **Result-set key** — The canonical form of a result set: its column width plus the
 order-free, duplicate-free set of its rows, so that two results share a key exactly
 when the benchmark's judge calls them a match. `modal` counts keys, which means
@@ -459,9 +448,23 @@ about the benchmark's.
 
 **Selection rule** — A rule that picks one candidate out of the set the arm kept, priced without
 running anything. `first` takes the earliest slot, `shortest` the fewest characters of SQL, `modal`
-the result set the most candidates agree on, `model` whatever the arm returned (the only one that
-spends a call), and `oracle` any correct candidate — the ceiling rather than a rule.
-`bench:bird:consensus` scores all five from one artifact.
+the result set the most candidates agree on; `model` is whatever the arm returned (the only one
+that spends a call) and `oracle` any correct candidate, which is the ceiling rather than a rule.
+`chooseCandidateByRule` runs the first three in a pipeline, `bench:bird:consensus` scores all five
+from one artifact, and a test holds the two implementations to the same slot on the same rows.
+All three free rules rank only the candidates that returned rows — see **Empty result**.
+
+**Empty result** — A candidate whose statement ran and returned no rows. It is the only member of
+a candidate set that can be ruled out without reading anything, because a result set with no rows
+is equal to another empty result and to nothing else: for an empty candidate to be the answer, the
+true answer would have to be empty, and no question in the dev artifacts has an empty answer.
+**586 empty results across four arms and not one of them was right.** Excluding them lifts
+`shortest` from 963 to 975 cases on 1,532 questions (63.64% against the selector's 62.79%) and from
+384 to 391 on the 600-question strong artifact (65.17% against 62.00%, p = 0.0163) — the first
+call-free rule that beats a paid selector by more than the split resolves. A candidate set where
+every member is empty falls back to the whole set, so a question whose answer really is empty still
+gets one. Do not confuse it with a **blank statement**, which is a text fact and is ranked last
+rather than removed: nothing written and nothing returned are two different refusals.
 
 **Unanimity** — The questions on which every candidate returned the same result, and therefore the
 share of the corpus no selection rule can move: if the set agrees and is wrong, choosing cannot

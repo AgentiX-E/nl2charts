@@ -7013,3 +7013,101 @@ kept an independent default: preflight answered `401 令牌已过期或验证不
 question. The endpoint is now derived from the provider and the overriding input starts empty, so the
 pair cannot disagree unless the caller spells both; two tests read the workflow and fail on the old
 wiring.
+
+## Execution is decidable; text is not
+
+The partition table left one number standing: 218 of 906 four-way-agreeing questions are wrong.
+94% of the candidates in this corpus ran, so the disagreement the pool never produced is not a
+disagreement about *whether the statement is well formed* — it is about what the statement
+returned. That suggests a signal no rule has used yet, and unlike every text-level rule in this
+document it is not an opinion about SQL: **a candidate that returned nothing answered nothing.**
+
+### The one thing a candidate set can rule out without reading it
+
+Every arm's artifact keeps a result fingerprint per candidate, and `resultKey` of no rows is one
+string, so the fingerprint of the empty result is a constant. Counting it costs nothing:
+
+| arm | candidates | empty results | of which correct |
+|---|---|---|---|
+| `select-mixed`, 1,532 questions | 4,534 | **223** | **0** |
+| `select-intent`, 1,532 questions | 5,846 | **287** | **0** |
+| `select-mixed`, 600 questions | 1,783 | 87 | **0** |
+| `select-balanced`, 600 questions | 1,791 | 76 | **0** |
+
+**586 empty results and not one of them was right** — 510 from the two arms over the whole split,
+and 76 more from the strong arm, which is the only arm in this document that was not already
+counted. The reason is mechanical rather than statistical: a result set with no rows is equal to
+another empty result and to nothing else, so for an empty candidate to be correct the true answer
+would have to be empty — and no question in either artifact has an empty answer.
+
+That makes the empty result the only member of a candidate set that can be removed before anything
+is read. Every free rule now ranks the candidates that returned rows, and falls back to the whole
+set when all of them are empty, so the rule stays total:
+
+| arm | `first` | `shortest` | `modal` | selector | ceiling |
+|---|---|---|---|---|---|
+| `select-mixed`, 1,532 | 61.36 → **61.88%** | 62.86 → **63.64%** | 61.75 → **62.40%** | 62.79% | 66.84% |
+| `select-intent`, 1,532 | 61.49 → **62.27%** | 62.47 → **63.51%** | 61.95 → **62.66%** | 62.47% | 69.06% |
+| `select-mixed`, 600 | 62.50 → **63.33%** | 62.00 → **63.50%** | 62.83 → **64.00%** | 63.67% | 68.00% |
+| `select-balanced`, 600 | 61.67 → **62.17%** | 64.00 → **65.17%** | 62.50 → **63.33%** | 62.00% | 70.83% |
+
+Read the last row. On the strong pool `shortest` was 384 = 64.00% against the selector's 372, and
+the difference did not resolve (p = 0.1686). With the empty results removed it is **391 = 65.17%**
+against 372, **+3.17pp at p = 0.0163** — *the first call-free rule in this document that beats a
+paid selector by more than the split resolves*, on 3.00 calls instead of 4.00.
+
+It is also the highest score any configuration here has reached, and the conversion rate it implies
+is **92.01%** of a 70.83% ceiling, against the 87.53% the selector got from the same pool.
+
+### Two things this is not
+
+**It is not a prior about shape.** The obvious generalisation — read the question, predict the
+shape, keep the candidates that match — was tested on the 496 questions whose databases are in this
+checkout, by executing every candidate against the real engine (zero model calls):
+
+| constraint read from the question | candidates it rejects | of which wrong | precision |
+|---|---|---|---|
+| "how many / how much" ⇒ a number | 146 | 89 | **0.610** |
+| "how many / what is the average …" ⇒ one row, one column | 28 | 18 | **0.643** |
+
+Both are worse than a coin flip on the cases that matter. The reason is visible in the 496-question
+alignment: 244 questions phrase the answer as a number and only 207 of them have a numeric gold
+value, because "how many X have property Y" can be answered by a list and "what is the average …
+of each school" is one row per school. **The question names what the answer *is about*, not what
+the answer *looks like***, and every rule that reads shape out of wording inherits that error.
+
+**It is not a selection fix either.** Of the 101 unanimous-but-wrong questions in the 496-question
+subset, **52 (51.5%) produced the correct shape and the wrong values** — right width, right row
+count, different numbers. No rule on a candidate list can reach those; they are arithmetic or
+reasoning errors that were made four times identically. Only 15 (14.9%) were cases where every
+candidate returned nothing, which is a value-retrieval failure wearing a selection failure's
+clothes.
+
+### What the empty result is actually telling us
+
+Those 15 cases are the interesting ones, because a candidate set whose members all return nothing
+is not a candidate set — it is a predicate that matched no row. That is a *repairable* state: the
+statement ran, the engine accepted it, and the answer is empty because a literal or a join key
+does not exist in the data. `values-gap`'s `filter-narrow` bucket is the same population counted
+from the other side.
+
+So the empty result earns two things. As a filter it is worth +12 cases on 1,532 questions and
++7 on the strong 600 — free, and now measured. As a **state** it marks the one failure the
+pipeline can detect without a judge and repair without a guess, and that is the next lever: a
+candidate that returns nothing should trigger a repair pass with the zero-row fact in hand, not be
+voted on.
+
+### Verdict
+
+| item | reading |
+|---|---|
+| empty result ⇒ wrong | **586 / 586**, two artifacts, four arms |
+| `shortest` without empty candidates, 1,532 | **975 = 63.64%**, +0.85pp over the selector, 3.00 calls |
+| `shortest` without empty candidates, strong 600 | **391 = 65.17%**, **+3.17pp, p = 0.0163**, 3.00 calls |
+| text-derived shape constraints | **rejected**, precision 0.61 / 0.64 |
+| unanimous-and-wrong, shape correct | 52 of 101 — not reachable by any rule |
+| unanimous-and-wrong, all candidates empty | 15 of 101 — a repair target, not a selection target |
+
+The rule is adopted. The generalisation is not. And the fourth call is now losing to a rule that
+costs three on the arm whose candidates are worth the most, which is the first time the arithmetic
+of "selection is closed" has been contradicted by a reading rather than by an argument.

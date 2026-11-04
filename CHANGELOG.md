@@ -21,6 +21,23 @@ cannot be argued with.
   question over every value type a SQLite result carries, so the mirror cannot become a second
   definition of equality.
 
+- **A result with no rows is not an answer, and that is the first free rule here to beat the
+  selector significantly.** Every free rule now ranks only the candidates that returned rows,
+  falling back to the whole set when all of them are empty so that a question whose answer really
+  is empty still gets an answer. The evidence is a count rather than an argument: **586 empty
+  results over two dev artifacts and four arms, and not one of them was right** — 223 under
+  `select-mixed` and 287 under `select-intent` on the 1,532-question artifact, 87 and 76 on the
+  600-question one. A result set with no rows is equal to another empty result and to nothing
+  else, so an empty candidate can only be right when the true answer is empty, and no question in
+  either artifact has an empty answer. On 1,532 questions `shortest` goes 963 → **975 = 63.64%**
+  against the selector's 62.79% for one call less; on the 600-question strong artifact
+  (`41795505400`, `select-balanced`, two `deepseek-reasoner` slots) it goes 384 → **391 = 65.17%**
+  against 62.00%, **+3.17pp at p = 0.0163** — the first call-free rule in this repository that
+  beats a paid selector by more than the split resolves, and the highest score any configuration
+  has reached. The harness applies the same exclusion, keyed on `resultFingerprint([])` rather than
+  a second definition of empty, and the cross-implementation test that already held the two to the
+  same slot now also covers an empty candidate.
+
 ### Fixed
 - **`shortest` ranked the candidate that wrote nothing as the minimal answer.** `consensus.ts` read
   a statement's length directly, so an empty statement scored zero and won every comparison it
@@ -29,7 +46,6 @@ cannot be argued with.
   the artifact this was measured against carries a statement for all 10,380 candidate records — but
   an artifact from a run where a source returned nothing would have been scored under the wrong
   rule. The blank case is now a refusal in both implementations.
-
 - **The benchmark workflow sent the second provider's key to the first provider's endpoint.**
   `41791956315` dispatched `select-balanced` with `second_provider=deepseek` and no endpoint, so
   `BIRD_SECOND_API_KEY` became DeepSeek's secret while `BIRD_SECOND_BASE_URL` stayed on the
@@ -39,6 +55,14 @@ cannot be argued with.
   of the two inputs keeps a default now: the endpoint is derived from the provider, and the input
   that overrides it starts empty, so the pair cannot disagree unless the caller spells both. Two
   tests read the workflow and fail on the old wiring, verified by restoring it.
+
+- **A count in the previous commit's message was wrong, and the correction is larger than the
+  error.** `ad7fe95` reported 87 and 76 empty candidates "on the 1,532-question artifact"; those
+  were the 600-question numbers. The whole split carries **223 and 287**, so the reading is 510
+  rather than 163 for the two arms, plus 76 for the strong arm that the smaller artifact alone
+  measures. No published rate moves — the rates were computed from the artifact, not from the
+  message — but a count in a commit message is a claim like any other, and a wrong one in the log
+  is worse than a wrong one in a comment because it cannot be edited.
 
 ### Changed
 - **A stronger author raises the ceiling by 2.83pp and the selector gives back 6.10pp of conversion.**

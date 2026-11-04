@@ -475,8 +475,8 @@ describe('choosing without a call', () => {
     // Both halves of this were wrong in the first version of the rule and the second half is the
     // correction. Two empty results are one result — count them as one group and the majority is
     // empty, which is how `modal` came to return the candidate that answered nothing. The reading
-    // that produced the fix: on the dev artifact 163 candidates returned the empty result, under
-    // two different arms, and not one of the 163 was right.
+    // that produced the fix: on the dev artifact 510 candidates returned the empty result, under
+    // two different arms, and not one of the 510 was right.
     const empties = [
       { sql: 'SELECT a FROM t WHERE 0', rows: [] },
       { sql: 'SELECT 1', rows: [[1]] },

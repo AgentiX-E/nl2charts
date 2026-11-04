@@ -460,10 +460,12 @@ function statementLength(candidate: ExecutedCandidate): number {
  *
  * A statement that returned no rows answered nothing, and — unlike every text-level signal in this
  * file — that is not an opinion about the statement. It is what the engine did. On the dev
- * artifact (`41767687844`, 1,532 questions) 87 candidates returned the empty result under
- * `select-mixed` and 76 under `select-intent`, and **none of the 163 was right**; excluding them
- * lifts the shortest statement from 963 to 975 cases, **63.64% against the selector's 62.79%** for
- * one call less.
+ * artifact (`41767687844`, 1,532 questions) 223 candidates returned the empty result under
+ * `select-mixed` and 287 under `select-intent`, and **none of the 510 was right**; on the strong
+ * 600-question artifact (`41795505400`) another 76 under `select-balanced`, also none right.
+ * Excluding them lifts the shortest statement from 963 to 975 cases on 1,532 questions —
+ * **63.64% against the selector's 62.79%** for one call less — and from 384 to 391 on the strong
+ * 600, **65.17% against 62.00%**, which is +3.17pp at p = 0.0163.
  *
  * A question whose true answer is empty makes every candidate empty, so the fallback is the whole
  * set rather than a refusal: a rule over a candidate set is total. This is the same shape as
