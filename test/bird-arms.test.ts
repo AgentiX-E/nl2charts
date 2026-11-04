@@ -364,12 +364,44 @@ describe('the chain that actually runs', () => {
 
   it('prices the empty-result lever by its reach and its yield', () => {
     const runs = [
-      { emptyRetried: true, emptyRecovered: true, emptyDropped: 1, predicted: '', reason: 'values', strict: false, id: '1', passed: false, calls: 5 },
-      { emptyRetried: false, emptyDropped: 2, predicted: '', reason: 'values', strict: false, id: '2', passed: false, calls: 4 },
+      {
+        emptyRetried: true,
+        emptyRecovered: true,
+        emptyDropped: 1,
+        emptyProbe: { queries: 3, literalGaps: 2, grounded: true, adoptedFree: false },
+        predicted: '',
+        reason: 'values',
+        strict: false,
+        id: '1',
+        passed: false,
+        calls: 5,
+      },
+      {
+        emptyRetried: false,
+        emptyDropped: 2,
+        emptyProbe: { queries: 2, literalGaps: 1, grounded: true, adoptedFree: true },
+        predicted: '',
+        reason: 'values',
+        strict: false,
+        id: '2',
+        passed: false,
+        calls: 4,
+      },
       { emptyRetried: false, emptyDropped: 0, predicted: '', reason: 'values', strict: false, id: '3', passed: true, calls: 4 },
     ];
     const funnel = emptyRetryFunnel(runs as never);
-    expect(funnel).toEqual({ dropped: 3, fired: 1, recovered: 1, extraCallsPerCase: Number((1 / 3).toFixed(4)) });
+    expect(funnel).toEqual({
+      dropped: 3,
+      fired: 1,
+      recovered: 1,
+      // The lookup is priced apart from the call: two of the three cases were probed, one of them
+      // was answered by the grounded statement without spending the retry turn at all.
+      literalGaps: 3,
+      grounded: 2,
+      adoptedFree: 1,
+      probeQueries: 5,
+      extraCallsPerCase: Number((1 / 3).toFixed(4)),
+    });
   });
 
   it('prices the audit turn by its reach, its yield and its calls', () => {
@@ -943,7 +975,7 @@ describe('mixed arms declare their own sources', () => {
   const mixed = ARMS.filter((arm) => arm.mixed !== undefined);
 
   it('has at least the two arms under test', () => {
-    expect(mixed.map((arm) => arm.name).sort()).toEqual(['select-balanced', 'select-cross', 'select-cross-agree', 'select-cross-canon', 'select-cross-empty', 'select-cross-judge', 'select-cross-judge-canon', 'select-cross-judge-reasoning', 'select-cross-pooled', 'select-cross-pooled-agree', 'select-cross-pooled-dissent', 'select-cross-pooled-dissent-pair', 'select-cross-pooled-judge-reasoning', 'select-cross-pooled-reconcile', 'select-cross-pooled-reconcile-novel', 'select-cross-pooled-vote', 'select-cross-repair-all', 'select-cross-repair-second', 'select-cross-shuffled', 'select-cross-unhinted', 'select-dc', 'select-duo', 'select-intent', 'select-mixed', 'select-mixed+agree', 'select-mixed+dc', 'select-mixed+empty', 'select-mixed+empty-blind', 'select-mixed-pooled', 'select-mixed-pooled-vote', 'select-samples', 'select-tagged', 'vote-cross', 'vote-mixed']);
+    expect(mixed.map((arm) => arm.name).sort()).toEqual(['select-balanced', 'select-cross', 'select-cross-agree', 'select-cross-canon', 'select-cross-empty', 'select-cross-judge', 'select-cross-judge-canon', 'select-cross-judge-reasoning', 'select-cross-pooled', 'select-cross-pooled-agree', 'select-cross-pooled-dissent', 'select-cross-pooled-dissent-pair', 'select-cross-pooled-judge-reasoning', 'select-cross-pooled-reconcile', 'select-cross-pooled-reconcile-novel', 'select-cross-pooled-vote', 'select-cross-repair-all', 'select-cross-repair-second', 'select-cross-shuffled', 'select-cross-unhinted', 'select-dc', 'select-duo', 'select-intent', 'select-mixed', 'select-mixed+agree', 'select-mixed+dc', 'select-mixed+empty', 'select-mixed+empty-blind', 'select-mixed+values', 'select-mixed-pooled', 'select-mixed-pooled-vote', 'select-samples', 'select-tagged', 'vote-cross', 'vote-mixed']);
   });
 
   it.each(mixed.map((arm) => [arm.name, arm] as const))('%s: candidates equal sources, and every source generates once', (name, arm) => {
@@ -1308,7 +1340,7 @@ describe('guards whose record carries no message', () => {
     // `emptyDropped` is written by the lever; a run from an arm without it must not turn the
     // funnel's sum into NaN, and must not be read as "the lever ran".
     const bare = Array.from({ length: 200 }, () => ({ emptyRetried: false }));
-    expect(emptyRetryFunnel(bare as never)).toEqual({ dropped: 0, fired: 0, recovered: 0, extraCallsPerCase: 0 });
+    expect(emptyRetryFunnel(bare as never)).toEqual({ dropped: 0, fired: 0, recovered: 0, literalGaps: 0, grounded: 0, adoptedFree: 0, probeQueries: 0, extraCallsPerCase: 0 });
     expect(() => assertEmptyRetryFired('select-mixed+empty', bare as never)).toThrow(/the lever did not run/);
   });
 

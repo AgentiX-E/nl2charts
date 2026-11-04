@@ -695,6 +695,94 @@ describe('a sampling arm', () => {
   });
 });
 
+describe('the value lookup behind a zero-row case', () => {
+  /** The question whose card certainly shows `items.name`, which is the column the lookup reads. */
+  const NAMED = 'How many distinct item names are there?';
+  /** Every question but that one answered correctly, so the run keeps its signal above the gate. */
+  const others = (question: string): string => GOLD[question] ?? 'select 1';
+
+  /**
+   * The arm's whole claim, in the state the lookup exists for.
+   *
+   * One candidate returned nothing because the column does not store the case the statement
+   * asked for — the fixture holds `pen` and the statement says `Pen`. The lookup settles that
+   * without a model, so the turn must not be spent: a lever that paid for a call it did not
+   * need would look identical in the score column and wrong in the cost column.
+   */
+  it('grounds a case-mismatched literal and adopts it without spending the turn', async () => {
+    const result = await run({
+      plan: { first: (question) => (question === NAMED ? "select name from items where name = 'Pen'" : others(question)) },
+      env: { BIRD_ARMS: 'select-mixed+values' },
+    });
+    expect(result.code, result.printed.join('\n')).toBe(0);
+    const arms = result.report.arms as {
+      arm: string;
+      emptyRetry: { mode: string; fired: number; recovered: number; grounded: number; adoptedFree: number; probeQueries: number };
+    }[];
+    const arm = arms[0];
+    expect(arm?.arm).toBe('select-mixed+values');
+    expect(arm?.emptyRetry.mode).toBe('values');
+    expect(arm?.emptyRetry.grounded).toBe(1);
+    expect(arm?.emptyRetry.adoptedFree).toBe(1);
+    expect(arm?.emptyRetry.recovered).toBe(1);
+    // The one case the lookup answered paid no call for it.
+    expect(arm?.emptyRetry.fired).toBe(0);
+    expect(arm?.emptyRetry.probeQueries).toBeGreaterThan(0);
+    // Nothing about an empty result was said to the model, because nothing needed saying.
+    expect(result.requests.filter((request) => request.prompt.includes('Its values were looked up in the database'))).toHaveLength(0);
+    const cases = result.report.cases as { emptyProbe?: { grounded: boolean; adoptedFree: boolean } }[];
+    expect(cases.filter((row) => row.emptyProbe?.adoptedFree === true)).toHaveLength(1);
+  });
+
+  it('quotes the values the column holds when the literal is only part of one', async () => {
+    const result = await run({
+      plan: { first: () => "select name from items where name = 'pe'" },
+      env: { BIRD_ARMS: 'select-mixed+values' },
+    });
+    expect(result.code, result.printed.join('\n')).toBe(0);
+    const retries = result.requests.filter((request) => request.prompt.includes('Its values were looked up in the database'));
+    expect(retries.length).toBeGreaterThan(0);
+    // The question that names the column gets the column's own value quoted back; the ones whose
+    // card does not show `name` have nothing to quote and fall back to the diagnosed message.
+    const quoted = retries.find((request) => request.prompt.includes('items.name'));
+    expect(quoted?.prompt).toContain("'pen'");
+    expect(quoted?.prompt).toContain('is not a value of');
+    const arms = result.report.arms as { emptyRetry: { fired: number; grounded: number; adoptedFree: number; literalGaps: number } }[];
+    expect(arms[0]?.emptyRetry.grounded).toBe(0);
+    expect(arms[0]?.emptyRetry.adoptedFree).toBe(0);
+    expect(arms[0]?.emptyRetry.fired).toBeGreaterThan(0);
+    expect(arms[0]?.emptyRetry.literalGaps).toBeGreaterThan(0);
+  });
+
+  it('says a value is absent when no row holds it', async () => {
+    const result = await run({
+      plan: { first: () => "select name from items where name = 'zzz'" },
+      env: { BIRD_ARMS: 'select-mixed+values' },
+    });
+    expect(result.code, result.printed.join('\n')).toBe(0);
+    const retries = result.requests.filter((request) => request.prompt.includes('Its values were looked up in the database'));
+    const absent = retries.find((request) => request.prompt.includes('contains no value with'));
+    expect(absent?.prompt).toContain('items.name');
+  });
+
+  it('keeps the grounded statement when it still returns nothing, and asks for one rewrite', async () => {
+    const result = await run({
+      plan: { first: (question) => (question === NAMED ? "select name from items where name = 'Pen' and price > 999" : others(question)) },
+      env: { BIRD_ARMS: 'select-mixed+values' },
+    });
+    expect(result.code, result.printed.join('\n')).toBe(0);
+    const retries = result.requests.filter((request) => request.prompt.includes('Its values were looked up in the database'));
+    expect(retries).toHaveLength(1);
+    // The statement the model is asked to repair is the grounded one, not the one with the
+    // spelling the database does not hold.
+    expect(retries[0]?.prompt).toContain("name = 'pen'");
+    const arms = result.report.arms as { emptyRetry: { grounded: number; adoptedFree: number; fired: number } }[];
+    expect(arms[0]?.emptyRetry.grounded).toBe(1);
+    expect(arms[0]?.emptyRetry.adoptedFree).toBe(0);
+    expect(arms[0]?.emptyRetry.fired).toBe(1);
+  });
+});
+
 describe('the audit arm', () => {
   it('names what the statement left out, rewrites it, and reports the call it spent', async () => {
     const result = await run({

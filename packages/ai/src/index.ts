@@ -14,7 +14,15 @@ export { buildAskMessages, buildSqlPrompt, choosePromptProfile, createPipeline, 
 export { buildInterpretationPrompt, parseInterpretation } from './interpret.js';
 export { buildPlanPrompt, parsePlan } from './plan.js';
 export { countSteps, DECOMPOSE_RULES, parseDecomposed } from './decompose.js';
-export { buildEmptyResultFeedback, EMPTY_BLIND_MESSAGE, emptyRetryMessages } from './empty.js';
+export {
+  buildEmptyResultFeedback,
+  buildValueGapFeedback,
+  EMPTY_BLIND_MESSAGE,
+  emptyRetryMessages,
+  VALUE_GAP_LITERALS,
+  VALUE_GAP_VALUES,
+} from './empty.js';
+export type { ValueGap } from './empty.js';
 export { auditMessages, buildConditionAuditFeedback, countNamedConditions } from './audit.js';
 export { classifyFailure, diagnoseFailure, readEngineError, resolveAliases } from './diagnose.js';
 export type { Diagnosis, EngineErrorFields, FailureClass } from './diagnose.js';

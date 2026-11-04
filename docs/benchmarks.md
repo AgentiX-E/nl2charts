@@ -7262,3 +7262,65 @@ Three things follow, and they are not the same thing:
 **13.43pp to AskData = 8.28pp of candidates + 5.15pp of selection.** The selection half is now
 smaller than the candidate half for the first time, and it is the half that three rounds of
 selector work failed to move while a rule that reads rows moved it in one round.
+
+## The zero-row repair, built
+
+The state was priced last round and the bar was written before anything was built: a statement that
+returns no rows is wrong by construction on this split, the whole candidate set returned nothing on
+**19 of 496 dev questions (3.83%)**, the selector was right on none of them, and 18 of those 19 wrote
+a value the database does not contain. That is a lookup failure, so the repair is a lookup.
+
+### What was built
+
+Three steps, and only the third one costs a model call:
+
+1. **Detect.** The winner ran and returned no rows. With the empty candidates dropped before the
+   vote, that is the same event as "every candidate returned nothing" — a case where something
+   survived with rows never triggers, which is 96.2% of the split.
+2. **Look up.** Every string literal the statement compares against a column (`=`/`!=`/`in`/`between`
+   sites, from the same `literalSites` the case repair reads) is searched in that column:
+   `lower(column) like lower('%literal%')`, one query per column, at most six literals per statement.
+   Three outcomes matter. A column that stores the literal as written needs no repair and says
+   nothing. A column that stores it in another case is **grounded deterministically** — the stored
+   spelling is substituted, and if that statement returns rows it is adopted with **no model call at
+   all**. A column that stores values *containing* the literal (`Benalish Knight (Fellwar Stone)` for
+   `Benalish Knight`) is a judgement, so those values are quoted back. A literal no value contains is
+   a fabrication, and saying so is cheaper than letting the model repeat it.
+3. **Rewrite once.** One call, carrying the statement and the quoted values, on the cases the lookup
+   could not settle.
+
+The lookup is deliberately not fuzzy: no stemming, no edit distance, no "did you mean". The only
+matches reported are the ones the database produced. A repair that guesses turns an empty answer into
+a plausible wrong one, and the empty one is visibly empty.
+
+Nothing about the trigger can disturb what already works: on the 96.2% of cases where a candidate
+returned rows, the arm does exactly what its parent does — same candidates, same selector, same
+calls.
+
+### What the artifact records
+
+Per case, `emptyProbe` carries `queries` (engine work, no calls), `literalGaps` (literals the columns
+do not store as written), `grounded` (the deterministic repair fired) and `adoptedFree` (it was
+adopted without spending the turn). The arm funnel adds `literalGaps`, `grounded`, `adoptedFree` and
+`probeQueries` beside the existing `dropped`/`fired`/`recovered`. The separation is the point: a case
+answered by the grounded statement never spent a call, and folding the two yields into one number
+would price a free repair as if it were the fourth call.
+
+### Pre-registration
+
+Dispatched as three arms on the full dev split (1,532 questions): `select-mixed` (the arm to beat,
+62.60%), `select-mixed+empty` (the same drop and the same call with the diagnosed message, the
+published null), and `select-mixed+values` (the lookup). One lever between the last two: the words
+of the turn, at the same call count.
+
+| # | criterion | bar |
+|---|---|---|
+| ① | correct on the triggered questions | **≥ 25%** of them |
+| ② | full split | **≥ +0.96pp** against `select-mixed+empty` |
+| ③ | the 96.2% that never trigger | **unchanged**, question for question |
+| ④ | cost | `calls.mean` and `promptChars` for the triggered subset **published**, with the lookup's `probeQueries` counted apart from its calls |
+| ⑤ | the free half is priced apart | `adoptedFree` reported, so a gain the lookup produced without a call cannot be read as a gain the model produced |
+
+A repair that cannot clear ① is a call spent for nothing, because the same 3.85pp is available to a
+filter that drops the state and reports it. ③ is not a formality: it is the check that the trigger
+is as narrow as it claims, and it fails loudly if a code path that should be untouched moved.

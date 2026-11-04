@@ -466,6 +466,19 @@ every member is empty falls back to the whole set, so a question whose answer re
 gets one. Do not confuse it with a **blank statement**, which is a text fact and is ranked last
 rather than removed: nothing written and nothing returned are two different refusals.
 
+**Value gap** — A literal a statement compares against a column, together with what that column
+actually holds: the same value in another case (`case`), a longer value containing it (`partial`), or
+nothing (`absent`). It is the repair target of the zero-row state, and the reason that state is worth
+a call: **18 of the 19 dev questions whose whole candidate set returned nothing wrote a value the
+database does not contain**, so the failure is a lookup and the fix is a lookup. Reading a gap costs
+one query per literal and column and no model call — `probeValueGaps` is the reader.
+
+**Grounded literal** — A literal whose case-only mismatch was settled by the lookup rather than by
+the model: the column stores exactly one spelling that matches ignoring case, so the statement is
+rewritten with that spelling and adopted if it returns rows. **No call is spent.** Two spellings, or
+a second table that stores the literal as written, leave the substitution to the model, because a
+guess dressed as a lookup is still a guess.
+
 **Unanimity** — The questions on which every candidate returned the same result, and therefore the
 share of the corpus no selection rule can move: if the set agrees and is wrong, choosing cannot
 help. It is the boundary between selection workmanship and generation work, and the column is

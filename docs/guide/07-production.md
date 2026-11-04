@@ -290,6 +290,39 @@ const pipeline = createPipeline({
 See [the natural-language guide](./05-natural-language.md#when-the-statement-runs-and-returns-nothing)
 for what the turn says and why the `blind` control exists.
 
+### When the empty result is a lookup, not a guess
+
+The diagnosed turn names three causes and leaves the model to find which applies. If your
+deployment can afford one query per literal — and it can, because the turn only happens on cases
+where every candidate returned nothing — look the literals up first and quote what the columns
+hold. That is the difference between a second opinion and evidence:
+
+```ts
+import { probeValueGaps } from '../eval/bird/value-probe.js';   // harness-side, not shipped
+
+const probe = await probeValueGaps(statement, columns, async (sql) => {
+  const result = await engine.run(sql);
+  return result.ok ? result.rows : undefined;    // a refused lookup is not evidence
+});
+
+// 1. A case-only difference is settled here, for no call at all.
+if (probe.grounded !== undefined) statement = probe.grounded;
+
+// 2. Everything else is quoted back to the model in one turn.
+messages.push(...emptyRetryMessages('values', statement, statement, probe.gaps));
+```
+
+`probeValueGaps` lives in the benchmark harness rather than in a package because it needs the
+engine and the schema card together; the parts that belong to the library are the message
+(`buildValueGapFeedback`) and the rendering rule that keeps it inside the same 900-character budget
+every other feedback turn lives under. Two properties are worth keeping if you port it:
+
+1. **No fuzzy matching.** The only values reported are ones the database returned. A repair that
+   guesses turns an empty answer into a plausible wrong one, and the empty one is visibly empty.
+2. **Ambiguity is not resolved by guessing.** Two columns storing two spellings, or one column
+   storing the literal as written, leave the substitution to the model.
+
+
 What the model is told on the second turn:
 
 ```

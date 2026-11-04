@@ -121,7 +121,7 @@ question
    ├─ inspectSql()                             lexical guard
    │     └─ rejected → repair prompt → retry (bounded)
    ├─ execute()                                optional: the caller's engine
-   │     └─ rows == 0 → empty-result turn → one retry (separate budget)
+   │     └─ rows == 0 → value lookup (no call) → grounded adopt, else one retry (separate budget)
    └─ runner.sql(sql)
          ├─ inspectSql()                       again: the guard is not optional
          ├─ withRowLimit()                     cap + 1 for truncation detection

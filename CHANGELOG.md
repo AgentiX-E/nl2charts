@@ -7,6 +7,24 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **A zero-row statement is repaired by looking the value up, and the lookup is free.** The state
+  was priced last round: on 496 dev questions whose databases are in this checkout, 19 (3.83%) had
+  every candidate return nothing, the selector was right on none of them, and 18 of the 19 had
+  written a literal the database does not contain. That is a lookup failure, so the repair is a
+  lookup. `probeValueGaps` (`eval/bird/value-probe.ts`) reads each literal the statement compares
+  against a column (`=`/`!=`/`in`/`between` sites, at most six literals per statement) and asks the
+  engine which of that column's values contain it, ignoring case — one query per column, no model
+  call. Three outcomes are acted on and no others: a column that stores the literal in another case
+  is **grounded deterministically** and adopted when the rewrite returns rows (**zero calls**); a
+  column that stores values *containing* the literal has those values quoted back; a literal no value
+  contains is reported as a fabrication. `buildValueGapFeedback` renders that message inside the same
+  900-character ceiling the repair turns live under, and `emptyRetryMessages` gains the `values` mode
+  and degrades to the diagnosed text when the lookup found nothing — an extra call that says nothing
+  would be the blind control by accident. The lookup is not fuzzy: no stemming, no edit distance, and
+  two columns storing two spellings (or one storing the literal as written) leave the substitution to
+  the model, because a guess dressed as a lookup is still a guess. The arm is `select-mixed+values`,
+  one lever from `select-mixed+empty`: same drop, same call count, different words.
+
 - **`chooseCandidateByRule`: the cheap side of a selection, as a library function.** `first`,
   `shortest` and `modal`, returning the same `{index, decided, sql}` the selector returns, with
   `decided` always true and no generation spent. The readings that justify it are on the dev split
@@ -134,6 +152,13 @@ cannot be argued with.
   change what the candidates are (I-45, I-77), not what is done with them.
 
 ### Fixed
+- **A per-case record the lever wrote was not in the artifact.** `CaseRun` carried what the zero-row
+  turn did, and `caseRows` projected none of it: the arm funnel said how many cases triggered and
+  the file could not say which, so "the lookup answered this one without a call" was a number with no
+  rows behind it — the same defect the reconcile turn and the value block each had on their first
+  dispatch. `emptyRetried`, `emptyRecovered` and the lookup's own `emptyProbe` are now published per
+  case. Nothing published before this release changes: the three fields are additive.
+
 - **`shortest` ranked the candidate that wrote nothing as the minimal answer.** `consensus.ts` read
   a statement's length directly, so an empty statement scored zero and won every comparison it
   entered; the library ranks a blank statement last, and the test that holds the two

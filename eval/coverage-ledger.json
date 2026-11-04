@@ -2,10 +2,10 @@
   "note": "Per-file eval coverage. Enforced by tools/check-eval-coverage.mjs: a number may rise freely and may only fall with an explicit, reviewed edit. `target` is the standard every file must reach before eval/ joins the main gate.",
   "target": 95,
   "tolerancePp": 0.2,
-  "measuredAt": "2026-11-03",
+  "measuredAt": "2026-11-04",
   "totals": {
-    "lines": 99.46,
-    "statements": 99.46,
+    "lines": 99.47,
+    "statements": 99.47,
     "functions": 100,
     "branches": 98.08
   },
@@ -80,7 +80,7 @@
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 99.5
+      "branches": 99.52
     },
     "eval/bird/data.ts": {
       "lines": 100,
@@ -315,6 +315,12 @@
       "statements": 100,
       "functions": 100,
       "branches": 100
+    },
+    "eval/bird/value-probe.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 95.83
     },
     "eval/bird/values-gap.ts": {
       "lines": 99.23,
