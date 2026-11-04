@@ -115,6 +115,21 @@ cannot be argued with.
   nothing, still publishes none rather than a zero.
 
 ### Added
+- **The fourth candidate moved the pool's ceiling by 2.22pp, and selection ate all of it.** `41767687844`
+  ran both arms on dev's 1,532 cases: `select-mixed` **962 = 62.79%** against `select-intent`
+  **957 = 62.47%** (−0.32pp, 29 up / 34 down, p = 0.6147), and the ceilings are **1,024 = 66.84%**
+  against **1,058 = 69.06%** — **+2.22pp, 41 gained and 7 lost, p < 0.0001**. This is the first time
+  since `select-mixed` that any lever has raised the pool ceiling rather than redistributed it, and the
+  price is exact: conversion fell **93.95% → 90.45%**, so a fourth candidate buys 2.22pp of ceiling and
+  costs the selector 3.50pp. At the parent's conversion rate this pool would score
+  `1,058 × 0.9395 = 64.88%`, which is +2.09pp — a number that is not a reading but the price of the
+  next lever, and the reason the next round is a selector that reads four candidates rather than a
+  fifth candidate.
+  The registered criteria read: ① ceiling **pass** (+2.22pp) but sole-correct **fail** (**28** against
+  31), ② conditional density **pass** (32 of 410 rendered = 7.80%), ③ rendering **pass** (87.4%),
+  ④ cost **pass** (4.999 calls), ⑤ conversion **fail** (90.45%). So the lever is adopted as a ceiling
+  lever and not as a score lever, and the arm stays with `select-mixed` as the one to beat on the pool
+  question.
 - **A query-intent renderer, and a fourth candidate that exists to move the pool's ceiling.**
   `packages/core/src/semantic/intent.ts` turns a JSON query description — tables, join column pairs,
   filters as `(column, op, value)` triples, grain, order — into a statement, deterministically. Three
@@ -158,6 +173,21 @@ cannot be argued with.
   names no column as a string literal, so `compileIntent(value, { columns })` refuses it as
   `unknown-identifier` (the seventeenth name), and the harness passes the card's columns on every
   call.
+- **Six ways a correct reply was being refused, all of them the contract's fault.** The third probe
+  kept the sentence for every refusal it sampled, and twelve sentences said nine of them were ours:
+  `IS NULL` because the operator list is lower case, `"value": null` on a nullary operator, `x in 'a'`
+  because a one-element list was not written as one, `having: [{column: "n"}]` because a select alias
+  was looked up in the schema, `having: [{column: "count(p.Id)"}]` because a filter's left side could
+  only be a name, and `f."School Name"` because a tokenizer read the quoted half as a stray dot. Each
+  is now read as what it means: operators match without case, a `null` value on `is null` is a missing
+  value, a scalar on `in` is a one-element list, a select alias is a name the statement invents, a
+  filter takes `expr` when its left side is an aggregate (the key the select list already uses, because
+  `column` cannot carry one — a column name may itself contain a space and a parenthesis), and a
+  qualified quoted name is one reference. The rule line gains two sentences for the two refusals that
+  are the model's: an aggregate on the left goes under `expr`, and distinct rows are the top-level
+  `distinct` key rather than DISTINCT inside an expression. The quoting change before this one lifted
+  rendering from 75.8% to **96 of 120 = 80.0%**; what these six lift it to is the next dispatch's
+  question, and the prompt is still 1,071 characters.
 - **A numeric spelling of a name is refused, because three engines read it three ways.** Quoting made
   `1` in a group-by key a *string*, which on SQLite is a constant — `GROUP BY "1"` groups every row
   into one bucket and answers a different question. In Postgres the same token is a position, in the

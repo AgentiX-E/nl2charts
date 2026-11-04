@@ -6694,3 +6694,101 @@ Sizing that against the bar: 31 sole-correct cases out of the ~490 dev cases the
 and 4.2% at n = 24 cannot separate 6.3% from 0 (the 95% interval runs from 0.1% to 21%). The verdict
 therefore needs more cases, not a different argument — but the direction is now a measurement rather
 than a guess, and the next dispatch is sized for it.
+
+**The third probe, after quoting and the schema check** (`41760255264`, same 120 questions): rendering
+**96 of 120 = 80.0%** against 75.8%, and the refusals are `unknown-identifier` **10**, `bad-operator`
+7, `bad-expression` 4, `bad-value` 1, `unexpected-value` 1, `unsupported-function` 1. The ceiling
+moved for the first time: **85 → 86**, one case gained (`879`), **none lost**, two sole-correct
+(`879`, `1160`). A pool that only grows is what the construction promises, and the previous probe's
+two lost cases were the redraw showing through — with them gone, +0.83pp is a reading rather than an
+accounting artefact.
+
+It is still short of the bar, and the conditional number says why: of the 35 cases `select-mixed`
+missed, the source rendered 25 and was right on **1 = 4.0%** against the 6.3% the bar needs. Its own
+accuracy rose to **66/95 = 69.5%**, above all three prompts (64.4 / 64.7 / 66.9) — a fourth opinion
+that is slightly better than its siblings and no better *where they failed* is worth about a point of
+ceiling and no more.
+
+What the ten `unknown-identifier` refusals were then produced the next round's six changes, and they
+were the contract's fault, not the model's: an operator written `IS NULL`, a `null` value on a nullary
+operator, `x in 'a'`, a select alias looked up in the schema, an aggregate on the left of a `having`,
+and `f."School Name"` read as a name plus a stray dot. Reading those sentences one at a time is what
+the `detail` field was added for; the histogram alone would have said "`unknown-identifier` 10" and
+stopped there.
+
+**The fourth probe, after those six** (`41766758694`, same 120 questions): rendering **106 of 120 =
+88.3%**, refusals down to 14 (`bad-expression` 6, `bad-value` 3, `unsupported-function` 2, and one
+each of `bad-identifier`, `unknown-identifier`, `unknown-key`), ceiling **86 → 89** against 86 for
+`select-mixed`, three cases gained (`75`, `168`, `617`), none lost, three sole-correct, and the
+conditional density at **2 of 27 = 7.4%** against the 6.3% the bar needs.
+
+| probe | rendering | ceiling Δ | sole-correct | conditional density |
+|---|---|---|---|---|
+| 40 questions, first grammar | 75.0% | — | — | — |
+| 120, after `case`/comparisons/`\|\|`/`between` | 75.8% | 0.00pp | 1 | 4.2% (1/24) |
+| 120, after quoting + schema check | 80.0% | +0.83pp | 2 | 4.0% (1/25) |
+| 120, after six tolerances | **88.3%** | **+2.50pp** | **3** | **7.4% (2/27)** |
+
+The density is the number that moved, and it moved with rendering: a grammar that refuses a quarter
+of the replies has a quarter of its cases missing from the pool, so the conditional hit rate was
+computed over fewer cases the worse the vocabulary was. That is worth stating plainly, because it
+means the first two probes understated the source for a reason the histogram had already named.
+
+**Pre-registration for the full split** (written before the dispatch, dev's 1,532 cases, two arms in
+one artifact, `deepseek-chat`):
+
+| # | criterion | bar | why this bar |
+|---|---|---|---|
+| ① | pool ceiling of `select-intent` minus `select-mixed`'s, **same run** | **≥ +2.0pp** (≥ 31 sole-correct) | the ceiling is the only number a fourth candidate can move, and 2pp is the smallest claim this project acts on |
+| ② | conditional density on the cases `select-mixed` missed | **≥ 6.3%** (31 of ~490) | the arm-level delta carries a redraw; this one is computed on one source against one pool |
+| ③ | the source's own rendering | **≥ 85%** | the probe reads 88.3%; below this the grammar is again refusing the corpus rather than answering it |
+| ④ | cost | `calls.mean` = 5.00, `promptChars` from the widest candidate | the price is published, not inferred |
+| ⑤ | conversion rate | **≥ 91.4%** | four candidates make selection harder, and that price has not been paid yet |
+
+Pass ① and ② ⇒ the ceiling has moved for the first time since `select-mixed`, and the next round
+prices `select-intent` as the arm to beat. Fail either ⇒ the grammar stays as product surface and as
+an instrument, the lever is reverted, and the candidate side is declared closed to *homogeneous*
+opinions — which is the reading the density has been pointing at since `I-74`.
+
+### The full split: the ceiling moved, and selection ate it (`41767687844`)
+
+dev's 1,532 cases, both arms in one artifact, `deepseek-chat`:
+
+| | `select-mixed` | `select-intent` | delta |
+|---|---|---|---|
+| score | 962 = **62.79%** | 957 = **62.47%** | **−0.32pp** (29 up / 34 down, p = 0.6147) |
+| pool ceiling | 1,024 = **66.84%** | 1,058 = **69.06%** | **+2.22pp** (41 up / 7 down, p < 0.0001) |
+| conversion | **93.95%** | **90.45%** | **−3.50pp** |
+| `calls.mean` | 3.994 | **4.999** | +1.005 |
+| source rendering | — | **1,339/1,532 = 87.4%** | — |
+
+| # | criterion | bar | read |
+|---|---|---|---|
+| ① | ceiling delta | ≥ +2.0pp | **pass**, +2.22pp, p < 0.0001 |
+| ① | sole-correct, the same criterion's other half | ≥ 31 | **fail**, **28** |
+| ② | conditional density | ≥ 6.3% | **pass**, 32 of 410 rendered = **7.80%** (32 of 508 misses = 6.30%) |
+| ③ | source rendering | ≥ 85% | **pass**, 87.4% |
+| ④ | cost | 5.00 calls | **pass**, 4.999 |
+| ⑤ | conversion | ≥ 91.4% | **fail**, 90.45% |
+
+**The ceiling moved, and it moved with p < 0.0001.** 41 cases gained against 7 lost is not a
+resampling artefact: this is the first time since `select-mixed` that a lever has raised the pool's
+ceiling, and it took four probes to get there because the first three were mostly measuring our own
+vocabulary.
+
+**And then selection ate it.** The score is −0.32pp with 29 up and 34 down (p = 0.6147) — the two
+arms are the same number — because conversion fell 3.50pp. A fourth candidate raises the ceiling by
+2.22pp and costs the selector 3.5pp, and the arithmetic is exact: at `select-mixed`'s conversion rate
+this pool would score `1,058 × 0.9395 = 64.88%`, **+2.09pp**. That number is not a reading, it is what
+the ceiling is worth to a selector that does not lose ground — and it is the next lever, priced before
+it is built.
+
+**Why the source's own accuracy dropped.** It reads 786 of 1,316 = **59.7%** on the full split against
+65.4% on 120 questions, which is the same regression `I-85` saw across two runs of one arm: the probe's
+120 cases are not a smaller copy of the split, they are the first 120. The lost 7 ceiling cases and the
+28-not-31 sole-correct count both live in that difference.
+
+**Verdict.** The lever is **adopted as a ceiling lever and not as a score lever**: `select-intent`
+stays in the catalogue with `select-mixed` as the arm to beat on the pool question, and the next round
+attacks conversion — a selector that reads four candidates as well as it reads three — because that is
+now the only place the +2.22pp can be collected.
