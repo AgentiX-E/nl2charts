@@ -57,6 +57,21 @@ cannot be argued with.
   same slot now also covers an empty candidate.
 
 ### Changed
+- **`I-95` closes without a dispatch: the lever it names is the family whose oracle already ran.**
+  The plan's next item proposed putting each column's most frequent values on the card, for the 33
+  of 50 triggered cases that wrote a literal no column stores. That is the `samples` family, whose
+  registered ceiling ran in `41620796848`: `inline+evidence+samples-gold` — the same sampler shown
+  **exactly** the columns the gold statement filters on — reads **944 = 61.62%, +0.72pp (36 up /
+  25 down, p = 0.2000)** against a bar of +1.5pp, and the wide form reads 952 = 62.14% (+1.24pp,
+  p = 0.0756). The price measured this round closes it twice over: the wide block is **+38.4% of
+  the card**, where the criterion allows 5%, and the narrow block is +1.4% while being an *oracle*,
+  so no realizable column rule can beat it. Its reach is 511 of 1,532 cases, where it reads
+  **+1.76pp = 9 questions = 0.59pp of the split**, against a bar of 15 questions. Criteria ①, ② and
+  ④ therefore all fail on readings that already existed, and they fail without a call being spent.
+  This does not say the 33 fabricated literals are beyond repair; it says the repair is not "show
+  the values on the card", which is now the one form of value grounding this repository has priced
+  twice.
+
 - **The zero-row lookup works; the lever around it does not clear its bar.** `41830439625` ran
   `select-mixed`, `select-mixed+empty` and `select-mixed+values` over all 1,532 dev questions in one
   artifact: **967 = 63.12%**, **973 = 63.51%** and **973 = 63.51%**, with ceilings 67.49%, 66.91%
@@ -169,6 +184,26 @@ cannot be argued with.
   change what the candidates are (I-45, I-77), not what is done with them.
 
 ### Fixed
+- **The cost instrument could not see the block it was pricing.** `bench:bird:card` renders the
+  prompt an arm sends, and for the arms that carry stored values on their card it rendered the
+  **parent's** card: `promptOf` built the schema, attached the definitions, pruned — and never
+  attached the values, so `buildAskMessages` was told `samples` and found nothing to render. The
+  two stored reports prove it without a run: `eval/out/card-select.json` and
+  `eval/out/card-inline+evidence+samples-gold.json` are two different arms with the **same** card
+  cost to the tenth of a character (2,121.4 mean). The block that two source comments and
+  `docs/architecture.md` price at +38.4% of the card therefore had no reproducing instrument in
+  this repository. `storedValuesFor` now reads the cache the run writes (profile or competitor
+  example set), `promptOf` layers it on the resolved card **before** the prune — the order the run
+  uses — and narrows it with the same `conditionColumns` when the arm asks for the gold's columns;
+  a cache the run never wrote throws rather than rendering the parent's card, and `bench:bird:join`
+  reads the same block through `blockReader` so the two instruments cannot disagree about which
+  card an arm sends. Re-derived by the fixed instrument over the 500 Mini-Dev cases and all eleven
+  databases: **1,479 → 2,047 characters (+38.4%)** for the wide block and **1,479 → 1,499 (+1.4%)**
+  narrowed to the gold's filtered columns, with 451 of 500 cases carrying a bracket. The quoted
+  number was right; it is now measurable. Ten tests pin it, including the class guard that was
+  missing — **every arm that declares a block must render a card that differs from its parent's**,
+  which is the one that would have caught this.
+
 - **The baseline gate rejected a report it should have accepted.** `BIRD1` knew two ways for an
   empty-result arm to speak (`diagnosed`, `blind`) and the third — `values` — reached it as an
   unknown mode, so `41830439625` failed at the accuracy floor with all of its own controls green.

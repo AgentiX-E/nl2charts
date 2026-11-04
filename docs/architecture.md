@@ -852,6 +852,15 @@ that differs in method rather than in prompt or in draw.
   characters, look at which cases each one touches. The generalisation is uncomfortable because it
   applies to levers this repository has already closed for cost reasons: the reading that closes a
   family has to name the width it was taken at, or it closes a different family.
+- **An instrument that ignores a lever does not report zero: it reports the parent.** The pair of
+  numbers in the bullet above — 38.4% wide, 1.4% narrow — lived in two source comments for four
+  rounds without a reproducing instrument, and the instrument that should have produced them was
+  rendering the block's arm as its parent: `promptOf` attached the definitions and the prune and
+  never the stored values, while the prompt builder was told to render samples. The two committed
+  reports of two different arms carry the **same** mean card, to a tenth of a character, and nothing
+  failed — because a card that is missing a block is still a plausible card. The check that finds
+  this is not "is the number plausible" but **"does this arm's card differ from its parent's"**, and
+  it is now a test over the whole arm catalogue rather than a property of one arm.
 - **A cache keyed by a name is keyed by nothing until the name is unique.** The profile cache was
   one directory for every dataset, keyed by database name, and two fixtures that both called their
   database `shop` read each other's schema — a card rendered from another dataset, on every case,

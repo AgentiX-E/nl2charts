@@ -25,11 +25,12 @@
  * instrument's whole point is that it runs without one; characters are proportional to tokens
  * for English text and the ratio is not assumed anywhere.
  */
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { attachDefinitions, buildAskMessages, renderSchemaCard } from '@agentix-e/nl2charts-ai';
-import type { PromptOptions, SchemaTable } from '@agentix-e/nl2charts-ai';
+import type { DatabaseProfile, PromptOptions, SchemaTable } from '@agentix-e/nl2charts-ai';
+import { conditionColumns } from './conditions.js';
 import { buildSchema, loadDescriptions, loadQuestions, loadTables } from './data.js';
 import type { BirdQuestion, BirdTable, ColumnNote } from './data.js';
 import type { CaseRecord } from './gap.js';
@@ -38,7 +39,10 @@ import { SHIPPED_ARM, requireArm } from './presence.js';
 import { CANDIDATE_RECALLERS, SHIPPED_RECALLERS, linkedTables, pruneSchema } from './prune.js';
 import { promptFor, renderableArm, resolveArm, resolveLayout } from './run.js';
 import type { Arm, BirdLayout } from './run.js';
+import { attachSamples, narrowSamples, sampleValuesOf } from './samples.js';
 import { definesOwnName, tableRefs } from './statement.js';
+import { EXAMPLE_RULE, exampleMapOf } from './value-examples.js';
+import type { ExampleSet } from './value-examples.js';
 
 /** How much of a case's gold tables a proposal keeps. */
 export const COVERAGES = ['all', 'some', 'none'] as const;
@@ -613,6 +617,61 @@ export interface CardReportShape {
   readonly controls?: { readonly synthesizedDefinitions?: Readonly<Record<string, string>> };
 }
 
+/**
+ * The stored values an arm's card carries, read from the cache the run fills.
+ *
+ * Two rules, two caches, and one identity: `samples: 'profile'` is the profiler's top spellings
+ * of every categorical column, `samples: 'example'` is MAC-SQL's rule over every non-key column.
+ * Neither is derivable here — a profile needs a database and this instrument has none — so a
+ * missing cache throws instead of returning an empty map. An empty map renders a card without a
+ * block, which is the parent's card, which is the defect this function exists to remove.
+ *
+ * The example cache carries the rule that wrote it, so a stale block is refused rather than
+ * priced: the run would have rebuilt it, and the difference between the two rules is exactly the
+ * thing a price is supposed to attribute.
+ */
+export function storedValuesFor(
+  arm: Pick<Arm, 'name' | 'samples'>,
+  db: string,
+  layout: BirdLayout,
+): Map<string, readonly string[]> | undefined {
+  if (arm.samples === undefined) return undefined;
+  if (arm.samples === 'profile') {
+    const file = join(layout.profileCache, `${db}.json`);
+    if (!existsSync(file)) {
+      throw new Error(`arm ${arm.name} carries the profiled values on its card and there is no profile for ${db} at ${file}`);
+    }
+    return sampleValuesOf(JSON.parse(readFileSync(file, 'utf8')) as DatabaseProfile);
+  }
+  const file = join(layout.exampleCache, `${db}.json`);
+  if (!existsSync(file)) {
+    throw new Error(`arm ${arm.name} carries the competitor's examples on its card and there is no example set for ${db} at ${file}`);
+  }
+  const set = JSON.parse(readFileSync(file, 'utf8')) as ExampleSet;
+  if (set.rule !== EXAMPLE_RULE) {
+    throw new Error(`the example set for ${db} was written by ${String(set.rule)} and this instrument prices ${EXAMPLE_RULE}, so the block it would measure is not the one sent`);
+  }
+  return exampleMapOf(set);
+}
+
+/**
+ * The same block, read once per database.
+ *
+ * Two instruments render a card from the same arm — `card` and `join` — and both need the block
+ * or neither prices the arm it was given. One reader is what keeps them from disagreeing about
+ * which card an arm sends, which is the shape of every defect in this file's history.
+ */
+export function blockReader(
+  arm: Pick<Arm, 'name' | 'samples'>,
+  layout: BirdLayout,
+): (db: string) => Map<string, readonly string[]> | undefined {
+  const cache = new Map<string, Map<string, readonly string[]> | undefined>();
+  return (db: string) => {
+    if (!cache.has(db)) cache.set(db, storedValuesFor(arm, db, layout));
+    return cache.get(db);
+  };
+}
+
 /** One case's two messages, built by the function the pipeline sends. */
 export function promptOf(
   arm: Arm,
@@ -620,6 +679,7 @@ export function promptOf(
   definitions: string,
   tables: BirdTable,
   notes?: Map<string, Map<string, ColumnNote>>,
+  values?: ReadonlyMap<string, readonly string[]>,
 ): { system: string; user: string; schema: readonly SchemaTable[] } {
   const options = promptFor(arm, question, {});
   // Which arms take their column comments from the dataset, and which from a generated
@@ -641,13 +701,29 @@ export function promptOf(
   const withDefinitions = arm.definitions === 'inline' || arm.definitions === 'dataset-subset';
   const base = buildSchema(tables, notes ?? new Map(), { withNotes: sendsNotes });
   const card = withDefinitions ? attachDefinitions(base, definitions) : { schema: base };
+  // The block is a lever, so it has to be on the card this instrument renders or the arm is
+  // priced as its parent. It was not: `promptOf` never attached the values, `buildAskMessages`
+  // was told `samples` and found nothing to render, and `bench:bird:card` reported
+  // `inline+evidence+samples-gold` at the parent's characters to the tenth of a character. The
+  // guard is the same shape as the one above it — a card that is missing the block its arm
+  // declares is not the card that was sent, and an instrument that silently prices it is
+  // measuring a prompt nobody sends.
+  if (arm.samples !== undefined && values === undefined) {
+    throw new Error(`arm ${arm.name} carries the stored values on its card and this instrument was given none, so the prompt it would measure is not the one sent`);
+  }
+  // The narrowing is the arm's, applied the way the run applies it: on the gold's filtered
+  // columns for the oracle arm, on everything the profile kept for the rest.
+  const wanted = arm.sampleColumns === 'gold' ? conditionColumns(question.SQL) : undefined;
+  const block = values === undefined ? undefined : wanted === undefined ? values : narrowSamples(values, wanted);
+  // Before the prune, because the run layers the block on the resolved card and prunes after it.
+  const layered = block === undefined ? (card.schema as SchemaTable[]) : attachSamples(card.schema as SchemaTable[], block);
   // The prune arm sends the closure, so this instrument has to render the closure. Rebuilding
   // the whole card for it would measure a prompt nobody sends — the same defect the two
   // `information` fixes were about — and would report the arm as its parent with a longer name.
   const pruned =
     arm.prune === undefined
-      ? (card.schema as SchemaTable[])
-      : (pruneSchema({ schema: card.schema as SchemaTable[], question: question.question, graph: graphOf(tables), hops: arm.prune })
+      ? layered
+      : (pruneSchema({ schema: layered, question: question.question, graph: graphOf(tables), hops: arm.prune })
           .schema as SchemaTable[]);
   const schema = pruned;
   const built = buildAskMessages({
@@ -695,6 +771,10 @@ export async function runCard(settings: CardSettings): Promise<CardOutcome> {
   } else if (!renderableArm(arm)) {
     drops.unrenderable = cases.length;
   } else {
+    // One block per database, read once: a card arm carries the same block on every question of
+    // one database, and reading the same file 498 times would make the instrument's cost the
+    // corpus's size.
+    const valuesFor = blockReader(arm, settings.layout);
     for (const row of cases) {
       const id = String(row.id);
       // A case appears once per arm; the split's own question file is what holds a duplicate
@@ -712,7 +792,14 @@ export async function runCard(settings: CardSettings): Promise<CardOutcome> {
         drops.definitionGap += 1;
         continue;
       }
-      const built = promptOf(arm, question, text ?? '', table, arm.notes === true ? notesFor(question.db_id, table) : undefined);
+      const built = promptOf(
+        arm,
+        question,
+        text ?? '',
+        table,
+        arm.notes === true ? notesFor(question.db_id, table) : undefined,
+        valuesFor(question.db_id),
+      );
       // `costOf` throws rather than returning a sentinel: a prompt these builders produced
       // always decomposes, the end-to-end tests below assert that on a real split, and a case
       // silently dropped for a reason nobody can act on is worse than a loud failure.

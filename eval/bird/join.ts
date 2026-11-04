@@ -39,7 +39,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { Recaller, SchemaTable } from '@agentix-e/nl2charts-ai';
-import { coverage, promptOf, tableChars } from './card.js';
+import { blockReader, coverage, promptOf, tableChars } from './card.js';
 import { EDGE_SOURCES, closureOf, joinGraphOf } from './join-graph.js';
 import { CANDIDATE_RECALLERS, SHIPPED_RECALLERS, linkedTables } from './prune.js';
 import type { EdgeSource, JoinGraph } from './join-graph.js';
@@ -387,8 +387,9 @@ export function schemaOf(
   definitions: string,
   tables: BirdTable,
   notes?: Map<string, Map<string, ColumnNote>>,
+  values?: Map<string, readonly string[]>,
 ): SchemaTable[] {
-  return promptOf(arm, question, definitions, tables, notes).schema as SchemaTable[];
+  return promptOf(arm, question, definitions, tables, notes, values).schema as SchemaTable[];
 }
 
 export function seedsOf(question: string, schema: readonly SchemaTable[]): Record<RecallerSet, readonly string[]> {
@@ -408,6 +409,9 @@ export async function runJoin(settings: JoinSettings): Promise<JoinOutcome> {
   const report = JSON.parse(readFileSync(settings.report, 'utf8')) as JoinReportShape;
 
   const arm = resolveArm(settings.arm);
+  // An arm that carries stored values on its card is rendered with them here too, or this
+  // instrument would price the parent's card under the arm's name.
+  const valuesFor = arm === undefined ? () => undefined : blockReader(arm, settings.layout);
   const questions = loadQuestions(settings.layout.questionsFile);
   const tables = loadTables(settings.layout.tablesFile);
   const byId = new Map(questions.map((question) => [String(question.question_id), question]));
@@ -454,7 +458,14 @@ export async function runJoin(settings: JoinSettings): Promise<JoinOutcome> {
         drops.definitionGap += 1;
         continue;
       }
-      const schema = schemaOf(arm, question, text ?? '', table, arm.notes === true ? notesFor(question.db_id, table) : undefined);
+      const schema = schemaOf(
+        arm,
+        question,
+        text ?? '',
+        table,
+        arm.notes === true ? notesFor(question.db_id, table) : undefined,
+        valuesFor(question.db_id),
+      );
       const names = new Set(schema.map((entry) => entry.table.toLowerCase()));
       const refs = classifyGold(question.SQL, names);
       if (refs.unknown.length > 0) unknownRefs.push(...refs.unknown.map((name) => `${question.db_id}.${name}`));

@@ -7388,3 +7388,97 @@ Two things would change that verdict, and neither is a tweak to the message:
    more than 1pp even if every triggered case were repaired. The lever's ceiling was always
    3.85pp; what this run shows is that the reachable part of it, with the taxonomy that actually
    occurs, is 0.2pp.
+
+## The instrument could not see the block, so the block's price was a rumour
+
+Every number in the section above about the stored-value block's cost — **+38.4% of the card** for
+the wide sampler, **+1.4%** for the sampler narrowed to the gold's filtered columns — was quoted in
+two source comments and in `docs/architecture.md`, and none of them had a reproducing instrument in
+this repository. `bench:bird:card` is the instrument that exists for exactly this question: it
+renders the prompt an arm sends, block by block, using the function the pipeline uses. It was
+rendering the **parent's** card.
+
+The defect is one call that was not made. `promptOf` built the schema, attached the generated
+definitions, pruned — and never attached the stored values, while `buildAskMessages` was told
+`samples: arm.samples !== undefined`, which renders a bracket only where a column carries one. So an
+arm whose whole lever is the block arrived at the renderer as its parent, and the report said so in
+the only way that is impossible to argue with:
+
+| report | arm measured | mean card characters |
+|---|---|---|
+| `eval/out/card-select.json` | `select` | 2,121.4 |
+| `eval/out/card-inline+evidence+samples-gold.json` | `inline+evidence+samples-gold` | 2,121.4 |
+
+Two arms, two names, one card, to the tenth of a character. A lever the instrument cannot see is a
+lever it prices at zero, and this repository had already published a ceiling for that lever — the
+`samples` family closed at +0.72pp — so the wrong number was not the verdict, it was the *price*.
+The verdict rests on the accuracy reading, which is measured by the run and not by this instrument.
+
+### The fix
+
+`storedValuesFor(arm, db, layout)` reads the cache the run itself writes: the profiler's per-database
+JSON for `samples: 'profile'`, the competitor-rule cache for `samples: 'example'`. `promptOf` layers
+that map on the resolved card **before** the prune, in the order the run layers it, and narrows it
+with the same `conditionColumns` the oracle arm uses. Two refusals keep the fix from becoming a
+quieter version of the bug: a cache the run never wrote **throws** — an empty map renders the
+parent's card, which is the defect — and an example set written by another rule than the pinned one
+throws too, because a stale block is not the block the arm would send. `bench:bird:join` reads the
+same block through `blockReader`, so the two instruments cannot come to disagree about which card an
+arm sends, which is the shape of every defect in that file's history.
+
+### What the block costs, re-derived
+
+The fixed instrument, over the 500 Mini-Dev cases and all eleven databases (profiles built locally,
+no model call, no query the run would not have made):
+
+| arm | mean card chars | vs parent | cases carrying a bracket |
+|---|---|---|---|
+| `inline+evidence` | 1,479 | — | 0 |
+| `inline+evidence+samples` (wide) | 2,047 | **+38.4%** | 451 of 500 |
+| `inline+evidence+samples-gold` (narrowed) | 1,499 | **+1.4%** | 185 of 500 |
+
+The number the comments quoted is confirmed to the tenth of a percent, and the arithmetic behind the
+family's closure is now reproducible rather than inherited: the wide block costs more than a third of
+the card, and the narrow one is cheap because it is an oracle. The command that reproduces it is a
+dispatch carrying both arms — `BIRD_ARMS=inline+evidence,inline+evidence+samples pnpm bench:bird`
+then `pnpm bench:bird:card --arm inline+evidence+samples` — which is why the arms stay in the
+catalogue even though the family is closed.
+
+## `I-95` closes on the readings it was meant to produce
+
+The previous section ended with a plan item: 33 of the 50 zero-row questions wrote a literal no value
+contains, so the repair is not a better message about the statement but a card that says what the
+column actually stores. That item was `I-95`, and its four criteria were registered before any arm
+was written: ① triggered accuracy ≥ 25% (baseline 17.6%), ② the full split ≥ +0.96pp, ③ the same
+candidates as `select-mixed+values`, ④ card growth ≤ 5%.
+
+The lever it describes is the `samples` family. The family's registered ceiling already ran
+(`41620796848`, 1,532 dev questions, three arms in one artifact):
+
+| arm | passed | accuracy | vs `inline+evidence` |
+|---|---|---|---|
+| `inline+evidence` | 933 | 60.90% | — |
+| `inline+evidence+samples` | 952 | 62.14% | +1.24pp, 61 up / 42 down, p = 0.0756 |
+| `inline+evidence+samples-gold` | 944 | **61.62%** | **+0.72pp**, 36 up / 25 down, p = 0.2000 |
+
+And the cost table above puts the two forms on opposite sides of criterion ④: the wide block is
++38.4% of the card where 5% is allowed, and the narrow block — which passes ④ at +1.4% — is an
+**oracle**, so no realizable column rule can beat it. Its reach is 511 of 1,532 cases (1,021 cases
+have a gold that filters on no column this profiler keeps), and where it lands it is worth
+**+1.76pp**, which is **9 questions**, which is **0.59pp of the split** against criterion ②'s 15
+questions.
+
+| criterion | threshold | what is already measured | verdict |
+|---|---|---|---|
+| ① the ceiling is worth having | triggered accuracy ≥ 25% | the oracle of this lever reads +0.72pp at p = 0.20 on the whole split | fails |
+| ② the split moves | ≥ +0.96pp | the narrow form's reach buys 0.59pp at its own measured rate | fails |
+| ③ same candidates | stock pool | a card change cannot reuse draws; the criterion is unsatisfiable as written, as 8i's ③ was | mis-specified |
+| ④ affordable | ≤ 5% card growth | wide **+38.4%**; narrow +1.4% but an oracle, so it prices a rule nobody can write | **fails** |
+
+**Verdict: closed without a dispatch.** The 3.85pp that the zero-row census opened is not reachable
+by showing values, and this is now the second time the repository has priced value grounding and
+found the same answer — the first time by candidate source (+2.82pp ceiling, +1.24pp read), this time
+by card block (+0.72pp ceiling). What remains true is the diagnosis: 33 of 50 triggered statements
+named a value that does not exist. A lever that reaches them has to change what the model *does*
+with an unknown literal, not what the prompt shows it, and the candidate that could is a statement
+whose filters are checked before it is written rather than after it returns nothing.

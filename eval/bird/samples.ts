@@ -50,8 +50,10 @@ export function attachSamples(
  * The same block, restricted to the columns a statement filters on.
  *
  * The block was measured at +38.4% characters a case when every profiled column carried one, and
- * +1.4% when only the columns a gold statement filters on do. That is the whole reason this
- * function exists: the cost of value grounding is not the bracket, it is the number of columns
+ * +1.4% when only the columns a gold statement filters on do — re-derived by `bench:bird:card` once
+ * that instrument learned to attach the block, which until then it did not: it rendered these arms
+ * as their parents, so the pair had no reproducing measurement for four rounds. That is the whole
+ * reason this function exists: the cost of value grounding is not the bracket, it is the number of columns
  * that carry a bracket. The sampler, the values and their order are untouched — a rule that also
  * re-ranked or re-cut the values would be a second lever inside a pair that exists to price one.
  *

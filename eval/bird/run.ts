@@ -153,8 +153,9 @@ export interface Arm {
    *
    * `'gold'` keeps the columns the gold statement filters on and nothing else. It is an oracle, and
    * it exists for one reason: the block's cost is the number of columns that carry a bracket, not
-   * the bracket itself. Measured on the 500-question Mini-Dev split, the sampler over every
-   * profiled column costs **+38.4%** characters a case and the same sampler over the filtered
+   * the bracket itself. Measured on the 500-question Mini-Dev split — and reproducible there by
+   * `bench:bird:card`, which now reads the block from the cache the run writes — the sampler over
+   * every profiled column costs **+38.4%** characters a case and the same sampler over the filtered
    * columns costs **+1.4%**, touching 185 of 500 cases. So the family "show stored values where a
    * condition needs one" has to be priced at the price it would actually be built at, and this arm
    * is the ceiling of that family: no realizable column rule can beat a rule that reads the answer.

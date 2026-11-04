@@ -12,7 +12,7 @@
  * What can be wrong is the instrument, and the cases below drive each of its four absolute
  * failures.
  */
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -41,7 +41,9 @@ import type { CardRow, CardTally } from '../eval/bird/card.js';
 import { resolveArm } from '../eval/bird/run.js';
 import { writeChainBirdDataset, writeMiniBirdDataset } from './helpers/bird-dataset.js';
 import { loadDescriptions, loadTables } from '../eval/bird/data.js';
-import { promptOf } from '../eval/bird/card.js';
+import { blockReader, promptOf, storedValuesFor } from '../eval/bird/card.js';
+import { ARMS } from '../eval/bird/run.js';
+import { EXAMPLE_RULE } from '../eval/bird/value-examples.js';
 
 const loadTablesFor = (data: string) => {
   const table = loadTables(join(data, 'dev_tables.json')).get('shop');
@@ -74,7 +76,23 @@ function settingsFor(data: string, overrides: Record<string, unknown> = {}, arm 
   const dir = mkdtempSync(join(tmpdir(), 'card-'));
   const path = join(dir, 'bird-eval.json');
   writeFileSync(path, JSON.stringify({ split: 'minidev', cases: [], controls: {}, ...overrides }));
-  return { report: path, layout: { split: 'minidev', questionsFile: join(data, 'mini_dev_sqlite.json'), tablesFile: join(data, 'dev_tables.json'), descriptionsRoot: join(data, 'dev_databases'), out: join(dir, 'out.json') }, arm, out: dir, strict: true } as never;
+  return {
+    report: path,
+    layout: {
+      split: 'minidev',
+      questionsFile: join(data, 'mini_dev_sqlite.json'),
+      tablesFile: join(data, 'dev_tables.json'),
+      descriptionsRoot: join(data, 'dev_databases'),
+      // The two caches the run writes its blocks into. The instrument reads them, and a layout
+      // without them would make every block arm unreachable rather than measurable.
+      profileCache: join(data, '.profiles'),
+      exampleCache: join(data, '.value-examples'),
+      out: join(dir, 'out.json'),
+    },
+    arm,
+    out: dir,
+    strict: true,
+  } as never;
 }
 
 /** One report row per question, with a known call count. */
@@ -814,5 +832,148 @@ describe('the paths a real report can take', () => {
     } as never);
     expect(outcome.rows[0]?.calls).toBe(1);
     expect(outcome.tally.calls).toBe(1);
+  });
+});
+
+describe('the block an arm carries on its card', () => {
+  const dataset = (): string => writeMiniBirdDataset(mkdtempSync(join(tmpdir(), 'card-block-')));
+
+  /** The profile the run would have written, with the columns these questions need. */
+  const writeProfile = (root: string, columns = [
+    { table: 'items', column: 'name', kind: 'categorical', values: ['pen', 'cup'], distinct: 2 },
+    { table: 'orders', column: 'item_id', kind: 'categorical', values: ['1', '2'], distinct: 2 },
+  ]): void => {
+    mkdirSync(join(root, '.profiles'), { recursive: true });
+    writeFileSync(join(root, '.profiles', 'shop.json'), JSON.stringify({ db: 'shop', columns }));
+  };
+
+  /** The competitor's set, written by the rule the instrument prices. */
+  const writeExamples = (root: string, rule = EXAMPLE_RULE): void => {
+    mkdirSync(join(root, '.value-examples'), { recursive: true });
+    writeFileSync(
+      join(root, '.value-examples', 'shop.json'),
+      JSON.stringify({
+        rule,
+        source: { tables: [], columns: 0 },
+        columns: [
+          { table: 'items', column: 'name', values: ['pen'] },
+          { table: 'orders', column: 'item_id', values: ['1'] },
+        ],
+      }),
+    );
+  };
+
+  const question = (id: number) => {
+    const data = dataset();
+    const parsed = JSON.parse(readFileSync(join(data, 'mini_dev_sqlite.json'), 'utf8')) as { question_id: number }[];
+    const found = parsed.find((entry) => entry.question_id === id);
+    if (found === undefined) throw new Error(`the fixture has no question ${String(id)}`);
+    // The fixture's own question, not a stub: the gold's conditions are what the narrowing arm
+    // reads, and a stub with an empty statement would render an unnarrowed card and pass.
+    return { data, question: found as never };
+  };
+
+  it('reads the profiled values and returns nothing for an arm that carries no block', () => {
+    const root = dataset();
+    writeProfile(root);
+    const layout = { profileCache: join(root, '.profiles'), exampleCache: join(root, '.value-examples') } as never;
+    expect(storedValuesFor(resolveArm('select') as never, 'shop', layout)).toBeUndefined();
+    const values = storedValuesFor(resolveArm('inline+evidence+samples') as never, 'shop', layout);
+    expect([...(values?.get('items.name') ?? [])]).toEqual(['pen', 'cup']);
+  });
+
+  it('refuses to price a block whose cache the run never wrote', () => {
+    const root = dataset();
+    const layout = { profileCache: join(root, '.profiles'), exampleCache: join(root, '.value-examples') } as never;
+    expect(() => storedValuesFor(resolveArm('inline+evidence+samples') as never, 'shop', layout)).toThrow(/no profile for shop/);
+    expect(() => storedValuesFor(resolveArm('inline+evidence+samples-wide') as never, 'shop', layout)).toThrow(/no example set for shop/);
+  });
+
+  it('refuses an example set another rule wrote', () => {
+    const root = dataset();
+    writeExamples(root, 'mac-sql@0000000');
+    const layout = { profileCache: join(root, '.profiles'), exampleCache: join(root, '.value-examples') } as never;
+    expect(() => storedValuesFor(resolveArm('inline+evidence+samples-wide') as never, 'shop', layout)).toThrow(/written by mac-sql@0000000/);
+  });
+
+  it('reads a competitor set the pinned rule wrote', () => {
+    const root = dataset();
+    writeExamples(root);
+    const layout = { profileCache: join(root, '.profiles'), exampleCache: join(root, '.value-examples') } as never;
+    const values = storedValuesFor(resolveArm('inline+evidence+samples-wide') as never, 'shop', layout);
+    expect([...(values?.get('items.name') ?? [])]).toEqual(['pen']);
+  });
+
+  it('memorises one read per database', () => {
+    const root = dataset();
+    writeProfile(root);
+    const read = blockReader(resolveArm('inline+evidence+samples') as never, { profileCache: join(root, '.profiles') } as never);
+    const first = read('shop');
+    expect(read('shop')).toBe(first);
+  });
+
+  it('puts the block on the card, and charges exactly the bracket for it', () => {
+    const root = dataset();
+    const tables = loadTablesFor(root);
+    const values = new Map([['items.name', ['pen', 'cup']]]);
+    const plain = promptOf(resolveArm('inline+evidence') as never, question(1).question as never, '', tables);
+    const sampled = promptOf(resolveArm('inline+evidence+samples') as never, question(1).question as never, '', tables, undefined, values);
+    expect(sampled.schema.length).toBe(plain.schema.length);
+    expect(sampled.system).not.toBe(plain.system);
+    // The defect this pins: before the block was attached, these two strings were identical and
+    // every price the report published for the arm was the parent's.
+    // The renderer writes the bracket after a space, so the charge is the bracket plus that space.
+    expect(sampled.system.length - plain.system.length).toBe(' [pen|cup]'.length);
+    expect(sampled.system).toContain('[pen|cup]');
+  });
+
+  it('narrows the block to the columns the gold filters on, and only those', () => {
+    const root = dataset();
+    const tables = loadTablesFor(root);
+    const values = new Map([
+      ['items.name', ['pen', 'cup']],
+      ['orders.item_id', ['1', '2']],
+    ]);
+    // Question 7 filters `item_id = 1`; `items.name` is on the card and is not filtered.
+    const built = promptOf(resolveArm('inline+evidence+samples-gold') as never, question(7).question as never, '', tables, undefined, values);
+    expect(built.system).toContain('[1|2]');
+    expect(built.system).not.toContain('[pen|cup]');
+  });
+
+  it('refuses to render a block arm with no block', () => {
+    const root = dataset();
+    const tables = loadTablesFor(root);
+    expect(() => promptOf(resolveArm('inline+evidence+samples') as never, question(1).question as never, '', tables)).toThrow(/was given none/);
+  });
+
+  it('prices every arm that declares a block differently from its parent', () => {
+    const root = dataset();
+    const tables = loadTablesFor(root);
+    writeProfile(root);
+    writeExamples(root);
+    const valuesFor = blockReader(resolveArm('inline+evidence+samples') as never, { profileCache: join(root, '.profiles') } as never);
+    const exampleFor = blockReader(resolveArm('inline+evidence+samples-wide') as never, { exampleCache: join(root, '.value-examples') } as never);
+    // Question 7 is the one whose gold states a condition, so all three arms have something to
+    // narrow to or to show; on a question with no condition the narrowing arm sends the parent's
+    // card, and that is the rule rather than a leak.
+    const parent = promptOf(resolveArm('inline+evidence') as never, question(7).question as never, '', tables).system;
+    // The guard the defect slipped past: an arm's name is a claim about its prompt, and a block
+    // that renders nowhere turns the claim into a second copy of the parent.
+    for (const arm of ARMS.filter((entry) => entry.samples !== undefined)) {
+      const block = arm.samples === 'example' ? exampleFor('shop') : valuesFor('shop');
+      const built = promptOf(arm, question(7).question as never, '', tables, undefined, block);
+      expect(built.system, `${arm.name} renders its parent's card`).not.toBe(parent);
+    }
+  });
+
+  it('charges a sampled case more than its parent, on a real split', async () => {
+    const root = dataset();
+    writeProfile(root);
+    const cases = [1, 2, 5];
+    const sampled = await runCard(settingsFor(root, reportBody(cases, {}, 'inline+evidence+samples'), 'inline+evidence+samples'));
+    const plain = await runCard(settingsFor(root, reportBody(cases, {}, 'inline+evidence'), 'inline+evidence'));
+    expect(sampled.tally.cost.card).toBeGreaterThan(plain.tally.cost.card);
+    expect(sampled.tally.total).toBe(cases.length);
+    expect(sampled.problems).toEqual([]);
   });
 });

@@ -479,6 +479,16 @@ rewritten with that spelling and adopted if it returns rows. **No call is spent.
 a second table that stores the literal as written, leave the substitution to the model, because a
 guess dressed as a lookup is still a guess.
 
+**Stored-value block** — The bracket a column carries on the schema card when an arm asks for one:
+`name TEXT [pen|cup]`, the profiler's most frequent spellings for `samples: 'profile'`, or MAC-SQL's
+six-value rule for `samples: 'example'`. It is the *unconditional* half of value grounding — the
+`values` block is built from the literals the question names, this one is in front of the model
+whether or not the question named anything — and it is the lever the `samples` family prices. On
+Mini-Dev its cost is **+38.4% of the card** over every profiled column and **+1.4%** narrowed to the
+columns the gold statement filters on, and it reaches 451 of 500 cases wide against 185 narrow. It
+buys **+1.24pp** wide and **+0.72pp** narrow on the dev split, which is why the family closed and the
+block is not a default.
+
 **Unanimity** — The questions on which every candidate returned the same result, and therefore the
 share of the corpus no selection rule can move: if the set agrees and is wrong, choosing cannot
 help. It is the boundary between selection workmanship and generation work, and the column is

@@ -323,6 +323,25 @@ every other feedback turn lives under. Two properties are worth keeping if you p
    storing the literal as written, leave the substitution to the model.
 
 
+#### The other half: showing values before the statement is written
+
+The lookup above fixes a literal *after* a statement returned nothing. The unconditional version —
+put the column's stored values on the schema card, `name TEXT [pen|cup]` — is the obvious next step,
+and it is measured: it costs **+38.4% of the card** when every profiled column carries a bracket and
+**+1.4%** when only the columns your answer filters on do, and it buys **+1.24pp** and **+0.72pp**
+respectively on BIRD's dev split (p = 0.0756 and 0.2000). Both are under the split's resolution, and
+the cheap form is an oracle — it uses the gold statement to pick the columns. So the block is not a
+default in this repository's benchmark arms, and you should treat it the same way: it is a lever to
+measure on your schema, not a setting to switch on. What to expect if you do measure it: on the third
+of cases whose answer filters on a column the profiler keeps, it is worth about +1.8pp, and on the
+other two thirds the block cannot know more than "here are the values" already shows.
+
+Two practical notes. The profiler only keeps values for categorical columns with a bounded number of
+distinct spellings, so an empty bracket means "nothing to show", not "no values". And a bracket
+invites invented filters — the prompt says samples are examples rather than defaults for a reason;
+if your model starts writing `where status = 'Active'` on questions that asked for every row, the
+block is why.
+
 What the model is told on the second turn:
 
 ```
