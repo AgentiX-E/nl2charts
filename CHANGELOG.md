@@ -38,33 +38,23 @@ cannot be argued with.
   a second definition of empty, and the cross-implementation test that already held the two to the
   same slot now also covers an empty candidate.
 
-### Fixed
-- **`shortest` ranked the candidate that wrote nothing as the minimal answer.** `consensus.ts` read
-  a statement's length directly, so an empty statement scored zero and won every comparison it
-  entered; the library ranks a blank statement last, and the test that holds the two
-  implementations to the same slot on the same rows is what found it. No published reading moves —
-  the artifact this was measured against carries a statement for all 10,380 candidate records — but
-  an artifact from a run where a source returned nothing would have been scored under the wrong
-  rule. The blank case is now a refusal in both implementations.
-- **The benchmark workflow sent the second provider's key to the first provider's endpoint.**
-  `41791956315` dispatched `select-balanced` with `second_provider=deepseek` and no endpoint, so
-  `BIRD_SECOND_API_KEY` became DeepSeek's secret while `BIRD_SECOND_BASE_URL` stayed on the
-  workflow's default — Zhipu's host. Preflight answered `401 令牌已过期或验证不正确` and the run
-  never reached a question: a valid key, a right model name, an endpoint belonging to another
-  vendor. The message blames an expired token, which is the one thing that was not wrong. Only one
-  of the two inputs keeps a default now: the endpoint is derived from the provider, and the input
-  that overrides it starts empty, so the pair cannot disagree unless the caller spells both. Two
-  tests read the workflow and fail on the old wiring, verified by restoring it.
-
-- **A count in the previous commit's message was wrong, and the correction is larger than the
-  error.** `ad7fe95` reported 87 and 76 empty candidates "on the 1,532-question artifact"; those
-  were the 600-question numbers. The whole split carries **223 and 287**, so the reading is 510
-  rather than 163 for the two arms, plus 76 for the strong arm that the smaller artifact alone
-  measures. No published rate moves — the rates were computed from the artifact, not from the
-  message — but a count in a commit message is a claim like any other, and a wrong one in the log
-  is worse than a wrong one in a comment because it cannot be edited.
-
 ### Changed
+- **The full split confirms the strong-model ceiling and, for the first time, a free rule beating a
+  paid selector.** `41808092447` ran both pools over all 1,532 dev questions with a second endpoint
+  in the same vendor: `select-mixed` **959 = 62.60%** against `select-balanced` **941 = 61.42%**
+  (61 up / 79 down, p = 0.1505), with the ceiling **1,022 = 66.71%** against **1,055 = 68.86%** —
+  **+2.15pp, 72 up / 39 down, p = 0.0022** — and conversion 93.84% → 89.19%. The 600-question
+  reading of +2.83pp was optimistic by a quarter, which is what that sample's 3.6pp MDE predicted.
+  The mechanism is the same one and now visible at full width: changing the author moved **212
+  questions out of unanimity** and removed **118 wrong unanimous votes** (371 → 253), even though
+  both reasoning sources are individually worse than the chat sources they replaced (57.8% / 58.5%
+  against 62.0% / 61.8%). And `shortest` on the strong pool is **976 = 63.71%** against the same
+  pool's selector at 61.42% — **+2.29pp, 84 up / 49 down, p = 0.0030**, on 3.00 calls instead of
+  4.00 — which is also +1.11pp above the arm to beat and the highest score any configuration has
+  reached on the full dev split. The previous round's verdict that a call-free rule cannot beat the
+  selector by more than the split resolves is withdrawn: what changed was not the rule but the pool
+  it reads, once the empty results were removed from it.
+
 - **A stronger author raises the ceiling by 2.83pp and the selector gives back 6.10pp of conversion.**
   `41795505400` ran `select-mixed` against `select-balanced` (two `deepseek-reasoner` slots and one
   `deepseek-chat`) on dev's 600 questions, both arms in one artifact: **382 = 63.67%** against
@@ -104,7 +94,6 @@ cannot be argued with.
   separate them: a refused call and a wrong answer are one row each. That is now the largest number
   in `docs/benchmarks.md`, larger than every delta it published this week, and it is the argument for
   the instrument added below.
-
 - **Three prompts carry no more independent opinions than three samples of one prompt.** `I-74` ran
   the separation the candidate side never made — `vote` (three draws of one prompt at 0.7) against
   `vote-mixed` (three prompts, one draw each) on the same 160 questions, 960 completions and no
@@ -114,7 +103,6 @@ cannot be argued with.
   on the same wrong rows**: a knowledge failure that neither an extra sample nor a new wording moves.
   This is why the fourth opinion added 22 to 27 ceiling pieces and was still the weakest candidate,
   and it is the baseline (`1.12`) that any lever claiming to add knowledge has to beat.
-
 - **The candidate side closes negative, and the measurement that closes it is a contingency table.**
   The pairwise arm (`41561960657`, dev 1,532) scored 941 against its parent's 940 — +1 case, 5 up and
   4 down — with 102 comparisons of which it overturned 10: **0 of the 20 where overturning would have
@@ -124,8 +112,6 @@ cannot be argued with.
   (68.93%) and CHASE-SQL's end-to-end at 76.02%, a perfect selector would land 7.1pp below the
   competitor: the gap is above the candidate set, so the next lever is generation, and its criterion
   is the ceiling (≥ +4pp) rather than the score.
-
-
 - **A push whose only code is tests no longer buys thirteen arms over the split.** The scope filter
   that decides whether a push is measured (`tools/ci-scope.mjs`) knew one inert class — Markdown — so
   a commit that added tests and a changelog line re-priced the whole BIRD chain, roughly 6,400
@@ -136,7 +122,6 @@ cannot be argued with.
   `packages/<name>/test/`, plus a colocated `*.test.ts`), so `eval/test/…` is still measured and a
   directory nobody argued for cannot buy a skip; the two conservative edges are unchanged — an
   undescribed list and a truncated one both measure.
-
 - **The reconcile line is closed, and the reason is measured rather than argued.** The sixth dispatch
   (`41462471819`, 600 dev questions) ran the five-arm reading the policy was built for:
   `select-cross` 62.50%, `-pooled` 62.33%, `-vote` **63.17%**, `-reconcile` 59.00%,
@@ -147,6 +132,31 @@ cannot be argued with.
   the vote case for case. So the pipeline around the lever is exonerated and the remaining gap is the
   model's own writing, which no prompt or policy in this repository changes. The next lever has to
   change what the candidates are (I-45, I-77), not what is done with them.
+
+### Fixed
+- **`shortest` ranked the candidate that wrote nothing as the minimal answer.** `consensus.ts` read
+  a statement's length directly, so an empty statement scored zero and won every comparison it
+  entered; the library ranks a blank statement last, and the test that holds the two
+  implementations to the same slot on the same rows is what found it. No published reading moves —
+  the artifact this was measured against carries a statement for all 10,380 candidate records — but
+  an artifact from a run where a source returned nothing would have been scored under the wrong
+  rule. The blank case is now a refusal in both implementations.
+- **The benchmark workflow sent the second provider's key to the first provider's endpoint.**
+  `41791956315` dispatched `select-balanced` with `second_provider=deepseek` and no endpoint, so
+  `BIRD_SECOND_API_KEY` became DeepSeek's secret while `BIRD_SECOND_BASE_URL` stayed on the
+  workflow's default — Zhipu's host. Preflight answered `401 令牌已过期或验证不正确` and the run
+  never reached a question: a valid key, a right model name, an endpoint belonging to another
+  vendor. The message blames an expired token, which is the one thing that was not wrong. Only one
+  of the two inputs keeps a default now: the endpoint is derived from the provider, and the input
+  that overrides it starts empty, so the pair cannot disagree unless the caller spells both. Two
+  tests read the workflow and fail on the old wiring, verified by restoring it.
+- **A count in the previous commit's message was wrong, and the correction is larger than the
+  error.** `ad7fe95` reported 87 and 76 empty candidates "on the 1,532-question artifact"; those
+  were the 600-question numbers. The whole split carries **223 and 287**, so the reading is 510
+  rather than 163 for the two arms, plus 76 for the strong arm that the smaller artifact alone
+  measures. No published rate moves — the rates were computed from the artifact, not from the
+  message — but a count in a commit message is a claim like any other, and a wrong one in the log
+  is worse than a wrong one in a comment because it cannot be edited.
 
 ### Changed
 - **The third slot answers its question: it does not matter.** `41673950028` ran the corrected

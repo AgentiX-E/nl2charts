@@ -7182,3 +7182,83 @@ because the bar is about the outcome rather than the mechanism:
 Steps 1 and 2 are the ones `values-gap` has been describing for thirty rounds. What is new is that
 they are now the **cause of a detectable state** instead of a hypothesis about a wrong answer, and
 a hypothesis can be argued with while a zero-row result cannot.
+
+## The whole split, and the first time a free rule wins a full-split comparison
+
+`41808092447` is the first run that carries both pools over all 1,532 questions with a second
+endpoint in the same vendor (`deepseek-chat` primary, `deepseek-reasoner` second). Every previous
+strong-model reading was on 600 questions, whose minimum detectable effect is about 3.6pp; this one
+resolves the split's 1.63pp.
+
+| | `select-mixed` | `select-balanced` | delta |
+|---|---|---|---|
+| score | 959 = **62.60%** | 941 = **61.42%** | −1.18pp (61 up / 79 down, p = 0.1505) |
+| pool ceiling | 1,022 = **66.71%** | 1,055 = **68.86%** | **+2.15pp** (72 up / 39 down, **p = 0.0022**) |
+| conversion | **93.84%** | **89.19%** | −4.65pp |
+| `calls.mean` | 3.995 | 4.000 | — |
+
+| # | criterion (registered before dispatch) | bar | read |
+|---|---|---|---|
+| ① | ceiling delta | ≥ +1.5pp | **pass**, +2.15pp, p = 0.0022 |
+| ② | score | ≥ +1.0pp and paired p < 0.05 | **fail**, −1.18pp |
+| ③ | conversion | ≥ 88% | **pass**, 89.19% |
+| ④ | cost published | 4.00 calls | **pass** |
+
+The 600-question reading said +2.83pp; the whole split says **+2.15pp**. Both are significant, so
+the strong-model lever is confirmed as a ceiling lever — the direction survives, the magnitude
+shrinks by a quarter, which is what a 600-question MDE of 3.6pp predicted it would.
+
+### Where the ceiling came from, on the whole split
+
+| arm | unanimity | unanimously wrong | share wrong |
+|---|---|---|---|
+| `select-mixed` | 1,219 (79.6%) | 371 | 30.43% |
+| `select-balanced` | 1,007 (65.7%) | **253** | 25.12% |
+
+**Changing the author moved 212 questions out of unanimity and removed 118 wrong votes.** That is
+the mechanism, now measured on 1,532 questions rather than argued from 600: a second author does
+not have to be more accurate to be worth more — it has to be wrong in different places. Both of its
+sources are individually worse than the chat sources they replaced (57.8% and 58.5% against 62.0%
+and 61.8%), and the pool still gains 33 correct answers.
+
+### And the free rule wins the comparison
+
+| arm | `first` | `shortest` | `modal` | selector | ceiling |
+|---|---|---|---|---|---|
+| `select-mixed` | 62.01% | 63.45% | 62.08% | 62.60% | 66.71% |
+| `select-balanced` | 58.88% | **63.71%** | 60.97% | 61.42% | 68.86% |
+
+`shortest` on the strong pool is **976 = 63.71%** against the same pool's selector at 61.42%:
+**+2.29pp, 84 up / 49 down, p = 0.0030**, on 3.00 calls instead of 4.00. It is also **+1.11pp above
+the arm to beat** (`select-mixed`, 62.60%) and is the highest score any configuration has reached on
+the full dev split.
+
+Three things follow, and they are not the same thing:
+
+1. **The free rule is a score lever after all.** The previous round's verdict was that 0.78pp and
+   2.00pp sat under the split's resolution, so a rule was "a way to pay less for the same pipeline".
+   At 2.29pp with p = 0.0030 that reading is dead. What changed was not the rule: it was that the
+   rule now sees candidates with the empty results removed, and it is pointed at a pool whose
+   candidates are worth more.
+2. **The 65.17% measured on 600 questions was optimistic by 1.46pp.** The whole split says 63.71%.
+   The 600-question number was not wrong — it was a different sample, and the difference is inside
+   that sample's MDE. Every reading in this document that came from 600 questions now has to be
+   read with that in mind, including the two that were used as pre-registration bars.
+3. **The conversion rate is the pool's, still.** 93.84% on three chat candidates, 89.19% on two
+   reasoning plus one, and the free rule lifts the second to 92.52% without a call. The selector and
+   the free rule are separated by exactly the amount the selector cannot read: the rows.
+
+### What this does to the gap
+
+| system | dev | note |
+|---|---|---|
+| AskData | **77.14%** | agentic, execution feedback |
+| CHASE-SQL | 76.02% | multi-candidate + selection agent |
+| XiYan-SQL | 75.63% | schema linking + ICL |
+| DecoSearch | 70.53% | training-free |
+| **this repository** | **63.71%** | strong pool + free rule, 3 calls |
+| its ceiling | 68.86% | strong pool, no selection loss |
+
+**13.43pp to AskData = 8.28pp of candidates + 5.15pp of selection.** The selection half is now
+smaller than the candidate half for the first time, and it is the half that three rounds of
+selector work failed to move while a rule that reads rows moved it in one round.
