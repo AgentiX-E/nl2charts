@@ -7493,3 +7493,72 @@ by card block (+0.72pp ceiling). What remains true is the diagnosis: 33 of 50 tr
 named a value that does not exist. A lever that reaches them has to change what the model *does*
 with an unknown literal, not what the prompt shows it, and the candidate that could is a statement
 whose filters are checked before it is written rather than after it returns nothing.
+
+## The same endpoint, the same judge, the same questions: MAC-SQL is 4.8pp ahead
+
+Every comparison with a competitor in this document until now has been a comparison of *published
+numbers* — theirs produced by their harness, ours by this one, often on a different model and always
+with a different executor and judge. This repository has one instrument that removes all three
+differences: `competitor pipelines` checks out the competitor at a pinned commit, runs its own
+inference against the same endpoint, and scores both pipelines' statements with `eval/bird/oracle.py`
+and `judgeOfficial`. It existed for three rounds without ever being run against our *best* arm — the
+first dispatch (`41169541647`) paired MAC-SQL with `metadata+evidence`, a single call, which answered
+"is our cheapest prompt better than their pipeline" and not "are we".
+
+`41856780841` answers the second question. 498 Mini-Dev questions asked, 496 judged (two excluded at
+the source: `OperationalError: interrupted`), `deepseek-chat` at `api.deepseek.com/v1`,
+`wbbeyourself/MAC-SQL` at `31a9df5e`, our arm `select-mixed` at 3.99 calls a case.
+
+| pipeline | correct | accuracy | 95% interval |
+|---|---|---|---|
+| `wbbeyourself/MAC-SQL` @ 31a9df5e | 323 / 496 | **65.12%** | [60.8, 69.2] |
+| `select-mixed` (this repository) | 299 / 496 | **60.28%** | — |
+
+| paired reading | cases |
+|---|---|
+| both correct | 265 |
+| only the competitor | 58 |
+| only ours | 34 |
+| neither | 139 |
+
+**Δ = −4.84pp, exact McNemar p = 0.0160.** The instrument also prints `resolves: false` with
+`needed: 3,640`, which is not a contradiction: p = 0.0160 rejects "no difference", and the split is
+still too small to *size* the difference to the ±2pp the dispatch asked for. Both statements are true
+and only one of them is the claim anyone wants.
+
+**Run against the earlier pairing, the adopted arm closes 1.6pp of a 6.5pp gap.** `41169541647` ran
+the same instrument on the same split and paired MAC-SQL against `metadata+evidence`:
+
+| dispatch | our arm | ours | competitor | Δ | p |
+|---|---|---|---|---|---|
+| `41169541647` | `metadata+evidence` | 294 = 59.27% | 326 = **65.73%** | −6.45pp | 0.0027 |
+| `41856780841` | `select-mixed` | 299 = **60.28%** | 323 = **65.12%** | **−4.84pp** | 0.0160 |
+
+The competitor moved 0.6pp between the two runs on identical questions, endpoint and judge, which is
+the scale on which the 1.6pp our stronger arm bought has to be read. Two 25-question probes preceded
+these runs — `41162862386` (19:16) and `41854048432` (20:17, where an empty `limit` fell back to the
+workflow's default) — and both pointed the same way with no resolution at all, 29.65pp of MDE on
+twenty-five questions. They are recorded here so the four readings are one history rather than a
+convenient pair. It is a real narrowing — the
+paired discordance is 58 against 34 — and it is not a closing.
+
+**What this changes.** Three things, and none of them is comfortable.
+
+1. **Our published number and our comparable number are different claims.** `63.71%` on dev is the
+   best this harness has measured for this repository, and MAC-SQL's published `59.59%` is on the
+   same set of questions under *their* harness. On the one split where both pipelines were run by
+   the same instrument, ours is **4.8pp behind**, not 4pp ahead. A leaderboard number compared with
+   another leaderboard number is an assumption wearing a table.
+2. **The gap is not the model.** Both pipelines called `deepseek-chat` at the same endpoint in the
+   same run. Whatever MAC-SQL has that we do not is pipeline: its extractor picks the tables the
+   question needs, its card carries value examples for every non-key column, its decomposer splits
+   the question before writing, and its refiner reads execution errors. We have priced each of those
+   as a separate lever — `samples` +1.24pp, `decompose` −1.1pp, `audit` +1.01pp — and the sum of the
+   readings is smaller than the gap, which says the levers were never the same thing as the pipeline.
+3. **Mini-Dev is not dev, and that is now a hypothesis with a size.** The split's databases are
+   truncated to 500 rows a table, which changes value distributions, cardinalities and what a join
+   returns. Our pipeline reads values through the profiler and the value index; theirs reads a
+   pre-generated dictionary. A 4.8pp disadvantage on this split and a 4pp advantage on published dev
+   numbers cannot both be about method until one of them is measured on the other split, and the
+   instrument that would do it — a `split` input on the competitor workflow — is the next dispatch's
+   first line of work.

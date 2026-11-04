@@ -57,6 +57,20 @@ cannot be argued with.
   same slot now also covers an empty candidate.
 
 ### Changed
+- **The first best-vs-best comparison puts this repository 4.8pp behind MAC-SQL, not ahead of it.**
+  `41856780841` ran `wbbeyourself/MAC-SQL` at its pin and our adopted arm on the same 498 Mini-Dev
+  questions, at the same endpoint (`deepseek-chat`) and scored by the same executor and judge:
+  **323/496 = 65.12%** against `select-mixed`'s **299/496 = 60.28%**, 58 cases only theirs and 34 only
+  ours, **Δ = −4.84pp, exact p = 0.0160**. The instrument also prints `resolves: false` for the ±2pp
+  the dispatch asked it to size (3,640 questions would be needed), which is not a contradiction: the
+  paired test rejects "no difference" and the split cannot yet say how big it is. Against the earlier
+  pairing (`41169541647`, `metadata+evidence` at 59.27% against 65.73%, p = 0.0027) the adopted arm
+  closes **1.6pp** of a 6.5pp gap, while the competitor itself drifted 0.6pp between the two runs —
+  that is the scale on which the narrowing should be read. **A leaderboard number compared with
+  another leaderboard number is an assumption wearing a table**: on the one split where both
+  pipelines were run by one instrument, this repository is behind, and the difference is pipeline
+  rather than model because both sides called the same endpoint in the same run.
+
 - **`I-95` closes without a dispatch: the lever it names is the family whose oracle already ran.**
   The plan's next item proposed putting each column's most frequent values on the card, for the 33
   of 50 triggered cases that wrote a literal no column stores. That is the `samples` family, whose
