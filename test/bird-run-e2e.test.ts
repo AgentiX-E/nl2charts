@@ -695,6 +695,30 @@ describe('a sampling arm', () => {
   });
 });
 
+describe('the blind control for the empty-result turn', () => {
+  /**
+   * The arm this repository has never run.
+   *
+   * `select-mixed+empty-blind` was declared, filed on demand and named in three documents, and
+   * no test had ever executed it: the catalogue entry was the only evidence it existed. It is
+   * the control that separates the words of the extra call from the call itself, so a control
+   * that cannot be shown to run is a control that prices nothing.
+   */
+  it('spends the same call and says nothing about the empty result', async () => {
+    const result = await run({ plan: { first: () => empty() }, env: { BIRD_ARMS: 'select-mixed+empty-blind' } });
+    expect(result.code, result.printed.join('\n')).toBe(0);
+    const retries = result.requests.filter((request) => request.prompt.includes('Write the statement for this question again'));
+    expect(retries.length).toBe(QUESTIONS.length);
+    // Nothing about the previous result reached the model: no diagnosis, no row count, no values.
+    expect(retries[0]?.prompt).not.toContain('returned no rows');
+    expect(retries[0]?.prompt).not.toContain('Its values were looked up');
+    const arms = result.report.arms as { emptyRetry: { mode: string; fired: number; recovered: number } }[];
+    expect(arms[0]?.emptyRetry.mode).toBe('blind');
+    expect(arms[0]?.emptyRetry.fired).toBe(QUESTIONS.length);
+    expect(arms[0]?.emptyRetry.recovered).toBe(QUESTIONS.length);
+  });
+});
+
 describe('the value lookup behind a zero-row case', () => {
   /** The question whose card certainly shows `items.name`, which is the column the lookup reads. */
   const NAMED = 'How many distinct item names are there?';
@@ -732,6 +756,35 @@ describe('the value lookup behind a zero-row case', () => {
     expect(result.requests.filter((request) => request.prompt.includes('Its values were looked up in the database'))).toHaveLength(0);
     const cases = result.report.cases as { emptyProbe?: { grounded: boolean; adoptedFree: boolean } }[];
     expect(cases.filter((row) => row.emptyProbe?.adoptedFree === true)).toHaveLength(1);
+  });
+
+  /**
+   * The 96.2% that never trigger, as an equality rather than a claim.
+   *
+   * Every question here is answered correctly on the first draw, so no candidate returns
+   * nothing and the lookup has no state to act on. The arm is then required to be its parent:
+   * same statements, same calls, same verdicts, question for question. A trigger that leaked
+   * into the normal path — one extra query that changed a prompt, one call charged on a case
+   * that did not need it — would show up here and nowhere else, because both arms score the
+   * same and the score is what every other reading looks at.
+   */
+  it('leaves a case that never triggers exactly as its parent left it', async () => {
+    const result = await run({ plan: {}, env: { BIRD_ARMS: 'select-mixed,select-mixed+values' } });
+    expect(result.code, result.printed.join('\n')).toBe(0);
+    const cases = result.report.cases as { arm: string; id: string; passed: boolean; calls: number; emptyProbe?: unknown }[];
+    const parent = new Map(cases.filter((row) => row.arm === 'select-mixed').map((row) => [row.id, row]));
+    const child = cases.filter((row) => row.arm === 'select-mixed+values');
+    expect(child.length).toBe(parent.size);
+    for (const row of child) {
+      const twin = parent.get(row.id);
+      expect(twin, row.id).toBeDefined();
+      expect(row.passed, row.id).toBe(twin?.passed);
+      expect(row.calls, row.id).toBe(twin?.calls);
+      // And nothing about the lookup was recorded, because nothing ran.
+      expect(row.emptyProbe, row.id).toBeUndefined();
+    }
+    const arms = result.report.arms as { emptyRetry?: { fired: number; probeQueries: number } }[];
+    expect(arms.every((arm) => arm.emptyRetry === undefined || (arm.emptyRetry.fired === 0 && arm.emptyRetry.probeQueries === 0))).toBe(true);
   });
 
   it('quotes the values the column holds when the literal is only part of one', async () => {

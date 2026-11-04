@@ -458,6 +458,23 @@ describe('the chain that actually runs', () => {
     expect(PAIRS).toContainEqual(['inline+evidence', 'inline+evidence+audit']);
   });
 
+  /**
+   * Every arm that declares the empty-result lever must be run by an end-to-end test.
+   *
+   * The defect this prevents has happened twice: `inline+evidence+empty` was declared, paired
+   * and filed, and its switch never reached the mechanism; `select-mixed+empty-blind` was
+   * declared, named in three documents and executed by nothing at all. A catalogue entry is not
+   * evidence that a lever runs, and the funnel assertions inside those tests are the only place
+   * that says "this arm fired". The check is textual on purpose — it reads the test file as the
+   * artifact it is, and a rename that breaks the match is a rename that lost the coverage.
+   */
+  it('runs every arm that declares the empty-result lever', () => {
+    const source = readFileSync(resolve('test/bird-run-e2e.test.ts'), 'utf8');
+    const declared = ARMS.filter((arm) => arm.emptyRetry !== undefined).map((arm) => arm.name);
+    expect(declared.length).toBeGreaterThan(3);
+    expect(declared.filter((name) => !source.includes(`'${name}'`))).toEqual([]);
+  });
+
   it('keeps the empty-result pair one lever apart, in both directions', () => {
     const parent = ARMS.find((arm) => arm.name === 'select-mixed') as Arm;
     const diagnosed = ARMS.find((arm) => arm.name === 'select-mixed+empty') as Arm;
