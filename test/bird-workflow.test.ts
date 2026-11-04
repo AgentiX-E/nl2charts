@@ -46,3 +46,39 @@ describe('a benchmark workflow publishes what a failed run produced', () => {
     }
   });
 });
+
+/**
+ * The endpoint has to follow the provider.
+ *
+ * `41791956315` dispatched `select-balanced` with `second_provider=deepseek` and no endpoint,
+ * so `BIRD_SECOND_API_KEY` became DeepSeek's secret while `BIRD_SECOND_BASE_URL` stayed on the
+ * workflow's default — Zhipu's host. The preflight answered `401 令牌已过期或验证不正确` and the
+ * run never reached a question: a valid key, a right model name, and an endpoint that belongs to
+ * another vendor. The message blames an expired token, which is the one thing that was not wrong.
+ *
+ * Two inputs with independent defaults can disagree, so only one of them keeps a default. These
+ * two assertions are what stops that from being undone: the endpoint is derived from the provider,
+ * and the input that could override it starts empty.
+ */
+describe('the second endpoint follows the second provider', () => {
+  const text = (): string => readFileSync(resolve(process.cwd(), '.github/workflows/bird-dev.yml'), 'utf8');
+
+  it('derives the endpoint from the provider rather than defaulting to one vendor', () => {
+    const line = text()
+      .split('\n')
+      .find((candidate) => candidate.trim().startsWith('BIRD_SECOND_BASE_URL:'));
+    expect(line).toBeDefined();
+    expect(line).toContain('inputs.second_provider');
+    expect(line).toContain('https://api.deepseek.com/v1');
+    expect(line).toContain('https://open.bigmodel.cn/api/paas/v4');
+  });
+
+  it('leaves the endpoint input empty so that the derivation is the default', () => {
+    const block = text()
+      .split('\n')
+      .slice(text().split('\n').findIndex((candidate) => candidate.trim() === 'second_base_url:'))
+      .slice(0, 4)
+      .join('\n');
+    expect(block).toContain("default: ''");
+  });
+});
