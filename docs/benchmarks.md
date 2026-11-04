@@ -7324,3 +7324,67 @@ of the turn, at the same call count.
 A repair that cannot clear ① is a call spent for nothing, because the same 3.85pp is available to a
 filter that drops the state and reports it. ③ is not a formality: it is the check that the trigger
 is as narrow as it claims, and it fails loudly if a code path that should be untouched moved.
+
+### The reading: the lookup works and the lever does not clear its bar
+
+`41830439625` ran the three arms over all 1,532 dev questions in one artifact.
+
+| arm | score | ceiling | `calls.mean` |
+|---|---|---|---|
+| `select-mixed` | 967 = **63.12%** | 1,034 = 67.49% | 3.995 |
+| `select-mixed+empty` | **973 = 63.51%** | 1,025 = 66.91% | 4.027 |
+| `select-mixed+values` | **973 = 63.51%** | 1,028 = 67.10% | 4.024 |
+
+| # | criterion (registered before dispatch) | bar | read |
+|---|---|---|---|
+| ① | correct on the triggered questions | ≥ 25% | **fail**, 9 of 51 = **17.6%** |
+| ② | full split against `select-mixed+empty` | ≥ +0.96pp | **fail**, **0.00pp** (973 = 973; 18 up / 18 down, p = 1) |
+| ③ | the 96.2% that never trigger | unchanged | **31 of 1,479 changed** — and the criterion was mis-specified, see below |
+| ④ | cost on the triggered subset | published | 96 queries on the 33 cases that were probed; `calls.mean` **4.92 against 4.94**; `promptChars` **20,422 against 20,553** |
+| ⑤ | the free half, priced apart | reported | `grounded` **4**, `adoptedFree` **4** |
+
+**The mechanism did exactly what it was built to do.** On the 50 questions the diagnosed arm
+retried, 33 had a literal the columns do not store as written, the lookup spent 96 queries and no
+calls on them, four were settled by a case-only grounding, and all four were adopted without
+spending the turn — three fewer calls than the control spent on the same population. The turn that
+did fire recovered 20 cases against the control's 19, and 8 of those 20 were correct against 6 of
+19. The triggered subset moved **9 correct against 6**, which is where the 17.6% comes from.
+
+**Why that is not a gain.** The full split moved by zero because 18 questions moved one way and 18
+the other. That is the signature of sampling, not of a lever: the two arms generate their own three
+candidates at temperature 0.7, so every question is a fresh draw and a paired difference under 1pp
+is indistinguishable from redrawing. The +3 on the triggered set and the −3 elsewhere are the same
+three cases' worth of noise.
+
+**The criterion that was wrong.** ③ was written as "no change on the 96.2% that never trigger",
+which is only meaningful if the two arms see the same candidates. They do not: `select-mixed`,
+`select-mixed+empty` and `select-mixed+values` each generate their own trio, so 31 of 1,479
+untouched questions differ by construction, and no implementation could have satisfied the bar.
+The correct form of that check is an A/A pair or a shared pool — `pool` reuse exists for exactly
+this reason — and it is now written that way in the plan rather than left as a bar that fails for
+a reason unrelated to the code.
+
+**What the artifact also says, for free.** The empty filter itself is worth **+6 cases** here
+(967 → 973, 24 up / 18 down, p = 0.4408) — smaller than the +12 measured on the previous full
+split, and the same sign. The two readings bracket a real but small effect; neither resolves it,
+and the filter costs nothing, which is why it stays.
+
+### Verdict
+
+The lookup is kept as a **reported state**, not as a repair. On this split the zero-row state is
+3.3% of the corpus (50 of 1,532 — the 496-question pilot said 3.83%), of which the deterministic
+half settles 4 cases and the paid half buys 3, against a bar of 25% of the population. The 3.85pp
+ceiling is therefore claimed by **dropping the state and saying so**, which is what the adopted arm
+already does by removing empty candidates before the vote.
+
+Two things would change that verdict, and neither is a tweak to the message:
+
+1. **The `absent` bucket is the whole population.** 33 of the 50 triggered questions wrote a literal
+   no value contains, and a literal that does not exist cannot be repaired by quoting. Quoting the
+   column's most frequent values instead of the matched ones is a different lever — it changes what
+   the prompt says about the schema rather than what it says about the statement — and it is priced
+   in the plan as `I-95`, not folded into this one.
+2. **The state is rare.** 3.3% of the split, at 0.038 calls a case, cannot move the full split by
+   more than 1pp even if every triggered case were repaired. The lever's ceiling was always
+   3.85pp; what this run shows is that the reachable part of it, with the taxonomy that actually
+   occurs, is 0.2pp.

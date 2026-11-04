@@ -57,6 +57,23 @@ cannot be argued with.
   same slot now also covers an empty candidate.
 
 ### Changed
+- **The zero-row lookup works; the lever around it does not clear its bar.** `41830439625` ran
+  `select-mixed`, `select-mixed+empty` and `select-mixed+values` over all 1,532 dev questions in one
+  artifact: **967 = 63.12%**, **973 = 63.51%** and **973 = 63.51%**, with ceilings 67.49%, 66.91%
+  and 67.10%. The mechanism behaved exactly as designed — on the 50 questions the control retried,
+  33 had a literal the columns do not store, the lookup spent **96 queries and no calls**, four were
+  settled by a case-only grounding and adopted for free, the turn recovered 20 cases against 19 and
+  8 of those were correct against 6 — and the triggered subset moved **9 correct against 6**. It
+  still scores the same, because 18 questions moved one way and 18 the other: the arms generate
+  their own candidates at temperature 0.7, so a sub-1pp paired difference is a redraw. Criterion ①
+  (**17.6% of triggered, bar 25%**) and ② (**0.00pp, bar +0.96pp**) both fail, and per the
+  pre-registration the 3.85pp goes to **dropping the state and reporting it** rather than to a
+  repair. Criterion ③ was mis-specified and is recorded as such: "no change on the 96.2% that never
+  trigger" is only checkable if the two arms share their candidates, which these do not, so 31 of
+  1,479 differ by construction. The empty filter on its own is **+6 cases** (24 up / 18 down,
+  p = 0.4408), the same sign as the +12 measured on the previous full split and small enough that
+  neither reading resolves it.
+
 - **The full split confirms the strong-model ceiling and, for the first time, a free rule beating a
   paid selector.** `41808092447` ran both pools over all 1,532 dev questions with a second endpoint
   in the same vendor: `select-mixed` **959 = 62.60%** against `select-balanced` **941 = 61.42%**
@@ -152,6 +169,16 @@ cannot be argued with.
   change what the candidates are (I-45, I-77), not what is done with them.
 
 ### Fixed
+- **The baseline gate rejected a report it should have accepted.** `BIRD1` knew two ways for an
+  empty-result arm to speak (`diagnosed`, `blind`) and the third — `values` — reached it as an
+  unknown mode, so `41830439625` failed at the accuracy floor with all of its own controls green.
+  The mode is named, the funnel is now checked for the two counters the free half adds
+  (`grounded`, `adoptedFree`, plus `probeQueries` and `literalGaps`), and the "recovered more cases
+  than it retried" rule is arithmetic over both halves, because a grounded statement is adopted
+  without a call. Three self-test mutations were added — an arm that adopts more statements than it
+  grounded, one that never reports the lookup, and one that recovers four of three retried cases by
+  grounding — and the fixed gate was then run against the real artifact, where it passes.
+
 - **A per-case record the lever wrote was not in the artifact.** `CaseRun` carried what the zero-row
   turn did, and `caseRows` projected none of it: the arm funnel said how many cases triggered and
   the file could not say which, so "the lookup answered this one without a call" was a number with no

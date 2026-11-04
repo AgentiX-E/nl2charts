@@ -315,14 +315,30 @@ export function compare(report, baseline) {
   for (const item of report.arms ?? []) {
     const lever = item.emptyRetry;
     if (lever === undefined) continue;
-    if (lever.mode !== 'diagnosed' && lever.mode !== 'blind') {
+    if (lever.mode !== 'diagnosed' && lever.mode !== 'blind' && lever.mode !== 'values') {
       issues.push(`BIRD1: ${item.arm} runs an empty-result lever that does not say how it speaks: ${String(lever.mode)}`);
+    }
+    // `values` speaks with the columns' own values, and it has a second half that costs no call:
+    // the lookup grounds a case-only mismatch and adopts the rewrite. Those adoptions are counted
+    // apart from the turn because they spend nothing, so the arithmetic is over both — a run that
+    // recovered more cases than it fired must have grounded the difference, and a run that claims
+    // more free adoptions than groundings counted the same case twice.
+    if (lever.mode === 'values') {
+      for (const field of ['grounded', 'adoptedFree', 'probeQueries', 'literalGaps']) {
+        if (typeof lever[field] !== 'number') {
+          issues.push(`BIRD1: ${item.arm} speaks with values and does not report ${field}, so the free half of the lever cannot be priced`);
+        }
+      }
+      if (typeof lever.adoptedFree === 'number' && typeof lever.grounded === 'number' && lever.adoptedFree > lever.grounded) {
+        issues.push(`BIRD1: ${item.arm} adopts ${String(lever.adoptedFree)} grounded statements of ${String(lever.grounded)} it grounded`);
+      }
     }
     if (typeof lever.fired !== 'number' || typeof lever.recovered !== 'number' || typeof lever.dropped !== 'number') {
       issues.push(`BIRD1: ${item.arm} declares an empty-result lever and does not report its funnel, so the call cannot be priced`);
       continue;
     }
-    if (lever.recovered > lever.fired) {
+    const free = typeof lever.adoptedFree === 'number' ? lever.adoptedFree : 0;
+    if (lever.recovered > lever.fired + free) {
       issues.push(`BIRD1: ${item.arm} recovers ${String(lever.recovered)} of ${String(lever.fired)} retried cases, which is impossible`);
     }
     if (lever.fired > (item.total ?? 0)) {
@@ -1121,6 +1137,33 @@ function selfTest() {
   );
   if (workingLever.issues.length !== 0) {
     issues.push(`BIRD1 rejects an empty-result lever that reports what it did (${workingLever.issues.join('; ')})`);
+  }
+
+  // The values mode has a second half that spends nothing, and the check is arithmetic over both:
+  // a run may recover more cases than it retried, but only by the number it grounded. Two shapes
+  // are rejected — a claim that more statements were adopted for free than were grounded at all,
+  // and a values arm that does not report the lookup, which is exactly the row `41830439625`
+  // published before the mode was named here.
+  const doubleCounted = compare(
+    { selection: { scored: 100, split: 'minidev' }, model: 'deepseek-chat', run, arms: [arm('select-mixed+values', 62, 100, { vote: 3, selector: 'model', calls: { mean: 4, max: 5 }, emptyRetry: { mode: 'values', dropped: 4, fired: 3, recovered: 2, grounded: 1, adoptedFree: 2, probeQueries: 9, literalGaps: 3 } })] },
+    { ...baseline, expectedArms: ['select-mixed+values'] },
+  );
+  if (!doubleCounted.issues.some((issue) => issue.includes('grounded statements'))) {
+    issues.push('BIRD1 accepts a values arm that adopted more statements than it grounded');
+  }
+  const unpricedLookup = compare(
+    { selection: { scored: 100, split: 'minidev' }, model: 'deepseek-chat', run, arms: [arm('select-mixed+values', 62, 100, { vote: 3, selector: 'model', calls: { mean: 4, max: 5 }, emptyRetry: { mode: 'values', dropped: 4, fired: 3, recovered: 2 } })] },
+    { ...baseline, expectedArms: ['select-mixed+values'] },
+  );
+  if (!unpricedLookup.issues.some((issue) => issue.includes('does not report grounded'))) {
+    issues.push('BIRD1 accepts a values arm with no lookup behind it');
+  }
+  const groundedRun = compare(
+    { selection: { scored: 100, split: 'minidev' }, model: 'deepseek-chat', run, arms: [arm('select-mixed+values', 63, 100, { vote: 3, selector: 'model', calls: { mean: 4, max: 5 }, emptyRetry: { mode: 'values', dropped: 4, fired: 3, recovered: 4, grounded: 2, adoptedFree: 1, probeQueries: 11, literalGaps: 5 } })] },
+    { ...baseline, expectedArms: ['select-mixed+values'] },
+  );
+  if (groundedRun.issues.length !== 0) {
+    issues.push(`BIRD1 rejects a values arm that recovers four of three retried cases by grounding one (${groundedRun.issues.join('; ')})`);
   }
 
   fail(empty, 1, 'BIRD1 does not reject a report with no sample size');
