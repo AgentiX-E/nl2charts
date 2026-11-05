@@ -3783,6 +3783,12 @@ Repeatability, from three runs of the same arm on the same split: **955, 967, 96
 62.99%) — a 0.78pp spread at temperature 0.7, still nearly four times below the resolution. That is
 the number to hold against any future delta on this split.
 
+The pair above is `select-mixed` because that is the arm Mini-Dev measured, and comparability was
+the point of the dispatch. The **shipped default** is the free rule (`select-mixed-rule`, 3.00 calls),
+and on the same split it reads **63.97% (980/1,532)** — so the gap to the same competitor is
+**3.92pp**, not 4.90pp, for one call less per question. Both numbers are behind, and the two
+measurements agree on where the mass is: the rule and the model selector draw on the same pool.
+
 **Selection cannot close this gap even if it were perfect.** Our four candidates hold a correct
 statement on **1,031 of 1,532** questions — a candidate recall of 67.30% — and MAC-SQL sits at 67.89%.
 A selector that never chose wrongly would land **0.59pp behind them**, inside the 2.93pp resolution,
@@ -3870,11 +3876,12 @@ measurement, and it is the only competitor number in this document that is.
 | comparison | number | what it is |
 | --- | --- | --- |
 | us, `select-mixed`, dev | **62.99%** | 965/1,532, deepseek-chat, four calls |
+| us, `select-mixed-rule`, dev (shipped) | **63.97%** | 980/1,532, three calls |
 | MAC-SQL, same everything | **67.89%** | 1,040/1,532 — their pipeline, our harness |
-| gap to a competitor we can run | **4.90pp** | resolves (p = 3.4 × 10⁻⁶, MDE 2.93pp) |
+| gap to a competitor we can run | **3.92pp** | from the shipped arm; 4.90pp from the four-call one |
 | SQLConductor, published | 73.2% | Qwen3-8B policy + Gemma4-31B, SFT + GRPO |
 | CHASE-SQL, published | 73.0% | Gemini-1.5-Pro, fine-tuned binary selector |
-| gap to published SOTA | **10.2pp** | 5.3pp of it is model and training we do not have |
+| gap to published SOTA | **9.2pp** | 63.97 → 73.2; 5.3pp of it is model and training we do not have |
 
 Two caveats, both of which the table needs. MAC-SQL's published dev number is not 67.89% — a pipeline
 scores what the harness around it scores, and the difference between their paper and this row is a
