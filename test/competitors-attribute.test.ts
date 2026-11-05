@@ -225,6 +225,22 @@ describe('a condition with its literals folded', () => {
     expect(conditionSkeletons('select count(*) from orders where item_id = 2 and item_id = 2')).toEqual(['item_id = #']);
     expect(conditionSkeletons('select count(*) from orders')).toEqual([]);
   });
+
+  it('reads the conditions of a statement written in upper case', () => {
+    // The atom splitter matches `where` and `and` case-sensitively. Reading the raw statement is how
+    // the first version of this comparison saw no conditions at all in 472 of MAC-SQL's 498
+    // statements, published `condition: 0`, and still printed a table that looked like a reading.
+    expect(conditionSkeletons("SELECT MAX(T2.qty) FROM orders T2 WHERE T2.item_id = 1 AND T2.qty > 1")).toEqual(['item_id = #', 'qty > #']);
+    expect(gapKind('SELECT COUNT(*) FROM orders WHERE qty > 1', ['select count(*) from orders where item_id = 1'])).toBe('condition');
+  });
+
+  it('rewrites aliases on both sides before comparing, so an alias is not a missing condition', () => {
+    // MAC-SQL writes `t1.item_id = 1` where this card's examples write `item_id = 1`. Comparing one
+    // side rewritten and the other raw files every aliased filter as a condition we never wrote.
+    expect(conditionSkeletons('select count(*) from orders t1 where t1.item_id = 1')).toEqual(['item_id = #']);
+    expect(gapKind('select count(*) from orders t1 where t1.item_id = 1', ['select count(*) from orders where item_id = 2'])).toBe('literal');
+    expect(gapKind('select count(*) from orders o where o.qty > 1', ['select count(*) from orders where item_id = 2'])).toBe('condition');
+  });
 });
 
 describe('what a statement has that its rivals never wrote', () => {

@@ -14,12 +14,21 @@ cannot be argued with.
   artifact's own**. Reading of `41856780841` (MAC-SQL 65.12% against `select-mixed` 60.28%, 496
   judged, 58/34/265/139 reproduced exactly): of the 58 questions they won, **9 (1.81pp) had a correct
   statement in our pool** and **48 (9.68pp) did not**, one record carrying no candidate statement at
-  all. Over the 48, what their statement had that none of ours had is `literal` 17 (3.43pp),
-  `projection` 13, `table` 7, `grain` 5, `aggregate` 3, `window` 3 — the same six kinds appear in the
-  other direction over the 34 we won, so the two pipelines differ in which statements they write and
-  not in which capabilities they have. **The gap is not selection**, the largest generation kind is
-  the value lever that has already been priced at about a third of its ceiling, and this run's own
-  5.42pp resolution covers every bucket, so the verdict line says it cannot price any of them.
+  all. Over the 48, what their statement had that none of ours had is **`condition` 28 (5.65pp)** —
+  a filter we never wrote — then `table` 7, `literal` 6, `projection` 3, `window` 2, `aggregate` 1,
+  `grain` 1. `condition` also leads in the other direction (19 of the 34 we won), so the axis is
+  where the two pipelines differ in both directions and the net is 9 questions. **The gap is not
+  selection**, the largest bucket is a missing filter rather than a missing value (the value lever,
+  priced twice already, accounts for six of the 48), and of every bucket only that one clears the
+  run's own 5.42pp resolution — by 0.23pp, which is why the verdict line prices the axis and not a
+  gain.
+- **The taxonomy read the raw statements, and 472 of theirs are written in upper case.** The atom
+  splitter matches `where` and `and` case-sensitively, so the first version extracted no conditions
+  from MAC-SQL at all: it published `condition: 0`, filed 17 cases under `literal`, and reversed the
+  conclusion above. Conditions are now read from `statementShape`, which lowercases, rewrites aliases
+  and collapses whitespace; two tests hold the two halves of that (an upper-case statement and an
+  aliased one). **A taxonomy built on a splitter inherits the splitter's sensitivities, and the only
+  way to find out is to run it on somebody else's spelling.**
 - **A lift with no contrast is not a lift, and the instrument caught itself printing one.** MAC-SQL's
   decomposer runs on every question, so the first run of the table printed `+11.69pp` for it — their
   win rate with a plus sign, the same error as a mean that is constant by construction. A flag with

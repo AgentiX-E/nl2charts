@@ -47,7 +47,7 @@ import type { Oracle } from '../bird/oracle.js';
 import { requireArm } from '../bird/presence.js';
 import { resolveLayout } from '../bird/run.js';
 import type { BirdLayout } from '../bird/run.js';
-import { predicateAtoms, statementShape } from '../bird/sql-shape.js';
+import { statementShape } from '../bird/sql-shape.js';
 import { parsePredictions } from './predictions.js';
 import { readIdMap } from './subset.js';
 
@@ -273,9 +273,25 @@ export function atomSkeleton(atom: string): string {
     .trim();
 }
 
-/** The condition skeletons of a statement, deduplicated and sorted, aliases already rewritten. */
+/**
+ * The condition skeletons of a statement's shape, deduplicated and sorted.
+ *
+ * Taken from the shape rather than from the raw statement, and that is not a style choice: the atom
+ * splitter matches `where` and `and` case-sensitively, and `statementShape` is what normalises case,
+ * rewrites aliases to their tables and collapses whitespace before any comparison happens. Calling
+ * `predicateAtoms` on the raw statement therefore reads **no conditions at all** out of a statement
+ * written in upper case — which is how the first version of this comparison filed every one of
+ * MAC-SQL's filters as absent and still produced a table that looked like a reading. On the Mini-Dev
+ * artifact **472 of 498** of its statements spell `WHERE` in upper case; the first run of this
+ * instrument published `condition: 0` and `literal: 17` for a split on which `condition` is the
+ * largest bucket. A fixture whose statements are all lower-case and alias-free cannot see this, which
+ * is why there is a case for each.
+ */
+const skeletonsOf = (shape: { readonly predicates: readonly string[] }): string[] =>
+  [...new Set(shape.predicates.map(atomSkeleton))].sort();
+
 export function conditionSkeletons(sql: string): string[] {
-  return [...new Set(predicateAtoms(sql).map(atomSkeleton))].sort();
+  return skeletonsOf(statementShape(sql));
 }
 
 const absent = (subject: readonly string[], held: ReadonlySet<string>): string[] => subject.filter((part) => !held.has(part));
@@ -291,9 +307,9 @@ const absent = (subject: readonly string[], held: ReadonlySet<string>): string[]
  */
 export function gapKind(subject: string, rivals: readonly string[]): GapKind {
   const their = statementShape(subject);
-  const theirConditions = conditionSkeletons(subject);
+  const theirConditions = skeletonsOf(their);
   const shapes = rivals.map((sql) => statementShape(sql));
-  const conditionSets = rivals.map((sql) => conditionSkeletons(sql));
+  const conditionSets = shapes.map((shape) => skeletonsOf(shape));
   // Spelling the same statement is not a difference between pipelines: it is the report's verdict
   // for that candidate disagreeing with an execution of that same statement. Checked first so a
   // case that is otherwise unremarkable cannot hide it.

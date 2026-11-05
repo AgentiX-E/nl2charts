@@ -3676,39 +3676,43 @@ What their winning statement had that none of our candidates had, over the 48 ge
 
 | kind | questions | points | the fix it names |
 | --- | --- | --- | --- |
-| `literal` | 17 | 3.43pp | a value inside a filter we did write |
-| `projection` | 13 | 2.62pp | a column none of our candidates selects |
+| `condition` | 28 | 5.65pp | a filter none of our candidates writes |
 | `table` | 7 | 1.41pp | a table none of our candidates reads |
-| `grain` | 5 | 1.01pp | a grouping none of our candidates applies |
-| `aggregate` | 3 | 0.60pp | a function none of our candidates calls |
-| `window` | 3 | 0.60pp | an order or a limit none of our candidates applies |
+| `literal` | 6 | 1.21pp | a value inside a filter we did write |
+| `projection` | 3 | 0.60pp | a column none of our candidates selects |
+| `window` | 2 | 0.40pp | an order or a limit none of our candidates applies |
+| `aggregate` | 1 | 0.20pp | a function none of our candidates calls |
+| `grain` | 1 | 0.20pp | a grouping none of our candidates applies |
 
-The same reading in the other direction, over the 34 questions we won: `projection` 10, `window` 7,
-`table` 5, `aggregate` 5, `literal` 5, `grain` 2. The same six kinds on both sides, which is the
-first useful thing the table says: the two pipelines do not differ in which capabilities they have,
-they differ in which statements they write.
+The same reading in the other direction, over the 34 questions we won: `condition` **19**, `table` 5,
+`projection` 4, `aggregate` 2, `over-filter` 2, `grain` 1, `literal` 1. The same kind leads on both
+sides, which is the first useful thing the table says: the two pipelines do not differ in which
+capabilities they have, they differ in **which filters they think the question asks for** — and each
+of them writes conditions the other never writes.
 
 Three claims the reading settles:
 
 1. **The gap is not selection.** 1.81pp of their 4.84pp sits on questions whose correct statement was
    already in our pool. The remaining 3.03pp is a statement none of our four candidates wrote — and
    those four are two prompt shapes sampled twice, so it is not a sampling shortfall either.
-2. **The largest generation kind is the value lever** (3.43pp), and that lever has been priced twice
-   in this document: the `samples` family reaches 62.14% (+1.24pp, p = 0.0756) with an oracle ceiling
-   of +2.82pp, i.e. the bucket is real and the purchase measured about a third of it. `literal` says
-   the same thing at the level of one statement: the filter is right and the number in it is not.
-3. **`projection` is the second kind on both sides** (2.62pp theirs, 2.02pp ours), which is the
-   opposite of what the width instrument priced: `width.ts` measured *extra* columns and found the
-   projection was a symptom there (2.22pp oracle, 11 of 52 cases recoverable by deleting columns).
-   Together the two readings say the projection axis is real in both directions and that neither
-   direction is the whole story, which is why neither is a lever yet.
+2. **The largest generation kind is a missing filter condition** (28 of 48, 5.65pp), not a missing
+   value. That is worth stating against the expectation this campaign carried for several rounds:
+   the value lever was the one already priced twice (`samples` reaches 62.14%, +1.24pp, p = 0.0756,
+   oracle ceiling +2.82pp) and it accounts for **six** of the 48. The bucket that is actually large is
+   the one `I-45` names — a condition the question implies and the prompt never forces — and it is
+   the only bucket in this table that clears the run's own 5.42pp resolution, by 0.23pp.
+3. **The axis is large in both directions and the net is not.** The same kind accounts for 19 of our
+   34 wins, so the net is 9 questions = 1.81pp, which sits inside the resolution. What this run
+   establishes is the *size of the axis*, not an advantage we could bank: both pipelines are guessing
+   which filters the question wants, and neither is systematically better at it.
 
 And one claim it refuses:
 
-**This run cannot price any bucket.** Its own resolution is 5.42pp; the widest bucket is 3.43pp and
-the selection share is 1.81pp. The verdict line says so instead of ranking buckets that the design
-cannot separate, and the dev pair (`41953255372`, 1,532 questions, same instruments) is the run that
-can.
+**No net bucket can be priced here.** The widest single-direction bucket (5.65pp) clears the 5.42pp
+resolution by a fifth of a point, and every net difference — 9 questions on this axis, 1.81pp of
+selection, 6 for `table` — is inside it. The verdict line says which is which instead of ranking
+buckets the design cannot separate, and the dev pair (`41953255372`, 1,532 questions, same
+instruments) is the run that can.
 
 The components, as a lift on winning — and the first row is where the instrument caught itself:
 
@@ -3727,6 +3731,17 @@ no contrast and prints which half is missing. What survives is the refiner's **�
 already failed — so "reproduce their refiner" is contradicted by their own output, and the
 decomposer's contribution cannot be read from this artifact at all (it would need an ablation on
 their side, not a correlation on ours).
+
+The same instrument caught a second defect in itself before this table was published, and it is the
+more embarrassing one. The first version extracted condition atoms from the raw statements, and the
+atom splitter matches `where` and `and` **case-sensitively**: MAC-SQL spells `WHERE` in upper case on
+**472 of its 498** statements, so that version read their filters as absent across the split,
+published `condition: 0`, put 17 cases in `literal`, and produced a table that looked exactly like a
+reading. Normalising through `statementShape` — which lowercases, rewrites aliases and collapses
+whitespace — moved 28 cases into `condition` and reversed the conclusion above. A fixture whose
+statements are all lower-case cannot see this, so there is now a case for upper case and a case for
+aliases, and the lesson is the ordinary one: **a taxonomy built on a splitter inherits the splitter's
+sensitivities, and the way to find out is to run it on somebody else's spelling.**
 
 ## What the selector costs, and what it returns
 
