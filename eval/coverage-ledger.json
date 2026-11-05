@@ -341,10 +341,10 @@
       "branches": 98.69
     },
     "eval/competitors/attribute.ts": {
-      "lines": 99.47,
-      "statements": 99.47,
+      "lines": 99.53,
+      "statements": 99.53,
       "functions": 100,
-      "branches": 98.76
+      "branches": 99.24
     },
     "eval/competitors/coordinates.ts": {
       "lines": 100,

@@ -3712,7 +3712,7 @@ And one claim it refuses:
 resolution by a fifth of a point, and every net difference — 9 questions on this axis, 1.81pp of
 selection, 6 for `table` — is inside it. The verdict line says which is which instead of ranking
 buckets the design cannot separate, and the dev pair (`41953255372`, 1,532 questions, same
-instruments) is the run that can.
+instruments) is the run that can — the next section is that run.
 
 The components, as a lift on winning — and the first row is where the instrument caught itself:
 
@@ -3726,11 +3726,12 @@ The components, as a lift on winning — and the first row is where the instrume
 MAC-SQL's decomposer runs on every question, so the first version of this table printed **+11.69pp**
 for it — which is not a lift, it is their win rate with a plus sign, and it is the same error as
 reading a mean that is constant by construction. The instrument now publishes `null` for a flag with
-no contrast and prints which half is missing. What survives is the refiner's **−4.22pp**: it fires on
-26 questions and wins 2, which is the shape of a mechanism that engages *after* the pipeline has
-already failed — so "reproduce their refiner" is contradicted by their own output, and the
-decomposer's contribution cannot be read from this artifact at all (it would need an ablation on
-their side, not a correlation on ours).
+no contrast and prints which half is missing. What survives here is the refiner's **−4.22pp**: it
+fires on 26 questions and wins 2, which is the shape of a mechanism that engages *after* the pipeline
+has already failed — **and that reading does not survive the wide split**, where the same pair of
+flags on 103 questions is +14.40pp; see *the same pair on dev* below, which retracts it. The
+decomposer's contribution cannot be read from this artifact at all: it would need an ablation on
+their side, not a correlation on ours.
 
 The same instrument caught a second defect in itself before this table was published, and it is the
 more embarrassing one. The first version extracted condition atoms from the raw statements, and the
@@ -3753,6 +3754,138 @@ mechanical class in our failures is a filter we never wrote, and the largest sin
 advantage is the same filter. **The next lever is condition coverage, and it is not the value
 family**, which has been priced twice and returns about a third of a ceiling that this gap does not
 sit under.
+
+### The same pair on dev: the sign holds, the ceiling does not
+
+Run `41953255372`, dispatched with `split: dev` and an **empty** `limit` — the whole split, not a
+sample of it — and the two arms byte-for-byte the ones Mini-Dev measured: our `select-mixed` (three
+candidates, model selection, four calls) and MAC-SQL at `31a9df5`.
+
+| | Mini-Dev `41856780841` | dev `41953255372` |
+| --- | --- | --- |
+| questions judged | 496 | **1,532** |
+| MAC-SQL | 65.12% | **67.89%** (1,040) |
+| `select-mixed` | 60.28% | **62.99%** (965) |
+| Δ (ours − theirs) | −4.84pp | **−4.90pp** |
+| MDE | 5.42pp | **2.93pp** |
+| exact McNemar | — | **p = 3.4 × 10⁻⁶** |
+| resolves | no | **yes** |
+| our `calls.mean` | 3.99 | 3.99 |
+
+`8l` pre-registered the test: the sign is established only if `|Δ| > MDE` **and** `p < 0.05`. On dev
+both hold — **we trail MAC-SQL by 4.90pp and the estimate resolves**. What does not survive is the
+leaderboard row that made the question look like a contradiction: "dev ahead by 4pp" was never this
+arm measured on this split. The two splits now agree in sign and in size (−4.84 / −4.90); Mini-Dev's
+number was simply too coarse to say so, and the contradiction was a comparison between an instrument
+and a leaderboard.
+
+Repeatability, from three runs of the same arm on the same split: **955, 967, 965** (62.34%, 63.12%,
+62.99%) — a 0.78pp spread at temperature 0.7, still nearly four times below the resolution. That is
+the number to hold against any future delta on this split.
+
+**Selection cannot close this gap even if it were perfect.** Our four candidates hold a correct
+statement on **1,031 of 1,532** questions — a candidate recall of 67.30% — and MAC-SQL sits at 67.89%.
+A selector that never chose wrongly would land **0.59pp behind them**, inside the 2.93pp resolution,
+i.e. level. Every point above that ceiling has to come from a statement we did not write.
+
+The attribution instrument, on the same artifact (counts reconciled with the score's own
+166 / 91 / 874 / 401):
+
+| bucket | questions | points |
+| --- | --- | --- |
+| they won and we did not | 166 | 10.84pp |
+| — our pool held a correct statement (**selection**) | 38 | 2.48pp |
+| — our pool held none (**generation**) | 125 | **8.16pp** |
+| — no candidate statement recorded (**unreadable**) | 3 | 0.20pp |
+| we won and they did not | 91 | 5.94pp |
+
+Over the 125 generation cases, what their statement had that none of ours had:
+
+| kind | questions | points |
+| --- | --- | --- |
+| `condition` | **61** | **3.98pp** |
+| `literal` | 22 | 1.44pp |
+| `table` | 17 | 1.11pp |
+| `projection` | 8 | 0.52pp |
+| `window` | 7 | 0.46pp |
+| `aggregate` | 6 | 0.39pp |
+| `other` | 2 | 0.13pp |
+| `grain` | 1 | 0.07pp |
+| `over-filter` | 1 | 0.07pp |
+
+And in the other direction, over the 91 we won: `condition` **42** (2.74pp), `table` 19 (1.24pp),
+`projection` 12 (0.78pp), `aggregate` 7, `over-filter` 7, `window` 4. `condition` leads both
+directions on the wide base as it did on the narrow one, with the same shape and about the same size
+(5.65 vs 3.98pp theirs; 3.83 vs 2.74pp ours) — so it is an axis of the two pipelines, not an artifact
+of Mini-Dev's 500-row databases.
+
+The run's verdict line, at its own 2.93pp resolution: the selection share (2.48pp) is inside it and
+**cannot be priced**; `condition` (3.98pp) clears it and **can**. `literal` at 1.44pp does not. Of the
+nine kinds this taxonomy can name, exactly one is priced by this run, and it is the one `I-45` has
+been describing for several rounds.
+
+The components, and the reading that reverses:
+
+| component | won when it fired | won when it did not | lift (dev) | lift (Mini-Dev) |
+| --- | --- | --- | --- | --- |
+| `decomposed` | 166/1,531 | 0/0 | **— no contrast** | — no contrast |
+| `refined` | 25/103 | 141/1,428 | **+14.40pp** | −4.22pp |
+| `retried` | 25/103 | 141/1,428 | +14.40pp | −4.22pp |
+| `extracted` | 144/1,322 | 22/209 | +0.37pp | +0.31pp |
+
+**The −4.22pp is retracted.** It was read off 26 questions and 2 wins, and on 103 questions and 25
+wins it is +14.40pp: their refiner fires on the 7% of questions whose first statement did not
+execute, and 24% of those end up right against 9.9% of the rest. So "reproduce their refiner is
+contradicted by their own output" was a small-sample artifact of the narrow split. What survives is
+the weaker, structural claim: the refiner engages *after* failure, so its lift is the value of a
+second attempt on a failed execution — not of asking a better question the first time — and it says
+nothing about the 93% of questions that execute on the first try.
+
+`refined` and `retried` fire on the same 103 questions and win the same 25, because the refiner runs
+**because** the first attempt failed. The instrument now prints that identity (`one event, 2 names`)
+instead of two rows that read as two findings. The flags stay: they are the competitor's own
+vocabulary, and a run that separates them would make the note disappear by itself.
+
+One more self-correction, and it is the third this instrument has caught in itself. Two cases were
+filed as `identical` — "the artifact contradicts itself: both sides wrote the same statement and the
+judge disagreed with itself". They were not: the pipeline wrote `'Banned'` where we wrote `'banned'`,
+and `'east Bohemia'` where we wrote `'East Bohemia'`. `statementShape().text` drops case **inside
+quotes** because it exists to compare shapes, where those pairs are the same filter; comparing
+statements needs the opposite, since BIRD's judge compares result rows. `identical` now also requires
+the literals to match case-sensitively, both cases moved to `literal` (6 → 22 on dev's 20, i.e. two
+cases and 0.13pp), and a test would fail if they moved back.
+
+What this leaves, in one sentence: **the 4.90pp is generation, the largest generation bucket is a
+filter we never wrote, and it is the only bucket this run can price.** The next lever is condition
+coverage (`I-45`); the value family is second at 1.44pp and has already been priced twice, returning
+about a third of a ceiling this gap does not sit under.
+
+#### Where 62.99% sits, now that a competitor can be run inside this harness
+
+For the first time the field is not only a table of other people's numbers: MAC-SQL at `31a9df5` ran
+on the same 1,532 questions, through this repository's executor, judged by this repository's judge,
+with the same model, in the same two-hour window. **67.89% against 62.99%** is a like-for-like
+measurement, and it is the only competitor number in this document that is.
+
+| comparison | number | what it is |
+| --- | --- | --- |
+| us, `select-mixed`, dev | **62.99%** | 965/1,532, deepseek-chat, four calls |
+| MAC-SQL, same everything | **67.89%** | 1,040/1,532 — their pipeline, our harness |
+| gap to a competitor we can run | **4.90pp** | resolves (p = 3.4 × 10⁻⁶, MDE 2.93pp) |
+| SQLConductor, published | 73.2% | Qwen3-8B policy + Gemma4-31B, SFT + GRPO |
+| CHASE-SQL, published | 73.0% | Gemini-1.5-Pro, fine-tuned binary selector |
+| gap to published SOTA | **10.2pp** | 5.3pp of it is model and training we do not have |
+
+Two caveats, both of which the table needs. MAC-SQL's published dev number is not 67.89% — a pipeline
+scores what the harness around it scores, and the difference between their paper and this row is a
+fact about harnesses rather than about them. And this pair ran on **one model**: the strong/weak
+contract is exercised elsewhere in this document (the cross-vendor section, `glm-4-flash` at 62.7%
+against 61.6% for the two selectors on all 1,532 questions), but a two-model competitor comparison is
+a dispatch this round did not spend, so no claim about it is made here.
+
+The 5.3pp between the runnable competitor and the published top is the part this campaign cannot
+reach by prompting: every system above 72% trained a generator, a selector, or both. The 4.90pp is
+the part it can, and the previous section says where inside it the mass is.
 
 ## What the selector costs, and what it returns
 

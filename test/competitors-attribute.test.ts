@@ -27,6 +27,8 @@ import {
   atomSkeleton,
   attributeLines,
   conditionSkeletons,
+  literalValues,
+  sameStatement,
   gapKind,
   isEntry,
   main,
@@ -224,6 +226,18 @@ describe('a condition with its literals folded', () => {
     expect(conditionSkeletons('select count(*) from orders where item_id = 1 and qty > 1')).toEqual(['item_id = #', 'qty > #']);
     expect(conditionSkeletons('select count(*) from orders where item_id = 2 and item_id = 2')).toEqual(['item_id = #']);
     expect(conditionSkeletons('select count(*) from orders')).toEqual([]);
+  });
+
+  it('keeps the case of a literal when it asks whether two statements are the same one', () => {
+    // Shape equality drops case; value equality must not. `'East Bohemia'` and `'east Bohemia'` are
+    // the same shape and different values, and on dev that pair was filed as `identical` — which
+    // claims the artifact contradicts itself. It does not: the judge was right and we were wrong.
+    expect(literalValues("select * from t where a = 'East Bohemia' and b = 'x''y'")).toEqual(['East Bohemia', "x'y"]);
+    expect(sameStatement("SELECT * FROM t WHERE a = 'East Bohemia'", "select *  from t where a = 'east Bohemia'")).toBe(false);
+    // Spelling is not a difference: quoting, aliasing, case and whitespace all fold away.
+    expect(sameStatement('SELECT COUNT(*) FROM account AS a WHERE a.frequency = \'POPLATEK\'', 'select count(*) from account where account.frequency = \'POPLATEK\'')).toBe(true);
+    expect(gapKind("select * from t where a = 'East Bohemia'", ["select * from t where a = 'east Bohemia'"])).toBe('literal');
+    expect(gapKind('select * from t where a = 1', ["SELECT * FROM t WHERE a = 1"])).toBe('identical');
   });
 
   it('reads the conditions of a statement written in upper case', () => {
@@ -530,6 +544,7 @@ describe('the reading it prints when there is nothing to read', () => {
       kinds: [],
       reverse: [],
       components: [],
+      collinear: [],
       mde: 5,
       problems: [],
     };
@@ -552,6 +567,7 @@ describe('the reading it prints when there is nothing to read', () => {
       kinds: [{ gap: 'table', cases: 2, points: 20 }],
       reverse: [],
       components: [],
+      collinear: [],
       mde: 5,
       problems: [],
     };
@@ -622,7 +638,9 @@ function sparse(): Fixture {
       JSON.stringify({ idx: 101, pred: 'select 1', pruned: true }),
       '',
       JSON.stringify({ idx: 105, pred: 'select min(price) from items', pruned: true }),
-      JSON.stringify({ idx: 106, pred: 'select count(*) from items', pruned: true }),
+      // 106 is missing on purpose: a pipeline that skips a question is a pipeline that did not win
+      // it, and the reader has to say that rather than failing on the absent record.
+
     ].join('\n'),
   );
   return { dir, layout, env, report, score, predictions };
@@ -653,10 +671,33 @@ describe('a pair of files that are missing one field each', () => {
     // `on` half and one has no `off` half, so none of the four has a lift to print: the numbers that
     // would appear there are rates, and a rate is what this column must not contain.
     expect(outcome.components.map((entry) => entry.liftPp)).toEqual([null, null, null, null]);
-    expect(outcome.components.map((entry) => [entry.on, entry.off])).toEqual([[0, 3], [0, 3], [0, 3], [3, 0]]);
+    // Two questions carry flags at all: the one the competitor skipped has no record to read them
+    // from, so it leaves the component denominators rather than counting as "did not fire".
+    expect(outcome.components.map((entry) => [entry.on, entry.off])).toEqual([[0, 2], [0, 2], [0, 2], [2, 0]]);
     const lines = attributeLines(outcome).join('\n');
     expect(lines).toContain('no contrast: it fired on no question');
     expect(lines).toContain('no contrast: it fired on every question');
+  });
+
+  it('groups flags that split the questions the same way, so one event is not read as two', async () => {
+    const { outcome } = await attribute(sparse());
+    // Nothing decomposed, refined or retried: the three flags have the same partition of the run, so
+    // there is one reading here wearing three names, and the table says so beside them.
+    expect(outcome.collinear).toEqual([{ components: ['decomposed', 'refined', 'retried'], on: 0, off: 2, wonOn: 0, wonOff: 1 }]);
+    const lines = attributeLines(outcome).join('\n');
+    expect(lines).toContain('decomposed, refined and retried split the questions identically (0 of 0 won when it fired) — one event, 3 names');
+  });
+
+  it('merges the two flags that fired on the same question and not the one that tied on totals', async () => {
+    const { outcome } = await attribute(fixture());
+    // The refiner and the retry both fire on the one question whose first attempt failed — that is a
+    // real identity. The extractor fires on a *different* question with the same totals (1 on, 12
+    // off), and grouping by counts — which the first version of this did — merged all three into one
+    // "event". The partition is the set, not the size.
+    expect(outcome.collinear.map((group) => group.components)).toEqual([['refined', 'retried']]);
+    const extracted = outcome.components.find((entry) => entry.component === 'extracted');
+    expect([extracted?.on, extracted?.off]).toEqual([1, 12]);
+    expect(attributeLines(outcome).join('\n')).toContain('refined and retried split the questions identically');
   });
 
   it('reads a pipeline that numbers its answers by row through the map the score used', async () => {
@@ -674,6 +715,14 @@ describe('a pair of files that are missing one field each', () => {
     expect(outcome.judged).toBe(13);
   });
 
+  it('counts a question the competitor never answered as one it did not win', async () => {
+    const { outcome } = await attribute(sparse());
+    // 106 has no prediction line at all. It stays in the denominator as `neither` — the reading is
+    // about what each side achieved, and a skipped question is achieved by nobody.
+    expect(outcome.reconciled).toEqual({ competitorOnly: 1, oursOnly: 1, both: 0, neither: 1, passed: 1 });
+    expect(outcome.judged).toBe(3);
+  });
+
   it('refuses a paired count that is not a number', async () => {
     const base = fixture();
     const score = JSON.parse(readFileSync(base.score, 'utf8')) as { paired: Record<string, unknown> };
@@ -687,6 +736,23 @@ describe('a refusal is a sentence, not a stack trace', () => {
     expect(messageOf(new Error('it broke'))).toBe('it broke');
     expect(messageOf('it broke')).toBe('it broke');
     expect(messageOf(17)).toBe('17');
+  });
+
+  it('closes the oracle it opened when the reading fails after it was constructed', async () => {
+    const base = fixture();
+    const errors: string[] = [];
+    // The settings resolve, the oracle is created, and then the report turns out not to exist: the
+    // failure path has to give the oracle back, and this is the only test that exercises a `finally`
+    // reached with something to close.
+    const code = await main(
+      ['--report', join(base.dir, 'absent.json'), '--score', base.score, '--predictions', base.predictions],
+      ROOT,
+      base.env,
+      () => undefined,
+      (line) => errors.push(line),
+    );
+    expect(code).toBe(1);
+    expect(errors.join('\n')).toContain('absent.json');
   });
 
   it('prints the problems it could not resolve and still exits zero', async () => {

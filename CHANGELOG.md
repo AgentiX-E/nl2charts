@@ -6,6 +6,29 @@ cannot be argued with.
 
 ## Unreleased
 
+### Changed
+- **The competitor comparison now has a split where it resolves, and we lose it.** `competitors.yml`
+  gained a `split` input (the four places that hardcoded `minidev` became coordinates), and
+  `41953255372` ran the same two arms on the whole dev split: **MAC-SQL 67.89% against `select-mixed`
+  62.99%**, Δ = −4.90pp, MDE 2.93pp, p = 3.4 × 10⁻⁶. Mini-Dev's −4.84pp had the same sign and was too
+  coarse to say so; the "dev ahead by 4pp" that made this look like a contradiction was a leaderboard
+  row, not this arm on this split. Three runs of the same arm on this split (955, 967, 965) span
+  0.78pp, so the delta is real and future deltas under a point are not.
+- **Selection cannot close the gap, even if it were perfect.** Our four candidates hold a correct
+  statement on 1,031 of 1,532 questions (candidate recall 67.30%); MAC-SQL is at 67.89%. A selector
+  that never chose wrongly lands 0.59pp behind them — inside the resolution, i.e. level. Everything
+  above that ceiling has to be a statement we did not write, which is what the attribution instrument
+  now says in numbers: 38 questions (2.48pp) selection, 125 (8.16pp) generation, and `condition` 61 of
+  the 125 (`3.98pp`) is the only bucket that clears the run's own resolution.
+- **The refiner's −4.22pp is retracted.** It came from 26 questions and 2 wins; on 103 questions and
+  25 wins the same flags read **+14.40pp**. `refined` and `retried` fire on the same 103 questions
+  because the refiner runs *because* the first attempt failed, and the instrument now prints that
+  identity (`one event, 2 names`) rather than two rows that look like two findings.
+- **`identical` was folding a value's case.** Two dev cases were filed as "the artifact contradicts
+  itself"; `'Banned'` against `'banned'` is a `literal`, and the judge was right twice.
+  `statementShape().text` drops case inside quotes because it compares shapes; `identical` now also
+  requires the literals to match case-sensitively, and both cases moved to `literal`.
+
 ### Added
 - **Which of the competitor's wins were in our pool, priced at zero model calls.** `score.ts` ends
   with four counts and cannot say whether a question they won was one a better selector could have

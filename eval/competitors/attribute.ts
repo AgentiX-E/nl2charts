@@ -156,6 +156,24 @@ export interface Reconciled {
   readonly passed: number;
 }
 
+/**
+ * Two component flags that split the questions the same way.
+ *
+ * MAC-SQL's `fixed` (the refiner rewrote the statement) and `try_times > 1` (it tried again) are
+ * the same event seen twice: the refiner runs *because* the first attempt failed. On dev they fire on
+ * the same 103 questions and win the same 25; on Mini-Dev on the same 26 and the same 2. A table that
+ * prints both rows prints one reading under two names, which is the same defect as a lift with no
+ * contrast — it looks like more evidence than it is. The flags are kept (they are the competitor's
+ * own vocabulary, and a different run may separate them) and the identity is published beside them.
+ */
+export interface CollinearFlags {
+  readonly components: readonly ComponentLift['component'][];
+  readonly on: number;
+  readonly off: number;
+  readonly wonOn: number;
+  readonly wonOff: number;
+}
+
 export interface AttributionOutcome {
   readonly competitor: string;
   readonly arm: string;
@@ -171,6 +189,8 @@ export interface AttributionOutcome {
   readonly kinds: readonly KindTally[];
   readonly reverse: readonly KindTally[];
   readonly components: readonly ComponentLift[];
+  /** Groups of flags that split the questions identically: one event wearing several names. */
+  readonly collinear: readonly CollinearFlags[];
   /** The resolution the score published for this run, in accuracy points. */
   readonly mde: number;
   readonly problems: readonly string[];
@@ -310,27 +330,71 @@ const absent = (subject: readonly string[], held: ReadonlySet<string>): string[]
  * their single one — runs through the same function, which is what makes the two tallies
  * comparable: a name means the same thing on both sides.
  */
+/**
+ * The values a statement puts inside single quotes, in order, with their case kept.
+ *
+ * `statementShape().text` drops case everywhere — including inside quotes — because it exists to
+ * compare *shapes*, where `'Banned'` and `'banned'` describe the same filter. Comparing *statements*
+ * needs the opposite: BIRD's judge compares result rows, so a literal's case is part of the value.
+ * Two dev cases were filed as `identical` on the strength of that text, and they are not
+ * contradictions in the artifact — the pipeline wrote `'Banned'` where we wrote `'banned'`, and the
+ * judge disagreed with the verdict rather than with itself.
+ */
+export function literalValues(sql: string): string[] {
+  // `''` inside a span is an escaped quote, so the captured text is unescaped before it is compared:
+  // two spellings of the same value must not read as two values.
+  return [...sql.matchAll(/'((?:[^']|'')*)'/g)].map((match) => match[0].slice(1, -1).replaceAll("''", "'"));
+}
+
+const sameLiterals = (left: readonly string[], right: readonly string[]): boolean =>
+  left.length === right.length && left.every((value, at) => value === right[at]);
+
+/**
+ * Two statements that are the same statement: same shape, and the same values inside it.
+ *
+ * Shape equality is `statementShape`'s job — quoting, aliasing, case and whitespace are spelling. The
+ * literals are compared separately and case-sensitively, because that is the one place where case is
+ * not spelling. Both halves are needed: without the shape half, an alias difference reads as a new
+ * statement; without the literal half, a wrong value reads as the same one.
+ */
+export function sameStatement(left: string, right: string): boolean {
+  return statementShape(left).text === statementShape(right).text && sameLiterals(literalValues(left), literalValues(right));
+}
+
 export function gapKind(subject: string, rivals: readonly string[]): GapKind {
   const their = statementShape(subject);
   const theirConditions = skeletonsOf(their);
-  const shapes = rivals.map((sql) => statementShape(sql));
-  const conditionSets = shapes.map((shape) => skeletonsOf(shape));
+  // One pass over the rivals: each carries its shape, its literals and its condition skeletons, so a
+  // rule below reads a property instead of indexing three parallel arrays by hand.
+  const rivalsShaped = rivals.map((sql) => ({
+    shape: statementShape(sql),
+    literals: literalValues(sql),
+  }));
+  const shapes = rivalsShaped.map((entry) => entry.shape);
+  const conditionSets = rivalsShaped.map((entry) => skeletonsOf(entry.shape));
+  const theirLiterals = literalValues(subject);
+  const tables = new Set(shapes.flatMap((shape) => shape.tables));
+  const aggregates = new Set(shapes.flatMap((shape) => shape.aggregates));
+  const groups = new Set(shapes.flatMap((shape) => shape.groups));
+  const projection = new Set(shapes.flatMap((shape) => shape.projection));
+  const conditions = new Set(conditionSets.flat());
   // Spelling the same statement is not a difference between pipelines: it is the report's verdict
-  // for that candidate disagreeing with an execution of that same statement. Checked first so a
-  // case that is otherwise unremarkable cannot hide it.
-  if (shapes.some((shape) => shape.text === their.text)) return 'identical';
-  if (absent(their.tables, new Set(shapes.flatMap((shape) => shape.tables))).length > 0) return 'table';
-  if (absent(theirConditions, new Set(conditionSets.flat())).length > 0) return 'condition';
-  if (absent(their.aggregates, new Set(shapes.flatMap((shape) => shape.aggregates))).length > 0) return 'aggregate';
-  if (absent(their.groups, new Set(shapes.flatMap((shape) => shape.groups))).length > 0) return 'grain';
+  // for that candidate disagreeing with an execution of that same statement. Checked first so a case
+  // that is otherwise unremarkable cannot hide it — with the literals' case kept, because a value
+  // that differs in case is a `literal` and the two verdicts are both right.
+  if (rivalsShaped.some((entry) => entry.shape.text === their.text && sameLiterals(entry.literals, theirLiterals))) return 'identical';
+  if (absent(their.tables, tables).length > 0) return 'table';
+  if (absent(theirConditions, conditions).length > 0) return 'condition';
+  if (absent(their.aggregates, aggregates).length > 0) return 'aggregate';
+  if (absent(their.groups, groups).length > 0) return 'grain';
   if (their.window !== '' && !shapes.some((shape) => shape.window === their.window)) return 'window';
-  if (absent(their.projection, new Set(shapes.flatMap((shape) => shape.projection))).length > 0) return 'projection';
+  if (absent(their.projection, projection).length > 0) return 'projection';
   // Every candidate filters more narrowly than the statement that worked: we did not miss a
   // condition, we added one. That is a different bug, and it is the one an over-eager reading of
   // "filter on the columns the question names" produces.
-  const narrower = conditionSets.length > 0 && conditionSets.every(
-    (set) => absent(theirConditions, new Set(set)).length === 0 && absent(set, new Set(theirConditions)).length > 0,
-  );
+  const narrower =
+    conditionSets.length > 0 &&
+    conditionSets.every((set) => absent(theirConditions, new Set(set)).length === 0 && absent(set, new Set(theirConditions)).length > 0);
   if (narrower) return 'over-filter';
   // The same conditions on both sides, so the difference sits inside an atom: a literal.
   if (conditionSets.some((set) => set.join('&') === theirConditions.join('&'))) return 'literal';
@@ -539,6 +603,37 @@ export async function runAttribution(settings: AttributionSettings, oracle: Orac
     return { component, on, off, wonOn, wonOff, liftPp };
   });
 
+  // One event, several names: grouped by **which questions** the flag fired on, not by how many.
+  // Two flags can fire on the same number of questions and on different ones, and grouping by counts
+  // would merge two unrelated readings — the first version of this did exactly that on the test
+  // fixture, where the refiner fired on one question and the extractor on another and both were
+  // reported as one event. A lift is a function of the set, so the set is the key.
+  const firedOn: Record<ComponentLift['component'], number[]> = { decomposed: [], refined: [], retried: [], extracted: [] };
+  for (const component of COMPONENTS) {
+    firedOn[component] = [...mine.keys()]
+      .map(Number)
+      .filter((id) => traits.get(id)?.[component] === true)
+      .sort((left, right) => left - right);
+  }
+  const byPartition = new Map<string, ComponentLift[]>();
+  for (const entry of components) {
+    const key = firedOn[entry.component].join(',');
+    byPartition.set(key, [...(byPartition.get(key) ?? []), entry]);
+  }
+  const collinear: CollinearFlags[] = [...byPartition.values()].flatMap((group) => {
+    const first = group[0];
+    if (first === undefined || group.length < 2) return [];
+    return [
+      {
+        components: group.map((entry) => entry.component),
+        on: first.on,
+        off: first.off,
+        wonOn: first.wonOn,
+        wonOff: first.wonOff,
+      },
+    ];
+  });
+
   return {
     competitor,
     arm,
@@ -555,6 +650,7 @@ export async function runAttribution(settings: AttributionSettings, oracle: Orac
     kinds: tally(theirs.filter((entry) => entry.pool === 'missed')),
     reverse: tally(ours),
     components,
+    collinear,
     mde: typeof paired.mde === 'number' ? Number((paired.mde * 100).toFixed(2)) : 0,
     problems,
   };
@@ -602,6 +698,12 @@ export function attributeLines(outcome: AttributionOutcome): string[] {
     lines.push(
       `${label(`  ${component.component}`)} ${`${String(component.wonOn)}/${String(component.on)}`.padStart(9)} on  ` +
         `${`${String(component.wonOff)}/${String(component.off)}`.padStart(9)} off  ${lift}`,
+    );
+  }
+  for (const group of outcome.collinear) {
+    const names = group.components.length === 2 ? `${group.components[0]} and ${group.components[1]}` : `${group.components.slice(0, -1).join(', ')} and ${String(group.components.at(-1))}`;
+    lines.push(
+      `${label('  note')} ${names} split the questions identically (${String(group.wonOn)} of ${String(group.on)} won when it fired) — one event, ${String(group.components.length)} names`,
     );
   }
   lines.push('');
