@@ -64,6 +64,14 @@ cannot be argued with.
   requires the literals to match case-sensitively, and both cases moved to `literal`.
 
 ### Added
+- **`bench:bird:pair`: two arms, one artifact, and the counts a rate cannot carry.** A delta of
+  `-0.13pp` on 1,532 questions is the same number whether an arm won 64 cases and lost 66 or won 6
+  and lost 8, and only the first is worth a second dispatch. The instrument prints the four cells,
+  the exact McNemar over the two discordant ones, and — the part no accuracy column can show — the
+  **shape transition**: a lever that repairs `column-count` shows `column-count -> match`, and a
+  lever that moves the failure shows `column-count -> values`, and the two are indistinguishable in
+  a score. Zero model calls, and two artifacts are refused rather than joined, because a join
+  across runs puts the endpoint's own displacement back into a paired delta.
 - **`inline+evidence+projection`: one rule line, and the bucket it is aimed at is a measurement.**
   The model comparison (`8q`) held every input fixed and moved 127 cases down and 70 up; the shape of
   that movement was not a general loss of reasoning — `values` fell 461 → 444 while `column-count`
@@ -76,8 +84,14 @@ cannot be argued with.
   MDE. `bench:bird:width` bounds the expectation before the run: on 496 questions the bucket is 37
   wide and 15 narrow, deleting columns recovers 11 of the 37 — a **2.22pp oracle ceiling**, below the
   dev split's resolution — and 26 stay wrong with the right width, so the width is usually a symptom
-  and the bucket, not the score, is what this experiment can read. It is written, paired and **not
-  yet dispatched** — the note in `ON_DEMAND_ARMS` says so.
+  and the bucket, not the score, is what this experiment can read. Dispatched with its parent in one
+  run (`42122026848`): **939 against 941** (−0.13pp, 64 gains, 66 losses, exact McNemar p = 0.93),
+  with `column-count` **129 → 124** and `values` **462 → 469**. The bucket fell and the second clause
+  of the criterion refused the reading — 13 cases left `column-count` for correct answers while 28
+  left it for `values` and 25 correct answers became `column-count`, so **77 cases changed shape to
+  buy two net matches**. Rejected on the criterion rather than kept on a `−5`, and kept as the
+  ablation reference for projection rules: the bucket was a symptom, exactly as the width ceiling
+  said it would be.
 - **`bench:bird:cache`: how much of every request is the same bytes as the request before it.** The
   cost page splits a prompt by block and the purpose table splits the bill by call, and neither
   answers what a budget asks. Rendering the arm's own messages and taking the longest common prefix

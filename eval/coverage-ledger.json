@@ -214,6 +214,12 @@
       "functions": 100,
       "branches": 96.42
     },
+    "eval/bird/pair.ts": {
+      "lines": 98.62,
+      "statements": 98.62,
+      "functions": 100,
+      "branches": 98.78
+    },
     "eval/bird/pool.ts": {
       "lines": 100,
       "statements": 100,

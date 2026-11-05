@@ -125,6 +125,7 @@ pnpm bench:bird:conditions <report.json> --arm A   # which gold condition the st
 pnpm bench:bird:gate --artifact <report.json> --arm A   # what the question alone can find; no model
 pnpm bench:bird:rewrite --artifact <report.json> --arm A # what a deterministic rewrite is worth; no model, re-executes
 pnpm bench:bird:cache --artifact <report.json> --arm A # how much of the prompt repeats, and what that is worth; no model
+pnpm bench:bird:pair <report.json> --pair A,B  # two arms, paired: gains, losses, exact McNemar, and what changed shape; no model
 ```
 
 Scope: **all 11 databases, all 500 Mini-Dev questions** (498 scorable: two gold
@@ -8132,7 +8133,71 @@ reasoner would be at 61.55% against the chat model's 61.42%.
 The next round is therefore pre-registered as a projection lever rather than a general "use a
 stronger model" claim: the same 1,532 questions, the same arm, the same reasoning model, with the
 output-shape instruction rewritten for the reasoning family — and the bar is that the `column-count`
-column falls without the `values` column rising.
+column falls without the `values` column rising. The section below reports what that lever returned;
+it returned a redistribution.
+
+## The projection rule: the bucket fell, and the bucket was a symptom
+
+`inline+evidence+projection` is one rule line added to the prompt — same card, same hint, same one
+call — asking for *exactly* the columns the question names rather than *fewer* of them:
+
+> Select exactly the columns the question asks for, in the order it names them. Do not add an
+> identifier column to make rows distinguishable, and do not add a column the question does not
+> mention.
+
+The rule costs 194 characters, or 7.0% of a 2,783-character generation prompt (+39 prompt tokens a
+case, all of it inside the block every question of a database shares, so it is cache-resident). It
+was paired in `PAIRS`, tested from both sides of the prompt, and dispatched with its parent on the
+1,532-question dev split in one run (`42122026848`).
+
+### What it returned
+
+| | `inline+evidence` | `+projection` | Δ |
+|---|---|---|---|
+| passed | 941 (61.42%) | 939 (61.29%) | −0.13pp |
+| `column-count` | 129 | **124** | −5 |
+| `values` | 462 | **469** | +7 |
+| gains / losses | — | 64 / 66 | exact McNemar **p = 0.93** |
+
+The bucket moved, and the pre-registered criterion's second clause refused the reading: the rule
+did not repair the failures it aimed at, it **moved** them. `bench:bird:pair` prints the movement
+as a transition table, which is the only place it is visible — in the accuracy column, a repair and
+a redistribution look the same:
+
+| from | to | cases | share |
+|---|---|---|---|
+| `values` | `match` | 51 | 3.3% |
+| `match` | `values` | 41 | 2.7% |
+| `column-count` | `values` | **28** | 1.8% |
+| `match` | `column-count` | **25** | 1.6% |
+| `column-count` | `match` | 13 | 0.8% |
+| `values` | `column-count` | 11 | 0.7% |
+
+**77 cases changed shape to buy two net matches.** The rule moved 13 cases out of `column-count`
+into correct answers and 28 out of it into `values`; it also broke 25 answers that were right. That
+is churn an order of magnitude larger than the signal, and it is symmetric in both directions —
+which is what `p = 0.93` says.
+
+### Why this was predictable, and why the prediction was written down first
+
+`bench:bird:width` had already priced the bucket by deleting the extra items from the select list
+and re-executing: on 496 questions the bucket is 37 wide and 15 narrow, removing columns recovers
+11 of the 37 — a **2.22pp oracle ceiling**, below the dev split's 2.30pp resolution — and **26 of
+the 37 stay wrong with the right width**. A band whose majority is wrong at the right width is a
+symptom band, and an instruction can only edit the symptom.
+
+So the round was pre-registered with the bucket as its primary read and accuracy as a side note,
+and the rule was rejected on the criterion rather than kept on a `−5`. The arm stays in the
+catalogue as the ablation reference for projection rules: any future instruction of this shape has
+to beat a measured redistribution, not a hypothetical one.
+
+### What it points at
+
+The 444 `values` failures in the model comparison are now the largest addressable population, and
+the depth of the failure is not in the prompt's shape: `bench:bird:gap:values` splits the bucket by
+where the literal went — spelled, mis-cased, mis-notated, or **absent from the card entirely** — and
+the last of those is a retrieval problem. That is the next lever, and it is the one this result
+promotes rather than the one it was aimed at.
 
 ## What the prompt repeats, and what repeating it is worth
 

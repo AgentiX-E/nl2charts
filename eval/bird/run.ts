@@ -763,8 +763,10 @@ export const ARMS: readonly Arm[] = [
   // One lever from `inline+evidence`, and the only one here that changes no card and spends no
   // call: a rule line about which columns the answer carries. It exists because the model
   // comparison put the largest negative term on `column-count` (130 → 204) while the same bucket
-  // is already a fifth of this arm's no-answer corpus, so "the projection is the finding" is a
-  // hypothesis with a bucket, a ceiling and a rule — not a hunch.
+  // is already a fifth of this arm's no-answer corpus, so "the projection is the finding" was a
+  // hypothesis with a bucket, a ceiling and a rule — not a hunch. It was dispatched once and the
+  // hypothesis is wrong: the bucket fell 5 and `values` rose 7, 64 gains against 66 losses at
+  // p = 0.93, and 77 cases changed shape to buy two net matches. See the note in `ON_DEMAND_ARMS`.
   { name: 'inline+evidence+projection', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', projection: 'asked' },
   // The same prompt with the card cut to the columns the model names, in one call before the
   // statement. One lever from `inline+evidence`, and the only card-cutting arm here whose rule
@@ -1220,10 +1222,14 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   // the number exists is how an arm acquires a verdict it never earned.
   'inline+evidence+samples-gold': 'the same sampler narrowed to the columns the gold statement filters on: an oracle, so its delta is a ceiling for the family and not an achievable one — run it when a column rule is proposed, never as a candidate',
   'inline+evidence+samples-wide': "the same lever with MAC-SQL's rule instead of ours: six most-frequent values of every non-key column, a small numeric dictionary included, a date collapsed to one, NULL first — dispatched to price the competitor's block on our cases, and until that artifact exists this note is the question rather than the verdict",
-  // Not "measured" — it has not been dispatched. The note states the question and the criterion,
-  // because an arm that acquires a verdict before its run is an arm whose number nobody can check
-  // and whose next reader will cite.
-  'inline+evidence+projection': "one rule line about which columns the answer carries, and nothing else: the model comparison put its largest negative term on `column-count` (130 → 204, against `values` 461 → 444) and 59 of its 127 negative cases are in that bucket, so the pre-registered criterion is `column-count` down with `values` not up, with accuracy read against the dev split's 2.30pp MDE rather than against the bucket alone",
+  // The verdict was recorded after the run, and it is the one the pre-registered criterion returns:
+  // `column-count` fell 129 → 124 and `values` rose 462 → 469, so the rule moved failures rather
+  // than repairing them, and 64 gains against 66 losses is a tie at p = 0.93. The transition table
+  // is the reading: 13 cases became correct and 28 became `values`, 25 correct answers became
+  // `column-count`, and 77 cases changed shape to buy two net matches. `bench:bird:width` said as
+  // much in advance — 26 of 37 wide cases stay wrong with the right width — so the bucket was a
+  // symptom and this lever is closed rather than "underpowered".
+  'inline+evidence+projection': "one rule line about which columns the answer carries: measured on `42122026848` at 939/1,532 against its parent's 941 (-0.13pp, 64 gains, 66 losses, p = 0.93), with `column-count` 129 → 124 and `values` 462 → 469 — a redistribution, not a repair, and the pre-registered criterion's second clause (values must not rise) refused it. Kept as the ablation reference for a projection rule; the 59 `column-count` cases in the model comparison are not addressable by an instruction",
   // The condition rather than the block, and the one trigger of their refiner's three that is both
   // true and ours. `agents.ts` counts it firing on 26 of the 496 answers (5.2%) and on no gold
   // statement, so here it is exact: every fire is a wrong answer. Its size, though, comes from the
