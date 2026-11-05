@@ -3428,6 +3428,7 @@ table above written as code rather than as prose:
 | `eval/competitors/subset.ts` | the question file, cut by the same `stratifiedSample` that cuts `BIRD_LIMIT`, and read back by `readIdMap` as the numbering a row-numbered pipeline answered in | two samples read as one question set |
 | `eval/competitors/predictions.ts` | the three shapes competitors write, and what each left out | an accuracy whose denominator is the answered subset |
 | `eval/competitors/score.ts` | their statements through `oracle.py`, judged by `judgeOfficial` | any accuracy before all five coordinates hold, and any accuracy at all from a file with no records |
+| `eval/competitors/attribute.ts` | which of the questions they won were in our pool and which were never written, and what the statement that beat us had | a join whose four counts disagree with the score's own, and a "lift" for a flag that fired on every question |
 
 The two pins are CHESS (`ShayanTalaei/CHESS`, Apache-2.0, five agents, ten-plus-ten candidates a
 question) and MAC-SQL (`wbbeyourself/MAC-SQL`, no licence file, three agents, two or three calls a
@@ -3642,6 +3643,90 @@ largest *count* (19 of 1,532) — a one-hop closure is not "enough for the easy 
 whose cost is spread across the split and slightly worse where the question names fewer tables. The
 only claim the table supports is the net one that matches the ceiling arithmetic: the pruned card
 loses reachable questions, and everything else follows from that.
+
+### Where the four points they lead by actually sit
+
+`score.ts` says which questions each side won. It cannot say whether a question they won was one a
+better selector could have taken out of a pool we already had, or one whose statement we never wrote.
+That is the difference between a selection fix and a generation fix, and on 498 questions it is worth
+a zero-call instrument rather than an opinion. `bench:competitors:attribute` re-executes both sides'
+statements with `oracle.py`, judges them with `judgeOfficial`, and then **requires its four counts to
+equal the score artifact's own** — a join that disagrees is refused, because two readings of the same
+pair of files must print the same numbers.
+
+```bash
+pnpm bench:competitors:attribute --report eval/out/bird-eval.json \
+  --score eval/out/competitors/mac-sql-score.json \
+  --predictions eval/out/competitors/predictions.json \
+  --id-map eval/out/competitors/mac-sql-subset.json
+```
+
+Reading of `41856780841` (MAC-SQL 65.12% against `select-mixed` 60.28%, 496 judged, and the counts
+reproduce that artifact exactly: 58 / 34 / 265 / 139):
+
+| bucket | questions | points |
+| --- | --- | --- |
+| they won and we did not | 58 | 11.69pp |
+| — our pool held a correct statement (**selection**) | 9 | 1.81pp |
+| — our pool held none (**generation**) | 48 | 9.68pp |
+| — no candidate statement recorded (**unreadable**) | 1 | 0.20pp |
+| we won and they did not | 34 | 6.85pp |
+
+What their winning statement had that none of our candidates had, over the 48 generation cases:
+
+| kind | questions | points | the fix it names |
+| --- | --- | --- | --- |
+| `literal` | 17 | 3.43pp | a value inside a filter we did write |
+| `projection` | 13 | 2.62pp | a column none of our candidates selects |
+| `table` | 7 | 1.41pp | a table none of our candidates reads |
+| `grain` | 5 | 1.01pp | a grouping none of our candidates applies |
+| `aggregate` | 3 | 0.60pp | a function none of our candidates calls |
+| `window` | 3 | 0.60pp | an order or a limit none of our candidates applies |
+
+The same reading in the other direction, over the 34 questions we won: `projection` 10, `window` 7,
+`table` 5, `aggregate` 5, `literal` 5, `grain` 2. The same six kinds on both sides, which is the
+first useful thing the table says: the two pipelines do not differ in which capabilities they have,
+they differ in which statements they write.
+
+Three claims the reading settles:
+
+1. **The gap is not selection.** 1.81pp of their 4.84pp sits on questions whose correct statement was
+   already in our pool. The remaining 3.03pp is a statement none of our four candidates wrote — and
+   those four are two prompt shapes sampled twice, so it is not a sampling shortfall either.
+2. **The largest generation kind is the value lever** (3.43pp), and that lever has been priced twice
+   in this document: the `samples` family reaches 62.14% (+1.24pp, p = 0.0756) with an oracle ceiling
+   of +2.82pp, i.e. the bucket is real and the purchase measured about a third of it. `literal` says
+   the same thing at the level of one statement: the filter is right and the number in it is not.
+3. **`projection` is the second kind on both sides** (2.62pp theirs, 2.02pp ours), which is the
+   opposite of what the width instrument priced: `width.ts` measured *extra* columns and found the
+   projection was a symptom there (2.22pp oracle, 11 of 52 cases recoverable by deleting columns).
+   Together the two readings say the projection axis is real in both directions and that neither
+   direction is the whole story, which is why neither is a lever yet.
+
+And one claim it refuses:
+
+**This run cannot price any bucket.** Its own resolution is 5.42pp; the widest bucket is 3.43pp and
+the selection share is 1.81pp. The verdict line says so instead of ranking buckets that the design
+cannot separate, and the dev pair (`41953255372`, 1,532 questions, same instruments) is the run that
+can.
+
+The components, as a lift on winning — and the first row is where the instrument caught itself:
+
+| component | won when it fired | won when it did not | lift |
+| --- | --- | --- | --- |
+| `decomposed` (their decomposer wrote sub-questions) | 58/496 | 0/0 | **— no contrast** |
+| `refined` (their refiner rewrote the statement) | 2/26 | 56/470 | −4.22pp |
+| `retried` (more than one attempt) | 2/26 | 56/470 | −4.22pp |
+| `extracted` (the extractor pruned the schema) | 50/426 | 8/70 | +0.31pp |
+
+MAC-SQL's decomposer runs on every question, so the first version of this table printed **+11.69pp**
+for it — which is not a lift, it is their win rate with a plus sign, and it is the same error as
+reading a mean that is constant by construction. The instrument now publishes `null` for a flag with
+no contrast and prints which half is missing. What survives is the refiner's **−4.22pp**: it fires on
+26 questions and wins 2, which is the shape of a mechanism that engages *after* the pipeline has
+already failed — so "reproduce their refiner" is contradicted by their own output, and the
+decomposer's contribution cannot be read from this artifact at all (it would need an ablation on
+their side, not a correlation on ours).
 
 ## What the selector costs, and what it returns
 

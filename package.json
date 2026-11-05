@@ -48,6 +48,7 @@
     "bench:competitors:probe": "tsx eval/competitors/probe.ts",
     "bench:competitors:subset": "tsx eval/competitors/subset.ts",
     "bench:competitors:score": "tsx eval/competitors/score.ts",
+    "bench:competitors:attribute": "tsx eval/competitors/attribute.ts",
     "eval:preflight": "tsx eval/preflight.ts",
     "bench:bird:recall": "tsx eval/bird/recall.ts",
     "bench:bird:strata": "tsx eval/bird/strata.ts",

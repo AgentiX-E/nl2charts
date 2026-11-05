@@ -7,6 +7,26 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **Which of the competitor's wins were in our pool, priced at zero model calls.** `score.ts` ends
+  with four counts and cannot say whether a question they won was one a better selector could have
+  taken or one whose statement we never wrote. `bench:competitors:attribute` re-executes both sides'
+  statements, judges them, and **refuses to publish a join whose four counts disagree with the score
+  artifact's own**. Reading of `41856780841` (MAC-SQL 65.12% against `select-mixed` 60.28%, 496
+  judged, 58/34/265/139 reproduced exactly): of the 58 questions they won, **9 (1.81pp) had a correct
+  statement in our pool** and **48 (9.68pp) did not**, one record carrying no candidate statement at
+  all. Over the 48, what their statement had that none of ours had is `literal` 17 (3.43pp),
+  `projection` 13, `table` 7, `grain` 5, `aggregate` 3, `window` 3 — the same six kinds appear in the
+  other direction over the 34 we won, so the two pipelines differ in which statements they write and
+  not in which capabilities they have. **The gap is not selection**, the largest generation kind is
+  the value lever that has already been priced at about a third of its ceiling, and this run's own
+  5.42pp resolution covers every bucket, so the verdict line says it cannot price any of them.
+- **A lift with no contrast is not a lift, and the instrument caught itself printing one.** MAC-SQL's
+  decomposer runs on every question, so the first run of the table printed `+11.69pp` for it — their
+  win rate with a plus sign, the same error as a mean that is constant by construction. A flag with
+  an empty half now publishes `liftPp: null`, prints which half is missing, and has two tests. What
+  survives is their refiner's **−4.22pp** (it fires on 26 questions and wins 2): a mechanism that
+  engages after the pipeline has already failed, which is why "reproduce their refiner" is
+  contradicted by their own output.
 - **The free selector became the shipped default, and the run that proves it is a measurement
   rather than a re-derivation.** `Strategy.selector` is now one name — `'none' | 'first' |
   'shortest' | 'modal' | 'model'` — instead of a boolean plus a rule, which had allowed the state
