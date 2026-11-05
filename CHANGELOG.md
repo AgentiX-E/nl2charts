@@ -73,7 +73,11 @@ cannot be argued with.
   question asks for, in the order it names them") and changes nothing else: same card, same hint,
   same call count, `PAIRS` entry and a one-lever test on both sides of the prompt. The pre-registered
   criterion is `column-count` down with `values` not up, accuracy read against the dev split's 2.30pp
-  MDE. It is written, paired and **not yet dispatched** — the note in `ON_DEMAND_ARMS` says so.
+  MDE. `bench:bird:width` bounds the expectation before the run: on 496 questions the bucket is 37
+  wide and 15 narrow, deleting columns recovers 11 of the 37 — a **2.22pp oracle ceiling**, below the
+  dev split's resolution — and 26 stay wrong with the right width, so the width is usually a symptom
+  and the bucket, not the score, is what this experiment can read. It is written, paired and **not
+  yet dispatched** — the note in `ON_DEMAND_ARMS` says so.
 - **`bench:bird:cache`: how much of every request is the same bytes as the request before it.** The
   cost page splits a prompt by block and the purpose table splits the bill by call, and neither
   answers what a budget asks. Rendering the arm's own messages and taking the longest common prefix
