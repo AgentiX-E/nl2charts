@@ -121,6 +121,9 @@ pnpm bench:bird:losses --arm A               # attribute every selection loss to
 pnpm bench:bird:position --arm A             # stratify a shuffle arm by candidate slot, with intervals; no model
 pnpm bench:bird:pool --artifact <report.json>      # the ceiling each candidate set offers; no model
 pnpm bench:bird:consensus --artifact <report.json> # which selection rule kept the answer; no model
+pnpm bench:bird:conditions <report.json> --arm A   # which gold condition the statement never wrote; no model
+pnpm bench:bird:gate --artifact <report.json> --arm A   # what the question alone can find; no model
+pnpm bench:bird:rewrite --artifact <report.json> --arm A # what a deterministic rewrite is worth; no model, re-executes
 ```
 
 Scope: **all 11 databases, all 500 Mini-Dev questions** (498 scorable: two gold
@@ -7902,3 +7905,122 @@ candidates — which is the difference between a derivation and a measurement.
 | `assertReportComplete` | a rule arm whose row carries no funnel: its `calls.mean` equals the candidate count whether the rule ran or the vote did, so nothing else can say the lever acted |
 | `BIRD1` | a rule arm that reports more calls than candidates (a four-call arm wearing the rule's name) or prices decisions it never bought (a bill copied from its parent) |
 
+
+## The bucket that was going to be the lever, split by where its value went
+
+The attribution reading on dev left one lever standing: in 61 of the 166 questions MAC-SQL wins,
+their statement filters on a column none of ours names — **3.98pp**, the only bucket above the
+split's 2.93pp resolution. Everything else in the round was aimed at it. The plan's next entry was a
+gated audit: fire one extra turn only on the questions where the question itself betrays a condition
+the statement never wrote, so the turn stops costing 100% of cases and starts costing 14%.
+
+Two measurements were taken before any of that was built, and both of them closed the lever.
+
+### First: the bucket is not what its name says
+
+`bench:bird:conditions` calls a gold condition missing when the prediction names **no column** of it.
+A column is not the only way to express a restriction, and the census now files every missing
+condition by where its value went — `substituted` (some predicate compares the same literal against
+another column), `absent` (nothing compares that literal anywhere), `unstated` (the atom carries no
+literal, so no wording could have named it). On `select-mixed-rule`'s 552 dev failures:
+
+| | cases | share of the 1,532 |
+|---|---|---|
+| failures carrying a missing condition | 226 | 14.75pp |
+| — the value is compared on another column | 102 | 6.66pp |
+| — the value is compared nowhere | 71 | 4.63pp |
+| — the atom carries no literal at all | 126 | 8.22pp |
+
+The three rows overlap by construction: a case can miss two conditions of different kinds. The
+run of the *attribution* device, on the population the 3.98pp came from, files the same bucket the
+same way — and this is the reading that ends the lever:
+
+| what the 61 condition cases actually are | cases | points |
+|---|---|---|
+| the same column, a different condition | **27** | **1.76pp** |
+| the value compared on another column | 16 | 1.04pp |
+| an atom with no literal (`IS NOT NULL` and friends) | 16 | 1.04pp |
+| **the value compared nowhere** | **2** | **0.13pp** |
+
+**The bucket that cleared the resolution contains 0.13pp of the finding it was named for.** The
+largest part of it — 27 cases, 1.76pp — is a column we *do* filter, with a different operator or a
+different value: that is the `literal` / `over-filter` family the taxonomy already had, measured
+from the other side. Sixteen more are restrictions we express on a different column, which is schema
+linking, and sixteen are null tests the question never states. A mechanism that "writes the missing
+condition again" would be adding a filter to a statement that already has one in 43 of the 61 cases.
+
+This is the same defect the round before last found in the taxonomy's own first version, one level
+down: a reader that compares columns cannot tell *the restriction is absent* from *the restriction is
+somewhere else*, and the difference is the whole population a repair could act on.
+
+### Second: no question-side signal fits the budget
+
+`bench:bird:gate` prices four signals that read only the question and the statement — no model, no
+database — against the same 1,532 questions and the same reader. `cost` is what the gate would add to
+the bill; `reached` is how many of the gap cases it fires on; `ceiling` is what a repair that always
+succeeded on every reach would be worth.
+
+| signal | fires | cost | reached | of the `absent` kind | precision | ceiling |
+|---|---|---|---|---|---|---|
+| `named-entity` — the question names something the SQL never mentions | 301 | 19.6pp | 83 | 42 | 28% | 5.42pp |
+| `no-predicate` — the question wants a row and the SQL filters nothing | 74 | 4.8pp | 32 | 11 | 43% | 2.09pp |
+| `cue-without-predicate` — a comparison and no predicate | 43 | 2.8pp | 23 | 7 | 54% | 1.50pp |
+| `quoted-literal` — a quoted value the SQL never mentions | 26 | 1.7pp | 5 | 1 | 19% | 0.33pp |
+
+The pre-registration fixed one number in advance: the intervention may cost at most **10% more calls
+per case**, which on 1,532 questions is a gate that may fire on 153 of them. The widest reaching
+signal fires on 301 — **2.0× the budget** — and even it is wrong about 72% of the calls it would buy.
+The widest signal *inside* the budget reaches 32 cases, a ceiling of **2.09pp against a resolution of
+2.93pp**: a repair that succeeded on every single case that gate finds could still not be read as a
+gain on this split. That is not a small effect; it is an unreadable one.
+
+Both failures have the same cause, and it is not the word list. A text matcher cannot separate *a
+value written shorter* (`Alameda` for "Alameda County"), *a value split across columns* (`Kacey` and
+`Gibson`), *a value attached to the wrong column* (the 16 substituted cases), and *a column-ish noun*
+(`Reading`) from a value the statement never used. Each of those is a different mechanism, and the
+corrected census above says the largest of them is not an omission at all.
+
+**Verdict: `I-45`'s gated audit is not dispatched.** The pre-check was designed to cost nothing and
+it saved a dispatch of about 12,300 model calls. What it produced instead is a cheaper and more
+useful fact: the bucket it was aimed at is 0.13pp of the thing it was named for.
+
+## A rule that came out of the same artifact, priced by re-execution
+
+The audit family is dead, but the census's third row — 16 cases whose condition is a null test the
+question never states — is not an omission a model can be told about: it is the engine's behaviour.
+SQLite and MySQL sort NULL before every value, so a statement answering "the school with the lowest
+average reading score" with `ORDER BY score ASC LIMIT 1` returns the school whose score is *missing*.
+BIRD's gold statements say `AND score IS NOT NULL` next to the order; a model writing from the schema
+has nothing to tell it that.
+
+`bench:bird:rewrite` prices rewrites of the statement by executing them — the model calls in this
+corpus are the expensive part, and a rewrite spends none. It re-executes every case's gold and its
+recorded statement first, and requires the recomputed pass count to equal the arm's published count
+exactly; a baseline that does not reproduce the score is refused rather than read.
+
+`41947376305`'s artifact, `select-mixed-rule`, 1,532 questions: baseline **980 = 63.97%**, the
+artifact claims **980**, agreement **1,532 / 1,532**.
+
+| rewrite | fires | won | lost | broken | net | p | its own resolution |
+|---|---|---|---|---|---|---|---|
+| `null-order` — put the unknown values last in the sort key that decides a `LIMIT` | 80 | **6** | **0** | 0 | **+0.39pp** | 0.0313 | 0.40pp |
+| `drop-limit-on-count` — drop a row cap when the question counts | 35 | 1 | **19** | 0 | **−1.17pp** | <0.0001 | 0.80pp |
+| `integer-division` — scale an integer numerator by 1.0 | 17 | 0 | 0 | 0 | 0.00pp | 1.0000 | 0.30pp |
+
+**Six wins and no losses, and the effect sits exactly on its own resolution** (0.39pp against
+0.40pp): six discordant pairs are six coin flips and the design they imply can resolve almost exactly
+what they bought. So the rule is not adopted as a *gain* — it is adopted on dominance: it costs
+nothing, it loses nothing on 1,532 questions, and it is a statement of what the question meant. Its
+value is a correctness fix that happens to also be worth six questions.
+
+The other two rows exist to keep the suspicion honest. Dropping a row cap from a counting question
+loses **19** cases to win 1 — "how many students does the school with the highest score have" is a
+counting question whose cap is the whole point — and the integer-division trap, which the corpus
+discussion treats as endemic, fires 17 times and changes nothing, because the statements that divide
+already write `* 1.0` or `CAST`.
+
+The instrument also caught a defect in the rule itself before it could ship. The first
+`guardNullOrder` built its output by trimming the sort clause and re-splicing `LIMIT`, and emitted
+`... ASCLIMIT 1` on **every** case it fired: 80 rewrites that do not run. The `broken` column is
+what made it a one-line fix instead of an unexplained −0.39pp, and the rewrite now echoes the key as
+the statement wrote it — the diff between the statement and its rewrite has one reason in it.

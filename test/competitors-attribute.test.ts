@@ -26,6 +26,7 @@ import {
   GAP_KINDS,
   atomSkeleton,
   attributeLines,
+  conditionKindOf,
   conditionSkeletons,
   literalValues,
   sameStatement,
@@ -543,6 +544,7 @@ describe('the reading it prints when there is nothing to read', () => {
       pool: { held: 0, missed: 0, unread: 0 },
       kinds: [],
       reverse: [],
+      conditionKinds: [],
       components: [],
       collinear: [],
       mde: 5,
@@ -566,6 +568,7 @@ describe('the reading it prints when there is nothing to read', () => {
       pool: { held: 0, missed: 2, unread: 0 },
       kinds: [{ gap: 'table', cases: 2, points: 20 }],
       reverse: [],
+      conditionKinds: [],
       components: [],
       collinear: [],
       mde: 5,
@@ -763,5 +766,101 @@ describe('a refusal is a sentence, not a stack trace', () => {
     const code = await main(['--report', base.report, '--score', base.score, '--predictions', base.predictions], ROOT, base.env, () => undefined, (line) => errors.push(line));
     expect(code).toBe(0);
     expect(errors).toEqual([`${base.score} published 4 correct statement(s) and this run executed 12`]);
+  });
+});
+
+describe('where the value of a `condition` gap went', () => {
+  it('files a value their statement compares on a column ours never names as absent', () => {
+    expect(conditionKindOf("select 1 from t where school type = 'Public'", "select 1 from t where county = 'Alameda'")).toBe('absent');
+  });
+
+  it('files a value our statement compares on another column as substituted', () => {
+    expect(conditionKindOf("select 1 from t where cname = 'Contra Costa'", "select 1 from t where county = 'Contra Costa'")).toBe('substituted');
+  });
+
+  it('files an atom that carries no literal as unstated', () => {
+    expect(conditionKindOf('select 1 from t where sname is not null', 'select 1 from t where county = \'Alameda\'')).toBe('unstated');
+  });
+
+  it('reports nothing when our statement names the column, which is the largest sub-bucket on dev', () => {
+    // Same column, a different condition: they wrote `takers > 100` and we wrote `takers < 100`.
+    expect(conditionKindOf("select 1 from t where takers > 100", 'select 1 from t where takers < 100')).toBeUndefined();
+  });
+
+  it('reports nothing when the statement or the reference is unknown', () => {
+    expect(conditionKindOf('select 1 from t', undefined)).toBeUndefined();
+    expect(conditionKindOf(undefined, 'select 1 from t')).toBeUndefined();
+  });
+
+  it('reports nothing when the gap is not a condition at all', () => {
+    expect(conditionKindOf("select 1 from t where c = 'x'", 'select 1 from t', 'table')).toBeUndefined();
+  });
+
+  it('prefers the strongest finding when one case carries two kinds', () => {
+    const theirs = "select 1 from t where school type = 'Public' and sname is not null";
+    expect(conditionKindOf(theirs, "select 1 from t where county = 'Alameda'")).toBe('absent');
+  });
+});
+
+describe('the condition breakdown the report prints', () => {
+  const outcome: AttributionOutcome = {
+    competitor: 'mac-sql',
+    arm: ARM,
+    split: 'dev',
+    judged: 100,
+    reconciled: { competitorOnly: 4, oursOnly: 0, both: 0, neither: 96, passed: 4 },
+    theirs: [
+      { id: 1, pool: 'missed', gap: 'condition', written: 'absent', sources: [] },
+      { id: 2, pool: 'missed', gap: 'condition', written: 'substituted', sources: [] },
+      { id: 3, pool: 'missed', gap: 'condition', sources: [] },
+    ],
+    ours: [],
+    pool: { held: 0, missed: 3, unread: 0 },
+    kinds: [{ gap: 'condition', cases: 3, points: 3 }],
+    reverse: [],
+    conditionKinds: [
+      { kind: 'absent', cases: 1, points: 1 },
+      { kind: 'substituted', cases: 1, points: 1 },
+    ],
+    components: [],
+    collinear: [],
+    mde: 2.93,
+    problems: [],
+  };
+
+  it('prints each kind beside its points and names what it means', () => {
+    const lines = attributeLines(outcome).join('\n');
+    expect(lines).toContain('of which a value written on another column');
+    expect(lines).toContain('linking, not an omission');
+    expect(lines).toContain('the omission the bucket was named for');
+  });
+
+  it('prints the remainder as a column that is filtered differently rather than as unreadable', () => {
+    const lines = attributeLines(outcome).join('\n');
+    expect(lines).toContain('the same column, another condition');
+    expect(lines).not.toContain('unreadable');
+  });
+
+  it('prints a zero row for a kind the run never saw', () => {
+    const lines = attributeLines({ ...outcome, conditionKinds: [{ kind: 'absent', cases: 1, points: 1 }] }).join('\n');
+    expect(lines).toContain('of which an atom with no literal');
+    expect(lines).toContain('0.00pp');
+  });
+
+  it('prints no remainder when every condition case carries a kind', () => {
+    const full: AttributionOutcome = {
+      ...outcome,
+      conditionKinds: [
+        { kind: 'absent', cases: 1, points: 1 },
+        { kind: 'substituted', cases: 1, points: 1 },
+        { kind: 'unstated', cases: 1, points: 1 },
+      ],
+    };
+    expect(attributeLines(full).join('\n')).not.toContain('the same column, another condition');
+  });
+
+  it('prints no breakdown when the bucket is empty', () => {
+    const lines = attributeLines({ ...outcome, kinds: [], conditionKinds: [] }).join('\n');
+    expect(lines).not.toContain('of which a value written');
   });
 });

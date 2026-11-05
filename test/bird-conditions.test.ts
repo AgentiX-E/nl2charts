@@ -18,6 +18,10 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   atomIdentifiers,
+  gapKindOf,
+  literalsOf,
+  missingGaps,
+  writtenLiterals,
   conditionColumns,
   conditionLines,
   conditionPath,
@@ -149,8 +153,56 @@ describe('the conditions a statement never names', () => {
   });
 });
 
+describe('where the value of a missing condition went', () => {
+  it('reads the literals an atom compares against, unquoted and unescaped', () => {
+    expect(literalsOf("segment = 'LAM'")).toEqual(['lam']);
+    expect(literalsOf("name = 'it''s'")).toEqual(["it's"]);
+    expect(literalsOf('score > 800')).toEqual(['800']);
+    expect(literalsOf("date between '2021-01-01' and '2021-12-31'")).toEqual(['2021-01-01', '2021-12-31']);
+    expect(literalsOf('x is not null')).toEqual([]);
+  });
+
+  it('does not read the digits of an identifier as a value', () => {
+    expect(literalsOf('col2 > col3')).toEqual([]);
+    expect(literalsOf('"Free Meal Count (K-12)" > 0')).toEqual(['0']);
+  });
+
+  it('files a value another column already compares as substituted', () => {
+    const values = writtenLiterals(["county = 'contra costa'"]);
+    expect(gapKindOf("cname = 'Contra Costa'", values)).toBe('substituted');
+  });
+
+  it('files a value no predicate mentions as absent', () => {
+    const values = writtenLiterals(["county = 'alameda'"]);
+    expect(gapKindOf("school type = 'High Schools (Public)'", values)).toBe('absent');
+  });
+
+  it('files an atom with no literal as unstated, because no wording could name it', () => {
+    expect(gapKindOf('charter num is not null', new Set())).toBe('unstated');
+    expect(gapKindOf('a > b', writtenLiterals(["a > 3"]))).toBe('unstated');
+  });
+
+  it('splits the missing conditions of one case across the three kinds', () => {
+    const gaps = missingGaps(
+      "select 1 from t where cname = 'Contra Costa' and sname is not null and type = 'Public'",
+      "select 1 from t where county = 'Contra Costa'",
+    );
+    expect(gaps.map((gap) => gap.kind)).toEqual(['substituted', 'unstated', 'absent']);
+  });
+
+  it('reports nothing when every column is named', () => {
+    expect(missingGaps("select 1 from t where c = 'x'", "select 1 from t where c = 'y'")).toEqual([]);
+  });
+});
+
 describe('the tally', () => {
-  const row = (missing: string[], bucket?: string): ConditionRow => ({ id: '1', missing, stated: 1, ...(bucket === undefined ? {} : { bucket }) });
+  const row = (missing: string[], bucket?: string): ConditionRow => ({
+    id: '1',
+    missing,
+    gaps: missing.map((atom) => ({ atom, kind: 'absent' as const })),
+    stated: 1,
+    ...(bucket === undefined ? {} : { bucket }),
+  });
 
   it('counts the cases that miss at least one condition and the conditions themselves', () => {
     const tally = tallyConditions([row(['a']), row([]), row(['a', 'b'])]);
@@ -164,8 +216,18 @@ describe('the tally', () => {
     expect(tally.byBucket.unknown).toEqual({ cases: 1, missing: 1 });
   });
 
+  it('counts the three kinds of missing condition side by side', () => {
+    const tally = tallyConditions([
+      { id: '1', missing: ['a'], gaps: [{ atom: 'a', kind: 'substituted' }], stated: 1 },
+      { id: '2', missing: ['b'], gaps: [{ atom: 'b', kind: 'absent' }], stated: 1 },
+      { id: '3', missing: ['c', 'd'], gaps: [{ atom: 'c', kind: 'absent' }, { atom: 'd', kind: 'unstated' }], stated: 2 },
+      { id: '4', missing: [], gaps: [], stated: 1 },
+    ]);
+    expect(tally).toMatchObject({ total: 4, missingSome: 3, atoms: 4, substituted: 1, absent: 2, unstated: 1 });
+  });
+
   it('reports an empty corpus as zeros', () => {
-    expect(tallyConditions([])).toMatchObject({ total: 0, missingSome: 0, atoms: 0, byBucket: {} });
+    expect(tallyConditions([])).toMatchObject({ total: 0, missingSome: 0, atoms: 0, substituted: 0, absent: 0, unstated: 0, byBucket: {} });
   });
 });
 
@@ -184,29 +246,29 @@ describe('what makes the reading unpublishable', () => {
   const none = { unknownQuestion: 0, unretained: 0, unreadableLadder: 0 };
 
   it('fails when a failed case names a question the split does not hold', () => {
-    expect(conditionProblems({ total: 1, missingSome: 1, missingNone: 0, atoms: 1, byBucket: {} }, { ...none, unknownQuestion: 1 })[0]).toContain(
+    expect(conditionProblems({ total: 1, missingSome: 1, missingNone: 0, atoms: 1, substituted: 0, absent: 1, unstated: 0, byBucket: {} }, { ...none, unknownQuestion: 1 })[0]).toContain(
       '1 failed cases name a question',
     );
   });
 
   it('fails when the ladder was supplied and could not be read', () => {
-    expect(conditionProblems({ total: 1, missingSome: 1, missingNone: 0, atoms: 1, byBucket: {} }, { ...none, unreadableLadder: 1 })[0]).toContain(
+    expect(conditionProblems({ total: 1, missingSome: 1, missingNone: 0, atoms: 1, substituted: 0, absent: 1, unstated: 0, byBucket: {} }, { ...none, unreadableLadder: 1 })[0]).toContain(
       'no case carries a bucket',
     );
   });
 
   it('fails a corpus where not one failure is missing a condition', () => {
-    expect(conditionProblems({ total: 4, missingSome: 0, missingNone: 4, atoms: 0, byBucket: {} }, none)[0]).toContain(
+    expect(conditionProblems({ total: 4, missingSome: 0, missingNone: 4, atoms: 0, substituted: 0, absent: 0, unstated: 0, byBucket: {} }, none)[0]).toContain(
       'not one failure is missing a condition',
     );
   });
 
   it('passes a corpus with a low share, because the share is the finding', () => {
-    expect(conditionProblems({ total: 4, missingSome: 1, missingNone: 3, atoms: 1, byBucket: {} }, none)).toEqual([]);
+    expect(conditionProblems({ total: 4, missingSome: 1, missingNone: 3, atoms: 1, substituted: 0, absent: 1, unstated: 0, byBucket: {} }, none)).toEqual([]);
   });
 
   it('passes an empty reading rather than dividing by zero', () => {
-    expect(conditionProblems({ total: 0, missingSome: 0, missingNone: 0, atoms: 0, byBucket: {} }, none)).toEqual([]);
+    expect(conditionProblems({ total: 0, missingSome: 0, missingNone: 0, atoms: 0, substituted: 0, absent: 0, unstated: 0, byBucket: {} }, none)).toEqual([]);
   });
 });
 
@@ -217,8 +279,8 @@ describe('the lines a reader sees', () => {
     scored: 496,
     rows: [],
     tally: tallyConditions([
-      { id: '1', missing: ['a'], stated: 1, bucket: 'predicate' },
-      { id: '2', missing: [], stated: 1, bucket: 'tables' },
+      { id: '1', missing: ['a'], gaps: [{ atom: 'a', kind: 'absent' as const }], stated: 1, bucket: 'predicate' },
+      { id: '2', missing: [], gaps: [], stated: 1, bucket: 'tables' },
     ]),
     drops: { unknownQuestion: 0, unretained: 0, unreadableLadder: 0 },
     problems: [],
@@ -228,6 +290,7 @@ describe('the lines a reader sees', () => {
     const lines = conditionLines(outcome).join('\n');
     expect(lines).toContain('2 failures of 496 scored');
     expect(lines).toContain('no condition on a column the gold filters: 1  50.0%');
+    expect(lines).toContain('of which written nowhere:           1  50.0%');
     expect(lines).toContain('predicate');
     expect(lines).toContain('1 cases,    1 missing a condition');
   });

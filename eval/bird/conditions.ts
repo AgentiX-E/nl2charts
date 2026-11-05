@@ -120,6 +120,79 @@ function conditionsOf(sql: string): string[] {
   return [...statementShape(sql).predicates];
 }
 
+/**
+ * What a missing condition actually is, once its literal is looked for elsewhere.
+ *
+ * `missingConditions` compares *columns*, and a column is not the only way to express a
+ * restriction. On BIRD's dev split 41% of the conditions this reader calls missing are not
+ * missing at all: the value is written, under a different column. `Contra Costa` filtered on
+ * `schools.County` where the gold filters `satscores.cname`; `Kacey Gibson` split across
+ * `AdmFName1` and `AdmLName1` where the gold has one name column. Reading both as "the
+ * statement never considered this column" over-counts the population a repair could act on by
+ * two thirds, and every lever aimed at that population inherits the error.
+ *
+ * So a missing condition is filed by where its value went:
+ *
+ * - **`substituted`** — some predicate of the statement compares the same literal against another
+ *   column. The restriction is present; the column is not the one the gold used. A mechanism for
+ *   this is schema linking, and a mechanism that writes the condition *again* would be adding a
+ *   filter the statement already has.
+ * - **`absent`** — no predicate compares anything to that literal. This is the population the
+ *   census was written for: the value the question names never reaches the statement.
+ * - **`unstated`** — the atom carries no literal at all, because it is a null test
+ *   (`x IS NOT NULL`) or a comparison between two columns. Nothing in the question's wording
+ *   could have pointed at it, so no question-side trigger can find it either.
+ */
+export type GapKind = 'substituted' | 'absent' | 'unstated';
+
+export interface ConditionGap {
+  /** The gold atom, as the reader printed it. */
+  readonly atom: string;
+  readonly kind: GapKind;
+}
+
+/**
+ * The values an atom compares against, lowercased, unquoted, `''` unescaped.
+ *
+ * Numbers are read outside string literals only: `'2000'` is the value two-thousand and `2000` is
+ * the same value written as a number, and the two have to match or a date filter would read as
+ * substituted on one side and absent on the other depending on which side quoted it.
+ */
+export function literalsOf(atom: string): string[] {
+  const found: string[] = [];
+  // The capture group is inside the pattern, so it is always present when the pattern matched.
+  for (const match of atom.matchAll(/'((?:''|[^'])*)'/g)) found.push((match[1] as string).replaceAll("''", "'").toLowerCase());
+  // Quoted identifiers are removed too, not only literals: `"Free Meal Count (K-12)" > 0` contains
+  // the digits of a name, and reading `12` as a value would make every column with a number in its
+  // title look like a condition some statement had already written.
+  const code = atom.replace(/'(?:''|[^'])*'/g, ' ').replace(/"[^"]*"/g, ' ').replace(/`[^`]*`/g, ' ');
+  for (const match of code.matchAll(/(?<![\w.])(-?\d+(?:\.\d+)?)(?![\w.])/g)) found.push(match[1] as string);
+  return [...new Set(found)];
+}
+
+/** The values a statement's predicates compare against, in the same form. */
+export function writtenLiterals(written: readonly string[]): Set<string> {
+  const values = new Set<string>();
+  for (const atom of written) for (const literal of literalsOf(atom)) values.add(literal);
+  return values;
+}
+
+/** Where a condition's value went. */
+export function gapKindOf(atom: string, values: ReadonlySet<string>): GapKind {
+  const literals = literalsOf(atom);
+  if (literals.length === 0) return 'unstated';
+  return literals.some((literal) => values.has(literal)) ? 'substituted' : 'absent';
+}
+
+/** Every condition of the gold the statement never names a column of, with where its value went. */
+export function missingGaps(gold: string, predicted: string): ConditionGap[] {
+  const written = conditionsOf(predicted);
+  const values = writtenLiterals(written);
+  return conditionsOf(gold)
+    .filter((atom) => !hasCounterpart(atom, written))
+    .map((atom) => ({ atom, kind: gapKindOf(atom, values) }));
+}
+
 /** The gold's conditions that the prediction never names a column of, in the reader's order. */
 export function missingConditions(gold: string, predicted: string): string[] {
   const written = conditionsOf(predicted);
@@ -151,6 +224,8 @@ export interface ConditionRow {
   readonly id: string;
   /** Conditions the prediction names no column of. */
   readonly missing: readonly string[];
+  /** The same conditions, filed by where their value went. */
+  readonly gaps: readonly ConditionGap[];
   /** Every condition the gold states, for the denominator. */
   readonly stated: number;
   /** The ladder bucket the case was filed under, when a ladder artifact was supplied. */
@@ -172,6 +247,12 @@ export interface ConditionTally {
   /** Cases whose every gold condition has a counterpart in the statement. */
   readonly missingNone: number;
   readonly atoms: number;
+  /** Missing conditions whose value another predicate already compares against. */
+  readonly substituted: number;
+  /** Missing conditions whose value appears in no predicate at all. */
+  readonly absent: number;
+  /** Missing conditions that carry no literal, so no question wording could have named them. */
+  readonly unstated: number;
   /** Missing conditions per ladder bucket, when a ladder artifact was supplied. */
   readonly byBucket: Readonly<Record<string, { readonly cases: number; readonly missing: number }>>;
 }
@@ -188,6 +269,9 @@ export function tallyConditions(rows: readonly ConditionRow[]): ConditionTally {
     missingSome: rows.filter((row) => row.missing.length > 0).length,
     missingNone: rows.filter((row) => row.missing.length === 0).length,
     atoms: rows.reduce((sum, row) => sum + row.missing.length, 0),
+    substituted: rows.filter((row) => row.gaps.some((gap) => gap.kind === 'substituted')).length,
+    absent: rows.filter((row) => row.gaps.some((gap) => gap.kind === 'absent')).length,
+    unstated: rows.filter((row) => row.gaps.some((gap) => gap.kind === 'unstated')).length,
     byBucket,
   };
 }
@@ -308,9 +392,11 @@ export function runConditions(settings: ConditionSettings): ConditionOutcome {
       continue;
     }
     const bucket = ladder?.get(id);
+    const gaps = missingGaps(question.SQL, failure.predicted);
     rows.push({
       id,
-      missing: missingConditions(question.SQL, failure.predicted),
+      missing: gaps.map((gap) => gap.atom),
+      gaps,
       stated: conditionsOf(question.SQL).length,
       ...(bucket === undefined ? {} : { bucket }),
     });
@@ -357,6 +443,9 @@ export function conditionLines(outcome: ConditionOutcome): string[] {
     `  no condition on a column the gold filters: ${String(tally.missingSome)}  ${share(tally.missingSome)}`,
     `  every gold condition written somewhere:   ${String(tally.missingNone)}  ${share(tally.missingNone)}`,
     `  missing conditions in total: ${String(tally.atoms)}`,
+    `  of which written on another column: ${String(tally.substituted)}  ${share(tally.substituted)}`,
+    `  of which written nowhere:           ${String(tally.absent)}  ${share(tally.absent)}`,
+    `  of which carry no literal at all:   ${String(tally.unstated)}  ${share(tally.unstated)}`,
   ];
   const buckets = Object.entries(tally.byBucket).sort((left, right) => right[1].cases - left[1].cases);
   for (const [bucket, entry] of buckets) {

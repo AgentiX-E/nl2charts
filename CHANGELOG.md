@@ -7,6 +7,40 @@ cannot be argued with.
 ## Unreleased
 
 ### Changed
+- **The bucket that was going to be the lever is 0.13pp of the thing it was named for.** The dev
+  attribution left one candidate standing: `condition` — 61 of the 166 questions MAC-SQL wins, 3.98pp,
+  the only kind above the split's 2.93pp resolution. Filing every missing condition by **where its
+  value went** splits it into four rows, and none of them is the omission: **27 cases (1.76pp)** filter
+  the same column with a different condition, **16 (1.04pp)** compare the value on another column
+  (linking), **16 (1.04pp)** are atoms with no literal (`IS NOT NULL` and friends), and **2 (0.13pp)**
+  compare the value nowhere. A repair that "writes the missing condition again" would be adding a
+  filter the statement already has in 43 of the 61 cases. The census (`bench:bird:conditions`) now
+  prints the same three kinds on its own 226 dev cases: 102 on another column, 71 nowhere, 126 with no
+  literal, of 357 missing atoms.
+- **A question-side gate cannot reach that population inside the cost it would have to fit.** The
+  next lever in the plan was an audit turn fired only when the question betrays a condition the
+  statement never wrote, which the plan priced at ≤10% more calls. `bench:bird:gate` measures four
+  signals against the same 1,532 questions: the widest (`named-entity`) fires on 301 and reaches 83 of
+  the gap cases at 28% precision — **2.0× the budget** — and the widest *inside* the budget
+  (`no-predicate`, 74 fires) reaches 32, a ceiling of **2.09pp against a 2.93pp resolution**, so a
+  repair that succeeded on every case it found could not be read as a gain. Both failures have one
+  cause: surface matching cannot separate a value written shorter (`Alameda` for "Alameda County"), a
+  value split across columns, a value attached to the wrong column, and a column-ish noun from a value
+  the statement never used. **`I-45`'s gated audit is not dispatched**; the pre-check cost zero calls
+  and saved about 12,300.
+- **A deterministic rewrite is adopted on dominance, not on a gain.** `guardNullOrder` puts the
+  unknown values last in the sort key that decides a `LIMIT`, because SQLite and MySQL sort NULL before
+  every value and "the school with the lowest score" otherwise returns the school whose score is
+  missing. `bench:bird:rewrite` prices it by re-execution on `select-mixed-rule`'s dev artifact (baseline
+  **980 = 63.97%**, reproduced exactly on 1,532/1,532): **80 fires, 6 wins, 0 losses, +0.39pp at
+  p = 0.0313**, against its own resolution of 0.40pp. Six discordant pairs cannot establish a gain, so
+  the rule is shipped for what it is — free, lossless, and a statement of what the question meant.
+  The same instrument prices two refusals: dropping a row cap from a counting question **loses 19 to
+  win 1** (−1.17pp), and the integer-division trap fires 17 times and changes nothing.
+- **The rule's own first version did not run.** `guardNullOrder` trimmed the sort clause and spliced
+  `LIMIT` back on, emitting `... ASCLIMIT 1` on every fire; the instrument counted **80 broken
+  statements** and refused to publish. The rewrite now echoes the key as the statement wrote it.
+
 - **The competitor comparison now has a split where it resolves, and we lose it.** `competitors.yml`
   gained a `split` input (the four places that hardcoded `minidev` became coordinates), and
   `41953255372` ran the same two arms on the whole dev split: **MAC-SQL 67.89% against `select-mixed`
@@ -30,6 +64,25 @@ cannot be argued with.
   requires the literals to match case-sensitively, and both cases moved to `literal`.
 
 ### Added
+- **`bench:bird:rewrite`: what a deterministic rewrite of the statement is worth, priced by
+  re-execution.** It reads an artifact, re-executes every case's gold and the statement the arm
+  recorded, and **refuses to price anything unless the recomputed pass count equals the arm's published
+  count exactly** — a rewrite measured against a baseline that cannot reproduce the score is a
+  difference between two instruments. Three rules ship: `null-order` (adopted), `drop-limit-on-count`
+  and `integer-division` (priced, refused, kept for the next reader who suspects them).
+- **`bench:bird:gate`: how much of a condition gap the question alone can find.** Four signals, each
+  priced on fires, cost in points of calls, reach into the gap population, precision and ceiling, with
+  the plan's pre-registered 10% cost budget printed beside them and the verdict written from the
+  numbers rather than from an opinion.
+- **`guardNullOrder` in the AI package**, dialect-aware: ascending is the trap where NULL sorts first
+  (SQLite, MySQL) and descending is the trap where it sorts last (PostgreSQL). It refuses a statement
+  with no row cap, an aggregate sort key (whose ties a constant prefix reorders — priced at 7 wins and
+  3 losses on dev), and a key that already states where the unknown values go.
+- **`bench:bird:conditions` files every missing condition by kind** — `substituted` (a predicate
+  compares the same literal against another column), `absent` (nothing compares it anywhere) and
+  `unstated` (the atom carries no literal, so no wording of the question could name it) — and the
+  attribution report prints the same split under the `condition` bucket.
+
 - **Which of the competitor's wins were in our pool, priced at zero model calls.** `score.ts` ends
   with four counts and cannot say whether a question they won was one a better selector could have
   taken or one whose statement we never wrote. `bench:competitors:attribute` re-executes both sides'

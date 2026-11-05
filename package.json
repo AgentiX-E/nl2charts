@@ -68,7 +68,9 @@
     "bench:bird:card": "tsx eval/bird/card.ts",
     "bench:bird:join": "tsx eval/bird/join.ts",
     "bird:stratify": "node tools/stratify-mixed.mjs",
-    "bench:bird:drift": "tsx eval/bird/drift.ts"
+    "bench:bird:drift": "tsx eval/bird/drift.ts",
+    "bench:bird:rewrite": "tsx eval/bird/rewrite.ts",
+    "bench:bird:gate": "tsx eval/bird/gate.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

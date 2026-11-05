@@ -33,3 +33,5 @@ export type { Compliance, FormatProfile, ReplyShape } from './format.js';
 export { DEFAULT_STRATEGY, MIN_OBSERVATIONS, STRATEGIES, admissible, chooseStrategy, createObserver, probeProtocol, strategy, wilson } from './adapt.js';
 export type { Answer, Decision, DecisionOptions, FirstContact, Interval, Observer, ObserverOptions, ProtocolStep, ProtocolVerdict, Refusal, Strategy, StrategyName, Tally } from './adapt.js';
 export type { AskMessagesInput, AskRequest, AskResult, PipelineOptions, PromptOptions, PromptProfile } from './pipeline.js';
+export { guardNullOrder, splitKeys } from './null-order.js';
+export type { NullOrderGuard } from './null-order.js';

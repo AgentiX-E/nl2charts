@@ -48,6 +48,7 @@ import { requireArm } from '../bird/presence.js';
 import { resolveLayout } from '../bird/run.js';
 import type { BirdLayout } from '../bird/run.js';
 import { statementShape } from '../bird/sql-shape.js';
+import { missingGaps } from '../bird/conditions.js';
 import { parsePredictions } from './predictions.js';
 import { readIdMap } from './subset.js';
 
@@ -112,6 +113,58 @@ export interface AttributedCase {
   readonly gap?: GapKind;
   /** Candidates that held a correct statement. Empty unless the pool held one. */
   readonly sources: readonly string[];
+  /**
+   * For a `condition` gap, where the value of the condition went.
+   *
+   * The kind above says *what* differs; this says whether the difference is an omission at all.
+   * `substituted` means one of our predicates compares the same literal against another column —
+   * the restriction is present, on the wrong column, and a mechanism that writes the condition again
+   * would be teaching the statement something it already does. `absent` means nothing compares that
+   * value anywhere. `unstated` means the atom carries no literal, so no wording of the question
+   * could have pointed at it and no question-side trigger can find it.
+   *
+   * Absent from every case the pool could have answered, and from the questions we won: they are
+   * not condition gaps, and a field that answered there would be applying a taxonomy to a
+   * population it was not defined on.
+   */
+  readonly written?: ConditionKind;
+}
+
+/** Where the value of a missing condition went, as `bench:bird:conditions` files it. */
+export type ConditionKind = 'substituted' | 'absent' | 'unstated';
+
+export const CONDITION_KINDS: readonly ConditionKind[] = ['absent', 'substituted', 'unstated'];
+
+/**
+ * The single kind a case is filed under when its missing conditions disagree.
+ *
+ * A case can miss two conditions of different kinds — `absent` on one column and `unstated` on
+ * another. The order is by how far the finding is from an omission: a value that appears nowhere is
+ * the strongest statement the data supports, a value that appears on another column is a linking
+ * problem, and an atom with no literal is a corpus convention. Filing by the weakest of the three
+ * would let one `IS NOT NULL` hide a genuinely dropped filter.
+ *
+ * The reference is **their** statement, not the gold. The bucket was filled by comparing their
+ * statement against our pool, and a breakdown against the gold would be answering a different
+ * question on the same cases: the first version of this function did exactly that and 31 of 61 cases
+ * came back empty, which read as "two readers disagree" when the truth is that `condition` covers two
+ * findings — a column we never filter, and a column we filter differently.
+ */
+export function conditionKindOf(
+  reference: string | undefined,
+  ours: string | undefined,
+  gap?: GapKind,
+): ConditionKind | undefined {
+  // The gap kind is a parameter rather than a guard at the call site: a caller that asks this
+  // question about a `table` or `window` gap would be filing a value that was never a condition,
+  // and putting the check here is what keeps the answer empty instead of plausible.
+  if (gap !== undefined && gap !== 'condition') return undefined;
+  if (reference === undefined || ours === undefined) return undefined;
+  const kinds = new Set(missingGaps(reference, ours).map((gap) => gap.kind));
+  if (kinds.size === 0) return undefined;
+  if (kinds.has('absent')) return 'absent';
+  if (kinds.has('substituted')) return 'substituted';
+  return 'unstated';
 }
 
 export interface KindTally {
@@ -188,12 +241,20 @@ export interface AttributionOutcome {
   readonly pool: { readonly held: number; readonly missed: number; readonly unread: number };
   readonly kinds: readonly KindTally[];
   readonly reverse: readonly KindTally[];
+  /** The `condition` bucket, split by where the missing value went. */
+  readonly conditionKinds: readonly ConditionTally[];
   readonly components: readonly ComponentLift[];
   /** Groups of flags that split the questions identically: one event wearing several names. */
   readonly collinear: readonly CollinearFlags[];
   /** The resolution the score published for this run, in accuracy points. */
   readonly mde: number;
   readonly problems: readonly string[];
+}
+
+export interface ConditionTally {
+  readonly kind: ConditionKind;
+  readonly cases: number;
+  readonly points: number;
 }
 
 export interface AttributionSettings {
@@ -530,10 +591,16 @@ export async function runAttribution(settings: AttributionSettings, oracle: Orac
       const rivals = record.candidates.flatMap((candidate) => (candidate.sql === undefined ? [] : [candidate.sql]));
       const sources = record.candidates.filter((candidate) => candidate.correct).map((candidate) => candidate.source);
       const pool: PoolState = rivals.length === 0 ? 'unread' : record.poolHeld ? 'held' : 'missed';
+      const gap = pool === 'missed' ? gapKind(theirSql as string, rivals) : undefined;
+      const written = conditionKindOf(theirSql, record.winner, gap);
+      // `written` is carried as a possibly-undefined field rather than spread conditionally: an
+      // absent value is dropped by `JSON.stringify` anyway, and the conditional spread was a branch
+      // no test could reach without a `condition` gap in the fixture.
       theirs.push({
         id: question.question_id,
         pool,
-        ...(pool === 'missed' ? { gap: gapKind(theirSql as string, rivals) } : {}),
+        ...(gap === undefined ? {} : { gap }),
+        written,
         sources,
       });
       continue;
@@ -649,6 +716,10 @@ export async function runAttribution(settings: AttributionSettings, oracle: Orac
     },
     kinds: tally(theirs.filter((entry) => entry.pool === 'missed')),
     reverse: tally(ours),
+    conditionKinds: CONDITION_KINDS.map((kind) => {
+      const cases = theirs.filter((entry) => entry.written === kind).length;
+      return { kind, cases, points: points(cases) };
+    }).filter((entry) => entry.cases > 0),
     components,
     collinear,
     mde: typeof paired.mde === 'number' ? Number((paired.mde * 100).toFixed(2)) : 0,
@@ -683,6 +754,28 @@ export function attributeLines(outcome: AttributionOutcome): string[] {
     lines.push(`${label(`  ${entry.gap}`)} ${String(entry.cases).padStart(4)}  ${`${entry.points.toFixed(2)}pp`.padStart(8)}`);
   }
   if (outcome.kinds.length === 0) lines.push('    (nothing: every pool miss is unreadable, which is a gap in the report rather than in the pipeline)');
+  const conditionCases = outcome.kinds.find((entry) => entry.gap === 'condition')?.cases ?? 0;
+  if (conditionCases > 0) {
+    // One lookup, three rows, no optional chaining in the middle of a template: the first version
+    // read the same array six times and every `?? 0` was a branch nobody could reach on purpose.
+    const countOf = (kind: string): number => {
+      for (const entry of outcome.conditionKinds) if (entry.kind === kind) return entry.cases;
+      return 0;
+    };
+    const row = (kind: string, text: string, why: string): string => {
+      const cases = countOf(kind);
+      return `${label(text)} ${String(cases).padStart(4)}  ${pp(cases).padStart(8)}  — ${why}`;
+    };
+    lines.push(row('substituted', '    of which a value written on another column', 'linking, not an omission'));
+    lines.push(row('absent', '    of which a value written nowhere', 'the omission the bucket was named for'));
+    lines.push(row('unstated', '    of which an atom with no literal', 'a corpus convention no question names'));
+    if (conditionCases > outcome.conditionKinds.reduce((sum, entry) => sum + entry.cases, 0)) {
+      lines.push(
+        `${label('    of which the same column, another condition')} ${String(conditionCases - outcome.conditionKinds.reduce((sum, entry) => sum + entry.cases, 0)).padStart(4)}  — ` +
+          'the column is filtered, not with the condition they wrote',
+      );
+    }
+  }
   lines.push('');
   lines.push(`${label('questions we won and they did not')} ${String(outcome.ours.length).padStart(4)}  ${pp(outcome.ours.length).padStart(8)}`);
   for (const entry of outcome.reverse) {

@@ -184,6 +184,12 @@ jobs:
       # never been measured at all.
       - name: Which filter the statement never wrote
         run: pnpm bench:bird:conditions eval/out/bird-eval.json --arm "$(node tools/bird-arm.mjs eval/out/bird-eval.json)"
+      # The census says which conditions are missing; this says whether the question alone could
+      # have said so before the statement was written. It costs no call and no query, and the
+      # verdict line is the reason it runs on every dispatch: a gate whose ceiling is under the
+      # split's resolution cannot produce a readable arm however good the repair is.
+      - name: What the question alone can find
+        run: pnpm bench:bird:gate --artifact eval/out/bird-eval.json --arm "$(node tools/bird-arm.mjs eval/out/bird-eval.json)"
       # 1534 gold statements and 515 no-answer statements through one literal edit, one oracle
       # query each and no model call. No `--strict`: this is where a repair is tried on the
       # split that has room for one, and a reading that says "it recovers two" is the finding.
