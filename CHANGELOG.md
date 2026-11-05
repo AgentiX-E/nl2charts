@@ -79,7 +79,11 @@ cannot be argued with.
   repository was a *list-price* column published as a bill. `cachedTokensOf` reads all three
   spellings, `withCallCounter` counts them per purpose, and the artifact gains `tokens.cached` and
   `byPurpose[*].cached` — written only when some answer reported the field, because an endpoint that
-  says nothing has not said it cached nothing.
+  says nothing has not said it cached nothing. The same arm, dispatched once more (`42056604480`),
+  showed what the columns had been hiding: **484 of 676 prompt tokens a case were served from
+  cache (71.6%)**, so the bill is **240 rather than 676 — 64.5% off list**, with 103 of the 1,532
+  cases paying a cold miss. `bench:bird:cache` reads the figure from the summary row or, on an
+  artifact written before it, from the per-case records.
 
 ### Fixed
 - **A condition breakdown that counted 11 questions from another bucket.** `conditionKindOf` took the

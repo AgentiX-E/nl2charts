@@ -8183,5 +8183,23 @@ three spellings, carries `cachedTokens` per purpose, and writes `tokens.cached` 
 and writes **nothing** when no answer reported the field, because an endpoint that says nothing has
 not said it cached nothing.
 
-That distinction is the one this document keeps coming back to: `0` and *absent* are different
-measurements, and a column that cannot tell them apart publishes the wrong one as a fact.
+That distinction turned out to matter immediately. The same arm, one cheap dispatch later
+(`42056604480`, `deepseek-chat`, 1,532 questions), and the endpoint had been reporting a cache all
+along:
+
+| | prompt tokens a case |
+|---|---|
+| list price (what this repository published until now) | 676 |
+| what the endpoint reported cached | **484 (71.6%)** |
+| what the bill actually is, at a cache rate of 0.1 | **240 (−64.5%)** |
+| the ceiling, if the whole prefix were always cached | 157 (−76.8%) |
+
+**103 of the 1,532 cases reported zero cached tokens** — the first request of each prefix is a miss,
+and a dispatch of 1,532 questions over 11 databases pays that toll eleven times over.
+
+So the deployment already keeps most of what the measurement said it could: **71.6% measured against
+85.3% structural**, and the 13.7pp between them is cold misses plus whatever the endpoint does at its
+own block granularity, which this instrument cannot see from the outside. What is left is **34.6% of
+the bill** (240 → 157), and the discount already realised is **64.5%**, not the 76.8% the ceiling
+promises: reading the ceiling as a saving overstates the win by 12.3 points of exactly the quantity a
+budget is made of.

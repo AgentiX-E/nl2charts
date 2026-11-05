@@ -290,7 +290,7 @@ export function cacheLines(
     );
   } else if (tally.share - bill.measuredShare > 0.05) {
     lines.push(
-      `  verdict: the prefix is ${percent(tally.share)} of the request and ${percent(bill.measuredShare)} was billed at the cache rate — the gap is what the order of the prompt still costs`,
+      `  verdict: the prefix is ${percent(tally.share)} of the request and ${percent(bill.measuredShare)} was billed at the cache rate — the difference is what the cache did not serve, which on a cold prefix is every database's first question`,
     );
   } else {
     lines.push(`  verdict: the endpoint is already billing the prefix at the cache rate, so there is nothing left in the order`);
@@ -345,6 +345,7 @@ export interface CacheArtifact {
       readonly byPurpose?: Readonly<Record<string, { readonly prompt?: number }>>;
     };
   }[];
+  readonly cases?: readonly { readonly arm?: string; readonly id?: string | number; readonly tokens?: { readonly cached?: number } }[];
 }
 
 /**
@@ -381,6 +382,41 @@ export function cacheMessages(armName: string, artifact: CacheArtifact, layout: 
   });
 }
 
+/**
+ * The cache figure for one arm, from the summary row or — when that row predates the field — from
+ * the per-case records it summarises.
+ *
+ * Two sources for one number is the shape of every disagreement in this directory, so the order is
+ * fixed rather than merged: the summary row is what the run computed, and the cases are only read
+ * when the row has nothing. What the cases give is the same quantity — a mean over the cases that
+ * reported, not over every case — because a case that reported nothing has not said it missed.
+ */
+export function meteredCache(
+  artifact: CacheArtifact,
+  arm: string,
+): { readonly promptTokens: number; readonly generateTokens?: number; readonly cachedTokens?: number; readonly from: 'summary' | 'cases' | 'none' } {
+  const arms = artifact.arms === undefined ? [] : artifact.arms;
+  const row = arms.find((entry) => entry.arm === arm);
+  // Written out rather than as one optional chain: a chain reports three branches for one
+  // question, and a reader of the coverage report cannot tell which of them is the interesting
+  // one. The question is "did this row carry a figure", and that is one `if`.
+  const tokens = row === undefined ? undefined : row.tokens;
+  const promptTokens = tokens !== undefined && tokens.prompt !== undefined ? tokens.prompt : 0;
+  const generateTokens = tokens === undefined ? undefined : (tokens.byPurpose === undefined ? undefined : tokens.byPurpose.generate?.prompt);
+  const summary = tokens === undefined ? undefined : tokens.cached;
+  if (summary !== undefined) {
+    return { promptTokens, ...(generateTokens === undefined ? {} : { generateTokens }), cachedTokens: summary, from: 'summary' };
+  }
+  const cases = artifact.cases === undefined ? [] : artifact.cases;
+  const reported = cases.filter((entry) => entry.arm === arm && entry.tokens !== undefined && entry.tokens.cached !== undefined);
+  if (reported.length === 0) return { promptTokens, ...(generateTokens === undefined ? {} : { generateTokens }), from: 'none' };
+  // The filter above is the guarantee these carry a figure; reading it again here would be a
+  // `?? 0` for a case that cannot exist, and a branch no test can reach.
+  const values = reported.map((entry) => entry.tokens?.cached as number);
+  const total = values.reduce((sum, value) => sum + value, 0);
+  return { promptTokens, ...(generateTokens === undefined ? {} : { generateTokens }), cachedTokens: Math.round(total / reported.length), from: 'cases' };
+}
+
 export function main(
   argv: readonly string[] = process.argv.slice(2),
   root = process.cwd(),
@@ -395,13 +431,9 @@ export function main(
   const messages = cacheMessages(settings.arm, artifact, layout);
   const rows = cacheRows(messages);
   const tally = cacheTally(messages, rows);
-  const generate = row.tokens?.byPurpose?.generate?.prompt;
+  const metered = meteredCache(artifact, settings.arm);
   const bill = cacheBill(
-    {
-      promptTokens: row.tokens?.prompt ?? 0,
-      ...(generate === undefined ? {} : { generateTokens: generate }),
-      ...(row.tokens?.cached === undefined ? {} : { cachedTokens: row.tokens.cached }),
-    },
+    { promptTokens: metered.promptTokens, ...(metered.generateTokens === undefined ? {} : { generateTokens: metered.generateTokens }), ...(metered.cachedTokens === undefined ? {} : { cachedTokens: metered.cachedTokens }) },
     tally.share,
     settings.rate,
   );

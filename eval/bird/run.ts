@@ -1504,6 +1504,13 @@ export interface CaseTokens {
   /** Answers that arrived without a usage block: a cost that is unknown, not zero. */
   readonly unbilled: number;
   /**
+   * Prompt tokens the endpoint served from its prefix cache, when it reported them.
+   *
+   * Absent rather than zero on an endpoint that says nothing about caching: those are different
+   * facts, and only one of them is a measurement of a prompt that missed.
+   */
+  readonly cached?: number;
+  /**
    * The same cost split by what each call was for.
    *
    * Absent on an artifact written before the meter split it. Present, it sums to the fields
@@ -6317,6 +6324,9 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
     messages.set(key, (messages.get(key) ?? 0) + 1);
   }
   const firstFailure = runs.find((run) => run.error !== undefined);
+  // The cases whose endpoint reported a cache figure. A run whose endpoint says nothing about
+  // caching has none, and that absence is what keeps `tokens.cached` out of the row.
+  const cachedMetered = metered.filter((cost) => cost.cached !== undefined);
   return {
     arm: label,
     passed: summary.passed,
@@ -6353,6 +6363,15 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
             completion: Math.round(metered.reduce((total, cost) => total + cost.completion, 0) / metered.length),
             chars: Math.round(metered.reduce((total, cost) => total + cost.chars, 0) / metered.length),
             unbilled: metered.reduce((total, cost) => total + cost.unbilled, 0),
+            // The cache figure the endpoint reported, averaged over the cases that reported one.
+            // A run whose endpoint says nothing about caching has no entry here at all: `0` would
+            // read as "the prompt never hit" and the truth is "nobody said". Averaged over the
+            // reporters rather than over every case because a partial reporter is an endpoint
+            // that answers differently per call, and the mean of the answered ones is the only
+            // figure that describes a hit.
+            ...(cachedMetered.length === 0
+              ? {}
+              : { cached: Math.round(cachedMetered.reduce((total, cost) => total + (cost.cached ?? 0), 0) / cachedMetered.length) }),
             ...(byPurpose === undefined ? {} : { byPurpose }),
           },
         }),

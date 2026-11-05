@@ -7,6 +7,7 @@
  * system turn plus the user turn, rendered by the same function the run calls. A test that only
  * exercised the prefix function would pass while the entry point priced a prompt nobody sends.
  */
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -21,6 +22,7 @@ import {
   commonPrefixLength,
   isEntry,
   main,
+  meteredCache,
   resolveCacheSettings,
   sharedPrefix,
 } from '../eval/bird/cache.js';
@@ -203,7 +205,7 @@ describe('the printed report', () => {
   it('names the gap between what the prefix is and what was billed when both were measured', () => {
     const printed = cacheLines('minidev', 'names', rows, tally, cacheBill({ promptTokens: 400, generateTokens: 300, cachedTokens: 40 }, 0.64), []).join('\n');
     expect(printed).toContain('40 of 400 prompt tokens cached (10.0%)');
-    expect(printed).toContain('the gap is what the order of the prompt still costs');
+    expect(printed).toContain('the difference is what the cache did not serve');
   });
 
   it('says there is nothing left to win when the endpoint already bills the prefix', () => {
@@ -282,6 +284,81 @@ describe('the prompts it measures', () => {
   });
 });
 
+describe('where the cache figure comes from', () => {
+  const artifact = {
+    arms: [{ arm: 'a', tokens: { prompt: 676, byPurpose: { generate: { prompt: 676 } } } }],
+    cases: [
+      { arm: 'a', id: '1', tokens: { cached: 768 } },
+      { arm: 'a', id: '2', tokens: { cached: 640 } },
+      { arm: 'a', id: '3', tokens: {} },
+      { arm: 'b', id: '4', tokens: { cached: 100 } },
+    ],
+  };
+
+  it('prefers the summary row the run computed', () => {
+    // Two sources for one number is the shape of every disagreement in this directory, so the
+    // order is fixed rather than merged.
+    const metered = meteredCache({ ...artifact, arms: [{ arm: 'a', tokens: { prompt: 676, cached: 484 } }] }, 'a');
+    expect(metered.cachedTokens).toBe(484);
+    expect(metered.from).toBe('summary');
+  });
+
+  it('carries the generation subtotal alongside the summary figure', () => {
+    // The two columns arrive from the same run, so an artifact that reports both must yield
+    // both: the bill discounts the generation calls only, and dropping the subtotal here would
+    // silently fall back to discounting the whole prompt.
+    const metered = meteredCache(
+      { arms: [{ arm: 'a', tokens: { prompt: 676, cached: 484, byPurpose: { generate: { prompt: 500 }, select: { prompt: 176 } } } }] },
+      'a',
+    );
+    expect(metered).toEqual({ promptTokens: 676, generateTokens: 500, cachedTokens: 484, from: 'summary' });
+  });
+
+  it('falls back to the per-case records an older artifact carries', () => {
+    // Averaged over the cases that reported, not over every case: a case that said nothing has
+    // not said it missed, and dividing by it would invent a discount nobody was billed.
+    const metered = meteredCache(artifact, 'a');
+    expect(metered.cachedTokens).toBe(704);
+    expect(metered.from).toBe('cases');
+    expect(metered.promptTokens).toBe(676);
+    expect(metered.generateTokens).toBe(676);
+  });
+
+  it('carries no generation figure when the artifact has no purpose split', () => {
+    // An artifact written before the meter split the bill: the cache figure is still readable and
+    // the generation subtotal is not, which the bill then treats as the conservative whole prompt.
+    const summary = meteredCache({ arms: [{ arm: 'a', tokens: { prompt: 676, cached: 400 } }] }, 'a');
+    expect(summary.generateTokens).toBeUndefined();
+    expect(summary.from).toBe('summary');
+    const cases = meteredCache({ arms: [{ arm: 'a', tokens: { prompt: 676 } }], cases: [{ arm: 'a', id: '1', tokens: { cached: 300 } }] }, 'a');
+    expect(cases.generateTokens).toBeUndefined();
+    expect(cases.cachedTokens).toBe(300);
+    expect(cases.from).toBe('cases');
+  });
+
+  it('reports a zero bill for an arm the artifact does not carry, and for one with no cases', () => {
+    // Both are defensive sides: the entry point refuses a missing arm before it gets here, and the
+    // reader still has to answer rather than invent a prompt.
+    expect(meteredCache({ arms: [{ arm: 'a', tokens: { prompt: 10 } }] }, 'b')).toEqual({ promptTokens: 0, from: 'none' });
+    expect(meteredCache({ arms: [{ arm: 'a', tokens: { prompt: 10, cached: 4 } }] }, 'a')).toEqual({ promptTokens: 10, cachedTokens: 4, from: 'summary' });
+  });
+
+  it('says nothing was measured when neither source carries a figure', () => {
+    const metered = meteredCache({ arms: [{ arm: 'a', tokens: { prompt: 10 } }], cases: [{ arm: 'a', id: '1', tokens: {} }] }, 'a');
+    expect(metered.cachedTokens).toBeUndefined();
+    expect(metered.from).toBe('none');
+  });
+
+  it('reads an artifact with no arms table, and one whose split names no generation call', () => {
+    // Both are shapes an older or a different writer can produce, and neither may throw: a
+    // measurement that crashes on a missing summary column is a measurement nobody can run on
+    // yesterday's artifact.
+    expect(meteredCache({}, 'a')).toEqual({ promptTokens: 0, from: 'none' });
+    const noGenerate = meteredCache({ arms: [{ arm: 'a', tokens: { prompt: 10, cached: 4, byPurpose: { select: { prompt: 3 } } } }] }, 'a');
+    expect(noGenerate.generateTokens).toBeUndefined();
+  });
+});
+
 describe('the entry point', () => {
   const run = (artifact: unknown): { code: number; printed: string } => {
     const data = writeMiniBirdDataset(mkdtempSync(join(tmpdir(), 'cache-main-')));
@@ -339,6 +416,23 @@ describe('the entry point', () => {
     expect(cached.printed).toContain('400 of 900 prompt tokens cached');
     const silent = run({ split: 'minidev', arms: [{ arm: 'names', tokens: { prompt: 900 } }] });
     expect(silent.printed).toContain('reported no cache field');
+  });
+
+  it('runs as a command and exits with what the measurement is worth', () => {
+    // The guard is one line, and a guard only a command line can reach is a guard no test covers.
+    // Running it the way the workflow runs it also holds the CLI contract: the artifact, the arm,
+    // and an exit code a shell can branch on.
+    const data = writeMiniBirdDataset(mkdtempSync(join(tmpdir(), 'cache-cli-')));
+    const dir = mkdtempSync(join(tmpdir(), 'cache-cli-out-'));
+    const file = join(dir, 'bird-eval.json');
+    writeFileSync(file, JSON.stringify({ split: 'minidev', arms: [{ arm: 'names', tokens: { prompt: 900, cached: 100 } }] }));
+    const out = execFileSync(process.execPath, ['--import', 'tsx', join(ROOT, 'eval/bird/cache.ts'), '--artifact', file, '--arm', 'names'], {
+      env: { ...process.env, BIRD_SPLIT: 'minidev', BIRD_DATA: data },
+      encoding: 'utf8',
+      timeout: 120_000,
+    });
+    expect(out).toContain('what the prompt repeats');
+    expect(out).toContain('100 of 900 prompt tokens cached');
   });
 
   it('is not the entry point when it was imported', () => {

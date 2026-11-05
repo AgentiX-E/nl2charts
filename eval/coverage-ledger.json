@@ -53,10 +53,10 @@
       "branches": 100
     },
     "eval/bird/cache.ts": {
-      "lines": 99.16,
-      "statements": 99.16,
+      "lines": 99.21,
+      "statements": 99.21,
       "functions": 100,
-      "branches": 99.16
+      "branches": 99.32
     },
     "eval/bird/canonical.ts": {
       "lines": 100,
