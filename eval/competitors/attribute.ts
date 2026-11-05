@@ -102,7 +102,12 @@ export interface OurCase {
 /** One question exactly one side answered correctly. */
 export interface AttributedCase {
   readonly id: number;
-  readonly pool: PoolState;
+  /**
+   * What our pool looked like. Absent from the questions **we** won: they wrote one statement, so
+   * there is no pool of theirs to read, and a field that said `missed` there would be stating
+   * something the artifact cannot support.
+   */
+  readonly pool?: PoolState;
   /** The kind of the gap. Absent for a pool-held case: the statement existed and was not taken. */
   readonly gap?: GapKind;
   /** Candidates that held a correct statement. Empty unless the pool held one. */
@@ -471,7 +476,7 @@ export async function runAttribution(settings: AttributionSettings, oracle: Orac
     }
     if (record.passed) {
       const gap = record.winner === undefined || theirSql === undefined ? undefined : gapKind(record.winner, [theirSql]);
-      ours.push({ id: question.question_id, pool: 'missed', ...(gap === undefined ? {} : { gap }), sources: [] });
+      ours.push({ id: question.question_id, ...(gap === undefined ? {} : { gap }), sources: [] });
       continue;
     }
     neither += 1;

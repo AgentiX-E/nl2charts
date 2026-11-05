@@ -370,7 +370,8 @@ describe('attributing a real pair of files', () => {
 
   it('files the questions we won by what our statement had and theirs did not', async () => {
     const { outcome } = await attribute(fixture());
-    expect(outcome.ours).toEqual([{ id: 2, pool: 'missed', gap: 'condition', sources: [] }]);
+    // No pool field on our own wins: they wrote one statement, so there is no pool of theirs.
+    expect(outcome.ours).toEqual([{ id: 2, gap: 'condition', sources: [] }]);
     expect(outcome.reverse).toEqual([{ gap: 'condition', cases: 1, points: 7.69 }]);
   });
 
@@ -640,7 +641,7 @@ describe('a pair of files that are missing one field each', () => {
     expect(outcome.theirs).toEqual([{ id: 105, pool: 'unread', sources: [] }]);
     expect(outcome.pool).toEqual({ held: 0, missed: 0, unread: 1 });
     // Our win has no statement to compare, so it is filed under the name that claims nothing.
-    expect(outcome.ours).toEqual([{ id: 101, pool: 'missed', sources: [] }]);
+    expect(outcome.ours).toEqual([{ id: 101, sources: [] }]);
     // No MDE published: the reading says zero rather than inventing a resolution.
     expect(outcome.mde).toBe(0);
     expect(outcome.problems).toEqual([]);
