@@ -3743,6 +3743,17 @@ statements are all lower-case cannot see this, so there is now a case for upper 
 aliases, and the lesson is the ordinary one: **a taxonomy built on a splitter inherits the splitter's
 sensitivities, and the way to find out is to run it on somebody else's spelling.**
 
+`bench:bird:conditions` reads the same artifact from the other side and lands on the same population.
+It compares our failures against the **gold** rather than against their statements, and on
+`select-mixed`/Mini-Dev it finds **80 of 197 failures (40.6%) with no condition at all on a column the
+gold filters**, 117 that write every gold condition somewhere. That number is not new — 39.2% was
+recorded on `inline+evidence+samples` and the value block was measured to leave the population
+untouched — but the two instruments now say the same thing from opposite directions: the largest
+mechanical class in our failures is a filter we never wrote, and the largest single bucket in their
+advantage is the same filter. **The next lever is condition coverage, and it is not the value
+family**, which has been priced twice and returns about a third of a ceiling that this gap does not
+sit under.
+
 ## What the selector costs, and what it returns
 
 `select` and `vote` draw the same three samples from the same prompt and differ in one thing: how
