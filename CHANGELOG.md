@@ -7,6 +7,17 @@ cannot be argued with.
 ## Unreleased
 
 ### Changed
+- **The instrument that prices "show the model the values" was reading a population the shipped arm
+  does not have.** `bench:bird:information` selected `candidateRecall === false`, which is the right
+  question for a selector arm — only a case whose pool held no answer is a prompt question — and an
+  empty one for a single call, so it reported **0 cases** on every failure `inline+evidence` has. An
+  empty reading is not a clean reading. The population is now stated once per arm shape
+  (`noAnswerCases`), and the reading it produces reframes the next lever: of 591 dev failures, 419
+  compare against a string value and **359 of those (60.7%) already had the literal in the prompt**;
+  `casing` 29, `notation` 11, `absent` **20**. A stored-value block can reach at most 60 cases —
+  **3.9pp of 1,532 as a ceiling** — and only 20 (1.3pp) are genuinely missing. The `values` bucket is
+  therefore not mainly an information deficit, and "more values" is not the next experiment.
+
 - **The bucket that was going to be the lever is 0.13pp of the thing it was named for.** The dev
   attribution left one candidate standing: `condition` — 61 of the 166 questions MAC-SQL wins, 3.98pp,
   the only kind above the split's 2.93pp resolution. Filing every missing condition by **where its

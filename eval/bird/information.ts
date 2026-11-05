@@ -337,6 +337,29 @@ export function promptForCase(
   return built.messages.map((message) => message.content).join('\n');
 }
 
+/**
+ * Which cases this instrument looks at, for an arm with a candidate set and for one without.
+ *
+ * The population was `candidateRecall === false` and nothing else, which is the right question for
+ * a selector arm and an empty question for the arm this repository ships: a single call has no pool,
+ * so it never records a recall column, and the instrument reported "0 cases" on every failure the
+ * shipped arm has. An empty reading is not a clean reading — it is a measurement of a population
+ * the artifact does not have.
+ *
+ * The two populations are not merged, because they answer different questions. On a selector arm
+ * only the cases whose pool held no answer are prompt questions; the rest were lost by the
+ * selector, and no sentence in the prompt would have saved them. On a single-call arm every wrong
+ * answer is a question about what the prompt said, which is exactly what the classes below
+ * classify — and the `none` class already removes the cases that compare against no value at all,
+ * so widening the population does not widen what the reading means.
+ */
+export function noAnswerCases(cases: readonly CaseRecord[], arm: string): CaseRecord[] {
+  const own = cases.filter((row) => row.arm === arm);
+  const recall = own.filter((row) => typeof row.candidateRecall === 'boolean');
+  if (recall.length > 0) return own.filter((row) => row.candidateRecall === false);
+  return own.filter((row) => row.passed !== true);
+}
+
 export async function runInformation(settings: InfoSettings): Promise<InfoOutcome> {
   const report = JSON.parse(readFileSync(settings.report, 'utf8')) as InfoReportShape;
 
@@ -349,9 +372,7 @@ export async function runInformation(settings: InfoSettings): Promise<InfoOutcom
   const definitions = report.controls?.synthesizedDefinitions ?? {};
   const rows: InfoRow[] = [];
   const drops = { unknownQuestion: 0, unknownArm: 0, definitionGap: 0, unrenderable: 0 };
-  const noAnswer = requireArm(report.cases, settings.arm, settings.report).filter(
-    (row) => row.arm === settings.arm && row.candidateRecall === false,
-  );
+  const noAnswer = noAnswerCases(requireArm(report.cases, settings.arm, settings.report), settings.arm);
   if (arm === undefined) {
     drops.unknownArm = noAnswer.length;
   } else if (!renderableArm(arm)) {

@@ -22,6 +22,7 @@ import {
   informationProblems,
   isEntry,
   main,
+  noAnswerCases,
   promptForCase,
   renderableArm,
   resolveInfoSettings,
@@ -386,6 +387,46 @@ describe('the settings', () => {
 
   it('refuses to run without a report', () => {
     expect(() => resolveInfoSettings({}, ['--strict'], ROOT)).toThrow('usage: information.ts');
+  });
+});
+
+describe('which cases the instrument looks at', () => {
+  it('takes the cases whose pool held no answer on a selector arm', () => {
+    // The rest were lost by the selector, and no sentence in the prompt would have saved them.
+    const rows = [
+      { arm: 'select', id: '1', passed: false, candidateRecall: false },
+      { arm: 'select', id: '2', passed: false, candidateRecall: true },
+      { arm: 'select', id: '3', passed: true },
+      { arm: 'other', id: '4', passed: false, candidateRecall: false },
+    ];
+    expect(noAnswerCases(rows, 'select').map((row) => row.id)).toEqual(['1']);
+  });
+
+  it('takes every wrong answer on the arm that makes one call', () => {
+    // A single call has no pool, so it records no recall column, and the first version of this
+    // filter reported "0 cases" on every failure the shipped arm has — an empty reading about a
+    // population the artifact does not carry, printed as if the instrument had measured nothing.
+    const rows = [
+      { arm: 'inline+evidence', id: '1', passed: false, reason: 'values' },
+      { arm: 'inline+evidence', id: '2', passed: false, reason: 'column-count' },
+      { arm: 'inline+evidence', id: '3', passed: true, reason: 'match' },
+    ];
+    expect(noAnswerCases(rows, 'inline+evidence').map((row) => row.id)).toEqual(['1', '2']);
+  });
+
+  it('prefers the recall column when the arm carries one, even beside cases that do not', () => {
+    // Two rules, one population: a half-written column must not silently switch the instrument to
+    // the other definition halfway through an artifact.
+    const rows = [
+      { arm: 'select', id: '1', passed: false, candidateRecall: false },
+      { arm: 'select', id: '2', passed: false },
+      { arm: 'select', id: '3', passed: false, candidateRecall: true },
+    ];
+    expect(noAnswerCases(rows, 'select').map((row) => row.id)).toEqual(['1']);
+  });
+
+  it('names an arm the artifact does not score as an empty population, not as every case', () => {
+    expect(noAnswerCases([{ arm: 'select', id: '1', passed: false }], 'inline+evidence')).toEqual([]);
   });
 });
 

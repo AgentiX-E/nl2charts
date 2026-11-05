@@ -8191,13 +8191,35 @@ and the rule was rejected on the criterion rather than kept on a `−5`. The arm
 catalogue as the ablation reference for projection rules: any future instruction of this shape has
 to beat a measured redistribution, not a hypothetical one.
 
-### What it points at
+### What it points at — and what it does not
 
-The 444 `values` failures in the model comparison are now the largest addressable population, and
-the depth of the failure is not in the prompt's shape: `bench:bird:gap:values` splits the bucket by
-where the literal went — spelled, mis-cased, mis-notated, or **absent from the card entirely** — and
-the last of those is a retrieval problem. That is the next lever, and it is the one this result
-promotes rather than the one it was aimed at.
+The 444 `values` failures in the model comparison are now the largest bucket, so the obvious next
+lever is "show the model the stored values". `bench:bird:information` answers whether that lever has
+anything to buy, with no model call: render the arm's own prompt, extract the filter values the gold
+statement compares against, and class each one by whether the prompt already spells it.
+
+It reported **0 cases** on the shipped arm until this round — the population was `candidateRecall
+=== false`, which is the right question for a selector arm and an empty one for a single call, and
+an empty reading about a population the artifact does not have is not a clean reading. Widening it
+to "every wrong answer" on an arm with no pool gives the reading below, on the parent arm's 591 dev
+failures:
+
+| class | cases | share |
+|---|---|---|
+| `spelled` — the prompt already says it | **359** | 60.7% |
+| `casing` — present in another case | 29 | 4.9% |
+| `notation` — present in another notation | 11 | 1.9% |
+| `absent` — not in the prompt in any form | **20** | 3.4% |
+| `none` — the gold compares against no string | 172 | 29.1% |
+
+Of 419 cases that compare against a string value, **60.7% had the literal in front of the model**.
+A stored-value block can reach at most 60 of the 591 — **3.9pp of 1,532, as a ceiling** — and only
+20 (1.3pp) are genuinely absent from the prompt.
+
+So the `values` bucket is **not mainly an information deficit**, and the next lever is not "more
+values": four fifths of the reachable cases are a column the model read and then failed to use —
+the condition it wrote does not match the value it was shown. That is a different experiment from
+the one this result was expected to promote, and it is the one the numbers recommend.
 
 ## What the prompt repeats, and what repeating it is worth
 
