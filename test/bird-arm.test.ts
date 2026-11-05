@@ -209,9 +209,12 @@ describe('bird-dev.yml asks the tool instead of naming an arm', () => {
 
   it('substitutes the chosen arm into every step that takes one', () => {
     const invocations = workflow.split('\n').filter((line) => line.includes('bench:bird:') && line.includes('--arm'));
-    // Values, gap, card, join, info, and the condition census — every instrument that prices an
-    // arm asks the artifact which one it holds, because a dispatch may name any of them.
-    expect(invocations.length).toBe(6);
+    // Values, gap, card, join, info, the condition census, and the gate — every instrument that
+    // prices an arm asks the artifact which one it holds, because a dispatch may name any of
+    // them. The count is here on purpose: a new instrument that names its arm by hand, or one
+    // that forgets the arm entirely, changes it, and this assertion is the only thing that reads
+    // the workflow as data.
+    expect(invocations.length).toBe(7);
     for (const line of invocations) {
       expect(line).toContain('--arm "$(node tools/bird-arm.mjs eval/out/bird-eval.json)"');
     }
