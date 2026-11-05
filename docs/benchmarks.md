@@ -124,6 +124,7 @@ pnpm bench:bird:consensus --artifact <report.json> # which selection rule kept t
 pnpm bench:bird:conditions <report.json> --arm A   # which gold condition the statement never wrote; no model
 pnpm bench:bird:gate --artifact <report.json> --arm A   # what the question alone can find; no model
 pnpm bench:bird:rewrite --artifact <report.json> --arm A # what a deterministic rewrite is worth; no model, re-executes
+pnpm bench:bird:cache --artifact <report.json> --arm A # how much of the prompt repeats, and what that is worth; no model
 ```
 
 Scope: **all 11 databases, all 500 Mini-Dev questions** (498 scorable: two gold
@@ -8076,3 +8077,111 @@ The instrument also caught a defect in the rule itself before it could ship. The
 `... ASCLIMIT 1` on **every** case it fired: 80 rewrites that do not run. The `broken` column is
 what made it a one-line fix instead of an unexplained −0.39pp, and the rewrite now echoes the key as
 the statement wrote it — the diff between the statement and its rewrite has one reason in it.
+
+## The model as a variable: one name changed, and everything else held
+
+Every published reading in this document was taken with `deepseek-chat`. The contract claims the
+pipeline runs either family — a reasoning endpoint drops sampling, gets an output budget, and is not
+asked to answer in one line — but *claiming* that is not *measuring* it, and "the stronger model is
+better" had been an argument rather than a number for the whole life of the project.
+
+The experiment is as narrow as it can be made. Same commit (`669f9c67`), same 1,532 dev questions,
+same arm (`inline+evidence`, one call per question), same prompts, same judge (row-by-row execution,
+no model), same concurrency, one field different: `LLM_MODEL`.
+
+| model | family | passed | accuracy | A/A duplicate | harness noise | completion tokens/case |
+|---|---|---|---|---|---|---|
+| `deepseek-chat` | chat | 941 | **61.42%** | 933 = 60.90% | 0.52pp | 49 |
+| `deepseek-reasoner` | reasoning | 884 | **57.70%** | 888 = 57.96% | 0.26pp | 500 |
+
+**The reasoning model is worse, by 3.72pp, and the difference is not noise.** Paired: 127 questions
+the chat model answers and the reasoner does not, against 70 the other way — exact McNemar
+**p = 5.9 × 10⁻⁵**, on a split whose own resolution is 2.93pp. It is also the more expensive of the
+two by an order of magnitude on the output side: 500 completion tokens per question against 49, for
+3.72pp less accuracy. Input is unchanged (676 vs 700 prompt tokens), so this is not a prompt-length
+effect — the two models were asked the same question in the same words.
+
+### Where the 127 questions went
+
+| the chat model answered, the reasoner did not | questions |
+|---|---|
+| `column-count` — the result had the wrong number of columns | **59** |
+| `values` — the rows disagreed on a value | 68 |
+
+And in the other direction the reasoner answers 70 that chat misses. The whole difference is those
+two columns, and the larger of them is not a reasoning failure at all: **`column-count` failures rise
+from 130 to 204 (+74)** while `values` failures *fall* from 461 to 444. The reasoning model reads and
+filters better than the chat model and then returns **more columns than the question asked for** —
+`select c.id, c.gender from ...` where the question asked for the gender.
+
+That is a shape failure, and it is the one failure mode this harness has a name for. A statement
+that returns an extra column is not a statement that misunderstood the question; it is a statement
+that was never told, in terms its family honours, what the projection is. The chat model obeys the
+instruction by habit. The reasoning model spends its answer budget explaining the query and treats
+the result shape as a detail — and the instruction that was supposed to prevent this is written in
+the register a chat model follows and a reasoning model reasons about.
+
+### What this does and does not say
+
+It does **not** say reasoning models cannot write SQL. It says that **on this pipeline, with these
+prompts, the family difference is a projection difference**, and that a contract which adapts
+sampling and output budget but not the *shape* instruction is only half adapted. The measured
+population is exact: 59 of 127 losses are one fix away from being wins, and if all 59 converted the
+reasoner would be at 61.55% against the chat model's 61.42%.
+
+The next round is therefore pre-registered as a projection lever rather than a general "use a
+stronger model" claim: the same 1,532 questions, the same arm, the same reasoning model, with the
+output-shape instruction rewritten for the reasoning family — and the bar is that the `column-count`
+column falls without the `values` column rising.
+
+## What the prompt repeats, and what repeating it is worth
+
+The cost page splits a prompt into rules, schema, context, hint and question, and the purpose table
+splits the bill by what each call was for. Neither answers the question a budget actually asks:
+**how much of what we send is the same bytes we sent a moment ago?** A provider that caches prefixes
+bills that part at a fraction of list price, and whether a prompt is cheap depends on the *order* of
+its text, not its length.
+
+`bench:bird:cache` renders the messages the arm sends — with the same `promptOf` the run calls —
+groups them, and takes the longest common prefix. Two levels, because caches have two: the bytes
+every question of the split shares (the rules) and the bytes every question of one database shares
+(the rules and the whole schema card).
+
+`select-mixed`, dev, 1,532 questions:
+
+| | characters | share of one generation call |
+|---|---|---|
+| the system turn | 2,569 | — |
+| the user turn | 214 | — |
+| **shared by every question of the split** | **283** | 10.2% |
+| **shared by every question of the same database** | **2,374** | **85.3%** |
+| one generation call | 2,783 | 100% |
+
+Per database the prefix is between **96.0%** (`european_football_2`) and **78.1%** (`toxicology`) of
+the system turn: the smaller the schema, the larger the share of the call that is the question.
+
+What that is worth, in the unit the artifact already meters — 2,447 prompt tokens a case, of which
+the generation call spends 2,035:
+
+| | prompt tokens a case |
+|---|---|
+| at list price | 2,447 |
+| if the per-database prefix were cached every time | **884** |
+| | **−63.9%** |
+
+Two things had to be right for that number to be true, and the first version of this instrument got
+the second one wrong. It multiplied the *whole* bill by the prefix share and reported **83%** off —
+which prices a selector call as if it carried the schema card, and the selector reads the candidates
+and answers one digit. The discount lands on the generation call alone; 63.9% is the truthful
+ceiling and 83% was the instrument measuring a prompt nobody sends.
+
+The second thing is that a ceiling is not a discount. The endpoints had never been asked, so the
+meter could not see one: `usage` carried `prompt_tokens` and `completion_tokens` and dropped
+`prompt_cache_hit_tokens`, `cached_tokens` and `prompt_tokens_details.cached_tokens` on the floor.
+A cost column built from that is a **list-price** column published as a bill. The meter now reads all
+three spellings, carries `cachedTokens` per purpose, and writes `tokens.cached` into the artifact —
+and writes **nothing** when no answer reported the field, because an endpoint that says nothing has
+not said it cached nothing.
+
+That distinction is the one this document keeps coming back to: `0` and *absent* are different
+measurements, and a column that cannot tell them apart publishes the wrong one as a fact.

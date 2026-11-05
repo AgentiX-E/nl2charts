@@ -36,6 +36,18 @@ export interface PurposeUsage {
   readonly completionTokens: number;
   readonly chars: number;
   readonly unbilled: number;
+  /**
+   * Prompt tokens the endpoint billed at its cache rate, when it said so.
+   *
+   * Not a saving this repository performs: it is a discount the *endpoint* applies, and the two
+   * numbers here exist because a cost column that cannot see it publishes list price as if it
+   * were the bill. Zero on an endpoint that does not report the field, which is why
+   * `cachedReported` travels beside it — "nothing was cached" and "nobody said" are different
+   * facts and only one of them is a measurement.
+   */
+  readonly cachedTokens: number;
+  /** Answers that carried a cache field at all. The count is what makes the two above readable. */
+  readonly cachedReported: number;
 }
 
 export interface LlmRequest {
@@ -86,6 +98,15 @@ export function turnTemperature(configured: number | null | undefined): number |
 export interface LlmUsage {
   readonly promptTokens: number;
   readonly completionTokens: number;
+  /**
+   * Prompt tokens the endpoint served from its prefix cache, when it reported them.
+   *
+   * Three spellings exist for this one fact and all three are read, because a provider that
+   * caches the prompt bills it at a lower rate and a meter that only counts `prompt_tokens`
+   * reports the list price as the bill. `undefined` is not zero: an endpoint that says nothing
+   * about caching has not said it cached nothing.
+   */
+  readonly cachedPromptTokens?: number;
 }
 
 export interface LlmResponse {
@@ -200,7 +221,38 @@ interface CompletionBody {
     readonly finish_reason?: unknown;
     readonly message?: { readonly content?: unknown; readonly reasoning_content?: unknown };
   }[];
-  readonly usage?: { readonly prompt_tokens?: unknown; readonly completion_tokens?: unknown };
+  readonly usage?: {
+    readonly prompt_tokens?: unknown;
+    readonly completion_tokens?: unknown;
+    /** DeepSeek's spelling, at the top level of `usage`. */
+    readonly prompt_cache_hit_tokens?: unknown;
+    /** Some OpenAI-compatible gateways spell it here instead. */
+    readonly cached_tokens?: unknown;
+    /** OpenAI's spelling, nested beside the audio and reasoning counters. */
+    readonly prompt_tokens_details?: { readonly cached_tokens?: unknown };
+  };
+}
+
+/**
+ * The cached-prompt count, from whichever field the endpoint used.
+ *
+ * The order is the vendor's own: DeepSeek reports `prompt_cache_hit_tokens` at the top level,
+ * OpenAI nests `cached_tokens` under `prompt_tokens_details`, and a gateway in between may put
+ * the raw name at the top. Reading all three in one place is what keeps the meter from
+ * depending on which vendor answered.
+ *
+ * A non-numeric or missing field returns `undefined` rather than zero. The difference is the
+ * whole point of the column: `0` says the prompt was not cached, and a provider that does not
+ * report caching has not made that claim.
+ */
+export function cachedTokensOf(usage: { readonly prompt_cache_hit_tokens?: unknown; readonly cached_tokens?: unknown; readonly prompt_tokens_details?: { readonly cached_tokens?: unknown } } | undefined): number | undefined {
+  if (usage === undefined) return undefined;
+  for (const raw of [usage.prompt_cache_hit_tokens, usage.prompt_tokens_details?.cached_tokens, usage.cached_tokens]) {
+    if (raw === undefined || raw === null) continue;
+    const value = Number(raw);
+    if (Number.isFinite(value)) return value;
+  }
+  return undefined;
 }
 
 export function createHttpProvider(options: HttpProviderOptions): LlmProvider {
@@ -355,11 +407,16 @@ export function createHttpProvider(options: HttpProviderOptions): LlmProvider {
       }
       const promptTokens = Number(payload.usage?.prompt_tokens ?? 0);
       const completionTokens = Number(payload.usage?.completion_tokens ?? 0);
+      const cachedPromptTokens = cachedTokensOf(payload.usage);
       const model = typeof payload.model === 'string' ? payload.model : options.model;
       return {
         text: content,
         model,
-        usage: { promptTokens: Number.isFinite(promptTokens) ? promptTokens : 0, completionTokens: Number.isFinite(completionTokens) ? completionTokens : 0 },
+        usage: {
+          promptTokens: Number.isFinite(promptTokens) ? promptTokens : 0,
+          completionTokens: Number.isFinite(completionTokens) ? completionTokens : 0,
+          ...(cachedPromptTokens === undefined ? {} : { cachedPromptTokens }),
+        },
         ...(adapted.ignored.length === 0 ? {} : { ignored: adapted.ignored }),
       };
     },
@@ -398,7 +455,14 @@ export function withCallCounter(provider: LlmProvider): {
   readonly provider: LlmProvider;
   /** Calls the harness asked for, including the ones that never answered. */
   readonly calls: () => number;
-  readonly usage: () => { readonly promptTokens: number; readonly completionTokens: number; readonly chars: number; readonly unbilled: number };
+  readonly usage: () => {
+    readonly promptTokens: number;
+    readonly completionTokens: number;
+    readonly chars: number;
+    readonly unbilled: number;
+    readonly cachedTokens: number;
+    readonly cachedReported: number;
+  };
   /**
    * The same totals, split by what each call was for.
    *
@@ -420,8 +484,16 @@ export function withCallCounter(provider: LlmProvider): {
    */
   readonly omitted: () => ReadonlyMap<string, number>;
 } {
-  type Meter = { calls: number; promptTokens: number; completionTokens: number; chars: number; unbilled: number };
-  const zero = (): Meter => ({ calls: 0, promptTokens: 0, completionTokens: 0, chars: 0, unbilled: 0 });
+  type Meter = {
+    calls: number;
+    promptTokens: number;
+    completionTokens: number;
+    chars: number;
+    unbilled: number;
+    cachedTokens: number;
+    cachedReported: number;
+  };
+  const zero = (): Meter => ({ calls: 0, promptTokens: 0, completionTokens: 0, chars: 0, unbilled: 0, cachedTokens: 0, cachedReported: 0 });
   // One ledger, two views: the totals are accumulated beside the buckets at the same point rather
   // than recounted later, and a test holds them to the property that makes the share meaningful —
   // the buckets add up to the total. Recounting would be a second implementation of the same sum.
@@ -464,11 +536,28 @@ export function withCallCounter(provider: LlmProvider): {
         meter.completionTokens += response.usage.completionTokens;
         totals.promptTokens += response.usage.promptTokens;
         totals.completionTokens += response.usage.completionTokens;
+        // Counted only when the endpoint said something, and counted on the same branch as the
+        // prompt it describes: a cache figure added to a case whose prompt tokens were never
+        // metered would be a share of a total that does not exist.
+        const cached = response.usage.cachedPromptTokens;
+        if (cached !== undefined) {
+          meter.cachedTokens += cached;
+          meter.cachedReported += 1;
+          totals.cachedTokens += cached;
+          totals.cachedReported += 1;
+        }
         return response;
       },
     },
     calls: () => totals.calls,
-    usage: () => ({ promptTokens: totals.promptTokens, completionTokens: totals.completionTokens, chars: totals.chars, unbilled: totals.unbilled }),
+    usage: () => ({
+      promptTokens: totals.promptTokens,
+      completionTokens: totals.completionTokens,
+      chars: totals.chars,
+      unbilled: totals.unbilled,
+      cachedTokens: totals.cachedTokens,
+      cachedReported: totals.cachedReported,
+    }),
     byPurpose: () => new Map(purposes),
     unlabelled: () => purposes.get(UNLABELLED)?.calls ?? 0,
     omitted: () => new Map(dropped),

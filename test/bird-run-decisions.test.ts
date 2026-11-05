@@ -28,6 +28,8 @@ import {
   assertDissentFired,
   assertDissentRule,
   assertSampleBlockFired,
+  cacheFieldOf,
+  mergePurposes,
   demonstrationsFunnel,
   dissentFunnel,
   reconcileFunnel,
@@ -1572,5 +1574,41 @@ describe('the free selector', () => {
     expect(() => assertRuleSelection({ name: 'x', select: true, selectRule: 'shortest' })).not.toThrow();
     // A model-selector arm is unaffected: it may declare all of them.
     expect(() => assertRuleSelection({ name: 'x', select: true, pairwise: true, judge: 'second' })).not.toThrow();
+  });
+});
+
+describe('what the artifact says about caching', () => {
+  it('writes no cached field when no answer reported one', () => {
+    // The absence is the measurement: an endpoint that says nothing about caching has not claimed
+    // it served none, and a zero here would publish "the cache never helped" on every run.
+    expect(cacheFieldOf({ cachedTokens: 0, cachedReported: 0 })).toEqual({});
+    expect(cacheFieldOf({ cachedTokens: 0, cachedReported: 0 }, { cachedTokens: 5, cachedReported: 0 })).toEqual({});
+  });
+
+  it('adds both models\u2019 cache figures when either reported one', () => {
+    expect(cacheFieldOf({ cachedTokens: 400, cachedReported: 1 })).toEqual({ cached: 400 });
+    // A cross arm draws from a second endpoint: one case can be billed by two meters, and the
+    // case total is the sum rather than the larger of them.
+    expect(cacheFieldOf({ cachedTokens: 400, cachedReported: 1 }, { cachedTokens: 250, cachedReported: 1 })).toEqual({ cached: 650 });
+    expect(cacheFieldOf({ cachedTokens: 0, cachedReported: 0 }, { cachedTokens: 250, cachedReported: 1 })).toEqual({ cached: 250 });
+  });
+
+  it('keeps the cached figure per purpose, and drops the field where nothing was reported', () => {
+    const merged = mergePurposes(
+      new Map([
+        ['generate', { calls: 1, promptTokens: 900, completionTokens: 40, chars: 3000, unbilled: 0, cachedTokens: 700, cachedReported: 1 }],
+        ['select', { calls: 1, promptTokens: 100, completionTokens: 1, chars: 400, unbilled: 0, cachedTokens: 0, cachedReported: 0 }],
+      ]),
+    );
+    expect(merged.generate).toEqual({ calls: 1, prompt: 900, completion: 40, chars: 3000, unbilled: 0, cached: 700 });
+    expect(merged.select).toEqual({ calls: 1, prompt: 100, completion: 1, chars: 400, unbilled: 0 });
+  });
+
+  it('sums one purpose spent on both models rather than listing it twice', () => {
+    const merged = mergePurposes(
+      new Map([['generate', { calls: 1, promptTokens: 900, completionTokens: 40, chars: 3000, unbilled: 0, cachedTokens: 600, cachedReported: 1 }]]),
+      new Map([['generate', { calls: 1, promptTokens: 300, completionTokens: 20, chars: 900, unbilled: 0, cachedTokens: 0, cachedReported: 1 }]]),
+    );
+    expect(merged.generate).toEqual({ calls: 2, prompt: 1200, completion: 60, chars: 3900, unbilled: 0, cached: 600 });
   });
 });

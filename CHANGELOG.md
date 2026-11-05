@@ -63,6 +63,24 @@ cannot be argued with.
   `statementShape().text` drops case inside quotes because it compares shapes; `identical` now also
   requires the literals to match case-sensitively, and both cases moved to `literal`.
 
+### Added
+- **`bench:bird:cache`: how much of every request is the same bytes as the request before it.** The
+  cost page splits a prompt by block and the purpose table splits the bill by call, and neither
+  answers what a budget asks. Rendering the arm's own messages and taking the longest common prefix
+  says it exactly: on `select-mixed` dev, **283 characters are sent by all 1,532 questions** (the
+  rules) and **2,374 are sent by every question of the same database** (the rules and the whole
+  schema card) — **85.3% of a generation call**. At a cache rate of 0.1 that is `2,447 → 884`
+  prompt tokens a case, **63.9% off**, and the discount lands on the generation call alone: the
+  first version multiplied the whole bill by the prefix share, reported 83%, and was pricing a
+  selector call as if it carried the card.
+- **The meter reads the cache fields.** `usage` carried `prompt_tokens` and `completion_tokens` and
+  dropped `prompt_cache_hit_tokens` (DeepSeek), `cached_tokens` (gateways) and
+  `prompt_tokens_details.cached_tokens` (OpenAI) on the floor, so every cost column in this
+  repository was a *list-price* column published as a bill. `cachedTokensOf` reads all three
+  spellings, `withCallCounter` counts them per purpose, and the artifact gains `tokens.cached` and
+  `byPurpose[*].cached` — written only when some answer reported the field, because an endpoint that
+  says nothing has not said it cached nothing.
+
 ### Fixed
 - **A condition breakdown that counted 11 questions from another bucket.** `conditionKindOf` took the
   gap kind as an optional parameter, and its guard was `gap !== undefined && gap !== 'condition'` — so

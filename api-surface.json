@@ -313,6 +313,7 @@
     "PurposeUsage",
     "Role",
     "UNLABELLED",
+    "cachedTokensOf",
     "createHttpProvider",
     "turnTemperature",
     "withCallCounter"

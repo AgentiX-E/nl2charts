@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { isNl2ChartsError } from '@agentix-e/nl2charts-spec';
-import { createHttpProvider, turnTemperature, withCallCounter } from '../src/provider.js';
+import { cachedTokensOf, createHttpProvider, turnTemperature, withCallCounter } from '../src/provider.js';
 
 let server: Server;
 let baseUrl: string;
@@ -442,12 +442,79 @@ describe('withCallCounter', () => {
           : { text: 'x', model: 'm', usage: { promptTokens: 100, completionTokens: 10 } };
       },
     });
-    expect(priced.usage()).toEqual({ promptTokens: 0, completionTokens: 0, chars: 0, unbilled: 0 });
+    expect(priced.usage()).toEqual({ promptTokens: 0, completionTokens: 0, chars: 0, unbilled: 0, cachedTokens: 0, cachedReported: 0 });
     for (let index = 0; index < 3; index += 1) await priced.provider.complete({ messages: [{ role: 'user', content: 'q' }] });
     expect(priced.calls()).toBe(3);
     // `chars` is the text of the same three requests: one character per call in this stub, which
     // is how the ratio stays a fact about one request rather than two.
-    expect(priced.usage()).toEqual({ promptTokens: 200, completionTokens: 20, chars: 3, unbilled: 1 });
+    expect(priced.usage()).toEqual({ promptTokens: 200, completionTokens: 20, chars: 3, unbilled: 1, cachedTokens: 0, cachedReported: 0 });
+  });
+
+  it('reads the cached-prompt count from every spelling an endpoint uses', async () => {
+    // Three vendors, one fact. DeepSeek writes `prompt_cache_hit_tokens` at the top of `usage`,
+    // OpenAI nests `cached_tokens` under `prompt_tokens_details`, and a gateway in between may
+    // put the raw name at the top. A meter that knew only one of them would report list price
+    // for the other two, which is the difference between a bill and a budget.
+    const cases: [string, Record<string, unknown>, number][] = [
+      ['deepseek', { prompt_tokens: 1000, completion_tokens: 10, prompt_cache_hit_tokens: 900 }, 900],
+      ['openai', { prompt_tokens: 1000, completion_tokens: 10, prompt_tokens_details: { cached_tokens: 640 } }, 640],
+      ['gateway', { prompt_tokens: 1000, completion_tokens: 10, cached_tokens: 128 }, 128],
+    ];
+    for (const [name, usage, expected] of cases) {
+      const provider = createHttpProvider({
+        baseUrl: 'https://example.test/v1',
+        apiKey: 'k',
+        model: 'm',
+        fetchImpl: async () =>
+          new Response(JSON.stringify({ model: 'm', choices: [{ message: { content: 'select 1' } }], usage }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          }),
+      });
+      const answer = await provider.complete({ messages: [{ role: 'user', content: 'q' }] });
+      expect(answer.usage?.cachedPromptTokens, name).toBe(expected);
+      expect(answer.usage?.promptTokens, name).toBe(1000);
+    }
+  });
+
+  it('says nothing about caching when the endpoint says nothing', async () => {
+    // `undefined` is the answer here, not zero: an endpoint that never reports the field has not
+    // claimed the prompt missed the cache, and a meter that wrote 0 would be inventing a
+    // measurement. The same body with a non-numeric field is also "nothing said" rather than a
+    // number the vendor never meant.
+    for (const usage of [
+      { prompt_tokens: 10, completion_tokens: 2 },
+      { prompt_tokens: 10, completion_tokens: 2, prompt_cache_hit_tokens: 'lots' },
+      { prompt_tokens: 10, completion_tokens: 2, prompt_tokens_details: {} },
+    ]) {
+      const provider = createHttpProvider({
+        baseUrl: 'https://example.test/v1',
+        apiKey: 'k',
+        model: 'm',
+        fetchImpl: async () =>
+          new Response(JSON.stringify({ model: 'm', choices: [{ message: { content: 'select 1' } }], usage }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          }),
+      });
+      const answer = await provider.complete({ messages: [{ role: 'user', content: 'q' }] });
+      expect(answer.usage?.cachedPromptTokens).toBeUndefined();
+      expect(answer.usage?.promptTokens).toBe(10);
+    }
+  });
+
+  it('counts a cache hit per answer, and a zero hit as a measurement', () => {
+    // The counter is per answer because an endpoint may report the field on some answers and not
+    // others. `cachedReported` is what separates "the prompt missed" from "nobody said", and a
+    // case that reported zero is a measurement: the cache was there and the prompt was not in it.
+    const hit = cachedTokensOf({ prompt_cache_hit_tokens: 512 });
+    const miss = cachedTokensOf({ prompt_cache_hit_tokens: 0 });
+    const silent = cachedTokensOf({});
+    expect([hit, miss, silent]).toEqual([512, 0, undefined]);
+    // A null is a vendor writing "no value", which is silence rather than a count of zero.
+    expect(cachedTokensOf({ cached_tokens: null })).toBeUndefined();
+    expect(cachedTokensOf(undefined)).toBeUndefined();
+    expect(cachedTokensOf({ prompt_tokens_details: { cached_tokens: '64' } })).toBe(64);
   });
 
   it('files each call under the purpose it declared', async () => {
@@ -466,11 +533,11 @@ describe('withCallCounter', () => {
     await counted.provider.complete({ messages: [{ role: 'user', content: 'aa' }], purpose: 'generate' });
     await counted.provider.complete({ messages: [{ role: 'user', content: 'b' }], purpose: 'select' });
     const byPurpose = counted.byPurpose();
-    expect(byPurpose.get('generate')).toEqual({ calls: 1, promptTokens: 100, completionTokens: 10, chars: 2, unbilled: 0 });
-    expect(byPurpose.get('select')).toEqual({ calls: 1, promptTokens: 200, completionTokens: 10, chars: 1, unbilled: 0 });
+    expect(byPurpose.get('generate')).toEqual({ calls: 1, promptTokens: 100, completionTokens: 10, chars: 2, unbilled: 0, cachedTokens: 0, cachedReported: 0 });
+    expect(byPurpose.get('select')).toEqual({ calls: 1, promptTokens: 200, completionTokens: 10, chars: 1, unbilled: 0, cachedTokens: 0, cachedReported: 0 });
     // The case total is the sum of the parts rather than a second measurement of them, so the
     // share taken over it cannot disagree with the table it is taken from.
-    expect(counted.usage()).toEqual({ promptTokens: 300, completionTokens: 20, chars: 3, unbilled: 0 });
+    expect(counted.usage()).toEqual({ promptTokens: 300, completionTokens: 20, chars: 3, unbilled: 0, cachedTokens: 0, cachedReported: 0 });
     expect(counted.unlabelled()).toBe(0);
   });
 
@@ -484,7 +551,7 @@ describe('withCallCounter', () => {
       complete: async () => ({ text: 'x', model: 'm', usage: { promptTokens: 5, completionTokens: 1 } }),
     });
     await counted.provider.complete({ messages: [{ role: 'user', content: 'q' }] });
-    expect(counted.byPurpose().get('unlabelled')).toEqual({ calls: 1, promptTokens: 5, completionTokens: 1, chars: 1, unbilled: 0 });
+    expect(counted.byPurpose().get('unlabelled')).toEqual({ calls: 1, promptTokens: 5, completionTokens: 1, chars: 1, unbilled: 0, cachedTokens: 0, cachedReported: 0 });
     expect(counted.byPurpose().has('generate')).toBe(false);
     expect(counted.unlabelled()).toBe(1);
   });
@@ -495,7 +562,9 @@ describe('withCallCounter', () => {
     // over a denominator that excludes the call it describes is not a share.
     const counted = withCallCounter({ id: 'stub', model: 'm', complete: async () => ({ text: 'x', model: 'm' }) });
     await counted.provider.complete({ messages: [{ role: 'user', content: 'q' }], purpose: 'select' });
-    expect(counted.byPurpose().get('select')).toEqual({ calls: 1, promptTokens: 0, completionTokens: 0, chars: 1, unbilled: 1 });
+    // An answer with no usage block reported no cache field either, so the two cache counters stay
+    // at zero and say so: nothing was measured, which is not the same as a prompt that missed.
+    expect(counted.byPurpose().get('select')).toEqual({ calls: 1, promptTokens: 0, completionTokens: 0, chars: 1, unbilled: 1, cachedTokens: 0, cachedReported: 0 });
   });
 
   it('adds the buckets up to the same total it reports', async () => {

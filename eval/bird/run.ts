@@ -1817,22 +1817,58 @@ export interface CaseRun extends CaseOutcome {
  * both sides is summed rather than listed twice: a cost table with two `select` rows is a table
  * whose share nobody can divide by.
  */
+/**
+ * The `cached` field of a case's token record, or nothing when nobody reported one.
+ *
+ * A field, not a number, because an endpoint that does not report cache figures has not claimed
+ * it served none: writing `cached: 0` would put "the cache never hit" into an artifact where the
+ * truth is "this endpoint says nothing about caching". Exported so the branch can be tested —
+ * only a live endpoint produces the other side of it, and a branch only a live endpoint reaches is
+ * a branch no test covers.
+ */
+export function cacheFieldOf(
+  primary: { readonly cachedTokens: number; readonly cachedReported: number },
+  second?: { readonly cachedTokens: number; readonly cachedReported: number },
+): { readonly cached?: number } {
+  if (primary.cachedReported + (second?.cachedReported ?? 0) === 0) return {};
+  return { cached: primary.cachedTokens + (second?.cachedTokens ?? 0) };
+}
+
 export function mergePurposes(
   first: ReadonlyMap<string, PurposeUsage>,
   second?: ReadonlyMap<string, PurposeUsage>,
 ): Readonly<Record<string, PurposeCost>> {
-  const total: Record<string, { calls: number; prompt: number; completion: number; chars: number; unbilled: number }> = {};
+  const total: Record<string, { calls: number; prompt: number; completion: number; chars: number; unbilled: number; cached: number; cachedReported: number }> = {};
   for (const source of second === undefined ? [first] : [first, second]) {
     for (const [purpose, usage] of source) {
-      const slot = (total[purpose] ??= { calls: 0, prompt: 0, completion: 0, chars: 0, unbilled: 0 });
+      const slot = (total[purpose] ??= { calls: 0, prompt: 0, completion: 0, chars: 0, unbilled: 0, cached: 0, cachedReported: 0 });
       slot.calls += usage.calls;
       slot.prompt += usage.promptTokens;
       slot.completion += usage.completionTokens;
       slot.chars += usage.chars;
       slot.unbilled += usage.unbilled;
+      slot.cached += usage.cachedTokens;
+      slot.cachedReported += usage.cachedReported;
     }
   }
-  return total;
+  // `cached` is written only when some answer reported it, and this is the one place that decides.
+  // A field that appeared as zero on every run would be read as "the cache never helped", which
+  // is a claim no endpoint made; an absent field says the run did not measure it.
+  return Object.fromEntries(
+    Object.entries(total).map(([purpose, slot]) => [
+      purpose,
+      slot.cachedReported === 0
+        ? { calls: slot.calls, prompt: slot.prompt, completion: slot.completion, chars: slot.chars, unbilled: slot.unbilled }
+        : {
+            calls: slot.calls,
+            prompt: slot.prompt,
+            completion: slot.completion,
+            chars: slot.chars,
+            unbilled: slot.unbilled,
+            cached: slot.cached,
+          },
+    ]),
+  );
 }
 
 export interface ArmReportRow {
@@ -1974,7 +2010,14 @@ export interface ArmReportRow {
     readonly completion: number;
     readonly chars: number;
     readonly unbilled: number;
-    readonly byPurpose?: Readonly<Record<string, { readonly calls: number; readonly prompt: number; readonly completion: number; readonly chars: number }>>;
+    /**
+     * Prompt tokens the endpoint served from its prefix cache.
+     *
+     * Absent when no answer reported the field, which is the honest spelling of "not measured":
+     * the meter cannot distinguish a cache that never hit from an endpoint that never said.
+     */
+    readonly cached?: number;
+    readonly byPurpose?: Readonly<Record<string, { readonly calls: number; readonly prompt: number; readonly completion: number; readonly chars: number; readonly cached?: number }>>;
   };
   readonly [field: string]: unknown;
 }
@@ -5318,6 +5361,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
           completion: primary.completionTokens + (second?.completionTokens ?? 0),
           chars: primary.chars + (second?.chars ?? 0),
           unbilled: primary.unbilled + (second?.unbilled ?? 0),
+          ...cacheFieldOf(primary, second),
           // The same money, split by what each call was for. A cross arm draws candidates from a
           // second model and may have that model judge them, so one purpose can be spent on both
           // sides; adding per purpose keeps one row per kind of call, which is the only shape a

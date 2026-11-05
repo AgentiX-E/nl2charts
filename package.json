@@ -70,7 +70,8 @@
     "bird:stratify": "node tools/stratify-mixed.mjs",
     "bench:bird:drift": "tsx eval/bird/drift.ts",
     "bench:bird:rewrite": "tsx eval/bird/rewrite.ts",
-    "bench:bird:gate": "tsx eval/bird/gate.ts"
+    "bench:bird:gate": "tsx eval/bird/gate.ts",
+    "bench:bird:cache": "tsx eval/bird/cache.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

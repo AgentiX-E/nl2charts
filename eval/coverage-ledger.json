@@ -52,6 +52,12 @@
       "functions": 100,
       "branches": 100
     },
+    "eval/bird/cache.ts": {
+      "lines": 99.16,
+      "statements": 99.16,
+      "functions": 100,
+      "branches": 99.16
+    },
     "eval/bird/canonical.ts": {
       "lines": 100,
       "statements": 100,
@@ -71,8 +77,8 @@
       "branches": 100
     },
     "eval/bird/conditions.ts": {
-      "lines": 99.27,
-      "statements": 99.27,
+      "lines": 99.39,
+      "statements": 99.39,
       "functions": 100,
       "branches": 97.56
     },
@@ -353,10 +359,10 @@
       "branches": 98.69
     },
     "eval/competitors/attribute.ts": {
-      "lines": 99.57,
-      "statements": 99.57,
+      "lines": 99.63,
+      "statements": 99.63,
       "functions": 100,
-      "branches": 99.32
+      "branches": 99.39
     },
     "eval/competitors/coordinates.ts": {
       "lines": 100,
