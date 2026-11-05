@@ -64,6 +64,16 @@ cannot be argued with.
   requires the literals to match case-sensitively, and both cases moved to `literal`.
 
 ### Added
+- **`inline+evidence+projection`: one rule line, and the bucket it is aimed at is a measurement.**
+  The model comparison (`8q`) held every input fixed and moved 127 cases down and 70 up; the shape of
+  that movement was not a general loss of reasoning — `values` fell 461 → 444 while `column-count`
+  rose 130 → 204, and 59 of the 127 negative cases are filed in that bucket. A statement that ran,
+  returned the right number of rows and carried the wrong number of columns is the one failure a rule
+  can remove rather than redistribute, so the arm adds one sentence ("select exactly the columns the
+  question asks for, in the order it names them") and changes nothing else: same card, same hint,
+  same call count, `PAIRS` entry and a one-lever test on both sides of the prompt. The pre-registered
+  criterion is `column-count` down with `values` not up, accuracy read against the dev split's 2.30pp
+  MDE. It is written, paired and **not yet dispatched** — the note in `ON_DEMAND_ARMS` says so.
 - **`bench:bird:cache`: how much of every request is the same bytes as the request before it.** The
   cost page splits a prompt by block and the purpose table splits the bill by call, and neither
   answers what a budget asks. Rendering the arm's own messages and taking the longest common prefix

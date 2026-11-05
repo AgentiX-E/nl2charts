@@ -212,6 +212,25 @@ export interface Arm {
    */
   readonly plan?: boolean;
   /**
+   * Add the projection rule to the prompt: one rule line, no extra call, no card change.
+   *
+   * The lever comes from a reading rather than from an idea. Holding everything else fixed and
+   * changing only the model moved 127 cases down and 70 up (`8q`), and the shape of that
+   * movement was not a general loss of reasoning: `values` fell 461 → 444 while `column-count`
+   * rose 130 → 204. Of the 127 negative cases, 59 are filed under `column-count` — the statement
+   * ran, returned the right number of rows, and carried the wrong number of columns — so all 59
+   * repaired would put the reasoning model back at 61.55% against the plain one's 61.42%.
+   *
+   * `bench:bird:width` already priced the ceiling of a rule like this one by deleting the extra
+   * items from the select list and re-executing: it is an oracle's ceiling, so no implementable
+   * rule can beat it, which is what makes it able to decide the experiment before the dispatch
+   * rather than after it. The rule itself has to be written in the prompt's voice and apply to
+   * every question, so it says *which* columns rather than *fewer* columns — the width bucket is
+   * two-sided, and a rule that only shortened answers would trade `column-count` for the `narrow`
+   * half of the same bucket.
+   */
+  readonly projection?: 'asked';
+  /**
    * Generate by decomposition: sub-questions with their own statements, then the answer.
    *
    * Not `plan`. A plan is written in an earlier call and carried in, and it measured
@@ -741,6 +760,12 @@ export const ARMS: readonly Arm[] = [
   // write before it writes one that expresses them. One lever, one call, aimed at the largest
   // failure class the ladder found — 16.1-18.8pp where a gold filter's column is absent.
   { name: 'inline+evidence+audit', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', audit: 'conditions' },
+  // One lever from `inline+evidence`, and the only one here that changes no card and spends no
+  // call: a rule line about which columns the answer carries. It exists because the model
+  // comparison put the largest negative term on `column-count` (130 → 204) while the same bucket
+  // is already a fifth of this arm's no-answer corpus, so "the projection is the finding" is a
+  // hypothesis with a bucket, a ceiling and a rule — not a hunch.
+  { name: 'inline+evidence+projection', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', projection: 'asked' },
   // The same prompt with the card cut to the columns the model names, in one call before the
   // statement. One lever from `inline+evidence`, and the only card-cutting arm here whose rule
   // is not the lexical linker: `select-prune` prices the join closure and loses 1.4pp, this one
@@ -1195,6 +1220,10 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   // the number exists is how an arm acquires a verdict it never earned.
   'inline+evidence+samples-gold': 'the same sampler narrowed to the columns the gold statement filters on: an oracle, so its delta is a ceiling for the family and not an achievable one — run it when a column rule is proposed, never as a candidate',
   'inline+evidence+samples-wide': "the same lever with MAC-SQL's rule instead of ours: six most-frequent values of every non-key column, a small numeric dictionary included, a date collapsed to one, NULL first — dispatched to price the competitor's block on our cases, and until that artifact exists this note is the question rather than the verdict",
+  // Not "measured" — it has not been dispatched. The note states the question and the criterion,
+  // because an arm that acquires a verdict before its run is an arm whose number nobody can check
+  // and whose next reader will cite.
+  'inline+evidence+projection': "one rule line about which columns the answer carries, and nothing else: the model comparison put its largest negative term on `column-count` (130 → 204, against `values` 461 → 444) and 59 of its 127 negative cases are in that bucket, so the pre-registered criterion is `column-count` down with `values` not up, with accuracy read against the dev split's 2.30pp MDE rather than against the bucket alone",
   // The condition rather than the block, and the one trigger of their refiner's three that is both
   // true and ours. `agents.ts` counts it firing on 26 of the 496 answers (5.2%) and on no gold
   // statement, so here it is exact: every fire is a wrong answer. Its size, though, comes from the
@@ -1342,6 +1371,10 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   // result, one extra call, same prompt and same hints. The only pair in this table whose
   // mechanism fires before anything is executed.
   ['inline+evidence', 'inline+evidence+audit'],
+  // One lever from the plain single call, and the cheapest one in this table: one rule line
+  // about the projection, no extra call and no card change. The pair exists so the delta is
+  // attributable to the sentence rather than to a prompt that grew somewhere else too.
+  ['inline+evidence', 'inline+evidence+projection'],
   ['vote', 'select'],
   // Where the candidates come from, held against how many there are: same count, same
   // selector, different prompts.
@@ -3925,6 +3958,26 @@ export function renderableArm(arm: Arm): boolean {
   );
 }
 
+/**
+ * The projection rule, as one line in the prompt's own voice.
+ *
+ * "Exactly the columns the question asks for, in the order it names them" — not "fewer columns",
+ * because the bucket this rule is aimed at is two-sided: a statement with too few columns fails
+ * in the same bucket as one with too many, and a rule that only shortened answers would move
+ * cases from one side to the other and call the movement a fix. "Do not add an identifier column
+ * to make rows distinguishable" names the most common way a correct projection grows: a grouped
+ * answer that returns the grouping key plus the aggregate, or a list answer that returns the id
+ * beside the label.
+ *
+ * `bench:bird:width` priced the ceiling by deleting the extra items and re-executing, so this
+ * sentence is the implementable half of a lever whose upper bound is already known. It is stated
+ * as a requirement on the answer rather than as a warning about a failure, because the other
+ * three rules in the prompt are requirements and a rule phrased as a prohibition reads as an
+ * exception to them.
+ */
+export const PROJECTION_RULE =
+  'Select exactly the columns the question asks for, in the order it names them. Do not add an identifier column to make rows distinguishable, and do not add a column the question does not mention.';
+
 export function promptFor(arm: Arm, question: BirdQuestion, blocks: PromptBlocks = {}): PromptOptions {
   const { synthesized, definitions, retrieved, demonstrations, values } = blocks;
   const profile = arm.profile === 'adaptive' ? choosePromptProfile(question.question) : undefined;
@@ -3938,8 +3991,10 @@ export function promptFor(arm: Arm, question: BirdQuestion, blocks: PromptBlocks
           : undefined;
   // The intent rule joins the arm's own notes rather than replacing them: the notes are the
   // shape-specific instructions the card was chosen for, and an arm that dropped them would differ
-  // from its parent by two things.
-  const notes = [...(profile?.notes ?? []), ...(arm.intent === 'query' ? [INTENT_RULE] : [])];
+  // from its parent by two things. The projection rule joins them the same way, and for the same
+  // reason — a rule that replaced the profile's notes would be a different lever from the one its
+  // name claims.
+  const notes = [...(profile?.notes ?? []), ...(arm.intent === 'query' ? [INTENT_RULE] : []), ...(arm.projection === 'asked' ? [PROJECTION_RULE] : [])];
   return {
     dialect: 'SQLite',
     // The inline arm is a placement experiment: the same sentences, attached to
@@ -3950,7 +4005,7 @@ export function promptFor(arm: Arm, question: BirdQuestion, blocks: PromptBlocks
     foreignKeys: profile?.foreignKeys ?? arm.notes,
     samples: arm.samples !== undefined,
     schemaLines: BIRD_SCHEMA_LINES,
-    ...(profile === undefined && arm.intent !== 'query' ? {} : { notes }),
+    ...(profile === undefined && arm.intent !== 'query' && arm.projection !== 'asked' ? {} : { notes }),
     ...(arm.definitions !== undefined && definitions !== undefined && definitions.length > 0 ? { definitions } : {}),
     ...(evidence === undefined || evidence.length === 0 ? {} : { evidence }),
     ...(arm.demonstrations === true && demonstrations !== undefined && demonstrations.length > 0

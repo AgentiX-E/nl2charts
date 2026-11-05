@@ -45,6 +45,7 @@ import {
   resolveLimit,
   parseMixedSource,
   promptFor,
+  PROJECTION_RULE,
   readPinnedDefinitions,
   repairAccounting,
   resolveArm,
@@ -59,7 +60,7 @@ import type { BirdQuestion } from '../eval/bird/data.js';
  * delta cannot be attributed to anything else. A future edit that adds a second
  * change to a pair turns this red before it turns the benchmark unreadable.
  */
-const LEVERS = ['notes', 'evidence', 'repairs', 'linking', 'profile', 'definitions', 'focus', 'interpret', 'vote', 'demonstrations', 'select', 'values', 'plan', 'repairFeedback', 'shapeGuard', 'mixed', 'pool', 'pairwise', 'sourcesVisible', 'judge', 'judgeFormat', 'emptyRetry', 'audit', 'decompose', 'samples', 'canonical', 'shuffle', 'prune', 'columnSelect', 'agreement', 'sourceLinking', 'sourceRepairs', 'reconcile', 'reconcileAdopt', 'sampleColumns', 'dissent', 'dissentVerify', 'masked', 'intent', 'selectRule'] as const;
+const LEVERS = ['notes', 'evidence', 'repairs', 'linking', 'profile', 'definitions', 'focus', 'interpret', 'vote', 'demonstrations', 'select', 'values', 'plan', 'repairFeedback', 'shapeGuard', 'mixed', 'pool', 'pairwise', 'sourcesVisible', 'judge', 'judgeFormat', 'emptyRetry', 'audit', 'decompose', 'samples', 'canonical', 'shuffle', 'prune', 'columnSelect', 'agreement', 'sourceLinking', 'sourceRepairs', 'reconcile', 'reconcileAdopt', 'sampleColumns', 'dissent', 'dissentVerify', 'masked', 'intent', 'selectRule', 'projection'] as const;
 
 function changedLevers(left: Arm, right: Arm): string[] {
   const levers = LEVERS.filter((lever) => left[lever] !== right[lever]);
@@ -447,6 +448,40 @@ describe('the chain that actually runs', () => {
       { audit: { fired: true, named: 0, rewritten: false } },
     ];
     expect(() => assertAuditFired('inline+evidence+audit', runs as never, 2)).not.toThrow();
+  });
+
+  /**
+   * The projection rule is one line and one lever, and this is the test that says so.
+   *
+   * The failure it prevents is a rule that arrives as part of a second change — the arm reads
+   * `projection: 'asked'`, and the prompt it renders also differs in its card, its notes or its
+   * call count. Then a delta in `column-count` cannot be attributed to the sentence, which is the
+   * only thing the experiment was for.
+   */
+  it('keeps the projection pair one lever apart, and puts the rule in the prompt', () => {
+    const parent = ARMS.find((arm) => arm.name === 'inline+evidence') as Arm;
+    const projection = ARMS.find((arm) => arm.name === 'inline+evidence+projection') as Arm;
+    expect(parent.projection).toBeUndefined();
+    expect(projection.projection).toBe('asked');
+    expect({ ...projection, projection: undefined, name: parent.name }).toEqual(parent);
+    expect(PAIRS).toContainEqual(['inline+evidence', 'inline+evidence+projection']);
+    // Declared is not rendered: the parent's prompt must not carry the line, and the arm's must
+    // end with it. Both directions, because a rule appended to every prompt is not a lever.
+    const sent = promptFor(projection, question).notes ?? [];
+    const unsent = promptFor(parent, question).notes ?? [];
+    expect(sent).toContain(PROJECTION_RULE);
+    expect(unsent).not.toContain(PROJECTION_RULE);
+    expect(sent[sent.length - 1]).toBe(PROJECTION_RULE);
+  });
+
+  it('asks for exactly the columns the question names, in both directions', () => {
+    // The bucket this rule is aimed at is two-sided — too many columns and too few are the same
+    // shape — so a rule that only shortened answers would move cases inside the bucket and report
+    // the movement as a fix. The text therefore says *which* columns, and the two assertions are
+    // about the two words that do that work.
+    expect(PROJECTION_RULE).toContain('exactly the columns the question asks for');
+    expect(PROJECTION_RULE).toContain('in the order it names them');
+    expect(PROJECTION_RULE).not.toMatch(/\bfewer\b/);
   });
 
   it('keeps the audit pair one lever apart', () => {
