@@ -209,6 +209,21 @@ Four things worth knowing before you turn it on:
 
 ### If you will not pay the fourth call
 
+**This is the shipped default.** `aimed-3` is three candidates and the free rule; `aimed-4` is the
+same three candidates and the paid selector. The reading below is why the fourth call was retired
+from the default — and the arm that runs it end to end is `select-mixed-rule`, whose artifact makes
+the rule's score checkable against the candidates it read.
+
+```ts
+import { STRATEGIES, strategy } from '@agentix-e/nl2charts-ai';
+
+strategy('aimed-3');  // { calls: 3, candidates: 3, selector: 'shortest', temperature: 0.7, ... }
+strategy('aimed-4');  // { calls: 4, candidates: 3, selector: 'model',    temperature: 0.7, ... }
+```
+
+Pin one or the other; both are values, so the choice can be diffed, rolled back and put in a
+baseline. The rest of this section is the measurement behind the default.
+
 The selector is one generation a case, and on this repository's dev split it returns
 what the candidates already imply. Read from the artifact of `41767687844` (1,532
 questions, three prompts), a rule that costs nothing scores at least as much:

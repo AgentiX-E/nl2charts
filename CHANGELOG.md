@@ -7,6 +7,37 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **The free selector became the shipped default, and the run that proves it is a measurement
+  rather than a re-derivation.** `Strategy.selector` is now one name — `'none' | 'first' |
+  'shortest' | 'modal' | 'model'` — instead of a boolean plus a rule, which had allowed the state
+  "a selector that is also a rule". `aimed-3` is three calls and `shortest`; `aimed-4` keeps the
+  fourth call and the model, and stays in the table as the ablation. `admissible` gates only
+  `aimed-4`, because the rule reads executed rows and has no reply format to fail. The arm
+  `select-mixed-rule` runs it end to end and records the slot the rule took on every case. Reading
+  (`41947376305`, 1,532 dev questions, both arms in one dispatch, same endpoint and judge):
+  `select-mixed` **967 = 63.12%** at **3.996** calls a case against `select-mixed-rule`
+  **980 = 63.97%** at **3.000**, with **11.4% fewer prompt tokens**. Question-paired that is
+  +0.85pp at p = 0.1980 (50:37), under the artifact's 1.71pp resolution; on the parent's own
+  candidates the same-pool pairing is +0.65pp at p = 0.2820 (40:30). **The pre-registered
+  significance criterion is not met and is recorded as not met** — what the round establishes is
+  non-inferiority at one call less, plus the empty-pool fallback exercised on 53 cases where every
+  candidate returned nothing. Handing the rule arm's artifact back to `bench:bird:consensus`
+  reproduces its score case for case (63.97% against 63.97%, 0 won / 0 lost, p = 1.0000), which is
+  the identity that makes the offline rule instrument and the pipeline the same object.
+- **Three guards for a selector that spends nothing.** `assertRuleSelection` refuses a rule with no
+  candidate set and a rule declared beside a lever only the model branch reads (`pairwise`,
+  `judge`, `agreement`, `reconcile`, `sourcesVisible`, `dissentVerify`, `canonical`);
+  `assertReportComplete` refuses a rule arm whose row carries no `selectorRule` funnel, because its
+  `calls.mean` equals the candidate count whether the rule ran or the vote did; `BIRD1` refuses a
+  rule arm that reports more calls than candidates or prices decisions it never bought. Both
+  directions of the gate rule have a self-test.
+- **`split` is a coordinate of the competitor comparison.** The workflow offers `minidev` and
+  `dev`, keys the dataset cache by split, and both adapters resolve their dataset root from
+  `BIRD_SPLIT` and refuse a third value before the first model call. The `limit` default is blank
+  rather than 25, because blank is what "the whole split" means to the runner and a non-empty
+  default silently decided the sample size once already. The contradiction this exists to test is a
+  sign: MAC-SQL leads by 4.84pp on Mini-Dev and our published dev row leads by four.
+
 - **A zero-row statement is repaired by looking the value up, and the lookup is free.** The state
   was priced last round: on 496 dev questions whose databases are in this checkout, 19 (3.83%) had
   every candidate return nothing, the selector was right on none of them, and 18 of the 19 had

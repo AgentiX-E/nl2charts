@@ -4415,20 +4415,26 @@ Three details make the gate mean something:
 Every number above was taken on one backbone. A deployment that swaps it keeps the code and
 loses the calibration, and the instinct — re-run the benchmark — is 1,532 questions times four
 calls, which no deployment can do. `packages/ai/src/adapt.ts` answers the smaller question
-instead: of four bounded strategies, which one should this model run? It decides in three layers
+instead: of five bounded strategies, which one should this model run? It decides in three layers
 that cost nothing, nothing, and one call, and the last layer only fires when two Wilson intervals
 separate.
 
 That rule is untested until someone prices the way it can be wrong, which is what
-`bench:bird:adapt` does. The four strategies map onto the four arms of the dev split — the same
-run, the same anchor, so the cost of a cold start is a subtraction rather than another benchmark:
+`bench:bird:adapt` does. The five strategies map onto five arms of the dev split — the same run,
+the same anchor, so the cost of a cold start is a subtraction rather than another benchmark:
 
 | strategy | arm | calls |
 | --- | --- | --- |
 | `single-lean` | `names` | 1 |
 | `single-full` | `metadata+evidence` | 1 |
 | `repeat-3` | `select` | 3 |
-| `aimed-3` | `select-mixed` | 4 |
+| `aimed-3` | `select-mixed-rule` | 3 |
+| `aimed-4` | `select-mixed` | 4 |
+
+The readings below were produced while the four-call arm was still named `aimed-3`; they are
+`aimed-4`'s numbers and the column here says so. Renaming rather than re-measuring is the honest
+move — the arm did not change, its name did — and the distinction matters, because `aimed-3` is now
+the rule arm: one call cheaper and 0.85pp ahead on the same split.
 
 The harness calibrates on the first N questions, freezes the verdict, and scores it on the rest.
 Three numbers, and the difference between them is the whole point: **chosen** is what a
@@ -4440,11 +4446,11 @@ deterministic shuffle as a control:
 
 | window | chosen | accuracy | best fixed | accuracy | oracle | regret | regret (shuffled) |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 12 | `single-full` | 60.9% | `aimed-3` | 62.1% | 68.6% | 1.18pp | 1.12pp |
-| 24 | `single-full` | 61.0% | `aimed-3` | 62.3% | 68.7% | **1.33pp** | **1.13pp** |
-| 48 | `single-full` | 61.4% | `aimed-3` | 62.7% | 69.1% | 1.28pp | 1.28pp |
-| 96 | `single-full` | 61.9% | `aimed-3` | 63.5% | 69.5% | 1.60pp | 1.25pp |
-| 192 | `single-full` | 62.3% | `aimed-3` | 63.7% | 69.5% | 1.42pp | 1.57pp |
+| 12 | `single-full` | 60.9% | `aimed-4` | 62.1% | 68.6% | 1.18pp | 1.12pp |
+| 24 | `single-full` | 61.0% | `aimed-4` | 62.3% | 68.7% | **1.33pp** | **1.13pp** |
+| 48 | `single-full` | 61.4% | `aimed-4` | 62.7% | 69.1% | 1.28pp | 1.28pp |
+| 96 | `single-full` | 61.9% | `aimed-4` | 63.5% | 69.5% | 1.60pp | 1.25pp |
+| 192 | `single-full` | 62.3% | `aimed-4` | 63.7% | 69.5% | 1.42pp | 1.57pp |
 | 1,200 | `single-full` | 62.3% | `repeat-3` | 63.0% | 69.6% | — | 0.60pp |
 
 **The pre-registered criterion fails.** It said regret below one point at a window of 24; the
@@ -4490,7 +4496,7 @@ calibrate harder, because no single strategy can reach it. The obvious next move
 reads the question and picks a strategy. `bench:bird:route` prices that move before anyone builds it,
 off the artifact the run already wrote and without spending a model call.
 
-The constraint is that a router has to cost the same. Choosing `aimed-3` over `single-full` is not a
+The constraint is that a router has to cost the same. Choosing `aimed-4` over `single-full` is not a
 routing decision, it is a purchase of three more calls; the honest question is whether a rule can
 choose **within one call**, among the three cards that all send a single request. On dev those three
 earn 61.16% together, and a per-question oracle over them earns 67.62% — so **6.46pp** is the entire
@@ -7562,3 +7568,68 @@ paired discordance is 58 against 34 — and it is not a closing.
    numbers cannot both be about method until one of them is measured on the other split, and the
    instrument that would do it — a `split` input on the competitor workflow — is the next dispatch's
    first line of work.
+
+## The fourth call, retired by its own candidates
+
+`I-96`. Every published selector reading in this repository was taken with the same shape: three
+candidates, and a fourth call that reads them and answers with an index. The instrument that prices
+the *rules* (`bench:bird:consensus`) had been saying for three rounds that the call was not paying
+for itself — `shortest` scored 63.64% against the selector's 62.79% on 1,532 dev questions, and
+63.71% against 61.42% on the strong pool (+2.29pp, p = 0.0030, 38 wins 19 losses). The product kept
+the fourth call anyway, and it was right to: a rule reading taken from an artifact is a
+**derivation**. It applies the rule to the candidates a previous run recorded, and it is only right
+if a future run draws the same candidates and ranks them the same way.
+
+So the delivery is not another selector. It is the derivation turned into a measurement.
+
+- `Strategy.selector` became one name — `'none' | 'first' | 'shortest' | 'modal' | 'model'` —
+  instead of a boolean plus a rule, because the pair allowed the state "a selector that is also a
+  rule", which no executor can honour.
+- `aimed-3` is three calls with `shortest`; `aimed-4` keeps the fourth call and the model. The
+  retired configuration stays in the table, because the reading that retired it is one split on one
+  backbone and a strategy that can be re-run is what keeps a finding falsifiable.
+- `admissible` now gates only `aimed-4`: the rule reads executed rows, so there is no reply format
+  it can fail, and a gate about a call a strategy does not make is a gate about the wrong strategy.
+- `select-mixed-rule` runs it end to end — same three prompts, same card, same candidates, same
+  judge, one call less — and writes the slot the rule took on every case (`selectedByRule`), which
+  is what lets the run and the offline device be checked against each other instead of beside each
+  other.
+
+### What the run says
+
+`41947376305`, both arms in one dispatch, 1,532 dev questions, `deepseek-chat`, `eval/bird/oracle.py`
+executing and `judgeOfficial` judging:
+
+| arm | calls / case | correct | accuracy | ceiling | prompt tokens / case |
+|---|---|---|---|---|---|
+| `select-mixed` (the model chooses) | **3.996** | 967 | 63.12% | 67.04% | 3,539 |
+| `select-mixed-rule` (`shortest` chooses) | **3.000** | **980** | **63.97%** | 66.91% | **3,137** |
+
+**+13 cases, one call less, and 11.4% fewer prompt tokens.** Question-paired, that is +0.85pp
+(50 wins, 37 losses) at exact McNemar p = 0.1980 — under this artifact's own resolution of 1.71pp,
+so the *sign* is all this run establishes about superiority. What it establishes about cost is not
+statistical: the fourth call is gone (3.996 → 3.000), the bill fell with it, and the candidate
+draws are the same three prompts.
+
+The pre-registered criterion was stricter than the reading: **① paired ≥ +0.5pp at p < 0.05**. On
+the same pool that criterion is +0.65pp at p = 0.2820 (40:30, `shortest` 63.77% against the
+selector's 63.12% on the parent's own candidates), and on the arms it is +0.85pp at p = 0.1980.
+**① is not met, and it is recorded as not met.** The decision to ship the rule rests on the reading
+this instrument exists to produce — a call-free rule within the split's MDE of the paid one, which
+means the paid one buys less than the split can resolve — plus the one reading that was
+significant, the strong pool's +2.29pp at p = 0.0030. ②③④ are met: 3.000 calls, the whole 1,532
+questions, and the fallback exercised on **53 cases where every candidate returned nothing** (the
+rule still decided, which is what makes it a total function rather than a rule with a hole).
+
+**The two instruments agree exactly, and that is the reading this round was built for.** Handing
+the rule arm's own artifact back to `bench:bird:consensus` reproduces its score case for case:
+`shortest` 63.97% against the arm's 63.97%, **0 won, 0 lost, p = 1.0000** on all 1,532. A rule that
+the offline device prices and a rule the pipeline runs are now the same object, measured on the same
+candidates — which is the difference between a derivation and a measurement.
+
+| check | what it would have caught |
+|---|---|
+| `assertRuleSelection` | a rule with no candidate set, or a rule declared beside a lever only the model branch reads (`pairwise`, `judge`, `agreement`, `reconcile`, `sourcesVisible`, `dissentVerify`, `canonical`) — priced and never run |
+| `assertReportComplete` | a rule arm whose row carries no funnel: its `calls.mean` equals the candidate count whether the rule ran or the vote did, so nothing else can say the lever acted |
+| `BIRD1` | a rule arm that reports more calls than candidates (a four-call arm wearing the rule's name) or prices decisions it never bought (a bill copied from its parent) |
+

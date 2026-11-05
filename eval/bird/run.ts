@@ -2961,7 +2961,17 @@ export function assertDissentFired(
  *
  * Declaration-time, so it costs nothing and refuses before a call is spent.
  */
-const MODEL_ONLY_LEVERS = ['agreement', 'dissentVerify', 'judge', 'judgeFormat', 'pairwise', 'reconcile', 'reconcileAdopt', 'sourcesVisible'] as const;
+const MODEL_ONLY_LEVERS = [
+  'agreement',
+  'canonical',
+  'dissentVerify',
+  'judge',
+  'judgeFormat',
+  'pairwise',
+  'reconcile',
+  'reconcileAdopt',
+  'sourcesVisible',
+] as const;
 
 export function assertRuleSelection(arm: Pick<Arm, 'name' | 'select' | 'selectRule'> & Partial<Arm>): void {
   if (arm.selectRule === undefined) return;

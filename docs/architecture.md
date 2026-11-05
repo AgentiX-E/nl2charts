@@ -561,7 +561,7 @@ does not exist, the guard pays.
 ### Adaptation without a benchmark
 
 A deployment that swaps the backbone loses the calibration and keeps the code. The layer that
-handles this is `packages/ai/src/adapt.ts`, and its unit of change is a `Strategy` — one of four
+handles this is `packages/ai/src/adapt.ts`, and its unit of change is a `Strategy` — one of five
 fixed configurations, each a value a caller can print, pin, diff and roll back:
 
 | strategy | calls | what it spends the calls on |
@@ -569,15 +569,30 @@ fixed configurations, each a value a caller can print, pin, diff and roll back:
 | `single-lean` | 1 | the card without curated notes |
 | `single-full` | 1 | the card with notes, which is the default |
 | `repeat-3` | 3 | three samples, decided by their result sets |
-| `aimed-3` | 4 | three candidates from three angles, plus a selector |
+| `aimed-3` | 3 | three candidates from three angles, and the free rule `shortest` chooses |
+| `aimed-4` | 4 | the same three candidates, and the model chooses |
+
+`aimed-3` used to be `aimed-4`. The fourth call was measured on its own candidates and lost:
+`shortest` scored 63.64% against the selector's 62.79% on 1,532 dev questions, and 63.71% against
+61.42% on the strong pool (+2.29pp, p = 0.0030, 38 wins 19 losses) — at three calls instead of
+four. A default that keeps a call the measurement retired is a default nobody measured. `aimed-4`
+stays in the table rather than being deleted, because the reading that retired it is one split on
+one backbone, and a configuration that can be re-run is what keeps the finding falsifiable.
+
+The three rules (`first`, `shortest`, `modal`) read the candidates the arm already executed, so
+they have no reply to parse. `shortest` ranks by characters of SQL among the candidates that
+returned rows; a set where every candidate returned nothing is still ranked, because a question
+whose answer really is empty has no other reading.
 
 Three layers choose among them, cheapest first, and each one can stop the search:
 
 1. `probeProtocol` reads the first contact. A 400 or a 422 is a statement about the *request* —
    usually a temperature field a reasoning model will not accept — and costs one retry with the
    field omitted. An answer is a statement about the model, and its shape is free evidence.
-2. `admissible` drops `aimed-3` when the model's replies never parse as a choice: a selector
-   spends a call asking for a label, and prose is not a label.
+2. `admissible` drops `aimed-4` when the model's replies never parse as a choice: that strategy
+   spends a call asking for a label, and prose is not a label. `aimed-3` is never dropped, and
+   that is the point of it — the rule reads rows, so there is no reply shape it can fail, and a
+   gate about a call a strategy does not make would be a gate about the wrong strategy.
 3. `chooseStrategy` (and its online form, `createObserver`) switches only when two Wilson
    intervals separate, after at least eight observations. The same interval the report uses, so
    the runtime decision and the published number cannot disagree about what "better" means.

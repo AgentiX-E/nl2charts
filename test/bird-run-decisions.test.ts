@@ -1566,6 +1566,9 @@ describe('the free selector', () => {
   it('refuses an arm that names a rule without a candidate set, or beside a model-only lever', () => {
     expect(() => assertRuleSelection({ name: 'x', selectRule: 'shortest' })).toThrow(/without a candidate set/);
     expect(() => assertRuleSelection({ name: 'x', select: true, selectRule: 'shortest', pairwise: true })).toThrow(/never run/);
+    // `canonical` rewrites the text the selector is shown; a rule reads the statements the engine
+    // ran, so the rewrite would be declared, priced and consumed by nobody.
+    expect(() => assertRuleSelection({ name: 'x', select: true, selectRule: 'shortest', canonical: true })).toThrow(/never run/);
     expect(() => assertRuleSelection({ name: 'x', select: true, selectRule: 'shortest' })).not.toThrow();
     // A model-selector arm is unaffected: it may declare all of them.
     expect(() => assertRuleSelection({ name: 'x', select: true, pairwise: true, judge: 'second' })).not.toThrow();

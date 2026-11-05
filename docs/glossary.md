@@ -399,10 +399,20 @@ second engine, with the failure taxonomy. Not an accuracy number: it answers
 (Python `sqlite3` for BIRD). Benchmarks execute through it so the judge compares
 tuples, including duplicate column names and duplicate rows.
 
-**Strategy** — One of four fixed ways to run a question, priced in calls: `single-lean` (one call,
+**Strategy** — One of five fixed ways to run a question, priced in calls: `single-lean` (one call,
 card without notes), `single-full` (one call, card with notes; the default), `repeat-3` (three
-samples, decided by their result sets), `aimed-3` (three candidates from three angles plus a
-selector). A strategy is a value, so it can be printed, pinned, diffed and rolled back.
+samples, decided by their result sets), `aimed-3` (three candidates from three angles, and the free
+rule `shortest` chooses), `aimed-4` (the same three candidates, and the model chooses). A strategy
+is a value, so it can be printed, pinned, diffed and rolled back. `aimed-3` and `aimed-4` differ by
+one thing — who chooses — which is why they are the pair a selector reading is taken on.
+
+**Free selector** — A rule that picks among candidates using only what the arm already computed:
+`shortest` (fewest characters of SQL), `first` (the slot the prompt offered first), `modal` (the
+result set most candidates agree on). It costs no call and cannot fail, since there is no reply to
+parse. All three rank only the candidates that returned rows, and fall back to the whole set when
+every candidate returned nothing — which is why a question whose answer really is empty still gets
+an answer. The counterpart is the **paid selector**: a fourth call that shows the candidates to the
+model and asks for an index.
 
 **Cold start** — The cost of choosing a strategy from the first few questions a deployment sees
 rather than from a benchmark. Measured as *regret*: what the best strategy would have earned on the
