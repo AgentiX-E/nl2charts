@@ -199,6 +199,95 @@ export function missingConditions(gold: string, predicted: string): string[] {
   return conditionsOf(gold).filter((atom) => !hasCounterpart(atom, written));
 }
 
+/** The tables each column name is declared on, and the columns each table declares. */
+export interface SchemaIndex {
+  /** Column name, lowercased, to the tables that declare it: one name can live on several. */
+  readonly owners: ReadonlyMap<string, ReadonlySet<string>>;
+  /** Table name, lowercased, to the columns it declares. */
+  readonly columnsOf: ReadonlyMap<string, ReadonlySet<string>>;
+}
+
+/**
+ * Which table every column of a database belongs to, keyed by database.
+ *
+ * A column name is not unique across a schema — `county` exists on `schools` and on `frpm` — so the
+ * question "was the value compared on the same table" cannot be answered by the name alone. BIRD's
+ * table file carries columns as `[tableOrdinal, columnName]`, which is exactly this map, and both
+ * directions are built from it because both questions get asked: which tables hold this column, and
+ * does this table hold this column at all.
+ */
+export function schemaIndex(tables: ReadonlyMap<string, { readonly tableNames: readonly string[]; readonly columnNames: readonly (readonly [number, string])[] }>): Map<string, SchemaIndex> {
+  const out = new Map<string, SchemaIndex>();
+  for (const [db, table] of tables) {
+    const owners = new Map<string, Set<string>>();
+    const columnsOf = new Map<string, Set<string>>();
+    for (const [ordinal, name] of table.columnNames) {
+      const tableName = table.tableNames[ordinal];
+      if (tableName === undefined) continue;
+      const column = name.toLowerCase();
+      const owner = tableName.toLowerCase();
+      owners.set(column, (owners.get(column) ?? new Set<string>()).add(owner));
+      columnsOf.set(owner, (columnsOf.get(owner) ?? new Set<string>()).add(column));
+    }
+    out.set(db.toLowerCase(), { owners, columnsOf });
+  }
+  return out;
+}
+
+export type LinkLevel = 'same-table' | 'other-table' | 'nowhere' | 'unresolved';
+
+export function linkLevelOf(
+  atom: string,
+  written: readonly string[],
+  schema: SchemaIndex | undefined,
+  tables: readonly string[] = [],
+): LinkLevel {
+  if (schema === undefined) return 'unresolved';
+  const literals = literalsOf(atom);
+  const column = atomIdentifiers(atom).map((token) => token.split('.').pop() as string)[0];
+  if (literals.length === 0 || column === undefined) return 'unresolved';
+  // Where each of the atom's values is compared: a predicate that names the value, whatever column it
+  // names. This is the same test `gapKindOf` uses to call a condition `substituted`, so a case this
+  // function calls `nowhere` can never have been called `substituted`.
+  const sites = written.filter((other) => {
+    const theirs = literalsOf(other);
+    return literals.some((literal) => theirs.includes(literal));
+  });
+  if (sites.length === 0) return 'nowhere';
+  const holders = schema.owners.get(column.toLowerCase());
+  if (holders === undefined) return 'unresolved';
+  // Qualified identifiers only: an unqualified `county = 'x'` cannot be placed on a table without
+  // re-parsing the statement's FROM clause, and a reader that guessed would be inventing the very
+  // distinction this function exists to measure.
+  let qualified = false;
+  for (const site of sites) {
+    for (const token of atomIdentifiers(site)) {
+      const [table, name] = token.split('.');
+      if (name === undefined || table === undefined) continue;
+      qualified = true;
+      if (holders.has(table.toLowerCase())) return 'same-table';
+    }
+  }
+  if (qualified) return 'other-table';
+  // A statement that reads one table is not ambiguous about a column that table declares, and most
+  // single-table statements never qualify anything: `where county = 'x'` is `schools.county` when
+  // `schools` is all the statement reads. Two conditions, and both are checked: exactly one table,
+  // and the column really is one of its own. An unqualified name the table does not declare is not
+  // placed on it — that would be inventing the distinction this function exists to measure.
+  if (tables.length === 1) {
+    const only = (tables[0] as string).toLowerCase();
+    const declared = schema.columnsOf.get(only);
+    const named = sites.flatMap((site) =>
+      atomIdentifiers(site)
+        .filter((token) => !token.includes('.'))
+        .map((token) => token.toLowerCase()),
+    );
+    if (declared === undefined || !named.some((token) => declared.has(token))) return 'unresolved';
+    return holders.has(only) ? 'same-table' : 'other-table';
+  }
+  return 'unresolved';
+}
+
 /**
  * The columns a statement filters on, lowercased and deduplicated in statement order.
  *

@@ -63,7 +63,28 @@ cannot be argued with.
   `statementShape().text` drops case inside quotes because it compares shapes; `identical` now also
   requires the literals to match case-sensitively, and both cases moved to `literal`.
 
+### Fixed
+- **A condition breakdown that counted 11 questions from another bucket.** `conditionKindOf` took the
+  gap kind as an optional parameter, and its guard was `gap !== undefined && gap !== 'condition'` — so
+  a selection failure, which has no gap at all, ran the whole taxonomy and was filed anyway. On the dev
+  pairing that put **11 `pool: held` cases** into the `condition` breakdown: the instrument printed
+  **21 substituted / 18 unstated / 6 absent** with a residual of 16, while its own per-case records said
+  **16 / 16 / 2** and a residual of 27. The right numbers were the ones in the document, computed by
+  hand — a right answer with no instrument behind it, which is the failure mode nothing catches. The
+  parameter is now required (the misuse is a type error), the call site computes a kind only when a gap
+  exists, and `strayConditionKinds` is checked on every run and printed as a problem line: a taxonomy
+  applied outside its population is a sentence in the output, not a plausible total.
+
 ### Added
+- **`bench:competitors:attribute` now splits a `substituted` value by the table it landed on**, and
+  prices the `table` bucket beside it. A value on another column of the same table is a column choice;
+  a value on another table's column is the table never being in view, and the two fixes cost different
+  things. The split is read from BIRD's manifest (column → tables and table → columns), placed by the
+  statement's own table list when there is exactly one, and reported as `unresolved` when the reader
+  cannot tell — `account_id` is declared on five tables of `financial`, so the name alone decides
+  nothing. On dev: **same table 9, another table 3, unresolved 4**, and the `table` bucket (17) against
+  the table-level cases (3) has an **empty intersection** with a union of **20 = 1.31pp**, inside the
+  2.93pp resolution. **`8p` closes without a dispatch.**
 - **`bench:bird:rewrite`: what a deterministic rewrite of the statement is worth, priced by
   re-execution.** It reads an artifact, re-executes every case's gold and the statement the arm
   recorded, and **refuses to price anything unless the recomputed pass count equals the arm's published

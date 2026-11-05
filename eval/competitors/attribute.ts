@@ -40,7 +40,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { judgeOfficial } from '@agentix-e/nl2charts-devkit';
-import { loadQuestions } from '../bird/data.js';
+import { loadQuestions, loadTables } from '../bird/data.js';
 import type { BirdQuestion } from '../bird/data.js';
 import { createOracle } from '../bird/oracle.js';
 import type { Oracle } from '../bird/oracle.js';
@@ -48,7 +48,8 @@ import { requireArm } from '../bird/presence.js';
 import { resolveLayout } from '../bird/run.js';
 import type { BirdLayout } from '../bird/run.js';
 import { statementShape } from '../bird/sql-shape.js';
-import { missingGaps } from '../bird/conditions.js';
+import { linkLevelOf, missingGaps, schemaIndex } from '../bird/conditions.js';
+import type { LinkLevel, SchemaIndex } from '../bird/conditions.js';
 import { parsePredictions } from './predictions.js';
 import { readIdMap } from './subset.js';
 
@@ -128,12 +129,33 @@ export interface AttributedCase {
    * population it was not defined on.
    */
   readonly written?: ConditionKind;
+  /**
+   * For a `substituted` condition, whether the value was compared on a column of the **same table**
+   * as the one they filtered, or of another one.
+   *
+   * The two are different fixes and the bucket cannot be priced until they are separated: the first
+   * is a column choice inside a table that is already in the prompt, the second is the table never
+   * being in view at all. Both are schema linking in the literature, and a plan written against the
+   * word covers the wrong one with the wrong mechanism.
+   */
+  readonly link?: LinkLevel;
 }
 
 /** Where the value of a missing condition went, as `bench:bird:conditions` files it. */
 export type ConditionKind = 'substituted' | 'absent' | 'unstated';
 
 export const CONDITION_KINDS: readonly ConditionKind[] = ['absent', 'substituted', 'unstated'];
+
+/** The linking split, ordered from the widest fix to the narrowest. */
+export const LINK_LEVELS: readonly LinkLevel[] = ['other-table', 'same-table', 'nowhere', 'unresolved'];
+
+/** What each level costs to fix, in one clause, printed beside the count. */
+const LINK_MEANING: Readonly<Record<LinkLevel, string>> = {
+  'other-table': 'the table they filtered was not the one we filtered — schema linking',
+  'same-table': 'the table was right and the column was not — a column choice',
+  nowhere: 'no predicate of ours compares that value, so `substituted` would be a misreading',
+  unresolved: 'the schema cannot place the column, so this case is not measured',
+};
 
 /**
  * The single kind a case is filed under when its missing conditions disagree.
@@ -153,18 +175,76 @@ export const CONDITION_KINDS: readonly ConditionKind[] = ['absent', 'substituted
 export function conditionKindOf(
   reference: string | undefined,
   ours: string | undefined,
-  gap?: GapKind,
+  gap: GapKind,
 ): ConditionKind | undefined {
   // The gap kind is a parameter rather than a guard at the call site: a caller that asks this
   // question about a `table` or `window` gap would be filing a value that was never a condition,
   // and putting the check here is what keeps the answer empty instead of plausible.
-  if (gap !== undefined && gap !== 'condition') return undefined;
+  //
+  // It is **required**, and that is a fix rather than a signature choice. It used to be optional and
+  // the guard read `gap !== undefined && gap !== 'condition'`, so a caller that had no gap at all —
+  // a selection failure, where the pool held a correct statement and no gap was ever computed — ran
+  // the whole taxonomy and filed a condition kind anyway. On the dev reading that put 11 cases
+  // (`pool: held`) into the condition breakdown, printing 21 substituted / 18 unstated / 6 absent
+  // where the per-case records said 16 / 16 / 2, and shrinking the residual that means "the same
+  // column, another condition" from 27 to 16. Two tables from one run disagreed and the table on
+  // screen was the wrong one. An optional parameter that exists so a unit test can call the function
+  // without its precondition is a precondition the production caller can also skip.
+  if (gap !== 'condition') return undefined;
   if (reference === undefined || ours === undefined) return undefined;
   const kinds = new Set(missingGaps(reference, ours).map((gap) => gap.kind));
   if (kinds.size === 0) return undefined;
   if (kinds.has('absent')) return 'absent';
   if (kinds.has('substituted')) return 'substituted';
   return 'unstated';
+}
+
+/**
+ * The cases a condition breakdown would count although they never had a condition gap.
+ *
+ * The breakdown is printed immediately beneath the `condition` bucket and adds up to its size, so a
+ * case that slipped in from another bucket makes the four lines describe 45 questions while the line
+ * above them says 61 — and both numbers are small enough to look plausible. Keeping the rule a
+ * function is what makes it testable: a guard that only a bug can reach is a guard nobody runs.
+ */
+/**
+ * The linking level of a case whose gap is `substituted`.
+ *
+ * One case can have two substituted atoms pointing at different levels, and the strongest one names
+ * the case: a value that landed on another table's column is a table-level mistake even when a second
+ * value landed on a column of the right table. `unresolved` outranks `nowhere` because "not measured"
+ * and "measured as absent" are different sentences, and only one of them is about the statement.
+ */
+export function linkOfCondition(reference: string, ours: string, schema: SchemaIndex | undefined): LinkLevel {
+  const shape = statementShape(ours);
+  const levels = missingGaps(reference, ours)
+    .filter((gap) => gap.kind === 'substituted')
+    .map((gap) => linkLevelOf(gap.atom, shape.predicates, schema, shape.tables));
+  for (const level of ['other-table', 'same-table', 'unresolved', 'nowhere'] as const) {
+    if (levels.includes(level)) return level;
+  }
+  return 'nowhere';
+}
+
+export function strayConditionKinds(cases: readonly AttributedCase[]): AttributedCase[] {
+  return cases.filter((entry) => entry.written !== undefined && entry.gap !== 'condition');
+}
+
+/**
+ * The problem line for those cases, or nothing when there are none.
+ *
+ * A sentence rather than a count: the reader whose table is wrong needs to know *why* it is wrong,
+ * and the ids are what make it checkable. It is a function so the non-empty branch can be tested —
+ * the condition itself can no longer be produced by the pipeline, which is the point.
+ */
+export function strayKindProblems(cases: readonly AttributedCase[]): string[] {
+  const stray = strayConditionKinds(cases);
+  if (stray.length === 0) return [];
+  return [
+    `${String(stray.length)} case(s) carry a condition kind without a condition gap ` +
+      `(${stray.slice(0, 3).map((entry) => String(entry.id)).join(', ')}); the breakdown would count them, ` +
+      'so the total it prints is not the size of the bucket above it',
+  ];
 }
 
 export interface KindTally {
@@ -243,6 +323,10 @@ export interface AttributionOutcome {
   readonly reverse: readonly KindTally[];
   /** The `condition` bucket, split by where the missing value went. */
   readonly conditionKinds: readonly ConditionTally[];
+  /** The `substituted` half of that bucket, split by whether the column's table was the right one. */
+  readonly linking: readonly LinkTally[];
+  /** The `table` bucket and the table-level linking cases, as two populations with an intersection. */
+  readonly overlap: BucketOverlap;
   readonly components: readonly ComponentLift[];
   /** Groups of flags that split the questions identically: one event wearing several names. */
   readonly collinear: readonly CollinearFlags[];
@@ -255,6 +339,31 @@ export interface ConditionTally {
   readonly kind: ConditionKind;
   readonly cases: number;
   readonly points: number;
+}
+
+/** One level of the linking split, with its population and what it is worth in accuracy points. */
+export interface LinkTally {
+  readonly level: LinkLevel;
+  readonly cases: number;
+  readonly points: number;
+}
+
+/**
+ * The `table` bucket beside the table-level linking cases.
+ *
+ * They name the same suspicion from two directions — their statement reads a table ours never reads,
+ * and their value is compared on another table's column — so the question `8p` asks is whether one
+ * mechanism covers both. `both` is the intersection measured on question ids, and `either` is the
+ * union: the population a single schema-linking step would have to move, which is the only number
+ * that can be compared to the run's resolution. A union printed without its intersection would let
+ * two readings of one phenomenon be added together into a bucket that looks twice as wide.
+ */
+export interface BucketOverlap {
+  readonly table: number;
+  readonly tableLevel: number;
+  readonly both: number;
+  readonly either: number;
+  readonly eitherPoints: number;
 }
 
 export interface AttributionSettings {
@@ -545,6 +654,9 @@ export async function runAttribution(settings: AttributionSettings, oracle: Orac
   const split = nameOf(score.competitor?.split) ?? settings.layout.split;
   const competitor = nameOf(score.competitor?.competitor) ?? 'competitor';
   const mine = readOurCases(readJson<Record<string, unknown>>(settings.report), arm, settings.report);
+  // The schema, for the one question statement text cannot answer: whether the column a value landed
+  // on belongs to the same table as the column they filtered. It is read once, not per case.
+  const schemas = schemaIndex(loadTables(settings.layout.tablesFile));
 
   const questions = loadQuestions(settings.layout.questionsFile);
   const byId = new Map<string, BirdQuestion>(questions.map((question) => [String(question.question_id), question]));
@@ -592,7 +704,13 @@ export async function runAttribution(settings: AttributionSettings, oracle: Orac
       const sources = record.candidates.filter((candidate) => candidate.correct).map((candidate) => candidate.source);
       const pool: PoolState = rivals.length === 0 ? 'unread' : record.poolHeld ? 'held' : 'missed';
       const gap = pool === 'missed' ? gapKind(theirSql as string, rivals) : undefined;
-      const written = conditionKindOf(theirSql, record.winner, gap);
+      // No gap, no kind: a selection failure has nothing to file, and the ternary is the one place
+      // that says so. The function enforces the same rule for its other callers.
+      const kind = gap === undefined ? undefined : conditionKindOf(theirSql, record.winner, gap);
+      const link =
+        kind === 'substituted' && theirSql !== undefined && record.winner !== undefined
+          ? linkOfCondition(theirSql, record.winner, schemas.get(question.db_id.toLowerCase()))
+          : undefined;
       // `written` is carried as a possibly-undefined field rather than spread conditionally: an
       // absent value is dropped by `JSON.stringify` anyway, and the conditional spread was a branch
       // no test could reach without a `condition` gap in the fixture.
@@ -600,7 +718,8 @@ export async function runAttribution(settings: AttributionSettings, oracle: Orac
         id: question.question_id,
         pool,
         ...(gap === undefined ? {} : { gap }),
-        written,
+        written: kind,
+        ...(link === undefined ? {} : { link }),
         sources,
       });
       continue;
@@ -640,6 +759,11 @@ export async function runAttribution(settings: AttributionSettings, oracle: Orac
       `${settings.score} judged ${String(publishedJudged)} question(s) and this run executed ${String(judged)}; the four counts agree, so the difference sits outside the pairing`,
     );
   }
+  // A taxonomy applied outside its population is the failure this line exists for. The breakdown
+  // below counts `written` over every case they won, so one case carrying a kind without a
+  // `condition` gap is counted in a total that is printed next to the bucket it does not belong to —
+  // and the reader has no way to see it, because both numbers are small.
+  problems.push(...strayKindProblems(theirs));
 
   const points = (cases: number): number => Number(((cases / Math.max(1, judged)) * 100).toFixed(2));
   const tally = (entries: readonly AttributedCase[]): KindTally[] =>
@@ -701,6 +825,21 @@ export async function runAttribution(settings: AttributionSettings, oracle: Orac
     ];
   });
 
+  // Two readings of one suspicion: their statement reads a table ours never reads, and their value is
+  // compared on another table's column. The union is the population one schema-linking step would
+  // have to move; the intersection says whether the two readings are describing the same cases.
+  const tableIds = new Set(theirs.filter((entry) => entry.gap === 'table').map((entry) => entry.id));
+  const linkIds = new Set(theirs.filter((entry) => entry.link === 'other-table').map((entry) => entry.id));
+  const shared = [...linkIds].filter((id) => tableIds.has(id)).length;
+  const either = new Set([...tableIds, ...linkIds]).size;
+  const overlap: BucketOverlap = {
+    table: tableIds.size,
+    tableLevel: linkIds.size,
+    both: shared,
+    either,
+    eitherPoints: points(either),
+  };
+
   return {
     competitor,
     arm,
@@ -715,6 +854,12 @@ export async function runAttribution(settings: AttributionSettings, oracle: Orac
       unread: theirs.filter((entry) => entry.pool === 'unread').length,
     },
     kinds: tally(theirs.filter((entry) => entry.pool === 'missed')),
+    linking: LINK_LEVELS.map((level) => ({
+      level,
+      cases: theirs.filter((entry) => entry.link === level).length,
+      points: points(theirs.filter((entry) => entry.link === level).length),
+    })).filter((entry) => entry.cases > 0),
+    overlap,
     reverse: tally(ours),
     conditionKinds: CONDITION_KINDS.map((kind) => {
       const cases = theirs.filter((entry) => entry.written === kind).length;
@@ -775,6 +920,24 @@ export function attributeLines(outcome: AttributionOutcome): string[] {
           'the column is filtered, not with the condition they wrote',
       );
     }
+    if (outcome.linking.length > 0) {
+      lines.push('      of the substituted ones, where the value was compared:');
+      for (const entry of outcome.linking) {
+        lines.push(
+          `${label(`        ${entry.level}`)} ${String(entry.cases).padStart(4)}  ${pp(entry.cases).padStart(8)}  — ${LINK_MEANING[entry.level]}`,
+        );
+      }
+    }
+  }
+  if (outcome.overlap.either > 0) {
+    lines.push('');
+    lines.push('  one suspicion, two readings — their statement reads a table we never read, and their value sits on another table:');
+    lines.push(`${label('    table bucket')} ${String(outcome.overlap.table).padStart(4)}`);
+    lines.push(`${label('    table-level linking')} ${String(outcome.overlap.tableLevel).padStart(4)}`);
+    lines.push(`${label('    both')} ${String(outcome.overlap.both).padStart(4)}  — counted once in the union, not twice`);
+    lines.push(
+      `${label('    union')} ${String(outcome.overlap.either).padStart(4)}  ${`${outcome.overlap.eitherPoints.toFixed(2)}pp`.padStart(8)}  — the population one schema-linking step would have to move`,
+    );
   }
   lines.push('');
   lines.push(`${label('questions we won and they did not')} ${String(outcome.ours.length).padStart(4)}  ${pp(outcome.ours.length).padStart(8)}`);
@@ -816,6 +979,13 @@ export function attributeLines(outcome: AttributionOutcome): string[] {
       widest.points >= outcome.mde
         ? `the widest kind, ${widest.gap}, is ${widest.points.toFixed(2)}pp and clears it`
         : `no gap kind clears it: the widest, ${widest.gap}, is ${widest.points.toFixed(2)}pp`,
+    );
+  }
+  if (outcome.overlap.either > 0) {
+    verdicts.push(
+      outcome.overlap.eitherPoints >= outcome.mde
+        ? `the table reading is ${String(outcome.overlap.either)} question(s) = ${outcome.overlap.eitherPoints.toFixed(2)}pp and clears it`
+        : `the table reading is ${String(outcome.overlap.either)} question(s) = ${outcome.overlap.eitherPoints.toFixed(2)}pp, inside it`,
     );
   }
   lines.push(`  verdict: ${verdicts.length === 0 ? 'nothing could be attributed' : verdicts.join('; ')}`);

@@ -3887,6 +3887,58 @@ filter we never wrote, and it is the only bucket this run can price.** The next 
 coverage (`I-45`); the value family is second at 1.44pp and has already been priced twice, returning
 about a third of a ceiling this gap does not sit under.
 
+#### What the condition bucket is made of, and one round in which its breakdown was wrong
+
+`condition` is 61 of the 125 generation cases (3.98pp) and the only bucket on dev that clears the
+run's 2.93pp resolution. A name is not a finding, so the instrument splits the bucket by **where the
+missing value went**:
+
+| where the value is | questions | points | what a fix would be |
+| --- | --- | --- | --- |
+| the same column, a different condition | **27** | 1.76pp | already filters that column; the condition is wrong |
+| another column of the same table | 9 | 0.59pp | a column choice inside a table already in the prompt |
+| a column of another table | 3 | 0.20pp | the table was never in view — schema linking |
+| no predicate of ours compares it | 2 | **0.13pp** | the omission the bucket is named for |
+| no literal in the atom at all | 16 | 1.04pp | a corpus convention (`IS NOT NULL`) no question names |
+| the schema cannot place the column | 4 | 0.26pp | not measured, and reported as such |
+
+Two rows are new this round. `substituted` says the restriction is present on the wrong column; **which
+table that column belongs to decides which mechanism could ever fix it**, so the split is read from
+BIRD's table manifest (column → tables, and table → columns) rather than guessed from the name — `county`
+is not unique — `account_id` is declared on five tables of `financial`, `userid` on four of
+`codebase_community` — and the same rule is what places an unqualified column when the statement reads
+exactly one table, and refuses to when it reads more. The `unresolved` row is the honest half:
+an unqualified column in a statement that reads two tables cannot be placed without parsing the FROM
+clause, and this reader does not do that, so it says so instead of picking one.
+
+The same reading answers the question the plan carried as `8p` — whether the `table` bucket and the
+value-on-another-column cases are one phenomenon:
+
+| | questions | points |
+| --- | --- | --- |
+| `table` bucket (their statement reads a table none of ours reads) | 17 | 1.11pp |
+| table-level linking (their value sits on another table's column) | 3 | 0.20pp |
+| in both | **0** | — |
+| union | **20** | **1.31pp** |
+
+**They are not the same thing** — the intersection is empty — and even their union is 1.31pp against a
+2.93pp resolution. A schema-linking step, as a single lever, cannot be priced on this run: the ceiling
+is below what the instrument can see. `8p` closes without a dispatch, for the same two reasons `8o`
+did: the population is smaller than the name suggests, and the ceiling is smaller than the noise.
+
+That table was wrong for one round, and the way it was wrong is worth recording. `conditionKindOf` took
+the gap kind as an **optional** parameter, and its guard read `gap !== undefined && gap !== 'condition'`
+— so a caller with no gap at all (a selection failure: the pool held a correct statement, no gap was
+ever computed) ran the whole taxonomy anyway. On dev that filed **11 pool-held cases** into the
+breakdown, and the printed lines said *21 substituted / 18 unstated / 6 absent* with a residual of *16*
+where the per-case records said **16 / 16 / 2** and a residual of **27**. The number this document had
+carried was the right one, computed by hand from the per-case records — **a right answer with no
+instrument behind it**, which is the worst of the two failure modes, because nothing would have caught
+it if the next reader had trusted the print. Two things changed: the parameter is required, so the
+misuse is a type error rather than a silent count, and an invariant (`strayConditionKinds`) is checked
+on every run and emitted as a problem line — a taxonomy applied outside its population is now a
+sentence in the output, not a plausible total.
+
 #### Where 62.99% sits, now that a competitor can be run inside this harness
 
 For the first time the field is not only a table of other people's numbers: MAC-SQL at `31a9df5` ran

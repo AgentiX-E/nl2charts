@@ -32,15 +32,19 @@ import {
   sameStatement,
   gapKind,
   isEntry,
+  linkOfCondition,
   main,
   messageOf,
   readOurCases,
   readTraits,
   resolveAttributionSettings,
   runAttribution,
+  strayConditionKinds,
+  strayKindProblems,
   writeAttribution,
 } from '../eval/competitors/attribute.js';
 import type { AttributionOutcome, AttributionSettings } from '../eval/competitors/attribute.js';
+import { schemaIndex } from '../eval/bird/conditions.js';
 import { createOracle } from '../eval/bird/oracle.js';
 import { MINI_DB, writeMiniBirdDataset } from './helpers/bird-dataset.js';
 
@@ -51,10 +55,16 @@ const ARM = 'select-mixed';
 const QUESTIONS = [
   { id: 1, question: 'How many items are there?', sql: 'select count(*) from items' },
   { id: 2, question: 'How many orders are for the pen?', sql: 'select count(*) from orders where item_id = 1' },
-  { id: 3, question: 'What is the total price of every item?', sql: 'select sum(price) from items' },
+  // A pool-held case whose correct statement carries a filter the winner lacks: the case is a
+  // selection failure, so no gap kind may be filed for it, and this is the shape that caught a
+  // breakdown counting it anyway.
+  { id: 3, question: 'What is the total price of every item?', sql: 'select sum(price) from items where price > 0' },
   { id: 4, question: 'How many distinct item names are there?', sql: 'select count(distinct name) from items' },
   { id: 5, question: 'How many cities are there?', sql: 'select count(distinct city) from cities' },
-  { id: 6, question: 'What is the largest quantity on an order?', sql: 'select max(qty) from orders' },
+  // Their filter is on `orders.qty`; ours puts the same value on `items.price`, a column of another
+  // table. That is the shape the linking split exists for, and it has to appear end to end: a unit
+  // test of the split would not prove the instrument produces it.
+  { id: 6, question: 'What is the largest quantity on an order?', sql: 'select max(qty) from orders where qty > 1' },
   { id: 7, question: 'What are the item names?', sql: 'select name from items' },
   { id: 8, question: 'What does the expensive stock cost in total?', sql: 'select sum(price) from items where price > 3' },
   { id: 9, question: 'How many orders per item?', sql: 'select item_id, count(*) from orders group by item_id' },
@@ -92,7 +102,7 @@ const OUR_CASES: Readonly<Record<number, { readonly passed: boolean; readonly ca
     passed: false,
     candidates: [
       { source: 'inline+evidence', correct: false, sql: 'select count(price) from items' },
-      { source: 'evidence+values', correct: true, sql: 'select sum(price) from items' },
+      { source: 'evidence+values', correct: true, sql: 'select sum(price) from items where price > 0' },
     ],
     winner: 'inline+evidence',
   },
@@ -100,7 +110,13 @@ const OUR_CASES: Readonly<Record<number, { readonly passed: boolean; readonly ca
   5: { passed: false, candidates: [{ source: 'inline+evidence', correct: false, sql: 'select count(distinct name) from items' }], winner: 'inline+evidence' },
   6: {
     passed: false,
-    candidates: [{ source: 'inline+evidence', correct: false, sql: 'select max(qty) from orders where item_id = 1' }],
+    candidates: [
+      {
+        source: 'inline+evidence',
+        correct: false,
+        sql: 'select max(qty) from orders join items on items.id = orders.item_id where items.price = 1',
+      },
+    ],
     winner: 'inline+evidence',
   },
   7: { passed: false, candidates: [{ source: 'inline+evidence', correct: false, sql: 'select price from items limit 1' }], winner: 'inline+evidence' },
@@ -130,10 +146,10 @@ const OUR_CASES: Readonly<Record<number, { readonly passed: boolean; readonly ca
 const THEIR_SQL: Readonly<Record<number, string>> = {
   1: 'select count(*) from items',
   2: 'select count(*) from orders',
-  3: 'select sum(price) from items',
+  3: 'select sum(price) from items where price > 0',
   4: 'select count(distinct name) from items',
   5: 'select count(distinct city) from cities',
-  6: 'select max(qty) from orders',
+  6: 'select max(qty) from orders where qty > 1',
   7: 'select name from items',
   8: 'select sum(price) from items where price > 3',
   9: 'select item_id, count(*) from orders group by item_id',
@@ -379,8 +395,30 @@ describe('attributing a real pair of files', () => {
 
   it('files every pool miss under the one kind its two statements differ in', async () => {
     const { outcome } = await attribute(fixture());
-    expect(kinds(outcome)).toEqual({ aggregate: 1, table: 1, 'over-filter': 1, projection: 1, literal: 1, grain: 1, window: 1, identical: 1, other: 1 });
+    // Question 6 used to be this fixture's `over-filter`, and it is now its `condition`: the same
+    // question cannot play both roles without inventing a fourteenth, and the ladder's over-filter
+    // branch is still covered by the unit tests that pin every rung of it.
+    expect(kinds(outcome)).toEqual({ aggregate: 1, table: 1, condition: 1, projection: 1, literal: 1, grain: 1, window: 1, identical: 1, other: 1 });
     expect(outcome.kinds.find((entry) => entry.gap === 'table')?.points).toBeCloseTo(7.69, 2);
+  });
+
+  it('says where a substituted value landed, and how much of the table bucket it shares', async () => {
+    const { outcome } = await attribute(fixture());
+    // Question 6, end to end: their filter is on `orders.qty`, ours puts the same value on
+    // `items.price`. The case is a condition gap, the value is written, and the table is not the one
+    // they filtered — which is the reading the next round is priced against.
+    expect(outcome.theirs.find((entry) => entry.id === 6)).toEqual({
+      id: 6,
+      pool: 'missed',
+      gap: 'condition',
+      written: 'substituted',
+      link: 'other-table',
+      sources: [],
+    });
+    expect(outcome.linking).toEqual([{ level: 'other-table', cases: 1, points: 7.69 }]);
+    // Question 5 is the `table` gap. One case each and no overlap: the union is two questions, and
+    // printing it as two is the only way the resolution test can be honest about one mechanism.
+    expect(outcome.overlap).toEqual({ table: 1, tableLevel: 1, both: 0, either: 2, eitherPoints: 15.38 });
   });
 
   it('files the questions we won by what our statement had and theirs did not', async () => {
@@ -545,6 +583,8 @@ describe('the reading it prints when there is nothing to read', () => {
       kinds: [],
       reverse: [],
       conditionKinds: [],
+      linking: [],
+      overlap: { table: 0, tableLevel: 0, both: 0, either: 0, eitherPoints: 0 },
       components: [],
       collinear: [],
       mde: 5,
@@ -569,6 +609,8 @@ describe('the reading it prints when there is nothing to read', () => {
       kinds: [{ gap: 'table', cases: 2, points: 20 }],
       reverse: [],
       conditionKinds: [],
+      linking: [],
+      overlap: { table: 0, tableLevel: 0, both: 0, either: 0, eitherPoints: 0 },
       components: [],
       collinear: [],
       mde: 5,
@@ -584,6 +626,38 @@ describe('a pool-held question carries no gap kind', () => {
   it('does not try to name a difference for a statement that already existed', async () => {
     const { outcome } = await attribute(fixture());
     expect(outcome.theirs.filter((entry) => entry.pool === 'held').every((entry) => entry.gap === undefined)).toBe(true);
+  });
+
+  it('does not file a condition kind either, because there was no condition gap to file', async () => {
+    // The dev reading had 61 condition gaps and printed a breakdown adding up to 45 cases, because
+    // 11 selection failures were passed through `conditionKindOf` with no gap at all. The fixture's
+    // third question is that shape on purpose: the pool held `sum(price) ... where price > 0`, the
+    // selector took `count(price)`, and their statement is the one in the pool. Filed as `absent`,
+    // it would be counted in a total printed directly beneath the 61.
+    const { outcome } = await attribute(fixture());
+    const held = outcome.theirs.filter((entry) => entry.pool === 'held');
+    expect(held.length).toBe(1);
+    expect(held.every((entry) => entry.written === undefined)).toBe(true);
+    expect(outcome.problems).toEqual([]);
+  });
+
+  it('names the cases a breakdown would count outside the bucket above it', async () => {
+    const { outcome } = await attribute(fixture());
+    // A guard that can only be reached by a bug is a guard nobody tests, so the rule is a function:
+    // given the cases, which ones carry a kind they were never entitled to.
+    expect(strayConditionKinds(outcome.theirs)).toEqual([]);
+    const stray = [
+      { id: 7, pool: 'held', written: 'absent', sources: [] },
+      { id: 8, pool: 'missed', gap: 'condition', written: 'absent', sources: [] },
+      { id: 9, pool: 'missed', gap: 'table', sources: [] },
+    ] as const;
+    expect(strayConditionKinds(stray).map((entry) => entry.id)).toEqual([7]);
+    // The sentence, not just the count: a reader whose breakdown is wrong needs to know that the
+    // total it prints is not the size of the bucket above it.
+    expect(strayKindProblems(stray)).toEqual([
+      '1 case(s) carry a condition kind without a condition gap (7); the breakdown would count them, so the total it prints is not the size of the bucket above it',
+    ]);
+    expect(strayKindProblems([])).toEqual([]);
   });
 });
 
@@ -771,25 +845,25 @@ describe('a refusal is a sentence, not a stack trace', () => {
 
 describe('where the value of a `condition` gap went', () => {
   it('files a value their statement compares on a column ours never names as absent', () => {
-    expect(conditionKindOf("select 1 from t where school type = 'Public'", "select 1 from t where county = 'Alameda'")).toBe('absent');
+    expect(conditionKindOf("select 1 from t where school type = 'Public'", "select 1 from t where county = 'Alameda'", 'condition')).toBe('absent');
   });
 
   it('files a value our statement compares on another column as substituted', () => {
-    expect(conditionKindOf("select 1 from t where cname = 'Contra Costa'", "select 1 from t where county = 'Contra Costa'")).toBe('substituted');
+    expect(conditionKindOf("select 1 from t where cname = 'Contra Costa'", "select 1 from t where county = 'Contra Costa'", 'condition')).toBe('substituted');
   });
 
   it('files an atom that carries no literal as unstated', () => {
-    expect(conditionKindOf('select 1 from t where sname is not null', 'select 1 from t where county = \'Alameda\'')).toBe('unstated');
+    expect(conditionKindOf('select 1 from t where sname is not null', 'select 1 from t where county = \'Alameda\'', 'condition')).toBe('unstated');
   });
 
   it('reports nothing when our statement names the column, which is the largest sub-bucket on dev', () => {
     // Same column, a different condition: they wrote `takers > 100` and we wrote `takers < 100`.
-    expect(conditionKindOf("select 1 from t where takers > 100", 'select 1 from t where takers < 100')).toBeUndefined();
+    expect(conditionKindOf("select 1 from t where takers > 100", 'select 1 from t where takers < 100', 'condition')).toBeUndefined();
   });
 
   it('reports nothing when the statement or the reference is unknown', () => {
-    expect(conditionKindOf('select 1 from t', undefined)).toBeUndefined();
-    expect(conditionKindOf(undefined, 'select 1 from t')).toBeUndefined();
+    expect(conditionKindOf('select 1 from t', undefined, 'condition')).toBeUndefined();
+    expect(conditionKindOf(undefined, 'select 1 from t', 'condition')).toBeUndefined();
   });
 
   it('reports nothing when the gap is not a condition at all', () => {
@@ -798,7 +872,66 @@ describe('where the value of a `condition` gap went', () => {
 
   it('prefers the strongest finding when one case carries two kinds', () => {
     const theirs = "select 1 from t where school type = 'Public' and sname is not null";
-    expect(conditionKindOf(theirs, "select 1 from t where county = 'Alameda'")).toBe('absent');
+    expect(conditionKindOf(theirs, "select 1 from t where county = 'Alameda'", 'condition')).toBe('absent');
+  });
+});
+
+describe('whether a substituted value landed on the right table', () => {
+  const schema = schemaIndex(
+    new Map([
+      [
+        MINI_DB,
+        {
+          tableNames: ['items', 'orders'],
+          columnNames: [
+            [-1, '*'],
+            [0, 'id'],
+            [0, 'name'],
+            [0, 'price'],
+            [1, 'id'],
+            [1, 'item_id'],
+            [1, 'qty'],
+          ] as (readonly [number, string])[],
+        },
+      ],
+    ]),
+  ).get(MINI_DB);
+
+  it('names a value compared on another table as the table-level difference it is', () => {
+    expect(linkOfCondition("select count(*) from orders where qty = 3", "select count(*) from items where price = 3", schema)).toBe('other-table');
+  });
+
+  it('names a value compared on another column of the same table as a column choice', () => {
+    expect(linkOfCondition("select count(*) from items where name = 'pen'", "select count(*) from items where price = 'pen'", schema)).toBe('same-table');
+  });
+
+  it('says nowhere when our statement compares no value at all', () => {
+    expect(linkOfCondition("select count(*) from items where name = 'pen'", 'select count(*) from items', schema)).toBe('nowhere');
+  });
+
+  it('lets the table-level site name the case when one case has both', () => {
+    // Two substituted atoms, one on the right table's other column and one on another table's column:
+    // the wider fix names the case, because a column hint cannot move a value onto a table that was
+    // never in view.
+    expect(
+      linkOfCondition(
+        "select count(*) from orders o join items i on i.id = o.item_id where o.qty = 3 and i.name = 'pen'",
+        "select count(*) from orders o join items i on i.id = o.item_id where i.price = 3 and i.id = 'pen'",
+        schema,
+      ),
+    ).toBe('other-table');
+    // The reverse order of the same two atoms changes nothing: precedence is by level, not by order.
+    expect(
+      linkOfCondition(
+        "select count(*) from orders o join items i on i.id = o.item_id where i.name = 'pen' and o.qty = 3",
+        "select count(*) from orders o join items i on i.id = o.item_id where i.id = 'pen' and i.price = 3",
+        schema,
+      ),
+    ).toBe('other-table');
+  });
+
+  it('reports unresolved when the schema is missing rather than calling it absent', () => {
+    expect(linkOfCondition("select count(*) from items where name = 'pen'", "select count(*) from items where price = 'pen'", undefined)).toBe('unresolved');
   });
 });
 
@@ -822,6 +955,8 @@ describe('the condition breakdown the report prints', () => {
       { kind: 'absent', cases: 1, points: 1 },
       { kind: 'substituted', cases: 1, points: 1 },
     ],
+    linking: [{ level: 'other-table', cases: 1, points: 1 }],
+    overlap: { table: 1, tableLevel: 1, both: 0, either: 2, eitherPoints: 2 },
     components: [],
     collinear: [],
     mde: 2.93,

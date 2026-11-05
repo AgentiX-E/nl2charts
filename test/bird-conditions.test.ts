@@ -18,7 +18,9 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   atomIdentifiers,
+  schemaIndex,
   gapKindOf,
+  linkLevelOf,
   literalsOf,
   missingGaps,
   writtenLiterals,
@@ -192,6 +194,80 @@ describe('where the value of a missing condition went', () => {
 
   it('reports nothing when every column is named', () => {
     expect(missingGaps("select 1 from t where c = 'x'", "select 1 from t where c = 'y'")).toEqual([]);
+  });
+});
+
+describe('whether the value landed on the right table', () => {
+  // BIRD's manifest carries columns as `[tableOrdinal, name]`, so the table of a column is a lookup
+  // rather than a guess. `county` is on two tables in this fixture on purpose: the same column name
+  // on different tables is what makes the question worth asking.
+  const TABLES = new Map([
+    [
+      'shop',
+      {
+        tableNames: ['schools', 'frpm', 'satscores'],
+        columnNames: [
+          [-1, '*'],
+          [0, 'cdscode'],
+          [0, 'county'],
+          [1, 'county'],
+          [1, 'enrollment'],
+          [2, 'cname'],
+          [2, 'county'],
+        ] as (readonly [number, string])[],
+      },
+    ],
+  ]);
+  const schema = schemaIndex(TABLES).get('shop');
+
+  it('indexes every column to the tables that declare it', () => {
+    expect([...(schema?.owners.get('county') ?? [])].sort()).toEqual(['frpm', 'satscores', 'schools']);
+    expect([...(schema?.owners.get('cname') ?? [])]).toEqual(['satscores']);
+    // The `*` every manifest carries has no table, and a column placed on table `undefined` would
+    // make every unqualified `*` comparison look like a table-level mistake.
+    expect(schema?.owners.has('*')).toBe(false);
+  });
+
+  it('calls a value compared on another table a table-level difference', () => {
+    // They filter `satscores.cname`, we filter `schools.county`: the value is written, the table is
+    // not the one they filtered, and the fix is a retrieval step rather than a column hint.
+    expect(linkLevelOf("cname = 'Contra Costa'", ["schools.county = 'Contra Costa'"], schema)).toBe('other-table');
+  });
+
+  it('calls a value compared on another column of the right table a column choice', () => {
+    expect(linkLevelOf("county = 'Contra Costa'", ["satscores.enrollment = 'Contra Costa'"], schema)).toBe('same-table');
+  });
+
+  it('reports nowhere when no predicate compares the value at all', () => {
+    expect(linkLevelOf("cname = 'Contra Costa'", ["schools.county = 'Alameda'"], schema)).toBe('nowhere');
+  });
+
+  it('reports unresolved rather than guessing when the schema cannot place the column', () => {
+    // A column that appears in no table file is not evidence of a table-level mistake, and the
+    // difference between "not measured" and "measured as absent" is the whole point of the split.
+    expect(linkLevelOf("ghost = 'x'", ["other.col = 'x'"], schema)).toBe('unresolved');
+    expect(linkLevelOf("cname = 'x'", ["schools.county = 'x'"], undefined)).toBe('unresolved');
+    // An atom with no literal carries no value to place.
+    expect(linkLevelOf('charter is not null', ["schools.county = 'x'"], schema)).toBe('unresolved');
+  });
+
+  it('reports unresolved when every site is unqualified, because the FROM clause was not read', () => {
+    expect(linkLevelOf("cname = 'Contra Costa'", ["county = 'Contra Costa'"], schema)).toBe('unresolved');
+  });
+
+  it('places an unqualified column when the statement reads one table, and refuses when it reads two', () => {
+    // Most single-table statements never qualify a column, and with one table in the FROM there is
+    // nothing to be ambiguous about. Two tables is where reading the clause would be needed, and this
+    // reader says so rather than picking the first name it finds.
+    expect(linkLevelOf("cname = 'Contra Costa'", ["county = 'Contra Costa'"], schema, ['satscores'])).toBe('same-table');
+    expect(linkLevelOf("cname = 'Contra Costa'", ["county = 'Contra Costa'"], schema, ['frpm'])).toBe('other-table');
+    expect(linkLevelOf("cname = 'Contra Costa'", ["county = 'Contra Costa'"], schema, ['frpm', 'satscores'])).toBe('unresolved');
+  });
+
+  it('prefers a qualified site over the unqualified ones around it', () => {
+    expect(linkLevelOf("cname = 'Contra Costa'", ["county = 'Contra Costa'", "satscores.enrollment = 'Contra Costa'"], schema)).toBe('same-table');
+    // And a qualified site on another table settles it the other way, whatever sits beside it.
+    expect(linkLevelOf("cname = 'Contra Costa'", ["county = 'Contra Costa'", "frpm.county = 'Contra Costa'"], schema)).toBe('other-table');
   });
 });
 
