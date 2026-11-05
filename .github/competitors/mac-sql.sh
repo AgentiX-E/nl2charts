@@ -15,9 +15,22 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SUBSET="${HERE}/eval/out/competitors/${COMPETITOR}-subset.json"
-DATABASES="${HERE}/eval/.cache/bird/minidev/MINIDEV/dev_databases"
-TABLES="${HERE}/eval/.cache/bird/minidev/MINIDEV/dev_tables.json"
 OUT="${HERE}/eval/out/competitors/predictions.json"
+
+# The dataset is the split's, not this script's. `minidev` extracts under `minidev/MINIDEV` and
+# `dev` under `dev/dev_20240627`, which is the layout `eval/bird/fetch.mjs` produces; hard-coding
+# one of them would silently point a dev run at the 498-question databases and score every
+# statement from it as an execution error.
+case "${BIRD_SPLIT:-minidev}" in
+  minidev) DATA="${HERE}/eval/.cache/bird/minidev/MINIDEV" ;;
+  dev) DATA="${HERE}/eval/.cache/bird/dev/dev_20240627" ;;
+  *)
+    echo "unknown BIRD_SPLIT '${BIRD_SPLIT}': the adapter knows minidev and dev" >&2
+    exit 1
+    ;;
+esac
+DATABASES="${DATA}/dev_databases"
+TABLES="${DATA}/dev_tables.json"
 
 cd "${HERE}/.competitor"
 mkdir -p outputs/run

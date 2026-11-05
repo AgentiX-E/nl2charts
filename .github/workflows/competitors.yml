@@ -41,7 +41,18 @@ on:
       limit:
         description: Questions to score (blank = the whole split)
         required: false
-        default: '25'
+        # Blank, because blank is what "the whole split" means to the runner and a default here
+        # overrides it silently: the first competitor dispatch declared 25 and produced a paired
+        # reading whose MDE was 29.65pp — a real measurement of the wrong question.
+        default: ''
+      split:
+        description: Which split both pipelines answer (minidev or dev)
+        required: true
+        type: choice
+        default: minidev
+        options:
+          - minidev
+          - dev
       effect:
         description: The accuracy difference a future run should be able to detect
         required: false
@@ -111,7 +122,9 @@ jobs:
     needs: probe
     if: inputs.stage == 'full'
     runs-on: ubuntu-latest
-    timeout-minutes: 240
+    # `dev` is 1,532 questions against 498, and the competitor's own pipeline is the slower half:
+    # the Mini-Dev pair took 63 minutes end to end, so the dev pair needs room rather than a retry.
+    timeout-minutes: 420
     # One slot for every heavyweight run: they draw from the same provider quota and write to the
     # same artifact paths.
     concurrency:
@@ -119,7 +132,7 @@ jobs:
       cancel-in-progress: false
     env:
       COMPETITOR: ${{ inputs.competitor }}
-      BIRD_SPLIT: minidev
+      BIRD_SPLIT: ${{ inputs.split }}
       BIRD_LIMIT: ${{ inputs.limit }}
       BIRD_ARMS: ${{ inputs.arms }}
       BIRD_CONCURRENCY: '4'
@@ -167,12 +180,18 @@ jobs:
       - name: Cache the external dataset
         uses: actions/cache@v4
         with:
-          path: eval/.cache/bird/minidev
-          key: bird-minidev-v3-${{ runner.os }}
-      - name: Fetch Mini-Dev (no-op when the cache is warm)
+          # Keyed by split: `dev` is 15 times the size of Mini-Dev, and one key covering both
+          # would have a dev run restore a cache that holds neither set completely.
+          path: eval/.cache/bird
+          key: bird-${{ inputs.split }}-v1-${{ runner.os }}
+      - name: Fetch the split (no-op when the cache is warm)
         run: node eval/bird/fetch.mjs
       - name: Cut the subset both pipelines will answer
-        run: pnpm exec tsx eval/competitors/subset.ts --limit "${BIRD_LIMIT}" --out "eval/out/competitors/${COMPETITOR}-subset.json"
+        run: |
+          # The two pipelines are given the same file, cut by the same function our own runner
+          # uses, so the pairing is a property of the design rather than of two matching limits.
+          echo "split ${BIRD_SPLIT}, limit '${BIRD_LIMIT}' (blank = the whole split)"
+          pnpm exec tsx eval/competitors/subset.ts --limit "${BIRD_LIMIT}" --out "eval/out/competitors/${COMPETITOR}-subset.json"
       - name: Our own arm on the same questions
         run: pnpm bench:bird
       - name: Declare the run's coordinates

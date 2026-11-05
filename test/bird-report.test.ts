@@ -115,6 +115,30 @@ describe('report completeness', () => {
     ).not.toThrow();
   });
 
+  it('refuses a rule-selected arm whose row carries no rule funnel', () => {
+    // A rule arm's `calls.mean` equals its candidate count whether the rule ran or the vote did, so
+    // the mean cannot say whether the lever acted at all. The funnel is the only field that can,
+    // and the row that omits it publishes a score under a selector that may never have been read.
+    expect(() =>
+      assertReportComplete({ arms: [{ arm: 'select-mixed-rule', total: 1532, format: FORMAT, candidateRecall: 0.67 }] }),
+    ).toThrow(
+      /lets the shortest rule decide and its row carries no rule funnel/,
+    );
+    expect(() =>
+      assertReportComplete({
+        arms: [
+          {
+            arm: 'select-mixed-rule',
+            total: 1532,
+            format: FORMAT,
+            candidateRecall: 0.67,
+            selectorRule: { rule: 'shortest', decided: 1532, eligible: 4596, emptyPool: 12 },
+          },
+        ],
+      }),
+    ).not.toThrow();
+  });
+
   it('refuses an examples arm whose funnel the artifact dropped', () => {
     // The block is retrieved per question, so "the examples did not help" and "the examples arrived
     // on a tenth of the split" are the same accuracy and opposite findings. The funnel is the only

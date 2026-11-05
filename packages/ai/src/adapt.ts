@@ -1,5 +1,6 @@
 import { replyShape } from './format.js';
 import type { FormatProfile, ReplyShape } from './format.js';
+import type { SelectionRule } from './select.js';
 
 /**
  * What a deployment should do with a model it has never benchmarked.
@@ -32,14 +33,15 @@ import type { FormatProfile, ReplyShape } from './format.js';
  */
 
 /**
- * The four configurations a deployment may run, named for what they spend.
+ * The five configurations a deployment may run, named for what they spend.
  *
  * The design document calls these `lean` / `full` / `consensus` / `select`; they are named
  * here by the call shape instead, because "consensus" and "select" are both what the *model*
  * is asked to do and neither says how many calls it costs — and the number of calls is the
- * only part of this a user pays for.
+ * only part of this a user pays for. `aimed-3` and `aimed-4` are the same candidate set with
+ * the two selectors, which is why they are the one pair whose names differ by their price.
  */
-export type StrategyName = 'single-lean' | 'single-full' | 'repeat-3' | 'aimed-3';
+export type StrategyName = 'single-lean' | 'single-full' | 'repeat-3' | 'aimed-3' | 'aimed-4';
 
 /** A bounded configuration. Every field is a value a caller can print, diff and pin. */
 export interface Strategy {
@@ -50,8 +52,21 @@ export interface Strategy {
   readonly card: 'lean' | 'full';
   /** Candidate statements the strategy produces before it commits to one. */
   readonly candidates: 1 | 3;
-  /** Whether a fourth call chooses among the candidates. */
-  readonly selector: boolean;
+  /**
+   * Who chooses among the candidates, and what that costs.
+   *
+   * `'none'` is a strategy with one candidate, where a chooser would have nothing to choose.
+   * The three rule names are `chooseCandidateByRule`'s, and they spend no call: on 1,532 dev
+   * questions `shortest` scored 63.64% against the model selector's 62.79% on the same
+   * candidates, and on the strong pool 63.71% against 61.42% (+2.29pp, p = 0.0030) — the only
+   * difference between the two readings was the fourth call, and it lost. `'model'` is kept
+   * as a strategy rather than deleted, because the reading that retired it as the default is
+   * one split and one backbone and a pin that can be re-run is what keeps it falsifiable.
+   *
+   * The field is one name rather than a boolean plus a rule, because the two would allow the
+   * state "a selector that is also a rule", which no executor can honour.
+   */
+  readonly selector: 'none' | SelectionRule | 'model';
   /**
    * Sampling temperature, or `null` for an endpoint that refuses the field.
    *
@@ -63,10 +78,17 @@ export interface Strategy {
 }
 
 export const STRATEGIES: readonly Strategy[] = [
-  { name: 'single-lean', calls: 1, card: 'lean', candidates: 1, selector: false, temperature: 0 },
-  { name: 'single-full', calls: 1, card: 'full', candidates: 1, selector: false, temperature: 0 },
-  { name: 'repeat-3', calls: 3, card: 'full', candidates: 3, selector: false, temperature: 0.7 },
-  { name: 'aimed-3', calls: 4, card: 'full', candidates: 3, selector: true, temperature: 0.7 },
+  { name: 'single-lean', calls: 1, card: 'lean', candidates: 1, selector: 'none', temperature: 0 },
+  { name: 'single-full', calls: 1, card: 'full', candidates: 1, selector: 'none', temperature: 0 },
+  { name: 'repeat-3', calls: 3, card: 'full', candidates: 3, selector: 'none', temperature: 0.7 },
+  // The default the evidence points at: three candidates, and the free rule choosing among
+  // them. It is the same candidate set `aimed-4` draws, one call cheaper, and the reading that
+  // moved it here (`I-96`) is a paired one on that very set.
+  { name: 'aimed-3', calls: 3, card: 'full', candidates: 3, selector: 'shortest', temperature: 0.7 },
+  // What `aimed-3` used to be, kept as the ablation: the fourth call reads the candidates and
+  // answers with an index. It is the strategy every published selector reading was taken with,
+  // so deleting it would delete the comparison.
+  { name: 'aimed-4', calls: 4, card: 'full', candidates: 3, selector: 'model', temperature: 0.7 },
 ];
 
 const BY_NAME: Readonly<Record<StrategyName, Strategy>> = {
@@ -74,6 +96,7 @@ const BY_NAME: Readonly<Record<StrategyName, Strategy>> = {
   'single-full': STRATEGIES[1]!,
   'repeat-3': STRATEGIES[2]!,
   'aimed-3': STRATEGIES[3]!,
+  'aimed-4': STRATEGIES[4]!,
 };
 
 /** Look one up. Total over the union, so there is no branch to leave uncovered. */
@@ -148,16 +171,20 @@ export function probeProtocol(contact: FirstContact): ProtocolVerdict {
 /**
  * Layer ②: the strategies a format profile leaves standing.
  *
- * Only one dimension gates anything, and it gates only the selector: `aimed-3` spends a fourth
- * call asking the model to name a candidate, and a model whose replies never parse as a choice
- * answers that call with prose the selector still has to fall back from. The other dimensions
- * are warnings rather than gates — `extractSql` reads an unfenced reply as the whole text, so a
- * model that never fences is riskier, not disqualified, and a strategy that cannot be run at
- * all would be a worse verdict than the one the data supports.
+ * Only one dimension gates anything, and it gates only the paid selector: `aimed-4` spends a
+ * fourth call asking the model to name a candidate, and a model whose replies never parse as a
+ * choice answers that call with prose the selector still has to fall back from. The other
+ * dimensions are warnings rather than gates — `extractSql` reads an unfenced reply as the whole
+ * text, so a model that never fences is riskier, not disqualified, and a strategy that cannot be
+ * run at all would be a worse verdict than the one the data supports.
+ *
+ * `aimed-3` is not gated, and that is the point of it: the rule reads the executed candidates,
+ * not the model's prose, so there is no format it can fail. A layer that dropped it for a
+ * reason belonging to a call it does not make would be a gate about the wrong strategy.
  */
 export function admissible(profile: FormatProfile): StrategyName[] {
-  const names: StrategyName[] = ['single-lean', 'single-full', 'repeat-3'];
-  if (profile.index !== 'never') names.push('aimed-3');
+  const names: StrategyName[] = ['single-lean', 'single-full', 'repeat-3', 'aimed-3'];
+  if (profile.index !== 'never') names.push('aimed-4');
   return names;
 }
 

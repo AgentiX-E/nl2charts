@@ -19,7 +19,13 @@ import type { Artifact, CaseRow } from '../eval/bird/adapt.js';
 
 const row = (arm: string, id: string, passed: boolean): CaseRow => ({ arm, id, passed });
 
-/** Four strategies over six questions, with `aimed-3` ahead on the tail. */
+/**
+ * Five strategies over six questions, with the free selector ahead on the tail.
+ *
+ * The bank is the reading `I-96` moved the default on, in miniature: `aimed-3` (three calls, the
+ * `shortest` rule) takes a case `aimed-4` (four calls, the model) gets wrong, and they agree
+ * everywhere else — which is the only shape in which the pair can be told apart at all.
+ */
 const artifact: Artifact = {
   split: 'dev',
   model: 'test-model',
@@ -27,31 +33,37 @@ const artifact: Artifact = {
     row('names', '0', true),
     row('metadata+evidence', '0', true),
     row('select', '0', true),
+    row('select-mixed-rule', '0', false),
     row('select-mixed', '0', false),
 
     row('names', '1', false),
     row('metadata+evidence', '1', true),
     row('select', '1', true),
+    row('select-mixed-rule', '1', true),
     row('select-mixed', '1', true),
 
     row('names', '2', false),
     row('metadata+evidence', '2', true),
     row('select', '2', false),
+    row('select-mixed-rule', '2', true),
     row('select-mixed', '2', true),
 
     row('names', '3', false),
     row('metadata+evidence', '3', true),
     row('select', '3', false),
+    row('select-mixed-rule', '3', true),
     row('select-mixed', '3', true),
 
     row('names', '4', false),
     row('metadata+evidence', '4', false),
     row('select', '4', false),
-    row('select-mixed', '4', true),
+    row('select-mixed-rule', '4', true),
+    row('select-mixed', '4', false),
 
     row('names', '5', false),
     row('metadata+evidence', '5', true),
     row('select', '5', true),
+    row('select-mixed-rule', '5', true),
     row('select-mixed', '5', true),
   ],
 };
@@ -60,7 +72,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('aligning an artifact onto the four strategies', () => {
+describe('aligning an artifact onto the five strategies', () => {
   it('maps each arm to one strategy and keeps the artifact order', () => {
     const cases = align(artifact);
     expect(cases.map((one) => one.id)).toEqual(['0', '1', '2', '3', '4', '5']);
@@ -69,7 +81,12 @@ describe('aligning an artifact onto the four strategies', () => {
       'single-full': true,
       'repeat-3': true,
       'aimed-3': false,
+      'aimed-4': false,
     });
+    // The pair is one lever, so the bank's tail has to separate it: case 4 is the one the free
+    // rule takes and the model does not.
+    expect(cases[4]?.outcomes['aimed-3']).toBe(true);
+    expect(cases[4]?.outcomes['aimed-4']).toBe(false);
   });
 
   it('drops a case one arm never answered instead of scoring it as a failure', () => {
@@ -85,7 +102,7 @@ describe('aligning an artifact onto the four strategies', () => {
   });
 
   it('refuses an artifact that carries fewer than two strategy arms', () => {
-    expect(() => align({ cases: [row('names', '0', true)] })).toThrow(/carries 1 of the four strategy arms/);
+    expect(() => align({ cases: [row('names', '0', true)] })).toThrow(/carries 1 of the five strategy arms/);
   });
 
   it('names the arms it found when refusing', () => {
@@ -105,6 +122,8 @@ describe('scoring a slice', () => {
     const counts = score(align(artifact));
     expect(counts['single-lean']).toEqual({ passed: 1, total: 6 });
     expect(counts['aimed-3']).toEqual({ passed: 5, total: 6 });
+    // Four calls buy four of six here, one fewer than three calls buy: the bank is the reading.
+    expect(counts['aimed-4']).toEqual({ passed: 4, total: 6 });
   });
 
   it('skips a strategy a slice never saw', () => {
@@ -261,6 +280,6 @@ describe('the command line', () => {
   it('maps every strategy to exactly one arm, and no arm twice', () => {
     const arms = Object.values(STRATEGY_ARMS);
     expect(new Set(arms).size).toBe(arms.length);
-    expect(Object.keys(STRATEGY_ARMS).sort()).toEqual(['aimed-3', 'repeat-3', 'single-full', 'single-lean']);
+    expect(Object.keys(STRATEGY_ARMS).sort()).toEqual(['aimed-3', 'aimed-4', 'repeat-3', 'single-full', 'single-lean']);
   });
 });

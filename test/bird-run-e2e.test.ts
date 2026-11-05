@@ -296,6 +296,21 @@ const broken = (): string => 'select count(*) from itemz';
  * as the "one wrong candidate" a mixed set is built around. `-1` is not a count, a sum, or a name.
  */
 const IMPOSSIBLE = 'select -1 as impossible';
+/**
+ * A shorter wrong statement, for the one case where a rule's tie-break is the finding.
+ *
+ * `shortest` ranks by characters, so a rule tested only on equal-length candidates has not been
+ * tested at all: it would pass by taking the first slot. This is eleven characters and wrong.
+ */
+const IMPOSSIBLE_SHORT = 'select -1';
+/**
+ * The same answer in fewer characters.
+ *
+ * The seventh question counts the orders for one item, and this says it without the `(*)`: same
+ * rows, five characters shorter, so `shortest` prefers it and is still right. A rule tested only
+ * on equal-length candidates would pass by taking the first slot, which is the vote's answer.
+ */
+const EQUIVALENT_SHORT = 'select count(*) from orders where item_id=1';
 
 describe('a dry run', () => {
   it('previews the arms it was asked for and calls no model', async () => {
@@ -3422,5 +3437,91 @@ describe('the bought opinion put to the selector instead of in front of it', () 
     } finally {
       await second.close();
     }
+  });
+});
+
+/**
+ * The selector that costs nothing, measured against the one it replaced on the same run.
+ *
+ * The reading this arm exists for was a derivation: `bench:bird:consensus` applies a rule to the
+ * candidates an artifact recorded and reports what the arm *would* have scored. Nothing in that
+ * proves the runner would draw the same candidates, rank them the same way, or stop paying for the
+ * fourth call. So both arms run here, on the same seven questions, with a plan that makes the two
+ * selectors disagree: the seventh question's value-grounded candidate writes the same answer in
+ * fewer characters, so `shortest` takes the third slot while the model takes the first.
+ */
+describe('the free selector', () => {
+  it('takes the rule\'s answer, spends three calls, and leaves the model selector on its own arm', async () => {
+    const result = await run({
+      plan: { first: correct, whenValues: EQUIVALENT_SHORT },
+      env: { BIRD_ARMS: 'select-mixed,select-mixed-rule' },
+    });
+    expect(result.code, result.printed.join('\n')).toBe(0);
+    const rows = result.report.arms as {
+      readonly arm: string;
+      readonly passed: number;
+      readonly total: number;
+      readonly calls: { readonly mean: number };
+      readonly selector?: string;
+      readonly spend?: { readonly asked: number; readonly priced: number };
+      readonly selectorRule?: { readonly rule: string; readonly decided: number; readonly eligible: number; readonly emptyPool: number };
+    }[];
+    const parent = rows.find((row) => row.arm === 'select-mixed');
+    const child = rows.find((row) => row.arm === 'select-mixed-rule');
+
+    // The two arms differ by the chooser and by nothing else: the same candidates, one call less.
+    expect(parent?.selector).toBe('model');
+    expect(child?.selector).toBe('rule:shortest');
+    expect(parent?.calls.mean).toBe(4);
+    expect(child?.calls.mean).toBe(3);
+    // A rule buys no decision, so it has no bill to publish — the absence is the claim. The parent
+    // still has to say what its call cost, and it does.
+    expect(child?.spend).toBeUndefined();
+    expect(parent?.spend).toEqual({ asked: QUESTIONS.length, priced: QUESTIONS.length });
+    // Three candidates a case, all of them executed: the funnel is the proof the rule had a set.
+    expect(child?.selectorRule).toEqual({ rule: 'shortest', decided: QUESTIONS.length, eligible: QUESTIONS.length * 3, emptyPool: 0 });
+
+    // Both answers are right and they are not the same statement, so the score cannot separate the
+    // selectors here — which is the point of reading the case record instead.
+    expect(parent?.passed).toBe(QUESTIONS.length);
+    expect(child?.passed).toBe(QUESTIONS.length);
+
+    // The call was not made, which the request log can say and the mean cannot: a mean of 3 is
+    // also what four calls with one never arriving looks like.
+    expect(result.requests.filter((request) => request.prompt.includes('which candidate statement answers the question'))).toHaveLength(QUESTIONS.length);
+
+    const cases = result.report.cases as {
+      readonly arm: string;
+      readonly id: string;
+      readonly selectedByRule?: { readonly rule: string; readonly index: number; readonly eligible: number; readonly emptyPool: boolean };
+      readonly candidates?: readonly { readonly source: string; readonly correct: boolean; readonly sql: string }[];
+    }[];
+    const decided = cases.filter((row) => row.arm === 'select-mixed-rule');
+    expect(decided).toHaveLength(QUESTIONS.length);
+    // Six cases where every candidate wrote the same statement: the rule has nothing to prefer and
+    // says so by taking the first slot.
+    expect(decided.filter((row) => row.selectedByRule?.index === 0)).toHaveLength(QUESTIONS.length - 1);
+    // The seventh is the decision, and the record names the slot the rule chose rather than the
+    // slot the vote would have chosen.
+    const split = decided.find((row) => row.id === String(QUESTIONS[6]?.id));
+    expect(split?.selectedByRule).toEqual({ rule: 'shortest', index: 2, eligible: 3, emptyPool: false });
+    // ...and the slot it named is the statement that was returned: the record and the answer cannot
+    // disagree, which is what makes the slot a reading rather than a note.
+    expect(split?.candidates?.[2]?.sql).toBe(EQUIVALENT_SHORT);
+    expect(split?.candidates?.[2]?.correct).toBe(true);
+  });
+
+  it('pays the rule\'s mistake when the shorter statement is the wrong one', async () => {
+    // The same arm on a plan where the third candidate is shorter and wrong. Run alone, because
+    // the harness refuses a child that trails its parent by more than 5pp — on seven questions
+    // that is one case — and the refusal is the correct behaviour, not something to arrange
+    // around. What this checks is the mechanism: the rule chose, and the choice was its own.
+    const result = await run({
+      plan: { first: correct, whenValues: IMPOSSIBLE_SHORT },
+      env: { BIRD_ARMS: 'select-mixed-rule' },
+    });
+    expect(result.code, result.printed.join('\n')).toBe(0);
+    const rows = result.report.arms as { readonly arm: string; readonly passed: number; readonly total: number }[];
+    expect(rows.find((row) => row.arm === 'select-mixed-rule')?.passed).toBe(QUESTIONS.length - 1);
   });
 });

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_STRATEGY,
   MIN_OBSERVATIONS,
+  SELECTION_RULES,
   STRATEGIES,
   admissible,
   chooseStrategy,
@@ -20,21 +21,54 @@ const profile = (index: 'always' | 'sometimes' | 'never'): FormatProfile => ({
   named: 'always',
 });
 
-describe('the four bounded strategies', () => {
+describe('the five bounded strategies', () => {
   it('prices every strategy in calls a user can count', () => {
     expect(STRATEGIES.map((entry) => [entry.name, entry.calls])).toEqual([
       ['single-lean', 1],
       ['single-full', 1],
       ['repeat-3', 3],
-      ['aimed-3', 4],
+      ['aimed-3', 3],
+      ['aimed-4', 4],
     ]);
   });
 
-  it('spends a selector call only where it has candidates to choose among', () => {
+  it('charges for a selector exactly when the selector is a call', () => {
+    // The invariant the retired boolean could not state: a rule reads the candidates the arm
+    // already paid for, so its price is the candidate count, and the paid selector is the only
+    // strategy whose calls exceed its candidates.
     for (const entry of STRATEGIES) {
-      expect(entry.selector ? entry.candidates : 1).toBe(entry.selector ? 3 : 1);
-      if (entry.selector) expect(entry.calls).toBe(entry.candidates + 1);
+      if (entry.selector === 'none') expect(entry.calls, entry.name).toBe(entry.candidates);
+      else if (entry.selector === 'model') expect(entry.calls, entry.name).toBe(entry.candidates + 1);
+      else expect(entry.calls, entry.name).toBe(entry.candidates);
     }
+  });
+
+  it('keeps the paid selector as a strategy, so the reading that retired it stays falsifiable', () => {
+    const paid = STRATEGIES.filter((entry) => entry.selector === 'model').map((entry) => entry.name);
+    expect(paid).toEqual(['aimed-4']);
+    // The pair is one lever: same candidates, same card, same temperature, different chooser.
+    const rule = STRATEGIES.find((entry) => entry.name === 'aimed-3');
+    const model = STRATEGIES.find((entry) => entry.name === 'aimed-4');
+    expect({ ...rule, name: '', calls: 0, selector: '' }).toEqual({ ...model, name: '', calls: 0, selector: '' });
+  });
+
+  it('names a rule that exists, on every strategy that names a rule', () => {
+    for (const entry of STRATEGIES) {
+      if (entry.selector === 'none' || entry.selector === 'model') continue;
+      expect(SELECTION_RULES, entry.name).toContain(entry.selector);
+    }
+  });
+
+  it('gives a one-candidate strategy nothing to choose among', () => {
+    for (const entry of STRATEGIES) {
+      if (entry.candidates === 1) expect(entry.selector, entry.name).toBe('none');
+    }
+    // The converse does not hold, and the test that said it did was wrong: `repeat-3` draws three
+    // candidates and aggregates them by majority, which is a rule over results rather than over
+    // statements and costs nothing — the same shape `aimed-3` has, with `modal` in place of
+    // `shortest`. Both are `'none'` only if one reads the name as "no aggregation at all".
+    const majority = STRATEGIES.filter((entry) => entry.candidates > 1 && entry.selector === 'none').map((entry) => entry.name);
+    expect(majority).toEqual(['repeat-3']);
   });
 
   it('sends zero temperature exactly where one sample is the point', () => {
@@ -45,6 +79,7 @@ describe('the four bounded strategies', () => {
     expect(STRATEGIES.filter((entry) => entry.temperature !== 0).map((entry) => entry.name)).toEqual([
       'repeat-3',
       'aimed-3',
+      'aimed-4',
     ]);
   });
 
@@ -79,18 +114,26 @@ describe('layer 1: the first contact', () => {
 });
 
 describe('layer 2: what the format profile leaves standing', () => {
-  it('drops the selector when the model never writes a parseable choice', () => {
-    expect(admissible(profile('never'))).toEqual(['single-lean', 'single-full', 'repeat-3']);
+  it('drops the paid selector when the model never writes a parseable choice', () => {
+    expect(admissible(profile('never'))).toEqual(['single-lean', 'single-full', 'repeat-3', 'aimed-3']);
   });
 
-  it('keeps all four when the choice parses at least sometimes', () => {
-    expect(admissible(profile('sometimes'))).toContain('aimed-3');
-    expect(admissible(profile('always'))).toHaveLength(4);
+  it('keeps the free selector whatever the model writes, because it reads no reply', () => {
+    // The gate belongs to the call the strategy makes. `aimed-3` reads the executed candidates,
+    // so a model that only ever answers in prose is a model `aimed-3` can still choose among.
+    for (const index of ['never', 'sometimes', 'always'] as const) {
+      expect(admissible({ ...profile(index), fenced: 'never', steps: 'never', named: 'never' }), index).toContain('aimed-3');
+    }
+  });
+
+  it('keeps all five when the choice parses at least sometimes', () => {
+    expect(admissible(profile('sometimes'))).toContain('aimed-4');
+    expect(admissible(profile('always'))).toHaveLength(5);
   });
 
   it('never drops a reader that falls back instead of failing', () => {
     const noFence: FormatProfile = { ...profile('never'), fenced: 'never', steps: 'never', named: 'never' };
-    expect(admissible(noFence)).toEqual(['single-lean', 'single-full', 'repeat-3']);
+    expect(admissible(noFence)).toEqual(['single-lean', 'single-full', 'repeat-3', 'aimed-3']);
   });
 });
 

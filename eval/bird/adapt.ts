@@ -1,11 +1,11 @@
 /**
  * What a cold start costs: the regret of calibrating on a few questions instead of all of them.
  *
- * `packages/ai/src/adapt.ts` decides which of four bounded strategies a deployment should run,
+ * `packages/ai/src/adapt.ts` decides which of five bounded strategies a deployment should run,
  * from outcomes it collects while serving. That decision is untested until someone prices the
  * two ways it can be wrong: eight questions is not many, and the arm that leads after eight is
  * not necessarily the arm a full split would have chosen. This harness prices exactly that,
- * offline, over an artifact that already exists — the four strategies map onto four arms of the
+ * offline, over an artifact that already exists — the five strategies map onto five arms of the
  * dev split, so the cost of a cold start is a subtraction rather than another benchmark.
  *
  * Three numbers, and the difference between them is the whole point:
@@ -37,7 +37,11 @@ export const STRATEGY_ARMS: Readonly<Record<StrategyName, string>> = {
   'single-lean': 'names',
   'single-full': 'metadata+evidence',
   'repeat-3': 'select',
-  'aimed-3': 'select-mixed',
+  // The two selectors over one candidate set, which is why they are adjacent here: `aimed-3`
+  // spends three calls and lets the free rule choose, `aimed-4` spends a fourth and asks the
+  // model. A deployment's calibration is choosing between them as much as between call counts.
+  'aimed-3': 'select-mixed-rule',
+  'aimed-4': 'select-mixed',
 };
 
 /** One row of a `bench:bird` artifact: one arm, one case, one verdict. */
@@ -74,7 +78,7 @@ export function align(artifact: Artifact): AlignedCase[] {
   const mapped = NAMES.filter((name) => present.has(STRATEGY_ARMS[name]));
   if (mapped.length < 2) {
     throw new Error(
-      `the artifact carries ${String(mapped.length)} of the four strategy arms (${mapped.join(', ') || 'none'}); ` +
+      `the artifact carries ${String(mapped.length)} of the five strategy arms (${mapped.join(', ') || 'none'}); ` +
         `a regret needs at least two, and they must come from one run`,
     );
   }

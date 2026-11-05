@@ -13,7 +13,17 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SUBSET="${HERE}/eval/out/competitors/${COMPETITOR}-subset.json"
-ROOT="${HERE}/eval/.cache/bird/minidev/MINIDEV"
+
+# The dataset root is the split's, by the layout `eval/bird/fetch.mjs` extracts. `--data_mode dev`
+# only says where their loader looks *inside* it, so the root has to be right first.
+case "${BIRD_SPLIT:-minidev}" in
+  minidev) ROOT="${HERE}/eval/.cache/bird/minidev/MINIDEV" ;;
+  dev) ROOT="${HERE}/eval/.cache/bird/dev/dev_20240627" ;;
+  *)
+    echo "unknown BIRD_SPLIT '${BIRD_SPLIT}': the adapter knows minidev and dev" >&2
+    exit 1
+    ;;
+esac
 OUT="${HERE}/eval/out/competitors/predictions.json"
 
 cd "${HERE}/.competitor"

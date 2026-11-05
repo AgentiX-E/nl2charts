@@ -132,3 +132,53 @@ describe('the workflow scores with our instruments, not theirs', () => {
     expect(WORKFLOW).not.toMatch(/continue-on-error/);
   });
 });
+
+/**
+ * The split is a coordinate, and every part of the run has to read it from the dispatch.
+ *
+ * The comparison this repository actually needs is the one that isolates the *pipeline*, and the
+ * contradiction it has to explain is a sign: on Mini-Dev the competitor leads by 4.84pp, and on
+ * dev our own published row leads by four. Both cannot be about method. The only way to test
+ * which is to run the same pair on the other split — which is impossible if any part of the
+ * harness has a split baked into it. Four places had one: the workflow's environment, its cache
+ * key, and the dataset path in each runner script.
+ */
+describe('the split is a coordinate, not a constant', () => {
+  /** The options offered under one input block, read the way the menu test reads them. */
+  const optionsOf = (input: string): string[] => {
+    const at = WORKFLOW.indexOf(`      ${input}:`);
+    expect(at, input).toBeGreaterThan(-1);
+    const block = WORKFLOW.slice(at, WORKFLOW.indexOf('permissions:', at));
+    return [...block.matchAll(/^\s{10}- ([\w-]+)\s*$/gmu)].map((match) => match[1] as string);
+  };
+
+  it('offers both splits, and passes the chosen one to the runner', () => {
+    expect(optionsOf('split')).toEqual(['minidev', 'dev']);
+    expect(WORKFLOW).toContain('BIRD_SPLIT: ${{ inputs.split }}');
+  });
+
+  it('keys the dataset cache by split, so a dev run cannot restore a Mini-Dev cache', () => {
+    // One key over both would restore 15 times less data than the run needs, and the fetch step
+    // would then be reading a directory that exists and is incomplete — the failure mode that
+    // produces execution errors rather than a missing file.
+    expect(WORKFLOW).toContain('key: bird-${{ inputs.split }}-');
+  });
+
+  it('leaves the limit blank by default, because blank is what "the whole split" means', () => {
+    // The first competitor dispatch declared 25 and produced a paired reading with a 29.65pp MDE.
+    // A default here overrides the runner's own meaning of an empty value, silently.
+    const at = WORKFLOW.indexOf('      limit:');
+    const block = WORKFLOW.slice(at, WORKFLOW.indexOf('      split:', at));
+    expect(block).toMatch(/default: ''/);
+  });
+
+  it.each(names)('%s resolves its dataset from the split, and refuses a third one', (name) => {
+    const script = readFileSync(join(ROOT, '.github/competitors', `${name}.sh`), 'utf8');
+    expect(script).toContain('BIRD_SPLIT');
+    // Both layouts, spelled the way `fetch.mjs` extracts them.
+    expect(script).toContain('eval/.cache/bird/minidev/MINIDEV');
+    expect(script).toContain('eval/.cache/bird/dev/dev_20240627');
+    // A split the adapter has never seen must stop the run before the first model call.
+    expect(script).toMatch(/unknown BIRD_SPLIT/);
+  });
+});

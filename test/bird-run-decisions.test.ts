@@ -24,6 +24,7 @@ import {
   assertDemonstrationsFired,
   assertMaskingFired,
   assertMaskingRule,
+  assertRuleSelection,
   assertDissentFired,
   assertDissentRule,
   assertSampleBlockFired,
@@ -38,6 +39,7 @@ import {
   meanCalls,
   offeredCandidates,
   pairedComparisons,
+  decideByRule,
   resolveLayout,
   resolveArm,
   resolveSettings,
@@ -1499,5 +1501,73 @@ describe('a mask declared with nothing to mask', () => {
       if (arm.masked !== true) continue;
       expect(arm.demonstrations, arm.name).toBe(true);
     }
+  });
+});
+
+/**
+ * The rule that replaced a call, priced in the only unit it has: characters and rows.
+ *
+ * These four assertions are the whole mechanism, and three of them are states a paid run cannot
+ * reliably produce: a tie between a short wrong statement and a long right one, a set where two
+ * candidates returned nothing, and a set where every one of them did. The fourth is the arm with
+ * nothing to rank, which must fail loudly rather than score a miss — a generation failure
+ * attributed to a rule is a wrong number that survives in an artifact.
+ */
+describe('the free selector', () => {
+  const rows = (count: number): readonly (readonly unknown[])[] => Array.from({ length: count }, (_unused, index) => [index]);
+
+  it('takes the fewest characters, not the first slot', () => {
+    const decided = decideByRule('shortest', [
+      { sql: 'select count(distinct name) from items', rows: rows(1) },
+      { sql: 'select 1', rows: rows(1) },
+      { sql: 'select max(qty) from orders', rows: rows(1) },
+    ]);
+    expect(decided).toEqual({ rule: 'shortest', index: 1, eligible: 3, emptyPool: false });
+  });
+
+  it('ranks only the candidates that returned rows, and says how many it could rank', () => {
+    // The empty statement is the shortest one and the wrong one on this corpus: ranking it would
+    // make the rule agree with the defect it exists to avoid.
+    const decided = decideByRule('shortest', [
+      { sql: 'select nothing at all from nowhere', rows: [] },
+      { sql: 'select sum(price) from items', rows: rows(2) },
+    ]);
+    expect(decided.index).toBe(1);
+    expect(decided.eligible).toBe(1);
+    expect(decided.emptyPool).toBe(false);
+  });
+
+  it('still answers when every candidate returned nothing, and says the pool was empty', () => {
+    // A question whose answer really is empty has no other reading, and the fallback is what
+    // makes the rule a total function rather than a rule with a hole in it.
+    const decided = decideByRule('shortest', [
+      { sql: 'select count(*) from items where 1 = 0', rows: [] },
+      { sql: 'select 1 where 0 = 1', rows: [] },
+    ]);
+    expect(decided).toMatchObject({ index: 1, eligible: 0, emptyPool: true });
+  });
+
+  it('keeps the earliest slot on a tie, which is what the vote would have done', () => {
+    const decided = decideByRule('first', [
+      { sql: 'aaaa', rows: rows(1) },
+      { sql: 'bbbb', rows: rows(1) },
+    ]);
+    expect(decided.index).toBe(0);
+    expect(decideByRule('shortest', [
+      { sql: 'aaaa', rows: rows(1) },
+      { sql: 'bbbb', rows: rows(1) },
+    ]).index).toBe(0);
+  });
+
+  it('refuses a set with no candidates instead of scoring a miss', () => {
+    expect(() => decideByRule('shortest', [])).toThrow(/no candidates/);
+  });
+
+  it('refuses an arm that names a rule without a candidate set, or beside a model-only lever', () => {
+    expect(() => assertRuleSelection({ name: 'x', selectRule: 'shortest' })).toThrow(/without a candidate set/);
+    expect(() => assertRuleSelection({ name: 'x', select: true, selectRule: 'shortest', pairwise: true })).toThrow(/never run/);
+    expect(() => assertRuleSelection({ name: 'x', select: true, selectRule: 'shortest' })).not.toThrow();
+    // A model-selector arm is unaffected: it may declare all of them.
+    expect(() => assertRuleSelection({ name: 'x', select: true, pairwise: true, judge: 'second' })).not.toThrow();
   });
 });

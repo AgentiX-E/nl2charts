@@ -23,8 +23,8 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHttpProvider } from '@agentix-e/nl2charts-ai';
 import type { LlmProvider, PromptOptions, SchemaTable } from '@agentix-e/nl2charts-ai';
-import { applySelection, attachDefinitions, buildAskMessages, buildReconcilePrompt, buildSelectionPrompt, chooseCandidatePairwise, buildSqlPrompt, choosePromptProfile, createPipeline, emptyRetryMessages, extractSql, formatProfile, renderDefinitions, renderEvidence, renderSchemaCard, resultGroups, withCallCounter } from '@agentix-e/nl2charts-ai';
-import type { FormatProfile, ModelCapabilities, PurposeUsage, ReplyShape, ValueGap } from '@agentix-e/nl2charts-ai';
+import { applySelection, attachDefinitions, buildAskMessages, buildReconcilePrompt, buildSelectionPrompt, chooseCandidateByRule, chooseCandidatePairwise, buildSqlPrompt, choosePromptProfile, createPipeline, emptyRetryMessages, extractSql, formatProfile, renderDefinitions, renderEvidence, renderSchemaCard, resultGroups, withCallCounter } from '@agentix-e/nl2charts-ai';
+import type { FormatProfile, ModelCapabilities, PurposeUsage, ReplyShape, SelectionRule, ValueGap } from '@agentix-e/nl2charts-ai';
 // The retry turn writes a statement outside the pipeline, so it goes through the same
 // guard the pipeline applies. Skipping it here would let the one arm that retries be the
 // one arm that can execute DDL.
@@ -109,6 +109,23 @@ export interface Arm {
    * reading the candidates. Same samples, same count — one lever.
    */
   readonly select?: boolean;
+  /**
+   * Choose among the candidates with a rule that costs no call, instead of with the model.
+   *
+   * Requires `select`: the arm still draws a candidate set, and this says who picks from it.
+   * `first` returns the candidate the prompt offered first, `shortest` the fewest characters of
+   * SQL, `modal` the result set most candidates agree on — all three ranking only candidates
+   * that returned rows (`eligibleIndices`), which is the one member of a set that can be ruled
+   * out without reading it.
+   *
+   * This exists because the reading said the fourth call loses: on 1,532 dev questions
+   * `shortest` scored 63.64% against the model selector's 62.79% on the same candidates, and on
+   * the strong pool 63.71% against 61.42% (+2.29pp, p = 0.0030, 38 wins 19 losses) at 3.00 calls
+   * against 4.00. The arm exists to make that reading a *measurement* rather than a derivation:
+   * the same candidates, the same prompts, the same judge, one call less — and, because the
+   * artifact still records every candidate, a third instrument that must agree with both.
+   */
+  readonly selectRule?: SelectionRule;
   /**
    * Column values the question names, resolved against the database under test.
    * The instance-specific counterpart to retrieved knowledge, which is generic.
@@ -767,6 +784,18 @@ export const ARMS: readonly Arm[] = [
   // narrow set. The sources are arms already measured on their own, so the candidate
   // set is a combination of known parts rather than a new invention.
   { name: 'select-mixed', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: MIXED_SOURCES },
+  // `select-mixed` with its fourth call replaced by a rule that reads what that call was given.
+  //
+  // One lever in the only sense this repository counts: same three prompts, same card, same
+  // candidates, same judge — a different chooser, and one call less. The reading that put this
+  // arm here was taken offline from the parent's own artifact, where `shortest` scored 63.64%
+  // against the selector's 62.79% on 1,532 dev questions, and 63.71% against 61.42% on the strong
+  // pool (+2.29pp, p = 0.0030, 38 wins 19 losses). An offline rule reading is a *derivation*: it
+  // assumes the pipeline would have produced the same candidates and ranked them the same way.
+  // This arm is that assumption under test. Its artifact makes three instruments comparable on
+  // one run — the score, the recorded candidates, and `bench:bird:consensus` over those
+  // candidates — and the identity between the last two is exact or something is wrong.
+  { name: 'select-mixed-rule', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, selectRule: 'shortest', mixed: MIXED_SOURCES },
   // The arm this split ships, plus one candidate that is a query description instead of a
   // statement. One lever from `select-mixed` in the sense that matters — same three prompts, same
   // card, same selector — and one call more, which the report publishes rather than hides.
@@ -1155,6 +1184,7 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'metadata+evidence+values': "the curated notes and the value block on the same card — measured on `41302183201` at 297/496 against the parent's 291 (+1.21pp, 6:12, p=0.2379, MDE 2.40pp) with an exact A/A, so the two sources are substitutes rather than complements and the 166 remaining failures are knowledge the card already carries; kept as the ablation reference for 'more text on the prompt', not as a candidate",
   'inline+evidence+llm-select-dense': "the same reply applied their way: a table the model named nothing in keeps its first six columns instead of vanishing, which is what MAC-SQL's `drop_all` does — measured 261/496 against the column rule's 253 and the parent's 278 (`41290647076`), so it recovers 1.61pp of the 5.04pp loss (p=0.416, unresolved at 14.9% discordance) and still loses 3.43pp to the parent (p=0.0241); the card lever is closed at both granularities",
   'select-mixed': 'three decompositions instead of three samples: within its MDE of a single call on this split, and the decomposition question needs the dev split to be answered',
+  'select-mixed-rule': "the parent's own candidates chosen by `shortest` instead of by the model: three calls instead of four, and the offline device already priced the rule at 63.64% against the selector's 62.79% on 1,532 dev questions (63.71% against 61.42% on the strong pool, +2.29pp, p = 0.0030) — this arm is the derivation becoming a measurement, and its artifact is what `bench:bird:consensus` must reproduce exactly",
   'select-samples': "the trio's third slot given to the sampled card rather than the value index: the same four calls, and the block it replaces is empty on 60.9% of the split",
   intent: 'the same card one rule longer, answering with a query object the renderer turns into SQL: the only arm whose output grammar is enforced, and the only one that cannot be dispatched alone — its statement is rendered on the candidate-source path, so `assertIntentRule` refuses a run that names it as an arm of its own',
   'select-intent': 'the shipped trio plus a fourth candidate rendered from a query intent: one call more than `select-mixed`, and the only arm on the board that can raise the pool ceiling rather than redistribute it — its verdict is the ceiling, pre-registered at +2.0pp (67.75 → 69.75) on dev',
@@ -1408,6 +1438,10 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   // truncated previews, and the pair prices the information rather than a rewrite.
   ['select-mixed', 'select-mixed+agree'],
   ['select-cross', 'select-cross-agree'],
+  // One lever: who chooses among the same four-or-three candidates — a call that reads them, or
+  // a rule that ranks them. The rule arm is the derivation from the parent's own artifact turned
+  // into a run, so this pair is also the test of the offline device.
+  ['select-mixed', 'select-mixed-rule'],
   // One lever: the same candidates and selector, with an empty result treated as a
   // failure — dropped before the vote and retried once when nothing survives.
   ['select-mixed', 'select-mixed+empty'],
@@ -1497,6 +1531,17 @@ export interface CaseRun extends CaseOutcome {
    * it means the reply carried a statement the engine ran, and `reconcile.adopted` says whether the
    * arm scored it — a restatement handed back by policy is a usable reply the arm declined. */
   readonly selectedByModel?: boolean;
+  /**
+   * The free decision, on an arm that made one.
+   *
+   * `index` is 0-based in the order the candidates were offered, `eligible` is how many of them
+   * returned rows and could therefore be ranked, and `emptyPool` records the one set where the
+   * rule had nothing to prefer — every candidate empty, which on a corpus whose answers are never
+   * empty is a wrong set and on one whose answers sometimes are is the only correct choice. The
+   * field is here rather than derived from the score because a rule that picks by accident and a
+   * rule that picks by construction are the same accuracy and different mechanisms.
+   */
+  readonly selectedByRule?: { readonly rule: SelectionRule; readonly index: number; readonly eligible: number; readonly emptyPool: boolean };
   /**
    * Why the adjudicating call did not happen, on the cases where it did not.
    *
@@ -1835,6 +1880,21 @@ export interface ArmReportRow {
    * missing from the bill.
    */
   readonly spend?: { readonly asked: number; readonly priced: number };
+  /**
+   * What the free rule decided, on the arm that lets it decide.
+   *
+   * The counterpart of `spend` for a selector that costs nothing, and it exists for the same
+   * reason: on a rule arm the accuracy alone cannot say whether the lever ran. `eligible` is the
+   * summed candidate count the rule could rank and `emptyPool` the cases where it could rank
+   * none, so an arm whose rule silently fell back to the first candidate on every case is a
+   * reading no accuracy can distinguish from a rule that chose.
+   */
+  readonly selectorRule?: {
+    readonly rule: SelectionRule;
+    readonly decided: number;
+    readonly eligible: number;
+    readonly emptyPool: number;
+  };
   /**
    * What the reconcile turn did across the arm's cases, on the arm that asks for a statement.
    *
@@ -2521,6 +2581,27 @@ export function poolReadOf(
 }
 
 /**
+ * The decision a free rule makes, over the candidates the arm already executed.
+ *
+ * Wrapped rather than inlined at the call site because two things have to be true of it and both
+ * are cheap to state once: a rule refuses to run on an empty set (an arm that produced no
+ * candidate has no answer, and scoring that as a miss would blame the rule for a generation
+ * failure), and the record has to say how many candidates were eligible, since a set of three
+ * where two returned nothing is a decision between one statement and itself.
+ */
+export function decideByRule(
+  rule: SelectionRule,
+  candidates: readonly { readonly sql: string; readonly rows: readonly (readonly unknown[])[] }[],
+): NonNullable<CaseRun['selectedByRule']> {
+  if (candidates.length === 0) {
+    throw new Error(`the ${rule} rule was given no candidates; an arm with nothing to choose among has no answer to score`);
+  }
+  const decided = chooseCandidateByRule(rule, candidates);
+  const eligible = candidates.filter((candidate) => candidate.rows.length > 0).length;
+  return { rule, index: decided.index, eligible, emptyPool: eligible === 0 };
+}
+
+/**
  * How many of an arm's decisions carry a counted call.
  *
  * The one number its cost cannot be inferred from. `calls.mean` is a mean over cases that did not
@@ -2868,6 +2949,36 @@ export function assertDissentFired(
 }
 
 /**
+ * A rule with nothing to rank, or a model-only lever declared beside it, is a claim without wiring.
+ *
+ * Two ways the same mistake arrives. The first is a rule named on an arm that draws one candidate:
+ * `select: true` is what builds the set, so a rule without it ranks a set of one and publishes the
+ * parent arm under a name that says otherwise. The second is a lever only the model branch reads —
+ * `pairwise`, `judge`, `agreement`, `reconcile`, `sourcesVisible`, `dissentVerify` — declared
+ * beside a rule that never enters that branch. The arm would report the lever in its name, price
+ * it in its diff, and never run it; three of the four levers caught this way over the last year
+ * were found by a paid artifact, and this is the free version of that finding.
+ *
+ * Declaration-time, so it costs nothing and refuses before a call is spent.
+ */
+const MODEL_ONLY_LEVERS = ['agreement', 'dissentVerify', 'judge', 'judgeFormat', 'pairwise', 'reconcile', 'reconcileAdopt', 'sourcesVisible'] as const;
+
+export function assertRuleSelection(arm: Pick<Arm, 'name' | 'select' | 'selectRule'> & Partial<Arm>): void {
+  if (arm.selectRule === undefined) return;
+  if (arm.select !== true) {
+    throw new Error(
+      `arm ${arm.name} names the ${arm.selectRule} rule without a candidate set; \`select: true\` is what draws one and a rule with nothing to rank decides nothing`,
+    );
+  }
+  const wired = MODEL_ONLY_LEVERS.filter((lever) => arm[lever] !== undefined && arm[lever] !== false);
+  if (wired.length > 0) {
+    throw new Error(
+      `arm ${arm.name} selects with the ${arm.selectRule} rule and declares ${wired.join(', ')}, which only the model selector reads: the lever would be declared, priced and never run`,
+    );
+  }
+}
+
+/**
  * An arm that answers with a query object can only be read where a candidate is drawn.
  *
  * The statement it produces is rendered by the candidate-source branch, so dispatching it as an arm
@@ -3107,13 +3218,21 @@ export function assertReportComplete(report: { readonly arms?: readonly ArmRepor
         `arm ${row.arm} reads the pool of ${arm.pool} and its row carries no pool verification, so the delta it publishes rests on an unstated number of shared cases`,
       );
     }
-    if (arm.select === true && row.spend === undefined && row.total >= MINIMUM_INSTRUMENT_SAMPLE) {
+    if (arm.select === true && arm.selectRule === undefined && row.spend === undefined && row.total >= MINIMUM_INSTRUMENT_SAMPLE) {
       // The row has to say how many decisions carried a counted call, on either shape. The gate cannot
       // read that off `calls.mean`: a case that fails before the selector returns and spends nothing,
       // which makes 1.0 and 0.99 the same number to a mean and opposite facts to a reader — one arm
       // priced its selector, the other never reached it.
       throw new Error(
         `arm ${row.arm} decides with the model and its row does not say how many of those decisions were priced: the selector call is one per decision and a mean cannot show it`,
+      );
+    }
+    if (arm.selectRule !== undefined && row.selectorRule === undefined && row.total >= MINIMUM_INSTRUMENT_SAMPLE) {
+      // The same question for a selector that spends nothing, and the one that a mean cannot
+      // answer for the same reason: a rule arm's `calls.mean` equals its candidate count whether
+      // the rule ran or the vote did. The funnel is the only record of the lever acting.
+      throw new Error(
+        `arm ${row.arm} lets the ${arm.selectRule} rule decide and its row carries no rule funnel, so the decision cannot be told from the vote that would have run without it`,
       );
     }
     if (row.total > 0 && row.format === undefined && row.pool === undefined) {
@@ -5120,6 +5239,9 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
   // ...and a dissent that names one of the arm's own sources is a fourth vote, refused before a
   // single call is spent on it.
   assertDissentRule(arm);
+  // ...and a rule that is declared beside a lever only the model selector reads is a lever that
+  // would be published without ever being wired.
+  assertRuleSelection(arm);
   /** What this arm drew per case, in the shape a pooled arm reads. */
   const collected = new Map<string, readonly PooledCandidate[]>();
   // A mixed arm runs three configurations under one label; if one of them repairs or
@@ -5549,6 +5671,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
         const majority = majorityResult(considered, sameResult);
         let winner = majority.winner as { sql: string; rows: readonly (readonly unknown[])[]; source: string };
         let selectedByModel: boolean | undefined;
+        let selectedByRule: CaseRun['selectedByRule'];
         let selectionFailed: 'llm' | 'harness' | undefined;
         let retryFailed: 'llm' | 'harness' | undefined;
         // Declared here rather than inside the select branch because the case row is built after
@@ -5560,7 +5683,15 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
         // per-candidate record below is written from, because a verdict is only attributable if
         // it is filed under the slot the judge actually saw.
         const ordered = arm.shuffle === true ? shuffleByCase(considered, question.question_id) : considered;
-        if (arm.select === true) {
+        if (arm.select === true && arm.selectRule !== undefined) {
+          // The choice the fourth call was buying. Every input is already in hand — the executed
+          // rows and the statement text — so this branch spends nothing and cannot fail: there is
+          // no reply to read, no index to parse and no endpoint to be down. That is the whole
+          // claim of the arm, and the reason `spendOf` reports no decision here rather than a
+          // decision that cost zero: a rule did not price a call, it replaced one.
+          selectedByRule = decideByRule(arm.selectRule, ordered);
+          winner = ordered[selectedByRule.index] as typeof winner;
+        } else if (arm.select === true) {
           // What the selector reads, as opposed to what the arm runs: on a canonical arm the
           // text carries no author signature, and `winner` below still comes from the raw set.
           const readable = readableCandidates(ordered, arm.canonical);
@@ -5845,6 +5976,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
           // of one is still a record.
           ...(verdicts.length === 0 ? {} : { candidates: verdicts }),
           ...(selectedByModel === undefined ? {} : { selectedByModel }),
+          ...(selectedByRule === undefined ? {} : { selectedByRule }),
           ...(selectionFailed === undefined ? {} : { selectionFailed }),
           ...(reconciled === undefined ? {} : { reconcile: reconciled }),
           ...(retryFailed === undefined ? {} : { retryFailed }),
@@ -6136,9 +6268,10 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
     passed: summary.passed,
     total: summary.total,
     ...(arm.pool === undefined ? {} : { pool: arm.pool }),
-    // What the decision cost, on every arm whose selector is the model. Beside the call mean it
-    // qualifies, because the mean is the one number that cannot say whether the selector was priced.
-    ...(arm.select !== true ? {} : { spend: spendOf(runs) }),
+    // What the decision cost, on every arm whose selector is the model. A rule arm decides with
+    // no call at all, so it has nothing to price — printing `{asked: 0, priced: 0}` there would
+    // read as a selector nobody reached, which is the opposite of a selector that costs nothing.
+    ...(arm.select !== true || arm.selectRule !== undefined ? {} : { spend: spendOf(runs) }),
     accuracy: summary.accuracy,
     wilson: wilsonInterval(summary.passed, summary.total),
     strictPassed,
@@ -6223,7 +6356,8 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
           agreement:
             runs.reduce((total, run) => total + (run.agreement ?? 0), 0) /
             Math.max(1, runs.filter((run) => run.agreement !== undefined).length),
-          selector: arm.select === true ? 'model' : 'majority',
+          selector:
+            arm.selectRule === undefined ? (arm.select === true ? 'model' : 'majority') : `rule:${arm.selectRule}`,
           // Who judges, when it is not the primary model. The gate needs this to insist the
           // artifact names the judge: a judge swap whose result cannot be attributed is a
           // number with no owner.
@@ -6252,7 +6386,7 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
             : {}),
           // How often the selector produced a usable index. A selector that fails to
           // answer half the time is not a null result; it is a broken prompt.
-          ...(arm.select === true
+          ...(arm.select === true && arm.selectRule === undefined
             ? {
                 selectorDecided: runs.filter((run) => run.selectedByModel === true).length,
                 selectorTotal: runs.filter((run) => run.selectedByModel !== undefined).length,
@@ -6266,6 +6400,20 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
                   : {}),
               }
             : {}),
+          // The free decision's own funnel, on the arm that made one. `eligible` sums the
+          // candidates the rule could rank, and `emptyPool` counts the sets where it had none to
+          // prefer — the state in which every candidate returned nothing, which is a wrong set on
+          // this corpus and the only correct one on a corpus whose answers are sometimes empty.
+          ...(arm.selectRule === undefined
+            ? {}
+            : {
+                selectorRule: {
+                  rule: arm.selectRule,
+                  decided: runs.filter((run) => run.selectedByRule !== undefined).length,
+                  eligible: runs.reduce((total, run) => total + (run.selectedByRule?.eligible ?? 0), 0),
+                  emptyPool: runs.filter((run) => run.selectedByRule?.emptyPool === true).length,
+                },
+              }),
         }),
     promptChars: {
       mean: Math.round(promptSizes.reduce((total, size) => total + size, 0) / Math.max(1, promptSizes.length)),
@@ -6426,6 +6574,13 @@ export function caseRows(outcomes: ReadonlyMap<string, readonly CaseRun[]>): Rec
       ...(run.candidates === undefined ? {} : { candidates: run.candidates }),
       ...(run.candidateSurvival === undefined ? {} : { candidateSurvival: run.candidateSurvival }),
       ...(run.winnerSource === undefined ? {} : { winnerSource: run.winnerSource }),
+      // Which slot the free rule took, on the arm where a rule decides.
+      //
+      // The arm-level funnel counts the decisions; a reading of "the rule agreed with the vote
+      // here and disagreed there" needs the case. It is also the only field that makes the arm's
+      // score checkable against the artifact: `bench:bird:consensus` re-derives the same rule from
+      // `candidates`, and the two must name the same slot on every case.
+      ...(run.selectedByRule === undefined ? {} : { selectedByRule: run.selectedByRule }),
       // What the reconcile turn did on this case. The fifth dispatch published the arm-level
       // funnel and not the per-case record, so the loss could be attributed to the restatements in
       // arithmetic and not in evidence: 514 replies restated a candidate, and the archive could not

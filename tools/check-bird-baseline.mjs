@@ -428,6 +428,29 @@ export function compare(report, baseline) {
         );
       }
     }
+    // A rule that decides in no call has two ways to be wrong about its price, and they point in
+    // opposite directions: a mean above its candidate count is a call it did not make (the arm was
+    // measured with a selector and published under the rule's name), and a priced decision is a
+    // call it did not spend (the bill was copied from the parent's row). Both are invisible to the
+    // accuracy, and the first one is the exact defect `I-96` exists to retire — a rule arm that is
+    // secretly a four-call arm would report the parent's number at the child's price.
+    if (typeof item.selector === 'string' && item.selector.startsWith('rule:')) {
+      if (samples !== undefined && mean > samples) {
+        issues.push(
+          `BIRD1: ${item.arm} selects with ${item.selector} and reports ${String(mean)} calls per case against ${String(samples)} candidates; the rule spends no call, so the mean is a selector that is still being bought`,
+        );
+      }
+      if (typeof item.spend?.priced === 'number' && item.spend.priced > 0) {
+        issues.push(
+          `BIRD1: ${item.arm} selects with ${item.selector} and prices ${String(item.spend.priced)} decisions; a rule buys nothing and a bill here belongs to a call the row does not admit to`,
+        );
+      }
+      if (item.selectorRule === undefined) {
+        issues.push(
+          `BIRD1: ${item.arm} selects with ${item.selector} and its row carries no rule funnel; the mean equals its candidate count either way, so nothing here says the rule decided`,
+        );
+      }
+    }
     // A pooled arm's candidates are the ones the arm it names already paid for, so it must spend
     // strictly less: an arm that regenerates them costs what its parent costs, which is the one thing
     // a shared pool exists to avoid — and it would do it while reporting the parent's candidates as
@@ -1000,6 +1023,44 @@ function selfTest() {
   if (pooledFree.issues.length !== 0) {
     issues.push(`BIRD1 demands a spent call from a pooled majority vote (${pooledFree.issues.join('; ')})`);
   }
+  // The free selector, three rows: the correct one, one that pays a call it does not make, and one
+  // that prices a decision it never bought. The second is the shape `I-96` spent a round arguing
+  // against — a rule arm that is a four-call arm with a different name — and the third is the same
+  // mistake as `41440646002` in the opposite direction.
+  const ruleArm = (overrides = {}) => ({
+    arm: 'select-mixed-rule',
+    passed: 58,
+    total: 100,
+    vote: 3,
+    selector: 'rule:shortest',
+    calls: { mean: 3, max: 3 },
+    selectorRule: { rule: 'shortest', decided: 100, eligible: 300, emptyPool: 2 },
+    ...overrides,
+  });
+  const ruleReport = (row) => ({
+    selection: { scored: 100, split: 'minidev' },
+    model: 'deepseek-chat',
+    run,
+    arms: [arm('select-mixed', 56, 100, { vote: 3, selector: 'model', calls: { mean: 4, max: 4 } }), row],
+  });
+  const ruleExpected = { ...baseline, expectedArms: ['select-mixed', 'select-mixed-rule'] };
+  const ruleClean = compare(ruleReport(ruleArm()), ruleExpected);
+  if (ruleClean.issues.length !== 0) {
+    issues.push(`BIRD1 refuses a rule arm for reporting the calls it actually made (${ruleClean.issues.join('; ')})`);
+  }
+  const ruleBuying = compare(ruleReport(ruleArm({ calls: { mean: 4, max: 4 } })), ruleExpected);
+  if (!ruleBuying.issues.some((issue) => issue.includes('still being bought'))) {
+    issues.push('BIRD1 accepts a rule arm whose cost is a call the rule does not make');
+  }
+  const rulePriced = compare(ruleReport(ruleArm({ spend: { asked: 100, priced: 100 } })), ruleExpected);
+  if (!rulePriced.issues.some((issue) => issue.includes('buys nothing'))) {
+    issues.push('BIRD1 accepts a rule arm that prices decisions it never bought');
+  }
+  const ruleSilent = compare(ruleReport(ruleArm({ selectorRule: undefined })), ruleExpected);
+  if (!ruleSilent.issues.some((issue) => issue.includes('no rule funnel'))) {
+    issues.push('BIRD1 accepts a rule arm whose row never says the rule decided');
+  }
+
   // The reconcile funnel, whose last column is nested by policy. `41453395203` reported 595 runnable
   // and 595 adopted under `'always'` and was right; the `-novel` arm reports fewer adopted than
   // runnable *on purpose*, so the two relationships have to be checked against the policy the row
