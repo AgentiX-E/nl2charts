@@ -3755,6 +3755,24 @@ advantage is the same filter. **The next lever is condition coverage, and it is 
 family**, which has been priced twice and returns about a third of a ceiling that this gap does not
 sit under.
 
+On the dev artifact the same instrument reads **567 failures of 1,532, of which 216 (38.1%) have no
+condition at all on a column the gold filters** — 325 missing conditions in total, and 351 failures
+that write every gold condition somewhere. That is the number the next lever has to be built
+against, and it prices three things before a single call is spent:
+
+| quantity | value | what it decides |
+| --- | --- | --- |
+| questions any condition gate could reach | 216 (14.1%) | how often the extra call would fire |
+| cost at one call per reached question | +0.14 calls/question (+3.5%) | inside the 10% budget `8o` set |
+| ceiling if every reached case were fixed | +14.1pp | the largest the lever could possibly be |
+| price the same lever already returned, on one statement | +1.01pp | what a *ungated* audit bought |
+
+The gate is the design decision, not the audit: an audit on every question costs a call for 86% of
+questions that already write the condition, and the instrument says those questions exist. What the
+ceiling cannot say is the yield — a gate that fires on 216 questions and fixes 20 is +1.3pp, and the
+measured +1.01pp for the ungated version suggests that is the range to expect rather than the
+ceiling.
+
 ### The same pair on dev: the sign holds, the ceiling does not
 
 Run `41953255372`, dispatched with `split: dev` and an **empty** `limit` — the whole split, not a
