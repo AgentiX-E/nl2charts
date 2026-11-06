@@ -21,6 +21,17 @@ cannot be argued with.
   written before the verdict fix records `values` on the five no-answer branches, and reading the
   verdict as the evidence would find no attrition in exactly the run this was built for.
 
+- **`tools/bird-dispatch.mjs` refuses to dispatch into an occupied concurrency group.** Four
+  workflows share `bird-eval` because they draw on the same quota and write the same artifact. None
+  of them cancels, but two dispatches 13 seconds apart still lost a run: the second arrival left the
+  first `pending` and it was cancelled, while the `ci` job holding the group was cancelled two
+  seconds after the first dispatch arrived. `busyRuns` therefore counts `queued` and `pending` as
+  busy, not only `in_progress` — the run that was lost was pending when it died. `--wait` queues
+  behind the group instead of into it, the body spells `timeout_ms` as the workflow declares it (a
+  number there is dropped by Actions and silently runs the 120 s default), and the token is read
+  from `GH_TOKEN` rather than an argument, because this repository has a gate that reads for
+  exactly that.
+
 ### Fixed
 - **A case that never produced a result set no longer claims a verdict.** The five no-answer
   branches (model timeout, guard refusal, empty pool, engine error, unusable reply) each wrote
