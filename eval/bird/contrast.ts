@@ -49,6 +49,15 @@ export interface ContrastArtifact {
   readonly armsRequested?: readonly string[];
   readonly promptChars?: { readonly mean?: number };
   readonly settings?: { readonly split?: string; readonly timeoutMs?: number };
+  /**
+   * The instrument's own settings, as the runner writes them.
+   *
+   * `timeoutMs` is here because it is the one setting `S1` proved is not plumbing: the same
+   * prompt, judge and arms at 120 s and at 300 s are two experiments whose difference is partly
+   * the setting. A contrast that ignored it would accept the pair this round dispatched to
+   * separate exactly that.
+   */
+  readonly run?: { readonly timeoutMs?: number; readonly concurrency?: number; readonly retries?: number };
   readonly cases?: readonly ContrastCase[];
 }
 
@@ -94,6 +103,13 @@ export interface ContrastOutcome {
   /** Discordant intent-to-treat cases where one side produced no answer at all. */
   readonly forfeitsLeft: number;
   readonly forfeitsRight: number;
+  /**
+   * The per-call ceiling both sides ran under, when both recorded one.
+   *
+   * Absent when either artifact predates the field. Reported rather than assumed equal: the
+   * comparison is only "same experiment, different base" because this number matched.
+   */
+  readonly deadlineMs?: number;
   readonly problems: readonly string[];
 }
 
@@ -184,6 +200,7 @@ export function comparabilityProblems(left: ContrastArtifact, right: ContrastArt
   differ('judge', left.judgeModel, right.judgeModel);
   differ('arms', left.armsRequested, right.armsRequested);
   differ('promptChars.mean', left.promptChars?.mean, right.promptChars?.mean);
+  differ('run.timeoutMs', left.run?.timeoutMs, right.run?.timeoutMs);
   return problems;
 }
 
@@ -222,6 +239,9 @@ export function contrastArtifacts(left: ContrastArtifact, right: ContrastArtifac
     completeCase,
     forfeitsLeft: discordant.filter((id) => !leftJudged.has(id)).length,
     forfeitsRight: discordant.filter((id) => !rightJudged.has(id)).length,
+    // Both sides carried it and the gate above let them through, which means the two values are
+    // equal; one side missing it means there is nothing to print.
+    ...(left.run?.timeoutMs === undefined ? {} : { deadlineMs: left.run.timeoutMs }),
     problems: [],
   };
 }
@@ -234,6 +254,10 @@ export function contrastLines(outcome: ContrastOutcome): string[] {
   const { left, right, intentToTreat, completeCase } = outcome;
   const lines: string[] = [];
   lines.push(`  ${left.label} (${left.model}) vs ${right.label} (${right.model})`);
+  // What was found equal, printed once. The deadline is the one equality that makes the pair a
+  // base comparison rather than a settings comparison, and the artifacts that carry it are the
+  // only ones where the claim can be checked at all.
+  if (outcome.deadlineMs !== undefined) lines.push(`  deadline ${String(outcome.deadlineMs)} ms on both sides`);
   lines.push('');
   lines.push('  what each side answered:');
   for (const side of [left, right]) {

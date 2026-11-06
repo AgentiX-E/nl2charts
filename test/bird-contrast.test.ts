@@ -85,6 +85,35 @@ describe('what makes two artifacts one contrast', () => {
     expect(lines).toContain('unanswered shares differ by 100.00pp');
   });
 
+  it('refuses two artifacts that shared the prompt but not the deadline', () => {
+    // The deadline is part of the experiment and not of the plumbing: `S1` at 120 s and `S1` at
+    // 300 s are the same prompt, the same judge and the same arms, and the second one exists
+    // because the first measured the deadline. A contrast that accepted them would print a
+    // difference between two bases that is partly a difference between two settings — and the
+    // pair being dispatched this round is exactly the one that would read as comparable.
+    const base = artifact([pass('1')], { run: { timeoutMs: 120000, concurrency: 8, retries: 4 } });
+    const relaxed = artifact([pass('1')], { run: { timeoutMs: 300000, concurrency: 8, retries: 4 } });
+    expect(comparabilityProblems(base, relaxed)).toEqual(['run.timeoutMs: 120000 vs 300000']);
+    expect(() => contrastArtifacts(base, relaxed)).toThrow(/run\.timeoutMs: 120000 vs 300000/);
+  });
+
+  it('names the shared deadline once, so the reader does not have to open the files', () => {
+    // "It names what it found equal" is the doctrine of this instrument; the deadline was found
+    // equal and was the only equal field it did not name.
+    const left = artifact([pass('1'), wrong('2')], { run: { timeoutMs: 300000, concurrency: 8, retries: 4 } });
+    const right = artifact([pass('1'), pass('2')], { run: { timeoutMs: 300000, concurrency: 8, retries: 4 } });
+    const outcome = contrastArtifacts(left, right);
+    expect(outcome.deadlineMs).toBe(300000);
+    expect(contrastLines(outcome).join('\n')).toContain('deadline 300000 ms on both sides');
+  });
+
+  it('says nothing about a deadline one side never recorded', () => {
+    // Absence is not disagreement (same rule as `promptChars`), and it must not print "undefined".
+    const outcome = contrastArtifacts(artifact([pass('1')]), artifact([pass('1')]));
+    expect(outcome.deadlineMs).toBeUndefined();
+    expect(contrastLines(outcome).join('\n')).not.toContain('deadline');
+  });
+
   it('does not refuse over a field an artifact simply does not carry', () => {
     // An older artifact has no `promptChars`. Absence is not disagreement, and a check that read
     // it as one would refuse every comparison against a file written before the field existed.
