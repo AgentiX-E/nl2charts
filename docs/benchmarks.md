@@ -8377,8 +8377,79 @@ run, so two models are always two files. The pairing is by question id, the colu
 the model the artifact recorded, and the run-to-run displacement is the one the A/A copies measure —
 not something this file invents by joining.
 
-### Status
+### The reading
 
-The instrument is built, tested and dispatched; the reading is not in yet. Until it is, the sentence
-this section opened with — *the reasoner projects too many columns* — remains what it always was: an
-inference from result sets, now with the means to check it.
+Two dispatches on the same commit (`4eb9e0a9`), the same 1,532 questions, the same arm, the same
+judge — only `LLM_MODEL` changed (`42138948702`, `42142701511`):
+
+| | `deepseek-chat` | `deepseek-reasoner` | Δ |
+|---|---|---|---|
+| passed | 939 (61.29%) | 896 (58.49%) | **−2.80pp** |
+| `values` | 462 | 432 | **−30** |
+| `column-count` | 131 | **204** | **+73** |
+| `select *` | 7 (0.5%) | 13 (0.9%) | +6 |
+| **wider than gold** | 100 (6.5%) | **183 (12.0%)** | **+83** |
+| the same width | 1,350 (88.1%) | 1,250 (81.8%) | −100 |
+| narrower than gold | 75 (4.9%) | 83 (5.4%) | +8 |
+| extra items | 976 | 1,148 | +172 |
+| &nbsp;&nbsp;of which carried | 323 (33.1%) | 387 (33.7%) | **p = 0.78** |
+| generated tokens: wrong | 58 | **692** | ×11.9 |
+| generated tokens: right | 43 | **333** | ×7.7 |
+
+The A/A copy each run carries puts the instrument's own noise on the table: `inline+evidence#2` read
+99 against 100 wider, 977 against 975 extra, 323 against 321 carried. **A reading of two is not a
+reading of six.**
+
+#### H1 is refuted, and that is the finding
+
+`carried` is 33.1% of the chat model's extra columns and 33.7% of the reasoner's — Fisher exact
+**p = 0.78**. The stronger model does not carry more of what it read; it adds the *same mix* of
+carried and invented columns, only more of them (+172). So the projection rule was aimed at a
+mechanism that does not differ between the two models: an instruction about *which* columns cannot
+help a model whose column choices were not the thing that changed.
+
+#### H2 holds, with an order of magnitude to spare
+
+The reasoner spends **692** generated tokens on the questions it gets wrong and **333** on the ones it
+gets right — a factor of 2.08 and a difference of 359 tokens. The chat model spends 58 and 43: the
+same sign, a factor of 1.35, a difference of 15. Longer generation predicts a wrong answer, and the
+stronger model's longer generation is a much stronger predictor.
+
+#### H3 holds: the widening lands on answers that were already right
+
+Of the 53 cases that went `match → column-count`, **49 (92%) are wider than the gold**. Restricting
+to the 121 losses, 55 are wider and 59 are the same width — so roughly half the damage is not "a wrong
+answer got wronger", it is **a right answer that was widened until it was wrong**.
+
+The transition table, both models on the same questions:
+
+| from | to | cases |
+|---|---|---|
+| `values` | `match` | 71 |
+| `match` | `values` | 68 |
+| **`match`** | **`column-count`** | **53** |
+| `values` | `column-count` | 33 |
+| `column-count` | `match` | 7 |
+| `column-count` | `values` | 6 |
+
+Net `column-count`: +73, of which 53 were previously correct and 33 previously wrong on values. The
+reasoner is not losing the questions it could not do; it is losing questions it had already answered.
+
+### What this closes and what it opens
+
+It closes the projection-rule line for good. The sentence "return exactly the columns the question
+names" edits a choice the model makes *before* it writes the statement — inside a chain of thought
+that the rule never sees — and the measurement says the mix of choices is unchanged, so the rule could
+only shake the distribution. 8s's 77 cases changing shape for two net matches was the expected
+signature of a rule operating downstream of the decision it meant to control.
+
+It opens the only repair the numbers point at: **separate the thinking from the writing.** If the
+widening is produced inside the reasoning trace, then the answer must be generated in a context that
+does not contain the trace — a second call with the question and the card only, using the trace's
+conclusion rather than its text. That is the implementable core of what AutoThinkSQL does by training
+(route easy questions away from CoT) and what ExCoT does with execution feedback (keep only what the
+engine confirms), and it is a one-arm experiment here rather than a fine-tuning job.
+
+The three cases the reasoner produced no statement for are worth naming rather than rounding away:
+they are `values` failures with an `errorKind`, so the arm made a call and the engine refused the
+reply — 1,529 of 1,532 is not a coverage problem, it is three refusals.

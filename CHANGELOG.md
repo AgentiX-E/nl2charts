@@ -90,6 +90,29 @@ cannot be argued with.
   two dispatches; the columns are labelled by the model each artifact recorded. `select *` is counted
   separately from a wide list, `count(*)` is not a wildcard, and a reply that is not a statement is an
   empty projection rather than a match — three ways this tool could have lied and does not.
+- **A CTE was read as a one-column answer.** `projectionItems` anchors at `select … from`, so a
+  statement opening with `with` matched nothing and fell through to "everything after the keyword is
+  one item". On the 1,532-question split the reasoning model wrote a CTE on **24** cases and the chat
+  model on **none**, so the misreading landed entirely on one side of the comparison it was built for.
+  `outerSelect` scans by parenthesis depth and hands the outermost statement to the clause reader; a
+  wildcard inside a CTE is no longer read as a wildcard answer either.
+
+### Measured
+- **Why the reasoning model loses, statement by statement.** Same commit, same 1,532 questions, same
+  arm, same judge; only the model changed. `deepseek-chat` 939 (61.29%) against `deepseek-reasoner` 896
+  (58.49%), with `values` 462 → 432 and `column-count` 131 → 204.
+  - **The widening is the failure**: 100 → 183 statements wider than the gold (6.5% → 12.0%), while
+    narrower barely moves (75 → 83). The reasoner does not write *less accurate* projections; it writes
+    **wider** ones.
+  - **Carried columns are the same share on both sides** — 33.1% against 33.7%, Fisher p = 0.78 — so the
+    extra columns are not "what the statement already read". The mix of carried and invented is
+    unchanged and only the volume grows (+172). This refutes the mechanism the projection rule was
+    aimed at, which is why that rule could only redistribute.
+  - **The widening lands on answers that were already right**: of the 53 cases that went
+    `match → column-count`, 49 (92%) are wider than the gold.
+  - **More generation, more error**: 692 generated tokens on wrong answers against 333 on right ones
+    (2.08×) where the chat model is 58 against 43 (1.35×).
+  - The A/A copy in each run bounds the instrument: 99/100 wider, 977/975 extra, 323/321 carried.
 
 - **`bench:bird:pair`: two arms, one artifact, and the counts a rate cannot carry.** A delta of
   `-0.13pp` on 1,532 questions is the same number whether an arm won 64 cases and lost 66 or won 6

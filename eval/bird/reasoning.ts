@@ -138,6 +138,42 @@ function keyColumns(sql: string): Set<string> {
   return named;
 }
 
+/**
+ * The start of the outermost `select`, on a statement that may open with a CTE.
+ *
+ * `with a as (select ...) select ...` has two select lists, and the answer's projection is the
+ * second one. The clause reader anchors at `select ... from`, so a statement that opens with
+ * `with` matched nothing and fell through to "everything after the keyword is one item" — which
+ * read a four-column answer as a one-column answer. That is not a hypothetical: on the
+ * 1,532-question split the reasoning model wrote a CTE on 24 cases and the chat model on none, so
+ * the misreading would have landed entirely on one side of the comparison it was built for.
+ *
+ * The scan is by parenthesis depth, so a `select` inside a subquery or a CTE does not qualify,
+ * and a `select` inside a string literal does not either.
+ */
+export function outerSelect(sql: string): string {
+  let depth = 0;
+  let quote: string | undefined;
+  let start = -1;
+  for (let index = 0; index < sql.length; index += 1) {
+    const character = sql[index] as string;
+    if (quote !== undefined) {
+      if (character === quote) quote = undefined;
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quote = character;
+      continue;
+    }
+    if (character === '(') depth += 1;
+    else if (character === ')') depth -= 1;
+    else if (depth === 0 && /^select\b/i.test(sql.slice(index, index + 6)) && !/[a-z0-9_]/i.test(sql[index - 1] ?? '')) {
+      start = index;
+    }
+  }
+  return start === -1 ? sql : sql.slice(start);
+}
+
 export interface ReadInput {
   readonly arm: string;
   readonly id: string | number;
@@ -159,15 +195,17 @@ export function readStatement(input: ReadInput): StatementReading {
   // one-column answer. That is the same mistake as "an endpoint that said nothing" filed as
   // "said zero": the reply did not answer, so its projection is empty and the whole gold is
   // missing, and saying so is the measurement.
-  const isStatement = /^\s*select\b/i.test(input.predicted);
-  const wildcard = isStatement && readsWildcard(input.predicted);
-  const mine = !isStatement || wildcard ? [] : statementShape(input.predicted).projection;
-  const theirs = statementShape(input.gold).projection;
+  const isStatement = /^\s*(?:select|with)\b/i.test(input.predicted);
+  // The wildcard, like the projection, is a property of the outermost statement: a CTE that
+  // reads `select *` to feed a named answer is not a wildcard answer.
+  const wildcard = isStatement && readsWildcard(outerSelect(input.predicted));
+  const mine = !isStatement || wildcard ? [] : statementShape(outerSelect(input.predicted)).projection;
+  const theirs = statementShape(outerSelect(input.gold)).projection;
   const goldSet = new Set(theirs);
   const mineSet = new Set(mine);
   const extra = wildcard ? [] : mine.filter((item) => !goldSet.has(item));
   const missing = theirs.filter((item) => !mineSet.has(item));
-  const keys = keyColumns(input.predicted);
+  const keys = keyColumns(outerSelect(input.predicted));
   return {
     id: String(input.id),
     arm: input.arm,

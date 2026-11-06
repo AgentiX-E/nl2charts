@@ -120,6 +120,50 @@ describe('comparing one statement with the gold', () => {
     expect(reading.predicted).toBe(0);
   });
 
+  it('reads the outer select of a CTE, not the first one inside the parentheses', () => {
+    // Measured on the 1,532-question split: the reasoning model wrote a CTE on 24 cases and the
+    // chat model on none. The parser's select-list regex anchors at `select ... from`, so a
+    // statement that opens with `with` matched nothing and fell through to "the whole text is one
+    // item" -- which read a four-column answer as a one-column answer and filed it as narrow.
+    const reading = readStatement({
+      arm: 'reasoner',
+      id: '13',
+      reason: 'column-count',
+      predicted: 'with t as (select id, name from singer) select name, id from t',
+      gold: 'select name, id from singer',
+    });
+    expect(reading.predicted).toBe(2);
+    expect(reading.extra).toEqual([]);
+    expect(reading.missing).toEqual([]);
+  });
+
+  it('reads the outer select when a CTE is nested and followed by an aggregate', () => {
+    const reading = readStatement({
+      arm: 'reasoner',
+      id: '14',
+      reason: 'column-count',
+      predicted:
+        'with a as (select id from t), b as (select id from a where id > 1) select count(*) from b',
+      gold: 'select count(*) from t where id > 1',
+    });
+    expect(reading.predicted).toBe(1);
+    expect(reading.extra).toEqual([]);
+  });
+
+  it('does not read a wildcard inside a CTE as the answer being a wildcard', () => {
+    // The outer statement names its columns; the `*` belongs to the subquery that feeds it.
+    // Reading the first match in the text would file a named projection as the widest answer.
+    const reading = readStatement({
+      arm: 'reasoner',
+      id: '15',
+      reason: 'match',
+      predicted: 'with t as (select * from singer) select name from t',
+      gold: 'select name from singer',
+    });
+    expect(reading.wildcard).toBe(false);
+    expect(reading.predicted).toBe(1);
+  });
+
   it('keeps a reply that is not a statement as an empty projection, not as a match', () => {
     const reading = readStatement({
       arm: 'reasoner',
