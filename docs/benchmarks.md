@@ -8484,6 +8484,53 @@ on the run, and it rules out the sampling explanation; it does not show that the
 what the next experiment has to be an intervention on, and it is the only repair these numbers
 leave: generate the statement in a context that does not contain the trace.
 
+### 8u: split the thinking from the writing, and pre-register it
+
+The section above ends on an intervention, and an intervention has to be registered before it is
+run or its result is a story about whatever happened. This is the registration.
+
+**The design.** Two arms, same prompt skeleton, same card, same two calls:
+
+- `plan` — the chat model writes the plan, the chat model writes the statement (measured on
+  Mini-Dev at 50.4% against its parent's 57.6%, −7.2pp, 63/27, p = 2 × 10⁻⁴: the ordered plan
+  anchored the statement it was supposed to prepare).
+- `inline+evidence+plan-cross` — the **reasoning** model writes the plan, the **chat** model writes
+  the statement, and the writer's context contains no trace at all because the trace never leaves
+  the endpoint that produced it.
+
+The ablation pair is `plan → inline+evidence+plan-cross`: one lever, the author of the plan. A pair
+against the shipped arm would move two levers — the plan's existence and its author — and the delta
+would belong to neither.
+
+**What it tests.** Not "is the reasoning model better". That question is answered: it is worse, by
+2.80pp, and the paired reading says the worsening is a widening (`+5.81pp [+4.50, +7.12]` on
+questions both arms projected, 7 discordant one way against 95 the other). What is untested is
+whether the *reading* half of that model — the part that finds conditions and joins, where `values`
+falls 462 → 432 — can be kept while the *projecting* half is discarded. `plan-cross` is exactly that
+trade: the reasoning model decides what the query must find, the chat model decides what the answer
+shows.
+
+**The criterion, written first.** The arm ships only if it beats **both** parents on the same
+1,532 questions:
+
+| reading | bar | why this bar |
+|---|---|---|
+| accuracy | **> 939** (61.29%) | below the chat model, the extra call buys a worse answer than the free one; below 896 it is not even a hybrid |
+| `values` | **≤ 462** | the reasoner's only measured strength is this bucket (432 against 462); a hybrid that loses it has kept the cost and dropped the benefit |
+| `column-count` | **≤ 131** | the chat model's level. Anything above it means the widening survived the split, which refutes the mechanism rather than the arm |
+| paired McNemar vs `plan` | one lever, so the delta is read against the plan written by the weaker model | a gain here is the plan's *author* talking, which is the only thing that moved |
+
+**What would refute the mechanism.** If `column-count` stays above 131 while `values` improves, the
+widening is not produced by the writer's reasoning trace — the split did not remove it, so it lives
+in the prompt or the schema card, and the next instrument is the prompt rather than the pipeline.
+If `values` does not improve, the reasoner's advantage was never in the plan, and the two families
+are simply better at different things with no composition available.
+
+**Cost, stated.** Two calls per question on 1,532 questions: 1,532 plan calls on the reasoning
+endpoint (the expensive one, ≈ 6× the chat model's completion) and 1,532 statements on the chat
+endpoint. The run also carries `inline+evidence` at A/A, because the comparison it is judged against
+was taken on a different day.
+
 ### What this closes and what it opens
 
 It closes the projection-rule line for good. The sentence "return exactly the columns the question

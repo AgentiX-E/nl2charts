@@ -7,6 +7,17 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **`8u`, registered before its dispatch: the plan written by the reasoning model, the statement by
+  the chat model.** The paired reading left exactly one repair — the widening is produced inside a
+  trace no prompt reaches — so the two halves are split instead of instructed. `createPipeline`
+  gains `planProvider` (the plan turn asks one endpoint, the generation turn another, each metered
+  where it is billed), and `inline+evidence+plan-cross` puts the plan on the second model. The
+  ablation pair is `plan -> inline+evidence+plan-cross` — one lever, the plan's author — because a
+  pair against the shipped arm would move the plan's existence and its author at once. The
+  criterion ships the arm only if it beats **both** parents: accuracy > 939, `values` <= 462,
+  `column-count` <= 131. Each bar is in `docs/benchmarks.md` with the reading that would refute
+  the mechanism rather than the arm.
+
 - **The mechanism behind the model gap is now a paired difference with an interval, not two
   marginal counts.** `bench:bird:reasoning` prints `100` against `183` wider-than-gold answers,
   and a difference of marginals is not the claim: on paired data only the questions the two sides
