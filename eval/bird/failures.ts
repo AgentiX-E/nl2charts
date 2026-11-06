@@ -23,15 +23,15 @@ export const FAILURE_SAMPLE = 2000;
  * a reader who sees 200 entries in a 563-failure arm has no way to tell whether the arm
  * failed 200 times or whether the file stopped at a limit.
  */
-export function failureCorpus<T extends { readonly id: string; readonly predicted: string; readonly reason: string; readonly error?: string }>(
+export function failureCorpus<T extends { readonly id: string; readonly predicted: string; readonly reason?: string; readonly error?: string }>(
   entries: readonly (readonly [string, readonly T[]])[],
   cap: number,
   questionOf: (id: string) => string | undefined,
 ): {
-  failures: Record<string, { id: string; question?: string; predicted: string; reason: string; error?: string }[]>;
+  failures: Record<string, { id: string; question?: string; predicted: string; reason?: string; error?: string }[]>;
   failureSample: { cap: number; total: Record<string, number>; truncated: string[] };
 } {
-  const failures: Record<string, { id: string; question?: string; predicted: string; reason: string; error?: string }[]> = {};
+  const failures: Record<string, { id: string; question?: string; predicted: string; reason?: string; error?: string }[]> = {};
   const total: Record<string, number> = {};
   const truncated: string[] = [];
   for (const [name, runs] of entries) {
@@ -44,7 +44,9 @@ export function failureCorpus<T extends { readonly id: string; readonly predicte
         id: run.id,
         ...(question === undefined ? {} : { question }),
         predicted: run.predicted,
-        reason: run.reason,
+        // Absent, not defaulted: a failure with no verdict is a failure nothing judged, and the
+        // bucket it would be filed under is the one a reader acts on.
+        ...(run.reason === undefined ? {} : { reason: run.reason }),
         ...(run.error === undefined ? {} : { error: run.error }),
       };
     });

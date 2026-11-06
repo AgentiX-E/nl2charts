@@ -6,6 +6,32 @@ cannot be argued with.
 
 ## Unreleased
 
+### Fixed
+- **A case that never produced a result set no longer claims a verdict.** The five no-answer
+  branches (model timeout, guard refusal, empty pool, engine error, unusable reply) each wrote
+  `reason: 'values'`, and the arm counter worked around it with `&& run.error === undefined`. Every
+  other reader inherited the claim: the failure corpus, `pair`, `route`, `width` and every bucket
+  attribution written by hand. In the `S1-b` run 94 of 1,532 cases were model timeouts, and they
+  arrived in the artifact as 94 answers with the right shape and the wrong numbers — 19% of the
+  `values` bucket that four rounds of work had been aimed at. `MatchReason` is what `judgeOfficial`
+  returns after comparing two result sets; a case with none has no verdict, so `reason` is absent
+  and the bucket counters are restricted to failures rather than to rows.
+- **The summary line says when answers never arrived.** `S1-b` printed `913/1532 59.6% strict 854`
+  with nothing to say that 6.1% of the split had forfeited, 21 of them questions the other arm
+  answered correctly. A denominator that quietly lost six percent of its questions is not the same
+  population as one that did not, and the line reporting the score is where a reader compares it
+  against something else. Printed only when it happened, so every published reading keeps its exact
+  line.
+- **`check-budgets` measures the import graph instead of the directory.** It summed every `.js` file
+  under `dist`, so one source tree read 62,540 B (fail) and 58,891 B (pass) depending on whether a
+  turbo cache replay had left a chunk the cached snapshot did not contain. It now walks from every
+  `exports` target, `main` and `module` through the relative specifiers those modules name, charges
+  only what is reachable, and reports leftovers as leftovers — with their size, uncounted, and the
+  one-line fix. An unresolvable specifier is a broken build and is refused rather than priced. A
+  `--self-test` pins the reader on fixtures: static and re-export edges, `require`, dynamic import,
+  a bare package and a string literal that contains the word `from` (this repository generates SQL
+  for a living), extension and directory resolution, a cycle, an orphan and a missing edge.
+
 ### Added
 - **The decode mode is a request field now, not a model name.** `deepseek-chat` and
   `deepseek-reasoner` are the non-thinking and thinking modes of one base model, and both names

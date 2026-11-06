@@ -518,6 +518,19 @@ describe('what an arm row says about itself', () => {
       blocksFor: () => ({}),
     }) as unknown as PreparedRun;
 
+  it('says on the summary line when an answer never arrived', () => {
+    // The S1 run printed `inline+evidence 913/1532 59.6% strict 854` and nothing else, while 94
+    // of its 1,532 cases had no answer because the call timed out — 6.1% of the split, 21 of
+    // them cases the other arm got right. A score over a population that quietly lost 6% of its
+    // questions is not a score of that population, and the line that reports the score is where
+    // a reader has to be able to see it. Printed only when it happened, like every other count
+    // here: an arm with no forfeits keeps the exact line every published reading was taken on.
+    const timedOut: CaseRun = { id: '3', passed: false, predicted: '', strict: false, attempts: 1, calls: 1, errorKind: 'llm', error: 'llm: llm call timed out' };
+    const line = armSummaryLine('names', resolveArm('names') as Arm, [outcome('1', true), timedOut]);
+    expect(line).toContain('llm-failed 1');
+    expect(armSummaryLine('names', resolveArm('names') as Arm, [outcome('1', true)])).not.toContain('llm-failed');
+  });
+
   it('leaves the recall column off an arm that generates once', () => {
     // `names` draws one statement, so a ceiling would be a column that always reads 100%
     // and a selector loss that is always zero. The column is absent, not zero.
@@ -565,6 +578,32 @@ describe('what an arm row says about itself', () => {
     const row = armReportRow(preparedWith([question(1, 'simple')]), resolveArm('names') as Arm, [outcome('1', true)], 'names');
     expect(row.servedModels).toBeUndefined();
     expect(armSummaryLine('names', resolveArm('names') as Arm, [outcome('1', true)])).not.toContain('served-by');
+  });
+
+  it('leaves the verdict off a case that never produced a result set', () => {
+    // The five no-answer branches hard-coded `reason: 'values'`, and the arm counter worked
+    // around it with `&& run.error === undefined`. Every other reader inherited the lie: the
+    // gap, route and width instruments all switch on `reason`, so 94 model timeouts in the S1
+    // run were counted as 94 answers of the right shape with wrong numbers — inflating, by 19%,
+    // exactly the bucket four rounds of work had been aimed at. `values` is a verdict the judge
+    // returns after comparing two result sets; a case with no result set has no verdict.
+    const timedOut: CaseRun = {
+      id: '2',
+      passed: false,
+      predicted: '',
+      strict: false,
+      attempts: 1,
+      calls: 1,
+      errorKind: 'llm',
+      error: 'llm: llm call timed out',
+    };
+    const row = armReportRow(preparedWith([question(1, 'simple'), question(2, 'simple')]), resolveArm('names') as Arm, [outcome('1', true), timedOut], 'names');
+    expect(row.errors).toMatchObject({ values: 0, columnCount: 0, llm: 1 });
+    // And the artifact says it too, because the artifact is what the offline instruments read.
+    const rows = caseRows(new Map([['names', [outcome('1', true), timedOut]]]));
+    expect(rows[0]).toHaveProperty('reason', 'values');
+    expect(rows[1]).not.toHaveProperty('reason');
+    expect(rows[1]).toHaveProperty('error', 'llm: llm call timed out');
   });
 
   it('files a case the dataset does not describe under unknown', () => {

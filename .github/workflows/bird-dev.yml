@@ -47,6 +47,17 @@ on:
         description: Which secret holds the second key — zhipu (cross-vendor) or deepseek (the control that separates a vendor from a weaker model)
         required: false
         default: 'zhipu'
+      timeout_ms:
+        description: Wall-clock ceiling per model call in ms (blank = 120000)
+        required: false
+        # The ceiling is part of the experiment, not of the plumbing. `S1-b` ran a 1.6T base at
+        # concurrency 8 with the same 120 s the chat base needed, and 94 of its 1,532 cases
+        # (6.1%) were scored wrong because the call timed out — 21 of them questions the other
+        # arm got right. That is a 3.6× larger effect than the 0.98pp the run was dispatched to
+        # detect, and it was invisible in the score line. A comparison between two bases must
+        # share this number, and a base that needs longer has to be given longer before its
+        # accuracy means anything about the base.
+        default: ''
 
 jobs:
   dev:
@@ -90,7 +101,9 @@ jobs:
       BIRD_PREFLIGHT_SAMPLES: '2'
       # The cross arms call a second endpoint whose model is slower than DeepSeek's; 60s was
       # enough when it only wrote one candidate, and this leaves headroom for a busy queue.
-      BIRD_LLM_TIMEOUT_MS: '120000'
+      # Overridable because the ceiling binds differently per model: the same 120 s that is
+      # generous for a chat base is a 94-case forfeit for a 1.6T thinking base at concurrency 8.
+      BIRD_LLM_TIMEOUT_MS: ${{ inputs.timeout_ms != '' && inputs.timeout_ms || '120000' }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

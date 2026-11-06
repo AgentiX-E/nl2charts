@@ -34,6 +34,17 @@ describe('the failure corpus', () => {
     expect(JSON.stringify(failures.arm?.[0])).not.toContain('undefined');
   });
 
+  it('omits the verdict on a failure that never reached a judge', () => {
+    // The corpus is the material every offline instrument reads, so a bucket written here is
+    // a claim about what went wrong. A model that timed out produced no result set; calling it
+    // `values` says the shape was right and the numbers were wrong, which is the opposite of
+    // the truth and inflates the bucket the next four rounds of work are aimed at.
+    const timedOut = { id: '9', passed: false, predicted: '', error: 'llm: llm call timed out' };
+    const { failures } = failureCorpus([['arm', [timedOut]]], 10, () => 'q');
+    expect(failures.arm?.[0]).toEqual({ id: '9', question: 'q', predicted: '', error: 'llm: llm call timed out' });
+    expect(failures.arm?.[0]).not.toHaveProperty('reason');
+  });
+
   it('keeps a corpus large enough to diagnose a whole split from', () => {
     // 200 was a third of a dev arm's failures, and the no-answer diagnosis measured the
     // consequence: 687 of 1,043 no-answer cases across two dev arms had no retained

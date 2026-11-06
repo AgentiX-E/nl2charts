@@ -1609,7 +1609,17 @@ export interface PurposeCost {
 
 export interface CaseRun extends CaseOutcome {
   readonly predicted: string;
-  readonly reason: MatchReason;
+  /**
+   * The judge's verdict, on a case that produced a result set to judge.
+   *
+   * Absent on a case that never got that far — a model timeout, a guard refusal, an engine
+   * error. Those five branches used to write `'values'`, and the arm counter worked around it
+   * with `&& run.error === undefined`; every other reader inherited the lie, so 94 timeouts in
+   * the `S1` run were counted as 94 answers with the right shape and the wrong numbers. `values`
+   * is what `judgeOfficial` returns after comparing two result sets, and a case with no result
+   * set has no verdict to report.
+   */
+  readonly reason?: MatchReason;
   readonly strict: boolean;
   /** Share of samples that agreed with the answer the arm returned. */
   readonly agreement?: number;
@@ -5511,7 +5521,6 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
           id: String(question.question_id),
           passed: false,
           predicted: '',
-          reason: 'values',
           strict: false,
           attempts: 1,
           // `llm` only when the provider said so. A bug in this file is `harness`, which
@@ -5648,7 +5657,6 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
             id: String(question.question_id),
             passed: false,
             predicted: '',
-            reason: 'values',
             strict: false,
             attempts: 0,
             errorKind: lookup.cause.errorKind ?? 'other',
@@ -5763,7 +5771,6 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
             id: String(question.question_id),
             passed: false,
             predicted: '',
-            reason: 'values',
             strict: false,
             attempts: arm.vote,
             error: outage ? 'every sample failed at the model' : 'no sample survived guard and execution',
@@ -6190,7 +6197,6 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
             id: String(question.question_id),
             passed: false,
             predicted: asked.sql,
-            reason: 'values',
             strict: false,
             attempts: asked.attempts,
             // Without the kind this case counted as `other`, which made
@@ -6242,7 +6248,6 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
           id: String(question.question_id),
           passed: false,
           predicted: typeof details.lastSql === 'string' ? details.lastSql : '',
-          reason: 'values',
           strict: false,
           attempts: arm.repairs + 1,
           calls: callsMade(),
@@ -6326,6 +6331,12 @@ export function armSummaryLine(label: string, arm: Arm, runs: readonly CaseRun[]
   // so that the console cannot show a clean score over a mixed base.
   const bases = new Set<string>();
   for (const run of runs) for (const model of run.tokens?.served ?? []) bases.add(model);
+  // Forfeits, printed next to the score they moved. The S1 run reported 913/1532 = 59.6% and
+  // this line said nothing about the 94 cases whose call timed out — 6.1% of the split, 21 of
+  // them questions the other arm answered correctly. A denominator that quietly lost 6% of its
+  // questions is not the same population as one that did not, and the arm row that reports the
+  // score is where a reader looks before comparing it with anything.
+  const forfeits = runs.filter((run) => run.errorKind === 'llm').length;
   return (
     `${label.padEnd(9)} ${summary.passed}/${summary.total}  ${(summary.accuracy * 100).toFixed(1)}%  ` +
     `strict ${runs.filter((run) => run.strict).length}` +
@@ -6333,6 +6344,7 @@ export function armSummaryLine(label: string, arm: Arm, runs: readonly CaseRun[]
     `${printed.samples === undefined ? '' : `  samples ${String(printed.samples)}`}` +
     `${failed === 0 ? '' : `  select-failed ${String(failed)}`}` +
     `${bases.size < 2 ? '' : `  served-by ${String(bases.size)}`}` +
+    `${forfeits === 0 ? '' : `  llm-failed ${String(forfeits)}`}` +
     `${vote === undefined ? '' : ceilingColumn(vote, candidateCeiling(runs))}`
   );
 }
@@ -6445,8 +6457,12 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
     shape: runs.filter((run) => kindOf(run) === 'shape').length,
     harness: runs.filter((run) => kindOf(run) === 'harness').length,
     other: runs.filter((run) => kindOf(run) === 'other').length,
-    columnCount: runs.filter((run) => run.reason === 'column-count').length,
-    values: runs.filter((run) => run.reason === 'values' && run.error === undefined).length,
+    // The buckets that describe *failures*, restricted to failures here rather than at each
+    // read. `reason` is the judge's verdict, and a pass has `'match'`, so this changes no
+    // published number — it removes the need for every future reader to remember that a
+    // bucket count is only a bucket count over the cases that failed.
+    columnCount: runs.filter((run) => !run.passed && run.reason === 'column-count').length,
+    values: runs.filter((run) => !run.passed && run.reason === 'values').length,
   };
   const messages = new Map<string, number>();
   for (const run of runs) {
@@ -6781,7 +6797,9 @@ export function caseRows(
       arm: name,
       id: run.id,
       passed: run.passed,
-      reason: run.reason,
+      // Absent on a case the judge never saw. Writing a bucket here would put a timeout in the
+      // same column as a wrong answer, which is the defect this row used to carry.
+      ...(run.reason === undefined ? {} : { reason: run.reason }),
       calls: run.calls,
       // The provider's own count for this case, when there is one. Per case rather than per arm
       // because the cost of a lever has to be paired with its outcome: an arm that spends more on
