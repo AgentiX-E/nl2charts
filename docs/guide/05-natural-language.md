@@ -88,6 +88,54 @@ const pipeline = createPipeline({ provider, temperature: null });
 a tight rate limit — a 429 retried inside the provider is a call, and a 429
 returned to the caller is a failed case.
 
+## A thinking mode is not a bigger model
+
+Two model names in one API are often **one set of weights and two decoding modes**, not two sizes. On
+DeepSeek, `deepseek-chat` is the non-thinking mode of V4-Flash and `deepseek-reasoner` is its thinking
+mode: same parameters, same pretraining, and whether the model writes a reasoning trace before it writes
+the answer. Neither of them is `deepseek-v4-pro`, which is the actually wider model.
+
+This matters for a deployment because the two modes are not ranked the same way on every task. On BIRD,
+measured over 600 development questions at one prompt, the thinking mode **raised the ceiling and lowered
+the conversion**:
+
+| | thinking mode | non-thinking | difference |
+|---|---:|---:|---|
+| best candidate exists in the pool | **69.83%** | 65.50% | **+4.33pp** |
+| selector returns the correct one | **91.17%** | 98.22% | **−7.05pp** |
+| score | 63.67% | 64.33% | −0.66pp (control spread 3.3pp) |
+
+Per slot the difference was 61.94% against 63.59%, forty-two discordant cases against thirty-three,
+exact McNemar p = 0.356 — **not significant**. So the honest statement is not "the thinking model is
+worse". It is: *on short questions, thinking is paid for and not always collected; on questions that
+need several steps, the same mode is the reason a correct candidate exists at all.* The difficulty is
+the variable, and it is not delivered by the model name.
+
+**Decide with one arm, not with the name.** The cheapest experiment in this repository is one candidate
+and one call per case:
+
+```bash
+# the same arm twice, two endpoints
+LLM_MODEL=deepseek-chat     BIRD_SPLIT=dev BIRD_ARMS=inline+evidence pnpm bench:bird:dev
+LLM_MODEL=deepseek-reasoner BIRD_SPLIT=dev BIRD_ARMS=inline+evidence pnpm bench:bird:dev
+```
+
+Read the two artifacts with the pairing helper rather than by eye — the arm-level spread of a control on
+600 questions is 3.3pp, which is larger than most effects a single dispatch can show. If the difference
+is smaller than that, you have not measured a difference.
+
+**Ask the artifact what answered.** An API name is an alias, and an alias can be re-pointed at new weights
+without a version change. Every arm row now records the models that actually served it:
+
+```ts
+const { report } = await runBird({ /* … */ });
+report.arms[0].servedModels; // { 'deepseek-v4.1-flash-1017': 1532 }
+```
+
+One entry means the row's numbers belong to the base its settings name. Two entries mean they belong to
+neither, and the console line prints `served-by 2` so that a mixed base cannot be read as a clean score.
+`cases[i].tokens.served` carries the same fact per question — a cross arm legitimately asks two endpoints.
+
 ## Schema linking
 
 Long schemas do not fit in a prompt. `linkSchema` ranks columns with three
