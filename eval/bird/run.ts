@@ -212,6 +212,25 @@ export interface Arm {
    */
   readonly plan?: boolean;
   /**
+   * Who writes that plan, when the arm has one: the primary model (the default) or the second.
+   *
+   * `8u` is the only repair the paired reading of the model comparison leaves. The stronger
+   * model is not worse at reading the question — it is worse at *projecting* it: `values` falls
+   * 462 -> 432 while `column-count` rises 131 -> 204, and the widened statements are
+   * disproportionately ones the weaker model already answered correctly (49 of 53). A projection
+   * rule cannot reach that decision, because the decision is made inside a reasoning trace the
+   * prompt never sees, and the rule's own judgement (`8s`) was a redistribution: 64 gains, 66
+   * losses, p = 0.93.
+   *
+   * So the two halves are split instead of instructed: the reasoning model writes the plan —
+   * where its better reading of conditions and joins is worth something — and the chat model
+   * writes the statement from that plan, in a context that contains no trace at all. The claim
+   * is falsifiable in one direction only: the arm has to beat **both** of its parents. Beat the
+   * chat arm (939) and the reasoning arm keeps nothing; fail to beat it and one extra call buys
+   * a worse answer than the free one.
+   */
+  readonly planBy?: 'second';
+  /**
    * Add the projection rule to the prompt: one rule line, no extra call, no card change.
    *
    * The lever comes from a reading rather than from an idea. Holding everything else fixed and
@@ -1074,6 +1093,11 @@ export const ARMS: readonly Arm[] = [
   // A plan before the statement: the ordering decisions (scan, filter, join, group,
   // answer) are made explicitly once instead of being encoded in one draft.
   { name: 'plan', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', plan: true },
+  // `8u`: the plan is written by the second model and the statement by the primary, so the
+  // writer never sees a reasoning trace. Priced against its parent, not against the `plan` arm:
+  // the question is whether a better plan buys anything, not whether a plan written by the
+  // weaker model does. See the lever's note for the criterion and why it is directional.
+  { name: 'inline+evidence+plan-cross', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', plan: true, planBy: 'second' },
   // The same prompt, with the statement composed from step statements written in the same
   // reply. One lever from `inline+evidence` at the same call count, which is what makes it
   // comparable to the other generators rather than to the budget ladder.
@@ -1281,6 +1305,7 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'select-balanced': 'the same three prompts with two candidates from the second model instead of one: flips which author holds the majority, and needs the second model',
   'select-cross-shuffled': 'the same three candidates permuted per question id: flips which author holds slot zero, which is the one thing `select-cross` and `select-balanced` both hold fixed; needs the second model',
   plan: 'query plan before the statement: 50.4% against 57.6% for its parent (-7.2pp, 63/27, p=0.0002) — anchoring, not helping; kept so the finding can be re-tested',
+  'inline+evidence+plan-cross': 'the plan written by the second model and the statement by the primary: `8u`, the only repair the paired widening reading leaves, and the first arm here whose criterion is to beat **both** parents — needs the second model and a second key, two calls per case',
   'select-pair': 'pairwise comparison instead of an absolute ranking: 58.4% against 57.6% for its parent (+0.8pp, 17/20, p=0.74) at one more call, and it lost more of its candidate set (25 cases against 20) — the absolute prompt is not what the selector loses; kept so a different comparison order or a two-of-three vote can be measured against it',
   'inline+shape': 'scalar-shape guard before the repair loop: 57.2% against 58.4% for its parent (-1.2pp, 11/5, p=0.21) — it fired on 21 cases, repaired 2, and shifted 14 more into the wrong column count; kept so a better shape test can be measured against this one',
   'select-mixed+empty': 'the adopted arm with an empty result treated as a failure: drops the candidate that returned nothing and spends one turn when every candidate did; the only lever measured so far whose signal is exact rather than heuristic',
@@ -1492,6 +1517,11 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   ['select', 'select5'],
   ['inline+evidence', 'values'],
   ['inline+evidence', 'plan'],
+  // `8u` is one lever from `plan`, not from the shipped arm: the prompt, the call count and the
+  // card are the same, and only the author of the plan moves. A pair against `inline+evidence`
+  // would change two levers at once and could not say which one the delta belonged to — the
+  // shipping criterion (beat both parents) is a reading of the artifact, not an ablation pair.
+  ['plan', 'inline+evidence+plan-cross'],
   // One lever at the same cost: the statement is composed from steps written in the same
   // reply, which is the generator the routing analysis says is the only one left.
   ['inline+evidence', 'decompose'],
@@ -5489,6 +5519,10 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
           linking: overrides.linking ?? target.linking,
           interpret: target.interpret === true,
           plan: target.plan === true,
+          // The plan call is the one the arm moves to the second model; the statement stays on
+          // the primary. Passing the provider rather than a model name is what keeps the arm's
+          // cost on the meter that will be billed for it.
+          ...(target.planBy === undefined ? {} : { planProvider: providerFor(target.planBy) }),
           decompose: target.decompose === true,
           ...(target.repairFeedback === undefined ? {} : { repairFeedback: target.repairFeedback }),
           ...(target.audit === undefined ? {} : { audit: target.audit }),
@@ -6880,7 +6914,10 @@ export function secondModelRoles(arms: readonly string[]): { draws: boolean; jud
     draws: arms.some(
       (name) =>
         resolveArm(name)?.pool === undefined &&
-        (resolveArm(name)?.mixed ?? []).some((source) => parseMixedSource(source).provider === 'second'),
+        ((resolveArm(name)?.mixed ?? []).some((source) => parseMixedSource(source).provider === 'second') ||
+          // A plan written by the second model is a draw too: it is a request with that key on
+          // it, and an arm that needs one without saying so fails at the endpoint instead.
+          resolveArm(name)?.planBy === 'second'),
     ),
     judges: arms.some((name) => resolveArm(name)?.judge === 'second'),
   };

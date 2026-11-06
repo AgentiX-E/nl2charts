@@ -122,6 +122,18 @@ export interface PipelineOptions {
   /** Ask for a query plan (scan, filter, join, group, answer) before writing SQL. */
   readonly plan?: boolean;
   /**
+   * Who writes that plan, when `plan` is on. Absent means the pipeline's own provider.
+   *
+   * A pipeline is otherwise one endpoint end to end, which is right for every lever measured so
+   * far and wrong for the one that matters now. The stronger model is not worse at reading a
+   * question — it is worse at *projecting* it, and the widening happens inside a trace the next
+   * call never sees. Splitting the two halves needs the plan and the statement to be written by
+   * different endpoints, and that is a property of the call site, not of the prompt: the plan
+   * turn asks one provider, the generation turn asks another, and both are metered where they
+   * are billed.
+   */
+  readonly planProvider?: LlmProvider;
+  /**
    * Generate by decomposition: sub-questions with their own statements, then the answer.
    *
    * One switch for two halves that must agree — the prompt gains the instruction and the
@@ -428,7 +440,8 @@ export function createPipeline(options: PipelineOptions): {
       // and then carried into the SQL prompt as its own block.
       let plan: string | undefined;
       if (options.plan === true) {
-        const planned = await options.provider.complete({
+        const planner = options.planProvider ?? options.provider;
+        const planned = await planner.complete({
           messages: [{ role: 'user', content: buildPlanPrompt(request.question, request.schema) }],
           temperature,
           purpose: 'plan',

@@ -183,6 +183,11 @@ describe('who needs the second model', () => {
     expect(secondModelRoles(['select-cross'])).toEqual({ draws: true, judges: false });
     expect(secondModelRoles(['select-cross-judge'])).toEqual({ draws: true, judges: true });
     expect(secondModelRoles(['names', 'inline+evidence'])).toEqual({ draws: false, judges: false });
+    // A plan written by the second model is a request with that key on it, so the arm has to
+    // declare the key. The arm that does not is an arm that fails at the endpoint instead.
+    expect(secondModelRoles(['inline+evidence+plan-cross'])).toEqual({ draws: true, judges: false });
+    // ... and an arm that only *reads* someone else's pool still draws nothing, even with a plan.
+    expect(secondModelRoles(['plan'])).toEqual({ draws: false, judges: false });
   });
 });
 

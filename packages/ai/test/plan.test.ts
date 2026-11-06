@@ -113,6 +113,22 @@ describe('pipeline with a plan', () => {
     expect(system).not.toContain('Plan:');
   });
 
+  it('asks a separate provider for the plan, and the pipeline provider for the statement', async () => {
+    // The whole point of the lever: two endpoints, one call each, and neither sees the other's
+    // trace. If the plan call leaked back to the primary provider the arm would be its parent
+    // with a longer prompt, which is the failure mode `secondModelRoles` exists to prevent.
+    const primary = answering('SELECT COUNT(*) FROM orders');
+    const plan = answering('SCAN: orders\nFILTER: none');
+    const pipeline = createPipeline({ provider: primary.provider, plan: true, planProvider: plan.provider });
+    await pipeline.ask({ question: 'How many orders?', schema });
+    expect(plan.calls).toHaveLength(1);
+    expect(primary.calls).toHaveLength(1);
+    expect(primary.calls[0]?.purpose).toBe('generate');
+    expect(plan.calls[0]?.purpose).toBe('plan');
+    const system = String(primary.calls[0]?.messages[0]?.content ?? '');
+    expect(system).toContain('SCAN: orders');
+  });
+
   it('renders a plan block only when it has content', () => {
     const withoutPlan = buildSqlPrompt('q', schema, {});
     expect(withoutPlan).not.toContain('Plan:');
