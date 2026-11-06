@@ -88,6 +88,28 @@ const pipeline = createPipeline({ provider, temperature: null });
 a tight rate limit — a 429 retried inside the provider is a call, and a 429
 returned to the caller is a failed case.
 
+**Choosing the mode by request, not by model name.** If your endpoint serves a
+thinking and a non-thinking mode under one model, say which one you want instead
+of picking an alias for it:
+
+```ts
+const provider = createHttpProvider({
+  baseUrl: 'https://api.deepseek.com/v1',
+  apiKey: process.env.LLM_API_KEY,
+  model: 'deepseek-flash',
+  capabilities: { thinkingSwitch: true },
+});
+
+const pipeline = createPipeline({ provider, thinking: false });
+```
+
+The field is sent as `thinking: {type: 'enabled' | 'disabled'}` **only** when the
+endpoint declared `thinkingSwitch`. On any other endpoint it is removed and counted
+in `samplingOmitted.thinking`, because both silent outcomes are worse than an error:
+an endpoint that ignores the field answers 200 and your report describes a run that
+did not happen, and one that rejects it answers 400 that reads as a bad key. Declare
+it only if the vendor documents the field — the default is "not served" on purpose.
+
 ## A thinking mode is not a bigger model
 
 Two model names in one API are often **one set of weights and two decoding modes**, not two sizes. On
