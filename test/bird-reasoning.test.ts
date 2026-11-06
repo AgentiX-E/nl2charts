@@ -10,6 +10,7 @@ import {
   columnLabel,
   columnOf,
   main,
+  outerSelect,
   readStatement,
   readsWildcard,
   reasoningLines,
@@ -57,6 +58,34 @@ describe('naming the column an item carries', () => {
   it('returns nothing for a constant, which names no column', () => {
     expect(columnOf('1')).toBe('');
     expect(columnOf("'x'")).toBe('');
+  });
+});
+
+describe('finding the outermost select', () => {
+  it('returns the text unchanged when the reply contains no select at all', () => {
+    expect(outerSelect('I cannot answer that from this database.')).toBe('I cannot answer that from this database.');
+  });
+
+  it('takes the last select at the top level, which is the answer', () => {
+    expect(outerSelect('with a as (select id from t) select count(*) from a')).toBe('select count(*) from a');
+  });
+
+  it('ignores a select inside a parenthesis, because a subquery is not the answer', () => {
+    expect(outerSelect('select a from (select b from t)')).toBe('select a from (select b from t)');
+  });
+
+  it('ignores the word inside a string literal and inside a quoted identifier', () => {
+    // A statement may name a column called `select`, and a filter may compare against the word.
+    // Neither is the start of the answer, and a scanner that only looked for the keyword would
+    // cut the statement in the middle.
+    expect(outerSelect(`select "select" from t where note = 'select this'`)).toBe(`select "select" from t where note = 'select this'`);
+    expect(outerSelect("select a from t where note = 'x select y'")).toBe("select a from t where note = 'x select y'");
+  });
+
+  it('keeps a doubled quote inside a literal from ending the literal early', () => {
+    // SQL escapes a quote by doubling it, and a scanner that closes on the first one reads the
+    // rest of the literal as code.
+    expect(outerSelect("select a from t where note = 'it''s a select'")).toBe("select a from t where note = 'it''s a select'");
   });
 });
 

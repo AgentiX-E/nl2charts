@@ -257,10 +257,10 @@
       "branches": 100
     },
     "eval/bird/reasoning.ts": {
-      "lines": 98.87,
-      "statements": 98.87,
+      "lines": 98.99,
+      "statements": 98.99,
       "functions": 100,
-      "branches": 96.58
+      "branches": 97.03
     },
     "eval/bird/recall.ts": {
       "lines": 99.37,
