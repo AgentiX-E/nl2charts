@@ -23,8 +23,22 @@
  * Two is below what a paired test can resolve, so this is a measured candidate rather than
  * a pipeline step: `bench:bird:repair` is the instrument that says so, and the gate is part
  * of what it measures rather than an optimisation in the caller.
+ *
+ * ## The gate is a hypothesis, and `bench:bird:rewrite` prices it
+ *
+ * "Only when the statement returned nothing" is an assumption about where this defect shows up,
+ * and an assumption is not a measurement. The same edit is worth more than two cases if the gate
+ * is wrong, because a value written in the wrong case does not always return nothing: `like`
+ * patterns, `in` lists and columns whose other rows match loosely all turn a wrong spelling into
+ * *some* rows rather than none. So the rule is a parameter of the caller, and the harness that
+ * re-executes statements prices both gates on the same 1,532 questions — one as a rewrite that
+ * may be adopted, one as a ceiling that says how much the strict gate is leaving behind.
+ *
+ * The domain reader lives here rather than in the instrument so that both callers read values
+ * the same way: one query per column, cached, and a failed read cached as *no values*, which
+ * makes the rule refuse to fire rather than guess.
  */
-import { literalSites } from './statement.js';
+import { literalSites, tableRefs } from './statement.js';
 
 /** One column and the values it is known to contain. */
 export interface ColumnDomain {
@@ -115,4 +129,66 @@ export function groundLiteralCase(sql: string, domains: readonly ColumnDomain[])
     out = out.slice(0, edit.start) + edit.text + out.slice(edit.end);
   }
   return { sql: out, substitutions };
+}
+
+/** A statement runner: the oracle's `run`, narrowed to what a domain read needs. */
+export type StatementRunner = (sql: string) => Promise<{ readonly ok: boolean; readonly rows: readonly (readonly unknown[])[] }>;
+
+/** One column's stored values, by table and column. */
+export type ReadDomain = (table: string, column: string) => Promise<readonly string[]>;
+
+/**
+ * One column's stored values, queried once per run.
+ *
+ * A read that fails is cached as no values, which makes the repair refuse to fire on that
+ * column. That is the safe direction: the edit's whole licence is knowing what the column
+ * stores, and a column whose contents are unknown is one where a substitution would be a
+ * guess. A column reaches this function because a statement the engine accepted compares
+ * against it, so in practice the read succeeds — the empty list is what happens when it does
+ * not, not an alternative outcome that needs its own report.
+ *
+ * The cache is keyed by database as well as by table, because two databases in one split can
+ * hold a table of the same name with different contents and a reader that ignored the split
+ * would answer one with the other's values.
+ */
+export function createDomainReader(run: StatementRunner, db: string, cache: Map<string, readonly string[]>): ReadDomain {
+  return async (table, column) => {
+    const key = `${db}\u0000${table}\u0000${column}`;
+    const hit = cache.get(key);
+    if (hit !== undefined) return hit;
+    const quotedTable = `"${table.replace(/"/g, '""')}"`;
+    const quotedColumn = `"${column.replace(/"/g, '""')}"`;
+    const result = await run(`select distinct ${quotedColumn} from ${quotedTable}`);
+    if (!result.ok) return [];
+    const values = [...new Set(result.rows.map((row) => String(row[0])))].filter((value) => value !== '');
+    cache.set(key, values);
+    return values;
+  };
+}
+
+/**
+ * The domains this statement's comparison sites could be reading.
+ *
+ * An unqualified column that exists in two joined tables yields two domains, and the repair
+ * refuses to choose between them — that decision belongs in `groundLiteralCase`, which is
+ * where it is tested. A qualifier that is not one of the statement's own aliases names a table
+ * this reader cannot see (a comma join, a subquery), and a column guessed from it would be read
+ * from the wrong table, so the site is skipped rather than resolved by elimination.
+ */
+export async function domainsOf(sql: string, read: ReadDomain): Promise<ColumnDomain[]> {
+  const refs = tableRefs(sql);
+  const aliases = new Map(refs.map((ref) => [ref.alias.toLowerCase(), ref.table.toLowerCase()]));
+  const wanted = new Map<string, { table: string; column: string }>();
+  for (const site of literalSites(sql)) {
+    const named = site.qualifier === undefined ? undefined : aliases.get(site.qualifier.toLowerCase());
+    if (site.qualifier !== undefined && named === undefined) continue;
+    const tables = named === undefined ? refs.map((ref) => ref.table) : [named];
+    for (const table of tables) wanted.set(`${table.toLowerCase()}\u0000${site.column.toLowerCase()}`, { table, column: site.column });
+  }
+  const domains: ColumnDomain[] = [];
+  for (const { table, column } of wanted.values()) {
+    const values = await read(table, column);
+    if (values.length > 0) domains.push({ table, column, values });
+  }
+  return domains;
 }

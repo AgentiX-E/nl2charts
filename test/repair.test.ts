@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { groundLiteralCase } from '../eval/bird/literal-repair.js';
+import { createDomainReader, domainsOf, groundLiteralCase } from '../eval/bird/literal-repair.js';
 import type { ColumnDomain } from '../eval/bird/literal-repair.js';
 
 const school: ColumnDomain = { table: 'frpm', column: 'School Type', values: ['Continuation School', 'Elementary School'] };
@@ -111,5 +111,56 @@ describe('groundLiteralCase', () => {
     const twice = groundLiteralCase(once.sql, [status]);
     expect(twice.substitutions).toEqual([]);
     expect(twice.sql).toBe(once.sql);
+  });
+});
+
+describe('the domain reader', () => {
+  it('reads a column once and serves the rest from the cache', async () => {
+    const asked: string[] = [];
+    const read = createDomainReader(
+      async (sql) => {
+        asked.push(sql);
+        return { ok: true, rows: [['pen'], ['cup'], ['cup'], ['']] };
+      },
+      'shop',
+      new Map(),
+    );
+    expect(await read('items', 'name')).toEqual(['pen', 'cup']);
+    expect(await read('items', 'name')).toEqual(['pen', 'cup']);
+    // One query for the column, not two: an instrument that re-read the same column would be
+    // paying for evidence it already has.
+    expect(asked).toEqual(['select distinct "name" from "items"']);
+  });
+
+  it('treats a column it cannot read as a column with no values', async () => {
+    // The safe direction: a substitution is only licensed by knowing what the column stores, so an
+    // unreadable column must make the rule refuse rather than guess.
+    const read = createDomainReader(async () => ({ ok: false, rows: [] }), 'shop', new Map());
+    expect(await read('missing', 'name')).toEqual([]);
+  });
+
+  it('finds the tables a statement reads and skips a qualifier it does not own', async () => {
+    const asked: string[] = [];
+    const read = async (table: string, column: string): Promise<readonly string[]> => {
+      asked.push(`${table}.${column}`);
+      return table === 'items' ? ['Cup'] : [];
+    };
+    // `o.name` names an alias the statement never introduced — a comma join or a subquery — and a
+    // column guessed from it would be read from the wrong table.
+    expect(await domainsOf("select i.name from items i where i.name = 'cup' and o.name = 'lid'", read)).toEqual([
+      { table: 'items', column: 'name', values: ['Cup'] },
+    ]);
+    expect(asked).toEqual(['items.name']);
+  });
+
+  it('refuses to name two spellings that disagree', async () => {
+    // Both columns match ignoring case and they name different spellings: a substitution here
+    // would be picking one table's convention for another table's row.
+    const sql = "select * from a join b on b.id = a.id where status = 'pending'";
+    const domains: ColumnDomain[] = [
+      { table: 'a', column: 'status', values: ['Pending'] },
+      { table: 'b', column: 'status', values: ['PENDING'] },
+    ];
+    expect(groundLiteralCase(sql, domains).substitutions).toEqual([]);
   });
 });

@@ -44,6 +44,18 @@ describe('guardNullOrder', () => {
     expect(guardNullOrder('select a from t order by a limit 3', 'sqlite')?.direction).toBe('asc');
   });
 
+  it('leaves a key that already says where the unknown values go', () => {
+    // `alt desc nulls last` is the statement making this decision itself. The direction test reads
+    // `desc` at the end of the key, and the decision sits after it — so this used to be read as an
+    // ascending key and rebuilt into `alt desc nulls last IS NULL, alt desc nulls last`, which is
+    // not valid SQL. A guard that is only ever *added to* a statement must never fail to parse.
+    expect(guardNullOrder('select country from circuits order by alt desc nulls last limit 1', 'sqlite')).toBeUndefined();
+    expect(guardNullOrder('select country from circuits order by alt nulls first limit 1', 'sqlite')).toBeUndefined();
+    // The rest of the statement is irrelevant: a second key with the decision does not license a
+    // rewrite of the first one either, since the first key is the one the cap reads.
+    expect(guardNullOrder('select a from t order by a asc, b desc nulls last limit 1', 'sqlite')?.sql).toBe('select a from t order by a IS NULL, a asc, b desc nulls last limit 1');
+  });
+
   it('leaves a statement with no row cap alone', () => {
     expect(guardNullOrder('select a from t order by a asc', 'sqlite')).toBeUndefined();
   });

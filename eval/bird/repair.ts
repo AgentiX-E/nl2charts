@@ -43,9 +43,8 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { groundLiteralCase } from './literal-repair.js';
-import type { ColumnDomain } from './literal-repair.js';
-import { literalSites, tableRefs } from './statement.js';
+import { createDomainReader, domainsOf, groundLiteralCase } from './literal-repair.js';
+import type { ReadDomain } from './literal-repair.js';
 import { loadQuestions } from './data.js';
 import type { BirdQuestion } from './data.js';
 import { createOracle } from './oracle.js';
@@ -99,61 +98,6 @@ export interface RepairSettings {
 /** The rows a report can be read as, without trusting any of them. */
 function casesOf(report: GapReportShape): readonly CaseRecord[] {
   return report.cases ?? [];
-}
-
-/**
- * One column's stored values, queried once per run.
- *
- * A read that fails is cached as no values, which makes the repair refuse to fire on that
- * column. That is the safe direction: the edit's whole licence is knowing what the column
- * stores, and a column whose contents are unknown is one where a substitution would be a
- * guess. A column reaches this function because a statement the engine accepted compares
- * against it, so in practice the read succeeds — the empty list is what happens when it does
- * not, not an alternative outcome that needs its own report.
- */
-function domainReader(oracle: ReturnType<typeof createOracle>, db: string, cache: Map<string, readonly string[]>) {
-  return async (table: string, column: string): Promise<readonly string[]> => {
-    const key = `${db}\u0000${table}\u0000${column}`;
-    const hit = cache.get(key);
-    if (hit !== undefined) return hit;
-    const quotedTable = `"${table.replace(/"/g, '""')}"`;
-    const quotedColumn = `"${column.replace(/"/g, '""')}"`;
-    const result = await oracle.run(db, `select distinct ${quotedColumn} from ${quotedTable}`);
-    if (!result.ok) return [];
-    const values = [...new Set(result.rows.map((row) => String(row[0])))].filter((value) => value !== '');
-    cache.set(key, values);
-    return values;
-  };
-}
-
-type ReadDomain = (table: string, column: string) => Promise<readonly string[]>;
-
-/**
- * The domains this statement's comparison sites could be reading.
- *
- * An unqualified column that exists in two joined tables yields two domains, and the repair
- * refuses to choose between them — that decision belongs in `groundLiteralCase`, which is
- * where it is tested.
- */
-async function domainsOf(sql: string, read: ReadDomain): Promise<ColumnDomain[]> {
-  const refs = tableRefs(sql);
-  const aliases = new Map(refs.map((ref) => [ref.alias.toLowerCase(), ref.table.toLowerCase()]));
-  const wanted = new Map<string, { table: string; column: string }>();
-  for (const site of literalSites(sql)) {
-    // A qualifier that is not one of the statement's own aliases names a table this reader
-    // cannot see — a comma join, a subquery — and a column guessed from it would be read from
-    // the wrong table. The site is skipped rather than resolved by elimination.
-    const named = site.qualifier === undefined ? undefined : aliases.get(site.qualifier.toLowerCase());
-    if (site.qualifier !== undefined && named === undefined) continue;
-    const tables = named === undefined ? refs.map((ref) => ref.table) : [named];
-    for (const table of tables) wanted.set(`${table.toLowerCase()}\u0000${site.column.toLowerCase()}`, { table, column: site.column });
-  }
-  const domains: ColumnDomain[] = [];
-  for (const { table, column } of wanted.values()) {
-    const values = await read(table, column);
-    if (values.length > 0) domains.push({ table, column, values });
-  }
-  return domains;
 }
 
 /** Result sets compare as multisets of stringified tuples, which is what the judge does. */
@@ -213,7 +157,7 @@ export async function runRepair(settings: RepairSettings): Promise<RepairOutcome
   const readerFor = (db: string): ReadDomain => {
     const existing = readers.get(db);
     if (existing !== undefined) return existing;
-    const created = domainReader(oracle, db, cache);
+    const created = createDomainReader((sql) => oracle.run(db, sql), db, cache);
     readers.set(db, created);
     return created;
   };

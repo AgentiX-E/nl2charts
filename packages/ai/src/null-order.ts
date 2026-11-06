@@ -139,6 +139,14 @@ export function guardNullOrder(sql: string, dialect?: string): NullOrderGuard | 
   const first = keys[0];
   if (first === undefined) return undefined;
   if (/\bis\s+(?:not\s+)?null\b/i.test(first)) return undefined;
+  // `NULLS FIRST` / `NULLS LAST` is the statement making this decision in the engine's own words,
+  // and rewriting it would repeat a choice its author already made. The first version of this
+  // check did not read that spelling, and the direction test — which looks for `desc` at the *end*
+  // of the key — then read `alt desc nulls last` as ascending and rebuilt it as
+  // `alt desc nulls last IS NULL, alt desc nulls last`, which SQLite refuses to parse. The case
+  // that carried the defect was one the arm answered correctly, which is why it survived a
+  // published reading: the rewrite pricer only read statements of the cases that failed.
+  if (/\bnulls\s+(?:first|last)\b/i.test(first)) return undefined;
   if (AGGREGATE.test(first)) return undefined;
   const direction: 'asc' | 'desc' = /\bdesc\s*$/i.test(first) ? 'desc' : 'asc';
   const expression = first.replace(/\s+(?:asc|desc)\s*$/i, '').trim();

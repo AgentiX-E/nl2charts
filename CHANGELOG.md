@@ -6,6 +6,36 @@ cannot be argued with.
 
 ## Unreleased
 
+### Added
+- **The `values` bucket is priced by re-execution, and half of it is free.** `bench:bird:rewrite`
+  gains `ground-case-empty` (the shipped literal-grounding edit under its "returned nothing" gate),
+  `ground-case-any` (the same edit with no gate) and, behind `--oracle`, `oracle-transplant` — the
+  ceiling of the whole literal family, computed by substituting one same-column value from the gold
+  statement and re-executing. On `select-mixed-rule` (dev 1,532, baseline 980 = 63.97%, agreement
+  1,532/1,532): **`ground-case-any` 18 fired, 13 won, 0 lost, +0.85pp, p = 0.0002**; the shipped
+  gate recovers 3 of those 13; the ceiling is **28 = +1.83pp**. On `inline+evidence` (937 =
+  61.16%): **18 won, 0 lost, +1.17pp, p < 0.0001**, ceiling 31 = +2.02pp. Adopted on dominance
+  (wins without losses, zero calls), the two adopted rules are disjoint and lift the shipped arm to
+  **999 = 65.21%**, closing the MAC-SQL gap from −3.92pp to **−2.68pp**. The report now prints the
+  union of wins across adopted rules and names any pair of rules that won the same case, because
+  per-rule deltas add up only when nothing overlapped.
+- **`--oracle` separates a ceiling from a rule.** A rule that reads the gold statement can never
+  ship, so it is printed under its own heading and kept out of the union; `rewriteProblems` still
+  refuses a rule that breaks a statement, oracle or not.
+
+### Fixed
+- **`statementOf` ignored the `sql` field, so every rewrite reading was priced on the failures
+  alone.** The artifact publishes the statement of every case as `sql`; the reader looked for
+  `predicted`, then the failure row. On a single-call artifact that dropped all 937 passing cases:
+  the denominator of every `pp` was the failure set, and `lost` — the column that catches a rule
+  breaking a correct statement — could not be non-zero. Fixed, and the reading it produced
+  immediately found the defect below.
+- **`guardNullOrder` rewrote `order by alt desc nulls last limit 1` into a statement SQLite
+  refuses.** The direction test looks for `desc` at the end of the sort key and the statement's own
+  `nulls last` sits after it, so the key was read as ascending and rebuilt as
+  `alt desc nulls last IS NULL, alt desc nulls last`. The product ships this rule; the case it
+  broke was one the arm answered correctly, which is exactly the case the defect above was hiding.
+
 ### Changed
 - **`8u` fails its criterion, and the way it fails closes the model-gap line.** `42175859623`, dev
   1,532: `inline+evidence` **937 = 61.16%**, `plan` (chat plans, chat writes) **837 = 54.63%**,

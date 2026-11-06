@@ -124,6 +124,7 @@ pnpm bench:bird:consensus --artifact <report.json> # which selection rule kept t
 pnpm bench:bird:conditions <report.json> --arm A   # which gold condition the statement never wrote; no model
 pnpm bench:bird:gate --artifact <report.json> --arm A   # what the question alone can find; no model
 pnpm bench:bird:rewrite --artifact <report.json> --arm A # what a deterministic rewrite is worth; no model, re-executes
+pnpm bench:bird:rewrite ... --oracle       # also price the ceilings, which read the gold statement
 pnpm bench:bird:cache --artifact <report.json> --arm A # how much of the prompt repeats, and what that is worth; no model
 pnpm bench:bird:pair <report.json> --pair A,B  # two arms, paired: gains, losses, exact McNemar, and what changed shape; no model
 pnpm bench:bird:reasoning <a.json> <b.json> --arms A  # what the statements say, paired, with an interval; no model
@@ -8594,3 +8595,110 @@ engine confirms), and it is a one-arm experiment here rather than a fine-tuning 
 The three cases the reasoner produced no statement for are worth naming rather than rounding away:
 they are `values` failures with an `errorKind`, so the arm made a call and the engine refused the
 reply — 1,529 of 1,532 is not a coverage problem, it is three refusals.
+
+## The `values` bucket, priced by re-execution: the literal family is 2.02pp, and half of it is free
+
+Six levers aimed at this bucket have read null: `notes` (−0.8pp), `definitions`, `samples`
+(+1.24pp, p = 0.0756), `samples-gold` (+0.72pp), `values`, `audit` (+1.01), and the projection rule
+(a redistribution, 64 gains against 66 losses). Every one of them was a change to what the model is
+shown. The bucket did not move, and the reason is now measured rather than argued: **the fact the
+statement needs is not in the question.** `'East Bohemia'` against a column that stores
+`'east Bohemia'` is a lookup failure, and no prompt contains the stored spelling unless someone puts
+it there — which `samples` tried, for +1.24pp at p = 0.0756, on a split that resolves 2.30pp.
+
+So this round priced the bucket with executions instead of a dispatch. `bench:bird:rewrite` gained
+two rules and one ceiling:
+
+- **`ground-case-empty`** — the literal grounding this project already had
+  (`groundLiteralCase`), under its shipped gate: only when the statement returned nothing.
+- **`ground-case-any`** — the same edit with no gate. A wrong-case value does not only return
+  *nothing*: an `in` list, a `like` pattern or a loosely-typed comparison returns *some* rows and
+  answers a different question.
+- **`oracle-transplant`** — the ceiling, and the reason the two above are worth pricing at all:
+  substitute one value the gold compares against the same column into the statement and re-execute.
+  A product does not have the gold, so this can never ship; what it can do is say how much of the
+  bucket is about the literal, which is the question six instructions failed to answer.
+
+The instrument refuses to publish unless re-execution reproduces the arm's own score, and it now
+also refuses to price a statement the engine refused (`unrunnable`, 26 of 1,532 on
+`inline+evidence`, none on the shipped arm), because a rewrite of text that never ran is priced as
+a rule defect that is not one.
+
+**`select-mixed-rule`, dev, 1,532 questions, baseline 980 = 63.97% (artifact 980, agreement
+1,532/1,532):**
+
+| rewrite | fired | won | lost | broken | net | exact McNemar | resolves |
+|---|---|---|---|---|---|---|---|
+| `null-order` | 80 | 6 | 0 | 0 | **+0.39pp** | 0.0313 | 0.4pp |
+| `drop-limit-on-count` | 35 | 1 | **19** | 0 | **−1.17pp** | <0.0001 | 0.8pp |
+| `integer-division` | 17 | 0 | 0 | 0 | 0.00pp | 1.0000 | 0.3pp |
+| `ground-case-empty` (shipped gate) | 6 | 3 | 0 | 0 | +0.20pp | 0.2500 | 0.3pp |
+| **`ground-case-any` (no gate)** | 18 | **13** | **0** | 0 | **+0.85pp** | **0.0002** | 0.7pp |
+| `oracle-transplant`* (ceiling) | 90 | **28** | 0 | 0 | **+1.83pp** | <0.0001 | 1.0pp |
+| **union across adopted rules** | | **19** | | | **+1.24pp** | | |
+
+`inline+evidence`, the same 1,532 questions, baseline 937 = 61.16%: `null-order` 5/0 (+0.33pp),
+`ground-case-any` **18/0 (+1.17pp, p < 0.0001)**, the ceiling **31 (+2.02pp)**, and a union of
+**24 (+1.57pp)**.
+
+**Four readings, and the fourth is the one that changes the product.**
+
+**The ceiling is small and it is real.** 28 cases — 1.83pp — is the entire literal family on the
+shipped arm. Every statement in that family could have its value repaired and the arm would still
+be 3.92pp behind MAC-SQL. That is a bound worth publishing precisely because it is unflattering: it
+says the remaining gap is *not* in the values, which is where four rounds of suspicion pointed.
+
+**Half the ceiling is reachable without a model.** 13 of 28 on the shipped arm, 18 of 31 on the
+prompt arm, at zero calls, zero tokens, and zero losses. It is adopted on dominance rather than on
+a gain — the same standard `null-order` was adopted on — and it is the first lever in this document
+that fires on the failure mode it was aimed at instead of on a proxy for it.
+
+**The gate costs ten wins.** Three against thirteen on the shipped arm, seven against eighteen on
+the prompt arm: the assumption "a wrong-case value returns nothing" is false for two thirds of the
+cases it excludes. The shipped gate was not wrong about the mechanism, it was wrong about the
+population — and it was wrong in the direction that hides work, because an empty result is the only
+state the harness had a name for.
+
+**A ceiling is not a dispatch, and here it saved one.** The ceiling is 1.83pp against a resolution
+of 1.00pp at the pairs it produced — so a *lever* aimed at literals would have been readable. It
+would also have been a lever that had to invent the stored spelling, which is what `samples` did
+for a null. The rule needs no invention: one `select distinct` per compared column, cached, and the
+edit fires only when exactly one stored spelling matches ignoring case.
+
+### The instrument found two defects on the way, and the second one was shipped
+
+**`statementOf` did not read the `sql` field.** It read `predicted`, then the failure row, and the
+artifact publishes the statement of every case as `sql` — so on every single-call artifact the
+pricer silently dropped all 937 passing cases. Two consequences, and the second is the serious one:
+every `pp` in the report was against the failures alone, and **`lost` could not be non-zero** —
+a rule that breaks a correct statement had nowhere to show it. The first run after the fix read
+1,532 cases instead of 595 and had a `broken` count on a rule that had been published as clean.
+
+**`guardNullOrder` turned a runnable statement into an unrunnable one.** `order by alt desc nulls
+last limit 1` was rebuilt as `order by alt desc nulls last IS NULL, alt desc nulls last`, which
+SQLite refuses: the direction test reads `desc` at the *end* of a key, and the statement's own
+`nulls last` sits after it, so the key was read as ascending. **The product ships this rule**, and
+the case it broke was one the arm answered correctly — which is exactly the case the first defect
+was hiding. One branch now refuses any key that already carries `nulls first`/`nulls last`, and the
+`broken` count is zero again on both artifacts.
+
+### What this changes, end to end
+
+| | before | after | Δ |
+|---|---|---|---|
+| `select-mixed-rule` (arm) | 980 = 63.97% | — | — |
+| + `null-order` + `ground-case-any` (adopted, disjoint) | | **999 = 65.21%** | **+1.24pp** |
+| MAC-SQL, same split, same judge, same endpoint | 1,040 = 67.89% | | |
+| **gap to SOTA** | **−3.92pp** | **−2.68pp** | **+1.24pp** |
+
+The two adopted rules are disjoint on the shipped arm (the report prints that rather than assuming
+it: `ground-case-empty` overlaps `ground-case-any` by 3 cases, which is the nested gate itself, and
+it is not adopted separately). The 1.24pp is free: no call, no token, and one `select distinct` per
+compared column.
+
+**What this does not establish.** That a model could be prompted into grounding — six attempts say
+no, and the reason is structural: the stored spelling is not in the question. That the rule
+generalises past BIRD's casing conventions; on a store whose values are all lower-case the rule
+fires more, not less, and on a case-insensitive collation it fires never. And that the remaining
+2.68pp is reachable at all: the ceiling for the entire literal family is behind us now, so the next
+lever has to be about *which rows*, not *which spelling*.
