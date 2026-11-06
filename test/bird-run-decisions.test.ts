@@ -740,6 +740,32 @@ describe('the per-case rows an artifact carries', () => {
     expect(rows.map((row) => row.arm)).toEqual(['select-mixed', 'select-mixed']);
   });
 
+  it('records the statement the arm wrote, because a result set says wrong and a statement says why', () => {
+    // The model comparison was published as a difference of two rates and a bucket that moved
+    // `column-count` 130 -> 204. Everything after that number was an inference from result
+    // sets: a wider result means a wider select list, and nothing more. The statements were in
+    // memory during the run and not in the artifact, so "the reasoner projects too many
+    // columns" was a hypothesis this codebase could not check.
+    const rows = caseRows(new Map<string, readonly CaseRun[]>([['a', [bare({ predicted: 'select name from singer' })]]]));
+    expect(rows[0]?.sql).toBe('select name from singer');
+    // A case that produced no statement is not a case that produced an empty one.
+    expect(caseRows(new Map<string, readonly CaseRun[]>([['a', [bare()]]]))[0]).not.toHaveProperty('sql');
+  });
+
+  it('joins the gold statement, and omits it when the questions are not handed over', () => {
+    const questions = [
+      { question_id: 1, db_id: 'd', question: 'q', evidence: '', SQL: 'select name from singer', difficulty: 'simple' as const },
+    ];
+    const rows = caseRows(
+      new Map<string, readonly CaseRun[]>([['a', [bare({ id: '1', predicted: 'select age from singer' })]]]),
+      questions,
+    );
+    expect(rows[0]?.gold).toBe('select name from singer');
+    // An artifact written by a caller that did not have the questions keeps no gold, and a
+    // missing gold is not an empty one.
+    expect(caseRows(new Map<string, readonly CaseRun[]>([['a', [bare({ id: '1' })]]]))[0]).not.toHaveProperty('gold');
+  });
+
   it('carries what the value block put on the card, so a stratum can be cut from the artifact', () => {
     // The first dispatch of the narrowed block published the arm-level funnel and not the record:
     // `sampleBlock` said 511 of 1,532 cases carried a value, and the artifact could not say which

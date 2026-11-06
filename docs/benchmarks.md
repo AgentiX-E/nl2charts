@@ -8130,11 +8130,14 @@ sampling and output budget but not the *shape* instruction is only half adapted.
 population is exact: 59 of 127 losses are one fix away from being wins, and if all 59 converted the
 reasoner would be at 61.55% against the chat model's 61.42%.
 
-The next round is therefore pre-registered as a projection lever rather than a general "use a
+The next round was therefore pre-registered as a projection lever rather than a general "use a
 stronger model" claim: the same 1,532 questions, the same arm, the same reasoning model, with the
-output-shape instruction rewritten for the reasoning family — and the bar is that the `column-count`
-column falls without the `values` column rising. The section below reports what that lever returned;
-it returned a redistribution.
+output-shape instruction rewritten for the reasoning family — and the bar that `column-count` falls
+without `values` rising. The section below reports what that lever returned; it returned a
+redistribution. **That result also closed the shape-instruction line of enquiry**: the sentence this
+paragraph reasoned to is a sentence an instruction cannot enforce, so the next question is not "what
+should the prompt say" but "what did the statements actually do", and answering it needed an
+instrument that did not exist yet.
 
 ## The projection rule: the bucket fell, and the bucket was a symptom
 
@@ -8290,3 +8293,92 @@ own block granularity, which this instrument cannot see from the outside. What i
 the bill** (240 → 157), and the discount already realised is **64.5%**, not the 76.8% the ceiling
 promises: reading the ceiling as a saving overstates the win by 12.3 points of exactly the quantity a
 budget is made of.
+
+## Why a reasoning model can lose: the statements, and the literature
+
+Everything this document said about the model comparison was read off **result sets**. `941` against
+`884`, a McNemar test, and a bucket table — `column-count` 130 → 204 while `values` 461 → 444. The
+sentence that followed, *the reasoner projects too many columns*, was an inference: a wider result
+means a wider select list, and nothing more. The statements themselves were in memory while the run
+happened and were **not written to the artifact**, so the inference could not be checked, refined, or
+refuted. That is the same defect `failure-shape.ts` was written to remove, one layer up — its own
+header says *the result set says "wrong", the statement says "why"* — and the artifact kept only the
+first half.
+
+This round fixes the artifact (every case now records `sql` and `gold`) and adds the instrument that
+reads them (`bench:bird:reasoning`, no model call). Before the reading lands, the prior has to be
+stated, because "a reasoning model lost" is not an anomaly the literature treats as surprising.
+
+### What the literature already knows
+
+| Source | Finding | What it predicts here |
+|---|---|---|
+| **Inverse Scaling in Test-Time Compute** ([arXiv:2507.14417](https://arxiv.org/abs/2507.14417)) | Longer reasoning **actively degrades** accuracy on simple tasks across nine frontier models; failure modes include fixation on irrelevant context and unfocused exploration. | A longer generation should correlate with a *wider* answer, not a narrower one. |
+| **Arctic ExCoT** (Snowflake) | Out-of-the-box CoT is *"negligible or even degraded"* on SQL generation versus direct generation on BIRD-dev. | The family gap on this benchmark is the expected sign, not a broken harness. |
+| **AutoThinkSQL** ([arXiv:2607.22622](https://arxiv.org/abs/2607.22622)) | CoT introduces *syntactic noise and hallucination* that direct generation does not; CoT-only models are unstable under greedy decoding. | Extra structure in the thought should surface as extra structure in the statement. |
+| Small-model study (AAU, BIRD/Spider ablation) | On BIRD, CoT is *"less helpful"* than on Spider, and few-shot is actively harmful. | The effect is benchmark-shaped: BIRD's wide schemas reward brevity. |
+
+None of these says a reasoning model is worse *at reasoning*. They say the extra tokens are spent on
+context that the answer does not need, and that the spend is billed as accuracy on this benchmark.
+
+### Three hypotheses, each with a reading that can fail
+
+The instrument prints three quantities, and each corresponds to a claim that could be wrong:
+
+| Hypothesis | Reading | Refuted when |
+|---|---|---|
+| **H1 — carried, not invented.** The wider answer projects columns the statement had *already named* in its own filter, grouping or ordering: the model read them, then carried them out. | `extra` items split into `carried` (named elsewhere in the same statement) and `invented` (named nowhere). | `carried / extra` is the same in both arms — then the difference is volume, not kind, and a projection rule is the wrong repair. |
+| **H2 — dose and response.** Within one model, more generated tokens predict a wider answer. | `generated tokens: mean` on wrong answers against right ones, per arm. | The reasoner generates *more* on its *correct* answers than on its wrong ones — then length is not the mechanism. |
+| **H3 — shape, not knowledge.** The extra columns sit on statements whose `values` were right. | The `wider than gold` count restricted to failures whose other clauses match the gold. | Widening co-occurs with wrong values at the same rate — then it is a symptom of a wrong query, not a cause. |
+
+H1 is the one the projection rule assumed and never measured: if the extra columns are mostly
+*carried*, a rule that says "fewer columns" competes with a model that has already decided the column
+matters; if they are mostly *invented*, the repair is schema linking and no sentence in the prompt
+touches it. The projection rule's measured redistribution (77 cases changed shape for two net
+matches) is consistent with either, which is exactly why it could not be kept.
+
+### What the instrument reads, and what it refuses to
+
+`bench:bird:reasoning <artifact.json> [more.json…] --arms <a>[,<b>]` prints one line per quantity with
+both arms side by side:
+
+```
+                          deepseek-chat inline            deepseek-reasoner inline
+  scored statements       …
+  select *                …
+  wider than gold         …
+  the same width          …
+  narrower than gold      …
+  extra items             …
+    of which carried      …
+  missing items           …
+  generated tokens: mean  …
+    on wrong answers      …
+    on right answers      …
+```
+
+Five decisions are worth naming, because each one is a way the tool could have lied:
+
+1. **`select *` is counted separately.** A wildcard has no item list to compare. Counting it as "wide"
+   would credit the model with a projection it did not write; inventing an item for it would put a
+   guess in a column of measurements.
+2. **`count(*)` is not a wildcard.** It is the narrowest possible answer to "how many", and reading it
+   as the widest would invert the sign of the finding on every aggregate question.
+3. **A reply that is not a statement is an empty projection, not a match.** The parser treats
+   everything after a missing `select` as one item, which read a prose apology as a one-column
+   answer — the same mistake as filing "the endpoint said nothing" as "it said zero".
+4. **`carried` and `invented` are counted separately**, because they are different repairs.
+5. **Generated tokens, not characters of the answer.** On a reasoning endpoint the chain of thought
+   is billed as completion, so `completion_tokens` measures the same thing on both sides. `0` is a
+   measurement; an absent block is the other measurement, and the table says "not reported".
+
+Two artifacts are accepted rather than refused, unlike `bench:bird:pair`: the endpoint is chosen per
+run, so two models are always two files. The pairing is by question id, the columns are labelled by
+the model the artifact recorded, and the run-to-run displacement is the one the A/A copies measure —
+not something this file invents by joining.
+
+### Status
+
+The instrument is built, tested and dispatched; the reading is not in yet. Until it is, the sentence
+this section opened with — *the reasoner projects too many columns* — remains what it always was: an
+inference from result sets, now with the means to check it.

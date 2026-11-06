@@ -72,7 +72,8 @@
     "bench:bird:rewrite": "tsx eval/bird/rewrite.ts",
     "bench:bird:gate": "tsx eval/bird/gate.ts",
     "bench:bird:cache": "tsx eval/bird/cache.ts",
-    "bench:bird:pair": "tsx eval/bird/pair.ts"
+    "bench:bird:pair": "tsx eval/bird/pair.ts",
+    "bench:bird:reasoning": "tsx eval/bird/reasoning.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

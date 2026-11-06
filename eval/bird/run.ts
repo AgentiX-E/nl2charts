@@ -6682,10 +6682,14 @@ export function pairedComparisons(outcomes: ReadonlyMap<string, readonly CaseRun
 }
 
 /** Per-case outcomes, because a per-arm total cannot answer "on which questions did this lever work". */
-export function caseRows(outcomes: ReadonlyMap<string, readonly CaseRun[]>): Record<string, unknown>[] {
+export function caseRows(
+  outcomes: ReadonlyMap<string, readonly CaseRun[]>,
+  questions: readonly BirdQuestion[] = [],
+): Record<string, unknown>[] {
   // The first question it is needed for: whether the mixed arm wins because its third
   // source is distinct on 35% of cases, or because a duplicated candidate is a frequency
   // signal on the other 65%. That is a stratum, and a stratum needs rows.
+  const goldOf = new Map(questions.map((question) => [String(question.question_id), question.SQL]));
   return [...outcomes.entries()].flatMap(([name, runs]) =>
     runs.map((run) => ({
       arm: name,
@@ -6757,6 +6761,20 @@ export function caseRows(outcomes: ReadonlyMap<string, readonly CaseRun[]>): Rec
       ...(run.emptyRetried === undefined ? {} : { emptyRetried: run.emptyRetried }),
       ...(run.emptyRecovered === undefined ? {} : { emptyRecovered: run.emptyRecovered }),
       ...(run.emptyProbe === undefined ? {} : { emptyProbe: run.emptyProbe }),
+      // The statement the arm returned, and the one it was measured against.
+      //
+      // `failure-shape` states the principle in its own header — the result set says "wrong",
+      // the statement says "why" — and the artifact kept only the first. That was survivable
+      // while every question was "which bucket did this land in". It stopped being survivable
+      // at the model comparison: `column-count` 130 -> 204 is a reading of results, and the
+      // sentence that followed it ("the reasoner projects too many columns") had no statement
+      // behind it, so it could not be checked, refined, or refuted. A row that carries both
+      // statements turns that sentence into a measurement.
+      //
+      // A case that produced no statement is not a case that produced an empty one, so the
+      // field is omitted rather than written as `''`.
+      ...(run.predicted.trim() === '' ? {} : { sql: run.predicted }),
+      ...(goldOf.get(String(run.id)) === undefined ? {} : { gold: goldOf.get(String(run.id)) as string }),
     })),
   );
 }
@@ -7024,7 +7042,7 @@ export async function runBird(settings: BirdSettings, options: BirdRunOptions = 
     report.comparisons = paired.comparisons;
     report.ablations = paired.ablations;
     report.arms = armReports;
-    report.cases = caseRows(outcomes);
+    report.cases = caseRows(outcomes, prepared.cases);
     const { failures, failureSample } = failureSection(prepared, outcomes);
     report.failures = failures;
     report.failureSample = failureSample;

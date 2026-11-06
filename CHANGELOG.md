@@ -75,6 +75,22 @@ cannot be argued with.
   requires the literals to match case-sensitively, and both cases moved to `literal`.
 
 ### Added
+- **The statement an arm wrote is now part of the artifact, and there is an instrument that reads
+  it.** `caseRows` publishes `sql` and `gold` per case. Until now it did not, so every sentence this
+  repository wrote about *why* a run failed was an inference from result sets — `column-count`
+  130 → 204 is a reading of results, and "the reasoner projects too many columns" had no statement
+  behind it, which is the defect `failure-shape.ts` names in its own header (*the result set says
+  "wrong", the statement says "why"*). A case that produced no statement omits the field rather than
+  writing `''`, and a caller without the questions keeps no `gold`.
+- **`bench:bird:reasoning`: what the stronger model wrote differently, with no model call.** Per arm
+  it prints `select *`, `wider / same / narrower` against the gold's width, extra items split into
+  **carried** (the statement named that column in its own filter, grouping or ordering) and
+  **invented** (named nowhere, which is schema linking and not projection), missing items, and
+  generated tokens on right against wrong answers. Two artifacts are accepted, because two models are
+  two dispatches; the columns are labelled by the model each artifact recorded. `select *` is counted
+  separately from a wide list, `count(*)` is not a wildcard, and a reply that is not a statement is an
+  empty projection rather than a match — three ways this tool could have lied and does not.
+
 - **`bench:bird:pair`: two arms, one artifact, and the counts a rate cannot carry.** A delta of
   `-0.13pp` on 1,532 questions is the same number whether an arm won 64 cases and lost 66 or won 6
   and lost 8, and only the first is worth a second dispatch. The instrument prints the four cells,
