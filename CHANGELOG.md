@@ -6,6 +6,19 @@ cannot be argued with.
 
 ## Unreleased
 
+### Changed
+- **`8u` fails its criterion, and the way it fails closes the model-gap line.** `42175859623`, dev
+  1,532: `inline+evidence` **937 = 61.16%**, `plan` (chat plans, chat writes) **837 = 54.63%**,
+  `inline+evidence+plan-cross` (reasoner plans, chat writes) **841 = 54.90%**. The pre-registered
+  bars were accuracy > 939, `values` <= 462, `column-count` <= 131; the arm missed all three
+  (`values` **550**, `column-count` **141**). The split *did* remove the widening — 141 against the
+  reasoner's 204 — and the accuracy did not come back, so **the widening was never what cost the
+  2.80pp**: the trace carries the conditions and the extra columns together, and removing it removes
+  both. The one-lever comparison `plan -> plan-cross` reads **+0.26pp** (95/99, p = 0.83, resolution
+  2.55pp) at 9x the completion tokens, and `inline+evidence -> plan` reproduces on the full split at
+  **-6.53pp** (158/58, p = 6.8e-12). The arm is not shipped: 1,478 completion tokens a question for
+  6.26pp less accuracy is a 30x bill for a regression.
+
 ### Added
 - **`8u`, registered before its dispatch: the plan written by the reasoning model, the statement by
   the chat model.** The paired reading left exactly one repair — the widening is produced inside a

@@ -8531,6 +8531,51 @@ endpoint (the expensive one, ≈ 6× the chat model's completion) and 1,532 stat
 endpoint. The run also carries `inline+evidence` at A/A, because the comparison it is judged against
 was taken on a different day.
 
+### The reading: the split removes the widening and the accuracy with it
+
+Dispatched as registered (`42175859623`), same commit as the arm table, 1,532 dev questions, chat
+writing on every arm, `deepseek-reasoner` as the second model:
+
+| arm | passed | accuracy | `column-count` | `values` | calls/case | completion tokens/case |
+|---|---|---|---|---|---|---|
+| `inline+evidence` (chat writes) | 937 | **61.16%** | 134 | 461 | 1.00 | 49 |
+| `plan` (chat plans, chat writes) | 837 | **54.63%** | 141 | 554 | 2.00 | 162 |
+| `inline+evidence+plan-cross` (reasoner plans, chat writes) | 841 | **54.90%** | 141 | 550 | 1.99 | **1,478** |
+
+| ablation (one lever each) | Δ | discordant | exact McNemar | resolves |
+|---|---|---|---|---|
+| `inline+evidence` → `plan` | **−6.53pp** | 158 / 58 | **p = 6.8 × 10⁻¹²** | 2.69pp |
+| `plan` → `inline+evidence+plan-cross` | **+0.26pp** | 95 / 99 | p = 0.83 | 2.55pp |
+
+**The criterion fails on every clause, and the way it fails is the finding.** Accuracy 841 against a
+bar of 939; `values` **550 against a bar of 462** — the arm did not keep the reasoner's one measured
+strength, it lost the chat arm's; `column-count` 141 against a bar of 131.
+
+The refutation clause in the registration said: *if `column-count` stays high while `values`
+improves, the widening lives in the prompt*. Neither half happened, and the actual shape is the more
+interesting one. **The split did remove the widening** — 141 against the reasoner's 204, within 7 of
+the chat model's 134 — and the accuracy did not return: it fell to 54.9%, below both parents. So the
+widening was never the thing that cost the 2.80pp. The trace is where the reasoner's accuracy comes
+from; it carries the conditions it finds and the extra columns it projects in the same breath, and
+removing the trace removes both.
+
+**A better plan's author buys 0.26pp.** `plan → plan-cross` is one lever, and it reads 95/99 at
+p = 0.83 against a design that resolves 2.55pp: the reasoning model's plan is worth nothing over the
+chat model's plan, at 9× the completion tokens (1,478 against 162). What both plan arms share is the
+6.5pp tax, and the full-dev reproduction of the Mini-Dev reading is exact in sign and larger in size
+(‑6.53pp here, ‑7.2pp on 498 questions, 158/58, p = 6.8 × 10⁻¹²).
+
+**What that closes.** The model-family gap is now closed on both sides of the obvious repair: an
+instruction cannot reach the projection (`8s`, 64/66, p = 0.93) and a pipeline split cannot keep the
+reading (`8u`, 841, −6.26pp against the chat arm). The remaining reading is the one the whole
+exercise started from — a family that reads better and projects worse — and the product answer is
+not to repair it but to **state** it: both families are supported, both are measured, and the
+default stays the chat family because on this benchmark the trade is measurable and negative.
+
+**Cost.** 1,478 completion tokens per question for 6.26pp less accuracy is a 30× bill for a
+regression. The arm is not shipped; it stays in the catalogue as the measured price of separating
+planning from writing.
+
 ### What this closes and what it opens
 
 It closes the projection-rule line for good. The sentence "return exactly the columns the question
