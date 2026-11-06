@@ -5238,6 +5238,47 @@ deterministic.
 
 ### A stronger model scored lower, and the reason was the pipeline
 
+> **Correction, 2026-11-06: it was never a stronger model.** Every comparison in this section, and
+> in the two rounds before it, calls `deepseek-reasoner` "the strong model" and `deepseek-chat`
+> "the weak" one. DeepSeek's own API documentation says the two names are **two modes of one base
+> model**, not two sizes of it: `deepseek-chat` is the non-thinking mode, `deepseek-reasoner` is the
+> thinking mode, and the migration note for the aliases states it in one line — *"`deepseek-chat`
+> maps to V4-Flash non-thinking and `deepseek-reasoner` maps to V4-Flash thinking mode; neither
+> alias maps to `deepseek-v4-pro`."* Same weights, same parameter count, same pretraining; the only
+> difference is whether the model emits a reasoning trace before it writes the statement.
+>
+> So the phenomenon this section tried to explain — a stronger model scoring lower — was never
+> observed here, because **a stronger model was never measured.** What was measured is one base
+> model's decoding mode against its own default, and a thinking trace that is worth its price on
+> multi-step inference is a cost on the 60% of BIRD that is one join and one filter. Read the rest
+> of this section with that substitution: wherever it says "the stronger model", read "the thinking
+> mode of the same model".
+>
+> Two consequences, and the second one is not cosmetic.
+>
+> 1. **The real strong/weak contrast is unrun.** `deepseek-v4-pro` is 1.6T total / 49B active
+>    parameters against `deepseek-v4-flash` at 284B / 13B — a 5.6× width and 3.8× activation gap,
+>    where the mode comparison above is a 0× gap. The cross-vendor slot in this repository has
+>    always accepted any model name, so the experiment costs one dispatch and one workflow input;
+>    it is registered below as `S1` rather than described as done.
+> 2. **The aliases are on a soft retirement, and the artifacts could not see it.** Both names left
+>    DeepSeek's official model list with a discontinuation date of 2026-07-24; requests still
+>    succeed and are routed to `DeepSeek-V4.1-Flash-1017`. A run dispatched before that date and a
+>    run dispatched after it asked for the same string and were served by different weights, and
+>    every artifact this document quotes records only the string it **asked for** — `model:
+>    'deepseek-chat'` — never the model that **answered**. Measurements taken on either side of the
+>    cut are therefore not known to be comparable, and no field in the old artifacts can settle it.
+>
+> The instrument changed in response to point 2, before any number above is re-quoted.
+> `withCallCounter` now keeps `servedModels()`, the model name carried by each answer, and every arm
+> row publishes it as `servedModels: {name: cases}`. One entry is proof that the row's numbers
+> belong to the base its settings name; two entries are the reason they belong to neither, and the
+> console line prints `served-by N` so that a mixed base cannot be read as a clean score. The field
+> is per case as well (`CaseTokens.served`), because a cross arm legitimately asks two endpoints and
+> a single-model arm legitimately sees one. It is **reported and not enforced**: a guard that
+> refused a mismatch would have stopped every run after 2026-07-24 for a change the endpoint made,
+> and the honest response to "the alias moved" is a published fact, not a red build.
+
 Three readings now point the same way. On 298 questions `deepseek-reasoner` and `deepseek-chat`
 scored 153 and 153 at the same prompt; on 600 stratified dev questions the reasoner's single slot
 scores 61.94% (371/599) against 63.59% (379/596) for the chat slot at the same prompt, and the arm
@@ -8702,3 +8743,58 @@ generalises past BIRD's casing conventions; on a store whose values are all lowe
 fires more, not less, and on a case-insensitive collation it fires never. And that the remaining
 2.68pp is reachable at all: the ceiling for the entire literal family is behind us now, so the next
 lever has to be about *which rows*, not *which spelling*.
+
+## `S1`: the contrast this document never ran, and the one it must
+
+The correction at the head of the section above is a claim about the literature and about DeepSeek's
+own documentation, not a measurement. It says the 2026 rounds compared a base model against its own
+decoding mode and called the difference a difference of strength. The way to settle a claim like
+that is not another re-reading of the artifacts. It is the experiment that was skipped.
+
+**Two bases, one prompt, one mode.** `deepseek-flash` serves DeepSeek-V4.1-Flash-1017 at 284B total
+and 13B active parameters; `deepseek-v4-pro` serves V4-Pro-0813 at 1.6T total and 49B active — a
+5.6× width and 3.8× activation gap, and the largest gap this deployment can reach without changing
+vendors. Both default to thinking **on**, so the mode is held constant by construction and the only
+variable is the base:
+
+| arm | `LLM_MODEL` | candidates | calls/case | what it isolates |
+| --- | --- | --- | --- | --- |
+| `S1-a` | `deepseek-flash` | 1 (`inline+evidence`) | 1 | the second-tier base, thinking on |
+| `S1-b` | `deepseek-v4-pro` | 1 (`inline+evidence`) | 1 | the first-tier base, thinking on |
+| `S1-c` | `deepseek-flash` | 3 (`select-mixed`) | 4 | does a selector change the conclusion |
+| `S1-d` | `deepseek-v4-pro` | 3 (`select-mixed`) | 4 | the same, on the wide base |
+
+The single-candidate pair runs first. It is the cheapest configuration in the repository (one call
+a case) and it is the one where a base-model difference cannot be absorbed by a pool: with one
+candidate there is no selector, no vote, and no disagreement to arbitrate, so the score is the
+model's own number. The three-candidate pair exists to answer the second question — whether the
+conversion collapse documented above is a property of the reasoning model or of *any* better pool,
+and a first-tier base draws a better pool at a 4.4× price.
+
+**The criteria are written before the dispatch, at 1,532 questions (MDE 2.30pp).**
+
+1. `S1-b` beats `S1-a` on the whole split by **≥ 2.30pp** with exact McNemar **p < 0.05**. A
+   first-tier base that cannot clear the resolution at 1,532 questions on a task this saturated is
+   a result about the task, and it would have to be published as one.
+2. Failures move out of `values` rather than out of `match`. The wide base's advantage should be
+   visible on the bucket where the question needs arithmetic or a nested aggregate — the bucket
+   where thinking has something to think about — and invisible on casing. If the gain lands on
+   `match`, the extra parameters bought formatting compliance, not reasoning.
+3. The selector's ceiling rises on `S1-d` and the conversion falls, in the same direction as the
+   two-reasoner arm. That is the falsifiable half of the "the pool gets better and the judge likes
+   its own answers less" story: if a first-tier base *also* loses conversion, the mechanism is the
+   selector's, not the thinking mode's.
+4. A/A on both: `S1-a` dispatched twice, `S1-b` dispatched twice, and the spread of each pair is the
+   floor every number above is read against. The existing 3.3pp control spread was measured across
+   arms drawn separately; it is not this floor, and this document has already been wrong once by
+   assuming a control's variance transfers.
+
+**What `S1` does not fix.** It does not make the retired aliases safe: `deepseek-chat` and
+`deepseek-reasoner` still appear in `.github/workflows/bird-dev.yml` and in every historical
+reading, and the migration is a separate change — `LLM_MODEL` moves to `deepseek-flash` and the mode
+becomes a request parameter (`thinking: {type: "enabled" | "disabled"}`), which the provider does
+not yet send. Until that parameter exists, mode can only be selected by alias, and an alias is the
+thing this correction just showed cannot be trusted to mean the same base twice. The `servedModels`
+column added today is what makes the migration checkable: after it, a run that says
+`servedModels: {"deepseek-v4.1-flash-1017": 1532}` has proved what it ran on, and a run that says
+two names has proved it should not be quoted.

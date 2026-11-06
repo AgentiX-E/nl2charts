@@ -7,6 +7,20 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **The artifact now records which model answered, not just which alias it asked for.** Every
+  comparison in this repository's BIRD history calls `deepseek-reasoner` "the strong model" against
+  `deepseek-chat` as "the weak" one; DeepSeek's API documentation states the two names are the
+  non-thinking and thinking modes **of one base model**, and both aliases have since left the
+  official model list and are routed to `DeepSeek-V4.1-Flash-1017`. A run dispatched before
+  2026-07-24 and one dispatched after asked for the same string and were served by different
+  weights, and no field in the old artifacts could tell them apart. `withCallCounter` gains
+  `servedModels()` — the model name carried by each answer, counted per answer including answers
+  with no usage block — and every arm row publishes `servedModels: {name: cases}` beside the cases
+  each base served. The console line prints `served-by N` when an arm saw more than one, so a score
+  drawn from two bases cannot read as a clean score. Reported, not enforced: refusing a mismatch
+  would have stopped every run after the alias moved, for a change the endpoint made.
+  `CaseTokens.served` carries the same fact per case, sorted and de-duplicated, because a cross arm
+  legitimately asks two endpoints.
 - **The `values` bucket is priced by re-execution, and half of it is free.** `bench:bird:rewrite`
   gains `ground-case-empty` (the shipped literal-grounding edit under its "returned nothing" gate),
   `ground-case-any` (the same edit with no gate) and, behind `--oracle`, `oracle-transplant` — the

@@ -483,6 +483,16 @@ export function withCallCounter(provider: LlmProvider): {
    * field, which is the state this repository's published readings were taken in.
    */
   readonly omitted: () => ReadonlyMap<string, number>;
+  /**
+   * The model that answered, per answer, keyed by the name the endpoint reported.
+   *
+   * A requested model name is an alias, and an alias is a promise kept on the endpoint's
+   * schedule: the same string can be served by a different base model next month, and a run
+   * that recorded only the request cannot tell a re-measurement from a re-measurement on new
+   * weights. The answer carries the truth, so it is kept per call rather than folded into the
+   * requested name — one arm served by two bases is a state this ledger has to be able to show.
+   */
+  readonly servedModels: () => ReadonlyMap<string, number>;
 } {
   type Meter = {
     calls: number;
@@ -500,6 +510,7 @@ export function withCallCounter(provider: LlmProvider): {
   const totals = zero();
   const purposes = new Map<CallPurpose | typeof UNLABELLED, Meter>();
   const dropped = new Map<string, number>();
+  const served = new Map<string, number>();
   return {
     provider: {
       id: provider.id,
@@ -525,6 +536,10 @@ export function withCallCounter(provider: LlmProvider): {
         }
         const response = await provider.complete(request, options);
         for (const parameter of response.ignored ?? []) dropped.set(parameter, (dropped.get(parameter) ?? 0) + 1);
+        // Counted before the usage branch, because an answer without a usage block is still an
+        // answer from a model. Recording only the billed calls would let a base change hide
+        // behind an endpoint that stopped reporting tokens that hour.
+        served.set(response.model, (served.get(response.model) ?? 0) + 1);
         // Read per answer rather than per arm: an endpoint that reports usage on some answers and
         // not others is a state that exists, and summing only what arrived would hide it.
         if (response.usage === undefined) {
@@ -561,5 +576,6 @@ export function withCallCounter(provider: LlmProvider): {
     byPurpose: () => new Map(purposes),
     unlabelled: () => purposes.get(UNLABELLED)?.calls ?? 0,
     omitted: () => new Map(dropped),
+    servedModels: () => new Map(served),
   };
 }

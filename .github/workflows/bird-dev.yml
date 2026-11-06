@@ -14,6 +14,16 @@ on:
         description: Questions to score (blank = all 1534)
         required: false
         default: ''
+      model:
+        description: Primary model (blank = deepseek-chat, the alias every published reading used)
+        required: false
+        # Blank keeps the historical default on purpose. `deepseek-chat` and `deepseek-reasoner`
+        # are one base model's non-thinking and thinking modes, not two sizes of model, and both
+        # names have left DeepSeek's official list and are routed to V4.1-Flash — so changing the
+        # default would silently re-point every comparison in `docs/benchmarks.md` at new weights.
+        # The migration belongs in its own change, with `servedModels` in the artifact proving what
+        # answered. Until then this input exists so `S1` can ask for a different base explicitly.
+        default: ''
       arms:
         description: Comma-separated arms
         required: false
@@ -55,7 +65,7 @@ jobs:
     env:
       DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
       LLM_BASE_URL: https://api.deepseek.com/v1
-      LLM_MODEL: deepseek-chat
+      LLM_MODEL: ${{ inputs.model != '' && inputs.model || 'deepseek-chat' }}
       BIRD_SPLIT: dev
       BIRD_ARMS: ${{ inputs.arms }}
       BIRD_CONCURRENCY: '8'

@@ -567,6 +567,53 @@ describe('withCallCounter', () => {
     expect(counted.byPurpose().get('select')).toEqual({ calls: 1, promptTokens: 0, completionTokens: 0, chars: 1, unbilled: 1, cachedTokens: 0, cachedReported: 0 });
   });
 
+  it('records the model the endpoint served, not the alias it was asked for', async () => {
+    // An alias is a promise the endpoint keeps on its own schedule. `deepseek-chat` was one
+    // base model in 2026-06 and a different one in 2026-11, and a run that only recorded the
+    // string it sent cannot tell a re-run of the same prompt from a re-run on a new base.
+    // The answer carries the model that actually answered; keeping it is the difference
+    // between an artifact that can prove what it measured and one that can only report what
+    // it asked for.
+    let answer = 0;
+    const counted = withCallCounter({
+      id: 'alias',
+      model: 'deepseek-chat',
+      complete: async () => {
+        answer += 1;
+        return { text: 'select 1', model: answer === 1 ? 'deepseek-v4.1-flash' : 'deepseek-v4-pro' };
+      },
+    });
+    await counted.provider.complete({ messages: [{ role: 'user', content: 'q1' }], purpose: 'generate' });
+    await counted.provider.complete({ messages: [{ role: 'user', content: 'q2' }], purpose: 'generate' });
+    // Both are kept, and neither is folded into the requested name: the run has to be able to
+    // say "one arm, two bases", which is a state that would otherwise be invisible.
+    expect([...counted.servedModels()]).toEqual([['deepseek-v4.1-flash', 1], ['deepseek-v4-pro', 1]]);
+    expect(counted.servedModels().has('deepseek-chat')).toBe(false);
+  });
+
+  it('counts a served model per answer, so a flapping endpoint is visible', async () => {
+    // The alias that holds for 599 answers and changes for one is not a small problem: it is
+    // the one case whose neighbours were measured on another model, and only a per-answer
+    // count makes that ratio readable.
+    let answer = 0;
+    const counted = withCallCounter({
+      id: 'flap',
+      model: 'alias',
+      complete: async () => {
+        answer += 1;
+        return { text: 'x', model: answer === 3 ? 'new-base' : 'old-base' };
+      },
+    });
+    for (let call = 0; call < 3; call += 1) {
+      await counted.provider.complete({ messages: [{ role: 'user', content: 'q' }], purpose: 'generate' });
+    }
+    expect(counted.servedModels().get('old-base')).toBe(2);
+    expect(counted.servedModels().get('new-base')).toBe(1);
+    // Answers without a usage block are still answers from a model, so the ledger covers every
+    // call rather than the billed ones.
+    expect([...counted.servedModels().values()].reduce((total, count) => total + count, 0)).toBe(counted.calls());
+  });
+
   it('adds the buckets up to the same total it reports', async () => {
     // The property every share rests on. It is asserted here rather than enforced by recounting
     // inside the meter: two implementations of one sum drift apart, one accumulation and one

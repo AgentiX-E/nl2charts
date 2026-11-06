@@ -1586,6 +1586,16 @@ export interface CaseTokens {
    * above exactly, because both are written at the same point rather than recounted later.
    */
   readonly byPurpose?: Readonly<Record<string, PurposeCost>>;
+  /**
+   * The models that actually answered this case, as the endpoint named them.
+   *
+   * The request carried an alias. An alias outlives the base model behind it — `deepseek-chat`
+   * named one set of weights in June 2026 and another in November — so an artifact that records
+   * only what it asked for cannot distinguish a re-run from a re-run on different weights. Sorted
+   * and de-duplicated per case, because the question a reader has is "did this case see one base
+   * or two", and the count per model belongs to the arm rather than to the case.
+   */
+  readonly served?: readonly string[];
 }
 
 /** One kind of call: what those calls cost this case. */
@@ -2094,7 +2104,17 @@ export interface ArmReportRow {
      */
     readonly cached?: number;
     readonly byPurpose?: Readonly<Record<string, { readonly calls: number; readonly prompt: number; readonly completion: number; readonly chars: number; readonly cached?: number }>>;
+    /** The bases that answered these cases, as the endpoint named them. See `CaseTokens.served`. */
+    readonly served?: readonly string[];
   };
+  /**
+   * How many cases each base model served.
+   *
+   * The settings record what was asked for; this records what answered. They differ whenever an
+   * endpoint re-points an alias, which is how a re-run on new weights can be mistaken for a
+   * re-run of the same experiment. Absent when no answer named a model.
+   */
+  readonly servedModels?: Readonly<Record<string, number>>;
   readonly [field: string]: unknown;
 }
 
@@ -5452,6 +5472,14 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
       for (const ledger of [counter.omitted(), secondCounter?.omitted() ?? new Map<string, number>()]) {
         for (const [parameter, count] of ledger) dropped.set(parameter, (dropped.get(parameter) ?? 0) + count);
       }
+      // Which base answered, unioned over both counters: a cross arm routinely asks two
+      // endpoints, and the case is served by both. Kept as a sorted list rather than a map
+      // because one case is one observation — how many cases each base served is the arm's
+      // column, and counting it here would give that column two definitions.
+      const served = new Set<string>();
+      for (const ledger of [counter.servedModels(), secondCounter?.servedModels() ?? new Map<string, number>()]) {
+        for (const model of ledger.keys()) served.add(model);
+      }
       return {
         ...(dropped.size === 0 ? {} : { samplingOmitted: Object.fromEntries(dropped) }),
         tokens: {
@@ -5460,6 +5488,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
           chars: primary.chars + (second?.chars ?? 0),
           unbilled: primary.unbilled + (second?.unbilled ?? 0),
           ...cacheFieldOf(primary, second),
+          ...(served.size === 0 ? {} : { served: [...served].sort() }),
           // The same money, split by what each call was for. A cross arm draws candidates from a
           // second model and may have that model judge them, so one purpose can be spent on both
           // sides; adding per purpose keeps one row per kind of call, which is the only shape a
@@ -6291,12 +6320,19 @@ export function armSummaryLine(label: string, arm: Arm, runs: readonly CaseRun[]
   // failed is scored by the vote on those cases, and a reader comparing it against a parent has to
   // see how much of the arm's answer the lever was not present for.
   const failed = runs.filter((run) => run.selectionFailed !== undefined).length;
+  // Printed only when it happened, and never silently: an arm whose answers came from two base
+  // models is not one measurement, and a reader who compares it against a parent is comparing
+  // against neither of them. The count of cases per base is in the artifact; this line exists
+  // so that the console cannot show a clean score over a mixed base.
+  const bases = new Set<string>();
+  for (const run of runs) for (const model of run.tokens?.served ?? []) bases.add(model);
   return (
     `${label.padEnd(9)} ${summary.passed}/${summary.total}  ${(summary.accuracy * 100).toFixed(1)}%  ` +
     `strict ${runs.filter((run) => run.strict).length}` +
     `${printed.repaired === undefined ? '' : `  repaired ${String(printed.repaired)}`}` +
     `${printed.samples === undefined ? '' : `  samples ${String(printed.samples)}`}` +
     `${failed === 0 ? '' : `  select-failed ${String(failed)}`}` +
+    `${bases.size < 2 ? '' : `  served-by ${String(bases.size)}`}` +
     `${vote === undefined ? '' : ceilingColumn(vote, candidateCeiling(runs))}`
   );
 }
@@ -6422,6 +6458,15 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
   // The cases whose endpoint reported a cache figure. A run whose endpoint says nothing about
   // caching has none, and that absence is what keeps `tokens.cached` out of the row.
   const cachedMetered = metered.filter((cost) => cost.cached !== undefined);
+  // How many cases each base model served. Counted from the rows rather than from a side
+  // ledger for the same reason every other column here is: a figure that has one definition
+  // cannot disagree with the rows it is reported beside. The alias that was requested is in
+  // the artifact's settings; this is the answer, and a run where the two differ is a run that
+  // measured something other than what its settings say.
+  const servedTally = new Map<string, number>();
+  for (const run of runs) {
+    for (const model of run.tokens?.served ?? []) servedTally.set(model, (servedTally.get(model) ?? 0) + 1);
+  }
   return {
     arm: label,
     passed: summary.passed,
@@ -6444,6 +6489,13 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
       mean: Number(meanCalls(runs).toFixed(3)),
       max: Math.max(0, ...runs.map((run) => run.calls)),
     },
+    // Which base actually answered, and on how many cases. Absent on an artifact whose provider
+    // reported nothing, which is the honest state: an endpoint that names no model has not said
+    // what it ran. Present with one entry, it is the proof that the arm's numbers belong to the
+    // model its settings name; present with two, it is the reason they do not.
+    ...(servedTally.size === 0
+      ? {}
+      : { servedModels: Object.fromEntries([...servedTally].sort((left, right) => (left[0] < right[0] ? -1 : 1))) }),
     // What the request cost in the endpoint's own unit, beside the characters the prompt
     // measurement counts. The two are not interchangeable: characters are a property of the text
     // and this is a property of the tokenizer, and the ratio between them is the only calibration

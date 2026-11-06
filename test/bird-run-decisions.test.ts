@@ -540,6 +540,33 @@ describe('what an arm row says about itself', () => {
     expect(line).toContain('recall@3 100.0% (lost 1)');
   });
 
+  it('records which base answered, and says so when one arm saw two', () => {
+    // The alias in the settings is what the run asked for; `servedModels` is what answered. The
+    // two are separated here because they diverge silently: an endpoint may re-point a name at
+    // new weights between two dispatches, and without this column the artifact would present
+    // both runs as the same measurement. The counter is per case, so a case that saw two bases
+    // (a cross arm asks twice) still counts once for each.
+    const runs: CaseRun[] = [
+      { ...outcome('1', true), tokens: { prompt: 10, completion: 2, chars: 4, unbilled: 0, served: ['deepseek-v4-flash'] } },
+      { ...outcome('2', true), tokens: { prompt: 10, completion: 2, chars: 4, unbilled: 0, served: ['deepseek-v4-flash'] } },
+      { ...outcome('3', false), tokens: { prompt: 10, completion: 2, chars: 4, unbilled: 0, served: ['deepseek-v4-pro'] } },
+    ];
+    const row = armReportRow(preparedWith([question(1, 'simple')]), resolveArm('names') as Arm, runs, 'names');
+    expect(row.servedModels).toEqual({ 'deepseek-v4-flash': 2, 'deepseek-v4-pro': 1 });
+    // And the console line refuses to look clean over a mixed base: a score that came from two
+    // models is not the score of either, so the count is printed rather than inferred.
+    expect(armSummaryLine('names', resolveArm('names') as Arm, runs)).toContain('served-by 2');
+  });
+
+  it('leaves the base column off a run whose endpoint named no model', () => {
+    // Absent rather than empty, for the reason every other optional column here is: a provider
+    // that reports nothing has not reported one base, and an empty object would read as "the
+    // endpoint declined" in a table where the reader expects a name.
+    const row = armReportRow(preparedWith([question(1, 'simple')]), resolveArm('names') as Arm, [outcome('1', true)], 'names');
+    expect(row.servedModels).toBeUndefined();
+    expect(armSummaryLine('names', resolveArm('names') as Arm, [outcome('1', true)])).not.toContain('served-by');
+  });
+
   it('files a case the dataset does not describe under unknown', () => {
     // A run row whose question is not in `cases` is a defect upstream, but the row still
     // has to land somewhere: an unlabelled bucket is honest, and dropping it would make
