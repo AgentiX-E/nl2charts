@@ -6,6 +6,22 @@ cannot be argued with.
 
 ## Unreleased
 
+### Added
+- **The mechanism behind the model gap is now a paired difference with an interval, not two
+  marginal counts.** `bench:bird:reasoning` prints `100` against `183` wider-than-gold answers,
+  and a difference of marginals is not the claim: on paired data only the questions the two sides
+  disagree on carry information about which one is wider. The instrument now pairs by question id —
+  skipping a wildcard on either side, because `select *` is the absence of a list rather than a
+  narrow one — and prints the discordant counts, the paired difference with its Wald interval, an
+  exact McNemar p, and the resolution the design had. On the two dev dispatches already published
+  (`42138948702`, `42142701511`, same commit, same 1,532 questions): **chat → reasoner +5.81pp
+  [+4.50, +7.12], 7 discordant one way against 95 the other, p < 0.0001**, on a design that
+  resolves 1.87pp. Both artifacts' A/A copies put the instrument's own displacement at
+  **+0.20pp [−0.27, +0.66]** (chat) and **+0.13pp [−1.08, +1.35]** (reasoner), so the difference is
+  8.8× the wider A/A bound and the widening rate is stable within each family (`12.0%` → `12.2%`).
+  It also fixes a display defect the reading exposed: `toFixed(4)` published an exact p of
+  `1.9 × 10⁻⁶` as `0.0000`, which is a probability no exact test produces.
+
 ### Changed
 - **The instrument that prices "show the model the values" was reading a population the shipped arm
   does not have.** `bench:bird:information` selected `candidateRecall === false`, which is the right

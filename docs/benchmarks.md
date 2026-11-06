@@ -126,6 +126,7 @@ pnpm bench:bird:gate --artifact <report.json> --arm A   # what the question alon
 pnpm bench:bird:rewrite --artifact <report.json> --arm A # what a deterministic rewrite is worth; no model, re-executes
 pnpm bench:bird:cache --artifact <report.json> --arm A # how much of the prompt repeats, and what that is worth; no model
 pnpm bench:bird:pair <report.json> --pair A,B  # two arms, paired: gains, losses, exact McNemar, and what changed shape; no model
+pnpm bench:bird:reasoning <a.json> <b.json> --arms A  # what the statements say, paired, with an interval; no model
 ```
 
 Scope: **all 11 databases, all 500 Mini-Dev questions** (498 scorable: two gold
@@ -8398,7 +8399,8 @@ judge — only `LLM_MODEL` changed (`42138948702`, `42142701511`):
 
 The A/A copy each run carries puts the instrument's own noise on the table: `inline+evidence#2` read
 99 against 100 wider, 977 against 975 extra, 323 against 321 carried. **A reading of two is not a
-reading of six.**
+reading of six.** The marginal counts are then paired by question and tested against exactly that
+displacement in *The widening is a property of the model, not of the dispatch* below.
 
 #### H1 is refuted, and that is the finding
 
@@ -8434,6 +8436,53 @@ The transition table, both models on the same questions:
 
 Net `column-count`: +73, of which 53 were previously correct and 33 previously wrong on values. The
 reasoner is not losing the questions it could not do; it is losing questions it had already answered.
+
+#### The widening is a property of the model, not of the dispatch
+
+`100` against `183` is two marginal counts, and a difference of marginals is not the claim. Two
+arms can differ in marginal width because they widened the same questions by different amounts, or
+because they answered different questions — and on paired data only the questions the two sides
+disagree on carry any information about which one is wider. So the counts are paired by question id
+and tested the way every other claim here is: exact McNemar on the discordant pairs, a Wald interval
+on the paired difference, and the resolution the design actually had.
+
+A case enters the pair only when **both** sides produced a projection to compare. A wildcard on
+either side is skipped and counted, because `select *` is not a wide list and not a narrow one, it
+is the absence of a list; filing it as "not wider" would put a zero in the discordance the model
+never asserted. The denominator is the intersection, which is why the rates below read `6.2%` where
+the table above reads `6.5%` — the table counts each arm against everything it answered, and this
+counts both arms against the questions they both projected.
+
+| pair | questions both projected | wider only left | wider only right | left → right | Δ [95% CI] | exact McNemar | resolves |
+|---|---|---|---|---|---|---|---|
+| **chat → reasoner** | 1,515 | **7** | **95** | 6.2% → 12.0% | **+5.81pp [+4.50, +7.12]** | **p < 0.0001** | 1.87pp |
+| chat → chat (A/A) | 1,523 | 5 | 8 | 6.4% → 6.6% | +0.20pp [−0.27, +0.66] | p = 0.58 | 0.66pp |
+| reasoner → reasoner (A/A) | 1,514 | 43 | 45 | 12.0% → 12.2% | +0.13pp [−1.08, +1.35] | p = 0.92 | 1.74pp |
+
+Three things follow, and the third is the one that changes the design of the next experiment.
+
+**The difference is an order of magnitude outside the instrument's own noise.** The chat model's A/A
+copy cannot exclude a widening shift of `0.66pp`; the reasoner's cannot exclude `1.35pp`. The
+cross-model difference is `5.81pp` — 8.8× the wider of the two bounds. "The reasoner widens more"
+is not a reading of six cases against two; it is a paired difference whose interval excludes zero by
+more than four standard errors, on a design that could have resolved `1.87pp`.
+
+**It is asymmetric in the direction the mechanism claims.** `95` questions the chat model kept at
+the gold's width and the reasoner widened, against `7` the other way. A model that simply wrote
+wider statements everywhere would produce a symmetric disagreement on questions that are hard for
+both; this produces a one-sided one, and the side it lands on is the side H3 already named — answers
+that were already right.
+
+**The widening rate is stable within a model.** `12.0%` and `12.2%` on two dispatches of the same
+endpoint, `6.4%` and `6.6%` on the other. Whatever produces the extra columns is a property of how
+the family answers, not a property of one run's sampling — which is the thing a single-dispatch
+comparison can never show and the reason both artifacts carry an A/A copy.
+
+What this still does **not** establish is causation. It puts the widening on the model rather than
+on the run, and it rules out the sampling explanation; it does not show that the chain of thought
+*produces* the extra column, because the trace is not observable from outside the endpoint. That is
+what the next experiment has to be an intervention on, and it is the only repair these numbers
+leave: generate the statement in a context that does not contain the trace.
 
 ### What this closes and what it opens
 

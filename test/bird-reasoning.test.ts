@@ -11,6 +11,8 @@ import {
   columnOf,
   main,
   outerSelect,
+  pairWidths,
+  pairedWidthLines,
   readStatement,
   readsWildcard,
   reasoningLines,
@@ -339,6 +341,100 @@ describe('printing the comparison', () => {
   });
 });
 
+describe('the same widening, paired question by question', () => {
+  const reading = (arm: string, id: string, predicted: string, gold: string) =>
+    readStatement({ arm, id, reason: 'match', predicted, gold });
+  // Two columns asked for, one column answered, three columns answered.
+  const gold = 'select a, b from t where id > 1';
+  const wide = 'select a, b, c from t where id > 1';
+  const narrow = 'select a from t where id > 1';
+  const rows = [
+    // chat narrow, reasoner wide: the direction the model comparison claims is typical.
+    reading('chat', '1', narrow, gold),
+    reading('reasoner', '1', wide, gold),
+    // and one the other way, so the test is not a test for a delta of one sign.
+    reading('chat', '2', wide, gold),
+    reading('reasoner', '2', gold, gold),
+    reading('chat', '3', wide, gold),
+    reading('reasoner', '3', wide, gold),
+    reading('chat', '4', gold, gold),
+    reading('reasoner', '4', gold, gold),
+    // asked of one side only, so it cannot be paired.
+    reading('chat', '5', wide, gold),
+    // a wildcard has no item list: skipped, not counted as "not wider".
+    reading('chat', '6', wide, gold),
+    reading('reasoner', '6', 'select * from t', gold),
+  ];
+
+  it('counts the four cells on the questions both sides projected', () => {
+    const pair = pairWidths(rows, 'chat', 'reasoner');
+    expect(pair?.paired).toBe(4);
+    expect(pair?.widerLeftOnly).toBe(1);
+    expect(pair?.widerRightOnly).toBe(1);
+    expect(pair?.widerBoth).toBe(1);
+    expect(pair?.widerNeither).toBe(1);
+    expect(pair?.leftRate).toBe(0.5);
+    expect(pair?.rightRate).toBe(0.5);
+  });
+
+  it('skips a wildcard on either side and says how many it skipped', () => {
+    // `select *` is not a narrow answer and not a wide one, it is the absence of a list. Counting
+    // it as "not wider" would put a zero in the discordance the model never asserted.
+    expect(pairWidths(rows, 'chat', 'reasoner')?.skipped).toBe(1);
+  });
+
+  it('states the difference from left to right, with a test and a resolution', () => {
+    const pair = pairWidths(rows, 'chat', 'reasoner');
+    expect(pair?.test.delta).toBe(0);
+    // One discordant question in each direction is the least a paired design can say: p = 1.
+    expect(pair?.p).toBe(1);
+    expect(pair?.test.mde).toBeGreaterThan(0);
+  });
+
+  it('returns nothing when the two sides share no question it can compare', () => {
+    // A paired read of two different populations is not a paired read, and printing 0 against 0
+    // would look like agreement.
+    expect(pairWidths([reading('chat', '1', narrow, gold)], 'chat', 'reasoner')).toBeUndefined();
+  });
+
+  it('keeps the later reading of a question, because a re-scored case is the later one', () => {
+    const twice = [
+      reading('chat', '1', wide, gold),
+      reading('chat', '1', narrow, gold),
+      reading('reasoner', '1', wide, gold),
+    ];
+    const pair = pairWidths(twice, 'chat', 'reasoner');
+    expect(pair?.paired).toBe(1);
+    expect(pair?.widerLeftOnly).toBe(0);
+    expect(pair?.widerRightOnly).toBe(1);
+  });
+
+  it('prints the difference with its interval, its p and what the design could resolve', () => {
+    const text = pairedWidthLines(pairWidths(rows, 'chat', 'reasoner') as NonNullable<
+      ReturnType<typeof pairWidths>
+    >).join('\n');
+    expect(text).toContain('wider than gold, paired: chat -> reasoner');
+    expect(text).toContain('wider only left 1  only right 1');
+    expect(text).toContain('95% CI');
+    expect(text).toContain('exact McNemar p = 1.0000');
+    expect(text).toContain('this design resolves');
+    expect(text).toContain('1 case(s) skipped');
+  });
+
+  it('prints a p below the fourth decimal as an inequality, not as zero', () => {
+    // 0 against 20 is 2 * 0.5^20, and `toFixed(4)` would publish it as `0.0000` — a probability
+    // that no exact test produces.
+    const many = Array.from({ length: 20 }, (_unused, index) => [
+      readStatement({ arm: 'chat', id: String(index), reason: 'match', predicted: narrow, gold }),
+      readStatement({ arm: 'reasoner', id: String(index), reason: 'match', predicted: wide, gold }),
+    ]).flat();
+    const pair = pairWidths(many, 'chat', 'reasoner');
+    const text = pairedWidthLines(pair as NonNullable<typeof pair>).join('\n');
+    expect(text).toContain('exact McNemar p = < 0.0001');
+    expect(text).not.toContain('p = 0.0000');
+  });
+});
+
 describe('the command line', () => {
   it('needs an artifact and at least one arm', () => {
     expect(() => resolveReasoningSettings(['--arms', 'a'], '/root')).toThrow(/usage: reasoning.ts/);
@@ -457,6 +553,69 @@ describe('the command line', () => {
     // The one extra item on the wider statement came from the statement's own filter, and the
     // instrument says so rather than counting it as invented.
     expect(text).toContain('of which carried');
+    log.mockRestore();
+  });
+
+  it('prints the paired difference when the read has two columns', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'reasoning-paired-'));
+    const wide = 'select name, age from t';
+    const wider = 'select name, age, id from t';
+    const narrow = 'select name from t';
+    const chat = artifactFile(dir, 'chat.json', 'deepseek-chat', [
+      { arm: 'inline', id: 1, passed: false, reason: 'column-count', sql: narrow, gold: wide },
+      { arm: 'inline', id: 2, passed: false, reason: 'column-count', sql: narrow, gold: wide },
+    ]);
+    const reasoner = artifactFile(dir, 'reasoner.json', 'deepseek-reasoner', [
+      { arm: 'inline', id: 1, passed: false, reason: 'column-count', sql: wider, gold: wide },
+      { arm: 'inline', id: 2, passed: false, reason: 'column-count', sql: wider, gold: wide },
+    ]);
+    const lines: string[] = [];
+    const log = vi.spyOn(console, 'log').mockImplementation((line: unknown) => void lines.push(String(line)));
+    expect(main([chat, reasoner, '--arms', 'inline'])).toBe(0);
+    const text = lines.join('\n');
+    expect(text).toContain('wider than gold, paired: deepseek-chat inline -> deepseek-reasoner inline');
+    expect(text).toContain('wider only left 0  only right 2');
+    // Two discordant questions, both one way: 2 * 0.5^2.
+    expect(text).toContain('exact McNemar p = 0.5000');
+    log.mockRestore();
+  });
+
+  it('says there is no paired difference when the two columns share no question', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'reasoning-disjoint-'));
+    const chat = artifactFile(dir, 'chat.json', 'deepseek-chat', [
+      { arm: 'inline', id: 1, passed: true, reason: 'match', sql: 'select a from t', gold: 'select a from t' },
+    ]);
+    const reasoner = artifactFile(dir, 'reasoner.json', 'deepseek-reasoner', [
+      { arm: 'inline', id: 2, passed: true, reason: 'match', sql: 'select a from t', gold: 'select a from t' },
+    ]);
+    const lines: string[] = [];
+    const log = vi.spyOn(console, 'log').mockImplementation((line: unknown) => void lines.push(String(line)));
+    expect(main([chat, reasoner, '--arms', 'inline'])).toBe(0);
+    expect(lines.join('\n')).toContain('share no question projected by both');
+    log.mockRestore();
+  });
+
+  it('does not invent a pair when the read has more than two columns', () => {
+    // With three columns the pairing is a choice, and a choice made by the printer would be a
+    // comparison the reader did not ask for.
+    const dir = mkdtempSync(join(tmpdir(), 'reasoning-three-'));
+    const file = artifactFile(
+      dir,
+      'three.json',
+      'deepseek-chat',
+      ['a', 'b', 'c'].map((arm) => ({
+        arm,
+        id: 1,
+        passed: true,
+        reason: 'match',
+        sql: 'select name from t',
+        gold: 'select name from t',
+      })),
+    );
+    const lines: string[] = [];
+    const log = vi.spyOn(console, 'log').mockImplementation((line: unknown) => void lines.push(String(line)));
+    expect(main([file, '--arms', 'a,b,c'])).toBe(0);
+    expect(lines.join('\n')).toContain('needs exactly two columns, and this read has 3');
     log.mockRestore();
   });
 });

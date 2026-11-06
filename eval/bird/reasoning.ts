@@ -23,6 +23,9 @@
  *   its token count is — a reasoning endpoint bills the thought as completion — and a longer
  *   generation on a wider answer is the mechanism the literature names (syntactic noise,
  *   over-thinking on easy questions) rather than a story about model quality.
+ * - **Is the widening difference bigger than the run-to-run displacement?** The counts are paired
+ *   by question, so the comparison is an exact McNemar test with an interval and a resolution,
+ *   which is the form every other claim in this repository is held to.
  *
  * The literature says the direction is ordinary: Snowflake's ExCoT reports simple CoT *lower*
  * than direct generation on BIRD-dev, AutoThinkSQL reports CoT introducing syntactic noise and
@@ -34,6 +37,8 @@
 import { readFileSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+
+import { mcnemarExact, pairedResolution, type PairedResolution } from '@agentix-e/nl2charts-devkit';
 
 import { statementShape } from './sql-shape.js';
 
@@ -267,6 +272,131 @@ function share(count: number, total: number): string {
 }
 
 /**
+ * The same widening, paired question by question, with a test on it.
+ *
+ * The table above is two descriptions. The sentence it is asked to support — *the stronger model
+ * widens more* — is a difference of two rates measured on the same questions, and the counts
+ * `100` against `183` are published nowhere with an interval. That is the defect this repository
+ * already named for accuracy (`pairedResolution` exists because a bare delta cannot say whether a
+ * design could have seen it), one bucket over: on paired data only the discordant questions carry
+ * information, and a difference of two marginal counts is not a paired difference.
+ *
+ * A case is paired only when both sides produced a projection to compare. A wildcard on either
+ * side is skipped and counted: it has no item list, so filing it as "not wider" would put a zero
+ * in the discordance the model never asserted, and filing it as "wider" would credit the model
+ * with a list it did not write.
+ *
+ * The paired denominator is the intersection, not either arm's own scorable set, so the rates here
+ * can differ from the table's by a tenth of a point. That is not an inconsistency: the table counts
+ * each arm against everything it answered, and this counts both arms against the questions they
+ * both projected.
+ */
+export interface WidthPair {
+  readonly left: string;
+  readonly right: string;
+  /** Questions with a comparable projection on both sides. */
+  readonly paired: number;
+  /** Questions dropped because one side answered with a wildcard. */
+  readonly skipped: number;
+  readonly widerLeftOnly: number;
+  readonly widerRightOnly: number;
+  readonly widerBoth: number;
+  readonly widerNeither: number;
+  readonly leftRate: number;
+  readonly rightRate: number;
+  readonly p: number;
+  readonly test: PairedResolution;
+}
+
+export function pairWidths(
+  readings: readonly StatementReading[],
+  left: string,
+  right: string,
+): WidthPair | undefined {
+  const index = (label: string): Map<string, StatementReading> => {
+    const rows = new Map<string, StatementReading>();
+    // Later duplicates win, because a re-scored case is the later one.
+    for (const row of readings) if (row.arm === label) rows.set(row.id, row);
+    return rows;
+  };
+  const leftRows = index(left);
+  const rightRows = index(right);
+  let paired = 0;
+  let skipped = 0;
+  let widerLeftOnly = 0;
+  let widerRightOnly = 0;
+  let widerBoth = 0;
+  let widerNeither = 0;
+  for (const [id, one] of leftRows) {
+    const two = rightRows.get(id);
+    if (two === undefined) continue;
+    if (one.wildcard || two.wildcard) {
+      skipped += 1;
+      continue;
+    }
+    paired += 1;
+    const wideLeft = one.predicted > one.gold;
+    const wideRight = two.predicted > two.gold;
+    if (wideLeft && wideRight) widerBoth += 1;
+    else if (!wideLeft && !wideRight) widerNeither += 1;
+    else if (wideLeft) widerLeftOnly += 1;
+    else widerRightOnly += 1;
+  }
+  if (paired === 0) return undefined;
+  return {
+    left,
+    right,
+    paired,
+    skipped,
+    widerLeftOnly,
+    widerRightOnly,
+    widerBoth,
+    widerNeither,
+    leftRate: (widerLeftOnly + widerBoth) / paired,
+    rightRate: (widerRightOnly + widerBoth) / paired,
+    p: mcnemarExact(widerLeftOnly, widerRightOnly),
+    test: pairedResolution(widerLeftOnly, widerRightOnly, paired),
+  };
+}
+
+/** Points, printed with their sign, so a negative delta is not read as a typo. */
+function points(value: number): string {
+  return `${value >= 0 ? '+' : ''}${(value * 100).toFixed(2)}pp`;
+}
+
+/**
+ * A p-value, without the `0.0000` that reads as "zero".
+ *
+ * `toFixed(4)` on a result 20 orders of magnitude below 1 prints a zero, and a zero p-value is not
+ * a quantity — the exact test has no mass there. The threshold is the one the rest of this
+ * repository's prose already uses (`p < 0.0001`), written as an inequality instead of rounded away.
+ */
+function pValue(p: number): string {
+  return p < 0.0001 ? '< 0.0001' : p.toFixed(4);
+}
+
+export function pairedWidthLines(pair: WidthPair): string[] {
+  const lines: string[] = [];
+  lines.push('');
+  lines.push(
+    `  wider than gold, paired: ${pair.left} -> ${pair.right}, ${String(pair.paired)} question(s) projected on both sides`,
+  );
+  lines.push(
+    `  wider only left ${String(pair.widerLeftOnly)}  only right ${String(pair.widerRightOnly)}  wide in both ${String(pair.widerBoth)}  wide in neither ${String(pair.widerNeither)}`,
+  );
+  lines.push(
+    `  ${(pair.leftRate * 100).toFixed(1)}% -> ${(pair.rightRate * 100).toFixed(1)}%  ${points(pair.test.delta)}  95% CI [${points(pair.test.low)}, ${points(pair.test.high)}]  exact McNemar p = ${pValue(pair.p)}`,
+  );
+  lines.push(
+    `  this design resolves ${(pair.test.mde * 100).toFixed(2)}pp at ${(pair.test.discordantShare * 100).toFixed(1)}% discordance`,
+  );
+  if (pair.skipped > 0) {
+    lines.push(`  ${String(pair.skipped)} case(s) skipped: a wildcard on one side has no item list to compare`);
+  }
+  return lines;
+}
+
+/**
  * One line per quantity, both arms side by side.
  *
  * Side by side rather than one block per arm because the only question this prints is a
@@ -381,6 +511,23 @@ export function main(argv: readonly string[] = process.argv.slice(2), root = pro
     return 1;
   }
   for (const line of reasoningLines(profiles)) console.log(line);
+  // The paired read is a difference between two columns, so it is printed when there are exactly
+  // two. With more, the pair is a choice this file would be making for the reader.
+  if (labels.length === 2) {
+    const [left, right] = labels as [string, string];
+    const pair = pairWidths(readings, left, right);
+    if (pair === undefined) {
+      console.log('');
+      console.log(
+        `  wider than gold, paired: ${left} and ${right} share no question projected by both, so there is no paired difference to test`,
+      );
+    } else {
+      for (const line of pairedWidthLines(pair)) console.log(line);
+    }
+  } else if (labels.length > 2) {
+    console.log('');
+    console.log(`  wider than gold, paired: needs exactly two columns, and this read has ${String(labels.length)}`);
+  }
   const empty = profiles.filter((profile) => profile.cases === 0).map((profile) => profile.arm);
   if (empty.length > 0) console.error(`REASONING: no recorded statement for ${empty.join(', ')}`);
   return empty.length === 0 ? 0 : 1;
