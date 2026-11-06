@@ -6,6 +6,21 @@ cannot be argued with.
 
 ## Unreleased
 
+### Added
+- **A zero-call contrast between two artifacts, and the two denominators it refuses to choose
+  between.** `pair.ts` refuses to join two artifacts, correctly: a join across runs puts the
+  endpoint's displacement into a delta that was supposed to have none. Comparing two *base models*
+  needs two dispatches, so the refusal becomes a condition — `bench:bird:contrast` accepts two
+  artifacts when the split, the judge, the arm list and the prompt size are equal, and names both
+  values of anything that is not. It prints intent-to-treat (a forfeit scores as a wrong answer,
+  which is the arm's own denominator) and complete-case (only questions both sides answered), the
+  forfeits on each side by cause, and how many discordant cases have an unanswered side. It does
+  not nominate a verdict: `S1`'s two readings were +0.98pp at p=0.29 and +2.50pp at p=0.0049, and
+  the difference between them was 94 model timeouts in the arm that ran slower. A case is judged
+  when the artifact records no error for it — not when it carries a reason, because every artifact
+  written before the verdict fix records `values` on the five no-answer branches, and reading the
+  verdict as the evidence would find no attrition in exactly the run this was built for.
+
 ### Fixed
 - **A case that never produced a result set no longer claims a verdict.** The five no-answer
   branches (model timeout, guard refusal, empty pool, engine error, unusable reply) each wrote

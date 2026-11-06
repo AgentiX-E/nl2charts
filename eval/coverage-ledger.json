@@ -4,10 +4,10 @@
   "tolerancePp": 0.2,
   "measuredAt": "2026-11-06",
   "totals": {
-    "lines": 99.47,
-    "statements": 99.47,
+    "lines": 99.48,
+    "statements": 99.48,
     "functions": 100,
-    "branches": 98.08
+    "branches": 98.17
   },
   "files": {
     "eval/ablate.ts": {
@@ -87,6 +87,12 @@
       "statements": 100,
       "functions": 100,
       "branches": 99.52
+    },
+    "eval/bird/contrast.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 100
     },
     "eval/bird/data.ts": {
       "lines": 100,
@@ -182,7 +188,7 @@
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 96.77
+      "branches": 100
     },
     "eval/bird/losses.ts": {
       "lines": 98.64,
@@ -257,10 +263,10 @@
       "branches": 100
     },
     "eval/bird/reasoning.ts": {
-      "lines": 98.99,
-      "statements": 98.99,
+      "lines": 99.31,
+      "statements": 99.31,
       "functions": 100,
-      "branches": 97.03
+      "branches": 97.63
     },
     "eval/bird/recall.ts": {
       "lines": 99.37,
@@ -272,7 +278,7 @@
       "lines": 99.12,
       "statements": 99.12,
       "functions": 100,
-      "branches": 96.73
+      "branches": 98.64
     },
     "eval/bird/retrieval.ts": {
       "lines": 100,
@@ -281,10 +287,10 @@
       "branches": 100
     },
     "eval/bird/rewrite.ts": {
-      "lines": 98.87,
-      "statements": 98.87,
+      "lines": 99.49,
+      "statements": 99.49,
       "functions": 100,
-      "branches": 96.21
+      "branches": 99
     },
     "eval/bird/route.ts": {
       "lines": 100,
@@ -323,10 +329,10 @@
       "branches": 98.57
     },
     "eval/bird/statement.ts": {
-      "lines": 98.73,
-      "statements": 98.73,
+      "lines": 100,
+      "statements": 100,
       "functions": 100,
-      "branches": 97.48
+      "branches": 98.11
     },
     "eval/bird/strata.ts": {
       "lines": 99,
