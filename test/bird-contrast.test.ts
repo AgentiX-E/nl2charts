@@ -14,6 +14,8 @@ import { describe, expect, it } from 'vitest';
 import { comparabilityProblems, contrastArtifacts, contrastLines, isEntry, main, pairedInterval, resolveContrastSettings, runIfEntry } from '../eval/bird/contrast.js';
 import type { ContrastArtifact, ContrastCase } from '../eval/bird/contrast.js';
 
+const ROOT = join(import.meta.dirname, '..');
+
 const artifact = (cases: readonly ContrastCase[], extra: Partial<ContrastArtifact> = {}): ContrastArtifact => ({
   split: 'dev',
   model: 'base',
@@ -252,8 +254,13 @@ describe('the entry point', () => {
     const right = write('b.json', artifact([silent('1'), wrong('2')], { model: 'wide' }));
     const dir = left.slice(0, left.lastIndexOf('/'));
     try {
-      const out = execFileSync('npx', ['tsx', 'eval/bird/contrast.ts', '--left', left, '--right', right], {
-        cwd: '/workspace/nl2charts',
+      // The first CI run of this file died here with `spawnSync npx ENOENT`, which names the
+      // command and blames the working directory: `cwd` was the absolute path of the machine this
+      // test was written on, and Node reports a `cwd` that does not exist as ENOENT against the
+      // binary. Both halves are fixed below — this checkout's path, and `process.execPath
+      // --import tsx` so the interpreter does not depend on a shim being on PATH either.
+      const out = execFileSync(process.execPath, ['--import', 'tsx', join(ROOT, 'eval/bird/contrast.ts'), '--left', left, '--right', right], {
+        cwd: ROOT,
         encoding: 'utf8',
       });
       expect(out).toContain('intent-to-treat');
