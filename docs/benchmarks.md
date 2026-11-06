@@ -8798,3 +8798,44 @@ thing this correction just showed cannot be trusted to mean the same base twice.
 column added today is what makes the migration checkable: after it, a run that says
 `servedModels: {"deepseek-v4.1-flash-1017": 1532}` has proved what it ran on, and a run that says
 two names has proved it should not be quoted.
+
+### The reading, at one ceiling for both bases
+
+`S1` was dispatched twice, and the first pair is the one that shows why the second exists. Four runs,
+two bases, one prompt, 1,532 questions:
+
+| run | base | per-call ceiling | passed | accuracy | cases with no verdict |
+| --- | --- | --- | --- | --- | --- |
+| `42223938003` | `deepseek-flash` | 120 s | 898 | 58.62% | 6 |
+| `42268153728` | `deepseek-flash` | 300 s | 892 | 58.22% | 5 |
+| `42230846912` | `deepseek-v4-pro` | 120 s | 913 | 59.60% | 109 (94 timeouts) |
+| `42250903916` | `deepseek-v4-pro` | 300 s | 940 | 61.36% | 19 |
+
+**At one ceiling the first-tier base wins by +3.13pp.** Paired 826/66/114/526, exact McNemar
+**p = 0.0004**, Wald **[+1.42, +4.84]**; complete case +3.51pp (p = 0.0001) with the two sides'
+attrition shares 0.91pp apart, so both denominators agree. At 120 s the same pair was +0.98pp
+(p = 0.2926) — same questions, same prompt, same judge. The difference between the two readings is
+the ceiling, and it is not small: 94 of the wide base's 1,532 cases were scored wrong because the
+call was cut off, and raising the ceiling recovered 24 of them (25.5%) while the narrow base, which
+never needed the extra time, moved 898 → 892 on re-sampling alone.
+
+The correction decomposes without a residual: **48 = 27 + 15 + 6** — 27 cases from raising the
+ceiling (24 recovered timeouts + 3 net re-sampling on 1,438 cases whose prompt was byte-identical),
+15 the base difference as it read at 120 s, 6 the narrow base's own re-sampling. In other words
+**a fixed ceiling had been understating the base difference by 2.15pp**, and it was doing so in
+proportion to how slow the base is.
+
+**What survives, and it survives exactly.** The claim that extra parameters buy projection rather
+than arithmetic is not retired — it is sharper than it was. At one ceiling the `values` bucket is a
+tie to the case (**425 vs 425**) and `column-count` falls **210 → 148 (−62)**, with cases carrying no
+verdict rising 5 → 19. The 48-case difference is 0 from `values`, −62 from `column-count`, +14 from
+unanswered. The wide base writes the right shape; it does not do the arithmetic better.
+
+So of the four criteria registered above: **1 is met** at equal ceiling and was not met at 120 s;
+**2 is not met, in the direction it was written to exclude** — the gain did not land on `values`, it
+landed on width; **3 was not run**; **4 has one pair of it and not the one it asked for** — the
+narrow base's 120 → 300 pair happens to be A/A on everything the criterion needs except the setting,
+which does not bind for it (1 timeout at 120 s, 0 at 300 s): **+58/−64, −0.39pp, p = 0.6510, 7.96%
+of the split changed verdict with the prompt held byte-identical**. That is the first measured
+floor for a paired claim on this split, and it is why a 2.30pp MDE can be read at all.
+

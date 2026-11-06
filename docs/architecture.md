@@ -698,7 +698,16 @@ that differs in method rather than in prompt or in draw.
   dispatch but one and the second is a rule no test can hold — but `tools/bird-arm.mjs`, which answers
   with the first arm the run's own `BIRD_ARMS` asked for that the artifact holds, else the largest
   population, and is tested for both edges plus the contract that it prints nothing else on stdout.
-- **Agreement is a partition, and the selector was never handed it.** The selector receives each
+- **A per-call ceiling is a dimension of the comparison, not a detail of the plumbing.** Two
+  artifacts with the same split, the same judge, the same arms and the same prompt are one contrast
+  only if the call had the same deadline too — and for a year the tool that decides this compared
+  four fields and not that one. The cost is now measured rather than argued: the same two bases read
+  **+0.98pp (p=0.29)** at a 120 s ceiling and **+3.13pp (p=0.0004)** at 300 s, because the slow base
+  forfeited 94 of 1,532 cases to a deadline the fast one never approached. A fixed ceiling taxes a
+  model in proportion to its output length, so it is a treatment whenever output length differs by
+  base, and a contrast that does not name it is measuring the harness. `contrastArtifacts` refuses
+  the pair when `run.timeoutMs` disagrees and prints the shared value when it does not.
+- - **Agreement is a partition, and the selector was never handed it.** The selector receives each
   candidate's statement, row count, column count and the first three rows — and three hundred
   characters of a wide result cannot establish that two result sets are the same set. So the one
   fact a 2+1 pool turns on, that two of the three returned exactly the same thing, was the one fact
