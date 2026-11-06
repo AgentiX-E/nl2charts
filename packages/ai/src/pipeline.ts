@@ -155,6 +155,16 @@ export interface PipelineOptions {
    * at the first would fail on the turn a weak model depends on most.
    */
   readonly temperature?: number | null;
+  /**
+   * Ask for a thinking or a non-thinking decode, where the endpoint serves the choice.
+   *
+   * Absent by default, which sends nothing — the arrangement every published reading was taken
+   * under, because the mode used to be chosen by picking a model name. Names are aliases and
+   * aliases are re-pointed; a request that names the mode is the only form that survives that.
+   * The endpoint must declare `thinkingSwitch`, or `adaptRequest` removes the field and counts it,
+   * so a deployment that guesses wrong sees `samplingOmitted.thinking` rather than a wrong score.
+   */
+  readonly thinking?: boolean;
   /** When provided, a candidate is executed before it is accepted; failures
    *  become repair turns (syntax and binding errors, not wrong answers). Returning
    *  a row count opts the pipeline into the empty-result turn; returning nothing
@@ -428,6 +438,7 @@ export function createPipeline(options: PipelineOptions): {
             { role: 'user', content: request.question },
           ],
           temperature,
+          ...(options.thinking === undefined ? {} : { thinking: options.thinking }),
           // Named for the meter: this call exists only on an arm that asked for a reading, and
           // a cost table that folded it into generation would make it look like part of the
           // statement's price.
@@ -444,6 +455,7 @@ export function createPipeline(options: PipelineOptions): {
         const planned = await planner.complete({
           messages: [{ role: 'user', content: buildPlanPrompt(request.question, request.schema) }],
           temperature,
+          ...(options.thinking === undefined ? {} : { thinking: options.thinking }),
           purpose: 'plan',
         });
         const parsed = parsePlan(planned.text);
@@ -482,6 +494,7 @@ export function createPipeline(options: PipelineOptions): {
         const response = await options.provider.complete({
           messages,
           temperature,
+          ...(options.thinking === undefined ? {} : { thinking: options.thinking }),
           // The first turn is the statement the arm is named for; every later turn is a repair,
           // and a repair's price is the thing a repair arm is judged on. One label would make
           // "three attempts cost three times one attempt" an assumption instead of a column.
@@ -512,6 +525,7 @@ export function createPipeline(options: PipelineOptions): {
                   previous: response.text,
                   statement: sql,
                   temperature,
+                  ...(options.thinking === undefined ? {} : { thinking: options.thinking }),
                   read: (text: string) => readReply(text).sql,
                 })
               : undefined;
@@ -605,11 +619,23 @@ async function auditStatement(input: {
   readonly previous: string;
   readonly statement: string;
   readonly temperature: number | null;
+  /**
+   * The decode mode, carried through so that the audit turn runs in the same mode as the turn
+   * it audits.
+   *
+   * This field was missing on the first attempt at this change, and the spread at the call site
+   * made the omission compile: an object literal with a `...spread` does not get TypeScript's
+   * excess-property check, so the audit call would have silently ignored a mode the rest of the
+   * pipeline honoured — the exact shape of D49, where a declaration that never reaches the
+   * mechanism reports as a mechanism that ran.
+   */
+  readonly thinking?: boolean;
   readonly read: (text: string) => string;
 }): Promise<{ readonly sql: string; readonly named: number }> {
   const response = await input.provider.complete({
     messages: [...input.messages, ...auditMessages(input.question, input.statement, input.previous)],
     temperature: input.temperature,
+    ...(input.thinking === undefined ? {} : { thinking: input.thinking }),
     // Its own purpose, so the price table can say what the check cost rather than folding it
     // into generation: on a one-call arm this turn doubles the characters billed.
     purpose: 'audit',

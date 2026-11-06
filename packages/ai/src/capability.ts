@@ -54,6 +54,16 @@ export interface ModelCapabilities {
    * deliberation it was chosen for. Both are the pipeline's fault, not the model's.
    */
   readonly thinksAloud: boolean;
+  /**
+   * Whether the endpoint accepts an explicit `thinking: {type: 'enabled' | 'disabled'}`.
+   *
+   * Not derived from the model name. A name that says "reasoner" describes a mode, not a
+   * protocol, and the two ways of being wrong are silent: an endpoint that ignores the field
+   * answers 200 and the report prints a mode nobody ran; one that rejects it answers 400 that
+   * reads as a bad key. So the default is `false` and a deployment that knows its endpoint
+   * says so — the same rule as every other field in this contract.
+   */
+  readonly thinkingSwitch: boolean;
 }
 
 /** A chat endpoint: sampling applies, JSON mode is served, the answer cap is the vendor's usual 4K. */
@@ -63,6 +73,7 @@ export const CHAT_CAPABILITIES: ModelCapabilities = {
   jsonMode: true,
   maxOutputTokens: 4096,
   thinksAloud: false,
+  thinkingSwitch: false,
 };
 
 /**
@@ -78,6 +89,10 @@ export const REASONING_CAPABILITIES: ModelCapabilities = {
   jsonMode: false,
   maxOutputTokens: 8192,
   thinksAloud: true,
+  // A mode is not a switch: `deepseek-reasoner` is *always* thinking, and the endpoint that
+  // can choose is a different one. Declaring it here would send the field to an endpoint that
+  // never documented it.
+  thinkingSwitch: false,
 };
 
 /**
@@ -151,6 +166,7 @@ export function adaptRequest(request: LlmRequest, capabilities: ModelCapabilitie
     temperature?: number | null;
     maxTokens?: number;
     json?: boolean;
+    thinking?: boolean;
     purpose?: LlmRequest['purpose'];
   } = { messages: request.messages };
 
@@ -174,6 +190,13 @@ export function adaptRequest(request: LlmRequest, capabilities: ModelCapabilitie
   else if (capabilities.family === 'reasoning') next.maxTokens = capabilities.maxOutputTokens;
 
   if (request.json !== undefined) next.json = request.json;
+  // The mode selector. Sent only where the endpoint declared it serves one, and counted when it
+  // was asked for and could not be honoured — the same rule as `temperature`, for the same
+  // reason: a field the endpoint discards makes the report describe a run that did not happen.
+  if (request.thinking !== undefined) {
+    if (capabilities.thinkingSwitch) next.thinking = request.thinking;
+    else ignored.push('thinking');
+  }
   if (request.purpose !== undefined) next.purpose = request.purpose;
 
   return { request: next, ignored, capabilities };

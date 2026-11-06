@@ -69,6 +69,15 @@ export interface LlmRequest {
   readonly maxTokens?: number;
   readonly json?: boolean;
   /**
+   * Ask for a thinking or a non-thinking decode, where the endpoint serves the choice.
+   *
+   * `undefined` is "this deployment has no opinion" and sends nothing — which is what every
+   * published reading did, because the mode was selected by choosing a model name. That is the
+   * arrangement this field replaces: an alias can be re-pointed at new weights, and a request
+   * that names a mode cannot.
+   */
+  readonly thinking?: boolean;
+  /**
    * What this call is for, for the meter to file it under.
    *
    * Optional because a caller that is not being measured (a preflight probe, a replay) has no
@@ -294,6 +303,12 @@ export function createHttpProvider(options: HttpProviderOptions): LlmProvider {
       }
       if (adapted.request.maxTokens !== undefined) body.max_tokens = adapted.request.maxTokens;
       if (adapted.request.json === true) body.response_format = { type: 'json_object' };
+      // Written only when the endpoint declared the switch. The value is a two-state object
+      // rather than a boolean because that is the shape the vendors document, and an
+      // undeclared mode is removed by `adaptRequest` before it reaches this line.
+      if (adapted.request.thinking !== undefined) {
+        body.thinking = { type: adapted.request.thinking ? 'enabled' : 'disabled' };
+      }
 
       let payload: CompletionBody | undefined;
       let response: Response | undefined;

@@ -7,6 +7,19 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **The decode mode is a request field now, not a model name.** `deepseek-chat` and
+  `deepseek-reasoner` are the non-thinking and thinking modes of one base model, and both names
+  were later re-pointed at new weights without a version change. A deployment that wants the
+  thinking mode had exactly one way to ask for it — by naming a model — and that way silently
+  changes meaning. `LlmRequest.thinking` and `ModelCapabilities.thinkingSwitch` replace it: the
+  field is sent as `thinking: {type: 'enabled' | 'disabled'}` only to an endpoint that declared the
+  switch, and removed-and-counted (`samplingOmitted.thinking`) on one that did not, because both
+  failures are silent otherwise — an endpoint that ignores the field answers 200 and the report
+  prints a mode nobody ran, and one that rejects it answers 400 that reads as a bad key. The
+  pipeline option reaches every turn it makes, including the audit turn; the first version of this
+  change spread the option into an object literal whose parameter type did not declare it, which
+  TypeScript accepts across a spread, so the audit turn would have run in a mode nobody chose. A
+  test holds all four turns to the value and fails when any of them drops it.
 - **The artifact now records which model answered, not just which alias it asked for.** Every
   comparison in this repository's BIRD history calls `deepseek-reasoner` "the strong model" against
   `deepseek-chat` as "the weak" one; DeepSeek's API documentation states the two names are the

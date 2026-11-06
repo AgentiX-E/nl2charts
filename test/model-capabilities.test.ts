@@ -153,6 +153,30 @@ describe('adaptRequest', () => {
     adaptRequest(request, REASONING_CAPABILITIES);
     expect(request.temperature).toBe(0);
   });
+
+  it('refuses to send a thinking switch to an endpoint that never declared one', () => {
+    // The switch is a request field only some endpoints serve, and the two failure modes are
+    // both silent: an endpoint that ignores it answers 200 and the report prints a mode nobody
+    // ran, and one that rejects it answers 400 that reads as a bad key. Neither is a guess this
+    // repository is entitled to make on a model name, so the default is "not served" and the
+    // removal is counted exactly like a dropped sampling parameter.
+    const adapted = adaptRequest({ messages: [{ role: 'user', content: 'q' }], thinking: true }, REASONING_CAPABILITIES);
+    expect(adapted.request.thinking).toBeUndefined();
+    expect(adapted.ignored).toEqual(['thinking']);
+    const silent = adaptRequest({ messages: [{ role: 'user', content: 'q' }], thinking: false }, { ...CHAT_CAPABILITIES, thinkingSwitch: true });
+    expect(silent.request.thinking).toBe(false);
+    expect(silent.ignored).toEqual([]);
+  });
+
+  it('reports a thinking switch the endpoint does not serve only when one was asked for', () => {
+    // `undefined` is "this deployment said nothing" and must stay byte-identical to a request
+    // written before the field existed; otherwise every published reading changes shape.
+    const quiet = adaptRequest({ messages: [{ role: 'user', content: 'q' }] }, { ...CHAT_CAPABILITIES, thinkingSwitch: false });
+    expect(quiet.ignored).toEqual([]);
+    expect('thinking' in quiet.request).toBe(false);
+    const asked = adaptRequest({ messages: [{ role: 'user', content: 'q' }], thinking: false }, { ...CHAT_CAPABILITIES, thinkingSwitch: false });
+    expect(asked.ignored).toEqual(['thinking']);
+  });
 });
 
 describe('the provider on the wire', () => {
