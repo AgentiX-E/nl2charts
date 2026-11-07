@@ -61,7 +61,7 @@
  * next to the loss count and beside the split's resolution, because 6 wins in 1,532 questions is
  * 0.39pp and no instrument here is allowed to call that a gain on its own.
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { mcnemarExact, pairedResolution } from '@agentix-e/nl2charts-devkit';
 import type { MatchReason } from '@agentix-e/nl2charts-devkit';
@@ -372,6 +372,14 @@ export interface RewriteReading {
   readonly kept: number;
   /** Fires that left a wrong answer wrong. */
   readonly unchangedWrong: number;
+  /**
+   * The cases the rule turned from wrong to right.
+   *
+   * A count says a rule works and cannot say where. The buckets are counted by the difference
+   * between two statements, so a ceiling's reach over them is a join between two reports — and a
+   * join needs the keys, not the total.
+   */
+  readonly wonCases: readonly string[];
   /** Rewrites the engine refused, which is a defect in the rule rather than a reading. */
   readonly broken: number;
   /**
@@ -609,11 +617,12 @@ export async function priceRewrites(
       if (before && now) tally.kept += 1;
       else if (!before && now) {
         tally.won += 1;
-        if (rule.oracle !== true) {
-          const repaired = wonCases.get(rule.name) ?? new Set<string>();
-          repaired.add(item.id);
-          wonCases.set(rule.name, repaired);
-        }
+        // Recorded for the ceilings too, and not for the union: `adopted` filters on `oracle`
+        // before anything reads this, so the only thing a ceiling's list can be used for is the
+        // question the table cannot answer — *which bucket did this ceiling reach*.
+        const repaired = wonCases.get(rule.name) ?? new Set<string>();
+        repaired.add(item.id);
+        wonCases.set(rule.name, repaired);
       }
       else if (before && !now) tally.lost += 1;
       else tally.unchangedWrong += 1;
@@ -627,6 +636,7 @@ export async function priceRewrites(
       claim: rule.claim,
       oracle: rule.oracle === true,
       ...tally,
+      wonCases: [...(wonCases.get(rule.name) ?? [])],
       net,
       // The exact test the pairs call for: only the discordant cases carry information, and a rule
       // that won six and lost none is as extreme as six coin flips that all landed the same way.
@@ -725,10 +735,20 @@ export interface RewriteSettings {
   readonly limit?: number;
   /** Price the ceilings too, which costs executions and reads the gold statement. */
   readonly oracle: boolean;
+  /**
+   * Where to write the report, so a reading can be crossed with another instrument's.
+   *
+   * Until this existed the harness printed a table and nothing else, and the per-case rows it had
+   * already computed were dropped with the process. That made one question unanswerable: a
+   * ceiling's wins are counted by statement shape, and the buckets are counted by the difference
+   * between two statements, so "which bucket does this ceiling actually reach" needs both
+   * artifacts on disk at the same time. Printing a total cannot be joined to anything.
+   */
+  readonly write?: string;
 }
 
 export function resolveRewriteSettings(argv: readonly string[]): RewriteSettings {
-  const takesValue = new Set(['--artifact', '--arm', '--limit']);
+  const takesValue = new Set(['--artifact', '--arm', '--limit', '--write']);
   const flags = new Set(['--oracle']);
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index] as string;
@@ -738,7 +758,7 @@ export function resolveRewriteSettings(argv: readonly string[]): RewriteSettings
     }
     if (flags.has(token)) continue;
     throw new Error(
-      `unrecognized argument ${token}: this harness takes --artifact <path>, --arm <name>, --limit <n> and --oracle`,
+      `unrecognized argument ${token}: this harness takes --artifact <path>, --arm <name>, --limit <n>, --write <path> and --oracle`,
     );
   }
   const flag = (name: string): string | undefined => {
@@ -754,7 +774,14 @@ export function resolveRewriteSettings(argv: readonly string[]): RewriteSettings
   if (limit !== undefined && (!Number.isInteger(limit) || limit <= 0)) {
     throw new Error(`--limit takes a positive whole number of questions, not ${String(raw)}`);
   }
-  return { artifact, arm, oracle: argv.includes('--oracle'), ...(limit === undefined ? {} : { limit }) };
+  const write = flag('--write');
+  return {
+    artifact,
+    arm,
+    oracle: argv.includes('--oracle'),
+    ...(limit === undefined ? {} : { limit }),
+    ...(write === undefined ? {} : { write }),
+  };
 }
 
 /** The type lookup the integer-division rule needs, per database. */
@@ -830,6 +857,7 @@ export async function main(
     const { unresolved, unrunnable, ...rest } = priced;
     const report: RewriteReport = { split: layout.split, arm: settings.arm, ...rest, problems: [] };
     const withProblems = { ...report, problems: rewriteProblems(report) };
+    if (settings.write !== undefined) writeFileSync(settings.write, `${JSON.stringify(withProblems, null, 2)}\n`);
     for (const line of rewriteLines(withProblems)) console.log(line);
     console.log(
       `  dropped: ${String(unretained)} without a statement, ${String(unknownQuestion)} naming a question the split does not hold` +

@@ -102,6 +102,41 @@ export function missingLiterals(goldSql: string, predictedSql: string): string[]
 }
 
 /**
+ * The *values* the gold compares against and the prediction never writes.
+ *
+ * `missingLiterals` answers "did the prediction write every literal the gold wrote", which is
+ * the right question for a detector of a swapped value and the wrong question for a taxonomy:
+ * a number in a statement is usually not a value. `* 100` turns a ratio into a percentage,
+ * `case when ... then 1 else 0 end` counts rows, `round(x, 5)` fixes a precision. None of them
+ * is anything the database stores, and a statement can miss all of them while naming every
+ * value correctly.
+ *
+ * That distinction was not academic. On the dev split, 72 of the 425 `values` cases were
+ * classified `literal-missing`, and **36 of them missed numbers and nothing else** — `100`,
+ * `1`, `0`, `5`, `3`, `4` — with not one data value among them. Read as a value gap, those
+ * cases sent the next round's budget to retrieval, which cannot move a case whose problem is a
+ * percentage expression. Twenty-two of them were `predicate` cases and eleven `aggregate`
+ * cases that the ladder never reached, because the literal test sits above both.
+ *
+ * So the value test reads strings only, and skips a string that carries `%`: a strftime mask or
+ * a `like` pattern is derived from the question rather than retrieved from a column. That is the
+ * same scope `information.ts` states for the prompt-coverage classes, and for the same reason —
+ * two instruments that disagree about what a stored value is will disagree about how many cases
+ * need one.
+ *
+ * Numbers are not discarded, they are handed back to the ladder. The case continues to
+ * `tables`, `predicate`, `aggregate` and the rest, and lands in the bucket whose fix would
+ * change it. Dropping them here without that hand-back would have raised `unclassified` from 2
+ * to 38 and hidden the arithmetic defects behind an accounting term.
+ */
+export function missingValueLiterals(goldSql: string, predictedSql: string): string[] {
+  const predicted = new Set(literals(predictedSql).map(normalise));
+  return literals(goldSql).filter(
+    (literal) => literal.startsWith("'") && !literal.includes('%') && !predicted.has(normalise(literal)),
+  );
+}
+
+/**
  * The literals the gold spells one way and the prediction spells another way in case only.
  *
  * This is the most actionable defect on the dev split and the least visible: SQLite compares

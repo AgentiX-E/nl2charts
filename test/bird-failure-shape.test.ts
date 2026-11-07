@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { caseMismatchedLiterals, classifyError, classifyFailureShape, missingLiterals } from '../eval/bird/failure-shape.js';
+import { caseMismatchedLiterals, classifyError, classifyFailureShape, missingLiterals, missingValueLiterals } from '../eval/bird/failure-shape.js';
 import { format, tally } from '../eval/bird/diagnose-corpus.js';
 import type { OracleResult } from '../eval/bird/oracle.js';
 
@@ -107,6 +107,56 @@ describe('the literals a prediction leaves out', () => {
 
   it('reports nothing when the prediction names every literal, which is the other half of the test', () => {
     expect(missingLiterals("SELECT 1 WHERE a = 'x' AND b = 2", "SELECT 1 WHERE b = 2 AND a = 'x'")).toEqual([]);
+  });
+});
+
+/**
+ * The value test the taxonomy runs on.
+ *
+ * `missingLiterals` answers a question about a statement pair; the bucket needs a question
+ * about the *data*, and the two are not the same one. `* 100` is arithmetic, `'%Y'` is a mask,
+ * and a classifier that counted either of them as a value filed arithmetic defects under
+ * retrieval. On the dev split that was 36 of 72 `literal-missing` cases.
+ */
+describe('the values a prediction leaves out', () => {
+  it('reports the stored value and not the arithmetic constant beside it', () => {
+    expect(
+      missingValueLiterals("select sum(x) * 100 / count(*) from t where county = 'Lake'", 'select sum(x) / count(*) from t'),
+    ).toEqual(["'Lake'"]);
+  });
+
+  it('reports nothing when every missing literal is a number', () => {
+    // Dev question 62 wrote the right value and a different percentage expression; the only
+    // thing missing was `100`. Filed as retrieval, it asked for values that were already in
+    // the prompt — and the case's real defect, the expression, was never counted anywhere.
+    expect(
+      missingValueLiterals('select CAST(free AS REAL) * 100 / enrolled from frpm', 'select free / enrolled from frpm'),
+    ).toEqual([]);
+    expect(missingLiterals('select CAST(free AS REAL) * 100 / enrolled from frpm', 'select free / enrolled from frpm')).toEqual([
+      '100',
+    ]);
+  });
+
+  it('reports nothing when every missing literal is a format mask', () => {
+    // `'%Y'` is derived from the question, not stored in a column, and so is a `like` pattern:
+    // the same scope `information.ts` states for its prompt-coverage classes.
+    expect(missingValueLiterals("select 1 where strftime('%Y', d) = '1998'", "select 1 where d = '1998'")).toEqual([]);
+    expect(missingValueLiterals("select 1 where name like '%cup%'", 'select 1 from t')).toEqual([]);
+  });
+
+  it('still reports a value whose only difference is the notation the gold used', () => {
+    // `'2000'` is what the gold compares against; a prediction that writes `'2000-01-01'` has
+    // not named it. This is a value gap that a stored-value sample can close, which is what
+    // separates it from the mask above.
+    expect(missingValueLiterals("select 1 where d between '2000' and '2005'", "select 1 where d between '2000-01-01' and '2005-12-31'")).toEqual([
+      "'2000'",
+      "'2005'",
+    ]);
+  });
+
+  it('keeps the case-insensitive comparison the rest of the reader uses', () => {
+    expect(missingValueLiterals("select 1 where name = 'cup'", "select 1 where name = 'CUP'")).toEqual([]);
+    expect(missingValueLiterals("select 1 where year = '2020'", 'select 1 where year = 2020')).toEqual([]);
   });
 });
 

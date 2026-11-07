@@ -15,7 +15,7 @@
  *   arm's own score. If re-execution cannot reproduce that score, the delta is between two
  *   instruments. `rewriteProblems` refuses, and the test drives it with an artifact that lies.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -468,7 +468,7 @@ describe('priceRewrites', () => {
       recomputed: 50,
       declared: 50,
       agreed: 100,
-      readings: [{ rule: 'r', claim: '', oracle: false, fired: 20, won: 1, lost: 19, kept: 0, unchangedWrong: 0, broken: 0, refused: 0, net: -18, mcnemar: 0.00001, resolutionPp: 1 }],
+      readings: [{ rule: 'r', claim: '', oracle: false, fired: 20, won: 1, lost: 19, kept: 0, unchangedWrong: 0, wonCases: [], broken: 0, refused: 0, net: -18, mcnemar: 0.00001, resolutionPp: 1 }],
       union: 1,
       overlap: [],
       problems: [],
@@ -603,7 +603,7 @@ describe('priceRewrites', () => {
       },
       () => undefined,
     );
-    expect(priced.readings[0]).toMatchObject({ fired: 1, won: 0, lost: 0, unchangedWrong: 1 });
+    expect(priced.readings[0]).toMatchObject({ fired: 1, won: 0, lost: 0, unchangedWrong: 1, wonCases: [] });
   });
 
   it('keeps a ceiling out of the union, because a ceiling is not adopted', async () => {
@@ -616,6 +616,22 @@ describe('priceRewrites', () => {
       () => undefined,
     );
     expect(priced.readings[0]?.won).toBe(1);
+    expect(priced.union).toBe(0);
+  });
+
+  it('names the cases a ceiling won, so its reach over the buckets can be read at all', async () => {
+    // The union must stay zero — a ceiling is not adopted — but the count alone cannot answer
+    // "which bucket did this ceiling reach": the buckets are counted by the difference between two
+    // statements and the wins by the shape of one, so the join needs the ids.
+    const ceiling: RewriteRule = { name: 'ceiling', claim: '', oracle: true, apply: (input) => `${input.sql} ` };
+    const base = rewriteCase();
+    const priced = await priceRewrites(
+      [base],
+      [ceiling],
+      { execute: async (_db, sql) => ({ ok: true, rows: sql === base.sql ? [['pen']] : [['cup']] }), judge: judgeOfficial },
+      () => undefined,
+    );
+    expect(priced.readings[0]?.wonCases).toEqual([base.id]);
     expect(priced.union).toBe(0);
   });
 });
@@ -631,7 +647,7 @@ describe('rewriteProblems', () => {
       recomputed: 1,
       declared: 1,
       scored: 1,
-      readings: [{ rule: 'x', claim: '', oracle: false, fired: 1, won: 0, lost: 0, kept: 0, unchangedWrong: 0, broken: 2, refused: 0, net: 0, mcnemar: 1, resolutionPp: 1 }],
+      readings: [{ rule: 'x', claim: '', oracle: false, fired: 1, won: 0, lost: 0, kept: 0, unchangedWrong: 0, wonCases: [], broken: 2, refused: 0, net: 0, mcnemar: 1, resolutionPp: 1 }],
     });
     expect(problems.join(' ')).toContain('no longer run');
   });
@@ -650,7 +666,7 @@ describe('rewriteLines', () => {
       recomputed: 980,
       declared: 980,
       agreed: 1532,
-      readings: [{ rule: 'null-order', claim: 'a claim', oracle: false, fired: 80, won: 6, lost: 0, kept: 36, unchangedWrong: 38, broken: 0, refused: 0, net: 6, mcnemar: 0.0313, resolutionPp: 0.4 }],
+      readings: [{ rule: 'null-order', claim: 'a claim', oracle: false, fired: 80, won: 6, lost: 0, kept: 36, unchangedWrong: 38, wonCases: [], broken: 0, refused: 0, net: 6, mcnemar: 0.0313, resolutionPp: 0.4 }],
       union: 6,
       overlap: [],
       problems: [],
@@ -672,7 +688,7 @@ describe('rewriteLines', () => {
       recomputed: 60,
       declared: 60,
       agreed: 100,
-      readings: [{ rule: 'oracle-predicate', claim: 'a ceiling', oracle: true, fired: 83, won: 20, lost: 0, kept: 0, unchangedWrong: 60, broken: 0, refused: 3, net: 20, mcnemar: 0.0001, resolutionPp: 1 }],
+      readings: [{ rule: 'oracle-predicate', claim: 'a ceiling', oracle: true, fired: 83, won: 20, lost: 0, kept: 0, unchangedWrong: 60, wonCases: [], broken: 0, refused: 3, net: 20, mcnemar: 0.0001, resolutionPp: 1 }],
       union: 0,
       overlap: [],
       problems: [],
@@ -686,7 +702,7 @@ describe('rewriteLines', () => {
       recomputed: 60,
       declared: 60,
       agreed: 100,
-      readings: [{ rule: 'ground', claim: 'a rule', oracle: false, fired: 22, won: 14, lost: 0, kept: 0, unchangedWrong: 8, broken: 0, refused: 0, net: 14, mcnemar: 0.0001, resolutionPp: 1 }],
+      readings: [{ rule: 'ground', claim: 'a rule', oracle: false, fired: 22, won: 14, lost: 0, kept: 0, unchangedWrong: 8, wonCases: [], broken: 0, refused: 0, net: 14, mcnemar: 0.0001, resolutionPp: 1 }],
       union: 14,
       overlap: [],
       problems: [],
@@ -705,8 +721,8 @@ describe('rewriteLines', () => {
       declared: 60,
       agreed: 100,
       readings: [
-        { rule: 'ground', claim: 'a rule', oracle: false, fired: 9, won: 3, lost: 0, kept: 0, unchangedWrong: 6, broken: 0, refused: 0, net: 3, mcnemar: 0.25, resolutionPp: 1 },
-        { rule: 'transplant', claim: 'a ceiling', oracle: true, fired: 20, won: 9, lost: 0, kept: 0, unchangedWrong: 11, broken: 0, refused: 0, net: 9, mcnemar: 0.004, resolutionPp: 1 },
+        { rule: 'ground', claim: 'a rule', oracle: false, fired: 9, won: 3, lost: 0, kept: 0, unchangedWrong: 6, wonCases: [], broken: 0, refused: 0, net: 3, mcnemar: 0.25, resolutionPp: 1 },
+        { rule: 'transplant', claim: 'a ceiling', oracle: true, fired: 20, won: 9, lost: 0, kept: 0, unchangedWrong: 11, wonCases: [], broken: 0, refused: 0, net: 9, mcnemar: 0.004, resolutionPp: 1 },
       ],
       union: 3,
       overlap: [],
@@ -727,8 +743,8 @@ describe('rewriteLines', () => {
       declared: 60,
       agreed: 100,
       readings: [
-        { rule: 'one', claim: '', oracle: false, fired: 4, won: 2, lost: 0, kept: 0, unchangedWrong: 2, broken: 0, refused: 0, net: 2, mcnemar: 0.5, resolutionPp: 1 },
-        { rule: 'two', claim: '', oracle: false, fired: 4, won: 3, lost: 0, kept: 0, unchangedWrong: 1, broken: 0, refused: 0, net: 3, mcnemar: 0.25, resolutionPp: 1 },
+        { rule: 'one', claim: '', oracle: false, fired: 4, won: 2, lost: 0, kept: 0, unchangedWrong: 2, wonCases: [], broken: 0, refused: 0, net: 2, mcnemar: 0.5, resolutionPp: 1 },
+        { rule: 'two', claim: '', oracle: false, fired: 4, won: 3, lost: 0, kept: 0, unchangedWrong: 1, wonCases: [], broken: 0, refused: 0, net: 3, mcnemar: 0.25, resolutionPp: 1 },
       ],
       union: 5,
       overlap: [],
@@ -767,6 +783,16 @@ describe('resolveRewriteSettings', () => {
 
   it('refuses an argument it does not know', () => {
     expect(() => resolveRewriteSettings(['--artefact', 'a'])).toThrow(/unrecognized argument/);
+  });
+
+  it('takes a path to write the per-case rows to, and writes nothing unless asked', () => {
+    // The table this harness prints is a total. A ceiling's wins are counted by statement shape
+    // and a bucket is counted by the difference between two statements, so the only way to ask
+    // which bucket a ceiling reaches is to have both reports on disk.
+    expect(resolveRewriteSettings(['--artifact', 'a.json', '--arm', 'x']).write).toBeUndefined();
+    expect(resolveRewriteSettings(['--artifact', 'a.json', '--arm', 'x', '--write', 'out.json'])).toMatchObject({
+      write: 'out.json',
+    });
   });
 });
 
@@ -885,6 +911,24 @@ describe('main', () => {
       }),
     );
     expect(await main(['--artifact', artifact, '--arm', 'a'], base, {})).toBe(0);
+  });
+
+  it('writes the per-case rows when asked to, so another instrument can join them', async () => {
+    // Printing a total cannot be joined to anything: the buckets are counted by the difference
+    // between two statements and a ceiling's wins by the shape of one, so the join only exists if
+    // both reports are files.
+    const base = layout();
+    const artifact = join(base, 'artifact.json');
+    writeFileSync(
+      artifact,
+      JSON.stringify({ split: 'minidev', cases: [{ id: '1', arm: 'a', passed: false, sql: "select id from items where name = 'pen'" }] }),
+    );
+    const out = join(base, 'rewrite.json');
+    expect(await main(['--artifact', artifact, '--arm', 'a', '--write', out], base, {})).toBe(0);
+    const written = JSON.parse(readFileSync(out, 'utf8')) as { arm: string; readings: { rule: string; fired: number }[] };
+    expect(written.arm).toBe('a');
+    expect(written.readings.length).toBeGreaterThan(0);
+    expect(written.readings[0]).toHaveProperty('fired');
   });
 
   it('exits non-zero when the baseline cannot reproduce the artifact', async () => {

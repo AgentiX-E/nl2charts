@@ -929,7 +929,7 @@ how often they occur:
 | `filter-narrow` | the statement returned no rows | a predicate that matches nothing |
 | `filter-wide` | a different number of rows | a weak predicate or a fan-out join |
 | `scale` | every value a constant multiple | an aggregation at the wrong level |
-| `literal-missing` | a value the gold names is absent | what the prompt shows about values |
+| `literal-missing` | a *value* the gold compares against is absent | what the prompt shows about values |
 | `literal-case` | the value is there, in another case | the stored casing of the value |
 | `tables` | the two statements read different tables | join selection |
 | `predicate` | same tables, different conditions | condition coverage |
@@ -958,6 +958,12 @@ Two runs, on two splits and two arms:
 | `literal-case` | 6 (1.5%) | 2 (1.5%) |
 | `window` | 2 (0.5%) | 0 |
 | `grain` | 1 (0.3%) | 0 |
+
+> The two columns above were taken before `literal-missing` was narrowed to values. Every
+> `literal-missing` count in this document from v9.45 on reads the narrower test, under which the
+> dev arm holds 31 rather than 70–72 — see *A bucket that was named after the wrong cause*. The
+> older numbers are left as they were measured; a table is a record of an instrument, not a
+> statement that the instrument was finished.
 | `scale` | 0 | 0 |
 | `equivalent` | 0 | 0 |
 | `unclassified` | 1 (0.3%) | 1 (0.8%) |
@@ -8912,9 +8918,11 @@ dropped. It reads the gold, so it can never ship:
 | the whole filter, moved (`oracle-predicate`) | 83 | 20 | 0 | 3 | +1.31pp | <0.0001 |
 
 **The criterion was written before the reading: under 54 cases (3.5pp) retires condition coverage as
-the next lever.** It is 20. Twenty of the eighty-two `predicate` cases are exactly one clause away
-— 24% of the bucket — and the other 62 are wrong in some second way that moving the filter does not
-touch. So condition coverage is not the next lever, and the budget moves to the two buckets that are
+the next lever.** It is 20. ~~Twenty of the eighty-two `predicate` cases are exactly one clause away
+— 24% of the bucket~~ — of those twenty wins, **four** fall in the `predicate` bucket; the other
+sixteen are `filter-wide` (7), `filter-narrow` (4), `literal-missing` (4) and `aggregate` (1), which
+the join two sections below measures. So the bucket is 4.8% reachable rather than 24%, and the rest
+of it is wrong in some second way that moving the filter does not touch. So condition coverage is not the next lever, and the budget moves to the two buckets that are
 larger and have not been priced yet: `tables` (51 cases, join selection) and `literal-missing` (72
 cases, which is a retrieval problem rather than a generation one — the value the answer needs is not
 in the prompt).
@@ -8924,3 +8932,115 @@ narrower reading, that `filter-wide` (102) and `filter-narrow` (56) are also `wh
 untouched, and the clause is still 327 of the 425. And it does not say a condition-coverage mechanism
 would recover 20: the ceiling moves the *gold's own* clause in one edit, which no mechanism that
 infers conditions from a question can do.
+
+> **Correction.** The paragraph above says `literal-missing` is "a retrieval problem rather than
+> a generation one — the value the answer needs is not in the prompt". That sentence was inferred
+> from the bucket's name and never from the bucket's cases, and the next round's first act was to
+> read them. It is wrong: the value is in the prompt for 18 of the 31 cases the bucket actually
+> holds, and the 72 it held at the time contained 36 cases whose missing literals were all
+> arithmetic constants. The section below is that reading.
+
+### A bucket that was named after the wrong cause
+
+The taxonomy's fifth rung is `literal-missing`, and the rung's test is `missingLiterals`: *did the
+prediction write every literal the gold wrote*. That is the right question for a detector of a
+swapped value, and it must count numbers — `where year = 2020` names a value and the number is how
+the gold spells it. It is the wrong question for a bucket, because most numbers in a statement are
+not values at all: `* 100` turns a ratio into a percentage, `case when ... then 1 else 0 end` counts
+rows, `round(x, 5)` fixes a precision, `/ 4` averages quarters.
+
+Reading the 72 cases the bucket held:
+
+| what the missing literals were | cases |
+| --- | --- |
+| numbers only | **36** |
+| strings only | 18 |
+| both, or a `%` mask among them | 18 |
+
+Not one of the 36 was a value the database stores. Every one was `100`, `1`, `0`, `5`, `3` or `4`,
+and every one sat inside an arithmetic expression. Dev 62 is the shape: the prediction wrote
+`frpm."Percent (%) Eligible Free (K-12)" < 0.18` where the gold wrote
+`CAST(free_meal_count AS REAL) * 100 / enrollment < 0.18`, so the two statements differ in the
+percentage and in nothing else — and the only literal the gold had that the prediction did not was
+`100`. Filed as retrieval, that case asked for a value that was already in the prompt, and its real
+defect — a different expression — was never counted anywhere.
+
+Two consequences followed, and both were invisible while the bucket kept its name. The 41 cases that
+were not value gaps were being counted as retrieval work, and the rungs below — `predicate`,
+`aggregate`, `tables` — never saw them, because the literal test sits above all three.
+
+The fix is a second test, `missingValueLiterals`, that reads strings only and skips a string
+carrying `%`: a strftime mask or a `like` pattern is derived from the question rather than retrieved
+from a column. That is the same scope `information.ts` states for its prompt-coverage classes, and
+for the same reason — two instruments that disagree about what a stored value is will disagree about
+how many cases need one. Numbers are not discarded; they go back to the ladder, and the case lands
+in the rung whose fix would change it:
+
+| bucket | before | after | Δ |
+| --- | --- | --- | --- |
+| `literal-missing` | 72 (16.9%) | **31 (7.3%)** | −41 |
+| `predicate` | 82 (19.3%) | **104 (24.5%)** | +22 |
+| `aggregate` | 27 (6.4%) | **38 (8.9%)** | +11 |
+| `tables` | 51 (12.0%) | **59 (13.9%)** | +8 |
+| everything else | 193 | 193 | 0 |
+| `unclassified` | 2 (0.5%) | 2 (0.5%) | 0 |
+
+The 41 re-filed cases land 22 / 11 / 8, and the three add up to 41 — no case was lost and none was
+parked in `unclassified`, which is the accounting term a re-classification must not grow. Coverage
+stays at 99.5% of 425.
+
+**And then the bucket's own question became answerable.** Crossed with the prompt-coverage classes,
+the 31 cases split like this:
+
+| what the prompt says about the value | cases |
+| --- | --- |
+| spelled verbatim in the prompt | **18** |
+| not in the prompt in any form (`absent`) | **7** |
+| a different notation of it | 1 |
+| the gold has no string value, so this axis does not apply | 5 |
+
+Seven cases. A stored-value sample — the one lever a retrieval reading would justify — can reach at
+most seven of the 425, which is **0.46pp** on 1,532 questions, against a measured pairing floor of
+0.4pp and a 7.96% verdict-flip rate. That is not a lever, it is a coin. The retrieval reading for
+this bucket is now closed on its own arithmetic, the same way condition coverage was closed one
+round earlier on its ceiling.
+
+Two numbers must not be confused here. `information.ts` reports "a stored-value sample can reach at
+most 56" — that is 28 `casing` + 10 `notation` + 18 `absent` over the 592 failed cases of the arm,
+and it is the right number for "how many failures involve a value the prompt does not spell". The
+seven above is the same question restricted to the 31 cases of one bucket. Both are true, they answer
+different questions, and the bucket-level one is the one that decides where to work next.
+
+### Which bucket a ceiling actually reaches
+
+A ceiling's wins are counted by the shape of one statement; a bucket is counted by the difference
+between two. Until this round the pricer printed a total and threw its per-case rows away, so the
+two could not be joined, and the sentence the last round wrote — *twenty of the eighty-two
+`predicate` cases are one clause away* — was an inference from a numerator and a denominator that
+were never the same set. `rewrite --write` keeps the rows now, so the question can be asked:
+
+| ceiling / rule | won | `filter-narrow` | `filter-wide` | `literal-missing` | `literal-case` | `predicate` | `aggregate` |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `oracle-transplant` (one value, from the gold) | 26 | **12** | 3 | 4 | 6 | **1** | 0 |
+| `oracle-predicate` (the whole filter, from the gold) | 20 | 4 | **7** | 4 | 0 | **4** | 1 |
+| `ground-shipped` (the rewrite the pipeline runs) | 14 | 7 | 0 | 1 | 6 | 0 | 0 |
+
+**Four of twenty.** The ceiling that moves the gold's entire `where` clause repairs four cases in
+the `predicate` bucket and seven in `filter-wide` — a bucket whose name says the statement returned
+the wrong *number* of rows, which a filter can also cause. The two ceilings together reach 5 of the
+104 `predicate` cases, which is 4.8%, and every one of the 26 value transplants lands somewhere
+other than `predicate` except one.
+
+This does not weaken the decision the last round took — condition coverage stays retired — but it
+replaces the reason with the right one. The bucket is not 24% reachable; it is 4.8% reachable by the
+strongest instrument we have, and the other 95% of it is wrong in a way that moving the gold's own
+filter does not fix. A census can overstate a lever in two directions at once: by counting absences
+as repairs, which the previous section measured, and by lending its total to a bucket it does not
+belong to, which this one does.
+
+It also redirects the budget, because the largest single share of ceiling-visible work is neither of
+the two buckets the plan named. It is `filter-narrow`: the statement ran and returned nothing, and
+12 + 7 of the 56 cases there are repaired by an edit that reads the data (a value spelled in the
+wrong case) or the gold (one value transplanted). `ground-shipped` alone already holds seven of the
+twelve, which is why the shipped rule's 14 wins are mostly a `filter-narrow` number wearing the name
+of a value rule.

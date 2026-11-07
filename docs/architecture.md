@@ -726,7 +726,39 @@ that differs in method rather than in prompt or in draw.
   measurement it exists to take or ship a rule that breaks statements. What the ceiling returns is a
   number about one edit: fired 83, won 20, lost 0, +1.31pp, p < 0.0001 — so the 82-case `predicate`
   census is not 82 ready cases, and a lever's census is an upper bound on the lever, never its price.
-- - **A per-call ceiling is a dimension of the comparison, not a detail of the plumbing.** Two
+- **A numerator and a denominator have to be the same set, or the ratio is a rumour.** One round
+  wrote `20 / 82 = 24.4%` and read it as "a quarter of the `predicate` bucket is one clause away".
+  The 20 was the ceiling's wins across every case that has a `where` clause; the 82 was the size of
+  one bucket. Joined this round, four of the twenty fall in that bucket. Four of 104 is 3.8%, and
+  the difference between 24% and 3.8% is the difference between a lever worth building and a
+  bucket that is wrong for some other reason — so the check is not stylistic. Two instruments that
+  count different things can be joined only if both keep their keys: the pricer threw its per-case
+  rows away with the process, and `--write` plus `RewriteReading.wonCases` is what made the join
+  exist at all. A proportion that cannot name its members is a proportion between two populations
+  nobody checked.
+- **A bucket named after a cause has to be read for that cause, and the test that names it must be
+  narrower than the sentence the name supports.** `literal-missing` held 72 of the 425 `values`
+  cases and the plan described them as a retrieval problem — a sentence inferred from the bucket's
+  name. Reading the cases found that 36 of the 72 missed numbers and nothing else, and every one of
+  those numbers was an arithmetic constant: `* 100`, `then 1 else 0`, `round(x, 5)`, `/ 4`. The
+  rung's test was `missingLiterals`, which *has* to count numbers, because `where year = 2020` names
+  a value and the number is how the statement spells it; the bucket needed a test that could not,
+  and `missingValueLiterals` is it — strings only, `%` masks skipped, which is the same scope
+  `information.ts` states for its prompt-coverage classes. Two instruments that disagree about what
+  a stored value is will disagree about how many cases need one. The 41 re-filed cases are handed
+  back to the ladder rather than dropped (22 `predicate`, 11 `aggregate`, 8 `tables`, `unclassified`
+  unchanged at 2), because a re-filing that parks the difference in an accounting term has moved the
+  work rather than named it. And the corrected bucket retires the lever it had been used to justify:
+  18 of its 31 cases have the value spelled in the prompt, 7 do not, and 7 cases is 0.46pp against a
+  measured pairing floor of 0.4pp.
+- **A measurement that prints a total cannot be joined to anything.** The rewrite pricer computed a
+  per-case row for every rule and dropped them with the process, which left one question with no
+  answer: *which bucket does this ceiling actually reach*. A ceiling's wins are counted by the shape
+  of one statement and a bucket by the difference between two, so the join exists only if both
+  reports are files. `--write` is that, and it is the same discipline as the artifact beside every
+  table elsewhere in this harness — a number that cannot be re-derived from what is on disk is a
+  number about the run that produced it.
+- **A per-call ceiling is a dimension of the comparison, not a detail of the plumbing.** Two
   artifacts with the same split, the same judge, the same arms and the same prompt are one contrast
   only if the call had the same deadline too — and for a year the tool that decides this compared
   four fields and not that one. The cost is now measured rather than argued: the same two bases read
@@ -735,7 +767,7 @@ that differs in method rather than in prompt or in draw.
   model in proportion to its output length, so it is a treatment whenever output length differs by
   base, and a contrast that does not name it is measuring the harness. `contrastArtifacts` refuses
   the pair when `run.timeoutMs` disagrees and prints the shared value when it does not.
-- - **Agreement is a partition, and the selector was never handed it.** The selector receives each
+- **Agreement is a partition, and the selector was never handed it.** The selector receives each
   candidate's statement, row count, column count and the first three rows — and three hundred
   characters of a wide result cannot establish that two result sets are the same set. So the one
   fact a 2+1 pool turns on, that two of the three returned exactly the same thing, was the one fact

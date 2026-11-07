@@ -80,8 +80,34 @@ describe('which fix the difference asks for', () => {
   });
 
   it('reads a value the gold names and the prediction never writes as retrieval', () => {
-    expect(gap('select count(*) from orders where item_id = 1', 'select count(*) from orders where item_id = 2')).toBe(
-      'literal-missing',
+    expect(
+      gap("select count(*) from orders where status = 'shipped'", "select count(*) from orders where status = 'pending'"),
+    ).toBe('literal-missing');
+  });
+
+  it('does not read an arithmetic constant as a value', () => {
+    // `* 100` is how a ratio becomes a percentage, not something the database stores. Counting
+    // it as a missing value filed 36 dev cases under retrieval whose real defect was the
+    // expression, and the buckets that describe that defect — `aggregate`, `predicate` — were
+    // never reached, because the literal test sits above both.
+    expect(gap('select sum(x) * 100 / count(*) from orders', 'select sum(x) / count(*) from orders')).toBe('projection');
+  });
+
+  it('hands a number in a predicate back to the ladder rather than calling it a value', () => {
+    // `where year = 2020` versus `2021` is a condition on a number, and the two statements
+    // differ in a predicate. Reporting it as a missing value named the wrong work item: no
+    // amount of value retrieval turns 2021 into 2020.
+    expect(gap('select count(*) from orders where year = 2020', 'select count(*) from orders where year = 2021')).toBe(
+      'predicate',
+    );
+  });
+
+  it('does not read a strftime mask or a like pattern as a value', () => {
+    // `'%Y'` and `'%cup%'` are derived from the question, not retrieved from a column. The
+    // prompt-coverage classes exclude them for the same reason, and two instruments that
+    // disagree about what a stored value is will disagree about how many cases need one.
+    expect(gap("select count(*) from orders where strftime('%Y', date) = '2020'", 'select count(*) from orders where date = 2020')).toBe(
+      'predicate',
     );
   });
 
@@ -295,8 +321,24 @@ describe('the entry, run the way a workflow runs it', () => {
   }
 
   function settingsFor(data: string, body: unknown): ReturnType<typeof resolveValuesGapSettings> {
-    return resolveValuesGapSettings({ BIRD_SPLIT: 'minidev', BIRD_DATA: data }, [writeReport(body), '--arm', 'select-cross'], ROOT);
+    // The artifact goes to a directory this test owns. Without `BIRD_OUT` the settings resolved
+    // against `eval/out`, and one gate run replaced the dev reading with this fixture's single
+    // row — a published number rewritten by a test that never claimed to produce one.
+    const out = join(mkdtempSync(join(tmpdir(), 'vgap-out-')), 'bird-eval.json');
+    return resolveValuesGapSettings(
+      { BIRD_SPLIT: 'minidev', BIRD_DATA: data, BIRD_OUT: out },
+      [writeReport(body), '--arm', 'select-cross'],
+      ROOT,
+    );
   }
+
+  it('writes nothing into the working tree, whatever the caller asked for', () => {
+    // The reading this tool publishes lives at `eval/out/values-gap-<arm>.json` when a caller names
+    // no directory. A test that resolved the same settings inherited that path, so a gate run wrote
+    // a one-row fixture over a 425-case reading and nothing in the report said so.
+    const settings = settingsFor(dataset(), report({ '1': 'select count(*) from items' }));
+    expect(valuesGapPath(settings).startsWith(tmpdir())).toBe(true);
+  });
 
   it('splits the bucket end to end, counting what it had to drop', async () => {
     const data = dataset();
@@ -321,7 +363,10 @@ describe('the entry, run the way a workflow runs it', () => {
     const outcome = await runValuesGap(settings);
     expect(outcome.tally.buckets['filter-wide']).toBe(1);
     expect(outcome.tally.buckets['filter-narrow']).toBe(1);
-    expect(outcome.tally.buckets['literal-missing']).toBe(1);
+    // `7` counts a different number, and a number in a predicate is not a value: the case is
+    // a `predicate` difference, and the ladder reaches the bucket that names the real fix.
+    expect(outcome.tally.buckets['literal-missing']).toBe(0);
+    expect(outcome.tally.buckets.predicate).toBe(1);
     expect(outcome.tally.buckets.scale).toBe(1);
     expect(outcome.tally.buckets.aggregate).toBe(1);
     expect(outcome.tally.buckets.unclassified).toBe(0);
@@ -418,13 +463,20 @@ describe('the entry, run the way a workflow runs it', () => {
       ],
       failures: { 'inline+evidence': [{ id: '91', predicted: 'select qty * 2 from orders', reason: 'values' }] },
     };
-    const settings = resolveValuesGapSettings({ BIRD_SPLIT: 'minidev', BIRD_DATA: data }, [writeReport(body), '--arm', 'inline+evidence'], ROOT);
+    // Named explicitly: resolving without `BIRD_OUT` puts the artifact in the working tree, where
+    // a published reading lives.
+    const out = join(mkdtempSync(join(tmpdir(), 'vgap-out-')), 'bird-eval.json');
+    const settings = resolveValuesGapSettings(
+      { BIRD_SPLIT: 'minidev', BIRD_DATA: data, BIRD_OUT: out },
+      [writeReport(body), '--arm', 'inline+evidence'],
+      ROOT,
+    );
     const outcome = await runValuesGap(settings);
     expect(outcome.population).toBe('failures');
     expect(outcome.tally.buckets.scale).toBe(1);
     // And the line a reader sees says which population it split, because "0 cases" from a
     // single-call arm and "0 cases" from a selecting one are different claims.
-    expect(await main([settings.report, '--arm', 'inline+evidence'], ROOT, { BIRD_SPLIT: 'minidev', BIRD_DATA: data })).toBe(0);
+    expect(await main([settings.report, '--arm', 'inline+evidence'], ROOT, { BIRD_SPLIT: 'minidev', BIRD_DATA: data, BIRD_OUT: out })).toBe(0);
   });
 
   it('counts a statement the engine refused as a refusal rather than a value error', async () => {

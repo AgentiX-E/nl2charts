@@ -14,7 +14,11 @@
  *    multiplied the rows.
  * 4. `scale` — every value a constant multiple of the gold's: an aggregation at the wrong
  *    level.
- * 5. `literal-missing` — a value the gold names does not appear at all: retrieval.
+ * 5. `literal-missing` — a *value* the gold compares against does not appear at all: retrieval.
+ *    Strings only, and no `%` masks: `* 100` and `then 1 else 0` are arithmetic, not data, and
+ *    a test that counted them put 36 arithmetic defects in a bucket named after retrieval —
+ *    see `missingValueLiterals`. The numbers are handed back to the ladder below, so a
+ *    percentage expression that the model got wrong is read as an `aggregate` difference.
  * 6. `literal-case` — the value appears in a different case. SQLite compares strings
  *    case-sensitively, so this is a wrong answer produced by a right-looking statement, and
  *    the fix is in what the prompt shows the model about stored values.
@@ -38,7 +42,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { loadQuestions } from './data.js';
-import { caseMismatchedLiterals, classifyFailureShape, missingLiterals } from './failure-shape.js';
+import { caseMismatchedLiterals, classifyFailureShape, missingValueLiterals } from './failure-shape.js';
 import type { FailureShape } from './failure-shape.js';
 import { createOracle } from './oracle.js';
 import { SHIPPED_ARM, requireArm } from './presence.js';
@@ -134,11 +138,11 @@ export function classifyValuesGap(input: {
   if (input.shape === 'empty') return 'filter-narrow';
   if (input.shape === 'row-count') return 'filter-wide';
   if (input.shape === 'scale') return 'scale';
-  // Literals are compared with the window cut off: `limit 5` against `limit 6` is a window
+  // Values are compared with the window cut off: `limit 5` against `limit 6` is a window
   // difference and must not be reported as a missing value.
   const goldValues = withoutWindow(input.gold);
   const predictedValues = withoutWindow(input.predicted);
-  if (missingLiterals(goldValues, predictedValues).length > 0) return 'literal-missing';
+  if (missingValueLiterals(goldValues, predictedValues).length > 0) return 'literal-missing';
   if (caseMismatchedLiterals(goldValues, predictedValues).length > 0) return 'literal-case';
   const gold = statementShape(input.gold);
   const predicted = statementShape(input.predicted);
