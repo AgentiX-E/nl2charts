@@ -5475,7 +5475,7 @@ caveat attached is still the only honest way to say where 63.67% sits.
 
 | system | BIRD | what it adds over a prompt |
 | --- | --- | --- |
-| AskData (2025) | 77.14% | GPT-4o with data-analysis agents and automatic metadata extraction |
+| AskData (2025) | 78.49% dev | GPT-4o with profiling metadata, task-aligned schema linking and a result-set vote; **no training** |
 | CHASE-SQL (2024) | 76.02% | divide-and-conquer decomposition, plan-based CoT, fine-tuned binary selector |
 | XiYan-SQL (2025) | 75.63% | multi-generator ensemble of fine-tuned models, schema filter, fine-tuned selector |
 | CSC-SQL (2025) | 73.67% | self-consistency plus GRPO-trained generation and merge-revision models |
@@ -5486,19 +5486,19 @@ caveat attached is still the only honest way to say where 63.67% sits.
 | CHESS (2024) | 71.1% | four agents including a unit tester |
 | **this repository** | **63.67%** | prompt-only, un-fine-tuned hosted models, three prompts, one selector |
 
-The gap is 7 to 13pp, and the decomposition that matters is not "which model" but **which parts of
+The gap is 7 to 15pp, and the decomposition that matters is not "which model" but **which parts of
 the pipeline are trained**. XiYan-SQL's own ablation prices three of them: removing the schema
 filter costs 1.24pp, dropping to a single generator costs 4.04pp, and replacing the selector with
 majority vote costs 3.13pp — 8.4pp of their 75.63% comes from structure this repository either has
 in a weaker form or does not have at all. CSC-SQL's 73.67% is built on self-correction, which is the
-loop `sourceRepairs` has just opened here. Three conclusions follow, in the order they are worth
-attacking:
+loop `sourceRepairs` has just opened here. Two conclusions follow, in the order they are worth
+attacking, and a third that this table got wrong:
 
-1. **Supervision is the largest single difference, and it is not available to a prompt-only
-   system.** Every system above trained something — a generator, a selector, or both. This
-   repository's selector is a prompted judge; XiYan-SQL's is a fine-tuned binary classifier that
-   "outperforms GPT-4o at SQL correctness". Closing that particular 3pp needs training data, not a
-   better prompt, and is out of scope until the prompt-side levers are exhausted.
+1. **Supervision is the largest difference for the middle of this table, and the top of it was never
+   tested for that.** XiYan-SQL, CSC-SQL, Reasoning-SQL and OmniSQL all trained a generator, a
+   selector or both; this repository's selector is a prompted judge, and closing that particular 3pp
+   needs training data rather than a better prompt. But the leader trained nothing, and until this
+   round this document said it did — see *The number we were comparing to was the wrong number*.
 2. **Schema context is the cheapest remaining lever and it is already registered.** 1.24pp for a
    schema filter, on systems that already send the full card; this repository sends the whole card
    plus a linker hint, and the next item on the plan (`I-45`) sends only the columns a differential
@@ -7633,16 +7633,120 @@ Three things follow, and they are not the same thing:
 
 | system | dev | note |
 |---|---|---|
-| AskData | **77.14%** | agentic, execution feedback |
+| AskData | **78.49%** | profiling metadata + schema linking + result-set vote, 8+ calls |
 | CHASE-SQL | 76.02% | multi-candidate + selection agent |
 | XiYan-SQL | 75.63% | schema linking + ICL |
 | DecoSearch | 70.53% | training-free |
 | **this repository** | **63.71%** | strong pool + free rule, 3 calls |
 | its ceiling | 68.86% | strong pool, no selection loss |
 
-**13.43pp to AskData = 8.28pp of candidates + 5.15pp of selection.** The selection half is now
-smaller than the candidate half for the first time, and it is the half that three rounds of
-selector work failed to move while a rule that reads rows moved it in one round.
+**14.78pp to AskData = 9.63pp of candidates + 5.15pp of selection.** The selection half is still
+smaller than the candidate half, and it is the half that three rounds of selector work failed to
+move while a rule that reads rows moved it in one round.
+
+That row read `77.14% ... agentic, execution feedback` until this round. Both halves of that cell
+were wrong, and one of them was wrong in a way that changed what this project did next — see below.
+
+## The number we were comparing to was the wrong number, and the wrong kind of system
+
+`77.14%` is AskData's **test** score from its 2025 submission, not its dev score, and the system is
+not an agent. The leaderboard row (26 September 2026) reads **dev 78.49%, test 83.40%**, and the
+paper it comes from — *Automatic Metadata Extraction for Text-to-SQL* (arXiv:2505.19988) — describes
+five named mechanisms, none of which is a tool-using agent:
+
+1. **Database profiling**, one pass per column: null fraction, distinct count, min/max, value shape
+   (length, alphabet, common prefixes), top-k values with counts, and a minhash sketch.
+2. **LLM summary of the profile**, in two lengths: a short one for schema linking, a long one for
+   generation.
+3. **Schema linking by task alignment** — the paper's own objection to the standard four linking
+   techniques is that an LLM is bad at answering "which columns are relevant" and good at writing
+   SQL, so it writes SQL under five schema variants, takes the union of the fields those statements
+   reference, and revises a statement whose literals no referenced field can contain.
+4. **Three candidates**, varied by sampling seed and schema order.
+5. **Result-set majority vote**, with up to three corrections on a hand-written list of bad SQL
+   constructions (min/max without a null guard, subquery instead of order by, string concatenation
+   where a column was asked for).
+
+The mislabel is not cosmetic. "Agentic, execution feedback" files the system under a design this
+repository does not have and cannot price, and the cell was read as a different *kind* of system
+rather than a better one. It never entered the replication queue. Correcting it costs nothing and
+changes the queue.
+
+### What its own ablation says each piece is worth (MiniDev, 500 questions, GPT-4o)
+
+| configuration | accuracy | what moved |
+|---|---|---|
+| no metadata, no hints | 49.8% | the floor with names only |
+| BIRD metadata, no hints | 59.6% | +9.8 for documented column meaning |
+| profiling metadata, no hints | 61.2% | +1.6 over documented |
+| fused metadata, no hints | 63.2% | +3.6 over documented |
+| BIRD metadata, hints | 72.0% | +12.4 for the hint alone |
+| fused metadata, hints | 73.0% | +1.0 for profiling on top of documented |
+| full schema, fused, hints | **71.2%** | the row this repository actually occupies |
+| its schema linking, fused, hints | **73.0%** | +1.8 for the linker |
+| perfect schema linking, fused, hints | **77.4%** | +6.2 over full schema, +4.4 above its own linker |
+
+Two readings in that table are uncomfortable for this document. **No single mechanism in it is small,
+and the hint is not a footnote.** Metadata from names to fusion is worth +13.4pp with no hint
+(49.8 → 63.2); the hint is then worth another +9.8pp on top of fused metadata and +12.4pp on top of
+the documented kind. A submission that uses the hint and one that does not are therefore not
+comparable, and the leaderboard's "oracle" mark is part of the number. And **the hint is also what this
+repository's 63.0% buys**: the comparable cell is not `73.0%`, it is `71.2%`, the same full schema
+carrying the same hint. On the 496 Mini-Dev questions this document has been reading since round one,
+the gap to that cell is **8.2pp**, and the one mechanism that has never been priced here is inside it.
+
+### Four of its five mechanisms are already here, and the fourth was already beaten
+
+| mechanism | what it is worth there | what it is here | status |
+|---|---|---|---|
+| profile → per-column summary | +1.0 on top of documented metadata | attached definitions: **+3.6pp** (41.4 → 45.0); on top of the hint 57.4 → 59.2, not separable | taken, same lever |
+| schema linking | +1.8 (perfect: +6.2) | a linker hint on a full card; it is priced in **characters**, never in accuracy | **not taken** |
+| three candidates | the pool it selects from | `select-mixed` / `select-balanced` pools | taken |
+| corrections on bad constructions | up to three, syntax plus a hand-written list | repair loop, syntax-triggered only; 2.4% of first statements fail on `deepseek-chat` ⇒ ≤0.4pp | partially, and the bound is known |
+| result-set majority vote | execute all three, equal result sets count as agreement | `select-rule modal`: **60.97%** on the strong pool against `shortest`'s **63.71%**, and 64.17 against 63.67 on `select-cross` (21:18, p = 0.749) | taken, and it lost |
+
+That last row is the useful one, because it is the mechanism a reader would most expect to be missing
+and it was priced twice. Voting on rows is not better than voting on characters here — the modal
+result ties the paid selector on a homogeneous pool and loses 2.74pp to `shortest` on the strong one.
+So the replication agenda is narrower than the mechanism list suggests: **one open row, the linker,
+and the five-variant construction that feeds it.**
+
+### Why "price the levers" is not a substitute for "build the system"
+
+This project's method is to price one mechanism at a time and adopt only what clears the noise floor.
+The method has a blind spot that this repository measured on itself: **MAC-SQL, paired on the same
+498 questions with the same endpoint, beat the adopted arm by 4.84pp (p = 0.0160), and the individual
+readings of its four components sum to less than that gap.** A pipeline is not the sum of its
+levers — the linker decides what the generator sees, the vote decides what the repair loop was
+allowed to try, and each one's price is measured in the presence of the others' defaults.
+
+So the honest answer to "why not copy the leader instead of inventing levers" is: **copying is the
+only instrument that prices a pipeline, and this document has been substituting levers for it.** It
+is also the answer to why copying must be done as a *system* and not as five separate adoptions:
+five separate adoptions is the method that already failed to predict a 4.84pp gap.
+
+### The replication arm, its price, and its bars
+
+`askdata-shape` is registered as a reproduction of the paper's *shape*, not of its code — the
+leaderboard lists no release for it, so a code-faithful run is not available and the report has to
+say so. Per question: five schema variants generate one statement each; the union of referenced
+fields plus the literal→field lookup becomes the card; up to two revisions move a literal onto a
+field whose values contain it; three candidates are drawn on that card; validity is checked and up
+to three corrections applied; all three are executed and voted as result sets. That is **8 calls at
+minimum against the 3 the shipped arm spends**, and the cost column is published per arm because
+the paper publishes no call count at all.
+
+| reading against `select-mixed` on the same 496 | verdict |
+|---|---|
+| ≥ +4.0pp, paired p < 0.05 | the pipeline carries something five levers do not: replication becomes the road, and the ablation runs in reverse (drop one mechanism at a time) |
+| +1.5 to +4.0pp | the mechanisms are worth their calls but the gap is not theirs; copy the vote and the linker, stop there |
+| < +1.5pp | the 8.2pp is the author, not the architecture: GPT-4o and eight retrieved examples against `deepseek-chat` and none, and the correct next lever is a stronger model, not a longer pipeline |
+
+The third row is the one the field's own numbers already hint at: the leaderboard's single-model
+column puts a reasoning model at **80.04%** (Gemini-SQL2, June 2026, secondary source) — above every
+scaffolded system in the table above. If that holds, the frontier moved from scaffolding to the
+model while this document was pricing prompts, and a replication arm is the cheapest way to find out
+which of the two the remaining 8.2pp belongs to.
 
 ## The zero-row repair, built
 

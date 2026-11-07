@@ -1155,3 +1155,28 @@ Two consequences follow, and both are enforced rather than documented:
   which the source was never asked or never rendered anything; it says nothing about a low
   conversion rate, because a grammar that expresses 60% of a corpus is a finding and not a bug. A
   guard on the rate would refuse the reading the arm exists to publish.
+
+## A rival's number is a claim about a condition, and the condition travels with it
+
+A leaderboard cell is three facts compressed into one: an accuracy, the split it was measured on, and
+the inputs the question came with. Dropping any of them turns the number into a target that cannot be
+hit and cannot be shown to be missed — and dropping two of them is how this repository filed the
+current leader as an agent it could not price, compared its own **dev** score to a rival's **test**
+score for four rounds, and left a system whose whole design is prompt-plus-metadata out of the
+replication queue.
+
+The rule that follows is cheap and mechanical. Before a rival's number enters a decision, the cell is
+expanded into: split (dev/test/Mini-Dev, and how many cases), condition (with or without the
+benchmark's per-question hint, which is worth more than every metadata mechanism in the paper that
+uses it), authored model (and whether anything was trained, because "everyone above us trained" was
+true of the middle of the table and false of its top), and availability (**a release can be run, a
+paper can only be re-shaped**, and the report must say which one it did). A number missing any of
+those four does not get a delta; it gets a footnote.
+
+The second half of the rule is about what a replication is *for*. Pricing one mechanism at a time is
+this repository's method, and it has a blind spot it measured on itself: against MAC-SQL, paired on
+the same questions and endpoint, the four components' individual readings summed to less than the
+4.84pp gap. A pipeline is not the sum of its levers, because each lever's price is read in the
+presence of the others' defaults. So a system-level arm — the whole shape, at its own call count, on
+our harness — is not a shortcut around the method; it is the only instrument that can price a
+pipeline at all. Everything after it is ablation, and ablation is where the method works again.
