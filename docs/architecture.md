@@ -1216,3 +1216,31 @@ intervention actually changes — fields kept, fields recalled, positions moved,
 has to be able to say no. An instrument that can only produce a number is not a gate; a gate is an
 instrument plus a bar written before the number existed, and both rounds that got this right wrote the
 bar down first.
+
+## A recaller with no input is indistinguishable from a recaller that does not work
+
+`Recaller` declares four sources, the linker ships three of them, and on BIRD the shipped set recalled
+exactly as much as `name` alone: 773 of 2,494 fields, 31.0%, the same sixteen cases covered. The other
+two recallers were not losing to the name recaller. They were reading nothing. `alias` reads
+`SchemaColumn.aliases` and no constructor in this repository has ever set that field; `value` reads
+`SchemaColumn.samples` and only the arms that ask for samples populate it. Two of the three recallers
+in the shipped set had no input on the card the pipeline sends.
+
+An instrument that reported only the union would have printed 31.0% and left the conclusion open. An
+instrument that reported each recaller separately printed `alias 0.0%` and made the conclusion
+unavoidable — and would still have been wrong if a reader took that row as evidence about aliases. The
+zero was a fact about the wiring, not about the corpus.
+
+The rule: **a per-source reading has to be able to distinguish "this source found nothing" from "this
+source was given nothing", and the way to distinguish them is to price the source once with an input it
+does not currently have.** That is what `comment` is in `eval/bird/selectivity.ts` — the curated
+column comment offered to `alias`, changing nothing else — and the same experiment that exonerates the
+recaller (7.2pp of reachable recall on a card that already carries the comments) also proves the zero
+was wiring. Where no such input exists, the row belongs in the report with the absence stated, so a
+reader cannot mistake a switched-off source for a failed one.
+
+The corollary is about arithmetic and it bit this round too: **adding a source does not add recall.**
+On `inline+evidence` the four recallers with comments recall 1,249 fields at `topK` 12 against 1,266
+without them, while the unsliced recall rises from 1,693 to 1,737. A fixed slice lets more candidates
+compete for the same twelve slots. A proposal that turns a recaller on without touching the budget has
+to be measured at the budget it will run at, not at the ceiling where every source is free.

@@ -9326,3 +9326,161 @@ realizable routes to it are a different *set* of fields (needs recall the linker
 different *order* of the same fields (needs a ranking signal worth more than five points of position).
 Neither is available, so the lever's next measurement is neither — it is a selector whose field recall
 can be stated in the same units as the 31.0% above.
+
+## Which source reaches the fields, and what no linker of this kind can reach
+
+The 31.0% ended the last round on a question it could not answer, and the question decides the next
+three dispatches: **is the linker under-built, or has it run out of information?** A ranker that is
+under-built wants a better ranker. A ranker that has run out wants a different input — an embedding
+index, a model that selects columns, or training — and none of those is cheap enough to start on a
+hunch.
+
+`bench:bird:selectivity` answers it with zero model calls, by varying three things that are all local
+and reading them in the same units as the 31.0%:
+
+1. **The budget is a slice, not the linker.** The same recallers at `topK = 12` and with no slice
+   differ by exactly the fields the cut removed.
+2. **A recaller is an information source.** `name` reads the column's own tokens, `alias` reads the
+   card's aliases, `value` reads the profiler's stored samples, `table` reads the entity. Opened one
+   at a time they say where the misses live.
+3. **The union of all of them, unsliced, is the ceiling of the family.** A field that union does not
+   name is a field whose name, aliases, comments, values and table all never appear in the question.
+   Nothing in the ranker can reach it, because there is nothing in the question to rank on.
+
+```bash
+pnpm bench:bird:selectivity eval/out/bird-eval.json --arm metadata+evidence
+```
+
+### The reading, on the card the pipeline ships (Mini-Dev 496, zero calls)
+
+| selector | budget | card width | gold fields | recalled | share | precision | full coverage |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `shipped` | 12 | 5.3 | 2,494 | 773 | **31.0%** | 29.1% | 16 |
+| `shipped` | none | 8.0 | 2,494 | 869 | 34.8% | 22.0% | 25 |
+| `name` | 12 | 5.3 | 2,494 | 773 | **31.0%** | 29.1% | 16 |
+| `alias` | 12 | 0.0 | 2,494 | **0** | **0.0%** | — | 0 |
+| `value` | 12 | 0.0 | 2,494 | **0** | **0.0%** | — | 0 |
+| `table` | 12 | 8.7 | 2,494 | **899** | **36.0%** | 20.9% | 61 |
+| `all` (four) | 12 | 9.7 | 2,494 | 1,266 | **50.8%** | 26.4% | 69 |
+| `all` (four) | none | 28.1 | 2,494 | 1,693 | 67.9% | 12.1% | 175 |
+| `all` + comments | 12 | 10.3 | 2,494 | **1,352** | **54.2%** | 26.5% | 89 |
+| `all` + comments | none | 33.8 | 2,494 | **1,872** | **75.1%** | 11.2% | **209** |
+
+Three rows are the answer, and the first two are a defect the document had been quoting around.
+
+### The shipped set is `name` wearing two more names
+
+`shipped` and `name` are **the same row**: 773 fields, 31.0%, precision 29.1%, 16 cases covered. They
+are the same row because `Recaller` declares `'name' | 'alias' | 'value' | 'table'`, the shipped set
+opens three of the four, and **two of those three have nothing to read**:
+
+* `alias` reports 0.0% on every card, because no constructor anywhere in this repository ever sets
+  `SchemaColumn.aliases`. The field exists in the type and nowhere in the data. The recaller is not
+  weak; it is unwired.
+* `value` reports 0.0% on this card because `samples` is only populated by the arms that ask for
+  samples. It is not unwired, it is switched off — and the samples card below turns it on.
+
+So the number this document has been calling "the shipped linker's recall" is the name recaller's
+recall, and every statement about it should say so. That is the honest version of the 31.0%, and it
+changes what a fix looks like: two of the three cheap fixes are to give the recallers an input rather
+than to make the ranker better.
+
+### `table` is the largest single source, and it was never in the shipped set
+
+| selector | recalled @12 | share | card width | precision |
+| --- | --- | --- | --- | --- |
+| `name` | 773 | 31.0% | 5.3 | 29.1% |
+| `table` | **899** | **36.0%** | 8.7 | 20.9% |
+| both, plus the two unwired | 1,266 | **50.8%** | 9.7 | 26.4% |
+
+The table recaller alone beats the name recaller by **5.0pp** and adding it lifts the union by
+**19.8pp**, for **+4.4 fields per case**. It is the single largest reachable source and it is the one
+the shipped set leaves out — deliberately, for a reason the code states: it was added after the corpus
+was measured, and turning it on would have changed the hint every measured arm sends. That reasoning
+is still correct for *changing* the shipped set. It is no longer a reason not to **price** it.
+
+### `value` is the most precise source in the family
+
+On the card that carries profiled samples (`inline+evidence+samples`, 498 cases):
+
+| selector | recalled @12 | share | card width | precision |
+| --- | --- | --- | --- | --- |
+| `name` | 777 | 31.0% | 5.4 | 29.1% |
+| `value` | **136** | **5.4%** | **0.9** | **32.1%** |
+| `shipped` (name + the two unwired) | 850 | 34.0% | 5.8 | 29.2% |
+| `all` (four) | 1,311 | 52.4% | 9.8 | 26.9% |
+
+Value matching covers one field in eighteen and is **more precise than the name recaller** — 32.1%
+against 29.1% — and it costs 0.9 fields per case. It is a scalpel, not a net, which is the opposite of
+what the `values` bucket's −2.02pp suggested about *grounding* values. Recalling a column because its
+stored value appears in the question is not the same act as guessing a literal into the statement.
+
+### The curated comment is worth 7.2pp of ceiling and 3.4pp at the shipped budget
+
+`metadata+evidence` is the arm whose card carries the dataset's curated column comments, and its
+`comment` row gives the alias recaller that text to read. Nothing else changes.
+
+| | without comments | with comments | delta |
+| --- | --- | --- | --- |
+| recall, `topK` 12 | 1,266 (50.8%) | 1,352 (54.2%) | **+3.4pp** |
+| recall, unsliced | 1,693 (67.9%) | 1,872 (**75.1%**) | **+7.2pp** |
+| fields named by nothing | 801 (32.1%) | **622 (24.9%)** | **−7.2pp** |
+| card width, `topK` 12 | 9.7 | 10.3 | +0.6 |
+
+The comment is the alias a deployment already has: the card shows it, the linker ignores it. Wiring it
+is a one-line change in the recaller and would move the hint every measured arm sends, so it is priced
+here as a mode rather than applied. **+7.2pp of reachable recall for +0.6 fields** is the cheapest item
+in the whole table, and it is available today with data already in the repository.
+
+### The ceiling, and why it is the number the next three rounds are ordered by
+
+| card | reached by token matching | never reached |
+| --- | --- | --- |
+| `inline+evidence` | 69.6% | 757 (30.4%) |
+| `metadata+evidence` | **75.1%** | **622 (24.9%)** |
+| `inline+evidence+samples` | 71.6% | 711 (28.4%) |
+
+`inline+evidence` reaches 69.6% rather than 67.9% even though the arm shows no comments, because the
+schema it builds still carries them: the card does not render a comment, and the linker can still read
+one. The row is therefore a statement about the *schema*, and the 67.9% in the table above is the same
+card with the comments withheld from the alias recaller.
+
+Between 24.9% and 30.4% of the fields the gold statements name are named by nothing the question
+contains. The ceiling arm reaches 100% of them **by being given the answer**, which is why it is worth
+11.09pp and why its price is not payable by any ranker. The remaining headroom for a system that reads
+only the question is bounded above by this row, and that bound is what makes the queue below a
+calculation rather than an opinion:
+
+| route | what it must supply | headroom it can reach | cost |
+| --- | --- | --- | --- |
+| `table` recaller into the shipped set | the entity, already in the question | up to +19.8pp @12 | +4.4 fields/case |
+| curated comment into `alias` | the comment, already on the card | up to +7.2pp ceiling | +0.6 fields @12 |
+| profiled samples into `value` | the data, already in the cache | +3.0pp @12 | +0.4 fields/case |
+| embedding index / column-selecting model / training | information from **outside** the question | the 24.9% above, and only that | calls or an index |
+
+The last row is the one the document has been circling since the AskData comparison, and it now has a
+denominator: **24.9% of the fields, no more**. A column selector that costs eight calls a question is
+priced against that 24.9%, not against the 69% the card ceiling recovers.
+
+### One interaction that would have been invisible without the split
+
+On `inline+evidence`, `all` at `topK` 12 recalls 1,266 fields and `all` + comments recalls **1,249** —
+adding a source *lowers* the shipped-budget recall by 17 fields, while raising the unsliced recall by
+44 (1,693 → 1,737). More candidates means more competition for the same twelve slots. The budget and
+the source are not independent, which is why a proposal that adds a recaller without touching `topK`
+has to be read on this table rather than assumed to help.
+
+### What the instrument refuses to publish
+
+Five refusals, all of them tables that would still print. The three piles must add up to the fields
+the statements named — `linked + cut + unreachable === total` — because a reader who sees 31% recalled
+and 25% unreachable will assume the remaining 44% is width without being told. A ceiling below a slice
+is refused: it would mean the "no budget" arm was sliced after all and every `cut` is a fiction. A
+report with no cases, a corpus that named no field, and a corpus where nothing is reachable are
+refused for the reasons the rest of this file refuses them — a division by zero wearing a percentage
+sign, an abstention read as a measurement, and a reader whose schema never arrived.
+
+One more rule goes in the code with them: **a recaller that reports zero is not evidence that its
+source is useless**. `alias` is 0.0% on every card in this document because it has no input, and an
+instrument that printed "aliases do not help" from that row would be reporting its own wiring as a
+finding about the corpus.

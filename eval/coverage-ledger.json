@@ -2,12 +2,12 @@
   "note": "Per-file eval coverage. Enforced by tools/check-eval-coverage.mjs: a number may rise freely and may only fall with an explicit, reviewed edit. `target` is the standard every file must reach before eval/ joins the main gate.",
   "target": 95,
   "tolerancePp": 0.2,
-  "measuredAt": "2026-11-06",
+  "measuredAt": "2026-11-07",
   "totals": {
     "lines": 99.48,
     "statements": 99.48,
     "functions": 100,
-    "branches": 98.17
+    "branches": 98.2
   },
   "files": {
     "eval/ablate.ts": {
@@ -65,10 +65,10 @@
       "branches": 100
     },
     "eval/bird/card.ts": {
-      "lines": 99.6,
-      "statements": 99.6,
+      "lines": 99.7,
+      "statements": 99.7,
       "functions": 100,
-      "branches": 99.13
+      "branches": 99.36
     },
     "eval/bird/columns.ts": {
       "lines": 100,
@@ -287,10 +287,10 @@
       "branches": 100
     },
     "eval/bird/rewrite.ts": {
-      "lines": 99.49,
-      "statements": 99.49,
+      "lines": 99.55,
+      "statements": 99.55,
       "functions": 100,
-      "branches": 99
+      "branches": 99.15
     },
     "eval/bird/route.ts": {
       "lines": 100,
@@ -309,6 +309,12 @@
       "statements": 100,
       "functions": 100,
       "branches": 100
+    },
+    "eval/bird/selectivity.ts": {
+      "lines": 99.33,
+      "statements": 99.33,
+      "functions": 100,
+      "branches": 98.41
     },
     "eval/bird/shape.ts": {
       "lines": 100,
