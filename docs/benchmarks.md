@@ -9148,3 +9148,84 @@ the two buckets the plan named. It is `filter-narrow`: the statement ran and ret
 wrong case) or the gold (one value transplanted). `ground-shipped` alone already holds seven of the
 twelve, which is why the shipped rule's 14 wins are mostly a `filter-narrow` number wearing the name
 of a value rule.
+
+## The card is the prompt, and what is on it is worth 11 points
+
+`card.ts` has priced the schema card in **characters** since the round it was written: 69.7% of the
+prompt, 56.1% of it belonging to tables no gold statement reads. What it could not say is what any of
+that is worth in accuracy. The literature says it is worth a lot — AskData measures perfect schema
+linking at **77.4** against **71.2** for the same full schema with the same hint, on 500 questions and
+one model — and this repository has been arguing about the replacement cost of a lever it never
+priced. So the lever got an arm.
+
+### The arm, and the one thing it changes
+
+`inline+evidence+card-gold` keeps the tables the gold statement reads and the fields it names, and
+nothing else. Same prompt, same hint, same inline definitions, **one call**, one lever:
+`changedLevers(parent, arm)` is `['cardColumns']`.
+
+Three rules decide membership, and each is stated rather than tuned:
+
+- `alias.column` resolves the alias back to its table through the statement's own `from`/`join`
+  references; a qualifier that matches no reference is dropped instead of guessed at.
+- a name written without a qualifier is kept on every referenced table that has a column of that
+  name. Over-keeping is the only direction a ceiling may err in — under-keeping would publish a lost
+  field as a property of perfect linking, which is the thing being measured.
+- a table the statement reads but whose columns cannot be attributed keeps all of them (`count(*)`),
+  and a statement that reads no table keeps its card (`select 1`). An empty card is not a prompt.
+
+### The reading (`42346556829`, Mini-Dev, 496 scored, `deepseek-chat`, 1 call)
+
+| arm | passed | accuracy | chars/case | prompt tokens/case |
+| --- | --- | --- | --- | --- |
+| `inline+evidence` | 276 | 55.65% | 2,864 | 698 |
+| `inline+evidence+card-gold` | **331** | **66.73%** | **821** | **194** |
+| `inline+evidence#2` (A/A control) | 274 | 55.24% | 2,864 | 698 |
+
+Provenance: `tokens.served` names `deepseek-flash` on every reply, which is what the `deepseek-chat`
+alias resolves to at this endpoint — the arm names the alias, not the weights, and the artifact is
+where the difference is visible.
+
+| pair | delta | up / down | p (exact McNemar) |
+| --- | --- | --- | --- |
+| `inline+evidence` → `+card-gold` | **+11.09pp** | **71 / 16** | **2.0e-9** |
+| `inline+evidence` → `#2` (A/A) | −0.40pp | 6 / 8 | — |
+
+The funnel says the rule ran and how much it removed: **2,494 columns kept, 35,638 dropped, 0 cases
+emptied** — 93.5% of the card, on every one of the 496 cases. The A/A control sits at −0.40pp, which
+is this split's floor for a one-call arm, so the effect is not competing with it: the control moved
+14 cases in total and the arm moved 87.
+
+Four things follow, and the first one is not a claim about the product.
+
+1. **Card content is the largest mechanism this repository has measured, and it is not a shippable
+   one.** The arm reads the answer. What it prices is the ceiling of every realizable column rule —
+   the linker we ship, a model asked to choose columns, a diff of two candidate statements — and at
+   **+11.09pp** that ceiling is three times the largest prompt lever adopted so far (+3.6pp for
+   attaching definitions to their columns).
+2. **Smaller is not the same as better, and the two readings now say why.** `select-prune` shrinks the
+   card by 13.5% and loses **1.50pp** (p = 0.035 on the full split), because its seeds drop 4.8% of
+   the gold's tables. This arm shrinks it by 93.5% and gains 11.09pp, because it drops *no field the
+   gold reads*. The variable was never size; it was whether the field is still there.
+3. **It beats the best configuration this repository has published, with a quarter of the calls.**
+   66.73% on 496 Mini-Dev questions at 1.00 calls against 63.0% for three prompt styles and a
+   selector at 4.00. That is not a fair comparison — one is an oracle and the other runs blind — but
+   it says where the headroom is: not in more opinions, in a better card.
+4. **The model gap is now visible from the other side.** With a perfect card, GPT-4o reaches 77.4 on
+   this split in the paper and `deepseek-chat` reaches 66.73 here. Their *full-schema* cell is 71.2.
+   So a perfect linker on our model lands below a full schema on theirs, and the remaining distance
+   to the top of the leaderboard is the author, not the architecture — which is the reading the
+   leaderboard's single-model column already suggested at 80.04%.
+
+### What this does not license
+
+It does not license shipping a column filter fitted on the split, and it does not license reading the
+11.09pp as achievable. The next measurement is the one that prices the distance: what fraction of the
+gold's fields does a rule that never reads the answer actually name? The shipped linker is the first
+candidate, `columnSelect` the second, and each has to be measured against this ceiling rather than
+against its parent.
+
+One process note, because it cost fourteen minutes of gate time. The dispatch went out two minutes
+after the push and took the shared `bird-eval` slot from `ci.yml`'s Mini-Dev job, which had not reached
+the group yet. The rule this round writes down: **a verification dispatch waits until the gate's own
+BIRD job is queued or finished — "after the push" is not the same as "after the gate".**
