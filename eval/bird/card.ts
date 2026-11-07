@@ -216,14 +216,36 @@ export function goldFieldKeys(sql: string, schema: readonly SchemaTable[]): Set<
  * curve in `FIELD_TOPS` is the same function at a larger budget, not a second linker that could
  * disagree with the first about which columns a question is about.
  */
+/** The fields a linker names, with the score it ranked them by: the set and the order in one read. */
+export interface LinkedFields {
+  readonly keys: ReadonlySet<string>;
+  readonly score: ReadonlyMap<string, number>;
+}
+
+export function linkedFields(
+  question: string,
+  schema: readonly SchemaTable[],
+  recallers: readonly Recaller[],
+  topK = 12,
+): LinkedFields {
+  const linked = buildAskMessages({ question, schema, linking: true, recallers, topK }).linked;
+  const keys = new Set<string>();
+  const score = new Map<string, number>();
+  for (const column of linked) {
+    const key = fieldKey(column.table, column.column);
+    keys.add(key);
+    score.set(key, column.score);
+  }
+  return { keys, score };
+}
+
 export function linkedFieldKeys(
   question: string,
   schema: readonly SchemaTable[],
   recallers: readonly Recaller[],
   topK = 12,
 ): Set<string> {
-  const linked = buildAskMessages({ question, schema, linking: true, recallers, topK }).linked;
-  return new Set(linked.map((column) => fieldKey(column.table, column.column)));
+  return new Set(linkedFields(question, schema, recallers, topK).keys);
 }
 
 /**
@@ -235,6 +257,71 @@ export function linkedFieldKeys(
  * the reading is a frontier: recall against the fields kept, not a single number.
  */
 export const FIELD_TOPS = [12, 24, 48, 96] as const;
+
+/**
+ * The card's fields in the order they are read, for the arm that reorders instead of removing.
+ *
+ * The ceiling arm's 11.09pp came from keeping a different *set*, and the set is out of reach: the
+ * linker names 31% of the gold's fields. What is not out of reach is the order — a rule can put the
+ * fields the linker does name at the front without dropping anything, so recall stays 100%. This
+ * function is that order, and `fieldRankOf` is what it buys.
+ */
+export function cardFieldOrder(schema: readonly SchemaTable[]): string[] {
+  const flat: string[] = [];
+  for (const table of schema) for (const column of table.columns) flat.push(fieldKey(table.table, column.name));
+  return flat;
+}
+
+/**
+ * The same fields with the linker's score deciding the order, and nothing removed.
+ *
+ * Tables are ordered by their best-scoring column, then columns by their own score, then by name so
+ * the order is total: a sort that is not total would make the reading depend on the engine's sort
+ * stability rather than on the rule. Fields the linker never names score zero and keep their relative
+ * order behind the ones it does — which is the whole point and also the whole limit, because 69% of
+ * the gold's fields are in that tail and no reordering moves them.
+ */
+export function linkedFieldOrder(schema: readonly SchemaTable[], score: ReadonlyMap<string, number>): string[] {
+  const value = (table: string, column: string): number => score.get(fieldKey(table, column)) ?? 0;
+  const tables = [...schema]
+    .map((table) => ({ table, best: Math.max(0, ...table.columns.map((column) => value(table.table, column.name))) }))
+    .sort((left, right) => right.best - left.best || left.table.table.localeCompare(right.table.table));
+  const flat: string[] = [];
+  for (const { table } of tables) {
+    const columns = [...table.columns].sort(
+      (left, right) =>
+        value(table.table, right.name) - value(table.table, left.name) || left.name.localeCompare(right.name),
+    );
+    for (const column of columns) flat.push(fieldKey(table.table, column.name));
+  }
+  return flat;
+}
+
+/** Where a set of fields sits in an order, as a fraction of the card's width: 0 is the first field. */
+export function meanPosition(order: readonly string[], fields: ReadonlySet<string>): number {
+  if (order.length === 0 || fields.size === 0) return 0;
+  let total = 0;
+  for (const key of fields) {
+    const at = order.indexOf(key);
+    // A field the card does not show has no position. Counting it as the end of the card would make
+    // a rule that dropped it look like a rule that ordered it badly, and the two are different bugs.
+    if (at === -1) continue;
+    total += at;
+  }
+  return total / fields.size / order.length;
+}
+
+/** What reordering a card by the linker's score is worth, over the cases an arm ran. */
+export interface FieldRank {
+  readonly cases: number;
+  /** The mean position of a gold field in the card as sent, as a fraction of the card's width. */
+  readonly before: number;
+  /** The same after ordering by the linker's score, with no field removed. */
+  readonly after: number;
+  /** The cases where the gold's fields moved earlier, and the ones where they moved later. */
+  readonly improved: number;
+  readonly worse: number;
+}
 
 /** What one budget would keep, over the cases an arm ran. */
 export interface FieldBudget {
@@ -399,7 +486,7 @@ export function tallyCards(rows: readonly CardRow[]): CardTally {
  * Absolute counts first, shares second: "eleven per cent" of a prompt is not a work item until
  * it is a number of characters per question and a number of calls.
  */
-export function cardLines(tally: CardTally, budget: readonly FieldBudget[] = []): string[] {
+export function cardLines(tally: CardTally, budget: readonly FieldBudget[] = [], rank?: FieldRank): string[] {
   const n = tally.total === 0 ? 1 : tally.total;
   const per = (value: number): number => Math.round(value / n);
   const pct = (value: number, of: number): string => (of === 0 ? '0.0%' : `${((value / of) * 100).toFixed(1)}%`);
@@ -446,6 +533,14 @@ export function cardLines(tally: CardTally, budget: readonly FieldBudget[] = [])
       `  at ${String(entry.topK).padStart(2)} fields: ${pct(entry.linked, tally.fieldTotal)} of the gold's fields, keeping ${entry.kept.toFixed(1)} fields and covering every one of them on ${String(entry.covered)} cases`,
     );
   }
+  // Ordering keeps every field, so its reading is a position rather than a count: where in the card a
+  // gold field sits, as a fraction of the card's width. The two counts beside it are how many cases
+  // moved each way, because a mean can be flat while half the cases improve.
+  if (rank !== undefined) {
+    out.push(
+      `  ordering by the linker moves a gold field from ${(rank.before * 100).toFixed(1)}% of the card to ${(rank.after * 100).toFixed(1)}%: earlier on ${String(rank.improved)} cases, later on ${String(rank.worse)}`,
+    );
+  }
   return out;
 }
 
@@ -465,6 +560,7 @@ export function cardProblems(input: {
   readonly tally: CardTally;
   readonly definitionGap: number;
   readonly unrenderable: number;
+  readonly rank?: FieldRank;
 }): string[] {
   const problems: string[] = [];
   // One root cause, not two symptoms: when every case was dropped the drop is the diagnosis,
@@ -493,6 +589,12 @@ export function cardProblems(input: {
     problems.push(
       `CARD: ${String(input.tally.fieldEmpty)} of ${String(input.tally.total)} cases name no field, which is more abstentions than a corpus of statements can produce — the field reader is not being read`,
     );
+  }
+  // An ordering that moved nothing is a rule that never ran, and the reading it publishes is the
+  // claim that ordering does not help. A card of one field cannot be reordered, so the check is on
+  // the movement rather than on a share: `improved + worse === 0` is exactly "no case changed".
+  if (input.rank !== undefined && input.rank.improved + input.rank.worse === 0) {
+    problems.push('CARD: ordering by the linker moved no field on any case, so its reading is a rule that never ran rather than a rule that did not help');
   }
   return problems;
 }
@@ -782,6 +884,12 @@ export interface CardOutcome {
    * the half that flatters a proposal.
    */
   readonly fieldBudget: readonly FieldBudget[];
+  /**
+   * What the ordering lever is worth, measured the same way the budget is: zero calls, on the card
+   * the arm sends. Absent when no case named a field, so a reader cannot mistake "no cases" for
+   * "no effect".
+   */
+  readonly fieldRank?: FieldRank;
   readonly problems: readonly string[];
 }
 
@@ -926,6 +1034,7 @@ export async function runCard(settings: CardSettings): Promise<CardOutcome> {
   const definitions = report.controls?.synthesizedDefinitions ?? {};
   const rows: CardRow[] = [];
   const curve = FIELD_TOPS.map((topK) => ({ topK, kept: 0, linked: 0, covered: 0 }));
+  const rank = { cases: 0, before: 0, after: 0, improved: 0, worse: 0 };
   const drops = { unknownQuestion: 0, unknownArm: 0, definitionGap: 0, unrenderable: 0 };
   // Before the filter: an arm that is not in the artifact produces an empty table, and an empty
   // table prints as zeros in the same columns a measured zero would.
@@ -988,8 +1097,21 @@ export async function runCard(settings: CardSettings): Promise<CardOutcome> {
       // schema: the fields a rule could keep are the fields the prompt shows, and an instrument that
       // counted against a card the arm does not send would price a prompt nobody sends (ADR-219).
       const goldFields = goldFieldKeys(question.SQL, built.schema);
-      const linked = linkedFieldKeys(question.question, built.schema, SHIPPED_RECALLERS);
+      const linkedFieldsOf = linkedFields(question.question, built.schema, SHIPPED_RECALLERS);
+      const linked = linkedFieldsOf.keys;
       const fields = fieldCoverage(goldFields, linked);
+      // What ordering would buy, on the card this arm sends: no field removed, the linker's score
+      // deciding the order. Zero calls, and the only honest way to decide whether the ordering arm
+      // is worth a dispatch — a registered instrument still has to earn its run.
+      if (goldFields.size > 0) {
+        const asSent = meanPosition(cardFieldOrder(built.schema), goldFields);
+        const reordered = meanPosition(linkedFieldOrder(built.schema, linkedFieldsOf.score), goldFields);
+        rank.cases += 1;
+        rank.before += asSent;
+        rank.after += reordered;
+        if (reordered < asSent) rank.improved += 1;
+        if (reordered > asSent) rank.worse += 1;
+      }
       // The frontier, one budget at a time. The shipped budget reuses the set just built, so the
       // anchor of the curve is the same reading as the row rather than a second call that could
       // drift from it.
@@ -1025,14 +1147,6 @@ export async function runCard(settings: CardSettings): Promise<CardOutcome> {
   }
   const tally = tallyCards(rows);
   const billed = billedRows(report as BilledReportShape);
-  const problems = [
-    ...cardProblems({
-      tally,
-      definitionGap: drops.definitionGap,
-      unrenderable: drops.unrenderable + drops.unknownArm,
-    }),
-    ...billedProblems(billed),
-  ];
   // Means over cases for the two quantities a reader compares, sums for the two they add: a frontier
   // is read as "at 24 the linker names 5.1 fields and 41% of the gold's", and both halves are per case.
   const n = rows.length === 0 ? 1 : rows.length;
@@ -1042,7 +1156,31 @@ export async function runCard(settings: CardSettings): Promise<CardOutcome> {
     linked: budget.linked,
     covered: budget.covered,
   }));
-  return { split: settings.layout.split, arm: settings.arm, rows, tally, drops, billed, purposes: purposeRows(report as BilledReportShape), fieldBudget, problems };
+  const fieldRank =
+    rank.cases === 0
+      ? undefined
+      : { cases: rank.cases, before: rank.before / rank.cases, after: rank.after / rank.cases, improved: rank.improved, worse: rank.worse };
+  const problems = [
+    ...cardProblems({
+      tally,
+      definitionGap: drops.definitionGap,
+      unrenderable: drops.unrenderable + drops.unknownArm,
+      ...(fieldRank === undefined ? {} : { rank: fieldRank }),
+    }),
+    ...billedProblems(billed),
+  ];
+  return {
+    split: settings.layout.split,
+    arm: settings.arm,
+    rows,
+    tally,
+    drops,
+    billed,
+    purposes: purposeRows(report as BilledReportShape),
+    fieldBudget,
+    ...(fieldRank === undefined ? {} : { fieldRank }),
+    problems,
+  };
 }
 
 export function cardPath(settings: CardSettings): string {
@@ -1063,7 +1201,7 @@ export async function main(
 ): Promise<number> {
   const settings = resolveCardSettings(env, argv, root);
   const outcome = await runCard(settings);
-  for (const line of cardLines(outcome.tally, outcome.fieldBudget)) console.log(line);
+  for (const line of cardLines(outcome.tally, outcome.fieldBudget, outcome.fieldRank)) console.log(line);
   for (const line of billedLines(outcome.billed)) console.log(line);
   for (const line of purposeLines(outcome.purposes)) console.log(line);
   console.log(

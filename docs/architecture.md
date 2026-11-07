@@ -1199,3 +1199,20 @@ what it should have kept.** Precision beside recall, and the denominator named. 
 an answer the system cannot have, that is what an oracle arm is for: it establishes the numerator's
 ceiling, and the realizable rule is then measured as a fraction of it rather than against its parent.
 A bucket that reports only its own size is a bucket that can be improved by keeping everything.
+
+## An oracle prices a lever; a registered instrument still has to earn its dispatch
+
+A ceiling answers "how much is this mechanism worth at all", and that is the right first question —
+it is what made the card's content worth 11.09pp before anyone spent a call on a rule that could reach
+it. But a ceiling is not a plan, and the step from one to a dispatch has to be a measurement rather
+than an inference. Two rounds here produced two different failures of that step, in opposite
+directions: the condition-coverage lever was closed *after* a dispatch because its own pre-registered
+bar said so, and the ordering lever was closed *before* one because a zero-call instrument showed the
+rule it depended on moves a gold field five points of position while moving 38% of cases backwards.
+
+The rule: **between a ceiling and a run there is a pre-dispatch reading, and it is priced in the units
+the ceiling is not.** The ceiling is in accuracy points; the pre-dispatch reading is in whatever the
+intervention actually changes — fields kept, fields recalled, positions moved, cases covered — and it
+has to be able to say no. An instrument that can only produce a number is not a gate; a gate is an
+instrument plus a bar written before the number existed, and both rounds that got this right wrote the
+bar down first.

@@ -29,8 +29,11 @@ import {
   costOf,
   coverage,
   FIELD_TOPS,
+  cardFieldOrder,
   fieldCoverage,
   fieldKey,
+  linkedFieldOrder,
+  meanPosition,
   goldFieldKeys,
   goldTables,
   linkedFieldKeys,
@@ -251,6 +254,53 @@ describe('the fields a rule would keep, and the ones it would pay for', () => {
   });
 });
 
+describe('ordering a card without removing anything', () => {
+  const card = [
+    { table: 'items', columns: [{ name: 'id', type: 'INTEGER' }, { name: 'name', type: 'TEXT' }, { name: 'price', type: 'REAL' }] },
+    { table: 'orders', columns: [{ name: 'qty', type: 'INTEGER' }, { name: 'warehouse_id', type: 'INTEGER' }] },
+  ] as never;
+
+  it('reads the card as sent in schema order', () => {
+    expect(cardFieldOrder(card)).toEqual([
+      fieldKey('items', 'id'),
+      fieldKey('items', 'name'),
+      fieldKey('items', 'price'),
+      fieldKey('orders', 'qty'),
+      fieldKey('orders', 'warehouse_id'),
+    ]);
+  });
+
+  it('puts the linker\'s fields first and removes none of the others', () => {
+    const score = new Map([[fieldKey('orders', 'warehouse_id'), 0.03]]);
+    const reordered = linkedFieldOrder(card, score);
+    // Same set, different order: that is the whole claim of the lever, so it is asserted as a set.
+    expect([...reordered].sort()).toEqual([...cardFieldOrder(card)].sort());
+    expect(reordered[0]).toBe(fieldKey('orders', 'warehouse_id'));
+    // The table with the best-scoring column goes first, and its columns are ranked within it.
+    expect(reordered.slice(0, 2)).toEqual([fieldKey('orders', 'warehouse_id'), fieldKey('orders', 'qty')]);
+  });
+
+  it('breaks ties by name so the order is total', () => {
+    // A sort that is not total would make the reading depend on the engine's sort stability rather
+    // than on the rule, and two runs of the same card could disagree.
+    const score = new Map([
+      [fieldKey('items', 'price'), 0.02],
+      [fieldKey('orders', 'qty'), 0.02],
+    ]);
+    expect(linkedFieldOrder(card, score)).toEqual(linkedFieldOrder(card, new Map([...score].reverse())));
+  });
+
+  it('reports a position as a fraction of the card, and ignores a field the card does not show', () => {
+    const order = cardFieldOrder(card);
+    expect(meanPosition(order, new Set([order[0] as string]))).toBe(0);
+    expect(meanPosition(order, new Set())).toBe(0);
+    expect(meanPosition([], new Set([fieldKey('items', 'id')]))).toBe(0);
+    // A field the card never shows has no position: counting it as the end of the card would read as
+    // a badly ordered rule rather than as a card that cannot express the statement.
+    expect(meanPosition(order, new Set([fieldKey('items', 'id'), fieldKey('nowhere', 'nothing')]))).toBe(0);
+  });
+});
+
 function row(overrides: Partial<CardRow> = {}): CardRow {
   return {
     id: '1',
@@ -335,6 +385,12 @@ describe('the sums a reader acts on', () => {
     expect(cardLines(tallyCards([row()])).join('\n')).not.toContain('fields:');
   });
 
+  it('prints where ordering puts a gold field, and how many cases moved each way', () => {
+    const lines = cardLines(tallyCards([row()]), [], { cases: 4, before: 0.435, after: 0.336, improved: 3, worse: 1 }).join('\n');
+    expect(lines).toContain('moves a gold field from 43.5% of the card to 33.6%');
+    expect(lines).toContain('earlier on 3 cases, later on 1');
+  });
+
   it('does not divide by zero on an empty population', () => {
     const tally = tallyCards([]);
     expect(tally.total).toBe(0);
@@ -395,6 +451,15 @@ describe('the four ways the instrument can be wrong', () => {
     expect(cardProblems({ tally: tallyCards([blank]), definitionGap: 0, unrenderable: 0 })[0]).toContain(
       'broken reader',
     );
+  });
+
+  it('fails when ordering moved nothing, which is a rule that never ran', () => {
+    expect(
+      cardProblems({ tally: tallyCards([row()]), definitionGap: 0, unrenderable: 0, rank: { cases: 4, before: 0.4, after: 0.4, improved: 0, worse: 0 } })[0],
+    ).toContain('never ran');
+    expect(
+      cardProblems({ tally: tallyCards([row()]), definitionGap: 0, unrenderable: 0, rank: { cases: 4, before: 0.4, after: 0.2, improved: 4, worse: 0 } }),
+    ).toEqual([]);
   });
 
   it('fails when most cases name no field, which no corpus of statements can produce', () => {
@@ -773,13 +838,28 @@ describe('a measurement over a real split', () => {
     expect(JSON.parse(readFileSync(path, 'utf8')).tally.total).toBe(1);
   });
 
+  it('measures what ordering buys on a case that names fields, with no call', async () => {
+    // "What is the total price of every item?" selects `items.price`: the question names the column,
+    // so the linker reaches it and an ordering rule has something to move.
+    const outcome = await runCard(settingsFor(dataset(), reportBody([2])));
+    const rank = outcome.fieldRank;
+    expect(rank?.cases).toBe(1);
+    // Exactly one direction per case, and the count has to agree with the positions: this case moves
+    // *later*, because the linker reads "every item" as `orders.item_id` and puts that table first.
+    // A reading that only ever claimed improvement would hide the half of the corpus that regresses.
+    expect((rank?.improved ?? 0) + (rank?.worse ?? 0)).toBe(1);
+    expect(rank?.improved).toBe((rank?.after ?? 0) < (rank?.before ?? 0) ? 1 : 0);
+    expect(cardLines(outcome.tally, outcome.fieldBudget, rank).join('\n')).toContain('ordering by the linker');
+  });
+
   it('carries the field reading and the budget frontier into the artifact', async () => {
     const settings = settingsFor(dataset(), reportBody([1]));
     const outcome = await runCard(settings);
     const written = JSON.parse(readFileSync(writeCardArtifact(settings, outcome), 'utf8')) as {
       readonly rows: readonly { readonly fields: { readonly total: number } }[];
-      readonly tally: { readonly fieldTotal: number };
+      readonly tally: { readonly fieldTotal: number; readonly fieldEmpty: number };
       readonly fieldBudget: readonly { readonly topK: number; readonly kept: number; readonly linked: number }[];
+      readonly fieldRank?: { readonly cases: number; readonly improved: number; readonly worse: number };
     };
     expect(written.rows[0]?.fields.total).toBe(written.tally.fieldTotal);
     // Four budgets, one per `FIELD_TOPS` entry, and the curve is monotone in what it keeps: a budget
@@ -787,6 +867,10 @@ describe('a measurement over a real split', () => {
     expect(written.fieldBudget.map((entry) => entry.topK)).toEqual([...FIELD_TOPS]);
     const kept = written.fieldBudget.map((entry) => entry.kept);
     expect([...kept].sort((left, right) => left - right)).toEqual(kept);
+    // This case is `select count(*)`: it names no field, so there is nothing to order and the
+    // reading is absent rather than zero — the distinction the guards are built on.
+    expect(written.fieldRank).toBeUndefined();
+    expect(written.tally.fieldEmpty).toBe(1);
   });
 
   it('exits zero on a clean measurement and one under --strict when the instrument failed', async () => {

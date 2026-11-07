@@ -9298,3 +9298,31 @@ abstention is kept in its own bucket (`fieldEmpty`) instead of being counted as 
 names no column of the table it counts from, and the extractor's limit is not the linker's failure.
 Precision is published beside recall for the same reason — a coverage number alone can always be
 improved by naming everything.
+
+### The ordering arm was registered, measured, and withdrawn before it was dispatched
+
+Round 97's next step was going to be an arm that keeps every field and only changes the order the
+card is read in — the one experiment that separates *removal* from *attention*, since the ceiling's
+gain could be either. The instrument that prices it costs nothing, so it was built first and the arm
+never ran.
+
+| quantity | value |
+| --- | --- |
+| where a gold field sits in the card as sent | **41.2%** of the card's width |
+| the same after ordering by the linker's score | **36.1%** |
+| cases where the gold's fields moved earlier | 296 |
+| cases where they moved later | **188** |
+
+A five-point shift, and 38% of cases move the wrong way. Ordering can only promote the fields the
+linker already names — that is the same 31% recall — so the 69% it never names cannot move at all,
+and the cases that regress are the ones where the linker points at the wrong table: "total price of
+every item" scores `orders.item_id` above `items.price`, so the table with the answer goes second.
+Five points of position on a card the model reads whole is not a mechanism worth ~1,000 calls, and
+the instrument said so before the dispatch existed.
+
+The rule this round writes down is the one the round before needed: **an oracle prices a lever, and a
+registered instrument still has to earn its dispatch.** The card-content ceiling is 11.09pp; the two
+realizable routes to it are a different *set* of fields (needs recall the linker does not have) and a
+different *order* of the same fields (needs a ranking signal worth more than five points of position).
+Neither is available, so the lever's next measurement is neither — it is a selector whose field recall
+can be stated in the same units as the 31.0% above.
