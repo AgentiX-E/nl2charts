@@ -136,6 +136,14 @@ describe('rewriteCases', () => {
     // job is to say "nothing to price" rather than to throw on a field that is legitimately absent.
     expect(rewriteCases({}, 'a', [])).toEqual({ cases: [], unretained: 0, unknownQuestion: 0 });
   });
+
+  it('prices a case list with no failure list beside it', () => {
+    // Every case that ran correctly leaves no failure row, so an artifact whose arm passed
+    // everything has `cases` and no `failures` key at all. The statement is on the case itself; a
+    // reader that needed the failure list would drop the whole arm as unretained.
+    const kept = rewriteCases({ cases: [{ id: '4', arm: 'a', passed: true, sql: 'select 4' }] }, 'a', [question({ question_id: 4 })]);
+    expect(kept).toEqual({ cases: [{ id: '4', question: question({ question_id: 4 }), sql: 'select 4', declared: true }], unretained: 0, unknownQuestion: 0 });
+  });
 });
 
 describe('REWRITE_RULES', () => {
@@ -311,6 +319,70 @@ describe('the ceilings', () => {
     expect(Array.isArray(proposed)).toBe(true);
     expect((proposed as readonly string[]).length).toBe(TRANSPLANT_LIMIT);
   });
+
+  /**
+   * The second ceiling: the gold's whole filter, moved across.
+   *
+   * `oracle-transplant` prices one literal at a time, so it cannot answer "was the filter the whole
+   * difference". Moving the clause answers it in one execution, and only on the case where both
+   * statements read the same single table — everywhere else the spliced clause is valid SQL against
+   * a table the prediction never read, and the ceiling would report a `tables` failure as a
+   * `predicate` one.
+   */
+  const predicate = ORACLE_RULES.find((entry) => entry.name === 'oracle-predicate');
+
+  it('splices the gold filter into a prediction that wrote none', () => {
+    expect(predicate?.apply(at('select count(*) from items', { goldSql: "select count(*) from items where name = 'Cup'" }))).toBe(
+      "select count(*) from items where name = 'Cup'",
+    );
+  });
+
+  it('takes the prediction filter out when the gold has none', () => {
+    // The `filter-wide` direction. A ceiling that could only add a clause would report the half of
+    // the bucket where the prediction filtered and the gold did not as unreachable.
+    expect(predicate?.apply(at("select id from items where name = 'cup'", { goldSql: 'select id from items' }))).toBe(
+      'select id from items',
+    );
+  });
+
+  it('drops the qualifier so one table under two spellings still matches', () => {
+    // The gold writes `frpm.name` and the prediction writes `i.id`; both name the same table. The
+    // splice is defined on the clause, so the spellings have to be reconciled first — without this
+    // the clause is `frpm.name = 'Cup'` against a statement with no `frpm` in scope, and every
+    // proposal would be refused instead of priced.
+    //
+    // The `i` declaration stays: an alias that is declared and never used is legal SQL, so removing
+    // it would be a second edit on text the ceiling does not otherwise touch, and one more place to
+    // be wrong about. The reading was taken with it standing.
+    expect(
+      predicate?.apply(at('select i.id from items i', { goldSql: "select frpm.id from items as frpm where frpm.name = 'Cup'" })),
+    ).toBe("select id from items i where name = 'Cup'");
+  });
+
+  it('refuses to splice into a join, where a bare column name means two things', () => {
+    // Two tables in scope: `name` is not one column any more, so the ceiling would be measuring a
+    // statement nobody wrote. Silence is the reading — the report prints how much of the bucket it
+    // could not reach rather than folding it into the denominator.
+    expect(predicate?.apply(at('select i.id from items i join orders o on i.id = o.item_id'))).toBeUndefined();
+    // And one table on one side only is the same case: the two statements are not about one schema.
+    expect(
+      predicate?.apply(at('select id from items', { goldSql: 'select i.id from items i join orders o on i.id = o.item_id' })),
+    ).toBeUndefined();
+  });
+
+  it('proposes nothing when the splice would write the statement it was given', () => {
+    // A case that passes, or one where the prediction already wrote the gold's filter: proposing it
+    // would count the case as fired and charge an execution for a statement that did not change.
+    expect(predicate?.apply(at("select id from items where name = 'Cup'"))).toBeUndefined();
+    expect(predicate?.apply(at("select id from items where name = 'Cup'", { passed: true }))).toBeUndefined();
+  });
+
+  it('declares refusal a reading, which a shippable rule may not', () => {
+    // The gold clause cannot run against a prediction that never read the gold's table, and that
+    // refusal is the finding — the case is in the `tables` bucket, not a defect in the splice.
+    expect(predicate?.tolerateRefusal).toBe(true);
+    expect(REWRITE_RULES.some((entry) => entry.tolerateRefusal === true)).toBe(false);
+  });
 });
 
 describe('priceRewrites', () => {
@@ -359,6 +431,35 @@ describe('priceRewrites', () => {
     }
   });
 
+  it('files a refused proposal as a reading when the rule declared it one, and as a defect otherwise', async () => {
+    // The same proposal, twice, differing only in what the rule says a refusal means. A shipped rule
+    // that writes a statement the engine refuses is wrong about something and the report fails the
+    // build; the predicate ceiling's refusal says the prediction never read the gold's table, which
+    // is the finding it went looking for. Counting both the same way would either fail a gate over a
+    // measurement or publish a rule that breaks statements.
+    const refuse = (tolerate: boolean): RewriteRule => ({
+      name: tolerate ? 'ceiling' : 'rule',
+      claim: 'splices a clause the statement cannot run',
+      ...(tolerate ? { tolerateRefusal: true as const } : {}),
+      apply: () => 'select from where',
+    });
+    const oracle = createOracle(resolve('eval/bird/oracle.py'), root);
+    try {
+      const priced = await priceRewrites(
+        [rewriteCase()],
+        [refuse(true), refuse(false)],
+        { execute: (db, sql) => oracle.run(db, sql), judge: judgeOfficial },
+        () => undefined,
+      );
+      expect(priced.readings[0]).toMatchObject({ fired: 1, refused: 1, broken: 0, net: 0 });
+      expect(priced.readings[1]).toMatchObject({ fired: 1, refused: 0, broken: 1, net: 0 });
+      // A refusal is neither a win nor a loss, so neither reading may be adopted on the strength of it.
+      expect(priced.readings.every((reading) => reading.won === 0 && reading.lost === 0)).toBe(true);
+    } finally {
+      await oracle.close();
+    }
+  });
+
   it('prints a p below one in ten thousand as such', () => {
     const lines = rewriteLines({
       split: 'dev',
@@ -367,7 +468,7 @@ describe('priceRewrites', () => {
       recomputed: 50,
       declared: 50,
       agreed: 100,
-      readings: [{ rule: 'r', claim: '', oracle: false, fired: 20, won: 1, lost: 19, kept: 0, unchangedWrong: 0, broken: 0, net: -18, mcnemar: 0.00001, resolutionPp: 1 }],
+      readings: [{ rule: 'r', claim: '', oracle: false, fired: 20, won: 1, lost: 19, kept: 0, unchangedWrong: 0, broken: 0, refused: 0, net: -18, mcnemar: 0.00001, resolutionPp: 1 }],
       union: 1,
       overlap: [],
       problems: [],
@@ -530,7 +631,7 @@ describe('rewriteProblems', () => {
       recomputed: 1,
       declared: 1,
       scored: 1,
-      readings: [{ rule: 'x', claim: '', oracle: false, fired: 1, won: 0, lost: 0, kept: 0, unchangedWrong: 0, broken: 2, net: 0, mcnemar: 1, resolutionPp: 1 }],
+      readings: [{ rule: 'x', claim: '', oracle: false, fired: 1, won: 0, lost: 0, kept: 0, unchangedWrong: 0, broken: 2, refused: 0, net: 0, mcnemar: 1, resolutionPp: 1 }],
     });
     expect(problems.join(' ')).toContain('no longer run');
   });
@@ -549,7 +650,7 @@ describe('rewriteLines', () => {
       recomputed: 980,
       declared: 980,
       agreed: 1532,
-      readings: [{ rule: 'null-order', claim: 'a claim', oracle: false, fired: 80, won: 6, lost: 0, kept: 36, unchangedWrong: 38, broken: 0, net: 6, mcnemar: 0.0313, resolutionPp: 0.4 }],
+      readings: [{ rule: 'null-order', claim: 'a claim', oracle: false, fired: 80, won: 6, lost: 0, kept: 36, unchangedWrong: 38, broken: 0, refused: 0, net: 6, mcnemar: 0.0313, resolutionPp: 0.4 }],
       union: 6,
       overlap: [],
       problems: [],
@@ -559,6 +660,38 @@ describe('rewriteLines', () => {
     expect(text).toContain('null-order');
     expect(text).toContain('a claim');
     expect(text).toContain('+0.39pp');
+  });
+
+  it('prints the refusals beside the defects, and nothing when there were none', () => {
+    // A ceiling that could not splice prints how many it could not reach; a rule with no refusals
+    // does not grow a column of zeroes that reads like a measurement.
+    const withRefusals = rewriteLines({
+      split: 'dev',
+      arm: 'a',
+      scored: 100,
+      recomputed: 60,
+      declared: 60,
+      agreed: 100,
+      readings: [{ rule: 'oracle-predicate', claim: 'a ceiling', oracle: true, fired: 83, won: 20, lost: 0, kept: 0, unchangedWrong: 60, broken: 0, refused: 3, net: 20, mcnemar: 0.0001, resolutionPp: 1 }],
+      union: 0,
+      overlap: [],
+      problems: [],
+    }).join('\n');
+    expect(withRefusals).toMatch(/oracle-predicate\*\s+fired\s+83/);
+    expect(withRefusals).toMatch(/refused\s+3/);
+    const clean = rewriteLines({
+      split: 'dev',
+      arm: 'a',
+      scored: 100,
+      recomputed: 60,
+      declared: 60,
+      agreed: 100,
+      readings: [{ rule: 'ground', claim: 'a rule', oracle: false, fired: 22, won: 14, lost: 0, kept: 0, unchangedWrong: 8, broken: 0, refused: 0, net: 14, mcnemar: 0.0001, resolutionPp: 1 }],
+      union: 14,
+      overlap: [],
+      problems: [],
+    }).join('\n');
+    expect(clean).not.toContain('refused');
   });
 
   it('separates a ceiling from the rules above it', () => {
@@ -572,8 +705,8 @@ describe('rewriteLines', () => {
       declared: 60,
       agreed: 100,
       readings: [
-        { rule: 'ground', claim: 'a rule', oracle: false, fired: 9, won: 3, lost: 0, kept: 0, unchangedWrong: 6, broken: 0, net: 3, mcnemar: 0.25, resolutionPp: 1 },
-        { rule: 'transplant', claim: 'a ceiling', oracle: true, fired: 20, won: 9, lost: 0, kept: 0, unchangedWrong: 11, broken: 0, net: 9, mcnemar: 0.004, resolutionPp: 1 },
+        { rule: 'ground', claim: 'a rule', oracle: false, fired: 9, won: 3, lost: 0, kept: 0, unchangedWrong: 6, broken: 0, refused: 0, net: 3, mcnemar: 0.25, resolutionPp: 1 },
+        { rule: 'transplant', claim: 'a ceiling', oracle: true, fired: 20, won: 9, lost: 0, kept: 0, unchangedWrong: 11, broken: 0, refused: 0, net: 9, mcnemar: 0.004, resolutionPp: 1 },
       ],
       union: 3,
       overlap: [],
@@ -594,8 +727,8 @@ describe('rewriteLines', () => {
       declared: 60,
       agreed: 100,
       readings: [
-        { rule: 'one', claim: '', oracle: false, fired: 4, won: 2, lost: 0, kept: 0, unchangedWrong: 2, broken: 0, net: 2, mcnemar: 0.5, resolutionPp: 1 },
-        { rule: 'two', claim: '', oracle: false, fired: 4, won: 3, lost: 0, kept: 0, unchangedWrong: 1, broken: 0, net: 3, mcnemar: 0.25, resolutionPp: 1 },
+        { rule: 'one', claim: '', oracle: false, fired: 4, won: 2, lost: 0, kept: 0, unchangedWrong: 2, broken: 0, refused: 0, net: 2, mcnemar: 0.5, resolutionPp: 1 },
+        { rule: 'two', claim: '', oracle: false, fired: 4, won: 3, lost: 0, kept: 0, unchangedWrong: 1, broken: 0, refused: 0, net: 3, mcnemar: 0.25, resolutionPp: 1 },
       ],
       union: 5,
       overlap: [],

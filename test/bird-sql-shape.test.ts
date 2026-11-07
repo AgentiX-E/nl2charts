@@ -14,7 +14,9 @@ import {
   predicateAtoms,
   projectionItems,
   rewriteAliases,
+  spliceWhereClause,
   statementShape,
+  whereClauseSpan,
   windowClause,
 } from '../eval/bird/sql-shape.js';
 
@@ -147,5 +149,86 @@ describe('the whole shape', () => {
     expect(shape.aggregates).toEqual(['count']);
     expect(shape.groups).toEqual(['region']);
     expect(shape.predicates).toEqual([]);
+  });
+});
+
+/**
+ * Finding and replacing the `where` clause by position rather than by text.
+ *
+ * The ceiling that needs this splices a clause from one statement into another, and the two
+ * spell the same table differently. Re-finding the clause by searching for its first predicate
+ * lands in the wrong place as soon as two clauses share a word, so the span is read once and the
+ * edit is a slice — the tests below are the positions that make the slice safe.
+ */
+describe('the where clause, as a span', () => {
+  it('ends where the next clause begins, not where the statement does', () => {
+    expect(whereClauseSpan('select a from t where x = 1 order by a limit 3')).toEqual({ start: 16, bodyStart: 21, bodyEnd: 28 });
+  });
+
+  it('ends at the statement when nothing follows it', () => {
+    const sql = 'select a from t where x = 1';
+    expect(whereClauseSpan(sql)?.bodyEnd).toBe(sql.length);
+  });
+
+  it('ignores a where inside a subquery, a literal or a comment', () => {
+    // Depth and quoting, not pattern matching: the clause to replace is the statement's own, and a
+    // splice into the inner query of `where x in (select ... where z = 1)` would run and answer a
+    // different question.
+    expect(whereClauseSpan("select a from t where b = 'where x = 1' order by a")?.bodyEnd).toBe(40);
+    // A `from` subquery's filter belongs to the subquery: the statement itself has no clause, so a
+    // ceiling that spliced one in would add a filter rather than replace the one it meant to.
+    expect(whereClauseSpan('select a from (select b from u where c = 1) q')).toBeUndefined();
+    expect(whereClauseSpan('-- where x = 1\nselect a from t')).toBeUndefined();
+  });
+
+  it('replaces the body and keeps everything after it', () => {
+    expect(spliceWhereClause('select a from t where x = 1 order by a limit 3', 'y = 2')).toBe(
+      'select a from t where y = 2 order by a limit 3',
+    );
+  });
+
+  it('inserts the clause in front of the tail when the statement has none', () => {
+    expect(spliceWhereClause('select a from t group by a', 'y = 2')).toBe('select a from t where y = 2 group by a');
+    expect(spliceWhereClause('select a from t', 'y = 2')).toBe('select a from t where y = 2');
+  });
+
+  it('removes the clause when there is no body to put there', () => {
+    // The `filter-wide` direction: a gold statement without a filter asks for the prediction's to
+    // go, and a ceiling that could only add one would report half the bucket as unreachable.
+    expect(spliceWhereClause('select a from t where x = 1 group by a', undefined)).toBe('select a from t group by a');
+    expect(spliceWhereClause('select a from t', undefined)).toBe('select a from t');
+  });
+
+  it('leaves one terminator and no space in front of it', () => {
+    expect(spliceWhereClause('select a from t where x = 1;', 'y = 2')).toBe('select a from t where y = 2;');
+    expect(spliceWhereClause('select a from t where x = 1;', undefined)).toBe('select a from t;');
+  });
+
+  it('does not read a block comment as a clause keyword', () => {
+    // A commented-out clause is text a person left behind, not a clause: treating `/* order by */`
+    // as the boundary would cut the body short and leave the comment standing after the splice.
+    // The comment goes with the clause it was written inside, so the *absence* of it is the proof
+    // that it was not read as a boundary.
+    expect(whereClauseSpan('/* where x = 1 */ select a from t')).toBeUndefined();
+    expect(spliceWhereClause('select a from t where x = 1 /* order by a */', 'y = 2')).toBe('select a from t where y = 2');
+  });
+
+  it('does not read a bracketed identifier as a clause keyword', () => {
+    // SQLite's and SQL Server's quoting: `[where]` is a column called `where`, and a scanner that
+    // opened the clause on it would replace a select-list item instead of a filter.
+    expect(whereClauseSpan('select [where] from t')).toBeUndefined();
+    expect(whereClauseSpan('select [where] from t where x = 1')?.start).toBe(22);
+  });
+
+  it('survives the four ways a statement can end inside a quote, a comment or a bracket', () => {
+    // A model does write these — a truncated response, a stray apostrophe — and the reader runs on
+    // every statement the artifact holds. Each unterminated region has to consume the rest of the
+    // text rather than throw or, worse, resume scanning inside it and open a clause on a word that
+    // is not one.
+    expect(whereClauseSpan('select a from t -- where x = 1')).toBeUndefined();
+    expect(whereClauseSpan('select a from t /* where x = 1')).toBeUndefined();
+    const openQuote = "select a from t where b = 'oops";
+    expect(whereClauseSpan(openQuote)).toEqual({ start: 16, bodyStart: 21, bodyEnd: openQuote.length });
+    expect(whereClauseSpan('select [where from t')).toBeUndefined();
   });
 });

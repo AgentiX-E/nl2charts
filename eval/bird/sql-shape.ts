@@ -309,3 +309,131 @@ export function statementShape(sql: string): StatementShape {
     text: text.replace(/\s+/g, ' ').trim(),
   };
 }
+
+/** Where one clause sits in the statement as written, so an edit can put another one there. */
+export interface ClauseSpan {
+  /** The keyword that opens the clause. */
+  readonly start: number;
+  /** Just past the keyword. */
+  readonly bodyStart: number;
+  /** Where the next clause begins, or the end of the statement. */
+  readonly bodyEnd: number;
+}
+
+/** Keywords that end a `where` clause at parenthesis depth zero. */
+const WHERE_BOUNDARY = ['group by', 'having', 'order by', 'limit', 'offset', 'union', 'except', 'intersect', 'window', 'returning'];
+
+/**
+ * The top-level keywords of a statement, skipping comments, quoted identifiers and literals.
+ *
+ * A `where` inside a subquery belongs to that subquery, so only depth zero counts: a rule that
+ * spliced into the first `where` it found would rewrite the inner query of a statement whose own
+ * filter is what it meant to replace, and the result would run and answer a different question.
+ */
+function topLevelWords(sql: string): { readonly word: string; readonly start: number; readonly end: number }[] {
+  const words: { word: string; start: number; end: number }[] = [];
+  let depth = 0;
+  let index = 0;
+  while (index < sql.length) {
+    const char = sql[index] as string;
+    const next = sql[index + 1];
+    if (char === '-' && next === '-') {
+      const end = sql.indexOf('\n', index);
+      index = end === -1 ? sql.length : end + 1;
+      continue;
+    }
+    if (char === '/' && next === '*') {
+      const end = sql.indexOf('*/', index + 2);
+      index = end === -1 ? sql.length : end + 2;
+      continue;
+    }
+    if (char === "'" || char === '"' || char === '`') {
+      const end = sql.indexOf(char, index + 1);
+      index = end === -1 ? sql.length : end + 1;
+      continue;
+    }
+    if (char === '[') {
+      const end = sql.indexOf(']', index + 1);
+      index = end === -1 ? sql.length : end + 1;
+      continue;
+    }
+    if (char === '(') {
+      depth += 1;
+      index += 1;
+      continue;
+    }
+    if (char === ')') {
+      depth = Math.max(0, depth - 1);
+      index += 1;
+      continue;
+    }
+    if (depth === 0 && /[A-Za-z_]/.test(char)) {
+      const word = /^[A-Za-z_]+/.exec(sql.slice(index))?.[0] as string;
+      words.push({ word: word.toLowerCase(), start: index, end: index + word.length });
+      index += word.length;
+      continue;
+    }
+    index += 1;
+  }
+  return words;
+}
+
+/** The end of the statement, without the terminator a statement does not need. */
+function endOfStatement(sql: string): number {
+  return sql.trimEnd().replace(/;\s*$/, '').trimEnd().length;
+}
+
+/**
+ * The first top-level clause keyword at or after `from`, or the end of the statement.
+ *
+ * `group by` and `order by` are two words, so each position is read as a pair: a rule that only
+ * knew single words would treat the `group` of `group by` as the boundary and cut the clause in
+ * front of the `by`.
+ */
+function boundaryFrom(sql: string, from: number): number {
+  const words = topLevelWords(sql);
+  for (let index = 0; index < words.length; index += 1) {
+    const here = words[index] as { word: string; start: number };
+    if (here.start < from) continue;
+    const following = words[index + 1]?.word;
+    const pair = following === undefined ? here.word : `${here.word} ${following}`;
+    if (WHERE_BOUNDARY.some((keyword) => keyword === here.word || keyword === pair)) return here.start;
+  }
+  return endOfStatement(sql);
+}
+
+/**
+ * The statement's own `where` clause, as a span rather than as text.
+ *
+ * Text is not enough because the clause has to be *replaced* in the statement the model wrote,
+ * and re-finding it by searching for its first predicate would land in the wrong place as soon as
+ * two clauses share a word.
+ */
+export function whereClauseSpan(sql: string): ClauseSpan | undefined {
+  const words = topLevelWords(sql);
+  const at = words.findIndex((word) => word.word === 'where');
+  const opening = words[at];
+  if (opening === undefined) return undefined;
+  return { start: opening.start, bodyStart: opening.end, bodyEnd: boundaryFrom(sql, opening.end) };
+}
+
+/**
+ * The statement with its `where` clause replaced, inserted or removed.
+ *
+ * `undefined` removes the clause, which is what a gold statement without a filter asks for: a
+ * prediction that filters where the answer does not is the `filter-wide` direction, and a ceiling
+ * that could only add filters would report that half of the bucket as unreachable.
+ */
+export function spliceWhereClause(sql: string, body: string | undefined): string {
+  const span = whereClauseSpan(sql);
+  if (span !== undefined) {
+    const spliced =
+      body === undefined
+        ? `${sql.slice(0, span.start)}${sql.slice(span.bodyEnd)}`
+        : `${sql.slice(0, span.bodyStart)} ${body} ${sql.slice(span.bodyEnd)}`;
+    return spliced.replace(/\s+/g, ' ').replace(/\s+;/, ';').trim();
+  }
+  if (body === undefined) return sql;
+  const cut = boundaryFrom(sql, 0);
+  return `${sql.slice(0, cut)} where ${body} ${sql.slice(cut)}`.replace(/\s+/g, ' ').replace(/\s+;/, ';').trim();
+}

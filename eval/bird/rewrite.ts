@@ -67,6 +67,7 @@ import { mcnemarExact, pairedResolution } from '@agentix-e/nl2charts-devkit';
 import type { MatchReason } from '@agentix-e/nl2charts-devkit';
 import { applyGrounding, guardNullOrder } from '@agentix-e/nl2charts-ai';
 import { domainsOf, groundLiteralCase } from './literal-repair.js';
+import { aliasTable, spliceWhereClause, whereClauseSpan } from './sql-shape.js';
 import type { ColumnDomain } from './literal-repair.js';
 import { literalSites } from './statement.js';
 import { loadQuestions, loadTables } from './data.js';
@@ -142,6 +143,17 @@ export interface RewriteRule {
   readonly needsDomains?: boolean;
   /** The rule reads the gold statement, so its reading is a ceiling and not a candidate. */
   readonly oracle?: boolean;
+  /**
+   * Whether a proposal the engine refuses is a reading rather than a defect in the rule.
+   *
+   * A shipped rule must produce statements that run — one that writes a statement the engine
+   * cannot parse is wrong about something, and the report fails the build over it. A ceiling is
+   * different: the gold clause spliced into a prediction that never read the gold's table cannot
+   * run, and that refusal *is* the finding ("this statement is in the `tables` bucket, not the
+   * `predicate` one"). Counting it as a broken rule would fail a gate over the measurement it was
+   * built to take.
+   */
+  readonly tolerateRefusal?: true;
 }
 
 /** Division by an integer column truncates in SQLite and PostgreSQL alike. */
@@ -277,7 +289,73 @@ export const ORACLE_RULES: readonly RewriteRule[] = [
     oracle: true,
     apply: transplantGoldLiterals,
   },
+  {
+    name: 'oracle-predicate',
+    claim: 'the gold statement\'s own filter, spliced into the prediction, repairs the case',
+    oracle: true,
+    tolerateRefusal: true,
+    apply: transplantGoldPredicate,
+  },
 ];
+
+/**
+ * The statement with its table qualifiers removed, when it reads exactly one table.
+ *
+ * The ceiling has to splice a clause from one statement into another, and the two spell the same
+ * table differently: the gold writes `frpm.county` or `t1.county`, the prediction writes `f.county`
+ * or nothing. Dropping the qualifier is safe only when one table is in scope — with two, `name`
+ * stops meaning one column — so the rule refuses to run on a join rather than guess, and the
+ * report prints the share it could not reach.
+ */
+function unqualify(sql: string, qualifiers: readonly string[]): string {
+  let out = sql;
+  // Longest first so `t1.` cannot eat `t10.`, and no empty-name guard: the names come from
+  // `aliasTable`, whose keys and values are both matched by `[a-z_][a-z0-9_]*`.
+  for (const name of [...qualifiers].sort((left, right) => right.length - left.length)) {
+    out = out.replace(new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\.`, 'gi'), '');
+  }
+  return out;
+}
+
+/**
+ * Both statements' single table and every name it goes by, or nothing when either reads a join.
+ *
+ * The predicate transplant is defined for the case where both statements read the same one table.
+ * That restriction is the whole reason the rule can be trusted: without it, a spliced clause could
+ * be valid SQL against a different table, run, and be scored as "the predicate was the problem"
+ * when the tables were.
+ */
+function singleTableOf(sql: string): readonly string[] | undefined {
+  const tables = [...aliasTable(sql).values()];
+  if (new Set(tables).size !== 1) return undefined;
+  const names = [...aliasTable(sql).keys(), tables[0] as string];
+  return names;
+}
+
+/**
+ * The ceiling: how many of this bucket are *exactly* one filter away.
+ *
+ * The `conditions` census says how often a statement never wrote a condition the gold has; it
+ * cannot say whether writing it would have been enough, because a statement missing a filter is
+ * usually missing something else too. Splicing the gold's whole clause answers that in one
+ * execution per case, and the difference between this number and the census is the share of the
+ * bucket where the filter was the *whole* difference.
+ *
+ * It reads the gold statement, so it can never ship; it exists to decide whether the next lever is
+ * condition coverage at all, and it is measured on the same statements the artifact executed.
+ */
+function transplantGoldPredicate(input: RewriteInput): string | undefined {
+  if (input.passed) return undefined;
+  const goldNames = singleTableOf(input.goldSql);
+  const baseNames = singleTableOf(input.sql);
+  if (goldNames === undefined || baseNames === undefined) return undefined;
+  const gold = unqualify(input.goldSql, goldNames);
+  const base = unqualify(input.sql, baseNames);
+  const span = whereClauseSpan(gold);
+  const body = span === undefined ? undefined : gold.slice(span.bodyStart, span.bodyEnd).trim();
+  const spliced = spliceWhereClause(base, body === undefined || body === '' ? undefined : body);
+  return spliced === base ? undefined : spliced;
+}
 
 export interface RewriteReading {
   readonly rule: string;
@@ -296,6 +374,14 @@ export interface RewriteReading {
   readonly unchangedWrong: number;
   /** Rewrites the engine refused, which is a defect in the rule rather than a reading. */
   readonly broken: number;
+  /**
+   * Rewrites the engine refused where the rule declared refusal a reading.
+   *
+   * Only a ceiling sets this: the gold clause cannot run against a prediction that never read the
+   * gold's table, and that refusal is how the ceiling reports the part of the bucket it cannot
+   * reach instead of dropping those cases from its own denominator.
+   */
+  readonly refused: number;
   readonly net: number;
   readonly mcnemar: number;
   /**
@@ -435,7 +521,7 @@ export async function priceRewrites(
 ): Promise<
   Omit<RewriteReport, 'split' | 'arm' | 'problems'> & { readonly unresolved: number; readonly unrunnable: number }
 > {
-  const tallies = rules.map(() => ({ fired: 0, won: 0, lost: 0, kept: 0, unchangedWrong: 0, broken: 0 }));
+  const tallies = rules.map(() => ({ fired: 0, won: 0, lost: 0, kept: 0, unchangedWrong: 0, broken: 0, refused: 0 }));
   // Which cases each shippable rule repaired. Only non-oracle wins are collected: a ceiling is
   // not adopted, so folding it into the union would price a pipeline that does not exist.
   const wonCases = new Map<string, Set<string>>();
@@ -513,7 +599,11 @@ export async function priceRewrites(
       // Every proposal refused by the engine is a defect in the rule, not a case that stayed
       // wrong: the rule wrote a statement that does not run.
       if (ran === 0) {
-        tally.broken += 1;
+        // A rule that may propose a statement the engine refuses is measuring something else: for
+        // the predicate ceiling the refusal says the prediction never read the gold's table, which
+        // is the `tables` bucket rather than a defect in the splice.
+        if (rule.tolerateRefusal === true) tally.refused += 1;
+        else tally.broken += 1;
         continue;
       }
       if (before && now) tally.kept += 1;
@@ -606,7 +696,7 @@ export function rewriteLines(report: RewriteReport): string[] {
     }
     lines.push(
       `  ${(reading.oracle ? `${reading.rule}*` : reading.rule).padEnd(20)} fired ${String(reading.fired).padStart(4)}  won ${String(reading.won).padStart(2)}  lost ${String(reading.lost).padStart(2)}` +
-        `  broken ${String(reading.broken).padStart(2)}  kept ${String(reading.kept).padStart(3)}/${String(reading.unchangedWrong).padStart(3)}` +
+        `  broken ${String(reading.broken).padStart(2)}${reading.refused === 0 ? '' : ` refused ${String(reading.refused).padStart(2)}`}  kept ${String(reading.kept).padStart(3)}/${String(reading.unchangedWrong).padStart(3)}` +
         `  net ${reading.net >= 0 ? '+' : ''}${share(reading.net)}  p ${reading.mcnemar < 0.0001 ? '<0.0001' : reading.mcnemar.toFixed(4)}` +
         `  resolves ${reading.resolutionPp.toFixed(1)}pp`,
     );
