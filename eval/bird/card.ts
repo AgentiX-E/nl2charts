@@ -29,7 +29,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { attachDefinitions, buildAskMessages, renderSchemaCard } from '@agentix-e/nl2charts-ai';
-import type { DatabaseProfile, PromptOptions, SchemaTable } from '@agentix-e/nl2charts-ai';
+import type { DatabaseProfile, PromptOptions, Recaller, SchemaTable } from '@agentix-e/nl2charts-ai';
 import { conditionColumns } from './conditions.js';
 import { buildSchema, loadDescriptions, loadQuestions, loadTables } from './data.js';
 import type { BirdQuestion, BirdTable, ColumnNote } from './data.js';
@@ -40,7 +40,7 @@ import { CANDIDATE_RECALLERS, SHIPPED_RECALLERS, linkedTables, pruneSchema } fro
 import { promptFor, renderableArm, resolveArm, resolveLayout } from './run.js';
 import type { Arm, BirdLayout } from './run.js';
 import { attachSamples, narrowSamples, sampleValuesOf } from './samples.js';
-import { definesOwnName, tableRefs } from './statement.js';
+import { definesOwnName, referencedFields, tableRefs } from './statement.js';
 import { EXAMPLE_RULE, exampleMapOf } from './value-examples.js';
 import type { ExampleSet } from './value-examples.js';
 
@@ -147,7 +147,116 @@ export function coverage(gold: ReadonlySet<string>, kept: ReadonlySet<string>): 
   return hit === 0 ? 'none' : 'some';
 }
 
-/** The tables a linker keeps, at the budget the prompt can afford. */
+/**
+ * One field, spelled the way both sides can compare it.
+ *
+ * The pair rather than the name, because `id` exists on most of BIRD's tables and a set of names
+ * would report a perfect linker for naming the wrong table's `id`. Case-folded because a card may
+ * spell a column `Qty` and a gold statement `qty`.
+ */
+export function fieldKey(table: string, column: string): string {
+  return `${table.toLowerCase()}\u0000${column.toLowerCase()}`;
+}
+
+/**
+ * What a field-level rule would keep of a case, and what it would cost.
+ *
+ * `total` counts the fields the gold statement names that this card can actually offer: a name the
+ * card does not have is not a field of the card, so a rule cannot keep it or lose it. `linked` is how
+ * many of them the shipped linker names. `spare` is the other direction — the linked fields the gold
+ * never names — and it is the price side: a filter keeps them, pays for them, and gains nothing.
+ *
+ * `total` of zero is not a miss. `count(*)` names no column of the table it counts from, a
+ * `select 1` names no table, and both are cases where the extractor abstained rather than failed;
+ * the tally keeps them in their own bucket so an abstention is never read as a linker error.
+ */
+export interface FieldCoverage {
+  readonly total: number;
+  readonly linked: number;
+  readonly spare: number;
+  readonly coverage: Coverage;
+}
+
+/**
+ * The fields a gold statement names, restricted to the ones a card can offer.
+ *
+ * Two forms, two rules. A qualified pair names its table and is kept if that table is one the
+ * statement reads and has that column. A bare name belongs to every table the statement reads that
+ * has a column of that name — the same over-keeping the card ceiling uses, and for the same reason:
+ * the linker cannot tell them apart either, and under-counting here would make a realizable rule's
+ * coverage look worse than it is while making its risk look smaller.
+ */
+export function goldFieldKeys(sql: string, schema: readonly SchemaTable[]): Set<string> {
+  const read = new Set(tableRefs(sql).map((ref) => ref.table.toLowerCase()));
+  const columns = new Map<string, Set<string>>();
+  for (const table of schema) {
+    columns.set(table.table.toLowerCase(), new Set(table.columns.map((column) => column.name.toLowerCase())));
+  }
+  const keys = new Set<string>();
+  const add = (table: string, column: string): void => {
+    const known = columns.get(table);
+    if (known === undefined || !known.has(column)) return;
+    keys.add(fieldKey(table, column));
+  };
+  const fields = referencedFields(sql);
+  for (const field of fields.qualified) {
+    if (read.has(field.table)) add(field.table, field.column);
+  }
+  for (const name of fields.bare) {
+    for (const table of read) add(table, name);
+  }
+  return keys;
+}
+
+/**
+ * The fields a linker names, in the same spelling `goldFieldKeys` produces.
+ *
+ * One path, and it is the prompt's: `buildAskMessages` is what the arm sends, so a linker read here
+ * is the linker the question will meet. `topK` is passed through rather than re-implemented — the
+ * curve in `FIELD_TOPS` is the same function at a larger budget, not a second linker that could
+ * disagree with the first about which columns a question is about.
+ */
+export function linkedFieldKeys(
+  question: string,
+  schema: readonly SchemaTable[],
+  recallers: readonly Recaller[],
+  topK = 12,
+): Set<string> {
+  const linked = buildAskMessages({ question, schema, linking: true, recallers, topK }).linked;
+  return new Set(linked.map((column) => fieldKey(column.table, column.column)));
+}
+
+/**
+ * The linker budgets a card rule could be built at, from the shipped one up.
+ *
+ * The ceiling arm removed 93.5% of the card while losing nothing the gold reads, and the shipped
+ * linker names 31% of the gold's fields — so the question a filter has to answer is not "is the card
+ * too big" but "at what budget does the linker name enough of the fields". This is that budget, and
+ * the reading is a frontier: recall against the fields kept, not a single number.
+ */
+export const FIELD_TOPS = [12, 24, 48, 96] as const;
+
+/** What one budget would keep, over the cases an arm ran. */
+export interface FieldBudget {
+  readonly topK: number;
+  /** The fields named per case, averaged. The card a rule would send is roughly this wide. */
+  readonly kept: number;
+  /** How many of the gold's fields the linker names at this budget, summed. */
+  readonly linked: number;
+  /** The cases where every field the gold names is named, at this budget. */
+  readonly covered: number;
+}
+
+/** How many of the gold's fields a proposal names, and what it would keep that the gold never names. */
+export function fieldCoverage(gold: ReadonlySet<string>, linked: ReadonlySet<string>): FieldCoverage {
+  if (gold.size === 0) return { total: 0, linked: 0, spare: linked.size, coverage: 'none' };
+  let hit = 0;
+  for (const key of gold) if (linked.has(key)) hit += 1;
+  let spare = 0;
+  for (const key of linked) if (!gold.has(key)) spare += 1;
+  return { total: gold.size, linked: hit, spare, coverage: hit === gold.size ? 'all' : hit === 0 ? 'none' : 'some' };
+}
+
 /** What one case costs, and what each proposal would keep of it. */
 export interface CardRow {
   readonly id: string;
@@ -174,6 +283,16 @@ export interface CardRow {
   readonly carded: Coverage;
   /** The gold's tables the card shows, counted rather than bucketed. */
   readonly cardedKept: number;
+  /**
+   * The same question one level down, at the field rather than the table.
+   *
+   * Tables are the unit a linker is documented in and fields are the unit the card is priced in: the
+   * ceiling arm showed 93.5% of the columns can go while nothing the gold reads is lost, and a rule
+   * that keeps whole tables cannot reach that. This is the count that says whether a field-level rule
+   * exists at all — the linker's recall of the gold's fields, and the fields it names that the gold
+   * never does.
+   */
+  readonly fields: FieldCoverage;
 }
 
 export interface CardTally {
@@ -193,6 +312,13 @@ export interface CardTally {
   readonly candidateKept: number;
   readonly carded: Readonly<Record<Coverage, number>>;
   readonly cardedKept: number;
+  /** The gold's fields the linker named, summed; the denominator is `fieldTotal`. */
+  readonly fieldTotal: number;
+  readonly fieldLinked: number;
+  readonly fieldSpare: number;
+  /** Field-level coverage, over the cases that name a field at all. `fieldEmpty` holds the rest. */
+  readonly fieldCoverage: Readonly<Record<Coverage, number>>;
+  readonly fieldEmpty: number;
 }
 
 /**
@@ -216,7 +342,8 @@ export function tallyCards(rows: readonly CardRow[]): CardTally {
   const shipped = zero();
   const candidate = zero();
   const carded = zero();
-  const sum = { calls: 0, tables: 0, goldTables: 0, goldChars: 0, spareChars: 0, shippedKept: 0, candidateKept: 0, cardedKept: 0, cardShare: 0, spareShare: 0 };
+  const fieldCovered = zero();
+  const sum = { calls: 0, tables: 0, goldTables: 0, goldChars: 0, spareChars: 0, shippedKept: 0, candidateKept: 0, cardedKept: 0, cardShare: 0, spareShare: 0, fieldTotal: 0, fieldLinked: 0, fieldSpare: 0, fieldEmpty: 0 };
   for (const row of rows) {
     for (const key of Object.keys(total) as (keyof PromptCost)[]) total[key] += row.cost[key];
     shipped[row.shipped] += 1;
@@ -230,6 +357,13 @@ export function tallyCards(rows: readonly CardRow[]): CardTally {
     sum.shippedKept += row.shippedTables;
     sum.candidateKept += row.candidateTables;
     sum.cardedKept += row.cardedKept;
+    sum.fieldTotal += row.fields.total;
+    sum.fieldLinked += row.fields.linked;
+    sum.fieldSpare += row.fields.spare;
+    // An abstention is not a miss: `count(*)` names no field of the table it counts from, and
+    // bucketing those cases as `none` would publish the extractor's limits as a linker failure.
+    if (row.fields.total === 0) sum.fieldEmpty += 1;
+    else fieldCovered[row.fields.coverage] += 1;
     const cardTotal = row.cost.card === 0 ? 1 : row.cost.card;
     sum.cardShare += row.cost.card / (row.cost.system + row.cost.user);
     sum.spareShare += row.spareChars / cardTotal;
@@ -251,6 +385,11 @@ export function tallyCards(rows: readonly CardRow[]): CardTally {
     candidateKept: sum.candidateKept,
     carded,
     cardedKept: sum.cardedKept,
+    fieldTotal: sum.fieldTotal,
+    fieldLinked: sum.fieldLinked,
+    fieldSpare: sum.fieldSpare,
+    fieldCoverage: fieldCovered,
+    fieldEmpty: sum.fieldEmpty,
   };
 }
 
@@ -260,7 +399,7 @@ export function tallyCards(rows: readonly CardRow[]): CardTally {
  * Absolute counts first, shares second: "eleven per cent" of a prompt is not a work item until
  * it is a number of characters per question and a number of calls.
  */
-export function cardLines(tally: CardTally): string[] {
+export function cardLines(tally: CardTally, budget: readonly FieldBudget[] = []): string[] {
   const n = tally.total === 0 ? 1 : tally.total;
   const per = (value: number): number => Math.round(value / n);
   const pct = (value: number, of: number): string => (of === 0 ? '0.0%' : `${((value / of) * 100).toFixed(1)}%`);
@@ -291,6 +430,22 @@ export function cardLines(tally: CardTally): string[] {
   out.push(
     `  the card this arm sends keeps ${(tally.cardedKept / n).toFixed(1)} of the gold's ${(tally.goldTables / n).toFixed(1)} tables: all ${String(tally.carded.all)}, some ${String(tally.carded.some)}, none ${String(tally.carded.none)}`,
   );
+  // The unit the card is priced in. The ceiling arm removed 93.5% of the columns while losing nothing
+  // the gold reads, and a table-level rule cannot reach that: most of those columns belong to tables
+  // the gold *does* read. This is the count a field-level rule has to be argued against, and the
+  // second line is its price — the fields it would keep and pay for, which the gold never names.
+  out.push(
+    `  the shipped linker names ${(tally.fieldLinked / n).toFixed(1)} of the gold's ${(tally.fieldTotal / n).toFixed(1)} fields (${pct(tally.fieldLinked, tally.fieldTotal)}): all of them on ${String(tally.fieldCoverage.all)} cases, some on ${String(tally.fieldCoverage.some)}, none on ${String(tally.fieldCoverage.none)}; ${String(tally.fieldEmpty)} name no field`,
+  );
+  out.push(`  it also names ${(tally.fieldSpare / n).toFixed(1)} fields the gold never does, which a field rule would keep and pay for`);
+  // The frontier, when one was measured. A single budget says what the linker does; the curve says
+  // whether the budget is what limits it, which is the difference between raising `topK` and
+  // replacing the recallers.
+  for (const entry of budget) {
+    out.push(
+      `  at ${String(entry.topK).padStart(2)} fields: ${pct(entry.linked, tally.fieldTotal)} of the gold's fields, keeping ${entry.kept.toFixed(1)} fields and covering every one of them on ${String(entry.covered)} cases`,
+    );
+  }
   return out;
 }
 
@@ -325,6 +480,18 @@ export function cardProblems(input: {
   if (input.unrenderable > 0) {
     problems.push(
       `CARD: ${String(input.unrenderable)} case(s) belong to an arm whose prompt needs a block the artifact does not keep, so the prompt this tool renders is not the one that was sent`,
+    );
+  }
+  // The field line is the fourth way this instrument can be wrong, and it is the quietest: an
+  // extractor that stopped recognising gold statements publishes a recall of zero, which reads as
+  // "the linker names nothing" rather than "the reader is broken". Both thresholds are absolute and
+  // deliberately loose — a real corpus has some `count(*)`, not half of them.
+  if (input.tally.total > 0 && input.tally.fieldTotal === 0) {
+    problems.push('CARD: the field reader named no field on any case, so the field recall is a broken reader rather than a linker measurement');
+  }
+  if (input.tally.total > 0 && input.tally.fieldEmpty * 2 > input.tally.total) {
+    problems.push(
+      `CARD: ${String(input.tally.fieldEmpty)} of ${String(input.tally.total)} cases name no field, which is more abstentions than a corpus of statements can produce — the field reader is not being read`,
     );
   }
   return problems;
@@ -607,6 +774,14 @@ export interface CardOutcome {
   readonly billed: readonly BilledRow[];
   /** How much of each arm's bill each kind of call is. Empty on an artifact written before the split. */
   readonly purposes: readonly PurposeRow[];
+  /**
+   * The linker budget frontier: the same recallers at `FIELD_TOPS`, over the same cases.
+   *
+   * A filter's viability is a ratio of two things this table holds — how many gold fields the linker
+   * names, and how many fields it names at all — so publishing either alone would let a reader pick
+   * the half that flatters a proposal.
+   */
+  readonly fieldBudget: readonly FieldBudget[];
   readonly problems: readonly string[];
 }
 
@@ -750,6 +925,7 @@ export async function runCard(settings: CardSettings): Promise<CardOutcome> {
   const byId = new Map(questions.map((question) => [String(question.question_id), question]));
   const definitions = report.controls?.synthesizedDefinitions ?? {};
   const rows: CardRow[] = [];
+  const curve = FIELD_TOPS.map((topK) => ({ topK, kept: 0, linked: 0, covered: 0 }));
   const drops = { unknownQuestion: 0, unknownArm: 0, definitionGap: 0, unrenderable: 0 };
   // Before the filter: an arm that is not in the artifact produces an empty table, and an empty
   // table prints as zeros in the same columns a measured zero would.
@@ -808,6 +984,21 @@ export async function runCard(settings: CardSettings): Promise<CardOutcome> {
       const gold = goldTables(question.SQL);
       const shipped = linkedTables(question.question, built.schema, SHIPPED_RECALLERS);
       const candidate = linkedTables(question.question, built.schema, CANDIDATE_RECALLERS);
+      // The same question one level down. Read from the card this arm renders, not from the plain
+      // schema: the fields a rule could keep are the fields the prompt shows, and an instrument that
+      // counted against a card the arm does not send would price a prompt nobody sends (ADR-219).
+      const goldFields = goldFieldKeys(question.SQL, built.schema);
+      const linked = linkedFieldKeys(question.question, built.schema, SHIPPED_RECALLERS);
+      const fields = fieldCoverage(goldFields, linked);
+      // The frontier, one budget at a time. The shipped budget reuses the set just built, so the
+      // anchor of the curve is the same reading as the row rather than a second call that could
+      // drift from it.
+      for (const budget of curve) {
+        const keys = budget.topK === 12 ? linked : linkedFieldKeys(question.question, built.schema, SHIPPED_RECALLERS, budget.topK);
+        budget.kept += keys.size;
+        budget.linked += fieldCoverage(goldFields, keys).linked;
+        if (goldFields.size > 0 && [...goldFields].every((key) => keys.has(key))) budget.covered += 1;
+      }
       // The tables the prompt shows are the keys of `chars`: one entry per table in the schema this
       // arm rendered, whatever rule produced it.
       const shown = new Set(chars.keys());
@@ -828,6 +1019,7 @@ export async function runCard(settings: CardSettings): Promise<CardOutcome> {
         candidateTables: candidate.size,
         carded: coverage(gold, shown),
         cardedKept: [...gold].filter((name) => shown.has(name)).length,
+        fields,
       });
     }
   }
@@ -841,7 +1033,16 @@ export async function runCard(settings: CardSettings): Promise<CardOutcome> {
     }),
     ...billedProblems(billed),
   ];
-  return { split: settings.layout.split, arm: settings.arm, rows, tally, drops, billed, purposes: purposeRows(report as BilledReportShape), problems };
+  // Means over cases for the two quantities a reader compares, sums for the two they add: a frontier
+  // is read as "at 24 the linker names 5.1 fields and 41% of the gold's", and both halves are per case.
+  const n = rows.length === 0 ? 1 : rows.length;
+  const fieldBudget = curve.map((budget) => ({
+    topK: budget.topK,
+    kept: budget.kept / n,
+    linked: budget.linked,
+    covered: budget.covered,
+  }));
+  return { split: settings.layout.split, arm: settings.arm, rows, tally, drops, billed, purposes: purposeRows(report as BilledReportShape), fieldBudget, problems };
 }
 
 export function cardPath(settings: CardSettings): string {
@@ -862,7 +1063,7 @@ export async function main(
 ): Promise<number> {
   const settings = resolveCardSettings(env, argv, root);
   const outcome = await runCard(settings);
-  for (const line of cardLines(outcome.tally)) console.log(line);
+  for (const line of cardLines(outcome.tally, outcome.fieldBudget)) console.log(line);
   for (const line of billedLines(outcome.billed)) console.log(line);
   for (const line of purposeLines(outcome.purposes)) console.log(line);
   console.log(

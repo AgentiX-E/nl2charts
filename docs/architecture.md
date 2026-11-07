@@ -1180,3 +1180,22 @@ the same questions and endpoint, the four components' individual readings summed
 presence of the others' defaults. So a system-level arm — the whole shape, at its own call count, on
 our harness — is not a shortcut around the method; it is the only instrument that can price a
 pipeline at all. Everything after it is ablation, and ablation is where the method works again.
+
+## A rule that keeps the right number of things for the wrong reason looks identical in the counts
+
+The card had been priced by its size for five rounds: 69.7% of the prompt, 56.1% of the bytes on
+tables the gold never reads, 13.5% removed by a pruning rule, 93.5% removed by a ceiling. Every one of
+those numbers is true, and together they supported a conclusion that turned out to be false — that the
+card's problem was how much of it there is. The missing quantity was one level down and one dimension
+across: not how many columns, but how many of them the answer needs.
+
+The two cards are the same width. The ceiling keeps 5.03 fields per case and all 5.03 are the gold's;
+the shipped linker keeps 5.3 and 1.6 of them are. A size-only reading cannot tell those apart, and a
+proposal built on a size reading — shrink the card — loses accuracy while looking like progress on
+every metric the instrument reports.
+
+So the rule: **a count of what a rule kept is only a measurement when it is published with a count of
+what it should have kept.** Precision beside recall, and the denominator named. Where the "should" needs
+an answer the system cannot have, that is what an oracle arm is for: it establishes the numerator's
+ceiling, and the realizable rule is then measured as a fraction of it rather than against its parent.
+A bucket that reports only its own size is a bucket that can be improved by keeping everything.

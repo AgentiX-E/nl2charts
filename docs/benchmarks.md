@@ -9229,3 +9229,72 @@ One process note, because it cost fourteen minutes of gate time. The dispatch we
 after the push and took the shared `bird-eval` slot from `ci.yml`'s Mini-Dev job, which had not reached
 the group yet. The rule this round writes down: **a verification dispatch waits until the gate's own
 BIRD job is queued or finished — "after the push" is not the same as "after the gate".**
+
+## Same card, same size, one and a half right fields instead of five
+
+The ceiling arm left one question open and it was the only one worth asking next: **93.5% of the card
+can go while nothing the gold reads is lost, so what stops a rule that never reads the answer from
+doing the same?** The answer needs no model call, and this round took it: `card.ts` now counts the
+gold's **fields** — table and column together — and compares them with the fields the shipped linker
+names.
+
+### The reading (`bench:bird:card`, Mini-Dev 496, zero calls)
+
+| quantity | value |
+| --- | --- |
+| fields the gold statements name | **2,494** (5.03 per case) |
+| of those, fields the shipped linker names | **773 = 31.0%** |
+| fields the linker names that the gold never does | **1,879** (precision 773 / 2,652 = **29.1%**) |
+| cases where every gold field is named | **16 of 496 (3.2%)** |
+| cases where some but not all are named | 364 (73.4%); 116 (23.4%) name none of them |
+
+And the budget frontier, same recallers at four `topK` values:
+
+| `topK` | gold fields named | fields kept per case | cases with every field |
+| --- | --- | --- | --- |
+| 12 (shipped) | 31.0% | 5.3 | 16 |
+| 24 | 33.4% | 6.5 | 23 |
+| 48 | 34.0% | 7.4 | 24 |
+| 96 | **34.8%** | 8.0 | 25 |
+
+An eight-fold budget buys **+3.8pp of recall**. The budget is not what limits the linker.
+
+### The comparison that decides the next lever
+
+| card | fields kept per case | of those, fields the gold names |
+| --- | --- | --- |
+| ceiling arm (`card-gold`) | **5.03** | **5.03** (all of them, by construction) |
+| shipped linker at `topK` 12 | **5.3** | **1.6** |
+
+The two cards are the **same width**. The ceiling gains 11.09pp not by keeping fewer fields but by
+keeping the right ones, and the linker keeps the right number and the wrong list. Every reading this
+document has published about the card has been about its size — 69.7% of the prompt, 56.1% of it on
+tables the gold never reads, 13.5% saved by `prune`, 93.5% saved by the ceiling — and the one number
+that was missing is the one that separates them.
+
+Three consequences, in the order they are cheap.
+
+1. **Narrowing the card to the linker's fields is closed, and it is closed by arithmetic rather than by
+   a run.** Such a rule would drop 69% of the gold's fields on the average case and lose something on
+   all but 16 of 496. `select-prune` already measured the direction — 13.5% of the card removed and
+   **−1.50pp**, because its seeds drop 4.8% of the gold's tables. This rule removes 65% of the gold's
+   fields. Nobody needs a dispatch to know what that is.
+2. **The lever is the selection, not the size.** So the next arm does not remove anything: it keeps
+   every field — recall 100% by construction — and changes only the **order** the card is read in,
+   putting the linker's columns first. That is the one experiment that separates *removal* from
+   *attention*: if order alone recovers a share of 11.09pp, then the ceiling's gain was emphasis and
+   the linker's 29% precision never had to be good; if it recovers nothing, the gain was removal and
+   only a linker with real field recall can reach it.
+3. **`topK` is not a knob and will not be turned.** Raising it eight-fold moved recall 3.8pp and the
+   card 2.6 fields, so a proposal to widen the hint is a proposal to spend characters for nothing.
+
+### What the instrument guards against now
+
+The field line can be wrong in a way that reads as a finding, so it is guarded the same way the rest of
+this file is. `fieldTotal === 0` across a run is refused as a **broken reader** rather than published
+as "the linker names nothing"; more than half the cases naming no field is refused as well, since no
+corpus of statements produces that and a reader that stopped recognising gold SQL would. An
+abstention is kept in its own bucket (`fieldEmpty`) instead of being counted as `none`: `count(*)`
+names no column of the table it counts from, and the extractor's limit is not the linker's failure.
+Precision is published beside recall for the same reason — a coverage number alone can always be
+improved by naming everything.

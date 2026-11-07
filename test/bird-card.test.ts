@@ -28,7 +28,12 @@ import {
   cardProblems,
   costOf,
   coverage,
+  FIELD_TOPS,
+  fieldCoverage,
+  fieldKey,
+  goldFieldKeys,
   goldTables,
+  linkedFieldKeys,
   isEntry,
   main,
   resolveCardSettings,
@@ -186,6 +191,66 @@ describe('what the gold statement reads and what a proposal keeps', () => {
 
 });
 
+describe('the fields a rule would keep, and the ones it would pay for', () => {
+  const card = [
+    { table: 'items', columns: [{ name: 'id', type: 'INTEGER' }, { name: 'name', type: 'TEXT' }, { name: 'price', type: 'REAL' }] },
+    { table: 'orders', columns: [{ name: 'id', type: 'INTEGER' }, { name: 'qty', type: 'INTEGER' }, { name: 'item_id', type: 'INTEGER' }] },
+  ] as never;
+
+  it('keys a field by its table as well as its name, in one spelling', () => {
+    // `id` is on most of BIRD's tables: a set of names would call naming the wrong one a hit.
+    expect(fieldKey('Orders', 'Qty')).toBe(fieldKey('orders', 'qty'));
+    expect(fieldKey('orders', 'qty')).not.toBe(fieldKey('items', 'qty'));
+  });
+
+  it('keeps a qualified pair only when the statement reads that table and the card has that column', () => {
+    expect([...goldFieldKeys('select o.qty from orders o', card)]).toEqual([fieldKey('orders', 'qty')]);
+    // A pair the card cannot offer is not a field of the card: a rule can neither keep nor lose it.
+    expect([...goldFieldKeys('select o.total from orders o', card)]).toEqual([]);
+    expect([...goldFieldKeys('select c.qty from orders o', card)]).toEqual([]);
+  });
+
+  it('attributes a bare name to every table the statement reads that has it', () => {
+    // Over-keeping, the same direction the card ceiling takes: the linker cannot tell the two `id`s
+    // apart either, and counting one would make a real rule look worse than it is.
+    expect([...goldFieldKeys('select id from items join orders on orders.item_id = items.id', card)].sort()).toEqual(
+      // The bare `id` lands on both tables' `id`; the join condition's own pair contributes
+      // `orders.item_id`, which is a field of the card and therefore part of the denominator.
+      [fieldKey('items', 'id'), fieldKey('orders', 'id'), fieldKey('orders', 'item_id')].sort(),
+    );
+    // A table the statement does not read contributes nothing, however many of its columns match.
+    expect([...goldFieldKeys('select price from items', card)]).toEqual([fieldKey('items', 'price')]);
+  });
+
+  it('names no field on a statement that names no column of a table it reads', () => {
+    expect([...goldFieldKeys('select count(*) from items', card)]).toEqual([]);
+    expect([...goldFieldKeys('select 1', card)]).toEqual([]);
+  });
+
+  it('names the fields the shipped linker keeps, in the same spelling', () => {
+    const linked = linkedFieldKeys('what is the price of each item', card as never, ['name', 'alias', 'value']);
+    expect([...linked]).toContain(fieldKey('items', 'price'));
+  });
+
+  it('buckets a case by how much of it a proposal keeps', () => {
+    const gold = new Set([fieldKey('items', 'price'), fieldKey('items', 'name')]);
+    expect(fieldCoverage(gold, new Set([fieldKey('items', 'price'), fieldKey('items', 'name'), fieldKey('orders', 'qty')]))).toEqual({
+      total: 2,
+      linked: 2,
+      spare: 1,
+      coverage: 'all',
+    });
+    expect(fieldCoverage(gold, new Set([fieldKey('items', 'price')])).coverage).toBe('some');
+    expect(fieldCoverage(gold, new Set([fieldKey('orders', 'qty')]))).toMatchObject({ linked: 0, spare: 1, coverage: 'none' });
+  });
+
+  it('calls a case that names no field an abstention rather than a miss', () => {
+    // `count(*)` has no field to keep. Reporting it as `none` would publish the extractor's limits
+    // as a linker failure, which is the quietest way this instrument can lie.
+    expect(fieldCoverage(new Set(), new Set([fieldKey('items', 'id')]))).toEqual({ total: 0, linked: 0, spare: 1, coverage: 'none' });
+  });
+});
+
 function row(overrides: Partial<CardRow> = {}): CardRow {
   return {
     id: '1',
@@ -201,11 +266,26 @@ function row(overrides: Partial<CardRow> = {}): CardRow {
     candidateTables: 2,
     carded: 'all',
     cardedKept: 1,
+    fields: { total: 3, linked: 3, spare: 2, coverage: 'all' },
     ...overrides,
   };
 }
 
 describe('the sums a reader acts on', () => {
+  it('sums the fields, and keeps an abstention out of the coverage buckets', () => {
+    // Three cases: one covers all three fields, one covers one of two, one names no field at all.
+    const tally = tallyCards([
+      row(),
+      row({ fields: { total: 2, linked: 1, spare: 4, coverage: 'some' } }),
+      row({ fields: { total: 0, linked: 0, spare: 9, coverage: 'none' } }),
+    ]);
+    expect([tally.fieldTotal, tally.fieldLinked, tally.fieldSpare]).toEqual([5, 4, 15]);
+    // The abstention is its own bucket: counting it as `none` would publish the extractor's limit as
+    // a linker failure, which is the reading this bucket exists to prevent.
+    expect(tally.fieldCoverage).toEqual({ all: 1, some: 1, none: 0 });
+    expect(tally.fieldEmpty).toBe(1);
+  });
+
   it('adds the blocks, counts the coverages and means the shares over cases', () => {
     const tally = tallyCards([row(), row({ shipped: 'all', spareChars: 0 })]);
     expect(tally.total).toBe(2);
@@ -224,6 +304,35 @@ describe('the sums a reader acts on', () => {
     const narrow = row({ cost: { system: 100, user: 10, rules: 10, card: 70, context: 0, hint: 5, question: 5 } });
     const tally = tallyCards([wide, narrow]);
     expect(tally.cardShare).toBeCloseTo((900 / 1100 + 70 / 110) / 2, 6);
+  });
+
+  it('prints the field recall, its buckets and the fields it would pay for', () => {
+    const lines = cardLines(
+      tallyCards([
+        row({ fields: { total: 4, linked: 4, spare: 0, coverage: 'all' } }),
+        row({ fields: { total: 4, linked: 2, spare: 6, coverage: 'some' } }),
+      ]),
+    ).join('\n');
+    expect(lines).toContain("the shipped linker names 3.0 of the gold's 4.0 fields (75.0%)");
+    expect(lines).toContain('all of them on 1 cases, some on 1, none on 0');
+    expect(lines).toContain('3.0 fields the gold never does');
+  });
+
+  it('prints the frontier a budget would buy, one line per budget', () => {
+    const budget = [
+      { topK: 12, kept: 5.3, linked: 2, covered: 16 },
+      { topK: 96, kept: 31.4, linked: 4, covered: 58 },
+    ];
+    const lines = cardLines(tallyCards([row({ fields: { total: 4, linked: 2, spare: 1, coverage: 'some' } })]), budget).join('\n');
+    // Both halves of the trade are on the line: a budget that names more gold fields also puts more
+    // fields on the card, and printing either alone lets a reader keep the half they like.
+    expect(lines).toContain('at 12 fields: 50.0% of the gold\'s fields, keeping 5.3 fields');
+    expect(lines).toContain('covering every one of them on 16 cases');
+    expect(lines).toContain('at 96 fields: 100.0%');
+  });
+
+  it('prints no frontier when none was measured', () => {
+    expect(cardLines(tallyCards([row()])).join('\n')).not.toContain('fields:');
   });
 
   it('does not divide by zero on an empty population', () => {
@@ -277,6 +386,25 @@ describe('the four ways the instrument can be wrong', () => {
     expect(cardProblems({ tally: tallyCards([row()]), definitionGap: 0, unrenderable: 2 })[0]).toContain(
       'not the one that was sent',
     );
+  });
+
+  it('fails when the field reader named nothing, which is a reader and not a linker', () => {
+    // The quietest failure this instrument has: a reader that stopped recognising gold statements
+    // publishes a recall of zero, and zero reads as a fact about the linker.
+    const blank = row({ fields: { total: 0, linked: 0, spare: 0, coverage: 'none' } });
+    expect(cardProblems({ tally: tallyCards([blank]), definitionGap: 0, unrenderable: 0 })[0]).toContain(
+      'broken reader',
+    );
+  });
+
+  it('fails when most cases name no field, which no corpus of statements can produce', () => {
+    const abstained = row({ fields: { total: 0, linked: 0, spare: 0, coverage: 'none' } });
+    const counted = row({ fields: { total: 3, linked: 3, spare: 0, coverage: 'all' } });
+    expect(cardProblems({ tally: tallyCards([abstained, abstained, counted]), definitionGap: 0, unrenderable: 0 })[0]).toContain(
+      'not being read',
+    );
+    // Half is the boundary and it is not a failure: the check is `more than half abstained`.
+    expect(cardProblems({ tally: tallyCards([abstained, counted]), definitionGap: 0, unrenderable: 0 })).toEqual([]);
   });
 
 });
@@ -643,6 +771,22 @@ describe('a measurement over a real split', () => {
     const outcome = await runCard(settings);
     const path = writeCardArtifact(settings, outcome);
     expect(JSON.parse(readFileSync(path, 'utf8')).tally.total).toBe(1);
+  });
+
+  it('carries the field reading and the budget frontier into the artifact', async () => {
+    const settings = settingsFor(dataset(), reportBody([1]));
+    const outcome = await runCard(settings);
+    const written = JSON.parse(readFileSync(writeCardArtifact(settings, outcome), 'utf8')) as {
+      readonly rows: readonly { readonly fields: { readonly total: number } }[];
+      readonly tally: { readonly fieldTotal: number };
+      readonly fieldBudget: readonly { readonly topK: number; readonly kept: number; readonly linked: number }[];
+    };
+    expect(written.rows[0]?.fields.total).toBe(written.tally.fieldTotal);
+    // Four budgets, one per `FIELD_TOPS` entry, and the curve is monotone in what it keeps: a budget
+    // that names more gold fields cannot put fewer fields on the card.
+    expect(written.fieldBudget.map((entry) => entry.topK)).toEqual([...FIELD_TOPS]);
+    const kept = written.fieldBudget.map((entry) => entry.kept);
+    expect([...kept].sort((left, right) => left - right)).toEqual(kept);
   });
 
   it('exits zero on a clean measurement and one under --strict when the instrument failed', async () => {
