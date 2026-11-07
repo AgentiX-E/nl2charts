@@ -92,6 +92,14 @@ describe('report completeness', () => {
     );
   });
 
+  it('refuses a grounding arm whose funnel the artifact dropped', () => {
+    // The rewrite is silent when it runs and silent when it does not: the statement changes, the
+    // score moves by the count, and a row without the count cannot be told from its parent.
+    expect(() => assertReportComplete({ arms: [{ arm: 'inline+evidence+ground', total: 1532 }] })).toThrow(
+      /grounds its literals.*no grounding funnel/,
+    );
+  });
+
   it('refuses a conditional-dissent arm whose funnel the artifact dropped', () => {
     // The arm's price is a share, and the share is the funnel: a row without it reports an
     // accuracy beside a cost that 0.745 calls a case and 0.745 of a case describe equally well.

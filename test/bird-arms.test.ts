@@ -37,6 +37,8 @@ import {
   SAMPLED_SOURCES,
   auditFunnel,
   assertAuditFired,
+  groundingFunnel,
+  assertGroundingFired,
   emptyRetryFunnel,
   offeredCandidates,
   candidateCeiling,
@@ -60,7 +62,7 @@ import type { BirdQuestion } from '../eval/bird/data.js';
  * delta cannot be attributed to anything else. A future edit that adds a second
  * change to a pair turns this red before it turns the benchmark unreadable.
  */
-const LEVERS = ['notes', 'evidence', 'repairs', 'linking', 'profile', 'definitions', 'focus', 'interpret', 'vote', 'demonstrations', 'select', 'values', 'plan', 'planBy', 'repairFeedback', 'shapeGuard', 'mixed', 'pool', 'pairwise', 'sourcesVisible', 'judge', 'judgeFormat', 'emptyRetry', 'audit', 'decompose', 'samples', 'canonical', 'shuffle', 'prune', 'columnSelect', 'agreement', 'sourceLinking', 'sourceRepairs', 'reconcile', 'reconcileAdopt', 'sampleColumns', 'dissent', 'dissentVerify', 'masked', 'intent', 'selectRule', 'projection'] as const;
+const LEVERS = ['notes', 'evidence', 'repairs', 'linking', 'profile', 'definitions', 'focus', 'interpret', 'vote', 'demonstrations', 'select', 'values', 'plan', 'planBy', 'repairFeedback', 'shapeGuard', 'mixed', 'pool', 'pairwise', 'sourcesVisible', 'judge', 'judgeFormat', 'emptyRetry', 'audit', 'decompose', 'samples', 'canonical', 'shuffle', 'prune', 'columnSelect', 'agreement', 'sourceLinking', 'sourceRepairs', 'reconcile', 'reconcileAdopt', 'sampleColumns', 'dissent', 'dissentVerify', 'masked', 'intent', 'selectRule', 'projection', 'ground'] as const;
 
 function changedLevers(left: Arm, right: Arm): string[] {
   const levers = LEVERS.filter((lever) => left[lever] !== right[lever]);
@@ -1559,5 +1561,38 @@ describe('the workflow\'s one question before it fetches 8.5 GB', () => {
     expect(lines).toEqual([]);
     expect(entryExit('/x.ts', 'file:///x.ts', (line) => lines.push(line), { BIRD_ARMS: 'names' })).toBe(0);
     expect(lines).toEqual(['no']);
+  });
+});
+
+describe('the grounding funnel', () => {
+  it('sums the substitutions and the refusals, and counts the cases the rewrite changed', () => {
+    const runs = [
+      { grounding: { substitutions: 1, refused: 0 } },
+      { grounding: { substitutions: 0, refused: 1 } },
+      { grounding: { substitutions: 2, refused: 0 } },
+    ];
+    expect(groundingFunnel(runs as never)).toEqual({ substitutions: 3, refused: 1, rewritten: 2, share: 0.6667 });
+  });
+
+  it('reports an arm with no reader as zeros rather than as an average', () => {
+    // A case with no grounding record is an arm that asked no column; reading it as "zero
+    // substitutions per case" would make a missing reader look like a corpus that spelled
+    // everything right.
+    expect(groundingFunnel([])).toEqual({ substitutions: 0, refused: 0, rewritten: 0, share: 0 });
+    expect(groundingFunnel([{ grounding: undefined }] as never)).toEqual({ substitutions: 0, refused: 0, rewritten: 0, share: 0 });
+  });
+
+  it('refuses a grounding arm that substituted nothing over a real sample', () => {
+    // The arms this pattern exists for: a lever that is silent when it does not run, because the
+    // statement it does not change still scores.
+    const runs = Array.from({ length: 100 }, () => ({ grounding: { substitutions: 0, refused: 1 } }));
+    expect(() => assertGroundingFired('inline+evidence+ground', runs as never)).toThrow(/substituted nothing.*lever did not run/);
+  });
+
+  it('accepts a sample too small to say anything about, and a run with one substitution', () => {
+    expect(() => assertGroundingFired('inline+evidence+ground', [] as never)).not.toThrow();
+    const runs = Array.from({ length: 100 }, () => ({ grounding: { substitutions: 0, refused: 0 } }));
+    runs[99] = { grounding: { substitutions: 1, refused: 0 } } as never;
+    expect(() => assertGroundingFired('inline+evidence+ground', runs as never)).not.toThrow();
   });
 });

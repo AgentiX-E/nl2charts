@@ -65,7 +65,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { mcnemarExact, pairedResolution } from '@agentix-e/nl2charts-devkit';
 import type { MatchReason } from '@agentix-e/nl2charts-devkit';
-import { guardNullOrder } from '@agentix-e/nl2charts-ai';
+import { applyGrounding, guardNullOrder } from '@agentix-e/nl2charts-ai';
 import { domainsOf, groundLiteralCase } from './literal-repair.js';
 import type { ColumnDomain } from './literal-repair.js';
 import { literalSites } from './statement.js';
@@ -206,6 +206,25 @@ export const REWRITE_RULES: readonly RewriteRule[] = [
     claim: 'the same edit under no gate: what the "returned nothing" condition costs',
     needsDomains: true,
     apply: groundCase,
+  },
+  {
+    // The rule the pipeline ships, priced as itself rather than as its idea: `applyGrounding` is
+    // the function `inline+evidence+ground` calls, over the domains this harness already read. The
+    // two lines above are the same edit built from the eval scanner, and the difference between
+    // them is the difference between "what the corpus needs" and "what the product does".
+    name: 'ground-shipped',
+    claim: 'the rewrite the pipeline runs, on the statements this artifact executed',
+    needsDomains: true,
+    apply: (input) => {
+      const byColumn = new Map<string, readonly string[]>();
+      for (const domain of input.domains) {
+        const key = domain.column.toLowerCase();
+        byColumn.set(key, [...(byColumn.get(key) ?? []), ...domain.values]);
+      }
+      if (byColumn.size === 0) return undefined;
+      const outcome = applyGrounding(input.sql, (query) => byColumn.get(query.column.toLowerCase()));
+      return outcome.substitutions.length === 0 ? undefined : outcome.sql;
+    },
   },
 ];
 

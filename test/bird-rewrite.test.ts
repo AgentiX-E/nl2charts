@@ -793,3 +793,47 @@ describe('main', () => {
     expect(await main(['--artifact', artifact, '--arm', 'a'], base, {})).toBe(1);
   });
 });
+
+describe('the rule the pipeline ships, priced as itself', () => {
+  const at = (sql: string, extra: Partial<RewriteInput> = {}): RewriteInput => ({
+    question: '',
+    sql,
+    domains: [{ table: 'items', column: 'name', values: ['Cup', 'Lid'] }],
+    empty: false,
+    goldSql: '',
+    passed: false,
+    ...extra,
+  });
+
+  it('is the product function, not a second implementation of the same idea', () => {
+    // The offline table this rule prints is the number the arm is dispatched to reproduce, so it
+    // has to run `applyGrounding` and nothing else. The `in` list is the case the two scanners
+    // could disagree about: the eval scanner reads `like` and `between` too, the product one does
+    // not, and a difference between them here would be a difference between the claim and the code.
+    expect(ruleOf('ground-shipped').apply(at("select id from items where name in ('cup', 'lid')"))).toBe(
+      "select id from items where name in ('Cup', 'Lid')",
+    );
+  });
+
+  it('does not fire on a pattern, because the product scanner does not read one', () => {
+    expect(ruleOf('ground-shipped').apply(at("select id from items where name like 'cup'"))).toBeUndefined();
+  });
+
+  it('cannot fire without domains, and says so by returning nothing', () => {
+    expect(ruleOf('ground-shipped').apply(at("select id from items where name = 'cup'", { domains: [] }))).toBeUndefined();
+  });
+
+  it('unions two tables that store the same column, as the harness reader does', () => {
+    const both = at("select id from items i join lids l on l.id = i.id where name = 'cup'", {
+      domains: [
+        { table: 'items', column: 'name', values: ['Cup'] },
+        { table: 'lids', column: 'name', values: ['Lid'] },
+      ],
+    });
+    expect(ruleOf('ground-shipped').apply(both)).toBe("select id from items i join lids l on l.id = i.id where name = 'Cup'");
+  });
+
+  it('leaves a statement whose value is already the stored spelling alone', () => {
+    expect(ruleOf('ground-shipped').apply(at("select id from items where name = 'Cup'"))).toBeUndefined();
+  });
+});

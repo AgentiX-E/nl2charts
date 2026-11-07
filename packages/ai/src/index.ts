@@ -34,4 +34,6 @@ export { DEFAULT_STRATEGY, MIN_OBSERVATIONS, STRATEGIES, admissible, chooseStrat
 export type { Answer, Decision, DecisionOptions, FirstContact, Interval, Observer, ObserverOptions, ProtocolStep, ProtocolVerdict, Refusal, Strategy, StrategyName, Tally } from './adapt.js';
 export type { AskMessagesInput, AskRequest, AskResult, PipelineOptions, PromptOptions, PromptProfile } from './pipeline.js';
 export { guardNullOrder, splitKeys } from './null-order.js';
+export { applyGrounding, groundLiterals } from './ground.js';
+export type { ColumnQuery, ColumnValues, Grounding, GroundingRefusal, GroundingRefusalReason, GroundingSubstitution } from './ground.js';
 export type { NullOrderGuard } from './null-order.js';

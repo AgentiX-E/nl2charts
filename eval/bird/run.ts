@@ -43,6 +43,8 @@ import type { CaseOutcome, MatchReason } from '@agentix-e/nl2charts-devkit';
 import { buildSchema, datasetName, describeQuestionSet, distinctQuestions, loadDescriptions, loadQuestions, loadTables, stratifiedSample } from './data.js';
 import type { BirdQuestion, QuestionSet } from './data.js';
 import { createOracle } from './oracle.js';
+import { createDomainReader } from './literal-repair.js';
+import { tableRefs } from './statement.js';
 import { probeValueGaps } from './value-probe.js';
 import type { ProbeColumn } from './value-probe.js';
 import { canonicalSql } from './canonical.js';
@@ -493,6 +495,16 @@ export interface Arm {
    */
   readonly audit?: 'conditions';
   /**
+   * Ground each literal in the column's own spelling, before the engine sees the statement.
+   *
+   * The one rewrite in this repository that needs no model judgement: `where status = 'banned'`
+   * against a column storing `Banned` is a statement that returns nothing, and the column can say
+   * so. It is a lever on the arm because it costs a query and changes the statement that runs;
+   * `bench:bird:rewrite` priced the same edit offline at +14 wins and 0 losses on dev, and this arm
+   * is that derivation under test.
+   */
+  readonly ground?: boolean;
+  /**
    * Let the model name the columns the card keeps, in one call before the statement.
    *
    * Every card-cutting instrument this harness has decides *tables*: the card measurement says
@@ -779,6 +791,16 @@ export const ARMS: readonly Arm[] = [
   // write before it writes one that expresses them. One lever, one call, aimed at the largest
   // failure class the ladder found — 16.1-18.8pp where a gold filter's column is absent.
   { name: 'inline+evidence+audit', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', audit: 'conditions' },
+  // The one rewrite the data proves, applied before the engine sees the statement.
+  //
+  // One lever from `inline+evidence`: the same prompt, the same card, the same single call, and a
+  // query per literal instead of a call. `bench:bird:rewrite` priced the same edit offline on this
+  // arm's own artifact — 22 fires, 14 wins, 0 losses, p = 0.0001 — and the gated form the project
+  // measured for three rounds (only after an empty result) won 7, so the gate was costing exactly
+  // what it excluded. This arm is the derivation under test: if the pipeline reaches the domain
+  // reader, the score is the rewrite's; if it does not, the funnel reports zero substitutions and
+  // `assertGroundingFired` refuses the reading rather than publishing the parent's accuracy.
+  { name: 'inline+evidence+ground', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', ground: true },
   // One lever from `inline+evidence`, and the only one here that changes no card and spends no
   // call: a rule line about which columns the answer carries. It exists because the model
   // comparison put the largest negative term on `column-count` (130 → 204) while the same bucket
@@ -1210,6 +1232,7 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   // −1.41pp through the card's ceiling (1,008 → 980 reachable cases); `select-mixed` +0.60pp
   // inside 2.10pp; `select5` +0.40pp inside 3.33pp for the largest bill in the catalogue.
   vote: 'majority over the same three candidates: the selector control, measured 17:17 against `select` (p = 1) — running it every push re-derives a tie at 2,092 tokens',
+  'inline+evidence+ground': 'the one rewrite the data proves, applied before the statement runs: priced offline on the parent arm\'s own artifact at 22 fires, 14 wins, 0 losses (+0.91pp, p = 0.0001) with the pairs disjoint from every other rule — run it when the domain reader or the prompt changes, and move it into the chain once the dispatch reproduces the offline count',
   'select-prune': 'the card cut to the join closure: measured −1.4pp, and the loss is the ceiling rather than the selector (1,008 → 980 reachable cases), so it is priced; run it when the card changes',
   'inline+evidence+llm-select': 'the card cut to the columns the model names: measured −5.65pp against its parent (53:25, p = 0.0020, MDE 4.99pp) on 496 questions at `41190457163`, with the choice deciding 495 of 496 cases and keeping 10.8% of the columns for +39% prompt tokens — the mechanism fires and is a net loss, so it is kept as the ablation reference for relevance-by-model rather than run on every push',
   // Measured on `41290647076` in the same run as its parent and the column arm, so the three
@@ -1402,6 +1425,11 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   // result, one extra call, same prompt and same hints. The only pair in this table whose
   // mechanism fires before anything is executed.
   ['inline+evidence', 'inline+evidence+audit'],
+  // One lever from the plain single call, and the only pair in this table that spends no call at
+  // all: the same prompt, the same card, one query per literal, and a statement the column can
+  // correct. The pair prices a rewrite, not a decision — which is why its delta is expected to be
+  // exactly the count `bench:bird:rewrite` already reported on the parent's own statements.
+  ['inline+evidence', 'inline+evidence+ground'],
   // One lever from the plain single call, and the cheapest one in this table: one rule line
   // about the projection, no extra call and no card change. The pair exists so the delta is
   // attributable to the sentence rather than to a prompt that grew somewhere else too.
@@ -1709,6 +1737,15 @@ export interface CaseRun extends CaseOutcome {
    */
   readonly audit?: { readonly fired: boolean; readonly named: number; readonly rewritten: boolean };
   /**
+   * How many literals the data settled before the statement ran.
+   *
+   * `substitutions` is the reach of the rewrite and `refused` is what it could not settle — a value
+   * the column does not hold, two spellings of it, or a column the harness could not read. An arm
+   * that declares the lever and reports zero substitutions on every case is an arm whose wiring
+   * never arrived, which is the defect `emptyRetry` shipped with for one round.
+   */
+  readonly grounding?: { readonly substitutions: number; readonly refused: number };
+  /**
    * The candidate set, in the order the selector saw it, with the truth for each.
    *
    * `candidateRecall` says whether the set held an answer; it cannot say *which* candidate
@@ -1970,6 +2007,15 @@ export function mergePurposes(
 export interface ArmReportRow {
   readonly arm: string;
   readonly total: number;
+  /**
+   * What the grounding rewrite reached, on the arm that carries it.
+   *
+   * `substitutions` is how many literals the data settled and `refused` how many it had an opinion
+   * about but could not settle. The second number is what stops the first from being read as a
+   * yield: a rewrite that fires nowhere because every column read failed is not a corpus that
+   * spelled everything right.
+   */
+  readonly grounding?: { readonly substitutions: number; readonly refused: number; readonly rewritten: number; readonly share: number };
   /**
    * The arm whose candidates this arm read instead of generating any.
    *
@@ -2816,6 +2862,76 @@ export function auditFunnel(runs: readonly CaseRun[]): {
 }
 
 /**
+ * The domain reader the grounding arm hands the pipeline, over one question's database.
+ *
+ * The pipeline knows no schema, so the reader resolves the statement's own references: an alias to
+ * its table, a table name to itself, and an unqualified column to every table the statement reads
+ * — the same rule `domainsOf` applies when the harness grounds a literal itself, so the two cannot
+ * disagree about which column was asked.
+ *
+ * A qualifier that names neither an alias nor a table of the statement (a comma join, a subquery)
+ * is answered as `undefined` rather than guessed at: reading the wrong table's values would ground
+ * a literal against a column the statement never compares. `undefined` and an empty list are
+ * different answers — one says "I could not look", the other "nothing is stored there" — and only
+ * the second is a fact about the database.
+ */
+export function groundingReader(
+  run: (sql: string) => Promise<OracleResult>,
+  db: string,
+): (query: { readonly column: string; readonly qualifier?: string; readonly sql: string }) => Promise<readonly string[] | undefined> {
+  const cache = new Map<string, readonly string[]>();
+  const read = createDomainReader(run, db, cache);
+  return async (query) => {
+    const refs = tableRefs(query.sql);
+    const aliases = new Map(refs.map((ref) => [ref.alias.toLowerCase(), ref.table]));
+    const named =
+      query.qualifier === undefined
+        ? undefined
+        : (aliases.get(query.qualifier.toLowerCase()) ?? refs.find((ref) => ref.table.toLowerCase() === query.qualifier?.toLowerCase())?.table);
+    if (query.qualifier !== undefined && named === undefined) return undefined;
+    const tables = [...new Set(named === undefined ? refs.map((ref) => ref.table) : [named])];
+    if (tables.length === 0) return undefined;
+    const values: string[] = [];
+    for (const table of tables) values.push(...(await read(table, query.column)));
+    return values.length === 0 ? undefined : values;
+  };
+}
+
+/**
+ * The grounding rewrite's reach, over the cases the arm ran.
+ *
+ * `substitutions` is what it changed and `refused` is what it could not settle. The second number
+ * is what keeps the first honest: a rule that fires on nothing because every column read failed
+ * would otherwise be indistinguishable from a corpus where every spelling was already right.
+ */
+export function groundingFunnel(runs: readonly CaseRun[]): {
+  readonly substitutions: number;
+  readonly refused: number;
+  readonly rewritten: number;
+  readonly share: number;
+} {
+  const substitutions = runs.reduce((total, run) => total + (run.grounding?.substitutions ?? 0), 0);
+  const refused = runs.reduce((total, run) => total + (run.grounding?.refused ?? 0), 0);
+  const rewritten = runs.filter((run) => (run.grounding?.substitutions ?? 0) > 0).length;
+  return { substitutions, refused, rewritten, share: runs.length === 0 ? 0 : Number((rewritten / runs.length).toFixed(4)) };
+}
+
+/**
+ * A grounding arm that grounded nothing is its parent with a domain reader attached.
+ *
+ * The failure mode is silent by construction: the statement is unchanged, so the accuracy is the
+ * parent's, and the only thing that distinguishes "the edit had nothing to do" from "the edit never
+ * ran" is this count. The threshold is the sample size the other asserts use.
+ */
+export function assertGroundingFired(armName: string, runs: readonly CaseRun[], minimumSample = MINIMUM_INSTRUMENT_SAMPLE): void {
+  if (runs.length < minimumSample) return;
+  if (runs.some((run) => (run.grounding?.substitutions ?? 0) > 0)) return;
+  throw new Error(
+    `arm ${armName}: across ${String(runs.length)} questions the grounding rewrite substituted nothing, so the arm is its parent with a dead domain reader — the lever did not run`,
+  );
+}
+
+/**
  * The shape the arm's replies had, aggregated over the cases that recorded one.
  *
  * Beside the accuracy rather than inside it, for the reason the contract exists: a score is
@@ -3339,6 +3455,12 @@ export function assertReportComplete(report: { readonly arms?: readonly ArmRepor
     }
     if (arm.audit !== undefined && row.audit === undefined) {
       throw new Error(`arm ${row.arm} runs the audit turn and its row carries no audit funnel, so the call cannot be priced`);
+    }
+    if (arm.ground === true && row.grounding === undefined) {
+      // The rewrite is invisible in the accuracy when it does nothing, so the row has to carry the
+      // count: without it, "the corpus spelled everything right" and "the reader never answered"
+      // are the same report.
+      throw new Error(`arm ${row.arm} grounds its literals and its row carries no grounding funnel, so the rewrite cannot be told from a no-op`);
     }
     if (arm.samples !== undefined && row.sampleBlock === undefined) {
       // The block is the arm's only cost, and its width is the lever on the one arm that narrows it.
@@ -5312,6 +5434,16 @@ export const MECHANISMS: readonly Mechanism[] = [
     quiet: () => quietBank({ audit: { fired: false, named: 0, rewritten: false } }),
   },
   {
+    lever: 'ground',
+    declares: (arm) => arm.ground === true,
+    // The rewrite is silent by construction: the statement changes, the score does not move, and a
+    // dead domain reader looks exactly like a corpus whose spellings were already right.
+    guard: ({ armName, runs }) => assertGroundingFired(armName, runs),
+    records: 'grounding',
+    scenarios: ['the grounding arm'],
+    quiet: () => quietBank({ grounding: { substitutions: 0, refused: 0 } }),
+  },
+  {
     lever: 'intent',
     declares: (arm) => arm.intent !== undefined,
     // Asked and never rendered is the one state in which this arm is its parent plus a rule line
@@ -5574,6 +5706,14 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
           // three candidates, where the harness owns the turn; passing the mode down would give the
           // pipeline a switch for a lookup it cannot make.
           ...(target.emptyRetry === undefined || target.emptyRetry === 'values' ? {} : { emptyRetry: target.emptyRetry }),
+          // The domain reader is the harness's, because the pipeline has no engine: it asks the
+          // oracle for the column's values, resolving the statement's own aliases and unioning an
+          // unqualified column over every table the statement reads. A column that resolves to no
+          // table at all is reported as unknown rather than as empty, which is the difference
+          // between "nothing is stored there" and "I did not look".
+          ...(target.ground === true
+            ? { readColumnValues: groundingReader((sql: string) => oracle.run(question.db_id, sql), question.db_id) }
+            : {}),
           temperature: target.vote === undefined ? 0 : 0.7,
           prompt: promptFor(target, question, prepared.blocksFor(target, question)),
           // Two mechanisms need the engine's answer, not one: the repair loop and the empty-result
@@ -6222,6 +6362,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
           calls: callsMade(),
           failures: asked.failures,
           ...(asked.audit === undefined ? {} : { audit: asked.audit }),
+          ...(asked.grounding === undefined ? {} : { grounding: asked.grounding }),
           // The pipeline's own funnel, on the return path the sampling branch never takes. It was
           // absent here, so an arm whose lever is this turn reported `fired: 0` even after it ran
           // — the mechanism was observable in the pipeline and invisible in the artifact.
@@ -6565,6 +6706,7 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
     ...(arm.emptyRetry === undefined ? {} : { emptyRetry: { mode: arm.emptyRetry, ...emptyRetryFunnel(runs) } }),
     ...(arm.reconcile === undefined ? {} : { reconcile: { policy: arm.reconcileAdopt ?? 'always', ...reconcileFunnel(runs) } }),
     ...(arm.audit === undefined ? {} : { audit: auditFunnel(runs) }),
+    ...(arm.ground === undefined ? {} : { grounding: groundingFunnel(runs) }),
     // The fourth candidate's whole mechanism, on the arm that draws it: how often the vocabulary
     // produced a statement and which refusals it produced when it did not. A mixed arm publishes
     // it because the lever rides on one of its sources rather than on the arm.

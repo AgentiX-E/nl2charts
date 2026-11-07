@@ -3525,3 +3525,78 @@ describe('the free selector', () => {
     expect(rows.find((row) => row.arm === 'select-mixed-rule')?.passed).toBe(QUESTIONS.length - 1);
   });
 });
+
+/**
+ * The one rewrite that needs no model judgement, priced end to end.
+ *
+ * The chain fixture's third question filters `cities.name` to a stored spelling — `Hangzhou` — and
+ * SQLite compares text case-sensitively, so a statement that writes `'hangzhou'` returns nothing.
+ * That is the failure the rewrite exists for: the model had the right column and the right value in
+ * mind and the engine disagreed about the spelling, and no prompt can prevent it because no schema
+ * card says which case a column uses.
+ *
+ * The scenario is the derivation `bench:bird:rewrite` priced offline (22 fires, 14 wins, 0 losses on
+ * 1,532 dev questions) under test: the parent arm must fail the question, the grounding arm must
+ * answer it, and the artifact must show the substitution rather than a score that moved for no
+ * stated reason.
+ */
+describe('the grounding arm', () => {
+  const groundRoot = mkdtempSync(join(tmpdir(), 'bird-ground-'));
+  afterAll(() => {
+    rmSync(groundRoot, { recursive: true, force: true });
+  });
+  const groundData = writeChainBirdDataset(groundRoot);
+  /** The statement the wrong-case spelling produces, written the way the prompt asks for one. */
+  const WRONG_CASE =
+    "select max(o.qty) from orders o join warehouses w on w.id = o.warehouse_id join cities c on c.id = w.city_id where c.name = 'hangzhou'";
+
+  it('runs the statement the column spells, and reports the substitution it made', async () => {
+    const asked = CHAIN_QUESTIONS[2]?.question as string;
+    const gold: Readonly<Record<string, string>> = Object.fromEntries(CHAIN_QUESTIONS.map((entry) => [entry.question, entry.sql]));
+    const result = await run({
+      plan: {
+        // The endpoint matches a question by looking for its text in the prompt, so the scenario
+        // has to hand the fixture's own statements over — the module-level map belongs to the other
+        // dataset and would answer every prompt with a definition line.
+        gold,
+        // Only the question with a literal is answered in the wrong case; the other two are
+        // answered correctly, so a difference between the arms cannot be a difference in the
+        // corpus.
+        // Raw statements: the endpoint fences whatever a plan returns, and a plan that fences its
+        // own answer produces a reply whose first block is a fence.
+        first: (question) => (question === asked ? WRONG_CASE : (gold[question] ?? 'select 1')),
+      },
+      env: { BIRD_DATA: groundData, BIRD_ARMS: 'inline+evidence,inline+evidence+ground' },
+    });
+    // The log travels with the assertion: a runner that refuses a document exits non-zero and says
+    // why on stderr, and a bare `toBe(0)` hides the sentence that identifies the defect.
+    expect(result.code, result.printed.join('\n')).toBe(0);
+    const rows = result.report.arms as {
+      readonly arm: string;
+      readonly passed: number;
+      readonly grounding?: { readonly substitutions: number; readonly refused: number; readonly rewritten: number; readonly share: number };
+    }[];
+    const byName = new Map(rows.map((row) => [row.arm, row]));
+    // The parent returns no rows for the third question, because the column stores `Hangzhou`.
+    expect(byName.get('inline+evidence')?.passed).toBe(CHAIN_QUESTIONS.length - 1);
+    // The rewrite changes one literal and the answer arrives: the case turns on the spelling, and
+    // nothing else about the run moved.
+    expect(byName.get('inline+evidence+ground')?.passed).toBe(CHAIN_QUESTIONS.length);
+    expect(byName.get('inline+evidence+ground')?.grounding).toEqual({
+      substitutions: 1,
+      refused: 0,
+      rewritten: 1,
+      share: Number((1 / CHAIN_QUESTIONS.length).toFixed(4)),
+    });
+    // The parent has no reader, so it reports no funnel at all — absence is not a zero.
+    expect(byName.get('inline+evidence')?.grounding).toBeUndefined();
+    // The statement the second arm ran is the one the column spells: the reads that ended in a
+    // correct answer carry `Hangzhou`, and none of them carries the spelling the model wrote.
+    // `sql` is the field the artifact publishes for every case, passing or not; `predicted` is the
+    // failure list's copy and reads as absent on exactly the cases that succeeded.
+    const ran = result.report.cases as { readonly arm: string; readonly sql?: string }[];
+    const grounded = ran.filter((row) => row.arm === 'inline+evidence+ground' && row.sql?.includes('cities')).map((row) => row.sql as string);
+    expect(grounded.some((sql) => sql.includes("'Hangzhou'"))).toBe(true);
+    expect(grounded.every((sql) => !sql.includes("'hangzhou'"))).toBe(true);
+  });
+});

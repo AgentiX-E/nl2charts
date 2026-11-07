@@ -8,6 +8,8 @@ import type { Diagnosis, FailureClass } from './diagnose.js';
 import { buildPlanPrompt, parsePlan } from './plan.js';
 import { DECOMPOSE_RULES, parseDecomposed } from './decompose.js';
 import { emptyRetryMessages } from './empty.js';
+import { groundLiterals } from './ground.js';
+import type { ColumnValues } from './ground.js';
 import { auditMessages, countNamedConditions } from './audit.js';
 import { replyShape } from './format.js';
 import type { ReplyShape } from './format.js';
@@ -171,6 +173,21 @@ export interface PipelineOptions {
    *  says the caller does not measure it. */
   readonly execute?: (sql: string) => Promise<{ readonly rows: number } | void>;
   /**
+   * What each column stores, for the one rewrite the data proves before anything is executed.
+   *
+   * A statement that compares a column with a literal the column does not hold returns nothing,
+   * and the prompt cannot prevent it: no schema card says which case a value is written in. Given
+   * a reader, the pipeline asks the column and rewrites the literal to the spelling it stores —
+   * one query, no call, applied to the statement the model wrote and to every statement a repair
+   * writes. Measured on 1,532 dev questions at one 300 s ceiling, the ungated edit won 14 and lost
+   * 0; the gated form (only after an empty result) won 7, which is what the extra condition cost.
+   *
+   * The reader returns `undefined` rather than an empty list when it could not read the column:
+   * "this column holds nothing" and "I did not look" must not be the same answer, or the rule goes
+   * silently inert on a broken connection.
+   */
+  readonly readColumnValues?: ColumnValues;
+  /**
    * One more turn when an accepted statement returns no rows.
    *
    * Distinct from `maxRepairs`, which is budgeted for statements the engine refused:
@@ -238,6 +255,14 @@ export interface AskResult {
    * and without the count the two readings look the same.
    */
   readonly audit?: { readonly fired: boolean; readonly named: number; readonly rewritten: boolean };
+  /**
+   * How many literals the data settled, and how many it had an opinion about.
+   *
+   * `substitutions` is the reach of the rewrite. `refused` is what the rewrite could not settle —
+   * a value the column does not hold, two spellings of it, or a column that could not be read —
+   * and reporting it is what keeps a silent no-op from reading like a mechanism that fired.
+   */
+  readonly grounding?: { readonly substitutions: number; readonly refused: number };
   /**
    * How many sub-statements the reply wrote, when the pipeline asked for a decomposition.
    *
@@ -529,13 +554,22 @@ export function createPipeline(options: PipelineOptions): {
                   read: (text: string) => readReply(text).sql,
                 })
               : undefined;
-          const stated = audited === undefined ? sql : audited.sql;
+          const written = audited === undefined ? sql : audited.sql;
           const spent = audited === undefined ? attempts : attempts + 1;
           const audit =
             audited === undefined
               ? {}
-              : { audit: { fired: true, named: audited.named, rewritten: stated !== sql } };
-          if (!options.execute) return { sql: stated, attempts: spent, linked, failures, diagnoses, ...audit, ...steps, ...shape };
+              : { audit: { fired: true, named: audited.named, rewritten: written !== sql } };
+          // The one rewrite the data proves, applied to whatever statement is about to run — the
+          // generation's, a repair's, or the audit turn's. It sits here rather than on the first
+          // `sql` because every one of those is a statement the model wrote from the same prompt,
+          // and a rule that only reached the first would price itself on the turns it never saw.
+          const grounded =
+            options.readColumnValues === undefined ? undefined : await groundLiterals(written, options.readColumnValues);
+          const stated = grounded === undefined || grounded.substitutions.length === 0 ? written : grounded.sql;
+          const grounding =
+            grounded === undefined ? {} : { grounding: { substitutions: grounded.substitutions.length, refused: grounded.refused.length } };
+          if (!options.execute) return { sql: stated, attempts: spent, linked, failures, diagnoses, ...audit, ...grounding, ...steps, ...shape };
           try {
             const outcome = await options.execute(stated);
             const rows = rowCountOf(outcome);
@@ -549,11 +583,12 @@ export function createPipeline(options: PipelineOptions): {
                 diagnoses,
                 emptyRetry: { fired: true, recovered: retried.recovered },
                 ...audit,
+                ...grounding,
                 ...steps,
                 ...shape,
               };
             }
-            return { sql: stated, attempts: spent, linked, failures, diagnoses, ...audit, ...steps, ...shape };
+            return { sql: stated, attempts: spent, linked, failures, diagnoses, ...audit, ...grounding, ...steps, ...shape };
           } catch (error) {
             const diagnosis = diagnoseFailure({
               sql: stated,
