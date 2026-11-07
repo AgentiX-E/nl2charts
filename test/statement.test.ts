@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { codeOnly, literalSites, stringLiterals, tableRefs } from '../eval/bird/statement.js';
+import { codeOnly, literalSites, referencedFields, stringLiterals, tableRefs } from '../eval/bird/statement.js';
 
 /**
  * The scanner exists so that an edit lands on the token a human would point at. Every
@@ -304,5 +304,81 @@ describe('codeOnly', () => {
 
   it('leaves an unterminated literal readable', () => {
     expect(codeOnly("select 1 where a = 'x")).toBe("select 1 where a = 'x");
+  });
+});
+
+describe('the fields a statement names', () => {
+  it('resolves a qualified field through the alias the statement gave the table', () => {
+    const fields = referencedFields('select max(o.qty) from orders as o join warehouses w on w.id = o.warehouse_id');
+    expect(fields.qualified).toEqual([
+      { table: 'orders', column: 'qty' },
+      { table: 'warehouses', column: 'id' },
+      { table: 'orders', column: 'warehouse_id' },
+    ]);
+  });
+
+  it('keeps a quoted column name whole, spaces and punctuation included', () => {
+    const fields = referencedFields('select f."Charter School (Y/N)" from frpm f');
+    expect(fields.qualified).toEqual([{ table: 'frpm', column: 'charter school (y/n)' }]);
+  });
+
+  it('reports a bare name without attributing it to a table', () => {
+    const fields = referencedFields('select name, price from items');
+    expect(fields.bare).toEqual(expect.arrayContaining(['name', 'price']));
+    expect(fields.qualified).toEqual([]);
+  });
+
+  it('drops a qualifier that matches no table the statement reads', () => {
+    // `x` is a table-like prefix that no `from` introduces, which is how a correlated name or a
+    // function argument arrives. Attributing it would put a column on a card that cannot express it.
+    expect(referencedFields('select x.qty from items').qualified).toEqual([]);
+  });
+
+  it('contributes nothing from a string literal that looks like a field', () => {
+    expect(referencedFields("select 1 from items where name = 'a.b'").qualified).toEqual([]);
+  });
+
+  it('reads a bracketed column the same way it reads a quoted one', () => {
+    expect(referencedFields('select [Order Date] from orders').bare).toContain('order date');
+  });
+
+  it('names no field in a statement that reads no table, and keeps the keyword as a bare token', () => {
+    // `select` is a bare token here because the reader does not know the schema: it reports every
+    // unqualified identifier and the caller intersects with the columns a table actually has. A
+    // keyword filter in this file would be a second list of SQL words to keep in agreement with the
+    // parser, and the caller already has the only list that matters — the card.
+    expect(referencedFields('select 1')).toEqual({ qualified: [], bare: ['select'] });
+  });
+});
+
+describe('the field scanner at its edges', () => {
+  it('stops a qualified pair at the dot when no column follows it', () => {
+    // `t.` at the end of a statement is broken SQL, and reporting a field named "" would put an
+    // empty column on a card.
+    expect(referencedFields('select qty from orders o where o.').qualified).toEqual([]);
+  });
+
+  it('reports nothing for an unterminated quoted name', () => {
+    // A statement that never closes its quote has no field after it; the scanner refuses to guess
+    // where the name ended, which is the same rule the literal reader follows.
+    expect(referencedFields('select "qty from orders').qualified).toEqual([]);
+  });
+
+  it('steps over punctuation and numbers without treating them as names', () => {
+    const fields = referencedFields('select qty * 2 + 1, price from orders');
+    expect(fields.qualified).toEqual([]);
+    expect(fields.bare).toEqual(expect.arrayContaining(['qty', 'price']));
+    expect(fields.bare).not.toContain('2');
+  });
+
+  it('reads a table name written in brackets as a name, not as punctuation', () => {
+    expect(referencedFields('select [Order Date] from [orders]').bare).toContain('order date');
+  });
+
+  it('stops at the end of a statement whose last characters are spaces', () => {
+    // The scanner walks tokens up to the end of the text; a statement that ends in whitespace is
+    // every statement a formatter produced, and reading past it would index outside the string.
+    expect(referencedFields('select qty from orders   ').qualified).toEqual([]);
+    expect(referencedFields('select qty from orders   ').bare).toContain('qty');
   });
 });

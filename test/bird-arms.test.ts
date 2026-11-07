@@ -29,6 +29,8 @@ import {
   assertDecompositionFired,
   assertEmptyRetryFired,
   assertRepairPathFired,
+  assertCardRule,
+  narrowFields,
   assertUniqueArmLabels,
   decompositionFunnel,
   declaresDecomposition,
@@ -62,7 +64,7 @@ import type { BirdQuestion } from '../eval/bird/data.js';
  * delta cannot be attributed to anything else. A future edit that adds a second
  * change to a pair turns this red before it turns the benchmark unreadable.
  */
-const LEVERS = ['notes', 'evidence', 'repairs', 'linking', 'profile', 'definitions', 'focus', 'interpret', 'vote', 'demonstrations', 'select', 'values', 'plan', 'planBy', 'repairFeedback', 'shapeGuard', 'mixed', 'pool', 'pairwise', 'sourcesVisible', 'judge', 'judgeFormat', 'emptyRetry', 'audit', 'decompose', 'samples', 'canonical', 'shuffle', 'prune', 'columnSelect', 'agreement', 'sourceLinking', 'sourceRepairs', 'reconcile', 'reconcileAdopt', 'sampleColumns', 'dissent', 'dissentVerify', 'masked', 'intent', 'selectRule', 'projection', 'ground'] as const;
+const LEVERS = ['notes', 'evidence', 'repairs', 'linking', 'profile', 'definitions', 'focus', 'interpret', 'vote', 'demonstrations', 'select', 'values', 'plan', 'planBy', 'repairFeedback', 'shapeGuard', 'mixed', 'pool', 'pairwise', 'sourcesVisible', 'judge', 'judgeFormat', 'emptyRetry', 'audit', 'decompose', 'samples', 'canonical', 'shuffle', 'prune', 'columnSelect', 'agreement', 'sourceLinking', 'sourceRepairs', 'reconcile', 'reconcileAdopt', 'sampleColumns', 'cardColumns', 'dissent', 'dissentVerify', 'masked', 'intent', 'selectRule', 'projection', 'ground'] as const;
 
 function changedLevers(left: Arm, right: Arm): string[] {
   const levers = LEVERS.filter((lever) => left[lever] !== right[lever]);
@@ -883,6 +885,52 @@ describe('mixed candidate sources', () => {
     // gold statement, so no realizable rule can be expected to match it, and a reader who took
     // its delta as an achievable one would plan work that cannot land.
     expect(ON_DEMAND_ARMS['inline+evidence+samples-gold']).toMatch(/gold/);
+  });
+
+  it('keeps only the fields the gold statement names, and changes nothing else', () => {
+    // One field. The prompt, the hint, the call count and the definitions stay the parent's; the
+    // card's *content* is the lever, which is what makes its delta a price for the linker rather
+    // than a price for a smaller prompt.
+    const arm = resolveArm('inline+evidence+card-gold') as Arm;
+    expect(arm.cardColumns).toBe('gold');
+    expect(changedLevers(resolveArm('inline+evidence') as Arm, arm)).toEqual(['cardColumns']);
+    // An oracle is a ceiling: no rule that does not read the answer can reach it, and a reader who
+    // planned against its delta as if it were achievable would be planning work that cannot land.
+    expect(ON_DEMAND_ARMS['inline+evidence+card-gold']).toMatch(/gold/);
+  });
+
+  it('refuses a card decided by two rules', () => {
+    // Three rules produce a card: the shipped linker's closure (`prune`), the model's choice
+    // (`columnSelect`), and the gold's own fields. An arm declaring two of them publishes the delta
+    // of whichever ran last, which reads as a measurement of one lever.
+    const base = { name: 'both', cardColumns: 'gold' } as const;
+    expect(() => assertCardRule({ ...base, prune: 1 })).toThrow(/prune/);
+    expect(() => assertCardRule({ ...base, columnSelect: 'dense' })).toThrow(/columnSelect/);
+    expect(() => assertCardRule(base)).not.toThrow();
+    expect(() => assertCardRule({ name: 'plain', prune: 1 })).not.toThrow();
+  });
+
+  it('cuts a card down to the fields a statement reads, and counts what it removed', () => {
+    const card = [
+      { table: 'items', columns: [{ name: 'id', type: 'INTEGER' }, { name: 'name', type: 'TEXT' }, { name: 'price', type: 'REAL' }] },
+      { table: 'orders', columns: [{ name: 'id', type: 'INTEGER' }, { name: 'qty', type: 'INTEGER' }] },
+    ] as never;
+    // A table the statement does not read is gone with its columns; a table it reads keeps only the
+    // fields it names. `4` removed of `5` is what the guard reads as "the rule ran".
+    const narrowed = narrowFields(card, 'select max(qty) from orders');
+    expect(narrowed.schema.map((table) => table.table)).toEqual(['orders']);
+    expect(narrowed.schema[0]?.columns.map((column) => column.name)).toEqual(['qty']);
+    expect([narrowed.columns, narrowed.dropped]).toEqual([1, 4]);
+    // A statement that names no column of the table it reads keeps the whole table: `count(*)` is
+    // the common case, and a card stripped of the counted table cannot answer.
+    const counted = narrowFields(card, 'select count(*) from items');
+    expect(counted.schema.map((table) => table.table)).toEqual(['items']);
+    expect(counted.schema[0]?.columns.length).toBe(3);
+    expect(counted.dropped).toBe(2);
+    // A statement that reads nothing keeps the card it was given, and says it removed nothing.
+    const nothing = narrowFields(card, 'select 1');
+    expect(nothing.schema).toBe(card);
+    expect(nothing.dropped).toBe(0);
   });
 
   it('counts which decomposition won, including the ones that never did', () => {

@@ -44,7 +44,7 @@ import { buildSchema, datasetName, describeQuestionSet, distinctQuestions, loadD
 import type { BirdQuestion, QuestionSet } from './data.js';
 import { createOracle } from './oracle.js';
 import { createDomainReader } from './literal-repair.js';
-import { tableRefs } from './statement.js';
+import { referencedFields, tableRefs } from './statement.js';
 import { probeValueGaps } from './value-probe.js';
 import type { ProbeColumn } from './value-probe.js';
 import { canonicalSql } from './canonical.js';
@@ -190,6 +190,25 @@ export interface Arm {
    * be fitted on the split it is measured on.
    */
   readonly sampleColumns?: 'gold';
+  /**
+   * Keep only the fields the gold statement names, and count what that removed.
+   *
+   * The schema card is the prompt: on Mini-Dev it is 69.7% of the characters sent, and 56.1% of it
+   * belongs to tables no gold statement reads. An arm that could drop all of it would be cheaper and,
+   * if AskData's ablation transfers, more accurate — their perfect schema linking scores 77.4 against
+   * 71.2 for the full schema on the same 500 questions and the same model. This arm is that ceiling
+   * for this repository, and it is the first time the linker is priced in accuracy rather than in
+   * characters: `card.ts` has only ever said how many characters a perfect linker would save.
+   *
+   * `'gold'` reads the answer, so the delta is a ceiling and never an adoption. It is deliberately
+   * not a column allow-list: the set is a property of the case, and an arm carrying one fitted on the
+   * split would price the fit.
+   *
+   * One field-selection lever per arm. `prune` seeds from the shipped linker and `columnSelect` asks
+   * the model, and an arm that combined either with this one would report a delta about which rule
+   * ran last.
+   */
+  readonly cardColumns?: 'gold';
   /**
    * Answer with a query object instead of a statement: which tables, which joins, which filters as
    * triples, which grain, which order. The statement is rendered by `renderIntent`.
@@ -780,6 +799,20 @@ export const ARMS: readonly Arm[] = [
   // alive for three rounds on a 2.22pp ceiling and +1.31pp at p = 0.052, which is the reading a
   // ceiling is supposed to settle rather than prolong.
   { name: 'inline+evidence+samples-gold', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', samples: 'profile', sampleColumns: 'gold' },
+  // The card restricted to the fields the gold statement names, and to no other. An oracle arm, and
+  // the answer to a question this repository has only ever asked in characters: what is a perfect
+  // linker worth in accuracy?
+  //
+  // The literature prices it. AskData's own ablation, 500 Mini-Dev questions and one model: full
+  // schema 71.2 with the hint, their linker 73.0, perfect linking 77.4 — so a linker that never errs
+  // is worth +6.2pp over the schema we send, and +4.4pp over theirs. This repository's readings point
+  // the other way, which is why the arm is decisive rather than confirmatory: `select-prune` loses
+  // 1.50pp on the full split (p = 0.035) while saving 13.5% of the prompt, so "smaller card" is not
+  // by itself a good. What prune cannot separate is size from content — it drops 4.8% of the gold's
+  // tables to its seeds — and this arm drops none of the tables a gold statement reads. If it moves
+  // the score, the lever is which fields are on the card; if it does not, the 8.2pp that separates
+  // this repository from that cell is the author and the hint, not the linker.
+  { name: 'inline+evidence+card-gold', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', cardColumns: 'gold' },
   // The empty-result turn on the arm this repository ships, which is not the arm it was
   // measured on: `select-mixed+empty` priced the message against a four-call parent whose
   // statements are chosen from three samples, and a trigger that fires on 5.2% of a single
@@ -1268,6 +1301,7 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   // Its note is a question until the run that answers it lands. Saying "measured" here before
   // the number exists is how an arm acquires a verdict it never earned.
   'inline+evidence+samples-gold': 'the same sampler narrowed to the columns the gold statement filters on: an oracle, so its delta is a ceiling for the family and not an achievable one — run it when a column rule is proposed, never as a candidate',
+  'inline+evidence+card-gold': 'the same prompt with the card cut down to the fields the gold statement names: an oracle for what a perfect linker is worth in accuracy, not in characters — run it to price the linker, never as a candidate',
   'inline+evidence+samples-wide': "the same lever with MAC-SQL's rule instead of ours: six most-frequent values of every non-key column, a small numeric dictionary included, a date collapsed to one, NULL first — dispatched to price the competitor's block on our cases, and until that artifact exists this note is the question rather than the verdict",
   // The verdict was recorded after the run, and it is the one the pre-registered criterion returns:
   // `column-count` fell 129 → 124 and `values` rose 462 → 469, so the rule moved failures rather
@@ -1826,6 +1860,14 @@ export interface CaseRun extends CaseOutcome {
    */
   readonly sampleBlock?: { readonly columns: number };
   /**
+   * What the field rule removed from this case's card, on the arm that keeps only the gold's fields.
+   *
+   * Per case rather than per arm because the two failures the guard has to separate are both
+   * run-wide: a rule that removed nothing on any case (its parent renamed) and a rule that emptied
+   * the card on one case (a statement naming no table). A total cannot tell them apart.
+   */
+  readonly fieldBlock?: { readonly columns: number; readonly dropped: number };
+  /**
    * What the intent candidate's reply was read as, on the case that drew it.
    *
    * One record per case, not a per-arm count: the refusal reasons are a distribution over a
@@ -2120,6 +2162,19 @@ export interface ArmReportRow {
     readonly empty: number;
   };
   /**
+   * What the field rule kept, on the arm whose card is the fields its gold names.
+   *
+   * The ratio is the lever: an arm that keeps 98% of the columns and publishes a delta is publishing
+   * a delta about nothing. `emptied` is the D56 count on this rule — the cases it left with no column
+   * at all cannot answer the question, and a wrong answer is a different finding.
+   */
+  readonly fieldBlock?: {
+    readonly cases: number;
+    readonly kept: number;
+    readonly dropped: number;
+    readonly emptied: number;
+  };
+  /**
    * What the worked examples reached, on the arms that ask for them.
    *
    * `cases` is the denominator, `blocks` the cases that carried at least one example and `examples`
@@ -2216,6 +2271,24 @@ export function readPinnedDefinitions(path: string): Map<string, string> | undef
  * that never existed — the same shape as a samples arm with an empty block, one field further
  * along, and the same rule: refuse it at the declaration rather than after a run.
  */
+/**
+ * One field-selection lever per arm, and a reason for the rule.
+ *
+ * `prune` decides tables from the shipped linker's seeds, `columnSelect` asks the model, and
+ * `cardColumns: 'gold'` reads the answer. Each produces a card, and an arm that declared two of them
+ * would report the delta of whichever ran last — a number that looks like a measurement of one lever
+ * and is a measurement of an order of operations.
+ */
+export function assertCardRule(arm: Pick<Arm, 'name' | 'cardColumns' | 'prune' | 'columnSelect'>): void {
+  if (arm.cardColumns === undefined) return;
+  const rivals = [arm.prune === undefined ? undefined : 'prune', arm.columnSelect === undefined ? undefined : 'columnSelect'].filter(
+    (name): name is string => name !== undefined,
+  );
+  if (rivals.length > 0) {
+    throw new Error(`arm ${arm.name} keeps only the gold's fields and also declares ${rivals.join(' and ')}, so its card would be decided twice`);
+  }
+}
+
 export function assertSampleRule(arm: Pick<Arm, 'name' | 'samples' | 'sampleColumns'>): void {
   if (arm.sampleColumns === undefined || arm.samples !== undefined) return;
   throw new Error(
@@ -3129,6 +3202,47 @@ export function assertSampleBlockFired(armName: string, runs: readonly CaseRun[]
 }
 
 /**
+ * What the field rule kept, over the cases an arm ran.
+ *
+ * `kept` and `dropped` are sums, and the ratio between them is the lever: a card restricted to the
+ * gold's fields is worth something only if it is materially smaller, and a rule that kept 98% of the
+ * columns would publish an accuracy difference about nothing. `emptied` counts the cases where the
+ * rule left no column at all — the statement named no table, or named only tables the card does not
+ * describe — which is a case that cannot answer the question and must not be read as a wrong answer.
+ */
+export function fieldBlockFunnel(
+  runs: readonly CaseRun[],
+): { readonly cases: number; readonly kept: number; readonly dropped: number; readonly emptied: number } | undefined {
+  // Narrowed by a type predicate rather than filtered and then read with `?.`: the fallback after
+  // the optional chain can never fire, and a branch no run can reach is a number in the coverage
+  // report that means nothing.
+  const counted = runs.filter(
+    (run): run is CaseRun & { readonly fieldBlock: { readonly columns: number; readonly dropped: number } } => run.fieldBlock !== undefined,
+  );
+  if (counted.length === 0) return undefined;
+  const kept = counted.reduce((total, run) => total + run.fieldBlock.columns, 0);
+  const dropped = counted.reduce((total, run) => total + run.fieldBlock.dropped, 0);
+  return { cases: counted.length, kept, dropped, emptied: counted.filter((run) => run.fieldBlock.columns === 0).length };
+}
+
+/**
+ * A field rule that removed nothing is its parent renamed.
+ *
+ * The arm publishes a delta and the reader attributes it to perfect linking; if the rule removed
+ * nothing, the delta is the arm's own noise wearing that name. The count is the arm's per-case one —
+ * the card measurement cannot stand in for it, because that instrument prices a *linker* and this
+ * guard is about a rule that ran.
+ */
+export function assertFieldBlockFired(armName: string, runs: readonly CaseRun[], minimumSample = MINIMUM_INSTRUMENT_SAMPLE): void {
+  if (runs.length < minimumSample) return;
+  const funnel = fieldBlockFunnel(runs);
+  if (funnel !== undefined && funnel.dropped > 0) return;
+  throw new Error(
+    `arm ${armName}: across ${String(runs.length)} questions the field rule removed no column, so the arm is its parent renamed`,
+  );
+}
+
+/**
  * What the conditional fourth opinion did, over the cases an arm ran.
  *
  * `asked` is the number of cases whose pool agreed with itself, which is the only population the
@@ -3461,6 +3575,12 @@ export function assertReportComplete(report: { readonly arms?: readonly ArmRepor
       // count: without it, "the corpus spelled everything right" and "the reader never answered"
       // are the same report.
       throw new Error(`arm ${row.arm} grounds its literals and its row carries no grounding funnel, so the rewrite cannot be told from a no-op`);
+    }
+    if (arm.cardColumns !== undefined && row.fieldBlock === undefined) {
+      // The rule's whole claim is a smaller card, and the row without the count reports an accuracy
+      // difference with no statement of what was removed — the same defect the block funnel was
+      // added for, one lever over.
+      throw new Error(`arm ${row.arm} keeps only the gold's fields and its row carries no field funnel, so the card cannot be priced`);
     }
     if (arm.samples !== undefined && row.sampleBlock === undefined) {
       // The block is the arm's only cost, and its width is the lever on the one arm that narrows it.
@@ -4166,6 +4286,57 @@ export function renderableArm(arm: Arm): boolean {
 export const PROJECTION_RULE =
   'Select exactly the columns the question asks for, in the order it names them. Do not add an identifier column to make rows distinguishable, and do not add a column the question does not mention.';
 
+/**
+ * The card a statement's own fields fit on, and what fitting it removed.
+ *
+ * Two rules decide membership, and they are different rules. A `alias.column` pair names its table,
+ * so the pair is the field and the table is known. A bare identifier names no table: it is kept on
+ * every referenced table that has a column of that name, which over-keeps — three joined tables with
+ * an `id` keep three `id`s. That is the direction a ceiling has to err in. Under-keeping would make
+ * the arm drop a field the gold reads and publish the loss as a property of perfect linking.
+ *
+ * A table the statement does not read is dropped with its columns. Keeping it would make this arm a
+ * description of the card's size rather than of its content, and the two are what the measurement is
+ * separating: `select-prune` already showed that a smaller card is not automatically a better one
+ * (−1.50pp on the full split, p = 0.035) — but that arm loses 4.8% of the gold's tables to its seeds,
+ * and this one loses none of the ones the gold reads.
+ *
+ * Two statements keep more than their fields, and both for the same reason: `select 1` reads no
+ * table (an empty card is not a reading), and `count(*)` names no column of the table it reads (a
+ * card stripped of the counted table cannot answer). In both cases the count says the rule removed
+ * nothing on that case, which is what the guard reads — the rule's failure and its abstention are
+ * different findings and the funnel keeps them apart.
+ */
+export function narrowFields(
+  schema: readonly SchemaTable[],
+  sql: string,
+): { readonly schema: readonly SchemaTable[]; readonly columns: number; readonly dropped: number } {
+  const fields = referencedFields(sql);
+  const read = new Set(tableRefs(sql).map((ref) => ref.table.toLowerCase()));
+  const total = schema.reduce((sum, table) => sum + table.columns.length, 0);
+  // A statement that reads no table has no fields to keep. Returning the card it was given is the
+  // only honest answer: an empty card is not a prompt, and the count says the rule removed nothing,
+  // which is what `assertFieldBlockFired` reads.
+  if (read.size === 0) return { schema, columns: total, dropped: 0 };
+  const named = new Set(fields.qualified.map((field) => `${field.table}\u0000${field.column}`));
+  const bare = new Set(fields.bare);
+  const kept: SchemaTable[] = [];
+  let columns = 0;
+  for (const table of schema) {
+    const name = table.table.toLowerCase();
+    if (!read.has(name)) continue;
+    const chosen = table.columns.filter((column) => named.has(`${name}\u0000${column.name.toLowerCase()}`) || bare.has(column.name.toLowerCase()));
+    // A table the statement reads but whose columns we could not attribute keeps all of them:
+    // `count(*)` names no column, and a card stripped of the table it counts from cannot answer.
+    // Under-keeping here would make the arm's loss a property of the extractor rather than of
+    // perfect linking, which is the measurement.
+    const keptColumns = chosen.length === 0 ? table.columns : chosen;
+    kept.push({ ...table, columns: keptColumns });
+    columns += keptColumns.length;
+  }
+  return { schema: kept, columns, dropped: total - columns };
+}
+
 export function promptFor(arm: Arm, question: BirdQuestion, blocks: PromptBlocks = {}): PromptOptions {
   const { synthesized, definitions, retrieved, demonstrations, values } = blocks;
   const profile = arm.profile === 'adaptive' ? choosePromptProfile(question.question) : undefined;
@@ -4327,6 +4498,14 @@ export interface CardOutcome {
    * everywhere. Present only on arms with a sampler, so a zero is always a measured zero.
    */
   readonly samples?: { readonly columns: number };
+  /**
+   * What the field rule removed from this case's card, on the arm that keeps only the gold's fields.
+   *
+   * `dropped` is the number the guard reads: a rule that removed nothing anywhere is its parent
+   * renamed, and the accuracy difference it publishes would be read as a statement about perfect
+   * linking. Present only on that arm, so a zero is always a measured zero.
+   */
+  readonly fields?: { readonly columns: number; readonly dropped: number };
   readonly columns?: {
     readonly named: number;
     readonly unknown: number;
@@ -4800,7 +4979,7 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
    * cannot prune still passes the question, so there is one signature and one place where a card
    * is decided — a second entry point is how the measured prompt and the sent prompt drift apart.
    */
-  const schemaFor = (arm: Arm, question: BirdQuestion): readonly SchemaTable[] => {
+  const cardPlan = (arm: Arm, question: BirdQuestion): { readonly schema: readonly SchemaTable[]; readonly fields?: { readonly columns: number; readonly dropped: number } } => {
     const db = question.db_id;
     const base =
       arm.definitions === 'inline'
@@ -4815,10 +4994,20 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
     // from the question rather than from an artifact on purpose: an allow-list fitted on the split
     // would price the fit, and this arm's whole claim is the ceiling of the family.
     const wanted = arm.sampleColumns === 'gold' ? conditionColumns(question.SQL) : undefined;
-    const layered = arm.samples === undefined ? base : withSamples(base, db, arm.samples, wanted);
-    if (arm.prune === undefined) return layered;
-    return pruneSchema({ schema: layered, question: question.question, graph: graphFor(db), hops: arm.prune }).schema;
+    // Field selection runs before the block is layered, and after nothing else: the block is a
+    // property of the columns that survived, so an arm that both narrowed the card and sampled it
+    // would otherwise print values on columns its own rule removed.
+    const narrowedPlan = arm.cardColumns === 'gold' ? narrowFields(base, question.SQL) : undefined;
+    const fields = narrowedPlan === undefined ? undefined : { columns: narrowedPlan.columns, dropped: narrowedPlan.dropped };
+    const narrowed = (narrowedPlan?.schema ?? base) as SchemaTable[];
+    const layered = arm.samples === undefined ? narrowed : withSamples(narrowed, db, arm.samples, wanted);
+    // One return, because the two card levers are mutually exclusive by declaration: a second
+    // `fields` spread after the prune branch would be a branch no arm can reach.
+    const schema = arm.prune === undefined ? layered : pruneSchema({ schema: layered, question: question.question, graph: graphFor(db), hops: arm.prune }).schema;
+    return { schema, ...(fields === undefined ? {} : { fields }) };
   };
+
+  const schemaFor = (arm: Arm, question: BirdQuestion): readonly SchemaTable[] => cardPlan(arm, question).schema;
 
   /**
    * The card one candidate of a mixed set is sent on: the source's own card.
@@ -4861,10 +5050,12 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
     schema.reduce((total, table) => total + table.columns.filter((column) => (column.samples?.length ?? 0) > 0).length, 0);
 
   const cardFor = async (arm: Arm, question: BirdQuestion, provider: LlmProvider): Promise<CardOutcome> => {
-    const base = schemaFor(arm, question);
+    const plan = cardPlan(arm, question);
+    const base = plan.schema;
     const samples = arm.samples === undefined ? {} : { samples: { columns: samplesOn(base) } };
+    const fields = plan.fields === undefined ? {} : { fields: plan.fields };
     const mode = arm.columnSelect;
-    if (mode === undefined) return { schema: base, ...samples };
+    if (mode === undefined) return { schema: base, ...samples, ...fields };
     const reply = await provider.complete({
       messages: [
         { role: 'system', content: buildColumnPrompt(question.question, base) },
@@ -5476,6 +5667,16 @@ export const MECHANISMS: readonly Mechanism[] = [
     quiet: () => quietBank({ sampleBlock: { columns: 0 } }),
   },
   {
+    lever: 'cardColumns',
+    declares: (arm) => arm.cardColumns !== undefined,
+    // The rule's whole claim is a smaller card, so a run in which it removed nothing anywhere is its
+    // parent renamed — and the delta it publishes would be read as a statement about perfect linking.
+    guard: ({ armName, runs }) => assertFieldBlockFired(armName, runs),
+    records: 'fieldBlock',
+    scenarios: ['a card cut down to the fields the gold statement names'],
+    quiet: () => quietBank({ fieldBlock: { columns: 4, dropped: 0 } }),
+  },
+  {
     lever: 'demonstrations',
     declares: (arm) => arm.demonstrations === true,
     // An arm that asks for worked examples and receives none is its parent renamed. The count is
@@ -5547,6 +5748,8 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
   const arm = resolveArm(name);
   if (arm === undefined) throw new Error(`unknown arm ${name}`);
   assertSampleRule(arm);
+  // ...and a card decided by two rules is a delta about which one ran last.
+  assertCardRule(arm);
   // ...and a mask with no examples under it is a name for the parent arm.
   assertMaskingRule(arm);
   // ...and a dissent that names one of the arm's own sources is a fourth vote, refused before a
@@ -6422,6 +6625,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
           ? {}
           : { sampleBlock: { columns: candidateColumns } }
         : { sampleBlock: card.samples }),
+      ...(card?.fields === undefined ? {} : { fieldBlock: card.fields }),
     };
   });
   // Before any number is printed: an arm that never reached the database has no
@@ -6715,6 +6919,10 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
     // even though the arm itself declares no sampler: `select-samples`' whole claim is that its
     // third opinion rides a card with values on it.
     ...(arm.samples === undefined && arm.mixed === undefined ? {} : { sampleBlock: sampleBlockFunnel(runs) }),
+    // The card's content, on the arm that decides it from the answer: the funnel is what separates
+    // "smaller card helped" from "smaller card with the same fields helped", and the second is the
+    // only thing this arm can claim.
+    ...(arm.cardColumns === undefined ? {} : { fieldBlock: fieldBlockFunnel(runs) }),
     // What the examples cost and what they reached: the arm's whole claim is that the block carries
     // knowledge the hint does not, and a delta with no statement of how many cases carried one is a
     // reading about whichever subset of the split happened to retrieve a neighbour.

@@ -405,3 +405,137 @@ export function literalSites(sql: string): LiteralSite[] {
   }
   return out;
 }
+
+/** One field a statement names, resolved against the tables the statement reads. */
+export interface FieldRef {
+  /** Lower-cased table name, not the alias: the alias belongs to the statement, the table to the card. */
+  readonly table: string;
+  readonly column: string;
+}
+
+/** What a statement names, split by how it named it. */
+export interface ReferencedFields {
+  /**
+   * `alias.column` pairs, with the alias resolved back to the table.
+   *
+   * A pair whose qualifier matches no `from`/`join` reference is dropped rather than attributed to
+   * a table: `strftime` arguments and correlated subqueries name tables the outer statement does
+   * not read, and guessing would put a column on a card that cannot express the statement.
+   */
+  readonly qualified: readonly FieldRef[];
+  /**
+   * Identifiers written without a qualifier, lower-cased and not resolved.
+   *
+   * Resolution needs the card, which this file does not have: a bare `id` may belong to three of
+   * the tables a statement joins. The caller attributes it to every referenced table that has a
+   * column of that name — deliberately over-keeping, because the one consumer is a ceiling and a
+   * ceiling that keeps too much understates the thing it is a ceiling of.
+   */
+  readonly bare: readonly string[];
+}
+
+/**
+ * One token of the statement's code, with its position.
+ *
+ * The scanner rather than a regular expression because the two forms of an identifier cannot be
+ * written as one alternation without either losing the quoted name or capturing the wrong group:
+ * `"Driver Name"` and `Driver` are both identifiers, the first may contain the dot that separates a
+ * qualifier from its column, and the second may not.
+ */
+interface CodeToken {
+  readonly text: string;
+  /** True when the token was written in double quotes, which is how BIRD escapes names with spaces. */
+  readonly quoted: boolean;
+  readonly end: number;
+}
+
+function nextToken(text: string, from: number): CodeToken | undefined {
+  let at = from;
+  while (at < text.length && /\s/.test(text[at] ?? '')) at += 1;
+  if (at >= text.length) return undefined;
+  if (text[at] === '"' || text[at] === '`' || text[at] === '[') {
+    const closing = text[at] === '[' ? ']' : (text[at] as string);
+    const close = text.indexOf(closing, at + 1);
+    if (close === -1) return undefined;
+    return { text: text.slice(at + 1, close), quoted: true, end: close + 1 };
+  }
+  const match = /^[A-Za-z_][\w$]*/.exec(text.slice(at));
+  if (match === null) return { text: text.charAt(at), quoted: false, end: at + 1 };
+  return { text: match[0], quoted: false, end: at + match[0].length };
+}
+
+function isIdentifier(token: CodeToken): boolean {
+  return token.quoted || /^[A-Za-z_]/.test(token.text);
+}
+
+/**
+ * The statement with comments and string literals blanked, and quoted names kept.
+ *
+ * `codeOnly` blanks every region, which is right for a caller reading numbers and wrong for this
+ * one: `frpm."Charter School (Y/N)"` is a column of a BIRD database, and a mask that erases it
+ * makes the hardest half of every schema invisible. Lengths are preserved for the same reason they
+ * are there: the scanner reports offsets and the caller may edit at them.
+ */
+function codeKeepingNames(sql: string): string {
+  const blank = sql.split('');
+  let index = 0;
+  while (index < sql.length) {
+    const region = regionAt(sql, index);
+    if (region === undefined) {
+      index += 1;
+      continue;
+    }
+    if (region.kind !== 'quoting') {
+      for (let at = index; at < region.end; at += 1) blank[at] = ' ';
+    }
+    index = region.end;
+  }
+  return blank.join('');
+}
+
+/**
+ * The fields a statement names, for the arm whose card is exactly what its gold reads.
+ *
+ * One pass over the code text, and two outcomes per identifier: an identifier followed by a dot is
+ * a qualifier and its successor is the column; an identifier not followed by a dot is a bare name.
+ * Doing it in one pass is what makes `"Driver Name"` work — a regular expression that blanks the
+ * pairs to find the bare names would have to decide, at the same time, whether the quoted text
+ * contains a dot.
+ *
+ * Comments and string literals are blanked and quoted names are kept: `'a.b'` contributes no pair,
+ * while `frpm."Charter School (Y/N)"` contributes one, which is the case the whole function exists
+ * for — BIRD's hard columns have spaces and punctuation in their names, and a mask that erased them
+ * would report a perfect linker on a card that never mentioned them.
+ */
+export function referencedFields(sql: string): ReferencedFields {
+  const alias = new Map<string, string>();
+  for (const ref of tableRefs(sql)) alias.set(ref.alias.toLowerCase(), ref.table.toLowerCase());
+  const code = codeKeepingNames(sql);
+  const qualified = new Set<string>();
+  const bare = new Set<string>();
+  let token = nextToken(code, 0);
+  while (token !== undefined) {
+    if (!isIdentifier(token)) {
+      token = nextToken(code, token.end);
+      continue;
+    }
+    const after = nextToken(code, token.end);
+    if (after !== undefined && after.text === '.') {
+      const column = nextToken(code, after.end);
+      const table = alias.get(token.text.toLowerCase());
+      if (column !== undefined && isIdentifier(column) && table !== undefined) {
+        qualified.add(`${table}\u0000${column.text.toLowerCase()}`);
+      }
+      token = column === undefined ? undefined : nextToken(code, column.end);
+      continue;
+    }
+    bare.add(token.text.toLowerCase());
+    token = after;
+  }
+  const fields: FieldRef[] = [];
+  for (const key of qualified) {
+    const [table, column] = key.split('\u0000');
+    if (table !== undefined && column !== undefined) fields.push({ table, column });
+  }
+  return { qualified: fields, bare: [...bare] };
+}

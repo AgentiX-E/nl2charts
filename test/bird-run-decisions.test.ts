@@ -28,6 +28,8 @@ import {
   assertDissentFired,
   assertDissentRule,
   assertSampleBlockFired,
+  assertFieldBlockFired,
+  fieldBlockFunnel,
   cacheFieldOf,
   mergePurposes,
   demonstrationsFunnel,
@@ -1367,6 +1369,38 @@ describe('what the value block put on the card', () => {
   it('says nothing below the sample floor, where a share describes the fixture', () => {
     // The floor is the one the other levers use: below it a share describes the fixture.
     expect(() => assertSampleBlockFired('samples-gold', sample(7, () => 0))).not.toThrow();
+  });
+});
+
+/**
+ * The card as a set of fields, guarded by the count of what it removed.
+ *
+ * A rule that removes nothing publishes its parent's score under a name that claims a linker was
+ * measured. A rule that empties a card publishes a wrong answer where there was no prompt. The two
+ * are different findings and the funnel keeps them apart, which is why the guard reads `dropped` and
+ * the report also carries `emptied`.
+ */
+describe('the field rule on a card', () => {
+  const runs = (count: number, kept: number, dropped: number): CaseRun[] =>
+    Array.from({ length: count }, (_unused, index) => ({ id: String(index + 1), fieldBlock: { columns: kept, dropped } }) as CaseRun);
+
+  it('counts the cases, the columns kept and the card it emptied', () => {
+    const funnel = fieldBlockFunnel([...runs(2, 4, 6), ...runs(1, 0, 10)]);
+    expect(funnel).toEqual({ cases: 3, kept: 8, dropped: 22, emptied: 1 });
+  });
+
+  it('reports no funnel at all when no case carries one', () => {
+    // Absent is "the rule did not run"; zero would be "it ran and kept nothing", which is a finding.
+    expect(fieldBlockFunnel([{ id: '1' } as CaseRun])).toBeUndefined();
+  });
+
+  it('refuses an arm whose rule removed nothing on any case', () => {
+    expect(() => assertFieldBlockFired('card-gold', runs(120, 10, 0))).toThrow(/removed no column/);
+    expect(() => assertFieldBlockFired('card-gold', runs(120, 10, 2))).not.toThrow();
+  });
+
+  it('says nothing below the sample floor, where a count describes the fixture', () => {
+    expect(() => assertFieldBlockFired('card-gold', runs(7, 10, 0))).not.toThrow();
   });
 });
 

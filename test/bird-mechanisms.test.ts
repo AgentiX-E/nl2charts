@@ -51,6 +51,7 @@ const NOT_A_MECHANISM: Readonly<Record<string, string>> = {
   assertMixedSources: 'declaration-time: every named source must resolve to an arm',
   assertDissentRule: 'declaration-time: a fourth opinion must come from somewhere else',
   assertSampleRule: 'declaration-time: a column rule needs a sampler to read',
+  assertCardRule: 'declaration-time: a card decided by two rules reports the order of operations',
   assertMaskingRule: 'declaration-time: a mask needs worked examples to act on',
   assertRuleSelection: 'declaration-time: a free rule needs a candidate set, and cannot sit beside a lever only the model selector reads',
   assertIntentRule: 'declaration-time: an arm whose statement is rendered on the candidate path cannot be dispatched alone',

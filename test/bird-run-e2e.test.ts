@@ -3046,6 +3046,73 @@ describe('a value block narrowed to the columns the statement filters on', () =>
 });
 
 /**
+ * The card as a *set of fields* rather than as a size.
+ *
+ * `select-prune` already showed that a smaller card is not automatically a better one: −1.50pp on
+ * the full split at p = 0.035, while saving 13.5% of the prompt. What that arm cannot separate is
+ * size from content, because its seeds lose 4.8% of the gold's tables. This arm loses none of the
+ * tables a gold statement reads and every column it does not name, so the difference between the two
+ * arms is the one the literature prices at +6.2pp (AskData's perfect linking against a full schema).
+ */
+describe('a card cut down to the fields the gold statement names', () => {
+  const root = mkdtempSync(join(tmpdir(), 'bird-card-gold-'));
+  afterAll(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+  const data = writeChainBirdDataset(root);
+  const gold: Readonly<Record<string, string>> = Object.fromEntries(CHAIN_QUESTIONS.map((entry) => [entry.question, entry.sql]));
+  /** The tables a prompt put on its card, in the renderer's own format. */
+  const tablesOf = (prompt: string): string[] =>
+    prompt
+      .split('\n')
+      .map((line) => /^([A-Za-z_][A-Za-z0-9_]*)\(/.exec(line)?.[1])
+      .filter((name): name is string => name !== undefined);
+
+  it('sends only the tables the statement reads, and only the fields it names', async () => {
+    const result = await run({
+      plan: { gold },
+      env: {
+        BIRD_DATA: data,
+        BIRD_ARMS: 'inline+evidence,inline+evidence+card-gold',
+        BIRD_DEFINITIONS_FORCE: '1',
+      },
+    });
+    expect(result.code).toBe(0);
+    const asked = CHAIN_QUESTIONS[2]?.question as string;
+    const prompts = result.requests.map((request) => request.prompt).filter((prompt) => prompt.includes(asked));
+    // Two arms, one prompt each: the parent sends the whole card, the arm sends what the statement reads.
+    expect(prompts).toHaveLength(2);
+    const [carded, narrowed] = prompts.map((prompt) => tablesOf(prompt));
+    expect(carded).toEqual(expect.arrayContaining(['items', 'orders', 'warehouses', 'cities']));
+    // `items` is on the schema and nowhere in the statement, which is the saving this arm prices.
+    expect(narrowed).toEqual(expect.arrayContaining(['orders', 'warehouses', 'cities']));
+    expect(narrowed).not.toContain('items');
+    // Column level, not table level: `orders` keeps the two fields the statement names (`qty`,
+    // `warehouse_id`) and loses `item_id`, which no clause of the gold reads. A rule that only
+    // dropped tables would pass the table assertions above and be a different lever.
+    const ordersLine = (prompt: string): string => prompt.split('\n').find((line) => line.startsWith('orders(')) ?? '';
+    expect(ordersLine(prompts[0] as string)).toContain('item_id');
+    expect(ordersLine(prompts[1] as string)).toContain('qty');
+    expect(ordersLine(prompts[1] as string)).toContain('warehouse_id');
+    expect(ordersLine(prompts[1] as string)).not.toContain('item_id');
+
+    const rows = result.report.arms as {
+      readonly arm: string;
+      readonly fieldBlock?: { readonly cases: number; readonly kept: number; readonly dropped: number; readonly emptied: number };
+    }[];
+    const byName = new Map(rows.map((row) => [row.arm, row]));
+    const funnel = byName.get('inline+evidence+card-gold')?.fieldBlock;
+    // Every case is counted, and the rule fired on all three: the two `count(*)` questions keep the
+    // table they count from and lose the other three, the join question keeps the three it reads.
+    expect(funnel?.cases).toBe(3);
+    expect(funnel?.dropped ?? 0).toBeGreaterThan(0);
+    expect(funnel?.emptied).toBe(0);
+    // The parent publishes no funnel: absent is "no rule ran", zero would be "a rule ran and kept nothing".
+    expect(byName.get('inline+evidence')?.fieldBlock).toBeUndefined();
+  });
+});
+
+/**
  * A mixed candidate set draws its blocks from its sources, not from the arm list.
  *
  * `select-samples` takes its third candidate from `inline+evidence+samples`, and the run's block
