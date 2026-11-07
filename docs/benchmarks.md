@@ -8891,3 +8891,36 @@ it — `=` and `in` only, since `like` is already case-insensitive and `between`
 occur in this split — loses nothing on these 1,532 statements. Precision is exactly 22 fires to 0
 losses, which is the only reason a rule of this kind is allowed to ship ungated.
 
+
+### How much of `where` is one clause away
+
+The census above says `predicate` is 82 cases: statements whose filter is missing a condition the
+question implies. A census counts *absences*, and an absence is not a repair — a statement missing a
+filter is usually missing something else too, so the question "would writing the condition have been
+enough" is a different question and needs a different instrument.
+
+`oracle-predicate` answers it by moving the gold statement's whole `where` clause into the
+prediction, unqualifying both sides first, and executing the result. It runs only where both
+statements read the same single table — two tables make a bare column name mean two things, and a
+spliced clause that is valid against a table the prediction never read would report a `tables`
+failure as a `predicate` one — and the 3 cases it could not reach that way are printed rather than
+dropped. It reads the gold, so it can never ship:
+
+| ceiling | fires | won | lost | refused | net | p |
+| --- | --- | --- | --- | --- | --- | --- |
+| one same-column value, moved (`oracle-transplant`) | 87 | 26 | 0 | 0 | +1.70pp | <0.0001 |
+| the whole filter, moved (`oracle-predicate`) | 83 | 20 | 0 | 3 | +1.31pp | <0.0001 |
+
+**The criterion was written before the reading: under 54 cases (3.5pp) retires condition coverage as
+the next lever.** It is 20. Twenty of the eighty-two `predicate` cases are exactly one clause away
+— 24% of the bucket — and the other 62 are wrong in some second way that moving the filter does not
+touch. So condition coverage is not the next lever, and the budget moves to the two buckets that are
+larger and have not been priced yet: `tables` (51 cases, join selection) and `literal-missing` (72
+cases, which is a retrieval problem rather than a generation one — the value the answer needs is not
+in the prompt).
+
+Two things this reading does **not** say. It does not say the `where` clause is 20 cases of work: the
+narrower reading, that `filter-wide` (102) and `filter-narrow` (56) are also `where`-shaped, stands
+untouched, and the clause is still 327 of the 425. And it does not say a condition-coverage mechanism
+would recover 20: the ceiling moves the *gold's own* clause in one edit, which no mechanism that
+infers conditions from a question can do.

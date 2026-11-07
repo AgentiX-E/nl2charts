@@ -708,6 +708,24 @@ that differs in method rather than in prompt or in draw.
   are different answers and only the first is a fact about the database. `applyGrounding` and
   `groundLiterals` share one reconstruction, so the number the harness printed is a number about
   the function that ships.
+- **A ceiling that can only reach the cases its mechanism is defined for has to say how many it
+  could not reach.** `oracle-predicate` splices the gold statement's whole `where` clause into the
+  prediction, which is the only way to ask whether the filter was the *whole* difference rather than
+  one of several. It is defined only where both statements read the same single table: with two
+  tables in scope a bare column name means two things, and a spliced clause that happens to be valid
+  against a table the prediction never read would be scored as a `predicate` failure when it is a
+  `tables` one. So the rule drops qualifiers to reconcile the two spellings, refuses joins rather
+  than guess, and reports the refusals — 3 of 83 on the dev split — instead of letting its own
+  denominator shrink in silence. The clause is found and replaced by position at parenthesis depth
+  zero, skipping comments, literals, quoted and bracketed identifiers, because a `where` inside a
+  subquery belongs to that subquery and a clause re-found by searching for its first predicate lands
+  in the wrong place as soon as two clauses share a word. The split between *refused* and *broken*
+  is load-bearing in both directions: a shippable rule that writes a statement the engine cannot
+  parse is wrong about something and fails the build, while the ceiling's refusal is the finding —
+  "this case belongs to `tables`" — and filing them together would either fail a gate over the
+  measurement it exists to take or ship a rule that breaks statements. What the ceiling returns is a
+  number about one edit: fired 83, won 20, lost 0, +1.31pp, p < 0.0001 — so the 82-case `predicate`
+  census is not 82 ready cases, and a lever's census is an upper bound on the lever, never its price.
 - - **A per-call ceiling is a dimension of the comparison, not a detail of the plumbing.** Two
   artifacts with the same split, the same judge, the same arms and the same prompt are one contrast
   only if the call had the same deadline too — and for a year the tool that decides this compared
