@@ -8839,3 +8839,55 @@ which does not bind for it (1 timeout at 120 s, 0 at 300 s): **+58/−64, −0.3
 of the split changed verdict with the prompt held byte-identical**. That is the first measured
 floor for a paired claim on this split, and it is why a 2.30pp MDE can be read at all.
 
+### What the 425 arithmetic failures are made of
+
+At one ceiling the wide base answers 61.36% and misses 592 questions. 425 of those are scored
+`values` — the statement ran, the width matched, the numbers did not — and "the numbers were wrong"
+is not a work item, so the bucket was split by re-reading the statements and re-executing them:
+
+| cause | cases | share | what a fix would change |
+| --- | --- | --- | --- |
+| `filter-wide` | 102 | 24.0% | the predicate is too weak, or a join multiplied the rows |
+| `predicate` | 82 | 19.3% | a condition atom the question implies is absent |
+| `literal-missing` | 72 | 16.9% | a value the answer needs never appears in the statement |
+| `filter-narrow` | 56 | 13.2% | the predicate matches nothing (the statement returns no rows) |
+| `tables` | 51 | 12.0% | join selection |
+| `aggregate` | 27 | 6.4% | which function answers the question |
+| `literal-case` | 15 | 3.5% | the value is stored in another case |
+| `projection` | 14 | 3.3% | which columns, in what order |
+| `grain`, `window`, `unclassified` | 6 | 1.4% | — |
+| `scale`, `equivalent` | **0** | 0% | — |
+
+Two readings matter more than the table. **The `where` clause is 327 of the 425 (76.9%)**: the wide
+base computes correctly and filters incorrectly, which is a different defect from the one the
+bucket's name suggests. And **`scale` is zero** — "the aggregation happened at the wrong level", a
+hypothesis this project has cited for months, does not occur once in four hundred and twenty-five
+cases.
+
+### One rule that costs no call, and the gate that was costing it half its wins
+
+Re-executing every statement of that run prices an edit rather than an idea. The baseline
+recomputes to 940, matching the artifact on all 1,532 cases, so the differences below are
+differences between statements and not between two judges:
+
+| rule | fires | won | lost | net | p |
+| --- | --- | --- | --- | --- | --- |
+| `null-order` (shipped) | 63 | 1 | 1 | +0.00pp | 1.0000 |
+| `drop-limit-on-count` (rejected) | 26 | 0 | 17 | −1.11pp | <0.0001 |
+| `integer-division` | 21 | 0 | 0 | +0.00pp | 1.0000 |
+| literal grounding, **only after an empty result** | 9 | 7 | 0 | +0.46pp | 0.0156 |
+| literal grounding, **no gate** | 22 | 14 | 0 | +0.91pp | 0.0001 |
+| literal grounding, **as the pipeline runs it** | 22 | 14 | 0 | +0.91pp | 0.0001 |
+
+The third and fourth rows are the same edit under two gates, and the difference between them is
+what the gate costs: **seven cases, with no loss to show for it**. The edit replaces a literal with
+the one spelling the column stores that equals it ignoring case; applied to every statement it wins
+14 and breaks none, because a value written in another case does not merely return nothing — an
+`in` list or a `like` pattern returns rows that answer a different question, and those are the cases
+a gate on "returned nothing" never reaches.
+
+The last row is the shipped function itself, and it matches the second: the narrower scanner behind
+it — `=` and `in` only, since `like` is already case-insensitive and `between` on strings does not
+occur in this split — loses nothing on these 1,532 statements. Precision is exactly 22 fires to 0
+losses, which is the only reason a rule of this kind is allowed to ship ungated.
+

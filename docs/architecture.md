@@ -698,7 +698,17 @@ that differs in method rather than in prompt or in draw.
   dispatch but one and the second is a rule no test can hold — but `tools/bird-arm.mjs`, which answers
   with the first arm the run's own `BIRD_ARMS` asked for that the artifact holds, else the largest
   population, and is tested for both edges plus the contract that it prints nothing else on stdout.
-- **A per-call ceiling is a dimension of the comparison, not a detail of the plumbing.** Two
+- **A rule that reads the data can be adopted on evidence no model-based rule can offer.** The
+  pipeline asks each compared column what it stores and rewrites a literal to the unique spelling
+  that equals it ignoring case — one query, no model call, before the statement is executed. What
+  licenses it is not a delta but an asymmetry: on 1,532 dev statements it wins 14 and loses 0, and
+  a loss is only possible if a column stores two spellings of the same word, which the rule refuses
+  rather than resolves. Two spellings, an absent value and an unreadable column are reported as
+  such (`ambiguous`, `absent`, `unknown`), because "nothing is stored there" and "I did not look"
+  are different answers and only the first is a fact about the database. `applyGrounding` and
+  `groundLiterals` share one reconstruction, so the number the harness printed is a number about
+  the function that ships.
+- - **A per-call ceiling is a dimension of the comparison, not a detail of the plumbing.** Two
   artifacts with the same split, the same judge, the same arms and the same prompt are one contrast
   only if the call had the same deadline too — and for a year the tool that decides this compared
   four fields and not that one. The cost is now measured rather than argued: the same two bases read
