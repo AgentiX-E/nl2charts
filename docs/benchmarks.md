@@ -8021,35 +8021,47 @@ other still did (`select` at Q p = 0.038). A tool whose verdicts change with eac
 worthless; a tool whose verdicts never change would be a constant. The fifth reading broke the tie in the
 more interesting direction — see below.
 
-**A fifth run, and the first label that moved.** `42523664683` is the run of the commit that added the
-base fingerprint, and it is the fifth reading of the same configuration. This time one label changed:
+**Runs five, six and seven: the first label that moved, and what seven readings say.** Three more runs
+of one configuration arrived after the fourth — `42523664683` (the fingerprint commit), `42526940345` (the
+pin commit, the first run whose gate enforced a fingerprint) and `42527570372` (a dispatch, to ask whether
+the fifth reading was an outlier). All three asked the same questions, and all three reported the same
+base fingerprint, `170d0beaa768594b` over `deepseek-flash`, six identical answers each.
 
-| pair | A | B | C | D | E `42523664683` | five-run pooled | verdict | Q |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `synth-definitions` → `inline-definitions` | 13/19 | 17/18 | 18/15 | 13/19 | 15/17 | −0.50pp ± 1.01 | none | 0.186 |
-| `inline+evidence` → `inline+evidence+audit` | 8/11 | 11/7 | 10/9 | 9/8 | **17/4, p = 0.0072** | +0.60pp ± 0.76 | **heterogeneous** | **0.007** |
-| `inline+evidence` → `select` | 13/13 | 22/8 | 19/18 | 19/11 | 26/13, p = 0.0533 | +1.40pp ± 0.99 | **heterogeneous** | 0.020 |
-| `metadata+evidence` → `select` | 19/32 | 27/26 | 18/34 | 22/28 | 27/33 | −1.63pp ± 1.29 | **sign-flip** | 0.065 |
-| `inline+evidence` → `metadata+evidence` | 31/18 | 28/15 | 32/15 | 31/17 | 35/16, p = 0.0110 | **+3.05pp ± 1.22** | **established** | 0.441 |
+| pair | A | B | C | D | E | F | G | seven-run pooled | verdict | Q |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `synth-definitions` → `inline-definitions` | 13/19 | 17/18 | 18/15 | 13/19 | 15/17 | 14/16 | 14/25 | −0.69pp ± 0.86 | none | 0.064 |
+| `inline+evidence` → `inline+evidence+audit` | 8/11 | 11/7 | 10/9 | 9/8 | **17/4** | 11/6 | 10/5 | +0.73pp ± 0.63 | **heterogeneous** | **0.006** |
+| `inline+evidence` → `select` | 13/13 | **22/8** | 19/18 | 19/11 | 26/13 | 19/10 | **23/10** | +1.63pp ± 0.84 | **heterogeneous** | 0.011 |
+| `metadata+evidence` → `select` | 19/32 | 27/26 | **18/34** | 22/28 | 27/33 | 23/29 | 24/28 | −1.45pp ± 1.08 | **sign-flip** | 0.054 |
+| `inline+evidence` → `metadata+evidence` | 31/18 | 28/15 | **32/15** | 31/17 | 35/16 | 31/16 | **31/14** | **+3.10pp ± 1.02** | **established** | 0.415 |
 
-The audit pair is the one that moved: four flat readings (−0.60, +0.81, +0.20, +0.20pp) and one at +2.62
-with exact p = 0.0072, seventeen cases against four. Cochran's Q puts the five at p = 0.007, so the label
-is neither `none` nor `established` — it says the readings differ by more than their own intervals, which
-forbids the average printed beside it. That is a stronger statement than the previous round's `none`, and
-the opposite of what a round of instrument work might hope to produce: the tool got a coordinate and
-immediately used it to say that one of its own pools cannot be taken.
+Three things came out of it, and only one of them is about a lever.
 
-Two explanations are consistent with the table and this document cannot separate them: the audit turn
-sometimes helps, or the first four runs were not the generator the fifth one was. It cannot separate them
-because A–D carry no fingerprint — E is the only one of the five that can say which base answered it. The
-coordinate this round added is also the one that would settle the question this round's run raised, and
-the answer is a sixth run of the same configuration, which costs one dispatch rather than an argument.
+1. **The fingerprint reproduces.** Three runs on three different commits, hours apart, hashed the same six
+   answers to the same 16 characters, and the third of them was the first whose gate compared a fresh
+   digest against the pin and passed. A pin taken from one run and never seen again would have been a
+   number; this one has now been reproduced twice.
+2. **The audit pair did not settle.** Its readings span −0.60 to +2.62pp with a standard error near 0.5
+   each, so Cochran's Q rejects homogeneity at p = 0.006 and stays rejected as the sample grows (0.007 at
+   five, 0.007 at six, 0.006 at seven). The dispatch was asked whether the fifth reading was an outlier;
+   it answered that there is no single outlier to remove — the pair's readings are simply not one number.
+   The label `heterogeneous` is the instrument refusing to average, and it is now the honest status of that
+   mechanism: **the audit turn is not shown to be worth one call, and it is not shown to be worth zero.**
+3. **The curated-notes pair became the firmest claim in this document.** Seven readings, every one
+   positive, between +2.62 and +3.83pp, Q p = 0.415, four of seven individually significant, pooled
+   **+3.10pp ± 1.02**. That is a homogeneous effect measured seven times on 496 questions — and it is
+   still *not* a product claim, because the dev split's only reading of the same pair is +0.07pp on 1,532
+   questions, and Mini-Dev is a subset of dev. The conflict is a property of the corpus, and seven
+   Mini-Dev runs cannot outvote one dev run about a different population.
 
-One more reading of the same table is worth stating, because it is the leftover the cost question needs:
-`inline+evidence` → `select` is now 4 of 5 readings positive, pooled +1.40pp with an interval that
-excludes zero, and still labelled `heterogeneous` — so the selector is neither shown to be worth four
-calls a question nor shown to be worth zero. Any decision to cut it from the default chain has to say
-that it is giving up ~1.4pp of unproven value, not 0pp.
+The `select` pair also deserves its own sentence, because it is the one a costing decision hangs on: six
+of seven readings are positive, pooled **+1.63pp ± 0.84**, and the label is still `heterogeneous` because
+the first reading is exactly zero and the third is +0.20. So the selector is neither shown to be worth
+four calls a question nor shown to be worth nothing; cutting it from the default chain would give up
+**about 1.6pp of unproven value**, which is a different decision from giving up zero.
+
+What the seven readings cost: nothing. Six of the seven artifacts were produced by pushes that were going
+to happen anyway, and the seventh was one dispatch made to test a specific claim about a specific pair.
 
 A paired test conditions on the questions. It does not condition on the generator's own draw, and on
 496 questions that draw is worth about two points per run. So the unit of evidence here is neither a
