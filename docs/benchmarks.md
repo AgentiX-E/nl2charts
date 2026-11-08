@@ -541,6 +541,17 @@ without documentation can be brought to the accuracy of a database with it, by
 generating definitions once per database and attaching them to the columns. What
 it cannot do is replace the per-question hint: that is still worth +14.1pp.
 
+**Revision (three runs later).** The −0.8pp above is one run's reading of that pair, and the pair has
+now been read three times: 31/18, 28/15, 32/15 discordant, i.e. +2.62, +2.62 and +3.43pp, pooled
+**+2.89pp ± 1.55** with Q p = 0.631 — `established` by the label rule, and in the opposite direction to
+the paragraph above. It is **not** written up as a product claim yet, because the only dev reading of
+the same pair says the opposite: +0.07pp, 65:66, p = 1.0000 on 1,532 questions (`41296610389`). Mini-Dev
+is 496 of those questions, and the two intervals do not overlap, so either the effect sits in the
+subset — the other 1,036 questions would have to be −1.28pp — or the two runs differ in a coordinate
+nobody recorded. Until one of those is excluded, `metadata+evidence` and `inline+evidence` are
+"not separated on dev and separated by 2.9pp on Mini-Dev", which is a statement about a corpus and not
+about a stack.
+
 ### The dev coordinate table, and what four calls buy
 
 The five arms the dev workflow runs had never been measured in one run. `41085194983` ran three of
@@ -7964,7 +7975,7 @@ differs from its twin only by being a second draw, moved 0.40pp over the same th
 same displacement the previous section measured, now in both directions, which rules out the reading
 that the second run was simply a lucky one.
 
-And the four declared pairs, read in all three runs and pooled by inverse variance over the discordant
+And the declared pairs, read in all three runs and pooled by inverse variance over the discordant
 counts. Each cell is the pair's discordant counts in the order the tool prints them — **the second arm
 only, over the first arm only** — so `22/8` on `inline+evidence → select` means 22 questions only the
 selector got right and 8 only `inline+evidence` did:
@@ -7975,6 +7986,7 @@ selector got right and 8 only `inline+evidence` did:
 | `inline+evidence` → `inline+evidence+audit` | 8/11, p = 0.6476 | 11/7, p = 0.4807 | 10/9, p = 1.0000 | +0.15pp ± 0.99 | **none** |
 | `inline+evidence` → `select` | 13/13, p = 1.0000 | 22/8, **p = 0.0161** | 19/18, p = 1.0000 | +1.01pp ± 1.26 | **heterogeneous** |
 | `metadata+evidence` → `select` | 19/32, p = 0.0919 | 27/26, p = 1.0000 | 18/34, **p = 0.0365** | −1.90pp ± 1.64 | **sign-flip** |
+| `inline+evidence` → `metadata+evidence` | 31/18, p = 0.0854 | 28/15, p = 0.0660 | 32/15, **p = 0.0186** | +2.89pp ± 1.55 | **established** |
 
 So the claim three paragraphs above — "the third row is the only mechanism on this split that a
 paired test separates" — is **withdrawn**. It was true of one run and false of the next, on identical
@@ -7982,8 +7994,9 @@ inputs. `inline+evidence -> select` read 22 against 8, then 19 against 18, and t
 13 against 13 on the same pair: the same questions, the same base model, hours apart. Pooled it is
 **+1.01pp ± 1.26**, and Cochran's Q on the three discordant counts is **p = 0.043** — the readings
 differ by more than their own intervals, so the honest label is `heterogeneous` and not
-`one-run-only`. The cost-frontier pair is worse than unproven: it reversed sign twice around zero,
-with the 1-call curated stack **beating** the 4-call chain by 16 cases in the third run.
+`one-run-only`. The cost-frontier pair is worse than unproven: the 1-call curated stack came out ahead
+in the middle run and behind in both others, so its sign is not even settled, and in the third run it
+**beat** the 4-call chain by 16 cases.
 
 A paired test conditions on the questions. It does not condition on the generator's own draw, and on
 496 questions that draw is worth about two points per run. So the unit of evidence here is neither a
@@ -7996,7 +8009,7 @@ and the label `one-run-only`, pooling all three gives +1.01pp and `heterogeneous
 a function of which two runs the command happened to be handed.** `bench:bird:compare` now takes
 every artifact it is given as a reading of the pair (`compare.ts a.json b.json c.json --pair x,y`),
 names any artifact that did not score both arms instead of dropping it silently, and prints the
-verdict and its evidence in two sentences — the label on one line, `2 of 3 readings significant, Q
+verdict and its evidence in two sentences — the label on one line, `1 of 3 readings significant, Q
 p = 0.043 — the readings differ by more than their own intervals` on the next. The four labels are
 the four things that can be true: `none` (nothing to report), `one-run-only` (a reading that did not
 survive being repeated), `sign-flip` (a pair that reversed), `heterogeneous` (readings that cannot be

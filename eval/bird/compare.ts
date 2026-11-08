@@ -576,9 +576,10 @@ function normalTwoSided(z: number): number {
  * questions that draw is worth about two points.
  *
  * So the unit of evidence is not one run. It is the pair's estimate pooled over the runs that read
- * it, with the between-reading disagreement reported rather than averaged away: a pair that is
- * significant in one run and absent in the next is `one-run-only`, which is a finding about the
- * instrument and not about the lever.
+ * it, with the between-reading disagreement reported rather than averaged away. Which runs those are
+ * is not the caller's choice: the command takes every artifact it is given, and one artifact fewer
+ * can change the label — `inline+evidence -> select` is `+1.65pp one-run-only` over two of its three
+ * readings and `+1.01pp heterogeneous` over all three.
  *
  * Pooling weights each reading by its inverse variance, and the variance comes from the discordant
  * count — the only cases that carry information about a pair. Two readings over the same questions
