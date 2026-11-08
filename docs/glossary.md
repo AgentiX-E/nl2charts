@@ -222,6 +222,29 @@ from names, declared types and foreign keys, with no human-written dictionary.
 Rendered by `renderDefinitions()` and passed to the prompt as `definitions`. It
 states what the schema licenses, not what a business owner meant.
 
+**Base fingerprint** — A digest over the answers a base model gives to a fixed
+probe set, asked twice at temperature zero. Its job is not to name the model but
+to notice that the same name is now being served by different weights, which
+neither `model` (what was asked for) nor `servedModels` (the name the endpoint
+answered with) can see. Two draws are what separate a fingerprint from a sample:
+if they disagree the endpoint is sampling an identical request, and the reading
+says `stable: false` instead of pretending to be a fingerprint. Recorded per run
+as `baseFingerprint`, pinned per split in `eval/baseline/bird.json`, checked by
+`gate:bird`.
+
+**Probe set** — The handful of fixed questions a base fingerprint is taken over,
+and the digest of those questions themselves. It is hashed because editing a
+question changes the model's digest for a reason that is not the model: a pin
+taken over other questions is not a pin, so a run whose probe set moved fails the
+gate and the pin has to move in the same commit.
+
+**Coordinate (of an experiment)** — A fact that must be equal for a difference
+between two runs to be about the thing they changed: split, corpus digest, model
+asked for, model served, base fingerprint, harness settings, second model.
+`bench:bird:compare` prints one line per coordinate and refuses to call two runs
+the same experiment while any of them differs *or is not recorded* — the two are
+different sentences, because "it changed" is a fact and "nobody looked" is not.
+
 **Discordance (paired)** — The share of cases where exactly one of two arms is
 right. Only those cases carry information about a paired difference, whose
 standard error is `sqrt(π/n)`. A pair that agrees on every case has a plug-in

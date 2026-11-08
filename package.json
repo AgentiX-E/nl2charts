@@ -76,6 +76,7 @@
     "bench:bird:gate": "tsx eval/bird/gate.ts",
     "bench:bird:cache": "tsx eval/bird/cache.ts",
     "bench:bird:pair": "tsx eval/bird/pair.ts",
+    "bench:bird:compare": "tsx eval/bird/compare.ts",
     "bench:bird:reasoning": "tsx eval/bird/reasoning.ts",
     "bench:bird:contrast": "tsx eval/bird/contrast.ts",
     "gate:dispatch": "node tools/bird-dispatch.mjs --self-test"

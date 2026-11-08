@@ -51,6 +51,25 @@ const stability = read('bird-stability.json');
 const adversarial = read('adversarial.json');
 const lines = ['## BIRD Mini-Dev (external benchmark)', ''];
 
+/**
+ * Which generator answered, as a sentence rather than as a row of fields.
+ *
+ * The summary is what a reader actually sees after a run, and the coordinate this line carries is
+ * the one no other line could: `Model:` above says what was asked for, and this says what answered
+ * and whether the answer is stable enough to call the same generator next time. A run with no
+ * digest is not omitted — it says so, because "nobody read it" and "it matched" look identical in
+ * a summary that only prints matches.
+ */
+function baseFingerprintLine(report) {
+  const fingerprint = report.baseFingerprint;
+  const digest = typeof fingerprint?.digest === 'string' ? fingerprint.digest : '';
+  if (digest === '') return 'Base fingerprint: **not recorded** — this run cannot say which generator answered.';
+  const total = typeof fingerprint.total === 'number' ? fingerprint.total : fingerprint.probes;
+  const bases = Array.isArray(fingerprint.bases) && fingerprint.bases.length > 0 ? fingerprint.bases.join('+') : 'no base named';
+  const state = fingerprint.stable === true ? 'stable' : '**unstable** — the endpoint answered identical probes differently, so this digest is a draw';
+  return `Base fingerprint: \`${digest}\` over ${fingerprint.probes}/${total} probe(s) x ${fingerprint.draws} draws, ${state}, served by \`${bases}\`.`;
+}
+
 if (report === null) {
   lines.push('No evaluation artifact was produced; see the job log.', '');
 } else {
@@ -101,6 +120,7 @@ if (report === null) {
   lines.push(
     `Model: \`${report.model ?? 'none (dry run)'}\` · split: ${selection.split ?? 'minidev'} · dialect: ${report.dialect} · ${databasesCell} · scored: ${selection.scored}/${selection.available}${subsetNote}`,
     ...(sampleLine === undefined ? [] : [sampleLine]),
+    baseFingerprintLine(report),
     '',
     `Gold queries executed before any model call: **${gold.runnable}/${gold.executed}** runnable (${(gold.runnableRate * 100).toFixed(1)}%).` +
       (gold.executed > gold.runnable
@@ -547,6 +567,24 @@ function selfTest() {
   if (!paired.includes('served by `deepseek-flash`')) issues.push('the paired section does not name the base that answered');
   if (noArms.includes('### Paired readings')) issues.push('a summary with no pair file printed the paired section anyway');
 
+  // The base fingerprint is the one coordinate a reader cannot recover from the arm table: `Model:`
+  // says what was asked for, and only this line says what answered. Its three states have to be
+  // three sentences, because a summary that prints nothing for the missing one makes "nobody read
+  // it" and "it matched" indistinguishable.
+  const fingerprinted = render({
+    ...base,
+    baseFingerprint: { digest: 'a1b2c3d4e5f60718', probes: 3, total: 3, draws: 2, stable: true, bases: ['deepseek-flash'] },
+  });
+  if (!fingerprinted.includes('Base fingerprint: `a1b2c3d4e5f60718` over 3/3 probe(s) x 2 draws, stable, served by `deepseek-flash`')) {
+    issues.push('the summary does not state the base fingerprint, its probe count or the base that answered');
+  }
+  if (!noArms.includes('Base fingerprint: **not recorded**')) issues.push('a run with no fingerprint is summarised as if it had one');
+  const unstableBase = render({
+    ...base,
+    baseFingerprint: { digest: 'a1b2c3d4e5f60718', probes: 3, total: 3, draws: 2, stable: false, bases: ['deepseek-flash'] },
+  });
+  if (!unstableBase.includes('**unstable**')) issues.push('a digest the endpoint would answer differently on the next draw is presented as a fingerprint');
+
   return issues;
 }
 
@@ -554,7 +592,7 @@ if (process.argv[2] === '--self-test') {
   const issues = selfTest();
   for (const issue of issues) console.error(issue);
   if (issues.length > 0) process.exit(1);
-  console.log('BIRD summary self-test: a delta with its interval, a resolution column, an A/A sentence that says what it could not see, a subset mix that over-weights the hard buckets, a proportional one, an artifact from before those columns, an artifact with no arms, and paired readings that were even, separable, or never scored all render');
+  console.log('BIRD summary self-test: a delta with its interval, a resolution column, an A/A sentence that says what it could not see, a subset mix that over-weights the hard buckets, a proportional one, an artifact from before those columns, an artifact with no arms, paired readings that were even, separable, or never scored, and a base fingerprint that matched, was never read, or was unstable all render');
 } else {
   console.log(lines.join('\n'));
 }

@@ -36,6 +36,11 @@
  * - `model.served` — the base that answered, as the endpoint named it. `deepseek-chat` is an alias
  *   and the two runs above were both answered by `deepseek-flash`; an alias that is re-pointed
  *   turns a re-run on new weights into what looks like a re-run of the same experiment.
+ * - `model.fingerprint` — the same coordinate read from behaviour instead of from paperwork. A
+ *   name survives a change of weights, and the pool of four runs this repository quotes averages
+ *   readings taken hours apart, so "one generator answered all four" is a claim that needs a
+ *   reading rather than a name. `eval/bird/fingerprint.ts` supplies it, and its absence is now a
+ *   coordinate that says `NOT RECORDED` instead of a silence that reads as agreement.
  * - `harness` — deadline, concurrency and retry budget. A shorter deadline converts slow answers
  *   into failures without touching the pipeline.
  * - `secondModel` — the second endpoint, when an arm draws a candidate from it.
@@ -71,6 +76,22 @@ export interface RunArtifact {
   readonly run?: { readonly timeoutMs?: number; readonly concurrency?: number; readonly retries?: number };
   readonly armsRequested?: readonly string[];
   readonly arms?: readonly RunArm[];
+  /**
+   * What the base model answered on the probe set, when the artifact recorded it.
+   *
+   * The third reading of the same coordinate the two above read badly: `model` is what was asked
+   * for and `servedModels` is the name the endpoint reported, and neither can see weights that
+   * changed under a name that did not. This is the only field here that is about the generator
+   * rather than about the run's own paperwork.
+   */
+  readonly baseFingerprint?: {
+    readonly digest?: string;
+    readonly probes?: number;
+    readonly total?: number;
+    readonly stable?: boolean;
+    readonly bases?: readonly string[];
+    readonly probeSet?: string;
+  };
   /** The per-case rows, when the artifact carries them. What the churn reading is built from. */
   readonly cases?: readonly { readonly arm?: string; readonly id?: string | number; readonly passed?: boolean }[];
 }
@@ -100,6 +121,15 @@ export interface Coordinate {
   readonly left: string;
   readonly right: string;
   readonly same: boolean;
+  /**
+   * Whether both sides carry the fact at all.
+   *
+   * A coordinate that matches because neither side recorded it is not a match, and it is not a
+   * disagreement either. Before this field the two were the same word — `not recorded` on both
+   * sides read as `same: false`, and the verdict below called that "changed", which is an
+   * assertion about the world in the one case where the truth is that nobody looked.
+   */
+  readonly recorded: boolean;
   /** What a disagreement means, printed only when it disagrees. */
   readonly consequence: string;
 }
@@ -131,6 +161,15 @@ export interface CompareReport {
   readonly coordinates: readonly Coordinate[];
   readonly comparable: boolean;
   readonly broken: readonly string[];
+  /**
+   * The coordinates that broke because nobody recorded them, rather than because they moved.
+   *
+   * Printed apart from `broken` because the two are different news: `corpus.digest` disagreeing
+   * means the questions changed, and `corpus.digest` missing means nobody can say. The verdict
+   * used to call both "changed", which is a sentence asserting a fact in the one case where the
+   * fact is that nobody looked.
+   */
+  readonly unrecorded: readonly string[];
   /** Arms both runs scored, most-moved first. The order is the finding. */
   readonly moved: readonly Displacement[];
   /** The flows behind each move, when both artifacts carry case rows. Most churn first. */
@@ -182,12 +221,22 @@ export function coordinatesOf(left: RunArtifact, right: RunArtifact): Coordinate
   };
   const second = (report: RunArtifact): string =>
     typeof report.secondModel === 'string' ? report.secondModel : 'none';
+  // A digest the endpoint would answer differently on the next draw is printed with the reason
+  // attached, because a reader who sees only a hex string has no way to know it is a draw.
+  const fingerprint = (report: RunArtifact): string => {
+    const recorded = report.baseFingerprint;
+    if (recorded === undefined || typeof recorded.digest !== 'string' || recorded.digest === '') return 'not recorded';
+    return recorded.stable === true ? recorded.digest : `${recorded.digest} (unstable)`;
+  };
+  const fingerprintUsable = (report: RunArtifact): boolean =>
+    typeof report.baseFingerprint?.digest === 'string' && report.baseFingerprint.digest !== '' && report.baseFingerprint.stable === true;
   return [
     {
       name: 'split',
       left: left.split ?? 'unknown',
       right: right.split ?? 'unknown',
       same: left.split === right.split,
+      recorded: true,
       consequence: 'a rate on two splits is two numbers, not one reading twice',
     },
     {
@@ -195,6 +244,7 @@ export function coordinatesOf(left: RunArtifact, right: RunArtifact): Coordinate
       left: digest(left),
       right: digest(right),
       same: digest(left) === digest(right) && digest(left) !== 'not recorded',
+      recorded: digest(left) !== 'not recorded' && digest(right) !== 'not recorded',
       consequence: 'the questions changed, so every floor pinned to either corpus is a floor on other questions',
     },
     {
@@ -202,6 +252,7 @@ export function coordinatesOf(left: RunArtifact, right: RunArtifact): Coordinate
       left: typeof left.model === 'string' ? left.model : 'none',
       right: typeof right.model === 'string' ? right.model : 'none',
       same: (left.model ?? null) === (right.model ?? null),
+      recorded: true,
       consequence: 'the two runs asked different endpoints for an answer',
     },
     {
@@ -209,13 +260,25 @@ export function coordinatesOf(left: RunArtifact, right: RunArtifact): Coordinate
       left: served(left),
       right: served(right),
       same: served(left) === served(right) && served(left) !== 'not recorded',
+      recorded: served(left) !== 'not recorded' && served(right) !== 'not recorded',
       consequence: 'the endpoint named a different base model, so the same alias answered with different weights',
+    },
+    {
+      name: 'model.fingerprint',
+      left: fingerprint(left),
+      right: fingerprint(right),
+      same: fingerprintUsable(left) && fingerprintUsable(right) && fingerprint(left) === fingerprint(right),
+      recorded: fingerprintUsable(left) && fingerprintUsable(right),
+      consequence:
+        'the endpoint answered its fixed probes differently, so the two runs may be two generators under one name — ' +
+        'this is the coordinate a re-pointed alias leaves behind when it keeps its name',
     },
     {
       name: 'secondModel',
       left: second(left),
       right: second(right),
       same: second(left) === second(right),
+      recorded: true,
       consequence: 'arms that draw a candidate from the second endpoint drew it from another one',
     },
     {
@@ -223,9 +286,15 @@ export function coordinatesOf(left: RunArtifact, right: RunArtifact): Coordinate
       left: harnessOf(left),
       right: harnessOf(right),
       same: harnessOf(left) === harnessOf(right) && harnessOf(left) !== 'not recorded',
+      recorded: harnessOf(left) !== 'not recorded' && harnessOf(right) !== 'not recorded',
       consequence: 'a different deadline or concurrency converts slow answers into failures without touching the pipeline',
     },
   ];
+}
+
+/** Whether a broken coordinate broke because nobody recorded it rather than because it moved. */
+export function isUnrecorded(coordinate: Coordinate): boolean {
+  return !coordinate.recorded;
 }
 
 /**
@@ -349,7 +418,9 @@ export function churn(left: RunArtifact, right: RunArtifact): Churn[] {
 
 export function compareRuns(left: RunArtifact, right: RunArtifact, leftName: string, rightName: string): CompareReport {
   const coordinates = coordinatesOf(left, right);
-  const broken = coordinates.filter((coordinate) => !coordinate.same).map((coordinate) => coordinate.name);
+  const brokenCoordinates = coordinates.filter((coordinate) => !coordinate.same);
+  const broken = brokenCoordinates.map((coordinate) => coordinate.name);
+  const unrecorded = brokenCoordinates.filter(isUnrecorded).map((coordinate) => coordinate.name);
   const leftArms = new Set((left.arms ?? []).map((arm) => arm.arm));
   const rightArms = new Set((right.arms ?? []).map((arm) => arm.arm));
   const onlyLeft = [...leftArms].filter((arm) => !rightArms.has(arm)).sort();
@@ -363,6 +434,7 @@ export function compareRuns(left: RunArtifact, right: RunArtifact, leftName: str
     coordinates,
     comparable: broken.length === 0,
     broken,
+    unrecorded,
     moved,
     churn: churn(left, right),
     onlyLeft,
@@ -395,7 +467,7 @@ export function compareLines(report: CompareReport, leftMeta: string, rightMeta:
   lines.push('');
   lines.push('  coordinates — a difference between these runs is about the experiment only where every line matches:');
   for (const coordinate of report.coordinates) {
-    const mark = coordinate.same ? 'same' : 'DIFFERS';
+    const mark = coordinate.same ? 'same' : coordinate.recorded ? 'DIFFERS' : 'NOT RECORDED';
     lines.push(`    ${coordinate.name.padEnd(pad)}${coordinate.left}  ${coordinate.same ? '=' : '≠'}  ${coordinate.right}   ${mark}`);
   }
   for (const coordinate of report.coordinates.filter((item) => !item.same)) {
@@ -405,7 +477,16 @@ export function compareLines(report: CompareReport, leftMeta: string, rightMeta:
   if (report.comparable) {
     lines.push('  verdict: comparable — these are the same experiment measured twice');
   } else {
-    lines.push(`  verdict: not comparable — ${report.broken.join(', ')} changed, so a delta below is about that coordinate`);
+    // Two ways to be incomparable, and saying which is the whole point: a coordinate that moved is
+    // a difference between the runs, and a coordinate nobody recorded is a difference between what
+    // the runs can be asked. The sentence used to call both "changed".
+    const moved = report.broken.filter((name) => !report.unrecorded.includes(name));
+    const missing = report.unrecorded;
+    const parts = [
+      moved.length === 0 ? '' : `${moved.join(', ')} changed`,
+      missing.length === 0 ? '' : `${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} not recorded on both sides`,
+    ].filter((part) => part !== '');
+    lines.push(`  verdict: not comparable — ${parts.join('; ')}, so a delta below is about that coordinate`);
   }
   if (report.onlyLeft.length > 0) lines.push(`  scored only on the left: ${report.onlyLeft.join(', ')}`);
   if (report.onlyRight.length > 0) lines.push(`  scored only on the right: ${report.onlyRight.join(', ')}`);

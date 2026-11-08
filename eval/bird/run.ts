@@ -50,6 +50,7 @@ import type { ProbeColumn } from './value-probe.js';
 import { canonicalSql } from './canonical.js';
 import { shapeFailure, shapeMismatch } from './shape.js';
 import { FAILURE_SAMPLE, failureCorpus } from './failures.js';
+import { fingerprintLine, probeBase } from './fingerprint.js';
 import type { Oracle, OracleResult } from './oracle.js';
 import { profileDatabase } from './profile.js';
 import { BIRD_SCHEMA_LINES } from './prompt-shape.js';
@@ -5330,8 +5331,14 @@ export function judgeModelName(
   return arms.some((name) => resolveArm(name)?.judge === 'second') ? second.model : null;
 }
 
+/** Where this artifact came from, when it came from a workflow. */
+export interface Provenance {
+  readonly run?: string | undefined;
+  readonly workflow?: string | undefined;
+}
+
 /** The report before any arm runs: everything the inputs alone can say. */
-export function baseReport(prepared: PreparedRun): Record<string, unknown> {
+export function baseReport(prepared: PreparedRun, provenance: Provenance = {}): Record<string, unknown> {
   const { settings, shape, questions, limit: preparedLimit, selected, cases, unrunnable, controls } = prepared;
   const layout = settings.layout;
   return {
@@ -5358,6 +5365,16 @@ export function baseReport(prepared: PreparedRun): Record<string, unknown> {
       retries: settings.retries,
     },
     generatedAt: new Date().toISOString(),
+    // Which run produced this file, when it can say.
+    //
+    // Every published reading in this repository is cited by workflow run id, and until now the
+    // artifact could not name its own: a reader holding the JSON had to infer it from the upload
+    // it arrived in. A pin recorded from an artifact needs exactly this to be traceable, and a
+    // document that quotes both can be checked by a stranger.
+    provenance: {
+      run: provenance.run ?? null,
+      workflow: provenance.workflow ?? null,
+    },
     // The arms this run set out to score. A subset is a measurement of those arms, and the
     // gate needs the declaration to tell it from a report that lost a row: the run that
     // scored six arms on dev was failed for not running two it never asked for.
@@ -7258,6 +7275,24 @@ export function failureSection(
 }
 
 /**
+ * Read the base fingerprint into the report, and say it in the log.
+ *
+ * Its own function so the step can be executed by a test: `runBird` needs a dataset and an oracle
+ * to reach this line, and the one thing worth checking here is the order — the report carries the
+ * reading before any arm runs, so a run killed by an outage at case 400 still says which generator
+ * it was talking to.
+ */
+export async function attachFingerprint(
+  report: Record<string, unknown>,
+  provider: LlmProvider,
+  log: (line: string) => void,
+): Promise<void> {
+  const fingerprint = await probeBase(provider);
+  report.baseFingerprint = fingerprint;
+  log(fingerprintLine(fingerprint));
+}
+
+/**
  * The artifact, written once and only after the reporters have agreed with the arms.
  *
  * Before the file is written: an instrument that ran and did not reach the artifact is
@@ -7422,12 +7457,19 @@ export async function runBird(settings: BirdSettings, options: BirdRunOptions = 
     // Above the rates, not below them: what the denominator is, stated before anything is
     // measured with it. A reader who stops after the first arm line still knows the pool.
     log(describeQuestionSet(prepared.shape, settings.layout.split));
-    const report = baseReport(prepared);
+    const report = baseReport(prepared, { run: process.env.GITHUB_RUN_ID, workflow: process.env.GITHUB_WORKFLOW });
     if (settings.dryRun) {
       previewPrompts(prepared, report);
       writeArtifact(settings, report, log);
       return report;
     }
+    // Which generator answered, read before the first arm spends a call on a case.
+    //
+    // Before, because a run whose endpoint turns out to be another base is a run whose numbers are
+    // about another model, and the reader should learn that in the first minute rather than in the
+    // gate an hour later; and separately from every arm's meter, because these six calls are the
+    // instrument identifying itself and folding them into an arm would price a probe as a case.
+    await attachFingerprint(report, provider, log);
     const outcomes = new Map<string, readonly CaseRun[]>();
     const armReports: ArmReportRow[] = [];
     // Pools by the arm *label* that generated them, so a pooled arm names the arm as it appears

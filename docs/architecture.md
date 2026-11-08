@@ -1260,17 +1260,50 @@ not a new benchmark. `gate:bird` refuses a report that declares the arms it ran 
 read. The pin — the digest the floors belong to — is written by the next baseline update from a CI
 run, because a pin guessed on a workstation is a claim about a cache rather than about CI.
 
-The same argument applies to weights, and this round carried it as far as the artifact allows. A floor
-is a claim about a model, and `floorModel` records the name the run **asked for** — an alias, which a
-provider can re-point without any field in the artifact changing. `servedModels` records the base each
-arm's answers came back named, and on both Mini-Dev runs of 2026-11-08 that was `deepseek-flash` on all
-6,448 cases while `model` said `deepseek-chat`. So the pin is on the name that answered:
-`served.minidev` in `eval/baseline/bird.json`, enforced by `gate:bird`. The alias mismatch itself is a
-note rather than a failure — a provider renaming its own model is not this repository's defect, but it
-is the fact a reader needs in order to know that `floorModel` names an alias. What is still missing is
-the weights: neither field changes when an alias is re-pointed at a *new build* of the same-named
-base. That is what a fingerprint buys, and it has to be a probe set rather than a version string,
-because a version string is the thing the endpoint has already declined to give.
+The same argument applies to weights, and it has three readings rather than one. A floor is a claim
+about a model, and `floorModel` records the name the run **asked for** — an alias, which a provider can
+re-point without any field in the artifact changing. `servedModels` records the base each arm's answers
+came back named, and on both Mini-Dev runs of 2026-11-08 that was `deepseek-flash` on all 6,448 cases
+while `model` said `deepseek-chat`. So the pin is on the name that answered: `served.minidev` in
+`eval/baseline/bird.json`, enforced by `gate:bird`. The alias mismatch itself is a note rather than a
+failure — a provider renaming its own model is not this repository's defect, but it is the fact a
+reader needs in order to know that `floorModel` names an alias.
+
+Neither field changes when an alias is re-pointed at a **new build of the same name**, and a version
+string is the thing the endpoint has already declined to give. That is the hole
+`eval/bird/fingerprint.ts` closes, and it closes it behaviourally: three fixed questions asked twice
+each at temperature zero, hashed into `baseFingerprint.digest`. Four decisions make that a measurement
+rather than a screenshot.
+
+- **Twice, not once.** A single draw cannot tell a change of weights from a change of draw. When the
+  two draws of a probe disagree, the endpoint is sampling on an identical request, and the digest is
+  then a draw: `stable: false` says so and `gate:bird` prints it instead of failing on it. An
+  enforcement that fired on an unstable endpoint would red the build every time the endpoint sampled.
+- **The probe set is hashed too.** Editing a question — a typo, a fifth probe — changes the digest for
+  a reason that has nothing to do with the model. `probeSet` is a digest of the questions, the pin
+  carries it, and a run whose probe set moved **fails**: the pin has to be re-recorded in the commit
+  that edits the questions, which is the only way an edit cannot quietly become a re-pin.
+- **The gate refuses to compare four different things it cannot compare.** No pin, no reading, an
+  unstable reading, and a digest over a different number of answered probes are four sentences and
+  three of them are notes. Only a stable digest over the pinned probe set that differs from the pin is
+  a failure.
+- **Six calls.** Reported in the artifact beside every other cost, because a probe that is free is a
+  probe nobody budgets for; a run of 1,532 questions spends 1,532 calls on a single arm.
+
+What it does not claim: a matching digest is not proof of the same weights. Two models can agree on
+three short answers. It is a one-sided test, and the side it covers is the one that cost this
+repository a claim — a *change* proves something changed, and before this field there was no reading at
+all that could. The questions are chosen so that models separate on **wording** even when they agree on
+the value: `17`, `17.` and `The 7th prime is 17.` are three fingerprints of three generators, and the
+letter-count question is there because a weaker base gets it wrong, which is a capability difference
+appearing in the digest rather than in someone's opinion of the model.
+
+`eval/bird/compare.ts` reads the same field as its seventh coordinate, `model.fingerprint`. That is
+what turned a silence into a statement: an artifact written before the field existed now prints
+`NOT RECORDED` on that line and its comparison is *not comparable*, because "nobody showed these were
+the same generator" and "these were the same generator" had been the same output. The verdict
+distinguishes the two — `<coordinate> changed` against `<coordinate> is not recorded on both sides` —
+which also fixed the same conflation for the corpus and the served base.
 
 ## A denylist's gaps are found by attacks, not by reading it
 

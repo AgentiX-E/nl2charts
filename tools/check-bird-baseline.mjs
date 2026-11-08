@@ -136,6 +136,66 @@ export function compare(report, baseline) {
         : `BIRD1: the base-model pin for ${split} belongs to ${String(floorsModel)} and this run asked for ${String(report?.model)}; its base (${servedNames.join(', ')}) is recorded rather than enforced`,
     );
   }
+  // The same coordinate, read from behaviour instead of from paperwork.
+  //
+  // `model.served` catches an alias that is re-pointed at a different *name*. It cannot catch an
+  // endpoint that keeps the name and changes the weights, and that is the case every pooled reading
+  // in `docs/benchmarks.md` depends on: four runs, hours apart, averaged as if one generator
+  // produced all four. `eval/bird/fingerprint.ts` asks a few fixed questions twice at temperature
+  // zero, and the gate compares the digest with a pin taken the same way.
+  //
+  // The comparison is refused rather than faked when it cannot be made, for four different
+  // reasons, and each of those is a separate sentence because they call for different actions:
+  // no pin (pin it), no reading (the instrument did not run), an unstable reading (the endpoint
+  // samples, so a digest is a draw), or a different number of probes (two digests over different
+  // questions). Only a stable digest over the same probe count that differs from the pin is a
+  // failure.
+  const fingerprintPin = baseline.baseFingerprint?.[split];
+  const fingerprint = report?.baseFingerprint;
+  const fingerprintDigest = typeof fingerprint?.digest === 'string' ? fingerprint.digest : '';
+  const fingerprintProbes = typeof fingerprint?.probes === 'number' ? fingerprint.probes : 0;
+  if (fingerprintPin === undefined) {
+    if (fingerprintDigest !== '') {
+      notes.push(
+        `BIRD1: no base fingerprint is pinned for split ${split}; this run read ${fingerprintDigest} over ${String(fingerprintProbes)} probe(s), which is recorded rather than enforced`,
+      );
+    }
+  } else if (!sameModel) {
+    notes.push(
+      `BIRD1: the base fingerprint pinned for ${split} belongs to ${String(floorsModel)} and this run asked for ${String(report?.model)}; its digest (${fingerprintDigest === '' ? 'none' : fingerprintDigest}) is recorded rather than enforced`,
+    );
+  } else if (fingerprint === undefined) {
+    issues.push(
+      `BIRD1: the report carries no base fingerprint and the floors were taken on ${String(fingerprintPin.digest)}; a run that cannot identify its generator cannot be compared with floors taken on one`,
+    );
+  } else if (fingerprintDigest === '' || fingerprintProbes === 0) {
+    const why = Array.isArray(fingerprint.failures) && fingerprint.failures.length > 0 ? String(fingerprint.failures[0]) : 'every probe answered nothing';
+    issues.push(
+      `BIRD1: this run asked the base ${String(fingerprint.calls ?? 0)} probe question(s) and got no answer (${why}), so it cannot say which generator produced its numbers`,
+    );
+  } else if (fingerprint.stable !== true) {
+    const which = Array.isArray(fingerprint.unstable) && fingerprint.unstable.length > 0 ? fingerprint.unstable.join(', ') : 'a probe';
+    notes.push(
+      `BIRD1: the endpoint answered identical probes differently (${which}), so ${fingerprintDigest} is a draw and not a fingerprint; a change of weights cannot be separated from it in this run`,
+    );
+  } else if (typeof fingerprintPin.probeSet === 'string' && fingerprint.probeSet !== fingerprintPin.probeSet) {
+    // A pin is a claim about the questions it was taken on. Editing a probe — fixing a typo, adding
+    // a fifth — changes the digest for a reason that has nothing to do with the model, so the pin
+    // has to move in the same commit as the question. This is the check that makes that mandatory
+    // rather than remembered.
+    issues.push(
+      `BIRD1: this run asked a different probe set (${String(fingerprint.probeSet ?? 'none')}) from the one the pin was taken on (${fingerprintPin.probeSet}); re-record the pin in the commit that edits the questions`,
+    );
+  } else if (fingerprintProbes !== fingerprintPin.probes) {
+    notes.push(
+      `BIRD1: this run fingerprinted ${String(fingerprintProbes)} probe(s) where the pin was taken over ${String(fingerprintPin.probes)}; the two digests are over different questions, so this one is recorded rather than compared`,
+    );
+  } else if (fingerprintDigest !== fingerprintPin.digest) {
+    issues.push(
+      `BIRD1: the base answered its fixed probes as ${fingerprintDigest} and the floors were taken on ${String(fingerprintPin.digest)}; the same name is being served by different weights, or the endpoint changed something about the request`,
+    );
+  }
+
   // Not a failure: a provider renaming its own model is not this repository's defect. It is the
   // fact a reader needs in order to know that `floorModel` names an alias, and it belongs in the
   // log of every run that hits it rather than in a footnote of a document.
@@ -1647,6 +1707,50 @@ function selfTest() {
     issues.push('BIRD1 does not record that the run asked for one model and was answered by another');
   }
 
+  // The base model as behaviour. The pin is a digest over fixed probes, and the gate has to tell
+  // five different states apart because only one of them is a failure: a digest that moved under
+  // the same name, a run that read no fingerprint at all, a probe that answered nothing, an
+  // endpoint that sampled its own probes, and a probe set of another size.
+  const fingerprinted = { ...baseline, baseFingerprint: { minidev: { digest: 'aaa111', probes: 3, probeSet: 'aaaa0000bbbb1111' } } };
+  const withReading = (reading, extra = {}) => ({ ...report([arm('names', 42), arm('inline', 47)]), ...(reading === undefined ? {} : { baseFingerprint: reading }), ...extra });
+  const fingerprintRun = (reading, pinned = fingerprinted, extra = {}) => compare(withReading(reading, extra), pinned);
+  const sameFingerprint = fingerprintRun({ digest: 'aaa111', probes: 3, stable: true, bases: ['deepseek-flash'], probeSet: 'aaaa0000bbbb1111' });
+  if (sameFingerprint.issues.length !== 0) {
+    issues.push('BIRD1 fails a run whose base answered its probes exactly as the pin did');
+  }
+  const movedFingerprint = fingerprintRun({ digest: 'bbb222', probes: 3, stable: true, bases: ['deepseek-flash'], probeSet: 'aaaa0000bbbb1111' });
+  if (!movedFingerprint.issues.some((issue) => issue.includes('different weights'))) {
+    issues.push('BIRD1 accepts a base model whose fixed probes came back different under the same name');
+  }
+  const absentFingerprint = compare(withReading(undefined), fingerprinted);
+  if (!absentFingerprint.issues.some((issue) => issue.includes('cannot identify its generator'))) {
+    issues.push('BIRD1 accepts a pinned run that never read a base fingerprint');
+  }
+  const silentFingerprint = fingerprintRun({ digest: '', probes: 0, stable: false, calls: 6, failures: ['letter-count: timed out'] });
+  if (!silentFingerprint.issues.some((issue) => issue.includes('got no answer'))) {
+    issues.push('BIRD1 accepts a fingerprint whose probes all failed as if it had read one');
+  }
+  const unstableFingerprint = fingerprintRun({ digest: 'ccc333', probes: 3, stable: false, unstable: ['letter-count'] });
+  if (unstableFingerprint.issues.length !== 0 || !unstableFingerprint.notes.some((note) => note.includes('is a draw'))) {
+    issues.push('BIRD1 either fails an endpoint for sampling or says nothing about why the digest was not compared');
+  }
+  const narrowerFingerprint = fingerprintRun({ digest: 'ddd444', probes: 2, stable: true, probeSet: 'aaaa0000bbbb1111' });
+  if (narrowerFingerprint.issues.length !== 0 || !narrowerFingerprint.notes.some((note) => note.includes('different questions'))) {
+    issues.push('BIRD1 compares two digests taken over different numbers of probes');
+  }
+  const editedProbes = fingerprintRun({ digest: 'aaa111', probes: 3, stable: true, probeSet: 'cccc2222dddd3333' });
+  if (!editedProbes.issues.some((issue) => issue.includes('different probe set'))) {
+    issues.push('BIRD1 lets a digest taken over edited probes pass as the pinned one');
+  }
+  const unpinnedFingerprint = compare(withReading({ digest: 'eee555', probes: 3, stable: true }), baseline);
+  if (!unpinnedFingerprint.notes.some((note) => note.includes('no base fingerprint is pinned'))) {
+    issues.push('BIRD1 records a fingerprint on an unpinned split without saying it is unenforced');
+  }
+  const otherModelFingerprint = fingerprintRun({ digest: 'fff666', probes: 3, stable: true }, fingerprinted, { model: 'glm-4.6' });
+  if (otherModelFingerprint.issues.length !== 0 || !otherModelFingerprint.notes.some((note) => note.includes('recorded rather than enforced'))) {
+    issues.push('BIRD1 enforces a base fingerprint on a run that was deliberately measuring another model');
+  }
+
   // Declared pairs. A pair is a promise that a delta is read inside one run, so the gate checks
   // both halves of the promise: the split still runs the arms, and the run actually read the pair.
   const pairBase = { expectedArms: ['names', 'inline', 'audit'], armsBySplit: {} };
@@ -1693,11 +1797,58 @@ function selfTest() {
   return issues;
 }
 
-if (process.argv[2] === '--self-test') {
+if (process.argv[2] === '--record-fingerprint') {
+  // The one thing a human cannot do by hand without introducing the number they are about to
+  // enforce. A pin whose digest was typed from a different run than the one it names is a pin that
+  // fails the next build for a reason nobody can reproduce, and this repository has already
+  // published a hand-copied number that had drifted (45.0 against 40.3). So the block is printed
+  // and pasted, never composed.
+  const reportPath = resolve(ROOT, 'eval/out/bird-eval.json');
+  let report;
+  try {
+    report = JSON.parse(readFileSync(reportPath, 'utf8'));
+  } catch {
+    console.error('BIRD1: eval/out/bird-eval.json is missing; run bench:bird before pinning a fingerprint');
+    process.exit(1);
+  }
+  const split = report.selection?.split ?? 'minidev';
+  const reading = report.baseFingerprint;
+  const digest = typeof reading?.digest === 'string' ? reading.digest : '';
+  if (reading === undefined || digest === '' || reading.stable !== true) {
+    const why =
+      reading === undefined
+        ? 'the report carries no base fingerprint'
+        : reading.stable !== true
+          ? 'the endpoint answered identical probes differently, so this digest is a draw'
+          : 'no probe answered';
+    console.error(`BIRD1: cannot pin a fingerprint from this run — ${why}`);
+    process.exit(1);
+  }
+  const bases = Array.isArray(reading.bases) && reading.bases.length > 0 ? reading.bases.join('+') : null;
+  console.log(
+    JSON.stringify(
+      {
+        baseFingerprint: {
+          [split]: {
+            digest,
+            probes: reading.probes,
+            total: reading.total,
+            probeSet: reading.probeSet,
+            served: bases,
+            run: report.provenance?.run ?? null,
+            at: report.generatedAt ?? null,
+          },
+        },
+      },
+      null,
+      1,
+    ),
+  );
+} else if (process.argv[2] === '--self-test') {
   const issues = selfTest();
   for (const issue of issues) console.error(issue);
   if (issues.length > 0) process.exit(1);
-  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, a dev run measured against its own sample, two split fields that disagree, a dataset name that disagrees with the split, other split, other model, unfloored arm, empty lever, a funnel that does not add up, a split-specific arm list, an uncounted selector call, a majority vote that spends exactly its samples, a pooled arm that pays for its decision and for no candidates, one that leaves a decision unpriced, one that never says whether its selector was counted, one that redrew the pool it claims to share, a pooled majority vote that costs nothing and the same two counts on a generating arm, a reconcile funnel that an adopting arm and a handing-back arm both satisfy, one that never says which policy it was read under, one that adopted more replies than it received, an adopting arm that did not score what it ran and a novel-only arm that scored a restatement, a repair count without a loop, an unpriced arm, an unnamed model, floors from an unnamed model and a cross-model arm with no second model named, a judge swap with no judge named, an arm with harness errors, a candidate set that lost a third of itself to an endpoint, a failure corpus that stopped at a cap without saying so, an empty-result lever with no funnel or an impossible yield or nothing behind it, a decomposition arm whose prompt the model ignored, an unrecorded instrument, a samples arm with no values behind it, a truncated schema card, a prompt with no table in it, a declared arm subset, a declared arm whose row was dropped, an undeclared row, an empty declaration and a floor that a declaration does not weaken, a declared sample subset, a subset that cannot clear a floor, a sample that shrank undeclared, an impossible declaration and a row count above the request, a cross-arm floor with a matching second model, a swapped one and an unattributed one, and a ceiling that held, a ceiling that fell while the score held, a ceiling inside the noise threshold, a sampling arm with no ceiling at all, a ceiling whose two fields disagree, a ceiling floor on an arm the split does not run, a score that fell while the ceiling held, a ceiling with no floor yet, a corpus that was named, unnamed, replaced under pinned floors or present without a digest, and a base model that matched the pin, answered as another one, or answered a run of another model, was never named, changed mid-run or was never pinned, and a declared pair that was read, was never read, lost an arm it names, lost an arm the run skipped, spanned no question or arrived malformed, and a declared pair a subset run never asked for all behave');
+  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, a dev run measured against its own sample, two split fields that disagree, a dataset name that disagrees with the split, other split, other model, unfloored arm, empty lever, a funnel that does not add up, a split-specific arm list, an uncounted selector call, a majority vote that spends exactly its samples, a pooled arm that pays for its decision and for no candidates, one that leaves a decision unpriced, one that never says whether its selector was counted, one that redrew the pool it claims to share, a pooled majority vote that costs nothing and the same two counts on a generating arm, a reconcile funnel that an adopting arm and a handing-back arm both satisfy, one that never says which policy it was read under, one that adopted more replies than it received, an adopting arm that did not score what it ran and a novel-only arm that scored a restatement, a repair count without a loop, an unpriced arm, an unnamed model, floors from an unnamed model and a cross-model arm with no second model named, a judge swap with no judge named, an arm with harness errors, a candidate set that lost a third of itself to an endpoint, a failure corpus that stopped at a cap without saying so, an empty-result lever with no funnel or an impossible yield or nothing behind it, a decomposition arm whose prompt the model ignored, an unrecorded instrument, a samples arm with no values behind it, a truncated schema card, a prompt with no table in it, a declared arm subset, a declared arm whose row was dropped, an undeclared row, an empty declaration and a floor that a declaration does not weaken, a declared sample subset, a subset that cannot clear a floor, a sample that shrank undeclared, an impossible declaration and a row count above the request, a cross-arm floor with a matching second model, a swapped one and an unattributed one, and a ceiling that held, a ceiling that fell while the score held, a ceiling inside the noise threshold, a sampling arm with no ceiling at all, a ceiling whose two fields disagree, a ceiling floor on an arm the split does not run, a score that fell while the ceiling held, a ceiling with no floor yet, a corpus that was named, unnamed, replaced under pinned floors or present without a digest, and a base model that matched the pin, answered as another one, or answered a run of another model, was never named, changed mid-run or was never pinned, and a base fingerprint that matched its pin, moved under the same name, was never read, answered nothing, came back unstable or arrived over another probe set, and a declared pair that was read, was never read, lost an arm it names, lost an arm the run skipped, spanned no question or arrived malformed, and a declared pair a subset run never asked for all behave');
 } else {
   const reportPath = resolve(ROOT, 'eval/out/bird-eval.json');
   const baseline = JSON.parse(readFileSync(resolve(ROOT, 'eval/baseline/bird.json'), 'utf8'));

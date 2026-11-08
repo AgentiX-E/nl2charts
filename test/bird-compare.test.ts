@@ -40,6 +40,9 @@ function run(overrides: Partial<RunArtifact> = {}): RunArtifact {
     generatedAt: '2026-11-08T13:00:00.000Z',
     corpus: { digest: '7f9b2384df7fd655', rows: 500, questions: 498 },
     run: { timeoutMs: 60000, concurrency: 8, retries: 3 },
+    // The coordinate that says which generator answered. A run written before this field existed
+    // has none, and the instrument now prints that as NOT RECORDED rather than as agreement.
+    baseFingerprint: { digest: 'a1b2c3d4e5f60718', probes: 3, total: 3, stable: true, bases: ['deepseek-flash'] },
     arms: [
       { arm: 'select', passed: 278, total: 496, accuracy: 0.5605, servedModels: { 'deepseek-flash': 496 } },
       { arm: 'names', passed: 180, total: 496, accuracy: 0.3629, servedModels: { 'deepseek-flash': 496 } },
@@ -92,9 +95,35 @@ describe('coordinatesOf', () => {
       'corpus.digest',
       'model.asked',
       'model.served',
+      'model.fingerprint',
       'secondModel',
       'harness',
     ]);
+  });
+
+  it('separates two runs whose base answered the same probes differently under one name', () => {
+    const coordinates = coordinatesOf(run(), run({ baseFingerprint: { digest: 'ffffffffffffffff', probes: 3, total: 3, stable: true } }));
+    const fingerprint = coordinates.find((coordinate) => coordinate.name === 'model.fingerprint') as { same: boolean; recorded: boolean; left: string; right: string };
+    expect(fingerprint.same).toBe(false);
+    expect(fingerprint.recorded).toBe(true);
+    expect(fingerprint.left).toBe('a1b2c3d4e5f60718');
+    expect(fingerprint.right).toBe('ffffffffffffffff');
+  });
+
+  it('says a fingerprint was not recorded rather than calling it a difference', () => {
+    const coordinates = coordinatesOf(run({ baseFingerprint: undefined }), run({ baseFingerprint: undefined }));
+    const fingerprint = coordinates.find((coordinate) => coordinate.name === 'model.fingerprint') as { same: boolean; recorded: boolean; left: string };
+    expect(fingerprint.left).toBe('not recorded');
+    expect(fingerprint.same).toBe(false);
+    expect(fingerprint.recorded).toBe(false);
+  });
+
+  it('refuses to compare a digest the endpoint would answer differently on the next draw', () => {
+    const coordinates = coordinatesOf(run(), run({ baseFingerprint: { digest: 'a1b2c3d4e5f60718', probes: 3, total: 3, stable: false } }));
+    const fingerprint = coordinates.find((coordinate) => coordinate.name === 'model.fingerprint') as { same: boolean; recorded: boolean; right: string };
+    expect(fingerprint.right).toBe('a1b2c3d4e5f60718 (unstable)');
+    expect(fingerprint.same).toBe(false);
+    expect(fingerprint.recorded).toBe(false);
   });
 
   it('separates what was asked from what answered', () => {
@@ -367,6 +396,23 @@ describe('compareLines', () => {
     const text = render(compareRuns(run(), run({ arms: [{ arm: 'select', passed: 1, total: 2, servedModels: { other: 2 } }] }), 'a', 'b'));
     expect(text).toContain('DIFFERS');
     expect(text).toContain('the endpoint named a different base model');
+  });
+
+  it('marks a coordinate nobody recorded as NOT RECORDED, and says that in the verdict', () => {
+    // The verdict used to call both cases "changed", which asserts that something moved in the one
+    // case where the truth is that nobody looked. The two are different news and they are now two
+    // different sentences.
+    const text = render(compareRuns(run({ baseFingerprint: undefined }), run({ baseFingerprint: undefined }), 'a', 'b'));
+    expect(text).toContain('NOT RECORDED');
+    expect(text).not.toContain('DIFFERS');
+    expect(text).toContain('model.fingerprint is not recorded on both sides');
+    expect(text).not.toContain('model.fingerprint changed');
+  });
+
+  it('states both halves when one coordinate moved and another was never read', () => {
+    const text = render(compareRuns(run(), run({ split: 'dev', baseFingerprint: undefined, corpus: { digest: '0000000000000000' } }), 'a', 'b'));
+    expect(text).toContain('split, corpus.digest changed');
+    expect(text).toContain('model.fingerprint is not recorded on both sides');
   });
 
   it('prints the movement table with the interval and the reading of each row', () => {

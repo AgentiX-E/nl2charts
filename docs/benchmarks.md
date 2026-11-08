@@ -9844,6 +9844,59 @@ bytes: a reformat is not a new benchmark), and `gate:bird` refuses a report that
 not its corpus. The pin — the digest the floors were set on — is written by the next baseline update
 from a CI run, because a pin guessed on a workstation is a claim about a cache.
 
+### The generator a rate is about
+
+`corpus.digest` names the questions. Two fields name the model and neither of them is a measurement:
+`model` is the alias the run asked for, and `servedModels` is the name the endpoint answered with.
+Those came apart on 2026-11-08 — `deepseek-chat` asked, `deepseek-flash` served, on all 6,448 answers —
+and `served` is pinned per split because of it. What no field could see is the case that matters for
+every pooled number in this document: an endpoint that keeps the name and changes the weights. Four
+runs of one configuration are averaged above as if one generator produced all four, and until this
+round that was an assumption with a name attached to it.
+
+`eval/bird/fingerprint.ts` replaces the assumption with six calls. Three fixed questions, asked twice
+each at temperature zero, hashed into `baseFingerprint.digest`:
+
+| field | what a reader does with it |
+| --- | --- |
+| `digest` | 16 hex characters over the answers, the same width as the corpus digest |
+| `probes` / `total` | how many of the three answered; a digest over 2 of 3 is about two questions |
+| `draws` | how many times each was asked — two, unless a test says otherwise |
+| `stable` | whether every probe answered identically on every draw |
+| `probeSet` | a digest of the questions themselves, so editing one is visible as an edit |
+| `bases` | the names the endpoint gave itself, which should be one |
+| `calls`, `promptTokens`, `completionTokens` | what the six calls cost, beside every other cost in the artifact |
+
+Two draws rather than one, because a single draw cannot tell a change of weights from a change of
+draw: an endpoint that samples on an identical request has not given a fingerprint, it has given a
+sample, and `stable: false` says exactly that. The probe set is hashed as well, because an edited
+question would move the digest for a reason that is not the model — the gate **fails** a run whose
+probe set differs from the pin's, which forces the pin to be re-recorded in the commit that edits the
+questions rather than months later in a diff nobody reads.
+
+`gate:bird` has four refusals here and only one of them is a failure, which is the whole design:
+
+| state | what the gate says |
+| --- | --- |
+| digest differs from the pin, same probe set, stable | **fails**: the same name is served by different weights, or the endpoint changed something about the request |
+| no fingerprint in the artifact | **fails**: a run that cannot identify its generator cannot be compared with floors taken on one |
+| probes all failed, or the digest is empty | **fails**, naming the first failure: the instrument could not establish the coordinate |
+| two draws disagree | note: the digest is a draw, and a change of weights cannot be separated from it in this run |
+| fewer probes answered than the pin records | note: the two digests are over different questions |
+
+A matching digest is not proof of the same weights, and this document will not treat it as one: two
+models can agree on three short answers. It is a one-sided test, and the side it covers is the one
+that has already cost this repository a claim — a *change* proves something changed, and before this
+field there was no reading at all that could. The questions are chosen so that models separate on
+wording even where they agree on the value: `17`, `17.` and `The 7th prime is 17.` are three
+fingerprints of three generators.
+
+The same field is the seventh coordinate in `bench:bird:compare`, which is where the assumption was
+being made loudest. An artifact written before the field existed now prints `NOT RECORDED` on that
+line and its comparison is **not comparable** — because "nobody showed these were the same generator"
+and "these were the same generator" had been the same output, and the verdict now says which of the
+two it means.
+
 ### Three things the audit asserted that this repository does not support
 
 | Claim | What is there |

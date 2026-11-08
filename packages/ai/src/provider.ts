@@ -18,7 +18,26 @@ export interface LlmMessage {
  * raises — which of its calls earned its tokens — and the selector, which answers with one digit
  * to a prompt nobody else reads, is the call whose price is easiest to hide.
  */
-export type CallPurpose = 'generate' | 'retry' | 'select' | 'compare' | 'plan' | 'interpret' | 'synthesize' | 'columns' | 'audit' | 'reconcile';
+export type CallPurpose =
+  | 'generate'
+  | 'retry'
+  | 'select'
+  | 'compare'
+  | 'plan'
+  | 'interpret'
+  | 'synthesize'
+  | 'columns'
+  | 'audit'
+  | 'reconcile'
+  /**
+   * A fixed question asked to identify the generator, not to answer anything.
+   *
+   * Its own bucket because it is the one call in the harness that is spent on the instrument
+   * rather than on a case: folding it into `generate` would price it as part of an arm, and
+   * leaving it unlabelled would make the meter's own "every call names a purpose" check fail
+   * on a call that knows exactly what it is for.
+   */
+  | 'probe';
 
 /**
  * The bucket a call lands in when it names no purpose.
