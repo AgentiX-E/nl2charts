@@ -8002,6 +8002,25 @@ cases in the first run and by 16 in the third, and behind by one case in the mid
 sign is settled — and the run in which it looks most convincing is the one that also read the pair's
 difference as nothing.
 
+**A fourth run, unasked for.** The commit that added the fifth declared pair was pushed, which produced
+another run (`42510049798`) of the same configuration — the first one to read all five pairs in CI. Every
+label above survived it, and the intervals narrowed the way the resolution paragraph promised:
+
+| pair | four-run pooled | was (three runs) | verdict | Q |
+| --- | --- | --- | --- | --- |
+| `synth-definitions` → `inline-definitions` | −0.52pp ± 1.13 | −0.28pp ± 1.32 | none | 0.187 |
+| `inline+evidence` → `inline+evidence+audit` | +0.16pp ± 0.84 | +0.15pp ± 0.99 | none | 0.249 |
+| `inline+evidence` → `select` | +1.16pp ± 1.09 | +1.01pp ± 1.26 | **heterogeneous** | 0.038 |
+| `metadata+evidence` → `select` | −1.72pp ± 1.42 | −1.90pp ± 1.64 | **sign-flip** | 0.069 |
+| `inline+evidence` → `metadata+evidence` | +2.87pp ± 1.35 | +2.89pp ± 1.55 | **established** | 0.630 |
+
+This is the check that matters for the instrument and not for the levers: a fifth run is coming, because
+every push that touches the pipeline produces one, so the question is not whether the numbers move but
+whether the labels do. One run later, none of the five did, and the two that disagree with each other
+still disagree (`select` at Q p = 0.038). A tool whose verdicts change with each new artifact would be
+worthless; a tool whose verdicts never change would be a constant. The evidence that it is neither is a
+table like this one, which is cheap because it costs no model calls.
+
 A paired test conditions on the questions. It does not condition on the generator's own draw, and on
 496 questions that draw is worth about two points per run. So the unit of evidence here is neither a
 rate nor a single paired reading: it is the pair's estimate pooled over the runs that read it, with
