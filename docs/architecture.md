@@ -1244,3 +1244,49 @@ On `inline+evidence` the four recallers with comments recall 1,249 fields at `to
 without them, while the unsliced recall rises from 1,693 to 1,737. A fixed slice lets more candidates
 compete for the same twelve slots. A proposal that turns a recaller on without touching the budget has
 to be measured at the budget it will run at, not at the ceiling where every source is free.
+
+## A rate must name its corpus, and a path is not a name
+
+Every number in `docs/benchmarks.md` is a claim about a set of questions, and until this round the
+only identity that set had was a file path and a cache key this repository chose. BIRD re-annotated
+Mini-Dev on 2026-10-28 — corrected annotations, replaced instances — and the harness downloads the
+split from a bucket URL. Two artifacts that disagree by 1.5pp could then be the pipeline, the
+questions, or both, and no field in either artifact could tell them apart. All 100 rounds of floors in
+`eval/baseline/bird.json` are floors on the questions that set them.
+
+The fix is an identity, not a version string: `corpus.digest` is a SHA-256 over the rows, computed by
+the reader that produced the question set, so a caller cannot forget it and a re-serialised file is
+not a new benchmark. `gate:bird` refuses a report that declares the arms it ran and not the corpus it
+read. The pin — the digest the floors belong to — is written by the next baseline update from a CI
+run, because a pin guessed on a workstation is a claim about a cache rather than about CI.
+
+The same argument applies to weights, and there the repository is half-done: `servedModels()` records
+which base model answered, which catches an alias re-pointed at new weights; it does not record what
+those weights were. A model fingerprint is the missing half, and the reason it is on the queue rather
+than in the artifact is that a fingerprint that is `UNPINNED` on most runs is a field that lies by
+being present.
+
+## A denylist's gaps are found by attacks, not by reading it
+
+The statement guard is a denylist: allowed heads, banned words, banned functions. Reading it suggests
+coverage; running it found two holes on the first attempt. `SELECT readfile('/etc/passwd')` and
+`SELECT load_extension('evil')` were accepted — the function list held DuckDB's readers
+(`read_csv`, `read_text`, `read_blob`) and neither of SQLite's file functions, on the driver the
+product ships by default. The second is worse than it looks: the database is opened `readOnly: true`,
+and that protects the *database*. `readfile` reads a path, so read-only never applied to it.
+
+Two rules follow, and the second is the one that generalises:
+
+1. **A guard is measured by what gets through, at a cost that is published beside it.** ASR alone is
+   bought by refusing everything, so `bench:guard` prints false-reject and utility on the same line:
+   0.0% ASR, 0 of 10 legitimate questions refused, 100% utility.
+2. **A gate whose removal changes nothing is not a gate.** The red team re-runs the same corpus with no
+   gate at all and requires the damage to rise — 0.0% guarded against 69.0% unguarded. That mutation
+   is checked on every run rather than in a test file, because a reading that cannot move is not
+   evidence about the thing it names.
+
+The instrument also had to be told what it cannot measure. `createRunner` races the engine against a
+timer, and `node:sqlite` executes on the calling thread: a recursive CTE with no bound blocks the
+event loop, so the timer cannot fire and the runner returns when the query finishes. Unbounded queries
+are therefore listed as unmeasured with that reason, instead of being asserted and passing on a fast
+machine.

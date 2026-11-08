@@ -5362,6 +5362,16 @@ export function baseReport(prepared: PreparedRun): Record<string, unknown> {
     // gate needs the declaration to tell it from a report that lost a row: the run that
     // scored six arms on dev was failed for not running two it never asked for.
     armsRequested: settings.arms,
+    // What was read, not what was asked for. A rate is a claim about a corpus, and the corpus is
+    // not a constant: BIRD re-annotated Mini-Dev on 2026-10-28 (corrected annotations, replaced
+    // instances) and this repository downloads it from a bucket URL rather than a pinned archive.
+    // An artifact that names only the path cannot separate "the pipeline moved" from "the
+    // questions moved", and every floor in the baseline is a floor on the corpus that set it.
+    corpus: {
+      digest: shape.digest,
+      rows: shape.rows,
+      questions: questions.length,
+    },
     selection: {
       // The databases this run actually scored. It used to be the databases that were asked
       // for, which is a different claim: a 120-question sample of dev covered 2 of the 11.
@@ -7265,6 +7275,7 @@ export function writeArtifact(
     const controls = report.controls as Controls;
     log(
       `dry run: gold runnable ${String((report.gold as { runnable: number }).runnable)}/${String((report.gold as { executed: number }).executed)}; ` +
+        `corpus ${(report.corpus as { digest: string }).digest}; ` +
         `self-consistency ${(controls.selfConsistency * 100).toFixed(1)}%; negative false matches ${String(controls.negativeFalseMatches)}; ` +
         `schema columns checked ${String(controls.schemaChecked)}, missing ${String(controls.schemaMissingTotal)}`,
     );

@@ -75,6 +75,31 @@ export function compare(report, baseline) {
     }
   }
 
+  // The corpus a rate is about, named as content rather than as a path. BIRD re-annotated
+  // Mini-Dev on 2026-10-28 — corrected annotations, replaced instances — and this repository
+  // downloads the split from a bucket URL rather than a pinned archive. Every floor in this
+  // file is a floor on the questions that set it, so a run that cannot name its corpus cannot
+  // be compared with those floors at all.
+  const corpus = report?.corpus;
+  const pinned = baseline.corpus?.[split];
+  if (corpus === undefined) {
+    if (pinned !== undefined) {
+      issues.push(`BIRD1: the report does not name the corpus it read, so it cannot be compared with floors pinned to ${pinned}`);
+    }
+  } else if (typeof corpus.digest !== 'string' || corpus.digest === '') {
+    issues.push('BIRD1: the report has a corpus block with no digest in it');
+  } else if (pinned !== undefined && corpus.digest !== pinned) {
+    issues.push(
+      `BIRD1: the report read corpus ${corpus.digest} and the floors were set on ${pinned}; the questions changed under the floors`,
+    );
+  }
+  // A report that declares its arms is a report from a runner that also knows its corpus. The
+  // exemption above is for artifacts written before the field existed, and this is what keeps
+  // it an exemption rather than a hole.
+  if (corpus === undefined && report?.armsRequested !== undefined) {
+    issues.push('BIRD1: the report declares the arms it ran and not the corpus it read');
+  }
+
   // Which questions a run set out to score is a fourth coordinate of a floor, after split,
   // arms and model — and it was the missing one. `bird-model.yml` took a 300-question slice
   // to compare two models on one prompt, the artifact recorded `requested: 300` and
@@ -685,7 +710,15 @@ function selfTest() {
     ...extra,
   });
   const run = { timeoutMs: 60000, concurrency: 8, retries: 3 };
-  const report = (arms, scored = 100, split = 'minidev', model = 'deepseek-chat') => ({ selection: { scored, split }, model, run, arms });
+  // Every fixture names a corpus, because a rate is about one. The fixtures that are about the
+  // declaration take it away on purpose.
+  const report = (arms, scored = 100, split = 'minidev', model = 'deepseek-chat') => ({
+    selection: { scored, split },
+    model,
+    run,
+    arms,
+    corpus: { digest: 'aaa', rows: 500, questions: 498 },
+  });
   const fail = (result, count, why) => {
     if (result.issues.length !== count) issues.push(why);
   };
@@ -740,6 +773,7 @@ function selfTest() {
     run,
     armsRequested: ['inline'],
     arms: [arm('inline', 100, 298)],
+    corpus: { digest: 'aaa', rows: 500, questions: 498 },
     ...extra,
   });
   // The fixture baseline above scores 100 questions; these cases are about Mini-Dev's real
@@ -1253,7 +1287,14 @@ function selfTest() {
     floors: { dev: { names: 41.5, 'select-mixed': 62.5 } },
     floorModel: { dev: 'deepseek-chat' },
   };
-  const devReport = (arms, extra = {}) => ({ selection: { scored: 1532, split: 'dev' }, model: 'deepseek-chat', run, arms, ...extra });
+  const devReport = (arms, extra = {}) => ({
+    selection: { scored: 1532, split: 'dev' },
+    model: 'deepseek-chat',
+    run,
+    arms,
+    corpus: { digest: 'dev-corpus', rows: 1534, questions: 1532 },
+    ...extra,
+  });
   const decomposed = { asked: 1532, fired: 1400, share: 0.914, meanSteps: 2.4 };
   const subset = compare(
     devReport([arm('names', 645, 1532), arm('decompose', 911, 1532, { decomposition: decomposed })], { armsRequested: ['names', 'decompose'] }),
@@ -1452,6 +1493,18 @@ function selfTest() {
   if (!unflooredCeiling.notes.some((note) => note.includes('no ceiling floor'))) {
     issues.push('BIRD1 does not say that a sampling arm has no ceiling floor yet');
   }
+  // Corpus identity. A rate is about a corpus, and BIRD re-annotated Mini-Dev in October 2026:
+  // the same path can hold a different benchmark, so the digest has to be in the artifact and the
+  // floors have to be pinned to one.
+  const declaredRun = (corpus) => ({
+    ...report([arm('names', 42), arm('inline', 51)]),
+    armsRequested: ['names', 'inline'],
+    ...(corpus === undefined ? { corpus: undefined } : { corpus }),
+  });
+  fail(compare(declaredRun({ digest: 'aaa' }), baseline), 0, 'BIRD1 fails a report that names the corpus it read');
+  fail(compare(declaredRun(undefined), baseline), 1, 'BIRD1 does not notice a report that declares its arms and not its corpus');
+  fail(compare(declaredRun({ digest: 'bbb' }), { ...baseline, corpus: { minidev: 'aaa' } }), 1, 'BIRD1 compares a run against floors pinned to a different corpus');
+  fail(compare(declaredRun({}), baseline), 1, 'BIRD1 accepts a corpus block with no digest in it');
   return issues;
 }
 
@@ -1459,7 +1512,7 @@ if (process.argv[2] === '--self-test') {
   const issues = selfTest();
   for (const issue of issues) console.error(issue);
   if (issues.length > 0) process.exit(1);
-  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, a dev run measured against its own sample, two split fields that disagree, a dataset name that disagrees with the split, other split, other model, unfloored arm, empty lever, a funnel that does not add up, a split-specific arm list, an uncounted selector call, a majority vote that spends exactly its samples, a pooled arm that pays for its decision and for no candidates, one that leaves a decision unpriced, one that never says whether its selector was counted, one that redrew the pool it claims to share, a pooled majority vote that costs nothing and the same two counts on a generating arm, a reconcile funnel that an adopting arm and a handing-back arm both satisfy, one that never says which policy it was read under, one that adopted more replies than it received, an adopting arm that did not score what it ran and a novel-only arm that scored a restatement, a repair count without a loop, an unpriced arm, an unnamed model, floors from an unnamed model and a cross-model arm with no second model named, a judge swap with no judge named, an arm with harness errors, a candidate set that lost a third of itself to an endpoint, a failure corpus that stopped at a cap without saying so, an empty-result lever with no funnel or an impossible yield or nothing behind it, a decomposition arm whose prompt the model ignored, an unrecorded instrument, a samples arm with no values behind it, a truncated schema card, a prompt with no table in it, a declared arm subset, a declared arm whose row was dropped, an undeclared row, an empty declaration and a floor that a declaration does not weaken, a declared sample subset, a subset that cannot clear a floor, a sample that shrank undeclared, an impossible declaration and a row count above the request, a cross-arm floor with a matching second model, a swapped one and an unattributed one, and a ceiling that held, a ceiling that fell while the score held, a ceiling inside the noise threshold, a sampling arm with no ceiling at all, a ceiling whose two fields disagree, a ceiling floor on an arm the split does not run, a score that fell while the ceiling held and a ceiling with no floor yet all behave');
+  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, a dev run measured against its own sample, two split fields that disagree, a dataset name that disagrees with the split, other split, other model, unfloored arm, empty lever, a funnel that does not add up, a split-specific arm list, an uncounted selector call, a majority vote that spends exactly its samples, a pooled arm that pays for its decision and for no candidates, one that leaves a decision unpriced, one that never says whether its selector was counted, one that redrew the pool it claims to share, a pooled majority vote that costs nothing and the same two counts on a generating arm, a reconcile funnel that an adopting arm and a handing-back arm both satisfy, one that never says which policy it was read under, one that adopted more replies than it received, an adopting arm that did not score what it ran and a novel-only arm that scored a restatement, a repair count without a loop, an unpriced arm, an unnamed model, floors from an unnamed model and a cross-model arm with no second model named, a judge swap with no judge named, an arm with harness errors, a candidate set that lost a third of itself to an endpoint, a failure corpus that stopped at a cap without saying so, an empty-result lever with no funnel or an impossible yield or nothing behind it, a decomposition arm whose prompt the model ignored, an unrecorded instrument, a samples arm with no values behind it, a truncated schema card, a prompt with no table in it, a declared arm subset, a declared arm whose row was dropped, an undeclared row, an empty declaration and a floor that a declaration does not weaken, a declared sample subset, a subset that cannot clear a floor, a sample that shrank undeclared, an impossible declaration and a row count above the request, a cross-arm floor with a matching second model, a swapped one and an unattributed one, and a ceiling that held, a ceiling that fell while the score held, a ceiling inside the noise threshold, a sampling arm with no ceiling at all, a ceiling whose two fields disagree, a ceiling floor on an arm the split does not run, a score that fell while the ceiling held, a ceiling with no floor yet, and a corpus that was named, unnamed, replaced under pinned floors or present without a digest all behave');
 } else {
   const reportPath = resolve(ROOT, 'eval/out/bird-eval.json');
   const baseline = JSON.parse(readFileSync(resolve(ROOT, 'eval/baseline/bird.json'), 'utf8'));

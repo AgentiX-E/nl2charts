@@ -27,6 +27,7 @@ import { startEndpoint } from './helpers/endpoint.js';
 import type { EndpointRequest } from './helpers/endpoint.js';
 import { assertSamplesRan, assertSecondModel, judgeModelName, main, resolveSettings } from '../eval/bird/run.js';
 import { INTENT_RULE } from '../eval/bird/intent.js';
+import { questionDigest } from '../eval/bird/data.js';
 
 const root = mkdtempSync(join(tmpdir(), 'nl2charts-bird-run-'));
 afterAll(() => {
@@ -392,6 +393,19 @@ describe('a split whose file repeats a question', () => {
     expect(selection.requested).toBe(2);
     expect(selection.sampled).toBe(false);
     expect(selection.repeats).toEqual([repeated.id]);
+  });
+
+  it('names the corpus it read, as content rather than as a path', async () => {
+    // BIRD re-annotated Mini-Dev in October 2026 and this harness downloads the split from a
+    // bucket URL, so a path is not an identity. The digest is of the rows, which means a reader
+    // can recompute it from the file the run says it read — which is what this test does.
+    const result = await run({ plan: {}, argv: ['--dry-run'], env: { BIRD_DATA: dir, BIRD_ARMS: 'names' } });
+    expect(result.code).toBe(0);
+    const corpus = result.report.corpus as { digest: string; rows: number; questions: number };
+    expect([corpus.rows, corpus.questions]).toEqual([3, 2]);
+    expect(corpus.digest).toMatch(/^[0-9a-f]{16}$/);
+    const file = JSON.parse(readFileSync(join(dir, 'mini_dev_sqlite.json'), 'utf8')) as unknown[];
+    expect(corpus.digest).toBe(questionDigest(file as never));
   });
 
   it('refuses a declared sample larger than the split instead of publishing it', async () => {

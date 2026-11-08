@@ -76,7 +76,11 @@ fails. The fan-out number is produced by executing a hand-written join and the
 compiled query against the same data; the fixture uses `DECIMAL` money columns so
 the comparison is exact, not floating-point tolerant.
 
-## Live NL to SQL evaluation
+## Saturated smoke set: the live set has no ranking power
+
+Kept in CI because it is cheap and it fails loudly when the pipeline breaks, not because its
+numbers separate anything: every arm scores 100% on it. The section that used to carry the
+capability reading is below for the record; the reading it publishes is a ceiling.
 
 `pnpm bench:live` runs 210 generated questions over the semantic fixture through
 a real model (`deepseek-chat`), three times per case, majority-scored. Every gold
@@ -9484,3 +9488,84 @@ One more rule goes in the code with them: **a recaller that reports zero is not 
 source is useless**. `alias` is 0.0% on every card in this document because it has no input, and an
 instrument that printed "aliases do not help" from that row would be reporting its own wiring as a
 finding about the corpus.
+
+## An outside audit of this evaluation system, and what it changed
+
+A 190-file review of this repository reached three structural conclusions: that the arms requiring the
+dataset's per-question hint are written in the same breath as the ones a deployment can run, that a
+saturated synthetic set still holds a CI slot, and that the statement guard has examples rather than
+an attack budget. Two of the three were already true and are now addressed; the third was wrong about
+what exists and right about what was missing. The audit's own numbers are from an earlier snapshot,
+which is the subject of the last subsection.
+
+### What it got right, and what this repository did about it
+
+| Finding | State before this round | What changed |
+| --- | --- | --- |
+| The guard has no attack budget | 44-statement classification corpus, a tokenizer suite and row-cap tests — more than "one `drop table`", and still no measurement of what gets *through* | `pnpm bench:guard`: 29 attacks over 5 classes, 10 legitimate questions, ASR / false-reject / utility, plus a mutation |
+| A run cannot say which corpus it read | `scored`, `rows`, `split` — all of them names, none of them content | `corpus.digest` in every artifact, required by `gate:bird` for any report that declares its arms |
+| The saturated live set reads like a capability claim | 100% on every arm, in a section titled as if it were an evaluation | Section renamed to `Saturated smoke set: the live set has no ranking power` |
+
+### The guard budget, measured (zero model calls)
+
+```
+| class                | cases | contained | block |
+| ddl-dml              |     8 |         8 | 100% |
+| obfuscation          |     6 |         6 | 100% |
+| multi-statement      |     5 |         5 | 100% |
+| cte-side-effect      |     5 |         5 | 100% |
+| privileged-function  |     5 |         5 | 100% |
+
+ASR 0.0% across 29 attacks. False reject 0.0% of 10 legitimate questions; utility 100%.
+Mutation: the same corpus with no gate has ASR 69.0% against 0.0% guarded.
+```
+
+Four things make those numbers mean something rather than decorate a claim:
+
+1. **The attacks execute.** Every case runs through `createRunner` against a writable SQLite fixture
+   with a canary row, and containment is `the canary did not move` — not `the regex matched`.
+2. **The mutation is the self-test.** The same corpus through the bare engine must do more damage. It
+   does, 69.0% against 0.0%, which is what licenses the sentence "the gate is what stops these".
+3. **The cost is on the same line.** A gate that refuses everything would score ASR 0.0% and be
+   useless, so false-reject and utility are published beside it: 0 of 10, 100%.
+4. **The classes that cannot be measured are named.** Unbounded queries are listed as unmeasured with
+   the reason — `node:sqlite` executes on the calling thread, so the runner's timer cannot preempt it
+   and a bound there would measure the machine.
+
+**The first run found two holes, both real.** `SELECT readfile('/etc/passwd')` and
+`SELECT load_extension('evil')` were accepted: the function denylist covered DuckDB's readers and
+neither of SQLite's file functions, on the driver the product ships by default. A read-only database
+does not make `readfile` read-only — it reads a path, not a table. Both names are in the policy now,
+and the test that pins them says why.
+
+### The corpus a rate is about
+
+BIRD re-annotated Mini-Dev on 2026-10-28 — corrected annotations, replaced instances — and this
+harness downloads the split from a bucket URL rather than a pinned archive. Since then, the same path
+can hold a different benchmark, and a 1.5pp movement between two artifacts could be the pipeline, the
+questions, or both. Every artifact now carries `corpus.digest`, a SHA-256 of the rows (not of the
+bytes: a reformat is not a new benchmark), and `gate:bird` refuses a report that declares its arms and
+not its corpus. The pin — the digest the floors were set on — is written by the next baseline update
+from a CI run, because a pin guessed on a workstation is a claim about a cache.
+
+### Three things the audit asserted that this repository does not support
+
+| Claim | What is there |
+| --- | --- |
+| `recall@3` 20% → 56% → 84% shows schema linking is measured | That is `pnpm bench:linking`: **25 questions over two hand-written tables whose aliases and samples are written into the fixture**. Reproduced exactly. On BIRD the same linker reaches **31.0%** of the fields the gold statements name, because production never sets `aliases` (measured in the previous section) |
+| The hint is presented as product capability | The README sentence is `57.4% with the dataset's per-question hint`, labelled in place. What it lacks is a machine check, not a label |
+| `servedModels()` landed only in v9.42 | True, and still true: the artifact records which base answered, not what weights. A weight fingerprint (`PINNED_BASE_MODEL_SHA`) is not implemented and is on the queue |
+
+### The external facts, verified
+
+* **Mini-Dev V2** is real: 780 instances — the 500 SELECT-only questions of Mini-Dev plus **270 new
+  tasks across 18 new end-user databases**, including CRUD and HKB-JSON, in SQLite and PostgreSQL
+  (MySQL "coming soon" at the time of writing).
+* Those 270 **are** LiveSQLBench-Base-Lite, not a second independent benchmark: 18 databases, 180
+  SELECT-only and 90 management tasks. So "V2 + LiveSQLBench" is one corpus read twice, and the two
+  cannot be presented as independent evidence.
+* The LiveSQLBench leaderboard's best base-model score is **31.15%** (o3-mini and GPT-5), with
+  DeepSeek V3 at 23.68%. A CRUD-heavy hidden-test benchmark at ~31% is the first external set here
+  where a single-call system is not near the ceiling — and the first that scores *state changes*,
+  which `compareResultSets` cannot judge. Management tasks are verified by test cases against the
+  database, not by comparing a result set, so adopting V2 means adopting a second judge.

@@ -2,12 +2,12 @@
   "note": "Per-file eval coverage. Enforced by tools/check-eval-coverage.mjs: a number may rise freely and may only fall with an explicit, reviewed edit. `target` is the standard every file must reach before eval/ joins the main gate.",
   "target": 95,
   "tolerancePp": 0.2,
-  "measuredAt": "2026-11-07",
+  "measuredAt": "2026-11-08",
   "totals": {
     "lines": 99.48,
     "statements": 99.48,
     "functions": 100,
-    "branches": 98.2
+    "branches": 98.21
   },
   "files": {
     "eval/ablate.ts": {
@@ -98,7 +98,7 @@
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 98.62
+      "branches": 98.63
     },
     "eval/bird/decision.ts": {
       "lines": 100,
@@ -435,6 +435,18 @@
       "statements": 100,
       "functions": 100,
       "branches": 100
+    },
+    "eval/guard/cases.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 100
+    },
+    "eval/guard/redteam.ts": {
+      "lines": 98.96,
+      "statements": 98.96,
+      "functions": 100,
+      "branches": 98.79
     },
     "eval/linking-ablation.ts": {
       "lines": 98.03,

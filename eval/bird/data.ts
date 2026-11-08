@@ -5,6 +5,7 @@
  * runner does the I/O, so these functions can be unit tested against small
  * fixtures without a database or a model.
  */
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { SchemaColumn, SchemaTable } from '@agentix-e/nl2charts-ai';
@@ -124,6 +125,19 @@ export interface QuestionSet {
   readonly questions: BirdQuestion[];
   readonly rows: number;
   readonly repeats: readonly QuestionRepeat[];
+  /**
+   * The corpus this set was read from, as a content digest.
+   *
+   * A rate is a claim about a corpus, and until this field existed the corpus was named by
+   * nothing but a file path and a cache key this repository chose. BIRD re-annotated Mini-Dev
+   * on 2026-10-28 — corrected annotations and replaced instances — so the same path can now
+   * hold two different benchmarks, and two artifacts that disagree by 2pp cannot be sorted
+   * into "the pipeline moved" and "the questions moved".
+   *
+   * The digest is of the rows, not of the file bytes: re-formatting the JSON is not a new
+   * corpus, and a digest that changed on whitespace would be a digest nobody could compare.
+   */
+  readonly digest: string;
 }
 
 /**
@@ -153,6 +167,11 @@ const firstDifference = (left: Record<string, unknown>, right: Record<string, un
   return 'no field differs';
 };
 
+/** The content digest of a question file, as the artifact records it. */
+export function questionDigest(rows: readonly BirdQuestion[]): string {
+  return createHash('sha256').update(recordKey(rows)).digest('hex').slice(0, 16);
+}
+
 export function distinctQuestions(rows: readonly BirdQuestion[]): QuestionSet {
   const kept: BirdQuestion[] = [];
   const firstAt = new Map<number, number>();
@@ -180,7 +199,7 @@ export function distinctQuestions(rows: readonly BirdQuestion[]): QuestionSet {
     if (at.length > 1) repeats.push({ id, positions: at });
   }
   repeats.sort((left, right) => left.id - right.id);
-  return { questions: kept, rows: rows.length, repeats };
+  return { questions: kept, rows: rows.length, repeats, digest: questionDigest(rows) };
 }
 
 /**

@@ -152,6 +152,8 @@ jobs:
         run: pnpm gate:exports
       - name: Bundle budgets
         run: pnpm gate:budgets
+      - name: Statement guard red team (attacks, false rejects, mutation)
+        run: pnpm bench:guard
       - name: Secret scan (tracked files, no values printed)
         run: pnpm gate:secrets
       - name: Secret scan self-test

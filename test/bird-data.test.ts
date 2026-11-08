@@ -12,6 +12,7 @@ import {
   loadQuestions,
   loadTables,
   parseCsv,
+  questionDigest,
   sqlType,
   stratifiedSample,
 } from '../eval/bird/data.js';
@@ -451,5 +452,55 @@ describe('the dataset name an artifact carries', () => {
     // A typo in `BIRD_SPLIT` already fails earlier, at the question file. Reaching this line
     // means the caller wants the subset name, not that the name should become the input.
     expect(datasetName('anything-else')).toBe('bird-mini-dev');
+  });
+});
+
+/**
+ * The corpus a rate is about, as content.
+ *
+ * BIRD re-annotated Mini-Dev in October 2026 — corrected annotations, replaced instances — and
+ * the split is downloaded from a bucket URL rather than a pinned archive. Every published rate,
+ * and every floor in `eval/baseline/bird.json`, is a claim about the questions that produced it;
+ * without a digest in the artifact, two runs that disagree by 2pp cannot be sorted into "the
+ * pipeline moved" and "the questions moved".
+ */
+describe('the digest that names a corpus', () => {
+  const row = (id: number, question: string) => ({
+    question_id: id,
+    db_id: 'shop',
+    question,
+    evidence: '',
+    SQL: 'select 1',
+    difficulty: 'simple' as const,
+    tables: [],
+  });
+
+  it('is stable across reads of the same rows', () => {
+    const rows = [row(1, 'How many orders?'), row(2, 'Which region?')];
+    expect(questionDigest(rows)).toBe(questionDigest(structuredClone(rows) as typeof rows));
+  });
+
+  it('does not depend on the order the keys were written in', () => {
+    // The file is JSON and a reader can re-serialise it; identity is of the questions, not of
+    // their spelling. Hashing the bytes would report a reformat as a different benchmark.
+    const rows = [row(1, 'How many orders?')];
+    const reordered = [{ SQL: 'select 1', tables: [], difficulty: 'simple' as const, evidence: '', question: 'How many orders?', db_id: 'shop', question_id: 1 }];
+    expect(questionDigest(reordered)).toBe(questionDigest(rows));
+  });
+
+  it('changes when a question changes', () => {
+    expect(questionDigest([row(1, 'How many orders?')])).not.toBe(questionDigest([row(1, 'How many orders are there?')]));
+  });
+
+  it('changes when a duplicate row is dropped, because the file is what was read', () => {
+    const twice = [row(1, 'How many orders?'), row(1, 'How many orders?')];
+    expect(questionDigest(twice)).not.toBe(questionDigest([row(1, 'How many orders?')]));
+  });
+
+  it('travels with the question set rather than being recomputed by the caller', () => {
+    const set = distinctQuestions([row(1, 'How many orders?'), row(1, 'How many orders?'), row(2, 'Which region?')]);
+    expect(set.digest).toBe(questionDigest([row(1, 'How many orders?'), row(1, 'How many orders?'), row(2, 'Which region?')]));
+    expect(set.rows).toBe(3);
+    expect(set.questions).toHaveLength(2);
   });
 });
