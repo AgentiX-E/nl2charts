@@ -157,6 +157,11 @@ jobs:
           # Blank means the whole split; the runner parses it, because an empty
           # environment variable is a string and `Number('')` is zero.
           BIRD_LIMIT: ${{ inputs.limit }}
+      # Before the floor, because the floor requires it. On the split that decides adoption, a
+      # delta between two runs is worth 2pp of displacement on an unchanged arm; inside one run
+      # the same pair costs nothing to read.
+      - name: Paired readings (a delta exists only inside one run)
+        run: pnpm bench:bird:pair --declared eval/out/bird-eval.json
       - name: Accuracy floor
         run: pnpm gate:bird
       # Zero model calls, and the only reading in this workflow about the half of the score
@@ -254,6 +259,7 @@ jobs:
           name: bird-dev-eval
           path: |
             eval/out/bird-eval.json
+            eval/out/bird-pairs.json
             eval/out/bird-summary.md
           if-no-files-found: warn
           retention-days: 30

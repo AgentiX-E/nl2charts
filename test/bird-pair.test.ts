@@ -1,15 +1,18 @@
 import { describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import {
   MATCH,
+  declaredLines,
+  declaredPairs,
   isEntry,
   main,
   pairLines,
   pairOutcome,
   pairProblems,
+  readDeclared,
   resolvePairSettings,
   shapeOf,
   summaries,
@@ -244,5 +247,244 @@ describe('the entry point', () => {
     });
     expect(out).toContain('exact McNemar');
     expect(isEntry(undefined, import.meta.url)).toBe(false);
+  });
+});
+
+/**
+ * The declared pairs, which is the half that turns a one-off reading into a standing one.
+ *
+ * The pair instrument already refused to join two artifacts. What it did not do was say *which*
+ * pairs a run owes, so the reading that got published was the one somebody happened to run — and
+ * on the placement question that reading was taken across two runs and came out +3.6pp while a
+ * single run puts it at 17 against 18. A declaration is what makes the owed reading the taken one.
+ */
+describe('declared pairs', () => {
+  const root = (pairs: unknown): string => {
+    const dir = mkdtempSync(join(tmpdir(), 'pair-declared-'));
+    mkdirSync(join(dir, 'eval/baseline'), { recursive: true });
+    writeFileSync(join(dir, 'eval/baseline/pairs.json'), JSON.stringify(pairs));
+    return dir;
+  };
+
+  it('reads the pairs a split declares and leaves the other splits alone', () => {
+    const dir = root({ minidev: [['a', 'b']], dev: [] });
+    expect(declaredPairs(dir, 'minidev')).toEqual([['a', 'b']]);
+    expect(declaredPairs(dir, 'dev')).toEqual([]);
+    expect(declaredPairs(dir, 'train')).toEqual([]);
+  });
+
+  it('trims a name, because a declaration pasted with spaces is still a declaration', () => {
+    expect(declaredPairs(root({ minidev: [[' a ', 'b ']] }), 'minidev')).toEqual([['a', 'b']]);
+  });
+
+  it('refuses a split entry that is not a list, and an entry that is not a pair', () => {
+    expect(() => declaredPairs(root({ minidev: { a: 'b' } }), 'minidev')).toThrow('is not a list of pairs');
+    expect(() => declaredPairs(root({ minidev: [['a']] }), 'minidev')).toThrow('is not a pair of arm names');
+    expect(() => declaredPairs(root({ minidev: [['a', 'b', 'c']] }), 'minidev')).toThrow('is not a pair of arm names');
+    expect(() => declaredPairs(root({ minidev: [['a', '']] }), 'minidev')).toThrow('is not a pair of arm names');
+  });
+
+  it('names the arms a run did not score instead of throwing on them', () => {
+    const [reading] = readDeclared(artifact([MATCH], [MATCH]), [['a', 'gone']]);
+    expect(reading?.missing).toEqual(['gone']);
+    expect(reading?.outcome).toBeUndefined();
+  });
+
+  it('reads the pair it can read', () => {
+    const [reading] = readDeclared(artifact([MATCH, 'values'], ['values', MATCH]), [['a', 'b']]);
+    expect(reading?.outcome?.wins).toBe(1);
+    expect(reading?.outcome?.losses).toBe(1);
+  });
+
+  it('prints one line per pair with the counts, the test and a verdict word', () => {
+    const report = artifact([MATCH, 'values'], ['values', MATCH]);
+    const lines = declaredLines(readDeclared(report, [['a', 'b']]), report).join('\n');
+    expect(lines).toContain('paired readings · dev · deepseek-chat · 2 questions');
+    expect(lines).toContain('a -> b');
+    expect(lines).toContain('no difference');
+    expect(lines).toContain('p = 1.0000');
+  });
+
+  it('says so when a declared pair was not scored, rather than printing a zero', () => {
+    const report = artifact([MATCH], [MATCH]);
+    const lines = declaredLines(readDeclared(report, [['a', 'gone']]), report).join('\n');
+    expect(lines).toContain('not scored this run (gone)');
+  });
+
+  it('prints a separable rate as a delta with its p', () => {
+    const left = [MATCH, MATCH, MATCH, MATCH, MATCH, MATCH, MATCH, MATCH];
+    const right = ['values', 'values', 'values', 'values', 'values', 'values', 'values', 'values'];
+    const report = artifact(left, right);
+    const lines = declaredLines(readDeclared(report, [['a', 'b']]), report).join('\n');
+    expect(lines).toContain('-100.00pp, separable at p = 0.0078');
+  });
+
+  it('names the base models the artifact was served by', () => {
+    const report = { ...artifact([MATCH], [MATCH]), arms: [{ arm: 'a', servedModels: { 'deepseek-flash': 1 } }] };
+    expect(declaredLines(readDeclared(report, [['a', 'b']]), report).join('\n')).toContain('served by deepseek-flash');
+  });
+
+  it('writes the reading beside the artifact rather than in the default directory', () => {
+    const dir = root({ dev: [['a', 'b']] });
+    const file = join(dir, 'bird-eval.json');
+    writeFileSync(file, JSON.stringify(artifact([MATCH, 'values'], ['values', MATCH])));
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      expect(main([file, '--declared'], dir)).toBe(0);
+    } finally {
+      log.mockRestore();
+    }
+    const written = JSON.parse(readFileSync(join(dir, 'bird-pairs.json'), 'utf8')) as {
+      split: string;
+      questions: number;
+      pairs: { left: string; wins: number; losses: number }[];
+    };
+    expect(written.split).toBe('dev');
+    expect(written.questions).toBe(2);
+    expect(written.pairs[0]).toMatchObject({ left: 'a', wins: 1, losses: 1 });
+  });
+
+  it('records a missing arm in the file rather than dropping the pair', () => {
+    const dir = root({ dev: [['a', 'gone']] });
+    const file = join(dir, 'bird-eval.json');
+    writeFileSync(file, JSON.stringify(artifact([MATCH], [MATCH])));
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      expect(main([file, '--declared'], dir)).toBe(0);
+    } finally {
+      log.mockRestore();
+    }
+    const written = JSON.parse(readFileSync(join(dir, 'bird-pairs.json'), 'utf8')) as { pairs: { missing?: string[] }[] };
+    expect(written.pairs[0]?.missing).toEqual(['gone']);
+  });
+
+  it('says a split declares nothing rather than inventing a pair for it', () => {
+    const dir = root({ dev: [] });
+    const file = join(dir, 'bird-eval.json');
+    writeFileSync(file, JSON.stringify(artifact([MATCH], [MATCH])));
+    const printed: string[] = [];
+    const log = vi.spyOn(console, 'log').mockImplementation((line: unknown) => {
+      printed.push(String(line));
+    });
+    try {
+      expect(main([file, '--declared'], dir)).toBe(0);
+    } finally {
+      log.mockRestore();
+    }
+    expect(printed.join('\n')).toContain('no pair is declared for dev');
+  });
+
+  it('fails the reading when a declared pair shares no question', () => {
+    const dir = root({ dev: [['a', 'b']] });
+    const file = join(dir, 'bird-eval.json');
+    const report: PairArtifact = {
+      split: 'dev',
+      cases: [
+        { arm: 'a', id: 1, passed: true },
+        { arm: 'b', id: 2, passed: true },
+      ],
+    };
+    writeFileSync(file, JSON.stringify(report));
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      expect(main([file, '--declared'], dir)).toBe(1);
+      expect(error.mock.calls.flat().join('\n')).toContain('PAIR: the two arms share no question');
+    } finally {
+      log.mockRestore();
+      error.mockRestore();
+    }
+  });
+
+  it('renders an artifact that names neither split nor model, and one with no cases', () => {
+    const lines = declaredLines(readDeclared({}, [['a', 'b']]), {}).join('\n');
+    expect(lines).toContain('paired readings · unknown split · no model · 0 questions');
+    expect(lines).toContain('not scored this run (a, b)');
+  });
+
+  it('prints a positive separable rate with its sign', () => {
+    const left = ['values', 'values', 'values', 'values', 'values', 'values', 'values', 'values'];
+    const right = [MATCH, MATCH, MATCH, MATCH, MATCH, MATCH, MATCH, MATCH];
+    const report = artifact(left, right);
+    const lines = declaredLines(readDeclared(report, [['a', 'b']]), report).join('\n');
+    expect(lines).toContain('+100.00pp, separable');
+  });
+
+  it('counts a base for the arms that name one and skips the arms that do not', () => {
+    const report = {
+      ...artifact([MATCH], [MATCH]),
+      arms: [{ arm: 'a' }, { arm: 'b', servedModels: { 'deepseek-flash': 1 } }],
+    };
+    expect(declaredLines(readDeclared(report, [['a', 'b']]), report).join('\n')).toContain('served by deepseek-flash');
+  });
+
+  it('defaults the split and the question count when the artifact records neither', () => {
+    const dir = root({ minidev: [['a', 'b']] });
+    const file = join(dir, 'bird-eval.json');
+    writeFileSync(
+      file,
+      JSON.stringify({
+        cases: [
+          { arm: 'a', id: 1, passed: true },
+          { arm: 'b', id: 1, passed: true },
+        ],
+        arms: [{ arm: 'a', servedModels: { 'deepseek-flash': 1 } }],
+      }),
+    );
+    const printed: string[] = [];
+    const log = vi.spyOn(console, 'log').mockImplementation((line: unknown) => {
+      printed.push(String(line));
+    });
+    try {
+      expect(main([file, '--declared'], dir)).toBe(0);
+    } finally {
+      log.mockRestore();
+    }
+    expect(printed.join('\n')).toContain('a -> b');
+    expect(printed.join('\n')).toContain('(minidev served by deepseek-flash)');
+    const written = JSON.parse(readFileSync(join(dir, 'bird-pairs.json'), 'utf8')) as { questions: number };
+    expect(written.questions).toBe(1);
+  });
+
+  it('writes a question count of zero for an artifact with no case rows', () => {
+    const dir = root({ dev: [['a', 'b']] });
+    const file = join(dir, 'bird-eval.json');
+    writeFileSync(file, JSON.stringify({ split: 'dev', cases: undefined }));
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      expect(main([file, '--declared'], dir)).toBe(0);
+    } finally {
+      log.mockRestore();
+    }
+    const written = JSON.parse(readFileSync(join(dir, 'bird-pairs.json'), 'utf8')) as { questions: number; pairs: { missing: string[] }[] };
+    expect(written.questions).toBe(0);
+    expect(written.pairs[0]?.missing).toEqual(['a', 'b']);
+  });
+
+  it('writes the exit code when it is the entry point', async () => {
+    const dir = root({ dev: [['a', 'b']] });
+    const file = join(dir, 'bird-eval.json');
+    writeFileSync(file, JSON.stringify(artifact([MATCH, 'values'], ['values', MATCH])));
+    const saved = process.argv.slice();
+    const moduleUrl = new URL('../eval/bird/pair.ts', import.meta.url);
+    process.argv.splice(0, process.argv.length, 'node', moduleUrl.pathname, file, '--declared');
+    const exits = process.exitCode;
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      vi.resetModules();
+      await import('../eval/bird/pair.js');
+      expect(process.exitCode).toBe(0);
+    } finally {
+      process.argv.splice(0, process.argv.length, ...saved);
+      process.exitCode = exits;
+      log.mockRestore();
+      vi.resetModules();
+    }
+  });
+
+  it('takes --declared as a switch with no value, and refuses it beside --pair', () => {
+    expect(resolvePairSettings(['x.json', '--declared'], '/root')).toEqual({ report: '/root/x.json', declared: true });
+    expect(() => resolvePairSettings(['x.json', '--declared', '--pair', 'a,b'], '/root')).toThrow('two different readings');
+    expect(() => resolvePairSettings(['--declared'], '/root')).toThrow('usage: pair.ts');
   });
 });

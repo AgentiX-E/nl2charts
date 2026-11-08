@@ -100,6 +100,51 @@ export function compare(report, baseline) {
     issues.push('BIRD1: the report declares the arms it ran and not the corpus it read');
   }
 
+  // Who answered — the coordinate `model` cannot supply. `model` records what the run asked for;
+  // `servedModels` records the base each arm's answers named. Those are two different claims and
+  // they came apart on 2026-11-08: both Mini-Dev runs asked for `deepseek-chat` and all 6,448 of
+  // their answers came back named `deepseek-flash`. An alias that is re-pointed turns a re-run on
+  // new weights into what looks like a re-run of the same experiment, which is the one failure a
+  // floor cannot see on its own: the numbers stay plausible and the subject changed.
+  const servedPin = baseline.served?.[split];
+  const bases = new Set();
+  let armsScored = 0;
+  for (const arm of Array.isArray(report?.arms) ? report.arms : []) {
+    armsScored += 1;
+    for (const base of Object.keys(arm?.servedModels ?? {})) bases.add(base);
+  }
+  const servedNames = [...bases].sort();
+  // The pin belongs to the model the floors belong to. `bird-model.yml` exists to measure *another*
+  // model, and failing it for answering as itself would be a gate that forbids the experiment it was
+  // written for; the accuracy floors are already switched off in that case, and this follows them.
+  const floorsModel = baseline.floorModel?.[split];
+  const sameModel = typeof report?.model !== 'string' || typeof floorsModel !== 'string' ? true : report.model === floorsModel;
+  if (servedPin !== undefined && sameModel) {
+    if (servedNames.length === 0) {
+      issues.push(
+        `BIRD1: the report scores ${String(armsScored)} arm(s) and cannot name the base that answered, so it cannot be compared with floors taken on ${servedPin.join(', ')}`,
+      );
+    } else if (servedNames.join(',') !== servedPin.join(',')) {
+      issues.push(
+        `BIRD1: the endpoint answered as ${servedNames.join(', ')} and the floors were taken on ${servedPin.join(', ')}; the alias was re-pointed, so these numbers are about another model`,
+      );
+    }
+  } else if (servedNames.length > 0) {
+    notes.push(
+      sameModel
+        ? `BIRD1: no base model is pinned for split ${split}; this run answered as ${servedNames.join(', ')}, which is recorded rather than enforced`
+        : `BIRD1: the base-model pin for ${split} belongs to ${String(floorsModel)} and this run asked for ${String(report?.model)}; its base (${servedNames.join(', ')}) is recorded rather than enforced`,
+    );
+  }
+  // Not a failure: a provider renaming its own model is not this repository's defect. It is the
+  // fact a reader needs in order to know that `floorModel` names an alias, and it belongs in the
+  // log of every run that hits it rather than in a footnote of a document.
+  if (typeof report?.model === 'string' && servedNames.length > 0 && !bases.has(report.model)) {
+    notes.push(
+      `BIRD1: the run asked for ${report.model} and the endpoint named ${servedNames.join(', ')} — only the second field answered`,
+    );
+  }
+
   // Which questions a run set out to score is a fourth coordinate of a floor, after split,
   // arms and model — and it was the missing one. `bird-model.yml` took a 300-question slice
   // to compare two models on one prompt, the artifact recorded `requested: 300` and
@@ -686,6 +731,69 @@ export function compare(report, baseline) {
     }
   }
   return { issues, notes };
+}
+
+/**
+ * The pairs a split declares, checked against what the split runs and what the run read.
+ *
+ * A declared pair is a promise that a delta will be measured inside one run rather than
+ * reconstructed across two. Two ways to break that promise, and they fail differently: an arm the
+ * split does not run means the reading can never be taken (a declaration that outlived its arm
+ * list), and a pair the run did not read means it was taken somewhere else — which is exactly the
+ * shape of the `+3.6pp` that two runs produced and one run contradicts.
+ *
+ * @returns {string[]}
+ */
+export function pairIssues(declarations, baseline, split, readings, requested) {
+  const issues = [];
+  const declared = declarations === undefined || declarations === null ? undefined : declarations[split];
+  if (declared === undefined) return issues;
+  if (!Array.isArray(declared)) {
+    issues.push(`BIRD1: pairs.json[${split}] is not a list of pairs`);
+    return issues;
+  }
+  const arms = new Set(baseline.armsBySplit?.[split] ?? baseline.expectedArms ?? []);
+  // A run that declares a subset of arms is measured on that subset. `bird-model.yml` asks two or
+  // three arms about one prompt, so a pair it never requested is not a promise it broke — the same
+  // treatment the arm list and the sample size already get from a declaration.
+  const asked = Array.isArray(requested) ? new Set(requested) : undefined;
+  const applicable = [];
+  for (const pair of declared) {
+    if (!Array.isArray(pair) || pair.length !== 2 || pair.some((name) => typeof name !== 'string')) {
+      issues.push(`BIRD1: pairs.json[${split}] carries an entry that is not a pair of arm names`);
+      continue;
+    }
+    const [left, right] = pair;
+    if (asked !== undefined && (!asked.has(left) || !asked.has(right))) continue;
+    applicable.push([left, right]);
+  }
+  // One sentence for the whole file rather than one per pair: a run that skipped the step skipped
+  // all of them, and four identical failures is a worse error message than one that counts them.
+  if (applicable.length > 0 && (readings === undefined || readings === null)) {
+    issues.push(
+      `BIRD1: ${split} declares ${String(applicable.length)} paired reading(s) and this run wrote none; run \`pnpm bench:bird:pair --declared eval/out/bird-eval.json\` before the gate`,
+    );
+  }
+  const read = new Map();
+  for (const pair of Array.isArray(readings?.pairs) ? readings.pairs : []) read.set(`${pair.left}\u0000${pair.right}`, pair);
+  for (const pair of applicable) {
+    const [left, right] = pair;
+    for (const arm of [left, right]) {
+      if (!arms.has(arm)) {
+        issues.push(`BIRD1: the pair ${left} -> ${right} is declared for ${split} and ${arm} is not in that split's arm list, so the reading it promises can never be taken`);
+      }
+    }
+    if (readings === undefined || readings === null) continue;
+    const found = read.get(`${left}\u0000${right}`);
+    if (found === undefined) {
+      issues.push(`BIRD1: the pair ${left} -> ${right} is declared for ${split} and this run did not read it`);
+    } else if (Array.isArray(found.missing)) {
+      issues.push(`BIRD1: the pair ${left} -> ${right} is declared for ${split} and this run did not score ${found.missing.join(', ')}`);
+    } else if (found.examined === 0) {
+      issues.push(`BIRD1: the pair ${left} -> ${right} shares no question in this run, so the reading it produced is empty`);
+    }
+  }
+  return issues;
 }
 
 function selfTest() {
@@ -1505,6 +1613,83 @@ function selfTest() {
   fail(compare(declaredRun(undefined), baseline), 1, 'BIRD1 does not notice a report that declares its arms and not its corpus');
   fail(compare(declaredRun({ digest: 'bbb' }), { ...baseline, corpus: { minidev: 'aaa' } }), 1, 'BIRD1 compares a run against floors pinned to a different corpus');
   fail(compare(declaredRun({}), baseline), 1, 'BIRD1 accepts a corpus block with no digest in it');
+
+  // Who answered. The pin is the base the endpoint named, not the alias the run asked for, and
+  // the two are separate fields because a provider can rename its own model under a stable alias.
+  const serving = { ...baseline, served: { minidev: ['deepseek-flash'] } };
+  const answered = (bases, model = 'deepseek-chat') =>
+    report([arm('names', 42, 100, bases === undefined ? {} : { servedModels: bases }), arm('inline', 47, 100, bases === undefined ? {} : { servedModels: bases })], 100, 'minidev', model);
+  fail(compare(answered({ 'deepseek-flash': 100 }), serving), 0, 'BIRD1 fails a run answered by the pinned base');
+  const repointed = compare(answered({ 'deepseek-pro': 100 }), serving);
+  if (!repointed.issues.some((issue) => issue.includes('re-pointed'))) {
+    issues.push('BIRD1 accepts a run the endpoint answered with another base model');
+  }
+  const nameless = compare(answered(undefined), serving);
+  if (!nameless.issues.some((issue) => issue.includes('cannot name the base that answered'))) {
+    issues.push('BIRD1 accepts a scored run that cannot say which base answered it');
+  }
+  fail(compare(answered({ 'deepseek-flash': 60, 'deepseek-pro': 40 }), serving), 1, 'BIRD1 accepts a run whose base changed mid-run');
+  const crossModelPin = compare(answered({ 'glm-4.6': 100 }, 'glm-4.6'), serving);
+  if (crossModelPin.issues.some((issue) => issue.includes('re-pointed'))) {
+    issues.push('BIRD1 fails a cross-model run on a pin that belongs to another model');
+  }
+  if (!crossModelPin.notes.some((note) => note.includes('belongs to deepseek-chat'))) {
+    issues.push('BIRD1 does not say which model the base-model pin belongs to');
+  }
+  if (compare(answered(undefined), baseline).issues.some((issue) => issue.includes('base that answered'))) {
+    issues.push('BIRD1 enforces a base-model pin on a split that has none');
+  }
+  const unpinned = compare(answered({ 'glm-4.6': 100 }), baseline);
+  if (!unpinned.notes.some((note) => note.includes('no base model is pinned'))) {
+    issues.push('BIRD1 records a base model on an unpinned split without saying it is unenforced');
+  }
+  if (!unpinned.notes.some((note) => note.includes('only the second field answered'))) {
+    issues.push('BIRD1 does not record that the run asked for one model and was answered by another');
+  }
+
+  // Declared pairs. A pair is a promise that a delta is read inside one run, so the gate checks
+  // both halves of the promise: the split still runs the arms, and the run actually read the pair.
+  const pairBase = { expectedArms: ['names', 'inline', 'audit'], armsBySplit: {} };
+  const declarations = { minidev: [['inline', 'audit']] };
+  const read = { pairs: [{ left: 'inline', right: 'audit', examined: 100, wins: 12, losses: 5, p: 0.05 }] };
+  if (pairIssues(declarations, pairBase, 'minidev', read).length !== 0) {
+    issues.push('BIRD1 rejects a declared pair that the split runs and the run read');
+  }
+  if (pairIssues(undefined, pairBase, 'minidev', read).length !== 0) issues.push('BIRD1 invents a pair for a repository with no declaration file');
+  if (pairIssues({ dev: [] }, pairBase, 'minidev', read).length !== 0) issues.push('BIRD1 applies one split\'s pairs to another split');
+  if (pairIssues({ minidev: [] }, pairBase, 'minidev', read).length !== 0) issues.push('BIRD1 treats an empty pair list as a missing one');
+  const noArm = pairIssues({ minidev: [['inline', 'gone']] }, pairBase, 'minidev', read);
+  if (!noArm.some((issue) => issue.includes('can never be taken'))) {
+    issues.push('BIRD1 accepts a declared pair whose arm the split does not run');
+  }
+  const unread = pairIssues(declarations, pairBase, 'minidev', { pairs: [] });
+  if (!unread.some((issue) => issue.includes('did not read it'))) {
+    issues.push('BIRD1 accepts a declared pair that the run never read');
+  }
+  const unscored = pairIssues(declarations, pairBase, 'minidev', { pairs: [{ left: 'inline', right: 'audit', missing: ['audit'] }] });
+  if (!unscored.some((issue) => issue.includes('did not score audit'))) {
+    issues.push('BIRD1 accepts a declared pair whose arm the run did not score');
+  }
+  const noQuestion = pairIssues(declarations, pairBase, 'minidev', { pairs: [{ left: 'inline', right: 'audit', examined: 0 }] });
+  if (!noQuestion.some((issue) => issue.includes('shares no question'))) {
+    issues.push('BIRD1 accepts a paired reading over zero questions');
+  }
+  const noReadings = pairIssues({ minidev: [['inline', 'audit']] }, pairBase, 'minidev', undefined);
+  if (noReadings.length !== 1 || !noReadings[0].includes('wrote none')) {
+    issues.push('BIRD1 accepts a run that skipped every declared pair, or says it four times');
+  }
+  if (pairIssues({ minidev: [['inline', 'audit']] }, pairBase, 'minidev', { pairs: [] }, ['names']).length !== 0) {
+    issues.push('BIRD1 demands a paired reading from a run that declared a subset without those arms');
+  }
+  if (pairIssues({ minidev: [['inline', 'audit']] }, pairBase, 'minidev', { pairs: [] }, ['inline', 'audit']).length !== 1) {
+    issues.push('BIRD1 skips a declared pair the run asked for and never read');
+  }
+  const malformed = pairIssues({ minidev: { not: 'a list' } }, pairBase, 'minidev', read);
+  if (!malformed.some((issue) => issue.includes('is not a list of pairs'))) issues.push('BIRD1 accepts a pair list that is not a list');
+  const shortEntry = pairIssues({ minidev: [['inline'], ['a', 'b', 'c']] }, pairBase, 'minidev', read);
+  if (shortEntry.filter((issue) => issue.includes('not a pair of arm names')).length !== 2) {
+    issues.push('BIRD1 accepts a declaration entry that is not a pair');
+  }
   return issues;
 }
 
@@ -1512,7 +1697,7 @@ if (process.argv[2] === '--self-test') {
   const issues = selfTest();
   for (const issue of issues) console.error(issue);
   if (issues.length > 0) process.exit(1);
-  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, a dev run measured against its own sample, two split fields that disagree, a dataset name that disagrees with the split, other split, other model, unfloored arm, empty lever, a funnel that does not add up, a split-specific arm list, an uncounted selector call, a majority vote that spends exactly its samples, a pooled arm that pays for its decision and for no candidates, one that leaves a decision unpriced, one that never says whether its selector was counted, one that redrew the pool it claims to share, a pooled majority vote that costs nothing and the same two counts on a generating arm, a reconcile funnel that an adopting arm and a handing-back arm both satisfy, one that never says which policy it was read under, one that adopted more replies than it received, an adopting arm that did not score what it ran and a novel-only arm that scored a restatement, a repair count without a loop, an unpriced arm, an unnamed model, floors from an unnamed model and a cross-model arm with no second model named, a judge swap with no judge named, an arm with harness errors, a candidate set that lost a third of itself to an endpoint, a failure corpus that stopped at a cap without saying so, an empty-result lever with no funnel or an impossible yield or nothing behind it, a decomposition arm whose prompt the model ignored, an unrecorded instrument, a samples arm with no values behind it, a truncated schema card, a prompt with no table in it, a declared arm subset, a declared arm whose row was dropped, an undeclared row, an empty declaration and a floor that a declaration does not weaken, a declared sample subset, a subset that cannot clear a floor, a sample that shrank undeclared, an impossible declaration and a row count above the request, a cross-arm floor with a matching second model, a swapped one and an unattributed one, and a ceiling that held, a ceiling that fell while the score held, a ceiling inside the noise threshold, a sampling arm with no ceiling at all, a ceiling whose two fields disagree, a ceiling floor on an arm the split does not run, a score that fell while the ceiling held, a ceiling with no floor yet, and a corpus that was named, unnamed, replaced under pinned floors or present without a digest all behave');
+  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, a dev run measured against its own sample, two split fields that disagree, a dataset name that disagrees with the split, other split, other model, unfloored arm, empty lever, a funnel that does not add up, a split-specific arm list, an uncounted selector call, a majority vote that spends exactly its samples, a pooled arm that pays for its decision and for no candidates, one that leaves a decision unpriced, one that never says whether its selector was counted, one that redrew the pool it claims to share, a pooled majority vote that costs nothing and the same two counts on a generating arm, a reconcile funnel that an adopting arm and a handing-back arm both satisfy, one that never says which policy it was read under, one that adopted more replies than it received, an adopting arm that did not score what it ran and a novel-only arm that scored a restatement, a repair count without a loop, an unpriced arm, an unnamed model, floors from an unnamed model and a cross-model arm with no second model named, a judge swap with no judge named, an arm with harness errors, a candidate set that lost a third of itself to an endpoint, a failure corpus that stopped at a cap without saying so, an empty-result lever with no funnel or an impossible yield or nothing behind it, a decomposition arm whose prompt the model ignored, an unrecorded instrument, a samples arm with no values behind it, a truncated schema card, a prompt with no table in it, a declared arm subset, a declared arm whose row was dropped, an undeclared row, an empty declaration and a floor that a declaration does not weaken, a declared sample subset, a subset that cannot clear a floor, a sample that shrank undeclared, an impossible declaration and a row count above the request, a cross-arm floor with a matching second model, a swapped one and an unattributed one, and a ceiling that held, a ceiling that fell while the score held, a ceiling inside the noise threshold, a sampling arm with no ceiling at all, a ceiling whose two fields disagree, a ceiling floor on an arm the split does not run, a score that fell while the ceiling held, a ceiling with no floor yet, a corpus that was named, unnamed, replaced under pinned floors or present without a digest, and a base model that matched the pin, answered as another one, or answered a run of another model, was never named, changed mid-run or was never pinned, and a declared pair that was read, was never read, lost an arm it names, lost an arm the run skipped, spanned no question or arrived malformed, and a declared pair a subset run never asked for all behave');
 } else {
   const reportPath = resolve(ROOT, 'eval/out/bird-eval.json');
   const baseline = JSON.parse(readFileSync(resolve(ROOT, 'eval/baseline/bird.json'), 'utf8'));
@@ -1524,6 +1709,20 @@ if (process.argv[2] === '--self-test') {
     process.exit(1);
   }
   const { issues, notes } = compare(report, baseline);
+  const pairsFile = resolve(ROOT, 'eval/baseline/pairs.json');
+  let declarations;
+  try {
+    declarations = JSON.parse(readFileSync(pairsFile, 'utf8'));
+  } catch {
+    declarations = undefined;
+  }
+  let readings;
+  try {
+    readings = JSON.parse(readFileSync(resolve(ROOT, 'eval/out/bird-pairs.json'), 'utf8'));
+  } catch {
+    readings = undefined;
+  }
+  issues.push(...pairIssues(declarations, baseline, report.selection.split ?? 'minidev', readings, report.armsRequested));
   for (const note of notes) console.error(note);
   for (const issue of issues) console.error(issue);
   if (issues.length > 0) process.exit(1);

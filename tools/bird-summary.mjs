@@ -5,7 +5,7 @@
  */
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
@@ -30,6 +30,22 @@ const report = (() => {
     return null;
   }
 })();
+/**
+ * An artifact written beside the run rather than in the default directory.
+ *
+ * `read()` is rooted at the repository, which is right for the instruments the harness always
+ * writes to `eval/out`. The paired readings are written by `pair.ts --declared` beside whatever
+ * artifact it was given, so a summary pointed at another file (`BIRD_OUT`) has to read its pairs
+ * from the same place — otherwise a fixture renders a section about a run it is not describing.
+ */
+function readBeside(name) {
+  try {
+    return JSON.parse(readFileSync(join(dirname(reportPath), name), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
 const portability = read('duckdb-portability.json');
 const stability = read('bird-stability.json');
 const adversarial = read('adversarial.json');
@@ -331,6 +347,31 @@ if (adversarial !== null) {
   lines.push('', 'Each category has 8 cases, so a category cell moves in steps of 12.5pp.', '');
 }
 
+const pairs = readBeside('bird-pairs.json');
+if (pairs !== null && Array.isArray(pairs.pairs) && pairs.pairs.length > 0) {
+  const served = Array.isArray(pairs.served) && pairs.served.length > 0 ? pairs.served.join('+') : 'unrecorded';
+  lines.push(
+    '### Paired readings inside this run',
+    '',
+    `| pair | won | lost | exact McNemar p | reading |`,
+    '| --- | --- | --- | --- | --- |',
+  );
+  for (const pair of pairs.pairs) {
+    if (Array.isArray(pair.missing)) {
+      lines.push(`| \`${pair.left}\` → \`${pair.right}\` | – | – | – | not scored on this run (${pair.missing.join(', ')}) |`);
+      continue;
+    }
+    const rate = pair.examined === 0 ? 0 : ((pair.wins - pair.losses) / pair.examined) * 100;
+    const verdict = pair.p < 0.05 ? `**${rate >= 0 ? '+' : ''}${rate.toFixed(2)}pp**, separable` : 'no difference';
+    lines.push(`| \`${pair.left}\` → \`${pair.right}\` | ${pair.wins} | ${pair.losses} | ${pair.p.toFixed(4)} | ${verdict} |`);
+  }
+  lines.push(
+    '',
+    `> ${pairs.questions} questions, served by \`${served}\`. A pair is read inside one artifact because two runs of the same unchanged arm move by up to 2pp — on the two Mini-Dev runs of 2026-11-08, \`select\` read 56.05% and 58.06% with every coordinate equal. A row that says "no difference" is a lever that has not been shown to do anything, and it is not the same claim as a lever that has been shown not to.`,
+    '',
+  );
+}
+
 if (portability !== null) {
   lines.push('### DuckDB portability of the same statements', '', '| stage | runnable | taxonomy of failures |', '| --- | --- | --- |');
   for (const [stage, value] of Object.entries(portability.stages)) {
@@ -390,10 +431,11 @@ function selfTest() {
       },
     ],
   };
-  const render = (report) => {
+  const render = (report, beside = {}) => {
     const dir = mkdtempSync(join(tmpdir(), 'bird-summary-'));
     const path = join(dir, 'bird-eval.json');
     writeFileSync(path, JSON.stringify(report));
+    for (const [name, body] of Object.entries(beside)) writeFileSync(join(dir, name), JSON.stringify(body));
     const run = spawnSync(process.execPath, [script], { env: { ...process.env, BIRD_OUT: path }, encoding: 'utf8' });
     if (run.status !== 0) issues.push(`the summary exited ${String(run.status)} on an artifact it must render: ${run.stderr}`);
     return run.stdout ?? '';
@@ -482,6 +524,29 @@ function selfTest() {
   if (!noArms.includes('Model: `deepseek-chat`')) issues.push('an artifact with no arms did not render its header');
   if (noArms.includes('### Paired ablations')) issues.push('an artifact with no arms printed an ablation table');
 
+  // The paired readings are the one table whose numbers a reader must not have to reconstruct:
+  // a pair that came out even has to say "no difference" rather than a rate, and a pair that the
+  // run did not score has to say so instead of printing a zero.
+  const paired = render({ ...base, model: 'deepseek-chat' }, {
+    'bird-pairs.json': {
+      split: 'dev',
+      model: 'deepseek-chat',
+      served: ['deepseek-flash'],
+      questions: 1532,
+      pairs: [
+        { left: 'a', right: 'b', examined: 1532, wins: 18, losses: 17, p: 1 },
+        { left: 'a', right: 'c', examined: 1532, wins: 40, losses: 12, p: 0.0002 },
+        { left: 'a', right: 'd', missing: ['d'] },
+      ],
+    },
+  });
+  if (!paired.includes('### Paired readings inside this run')) issues.push('the summary does not render the paired readings it was given');
+  if (!paired.includes('| `a` → `b` | 18 | 17 | 1.0000 | no difference |')) issues.push('a pair with p = 1 does not print as no difference');
+  if (!paired.includes('**+1.83pp**, separable')) issues.push('a pair that cleared the test does not print its rate as a delta');
+  if (!paired.includes('not scored on this run (d)')) issues.push('a declared pair the run did not score is not named');
+  if (!paired.includes('served by `deepseek-flash`')) issues.push('the paired section does not name the base that answered');
+  if (noArms.includes('### Paired readings')) issues.push('a summary with no pair file printed the paired section anyway');
+
   return issues;
 }
 
@@ -489,7 +554,7 @@ if (process.argv[2] === '--self-test') {
   const issues = selfTest();
   for (const issue of issues) console.error(issue);
   if (issues.length > 0) process.exit(1);
-  console.log('BIRD summary self-test: a delta with its interval, a resolution column, an A/A sentence that says what it could not see, a subset mix that over-weights the hard buckets, a proportional one, an artifact from before those columns, and an artifact with no arms all render');
+  console.log('BIRD summary self-test: a delta with its interval, a resolution column, an A/A sentence that says what it could not see, a subset mix that over-weights the hard buckets, a proportional one, an artifact from before those columns, an artifact with no arms, and paired readings that were even, separable, or never scored all render');
 } else {
   console.log(lines.join('\n'));
 }

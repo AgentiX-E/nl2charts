@@ -352,6 +352,13 @@ jobs:
       # that counts is a step name that lies after the next retirement.
       - name: Every arm in the chain, with paired ablations and an A/A control
         run: pnpm bench:bird
+      # Before the gate, because the gate requires it: each pair this split declares is read here,
+      # inside this artifact, on the same questions by the same judge. A pair across two runs is
+      # not a delta — on the two Mini-Dev runs of 2026-11-08 the unchanged `select` arm read 56.05%
+      # and 58.06% with every coordinate equal, and the placement pair that was published as +3.6pp
+      # is 17 against 18 here. The output is what the summary and `docs/benchmarks.md` quote.
+      - name: Paired readings (a delta exists only inside one run)
+        run: pnpm bench:bird:pair --declared eval/out/bird-eval.json
       - name: Accuracy floor (a regression fails the build)
         run: pnpm gate:bird
       # The score is a product of two mechanisms — the candidate set and the selector — and
@@ -462,6 +469,7 @@ jobs:
           include-hidden-files: true
           path: |
             eval/out/bird-eval.json
+            eval/out/bird-pairs.json
             eval/out/duckdb-portability.json
             eval/out/bird-stability.json
             eval/out/adversarial.json

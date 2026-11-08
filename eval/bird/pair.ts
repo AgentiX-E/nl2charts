@@ -27,8 +27,8 @@
  * endpoint's own displacement into a delta that was supposed to have no noise in it, and this
  * repository has already published one movement of that size.
  */
-import { readFileSync } from 'node:fs';
-import { relative, resolve } from 'node:path';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { mcnemarExact } from '@agentix-e/nl2charts-devkit';
 
@@ -47,6 +47,8 @@ export interface PairCase {
 export interface PairArtifact {
   readonly split?: string;
   readonly model?: string;
+  /** The arms, for the per-arm base model a header line names. Nothing here reads `passed` from it. */
+  readonly arms?: readonly { readonly arm?: string; readonly servedModels?: Readonly<Record<string, number>> }[];
   readonly cases?: readonly PairCase[];
   readonly failures?: unknown;
 }
@@ -224,20 +226,107 @@ export function pairLines(outcome: PairOutcome): string[] {
   return lines;
 }
 
-export interface PairSettings {
-  readonly report: string;
+/**
+ * The pairs a split promises to read, from `eval/baseline/pairs.json`.
+ *
+ * A declaration rather than a habit, because the habit was the problem: the placement reading was
+ * taken by comparing two runs' rates (41.4 against 45.0), it was written into the benchmark
+ * document as +3.6pp, and inside a single run the same two arms are 18 and 17 discordant cases with
+ * p = 1.0000. A pair that is written down is read on every run; a pair that lives in someone's
+ * memory is read once, in the direction the run happened to fall.
+ *
+ * A split with no entry declares nothing and this returns no pairs — an empty list is a statement
+ * about the split, and it is the honest default for a split whose decision is not a delta.
+ */
+export function declaredPairs(root: string, split: string): string[][] {
+  const path = join(root, 'eval/baseline/pairs.json');
+  const raw = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+  const entry = raw[split];
+  if (entry === undefined) return [];
+  if (!Array.isArray(entry)) throw new Error(`pairs.json[${split}] is not a list of pairs`);
+  return entry.map((item, index) => {
+    if (!Array.isArray(item) || item.length !== 2 || item.some((name) => typeof name !== 'string' || name.trim() === '')) {
+      throw new Error(`pairs.json[${split}][${String(index)}] is not a pair of arm names`);
+    }
+    return [String(item[0]).trim(), String(item[1]).trim()];
+  });
+}
+
+/** The base models an artifact's arms were served by, for the header line. */
+function servedOf(report: PairArtifact): string[] {
+  const bases = new Set<string>();
+  for (const arm of report.arms ?? []) for (const base of Object.keys(arm.servedModels ?? {})) bases.add(base);
+  return [...bases].sort();
+}
+
+/** One declared pair as it came out: the outcome, or the arms the run did not score. */
+export interface DeclaredReading {
   readonly left: string;
   readonly right: string;
+  readonly outcome?: PairOutcome;
+  readonly missing: readonly string[];
+}
+
+export function readDeclared(report: PairArtifact, pairs: readonly (readonly string[])[]): DeclaredReading[] {
+  const scored = new Set((report.cases ?? []).map((entry) => entry.arm));
+  return pairs.map((pair) => {
+    const [left = '', right = ''] = pair;
+    const missing = [left, right].filter((arm) => !scored.has(arm));
+    return missing.length > 0
+      ? { left, right, missing }
+      : { left, right, missing: [], outcome: pairOutcome(report, left, right) };
+  });
+}
+
+/** One line per pair: the counts, the test, and the only verdict a pair can support. */
+export function declaredLines(readings: readonly DeclaredReading[], artifact: PairArtifact): string[] {
+  const questions = new Set((artifact.cases ?? []).map((entry) => String(entry.id))).size;
+  const bases = servedOf(artifact);
+  const served = bases.length === 0 ? '' : ` served by ${bases.join('+')}`;
+  const lines = [
+    `paired readings · ${artifact.split ?? 'unknown split'} · ${artifact.model ?? 'no model'}${served} · ${String(questions)} questions`,
+  ];
+  for (const reading of readings) {
+    const pair = `${reading.left} -> ${reading.right}`;
+    if (reading.outcome === undefined) {
+      lines.push(`  ${pair.padEnd(52)} not scored this run (${reading.missing.join(', ')})`);
+      continue;
+    }
+    const outcome = reading.outcome;
+    const rate = outcome.examined === 0 ? 0 : ((outcome.wins - outcome.losses) / outcome.examined) * 100;
+    const verdict =
+      outcome.p < 0.05
+        ? `${rate >= 0 ? '+' : ''}${rate.toFixed(2)}pp, separable at p = ${outcome.p.toFixed(4)}`
+        : `no difference (${outcome.wins} won, ${outcome.losses} lost, p = ${outcome.p.toFixed(4)})`;
+    lines.push(`  ${pair.padEnd(52)} ${String(outcome.wins).padStart(3)} / ${String(outcome.losses).padStart(3)}   ${verdict}`);
+  }
+  return lines;
+}
+
+export interface PairSettings {
+  readonly report: string;
+  readonly left?: string;
+  readonly right?: string;
+  /** Set when the pairs come from the declaration file rather than from `--pair`. */
+  readonly declared?: boolean;
 }
 
 export function resolvePairSettings(argv: readonly string[], root: string): PairSettings {
   const consumed = new Set<number>();
   argv.forEach((item, index) => {
-    if (item.startsWith('--')) consumed.add(index).add(index + 1);
+    if (!item.startsWith('--')) return;
+    consumed.add(index);
+    // `--declared` takes no value, so the token after it is the artifact, not a name.
+    if (item !== '--declared') consumed.add(index + 1);
   });
   const path = argv.find((item, index) => !item.startsWith('--') && !consumed.has(index));
-  if (path === undefined) throw new Error('usage: pair.ts <artifact.json> --pair <left>,<right>');
   const flag = argv.indexOf('--pair');
+  const declared = argv.includes('--declared');
+  if (path === undefined) throw new Error('usage: pair.ts <artifact.json> --pair <left>,<right> -- or --declared <artifact.json>');
+  if (declared && flag !== -1) {
+    throw new Error('--pair and --declared name two different readings of the same artifact; run them as two commands');
+  }
+  if (declared) return { report: resolve(root, path), declared: true };
   if (flag === -1) throw new Error('pair.ts needs --pair <left>,<right>, because a pair with one name is an arm nobody compared');
   const names = (argv[flag + 1] ?? '').split(',');
   if (names.length !== 2 || names.some((name) => name.trim() === '')) {
@@ -246,10 +335,67 @@ export function resolvePairSettings(argv: readonly string[], root: string): Pair
   return { report: resolve(root, path), left: (names[0] as string).trim(), right: (names[1] as string).trim() };
 }
 
+/**
+ * The declared pairs of one artifact, printed and written beside it.
+ *
+ * The file it writes is what the summary and any later reader consume, so a number that appears in
+ * a document can be traced to a run rather than to a habit. A split with no declaration is not an
+ * error: it is a split whose decision is not a delta, and saying so is more useful than inventing
+ * a pair for it.
+ */
+export function runDeclared(report: PairArtifact, root: string, path: string): number {
+  const split = report.split ?? 'minidev';
+  const pairs = declaredPairs(root, split);
+  const bases = servedOf(report);
+  const served = bases.length === 0 ? '' : ` served by ${bases.join('+')}`;
+  console.log(`  ${relative(root, path)} (${split}${report.model === undefined ? '' : `, ${report.model}`}${served})`);
+  if (pairs.length === 0) {
+    console.log(`  no pair is declared for ${split}, so this run settles no delta`);
+    return 0;
+  }
+  const readings = readDeclared(report, pairs);
+  for (const line of declaredLines(readings, report)) console.log(line);
+  const questions = new Set((report.cases ?? []).map((entry) => String(entry.id))).size;
+  // Beside the artifact it describes, not in `eval/out`: a run pointed at another file (`BIRD_OUT`)
+  // must not have its readings land in the default directory, where the next summary would read
+  // them as that run's — and where a test fixture would overwrite a CI reading.
+  const beside = join(dirname(path), 'bird-pairs.json');
+  mkdirSync(dirname(beside), { recursive: true });
+  writeFileSync(
+    beside,
+    `${JSON.stringify(
+      {
+        split,
+        model: report.model ?? null,
+        served: bases,
+        questions,
+        pairs: readings.map((reading) =>
+          reading.outcome === undefined
+            ? { left: reading.left, right: reading.right, missing: reading.missing }
+            : {
+                left: reading.left,
+                right: reading.right,
+                examined: reading.outcome.examined,
+                wins: reading.outcome.wins,
+                losses: reading.outcome.losses,
+                p: reading.outcome.p,
+              },
+        ),
+      },
+      null,
+      1,
+    )}\n`,
+  );
+  const problems = readings.flatMap((reading) => reading.outcome?.problems ?? []);
+  for (const problem of problems) console.error(`PAIR: ${problem}`);
+  return problems.length === 0 ? 0 : 1;
+}
+
 export function main(argv: readonly string[] = process.argv.slice(2), root = process.cwd()): number {
   const settings = resolvePairSettings(argv, root);
   const report = JSON.parse(readFileSync(settings.report, 'utf8')) as PairArtifact;
-  const outcome = pairOutcome(report, settings.left, settings.right);
+  if (settings.declared === true) return runDeclared(report, root, settings.report);
+  const outcome = pairOutcome(report, settings.left as string, settings.right as string);
   console.log(`  ${relative(root, settings.report)}${report.split === undefined ? '' : ` (${report.split}${report.model === undefined ? '' : `, ${report.model}`})`}`);
   for (const line of pairLines(outcome)) console.log(line);
   for (const problem of outcome.problems) console.error(`PAIR: ${problem}`);

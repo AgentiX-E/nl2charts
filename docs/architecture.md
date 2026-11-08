@@ -1260,11 +1260,17 @@ not a new benchmark. `gate:bird` refuses a report that declares the arms it ran 
 read. The pin — the digest the floors belong to — is written by the next baseline update from a CI
 run, because a pin guessed on a workstation is a claim about a cache rather than about CI.
 
-The same argument applies to weights, and there the repository is half-done: `servedModels()` records
-which base model answered, which catches an alias re-pointed at new weights; it does not record what
-those weights were. A model fingerprint is the missing half, and the reason it is on the queue rather
-than in the artifact is that a fingerprint that is `UNPINNED` on most runs is a field that lies by
-being present.
+The same argument applies to weights, and this round carried it as far as the artifact allows. A floor
+is a claim about a model, and `floorModel` records the name the run **asked for** — an alias, which a
+provider can re-point without any field in the artifact changing. `servedModels` records the base each
+arm's answers came back named, and on both Mini-Dev runs of 2026-11-08 that was `deepseek-flash` on all
+6,448 cases while `model` said `deepseek-chat`. So the pin is on the name that answered:
+`served.minidev` in `eval/baseline/bird.json`, enforced by `gate:bird`. The alias mismatch itself is a
+note rather than a failure — a provider renaming its own model is not this repository's defect, but it
+is the fact a reader needs in order to know that `floorModel` names an alias. What is still missing is
+the weights: neither field changes when an alias is re-pointed at a *new build* of the same-named
+base. That is what a fingerprint buys, and it has to be a probe set rather than a version string,
+because a version string is the thing the endpoint has already declined to give.
 
 ## A denylist's gaps are found by attacks, not by reading it
 
@@ -1290,3 +1296,33 @@ timer, and `node:sqlite` executes on the calling thread: a recursive CTE with no
 event loop, so the timer cannot fire and the runner returns when the query finishes. Unbounded queries
 are therefore listed as unmeasured with that reason, instead of being asserted and passing on a fast
 machine.
+
+## A delta inside one run and a delta between two are different claims
+
+`bench:bird:pair` refuses to join two artifacts, and the refusal is the design. A paired test is
+legitimate only when both arms were scored on the same questions by the same judge in one run; a join
+across runs reintroduces the endpoint's own displacement into a delta that was supposed to have none.
+`bench:bird:compare` does the opposite — it joins two artifacts on purpose and produces a statement
+about the **instrument**, never about a lever.
+
+Both instruments exist because the same arm, unchanged, moves. `select` read 56.05% in `42482353883`
+and 58.06% in `42491745712`, three hours apart, with the corpus digest, the served base, the harness
+and the arm definitions all identical. Paired across those runs the arm flipped **18 cases up and 8
+down** (26 of 496, 5.2% churn, exact McNemar p = 0.0755): a `+2.02pp` that a cross-run comparison would
+report as a gain and that a paired test cannot separate from a draw. The single-call arms churn about
+2%; the four-call selector chain churns 5.2%, because every extra call is another draw that can move a
+case.
+
+The consequence is a resolution, not an opinion: a difference of two independent rates on 496 questions
+has a 95% interval of **6.16pp**, so nothing this project has published as a `+0.6pp` or `+1.2pp` arm
+delta could have been read that way. Everything that survived is a paired reading taken inside one
+run — `inline+evidence → select` at 22 against 8 (p = 0.0161) is the only mechanism on Mini-Dev that a
+paired test separates, and `metadata+evidence → select` at 27 against 26 (p = 1.0000) says a 1-call
+curated stack ties the 4-call chain.
+
+Two mechanisms keep that discipline from decaying into a habit. `eval/baseline/pairs.json` declares the
+pairs each split owes, `ci.yml` reads them with `--declared` before the floor gate, and a run that
+skipped a declared pair **fails**: the promise exists because the placement reading (`+3.6pp`, 41.4
+against 45.0) was once published from two runs and is 18 against 17 inside one. And a subset run is
+measured on its declaration, the same way the arm list and the sample size are — `bird-model.yml` asks
+two or three arms about one prompt and is not failed for the pairs it never requested.

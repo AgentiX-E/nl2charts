@@ -1,0 +1,35 @@
+{
+ "note": "The pairs a split promises to read on every run. A pair is a claim that two arms differ only by the lever named between them, so it can be read inside one artifact on the same questions by the same judge — which is the only reading of a delta this repository accepts. The placement pair is here because it was published the other way: `synth-definitions` and `inline-definitions` were compared across two runs (41.4 against 45.0) and written into the benchmark document as +3.6pp, and inside a single run they are 18 and 17 discordant cases with p = 1.0000 (run 42491745712). The audit pair is here because its `+1.01pp at p = 0.27` is a reading every later round quotes and none re-derives. The selector pair is here because the arm that decides adoption spends four calls a case and the question `metadata+evidence -> select` is what those calls buy. A split with no entry declares nothing: an empty list is a statement, and it is the honest one for a split whose decision is not a delta. The dev split declares three pairs rather than four because it runs five arms; the four Mini-Dev pairs include the placement pair, which the dev run does not score.",
+ "minidev": [
+  [
+   "synth-definitions",
+   "inline-definitions"
+  ],
+  [
+   "inline+evidence",
+   "inline+evidence+audit"
+  ],
+  [
+   "inline+evidence",
+   "select"
+  ],
+  [
+   "metadata+evidence",
+   "select"
+  ]
+ ],
+ "dev": [
+  [
+   "inline+evidence",
+   "metadata+evidence"
+  ],
+  [
+   "metadata+evidence",
+   "select"
+  ],
+  [
+   "select",
+   "select-mixed"
+  ]
+ ]
+}

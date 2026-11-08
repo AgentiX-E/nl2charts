@@ -7703,7 +7703,7 @@ the gap to that cell is **8.2pp**, and the one mechanism that has never been pri
 
 | mechanism | what it is worth there | what it is here | status |
 |---|---|---|---|
-| profile → per-column summary | +1.0 on top of documented metadata | attached definitions: **+3.6pp** (41.4 → 45.0); on top of the hint 57.4 → 59.2, not separable | taken, same lever |
+| profile → per-column summary | +1.0 on top of documented metadata | attached definitions: **+3.6pp across two runs** (41.4 → 45.0) and **no difference inside one** (18 against 17, p = 1.0000; see *Two runs of the same experiment are not the same experiment*); on top of the hint 57.4 → 59.2, not separable | taken as a mechanism, **not shown to be worth anything** |
 | schema linking | +1.8 (perfect: +6.2) | a linker hint on a full card; it is priced in **characters**, never in accuracy | **not taken** |
 | three candidates | the pool it selects from | `select-mixed` / `select-balanced` pools | taken |
 | corrections on bad constructions | up to three, syntax plus a hand-written list | repair loop, syntax-triggered only; 2.4% of first statements fail on `deepseek-chat` ⇒ ≤0.4pp | partially, and the bound is known |
@@ -7806,6 +7806,134 @@ MAC-SQL instead, which is free to dispatch and won 4.84pp. A paper-only leader i
 *after* the released ones have been run, because a rebuild's first result is a number with no
 denominator — and this document already has one entry of that kind, the `45.0%` that did not
 reproduce at `40.3%`.
+
+## Two runs of the same experiment are not the same experiment
+
+The `40.3%` above left three explanations standing and said the artifact could not separate them.
+One round later, the artifact can: `42491745712` scored **both** placement arms, and this round
+downloaded both Mini-Dev artifacts and put them side by side. What came out is bigger than the
+question that prompted it.
+
+### The placement pair, read inside one run
+
+`bench:bird:pair` over `42491745712` — one artifact, one set of 496 questions, one judge:
+
+| reading | value |
+| --- | --- |
+| questions paired | 496 |
+| `synth-definitions` right, `inline-definitions` wrong | 18 |
+| `inline-definitions` right, `synth-definitions` wrong | 17 |
+| exact McNemar | **p = 1.0000** |
+| the two rates in that run | 40.93% and 40.73% |
+
+So the `+3.6pp` this document credited to *attached definitions* — 41.4% as a block against 45.0% on
+the column line — was never a measurement of placement. It was the difference between **two runs**,
+and inside one run the same two arms are one case apart. The 45.0% itself is a real reading of run
+`40101482710`; what it is not is evidence that the placement was worth anything. The pairing is the
+cheapest reading in this document (no model call, one command) and it is now declared per split, so a
+run that does not take it fails the gate rather than passing quietly.
+
+### What two runs of one unchanged configuration differ by
+
+Two Mini-Dev runs on 2026-11-08, three hours apart. `bench:bird:compare` checks the coordinates a
+difference has to hold constant, and every one of them matches:
+
+| coordinate | run `42482353883` | run `42491745712` |
+| --- | --- | --- |
+| split | minidev | minidev |
+| corpus digest | `7f9b2384df7fd655` | `7f9b2384df7fd655` |
+| model asked for | `deepseek-chat` | `deepseek-chat` |
+| model that answered | `deepseek-flash` | `deepseek-flash` |
+| harness | timeout 60000, concurrency 8, retries 3 | identical |
+| arms scored | 13 | 13 |
+
+Same experiment, twice. The arms that did not change between them:
+
+| arm | run A | run B | delta | ±95% on two independent rates | reading |
+| --- | --- | --- | --- | --- | --- |
+| **`select`** (the shipped arm) | 56.05% | 58.06% | **+2.02** | 6.16 | inside the interval |
+| `inline+repair-raw` | 56.25% | 57.46% | +1.21 | 6.16 | inside |
+| `inline+evidence` | 56.05% | 55.24% | −0.81 | 6.18 | inside |
+| `metadata+evidence` | 58.67% | 57.86% | −0.81 | 6.14 | inside |
+| `synth-definitions` | 41.53% | 40.93% | −0.60 | 6.13 | inside |
+| `inline-definitions` | 40.32% | 40.73% | +0.40 | 6.11 | inside |
+| `names` | 36.29% | 36.29% | 0.00 | 5.98 | inside |
+
+Every row is inside the interval a difference of two independent rates has to clear at n = 496, which
+is **6.16pp**. That is not a failure of the runs; it is the resolution of a 496-question benchmark, and
+it is the number every `+0.6pp` and `+1.2pp` in this document has been quietly smaller than.
+
+### The flows under the rates
+
+A rate difference is the net of two flows, and the artifact carries the case rows that produce them.
+Paired across the two runs — same arm, same question, different execution:
+
+| arm | cases | flips up | flips down | net | churn |
+| --- | --- | --- | --- | --- | --- |
+| **`select`** | 496 | 18 | 8 | +10 | **5.2%** |
+| `inline+evidence+audit` | 496 | 9 | 6 | +3 | 3.0% |
+| `inline+evidence` | 496 | 5 | 9 | −4 | 2.8% |
+| `values` | 496 | 6 | 8 | −2 | 2.8% |
+| `inline+repair-raw` | 496 | 9 | 3 | +6 | 2.4% |
+| `metadata+evidence` | 496 | 4 | 8 | −4 | 2.4% |
+| `inline+definitions` | 496 | 5 | 3 | +2 | 1.6% |
+| `synth-definitions` | 496 | 2 | 5 | −3 | 1.4% |
+| `names` | 496 | 5 | 5 | 0 | 2.0% |
+
+**26 of 496 questions came out differently on the shipped arm**, with the corpus, the model and the
+harness identical. Eighteen went one way and eight the other, exact McNemar **p = 0.0755**: not a
+regression, and not nothing either — it is a 2pp swing sitting one favourable draw away from the
+significance line. Anyone comparing two runs would have reported `+2.02pp` as a win, and this document
+has a `+1.01pp at p = 0.27` in it that was reported exactly that way.
+
+Two things follow, and they are different things. The **single-call** arms churn about 2%, the
+**four-call** selector chain 5.2%, because each extra call is another draw that can move a case. And a
+paired test inside one run removes the questions' own difficulty from the difference, which is why the
+A/A control on `inline+evidence` is 0.4pp (4 against 6, p = 0.754) while the same arm moved 0.81pp
+between runs.
+
+### What the endpoint said it served
+
+Every one of the 6,448 cases in both runs was answered by a base the endpoint named **`deepseek-flash`**
+while the artifact's `model` field says `deepseek-chat`, because that is what the run asked for. Both
+fields are now recorded and neither is derived from the other: `model` is what a re-run asks for,
+`servedModels` is what answered, and `eval/baseline/bird.json` pins the second one. A run whose base
+differs from the pin **fails** — a floor is a claim about a model, and the name that has to match is
+the one that answered.
+
+The three explanations from the previous section are therefore settled as far as this artifact can
+settle them: it was not the corpus (digest equal), it was not the arm (same definition, prompt sizes
+within two characters), and it was not a change of weights behind the alias **during** the interval
+both runs sit in (both served `deepseek-flash`). What is left is the draw, and the draw is ±2pp on an
+arm and 5.2% churn on the chain.
+
+### What this changes in the instrument
+
+- **`bench:bird:compare`** reads two artifacts and prints the coordinate table, the displacement table
+  with its ±95% column, and the churn table. It is the only tool here that joins two artifacts, and
+  what it produces is a statement about the *instrument*, not about a lever.
+- **Pairs are declared.** `eval/baseline/pairs.json` names the pairs each split owes; `ci.yml` reads
+  them with `bench:bird:pair --declared` before the floor gate, and the gate fails a run that skipped
+  one. Four on Mini-Dev, three on dev, and the same table appears in the job summary.
+- **Corpus and base model are pinned.** `corpus.minidev = 7f9b2384df7fd655` and `served.minidev =
+  ["deepseek-flash"]`. The first was already checked and unenforced because the baseline had no value;
+  the second did not exist.
+
+The three declared readings from `42491745712`, which is the last full run before this section was
+written:
+
+| pair | won | lost | p | reading |
+| --- | --- | --- | --- | --- |
+| `synth-definitions` → `inline-definitions` | 18 | 17 | 1.0000 | placement: no difference |
+| `inline+evidence` → `inline+evidence+audit` | 11 | 7 | 0.4807 | the audit turn: no difference |
+| `inline+evidence` → `select` | 22 | 8 | **0.0161** | selection: **+2.82pp**, separable |
+| `metadata+evidence` → `select` | 27 | 26 | 1.0000 | a 1-call curated stack against the 4-call chain: **no difference** |
+
+The third row is the only mechanism on this split that a paired test separates. The fourth is the one
+that matters for the bill: **four calls a question buy nothing over one prompt carrying the curated
+notes**, on the split that this document uses for mechanism readings. It is a cross-level comparison
+and `COMPARISONS` files it as one — three stack levels, not one lever — but a tie is a tie, and a tie
+between a 1-call arm and a 4-call arm is an argument about cost.
 
 ## The zero-row repair, built
 
@@ -9653,7 +9781,9 @@ Three explanations survive the evidence:
 
 The artifact cannot distinguish them, and that is the finding. A 4.7pp movement on a configuration
 that did not change is a claim nobody can defend until a run records *what answered*, which is why
-the model fingerprint is a P0 rather than the housekeeping item it looked like an hour ago.
+the model fingerprint is a P0 rather than the housekeeping item it looked like an hour ago. The next
+section takes the question up with two artifacts in hand and answers it with the one reading that has
+no cross-run noise in it.
 
 One more reading in the same table: the A/A pair (`inline+evidence` and `inline+evidence#2`) landed on
 the same number, 56.0% and 56.0%, tighter than the 0.2–1.2pp this file calls its noise floor. A noise
