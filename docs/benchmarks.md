@@ -7925,12 +7925,12 @@ arm and 5.2% churn on the chain.
   what it produces is a statement about the *instrument*, not about a lever.
 - **Pairs are declared.** `eval/baseline/pairs.json` names the pairs each split owes; `ci.yml` reads
   them with `bench:bird:pair --declared` before the floor gate, and the gate fails a run that skipped
-  one. Four on Mini-Dev, three on dev, and the same table appears in the job summary.
+  one. Five on Mini-Dev, three on dev, and the same table appears in the job summary.
 - **Corpus and base model are pinned.** `corpus.minidev = 7f9b2384df7fd655` and `served.minidev =
   ["deepseek-flash"]`. The first was already checked and unenforced because the baseline had no value;
   the second did not exist.
 
-The three declared readings from `42491745712`, which is the last full run before this section was
+The declared readings from `42491745712`, which is the last full run before this section was
 written:
 
 | pair | won | lost | p | reading |
@@ -7941,10 +7941,13 @@ written:
 | `metadata+evidence` → `select` | 27 | 26 | 1.0000 | a 1-call curated stack against the 4-call chain: **no difference** |
 
 The third row is what a paired test separates **in this run**; the next subsection reads the same pair
-in the run that followed and withdraws it. The fourth is the one that matters for the bill: **four calls a question buy nothing over one prompt carrying the curated
-notes**, on the split that this document uses for mechanism readings. It is a cross-level comparison
-and `COMPARISONS` files it as one — three stack levels, not one lever — but a tie is a tie, and a tie
-between a 1-call arm and a 4-call arm is an argument about cost.
+in the two runs that followed and withdraws it. The fourth is the one that matters for the bill, and
+in this run it is a tie: **four calls a question buy nothing over one prompt carrying the curated
+notes**. It is a cross-level comparison and `COMPARISONS` files it as one — three stack levels, not one
+lever — but a tie between a 1-call arm and a 4-call arm is an argument about cost. Two runs later the
+tie is a `sign-flip` (−1.90pp ± 1.64, the 1-call arm ahead in two runs and behind in the middle one), so
+the argument is about cost **and** about resolution: the difference is not that four calls are cheaper or
+dearer, it is that at 496 questions neither direction survives being repeated.
 
 ### The third run, and what one paired reading is worth
 
@@ -7988,15 +7991,16 @@ selector got right and 8 only `inline+evidence` did:
 | `metadata+evidence` → `select` | 19/32, p = 0.0919 | 27/26, p = 1.0000 | 18/34, **p = 0.0365** | −1.90pp ± 1.64 | **sign-flip** |
 | `inline+evidence` → `metadata+evidence` | 31/18, p = 0.0854 | 28/15, p = 0.0660 | 32/15, **p = 0.0186** | +2.89pp ± 1.55 | **established** |
 
-So the claim three paragraphs above — "the third row is the only mechanism on this split that a
-paired test separates" — is **withdrawn**. It was true of one run and false of the next, on identical
-inputs. `inline+evidence -> select` read 22 against 8, then 19 against 18, and the first run had read
+So the sentence above the table — "the third row is what a paired test separates **in this run**" —
+does not survive the runs that followed, and neither does the one before it that read the fourth row as
+a tie worth arguing about. The first was true of one run and false of the next, on identical inputs. `inline+evidence -> select` read 22 against 8, then 19 against 18, and the first run had read
 13 against 13 on the same pair: the same questions, the same base model, hours apart. Pooled it is
 **+1.01pp ± 1.26**, and Cochran's Q on the three discordant counts is **p = 0.043** — the readings
 differ by more than their own intervals, so the honest label is `heterogeneous` and not
-`one-run-only`. The cost-frontier pair is worse than unproven: the 1-call curated stack came out ahead
-in the middle run and behind in both others, so its sign is not even settled, and in the third run it
-**beat** the 4-call chain by 16 cases.
+`one-run-only`. The cost-frontier pair is worse than unproven: the 1-call curated stack is ahead by 13
+cases in the first run and by 16 in the third, and behind by one case in the middle one, so not even its
+sign is settled — and the run in which it looks most convincing is the one that also read the pair's
+difference as nothing.
 
 A paired test conditions on the questions. It does not condition on the generator's own draw, and on
 496 questions that draw is worth about two points per run. So the unit of evidence here is neither a
@@ -8017,9 +8021,13 @@ pooled at all).
 
 What this leaves standing is the resolution, and it is the useful number: **a prompt-layer lever on
 Mini-Dev cannot be resolved smaller than about 2pp per run, and a single run's paired reading can move
-by that much.** The ways out are arithmetic, not rhetorical — average three runs (SE falls by √3),
-move the decision to the 1,532-question dev split (SE falls by 1.8×), or stop pricing prompt levers
-and attack the model axis, where the gap to the comparable leaderboard cell is 8.2pp.
+by that much.** The ways out are arithmetic, not rhetorical — average three runs (SE falls by √3, which
+is why the pools above are ±0.99 to ±1.64pp instead of ±2pp, and why `synth-definitions` →
+`inline-definitions` can now be stated as −0.28pp ± 1.32 rather than "18 against 17"), move the decision
+to the 1,532-question dev split (SE falls by 1.8×), or stop pricing prompt levers and attack the model
+axis, where the gap to the comparable leaderboard cell is 8.2pp. The escape is not free either:
+`inline+evidence` → `select` could not be pooled at all (Q p = 0.043), so the √3 is only available for a
+pair whose readings agree.
 
 ## The zero-row repair, built
 
