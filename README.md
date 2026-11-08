@@ -59,7 +59,7 @@ const ir = {
   alt: 'Revenue rises from 120 in January to 150 in February.',
 };
 
-const issues = lint(ir);                                 // 12 rules, errors block rendering
+const issues = lint(ir);                                 // 14 rules, errors block rendering
 const chart = echarts.init(null, null, { renderer: 'svg', ssr: true, width: 640, height: 400 });
 chart.setOption(compileToECharts(ir));
 const svg = chart.renderToSVGString();
@@ -153,7 +153,7 @@ Every push runs the same gates locally and in CI:
 | Coverage | ≥95% statements, branches, functions and lines **per package** |
 | Layering | 8 packages, no forbidden dependency edge, `devkit` never a production dependency |
 | Platform | `core`'s browser graph contains no `node:`, driver or `ai` import; declarations leak no driver types (PLT1–PLT7, with 7 mutation tests) |
-| API surface | An export that disappears fails the build (330 symbols snapshotted) |
+| API surface | An export that disappears fails the build (430 symbols snapshotted) |
 | Gate parity | `gate:all` runs every check command the quality job runs, expanded through the scripts |
 | Budgets | gzip size ceilings per package |
 | Benchmark | Oracle must score 100%, empty predictor 0%, or the run fails |
