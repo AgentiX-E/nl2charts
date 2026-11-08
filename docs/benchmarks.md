@@ -8016,10 +8016,40 @@ label above survived it, and the intervals narrowed the way the resolution parag
 
 This is the check that matters for the instrument and not for the levers: a fifth run is coming, because
 every push that touches the pipeline produces one, so the question is not whether the numbers move but
-whether the labels do. One run later, none of the five did, and the two that disagree with each other
-still disagree (`select` at Q p = 0.038). A tool whose verdicts change with each new artifact would be
-worthless; a tool whose verdicts never change would be a constant. The evidence that it is neither is a
-table like this one, which is cheap because it costs no model calls.
+whether the labels do. At four readings none of the five had moved, and the two that disagree with each
+other still did (`select` at Q p = 0.038). A tool whose verdicts change with each new artifact would be
+worthless; a tool whose verdicts never change would be a constant. The fifth reading broke the tie in the
+more interesting direction — see below.
+
+**A fifth run, and the first label that moved.** `42523664683` is the run of the commit that added the
+base fingerprint, and it is the fifth reading of the same configuration. This time one label changed:
+
+| pair | A | B | C | D | E `42523664683` | five-run pooled | verdict | Q |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `synth-definitions` → `inline-definitions` | 13/19 | 17/18 | 18/15 | 13/19 | 15/17 | −0.50pp ± 1.01 | none | 0.186 |
+| `inline+evidence` → `inline+evidence+audit` | 8/11 | 11/7 | 10/9 | 9/8 | **17/4, p = 0.0072** | +0.60pp ± 0.76 | **heterogeneous** | **0.007** |
+| `inline+evidence` → `select` | 13/13 | 22/8 | 19/18 | 19/11 | 26/13, p = 0.0533 | +1.40pp ± 0.99 | **heterogeneous** | 0.020 |
+| `metadata+evidence` → `select` | 19/32 | 27/26 | 18/34 | 22/28 | 27/33 | −1.63pp ± 1.29 | **sign-flip** | 0.065 |
+| `inline+evidence` → `metadata+evidence` | 31/18 | 28/15 | 32/15 | 31/17 | 35/16, p = 0.0110 | **+3.05pp ± 1.22** | **established** | 0.441 |
+
+The audit pair is the one that moved: four flat readings (−0.60, +0.81, +0.20, +0.20pp) and one at +2.62
+with exact p = 0.0072, seventeen cases against four. Cochran's Q puts the five at p = 0.007, so the label
+is neither `none` nor `established` — it says the readings differ by more than their own intervals, which
+forbids the average printed beside it. That is a stronger statement than the previous round's `none`, and
+the opposite of what a round of instrument work might hope to produce: the tool got a coordinate and
+immediately used it to say that one of its own pools cannot be taken.
+
+Two explanations are consistent with the table and this document cannot separate them: the audit turn
+sometimes helps, or the first four runs were not the generator the fifth one was. It cannot separate them
+because A–D carry no fingerprint — E is the only one of the five that can say which base answered it. The
+coordinate this round added is also the one that would settle the question this round's run raised, and
+the answer is a sixth run of the same configuration, which costs one dispatch rather than an argument.
+
+One more reading of the same table is worth stating, because it is the leftover the cost question needs:
+`inline+evidence` → `select` is now 4 of 5 readings positive, pooled +1.40pp with an interval that
+excludes zero, and still labelled `heterogeneous` — so the selector is neither shown to be worth four
+calls a question nor shown to be worth zero. Any decision to cut it from the default chain has to say
+that it is giving up ~1.4pp of unproven value, not 0pp.
 
 A paired test conditions on the questions. It does not condition on the generator's own draw, and on
 496 questions that draw is worth about two points per run. So the unit of evidence here is neither a
@@ -8033,10 +8063,10 @@ a function of which two runs the command happened to be handed.** `bench:bird:co
 every artifact it is given as a reading of the pair (`compare.ts a.json b.json c.json --pair x,y`),
 names any artifact that did not score both arms instead of dropping it silently, and prints the
 verdict and its evidence in two sentences — the label on one line, `1 of 3 readings significant, Q
-p = 0.043 — the readings differ by more than their own intervals` on the next. The four labels are
-the four things that can be true: `none` (nothing to report), `one-run-only` (a reading that did not
+p = 0.043 — the readings differ by more than their own intervals` on the next. The five labels are
+the five things that can be true: `none` (nothing to report), `one-run-only` (a reading that did not
 survive being repeated), `sign-flip` (a pair that reversed), `heterogeneous` (readings that cannot be
-pooled at all).
+pooled at all), and `established` (the same sign in every reading, and a pool that clears zero).
 
 What this leaves standing is the resolution, and it is the useful number: **a prompt-layer lever on
 Mini-Dev cannot be resolved smaller than about 2pp per run, and a single run's paired reading can move
@@ -9883,6 +9913,19 @@ questions rather than months later in a diff nobody reads.
 | probes all failed, or the digest is empty | **fails**, naming the first failure: the instrument could not establish the coordinate |
 | two draws disagree | note: the digest is a draw, and a change of weights cannot be separated from it in this run |
 | fewer probes answered than the pin records | note: the two digests are over different questions |
+
+The first reading is `42523664683`: three probes, two draws each, six identical answers —
+`170d0beaa768594b` over `deepseek-flash`, for **138 prompt and 10 completion tokens**. Both draws agreeing
+is what makes the digest a fingerprint rather than a sample, and it is the branch this design hoped for
+rather than one it could assume: had they disagreed the pin would have stayed unwritten and the gate would
+have said why. It is now pinned per split in `eval/baseline/bird.json`, with the run that produced it.
+
+The four runs pooled above were written before this field existed, so their `model.fingerprint` line reads
+`NOT RECORDED` — including when they are compared with each other. Their pool is still four readings of one
+configuration, but "one generator produced all four" is a claim none of those four artifacts supports; the
+next pool, made of runs after this one, will be the first that can. That is the honest shape of a coordinate
+added after the fact: it makes the following reading checkable and says plainly that the previous one was
+not.
 
 A matching digest is not proof of the same weights, and this document will not treat it as one: two
 models can agree on three short answers. It is a one-sided test, and the side it covers is the one
