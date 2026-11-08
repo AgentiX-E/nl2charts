@@ -9569,3 +9569,38 @@ from a CI run, because a pin guessed on a workstation is a claim about a cache.
   where a single-call system is not near the ceiling — and the first that scores *state changes*,
   which `compareResultSets` cannot judge. Management tasks are verified by test cases against the
   database, not by comparing a result set, so adopting V2 means adopting a second judge.
+
+### A number that stopped reproducing while this section was being written
+
+The first CI run with the corpus digest in the artifact printed one: `corpus 7f9b2384df7fd655`, 500
+rows, 498 questions. It also printed readings that do not match the ones this file quotes.
+
+| arm | run `40101482710` | run `42482353883` | delta |
+| --- | --- | --- | --- |
+| `names` | 35.7% | 36.3% | +0.6 |
+| `synth-definitions` (block) | 41.4% | 41.5% | +0.1 |
+| `inline-definitions` | **45.0%** | **40.3%** | **−4.7** |
+| `inline+evidence` | 57.4% | 56.0% | −1.4 |
+| `metadata+evidence` | 59.2% | 58.7% | −0.5 |
+
+Same arm definition in the catalogue, same corpus (500 rows, 498 question ids), and prompt sizes
+within two characters — 1,865 / 2,904 / 2,506 / 2,641 / 6,974 against 1,862 / 2,903 / 2,504 / 2,639 /
+6,967. So this is not the arm, and it is not the corpus. The placement result this file has carried
+since `40101482710` — the identical sentences score 41.4% as a block and 45.0% on the column line,
+**+3.6pp, p=0.039** — now reads **−1.2pp** on the same text.
+
+Three explanations survive the evidence:
+
+1. the weights behind the `deepseek-chat` alias moved between the two runs;
+2. the placement effect is an interaction with a particular base model, and a new base reversed it;
+3. something in the inline rendering changed by less than two characters — which the prompt sizes
+   cannot rule out and cannot confirm.
+
+The artifact cannot distinguish them, and that is the finding. A 4.7pp movement on a configuration
+that did not change is a claim nobody can defend until a run records *what answered*, which is why
+the model fingerprint is a P0 rather than the housekeeping item it looked like an hour ago.
+
+One more reading in the same table: the A/A pair (`inline+evidence` and `inline+evidence#2`) landed on
+the same number, 56.0% and 56.0%, tighter than the 0.2–1.2pp this file calls its noise floor. A noise
+floor is measured per run, not assumed; two arms agreeing exactly is a floor for *this* run, not a
+promise about the next one.
