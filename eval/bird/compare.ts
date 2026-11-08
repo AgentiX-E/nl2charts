@@ -46,6 +46,8 @@
 import { readFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { pairOutcome } from './pair.js';
+import type { PairArtifact } from './pair.js';
 
 /** The slice of an artifact this instrument reads. Written out rather than imported: see `pair.ts`. */
 export interface RunArm {
@@ -462,16 +464,213 @@ export function compareLines(report: CompareReport, leftMeta: string, rightMeta:
 export interface CompareSettings {
   readonly left: string;
   readonly right: string;
+  /**
+   * Further artifacts, read for the pair only.
+   *
+   * The comparison table stays two-sided: it is a statement about what one coordinate did between
+   * two runs. The pair table is not — a pair's evidence is every run that read it, and a command
+   * that can only be handed two of them reports a verdict that depends on which two. That happened:
+   * `inline+evidence -> select` was `one-run-only` when pooled over two of its three readings and
+   * `heterogeneous` over all three, because the third is what made the readings disagree.
+   */
+  readonly also: readonly string[];
+  /** The one pair whose readings are pooled across every artifact, when asked for. */
+  readonly pair?: readonly [string, string];
 }
 
 export function resolveCompareSettings(argv: readonly string[], root: string): CompareSettings {
-  const positional = argv.filter((item) => !item.startsWith('--'));
-  if (positional.length !== 2) {
-    throw new Error('usage: compare.ts <a.json> <b.json> — two artifacts, and the order is the direction of every delta');
+  const at = argv.indexOf('--pair');
+  let pair: [string, string] | undefined;
+  if (at !== -1) {
+    const names = (argv[at + 1] ?? '').split(',');
+    if (names.length !== 2 || names.some((name) => name.trim() === '')) {
+      throw new Error('--pair takes two arm names, for example inline+evidence,select');
+    }
+    pair = [(names[0] as string).trim(), (names[1] as string).trim()];
   }
-  const flags = argv.filter((item) => item.startsWith('--'));
-  if (flags.length > 0) throw new Error(`unrecognized argument ${flags[0] as string}: this tool takes two artifact paths and nothing else`);
-  return { left: resolve(root, positional[0] as string), right: resolve(root, positional[1] as string) };
+  const consumed = new Set<number>();
+  argv.forEach((item, index) => {
+    if (!item.startsWith('--')) return;
+    consumed.add(index);
+    if (item === '--pair') consumed.add(index + 1);
+  });
+  const positional = argv.filter((item, index) => !item.startsWith('--') && !consumed.has(index));
+  if (positional.length < 2) {
+    throw new Error(
+      'usage: compare.ts <a.json> <b.json> [more.json ...] [--pair <left>,<right>] — the first two are the comparison, every path is a reading of the pair',
+    );
+  }
+  const flags = argv.filter((item) => item.startsWith('--') && item !== '--pair');
+  if (flags.length > 0) throw new Error(`unrecognized argument ${flags[0] as string}: this tool takes at least two artifact paths and optionally one pair`);
+  const [left, right, ...also] = positional.map((path) => resolve(root, path)) as [string, string, ...string[]];
+  return { left, right, also, ...(pair === undefined ? {} : { pair }) };
+}
+
+/** One artifact's reading of one pair, or nothing when the artifact did not score both arms. */
+export function readPairOf(report: RunArtifact, name: string, left: string, right: string): PairReading | undefined {
+  const scored = new Set((report.cases ?? []).map((row) => row.arm));
+  if (!scored.has(left) || !scored.has(right)) return undefined;
+  const outcome = pairOutcome(report as PairArtifact, left, right);
+  const deltaPp = outcome.examined === 0 ? 0 : ((outcome.wins - outcome.losses) / outcome.examined) * 100;
+  return {
+    artifact: name,
+    examined: outcome.examined,
+    wins: outcome.wins,
+    losses: outcome.losses,
+    deltaPp: Number(deltaPp.toFixed(2)),
+    p: Number(outcome.p.toFixed(4)),
+  };
+}
+
+/** One artifact's reading of one declared pair. */
+export interface PairReading {
+  readonly artifact: string;
+  readonly examined: number;
+  readonly wins: number;
+  readonly losses: number;
+  readonly deltaPp: number;
+  readonly p: number;
+}
+
+/** The same pair read in more than one run, and whether it survived the second reading. */
+export interface PooledReading {
+  readonly left: string;
+  readonly right: string;
+  readonly readings: readonly PairReading[];
+  /** Inverse-variance pooled estimate of the difference, in percentage points. */
+  readonly pooledPp: number;
+  /** Its 95% half-width. */
+  readonly pooledIntervalPp: number;
+  /** Two-sided normal p for the pooled estimate. */
+  readonly pooledP: number;
+  /**
+   * Cochran's Q on the readings, as a p-value with k-1 degrees of freedom.
+   *
+   * Two runs of one pair that disagree by more than their own intervals is the case this exists for:
+   * the pooled estimate is still the best number available, and its interval is only honest if the
+   * readings are compatible. Below 0.05 the verdict stops being about the lever and becomes about
+   * the instrument, and the line says so rather than narrowing the interval over a disagreement.
+   */
+  readonly heterogeneityP: number;
+  /** How many of the readings cleared p < 0.05 on their own. */
+  readonly readingsSignificant: number;
+  /** `established`, `sign-flip`, `one-run-only` or `none`. */
+  readonly verdict: string;
+  readonly problems: readonly string[];
+}
+
+function normalTwoSided(z: number): number {
+  // Abramowitz-Stegun 7.1.26 on the error function; the alternative is a dependency for one number.
+  const t = 1 / (1 + 0.3275911 * (z / Math.SQRT2));
+  const erf = 1 - ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-(z * z) / 2);
+  return Math.min(1, Math.max(0, 1 - erf));
+}
+
+/**
+ * One pair, read in every artifact it was scored in, and pooled.
+ *
+ * This exists because a single paired reading turned out not to be a result either. `inline+evidence
+ * -> select` read 22 against 8 (p = 0.0161) in `42491745712` and 19 against 18 (p = 1.0000) in
+ * `42502095942` — the same pair, the same corpus, the same base model, three hours apart. A paired
+ * test conditions on the questions; it does not condition on the generator's own draw, and at 496
+ * questions that draw is worth about two points.
+ *
+ * So the unit of evidence is not one run. It is the pair's estimate pooled over the runs that read
+ * it, with the between-reading disagreement reported rather than averaged away: a pair that is
+ * significant in one run and absent in the next is `one-run-only`, which is a finding about the
+ * instrument and not about the lever.
+ *
+ * Pooling weights each reading by its inverse variance, and the variance comes from the discordant
+ * count — the only cases that carry information about a pair. Two readings over the same questions
+ * are not independent samples of the corpus, and this does not claim they are; what is independent
+ * is the draw, which is exactly what a second run re-rolls.
+ */
+export function poolPair(readings: readonly PairReading[], left: string, right: string): PooledReading {
+  const usable = readings.filter((reading) => reading.examined > 0 && reading.wins + reading.losses > 0);
+  const problems = usable.length === 0 ? [`the pair ${left} -> ${right} carries no discordant case in any run, so there is nothing to pool`] : [];
+  // The variance of a paired difference is the discordant count over n squared, and the estimate is
+  // in percentage points, so the weight carries the 10^4 that converts a fraction to a point. Getting
+  // this wrong is not cosmetic: without it the pooled interval came out at 0.02pp and reported
+  // certainty that two contradicting runs cannot support.
+  const weights = usable.map((reading) => (reading.examined * reading.examined) / ((reading.wins + reading.losses) * 1e4));
+  const total = weights.reduce((sum, weight) => sum + weight, 0);
+  const pooledPp = total === 0 ? 0 : usable.reduce((sum, reading, index) => sum + reading.deltaPp * (weights[index] as number), 0) / total;
+  const standardError = total === 0 ? 0 : Math.sqrt(1 / total);
+  const pooledP = total === 0 ? 1 : normalTwoSided(Math.abs(pooledPp) / standardError);
+  const q = usable.reduce((sum, reading, index) => sum + (weights[index] as number) * (reading.deltaPp - pooledPp) ** 2, 0);
+  const heterogeneityP = usable.length < 2 ? 1 : normalTwoSided(Math.sqrt(q));
+  const significant = usable.filter((reading) => reading.p < 0.05);
+  const signs = new Set(usable.map((reading) => Math.sign(reading.deltaPp)));
+  // The label describes the evidence, and the evidence is the pool: a pair is `established` when the
+  // pooled estimate excludes zero and the readings agree in sign, whatever any single reading managed
+  // on its own. The first version required every reading to clear 0.05 by itself, which labelled
+  // `inline+evidence -> metadata+evidence` — +2.62, +2.62, +3.43pp, pooled +2.89 ± 1.55 at p = 0.0003
+  // with Q p = 0.631 — as `one-run-only`, contradicting the estimate printed beside it. Whether one
+  // run carried the result or all of them did is a printed count (`readingsSignificant`), not a label.
+  //
+  // A sign change between two readings that are both inside their own noise is a wobble around zero,
+  // not a flip: `synth-definitions -> inline-definitions` reads -0.20 and +0.60, and giving that the
+  // same label as a pair that reversed a real effect would make the label useless.
+  const verdict =
+    usable.length < 2
+      ? 'one-run-only'
+      : heterogeneityP < 0.05
+        ? 'heterogeneous'
+        : significant.length > 0 && signs.size > 1
+          ? 'sign-flip'
+          : signs.size === 1 && pooledP < 0.05
+            ? 'established'
+            : significant.length > 0
+              ? 'one-run-only'
+              : 'none';
+  return {
+    left,
+    right,
+    readings: [...usable],
+    pooledPp: Number(pooledPp.toFixed(2)),
+    pooledIntervalPp: Number((1.96 * standardError).toFixed(2)),
+    pooledP: Number(pooledP.toFixed(4)),
+    heterogeneityP: Number(heterogeneityP.toFixed(4)),
+    readingsSignificant: significant.length,
+    verdict,
+    problems,
+  };
+}
+
+/** The pair table, with the sentence a reader needs to stop reading one run as a result. */
+export function pooledLines(pooled: readonly PooledReading[], unscored: readonly string[] = []): string[] {
+  const lines: string[] = [''];
+  if (pooled.length === 0) return lines;
+  lines.push('  the same pair read in every run that scored it — a single reading is not a result:');
+  for (const reading of pooled) {
+    lines.push(`    ${reading.left} -> ${reading.right}`);
+    for (const run of reading.readings) {
+      lines.push(
+        `      ${run.artifact.padEnd(28)}${String(run.wins).padStart(3)} / ${String(run.losses).padStart(3)}` +
+          `${`${run.deltaPp >= 0 ? '+' : ''}${run.deltaPp.toFixed(2)}pp`.padStart(10)}   p = ${run.p.toFixed(4)}`,
+      );
+    }
+    lines.push(
+      `      ${'pooled'.padEnd(28)}${''.padStart(3)}${''.padStart(7)}${`${reading.pooledPp >= 0 ? '+' : ''}${reading.pooledPp.toFixed(2)}pp`.padStart(10)}` +
+        `   ± ${reading.pooledIntervalPp.toFixed(2)} (95%), p ≈ ${reading.pooledP.toFixed(3)} → ${reading.verdict}`,
+    );
+    // The verdict is a statement about the readings, and the pooled p is a statement about the
+    // estimate; printing one without the other let `p ≈ 0.047 → one-run-only` read as a defect, and
+    // `→ heterogeneous, readings agree` read as a contradiction. Each half gets its own sentence.
+    if (reading.readings.length === 1) {
+      lines.push('      1 reading, and one reading is not a result — this line says what is missing, not what is true');
+    } else if (reading.readings.length > 1) {
+      lines.push(
+        `      ${String(reading.readingsSignificant)} of ${String(reading.readings.length)} readings significant, ` +
+          `Q p = ${reading.heterogeneityP.toFixed(3)} — the readings differ ` +
+          `${reading.heterogeneityP < 0.05 ? 'by more than' : 'no more than'} their own intervals`,
+      );
+    }
+    for (const problem of reading.problems) lines.push(`      FAILED ${problem}`);
+    for (const problem of reading.problems) lines.push(`      FAILED ${problem}`);
+  }
+  for (const name of unscored) lines.push(`      ${name} did not score both arms, so it is not one of the readings`);
+  return lines;
 }
 
 /** The line a reader needs to identify an artifact without opening it. */
@@ -482,11 +681,25 @@ function metaOf(report: RunArtifact): string {
 
 export function main(argv: readonly string[] = process.argv.slice(2), root = process.cwd()): number {
   const settings = resolveCompareSettings(argv, root);
-  const left = JSON.parse(readFileSync(settings.left, 'utf8')) as RunArtifact;
-  const right = JSON.parse(readFileSync(settings.right, 'utf8')) as RunArtifact;
-  const report = compareRuns(left, right, basename(settings.left), basename(settings.right));
-  for (const line of compareLines(report, metaOf(left), metaOf(right))) console.log(line);
-  return report.problems.length === 0 ? 0 : 1;
+  const paths = [settings.left, settings.right, ...settings.also];
+  const artifacts = paths.map((path) => [basename(path), JSON.parse(readFileSync(path, 'utf8')) as RunArtifact] as const);
+  const [[leftName, left], [rightName, right]] = [artifacts[0] as (typeof artifacts)[number], artifacts[1] as (typeof artifacts)[number]];
+  const report = compareRuns(left, right, leftName, rightName);
+  const lines = compareLines(report, metaOf(left), metaOf(right));
+  if (settings.also.length > 0) {
+    // A reader who handed this command three runs will read the table above as covering three.
+    lines.splice(1, 0, `  the comparison above is the first two paths; ${String(settings.also.length)} further artifact(s) are read for the pair only`);
+  }
+  for (const line of lines) console.log(line);
+  if (settings.pair === undefined) return report.problems.length === 0 ? 0 : 1;
+  const [pairLeft, pairRight] = settings.pair;
+  const readings = artifacts
+    .map(([name, artifact]) => readPairOf(artifact, name, pairLeft, pairRight))
+    .filter((reading): reading is PairReading => reading !== undefined);
+  const unscored = artifacts.map(([name]) => name).filter((name) => !readings.some((reading) => reading.artifact === name));
+  const pooled = poolPair(readings, pairLeft, pairRight);
+  for (const line of pooledLines([pooled], unscored)) console.log(line);
+  return report.problems.length === 0 && pooled.problems.length === 0 ? 0 : 1;
 }
 
 export function isEntry(argv1: string | undefined, moduleUrl: string): boolean {

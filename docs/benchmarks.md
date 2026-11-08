@@ -7703,7 +7703,7 @@ the gap to that cell is **8.2pp**, and the one mechanism that has never been pri
 
 | mechanism | what it is worth there | what it is here | status |
 |---|---|---|---|
-| profile → per-column summary | +1.0 on top of documented metadata | attached definitions: **+3.6pp across two runs** (41.4 → 45.0) and **no difference inside one** (18 against 17, p = 1.0000; see *Two runs of the same experiment are not the same experiment*); on top of the hint 57.4 → 59.2, not separable | taken as a mechanism, **not shown to be worth anything** |
+| profile → per-column summary | +1.0 on top of documented metadata | attached definitions: **+3.6pp across two runs** (41.4 → 45.0) and **no difference inside any of three** (19/13, 18/17, 15/18; pooled 0.28pp apart ± 1.32; see *Two runs of the same experiment are not the same experiment*); on top of the hint 57.4 → 59.2, not separable | taken as a mechanism, **not shown to be worth anything** |
 | schema linking | +1.8 (perfect: +6.2) | a linker hint on a full card; it is priced in **characters**, never in accuracy | **not taken** |
 | three candidates | the pool it selects from | `select-mixed` / `select-balanced` pools | taken |
 | corrections on bad constructions | up to three, syntax plus a hand-written list | repair loop, syntax-triggered only; 2.4% of first statements fail on `deepseek-chat` ⇒ ≤0.4pp | partially, and the bound is known |
@@ -7929,11 +7929,84 @@ written:
 | `inline+evidence` → `select` | 22 | 8 | **0.0161** | selection: **+2.82pp**, separable |
 | `metadata+evidence` → `select` | 27 | 26 | 1.0000 | a 1-call curated stack against the 4-call chain: **no difference** |
 
-The third row is the only mechanism on this split that a paired test separates. The fourth is the one
-that matters for the bill: **four calls a question buy nothing over one prompt carrying the curated
+The third row is what a paired test separates **in this run**; the next subsection reads the same pair
+in the run that followed and withdraws it. The fourth is the one that matters for the bill: **four calls a question buy nothing over one prompt carrying the curated
 notes**, on the split that this document uses for mechanism readings. It is a cross-level comparison
 and `COMPARISONS` files it as one — three stack levels, not one lever — but a tie is a tie, and a tie
 between a 1-call arm and a 4-call arm is an argument about cost.
+
+### The third run, and what one paired reading is worth
+
+Everything above was written with two artifacts. The push that added the declared pairs produced a
+third run (`42502095942`) of the same configuration, and it moved the answer again — this time the
+answer to "is a paired reading a result?".
+
+The three runs, all Mini-Dev, all `deepseek-chat` asked and `deepseek-flash` served, all on corpus
+`7f9b2384df7fd655`, thirteen arms each:
+
+| arm | `42482353883` | `42491745712` | `42502095942` | range |
+| --- | --- | --- | --- | --- |
+| **`select`** | 56.05% | 58.06% | 56.05% | **2.01** |
+| `metadata+evidence` | 58.67% | 57.86% | 59.27% | 1.41 |
+| `inline-definitions` | 40.32% | 40.73% | 41.73% | 1.41 |
+| `inline+repair` | 56.05% | 56.45% | 55.24% | 1.21 |
+| `values` | 57.86% | 57.46% | 58.67% | 1.21 |
+| `inline+retrieval` | 40.93% | 41.33% | 41.94% | 1.01 |
+| `inline+evidence` | 56.05% | 55.24% | 55.85% | 0.81 |
+| `inline+icl` | 41.73% | 41.13% | 41.94% | 0.81 |
+| `inline+evidence+audit` | 55.44% | 56.05% | 56.05% | 0.61 |
+| `names` | 36.29% | 36.29% | 36.90% | 0.61 |
+| `synth-definitions` | 41.53% | 40.93% | 41.13% | 0.60 |
+| `inline+evidence#2` (A/A) | 56.05% | 55.65% | 55.85% | 0.40 |
+
+The shipped arm moved **2.01pp across three runs** — up 2.02, then back down 2.01. The A/A arm, which
+differs from its twin only by being a second draw, moved 0.40pp over the same three runs. This is the
+same displacement the previous section measured, now in both directions, which rules out the reading
+that the second run was simply a lucky one.
+
+And the four declared pairs, read in all three runs and pooled by inverse variance over the discordant
+counts. Each cell is the pair's discordant counts in the order the tool prints them — **the second arm
+only, over the first arm only** — so `22/8` on `inline+evidence → select` means 22 questions only the
+selector got right and 8 only `inline+evidence` did:
+
+| pair | `42482353883` | `42491745712` | `42502095942` | pooled | verdict |
+| --- | --- | --- | --- | --- | --- |
+| `synth-definitions` → `inline-definitions` | 13/19, p = 0.3771 | 17/18, p = 1.0000 | 18/15, p = 0.7283 | −0.28pp ± 1.32 | **none** |
+| `inline+evidence` → `inline+evidence+audit` | 8/11, p = 0.6476 | 11/7, p = 0.4807 | 10/9, p = 1.0000 | +0.15pp ± 0.99 | **none** |
+| `inline+evidence` → `select` | 13/13, p = 1.0000 | 22/8, **p = 0.0161** | 19/18, p = 1.0000 | +1.01pp ± 1.26 | **heterogeneous** |
+| `metadata+evidence` → `select` | 19/32, p = 0.0919 | 27/26, p = 1.0000 | 18/34, **p = 0.0365** | −1.90pp ± 1.64 | **sign-flip** |
+
+So the claim three paragraphs above — "the third row is the only mechanism on this split that a
+paired test separates" — is **withdrawn**. It was true of one run and false of the next, on identical
+inputs. `inline+evidence -> select` read 22 against 8, then 19 against 18, and the first run had read
+13 against 13 on the same pair: the same questions, the same base model, hours apart. Pooled it is
+**+1.01pp ± 1.26**, and Cochran's Q on the three discordant counts is **p = 0.043** — the readings
+differ by more than their own intervals, so the honest label is `heterogeneous` and not
+`one-run-only`. The cost-frontier pair is worse than unproven: it reversed sign twice around zero,
+with the 1-call curated stack **beating** the 4-call chain by 16 cases in the third run.
+
+A paired test conditions on the questions. It does not condition on the generator's own draw, and on
+496 questions that draw is worth about two points per run. So the unit of evidence here is neither a
+rate nor a single paired reading: it is the pair's estimate pooled over the runs that read it, with
+the disagreement between readings printed rather than averaged away.
+
+That pool is also where the instrument's own first defect turned up. `--pair` accepted two artifacts,
+while the table it prints says "in every run that scored it": pooling the last two runs gave +1.65pp
+and the label `one-run-only`, pooling all three gives +1.01pp and `heterogeneous`. **The verdict was
+a function of which two runs the command happened to be handed.** `bench:bird:compare` now takes
+every artifact it is given as a reading of the pair (`compare.ts a.json b.json c.json --pair x,y`),
+names any artifact that did not score both arms instead of dropping it silently, and prints the
+verdict and its evidence in two sentences — the label on one line, `2 of 3 readings significant, Q
+p = 0.043 — the readings differ by more than their own intervals` on the next. The four labels are
+the four things that can be true: `none` (nothing to report), `one-run-only` (a reading that did not
+survive being repeated), `sign-flip` (a pair that reversed), `heterogeneous` (readings that cannot be
+pooled at all).
+
+What this leaves standing is the resolution, and it is the useful number: **a prompt-layer lever on
+Mini-Dev cannot be resolved smaller than about 2pp per run, and a single run's paired reading can move
+by that much.** The ways out are arithmetic, not rhetorical — average three runs (SE falls by √3),
+move the decision to the 1,532-question dev split (SE falls by 1.8×), or stop pricing prompt levers
+and attack the model axis, where the gap to the comparable leaderboard cell is 8.2pp.
 
 ## The zero-row repair, built
 

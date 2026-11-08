@@ -1316,13 +1316,34 @@ case.
 The consequence is a resolution, not an opinion: a difference of two independent rates on 496 questions
 has a 95% interval of **6.16pp**, so nothing this project has published as a `+0.6pp` or `+1.2pp` arm
 delta could have been read that way. Everything that survived is a paired reading taken inside one
-run — `inline+evidence → select` at 22 against 8 (p = 0.0161) is the only mechanism on Mini-Dev that a
-paired test separates, and `metadata+evidence → select` at 27 against 26 (p = 1.0000) says a 1-call
-curated stack ties the 4-call chain.
+run — and a paired reading is not automatically a result either. `inline+evidence → select` read 13
+against 13, then 22 against 8 (p = 0.0161), then 19 against 18 (p = 1.0000), same corpus, same base;
+pooled over all three it is +1.01pp ± 1.26 with **Cochran's Q at p = 0.043**, so the readings differ by
+more than their own intervals and the label is `heterogeneous`. `metadata+evidence → select` went the
+other way twice: 19 against 32, then 27 against 26, then 18 against 34 (p = 0.0365) — a `sign-flip` in
+which the 1-call curated stack beat the 4-call chain by 16 cases.
+
+A paired test conditions on the questions and not on the generator's own draw. At 496 questions that
+draw is worth about two points per run — the shipped arm moved 56.05 → 58.06 → 56.05 across three runs
+of one configuration — so the unit of evidence is the pair pooled over the runs that read it, with the
+disagreement between readings printed rather than averaged away. `bench:bird:compare --pair` does
+that, and its four verdicts are the four things that can be true: `none`, `one-run-only`, `sign-flip`,
+`heterogeneous`.
+
+Getting that wrong is easy enough that it happened here on the first try: the command took two
+artifacts while the table it printed claimed to cover every run that scored the pair, so the verdict
+depended on which two runs a reader happened to pass. It now takes any number of artifacts
+(`compare.ts a.json b.json c.json --pair x,y`), names the ones that did not score both arms instead of
+dropping them silently, and prints the label and its evidence as two sentences — the pooled `+1.01pp
+± 1.26` on one line, `1 of 3 readings significant, Q p = 0.043 — the readings differ by more than
+their own intervals` on the next. Splitting the sentence is not typography: the earlier single line
+read `→ heterogeneous, readings agree (Q p = 0.043)`, and `p ≈ 0.047 → one-run-only` elsewhere, both
+of which are a label contradicting the half of the sentence a reader skims.
 
 Two mechanisms keep that discipline from decaying into a habit. `eval/baseline/pairs.json` declares the
 pairs each split owes, `ci.yml` reads them with `--declared` before the floor gate, and a run that
 skipped a declared pair **fails**: the promise exists because the placement reading (`+3.6pp`, 41.4
-against 45.0) was once published from two runs and is 18 against 17 inside one. And a subset run is
+against 45.0) was once published from two runs and is 19 against 13, 18 against 17 and 15 against 18
+inside three. And a subset run is
 measured on its declaration, the same way the arm list and the sample size are — `bird-model.yml` asks
 two or three arms about one prompt and is not failed for the pairs it never requested.
