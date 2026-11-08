@@ -1,0 +1,49 @@
+[
+  {
+    "system": "MAC-SQL",
+    "status": "released",
+    "repo": "wbbeyourself/MAC-SQL",
+    "commit": "31a9df5e0d520be4769be57a4b9022e5e34a14f4",
+    "license": "none declared",
+    "evidence": "https://github.com/wbbeyourself/MAC-SQL",
+    "checkedAt": "2026-11-08",
+    "note": "Pinned and dispatched. Paired on the same 498 questions and the same endpoint it beat the adopted arm by 4.84pp (p = 0.0160) while the four component readings summed to less than that gap, which is the whole argument for copying a pipeline instead of pricing its levers one at a time."
+  },
+  {
+    "system": "CHESS",
+    "status": "released",
+    "repo": "ShayanTalaei/CHESS",
+    "commit": "3d6e835f858d26885d21d4bc0215aeecf855efbe",
+    "license": "Apache-2.0",
+    "evidence": "https://github.com/ShayanTalaei/CHESS",
+    "checkedAt": "2026-11-08",
+    "note": "Pinned. Five agents, ten candidates drawn twice, unit tests generated and evaluated: the run needs an embedding model and a few hundred calls, so it is dispatched rather than run per push."
+  },
+  {
+    "system": "Agentar-Scale-SQL",
+    "status": "partial",
+    "repo": "antgroup/Agentar-Scale-SQL",
+    "commit": "00657e903e51857c726d6c8d77c8851297757269",
+    "license": "Apache-2.0",
+    "evidence": "https://github.com/antgroup/Agentar-Scale-SQL",
+    "checkedAt": "2026-11-08",
+    "released": ["light-schema-engine", "ddl-schema-generation", "offline-preprocessing-pipeline", "keyword-extraction", "metadata-generation", "bm25-retrieval"],
+    "withheld": ["sql-selection", "iterative-refinement", "task-understanding-icl-generators", "reasoning-generator-candidates"],
+    "note": "The README's roadmap lists the four withheld modules as future releases, and `ScaleSQL/modules` holds only the schema side, so the repository is the preprocessing half of an 81.67% test run. Running it produces a schema, not a system: the number it would make belongs to a hybrid and may not be plotted as theirs. Also the first leader in this queue whose gain is largely a 32B fine-tune plus vLLM, which this repository cannot host behind an API."
+  },
+  {
+    "system": "AskData",
+    "status": "paper-only",
+    "paper": "arXiv:2505.19988",
+    "evidence": "https://arxiv.org/abs/2505.19988",
+    "checkedAt": "2026-11-08",
+    "mechanisms": [
+      "database-profiling-per-column-with-minhash-sketch",
+      "llm-summary-of-the-profile-two-lengths",
+      "schema-linking-by-task-alignment-five-schema-variants",
+      "three-candidates-by-sampling-seed-and-schema-order",
+      "result-set-majority-vote-with-three-hand-written-corrections"
+    ],
+    "note": "No release exists: the leaderboard row carries no repository and a GitHub search returns only community rebuilds. Four of the five mechanisms are already priced here (profile summary +3.6pp, three candidates, vote which lost 2.74pp to `shortest`, corrections bounded at 0.4pp); the open one is the linker, whose own ablation puts it at +1.8pp against +6.2pp for perfect linking. One community rebuild of the four-stage pipeline reports 95.6% mean column recall and 90.5% F1 in linking but 61.8% BIRD accuracy against the paper's 76.14-78.49 dev, which is what a rebuild of the published part buys when the unpublished part is the prompt text and the eight retrieved examples."
+  }
+]

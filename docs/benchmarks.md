@@ -7731,14 +7731,14 @@ five separate adoptions is the method that already failed to predict a 4.84pp ga
 
 ### The replication arm, its price, and its bars
 
-`askdata-shape` is registered as a reproduction of the paper's *shape*, not of its code — the
+`askdata-shape` is specified here as a reproduction of the paper's *shape*, not of its code — the
 leaderboard lists no release for it, so a code-faithful run is not available and the report has to
-say so. Per question: five schema variants generate one statement each; the union of referenced
-fields plus the literal→field lookup becomes the card; up to two revisions move a literal onto a
-field whose values contain it; three candidates are drawn on that card; validity is checked and up
-to three corrections applied; all three are executed and voted as result sets. That is **8 calls at
-minimum against the 3 the shipped arm spends**, and the cost column is published per arm because
-the paper publishes no call count at all.
+say so. Per question, if it were dispatched: five schema variants generate one statement each; the
+union of referenced fields plus the literal→field lookup becomes the card; up to two revisions move
+a literal onto a field whose values contain it; three candidates are drawn on that card; validity is
+checked and up to three corrections applied; all three are executed and voted as result sets. That
+is **8 calls at minimum against the 3 the shipped arm spends**, and the cost column is published per
+arm because the paper publishes no call count at all.
 
 | reading against `select-mixed` on the same 496 | verdict |
 |---|---|
@@ -7751,6 +7751,61 @@ column puts a reasoning model at **80.04%** (Gemini-SQL2, June 2026, secondary s
 scaffolded system in the table above. If that holds, the frontier moved from scaffolding to the
 model while this document was pricing prompts, and a replication arm is the cheapest way to find out
 which of the two the remaining 8.2pp belongs to.
+
+### Which of them can be copied at all
+
+The question "why not copy the leader" has a different answer per system, and only one of the
+answers is "copy it". `pnpm bench:competitors:intake` holds the record — one row per system, with
+the URL the status was read from and the date it was read, and a gate that refuses a status without
+either.
+
+| system | what the artifact is | what copying it produces |
+|---|---|---|
+| MAC-SQL | repository, 40-character commit, no licence file | **run their code** |
+| CHESS | repository, 40-character commit, Apache-2.0 | **run their code** |
+| Agentar-Scale-SQL | repository, Apache-2.0, the schema half only | run the released half, rebuild the rest |
+| AskData | a paper with five named mechanisms, no release | rebuild the paper's mechanisms |
+
+Two of the four are pinned. One has been run, and it won: MAC-SQL, paired on the same 498 questions
+with the same endpoint, beat the adopted arm by **4.84pp** (p = 0.0160). That is the result that
+settles the argument in favour of copying, and it is the same result that says why copying has to be
+done as a system: its four component readings summed to less than the gap, so a pipeline is not the
+sum of its levers, and the only instrument that prices a pipeline is another pipeline.
+
+The third row is the one that arrives looking like the second. `antgroup/Agentar-Scale-SQL` is
+Apache-2.0, 480 stars, and its README reports 81.67% test. `ScaleSQL/modules` holds
+`light_schema.py`, `metadata_generation.py`, `retrieve.py` and `keyword_extraction.py`; the selection
+and refinement modules the paper describes are on the README's roadmap and not in the tree. A run of
+that repository therefore produces a schema, not a system, and the number such a run would make
+belongs to a hybrid — the released half is exactly the half this document has been pricing in
+characters for three rounds.
+
+The fourth row has no artifact at all, and what a rebuild of it is worth is measurable from outside.
+A community rebuild of the four-stage pipeline — profiling with FAISS and MinHash LSH over 10,000
+literals per column, five schema representations, fifteen candidate statements, `sqlglot`
+validation — reports **95.6% mean column recall and 90.5% F1** in linking, and **61.8%** execution
+accuracy on BIRD against the paper's **76.14-78.49** dev. The linking half reproduces; the score does
+not. What the paper does not carry is the part the score is made of: the eight retrieved
+demonstrations, the wording of the templates, and the order in which the metadata is fused and
+truncated.
+
+So the answer is not "copying does not work". It is that copying works in proportion to what was
+published, and the three kinds of copying cannot be filed in one column:
+
+- **run** may be plotted beside a run of this repository: the templates are theirs, and
+  `coordinates.ts` will accept the comparison or say which coordinate broke.
+- **run-shell** may not. A number from the released half plus our rebuild of the withheld half
+  contains this repository's author, and filing it under their name is the mislabel this document
+  spent a round correcting.
+- **rebuild** may not either, and it may not be called a replication. The bar it has to clear is its
+  own before-and-after, not the paper's number.
+
+That is why the queue is ordered as it is. `askdata-shape` is specified above and **no arm carries
+that name today**: the round that would have spent eight calls a question rebuilding it went to
+MAC-SQL instead, which is free to dispatch and won 4.84pp. A paper-only leader is worth rebuilding
+*after* the released ones have been run, because a rebuild's first result is a number with no
+denominator — and this document already has one entry of that kind, the `45.0%` that did not
+reproduce at `40.3%`.
 
 ## The zero-row repair, built
 

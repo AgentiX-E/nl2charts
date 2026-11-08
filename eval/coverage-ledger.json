@@ -394,6 +394,12 @@
       "functions": 100,
       "branches": 100
     },
+    "eval/competitors/intake.ts": {
+      "lines": 99.17,
+      "statements": 99.17,
+      "functions": 100,
+      "branches": 95.93
+    },
     "eval/competitors/predictions.ts": {
       "lines": 100,
       "statements": 100,
