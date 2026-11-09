@@ -125,7 +125,16 @@ every expected column appears in the top *k*. The pipeline uses k = 3.
 declared arm pair in every run, and nothing else. The tables in
 [benchmarks.md](benchmarks.md) are generated from it, so a cell and the pooled line under
 it cannot disagree; a hand-typed number would be a second source of truth, which is what
-drifted four times before the ledger existed.
+drifted four times before the ledger existed. Every run also names the split it was read
+on, and a table whose runs disagree about that is refused: a pool is only ever within one
+population.
+
+**Random effects (DerSimonian–Laird)** — The pool used when the readings of one pair
+disagree by more than their own sampling error. The estimate is unchanged; τ² is the
+between-reading variance estimated from the excess of Cochran's Q over its degrees of
+freedom, and it widens the interval to include the disagreement. τ² is exactly zero unless
+the heterogeneity test rejects, so the interval is widened exactly when the label reads
+`heterogeneous`.
 
 **Refusal** — A 4xx the endpoint will repeat: a model name it does not serve, a key it
 rejects, a field it will not accept. `NL2C_E_LLM_REJECTED`, as opposed to

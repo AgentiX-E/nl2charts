@@ -1353,8 +1353,9 @@ has a 95% interval of **6.16pp**, so nothing this project has published as a `+0
 delta could have been read that way. Everything that survived is a paired reading taken inside one
 run — and a paired reading is not automatically a result either. `inline+evidence → select` read 13
 against 13, then 22 against 8 (p = 0.0161), then 19 against 18 (p = 1.0000), same corpus, same base;
-pooled over all three it is +1.01pp ± 1.26 with **Cochran's Q at p = 0.043**, so the readings differ by
-more than their own intervals and the label is `heterogeneous`. `metadata+evidence → select` went the
+pooled over all three it is +1.01pp ± 1.26 with **Cochran's Q at p = 0.130**, so the readings are
+compatible with one mean and the label is `one-run-only` — an effect one run found and the pool could
+not keep. `metadata+evidence → select` went the
 other way twice: 19 against 32, then 27 against 26, then 18 against 34 (p = 0.0365) — a `sign-flip` in
 which the 1-call curated stack beat the 4-call chain by 16 cases.
 
@@ -1362,18 +1363,19 @@ A paired test conditions on the questions and not on the generator's own draw. A
 draw is worth about two points per run — the shipped arm moved 56.05 → 58.06 → 56.05 across three runs
 of one configuration — so the unit of evidence is the pair pooled over the runs that read it, with the
 disagreement between readings printed rather than averaged away. `bench:bird:compare --pair` does
-that, and its four verdicts are the four things that can be true: `none`, `one-run-only`, `sign-flip`,
-`heterogeneous`.
+that, and its five verdicts are the five things that can be true: `none`, `one-run-only`, `sign-flip`,
+`heterogeneous` (the readings are not one number, and the interval is widened to say so) and
+`established` (the same direction everywhere and a pool that clears zero).
 
 Getting that wrong is easy enough that it happened here on the first try: the command took two
 artifacts while the table it printed claimed to cover every run that scored the pair, so the verdict
 depended on which two runs a reader happened to pass. It now takes any number of artifacts
 (`compare.ts a.json b.json c.json --pair x,y`), names the ones that did not score both arms instead of
 dropping them silently, and prints the label and its evidence as two sentences — the pooled `+1.01pp
-± 1.26` on one line, `1 of 3 readings significant, Q p = 0.043 — the readings differ by more than
+± 1.26` on one line, `1 of 3 readings significant, Q p = 0.130 — the readings differ no more than
 their own intervals` on the next. Splitting the sentence is not typography: the earlier single line
-read `→ heterogeneous, readings agree (Q p = 0.043)`, and `p ≈ 0.047 → one-run-only` elsewhere, both
-of which are a label contradicting the half of the sentence a reader skims.
+read `→ heterogeneous, readings agree`, which is a label contradicting the half of the sentence a
+reader skims.
 
 Two mechanisms keep that discipline from decaying into a habit. `eval/baseline/pairs.json` declares the
 pairs each split owes, `ci.yml` reads them with `--declared` before the floor gate, and a run that

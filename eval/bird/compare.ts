@@ -633,6 +633,16 @@ export interface PooledReading {
    * the instrument, and the line says so rather than narrowing the interval over a disagreement.
    */
   readonly heterogeneityP: number;
+  /**
+   * The between-reading variance the interval was widened by, in pp².
+   *
+   * Zero means the readings are compatible and the interval is the fixed-effect one. Positive means
+   * the pool was estimated by DerSimonian–Laird: `pooledPp` is unchanged, and `pooledIntervalPp`
+   * and `pooledP` are wider, because an interval for a number the readings disagree about has to
+   * include that disagreement. Publishing the fixed-effect interval beside a `heterogeneous` label
+   * was the estimator answering a question it had just said it could not answer.
+   */
+  readonly tauSquaredPp2: number;
   /** How many of the readings cleared p < 0.05 on their own. */
   readonly readingsSignificant: number;
   /** `established`, `sign-flip`, `one-run-only` or `none`. */
@@ -641,10 +651,57 @@ export interface PooledReading {
 }
 
 function normalTwoSided(z: number): number {
+  return erfcOf(z / Math.SQRT2);
+}
+
+/** `erfc(x)`, which is also the two-sided normal tail at x·√2. */
+function erfcOf(x: number): number {
   // Abramowitz-Stegun 7.1.26 on the error function; the alternative is a dependency for one number.
-  const t = 1 / (1 + 0.3275911 * (z / Math.SQRT2));
-  const erf = 1 - ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-(z * z) / 2);
+  const t = 1 / (1 + 0.3275911 * x);
+  const erf = 1 - ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-(x * x));
   return Math.min(1, Math.max(0, 1 - erf));
+}
+
+/**
+ * The survival function of a chi-square with `df` degrees of freedom: P(X > q).
+ *
+ * Cochran's Q is distributed as χ² with k−1 degrees of freedom, where k is the number of readings,
+ * and this function is what refers Q to that distribution. It exists because the code that reported
+ * the heterogeneity p-value did not do this: it computed `2·Q_normal(√Q)`, which is χ² **with one
+ * degree of freedom**, whatever the number of readings. At k = 2 — the shape most of the pooling
+ * tests use — the two coincide exactly, which is why nothing failed for three rounds while pairs of
+ * three to eight readings were being called `heterogeneous` on a test that was too liberal by the
+ * difference between χ²₁ and χ²_{k−1}.
+ *
+ * Closed form rather than a library: for even `df` the upper incomplete gamma is a finite sum, and
+ * for odd `df` it is `erfc` plus a finite series, so the whole function is twenty lines and no
+ * dependency. Accuracy is the 1.5e-7 of the error-function approximation already in use.
+ */
+export function chiSquareSurvival(q: number, df: number): number {
+  if (df < 1 || !(q > 0)) return 1;
+  const x = q / 2;
+  const a = df / 2;
+  if (Number.isInteger(a)) {
+    // Q(a,x) = e^{-x} · Σ_{j=0}^{a-1} x^j / j!
+    let term = 1;
+    let sum = 1;
+    for (let j = 1; j < a; j += 1) {
+      term *= x / j;
+      sum += term;
+    }
+    return Math.min(1, Math.max(0, Math.exp(-x) * sum));
+  }
+  // Q(m + ½, x) = erfc(√x) + Σ_{i=0}^{m-1} x^{i+½} e^{-x} / Γ(i + 3/2)
+  const m = (df - 1) / 2;
+  let sum = erfcOf(Math.sqrt(x));
+  let gamma = Math.sqrt(Math.PI) / 2;
+  let power = Math.sqrt(x);
+  for (let i = 0; i < m; i += 1) {
+    sum += (power * Math.exp(-x)) / gamma;
+    power *= x;
+    gamma *= i + 1.5;
+  }
+  return Math.min(1, Math.max(0, sum));
 }
 
 /**
@@ -676,13 +733,50 @@ export function poolPair(readings: readonly PairReading[], left: string, right: 
   // certainty that two contradicting runs cannot support.
   const weights = usable.map((reading) => (reading.examined * reading.examined) / ((reading.wins + reading.losses) * 1e4));
   const total = weights.reduce((sum, weight) => sum + weight, 0);
-  const pooledPp = total === 0 ? 0 : usable.reduce((sum, reading, index) => sum + reading.deltaPp * (weights[index] as number), 0) / total;
-  const standardError = total === 0 ? 0 : Math.sqrt(1 / total);
-  const pooledP = total === 0 ? 1 : normalTwoSided(Math.abs(pooledPp) / standardError);
-  const q = usable.reduce((sum, reading, index) => sum + (weights[index] as number) * (reading.deltaPp - pooledPp) ** 2, 0);
-  const heterogeneityP = usable.length < 2 ? 1 : normalTwoSided(Math.sqrt(q));
+  // The fixed-effect estimate: every reading weighted by its own precision, which is the right
+  // answer when the readings estimate one number.
+  const fixedPp = total === 0 ? 0 : usable.reduce((sum, reading, index) => sum + reading.deltaPp * (weights[index] as number), 0) / total;
+  const fixedError = total === 0 ? 0 : Math.sqrt(1 / total);
+  const q = usable.reduce((sum, reading, index) => sum + (weights[index] as number) * (reading.deltaPp - fixedPp) ** 2, 0);
+  // Referred to χ² with k−1 degrees of freedom, which is what Q is distributed as under the
+  // hypothesis that the readings share one mean. Reporting it as a 1-df statistic made every
+  // three-to-eight-reading pair look less compatible than it was.
+  const heterogeneityP = usable.length < 2 ? 1 : chiSquareSurvival(q, usable.length - 1);
+  // DerSimonian–Laird (1986): the moment estimator of the between-reading variance. Q has k-1
+  // degrees of freedom under the hypothesis that the readings share one mean, so the excess of Q
+  // over k-1 is the disagreement sampling error does not explain, scaled by how much information
+  // the readings carry.
+  //
+  // It is applied as a pre-test estimator: τ² is estimated only when the heterogeneity test
+  // rejects, and is exactly zero otherwise. Textbook DL would take any Q above k-1, which is a
+  // lower bar than p < 0.05 and would widen every pool in this document slightly for a disagreement
+  // no test found. The pre-test has a known bias — it under-covers when Q sits just above the
+  // threshold — and it buys an invariant that is worth more here than that bias: **the interval is
+  // widened exactly when the label says the readings are not one number**, so the label and the
+  // number beside it cannot disagree about whether the pair is poolable.
+  //
+  // What it replaces: the fixed-effect interval printed beside the word `heterogeneous` for three
+  // pairs. The word said the readings are not one number; the interval was computed as if they
+  // were, so it was narrower than the distance between the readings it claimed to summarise. A
+  // reader acting on ±0.84 while the report says the readings disagree is being told two things and
+  // handed the more confident one.
+  const denominator = total - weights.reduce((sum, weight) => sum + weight * weight, 0) / (total === 0 ? 1 : total);
+  const tauSquared =
+    usable.length < 2 || heterogeneityP >= 0.05 || denominator <= 0
+      ? 0
+      : Math.max(0, (q - (usable.length - 1)) / denominator);
+  const adjusted = weights.map((weight) => 1 / (1 / weight + tauSquared));
+  const pooledTotal = adjusted.reduce((sum, weight) => sum + weight, 0);
+  const pooledPp = pooledTotal === 0 ? fixedPp : usable.reduce((sum, reading, index) => sum + reading.deltaPp * (adjusted[index] as number), 0) / pooledTotal;
+  const standardError = pooledTotal === 0 ? fixedError : Math.sqrt(1 / pooledTotal);
+  const pooledP = pooledTotal === 0 ? 1 : normalTwoSided(Math.abs(pooledPp) / standardError);
   const significant = usable.filter((reading) => reading.p < 0.05);
-  const signs = new Set(usable.map((reading) => Math.sign(reading.deltaPp)));
+  // A reading of exactly zero is a tie, not a direction: it says the pair made no difference on
+  // those questions, which is not evidence against a positive effect and not evidence for one. Left
+  // in the sign set it turned every pair with one exact tie into a `sign-flip` — the label for a
+  // pair that reversed — so `inline+evidence -> select` read `sign-flip` on the strength of a single
+  // 13-against-13 run followed by seven positive ones.
+  const signs = new Set(usable.map((reading) => Math.sign(reading.deltaPp)).filter((sign) => sign !== 0));
   // The label describes the evidence, and the evidence is the pool: a pair is `established` when the
   // pooled estimate excludes zero and the readings agree in sign, whatever any single reading managed
   // on its own. The first version required every reading to clear 0.05 by itself, which labelled
@@ -713,6 +807,7 @@ export function poolPair(readings: readonly PairReading[], left: string, right: 
     pooledIntervalPp: Number((1.96 * standardError).toFixed(2)),
     pooledP: Number(pooledP.toFixed(4)),
     heterogeneityP: Number(heterogeneityP.toFixed(4)),
+    tauSquaredPp2: Number(tauSquared.toFixed(2)),
     readingsSignificant: significant.length,
     verdict,
     problems,
@@ -734,7 +829,10 @@ export function pooledLines(pooled: readonly PooledReading[], unscored: readonly
     }
     lines.push(
       `      ${'pooled'.padEnd(28)}${''.padStart(3)}${''.padStart(7)}${`${reading.pooledPp >= 0 ? '+' : ''}${reading.pooledPp.toFixed(2)}pp`.padStart(10)}` +
-        `   ± ${reading.pooledIntervalPp.toFixed(2)} (95%), p ≈ ${reading.pooledP.toFixed(3)} → ${reading.verdict}`,
+        `   ± ${reading.pooledIntervalPp.toFixed(2)} (95%), p ≈ ${reading.pooledP.toFixed(3)} → ${reading.verdict}` +
+        // Which estimator produced the interval is part of the reading, not a footnote: the same
+        // readings give ±1.26pp under one and ±1.81pp under the other.
+        (reading.tauSquaredPp2 > 0 ? `   τ² = ${reading.tauSquaredPp2.toFixed(2)}pp² (random effects, DerSimonian–Laird)` : ''),
     );
     // The verdict is a statement about the readings, and the pooled p is a statement about the
     // estimate; printing one without the other let `p ≈ 0.047 → one-run-only` read as a defect, and

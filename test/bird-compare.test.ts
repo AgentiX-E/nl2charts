@@ -23,6 +23,7 @@ import {
   displacement,
   isEntry,
   main,
+  chiSquareSurvival,
   poolPair,
   pooledLines,
   readPairOf,
@@ -568,6 +569,39 @@ describe('the command', () => {
  * two points — so the unit of evidence has to be the pair pooled over the runs that read it, with
  * the disagreement between readings reported rather than averaged away.
  */
+/**
+ * Cochran's Q is referred to χ² with k−1 degrees of freedom, and the code that reported it used the
+ * 1-df value for every k. The two coincide at k = 2 — which is the shape most of the tests above use
+ * — and diverge from k = 3, so a wrong test sat under three rounds of published labels without a
+ * single failing assertion. These are the table's 5% points, which is what a survival function has
+ * to reproduce before anything can be referred to it.
+ */
+describe('the chi-square survival function the heterogeneity test needs', () => {
+  const points: [number, number, number][] = [
+    [3.841, 1, 0.05],
+    [5.991, 2, 0.05],
+    [7.815, 3, 0.05],
+    [9.488, 4, 0.05],
+    [12.592, 6, 0.05],
+    [14.067, 7, 0.05],
+    [18.307, 10, 0.05],
+  ];
+
+  it('reproduces the 5% points of the table it is standing in for', () => {
+    for (const [q, df, p] of points) expect(chiSquareSurvival(q, df)).toBeCloseTo(p, 3);
+  });
+
+  it('is one at zero, and approaches zero as q grows', () => {
+    expect(chiSquareSurvival(0, 3)).toBe(1);
+    expect(chiSquareSurvival(1e-9, 1)).toBeGreaterThan(0.9999);
+    expect(chiSquareSurvival(200, 6)).toBeLessThan(1e-30);
+  });
+
+  it('has no degrees of freedom below one', () => {
+    expect(chiSquareSurvival(10, 0)).toBe(1);
+  });
+});
+
 describe('pooling one pair over the runs that read it', () => {
   const reading = (wins: number, losses: number, p = 1): Parameters<typeof poolPair>[0][number] => ({
     artifact: `run-${String(wins)}-${String(losses)}`,
@@ -647,6 +681,46 @@ describe('pooling one pair over the runs that read it', () => {
     expect(pooled.pooledPp).toBe(0);
   });
 
+  /**
+   * The interval has to be an interval for the estimate that is printed. Two readings of +11.09 and
+   * −11.09pp on 65 discordant cases each are compatible with a pooled 0 and with nothing else: a
+   * fixed-effect interval is ±2.1pp, which is narrower than either reading is from the mean, and it
+   * claimed a precision the readings contradict in the same paragraph that said they contradict it.
+   */
+  it('widens the interval when the readings disagree by more than their sampling error', () => {
+    const pooled = poolPair([reading(60, 5, 0.0001), reading(5, 60, 0.0001)], 'a', 'b');
+    expect(pooled.tauSquaredPp2).toBeCloseTo(243.3, 1);
+    expect(pooled.pooledIntervalPp).toBeCloseTo(21.73, 1);
+    expect(pooled.pooledPp).toBe(0);
+  });
+
+  it('leaves a compatible pool exactly where the fixed-effect estimator put it', () => {
+    const pooled = poolPair([reading(22, 8, 0.0161), reading(19, 18)], 'a', 'b');
+    expect(pooled.tauSquaredPp2).toBe(0);
+    expect(pooled.pooledIntervalPp).toBe(1.61);
+  });
+
+  /**
+   * The invariant the pre-test buys, stated as a property rather than as five constants: a widened
+   * interval is a *different estimator*, so a reader who sees ±0.87 next to `heterogeneous` is
+   * entitled to know the label and the number agree about whether the readings are one number.
+   */
+  it('widens the interval exactly when the label says the readings are not one number', () => {
+    const cases: [number, number][][] = [
+      [[22, 8], [19, 18]],
+      [[13, 13], [22, 8], [19, 18]],
+      [[60, 5], [5, 60]],
+      [[31, 18], [28, 15], [32, 15]],
+      [[40, 5], [38, 6]],
+      [[17, 18], [18, 15]],
+      [[27, 26], [18, 34]],
+    ];
+    for (const cells of cases) {
+      const pooled = poolPair(cells.map(([wins, losses]) => reading(wins, losses)), 'a', 'b');
+      expect(pooled.tauSquaredPp2 > 0).toBe(pooled.verdict === 'heterogeneous');
+    }
+  });
+
   it('calls readings that disagree beyond their intervals heterogeneous', () => {
     const pooled = poolPair([reading(60, 5, 0.0001), reading(5, 60, 0.0001)], 'a', 'b');
     expect(pooled.verdict).toBe('heterogeneous');
@@ -664,28 +738,40 @@ describe('pooling one pair over the runs that read it', () => {
 
   /**
    * The three real readings of `inline+evidence -> select`: 13/13, 22/8, 19/18. Pooling the last two
-   * gives +1.65pp and calls the pair `one-run-only`; pooling all three gives +1.01pp ± 1.26 and calls
-   * it `heterogeneous`, because Cochran's Q on the discordant counts is p = 0.043 — the readings
-   * disagree by more than their own intervals. The verdict was therefore a function of how many
-   * readings the command was handed, which is the defect these tests exist against.
+   * gives +1.65pp and calls the pair `established`; pooling all three gives +1.01pp and calls it
+   * `one-run-only`, because the pool no longer clears zero once the third reading is in.
+   *
+   * This case used to be *the* example of a verdict changing with the number of readings: at three
+   * readings it was labelled `heterogeneous` on Q p = 0.043, and the 1.26pp interval printed beside
+   * that label was widened to 1.81pp by DerSimonian–Laird. Both of those numbers were artefacts of
+   * referring Q to one degree of freedom. With two — which is what Q has at k = 3 — the readings are
+   * compatible (p = 0.13), τ² is zero, the interval is the fixed-effect one, and the label is the
+   * pool's own verdict. The test now pins the corrected behaviour and records what it replaced.
    */
   it('pools a third reading, and the verdict changes when it does', () => {
     const two = poolPair([reading(22, 8, 0.0161), reading(19, 18)], 'a', 'b');
     const three = poolPair([reading(13, 13), reading(22, 8, 0.0161), reading(19, 18)], 'a', 'b');
     expect(two.verdict).toBe('established');
-    expect(three.verdict).toBe('heterogeneous');
+    expect(three.verdict).toBe('one-run-only');
     expect(three.readings).toHaveLength(3);
     expect(three.pooledPp).toBe(1.01);
     expect(three.pooledIntervalPp).toBe(1.26);
-    expect(three.heterogeneityP).toBeLessThan(0.05);
+    expect(three.heterogeneityP).toBeGreaterThan(0.05);
+    expect(three.tauSquaredPp2).toBe(0);
   });
 
   it('says the readings differ by more than their own intervals when they do', () => {
-    // The line used to print `→ heterogeneous, readings agree (Q p = 0.043)`: the label and the tail
-    // of the same sentence contradicting each other, and the tail is the half a reader skims.
-    const text = pooledLines([poolPair([reading(13, 13), reading(22, 8, 0.0161), reading(19, 18)], 'a', 'b')]).join('\n');
+    // The line used to print `→ heterogeneous, readings agree`: the label and the tail of the same
+    // sentence contradicting each other, and the tail is the half a reader skims.
+    const text = pooledLines([poolPair([reading(60, 5, 0.0001), reading(5, 60, 0.0001)], 'a', 'b')]).join('\n');
     expect(text).toContain('heterogeneous');
-    expect(text).toContain('1 of 3 readings significant, Q p = 0.043 — the readings differ by more than their own intervals');
+    expect(text).toContain('2 of 2 readings significant, Q p = 0.000 — the readings differ by more than their own intervals');
+    expect(text).toContain('(random effects, DerSimonian–Laird)');
+  });
+
+  it('says a pair is compatible when the chi-square test cannot reject', () => {
+    const text = pooledLines([poolPair([reading(13, 13), reading(22, 8, 0.0161), reading(19, 18)], 'a', 'b')]).join('\n');
+    expect(text).toContain('1 of 3 readings significant, Q p = 0.130 — the readings differ no more than their own intervals');
   });
 
   it('does not let a single reading borrow the language of a comparison', () => {
@@ -883,7 +969,9 @@ describe('the pair flag', () => {
       expect(text).toContain('+2.82pp');
       expect(text).toContain('+0.20pp');
       expect(text).toContain('+1.01pp');
-      expect(text).toContain('heterogeneous');
+      // `one-run-only`, not `heterogeneous`: with Q referred to two degrees of freedom the three
+      // readings are compatible, and the pool stops clearing zero once the tie is in it.
+      expect(text).toContain('one-run-only');
     } finally {
       log.mockRestore();
     }

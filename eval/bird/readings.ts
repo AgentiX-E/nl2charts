@@ -37,12 +37,28 @@ export interface LedgerRun {
   /** The run identifier — the number in `GITHUB_RUN_ID`, which is what an artifact is filed under. */
   readonly id: string;
   readonly examined: number;
+  /**
+   * The split the run was read on.
+   *
+   * Asserted per run rather than per view, because a view's premise is not something it can be
+   * trusted to state about itself: the pool adds up two readings, and two readings on different
+   * splits are not two estimates of one quantity. Nine readings of 496 questions are worth more
+   * than one reading of 1,532 of them, and neither is evidence about the other's population.
+   */
+  readonly split: string;
 }
 
 /** A set of runs read as one table, and what its pooled column is called. */
 export interface LedgerView {
   readonly id: string;
-  /** Header of the pooled column: `pooled`, `four-run pooled`, `seven-run pooled`. */
+  /**
+   * Header of the pooled column: `pooled`, `four-run pooled`, `seven-run pooled`.
+   *
+   * The file may leave this out when the label is only a count: writing `four-run pooled` for a
+   * view of four runs is a second copy of the number, and a second copy is what drifts. Left out,
+   * the label is derived from the number of runs the view reads — and written out, it is checked
+   * against that number, so a label cannot count a different number of runs than the row lists.
+   */
   readonly pooled: string;
   readonly runs: readonly string[];
   /**
@@ -169,6 +185,21 @@ function pairName(pair: { left: string; right: string }): string {
 }
 
 /**
+ * A count as a word, for the places a number is part of a sentence rather than of a formula.
+ *
+ * Only the range a table of runs can plausibly reach is spelled; beyond it the digits are their own
+ * answer, and a repository that runs a benchmark twenty-one times has a different problem.
+ */
+const COUNT_WORDS = [
+  'no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
+  'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty',
+] as const;
+
+function wordOf(count: number): string {
+  return COUNT_WORDS[count] ?? String(count);
+}
+
+/**
  * Read the ledger, and refuse the shapes that would make a table mean something other than it says.
  *
  * Every check here is one that a plausible-looking ledger could fail silently: a reading for a run
@@ -181,14 +212,16 @@ export function parseLedger(raw: unknown): ReadingsLedger {
   const runs = list(ledger.runs, 'runs').map((item, index) => {
     const run = object(item, `runs[${String(index)}]`);
     const examined = count(run.examined, `runs[${String(index)}].examined`);
-    if (examined === 0) fail(`run ${text(run.key, `runs[${String(index)}].key`)} examined no question, so it is not a reading`);
-    return { key: text(run.key, `runs[${String(index)}].key`), id: text(run.id, `runs[${String(index)}].id`), examined };
+    const key = text(run.key, `runs[${String(index)}].key`);
+    if (examined === 0) fail(`run ${key} examined no question, so it is not a reading`);
+    return { key, id: text(run.id, `runs[${String(index)}].id`), examined, split: text(run.split, `runs[${String(index)}].split`) };
   });
   const keys = new Set<string>();
   for (const run of runs) {
     if (keys.has(run.key)) fail(`run key ${run.key} appears twice`);
     keys.add(run.key);
   }
+  const splitOf = new Map(runs.map((run) => [run.key, run.split]));
   const views = list(ledger.views, 'views').map((item, index) => {
     const view = object(item, `views[${String(index)}]`);
     const id = text(view.id, `views[${String(index)}].id`);
@@ -202,7 +235,23 @@ export function parseLedger(raw: unknown): ReadingsLedger {
     const rawCells = view.cells ?? 'counts-p';
     if (rawCells !== 'counts' && rawCells !== 'counts-p') fail(`view ${id} prints cells as ${String(rawCells)}, which is neither counts nor counts-p`);
     const cells: 'counts' | 'counts-p' = rawCells;
-    return { id, pooled: text(view.pooled, `views[${String(index)}].pooled`), runs: members, labelRuns, cells };
+    // The view does not declare its split; it is inferred from the runs it reads and refused when
+    // they disagree. A declared split is one more field a view can be wrong about, and the failure
+    // it hides — a 496-question reading pooled with a 1,532-question one — reads on the page as a
+    // narrower interval rather than as an error.
+    const splits = [...new Set(members.map((key) => splitOf.get(key) as string))].sort();
+    if (splits.length > 1) {
+      fail(
+        `view ${id} reads ${splits.join(' and ')}, and a pool across splits is a difference between corpora reported as a difference between arms`,
+      );
+    }
+    const runWord = wordOf(members.length);
+    const pooled = view.pooled === undefined ? `${runWord}-run pooled` : text(view.pooled, `views[${String(index)}].pooled`);
+    const counted = /^([a-z]+)-run pooled$/.exec(pooled);
+    if (counted !== null && counted[1] !== runWord) {
+      fail(`view ${id} calls its pool "${pooled}" while it lists ${String(members.length)} runs`);
+    }
+    return { id, pooled, runs: members, labelRuns, cells };
   });
   const viewIds = new Set<string>();
   for (const view of views) {
@@ -336,8 +385,35 @@ export function renderTable(ledger: ReadingsLedger, id: string): string[] {
     });
     const estimate = `${signed(row.pooled.pooledPp)} ± ${row.pooled.pooledIntervalPp.toFixed(2)}`;
     const verdict = `**${row.pooled.verdict}**`;
-    const q = row.pooled.heterogeneityP < 0.05 ? `**${row.pooled.heterogeneityP.toFixed(3)}**` : row.pooled.heterogeneityP.toFixed(3);
+    // A Q statistic is a test of whether two or more estimates agree. Over one reading there is
+    // nothing to compare, and the number `poolPair` returns for that case (1, so that nothing is
+    // red) is a placeholder rather than a p-value — printing it would claim a test was run.
+    const q =
+      row.pooled.readings.length < 2
+        ? '—'
+        : row.pooled.heterogeneityP < 0.05
+          ? `**${row.pooled.heterogeneityP.toFixed(3)}**`
+          : row.pooled.heterogeneityP.toFixed(3);
     lines.push(`| \`${row.left}\` → \`${row.right}\` | ${cells.join(' | ')} | ${row.pooled.verdict === 'established' ? `**${estimate}**` : estimate} | ${verdict} | ${q} |`);
+  }
+  // A widened interval is a different estimator, and a table that prints it without saying so
+  // invites the reader to compare it with a fixed-effect interval beside it. Named per pair
+  // rather than described in a footnote, because "some of these were widened" is not a reading.
+  // A view reads the pairs it has readings for, and the table cannot say so by having fewer rows:
+  // a dev-split dispatch that ran three of five arms would otherwise print a table that reads as a
+  // table of everything. The declaration is in the ledger, so the silence is derived rather than
+  // left to the reader to notice.
+  if (derived.unscored.length > 0) {
+    lines.push('');
+    lines.push(`*Not read here: ${derived.unscored.map((name) => `\`${name.replace(' → ', '` → `')}\``).join(', ')}.*`);
+  }
+  const widened = derived.rows.filter((row) => row.pooled.tauSquaredPp2 > 0);
+  if (widened.length > 0) {
+    const named = widened
+      .map((row) => `\`${row.left}\` → \`${row.right}\` (τ² = ${row.pooled.tauSquaredPp2.toFixed(2)} pp²)`)
+      .join(', ');
+    lines.push('');
+    lines.push(`*Interval widened by DerSimonian–Laird for ${named}, because the label says those readings are not one number.*`);
   }
   return lines;
 }
@@ -389,6 +465,7 @@ export function renderClaim(ledger: ReadingsLedger, claim: LedgerClaim): Rendere
     .replace('{pooled}', signed(row.pooled.pooledPp))
     .replace('{magnitude}', Math.abs(row.pooled.pooledPp).toFixed(2))
     .replace('{interval}', row.pooled.pooledIntervalPp.toFixed(2))
+    .replace('{runs}', wordOf(row.pooled.readings.length))
     .replace('{verdict}', row.pooled.verdict)
     .replace('{q}', row.pooled.heterogeneityP.toFixed(3))
     .replace('{significant}', String(row.pooled.readingsSignificant));

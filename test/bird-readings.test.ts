@@ -34,8 +34,8 @@ function fixture(): Record<string, unknown> {
     corpus: 'a-corpus',
     docs: [{ file: 'DOC.md', views: ['both'] }],
     runs: [
-      { key: 'R1', id: '111', examined: 100 },
-      { key: 'R2', id: '222', examined: 100 },
+      { key: 'R1', id: '111', examined: 100, split: 'minidev' },
+      { key: 'R2', id: '222', examined: 100, split: 'minidev' },
     ],
     views: [{ id: 'both', pooled: 'pooled', runs: ['R1', 'R2'], cells: 'counts-p' }],
     pairs: [{ left: 'a', right: 'b', readings: { R1: { wins: 10, losses: 5 }, R2: { wins: 8, losses: 6 } } }],
@@ -85,18 +85,18 @@ describe('reading a ledger', () => {
   it('refuses two runs under one key', () => {
     expect(() => parseLedger(withLedger((raw) => {
       raw.runs = [
-        { key: 'R1', id: '111', examined: 100 },
-        { key: 'R1', id: '222', examined: 100 },
+        { key: 'R1', id: '111', examined: 100, split: 'minidev' },
+        { key: 'R1', id: '222', examined: 100, split: 'minidev' },
       ];
     }))).toThrow(/run key R1 appears twice/);
   });
 
   it('refuses a run that examined nothing, or a fraction of a question', () => {
     expect(() => parseLedger(withLedger((raw) => {
-      raw.runs = [{ key: 'R1', id: '111', examined: 0 }];
+      raw.runs = [{ key: 'R1', id: '111', examined: 0, split: 'minidev' }];
     }))).toThrow(/examined no question/);
     expect(() => parseLedger(withLedger((raw) => {
-      raw.runs = [{ key: 'R1', id: '111', examined: 99.5 }];
+      raw.runs = [{ key: 'R1', id: '111', examined: 99.5, split: 'minidev' }];
     }))).toThrow(/not a whole count/);
   });
 
@@ -186,6 +186,54 @@ describe('reading a ledger', () => {
   });
 });
 
+describe('which split a reading came from', () => {
+  it('refuses a run that does not say which split it was read on', () => {
+    expect(() => parseLedger(withLedger((raw) => {
+      raw.runs = [{ key: 'R1', id: '111', examined: 100 }];
+    }))).toThrow(/runs\[0\]\.split is not a non-empty string/);
+  });
+
+  it('refuses a view that reads two splits, and names both', () => {
+    expect(() => parseLedger(withLedger((raw) => {
+      raw.runs = [
+        { key: 'R1', id: '111', examined: 100, split: 'minidev' },
+        { key: 'R2', id: '222', examined: 1532, split: 'dev' },
+      ];
+    }))).toThrow(/view both reads dev and minidev, and a pool across splits is a difference between corpora reported as a difference between arms/);
+  });
+
+  it('accepts a view whose runs share a split while the ledger holds another', () => {
+    const ledger = parseLedger(withLedger((raw) => {
+      raw.runs = [
+        { key: 'R1', id: '111', examined: 100, split: 'minidev' },
+        { key: 'R2', id: '222', examined: 100, split: 'minidev' },
+        { key: 'D1', id: '333', examined: 1532, split: 'dev' },
+      ];
+      raw.views = [
+        { id: 'both', pooled: 'pooled', runs: ['R1', 'R2'] },
+        { id: 'dev-split', pooled: 'pooled', runs: ['D1'] },
+      ];
+      raw.docs = [{ file: 'DOC.md', views: ['both', 'dev-split'] }];
+    }));
+    expect(viewOf(ledger, 'dev-split').runs).toEqual(['D1']);
+  });
+});
+
+describe('the number in a pooled label', () => {
+  it('refuses a label that counts a different number of runs than the view lists', () => {
+    expect(() => parseLedger(withLedger((raw) => {
+      raw.views = [{ id: 'both', pooled: 'three-run pooled', runs: ['R1', 'R2'] }];
+    }))).toThrow(/view both calls its pool "three-run pooled" while it lists 2 runs/);
+  });
+
+  it('derives the label when the view does not print one', () => {
+    const ledger = parseLedger(withLedger((raw) => {
+      raw.views = [{ id: 'both', runs: ['R1', 'R2'] }];
+    }));
+    expect(ledger.views[0]?.pooled).toBe('two-run pooled');
+  });
+});
+
 describe('pooling a view', () => {
   it('carries a cell for every run in the view, and pools the ones that scored it', () => {
     const derived = deriveView(parseLedger(fixture()), 'both');
@@ -236,6 +284,49 @@ describe('rendering a view', () => {
       raw.pairs = [{ left: 'a', right: 'b', readings: { R1: { wins: 40, losses: 2 } } }];
     }));
     expect(renderTable(ledger, 'both')[2]).toContain('| **40/2** |');
+  });
+
+  it('prints no Q for a view that reads one run, because a Q over one reading is undefined', () => {
+    const ledger = parseLedger(withLedger((raw) => {
+      raw.views = [{ id: 'both', pooled: 'pooled', runs: ['R1'] }];
+    }));
+    expect(renderTable(ledger, 'both')[2]?.endsWith('| **one-run-only** | — |')).toBe(true);
+  });
+
+  it('says which declared pairs a view does not read, rather than showing fewer rows in silence', () => {
+    // A dev-split table reads three of the five declared pairs, because that dispatch did not run
+    // two of the arms. A table that simply has fewer rows reads as a table of everything.
+    const ledger = parseLedger(withLedger((raw) => {
+      raw.runs = [
+        { key: 'R1', id: '111', examined: 100, split: 'minidev' },
+        { key: 'R2', id: '222', examined: 100, split: 'minidev' },
+        { key: 'R3', id: '333', examined: 100, split: 'minidev' },
+      ];
+      raw.pairs = [
+        { left: 'a', right: 'b', readings: { R1: { wins: 10, losses: 5 } } },
+        { left: 'a', right: 'c', readings: { R3: { wins: 9, losses: 9 } } },
+      ];
+    }));
+    const table = renderTable(ledger, 'both');
+    expect(table[table.length - 1]).toBe('*Not read here: `a` → `c`.*');
+  });
+
+  it('names the pairs whose interval the random-effects estimator widened', () => {
+    const ledger = parseLedger(withLedger((raw) => {
+      raw.pairs = [{ left: 'a', right: 'b', readings: { R1: { wins: 60, losses: 5 }, R2: { wins: 5, losses: 60 } } }];
+    }));
+    const table = renderTable(ledger, 'both');
+    expect(table.some((line) => /^\*Interval widened by DerSimonian–Laird for `a` → `b` \(τ² = [\d.]+ pp²\), because the label says those readings are not one number\.\*$/.test(line))).toBe(true);
+  });
+
+  it('prints a count above twenty as digits, because the words stop there', () => {
+    const ledger = parseLedger(withLedger((raw) => {
+      const keys = Array.from({ length: 21 }, (_, index) => `R${String(index)}`);
+      raw.runs = keys.map((key, index) => ({ key, id: String(100 + index), examined: 100, split: 'minidev' }));
+      raw.views = [{ id: 'both', runs: keys }];
+      raw.pairs = [{ left: 'a', right: 'b', readings: { R0: { wins: 10, losses: 5 } } }];
+    }));
+    expect(ledger.views[0]?.pooled).toBe('21-run pooled');
   });
 
   it('leaves an empty column as an em dash rather than a zero', () => {
@@ -337,6 +428,13 @@ describe('a number quoted in prose', () => {
       raw.claims = [{ file: 'DOC.md', view: 'both', pair: ['a', 'b'], template: '{pooled} ± {interval}' }];
     }));
     expect(renderClaim(ledger, ledger.claims[0] as LedgerClaim).wanted).toBe('+3.45pp ± 5.27');
+  });
+
+  it('renders {runs} as the number of runs the view reads, in words', () => {
+    const ledger = parseLedger(withLedger((raw) => {
+      raw.claims = [{ file: 'DOC.md', view: 'both', pair: ['a', 'b'], template: '{runs} runs' }];
+    }));
+    expect(renderClaim(ledger, ledger.claims[0] as LedgerClaim).wanted).toBe('two runs');
   });
 
   it('fills every placeholder, including the magnitude of a signed estimate', () => {
@@ -459,8 +557,12 @@ describe('an artifact, against the ledger', () => {
 describe('the published tables', () => {
   const ledger = parseLedger(JSON.parse(readFileSync(join(ROOT, 'eval/baseline/readings.json'), 'utf8')) as unknown);
 
-  it('reproduces the seven-run estimates the document printed by hand', () => {
-    const rows = deriveView(ledger, 'seven-runs').rows;
+  it('reproduces the eight-run estimates the document prints', () => {
+    // These are the numbers the document carried when it was still hand-typed, re-derived after the
+    // heterogeneity test was corrected. The three labels that moved are the point: `select` and the
+    // audit pair were `heterogeneous` under a Q referred to one degree of freedom, and neither pair
+    // rejects the hypothesis that its readings share one mean.
+    const rows = deriveView(ledger, 'all-runs').rows;
     const numbers = rows.map((row) => [
       row.left,
       row.right,
@@ -470,11 +572,11 @@ describe('the published tables', () => {
       row.pooled.heterogeneityP,
     ]);
     expect(numbers).toEqual([
-      ['synth-definitions', 'inline-definitions', -0.69, 0.86, 'none', 0.0638],
-      ['inline+evidence', 'inline+evidence+audit', 0.73, 0.63, 'heterogeneous', 0.0062],
-      ['inline+evidence', 'select', 1.63, 0.84, 'heterogeneous', 0.0113],
-      ['metadata+evidence', 'select', -1.45, 1.08, 'sign-flip', 0.0545],
-      ['inline+evidence', 'metadata+evidence', 3.1, 1.02, 'established', 0.4149],
+      ['synth-definitions', 'inline-definitions', -0.65, 0.8, 'none', 0.8364],
+      ['inline+evidence', 'inline+evidence+audit', 0.71, 0.59, 'sign-flip', 0.377],
+      ['inline+evidence', 'select', 1.6, 0.78, 'established', 0.4887],
+      ['metadata+evidence', 'select', -1.43, 1.02, 'sign-flip', 0.8117],
+      ['inline+evidence', 'metadata+evidence', 3.05, 0.96, 'established', 0.9978],
     ]);
   });
 
@@ -493,11 +595,12 @@ describe('the published tables', () => {
   });
 
   it('counts the readings that cleared 0.05 on their own, which the prose quotes', () => {
-    const curated = deriveView(ledger, 'seven-runs').rows.find((row) => row.right === 'metadata+evidence');
+    const curated = deriveView(ledger, 'all-runs').rows.find((row) => row.right === 'metadata+evidence');
     expect(curated?.pooled.readingsSignificant).toBe(4);
-    const select = deriveView(ledger, 'seven-runs').rows.find((row) => row.right === 'select');
+    const select = deriveView(ledger, 'all-runs').rows.find((row) => row.right === 'select');
     const signs = select?.pooled.readings.map((reading) => Math.sign(reading.deltaPp));
-    expect(signs?.filter((sign) => sign > 0)).toHaveLength(6);
+    expect(signs?.filter((sign) => sign > 0)).toHaveLength(7);
+    expect(signs?.filter((sign) => sign === 0)).toHaveLength(1);
   });
 
   it('is what the repository’s own documents carry', () => {
@@ -532,6 +635,6 @@ describe('the command', () => {
   it('runs as a script, because a gate that cannot be invoked checks nothing', () => {
     const result = spawnSync('npx', ['tsx', 'eval/bird/readings.ts', '--check'], { cwd: ROOT, encoding: 'utf8' });
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain('5 pairs · three-runs (3 runs), four-runs (4 runs), seven-runs (7 runs) · 2 documents');
+    expect(result.stdout).toContain('5 pairs · three-runs (3 runs), four-runs (4 runs), all-runs (8 runs), dev-split (1 runs) · 2 documents');
   });
 });

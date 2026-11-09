@@ -1,13 +1,14 @@
 {
-  "corpus": "bird-mini-dev",
-  "note": "The discordant counts of each declared pair in each run, and nothing else. Every number printed in docs/benchmarks.md and README.md is derived from these counts by eval/bird/readings.ts at gate time, so a cell and the pooled line under it cannot disagree. Adding a run is adding a row of two numbers; changing a printed digit is impossible without changing a count.",
+  "corpus": "bird (mini-dev and dev)",
+  "note": "The discordant counts of each declared pair in each run, and nothing else. Every number printed in docs/benchmarks.md and README.md is derived from these counts by eval/bird/readings.ts at gate time, so a cell and the pooled line under it cannot disagree. Adding a run is adding a row of two numbers; changing a printed digit is impossible without changing a count. Every run names the split it was read on, and a table whose runs disagree about that is refused: a pool is only ever within one population.",
   "docs": [
     {
       "file": "docs/benchmarks.md",
       "views": [
         "three-runs",
         "four-runs",
-        "seven-runs"
+        "all-runs",
+        "dev-split"
       ]
     },
     {
@@ -19,37 +20,56 @@
     {
       "key": "A",
       "id": "42482353883",
-      "examined": 496
+      "examined": 496,
+      "split": "minidev"
     },
     {
       "key": "B",
       "id": "42491745712",
-      "examined": 496
+      "examined": 496,
+      "split": "minidev"
     },
     {
       "key": "C",
       "id": "42502095942",
-      "examined": 496
+      "examined": 496,
+      "split": "minidev"
     },
     {
       "key": "D",
       "id": "42510049798",
-      "examined": 496
+      "examined": 496,
+      "split": "minidev"
     },
     {
       "key": "E",
       "id": "42523664683",
-      "examined": 496
+      "examined": 496,
+      "split": "minidev"
     },
     {
       "key": "F",
       "id": "42526940345",
-      "examined": 496
+      "examined": 496,
+      "split": "minidev"
     },
     {
       "key": "G",
       "id": "42527570372",
-      "examined": 496
+      "examined": 496,
+      "split": "minidev"
+    },
+    {
+      "key": "H",
+      "id": "42552807523",
+      "examined": 496,
+      "split": "minidev"
+    },
+    {
+      "key": "dev",
+      "id": "42563674600",
+      "examined": 1532,
+      "split": "dev"
     }
   ],
   "views": [
@@ -75,8 +95,7 @@
       "cells": "counts-p"
     },
     {
-      "id": "seven-runs",
-      "pooled": "seven-run pooled",
+      "id": "all-runs",
       "runs": [
         "A",
         "B",
@@ -84,10 +103,19 @@
         "D",
         "E",
         "F",
-        "G"
+        "G",
+        "H"
       ],
       "labelRuns": "key",
       "cells": "counts"
+    },
+    {
+      "id": "dev-split",
+      "pooled": "pooled",
+      "runs": [
+        "dev"
+      ],
+      "cells": "counts-p"
     }
   ],
   "pairs": [
@@ -122,6 +150,10 @@
         "G": {
           "wins": 14,
           "losses": 25
+        },
+        "H": {
+          "wins": 16,
+          "losses": 18
         }
       }
     },
@@ -156,6 +188,10 @@
         "G": {
           "wins": 10,
           "losses": 5
+        },
+        "H": {
+          "wins": 10,
+          "losses": 7
         }
       }
     },
@@ -190,6 +226,14 @@
         "G": {
           "wins": 23,
           "losses": 10
+        },
+        "H": {
+          "wins": 18,
+          "losses": 11
+        },
+        "dev": {
+          "wins": 37,
+          "losses": 39
         }
       }
     },
@@ -224,6 +268,14 @@
         "G": {
           "wins": 24,
           "losses": 28
+        },
+        "H": {
+          "wins": 27,
+          "losses": 33
+        },
+        "dev": {
+          "wins": 68,
+          "losses": 84
         }
       }
     },
@@ -258,6 +310,14 @@
         "G": {
           "wins": 31,
           "losses": 14
+        },
+        "H": {
+          "wins": 33,
+          "losses": 20
+        },
+        "dev": {
+          "wins": 75,
+          "losses": 61
         }
       }
     }
@@ -265,7 +325,7 @@
   "claims": [
     {
       "file": "README.md",
-      "view": "seven-runs",
+      "view": "all-runs",
       "pair": [
         "inline+evidence",
         "metadata+evidence"
@@ -274,7 +334,7 @@
     },
     {
       "file": "README.md",
-      "view": "seven-runs",
+      "view": "all-runs",
       "pair": [
         "synth-definitions",
         "inline-definitions"
@@ -301,7 +361,7 @@
     },
     {
       "file": "docs/benchmarks.md",
-      "view": "seven-runs",
+      "view": "all-runs",
       "pair": [
         "inline+evidence",
         "select"
@@ -310,10 +370,37 @@
     },
     {
       "file": "docs/benchmarks.md",
-      "view": "seven-runs",
+      "view": "all-runs",
       "pair": [
         "inline+evidence",
         "metadata+evidence"
+      ],
+      "template": "**{pooled} ± {interval}**"
+    },
+    {
+      "file": "README.md",
+      "view": "all-runs",
+      "pair": [
+        "inline+evidence",
+        "select"
+      ],
+      "template": "**{pooled} ± {interval}**"
+    },
+    {
+      "file": "docs/benchmarks.md",
+      "view": "dev-split",
+      "pair": [
+        "inline+evidence",
+        "metadata+evidence"
+      ],
+      "template": "**{pooled} ± {interval}**"
+    },
+    {
+      "file": "docs/benchmarks.md",
+      "view": "dev-split",
+      "pair": [
+        "inline+evidence",
+        "select"
       ],
       "template": "**{pooled} ± {interval}**"
     }
