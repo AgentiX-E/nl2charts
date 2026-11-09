@@ -8207,9 +8207,9 @@ by that much.** The ways out are arithmetic, not rhetorical — average three ru
 is why the pools above are ±0.99 to ±1.64pp instead of ±2pp, and why `synth-definitions` →
 `inline-definitions` can now be stated as −0.28pp ± 1.32 rather than "18 against 17"), move the decision
 to the 1,532-question dev split (SE falls by 1.8×), or stop pricing prompt levers and attack the model
-axis, where the gap to the comparable leaderboard cell is 8.2pp. The escape is not free either:
-`inline+evidence` → `select` could not be pooled at all (Q p = 0.043), so the √3 is only available for a
-pair whose readings agree.
+axis, where the gap to the comparable leaderboard cell is 8.2pp. The √3 is not free: it needs a pair whose
+readings share one mean, and a pair that rejects homogeneity gets an interval widened by the disagreement
+instead of narrowed by the extra readings.
 
 ## The zero-row repair, built
 
