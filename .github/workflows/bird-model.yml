@@ -60,11 +60,23 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 300
     concurrency:
-      # The same slot as `bird-dev.yml` and `ci.yml`'s Mini-Dev job: a different group name
-      # here meant two dev-split runs could share a provider quota at once, which reads as a
-      # slower endpoint rather than as two jobs. Never cancel in progress — a 60-minute
-      # benchmark thrown away by a push is worse than waiting for it.
-      group: bird-eval
+      # One slot per provider, not one slot for every run in the repository.
+      #
+      # The group used to be `bird-eval`, shared with `bird-dev.yml` and `ci.yml`'s Mini-Dev job,
+      # because two dev-split runs drawing on one provider quota read as a slow endpoint rather
+      # than as two jobs. That reason holds only while the runs share a provider — and this job's
+      # whole point is that it does not: `secret_name` names which org secret, and therefore which
+      # endpoint, the run will draw on.
+      #
+      # Sharing the slot cost a run: GitHub keeps only the newest *pending* run in a group, so a
+      # `glm-4.6` run queued behind a CI push was cancelled by the next CI push before it started,
+      # with `cancel-in-progress: false` and no way to tell from the run list that it never ran.
+      # Keying the group by the secret keeps the quota reason and drops the collision: a Zhipu run
+      # and a DeepSeek run are two quotas, and two Zhipu runs still serialize.
+      #
+      # Never cancel in progress — a 60-minute benchmark thrown away by a push is worse than
+      # waiting for it.
+      group: bird-eval-${{ inputs.secret_name }}
       cancel-in-progress: false
     env:
       # Deliberately not DEEPSEEK_API_KEY: this job must fail loudly if the other
