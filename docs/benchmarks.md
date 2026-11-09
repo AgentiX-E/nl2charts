@@ -9730,6 +9730,30 @@ comparison site whose column could not be read, because classifying a literal ag
 "the column stores something else" into "the column stores nothing" — the one confusion the tool
 exists to prevent.
 
+### What each arm costs per point, on all 1,532 dev questions
+
+An earlier section priced the arms on a 600-question artifact and found every multi-call arm
+dominated. The same question is answerable on the split a product is judged on, from the artifact
+`42563674600` that every reading in this section already uses:
+
+| arm | calls | prompt tokens/case | accuracy | tokens per point over `inline+evidence` |
+| --- | --- | --- | --- | --- |
+| `names` | 1 | 522 | 42.04% | — (18.6pp cheaper and worse) |
+| `inline+evidence` | 1 | **676** | 60.57% | baseline |
+| `metadata+evidence` | 1 | 1,778 | **61.49%** | 1,198 tokens per point |
+| `select` | 3.99 | 2,442 | 60.44% | **negative: 1.4× the tokens, 0.13pp worse** |
+| `select-mixed` | 4.00 | 3,547 | **62.92%** | 1,222 tokens per point |
+
+Two things the full split adds to the earlier reading. **`select` is dominated**: four calls and
+1.4 times the prompt of `metadata+evidence` buy 1.05pp less accuracy, and there is no axis on which
+it wins — which is the same finding the paired test reached from the other direction (`metadata+evidence
+→ select` is −1.42pp ± 0.96 over nine Mini-Dev readings). And **the two single-call arms and the
+four-call arm cost the same per point** — 1,198 against 1,222 tokens per point — so the selector's
+four calls are not a different price for accuracy, they are the same price with four times the
+latency. Neither sentence licenses spending the four calls by default; both say that if the
+selector is kept, it should be kept for the 1.4pp it actually adds, not for an efficiency argument
+that does not hold.
+
 ## The card is the prompt, and what is on it is worth 11 points
 
 `card.ts` has priced the schema card in **characters** since the round it was written: 69.7% of the
