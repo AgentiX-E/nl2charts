@@ -2001,7 +2001,7 @@ remaining failures are questions whose literal is absent from the column the pro
 column-level failure. Column evidence in the prompt is the fix, and the only place to pay for it
 without growing the bill is the 54.1% of the card that answers no question.
 
-### Half the comments repeat the column name
+### What a comment is worth: 77.2% of the card, and 1.6% of it repeats the column name
 
 The same measurement, taken one level down, on the 1,534 questions the dev split carries:
 
@@ -2009,16 +2009,21 @@ The same measurement, taken one level down, on the 1,534 questions the dev split
 | --- | --- |
 | the schema card | 90.2% of the prompt |
 | comments inside that card | **77.2% of the card** |
-| comments that restate the column name once case, spacing and punctuation are normalised | **36.9% of the card** — 47.9% of all comment characters, on 50.6% of commented columns |
+| comments that restate the column name, after case, spacing and punctuation are normalised | **1.6% of the card** — 2.0% of all comment characters, on 10.5% of commented columns |
 
-`Currency -- Currency`, `GasStationID -- Gas Station ID - Gas Station ID`, `Date -- Date`. These
-carry no information a reader does not already have from the column name, and together they are
-about **a third of every prompt the product sends**. It is the largest lossless reduction the
-instrument has found — larger than any prompt-engineering change the project has measured — and it
-is not shipped yet, because "lossless" is a claim about the model, not about the reader, and this
-project only accepts that claim from an arm. The arm is the next thing to run: the same card with
-redundant comments dropped, priced against `metadata+evidence` on the same split, with the token
-delta reported beside the accuracy delta.
+`Currency -- Currency`, `GasStationID -- Gas Station ID - Gas Station ID`. Dropping them is lossless
+by construction — the name is already in the prompt — and it is worth **1.6%**, not the third of the
+prompt a looser matcher first reported. The loose version asked whether either string started with
+the other, which counts `Date -- Date of birth` as a restatement of `Date` and would have deleted
+the only part of that comment that says anything. The rule that survives is stricter and smaller:
+delete every occurrence of the normalised column name from the normalised comment, and drop the
+comment only if nothing is left.
+
+The bigger number in that table is the one that is not a reduction. Comments are 77.2% of the card
+and the card is 90.2% of the prompt, so **70% of every prompt the product sends is prose about
+columns**, and most of it is load-bearing — `Price -- total price = Amount x Price` is what makes a
+question answerable. The 54.1% of the card that belongs to tables no question reads is where the
+tokens are; the comments are where the *knowledge* is, and they are not interchangeable.
 
 ## The candidate the three prompts cannot write
 
