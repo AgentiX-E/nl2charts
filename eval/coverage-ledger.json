@@ -196,6 +196,12 @@
       "functions": 100,
       "branches": 96.52
     },
+    "eval/bird/literal-gap.ts": {
+      "lines": 99,
+      "statements": 99,
+      "functions": 100,
+      "branches": 95.52
+    },
     "eval/bird/literal-repair.ts": {
       "lines": 100,
       "statements": 100,
@@ -275,10 +281,10 @@
       "branches": 100
     },
     "eval/bird/readings.ts": {
-      "lines": 99.47,
-      "statements": 99.47,
+      "lines": 99.56,
+      "statements": 99.56,
       "functions": 100,
-      "branches": 99.55
+      "branches": 99.62
     },
     "eval/bird/reasoning.ts": {
       "lines": 99.31,
@@ -305,10 +311,10 @@
       "branches": 100
     },
     "eval/bird/rewrite.ts": {
-      "lines": 99.55,
-      "statements": 99.55,
+      "lines": 99.57,
+      "statements": 99.57,
       "functions": 100,
-      "branches": 99.15
+      "branches": 99.17
     },
     "eval/bird/route.ts": {
       "lines": 100,

@@ -90,14 +90,76 @@ function domainsFor(site: { readonly column: string }, domains: readonly ColumnD
 }
 
 /**
- * Ground every literal the statement compares against a column that stores it in another
- * case.
+ * The kinds of absence a column can explain, in the order a repair prefers them.
+ *
+ * `case` is the one the pipeline ships; `padding` and `parenthetical` are the two this module can
+ * also prove from the column's own values; `absent` is not a repair at all — it is the statement
+ * that the literal and the column do not belong together, which is a schema-linking failure and
+ * not a spelling one.
+ */
+export const ABSENCE_KINDS = ['case', 'padding', 'parenthetical', 'absent'] as const;
+
+export type AbsenceKind = (typeof ABSENCE_KINDS)[number];
+
+/** The kinds an edit to the literal can reach. */
+export type GroundableKind = Exclude<AbsenceKind, 'absent'>;
+
+/** What the column's values say about one literal. */
+export interface Absence {
+  readonly kind: AbsenceKind;
+  /** The stored value the literal should have been written as. Absent on `absent`. */
+  readonly replacement?: string;
+}
+
+/**
+ * Why this literal is not in this column, or nothing when it is.
+ *
+ * Every kind is a *matching* claim, and a claim with two candidates is a guess. The guess is worse
+ * than the empty result it repairs: an empty result is visibly empty, and a plausible wrong answer
+ * is not. So each branch requires exactly one stored value, and the branches are tried in the
+ * order of the evidence rather than of convenience.
+ *
+ * `padding` compares numeric values rather than lengths on purpose: `'40'` and `'0040'` are the
+ * same number and the same lookup key, while `'400'` and `'0040'` are different keys even though
+ * they share four digits.
+ *
+ * `parenthetical` requires the literal to be followed immediately by ` (`, because a bare prefix
+ * is not a label: `Continuation` is a prefix of both `Continuation School (Public)` and
+ * `Continuation High Schools`, and choosing between them is exactly the guess this function
+ * refuses to make.
+ */
+export function classifyAbsence(literal: string, values: readonly string[]): Absence | undefined {
+  if (values.includes(literal)) return undefined;
+  const lowered = literal.toLowerCase();
+  const caseMatches = [...new Set(values.filter((value) => value.toLowerCase() === lowered))];
+  if (caseMatches.length === 1) return { kind: 'case', replacement: caseMatches[0] as string };
+  if (caseMatches.length > 1) return { kind: 'absent' };
+  if (/^\d+$/.test(literal)) {
+    const padded = [...new Set(values.filter((value) => /^\d+$/.test(value) && Number(value) === Number(literal)))];
+    if (padded.length === 1) return { kind: 'padding', replacement: padded[0] as string };
+    if (padded.length > 1) return { kind: 'absent' };
+  }
+  const stem = `${lowered} (`;
+  const labelled = [...new Set(values.filter((value) => value.toLowerCase().startsWith(stem)))];
+  if (labelled.length === 1) return { kind: 'parenthetical', replacement: labelled[0] as string };
+  return { kind: 'absent' };
+}
+
+/**
+ * Ground every literal the statement compares against a column that stores it in another form.
  *
  * Edits are applied from the end of the statement backwards so an earlier substitution
  * cannot move a later offset — the failure that makes offset-based rewriting look correct
  * on one edit and corrupt the statement on two.
+ *
+ * `kinds` is the licence, and it is a parameter rather than a constant because the three edits
+ * have three different amounts of evidence behind them and one of them ships.
  */
-export function groundLiteralCase(sql: string, domains: readonly ColumnDomain[]): RepairResult {
+export function groundLiteralAbsence(
+  sql: string,
+  domains: readonly ColumnDomain[],
+  kinds: readonly GroundableKind[],
+): RepairResult {
   if (domains.length === 0) return { sql, substitutions: [] };
   const substitutions: Substitution[] = [];
   const edits: { start: number; end: number; text: string }[] = [];
@@ -105,20 +167,27 @@ export function groundLiteralCase(sql: string, domains: readonly ColumnDomain[])
     if (!GROUNDING_OPERATORS.has(site.operator)) continue;
     const candidates = domainsFor(site, domains);
     if (candidates.length === 0) continue;
-    // The written literal is already stored somewhere it could be read from: nothing to fix.
-    if (candidates.some((domain) => domain.values.includes(site.literal.value))) continue;
-    const lowered = site.literal.value.toLowerCase();
-    // Every candidate column has to name exactly one spelling, and they all have to name the
-    // same one. A column that cannot name it, or names two, makes the substitution a guess —
-    // and an unqualified column that the engine would have rejected as ambiguous turns into a
-    // statement that runs and answers the wrong question, which is the one outcome worse than
-    // an error.
-    const spellings = candidates.map((domain) => [...new Set(domain.values.filter((value) => value.toLowerCase() === lowered))]);
-    if (!spellings.every((found) => found.length === 1)) continue;
-    const agreed = (spellings[0] as string[])[0] as string;
-    if (!spellings.every((found) => found[0] === agreed)) continue;
-    const value = agreed;
-    const owner = candidates.find((domain) => domain.values.includes(value)) as ColumnDomain;
+    // A literal any candidate column already stores is a value the engine could find: nothing to
+    // fix, and editing it would be a change to a lookup that already resolves.
+    const verdicts = candidates.map((domain) => classifyAbsence(site.literal.value, domain.values));
+    if (verdicts.some((verdict) => verdict === undefined)) continue;
+    // Every candidate column has to name the same kind and the same replacement. A column that
+    // cannot name it, or names another kind, makes the substitution a guess — and an unqualified
+    // column the engine would have rejected as ambiguous turns into a statement that runs and
+    // answers the wrong question, which is the one outcome worse than an error.
+    const first = verdicts[0] as Absence;
+    if (first.replacement === undefined) continue;
+    if (!kinds.includes(first.kind as GroundableKind)) continue;
+    if (!verdicts.every((verdict) => (verdict as Absence).kind === first.kind && (verdict as Absence).replacement === first.replacement)) {
+      continue;
+    }
+    const value = first.replacement;
+    // The owner is the first candidate by construction: `first` is the verdict computed from
+    // `candidates[0]`'s own values, so that column is the one that stores the replacement. Looking
+    // it up again with `find` produced a branch no input could reach — the value came out of that
+    // column, so a search for the column that holds it always succeeds — and an unreachable branch
+    // is a claim about safety that nothing tests.
+    const owner = candidates[0] as ColumnDomain;
     const substitution: Substitution = { literal: site.literal.value, value, table: owner.table, column: owner.column };
     substitutions.push(substitution);
     edits.push({ start: site.literal.start, end: site.literal.end, text: quote(value) });
@@ -129,6 +198,18 @@ export function groundLiteralCase(sql: string, domains: readonly ColumnDomain[])
     out = out.slice(0, edit.start) + edit.text + out.slice(edit.end);
   }
   return { sql: out, substitutions };
+}
+
+/**
+ * The shipped edit, named for what it does rather than for the mechanism behind it.
+ *
+ * Kept as its own export because callers — the pipeline and the rewrite pricer — should be able
+ * to say "the rule that ships" without also saying which kinds it is allowed to apply. It is the
+ * case-only licence over `groundLiteralAbsence`, and the two must not diverge: the tests assert
+ * the delegate, so a change to one that is not a change to the other fails.
+ */
+export function groundLiteralCase(sql: string, domains: readonly ColumnDomain[]): RepairResult {
+  return groundLiteralAbsence(sql, domains, ['case']);
 }
 
 /** A statement runner: the oracle's `run`, narrowed to what a domain read needs. */

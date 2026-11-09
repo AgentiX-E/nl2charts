@@ -66,9 +66,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { mcnemarExact, pairedResolution } from '@agentix-e/nl2charts-devkit';
 import type { MatchReason } from '@agentix-e/nl2charts-devkit';
 import { applyGrounding, guardNullOrder } from '@agentix-e/nl2charts-ai';
-import { domainsOf, groundLiteralCase } from './literal-repair.js';
+import { domainsOf, groundLiteralAbsence, groundLiteralCase } from './literal-repair.js';
 import { aliasTable, spliceWhereClause, whereClauseSpan } from './sql-shape.js';
-import type { ColumnDomain } from './literal-repair.js';
+import type { ColumnDomain, GroundableKind } from './literal-repair.js';
 import { literalSites } from './statement.js';
 import { loadQuestions, loadTables } from './data.js';
 import type { BirdQuestion } from './data.js';
@@ -185,6 +185,12 @@ function groundCase(input: RewriteInput): string | undefined {
   return edit.substitutions.length === 0 ? undefined : edit.sql;
 }
 
+/** The same edit machinery under a different licence, for the two forms that are priced here. */
+function groundAbsence(input: RewriteInput, kinds: readonly GroundableKind[]): string | undefined {
+  const edit = groundLiteralAbsence(input.sql, input.domains, kinds);
+  return edit.substitutions.length === 0 ? undefined : edit.sql;
+}
+
 /**
  * The rules, in the order the report prints them: the one that ships first, then the two the
  * suspicion produced and the measurement refused, then the two gates on the grounding edit.
@@ -218,6 +224,22 @@ export const REWRITE_RULES: readonly RewriteRule[] = [
     claim: 'the same edit under no gate: what the "returned nothing" condition costs',
     needsDomains: true,
     apply: groundCase,
+  },
+  {
+    // The other two forms of absence a column's own values can prove. They are priced rather than
+    // adopted: `ground-case-any` is the one this corpus paid for, and these two are one case each,
+    // which is below what a paired test resolves. Pricing them is what turns "the bucket might be
+    // bigger than the shipped rule" into a number.
+    name: 'ground-padding',
+    claim: 'a number written without the leading zeros its column stores',
+    needsDomains: true,
+    apply: (input) => groundAbsence(input, ['padding']),
+  },
+  {
+    name: 'ground-parenthetical',
+    claim: 'a label written without the parenthetical the column appends',
+    needsDomains: true,
+    apply: (input) => groundAbsence(input, ['parenthetical']),
   },
   {
     // The rule the pipeline ships, priced as itself rather than as its idea: `applyGrounding` is

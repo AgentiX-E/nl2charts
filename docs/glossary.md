@@ -533,7 +533,20 @@ actually holds: the same value in another case (`case`), a longer value containi
 nothing (`absent`). It is the repair target of the zero-row state, and the reason that state is worth
 a call: **18 of the 19 dev questions whose whole candidate set returned nothing wrote a value the
 database does not contain**, so the failure is a lookup and the fix is a lookup. Reading a gap costs
-one query per literal and column and no model call — `probeValueGaps` is the reader.
+one query per literal and column and no model call — `probeValueGaps` is the reader. `partial` is
+what the message to the model says, and it is deliberately wider than what an edit may act on: a
+column that holds `Benalish Knight (Fellwar Stone)` is a useful thing to show a model and a dangerous
+thing to substitute without one.
+
+**Literal gap** — The same question asked for the budget rather than for a retry, and answered in
+four kinds an edit can or cannot reach: `case`, `padding` (`40` against `0040`), `parenthetical`
+(`High Schools` against `High Schools (Public)`), and `absent`. The difference from a **value gap**
+is not the data but the licence: a `literal gap` may only name a replacement when the column holds
+exactly one candidate, because its output is an edit rather than a hint. `bench:bird:literals`
+produces it, and the reading it produced on the dev split is the reason the two are kept apart — of
+seventy-six `filter-narrow` cases, sixteen carry a site an edit can explain, fourteen of those have
+nothing but such sites, and **seven** are repaired. The other sixty-nine filter a column that has
+never held the value, which is a schema-linking failure and not a spelling one.
 
 **Grounded literal** — A literal whose case-only mismatch was settled by the lookup rather than by
 the model: the column stores exactly one spelling that matches ignoring case, so the statement is

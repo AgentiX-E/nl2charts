@@ -1219,6 +1219,17 @@ has to be able to say no. An instrument that can only produce a number is not a 
 instrument plus a bar written before the number existed, and both rounds that got this right wrote the
 bar down first.
 
+A third failure belongs beside those two, because it is the same step taken in the same direction and
+it is the one that looks most like a reading. `bench:bird:literals` counts the comparison sites inside
+`filter-narrow` whose literal a column can explain: sixteen of fifty-seven. Sixteen is a number, it is
+derived from the data, and it is **not** the number of cases an edit repairs, because a case with six
+sites needs all six and a case whose literal was one of several faults needs more than the literal.
+The count of repairable *sites* is a ceiling; the dispatch needs the count of repaired *cases*, which
+only re-execution and a judge can produce — seven. The two differ by a factor of two, and the gap is
+exactly the set of cases where the literal was not the only fault. **A count of things a rule could
+touch is a ceiling even when it is expressed in cases, if the rule needs more than one thing to touch
+per case.**
+
 ## A recaller with no input is indistinguishable from a recaller that does not work
 
 `Recaller` declares four sources, the linker ships three of them, and on BIRD the shipped set recalled

@@ -251,6 +251,35 @@ describe('the grounding rules', () => {
     // The gate is the only difference between the two rules: same edit, same guard, same evidence.
     expect(ruleOf('ground-case-any').apply(at(sql, { empty: false }))).toBe("select id from items where name = 'Cup'");
   });
+
+  /**
+   * The two licences beyond `case`, priced rather than adopted.
+   *
+   * Both edits are the same machinery under a narrower claim, so the tests that matter are the
+   * ones about the claim: a number whose value matches and whose length does not must not be
+   * substituted, and a prefix with two continuations must not be completed. The shipped rule is
+   * asserted to *refuse* both, because a licence that leaks is not a licence.
+   */
+  it('pads a number whose column stores the leading zeros, and refuses a different number', () => {
+    const padded = { domains: [{ table: 'schools', column: 'CharterNum', values: ['0040', '0728'] }] };
+    expect(ruleOf('ground-padding').apply(at("select id from schools where CharterNum = '40'", padded))).toBe(
+      "select id from schools where CharterNum = '0040'",
+    );
+    // `400` and `0040` share digits and are not the same lookup key.
+    expect(ruleOf('ground-padding').apply(at("select id from schools where CharterNum = '400'", padded))).toBeUndefined();
+    // The shipped rule does not reach a digit string, which is why this needed its own licence.
+    expect(ruleOf('ground-case-any').apply(at("select id from schools where CharterNum = '40'", padded))).toBeUndefined();
+  });
+
+  it('completes a label with the parenthetical the column appends, and refuses a bare prefix', () => {
+    const labels = { domains: [{ table: 'frpm', column: 'School Type', values: ['High Schools (Public)', 'Continuation High Schools'] }] };
+    expect(ruleOf('ground-parenthetical').apply(at("select id from frpm where \"School Type\" = 'High Schools'", labels))).toBe(
+      "select id from frpm where \"School Type\" = 'High Schools (Public)'",
+    );
+    // `Continuation` begins both continuation labels; choosing one would answer another question.
+    expect(ruleOf('ground-parenthetical').apply(at("select id from frpm where \"School Type\" = 'Continuation'", labels))).toBeUndefined();
+    expect(ruleOf('ground-case-any').apply(at("select id from frpm where \"School Type\" = 'High Schools'", labels))).toBeUndefined();
+  });
 });
 
 describe('the ceilings', () => {

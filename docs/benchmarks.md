@@ -9650,6 +9650,86 @@ wrong case) or the gold (one value transplanted). `ground-shipped` alone already
 twelve, which is why the shipped rule's 14 wins are mostly a `filter-narrow` number wearing the name
 of a value rule.
 
+> **Correction.** The sentence above adds two win sets and calls the sum a share of the bucket. It
+> is neither: the sets overlap, and neither is a measurement of whether an edit that *could* be made
+> *repairs* the case. The next section measures both, and the number that survives is smaller than
+> either — **seven** cases, not twelve plus seven.
+
+## What `filter-narrow` is made of: sixteen spellings and forty-one column choices
+
+The section above ends by calling `filter-narrow` the largest addressable share of the values
+bucket, on the strength of a per-case join between a ceiling's wins and a rule's wins. A join of two
+win sets cannot say what the bucket is made of, because it begins from the wins. `bench:bird:literals`
+begins from the cases: it takes every `values` failure whose statement returned no rows, reads the
+column each literal is compared against, and says **why the literal is not in it**.
+
+The reading is on the dev split, arm `metadata+evidence`, run `42563674600` — the same artifact the
+rewrite pricer reconciles against 1,532/1,532 below, so the two instruments are measuring one set.
+Seventy-six cases returned no rows, and their comparison sites split four ways:
+
+| kind | sites | share | what it is |
+| --- | --- | --- | --- |
+| `case` | 14 | 24.6% | the column stores one spelling equal to the literal ignoring case |
+| `padding` | 1 | 1.8% | the column stores `0040` where the statement wrote `40` |
+| `parenthetical` | 1 | 1.8% | the column stores `High Schools (Public)` where the statement wrote `High Schools` |
+| `absent` | **41** | **71.9%** | the column holds nothing like it: the statement is filtering the wrong column |
+
+Two numbers follow from the same table, and they are the point of the tool:
+
+1. **Every case has more than one site.** The 76 cases carry 45 statements with at least one literal
+   comparison and 57 sites between them; 31 cases compare no string at all (they filter numbers, or
+   they filter nothing and lose their rows to a join). So a per-site repair is not a per-case repair.
+2. **A site that can be edited is not a case that gets repaired.** Fourteen cases have at least one
+   site whose literal the column can explain, thirteen have nothing but such sites, and the pricer —
+   which re-executes and judges — repairs **seven**. The other seven are cases where the literal was
+   one of several faults: `City = 'Monterey'` against a corpus that files the county in a column
+   named `County`, `CharterNum = '40'` against `0040` with a second condition wrong, and so on.
+
+### The two edits this reading proposed, and what they were worth
+
+The classifier named two forms of absence the shipped rule does not reach, and both were priced
+rather than adopted, because a classifier that can name an edit is not evidence that the edit pays:
+
+| rule | fires | won | lost | net | p | verdict |
+| --- | --- | --- | --- | --- | --- | --- |
+| `ground-padding` | 1 | 1 | 0 | +0.07pp | 1.0000 | below the split's resolution |
+| `ground-parenthetical` | 1 | 0 | 0 | +0.00pp | 1.0000 | fires, repairs nothing |
+| `ground-case-any` (shipped) | 24 | **16** | **0** | **+1.04pp** | <0.0001 | adopted |
+
+Neither new rule loses anything, which is what their licence was designed to guarantee: both require
+exactly one stored value that matches, and a second candidate makes the edit refuse. They are still
+not adopted, because one case is what this split cannot resolve — and the parenthetical rule shows
+why a zero-loss rule is not automatically a rule: it fires on question 26, edits `High Schools` to
+`High Schools (Public)`, and the case stays wrong because the same statement also filters the wrong
+column. **A rule can be correct and worth nothing at the same time.**
+
+### What the bucket is, then
+
+`filter-narrow` is not a predicate that is too tight. It is, for seven cases in ten, a predicate
+aimed at a column that does not hold the value: the statement joined the right tables, filtered a
+column of the right type, and compared it with a value the column has never contained. That is a
+schema-linking failure, and it is the same failure the schema card prices at **+11.09pp** when the
+card is cut to the columns the gold reads — which is now the only lever in this bucket with a
+reading above the floor.
+
+The seven cases the shipped rule does repair are real and free, and they are the reason the rule
+ships. The other sixty-nine are the reason no further literal edit will move this bucket: an edit to
+a literal cannot reach a statement whose literal belongs to another column, and 41 of 57 sites are
+exactly that.
+
+The reading is reproducible without a model call, which is why it exists at all:
+
+```bash
+BIRD_SPLIT=dev pnpm bench:bird:literals --artifact eval/out/bird-eval.json --arm metadata+evidence
+```
+
+It re-executes the artifact's own statements against the split's databases and writes
+`eval/out/literal-gap-<arm>.json`. Two conditions fail the build rather than being printed and
+ignored: an empty bucket, because `0 of 0` prints as `0.0%` and reads like a measured zero, and a
+comparison site whose column could not be read, because classifying a literal against no values turns
+"the column stores something else" into "the column stores nothing" — the one confusion the tool
+exists to prevent.
+
 ## The card is the prompt, and what is on it is worth 11 points
 
 `card.ts` has priced the schema card in **characters** since the round it was written: 69.7% of the

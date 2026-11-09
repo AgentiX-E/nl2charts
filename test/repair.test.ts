@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createDomainReader, domainsOf, groundLiteralCase } from '../eval/bird/literal-repair.js';
+import { createDomainReader, domainsOf, groundLiteralAbsence, groundLiteralCase } from '../eval/bird/literal-repair.js';
 import type { ColumnDomain } from '../eval/bird/literal-repair.js';
 
 const school: ColumnDomain = { table: 'frpm', column: 'School Type', values: ['Continuation School', 'Elementary School'] };
@@ -111,6 +111,32 @@ describe('groundLiteralCase', () => {
     const twice = groundLiteralCase(once.sql, [status]);
     expect(twice.substitutions).toEqual([]);
     expect(twice.sql).toBe(once.sql);
+  });
+
+  /**
+   * The licence is a parameter, and these are the two ways it has to hold.
+   *
+   * `groundLiteralCase` is `groundLiteralAbsence` with `['case']`, so every other form of absence
+   * has to be refused by the function the pipeline calls — a padding edit that slipped through
+   * would be a rule shipping under another rule's evidence. The second case is the ambiguity the
+   * delegate inherits: two columns that name different spellings cannot both be right.
+   */
+  it('refuses a form of absence its licence does not include', () => {
+    const padded: ColumnDomain = { table: 'schools', column: 'CharterNum', values: ['0040', '0728'] };
+    const sql = "select * from schools where CharterNum = '40'";
+    expect(groundLiteralCase(sql, [padded])).toEqual({ sql, substitutions: [] });
+    // The same statement under the padding licence is an edit, which is what makes the refusal a
+    // choice rather than an inability.
+    expect(groundLiteralAbsence(sql, [padded], ['padding']).sql).toBe("select * from schools where CharterNum = '0040'");
+  });
+
+  it('refuses when two same-named columns name different spellings of the same kind', () => {
+    const sql = "select * from a join b on b.id = a.id where status = 'pending'";
+    const domains: ColumnDomain[] = [
+      { table: 'a', column: 'status', values: ['Pending'] },
+      { table: 'b', column: 'status', values: ['PENDING'] },
+    ];
+    expect(groundLiteralCase(sql, domains)).toEqual({ sql, substitutions: [] });
   });
 });
 
