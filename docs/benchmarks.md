@@ -10545,3 +10545,28 @@ and a reading with an interval narrow enough to be about the model.
 | full split, one arm | 496 | 18 | 2.5 h | a rate on the split |
 | full split, one arm + A/A | 992 | 18 | 5.0 h — the cap | the above, plus the harness's own noise |
 | **150-question subset, one arm** | 150 | 18 | **45 min** | a pair against the anchor on the same 150 questions |
+
+### How large a difference 150 paired questions can see
+
+A pair is a test, and a test has a resolution. For McNemar at 5% with 80% power the sample a design
+needs is `n ≈ (1.96 + 0.84)² · π_d / δ²`, where `π_d` is the share of questions the two generators
+answer differently at all and `δ` is the difference being looked for. Reading it the other way, at
+`n = 150`:
+
+| discordant share `π_d` | smallest difference detected 80% of the time | what produces that discordance |
+| --- | --- | --- |
+| 7% | **6.1pp** | two runs of the *same* generator: measured below at 2.8% on the shipped arm |
+| 10% | 7.2pp | |
+| 20% | 10.2pp | |
+| 30% | 12.5pp | two generators roughly ten points apart, with half the flips going the wrong way |
+
+So 150 is enough for a ten-point difference as long as the two models disagree on no more than a
+fifth of the split, and not enough for a three-point one whatever they disagree on. That is the honest
+resolution of this design, and it is the reason the subset size is a declared input rather than a
+constant: a smaller difference needs a bigger sample, and the arithmetic above says how much bigger.
+
+For scale, the same instrument read across two runs of the *same* model on Mini-Dev — the two
+DeepSeek artifacts of 2026-11-09, thirteen arms, 496 questions — puts the cross-run displacement of
+the shipped arm at **+0.81pp, 9 up and 5 down, p = 0.424**, and no arm outside its own interval. Two
+runs of one generator disagree on 2.8% of the split, so the noise a *model* comparison has to clear
+is about a point; the interval at 150 questions is what says whether it cleared it.
