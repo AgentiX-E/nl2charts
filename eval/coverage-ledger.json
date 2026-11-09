@@ -326,7 +326,7 @@
       "lines": 99.44,
       "statements": 99.44,
       "functions": 100,
-      "branches": 95.83
+      "branches": 95.84
     },
     "eval/bird/samples.ts": {
       "lines": 100,
@@ -497,10 +497,10 @@
       "branches": 99.07
     },
     "eval/preflight.ts": {
-      "lines": 98.46,
-      "statements": 98.46,
+      "lines": 98.69,
+      "statements": 98.69,
       "functions": 100,
-      "branches": 96.77
+      "branches": 97.14
     },
     "eval/run.ts": {
       "lines": 98.46,
