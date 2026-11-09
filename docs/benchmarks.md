@@ -2001,6 +2001,25 @@ remaining failures are questions whose literal is absent from the column the pro
 column-level failure. Column evidence in the prompt is the fix, and the only place to pay for it
 without growing the bill is the 54.1% of the card that answers no question.
 
+### Half the comments repeat the column name
+
+The same measurement, taken one level down, on the 1,534 questions the dev split carries:
+
+| | share |
+| --- | --- |
+| the schema card | 90.2% of the prompt |
+| comments inside that card | **77.2% of the card** |
+| comments that restate the column name once case, spacing and punctuation are normalised | **36.9% of the card** — 47.9% of all comment characters, on 50.6% of commented columns |
+
+`Currency -- Currency`, `GasStationID -- Gas Station ID - Gas Station ID`, `Date -- Date`. These
+carry no information a reader does not already have from the column name, and together they are
+about **a third of every prompt the product sends**. It is the largest lossless reduction the
+instrument has found — larger than any prompt-engineering change the project has measured — and it
+is not shipped yet, because "lossless" is a claim about the model, not about the reader, and this
+project only accepts that claim from an arm. The arm is the next thing to run: the same card with
+redundant comments dropped, priced against `metadata+evidence` on the same split, with the token
+delta reported beside the accuracy delta.
+
 ## The candidate the three prompts cannot write
 
 Seven configurations answered 466 of the 1,532 dev questions wrongly — no arm held the right
