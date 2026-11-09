@@ -780,7 +780,7 @@ export function poolPair(readings: readonly PairReading[], left: string, right: 
   // two different questions: whether anything was significant anywhere, and whether any two signs
   // differed. `inline+evidence -> inline+evidence+audit` satisfied it with the significance in
   // `17/4` and the opposite sign in `8/11` — a reading that is p = 0.65 on its own — so a pair with
-  // seven positive readings and one wobble printed `sign-flip` for three rounds. `metadata+evidence
+  // seven positive readings and one wobble printed `sign-flip` until this rule was corrected. `metadata+evidence
   // -> select` did the same with `27/26` against a single significant negative reading. Both had the
   // same shape: one direction carried the evidence and the other carried only the sign.
   //

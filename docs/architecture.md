@@ -1358,7 +1358,7 @@ compatible with one mean and the label is `one-run-only` — an effect one run f
 not keep. `metadata+evidence → select` went the
 other way twice: 19 against 32, then 27 against 26, then 18 against 34 (p = 0.0365) — `established` at
 −1.90pp ± 1.64 over those three readings, in which the 1-call curated stack beat the 4-call chain by 16
-cases. It read `sign-flip` for two rounds, which was a defect in the rule rather than a fact about the
+cases. It read `sign-flip` until this rule was corrected, which was a defect in the rule rather than a fact about the
 pair: the label asked whether anything was significant and whether two signs differed, and the
 significance and the opposite sign were in two different readings.
 

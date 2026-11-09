@@ -8043,7 +8043,7 @@ previous version of this section made.
 `significant.length > 0 && signs.size > 1` — whether *anything* was significant anywhere, and whether any
 two readings differed in sign. Those are two different readings. `inline+evidence -> inline+evidence+audit`
 satisfied it with the significance in `17/4` and the opposite sign in `8/11`, a reading that is p = 0.65 on
-its own, so a pair with seven positive readings and one wobble printed `sign-flip` for two rounds;
+its own, so a pair with seven positive readings and one wobble printed `sign-flip` until this rule was corrected;
 `metadata+evidence -> select` did the same with `27/26` — one case — against a single significant negative
 reading. A reversal now needs a reading that cleared its own test in *each* direction, and the rule is
 applied before heterogeneity because it names the kind of disagreement rather than its existence: both
