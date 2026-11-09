@@ -9685,6 +9685,23 @@ Two numbers follow from the same table, and they are the point of the tool:
    one of several faults: `City = 'Monterey'` against a corpus that files the county in a column
    named `County`, `CharterNum = '40'` against `0040` with a second condition wrong, and so on.
 
+### The same split on a second arm, because one arm is one reading
+
+`literal-gap` starts from a `values` failure rather than from a candidate set, so it runs on any arm
+— including the single-call ones, which publish no candidate ceiling and therefore cannot be handed
+to `values-gap` at all. That is not a convenience: it is the check that the composition is a property
+of the corpus rather than of one prompt.
+
+| arm | `filter-narrow` cases | sites | `case` | `padding` | `parenthetical` | `absent` | repairable |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `metadata+evidence` | 76 | 57 | 14 | 1 | 1 | **41 (71.9%)** | 16 (28.1%) |
+| `select-mixed` | 53 | 41 | 7 | 1 | 1 | **32 (78.0%)** | 9 (22.0%) |
+
+The better arm returns no rows on fewer questions (53 against 76) and its misses are *more* often
+column choices rather than spellings — 78.0% against 71.9%. The two arms disagree about how many
+cases fail; they agree about what the failures are made of, which is the only thing the composition
+was ever asked to explain.
+
 ### The two edits this reading proposed, and what they were worth
 
 The classifier named two forms of absence the shipped rule does not reach, and both were priced
