@@ -4,8 +4,8 @@
   "tolerancePp": 0.2,
   "measuredAt": "2026-11-09",
   "totals": {
-    "lines": 99.5,
-    "statements": 99.5,
+    "lines": 99.51,
+    "statements": 99.51,
     "functions": 100,
     "branches": 98.3
   },

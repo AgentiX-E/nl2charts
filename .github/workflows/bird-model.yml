@@ -49,6 +49,10 @@ on:
         description: Per-call deadline in milliseconds (a reasoning model needs more than a chat model)
         required: false
         default: '300000'
+      budget_ms:
+        description: Milliseconds any one arm may spend (blank = no limit; 0 is refused)
+        required: false
+        default: '7200000'
       aa:
         description: Arm to run twice as an A/A control (blank = none)
         required: false
@@ -105,6 +109,17 @@ jobs:
       # the model and everything about the deadline it was given. A caller that knows its
       # endpoint is slower must be able to say so without editing this file.
       BIRD_LLM_TIMEOUT_MS: ${{ inputs.timeout_ms }}
+      # Per arm, and it has to be, because what runs out is one arm's time.
+      #
+      # `42666720439` spent five hours on `metadata+evidence` at two calls in flight and was killed
+      # by the 300-minute job cap at `cancelled` — no artifact, and not one line of progress to say
+      # where the time went. A job cap cannot report; this can, and what it reports is the
+      # `BIRD_LIMIT` the next dispatch should ask for.
+      #
+      # The arithmetic the caller has to keep: budget × (arms + 1 for A/A) must stay under the job's
+      # 300 minutes, or the cap arrives before any reading does. Two hours covers a single arm of
+      # 496 cases at eighteen seconds a case with room for the tail.
+      BIRD_RUN_BUDGET_MS: ${{ inputs.budget_ms }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

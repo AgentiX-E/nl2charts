@@ -10462,3 +10462,86 @@ One more reading in the same table: the A/A pair (`inline+evidence` and `inline+
 the same number, 56.0% and 56.0%, tighter than the 0.2–1.2pp this file calls its noise floor. A noise
 floor is measured per run, not assumed; two arms agreeing exactly is a floor for *this* run, not a
 promise about the next one.
+
+## Five hours, and the two instruments a clock needs
+
+`42666720439` ran `glm-4.6` on `metadata+evidence` with the A/A arm beside it, two calls in flight and
+a 600-second deadline. It started at 17:39:20 and ended at 22:39:38 — **exactly the job's
+`timeout-minutes: 300`** — with the conclusion `cancelled`, an artifact of **2,083 bytes**, and not one
+line of output from the evaluation step. Everything it knew at minute 299 died with it.
+
+The cap was not bad luck. The run before it, `42645923773`, answered the question of how fast this
+model is: **398 of 496 cases in 7,169 seconds at concurrency 2**, which is **18.0 seconds a case**.
+496 cases at that rate is 2.5 hours per arm; two arms is **five hours**, and the cap is five hours.
+The arithmetic was available before the dispatch and nothing computed it.
+
+| | `42645923773` | `42666720439` |
+| --- | --- | --- |
+| deadline | 300 s | 600 s |
+| seconds per case | **18.0** (measured) | unknown — nothing printed |
+| cases before the stop | 398 | unknown |
+| how it ended | the failure breaker, with the rate and the reason | the job cap, with nothing |
+| what a reader learns | `50 of 398 calls (12.6%) failed … The remaining 98 calls were not spent.` | `cancelled` |
+
+Two instruments follow, and they are different instruments because they answer different questions.
+
+**The clock.** `BIRD_RUN_BUDGET_MS` is per arm, checked before each case starts and reported after
+each one lands. When it fires the arm does not publish a table — 137 of 496 cases is a different
+population, which is the reason the gate refuses a partial artifact — it publishes **the number the
+next dispatch needs**:
+
+> `arm metadata+evidence: stopped after 100 of 496 cases — the 10000 s run budget ran out; no call
+> failed, the clock did. 100 case(s) took 10000 s at concurrency 2 (100 s/case), so a full split at
+> this rate needs 13.8 h. Dispatch again with BIRD_LIMIT=75 (about 7500 s of the same clock), or a
+> longer budget, or a faster model. The remaining 396 cases were not spent.`
+
+Three quarters of the budget, not all of it: a run that stops at 99% of its clock has learned nothing
+about how close it came, and the next dispatch would be a second guess. Zero cases in a whole budget
+prints a different message, because zero cases is a shape rather than a speed — one case makes several
+calls, each bounded by `BIRD_LLM_TIMEOUT_MS`, and the product is what to look at. The suggestion is
+computed from measurement in both directions; it is not a constant anyone has to remember.
+
+**The line.** One line per case:
+
+```
+  [ 42/150] 38.1%  18.0 s/case  case 7.2 s  elapsed 756 s
+```
+
+The rate is the only thing that distinguishes *slow* from *stuck*. It cannot be read from a total that
+has not arrived, and the five-hour run had neither a line nor a rate — so its death was the first fact
+anyone could read about it. The timestamps of these lines are the instrument; the numbers beside them
+are what lets a reader stop a run that is going nowhere before the cap does it.
+
+### What a smaller run can claim
+
+Cutting the sample is the only affordable way to measure a reasoning model, and it looks like it
+destroys the comparison: `displacement` measures a difference between two runs and states the interval
+two independent rates must clear — **±6.2pp** at 496 questions near 0.57. Against a 150-question
+subset that interval is wider still, and a 10pp difference between two models would sit inside it.
+
+That interval is the price of the two runs not necessarily having scored the same questions, and for a
+*model* comparison the price need not be paid: the DeepSeek anchor already holds a verdict for every
+question in the split. `crossPair` restricts **both** rates to the ids the two artifacts share and
+tests the flips with McNemar, so the questions' own difficulty cancels:
+
+| | two artifacts, side by side | one arm, read as a pair |
+| --- | --- | --- |
+| sample | each artifact's own | the intersection |
+| interval | both rates' uncertainty | the discordant cases only |
+| at 150 questions near 0.58, 20 flips (14 up, 6 down) | ±11.2pp | ±5.8pp |
+| what it can say | the runs are, or are not, the same experiment | which of two generators answered better questions |
+
+A tool that read the artifacts' own totals would report 4/6 against 3/3 where the pair is 2/3 against
+3/3. The 16.7pp it printed would be a difference between two populations wearing the name of a
+difference between two models, which is why the restriction is in the function rather than in the
+reader's head.
+
+The experiment this makes possible: `BIRD_LIMIT=150` — a stratified sample of the same corpus, so not
+a different population — one arm, no A/A, at 18 seconds a case. **45 minutes** instead of five hours,
+and a reading with an interval narrow enough to be about the model.
+
+| design | cases | seconds a case | wall clock | what it can claim |
+| --- | --- | --- | --- | --- |
+| full split, one arm | 496 | 18 | 2.5 h | a rate on the split |
+| full split, one arm + A/A | 992 | 18 | 5.0 h — the cap | the above, plus the harness's own noise |
+| **150-question subset, one arm** | 150 | 18 | **45 min** | a pair against the anchor on the same 150 questions |

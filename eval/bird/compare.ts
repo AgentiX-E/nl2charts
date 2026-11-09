@@ -51,6 +51,7 @@
 import { readFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { mcnemarExact } from '@agentix-e/nl2charts-devkit';
 import { pairOutcome } from './pair.js';
 import type { PairArtifact } from './pair.js';
 
@@ -367,6 +368,56 @@ export function rateOf(arm: RunArm): number | undefined {
   return typeof arm.accuracy === 'number' ? arm.accuracy : undefined;
 }
 
+/** One arm's case rows, keyed by question id. Ids are strings because an artifact may number them. */
+function caseIndex(report: RunArtifact): Map<string, Map<string, boolean>> {
+  const arms = new Map<string, Map<string, boolean>>();
+  for (const row of report.cases ?? []) {
+    if (row.arm === undefined || row.id === undefined || typeof row.passed !== 'boolean') continue;
+    const cases = arms.get(row.arm) ?? new Map<string, boolean>();
+    cases.set(String(row.id), row.passed);
+    arms.set(row.arm, cases);
+  }
+  return arms;
+}
+
+/**
+ * The 2×2 of one arm across two runs, over the questions both of them answered.
+ *
+ * Every reading that joins two artifacts is built from this and nothing else: a total cannot
+ * produce a flow, and a rate on a different sample cannot produce a pair.
+ */
+export interface ArmJoin {
+  readonly arm: string;
+  readonly examined: number;
+  readonly leftPassed: number;
+  readonly rightPassed: number;
+  /** Right passed, left failed. */
+  readonly up: number;
+  /** Left passed, right failed. */
+  readonly down: number;
+}
+
+export function joinArm(left: RunArtifact, right: RunArtifact, arm: string): ArmJoin | undefined {
+  const leftCases = caseIndex(left).get(arm);
+  const rightCases = caseIndex(right).get(arm);
+  if (leftCases === undefined || rightCases === undefined) return undefined;
+  let examined = 0;
+  let leftPassed = 0;
+  let rightPassed = 0;
+  let up = 0;
+  let down = 0;
+  for (const [id, passedLeft] of leftCases) {
+    const passedRight = rightCases.get(id);
+    if (passedRight === undefined) continue;
+    examined += 1;
+    if (passedLeft) leftPassed += 1;
+    if (passedRight) rightPassed += 1;
+    if (passedRight && !passedLeft) up += 1;
+    if (passedLeft && !passedRight) down += 1;
+  }
+  return examined === 0 ? undefined : { arm, examined, leftPassed, rightPassed, up, down };
+}
+
 /**
  * The flows behind each rate difference, per arm, for the arms both runs scored on the same ids.
  *
@@ -376,44 +427,136 @@ export function rateOf(arm: RunArm): number | undefined {
  * absent reading and a stable arm are different findings.
  */
 export function churn(left: RunArtifact, right: RunArtifact): Churn[] {
-  const index = (report: RunArtifact): Map<string, Map<string, boolean>> => {
-    const arms = new Map<string, Map<string, boolean>>();
-    for (const row of report.cases ?? []) {
-      if (row.arm === undefined || row.id === undefined || typeof row.passed !== 'boolean') continue;
-      const cases = arms.get(row.arm) ?? new Map<string, boolean>();
-      cases.set(String(row.id), row.passed);
-      arms.set(row.arm, cases);
-    }
-    return arms;
-  };
-  const leftArms = index(left);
-  const rightArms = index(right);
   const rows: Churn[] = [];
-  for (const [arm, leftCases] of leftArms) {
-    const rightCases = rightArms.get(arm);
-    if (rightCases === undefined) continue;
-    let examined = 0;
-    let up = 0;
-    let down = 0;
-    for (const [id, passedLeft] of leftCases) {
-      const passedRight = rightCases.get(id);
-      if (passedRight === undefined) continue;
-      examined += 1;
-      if (passedRight && !passedLeft) up += 1;
-      if (passedLeft && !passedRight) down += 1;
-    }
-    if (examined === 0) continue;
+  for (const arm of caseIndex(left).keys()) {
+    const join = joinArm(left, right, arm);
+    if (join === undefined) continue;
     rows.push({
       arm,
-      examined,
-      up,
-      down,
-      net: up - down,
-      churnShare: Number((((up + down) / examined) * 100).toFixed(1)),
+      examined: join.examined,
+      up: join.up,
+      down: join.down,
+      net: join.up - join.down,
+      churnShare: Number((((join.up + join.down) / join.examined) * 100).toFixed(1)),
     });
   }
   rows.sort((one, two) => two.churnShare - one.churnShare || one.arm.localeCompare(two.arm));
   return rows;
+}
+
+/**
+ * One arm, two runs, read as a pair on the questions they share.
+ *
+ * `displacement` measures a difference between two runs and states the interval two independent
+ * rates have to clear — ±6.2pp at 496 questions. That interval is the price of the two runs not
+ * necessarily having scored the same questions, and for a *model* comparison it is a price that
+ * need not be paid: the anchor already holds a verdict for every question in the split, so a
+ * smaller run can be read against the anchor's rows for exactly its own ids.
+ *
+ * That is what makes an affordable strong-model reading possible at all. A reasoning model answers
+ * in about eighteen seconds a case, so 496 of them is two and a half hours per arm; `BIRD_LIMIT=150`
+ * is forty-five minutes, and the 150 questions are a stratified sample of the same corpus rather
+ * than a different population. Comparing the two artifacts' own rates would then be comparing a
+ * 150-question sample with a 496-question one, which is the defect `sameSample` exists to flag.
+ * This restricts both rates to the intersection first, and tests the flips with McNemar — the
+ * questions' own difficulty cancels, so the interval is built from the discordant cases alone.
+ */
+export interface CrossPair {
+  readonly arm: string;
+  readonly examined: number;
+  readonly leftPassed: number;
+  readonly rightPassed: number;
+  readonly leftRate: number;
+  readonly rightRate: number;
+  readonly deltaPp: number;
+  readonly up: number;
+  readonly down: number;
+  /** Exact McNemar on the discordant cases. Two-sided, and 1 when nothing flipped. */
+  readonly p: number;
+  /** 95% half-width of the paired difference, from the discordant count. */
+  readonly intervalPp: number;
+  /** Whether the exact test clears 0.05. */
+  readonly readable: boolean;
+}
+
+/**
+ * The paired half-width of a difference between two proportions measured on one sample.
+ *
+ * The usual two-sample variance is `p₁(1−p₁) + p₂(1−p₂)`, and on paired data that double-counts the
+ * questions both runs got right: their contribution to the *difference* is zero. McNemar's form
+ * keeps only the discordant cases, `(b + c − (b − c)²/n)/n`, which is smaller whenever the runs
+ * agree on anything — and on a benchmark where both models answer half the split correctly, they
+ * agree on a lot.
+ *
+ * The correction term matters at small `n`: eight flips one way and eight the other is a difference
+ * of zero with a non-zero variance, and `b + c` alone would report it as eight.
+ */
+export function pairedIntervalPp(up: number, down: number, examined: number): number {
+  if (examined === 0) return 0;
+  const variance = (up + down - (up - down) ** 2 / examined) / examined;
+  return Number((1.96 * Math.sqrt(Math.max(0, variance) / examined) * 100).toFixed(2));
+}
+
+export function crossPair(left: RunArtifact, right: RunArtifact, arm: string): CrossPair | undefined {
+  const join = joinArm(left, right, arm);
+  if (join === undefined) return undefined;
+  const p = mcnemarExact(join.down, join.up);
+  return {
+    arm,
+    examined: join.examined,
+    leftPassed: join.leftPassed,
+    rightPassed: join.rightPassed,
+    leftRate: join.leftPassed / join.examined,
+    rightRate: join.rightPassed / join.examined,
+    deltaPp: Number((((join.rightPassed - join.leftPassed) / join.examined) * 100).toFixed(2)),
+    up: join.up,
+    down: join.down,
+    p: Number(p.toFixed(4)),
+    intervalPp: pairedIntervalPp(join.up, join.down, join.examined),
+    readable: p < 0.05,
+  };
+}
+
+/** Every arm both artifacts scored, largest move first. The order is the finding. */
+export function crossPairs(left: RunArtifact, right: RunArtifact): CrossPair[] {
+  const rows: CrossPair[] = [];
+  for (const arm of caseIndex(left).keys()) {
+    const row = crossPair(left, right, arm);
+    if (row !== undefined) rows.push(row);
+  }
+  rows.sort((one, two) => Math.abs(two.deltaPp) - Math.abs(one.deltaPp) || one.arm.localeCompare(two.arm));
+  return rows;
+}
+
+/**
+ * The paired table, printed under the comparison and never instead of it.
+ *
+ * Both are printed because they answer different questions and only one of them is about a lever:
+ * the table above says whether the two runs are the same experiment, and this one says what the one
+ * arm they share did when both of them answered the same questions. A reader who saw only this
+ * would not learn that the two runs asked different models, which is the whole comparison.
+ */
+export function crossLines(pairs: readonly CrossPair[]): string[] {
+  if (pairs.length === 0) return [];
+  const lines: string[] = [''];
+  lines.push('  the same arm, two generators, on the questions both of them answered — a pair, not two samples:');
+  lines.push(`  ${'arm'.padEnd(28)}${'n'.padStart(6)}${'left'.padStart(10)}${'right'.padStart(10)}${'delta'.padStart(9)}${'±95%'.padStart(8)}${'up'.padStart(5)}${'down'.padStart(6)}${'p'.padStart(9)}`);
+  for (const row of pairs) {
+    lines.push(
+      `  ${row.arm.padEnd(28)}${String(row.examined).padStart(6)}` +
+        `${`${(row.leftRate * 100).toFixed(2)}%`.padStart(10)}${`${(row.rightRate * 100).toFixed(2)}%`.padStart(10)}` +
+        `${`${row.deltaPp >= 0 ? '+' : ''}${row.deltaPp.toFixed(2)}`.padStart(9)}${row.intervalPp.toFixed(2).padStart(8)}` +
+        `${String(row.up).padStart(5)}${String(row.down).padStart(6)}${row.p.toFixed(4).padStart(9)}` +
+        `  ${row.readable ? 'outside' : 'inside'}`,
+    );
+  }
+  const moved = pairs.filter((row) => row.readable);
+  lines.push(
+    moved.length === 0
+      ? '  no pair moved outside its own interval: every difference here is the draw, not the model'
+      : `  ${String(moved.length)} pair(s) moved outside their interval (${moved.map((row) => row.arm).join(', ')}) — a reading, on this sample`,
+  );
+  return lines;
 }
 
 export function compareRuns(left: RunArtifact, right: RunArtifact, leftName: string, rightName: string): CompareReport {
@@ -889,6 +1032,9 @@ export function main(argv: readonly string[] = process.argv.slice(2), root = pro
   const [[leftName, left], [rightName, right]] = [artifacts[0] as (typeof artifacts)[number], artifacts[1] as (typeof artifacts)[number]];
   const report = compareRuns(left, right, leftName, rightName);
   const lines = compareLines(report, metaOf(left), metaOf(right));
+  // After the two-sided table and before the caller's own notes: the pair is what a smaller run can
+  // claim, and it is the only section here whose interval does not carry both samples' uncertainty.
+  for (const line of crossLines(crossPairs(left, right))) lines.push(line);
   if (settings.also.length > 0) {
     // A reader who handed this command three runs will read the table above as covering three.
     lines.splice(1, 0, `  the comparison above is the first two paths; ${String(settings.also.length)} further artifact(s) are read for the pair only`);

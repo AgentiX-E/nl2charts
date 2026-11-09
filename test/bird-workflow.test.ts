@@ -82,3 +82,67 @@ describe('the second endpoint follows the second provider', () => {
     expect(block).toContain("default: ''");
   });
 });
+
+/**
+ * An input that is declared and never read is a switch that does nothing, and one that is read and
+ * never declared expands to an empty string.
+ *
+ * Both failures are silent in a workflow: `${{ inputs.budget_milliseconds }}` on a typo becomes the
+ * empty string, `parseBudgetMs('')` becomes "no budget", and the run proceeds without the guard the
+ * caller asked for. The same slip in the other direction leaves a documented input that no step
+ * touches, which a caller will set and then wonder about. Neither is visible in a log, so this reads
+ * the file instead: every reference has a declaration and every declaration has a reference.
+ */
+describe('every workflow input is declared, and every declaration is read', () => {
+  /** The keys directly under `inputs:`, found by indentation rather than by a YAML library. */
+  function declaredInputs(text: string): string[] {
+    const lines = text.split('\n');
+    const start = lines.findIndex((line) => line.trim() === 'inputs:');
+    if (start === -1) return [];
+    const indent = (lines[start] as string).search(/\S/);
+    const names: string[] = [];
+    for (const line of lines.slice(start + 1)) {
+      if (line.trim() === '') continue;
+      const own = line.search(/\S/);
+      if (own <= indent) break;
+      const match = /^ {6}([a-z_]+):\s*$/.exec(line);
+      if (match !== null) names.push(match[1] as string);
+    }
+    return names;
+  }
+
+  const files = ['.github/workflows/bird-model.yml'];
+
+  it('reads only names it declares', () => {
+    for (const file of files) {
+      const text = readFileSync(resolve(process.cwd(), file), 'utf8');
+      const declared = new Set(declaredInputs(text));
+      const used = new Set([...text.matchAll(/inputs\.([a-z_]+)/gu)].map((match) => match[1] as string));
+      expect(declared.size, file).toBeGreaterThan(0);
+      for (const name of used) expect(declared.has(name), `${file} reads inputs.${name} without declaring it`).toBe(true);
+    }
+  });
+
+  it('declares only names a step reads', () => {
+    for (const file of files) {
+      const text = readFileSync(resolve(process.cwd(), file), 'utf8');
+      const used = new Set([...text.matchAll(/inputs\.([a-z_]+)/gu)].map((match) => match[1] as string));
+      for (const name of declaredInputs(text)) {
+        expect(used.has(name), `${file} declares input ${name} and no step reads it`).toBe(true);
+      }
+    }
+  });
+
+  it('gives the run a clock below the job cap, because a cap cannot report', () => {
+    // `42666720439` ran into `timeout-minutes: 300` and was cancelled with nothing to show. The
+    // budget has to arrive first, or the only thing that stops the run is the thing that cannot say
+    // how far it got.
+    const text = readFileSync(resolve(process.cwd(), '.github/workflows/bird-model.yml'), 'utf8');
+    const cap = Number(/timeout-minutes:\s*(\d+)/u.exec(text)?.[1]);
+    const budget = Number(/budget_ms:[\s\S]*?default:\s*'(\d+)'/u.exec(text)?.[1]);
+    expect(cap).toBeGreaterThan(0);
+    expect(budget).toBeGreaterThan(0);
+    // Per arm, and the A/A arm is another arm: the comparison is against the cap divided by two.
+    expect(budget / 60_000).toBeLessThan(cap / 2);
+  });
+});

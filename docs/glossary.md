@@ -639,3 +639,18 @@ A rate limit is a function of simultaneous requests, so twelve calls one after a
 endpoint under a load the run never applies. `glm-4.6` passed twelve serial probes (median 7.1 s, none
 refused) and then answered 429 to 416 of 496 calls at concurrency 8; the probes saw no failures because
 at one call at a time there were none to see.
+
+**Run budget** — The clock a run keeps on itself, per arm: `BIRD_RUN_BUDGET_MS`. A GitHub job cap
+cannot report, and `42666720439` proved it — five hours on one arm, killed at `cancelled`, an artifact
+of 2,083 bytes. The budget fires first and its message is the deliverable: cases finished, seconds a
+case, the projection for the full split, and the `BIRD_LIMIT` that would have fitted. It throws rather
+than publishing a partial table, because 137 of 496 cases is a different population and the same reason
+stops the gate accepting one.
+
+**Paired subset** — A smaller run read against a larger anchor on the questions both answered. The
+sample is cut because a reasoning model costs 18 seconds a case and 496 of them is two and a half
+hours; the cut does not cost the comparison, because the anchor already holds a verdict for every
+question in the split. `crossPair` restricts both rates to the shared ids and tests the flips with
+McNemar, so the questions' own difficulty cancels: at 150 questions near 0.58 with 20 flips the
+interval is ±5.8pp, against ±11.2pp for the same two rates read side by side. Two artifacts' own
+totals must never be compared directly — that was a difference between two populations.

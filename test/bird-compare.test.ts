@@ -20,6 +20,10 @@ import {
   compareProblems,
   compareRuns,
   coordinatesOf,
+  crossLines,
+  crossPair,
+  crossPairs,
+  pairedIntervalPp,
   crossRunIntervalPp,
   displacement,
   isEntry,
@@ -1049,5 +1053,197 @@ describe('the pair flag', () => {
     } finally {
       log.mockRestore();
     }
+  });
+});
+
+/**
+ * One arm, two generators, and the questions both of them answered.
+ *
+ * This is the reading a cheaper experiment produces, and it is the only reading that is *not* a
+ * comparison of two samples. `displacement` says a delta between two runs carries both draws'
+ * uncertainty — at 496 questions that is ±6.2pp — and it says so because the two runs need not have
+ * scored the same questions. A model comparison never scores the same questions twice: a reasoning
+ * model at 18 seconds a case cannot afford 496 of them, and `BIRD_LIMIT` has to cut the sample. The
+ * cut is what makes the pair possible as well as cheap, because the anchor already holds a verdict
+ * for every question the subset contains.
+ *
+ * So the counts below are deliberately *not* the artifacts' own totals. A tool that read the totals
+ * would report 4/6 against 3/3 where the pair is 2/3 against 3/3, and the 16.7pp it printed would be
+ * a difference between two populations wearing the name of a difference between two models.
+ */
+describe('crossPair', () => {
+  const cases = (...rows: [string, number, boolean][]): RunArtifact['cases'] =>
+    rows.map(([arm, id, passed]) => ({ arm, id, passed }));
+
+  it('reads both rates on the questions the two artifacts share, not on their own totals', () => {
+    const full = {
+      arms: [{ arm: 'metadata+evidence', passed: 4, total: 6 }],
+      cases: cases(
+        ['metadata+evidence', 1, true],
+        ['metadata+evidence', 2, true],
+        ['metadata+evidence', 3, false],
+        ['metadata+evidence', 4, false],
+        ['metadata+evidence', 5, true],
+        ['metadata+evidence', 6, true],
+      ),
+    };
+    const subset = {
+      arms: [{ arm: 'metadata+evidence', passed: 3, total: 3 }],
+      cases: cases(['metadata+evidence', 1, false], ['metadata+evidence', 2, true], ['metadata+evidence', 3, true]),
+    };
+    const reading = crossPair(full, subset, 'metadata+evidence');
+    // Two of the three shared questions, not four of six: the subset has no row for 4, 5 or 6.
+    expect(reading?.examined).toBe(3);
+    expect(reading?.leftPassed).toBe(2);
+    expect(reading?.rightPassed).toBe(2);
+    expect(reading?.leftRate).toBeCloseTo(2 / 3, 6);
+    expect(reading?.rightRate).toBeCloseTo(2 / 3, 6);
+    expect(reading?.deltaPp).toBe(0);
+    expect(reading?.up).toBe(1);
+    expect(reading?.down).toBe(1);
+  });
+
+  it('tests the flips with McNemar, and a pair that never flips is not evidence', () => {
+    const same = {
+      arms: [{ arm: 'a', passed: 3, total: 3 }],
+      cases: cases(['a', 1, true], ['a', 2, true], ['a', 3, true]),
+    };
+    const alsoSame = { ...same };
+    const quiet = crossPair(same, alsoSame, 'a');
+    expect(quiet?.up).toBe(0);
+    expect(quiet?.down).toBe(0);
+    // Not zero: a test that finds nothing is p = 1, and printing 0 makes "no difference" read as
+    // "certainly no difference".
+    expect(quiet?.p).toBe(1);
+    expect(quiet?.readable).toBe(false);
+    // Eight flips one way and none the other is 2 × 2^-8, the smallest p eight cases can produce.
+    const eight = { cases: cases(...(Array.from({ length: 8 }, (_, index) => ['a', index + 1, false] as [string, number, boolean]))) };
+    const swept = { cases: cases(...(Array.from({ length: 8 }, (_, index) => ['a', index + 1, true] as [string, number, boolean]))) };
+    const loud = crossPair(eight, swept, 'a');
+    expect(loud?.up).toBe(8);
+    expect(loud?.p).toBeCloseTo(0.0078, 4);
+    expect(loud?.readable).toBe(true);
+    expect(loud?.deltaPp).toBeCloseTo(100, 6);
+  });
+
+  it('refuses an arm one side never scored rather than inventing a reading for it', () => {
+    expect(crossPair({ cases: cases(['a', 1, true]) }, { cases: cases(['b', 1, true]) }, 'a')).toBeUndefined();
+    expect(crossPair({ cases:cases(['a', 1, true]) }, { cases: cases(['a', 1, true]) }, 'b')).toBeUndefined();
+  });
+
+  it('states the interval the pair has to clear, and it is narrower than the two-sample one', () => {
+    const rows = (passed: boolean[]): RunArtifact['cases'] => cases(...passed.map((value, index) => ['a', index + 1, value] as [string, number, boolean]));
+    // 100 shared questions, 12 flips one way and 2 the other.
+    const left = [...Array.from({ length: 50 }, () => true), ...Array.from({ length: 50 }, () => false)];
+    const right = [...Array.from({ length: 50 }, () => true), ...Array.from({ length: 50 }, () => false)];
+    for (let index = 0; index < 12; index += 1) right[50 + index] = true;
+    for (let index = 0; index < 2; index += 1) right[index] = false;
+    const reading = crossPair({ cases: rows(left.concat()) }, { cases: rows(right) }, 'a');
+    expect(reading?.examined).toBe(100);
+    expect(reading?.up).toBe(12);
+    expect(reading?.down).toBe(2);
+    // Paired: the questions' own difficulty cancels, so the interval is built from the ten flips
+    // rather than from both rates' uncertainty.
+    expect(reading?.intervalPp).toBeLessThan(crossRunIntervalPp(50, 100, 60, 100));
+  });
+
+  it('lists every arm both sides scored, largest move first', () => {
+    const pairs = crossPairs(
+      {
+        cases: cases(
+          ['big', 1, false],
+          ['big', 2, false],
+          ['big', 3, false],
+          ['big', 4, false],
+          ['small', 1, true],
+          ['small', 2, true],
+          ['small', 3, false],
+          ['small', 4, false],
+        ),
+      },
+      {
+        cases: cases(
+          ['big', 1, true],
+          ['big', 2, true],
+          ['big', 3, true],
+          ['big', 4, true],
+          ['small', 1, true],
+          ['small', 2, true],
+          ['small', 3, true],
+          ['small', 4, false],
+        ),
+      },
+    );
+    expect(pairs.map((row) => row.arm)).toEqual(['big', 'small']);
+    expect(pairs[0]?.deltaPp).toBeCloseTo(100, 6);
+    expect(pairs[1]?.deltaPp).toBeCloseTo(25, 6);
+  });
+
+  it('prints the restricted sample size, because a rate without it reads as the split', () => {
+    const lines = crossLines([
+      {
+        arm: 'metadata+evidence',
+        examined: 150,
+        leftPassed: 87,
+        rightPassed: 104,
+        leftRate: 0.58,
+        rightRate: 104 / 150,
+        deltaPp: 11.33,
+        up: 32,
+        down: 15,
+        p: 0.0193,
+        intervalPp: 7.69,
+        readable: true,
+      },
+    ]);
+    const text = lines.join('\n');
+    expect(text).toContain('metadata+evidence');
+    expect(text).toContain('150');
+    expect(text).toContain('58.00%');
+    expect(text).toContain('+11.33');
+    expect(text).toContain('32');
+    expect(text).toContain('15');
+    expect(text).toContain('0.0193');
+    expect(text).toMatch(/outside|inside/);
+  });
+
+  it('says nothing rather than a header when no arm was scored twice', () => {
+    expect(crossLines([])).toEqual([]);
+  });
+
+  it('says a pair that never moved is the draw, and does not leave the table to imply it', () => {
+    const lines = crossLines([
+      {
+        arm: 'a',
+        examined: 150,
+        leftPassed: 87,
+        rightPassed: 89,
+        leftRate: 0.58,
+        rightRate: 89 / 150,
+        deltaPp: 1.33,
+        up: 9,
+        down: 7,
+        p: 0.8036,
+        intervalPp: 5.13,
+        readable: false,
+      },
+    ]);
+    expect(lines.join('\n')).toContain('no pair moved outside its own interval');
+  });
+
+  it('gives an interval of zero to a pair with nothing examined, rather than dividing by it', () => {
+    expect(pairedIntervalPp(0, 0, 0)).toBe(0);
+  });
+
+  it('builds the interval from the flips, so a balanced pair is the least determined one', () => {
+    // Sixteen flips split eight and eight: the difference is zero and the interval is the widest a
+    // sixteen-flip pair can have, because the correction term `(b − c)²/n` — the part of the
+    // imbalance the flips already determine — is at its minimum. Sixteen flips one way is the same
+    // number of discordant cases with slightly less uncertainty, and neither is the two-sample
+    // interval for two rates near 0.58 at this sample size, which is ±11.2pp.
+    expect(pairedIntervalPp(8, 8, 100)).toBeCloseTo(7.84, 2);
+    expect(pairedIntervalPp(16, 0, 100)).toBeCloseTo(7.19, 2);
+    expect(pairedIntervalPp(8, 8, 100)).toBeGreaterThan(pairedIntervalPp(16, 0, 100));
+    expect(pairedIntervalPp(16, 0, 100)).toBeLessThan(crossRunIntervalPp(58, 100, 74, 100));
   });
 });

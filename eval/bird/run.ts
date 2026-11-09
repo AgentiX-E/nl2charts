@@ -2516,6 +2516,111 @@ export function assertHarnessClean(armName: string, runs: readonly { errorKind?:
 }
 
 /**
+ * The run's own clock, because the job's clock is not a report.
+ *
+ * `42666720439` was killed by its 300-minute job cap at `cancelled`, having spent five hours and
+ * published nothing: not one line of progress, and an artifact of 2,083 bytes. Everything the run
+ * had learned at minute 299 — how many cases it had done, what each one cost — died with it. The
+ * cap is a wall; this is a reading taken before the wall.
+ *
+ * The value is read rather than defaulted, because a guard that turns itself on is a guard whose
+ * absence is invisible. A run without one prints `budget: none`, and that line is the finding.
+ */
+export function parseBudgetMs(raw: string | undefined): number | undefined {
+  const trimmed = raw?.trim() ?? '';
+  if (trimmed === '') return undefined;
+  const value = Number(trimmed);
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`BIRD_RUN_BUDGET_MS=${JSON.stringify(raw)} is not a run budget; give whole milliseconds or leave it unset`);
+  }
+  return value;
+}
+
+/**
+ * The subset a budget can afford, at three quarters of itself.
+ *
+ * Three quarters rather than all of it: a run that stops at 99% of its clock has learned nothing
+ * about how close it came, and the next dispatch would be a second guess. A quarter of the clock is
+ * headroom for the tail — and the tail is what a reasoning model has.
+ *
+ * Rounded down and floored at one, because a suggestion of zero is not a suggestion.
+ */
+export function suggestedLimit(budgetMs: number, elapsedMs: number, casesDone: number): number | undefined {
+  if (casesDone <= 0 || elapsedMs <= 0) return undefined;
+  const perCaseMs = elapsedMs / casesDone;
+  return Math.max(1, Math.floor((budgetMs * 0.75) / perCaseMs));
+}
+
+/**
+ * What a run says when its clock runs out instead of saying nothing.
+ *
+ * The message is the deliverable, not an apology for a missing table: the next dispatch needs a
+ * sample size, and this is the only instrument that can compute one. A partial table is refused for
+ * the same reason the gate refuses one — 137 of 496 cases is a different population, and a rate on
+ * it is not a rate on the split. What a smaller run *can* claim is a pair against the anchor on the
+ * questions both answered, which is a separate artifact and `crossPair`'s reading.
+ */
+export function budgetExhaustedMessage(state: {
+  readonly arm: string;
+  readonly budgetMs: number;
+  readonly elapsedMs: number;
+  readonly casesDone: number;
+  readonly total: number;
+  readonly concurrency: number;
+}): string {
+  const { arm, budgetMs, elapsedMs, casesDone, total, concurrency } = state;
+  const budgetS = (budgetMs / 1000).toFixed(0);
+  const elapsedS = (elapsedMs / 1000).toFixed(0);
+  const remaining = Math.max(0, total - casesDone);
+  const head = `arm ${arm}: stopped after ${String(casesDone)} of ${String(total)} cases — the ${budgetS} s run budget ran out`;
+  if (casesDone === 0) {
+    // Zero cases in a whole budget is a shape, not a speed: one case makes several model calls and
+    // each is bounded by the per-call deadline, so the product of the two is what to look at.
+    return (
+      `${head}. In ${elapsedS} s not one case finished, so there is no per-case rate to extrapolate and no BIRD_LIMIT that ` +
+      'can help: a case makes several calls and each is bounded by BIRD_LLM_TIMEOUT_MS, so lower that, or the ' +
+      'concurrency, before dispatching again.'
+    );
+  }
+  const perCaseMs = elapsedMs / casesDone;
+  const perCaseS = (perCaseMs / 1000).toFixed(0);
+  const projectionH = ((perCaseMs * total) / 3_600_000).toFixed(1);
+  const suggestion = suggestedLimit(budgetMs, elapsedMs, casesDone);
+  return (
+    `${head}; no call failed, the clock did. ${String(casesDone)} case(s) took ${elapsedS} s at concurrency ` +
+    `${String(concurrency)} (${perCaseS} s/case), so a full split at this rate needs ${projectionH} h. Dispatch again ` +
+    `with BIRD_LIMIT=${String(suggestion ?? 1)} (about ${(budgetMs * 0.75 / 1000).toFixed(0)} s of the same clock), or a ` +
+    `longer budget, or a faster model. The remaining ${String(remaining)} cases were not spent.`
+  );
+}
+
+/**
+ * One line per case, so a long run is watchable.
+ *
+ * The five-hour run printed nothing between its first case and its death. A rate is the only thing
+ * that distinguishes "slow" from "stuck", and it cannot be read from a total that has not arrived:
+ * the timestamps of these lines are the instrument, and the numbers beside them are what a reader
+ * needs in order to stop a run that is going nowhere before the job cap does it.
+ */
+export function progressLine(state: {
+  /** Cases finished so far. Zero is a legal state and prints `n/a` rather than dividing by it. */
+  readonly index: number;
+  readonly total: number;
+  readonly passed: number;
+  readonly elapsedMs: number;
+  /** How long this case took on its own, which is where a tail is visible before it becomes a mean. */
+  readonly caseMs: number;
+}): string {
+  const { index, total, passed, elapsedMs, caseMs } = state;
+  const rate = index === 0 ? 'n/a' : `${(passed / index * 100).toFixed(1)}%`;
+  const perCase = index === 0 ? 'n/a' : `${(elapsedMs / index / 1000).toFixed(1)} s/case`;
+  return (
+    `  [${String(index).padStart(3)}/${String(total)}] ${rate}  ${perCase}  ` +
+    `case ${(caseMs / 1000).toFixed(1)} s  elapsed ${(elapsedMs / 1000).toFixed(0)} s`
+  );
+}
+
+/**
  * How many cases an instrument needs before its share is a measurement.
  *
  * Every guard in this section asks a question of the form "did this mechanism fire often enough to
@@ -4036,6 +4141,14 @@ export interface BirdSettings {
   readonly timeoutMs: number;
   readonly retries: number;
   readonly retryDelayMs: number;
+  /**
+   * How long any one arm may spend, or `undefined` for no limit.
+   *
+   * Not a natural consequence of the deadline and the split: `42666720439` was killed by its job
+   * cap after five hours at 300 s a call and 2 in flight, and the deadline cannot see that coming.
+   * This can, because it measures the thing that ran out.
+   */
+  readonly budgetMs: number | undefined;
   readonly valuesForce: boolean;
   readonly definitionsForce: boolean;
 }
@@ -4114,6 +4227,7 @@ export function resolveSettings(
     timeoutMs: Number(env.BIRD_LLM_TIMEOUT_MS ?? 60000),
     retries: Number(env.BIRD_LLM_RETRIES ?? 3),
     retryDelayMs: Number(env.BIRD_LLM_RETRY_DELAY_MS ?? 1000),
+    budgetMs: parseBudgetMs(env.BIRD_RUN_BUDGET_MS),
     valuesForce: env.BIRD_VALUES_FORCE === '1',
     definitionsForce: env.BIRD_DEFINITIONS_FORCE === '1',
   };
@@ -5438,6 +5552,12 @@ export function baseReport(prepared: PreparedRun, provenance: Provenance = {}): 
       timeoutMs: settings.timeoutMs,
       concurrency: settings.concurrency,
       retries: settings.retries,
+      // Recorded, and deliberately not a `compare.ts` coordinate: a budget that did not fire did
+      // not change the result, and a budget that fires publishes no artifact at all. So it can
+      // never be a silent difference between two tables — which is the only thing a coordinate is
+      // for — and adding it there would mark every comparison against a run from before this field
+      // as `harness DIFFERS` for a field that never acted.
+      ...(settings.budgetMs === undefined ? {} : { budgetMs: settings.budgetMs }),
     },
     generatedAt: new Date().toISOString(),
     // Which run produced this file, when it can say.
@@ -6741,14 +6861,49 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
    * their rejections unhandled. A flag they all read costs one comparison and stops the spending.
    */
   const results = new Array<CaseRun | undefined>(cases.length);
+  const startedAt = Date.now();
+  let finished = 0;
+  let passing = 0;
+  /**
+   * The clock, checked before each case starts and reported after each one lands.
+   *
+   * Same shape as the failure breaker and for the same reason: the slots already in flight finish
+   * their case, and every case behind them is skipped rather than thrown from a worker. The
+   * difference is what a stop means — a breaker stop says the endpoint refused a tenth of the calls,
+   * and a budget stop says nothing failed and the run simply outgrew its clock.
+   */
+  const expired = (): boolean => settings.budgetMs !== undefined && Date.now() - startedAt > settings.budgetMs;
   await pool(cases, settings.concurrency, async (question, index) => {
-    if (breaker.verdict() !== null) return;
+    if (breaker.verdict() !== null || expired()) return;
+    const caseStartedAt = Date.now();
     const run = await scoreOne(question);
     // Written by index so the table stays in split order: the artifact's row order is part of the
     // reading, and a stop must not reorder what did run.
     results[index] = run;
     breaker.observe(run);
+    finished += 1;
+    if (run.passed) passing += 1;
+    // One line per case, and it is the only instrument that distinguishes "slow" from "stuck": the
+    // five-hour run had neither a line nor a rate, so its death at the job cap was the first thing
+    // anyone could read about it.
+    console.log(progressLine({ index: finished, total: cases.length, passed: passing, elapsedMs: Date.now() - startedAt, caseMs: Date.now() - caseStartedAt }));
   });
+  // A run that outgrew its clock has no table to publish, for the same reason a refused one does
+  // not: the rate would be computed from the cases that happened to fit, which is a different
+  // population from the one the run declared. What it *does* have is the number the next dispatch
+  // needs, and that is what this message is.
+  if (expired()) {
+    throw new Error(
+      budgetExhaustedMessage({
+        arm: name,
+        budgetMs: settings.budgetMs ?? 0,
+        elapsedMs: Date.now() - startedAt,
+        casesDone: finished,
+        total: cases.length,
+        concurrency: settings.concurrency,
+      }),
+    );
+  }
   // Before any number is printed, and before a single row is summarised: a run stopped because the
   // endpoint refused a tenth of its calls has no accuracy, and reporting one would be a score
   // computed from the provider's mood. The table guard below would say the same thing an hour
@@ -7558,6 +7713,13 @@ export async function runBird(settings: BirdSettings, options: BirdRunOptions = 
     // Above the rates, not below them: what the denominator is, stated before anything is
     // measured with it. A reader who stops after the first arm line still knows the pool.
     log(describeQuestionSet(prepared.shape, settings.layout.split));
+    // Said before the first call, because a run that will be cut for time should say so up front:
+    // the reader of a five-hour log should have been able to see at minute one whether a clock was
+    // watching. `none` is printed rather than omitted — an absent guard is a finding, not a default.
+    log(
+      `budget: ${settings.budgetMs === undefined ? 'none' : `${(settings.budgetMs / 1000).toFixed(0)} s per arm`}` +
+        `, deadline ${(settings.timeoutMs / 1000).toFixed(0)} s, concurrency ${String(settings.concurrency)}`,
+    );
     const report = baseReport(prepared, { run: process.env.GITHUB_RUN_ID, workflow: process.env.GITHUB_WORKFLOW });
     if (settings.dryRun) {
       previewPrompts(prepared, report);

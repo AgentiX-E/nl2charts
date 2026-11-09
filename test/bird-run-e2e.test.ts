@@ -1065,6 +1065,48 @@ describe('inputs an arm needs and does not have', () => {
       await endpoint.close();
     }
   });
+
+  it('stops a run that outgrew its clock, and says what would have fitted', async () => {
+    // `42666720439` was killed by its 300-minute job cap at `cancelled`, five hours in, with an
+    // artifact of 2,083 bytes and not one line of progress. A job cap is a wall; a run budget is a
+    // reading taken before it, and the only thing that reading can usefully say is the sample the
+    // next dispatch should ask for. One case at 40 ms against a 1 ms budget is the smallest version
+    // of that: the first case lands, the clock is already gone, and the six behind it never start.
+    const endpoint = await startEndpoint({ reply: () => ({ content: 'select id from items', delayMs: 40 }) });
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const logs = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      const thrown: unknown = await main(
+        {
+          BIRD_DATA: data,
+          BIRD_DBS: 'shop',
+          BIRD_OUT: join(root, `out-budget-${String(Math.random()).slice(2, 8)}.json`),
+          LLM_BASE_URL: endpoint.url,
+          LLM_API_KEY: 'test-key',
+          LLM_MODEL: 'stub-model',
+          BIRD_ARMS: 'names',
+          BIRD_CONCURRENCY: '1',
+          BIRD_LLM_RETRIES: '1',
+          BIRD_RUN_BUDGET_MS: '1',
+        },
+        [],
+        root,
+      ).catch((error: Error) => error);
+      expect(thrown).toBeInstanceOf(Error);
+      const message = (thrown as Error).message;
+      expect(message).toMatch(/stopped after 1 of 7 cases .*run budget ran out/);
+      // The message is the deliverable, so it has to carry the prescription and not only the news.
+      expect(message).toContain('BIRD_LIMIT=');
+      expect(message).toContain('6 cases were not spent');
+      // The clock is per arm and starts at the arm, so the fingerprint probes before it are not
+      // charged to a budget that has no bearing on them.
+      expect(endpoint.requests.length).toBeGreaterThan(1);
+    } finally {
+      errors.mockRestore();
+      logs.mockRestore();
+      await endpoint.close();
+    }
+  });
 });
 
 describe('retrieval and the second model, when they are configured', () => {
