@@ -8128,8 +8128,8 @@ and the two pairs with a claim resting on them are read here side by side:
 *Not read here: `synth-definitions` → `inline-definitions`, `inline+evidence` → `inline+evidence+audit`.*
 <!-- readings:end dev-split -->
 
-Three of the five declared pairs are missing from that table because the dispatch did not run two of the
-arms — `synth-definitions` and the audit turn are not scored on this split, and the table says so rather
+Two of the five declared pairs are missing from that table because the dispatch did not run the arms they
+name — `synth-definitions` and the audit turn are not scored on this split, and the table says so rather
 than showing three rows and letting a reader count them.
 
 What it says about the two claims:
