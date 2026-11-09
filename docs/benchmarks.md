@@ -1969,6 +1969,38 @@ The last call is left to `assertArmProducedResults` on purpose: with nothing lef
 one case failed" reads as a throttle, and "this is not an accuracy of zero; it is a run that did not
 happen" is the reading that is actually true.
 
+### The breaker's first run, and what it did not fix
+
+`42645923773` is the first run in this repository that stopped itself. `glm-4.6`, concurrency 2, a
+300-second deadline, two arms. The preflight passed — twelve probes, at the run's own concurrency, no
+429 — and the account's rate limit is not what ended it:
+
+```
+arm inline+evidence: stopped after 398 of 496 calls — 50 of 398 calls (12.6%) failed at the model,
+above the 10% this harness treats as an outage (first error: llm call timed out). Every failure is a
+timeout, so the deadline (BIRD_LLM_TIMEOUT_MS) may be shorter than the model needs. The remaining 98
+calls were not spent.
+```
+
+Three readings, and the third is the one that costs:
+
+1. **The guard worked.** 594 of the 992 calls — the last 98 of the first arm and all of the second —
+   were not spent. The verdict arrived at call 398 rather than at the end of the second arm.
+2. **The absolute rule trips late when failures are rare.** A tenth of 496 is 50, and a 12.6% timeout
+   rate reaches 50 failures only near the end of an arm. A share-based rule would have tripped at
+   call 40 — and could have refused a run the table guard would have accepted, which is the property
+   this rule was built to keep. The late trip is the price of the guarantee, not a defect in it.
+3. **`glm-4.6`'s tail exceeds 300 seconds on one call in eight.** At concurrency 2 there is no rate
+   limiting and no queue: the deadline is simply shorter than the model's tail. The 12.6% is above
+   the 10% this harness publishes at, so **no split size fixes it** — the guard divides by the split,
+   and a smaller split refuses at the same rate. The only two knobs that can produce a table are a
+   longer deadline and a lower concurrency, and the next dispatch moves the first one to 600 s.
+
+That is the honest state of the strong-model reading: two attempts, both refused by the harness on
+arithmetic rather than on a number, and the reason named in the log each time. What the project has
+measured about the model axis is its **tail**, not its accuracy — and the tail is the reason the
+accuracy is still unmeasured.
+
 ## What the shipped prompt is made of, per block
 
 `pnpm bench:bird:card <report.json> --arm metadata+evidence` renders the prompt the pipeline would
