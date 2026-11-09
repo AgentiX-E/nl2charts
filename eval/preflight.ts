@@ -213,6 +213,25 @@ export function targetProblem(target: PreflightTarget): string | null {
   return `no key for ${target.model}. Set ${variable}.`;
 }
 
+/**
+ * The failure rate a clean preflight cannot rule out.
+ *
+ * A preflight is a sample, and a sample that passes is not a statement that nothing fails: if the
+ * true failure rate were `p`, `n` clean probes would still happen with probability `(1 - p)^n`. So
+ * a clean run is only 95%-consistent with failure rates up to `1 - 0.05^(1/n)` — 63.2% at three
+ * probes, 31.2% at eight, 22.1% at twelve, 9.7% at twenty-nine.
+ *
+ * The number is printed rather than kept in a comment because it is the half of the reading the
+ * caller cannot see. A `glm-4.6` run failed **207 of 496 calls (41.7%)** on the `names` arm after a
+ * three-probe preflight passed — and at three probes a 41.7% failure rate passes 19.8% of the time,
+ * so the preflight was not lying. It was answering a narrower question than the one it was read as
+ * answering, which is the difference between "the endpoint answers" and "the run will finish".
+ */
+export function undetectedFailureRate(samples: number): number {
+  if (!Number.isFinite(samples) || samples <= 0) return 1;
+  return 1 - Math.pow(0.05, 1 / samples);
+}
+
 export async function main(env: NodeJS.ProcessEnv = process.env): Promise<number> {
   const settings = resolvePreflightSettings(env);
   if (settings.apiKey.length === 0) {
@@ -243,7 +262,10 @@ export async function main(env: NodeJS.ProcessEnv = process.env): Promise<number
       failed = true;
       continue;
     }
-    console.log(`${named(target)}: ${report.summary}`);
+    console.log(
+      `${named(target)}: ${report.summary}; ${String(settings.samples)} clean probe(s) leave a failure rate above ` +
+        `${(undetectedFailureRate(settings.samples) * 100).toFixed(1)}% undetected`,
+    );
   }
   return failed ? 1 : 0;
 }

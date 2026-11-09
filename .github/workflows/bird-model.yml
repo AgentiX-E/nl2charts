@@ -45,6 +45,10 @@ on:
         description: Parallel calls (a reasoning model needs fewer, and a slow endpoint more time)
         required: false
         default: '2'
+      timeout_ms:
+        description: Per-call deadline in milliseconds (a reasoning model needs more than a chat model)
+        required: false
+        default: '300000'
       aa:
         description: Arm to run twice as an A/A control (blank = none)
         required: false
@@ -75,11 +79,20 @@ jobs:
       # measures the queue. The provider retries 429 with backoff on top of this.
       BIRD_CONCURRENCY: ${{ inputs.concurrency }}
       BIRD_LLM_RETRIES: '4'
-      BIRD_PREFLIGHT_SAMPLES: '3'
+      # Twelve, not three: three clean probes are consistent with a 63% failure rate, which is
+      # what let a `glm-4.6` run pass its preflight and then fail 207 of 496 calls. Twelve probes
+      # narrow that to 22.1%, and the preflight prints the number it did not rule out.
+      BIRD_PREFLIGHT_SAMPLES: '12'
       # A slower model needs a longer deadline, and a timeout reported as "the endpoint was
       # busy" is this harness measuring its own patience: glm-4.5 as primary hit the 60s
       # default on 88% of cases at concurrency 8.
-      BIRD_LLM_TIMEOUT_MS: '180000'
+      #
+      # The number is an input because a hard-coded deadline is a contract with one model.
+      # `glm-4.6` at 180s failed 207 of 496 calls in the `names` arm — 41.7%, above the 10%
+      # outage threshold — and every one of them was a timeout, so the run said nothing about
+      # the model and everything about the deadline it was given. A caller that knows its
+      # endpoint is slower must be able to say so without editing this file.
+      BIRD_LLM_TIMEOUT_MS: ${{ inputs.timeout_ms }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

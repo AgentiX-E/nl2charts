@@ -3,7 +3,7 @@ import type { AddressInfo } from 'node:net';
 import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 import { afterAll, describe, expect, it, vi } from 'vitest';
-import { main, resolvePreflightSettings, resolvePreflightTargets, targetProblem } from '../eval/preflight.js';
+import { main, resolvePreflightSettings, resolvePreflightTargets, targetProblem, undetectedFailureRate } from '../eval/preflight.js';
 
 /**
  * The preflight is a latency check, not a liveness check.
@@ -63,6 +63,10 @@ describe('preflight', () => {
     expect(run.status).toBe(0);
     expect(run.stdout).toContain('deadline 5000 ms');
     expect(run.stdout).toContain('2 calls to stub');
+    // A pass is a sample, and the report has to say how wide the sample is: two clean probes are
+    // consistent with a failure rate up to 77.6%, which is not what "the endpoint passed" sounds
+    // like.
+    expect(run.stdout).toContain('2 clean probe(s) leave a failure rate above 77.6% undetected');
   });
 
   it('fails an endpoint whose median is more than half the deadline', async () => {
@@ -134,6 +138,32 @@ async function refusing(status: number): Promise<string> {
  * costs forty minutes, and ADR-202 exists precisely because a forty-minute discovery is a
  * four-hour discovery waiting to happen.
  */
+describe('what a clean preflight rules out', () => {
+  /**
+   * The number the preflight prints, as arithmetic rather than as a sentence.
+   *
+   * `(1 - p)^n = 0.05` at the 95% confidence this project uses everywhere else, so a clean run is
+   * consistent with `p` up to `1 - 0.05^(1/n)`. Three probes is the default and covers almost
+   * nothing; the run that motivated this table (`glm-4.6`, 41.7% timeouts after three clean probes)
+   * is exactly the case the number exists to make visible.
+   */
+  it('falls as the sample grows, and only reaches the outage threshold at twenty-nine', () => {
+    expect(undetectedFailureRate(1)).toBeCloseTo(0.95, 4);
+    expect(undetectedFailureRate(3)).toBeCloseTo(0.632, 2);
+    expect(undetectedFailureRate(8)).toBeCloseTo(0.312, 2);
+    expect(undetectedFailureRate(12)).toBeCloseTo(0.221, 2);
+    expect(undetectedFailureRate(29)).toBeLessThanOrEqual(0.1);
+    // A 41.7% failure rate passes three probes 19.8% of the time: the preflight was not wrong, and
+    // it was not enough either.
+    expect(Math.pow(1 - 0.417, 3)).toBeGreaterThan(0.15);
+  });
+
+  it('reads a non-positive or unreadable sample as no coverage rather than as one', () => {
+    expect(undetectedFailureRate(0)).toBe(1);
+    expect(undetectedFailureRate(Number.NaN)).toBe(1);
+  });
+});
+
 describe('every endpoint the run will call', () => {
   it('names the primary endpoint and nothing else when no second model is configured', () => {
     const targets = resolvePreflightTargets({ LLM_BASE_URL: 'https://a/v1', LLM_MODEL: 'm', LLM_API_KEY: 'k' });
