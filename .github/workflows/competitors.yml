@@ -128,7 +128,7 @@ jobs:
     # One slot for every heavyweight run: they draw from the same provider quota and write to the
     # same artifact paths.
     concurrency:
-      group: bird-eval
+      group: bird-eval-DEEPSEEK_API_KEY
       cancel-in-progress: false
     env:
       COMPETITOR: ${{ inputs.competitor }}
