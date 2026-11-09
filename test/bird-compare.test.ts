@@ -741,6 +741,17 @@ describe('pooling one pair over the runs that read it', () => {
   it('prints a failure beside a pair it could not pool', () => {
     expect(pooledLines([poolPair([reading(0, 0)], 'a', 'b')]).join('\n')).toContain('FAILED');
   });
+
+  it('prints that failure once, because a problem printed twice reads as two problems', () => {
+    const lines = pooledLines([poolPair([reading(0, 0)], 'a', 'b')]);
+    expect(lines.filter((line) => line.includes('FAILED'))).toHaveLength(1);
+  });
+
+  it('prints every distinct failure, when a pair carries more than one', () => {
+    const pooled = { ...poolPair([reading(22, 8, 0.0161), reading(19, 18)], 'a', 'b'), problems: ['first', 'second'] };
+    const lines = pooledLines([pooled]);
+    expect(lines.filter((line) => line.includes('FAILED'))).toEqual(['      FAILED first', '      FAILED second']);
+  });
 });
 
 describe('reading one pair out of one artifact', () => {

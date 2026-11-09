@@ -121,6 +121,12 @@ every expected column appears in the top *k*. The pipeline uses k = 3.
 **Reciprocal Rank Fusion (RRF)** — Combining several ranked lists by summing
 `1 / (60 + rank)`. Used to fuse the name, alias and value recallers.
 
+**Reading ledger** — `eval/baseline/readings.json`: the discordant counts of every
+declared arm pair in every run, and nothing else. The tables in
+[benchmarks.md](benchmarks.md) are generated from it, so a cell and the pooled line under
+it cannot disagree; a hand-typed number would be a second source of truth, which is what
+drifted four times before the ledger existed.
+
 **Refusal** — A 4xx the endpoint will repeat: a model name it does not serve, a key it
 rejects, a field it will not accept. `NL2C_E_LLM_REJECTED`, as opposed to
 `NL2C_E_LLM_UNAVAILABLE` for the failures worth retrying (network, 408, 429, 5xx). The two

@@ -748,7 +748,8 @@ export function pooledLines(pooled: readonly PooledReading[], unscored: readonly
           `${reading.heterogeneityP < 0.05 ? 'by more than' : 'no more than'} their own intervals`,
       );
     }
-    for (const problem of reading.problems) lines.push(`      FAILED ${problem}`);
+    // One line per problem. The statement below was once written twice, which printed every
+    // failure as a pair and made a single unpoolable pair look like two.
     for (const problem of reading.problems) lines.push(`      FAILED ${problem}`);
   }
   for (const name of unscored) lines.push(`      ${name} did not score both arms, so it is not one of the readings`);

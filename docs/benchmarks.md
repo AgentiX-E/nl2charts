@@ -7983,13 +7983,15 @@ counts. Each cell is the pair's discordant counts in the order the tool prints t
 only, over the first arm only** — so `22/8` on `inline+evidence → select` means 22 questions only the
 selector got right and 8 only `inline+evidence` did:
 
-| pair | `42482353883` | `42491745712` | `42502095942` | pooled | verdict |
-| --- | --- | --- | --- | --- | --- |
-| `synth-definitions` → `inline-definitions` | 13/19, p = 0.3771 | 17/18, p = 1.0000 | 18/15, p = 0.7283 | −0.28pp ± 1.32 | **none** |
-| `inline+evidence` → `inline+evidence+audit` | 8/11, p = 0.6476 | 11/7, p = 0.4807 | 10/9, p = 1.0000 | +0.15pp ± 0.99 | **none** |
-| `inline+evidence` → `select` | 13/13, p = 1.0000 | 22/8, **p = 0.0161** | 19/18, p = 1.0000 | +1.01pp ± 1.26 | **heterogeneous** |
-| `metadata+evidence` → `select` | 19/32, p = 0.0919 | 27/26, p = 1.0000 | 18/34, **p = 0.0365** | −1.90pp ± 1.64 | **sign-flip** |
-| `inline+evidence` → `metadata+evidence` | 31/18, p = 0.0854 | 28/15, p = 0.0660 | 32/15, **p = 0.0186** | +2.89pp ± 1.55 | **established** |
+<!-- readings:begin three-runs -->
+| pair | `42482353883` | `42491745712` | `42502095942` | pooled | verdict | Q |
+| --- | --- | --- | --- | --- | --- | --- |
+| `synth-definitions` → `inline-definitions` | 13/19, p = 0.3771 | 17/18, p = 1.0000 | 18/15, p = 0.7283 | −0.28pp ± 1.32 | **none** | 0.264 |
+| `inline+evidence` → `inline+evidence+audit` | 8/11, p = 0.6476 | 11/7, p = 0.4807 | 10/9, p = 1.0000 | +0.15pp ± 0.99 | **none** | 0.249 |
+| `inline+evidence` → `select` | 13/13, p = 1.0000 | 22/8, **p = 0.0161** | 19/18, p = 1.0000 | +1.01pp ± 1.26 | **heterogeneous** | **0.043** |
+| `metadata+evidence` → `select` | 19/32, p = 0.0919 | 27/26, p = 1.0000 | 18/34, **p = 0.0365** | −1.90pp ± 1.64 | **sign-flip** | 0.077 |
+| `inline+evidence` → `metadata+evidence` | 31/18, p = 0.0854 | 28/15, p = 0.0660 | 32/15, **p = 0.0186** | **+2.89pp ± 1.55** | **established** | 0.631 |
+<!-- readings:end three-runs -->
 
 So the sentence above the table — "the third row is what a paired test separates **in this run**" —
 does not survive the runs that followed, and neither does the one before it that read the fourth row as
@@ -8004,15 +8006,19 @@ difference as nothing.
 
 **A fourth run, unasked for.** The commit that added the fifth declared pair was pushed, which produced
 another run (`42510049798`) of the same configuration — the first one to read all five pairs in CI. Every
-label above survived it, and the intervals narrowed the way the resolution paragraph promised:
+label above survived it, and the intervals narrowed the way the resolution paragraph promised. This is the
+same table with one more reading rather than a second kind of table, so the two can be read as a sequence —
+the `was (three runs)` column the hand-written version carried is the table above it:
 
-| pair | four-run pooled | was (three runs) | verdict | Q |
-| --- | --- | --- | --- | --- |
-| `synth-definitions` → `inline-definitions` | −0.52pp ± 1.13 | −0.28pp ± 1.32 | none | 0.187 |
-| `inline+evidence` → `inline+evidence+audit` | +0.16pp ± 0.84 | +0.15pp ± 0.99 | none | 0.249 |
-| `inline+evidence` → `select` | +1.16pp ± 1.09 | +1.01pp ± 1.26 | **heterogeneous** | 0.038 |
-| `metadata+evidence` → `select` | −1.72pp ± 1.42 | −1.90pp ± 1.64 | **sign-flip** | 0.069 |
-| `inline+evidence` → `metadata+evidence` | +2.87pp ± 1.35 | +2.89pp ± 1.55 | **established** | 0.630 |
+<!-- readings:begin four-runs -->
+| pair | `42482353883` | `42491745712` | `42502095942` | `42510049798` | four-run pooled | verdict | Q |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `synth-definitions` → `inline-definitions` | 13/19, p = 0.3771 | 17/18, p = 1.0000 | 18/15, p = 0.7283 | 13/19, p = 0.3771 | −0.52pp ± 1.13 | **none** | 0.187 |
+| `inline+evidence` → `inline+evidence+audit` | 8/11, p = 0.6476 | 11/7, p = 0.4807 | 10/9, p = 1.0000 | 9/8, p = 1.0000 | +0.16pp ± 0.84 | **none** | 0.249 |
+| `inline+evidence` → `select` | 13/13, p = 1.0000 | 22/8, **p = 0.0161** | 19/18, p = 1.0000 | 19/11, p = 0.2005 | +1.16pp ± 1.09 | **heterogeneous** | **0.038** |
+| `metadata+evidence` → `select` | 19/32, p = 0.0919 | 27/26, p = 1.0000 | 18/34, **p = 0.0365** | 22/28, p = 0.4799 | −1.72pp ± 1.42 | **sign-flip** | 0.069 |
+| `inline+evidence` → `metadata+evidence` | 31/18, p = 0.0854 | 28/15, p = 0.0660 | 32/15, **p = 0.0186** | 31/17, p = 0.0595 | **+2.87pp ± 1.35** | **established** | 0.630 |
+<!-- readings:end four-runs -->
 
 This is the check that matters for the instrument and not for the levers: a fifth run is coming, because
 every push that touches the pipeline produces one, so the question is not whether the numbers move but
@@ -8027,13 +8033,15 @@ pin commit, the first run whose gate enforced a fingerprint) and `42527570372` (
 the fifth reading was an outlier). All three asked the same questions, and all three reported the same
 base fingerprint, `170d0beaa768594b` over `deepseek-flash`, six identical answers each.
 
+<!-- readings:begin seven-runs -->
 | pair | A | B | C | D | E | F | G | seven-run pooled | verdict | Q |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `synth-definitions` → `inline-definitions` | 13/19 | 17/18 | 18/15 | 13/19 | 15/17 | 14/16 | 14/25 | −0.69pp ± 0.86 | none | 0.064 |
+| `synth-definitions` → `inline-definitions` | 13/19 | 17/18 | 18/15 | 13/19 | 15/17 | 14/16 | 14/25 | −0.69pp ± 0.86 | **none** | 0.064 |
 | `inline+evidence` → `inline+evidence+audit` | 8/11 | 11/7 | 10/9 | 9/8 | **17/4** | 11/6 | 10/5 | +0.73pp ± 0.63 | **heterogeneous** | **0.006** |
-| `inline+evidence` → `select` | 13/13 | **22/8** | 19/18 | 19/11 | 26/13 | 19/10 | **23/10** | +1.63pp ± 0.84 | **heterogeneous** | 0.011 |
+| `inline+evidence` → `select` | 13/13 | **22/8** | 19/18 | 19/11 | 26/13 | 19/10 | **23/10** | +1.63pp ± 0.84 | **heterogeneous** | **0.011** |
 | `metadata+evidence` → `select` | 19/32 | 27/26 | **18/34** | 22/28 | 27/33 | 23/29 | 24/28 | −1.45pp ± 1.08 | **sign-flip** | 0.054 |
-| `inline+evidence` → `metadata+evidence` | 31/18 | 28/15 | **32/15** | 31/17 | 35/16 | 31/16 | **31/14** | **+3.10pp ± 1.02** | **established** | 0.415 |
+| `inline+evidence` → `metadata+evidence` | 31/18 | 28/15 | **32/15** | 31/17 | **35/16** | **31/16** | **31/14** | **+3.10pp ± 1.02** | **established** | 0.415 |
+<!-- readings:end seven-runs -->
 
 Three things came out of it, and only one of them is about a lever.
 
@@ -8079,6 +8087,17 @@ p = 0.043 — the readings differ by more than their own intervals` on the next.
 the five things that can be true: `none` (nothing to report), `one-run-only` (a reading that did not
 survive being repeated), `sign-flip` (a pair that reversed), `heterogeneous` (readings that cannot be
 pooled at all), and `established` (the same sign in every reading, and a pool that clears zero).
+
+**None of the numbers above is typed.** The three tables in this section are generated from
+`eval/baseline/readings.json`, which stores the only thing that cannot be derived — two discordant counts
+per pair per run — and nothing else. `pnpm bench:bird:readings` writes the tables, and
+`pnpm gate:readings` fails when a table, or one of the numbers quoted in the sentences around it, is not
+what those counts derive. The arithmetic did not change to make this possible: the per-reading p and the
+pool come from `mcnemarExact` and `poolPair`, the same functions `bench:bird:compare` prints with, so a
+generated table and the artifact it describes are the same computation rather than two implementations of
+it. What changed is provenance. Four hand-typed numbers in this document had already drifted from the
+artifacts they described, and every one of them was plausible on the page — which is the property that
+made them survive review, and the reason a reader could not have caught them either.
 
 What this leaves standing is the resolution, and it is the useful number: **a prompt-layer lever on
 Mini-Dev cannot be resolved smaller than about 2pp per run, and a single run's paired reading can move

@@ -162,6 +162,8 @@ Every push runs the same gates locally and in CI:
 | Gate parity | `gate:all` runs every check command the quality job runs, expanded through the scripts |
 | Budgets | gzip size ceilings per package |
 | Benchmark | Oracle must score 100%, empty predictor 0%, or the run fails |
+| Documented commands | Every `pnpm <script>` in this README or under `docs/` is a script in `package.json` |
+| Published tables | The paired-reading tables in [benchmarks.md](docs/benchmarks.md) are derived from `eval/baseline/readings.json`, never typed |
 
 ## Documentation
 

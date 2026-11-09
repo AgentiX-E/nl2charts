@@ -19,7 +19,9 @@
     "gate:platform": "node tools/check-platform.mjs && node tools/check-platform.mjs --self-test",
     "gate:exports": "node tools/check-exports.mjs",
     "gate:budgets": "node tools/check-budgets.mjs && node tools/check-budgets.mjs --self-test",
-    "gate:all": "pnpm typecheck && pnpm build && pnpm test:coverage && pnpm gate:coverage && node tools/coverage-gate.mjs --self-test && pnpm gate:layering && node tools/check-layering.mjs --self-test && node tools/check-platform.mjs && node tools/check-platform.mjs --self-test && pnpm gate:exports && pnpm gate:budgets && pnpm gate:dispatch && pnpm bench:guard && pnpm bench:competitors:intake && pnpm gate:secrets && node tools/check-secrets.mjs --self-test && node tools/check-bird-baseline.mjs --self-test && node tools/bird-summary.mjs --self-test && node tools/bird-reconcile.mjs --self-test && node tools/stratify-mixed.mjs --self-test && node tools/check-gate-parity.mjs --self-test && node tools/check-gate-parity.mjs && node tools/check-eval-coverage.mjs --self-test && node tools/check-eval-coverage.mjs",
+    "gate:commands": "node tools/check-commands.mjs && node tools/check-commands.mjs --self-test",
+    "gate:readings": "tsx eval/bird/readings.ts --check",
+    "gate:all": "pnpm typecheck && pnpm build && pnpm test:coverage && pnpm gate:coverage && node tools/coverage-gate.mjs --self-test && pnpm gate:layering && node tools/check-layering.mjs --self-test && node tools/check-platform.mjs && node tools/check-platform.mjs --self-test && pnpm gate:exports && pnpm gate:budgets && pnpm gate:dispatch && pnpm bench:guard && pnpm bench:competitors:intake && pnpm gate:secrets && node tools/check-secrets.mjs --self-test && node tools/check-bird-baseline.mjs --self-test && node tools/bird-summary.mjs --self-test && node tools/bird-reconcile.mjs --self-test && node tools/stratify-mixed.mjs --self-test && node tools/check-gate-parity.mjs --self-test && node tools/check-gate-parity.mjs && pnpm gate:commands && pnpm gate:readings && node tools/check-eval-coverage.mjs --self-test && node tools/check-eval-coverage.mjs",
     "bench": "tsx eval/run.ts",
     "bench:ablate": "tsx eval/ablate.ts",
     "verify": "pnpm typecheck && pnpm build && pnpm test:coverage && pnpm gate:coverage && pnpm gate:all && pnpm bench && pnpm bench:linking && pnpm bench:semantic",
@@ -77,6 +79,7 @@
     "bench:bird:cache": "tsx eval/bird/cache.ts",
     "bench:bird:pair": "tsx eval/bird/pair.ts",
     "bench:bird:compare": "tsx eval/bird/compare.ts",
+    "bench:bird:readings": "tsx eval/bird/readings.ts",
     "bench:bird:reasoning": "tsx eval/bird/reasoning.ts",
     "bench:bird:contrast": "tsx eval/bird/contrast.ts",
     "gate:dispatch": "node tools/bird-dispatch.mjs --self-test"

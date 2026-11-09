@@ -1,0 +1,321 @@
+{
+  "corpus": "bird-mini-dev",
+  "note": "The discordant counts of each declared pair in each run, and nothing else. Every number printed in docs/benchmarks.md and README.md is derived from these counts by eval/bird/readings.ts at gate time, so a cell and the pooled line under it cannot disagree. Adding a run is adding a row of two numbers; changing a printed digit is impossible without changing a count.",
+  "docs": [
+    {
+      "file": "docs/benchmarks.md",
+      "views": [
+        "three-runs",
+        "four-runs",
+        "seven-runs"
+      ]
+    },
+    {
+      "file": "README.md",
+      "views": []
+    }
+  ],
+  "runs": [
+    {
+      "key": "A",
+      "id": "42482353883",
+      "examined": 496
+    },
+    {
+      "key": "B",
+      "id": "42491745712",
+      "examined": 496
+    },
+    {
+      "key": "C",
+      "id": "42502095942",
+      "examined": 496
+    },
+    {
+      "key": "D",
+      "id": "42510049798",
+      "examined": 496
+    },
+    {
+      "key": "E",
+      "id": "42523664683",
+      "examined": 496
+    },
+    {
+      "key": "F",
+      "id": "42526940345",
+      "examined": 496
+    },
+    {
+      "key": "G",
+      "id": "42527570372",
+      "examined": 496
+    }
+  ],
+  "views": [
+    {
+      "id": "three-runs",
+      "pooled": "pooled",
+      "runs": [
+        "A",
+        "B",
+        "C"
+      ],
+      "cells": "counts-p"
+    },
+    {
+      "id": "four-runs",
+      "pooled": "four-run pooled",
+      "runs": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
+      "cells": "counts-p"
+    },
+    {
+      "id": "seven-runs",
+      "pooled": "seven-run pooled",
+      "runs": [
+        "A",
+        "B",
+        "C",
+        "D",
+        "E",
+        "F",
+        "G"
+      ],
+      "labelRuns": "key",
+      "cells": "counts"
+    }
+  ],
+  "pairs": [
+    {
+      "left": "synth-definitions",
+      "right": "inline-definitions",
+      "readings": {
+        "A": {
+          "wins": 13,
+          "losses": 19
+        },
+        "B": {
+          "wins": 17,
+          "losses": 18
+        },
+        "C": {
+          "wins": 18,
+          "losses": 15
+        },
+        "D": {
+          "wins": 13,
+          "losses": 19
+        },
+        "E": {
+          "wins": 15,
+          "losses": 17
+        },
+        "F": {
+          "wins": 14,
+          "losses": 16
+        },
+        "G": {
+          "wins": 14,
+          "losses": 25
+        }
+      }
+    },
+    {
+      "left": "inline+evidence",
+      "right": "inline+evidence+audit",
+      "readings": {
+        "A": {
+          "wins": 8,
+          "losses": 11
+        },
+        "B": {
+          "wins": 11,
+          "losses": 7
+        },
+        "C": {
+          "wins": 10,
+          "losses": 9
+        },
+        "D": {
+          "wins": 9,
+          "losses": 8
+        },
+        "E": {
+          "wins": 17,
+          "losses": 4
+        },
+        "F": {
+          "wins": 11,
+          "losses": 6
+        },
+        "G": {
+          "wins": 10,
+          "losses": 5
+        }
+      }
+    },
+    {
+      "left": "inline+evidence",
+      "right": "select",
+      "readings": {
+        "A": {
+          "wins": 13,
+          "losses": 13
+        },
+        "B": {
+          "wins": 22,
+          "losses": 8
+        },
+        "C": {
+          "wins": 19,
+          "losses": 18
+        },
+        "D": {
+          "wins": 19,
+          "losses": 11
+        },
+        "E": {
+          "wins": 26,
+          "losses": 13
+        },
+        "F": {
+          "wins": 19,
+          "losses": 10
+        },
+        "G": {
+          "wins": 23,
+          "losses": 10
+        }
+      }
+    },
+    {
+      "left": "metadata+evidence",
+      "right": "select",
+      "readings": {
+        "A": {
+          "wins": 19,
+          "losses": 32
+        },
+        "B": {
+          "wins": 27,
+          "losses": 26
+        },
+        "C": {
+          "wins": 18,
+          "losses": 34
+        },
+        "D": {
+          "wins": 22,
+          "losses": 28
+        },
+        "E": {
+          "wins": 27,
+          "losses": 33
+        },
+        "F": {
+          "wins": 23,
+          "losses": 29
+        },
+        "G": {
+          "wins": 24,
+          "losses": 28
+        }
+      }
+    },
+    {
+      "left": "inline+evidence",
+      "right": "metadata+evidence",
+      "readings": {
+        "A": {
+          "wins": 31,
+          "losses": 18
+        },
+        "B": {
+          "wins": 28,
+          "losses": 15
+        },
+        "C": {
+          "wins": 32,
+          "losses": 15
+        },
+        "D": {
+          "wins": 31,
+          "losses": 17
+        },
+        "E": {
+          "wins": 35,
+          "losses": 16
+        },
+        "F": {
+          "wins": 31,
+          "losses": 16
+        },
+        "G": {
+          "wins": 31,
+          "losses": 14
+        }
+      }
+    }
+  ],
+  "claims": [
+    {
+      "file": "README.md",
+      "view": "seven-runs",
+      "pair": [
+        "inline+evidence",
+        "metadata+evidence"
+      ],
+      "template": "{pooled} ± {interval}"
+    },
+    {
+      "file": "README.md",
+      "view": "seven-runs",
+      "pair": [
+        "synth-definitions",
+        "inline-definitions"
+      ],
+      "template": "pooled {magnitude}pp apart (± {interval})"
+    },
+    {
+      "file": "docs/benchmarks.md",
+      "view": "three-runs",
+      "pair": [
+        "inline+evidence",
+        "select"
+      ],
+      "template": "**{pooled} ± {interval}**"
+    },
+    {
+      "file": "docs/benchmarks.md",
+      "view": "three-runs",
+      "pair": [
+        "inline+evidence",
+        "select"
+      ],
+      "template": "Cochran's Q on the three discordant counts is **p = {q}**"
+    },
+    {
+      "file": "docs/benchmarks.md",
+      "view": "seven-runs",
+      "pair": [
+        "inline+evidence",
+        "select"
+      ],
+      "template": "**{pooled} ± {interval}**"
+    },
+    {
+      "file": "docs/benchmarks.md",
+      "view": "seven-runs",
+      "pair": [
+        "inline+evidence",
+        "metadata+evidence"
+      ],
+      "template": "**{pooled} ± {interval}**"
+    }
+  ]
+}

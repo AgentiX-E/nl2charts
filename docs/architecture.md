@@ -495,6 +495,8 @@ test/              cross-package public-surface snapshot
 | `pnpm gate:exports` | the public surface (including subpaths) drifted without review |
 | `pnpm gate:budgets` | a package exceeded its gzip ceiling |
 | `pnpm gate:eval-coverage` | an `eval/` file dropped below its recorded coverage |
+| `pnpm gate:commands` | a document tells a reader to run a script `package.json` does not have |
+| `pnpm gate:readings` | a published table, or a number quoted in prose, is not what the reading ledger derives |
 | `pnpm bench` | a control broke (oracle ≠ 100% or empty ≠ 0%) |
 
 ### Running the gates on a machine that has no service containers

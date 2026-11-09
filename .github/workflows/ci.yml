@@ -175,6 +175,17 @@ jobs:
         # `pnpm gate:all` read like the whole gate and was a third of it, which is how a type
         # error reached this job on a commit whose author had run it.
         run: node tools/check-gate-parity.mjs
+      - name: Documented commands are registered scripts
+        # Five paragraphs in docs/benchmarks.md told a reader to run a script that had never been
+        # added to package.json, and nothing noticed: a command name is not a path a link checker
+        # follows and not a symbol a compiler resolves, so it sat in prose looking exactly as
+        # authoritative as one that works.
+        run: pnpm gate:commands
+      - name: Published tables are derived from the reading ledger
+        # Four times a hand-typed number drifted from the artifact it described. The tables are
+        # generated from the discordant counts instead, so a cell and the pooled line under it
+        # cannot disagree, and a document that loses its block is red rather than unchecked.
+        run: pnpm gate:readings
       - name: Upload coverage
         if: always()
         uses: actions/upload-artifact@v5
