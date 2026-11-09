@@ -1885,6 +1885,45 @@ So the ordering is now:
 The cost is two calls. The saving is the forty minutes between "the endpoint is refusing" and
 "the arm has already spent itself finding out".
 
+## A preflight that passed, and a run that failed anyway
+
+`glm-4.6` was dispatched with eight arms, and the first one — `names` — ended the run at
+**207 of 496 calls (41.7%) failed at the model**, above the 10% the harness treats as an outage.
+Every failure was a timeout. Nothing was published, and the message said why.
+
+The preflight had passed twenty minutes earlier, and it was not lying. It was answering a smaller
+question than the one it was read as answering, and the size of that gap is arithmetic:
+
+| clean probes | failure rate a clean run cannot rule out (95%) |
+| --- | --- |
+| 3 | 63.2% |
+| 8 | 31.2% |
+| 12 | 22.1% |
+| 29 | 9.7% |
+
+If the true rate were `p`, `n` clean probes would still occur with probability `(1-p)^n`, so a clean
+run is only 95%-consistent with rates up to `1 - 0.05^(1/n)`. At the three probes this workflow used,
+a 41.7% failure rate passes **19.8%** of the time — one run in five. The preflight said "the endpoint
+answers"; the reviewer read "the run will finish".
+
+Three changes, and the first two are the ones that matter:
+
+1. **The preflight prints what it did not rule out.** `preflight[primary]: 12 calls to glm-4.6, median
+   1,940 ms, deadline 300000 ms; 12 clean probe(s) leave a failure rate above 22.1% undetected`. A
+   pass is now a reading with a width rather than a boolean, and `undetectedFailureRate` is the
+   arithmetic, tested at 1, 3, 8, 12 and 29 probes.
+2. **The deadline is an input.** It was the string `'180000'` in the workflow — a contract with one
+   model. `glm-4.6` at 180s is the second provider's reasoning model at a deadline written for its
+   chat model, and the 41% figure is the same one `glm-4.5` produced two rounds ago, which says the
+   number is a property of the family rather than of a bad afternoon.
+3. **The probes went from three to twelve**, because twelve is the smallest round number that puts
+   the undetected rate below the 10% the harness uses everywhere else — at 22.1% it is still not
+   enough, and the report says so rather than implying it is.
+
+What this does not do is make the run cheaper. Two arms instead of eight, at concurrency 8 and a
+300-second deadline, is the experiment the project's own rule asked for — *does a reasoning model move the
+accuracy* — and not the eight-arm sweep, which is a different question asked at four times the bill.
+
 ## The candidate the three prompts cannot write
 
 Seven configurations answered 466 of the 1,532 dev questions wrongly — no arm held the right
@@ -6448,7 +6487,7 @@ the dispatch:
   quarters of everything it could possibly reach.
 - **② ≥8 of the 100 needs 36%** — the arm can fail ① while passing ②, which is exactly the shape a
   two-way comparison of a weak candidate should produce.
-- **③ 无法达成（结构上不可能）**: 92% of the ceiling is 966 cases and the oracle is 963. The
+- **③ unreachable by construction**: 92% of the ceiling is 966 cases and the oracle is 963. The
   criterion was written before this table existed and it sits **three cases above the maximum**. It
   cannot pass, and reporting it as a failure would blame the arm for an arithmetic error in its own
   registration. It is therefore recorded here, before the read, in two parts: ③ stands as written
