@@ -102,7 +102,12 @@ export interface LedgerClaim {
   readonly file: string;
   readonly view: string;
   readonly pair: readonly [string, string];
-  /** Template with `{pooled}`, `{interval}`, `{verdict}`, `{q}` and `{significant}` placeholders. */
+  /**
+   * Template with `{pooled}`, `{interval}`, `{verdict}`, `{split}`, `{q}` and `{significant}`
+   * placeholders. `{verdict}` may not appear without `{split}`: a label is a statement about a
+   * population, and two of the five pairs this repository reads were `established` on Mini-Dev and
+   * `none` on dev.
+   */
   readonly template: string;
 }
 
@@ -152,6 +157,8 @@ export interface DerivedView {
   readonly rows: readonly ViewRow[];
   /** Pairs with no reading at all in this view — dropped from the table, and said out loud. */
   readonly unscored: readonly string[];
+  /** The population every label in this table is a statement about, taken from its runs. */
+  readonly split: string;
 }
 
 const MINUS = '\u2212';
@@ -295,7 +302,14 @@ export function parseLedger(raw: unknown): ReadingsLedger {
     if (pair.length !== 2) fail(`claim ${file} names ${String(pair.length)} arms, and a pair is two`);
     const name = `${pair[0] as string} → ${pair[1] as string}`;
     if (!pairKeys.has(name)) fail(`claim ${file} quotes pair ${name}, which is not in pairs`);
-    return { file, view, pair: [pair[0] as string, pair[1] as string] as const, template: text(claim.template, `claims[${String(index)}].template`) };
+    const template = text(claim.template, `claims[${String(index)}].template`);
+    // A label without its population is a sentence that can be carried from one table to another.
+    // `established` on 496 Mini-Dev questions was `none` on dev for two of the five pairs, so a
+    // claim that quotes a verdict has to name the split it was read on.
+    if (template.includes('{verdict}') && !template.includes('{split}')) {
+      fail(`claim ${file} quotes {verdict} without {split}, and a label is about a population`);
+    }
+    return { file, view, pair: [pair[0] as string, pair[1] as string] as const, template };
   });
   const docs = list(ledger.docs, 'docs').map((item, index) => {
     const entry = object(item, `docs[${String(index)}]`);
@@ -326,6 +340,8 @@ export function viewOf(ledger: ReadingsLedger, id: string): LedgerView {
 export function deriveView(ledger: ReadingsLedger, id: string): DerivedView {
   const view = viewOf(ledger, id);
   const examinedOf = new Map(ledger.runs.map((run) => [run.key, run.examined]));
+  const splitOf = new Map(ledger.runs.map((run) => [run.key, run.split]));
+  const split = splitOf.get(view.runs[0] as string) as string;
   const rows: ViewRow[] = [];
   const unscored: string[] = [];
   for (const pair of ledger.pairs) {
@@ -356,7 +372,7 @@ export function deriveView(ledger: ReadingsLedger, id: string): DerivedView {
     }));
     rows.push({ left: pair.left, right: pair.right, cells, pooled: poolPair(readings, pair.left, pair.right) });
   }
-  return { view, rows, unscored };
+  return { view, rows, unscored, split };
 }
 
 function signed(pp: number): string {
@@ -368,6 +384,101 @@ function headerOf(ledger: ReadingsLedger, view: LedgerView, key: string): string
   if (view.labelRuns === 'key') return key;
   const run = ledger.runs.find((item) => item.key === key) as LedgerRun;
   return `\`${run.id}\``;
+}
+
+/**
+ * The label a pair carries at every prefix of the view's runs.
+ *
+ * A table shows where the label settled; the ladder shows that it settled rather than wandered. The
+ * document used to carry this as forty hand-typed labels in one table, which is forty numbers that
+ * can drift — and two of them had already drifted, because they said `sign-flip` for pairs whose
+ * readings now pool as `established`. Derived, the ladder cannot disagree with the table it sits
+ * under: both come from the same `poolPair` calls.
+ */
+export interface LadderStep {
+  readonly verdict: string;
+  readonly from: number;
+  readonly to: number;
+}
+
+export function ladderOf(ledger: ReadingsLedger, viewId: string, left: string, right: string): LadderStep[] {
+  const view = viewOf(ledger, viewId);
+  const pair = ledger.pairs.find((item) => item.left === left && item.right === right);
+  if (pair === undefined || view.runs.length < 2) return [];
+  const examinedOf = new Map(ledger.runs.map((run) => [run.key, run.examined]));
+  const steps: LadderStep[] = [];
+  for (let count = 2; count <= view.runs.length; count += 1) {
+    const readings: PairReading[] = [];
+    for (const key of view.runs.slice(0, count)) {
+      const reading = pair.readings[key];
+      if (reading === undefined) continue;
+      const examined = examinedOf.get(key) as number;
+      readings.push({
+        artifact: key,
+        examined,
+        wins: reading.wins,
+        losses: reading.losses,
+        deltaPp: Number((((reading.wins - reading.losses) / examined) * 100).toFixed(2)),
+        p: Number(mcnemarExact(reading.losses, reading.wins).toFixed(4)),
+      });
+    }
+    if (readings.length < 2) continue;
+    const verdict = poolPair(readings, left, right).verdict;
+    const last = steps[steps.length - 1];
+    if (last !== undefined && last.verdict === verdict) steps[steps.length - 1] = { verdict, from: last.from, to: count };
+    else steps.push({ verdict, from: count, to: count });
+  }
+  return steps;
+}
+
+/** The ladder as a reader reads it, or nothing when there is only one reading to ladder. */
+export function renderLadder(ledger: ReadingsLedger, id: string): string[] {
+  const view = viewOf(ledger, id);
+  const rows = view.runs.slice();
+  if (rows.length < 2) return [];
+  const lines: string[] = [];
+  for (const pair of ledger.pairs) {
+    const steps = ladderOf(ledger, id, pair.left, pair.right);
+    if (steps.length === 0) continue;
+    const described = steps
+      .map((step) => (step.from === step.to ? `${step.verdict} at ${String(step.from)}` : `${step.verdict} at ${String(step.from)}–${String(step.to)}`))
+      .join(', ');
+    lines.push(`- \`${pair.left}\` → \`${pair.right}\`: ${described} readings`);
+  }
+  if (lines.length === 0) return [];
+  return ['*The label at every prefix of these readings — it should arrive once and stay:*', ...lines];
+}
+
+/**
+ * Labels that arrive, leave and arrive again.
+ *
+ * This is the property the hand-written ladder table was making: a pair's evidence accumulates, so
+ * its label should move in one direction as readings arrive, never back. A label that returns is a
+ * pool whose estimate depends on how many readings were pooled in a way no single reading explains,
+ * and the moment to hear about it is here rather than in a paragraph.
+ *
+ * Kept as a function of the steps rather than of the ledger so that the shape it rejects can be
+ * stated in a test directly: constructing a corpus that produces a recurrence is a search, and a
+ * check that can only be exercised by a search is a check nobody runs.
+ */
+export function recurrences(steps: readonly LadderStep[]): string[] {
+  const seen = new Set<string>();
+  const repeated: string[] = [];
+  for (const step of steps) {
+    if (seen.has(step.verdict)) repeated.push(step.verdict);
+    seen.add(step.verdict);
+  }
+  return repeated;
+}
+
+export function ladderProblems(ledger: ReadingsLedger, id: string): string[] {
+  const problems: string[] = [];
+  for (const pair of ledger.pairs) {
+    for (const verdict of recurrences(ladderOf(ledger, id, pair.left, pair.right))) {
+      problems.push(`${pair.left} → ${pair.right} reads ${verdict} again in ${id}, after leaving it`);
+    }
+  }
+  return problems;
 }
 
 /** The table, as Markdown, with the p-value bolded where it clears 0.05. */
@@ -384,7 +495,11 @@ export function renderTable(ledger: ReadingsLedger, id: string): string[] {
       return `${counts}, ${cell.p < 0.05 ? `**${p}**` : p}`;
     });
     const estimate = `${signed(row.pooled.pooledPp)} ± ${row.pooled.pooledIntervalPp.toFixed(2)}`;
-    const verdict = `**${row.pooled.verdict}**`;
+    // A verdict is a statement about a population, and the table says which one in the same cell.
+    // `established` on 496 Mini-Dev questions is not `established`: the pair that carried this
+    // section's headline read `none` on dev in a dispatch of 1,532 questions. The split used to live
+    // in the prose above the table, which is where a reader who copies one row does not look.
+    const verdict = `**${row.pooled.verdict}** (${derived.split})`;
     // A Q statistic is a test of whether two or more estimates agree. Over one reading there is
     // nothing to compare, and the number `poolPair` returns for that case (1, so that nothing is
     // red) is a placeholder rather than a p-value — printing it would claim a test was run.
@@ -414,6 +529,11 @@ export function renderTable(ledger: ReadingsLedger, id: string): string[] {
       .join(', ');
     lines.push('');
     lines.push(`*Interval widened by DerSimonian–Laird for ${named}, because the label says those readings are not one number.*`);
+  }
+  const ladder = renderLadder(ledger, id);
+  if (ladder.length > 0) {
+    lines.push('');
+    lines.push(...ladder);
   }
   return lines;
 }
@@ -467,6 +587,7 @@ export function renderClaim(ledger: ReadingsLedger, claim: LedgerClaim): Rendere
     .replace('{interval}', row.pooled.pooledIntervalPp.toFixed(2))
     .replace('{runs}', wordOf(row.pooled.readings.length))
     .replace('{verdict}', row.pooled.verdict)
+    .replace('{split}', derived.split)
     .replace('{q}', row.pooled.heterogeneityP.toFixed(3))
     .replace('{significant}', String(row.pooled.readingsSignificant));
   return { wanted, row };
@@ -617,6 +738,7 @@ export function main(argv: readonly string[] = process.argv.slice(2), root = pro
     return problems.length === 0 ? 0 : 1;
   }
   const problems: string[] = [];
+  for (const view of ledger.views) problems.push(...ladderProblems(ledger, view.id));
   for (const entry of ledger.docs) {
     const path = resolve(root, entry.file);
     const before = readFileSync(path, 'utf8');

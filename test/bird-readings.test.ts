@@ -16,6 +16,9 @@ import {
   checkDoc,
   countsOf,
   deriveView,
+  ladderOf,
+  ladderProblems,
+  recurrences,
   reconcile,
   main,
   markers,
@@ -290,7 +293,30 @@ describe('rendering a view', () => {
     const ledger = parseLedger(withLedger((raw) => {
       raw.views = [{ id: 'both', pooled: 'pooled', runs: ['R1'] }];
     }));
-    expect(renderTable(ledger, 'both')[2]?.endsWith('| **one-run-only** | — |')).toBe(true);
+    expect(renderTable(ledger, 'both')[2]?.endsWith('| **none** (minidev) | — |')).toBe(true);
+  });
+
+  /**
+   * A verdict is a statement about a population, and the table has to say which one. `established`
+   * on 496 Mini-Dev questions is not `established` on dev: the same pair read `none` there in a
+   * dispatch of 1,532 questions. A label that does not name its split is a label a reader can carry
+   * from one table to the other, which is exactly the error this section exists to stop.
+   */
+  it('names the split beside every verdict, because a label is about a population', () => {
+    const ledger = parseLedger(withLedger((raw) => {
+      raw.runs = [
+        { key: 'R1', id: '111', examined: 100, split: 'minidev' },
+        { key: 'D1', id: '333', examined: 900, split: 'dev' },
+      ];
+      raw.views = [
+        { id: 'both', runs: ['R1'] },
+        { id: 'dev-split', runs: ['D1'] },
+      ];
+      raw.docs = [{ file: 'DOC.md', views: ['both', 'dev-split'] }];
+      raw.pairs = [{ left: 'a', right: 'b', readings: { R1: { wins: 40, losses: 5 }, D1: { wins: 40, losses: 5 } } }];
+    }));
+    expect(renderTable(ledger, 'both')[2]).toContain('| **one-run-only** (minidev) |');
+    expect(renderTable(ledger, 'dev-split')[2]).toContain('| **one-run-only** (dev) |');
   });
 
   it('says which declared pairs a view does not read, rather than showing fewer rows in silence', () => {
@@ -342,7 +368,91 @@ describe('rendering a view', () => {
     }));
     const table = renderTable(ledger, 'both');
     expect(table[2]).toContain('| −2.00pp ± 4.38 |');
-    expect(table[2]).toContain('| **none** |');
+    expect(table[2]).toContain('| **none** (minidev) |');
+  });
+});
+
+describe('the ladder of labels as readings accrue', () => {
+  /** The three real readings of `metadata+evidence -> select`: null, null, then established. */
+  function ladderLedger(): ReturnType<typeof parseLedger> {
+    return parseLedger(withLedger((raw) => {
+      raw.runs = ['R1', 'R2', 'R3'].map((key) => ({ key, id: key, examined: 496, split: 'minidev' }));
+      raw.views = [{ id: 'both', runs: ['R1', 'R2', 'R3'] }];
+      raw.pairs = [{
+        left: 'a',
+        right: 'b',
+        readings: {
+          R1: { wins: 19, losses: 32 },
+          R2: { wins: 27, losses: 26 },
+          R3: { wins: 18, losses: 34 },
+        },
+      }];
+    }));
+  }
+
+  it('collapses prefixes that carry the same label into one step', () => {
+    const steps = ladderOf(ladderLedger(), 'both', 'a', 'b');
+    expect(steps).toEqual([
+      { verdict: 'none', from: 2, to: 2 },
+      { verdict: 'established', from: 3, to: 3 },
+    ]);
+  });
+
+  it('renders the ladder as one line per pair, under the table it belongs to', () => {
+    const table = renderTable(ladderLedger(), 'both');
+    expect(table).toContain('*The label at every prefix of these readings — it should arrive once and stay:*');
+    expect(table.some((line) => line === '- `a` → `b`: none at 2, established at 3 readings')).toBe(true);
+  });
+
+  it('says nothing for a view with one reading, because a ladder of one rung is not a ladder', () => {
+    const ledger = parseLedger(withLedger((raw) => {
+      raw.views = [{ id: 'both', runs: ['R1'] }];
+    }));
+    expect(ladderOf(ledger, 'both', 'a', 'b')).toEqual([]);
+    expect(renderTable(ledger, 'both').some((line) => line.startsWith('*The label at every prefix'))).toBe(false);
+  });
+
+  /**
+   * The property the hand-written table asserted. Stated over steps rather than over a corpus: no
+   * count sequence in this ledger produces a recurrence, and a check that can only be reached by
+   * searching for one would never run.
+   */
+  it('fails when a label leaves and comes back', () => {
+    expect(recurrences([
+      { verdict: 'none', from: 2, to: 2 },
+      { verdict: 'established', from: 3, to: 4 },
+      { verdict: 'none', from: 5, to: 5 },
+    ])).toEqual(['none']);
+    expect(recurrences([
+      { verdict: 'none', from: 2, to: 3 },
+      { verdict: 'established', from: 4, to: 9 },
+    ])).toEqual([]);
+  });
+
+  it('reports nothing for a ledger whose labels only ever strengthen', () => {
+    expect(ladderProblems(ladderLedger(), 'both')).toEqual([]);
+  });
+
+  /**
+   * A corpus that really does take a label back, which is why the check exists rather than being
+   * assumed true. Four readings of `19/32` make a pair `established` at −2.62pp; a `27/26` and a
+   * `32/19` then push Cochran's Q to p = 0.037 and the label to `heterogeneous`; one more `19/32`
+   * pulls Q back over the line and the label returns to `established`. The estimate never left its
+   * sign — what moved was whether the readings could be summarised at all.
+   */
+  it('names the pair and the view when a label leaves and comes back', () => {
+    const cells: [number, number][] = [[19, 32], [19, 32], [19, 32], [19, 32], [27, 26], [32, 19], [19, 32]];
+    const ledger = parseLedger(withLedger((raw) => {
+      raw.runs = cells.map((_, index) => ({ key: `R${String(index + 1)}`, id: String(index + 1), examined: 496, split: 'minidev' }));
+      raw.views = [{ id: 'both', runs: cells.map((_, index) => `R${String(index + 1)}`) }];
+      raw.pairs = [{
+        left: 'a',
+        right: 'b',
+        readings: Object.fromEntries(cells.map(([wins, losses], index) => [`R${String(index + 1)}`, { wins, losses }])),
+      }];
+    }));
+    expect(ladderOf(ledger, 'both', 'a', 'b').map((step) => step.verdict)).toEqual(['established', 'heterogeneous', 'established']);
+    expect(ladderProblems(ledger, 'both')).toEqual(['a → b reads established again in both, after leaving it']);
   });
 });
 
@@ -439,9 +549,21 @@ describe('a number quoted in prose', () => {
 
   it('fills every placeholder, including the magnitude of a signed estimate', () => {
     const ledger = parseLedger(withLedger((raw) => {
-      raw.claims = [{ file: 'DOC.md', view: 'both', pair: ['a', 'b'], template: '{magnitude}|{verdict}|{q}|{significant}' }];
+      raw.claims = [{ file: 'DOC.md', view: 'both', pair: ['a', 'b'], template: '{magnitude}|{verdict}|{split}|{q}|{significant}' }];
     }));
-    expect(renderClaim(ledger, ledger.claims[0] as LedgerClaim).wanted).toBe('3.45|none|0.578|0');
+    expect(renderClaim(ledger, ledger.claims[0] as LedgerClaim).wanted).toBe('3.45|none|minidev|0.578|0');
+  });
+
+  /**
+   * The rule that keeps a sentence honest: a label cannot be quoted without the population it was
+   * measured on. `established` on 496 questions and `established` on 1,532 are different claims, and
+   * the second one was withdrawn by a dev dispatch. Refused at parse time rather than checked at
+   * gate time, because a template is the only place this can be prevented rather than detected.
+   */
+  it('refuses a claim that quotes a verdict without the split it was read on', () => {
+    expect(() => parseLedger(withLedger((raw) => {
+      raw.claims = [{ file: 'DOC.md', view: 'both', pair: ['a', 'b'], template: 'it is {verdict}' }];
+    }))).toThrow(/quotes \{verdict\} without \{split\}, and a label is about a population/);
   });
 
   it('passes when the sentence carries what the ledger derives', () => {
@@ -557,11 +679,13 @@ describe('an artifact, against the ledger', () => {
 describe('the published tables', () => {
   const ledger = parseLedger(JSON.parse(readFileSync(join(ROOT, 'eval/baseline/readings.json'), 'utf8')) as unknown);
 
-  it('reproduces the eight-run estimates the document prints', () => {
+  it('reproduces the nine-run estimates the document prints', () => {
     // These are the numbers the document carried when it was still hand-typed, re-derived after the
-    // heterogeneity test was corrected. The three labels that moved are the point: `select` and the
-    // audit pair were `heterogeneous` under a Q referred to one degree of freedom, and neither pair
-    // rejects the hypothesis that its readings share one mean.
+    // heterogeneity test was corrected and after the ninth run was filed. Two labels moved for a
+    // second reason: a reversal now requires a reading that cleared its own test in each direction,
+    // so `inline+evidence -> inline+evidence+audit` — seven positive readings and one at p = 0.65 —
+    // and `metadata+evidence -> select` — one significant negative reading and one tie — stopped
+    // being called `sign-flip` and became what the pooled estimate says they are.
     const rows = deriveView(ledger, 'all-runs').rows;
     const numbers = rows.map((row) => [
       row.left,
@@ -572,11 +696,11 @@ describe('the published tables', () => {
       row.pooled.heterogeneityP,
     ]);
     expect(numbers).toEqual([
-      ['synth-definitions', 'inline-definitions', -0.65, 0.8, 'none', 0.8364],
-      ['inline+evidence', 'inline+evidence+audit', 0.71, 0.59, 'sign-flip', 0.377],
-      ['inline+evidence', 'select', 1.6, 0.78, 'established', 0.4887],
-      ['metadata+evidence', 'select', -1.43, 1.02, 'sign-flip', 0.8117],
-      ['inline+evidence', 'metadata+evidence', 3.05, 0.96, 'established', 0.9978],
+      ['synth-definitions', 'inline-definitions', -0.67, 0.77, 'none', 0.899],
+      ['inline+evidence', 'inline+evidence+audit', 0.63, 0.56, 'established', 0.4016],
+      ['inline+evidence', 'select', 1.54, 0.72, 'established', 0.5827],
+      ['metadata+evidence', 'select', -1.42, 0.96, 'established', 0.8817],
+      ['inline+evidence', 'metadata+evidence', 3, 0.91, 'established', 0.9991],
     ]);
   });
 
@@ -599,7 +723,7 @@ describe('the published tables', () => {
     expect(curated?.pooled.readingsSignificant).toBe(4);
     const select = deriveView(ledger, 'all-runs').rows.find((row) => row.right === 'select');
     const signs = select?.pooled.readings.map((reading) => Math.sign(reading.deltaPp));
-    expect(signs?.filter((sign) => sign > 0)).toHaveLength(7);
+    expect(signs?.filter((sign) => sign > 0)).toHaveLength(8);
     expect(signs?.filter((sign) => sign === 0)).toHaveLength(1);
   });
 
@@ -635,6 +759,6 @@ describe('the command', () => {
   it('runs as a script, because a gate that cannot be invoked checks nothing', () => {
     const result = spawnSync('npx', ['tsx', 'eval/bird/readings.ts', '--check'], { cwd: ROOT, encoding: 'utf8' });
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain('5 pairs · three-runs (3 runs), four-runs (4 runs), all-runs (8 runs), dev-split (1 runs) · 2 documents');
+    expect(result.stdout).toContain('5 pairs · three-runs (3 runs), four-runs (4 runs), all-runs (9 runs), dev-split (1 runs) · 2 documents');
   });
 });

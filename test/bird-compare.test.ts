@@ -13,6 +13,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
+import { mcnemarExact } from '@agentix-e/nl2charts-devkit';
 import {
   churn,
   compareLines,
@@ -612,6 +613,16 @@ describe('pooling one pair over the runs that read it', () => {
     p,
   });
 
+  /**
+   * A reading whose p is the test the ledger would run, rather than a number typed into a fixture.
+   *
+   * The default `p = 1` above is safe for the arithmetic tests and wrong for the label tests: a
+   * verdict is a statement about which readings cleared their own test, so a fixture that hands
+   * every reading the same p is a fixture that cannot tell one rule from another.
+   */
+  const observed = (wins: number, losses: number): Parameters<typeof poolPair>[0][number] =>
+    reading(wins, losses, Number(mcnemarExact(losses, wins).toFixed(4)));
+
   it('weights each reading by its inverse variance and reports the pooled interval', () => {
     const pooled = poolPair([reading(22, 8, 0.0161), reading(19, 18)], 'a', 'b');
     expect(pooled.pooledPp).toBe(1.65);
@@ -626,8 +637,26 @@ describe('pooling one pair over the runs that read it', () => {
     expect(poolPair([reading(22, 8, 0.0161), reading(19, 18), reading(14, 12)], 'a', 'b').verdict).toBe('one-run-only');
   });
 
-  it('calls a pair whose readings disagree in sign a sign flip', () => {
-    expect(poolPair([reading(27, 26), reading(18, 34, 0.0365)], 'a', 'b').verdict).toBe('sign-flip');
+  it('calls a pair a sign flip when a reading in each direction cleared its own test', () => {
+    // A reversal is the one thing a pool must not average away, so it is checked before
+    // heterogeneity: both readings are significant, in opposite directions, and Q rejects too.
+    // The label names the kind of disagreement rather than the fact of it.
+    const pooled = poolPair([observed(40, 5), observed(5, 40)], 'a', 'b');
+    expect(pooled.verdict).toBe('sign-flip');
+    expect(pooled.tauSquaredPp2).toBeGreaterThan(0);
+  });
+
+  it('does not call one null reading on the other side of zero a reversal', () => {
+    // The eight real readings of `inline+evidence -> inline+evidence+audit`. Seven are positive and
+    // one is negative — `8/11`, which is p = 0.65 on its own. This pair printed `sign-flip` for
+    // three rounds because the rule asked whether *any* reading was significant and whether the sign
+    // set had two members, and those were two different readings: the significance was in `17/4`
+    // and the opposite sign was in `8/11`. A reading that cannot separate itself from zero is a
+    // wobble, and calling the pool a reversal on its behalf made the label mean "not unanimous".
+    const cells: [number, number][] = [[8, 11], [11, 7], [10, 9], [9, 8], [17, 4], [11, 6], [10, 5], [10, 7]];
+    const pooled = poolPair(cells.map(([wins, losses]) => observed(wins, losses)), 'a', 'b');
+    expect(pooled.verdict).toBe('established');
+    expect(pooled.pooledP).toBeLessThan(0.05);
   });
 
   it('calls a sign change between two insignificant readings a wobble, not a flip', () => {
@@ -674,6 +703,19 @@ describe('pooling one pair over the runs that read it', () => {
     expect(pooled.heterogeneityP).toBe(1);
   });
 
+  /**
+   * A dev-split table reads one run, and every row of it used to say `one-run-only` — including the
+   * rows whose single reading was 37/39 and 75/61. `one-run-only` is the label for an effect one run
+   * found and the pool could not keep; a reading that found nothing is `none`, and printing the
+   * first for the second made the dev table read as though it had findings in three pairs when it
+   * had none.
+   */
+  it('calls a single reading that found nothing nothing, not an effect one run found', () => {
+    expect(poolPair([observed(75, 61)], 'a', 'b').verdict).toBe('none');
+    expect(poolPair([observed(37, 39)], 'a', 'b').verdict).toBe('none');
+    expect(poolPair([observed(40, 5)], 'a', 'b').verdict).toBe('one-run-only');
+  });
+
   it('says a pair with no discordant case anywhere has nothing to pool', () => {
     const pooled = poolPair([reading(0, 0)], 'a', 'b');
     expect(pooled.problems).toHaveLength(1);
@@ -704,6 +746,10 @@ describe('pooling one pair over the runs that read it', () => {
    * The invariant the pre-test buys, stated as a property rather than as five constants: a widened
    * interval is a *different estimator*, so a reader who sees ±0.87 next to `heterogeneous` is
    * entitled to know the label and the number agree about whether the readings are one number.
+   *
+   * Two labels say the readings are not one number: `heterogeneous` (they disagree about the size)
+   * and `sign-flip` (they disagree about the direction, and both directions cleared their own test).
+   * A reversal is a kind of heterogeneity, so it carries the widened interval too.
    */
   it('widens the interval exactly when the label says the readings are not one number', () => {
     const cases: [number, number][][] = [
@@ -716,14 +762,17 @@ describe('pooling one pair over the runs that read it', () => {
       [[27, 26], [18, 34]],
     ];
     for (const cells of cases) {
-      const pooled = poolPair(cells.map(([wins, losses]) => reading(wins, losses)), 'a', 'b');
-      expect(pooled.tauSquaredPp2 > 0).toBe(pooled.verdict === 'heterogeneous');
+      const pooled = poolPair(cells.map(([wins, losses]) => observed(wins, losses)), 'a', 'b');
+      expect(pooled.tauSquaredPp2 > 0).toBe(pooled.verdict === 'heterogeneous' || pooled.verdict === 'sign-flip');
     }
   });
 
   it('calls readings that disagree beyond their intervals heterogeneous', () => {
-    const pooled = poolPair([reading(60, 5, 0.0001), reading(5, 60, 0.0001)], 'a', 'b');
+    // Same direction, different sizes: +11.09pp and +4.03pp, Q p = 0.001. Nothing reversed, so the
+    // label is the plain one — `heterogeneous` is the disagreement that is not a reversal.
+    const pooled = poolPair([reading(60, 5, 0.0001), reading(30, 10, 0.0018)], 'a', 'b');
     expect(pooled.verdict).toBe('heterogeneous');
+    expect(pooled.tauSquaredPp2).toBeGreaterThan(0);
   });
 
   it('prints each reading, the pooled line and what the readings do to each other', () => {
@@ -762,10 +811,17 @@ describe('pooling one pair over the runs that read it', () => {
 
   it('says the readings differ by more than their own intervals when they do', () => {
     // The line used to print `→ heterogeneous, readings agree`: the label and the tail of the same
-    // sentence contradicting each other, and the tail is the half a reader skims.
-    const text = pooledLines([poolPair([reading(60, 5, 0.0001), reading(5, 60, 0.0001)], 'a', 'b')]).join('\n');
+    // sentence contradicting each other, and the tail is the half a reader skims. A same-direction
+    // disagreement is `heterogeneous`; the reversal beside it is `sign-flip`, and both are widened.
+    const text = pooledLines([poolPair([reading(60, 5, 0.0001), reading(30, 10, 0.0018)], 'a', 'b')]).join('\n');
     expect(text).toContain('heterogeneous');
-    expect(text).toContain('2 of 2 readings significant, Q p = 0.000 — the readings differ by more than their own intervals');
+    expect(text).toContain('2 of 2 readings significant, Q p = 0.001 — the readings differ by more than their own intervals');
+    expect(text).toContain('(random effects, DerSimonian–Laird)');
+  });
+
+  it('calls a reversal sign-flip and widens its interval, because a reversal is not a number either', () => {
+    const text = pooledLines([poolPair([reading(60, 5, 0.0001), reading(5, 60, 0.0001)], 'a', 'b')]).join('\n');
+    expect(text).toContain('± 21.74 (95%), p ≈ 1.000 → sign-flip');
     expect(text).toContain('(random effects, DerSimonian–Laird)');
   });
 

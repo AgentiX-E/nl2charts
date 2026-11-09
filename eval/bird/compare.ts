@@ -645,7 +645,11 @@ export interface PooledReading {
   readonly tauSquaredPp2: number;
   /** How many of the readings cleared p < 0.05 on their own. */
   readonly readingsSignificant: number;
-  /** `established`, `sign-flip`, `one-run-only` or `none`. */
+  /**
+   * `established`, `sign-flip`, `heterogeneous`, `one-run-only` or `none`, in that order of
+   * precedence: a reversal wins over heterogeneity because it names the kind of disagreement, and
+   * both are checked before the pool's own significance.
+   */
   readonly verdict: string;
   readonly problems: readonly string[];
 }
@@ -771,30 +775,48 @@ export function poolPair(readings: readonly PairReading[], left: string, right: 
   const standardError = pooledTotal === 0 ? fixedError : Math.sqrt(1 / pooledTotal);
   const pooledP = pooledTotal === 0 ? 1 : normalTwoSided(Math.abs(pooledPp) / standardError);
   const significant = usable.filter((reading) => reading.p < 0.05);
-  // A reading of exactly zero is a tie, not a direction: it says the pair made no difference on
-  // those questions, which is not evidence against a positive effect and not evidence for one. Left
-  // in the sign set it turned every pair with one exact tie into a `sign-flip` — the label for a
-  // pair that reversed — so `inline+evidence -> select` read `sign-flip` on the strength of a single
-  // 13-against-13 run followed by seven positive ones.
-  const signs = new Set(usable.map((reading) => Math.sign(reading.deltaPp)).filter((sign) => sign !== 0));
-  // The label describes the evidence, and the evidence is the pool: a pair is `established` when the
-  // pooled estimate excludes zero and the readings agree in sign, whatever any single reading managed
-  // on its own. The first version required every reading to clear 0.05 by itself, which labelled
-  // `inline+evidence -> metadata+evidence` — +2.62, +2.62, +3.43pp, pooled +2.89 ± 1.55 at p = 0.0003
-  // with Q p = 0.631 — as `one-run-only`, contradicting the estimate printed beside it. Whether one
-  // run carried the result or all of them did is a printed count (`readingsSignificant`), not a label.
+  // A reversal is two readings pointing opposite ways *with evidence behind each direction*. The
+  // rule used to be `significant.length > 0 && signs.size > 1`, which asks two different readings
+  // two different questions: whether anything was significant anywhere, and whether any two signs
+  // differed. `inline+evidence -> inline+evidence+audit` satisfied it with the significance in
+  // `17/4` and the opposite sign in `8/11` — a reading that is p = 0.65 on its own — so a pair with
+  // seven positive readings and one wobble printed `sign-flip` for three rounds. `metadata+evidence
+  // -> select` did the same with `27/26` against a single significant negative reading. Both had the
+  // same shape: one direction carried the evidence and the other carried only the sign.
   //
-  // A sign change between two readings that are both inside their own noise is a wobble around zero,
-  // not a flip: `synth-definitions -> inline-definitions` reads -0.20 and +0.60, and giving that the
-  // same label as a pair that reversed a real effect would make the label useless.
+  // So the label now requires a reading that cleared its own test in *each* direction. A reading of
+  // exactly zero is not a direction either: it contributes to neither count, which is what the tie
+  // in `13/13` needed — before ties were excluded, `inline+evidence -> select` read `sign-flip` on
+  // the strength of one tie followed by seven positive readings.
+  //
+  // A reversal is checked before heterogeneity, and both labels say the same thing about the
+  // interval: the readings are not one number, so the interval is widened (see `tauSquaredPp2`).
+  // The order names the kind of disagreement rather than only its existence.
+  const positive = significant.filter((reading) => reading.deltaPp > 0).length;
+  const negative = significant.length - positive;
+  const reversal = positive > 0 && negative > 0;
+  // The label describes the evidence, and the evidence is the pool: a pair is `established` when
+  // the pooled estimate excludes zero and no reading cleared its own test in the other direction,
+  // whatever any single reading managed on its own. The first version required every reading to
+  // clear 0.05 by itself, which labelled `inline+evidence -> metadata+evidence` — +2.62, +2.62,
+  // +3.43pp, pooled +2.89 ± 1.55 at p = 0.0003 with Q p = 0.631 — as `one-run-only`, contradicting
+  // the estimate printed beside it. Whether one run carried the result or all of them did is a
+  // printed count (`readingsSignificant`), not a label.
+  //
+  // A pair read once is not a verdict either way: a single reading that found something is
+  // `one-run-only`, and a single reading that found nothing is `none`. The dev table used to print
+  // `one-run-only` on all three of its rows, including 37/39 and 75/61, which reads as "an effect
+  // one run found" for three pairs where no run found anything.
   const verdict =
     usable.length < 2
-      ? 'one-run-only'
-      : heterogeneityP < 0.05
-        ? 'heterogeneous'
-        : significant.length > 0 && signs.size > 1
-          ? 'sign-flip'
-          : signs.size === 1 && pooledP < 0.05
+      ? pooledP < 0.05
+        ? 'one-run-only'
+        : 'none'
+      : reversal
+        ? 'sign-flip'
+        : heterogeneityP < 0.05
+          ? 'heterogeneous'
+          : pooledP < 0.05
             ? 'established'
             : significant.length > 0
               ? 'one-run-only'

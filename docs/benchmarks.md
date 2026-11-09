@@ -7945,9 +7945,9 @@ in the two runs that followed and withdraws it. The fourth is the one that matte
 in this run it is a tie: **four calls a question buy nothing over one prompt carrying the curated
 notes**. It is a cross-level comparison and `COMPARISONS` files it as one — three stack levels, not one
 lever — but a tie between a 1-call arm and a 4-call arm is an argument about cost. Two runs later the
-tie is a `sign-flip` (−1.90pp ± 1.64, the 1-call arm ahead in two runs and behind in the middle one), so
-the argument is about cost **and** about resolution: the difference is not that four calls are cheaper or
-dearer, it is that at 496 questions neither direction survives being repeated.
+tie is a **−1.90pp ± 1.64** estimate with `established` against it — the 1-call arm ahead in two runs of
+three — so the argument is about cost **and** about resolution: at 496 questions, four calls a question
+are not shown to buy accuracy, and the one-call stack is if anything the better buy.
 
 ### The third run, and what one paired reading is worth
 
@@ -7986,11 +7986,18 @@ selector got right and 8 only `inline+evidence` did:
 <!-- readings:begin three-runs -->
 | pair | `42482353883` | `42491745712` | `42502095942` | pooled | verdict | Q |
 | --- | --- | --- | --- | --- | --- | --- |
-| `synth-definitions` → `inline-definitions` | 13/19, p = 0.3771 | 17/18, p = 1.0000 | 18/15, p = 0.7283 | −0.28pp ± 1.32 | **none** | 0.536 |
-| `inline+evidence` → `inline+evidence+audit` | 8/11, p = 0.6476 | 11/7, p = 0.4807 | 10/9, p = 1.0000 | +0.15pp ± 0.99 | **none** | 0.515 |
-| `inline+evidence` → `select` | 13/13, p = 1.0000 | 22/8, **p = 0.0161** | 19/18, p = 1.0000 | +1.01pp ± 1.26 | **one-run-only** | 0.130 |
-| `metadata+evidence` → `select` | 19/32, p = 0.0919 | 27/26, p = 1.0000 | 18/34, **p = 0.0365** | −1.90pp ± 1.64 | **sign-flip** | 0.209 |
-| `inline+evidence` → `metadata+evidence` | 31/18, p = 0.0854 | 28/15, p = 0.0660 | 32/15, **p = 0.0186** | **+2.89pp ± 1.55** | **established** | 0.891 |
+| `synth-definitions` → `inline-definitions` | 13/19, p = 0.3771 | 17/18, p = 1.0000 | 18/15, p = 0.7283 | −0.28pp ± 1.32 | **none** (minidev) | 0.536 |
+| `inline+evidence` → `inline+evidence+audit` | 8/11, p = 0.6476 | 11/7, p = 0.4807 | 10/9, p = 1.0000 | +0.15pp ± 0.99 | **none** (minidev) | 0.515 |
+| `inline+evidence` → `select` | 13/13, p = 1.0000 | 22/8, **p = 0.0161** | 19/18, p = 1.0000 | +1.01pp ± 1.26 | **one-run-only** (minidev) | 0.130 |
+| `metadata+evidence` → `select` | 19/32, p = 0.0919 | 27/26, p = 1.0000 | 18/34, **p = 0.0365** | **−1.90pp ± 1.64** | **established** (minidev) | 0.209 |
+| `inline+evidence` → `metadata+evidence` | 31/18, p = 0.0854 | 28/15, p = 0.0660 | 32/15, **p = 0.0186** | **+2.89pp ± 1.55** | **established** (minidev) | 0.891 |
+
+*The label at every prefix of these readings — it should arrive once and stay:*
+- `synth-definitions` → `inline-definitions`: none at 2–3 readings
+- `inline+evidence` → `inline+evidence+audit`: none at 2–3 readings
+- `inline+evidence` → `select`: one-run-only at 2–3 readings
+- `metadata+evidence` → `select`: none at 2, established at 3 readings
+- `inline+evidence` → `metadata+evidence`: established at 2–3 readings
 <!-- readings:end three-runs -->
 
 So the sentence above the table — "the third row is what a paired test separates **in this run**" —
@@ -8000,10 +8007,11 @@ a tie worth arguing about. The first was true of one run and false of the next, 
 **+1.01pp ± 1.26**, and Cochran's Q on the three discordant counts is **p = 0.130** — the three readings
 are compatible, so nothing in this table is called unpoolable, and the pool stops clearing zero once the
 tie is in it: `one-run-only`, which is the label for an effect one run found and the pooled estimate could
-not keep. The cost-frontier pair is worse than unproven: the 1-call curated stack is ahead by 13
-cases in the first run and by 16 in the third, and behind by one case in the middle one, so not even its
-sign is settled — and the run in which it looks most convincing is the one that also read the pair's
-difference as nothing.
+not keep. The cost-frontier pair is not a tie either: the 1-call curated stack is ahead by 13 cases in the
+first run and 16 in the third, and behind by one in the middle one, and its pool reads **−1.90pp ± 1.64**
+with `established` beside it. Both of those labels moved while the rules were being repaired, and the
+estimates they label did not: a label is a statement about evidence, and a corrected rule can change it
+without touching the pool.
 
 **A defect in the heterogeneity test, and the label it retracted.** The Q column in every table in this
 section was computed correctly and referred to the wrong distribution. `poolPair` turned Q into a p-value
@@ -8014,30 +8022,38 @@ coincide at k = 2, which is the shape almost every pooling unit test used, and d
 error was invisible in a suite that passed for three rounds.
 
 Referred correctly, the readings are far more compatible than they were said to be. No pair rejects
-homogeneity at any number of readings tried, and the labels become monotone — each pair moves at most once,
-and never back:
-
-| pair | 2 readings | 3 | 4 | 5 | 6 | 7 | 8 |
-|---|---|---|---|---|---|---|---|
-| `synth-definitions` → `inline-definitions` | none | none | none | none | none | none | none |
-| `inline+evidence` → `inline+evidence+audit` | none | none | none | **sign-flip** | sign-flip | sign-flip | sign-flip |
-| `inline+evidence` → `select` | one-run-only | one-run-only | **established** | established | established | established | established |
-| `metadata+evidence` → `select` | none | **sign-flip** | sign-flip | sign-flip | sign-flip | sign-flip | sign-flip |
-| `inline+evidence` → `metadata+evidence` | established | established | established | established | established | established | established |
+homogeneity at any number of readings tried, and the labels move in one direction as readings arrive and
+never back. That claim used to be a table of forty hand-typed labels, which is forty numbers that can
+drift — and two of them had. It is now a ladder derived from the same counts as the table it sits under
+and printed beneath it, one line per pair, with the gate failing on any label that leaves and returns.
 
 Two things follow, and the first is a retraction. The earlier version of this section concluded that the
 audit turn's readings "are simply not one number", on Q p = 0.006 at seven readings, and left that mechanism
 filed as `heterogeneous`. That p was the one-degree-of-freedom value; with χ²₆ it is 0.277, the pair is not
 heterogeneous at any size, and the conclusion was an artefact of the test rather than a property of the
-mechanism. What survives is narrower and more useful: one of the eight readings sits on the other side of
-zero (−0.60pp, p = 0.65 on its own), the pool is positive and clears zero, and the label prints `sign-flip`
-because the readings are not unanimous.
+mechanism.
 
 The second is that the DerSimonian–Laird pool added in the same change now widens **nothing**: τ² is zero for
 every pair in every table, because the test it is conditioned on no longer rejects anywhere. The estimator
 stays, and so do its tests — a pair of +11.09 and −11.09pp gives τ² = 243.33pp² and an interval of ±21.74 —
 but on this corpus it is a mechanism with no work to do, which is a different statement from the one the
 previous version of this section made.
+
+**A second defect, found by writing the ladder down: `sign-flip` did not mean a reversal.** The label was
+`significant.length > 0 && signs.size > 1` — whether *anything* was significant anywhere, and whether any
+two readings differed in sign. Those are two different readings. `inline+evidence -> inline+evidence+audit`
+satisfied it with the significance in `17/4` and the opposite sign in `8/11`, a reading that is p = 0.65 on
+its own, so a pair with seven positive readings and one wobble printed `sign-flip` for two rounds;
+`metadata+evidence -> select` did the same with `27/26` — one case — against a single significant negative
+reading. A reversal now needs a reading that cleared its own test in *each* direction, and the rule is
+applied before heterogeneity because it names the kind of disagreement rather than its existence: both
+labels say the readings are not one number, and both widen the interval.
+
+Two pairs changed label under the corrected rule and neither estimate moved. The audit pair reads
+`established` at +0.63pp ± 0.56 over nine readings, and the cost-frontier pair `established` at
+−1.42pp ± 0.96 — the direction the three-run table had already shown. A label can change without the
+evidence changing; that is what a label is for, and it is also why a rule has to be tested against the
+readings it will meet rather than against the ones it was written for.
 
 **A fourth run, unasked for.** The commit that added the fifth declared pair was pushed, which produced
 another run (`42510049798`) of the same configuration — the first one to read all five pairs in CI. Every
@@ -8048,72 +8064,90 @@ the `was (three runs)` column the hand-written version carried is the table abov
 <!-- readings:begin four-runs -->
 | pair | `42482353883` | `42491745712` | `42502095942` | `42510049798` | four-run pooled | verdict | Q |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `synth-definitions` → `inline-definitions` | 13/19, p = 0.3771 | 17/18, p = 1.0000 | 18/15, p = 0.7283 | 13/19, p = 0.3771 | −0.52pp ± 1.13 | **none** | 0.628 |
-| `inline+evidence` → `inline+evidence+audit` | 8/11, p = 0.6476 | 11/7, p = 0.4807 | 10/9, p = 1.0000 | 9/8, p = 1.0000 | +0.16pp ± 0.84 | **none** | 0.722 |
-| `inline+evidence` → `select` | 13/13, p = 1.0000 | 22/8, **p = 0.0161** | 19/18, p = 1.0000 | 19/11, p = 0.2005 | **+1.16pp ± 1.09** | **established** | 0.230 |
-| `metadata+evidence` → `select` | 19/32, p = 0.0919 | 27/26, p = 1.0000 | 18/34, **p = 0.0365** | 22/28, p = 0.4799 | −1.72pp ± 1.42 | **sign-flip** | 0.346 |
-| `inline+evidence` → `metadata+evidence` | 31/18, p = 0.0854 | 28/15, p = 0.0660 | 32/15, **p = 0.0186** | 31/17, p = 0.0595 | **+2.87pp ± 1.35** | **established** | 0.972 |
+| `synth-definitions` → `inline-definitions` | 13/19, p = 0.3771 | 17/18, p = 1.0000 | 18/15, p = 0.7283 | 13/19, p = 0.3771 | −0.52pp ± 1.13 | **none** (minidev) | 0.628 |
+| `inline+evidence` → `inline+evidence+audit` | 8/11, p = 0.6476 | 11/7, p = 0.4807 | 10/9, p = 1.0000 | 9/8, p = 1.0000 | +0.16pp ± 0.84 | **none** (minidev) | 0.722 |
+| `inline+evidence` → `select` | 13/13, p = 1.0000 | 22/8, **p = 0.0161** | 19/18, p = 1.0000 | 19/11, p = 0.2005 | **+1.16pp ± 1.09** | **established** (minidev) | 0.230 |
+| `metadata+evidence` → `select` | 19/32, p = 0.0919 | 27/26, p = 1.0000 | 18/34, **p = 0.0365** | 22/28, p = 0.4799 | **−1.72pp ± 1.42** | **established** (minidev) | 0.346 |
+| `inline+evidence` → `metadata+evidence` | 31/18, p = 0.0854 | 28/15, p = 0.0660 | 32/15, **p = 0.0186** | 31/17, p = 0.0595 | **+2.87pp ± 1.35** | **established** (minidev) | 0.972 |
+
+*The label at every prefix of these readings — it should arrive once and stay:*
+- `synth-definitions` → `inline-definitions`: none at 2–4 readings
+- `inline+evidence` → `inline+evidence+audit`: none at 2–4 readings
+- `inline+evidence` → `select`: one-run-only at 2–3, established at 4 readings
+- `metadata+evidence` → `select`: none at 2, established at 3–4 readings
+- `inline+evidence` → `metadata+evidence`: established at 2–4 readings
 <!-- readings:end four-runs -->
 
 This is the check that matters for the instrument and not for the levers: a fifth run is coming, because
 every push that touches the pipeline produces one, so the question is not whether the numbers move but
 whether the labels do. At four readings one label moved and one only: `select` went from `one-run-only`
 to `established`, because a fourth reading pushed its pool clear of zero and every reading but one was
-positive. The pairs whose readings disagree with themselves still said so, and the runs that followed did
-not move anything back — see below.
+positive. Nothing else moved, and the runs that followed moved nothing back — each label arrives once and
+stays, which the ladder beneath the nine-run table prints rather than asserts.
 
-**Runs five to eight: four more readings, and what eight of them say.** Four more runs of one
+**Runs five to nine: five more readings, and what nine of them say.** Five more runs of one
 configuration arrived after the fourth — `42523664683` (the fingerprint commit), `42526940345` (the pin
 commit, the first run whose gate enforced a fingerprint), `42527570372` (a dispatch, to ask whether the
-fifth reading was an outlier) and `42552807523` (the reading-ledger commit, whose push produced it). All
-four asked the same questions, and all four reported the same base fingerprint, `170d0beaa768594b` over
-`deepseek-flash`, six identical answers each.
+fifth reading was an outlier), `42552807523` (the reading-ledger commit, whose push produced it) and
+`42571328962` (the commit that corrected the heterogeneity test, whose first attempt lost 296 of 496
+`select` calls to the provider and whose re-run scored all of them). All five asked the same questions,
+and all five reported the same base fingerprint, `170d0beaa768594b` over `deepseek-flash`, six identical
+answers each.
 
 <!-- readings:begin all-runs -->
-| pair | A | B | C | D | E | F | G | H | eight-run pooled | verdict | Q |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `synth-definitions` → `inline-definitions` | 13/19 | 17/18 | 18/15 | 13/19 | 15/17 | 14/16 | 14/25 | 16/18 | −0.65pp ± 0.80 | **none** | 0.836 |
-| `inline+evidence` → `inline+evidence+audit` | 8/11 | 11/7 | 10/9 | 9/8 | **17/4** | 11/6 | 10/5 | 10/7 | +0.71pp ± 0.59 | **sign-flip** | 0.377 |
-| `inline+evidence` → `select` | 13/13 | **22/8** | 19/18 | 19/11 | 26/13 | 19/10 | **23/10** | 18/11 | **+1.60pp ± 0.78** | **established** | 0.489 |
-| `metadata+evidence` → `select` | 19/32 | 27/26 | **18/34** | 22/28 | 27/33 | 23/29 | 24/28 | 27/33 | −1.43pp ± 1.02 | **sign-flip** | 0.812 |
-| `inline+evidence` → `metadata+evidence` | 31/18 | 28/15 | **32/15** | 31/17 | **35/16** | **31/16** | **31/14** | 33/20 | **+3.05pp ± 0.96** | **established** | 0.998 |
+| pair | A | B | C | D | E | F | G | H | I | nine-run pooled | verdict | Q |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `synth-definitions` → `inline-definitions` | 13/19 | 17/18 | 18/15 | 13/19 | 15/17 | 14/16 | 14/25 | 16/18 | 18/22 | −0.67pp ± 0.77 | **none** (minidev) | 0.899 |
+| `inline+evidence` → `inline+evidence+audit` | 8/11 | 11/7 | 10/9 | 9/8 | **17/4** | 11/6 | 10/5 | 10/7 | 11/12 | **+0.63pp ± 0.56** | **established** (minidev) | 0.402 |
+| `inline+evidence` → `select` | 13/13 | **22/8** | 19/18 | 19/11 | 26/13 | 19/10 | **23/10** | 18/11 | 15/9 | **+1.54pp ± 0.72** | **established** (minidev) | 0.583 |
+| `metadata+evidence` → `select` | 19/32 | 27/26 | **18/34** | 22/28 | 27/33 | 23/29 | 24/28 | 27/33 | 23/30 | **−1.42pp ± 0.96** | **established** (minidev) | 0.882 |
+| `inline+evidence` → `metadata+evidence` | 31/18 | 28/15 | **32/15** | 31/17 | **35/16** | **31/16** | **31/14** | 33/20 | 30/17 | **+3.00pp ± 0.91** | **established** (minidev) | 0.999 |
+
+*The label at every prefix of these readings — it should arrive once and stay:*
+- `synth-definitions` → `inline-definitions`: none at 2–9 readings
+- `inline+evidence` → `inline+evidence+audit`: none at 2–4, one-run-only at 5–6, established at 7–9 readings
+- `inline+evidence` → `select`: one-run-only at 2–3, established at 4–9 readings
+- `metadata+evidence` → `select`: none at 2, established at 3–9 readings
+- `inline+evidence` → `metadata+evidence`: established at 2–9 readings
 <!-- readings:end all-runs -->
 
 Three things came out of it, and only one of them is about a lever.
 
-1. **The fingerprint reproduces.** Four runs on four different commits, hours apart, hashed the same six
+1. **The fingerprint reproduces.** Five runs on five different commits, hours apart, hashed the same six
    answers to the same 16 characters. The third was the first whose gate compared a fresh digest against
    the pin and passed; the fourth is the first whose artifact also records which run produced it. A pin
    taken from one run and never seen again would have been a number; this one has now been reproduced
-   three times.
-2. **The audit pair is not unpoolable, and the label that said it was a defect.** Its readings span −0.60
-   to +2.62pp, which looks like disagreement and is not: referred to χ²₆, Cochran's Q gives p = 0.377, and
-   the pool is +0.71pp ± 0.59. One reading sits on the other side of zero — the first, at −0.60pp with
-   p = 0.65 on its own — so the label is `sign-flip`, which says the readings are not unanimous and says
-   nothing about a mechanism being unmeasurable. **What was retracted is the claim, made in the previous
-   version of this section, that the audit turn's readings are simply not one number.** The test that
-   supported it had one degree of freedom; the correct test never rejected.
-3. **The curated-notes pair is still the firmest thing here, and still not a product claim.** Eight
-   readings, every one positive, between +2.62 and +3.83pp, Q p = 0.998, five of eight individually
-   significant, pooled **+3.05pp ± 0.96**. That is a homogeneous effect measured eight times on 496
-   questions — and it is still not a product claim, because the dev split's only reading of the same pair
-   is +0.07pp on 1,532 questions and +0.91pp in a second run, and Mini-Dev is a subset of dev. Eight
-   Mini-Dev runs cannot outvote the larger split about a different population; the dev run that could was
-   dispatched before this paragraph was written, and it reads a third of the effect — below.
+   four times.
+2. **The audit pair is not unpoolable, and two labels that said otherwise were both defects.** Its nine
+   readings span −0.60 to +2.62pp, which looks like disagreement and is not: referred to χ²₈, Cochran's Q
+   gives p = 0.402, and the pool is **+0.63pp ± 0.56**, `established`. One reading sits on the other side
+   of zero — the first, at −0.60pp with p = 0.65 on its own — which is a wobble and not a reversal.
+   **Two claims were retracted here.** The first, two versions back, was that the audit turn's readings
+   "are simply not one number": the test behind it had one degree of freedom and the correct one never
+   rejected. The second, from the last version, was the label `sign-flip` itself, which asked two
+   different readings two different questions — the significance was in `17/4` and the opposite sign in
+   `8/11`. A reversal now requires a reading that cleared its own test in each direction.
+3. **The curated-notes pair is still the firmest thing here, and still not a product claim.** Nine
+   readings, every one positive, between +2.62 and +3.83pp, Q p = 0.999, four of nine individually
+   significant, pooled **+3.00pp ± 0.91**. That is a homogeneous effect measured nine times on 496
+   questions — and it is still not a product claim, because the dev split's only readings of the same pair
+   are +0.07pp and +0.91pp on 1,532 questions, and Mini-Dev is a subset of dev. Nine Mini-Dev runs cannot
+   outvote the larger split about a different population; the dev run that could was dispatched before
+   this paragraph was written, and it reads a third of the effect — below.
 
 The `select` pair deserves its own paragraph, because a costing decision hangs on it and because the
-correction changed its label: seven of eight readings are positive and one is exactly zero, the pool is
-**+1.60pp ± 0.78** with Q p = 0.489, and it is `established` — an effect Mini-Dev resolves, on 496
+correction changed its label: eight of nine readings are positive and one is exactly zero, the pool is
+**+1.54pp ± 0.72** with Q p = 0.583, and it is `established` — an effect Mini-Dev resolves, on 496
 questions, in a corpus whose own dev split is the population being claimed about. So cutting the selector
-from the default chain would give up about 1.6pp that this corpus establishes — and the dev split, which
+from the default chain would give up about 1.5pp that this corpus establishes — and the dev split, which
 is the population being claimed about, reads the same pair at −0.13pp. That reading was dispatched before
 this paragraph was written and is set out below; it is the reason the label is a Mini-Dev property and not
 a product claim.
 
-What the eight readings cost: nothing. Seven of the eight artifacts were produced by pushes that were
-going to happen anyway, and the eighth is the dispatch above.
+What the nine readings cost: nothing. Every one of the nine artifacts was produced by a push that was
+going to happen anyway; the only dispatched run in this chapter is the dev one below.
 
-**The dev split, read on the same pairs — the question this section has been deferring.** Eight readings
+**The dev split, read on the same pairs — the question this section has been deferring.** Nine readings
 of 496 questions can establish an effect *on those 496* and say nothing about the split that published
 leaderboards report. So a dev dispatch (`42563674600`) ran the same arms on all 1,532 scorable questions,
 and the two pairs with a claim resting on them are read here side by side:
@@ -8121,9 +8155,9 @@ and the two pairs with a claim resting on them are read here side by side:
 <!-- readings:begin dev-split -->
 | pair | `42563674600` | pooled | verdict | Q |
 | --- | --- | --- | --- | --- |
-| `inline+evidence` → `select` | 37/39, p = 0.9088 | −0.13pp ± 1.12 | **one-run-only** | — |
-| `metadata+evidence` → `select` | 68/84, p = 0.2236 | −1.04pp ± 1.58 | **one-run-only** | — |
-| `inline+evidence` → `metadata+evidence` | 75/61, p = 0.2649 | +0.91pp ± 1.49 | **one-run-only** | — |
+| `inline+evidence` → `select` | 37/39, p = 0.9088 | −0.13pp ± 1.12 | **none** (dev) | — |
+| `metadata+evidence` → `select` | 68/84, p = 0.2236 | −1.04pp ± 1.58 | **none** (dev) | — |
+| `inline+evidence` → `metadata+evidence` | 75/61, p = 0.2649 | +0.91pp ± 1.49 | **none** (dev) | — |
 
 *Not read here: `synth-definitions` → `inline-definitions`, `inline+evidence` → `inline+evidence+audit`.*
 <!-- readings:end dev-split -->
@@ -8134,21 +8168,21 @@ than showing three rows and letting a reader count them.
 
 What it says about the two claims:
 
-1. **The curated-notes effect is a third the size on dev, and not resolvable there.** Eight Mini-Dev runs
-   pool at +3.05pp ± 0.96 with Q p = 0.998; the dev split reads **+0.91pp ± 1.49** (75 won, 61 lost,
+1. **The curated-notes effect is a third the size on dev, and not resolvable there.** Nine Mini-Dev runs
+   pool at +3.00pp ± 0.91 with Q p = 0.999; the dev split reads **+0.91pp ± 1.49** (75 won, 61 lost,
    p = 0.2649). Same direction, one third the magnitude, and the interval includes zero. This is the second
    dev reading of that pair — the first was +0.07pp (65:66) — and the two are one standard error apart, so
-   the dev split's own answer is roughly "between −0.3 and +1.7pp". Mini-Dev's eight runs and dev's one
+   the dev split's own answer is roughly "between −0.3 and +1.7pp". Mini-Dev's nine runs and dev's one
    differ by about 2.1pp, which is 2.4 standard errors: **the split is not a smaller sample of the same
    question for this pair**, and the smaller number is the one about the population a leaderboard means.
 2. **The selector's advantage does not survive the split.** Mini-Dev labels `inline+evidence → select`
-   `established` at +1.60pp ± 0.78; on dev it reads **−0.13pp ± 1.12** (37 won, 39 lost, p = 0.9088) — one
+   `established` at +1.54pp ± 0.72; on dev it reads **−0.13pp ± 1.12** (37 won, 39 lost, p = 0.9088) — one
    case in the wrong direction, and an interval that excludes everything the smaller split claimed. The
    four-call chain is not shown to be worth a call more than the two-call one on the split that decides,
-   which is the opposite of what eight Mini-Dev runs said with a `established` label attached.
+   which is the opposite of what nine Mini-Dev runs said with an `established` label attached.
 
 Neither of those is a surprise to the paragraph above, which called the conflict a property of the corpus
-and refused to let eight small-split runs outvote one large one. It is a surprise to the labels: two pairs
+and refused to let nine small-split runs outvote one large one. It is a surprise to the labels: two pairs
 that Mini-Dev calls `established` are, on dev, indistinguishable from zero and pointing the wrong way
 respectively. **The corpus a claim is made on belongs in the claim**, and the only reason this section can
 say so with a number rather than a caution is that the dev run was dispatched before the answer was known.
@@ -8166,9 +8200,13 @@ every artifact it is given as a reading of the pair (`compare.ts a.json b.json c
 names any artifact that did not score both arms instead of dropping it silently, and prints the
 verdict and its evidence in two sentences — the label on one line, `1 of 3 readings significant, Q
 p = 0.130 — the readings differ no more than their own intervals` on the next. The five labels are
-the five things that can be true: `none` (nothing to report), `one-run-only` (a reading that did not
-survive being repeated), `sign-flip` (a pair that reversed), `heterogeneous` (readings that cannot be
-pooled at all), and `established` (the same sign in every reading, and a pool that clears zero).
+the five things that can be true: `none` (the pool's interval includes zero and no single reading
+cleared its own test), `one-run-only` (a direction that rests on one reading, or a reading the pool did
+not keep), `sign-flip` (readings that cleared their own tests in *opposite* directions — a reversal, not
+a disagreement), `heterogeneous` (readings that disagree about the size and cannot be pooled as one
+number), and `established` (the pool clears zero and no reading cleared its own test the other way).
+Every one of them is a statement about a split, so every generated table prints the split beside the
+label: this section's headline pair reads `established` on 496 questions and `none` on 1,532.
 
 **An interval for a pool the label calls unpoolable.** A pair labelled `heterogeneous` used to keep the
 fixed-effect interval: the same weights, the same `1/Σw`, an interval narrower than the distance between

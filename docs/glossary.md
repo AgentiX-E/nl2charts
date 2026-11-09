@@ -129,12 +129,26 @@ drifted four times before the ledger existed. Every run also names the split it 
 on, and a table whose runs disagree about that is refused: a pool is only ever within one
 population.
 
+**Ladder** — The label a pair carries at every prefix of a view's readings, printed under the
+generated table. It exists so that "the label settles and stays" is a derived fact rather than a
+hand-typed table: the gate fails if any label leaves and returns. A pair's evidence accumulates,
+so its label should move in one direction as readings arrive.
+
 **Random effects (DerSimonian–Laird)** — The pool used when the readings of one pair
 disagree by more than their own sampling error. The estimate is unchanged; τ² is the
 between-reading variance estimated from the excess of Cochran's Q over its degrees of
 freedom, and it widens the interval to include the disagreement. τ² is exactly zero unless
-the heterogeneity test rejects, so the interval is widened exactly when the label reads
-`heterogeneous`.
+the heterogeneity test rejects, so the interval is widened exactly when the label says the
+readings are not one number — `heterogeneous` or `sign-flip`.
+
+**Verdict (pair)** — What a pooled pair's readings support, printed with the split it was
+measured on because the same pair can read `established` on 496 questions and `none` on
+1,532. `none`: the pool includes zero and no single reading cleared its own test.
+`one-run-only`: a direction resting on one reading, or on a reading the pool did not keep.
+`sign-flip`: readings that cleared their own tests in opposite directions — a reversal, not
+a mere disagreement in sign. `heterogeneous`: the readings disagree about the size. Both of
+the last two widen the interval. `established`: the pool clears zero and no reading cleared
+its own test the other way.
 
 **Refusal** — A 4xx the endpoint will repeat: a model name it does not serve, a key it
 rejects, a field it will not accept. `NL2C_E_LLM_REJECTED`, as opposed to

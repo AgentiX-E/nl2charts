@@ -1356,16 +1356,22 @@ against 13, then 22 against 8 (p = 0.0161), then 19 against 18 (p = 1.0000), sam
 pooled over all three it is +1.01pp ± 1.26 with **Cochran's Q at p = 0.130**, so the readings are
 compatible with one mean and the label is `one-run-only` — an effect one run found and the pool could
 not keep. `metadata+evidence → select` went the
-other way twice: 19 against 32, then 27 against 26, then 18 against 34 (p = 0.0365) — a `sign-flip` in
-which the 1-call curated stack beat the 4-call chain by 16 cases.
+other way twice: 19 against 32, then 27 against 26, then 18 against 34 (p = 0.0365) — `established` at
+−1.90pp ± 1.64 over those three readings, in which the 1-call curated stack beat the 4-call chain by 16
+cases. It read `sign-flip` for two rounds, which was a defect in the rule rather than a fact about the
+pair: the label asked whether anything was significant and whether two signs differed, and the
+significance and the opposite sign were in two different readings.
 
 A paired test conditions on the questions and not on the generator's own draw. At 496 questions that
 draw is worth about two points per run — the shipped arm moved 56.05 → 58.06 → 56.05 across three runs
 of one configuration — so the unit of evidence is the pair pooled over the runs that read it, with the
 disagreement between readings printed rather than averaged away. `bench:bird:compare --pair` does
-that, and its five verdicts are the five things that can be true: `none`, `one-run-only`, `sign-flip`,
-`heterogeneous` (the readings are not one number, and the interval is widened to say so) and
-`established` (the same direction everywhere and a pool that clears zero).
+that, and its five verdicts are the five things that can be true: `none`, `one-run-only`, `sign-flip`
+(readings that cleared their own tests in opposite directions), `heterogeneous` (the readings disagree
+about the size, and the interval is widened to say so) and `established` (the pool clears zero and no
+reading cleared its own test the other way). Both labels that say the readings are not one number widen
+the interval, and every label is printed with the split it was measured on, because `established` on 496
+questions was `none` on 1,532.
 
 Getting that wrong is easy enough that it happened here on the first try: the command took two
 artifacts while the table it printed claimed to cover every run that scored the pair, so the verdict
