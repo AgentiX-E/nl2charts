@@ -27,6 +27,13 @@ export interface PreflightOptions {
   readonly apiKey: string;
   readonly samples: number;
   readonly deadlineMs: number;
+  /**
+   * How many calls are in flight at once, which is the run's own `BIRD_CONCURRENCY`.
+   *
+   * Required rather than optional: a probe that defaults to one call at a time answers a different
+   * question from the one the run asks, and a default would be the quiet way to keep doing it.
+   */
+  readonly concurrency: number;
   /** Called once, with the first successful call. Absent means silent. */
   readonly log?: (line: string) => void;
 }
@@ -36,8 +43,10 @@ export interface PreflightReport {
   readonly baseUrl: string;
   readonly model: string;
   readonly samples: number;
+  readonly concurrency: number;
   readonly answered: number;
   readonly failures: number;
+  readonly rateLimited: number;
   readonly deadlineMs: number;
   readonly firstError: string;
   /** Undefined when no call answered, which is a different report from "slow". */
@@ -50,17 +59,24 @@ export interface PreflightReport {
 }
 
 /**
- * A latency check, not a liveness check.
+ * A latency check, not a liveness check — and now a load check as well.
  *
  * One successful call says the endpoint answers; it does not say it answers within the deadline
  * the run will impose. A glm-4.5 run once spent 3h43m and 1,532 calls to discover that 41% of
  * them exceeded a 180-second deadline — a fact three timed calls would have shown in nine
  * minutes. The threshold is the run's own: a median above half the deadline leaves no headroom
  * for the tail, and the tail is what fills the failure column.
+ *
+ * The calls go out in waves of the run's concurrency, and that is a correction rather than a
+ * refinement. `glm-4.6` passed twelve serial probes (median 7.1 s, nothing refused) and then
+ * answered 429 to 416 of 496 calls at concurrency 8. The preflight was not lying; it was measuring
+ * one call at a time, and a rate limit is a function of simultaneous requests. A prober that
+ * serialises cannot see the limit it exists to find.
  */
 export async function runPreflight(options: PreflightOptions): Promise<PreflightReport> {
   const { baseUrl, model, apiKey, deadlineMs } = options;
   const samples = Math.max(1, Math.floor(options.samples));
+  const concurrency = Math.max(1, Math.floor(options.concurrency));
 
   // The deadline the run will use, not a comfortable one of its own: a preflight that passes
   // under a 30s deadline and hands the run a 60s one has measured a different instrument.
@@ -68,8 +84,9 @@ export async function runPreflight(options: PreflightOptions): Promise<Preflight
 
   const elapsed: number[] = [];
   let failures = 0;
+  let rateLimited = 0;
   let firstError = '';
-  for (let sample = 0; sample < samples; sample += 1) {
+  const probe = async (): Promise<void> => {
     const started = Date.now();
     try {
       const reply = await provider.complete({
@@ -83,13 +100,18 @@ export async function runPreflight(options: PreflightOptions): Promise<Preflight
         // endpoint when the endpoint is fine.
       });
       elapsed.push(Date.now() - started);
-      if (sample === 0) options.log?.(`preflight: ${baseUrl} ${model} answered (${String(reply.text.length)} chars)`);
+      if (elapsed.length === 1) options.log?.(`preflight: ${baseUrl} ${model} answered (${String(reply.text.length)} chars)`);
     } catch (error) {
       failures += 1;
       const status = isNl2ChartsError(error) ? (error.details as { status?: number } | undefined)?.status : undefined;
+      if (status === 429) rateLimited += 1;
       const message = describeError(error);
       if (firstError === '') firstError = `${status === undefined ? '' : `answered ${String(status)}: `}${message}`;
     }
+  };
+  for (let launched = 0; launched < samples; launched += concurrency) {
+    const wave = Math.min(concurrency, samples - launched);
+    await Promise.all(Array.from({ length: wave }, probe));
   }
 
   const median = elapsed.length === 0 ? undefined : [...elapsed].sort((left, right) => left - right)[Math.floor(elapsed.length / 2)];
@@ -97,13 +119,20 @@ export async function runPreflight(options: PreflightOptions): Promise<Preflight
   const summary =
     `preflight: ${String(samples)} calls to ${model} — ${String(samples - failures)} answered, ` +
     `median ${median === undefined ? 'n/a' : median.toFixed(0)} ms, worst ${worst === undefined ? 'n/a' : worst.toFixed(0)} ms, ` +
-    `deadline ${String(deadlineMs)} ms`;
+    `deadline ${String(deadlineMs)} ms, ${String(concurrency)} at a time`;
   // Reading a report should not require reading three fields: the problems are composed here,
   // where the numbers are, rather than at the call site where they would be paraphrased.
   const problems: string[] = [];
   if (failures > 0) {
     problems.push(`${String(failures)} of ${String(samples)} calls failed (first: ${firstError})`);
     problems.push("the endpoint did not answer every call within the run's deadline");
+  }
+  if (rateLimited > 0) {
+    problems.push(
+      `${String(rateLimited)} of ${String(samples)} calls were refused with 429 at ${String(concurrency)} concurrent, which is the ` +
+        "run's own concurrency: the endpoint is rate limiting this account. Lower BIRD_CONCURRENCY, " +
+        'raise the account limit, or dispatch this model to another provider.',
+    );
   }
   if (median !== undefined && median > deadlineMs / 2) {
     problems.push(
@@ -117,8 +146,10 @@ export async function runPreflight(options: PreflightOptions): Promise<Preflight
     baseUrl,
     model,
     samples,
+    concurrency,
     answered: samples - failures,
     failures,
+    rateLimited,
     deadlineMs,
     firstError,
     ...(median === undefined ? {} : { medianMs: median }),
@@ -147,6 +178,7 @@ export interface PreflightSettings {
   readonly apiKey: string;
   readonly samples: number;
   readonly deadlineMs: number;
+  readonly concurrency: number;
 }
 
 export function resolvePreflightSettings(env: NodeJS.ProcessEnv): PreflightSettings {
@@ -156,6 +188,9 @@ export function resolvePreflightSettings(env: NodeJS.ProcessEnv): PreflightSetti
     apiKey: env.LLM_API_KEY ?? env.DEEPSEEK_API_KEY ?? '',
     samples: Number(env.BIRD_PREFLIGHT_SAMPLES ?? 3),
     deadlineMs: Number(env.BIRD_LLM_TIMEOUT_MS ?? 60_000),
+    // The run's own default, read from the same variable the run reads. Two defaults that drift
+    // would make the probe a different experiment from the run it is gating.
+    concurrency: Number(env.BIRD_CONCURRENCY ?? 8),
   };
 }
 
@@ -254,6 +289,7 @@ export async function main(env: NodeJS.ProcessEnv = process.env): Promise<number
       apiKey: target.apiKey,
       samples: settings.samples,
       deadlineMs: settings.deadlineMs,
+      concurrency: settings.concurrency,
       log: (line) => console.log(line),
     });
     if (!report.ok) {

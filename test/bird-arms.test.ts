@@ -21,6 +21,8 @@ import {
   armsNeedRetrieval,
   assertArmProducedResults,
   assertFailureRate,
+  createFailureBreaker,
+  outageDecided,
   assertHarnessClean,
   escapeKind,
   assertMixedFeasible,
@@ -1384,6 +1386,99 @@ describe('escaped errors', () => {
       ...Array.from({ length: 50 }, () => ({})),
     ];
     expect(() => assertFailureRate('names', runs)).not.toThrow();
+  });
+});
+
+/**
+ * The same tenth, read while the run is still spending calls.
+ *
+ * `assertFailureRate` is a verdict on a table, and a table only exists once every case has been
+ * asked. That is the right shape for a guard and the wrong shape for a budget: `glm-4.6` spent
+ * 496 calls and twenty-five minutes to produce a table whose first forty rows already said the
+ * endpoint was refusing four calls in five. A verdict that arrives after the money is spent is a
+ * post-mortem, not a guard.
+ */
+describe('the outage guard reads the run while it is still running', () => {
+  it('seals the verdict exactly when a tenth of the whole split has failed', () => {
+    // Not "a tenth of the calls so far": the table guard divides by the split, so an early refusal
+    // that the table would have accepted is the one thing this rule must never produce.
+    expect(outageDecided(0, 496)).toBe(false);
+    expect(outageDecided(49, 496)).toBe(false);
+    // 49.6 is a tenth of 496, so the fiftieth failure seals it — and the table guard would refuse
+    // the finished run at exactly that count.
+    expect(outageDecided(50, 496)).toBe(true);
+    // A tenth of ten is one, and one of ten is not "above" ten percent.
+    expect(outageDecided(1, 10)).toBe(false);
+    expect(outageDecided(2, 10)).toBe(true);
+    // A split with no cases never seals anything, and the number cannot depend on dividing by it.
+    expect(outageDecided(1, 0)).toBe(false);
+    expect(outageDecided(1, Number.NaN)).toBe(false);
+  });
+
+  it('stops at the call that seals it, with the sentence the table guard would have printed', () => {
+    const breaker = createFailureBreaker('names', 496);
+    for (let call = 0; call < 49; call += 1) {
+      expect(breaker.observe({ errorKind: 'llm', error: 'llm returned 429' })).toBeNull();
+    }
+    const verdict = breaker.observe({ errorKind: 'llm', error: 'llm returned 429' });
+    expect(verdict).toContain('stopped after 50 of 496 calls');
+    // One sentence, shared: a run stopped early and a run judged afterwards must not describe the
+    // same failure two ways, or the log reads as two different problems.
+    expect(verdict).toContain('50 of 50 calls (100.0%) failed at the model');
+    expect(verdict).toContain('above the 10% this harness treats as an outage');
+    expect(verdict).toContain('first error: llm returned 429');
+    expect(verdict).toContain('446 calls were not spent');
+  });
+
+  it('leaves the last call to the guard that has a better sentence for it', () => {
+    // A one-case split has nothing to save by stopping, and `assertArmProducedResults` says what a
+    // run that never reached the database is: "not an accuracy of zero". Stopping there would
+    // replace that with a share of one, which reads as a throttle.
+    const breaker = createFailureBreaker('names', 1);
+    expect(breaker.observe({ errorKind: 'llm', error: 'llm returned 500' })).toBeNull();
+    expect(breaker.verdict()).toBeNull();
+  });
+
+  it('counts only the provider, so a run of engine refusals is not stopped', () => {
+    // `execution`, `guard`, `shape` and a harness bug are all output quality or this file's own
+    // defect. Stopping on them would turn "the model writes bad SQL" into "the endpoint is down".
+    const breaker = createFailureBreaker('names', 100);
+    const kinds = ['execution', 'guard', 'shape', 'harness', undefined] as const;
+    for (let call = 0; call < 100; call += 1) {
+      expect(breaker.observe({ errorKind: kinds[call % kinds.length] })).toBeNull();
+    }
+    expect(breaker.verdict()).toBeNull();
+  });
+
+  it('says nothing at all when a healthy run finishes', () => {
+    const breaker = createFailureBreaker('names', 496);
+    for (let call = 0; call < 496; call += 1) expect(breaker.observe({})).toBeNull();
+    expect(breaker.verdict()).toBeNull();
+  });
+
+  it('says the verdict once and keeps it', () => {
+    // The pool asks `verdict()` before every case after the stop, so the second case to fail must
+    // not compose a second sentence with the numbers of a later call.
+    const breaker = createFailureBreaker('names', 20);
+    expect(breaker.observe({ errorKind: 'llm', error: 'llm returned 429' })).toBeNull();
+    expect(breaker.observe({ errorKind: 'llm', error: 'llm returned 429' })).toBeNull();
+    expect(breaker.observe({ errorKind: 'llm', error: 'llm returned 429' })).toContain('stopped after 3 of 20 calls');
+    expect(breaker.observe({ errorKind: 'llm', error: 'llm returned 429' })).toBeNull();
+    expect(breaker.verdict()).toContain('stopped after 3 of 20 calls');
+  });
+
+  it('explains a timeout rather than blaming the key', () => {
+    const breaker = createFailureBreaker('names', 100);
+    for (let call = 0; call < 11; call += 1) breaker.observe({ errorKind: 'llm', error: 'request timed out' });
+    const verdict = breaker.verdict();
+    expect(verdict).toContain('BIRD_LLM_TIMEOUT_MS');
+  });
+
+  it('names a missing message instead of inventing one', () => {
+    // A record with no `error` is what a run killed before the provider wrote anything looks like.
+    const breaker = createFailureBreaker('names', 20);
+    for (let call = 0; call < 3; call += 1) breaker.observe({ errorKind: 'llm' });
+    expect(breaker.verdict()).toContain('first error: no error text');
   });
 });
 

@@ -2397,6 +2397,24 @@ export function assertArmProducedResults(armName: string, runs: readonly { error
  * reaches here is a failure after those attempts — for a batch this size that means the
  * endpoint is the variable, not the prompt.
  */
+/**
+ * The one sentence both outage verdicts print.
+ *
+ * Composed here because there are two of them now — the table read after the run and the reading
+ * taken during it — and two descriptions of one failure is how a log comes to look like two
+ * different problems. The timeout hint rides in the same sentence for the same reason: a reader who
+ * sees "429" in one place and "timed out" in the other learns nothing from either.
+ */
+function outageSentence(failures: number, seen: number, maxShare: number, first: string): string {
+  const hint = first.includes('timed out')
+    ? ' Every failure is a timeout, so the deadline (BIRD_LLM_TIMEOUT_MS) may be shorter than the model needs.'
+    : '';
+  return (
+    `${String(failures)} of ${String(seen)} calls (${((failures / seen) * 100).toFixed(1)}%) failed at the model, ` +
+    `above the ${(maxShare * 100).toFixed(0)}% this harness treats as an outage (first error: ${first}).${hint}`
+  );
+}
+
 export function assertFailureRate(
   armName: string,
   runs: readonly { errorKind?: string; error?: string }[],
@@ -2409,17 +2427,74 @@ export function assertFailureRate(
   // The first message, not a summary of them: "65% failed" without the reason sends the
   // reader to the workflow file when the answer is in the provider's reply.
   const first = failures.find((run) => run.error !== undefined)?.error ?? 'no error text';
-  // "Timed out" is not "busy": one is the endpoint queueing, the other is this harness giving
-  // up. The message says which, because the fix is different and 1,355 of 1,532 cases were once
-  // reported as an outage when the deadline was the cause.
-  const hint = first.includes('timed out')
-    ? ' Every failure is a timeout, so the deadline (BIRD_LLM_TIMEOUT_MS) may be shorter than the model needs.'
-    : '';
   throw new Error(
-    `arm ${armName}: ${String(failures.length)} of ${String(runs.length)} calls (${(share * 100).toFixed(1)}%) failed at the model, ` +
-      `above the ${(maxShare * 100).toFixed(0)}% this harness treats as an outage (first error: ${first}).${hint} ` +
+    `arm ${armName}: ${outageSentence(failures.length, runs.length, maxShare, first)} ` +
       'The accuracy would be a function of how busy the endpoint was.',
   );
+}
+
+/**
+ * Whether the outage verdict is already sealed, whatever the remaining calls do.
+ *
+ * `assertFailureRate` refuses a table in which more than a tenth of the cases failed at the model.
+ * Failures only accumulate, so once the count exceeds a tenth of the *whole split* the run cannot
+ * end below the threshold: the verdict is decided, and every further call is spent on a table that
+ * will not be published.
+ *
+ * Stated as arithmetic rather than as a heuristic on purpose. A "grace period" — ignore the first
+ * N calls — is a judgement about which refusals are transient, and a guard is the wrong place for
+ * one: this rule cannot refuse a run the table guard would have accepted, which is the only
+ * property the early verdict has to preserve.
+ */
+export function outageDecided(failures: number, total: number, maxShare = 0.1): boolean {
+  if (!Number.isFinite(total) || total <= 0) return false;
+  return failures > maxShare * total;
+}
+
+/**
+ * The failure-share verdict, taken while the run can still stop spending.
+ *
+ * `assertFailureRate` reads a table, and a table only exists after every case has been asked: the
+ * guard is correct and arrives after the budget is gone. `glm-4.6` answered 429 to 416 of 496
+ * calls, and its first forty rows said so. This is the same tenth, counted as the cases land.
+ */
+export interface FailureBreaker {
+  /** Record one case's outcome. Returns the verdict when this case is the one that confirms it. */
+  observe(run: { errorKind?: string; error?: string }): string | null;
+  /** The verdict once taken, or `null`. Read by the pool so the slots behind a stop make no call. */
+  verdict(): string | null;
+}
+
+export function createFailureBreaker(armName: string, total: number, maxShare = 0.1): FailureBreaker {
+  let seen = 0;
+  let failures = 0;
+  let first = '';
+  let stopped: string | null = null;
+  return {
+    observe(run) {
+      seen += 1;
+      // Only the provider can end a run early. `execution`, `guard`, `shape` and a harness bug are
+      // output quality or this file's own defect; stopping on them would report "the model writes
+      // bad SQL" as "the endpoint is down", which is the confusion `escapeKind` exists to prevent.
+      if (run.errorKind !== 'llm') return null;
+      failures += 1;
+      if (first === '') first = run.error ?? 'no error text';
+      if (stopped !== null) return null;
+      // Nothing left to save on the last case, and the guards that read the finished table have a
+      // better sentence for a run that never reached the database: `assertArmProducedResults` says
+      // "this is not an accuracy of zero", which is the reading a one-case split needs.
+      if (seen >= total) return null;
+      if (!outageDecided(failures, total, maxShare)) return null;
+      stopped =
+        `arm ${armName}: stopped after ${String(seen)} of ${String(total)} calls — ` +
+        `${outageSentence(failures, seen, maxShare, first)} ` +
+        `The remaining ${String(Math.max(0, total - seen))} calls were not spent.`;
+      return stopped;
+    },
+    verdict() {
+      return stopped;
+    },
+  };
 }
 
 /**
@@ -5814,7 +5889,10 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
     if (block === undefined) return {};
     return { examples: block.examples, ...(arm.masked === true ? { masked: block.rewritten } : {}) };
   };
-  const runs = await pool(cases, settings.concurrency, async (question): Promise<CaseRun> => {
+  const breaker = createFailureBreaker(name, cases.length);
+  // The case body, as a function of the question rather than as the pool's argument, because the
+  // pool now also has to decide whether to start it: a stopped run makes no further calls.
+  const scoreOne = async (question: BirdQuestion): Promise<CaseRun> => {
     // Counted, not derived: a plan costs two calls, a selector costs one, and a
     // configuration-derived count got both wrong in opposite directions.
     const counter = withCallCounter(provider);
@@ -6654,7 +6732,30 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
         : { sampleBlock: card.samples }),
       ...(card?.fields === undefined ? {} : { fieldBlock: card.fields }),
     };
+  };
+  /**
+   * The slots that are already in flight finish their case; every case behind them is skipped.
+   *
+   * Skipping rather than throwing from the worker is deliberate: `pool` runs its slots as parallel
+   * promises and rejects on the first throw, which would leave the other slots' loops running and
+   * their rejections unhandled. A flag they all read costs one comparison and stops the spending.
+   */
+  const results = new Array<CaseRun | undefined>(cases.length);
+  await pool(cases, settings.concurrency, async (question, index) => {
+    if (breaker.verdict() !== null) return;
+    const run = await scoreOne(question);
+    // Written by index so the table stays in split order: the artifact's row order is part of the
+    // reading, and a stop must not reorder what did run.
+    results[index] = run;
+    breaker.observe(run);
   });
+  // Before any number is printed, and before a single row is summarised: a run stopped because the
+  // endpoint refused a tenth of its calls has no accuracy, and reporting one would be a score
+  // computed from the provider's mood. The table guard below would say the same thing an hour
+  // later; this says it at call forty.
+  const stopped = breaker.verdict();
+  if (stopped !== null) throw new Error(stopped);
+  const runs = results.filter((run): run is CaseRun => run !== undefined);
   // Before any number is printed: an arm that never reached the database has no
   // accuracy, and publishing 0% would hide the provider's message behind a score.
   assertArmProducedResults(name, runs);

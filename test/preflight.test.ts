@@ -97,6 +97,10 @@ describe('the settings a preflight reads', () => {
       apiKey: '',
       samples: 3,
       deadlineMs: 60_000,
+      // The run's own default, because a probe at a lower concurrency than the run answers a
+      // different question: `glm-4.6` passed twelve serial probes and then refused 83.9% of a
+      // concurrency-8 arm.
+      concurrency: 8,
     });
   });
 
@@ -109,8 +113,9 @@ describe('the settings a preflight reads', () => {
         DEEPSEEK_API_KEY: 'old',
         BIRD_PREFLIGHT_SAMPLES: '1',
         BIRD_LLM_TIMEOUT_MS: '250',
+        BIRD_CONCURRENCY: '3',
       }),
-    ).toEqual({ baseUrl: 'http://127.0.0.1:9/v1', model: 'm', apiKey: 'new', samples: 1, deadlineMs: 250 });
+    ).toEqual({ baseUrl: 'http://127.0.0.1:9/v1', model: 'm', apiKey: 'new', samples: 1, deadlineMs: 250, concurrency: 3 });
     expect(resolvePreflightSettings({ DEEPSEEK_API_KEY: 'old' }).apiKey).toBe('old');
   });
 });

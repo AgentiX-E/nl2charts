@@ -624,3 +624,18 @@ be written otherwise. Quoting is also why the renderer wants the schema: SQLite 
 name that matches no column as a *string literal*, so a misspelling compares a column to a constant
 and returns a clean wrong answer. With `columns` passed, `compileIntent` refuses it as
 `unknown-identifier` instead.
+
+**Circuit breaker** — The failure-share verdict taken while a run is still spending calls. The guards
+that read a finished table are correct and late: `glm-4.6` spent 496 calls to build a table whose
+first sixty rows already said the endpoint was refusing four calls in five. `outageDecided(failures,
+total)` seals the same verdict earlier — failures only accumulate, so once the count exceeds a tenth of
+the *split* the finished table cannot come back under the threshold — and the pool it feeds stops
+starting cases instead of throwing from a worker, because a thrown worker leaves the other pool slots
+running and their rejections unhandled. The rule cannot refuse a run the table guard would have
+accepted, which is the only property an early verdict has to keep.
+
+**Probe wave** — How a preflight sends its calls: `BIRD_CONCURRENCY` at a time, the run's own number.
+A rate limit is a function of simultaneous requests, so twelve calls one after another measure an
+endpoint under a load the run never applies. `glm-4.6` passed twelve serial probes (median 7.1 s, none
+refused) and then answered 429 to 416 of 496 calls at concurrency 8; the probes saw no failures because
+at one call at a time there were none to see.

@@ -1022,6 +1022,49 @@ describe('inputs an arm needs and does not have', () => {
   it('refuses an arm that is not in the table', async () => {
     await expect(run({ plan: { first: correct }, env: { BIRD_ARMS: 'names,not-an-arm' } })).rejects.toThrow(/unknown arm/);
   });
+
+  it('stops a throttled arm at the first verdict instead of spending the whole split', async () => {
+    // `42633514038` spent 496 calls and twenty-five minutes on `glm-4.6` to learn what its first
+    // forty already said: every request answered 429. The split is seven cases, the run serialised
+    // and the retries off, because what is under test is how many *cases* were asked — with a pool
+    // of eight the whole split would already be in flight, and with three retries each case costs
+    // three requests, both of which would hide the saving behind arithmetic about requests.
+    const endpoint = await startEndpoint({ reply: () => ({ status: 429, content: '{"error":"rate limited"}' }) });
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const logs = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await expect(
+        main(
+          {
+            BIRD_DATA: data,
+            BIRD_DBS: 'shop',
+            BIRD_OUT: join(root, `out-throttled-${String(Math.random()).slice(2, 8)}.json`),
+            LLM_BASE_URL: endpoint.url,
+            LLM_API_KEY: 'test-key',
+            LLM_MODEL: 'stub-model',
+            BIRD_ARMS: 'names',
+            BIRD_CONCURRENCY: '1',
+            BIRD_LLM_RETRIES: '1',
+          },
+          [],
+          root,
+        ),
+      ).rejects.toThrow(/stopped after 1 of 7 calls/);
+      // Which questions were asked, rather than how many requests arrived: the runner probes the
+      // endpoint three times before the first arm, and those probes are not part of the budget this
+      // guard is protecting.
+      const asked = (index: number): number =>
+        endpoint.requests.filter((request) => request.prompt.includes(QUESTIONS[index]?.question ?? '\u0000')).length;
+      // One failure of seven is already more than a tenth of the split, so the first case that
+      // failed seals the verdict and every case behind it is never asked.
+      expect(asked(0)).toBe(1);
+      for (const index of [1, 2, 3, 4, 5, 6]) expect(asked(index)).toBe(0);
+    } finally {
+      errors.mockRestore();
+      logs.mockRestore();
+      await endpoint.close();
+    }
+  });
 });
 
 describe('retrieval and the second model, when they are configured', () => {
@@ -2048,9 +2091,10 @@ describe('an endpoint that is down for one kind of request', () => {
     // The card is the first call an arm makes, and it was built *outside* the wrapper whose whole
     // job is "one case cannot take the run down" — so a refused card escaped the per-case worker and
     // ended the run with a provider stack trace. It is inside the wrapper now, which means the case
-    // is a recorded `llm` failure and the share guard decides what to do with it: on a seven-case
-    // fixture one failure is 14.3%, above the 10% this harness treats as an outage, so the arm is
-    // refused with the guard's own sentence instead of the provider's.
+    // is a recorded `llm` failure: on a seven-case fixture one failure is already more than a tenth
+    // of the split, so the circuit breaker seals the verdict at the case that failed rather than
+    // after the other five. Either sentence can only be printed if the refusal was counted as the
+    // provider's, which is the property this case exists to hold.
     const target = QUESTIONS[1]?.question ?? '';
     await expect(
       run({
@@ -2061,14 +2105,28 @@ describe('an endpoint that is down for one kind of request', () => {
         },
         env: { BIRD_ARMS: 'inline+evidence+llm-select', BIRD_DEFINITIONS_FORCE: '1', BIRD_LLM_RETRIES: '1', BIRD_CONCURRENCY: '1' },
       }),
-    ).rejects.toThrow(/arm inline\+evidence\+llm-select: 1 of 7 calls \(14\.3%\) failed at the model, above the 10%/);
+    ).rejects.toThrow(/arm inline\+evidence\+llm-select: stopped after 2 of 7 calls .*50\.0%\) failed at the model.*first error: .*500/);
   });
 
   it('refuses a voting arm whose every sample failed at the model', async () => {
+    // The first failure of seven is more than a tenth, so the verdict is sealed before the split
+    // ends: the sentence is the breaker's, and the count is what says it was the provider.
     await expect(
       run({
         plan: { fail: () => 500 },
         env: { BIRD_ARMS: 'vote', BIRD_LLM_RETRIES: '1' },
+      }),
+    ).rejects.toThrow(/arm vote: stopped after 1 of 7 calls .*failed at the model.*first error: every sample failed at the model/);
+  });
+
+  it('leaves a one-case split to the guard that says the run did not happen', async () => {
+    // With nothing left to save, the breaker declines and `assertArmProducedResults` speaks: on a
+    // single case "100% failed" reads as a throttle, and "this is not an accuracy of zero" is the
+    // reading that is actually true.
+    await expect(
+      run({
+        plan: { fail: () => 500 },
+        env: { BIRD_ARMS: 'names', BIRD_LLM_RETRIES: '1', BIRD_LIMIT: '1' },
       }),
     ).rejects.toThrow(/every case failed before reaching the database/);
   });

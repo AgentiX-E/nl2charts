@@ -23,6 +23,14 @@ export interface EndpointRequest {
   };
   /** The prompt text, joined, for tests that key their answer on it. */
   readonly prompt: string;
+  /**
+   * How many requests this server is answering right now, this one included.
+   *
+   * A provider's rate limit is a function of concurrent requests, not of requests: an endpoint
+   * that answers twelve pings one at a time and refuses the eighth simultaneous one is healthy
+   * to a serial prober and closed to a run. This is the number that lets a test say so.
+   */
+  readonly inFlight: number;
 }
 
 export interface EndpointReply {
@@ -47,10 +55,14 @@ export interface Endpoint {
 
 export async function startEndpoint(options: EndpointOptions): Promise<Endpoint> {
   const requests: EndpointRequest[] = [];
+  // Counted here rather than in each test, because the tests that need it are the ones about a
+  // provider under load and a hand-rolled counter in each of them would drift from the server.
+  let inFlight = 0;
   const server: Server = createServer((request: IncomingMessage, response: ServerResponse) => {
     const chunks: Buffer[] = [];
     request.on('data', (chunk: Buffer) => chunks.push(chunk));
     request.on('end', () => {
+      inFlight += 1;
       const text = Buffer.concat(chunks).toString('utf8');
       let body: EndpointRequest['body'] = {};
       try {
@@ -64,11 +76,13 @@ export async function startEndpoint(options: EndpointOptions): Promise<Endpoint>
         authorization: request.headers.authorization,
         body,
         prompt,
+        inFlight,
       };
       requests.push(seen);
       const decided = options.reply(seen, requests.length - 1);
       const answer: EndpointReply = typeof decided === 'string' ? { content: decided } : decided;
       const send = (): void => {
+        inFlight -= 1;
         const status = answer.status ?? 200;
         const payload =
           answer.raw ??

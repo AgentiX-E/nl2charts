@@ -1924,6 +1924,83 @@ What this does not do is make the run cheaper. Two arms instead of eight, at con
 300-second deadline, is the experiment the project's own rule asked for — *does a reasoning model move the
 accuracy* — and not the eight-arm sweep, which is a different question asked at four times the bill.
 
+## The preflight was serial, and the endpoint was not
+
+`42633514038`, `glm-4.6`, two arms on the 496-case Mini-Dev split. The preflight passed and printed
+its own width:
+
+```
+preflight[primary]: preflight: 12 calls to glm-4.6 — 12 answered, median 7151 ms, worst 7890 ms,
+deadline 300000 ms; 12 clean probe(s) leave a failure rate above 22.1% undetected
+```
+
+Then `inline+evidence` failed **416 of 496 calls (83.9%)**, every one of them a 429, and the harness
+refused to publish a table computed from the endpoint's mood. The arithmetic above is not the
+explanation this time: at a true 83.9% failure rate, twelve clean probes would essentially never
+happen (`0.161^12`). The probes saw no failures because, at one call at a time, there were none to
+see. What they missed is that they were **serial**.
+
+A rate limit is a function of simultaneous requests, not of requests. Twelve calls one after another
+measure an endpoint under a load the run never applies; the run applies eight at a time. So the probe
+now goes out in **waves of the run's own concurrency** — `BIRD_CONCURRENCY`, read from the variable the
+run reads — and a 429 inside a wave is its own problem line, naming the setting that produced it
+rather than the timeout:
+
+> `8 of 12 calls were refused with 429 at 8 concurrent, which is the run's own concurrency: the
+> endpoint is rate limiting this account. Lower BIRD_CONCURRENCY, raise the account limit, or
+> dispatch this model to another provider.`
+
+The second fix is about when the verdict arrives. `assertFailureRate` reads a **table**, and a table
+only exists once every case has been asked: it cost 496 calls and twenty minutes to reach a
+conclusion its first sixty rows had already established. `outageDecided(failures, total)` is the same
+tenth expressed as a sealed verdict — failures only accumulate, so once the count exceeds a tenth of
+the *split*, the finished table cannot come back under the threshold. Stated that way the early stop
+cannot refuse a run the table guard would have accepted, which is the only property it has to keep; a
+"grace period" for the first N calls would have been a judgement about which refusals are transient,
+and a guard is the wrong place for one.
+
+| | `42633514038` | with the breaker |
+| --- | --- | --- |
+| calls spent before the refusal | 496 | 50 failures is a tenth of 496, reached at about call 60 |
+| wall clock before the refusal | 20 min 26 s | the minute the fiftieth 429 arrives |
+| what the reader sees | `416 of 496 calls (83.9%) failed` | `stopped after 60 of 496 calls — 50 of 60 calls (83.3%) failed at the model … (first error: llm returned 429). The remaining 436 calls were not spent.` |
+
+The last call is left to `assertArmProducedResults` on purpose: with nothing left to save, "100% of
+one case failed" reads as a throttle, and "this is not an accuracy of zero; it is a run that did not
+happen" is the reading that is actually true.
+
+## What the shipped prompt is made of, per block
+
+`pnpm bench:bird:card <report.json> --arm metadata+evidence` renders the prompt the pipeline would
+send for every case and splits its cost by the block that spent it. No model calls, so the number can
+be re-measured at any time, and it is measured on the split the product is judged on (496 cases):
+
+| block | chars per call | share |
+| --- | --- | --- |
+| schema card | 6,801 | 90.2% |
+| rules | 274 | 3.6% |
+| context | 135 | 1.8% |
+| linker hint | 133 | 1.8% |
+| question | 90 | 1.2% |
+| **total** | **7,544** | |
+
+The card is the prompt. What the card carries is not:
+
+- the card shows **7.3 tables**; the gold statement reads **2.1**, so **54.1% of those characters
+  belong to tables the gold never reads** — the ceiling for a perfect table linker is half the prompt.
+- the linker that ships keeps 2.9 tables: **every** gold table on 234 of 496 cases, some on 176, and
+  **none on 86**. That 86 is why `select-prune` loses 1.4pp: the ceiling is large and the coverage is
+  the constraint, which is a linker problem rather than a card problem.
+- a *field* budget cannot pay for itself yet: at 12 fields the linker names 30.9% of the gold's
+  fields and covers all of them on **16 of 496** cases. Cutting columns to save tokens would delete
+  answers, so the token work belongs at the table level and only after the linker stops missing whole
+  tables.
+
+That ordering matters for the next mechanism: the `filter-narrow` composition below says 72% of the
+remaining failures are questions whose literal is absent from the column the prompt compared — a
+column-level failure. Column evidence in the prompt is the fix, and the only place to pay for it
+without growing the bill is the 54.1% of the card that answers no question.
+
 ## The candidate the three prompts cannot write
 
 Seven configurations answered 466 of the 1,532 dev questions wrongly — no arm held the right
