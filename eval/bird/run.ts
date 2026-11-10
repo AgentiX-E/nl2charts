@@ -1224,10 +1224,6 @@ export const DEFAULT_ARMS: readonly string[] = [
   'inline+icl',
   'inline+repair',
   'inline+repair-raw',
-  // The chain's only arm whose trigger is the question rather than the result. It is here
-  // because the failure class it targets is the largest one left (16.1-18.8pp) and it is
-  // invisible to every other trigger on this page.
-  'inline+evidence+audit',
   'values',
   'metadata+evidence',
   // The only multi-call arm left in the chain, and it is here to keep the path alive rather
@@ -1321,6 +1317,14 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   // harness moves by itself on 496 questions and below the dev split's MDE, so the arm is written
   // and paired and deliberately not dispatched: an experiment that cannot resolve its own effect
   // spends 496 calls to report noise.
+  // The chain's only arm whose trigger is the question rather than the result, and the one
+  // whose verdict moved it out of the chain. It targets the largest failure class left
+  // (16.1-18.8pp) and is invisible to every other trigger on this page, which is why it was
+  // written; measured on the dev split it pays 2x calls and 2.3x completion tokens for +1.2pp
+  // at p = 0.48, so it is an ablation reference rather than a candidate. Kept beside
+  // `inline+evidence+empty` because the two are the same question asked at different triggers:
+  // a condition the question implies and never wrote, versus a result that came back empty.
+  'inline+evidence+audit': "the condition audit as a second call, measured on dev at +1.2pp for 2x calls and 2.3x completion tokens (p = 0.48) — the largest failure class it targets is real and this trigger is not what repairs it, so it is the ablation reference for 'ask again about the conditions' rather than a candidate",
   'inline+evidence+empty': "the turn after a statement returns nothing, on the arm that ships: 5.2% of answers fire it and every fire is a wrong answer, but the measured yield is 9 cases in 63 fires, so +0.75pp on 496 questions — under this harness's own 2.0pp noise and under the dev split's MDE, which is why it is written, paired and not dispatched",
   definitions: 'structural semantics built from keys: superseded by inline placement, kept as the parent of definitions+evidence',
   'dataset-subset': 'isolates coverage from author, run when a definition arm moves',
@@ -1457,10 +1461,11 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   // prompt skeleton — the only difference is whether the literals the question names are spelled
   // beside the columns that hold them, which is what `values` adds and nothing else does.
   ['metadata+evidence', 'metadata+evidence+values'],
-  // One lever from the plain single call: the turn that reads the question instead of the
-  // result, one extra call, same prompt and same hints. The only pair in this table whose
-  // mechanism fires before anything is executed.
-  ['inline+evidence', 'inline+evidence+audit'],
+  // The audit pair is gone, and its absence is the record. It was declared here while the arm was
+  // in the minidev chain; the arm left the chain on the dev split's own reading (+1.2pp for 2x
+  // calls and 2.3x completion tokens, p = 0.48), and a pair that names an arm a split does not run
+  // promises a reading nobody can take — `check-bird-baseline` refuses exactly that, which is how
+  // this line came to be removed rather than left as a comment about a measurement that is over.
   // One lever from the plain single call, and the only pair in this table that spends no call at
   // all: the same prompt, the same card, one query per literal, and a statement the column can
   // correct. The pair prices a rewrite, not a decision — which is why its delta is expected to be

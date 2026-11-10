@@ -255,16 +255,19 @@ describe('the chain that actually runs', () => {
     // grew one arm at a time to sixteen — 23,840 prompt tokens a question, 11.9M a run. The
     // cut that took it to eleven was justified by measurement (`vote` +0.00pp against `select`
     // at 17:17, `select-duo` −0.60pp, `select5` +0.40pp inside a 3.33pp MDE) and this line is
-    // what keeps the next arm from being added without that argument: fifteen nominal calls
-    // today against a ceiling of fifteen, so the chain is full. The fifteenth rung is the
-    // audit arm — one call, aimed at the largest failure class left — and the next arm has to
-    // displace one rather than extend the bill.
+    // what keeps the next arm from being added without that argument.
+    //
+    // Fourteen today, and the fourteenth rung left by its own measurement: the audit arm was
+    // the fifteenth — one call, aimed at the largest failure class left — until the dev split
+    // priced it at +1.2pp for 2x calls and 2.3x completion tokens (p = 0.48). It became the
+    // ablation reference, so the position it frees belongs to the next lever with a reading
+    // rather than to the next idea.
     const nominal = DEFAULT_ARMS.reduce((total, name) => {
       const arm = ARMS.find((entry) => entry.name === name) as Arm;
       return total + (arm.vote ?? 1) + (arm.select === true ? 1 : 0);
     }, 0);
     expect(nominal).toBeLessThanOrEqual(15);
-    expect(nominal).toBe(15);
+    expect(nominal).toBe(14);
   });
 
   it('gives the demonstration arm statements and the textual arm only text', () => {
@@ -492,13 +495,19 @@ describe('the chain that actually runs', () => {
     expect(PROJECTION_RULE).not.toMatch(/\bfewer\b/);
   });
 
-  it('keeps the audit pair one lever apart', () => {
+  it('keeps the audit arm one lever from its parent, and out of the chain', () => {
     const parent = ARMS.find((arm) => arm.name === 'inline+evidence') as Arm;
     const audit = ARMS.find((arm) => arm.name === 'inline+evidence+audit') as Arm;
     expect(parent.audit).toBeUndefined();
     expect(audit.audit).toBe('conditions');
     expect({ ...audit, audit: undefined, name: parent.name }).toEqual(parent);
-    expect(PAIRS).toContainEqual(['inline+evidence', 'inline+evidence+audit']);
+    // The arm still exists and is still one lever, and it left the chain on the dev split's own
+    // reading (+1.2pp for 2x calls and 2.3x completion tokens, p = 0.48). The pair went with it:
+    // a pair naming an arm a split does not run promises a reading nobody can take, which is the
+    // condition `check-bird-baseline` refuses.
+    expect(DEFAULT_ARMS).not.toContain('inline+evidence+audit');
+    expect(ON_DEMAND_ARMS['inline+evidence+audit']).toMatch(/\+1\.2pp/);
+    expect(PAIRS).not.toContainEqual(['inline+evidence', 'inline+evidence+audit']);
   });
 
   /**
