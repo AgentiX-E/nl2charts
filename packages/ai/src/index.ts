@@ -1,4 +1,4 @@
-export { createHttpProvider, turnTemperature, withCallCounter } from './provider.js';
+export { createHttpProvider, reasoningTokensOf, turnTemperature, withCallCounter } from './provider.js';
 export { CHAT_CAPABILITIES, REASONING_CAPABILITIES, adaptRequest, capabilitiesOf } from './capability.js';
 export type { AdaptedRequest, ModelCapabilities, ModelFamily, SamplingSupport } from './capability.js';
 export { renderEvidence } from './evidence.js';

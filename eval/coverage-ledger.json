@@ -7,7 +7,7 @@
     "lines": 99.51,
     "statements": 99.51,
     "functions": 100,
-    "branches": 98.3
+    "branches": 98.31
   },
   "files": {
     "eval/ablate.ts": {
@@ -326,7 +326,7 @@
       "lines": 99.44,
       "statements": 99.44,
       "functions": 100,
-      "branches": 95.93
+      "branches": 95.97
     },
     "eval/bird/samples.ts": {
       "lines": 100,

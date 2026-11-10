@@ -1644,6 +1644,16 @@ export interface CaseTokens {
    */
   readonly cached?: number;
   /**
+   * Completion tokens the endpoint spent deliberating, when it reported them.
+   *
+   * Already inside `completion`, so this is a decomposition of the bill rather than an addition to
+   * it. It is the only direct evidence the artifact can hold that a request reached a model that
+   * thinks: the response's `model` field names the serving deployment (`deepseek-flash` answered
+   * both aliases here), so it cannot say which model ran, and completion tokens alone cannot tell
+   * "wrote 594 tokens of SQL" from "thought for 540 and wrote 54".
+   */
+  readonly reasoning?: number;
+  /**
    * The same cost split by what each call was for.
    *
    * Absent on an artifact written before the meter split it. Present, it sums to the fields
@@ -1669,6 +1679,8 @@ export interface PurposeCost {
   readonly completion: number;
   readonly chars: number;
   readonly unbilled: number;
+  /** The share of `completion` the endpoint said it spent thinking, when it said anything. */
+  readonly reasoning?: number;
 }
 
 export interface CaseRun extends CaseOutcome {
@@ -2011,14 +2023,62 @@ export function cacheFieldOf(
   return { cached: primary.cachedTokens + (second?.cachedTokens ?? 0) };
 }
 
+/**
+ * The `reasoning` field of a case's token record, or nothing when nobody reported one.
+ *
+ * The same shape as `cacheFieldOf` and for the same reason: an endpoint that says nothing about
+ * deliberation has not said it spent none, and `reasoning: 0` in an artifact is a measurement
+ * somebody made. Summed over both meters because a cross arm can ask two endpoints, and the case's
+ * cost is what both of them billed.
+ */
+export function reasoningFieldOf(
+  primary: { readonly reasoningTokens: number; readonly reasoningReported: number },
+  second?: { readonly reasoningTokens: number; readonly reasoningReported: number },
+): { readonly reasoning?: number } {
+  if (primary.reasoningReported + (second?.reasoningReported ?? 0) === 0) return {};
+  return { reasoning: primary.reasoningTokens + (second?.reasoningTokens ?? 0) };
+}
+
+/**
+ * The mean of one optional per-case figure, over the cases that carried it.
+ *
+ * `undefined` when nobody reported one, so "no endpoint said" never renders as zero — the same rule
+ * `cacheFieldOf` and `reasoningFieldOf` follow one layer down. The narrowing happens here rather
+ * than at the call site: `?? 0` inside that reduce would be a branch no run can take, because the
+ * array it reads was already filtered on the field, and an unreachable branch is coverage that
+ * cannot be earned back with a test.
+ */
+export function meanReported<T>(costs: readonly T[], pick: (cost: T) => number | undefined): number | undefined {
+  const values: number[] = [];
+  for (const cost of costs) {
+    const value = pick(cost);
+    if (value !== undefined) values.push(value);
+  }
+  if (values.length === 0) return undefined;
+  return Math.round(values.reduce((total, value) => total + value, 0) / values.length);
+}
+
 export function mergePurposes(
   first: ReadonlyMap<string, PurposeUsage>,
   second?: ReadonlyMap<string, PurposeUsage>,
 ): Readonly<Record<string, PurposeCost>> {
-  const total: Record<string, { calls: number; prompt: number; completion: number; chars: number; unbilled: number; cached: number; cachedReported: number }> = {};
+  const total: Record<
+    string,
+    { calls: number; prompt: number; completion: number; chars: number; unbilled: number; cached: number; cachedReported: number; reasoning: number; reasoningReported: number }
+  > = {};
   for (const source of second === undefined ? [first] : [first, second]) {
     for (const [purpose, usage] of source) {
-      const slot = (total[purpose] ??= { calls: 0, prompt: 0, completion: 0, chars: 0, unbilled: 0, cached: 0, cachedReported: 0 });
+      const slot = (total[purpose] ??= {
+        calls: 0,
+        prompt: 0,
+        completion: 0,
+        chars: 0,
+        unbilled: 0,
+        cached: 0,
+        cachedReported: 0,
+        reasoning: 0,
+        reasoningReported: 0,
+      });
       slot.calls += usage.calls;
       slot.prompt += usage.promptTokens;
       slot.completion += usage.completionTokens;
@@ -2026,6 +2086,8 @@ export function mergePurposes(
       slot.unbilled += usage.unbilled;
       slot.cached += usage.cachedTokens;
       slot.cachedReported += usage.cachedReported;
+      slot.reasoning += usage.reasoningTokens;
+      slot.reasoningReported += usage.reasoningReported;
     }
   }
   // `cached` is written only when some answer reported it, and this is the one place that decides.
@@ -2034,16 +2096,15 @@ export function mergePurposes(
   return Object.fromEntries(
     Object.entries(total).map(([purpose, slot]) => [
       purpose,
-      slot.cachedReported === 0
-        ? { calls: slot.calls, prompt: slot.prompt, completion: slot.completion, chars: slot.chars, unbilled: slot.unbilled }
-        : {
-            calls: slot.calls,
-            prompt: slot.prompt,
-            completion: slot.completion,
-            chars: slot.chars,
-            unbilled: slot.unbilled,
-            cached: slot.cached,
-          },
+      {
+        calls: slot.calls,
+        prompt: slot.prompt,
+        completion: slot.completion,
+        chars: slot.chars,
+        unbilled: slot.unbilled,
+        ...(slot.cachedReported === 0 ? {} : { cached: slot.cached }),
+        ...(slot.reasoningReported === 0 ? {} : { reasoning: slot.reasoning }),
+      },
     ]),
   );
 }
@@ -6138,6 +6199,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
           chars: primary.chars + (second?.chars ?? 0),
           unbilled: primary.unbilled + (second?.unbilled ?? 0),
           ...cacheFieldOf(primary, second),
+          ...reasoningFieldOf(primary, second),
           ...(served.size === 0 ? {} : { served: [...served].sort() }),
           // The same money, split by what each call was for. A cross arm draws candidates from a
           // second model and may have that model judge them, so one purpose can be spent on both
@@ -7184,7 +7246,11 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
   const firstFailure = runs.find((run) => run.error !== undefined);
   // The cases whose endpoint reported a cache figure. A run whose endpoint says nothing about
   // caching has none, and that absence is what keeps `tokens.cached` out of the row.
-  const cachedMetered = metered.filter((cost) => cost.cached !== undefined);
+  // The two figures an endpoint reports on some answers and not others. Both are averaged over
+  // the reporters rather than over every case: an endpoint that reports unevenly has measured a
+  // subset, and dividing it by the whole would understate the ones it did answer.
+  const cachedFigure = meanReported(metered, (cost) => cost.cached);
+  const reasoningFigure = meanReported(metered, (cost) => cost.reasoning);
   // How many cases each base model served. Counted from the rows rather than from a side
   // ledger for the same reason every other column here is: a figure that has one definition
   // cannot disagree with the rows it is reported beside. The alias that was requested is in
@@ -7243,9 +7309,11 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
             // reporters rather than over every case because a partial reporter is an endpoint
             // that answers differently per call, and the mean of the answered ones is the only
             // figure that describes a hit.
-            ...(cachedMetered.length === 0
-              ? {}
-              : { cached: Math.round(cachedMetered.reduce((total, cost) => total + (cost.cached ?? 0), 0) / cachedMetered.length) }),
+            ...(cachedFigure === undefined ? {} : { cached: cachedFigure }),
+            // How much of `completion` was thinking. Absent on a chat endpoint and on any endpoint
+            // that reports no reasoning counter — the state every published reading before this
+            // column was written in, and a state a reader has to be able to tell from `0`.
+            ...(reasoningFigure === undefined ? {} : { reasoning: reasoningFigure }),
             ...(byPurpose === undefined ? {} : { byPurpose }),
           },
         }),

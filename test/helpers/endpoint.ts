@@ -38,6 +38,13 @@ export interface EndpointReply {
   readonly content?: string;
   /** Milliseconds to wait before answering, for deadline tests. */
   readonly delayMs?: number;
+  /**
+   * Reasoning tokens to bill inside `completion_tokens`, the way a thinking endpoint reports them.
+   *
+   * Absent by default, so every existing test still answers like a chat endpoint that says nothing
+   * about deliberation — which is the state of every run before the column existed.
+   */
+  readonly reasoningTokens?: number;
   /** Overrides the whole body, for malformed-response tests. */
   readonly raw?: string;
 }
@@ -89,7 +96,11 @@ export async function startEndpoint(options: EndpointOptions): Promise<Endpoint>
           JSON.stringify({
             model: body.model ?? 'test-model',
             choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: answer.content ?? '' } }],
-            usage: { prompt_tokens: 7, completion_tokens: 3 },
+            usage: {
+              prompt_tokens: 7,
+              completion_tokens: 3,
+              ...(answer.reasoningTokens === undefined ? {} : { completion_tokens_details: { reasoning_tokens: answer.reasoningTokens } }),
+            },
           });
         response.writeHead(status, { 'content-type': 'application/json' });
         response.end(payload);

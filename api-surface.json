@@ -232,6 +232,7 @@
     "parseSelection",
     "probeProtocol",
     "readEngineError",
+    "reasoningTokensOf",
     "recordProvider",
     "renderDefinitions",
     "renderEvidence",
@@ -323,6 +324,7 @@
     "UNLABELLED",
     "cachedTokensOf",
     "createHttpProvider",
+    "reasoningTokensOf",
     "turnTemperature",
     "withCallCounter"
   ],

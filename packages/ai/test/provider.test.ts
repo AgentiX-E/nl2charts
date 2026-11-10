@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { isNl2ChartsError } from '@agentix-e/nl2charts-spec';
-import { cachedTokensOf, createHttpProvider, turnTemperature, withCallCounter } from '../src/provider.js';
+import { cachedTokensOf, createHttpProvider, reasoningTokensOf, turnTemperature, withCallCounter } from '../src/provider.js';
 
 let server: Server;
 let baseUrl: string;
@@ -442,12 +442,12 @@ describe('withCallCounter', () => {
           : { text: 'x', model: 'm', usage: { promptTokens: 100, completionTokens: 10 } };
       },
     });
-    expect(priced.usage()).toEqual({ promptTokens: 0, completionTokens: 0, chars: 0, unbilled: 0, cachedTokens: 0, cachedReported: 0 });
+    expect(priced.usage()).toEqual({ promptTokens: 0, completionTokens: 0, chars: 0, unbilled: 0, cachedTokens: 0, cachedReported: 0, reasoningTokens: 0, reasoningReported: 0 });
     for (let index = 0; index < 3; index += 1) await priced.provider.complete({ messages: [{ role: 'user', content: 'q' }] });
     expect(priced.calls()).toBe(3);
     // `chars` is the text of the same three requests: one character per call in this stub, which
     // is how the ratio stays a fact about one request rather than two.
-    expect(priced.usage()).toEqual({ promptTokens: 200, completionTokens: 20, chars: 3, unbilled: 1, cachedTokens: 0, cachedReported: 0 });
+    expect(priced.usage()).toEqual({ promptTokens: 200, completionTokens: 20, chars: 3, unbilled: 1, cachedTokens: 0, cachedReported: 0, reasoningTokens: 0, reasoningReported: 0 });
   });
 
   it('reads the cached-prompt count from every spelling an endpoint uses', async () => {
@@ -517,6 +517,64 @@ describe('withCallCounter', () => {
     expect(cachedTokensOf({ prompt_tokens_details: { cached_tokens: '64' } })).toBe(64);
   });
 
+  it('reads the reasoning count from the fields an endpoint puts it in', () => {
+    // A reasoning model's deliberation is billed inside `completion_tokens`, so a meter that reads
+    // only that one number cannot tell "it wrote 594 tokens of SQL" from "it thought for 540 and
+    // wrote 54". Both spellings are read: OpenAI nests the counter under
+    // `completion_tokens_details`, and gateways in between put the raw name at the top.
+    const nested = reasoningTokensOf({ completion_tokens: 594, completion_tokens_details: { reasoning_tokens: 540 } });
+    const flat = reasoningTokensOf({ completion_tokens: 594, reasoning_tokens: 512 });
+    const silent = reasoningTokensOf({ completion_tokens: 594 });
+    expect([nested, flat, silent]).toEqual([540, 512, undefined]);
+    // A chat endpoint that reports nothing has not claimed it thought for zero; a null is silence
+    // as well, and a string is a field nobody meant as a count.
+    expect(reasoningTokensOf({ reasoning_tokens: null })).toBeUndefined();
+    expect(reasoningTokensOf({ reasoning_tokens: 'lots' })).toBeUndefined();
+    expect(reasoningTokensOf(undefined)).toBeUndefined();
+    // Zero is a measurement: an endpoint that reported the field and spent nothing on thinking is
+    // a different fact from one that said nothing at all, and the arm's column has to show both.
+    expect(reasoningTokensOf({ reasoning_tokens: 0 })).toBe(0);
+  });
+
+  it('meters reasoning tokens beside completion tokens, and counts who reported', async () => {
+    // The count of reporters is what makes the column readable: an average over every case would
+    // divide a partial reporter's deliberation by cases that never mentioned it.
+    let answer = 0;
+    const counted = withCallCounter({
+      id: 'thinks',
+      model: 'm',
+      complete: async () => {
+        answer += 1;
+        if (answer === 1) return { text: 'x', model: 'm', usage: { promptTokens: 100, completionTokens: 60, reasoningTokens: 45 } };
+        if (answer === 2) return { text: 'y', model: 'm', usage: { promptTokens: 100, completionTokens: 7, reasoningTokens: 0 } };
+        return { text: 'z', model: 'm', usage: { promptTokens: 100, completionTokens: 5 } };
+      },
+    });
+    for (const content of ['a', 'b', 'c']) await counted.provider.complete({ messages: [{ role: 'user', content }] });
+    expect(counted.usage()).toEqual({
+      promptTokens: 300,
+      completionTokens: 72,
+      chars: 3,
+      unbilled: 0,
+      cachedTokens: 0,
+      cachedReported: 0,
+      reasoningTokens: 45,
+      reasoningReported: 2,
+    });
+    // The case total still adds up to the sum of its purposes, which is the property the share
+    // columns are divided by.
+    const summed = [...counted.byPurpose().values()].reduce(
+      (total, row) => ({
+        promptTokens: total.promptTokens + row.promptTokens,
+        completionTokens: total.completionTokens + row.completionTokens,
+        reasoningTokens: total.reasoningTokens + row.reasoningTokens,
+        reasoningReported: total.reasoningReported + row.reasoningReported,
+      }),
+      { promptTokens: 0, completionTokens: 0, reasoningTokens: 0, reasoningReported: 0 },
+    );
+    expect(summed).toEqual({ promptTokens: 300, completionTokens: 72, reasoningTokens: 45, reasoningReported: 2 });
+  });
+
   it('files each call under the purpose it declared', async () => {
     // The selector is the call whose price is easiest to hide: it reads a prompt nobody else
     // reads and answers with one digit, and on a four-call arm it is a quarter of the bill. A
@@ -533,11 +591,11 @@ describe('withCallCounter', () => {
     await counted.provider.complete({ messages: [{ role: 'user', content: 'aa' }], purpose: 'generate' });
     await counted.provider.complete({ messages: [{ role: 'user', content: 'b' }], purpose: 'select' });
     const byPurpose = counted.byPurpose();
-    expect(byPurpose.get('generate')).toEqual({ calls: 1, promptTokens: 100, completionTokens: 10, chars: 2, unbilled: 0, cachedTokens: 0, cachedReported: 0 });
-    expect(byPurpose.get('select')).toEqual({ calls: 1, promptTokens: 200, completionTokens: 10, chars: 1, unbilled: 0, cachedTokens: 0, cachedReported: 0 });
+    expect(byPurpose.get('generate')).toEqual({ calls: 1, promptTokens: 100, completionTokens: 10, chars: 2, unbilled: 0, cachedTokens: 0, cachedReported: 0, reasoningTokens: 0, reasoningReported: 0 });
+    expect(byPurpose.get('select')).toEqual({ calls: 1, promptTokens: 200, completionTokens: 10, chars: 1, unbilled: 0, cachedTokens: 0, cachedReported: 0, reasoningTokens: 0, reasoningReported: 0 });
     // The case total is the sum of the parts rather than a second measurement of them, so the
     // share taken over it cannot disagree with the table it is taken from.
-    expect(counted.usage()).toEqual({ promptTokens: 300, completionTokens: 20, chars: 3, unbilled: 0, cachedTokens: 0, cachedReported: 0 });
+    expect(counted.usage()).toEqual({ promptTokens: 300, completionTokens: 20, chars: 3, unbilled: 0, cachedTokens: 0, cachedReported: 0, reasoningTokens: 0, reasoningReported: 0 });
     expect(counted.unlabelled()).toBe(0);
   });
 
@@ -551,7 +609,7 @@ describe('withCallCounter', () => {
       complete: async () => ({ text: 'x', model: 'm', usage: { promptTokens: 5, completionTokens: 1 } }),
     });
     await counted.provider.complete({ messages: [{ role: 'user', content: 'q' }] });
-    expect(counted.byPurpose().get('unlabelled')).toEqual({ calls: 1, promptTokens: 5, completionTokens: 1, chars: 1, unbilled: 0, cachedTokens: 0, cachedReported: 0 });
+    expect(counted.byPurpose().get('unlabelled')).toEqual({ calls: 1, promptTokens: 5, completionTokens: 1, chars: 1, unbilled: 0, cachedTokens: 0, cachedReported: 0, reasoningTokens: 0, reasoningReported: 0 });
     expect(counted.byPurpose().has('generate')).toBe(false);
     expect(counted.unlabelled()).toBe(1);
   });
@@ -564,7 +622,7 @@ describe('withCallCounter', () => {
     await counted.provider.complete({ messages: [{ role: 'user', content: 'q' }], purpose: 'select' });
     // An answer with no usage block reported no cache field either, so the two cache counters stay
     // at zero and say so: nothing was measured, which is not the same as a prompt that missed.
-    expect(counted.byPurpose().get('select')).toEqual({ calls: 1, promptTokens: 0, completionTokens: 0, chars: 1, unbilled: 1, cachedTokens: 0, cachedReported: 0 });
+    expect(counted.byPurpose().get('select')).toEqual({ calls: 1, promptTokens: 0, completionTokens: 0, chars: 1, unbilled: 1, cachedTokens: 0, cachedReported: 0, reasoningTokens: 0, reasoningReported: 0 });
   });
 
   it('records the model the endpoint served, not the alias it was asked for', async () => {

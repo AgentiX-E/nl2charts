@@ -144,6 +144,13 @@ interface Plan {
    * and not the card — is what changed.
    */
   readonly intent?: (question: string) => string;
+  /**
+   * Reasoning tokens the endpoint bills inside the completion, keyed on the request.
+   *
+   * Absent means the endpoint says nothing about deliberation, which is what every chat endpoint
+   * in this file does — and what every published reading before the column existed was taken on.
+   */
+  readonly reasoning?: (request: EndpointRequest) => number | undefined;
 }
 
 /**
@@ -153,17 +160,26 @@ interface Plan {
  * selection, a repair turn, an empty-result turn, a semantics request. Keying on the
  * prompt is what makes one endpoint serve all of them.
  */
-function replyFor(request: EndpointRequest, plan: Plan): { status?: number; content: string; delayMs?: number } {
+function replyFor(request: EndpointRequest, plan: Plan): { status?: number; content: string; delayMs?: number; reasoningTokens?: number } {
   const delayMs = plan.delayMs?.(request);
+  const reasoningTokens = plan.reasoning?.(request);
   const status = plan.fail?.(request);
-  if (status !== undefined) return { status, content: '{"error":"unavailable"}', ...(delayMs === undefined ? {} : { delayMs }) };
+  if (status !== undefined) {
+    return { status, content: '{"error":"unavailable"}', ...(delayMs === undefined ? {} : { delayMs }), ...(reasoningTokens === undefined ? {} : { reasoningTokens }) };
+  }
   const prompt = request.prompt;
   // The golds this scenario answers with. A scenario that points the runner at another fixture
   // brings its own statements; every other scenario reads the module-level map, so this is the
   // same lookup it always was.
   const golds: Readonly<Record<string, string>> = plan.gold ?? GOLD;
-  const send = (content: string): { content: string; delayMs?: number } =>
-    delayMs === undefined ? { content } : { content, delayMs };
+  // Every answer carries the reasoning count when the scenario declares one: the column is a
+  // property of the endpoint, not of one branch of the prompt, and a count that appeared on some
+  // answers and not others would make the arm's average a fact about the branch.
+  const send = (content: string): { content: string; delayMs?: number; reasoningTokens?: number } => ({
+    content,
+    ...(delayMs === undefined ? {} : { delayMs }),
+    ...(reasoningTokens === undefined ? {} : { reasoningTokens }),
+  });
   // The selector. Its reply is a bare number by contract (`parseSelection`), so a SQL
   // block here would be counted as "the selector did not answer".
   if (prompt.includes('which candidate statement answers the question')) {
@@ -490,6 +506,52 @@ describe('a full run', () => {
     // The characters are counted from the same requests: four calls, so a case's character count
     // is four times the length of a prompt the stub saw, never zero.
     expect(cases.every((entry) => (entry.tokens?.chars ?? 0) > 0)).toBe(true);
+  });
+
+  it('records the deliberation a thinking endpoint billed inside the completion', async () => {
+    // A reasoning alias bills its deliberation inside `completion_tokens`, so a report that only
+    // prints that number cannot say whether 594 tokens were 594 of SQL or 54 of SQL and 540 of
+    // thinking. The endpoint here reports two of its three completion tokens as reasoning, which is
+    // the shape `deepseek-reasoner` produced at 594 against a chat model's 55.
+    const result = await run({ plan: { first: correct, reasoning: () => 2 }, env: { BIRD_ARMS: 'inline+evidence' } });
+    const [row] = result.report.arms as { tokens: { prompt: number; completion: number; reasoning?: number } }[];
+    expect(row?.tokens.reasoning).toBe(2);
+    // Still inside the completion bill rather than added to it: a column that changed the total
+    // would make every cost figure incomparable with the runs taken before it existed.
+    expect(row?.tokens.completion).toBe(3);
+    const cases = result.report.cases as { tokens?: { completion: number; reasoning?: number } }[];
+    expect(cases.every((entry) => entry.tokens?.reasoning === 2 && entry.tokens.completion === 3)).toBe(true);
+  });
+
+  it('averages the reasoning count over the cases that reported one, not over every case', async () => {
+    // An endpoint that reports the counter on one answer and not the next has measured one answer.
+    // Dividing that by every case would report a third of the truth and look like a smaller model;
+    // the mean is taken over the reporters, and the cases that said nothing keep no field at all.
+    // Every other call reports the counter, which is what a partial reporter looks like from the
+    // harness's side and does not depend on how the prompt happens to render a question.
+    let calls = 0;
+    const result = await run({
+      plan: { first: correct, reasoning: () => (calls++ % 2 === 0 ? 2 : undefined) },
+      env: { BIRD_ARMS: 'inline+evidence' },
+    });
+    const [row] = result.report.arms as { tokens: { reasoning?: number } }[];
+    expect(row?.tokens.reasoning).toBe(2);
+    const cases = result.report.cases as { tokens?: { reasoning?: number } }[];
+    const reporting = cases.filter((entry) => entry.tokens?.reasoning !== undefined);
+    expect(reporting.length).toBeGreaterThan(0);
+    expect(reporting.length).toBeLessThan(cases.length);
+    expect(reporting.every((entry) => entry.tokens?.reasoning === 2)).toBe(true);
+  });
+
+  it('says nothing about deliberation when the endpoint says nothing', async () => {
+    // An endpoint that reports no reasoning counter has not claimed it spent none, and `0` here
+    // would publish "this model never thinks" on every chat run in the repository. The field is
+    // absent, which is a state a reader can tell from a measurement of zero.
+    const result = await run({ plan: { first: correct }, env: { BIRD_ARMS: 'inline+evidence' } });
+    const [row] = result.report.arms as { tokens: Record<string, number> }[];
+    expect(row?.tokens !== undefined && 'reasoning' in row.tokens).toBe(false);
+    const cases = result.report.cases as { tokens?: Record<string, number> }[];
+    expect(cases.some((entry) => entry.tokens !== undefined && 'reasoning' in entry.tokens)).toBe(false);
   });
 
   it('sends the join closure on the prune arm, and says what it billed', async () => {

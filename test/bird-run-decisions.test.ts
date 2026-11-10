@@ -31,6 +31,8 @@ import {
   assertFieldBlockFired,
   fieldBlockFunnel,
   cacheFieldOf,
+  reasoningFieldOf,
+  meanReported,
   mergePurposes,
   demonstrationsFunnel,
   dissentFunnel,
@@ -1708,6 +1710,52 @@ describe('the free selector', () => {
   });
 });
 
+describe('averaging a figure an endpoint reports unevenly', () => {
+  it('says nothing when nobody reported one', () => {
+    // The arm's column is absent rather than zero: no endpoint said, and a zero would publish
+    // "this model spent nothing" on every chat run in the repository.
+    expect(meanReported([{}, {}], (cost: { cache?: number }) => cost.cache)).toBeUndefined();
+    expect(meanReported([], (cost: { cache?: number }) => cost.cache)).toBeUndefined();
+  });
+
+  it('averages over the reporters, not over every case', () => {
+    // An endpoint that reports on half its answers has measured a half. Dividing by every case
+    // would report 2.5 where the two answers it did report both said 5.
+    const cases = [{ cache: 5 }, { cache: 5 }, {}, {}];
+    expect(meanReported(cases, (cost) => cost.cache)).toBe(5);
+  });
+
+  it('counts a reported zero and rounds the mean', () => {
+    // Zero is a measurement, so it belongs in the denominator; the mean is a rounded number
+    // because a fractional token count is not a thing an endpoint can bill.
+    expect(meanReported([{ cache: 0 }, { cache: 0 }], (cost) => cost.cache)).toBe(0);
+    expect(meanReported([{ cache: 1 }, { cache: 2 }], (cost) => cost.cache)).toBe(2);
+  });
+});
+
+describe('what the artifact says about deliberation', () => {
+  it('writes no reasoning field when no answer reported one', () => {
+    // A chat endpoint, and every run before this column existed, report nothing. `0` would turn
+    // "nobody measured it" into "it thought for zero tokens", which is a claim about the model
+    // that no endpoint made.
+    expect(reasoningFieldOf({ reasoningTokens: 0, reasoningReported: 0 })).toEqual({});
+    expect(reasoningFieldOf({ reasoningTokens: 0, reasoningReported: 0 }, { reasoningTokens: 9, reasoningReported: 0 })).toEqual({});
+  });
+
+  it('a reported zero is a measurement, not a silence', () => {
+    // An endpoint that answered with the counter and spent nothing thinking has said something
+    // about the model: it did not deliberate. Dropping the field would erase that.
+    expect(reasoningFieldOf({ reasoningTokens: 0, reasoningReported: 1 })).toEqual({ reasoning: 0 });
+  });
+
+  it('adds both meters when either reported one', () => {
+    // A cross arm can ask two endpoints in one case, and the case's bill is what both charged.
+    expect(reasoningFieldOf({ reasoningTokens: 540, reasoningReported: 1 })).toEqual({ reasoning: 540 });
+    expect(reasoningFieldOf({ reasoningTokens: 540, reasoningReported: 1 }, { reasoningTokens: 61, reasoningReported: 1 })).toEqual({ reasoning: 601 });
+    expect(reasoningFieldOf({ reasoningTokens: 0, reasoningReported: 0 }, { reasoningTokens: 61, reasoningReported: 1 })).toEqual({ reasoning: 61 });
+  });
+});
+
 describe('what the artifact says about caching', () => {
   it('writes no cached field when no answer reported one', () => {
     // The absence is the measurement: an endpoint that says nothing about caching has not claimed
@@ -1727,8 +1775,8 @@ describe('what the artifact says about caching', () => {
   it('keeps the cached figure per purpose, and drops the field where nothing was reported', () => {
     const merged = mergePurposes(
       new Map([
-        ['generate', { calls: 1, promptTokens: 900, completionTokens: 40, chars: 3000, unbilled: 0, cachedTokens: 700, cachedReported: 1 }],
-        ['select', { calls: 1, promptTokens: 100, completionTokens: 1, chars: 400, unbilled: 0, cachedTokens: 0, cachedReported: 0 }],
+        ['generate', { calls: 1, promptTokens: 900, completionTokens: 40, chars: 3000, unbilled: 0, cachedTokens: 700, cachedReported: 1, reasoningTokens: 0, reasoningReported: 0 }],
+        ['select', { calls: 1, promptTokens: 100, completionTokens: 1, chars: 400, unbilled: 0, cachedTokens: 0, cachedReported: 0, reasoningTokens: 0, reasoningReported: 0 }],
       ]),
     );
     expect(merged.generate).toEqual({ calls: 1, prompt: 900, completion: 40, chars: 3000, unbilled: 0, cached: 700 });
@@ -1737,9 +1785,22 @@ describe('what the artifact says about caching', () => {
 
   it('sums one purpose spent on both models rather than listing it twice', () => {
     const merged = mergePurposes(
-      new Map([['generate', { calls: 1, promptTokens: 900, completionTokens: 40, chars: 3000, unbilled: 0, cachedTokens: 600, cachedReported: 1 }]]),
-      new Map([['generate', { calls: 1, promptTokens: 300, completionTokens: 20, chars: 900, unbilled: 0, cachedTokens: 0, cachedReported: 1 }]]),
+      new Map([['generate', { calls: 1, promptTokens: 900, completionTokens: 40, chars: 3000, unbilled: 0, cachedTokens: 600, cachedReported: 1, reasoningTokens: 0, reasoningReported: 0 }]]),
+      new Map([['generate', { calls: 1, promptTokens: 300, completionTokens: 20, chars: 900, unbilled: 0, cachedTokens: 0, cachedReported: 1, reasoningTokens: 0, reasoningReported: 0 }]]),
     );
     expect(merged.generate).toEqual({ calls: 2, prompt: 1200, completion: 60, chars: 3900, unbilled: 0, cached: 600 });
+  });
+
+  it('keeps the reasoning figure per purpose, and drops the field where nothing was reported', () => {
+    // The selector's deliberation and the generator's are different purchases: a judge that thinks
+    // for 300 tokens to answer "3" is the clearest example, and a per-case total cannot show it.
+    const merged = mergePurposes(
+      new Map([
+        ['generate', { calls: 1, promptTokens: 900, completionTokens: 594, chars: 3000, unbilled: 0, cachedTokens: 0, cachedReported: 0, reasoningTokens: 540, reasoningReported: 1 }],
+        ['select', { calls: 1, promptTokens: 100, completionTokens: 1, chars: 400, unbilled: 0, cachedTokens: 0, cachedReported: 0, reasoningTokens: 0, reasoningReported: 0 }],
+      ]),
+    );
+    expect(merged.generate).toEqual({ calls: 1, prompt: 900, completion: 594, chars: 3000, unbilled: 0, reasoning: 540 });
+    expect(merged.select).toEqual({ calls: 1, prompt: 100, completion: 1, chars: 400, unbilled: 0 });
   });
 });

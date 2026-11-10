@@ -67,6 +67,16 @@ export interface PurposeUsage {
   readonly cachedTokens: number;
   /** Answers that carried a cache field at all. The count is what makes the two above readable. */
   readonly cachedReported: number;
+  /**
+   * Completion tokens an endpoint spent deliberating, when it said so.
+   *
+   * Already inside `completionTokens` — this is a decomposition of that bill, not a second one.
+   * It exists because a reasoning alias and a chat alias can write the same 58 tokens of SQL and
+   * differ tenfold in cost, and `completionTokens` alone reports the two as one number.
+   */
+  readonly reasoningTokens: number;
+  /** Answers that carried a reasoning count at all, for the same reason `cachedReported` exists. */
+  readonly reasoningReported: number;
 }
 
 export interface LlmRequest {
@@ -135,6 +145,16 @@ export interface LlmUsage {
    * about caching has not said it cached nothing.
    */
   readonly cachedPromptTokens?: number;
+  /**
+   * Completion tokens the endpoint spent deliberating, when it reported them.
+   *
+   * Billed inside `completionTokens`, which is why this column exists: a reasoning alias and a
+   * chat alias that both write 58 tokens of SQL are not the same bill, and a meter reading only
+   * `completion_tokens` reports them as one. It is also the only direct evidence an artifact can
+   * hold that a request reached a model that thinks — the response's `model` field names the
+   * serving deployment, so it cannot say which alias answered.
+   */
+  readonly reasoningTokens?: number;
 }
 
 export interface LlmResponse {
@@ -258,6 +278,10 @@ interface CompletionBody {
     readonly cached_tokens?: unknown;
     /** OpenAI's spelling, nested beside the audio and reasoning counters. */
     readonly prompt_tokens_details?: { readonly cached_tokens?: unknown };
+    /** The deliberation a reasoning model billed inside `completion_tokens`. */
+    readonly completion_tokens_details?: { readonly reasoning_tokens?: unknown };
+    /** Some gateways put the raw counter at the top of `usage` instead. */
+    readonly reasoning_tokens?: unknown;
   };
 }
 
@@ -276,6 +300,31 @@ interface CompletionBody {
 export function cachedTokensOf(usage: { readonly prompt_cache_hit_tokens?: unknown; readonly cached_tokens?: unknown; readonly prompt_tokens_details?: { readonly cached_tokens?: unknown } } | undefined): number | undefined {
   if (usage === undefined) return undefined;
   for (const raw of [usage.prompt_cache_hit_tokens, usage.prompt_tokens_details?.cached_tokens, usage.cached_tokens]) {
+    if (raw === undefined || raw === null) continue;
+    const value = Number(raw);
+    if (Number.isFinite(value)) return value;
+  }
+  return undefined;
+}
+
+/**
+ * The reasoning-token count, from whichever field the endpoint used.
+ *
+ * OpenAI nests the counter under `completion_tokens_details`, DeepSeek reports none at all for a
+ * thinking alias, and gateways in between put the raw name at the top of `usage`. Reading both
+ * spellings in one place keeps the meter from depending on which vendor answered.
+ *
+ * `undefined` and `0` are different facts, for the same reason they are in `cachedTokensOf`: an
+ * endpoint that reported the field and spent nothing thinking has measured something, and one
+ * that said nothing has not. `0` is returned, not swallowed.
+ */
+export function reasoningTokensOf(
+  usage:
+    | { readonly reasoning_tokens?: unknown; readonly completion_tokens_details?: { readonly reasoning_tokens?: unknown }; readonly [field: string]: unknown }
+    | undefined,
+): number | undefined {
+  if (usage === undefined) return undefined;
+  for (const raw of [usage.completion_tokens_details?.reasoning_tokens, usage.reasoning_tokens]) {
     if (raw === undefined || raw === null) continue;
     const value = Number(raw);
     if (Number.isFinite(value)) return value;
@@ -442,6 +491,11 @@ export function createHttpProvider(options: HttpProviderOptions): LlmProvider {
       const promptTokens = Number(payload.usage?.prompt_tokens ?? 0);
       const completionTokens = Number(payload.usage?.completion_tokens ?? 0);
       const cachedPromptTokens = cachedTokensOf(payload.usage);
+      // Read at the same point as the cache figure and for the same reason: a reasoning alias's
+      // deliberation is billed inside `completion_tokens`, so without this column "594 tokens"
+      // cannot be split into "thought for 540, wrote 54" — which is the whole question a
+      // reasoning-alias comparison asks.
+      const reasoningTokens = reasoningTokensOf(payload.usage);
       const model = typeof payload.model === 'string' ? payload.model : options.model;
       return {
         text: content,
@@ -450,6 +504,7 @@ export function createHttpProvider(options: HttpProviderOptions): LlmProvider {
           promptTokens: Number.isFinite(promptTokens) ? promptTokens : 0,
           completionTokens: Number.isFinite(completionTokens) ? completionTokens : 0,
           ...(cachedPromptTokens === undefined ? {} : { cachedPromptTokens }),
+          ...(reasoningTokens === undefined ? {} : { reasoningTokens }),
         },
         ...(adapted.ignored.length === 0 ? {} : { ignored: adapted.ignored }),
       };
@@ -496,6 +551,8 @@ export function withCallCounter(provider: LlmProvider): {
     readonly unbilled: number;
     readonly cachedTokens: number;
     readonly cachedReported: number;
+    readonly reasoningTokens: number;
+    readonly reasoningReported: number;
   };
   /**
    * The same totals, split by what each call was for.
@@ -536,8 +593,20 @@ export function withCallCounter(provider: LlmProvider): {
     unbilled: number;
     cachedTokens: number;
     cachedReported: number;
+    reasoningTokens: number;
+    reasoningReported: number;
   };
-  const zero = (): Meter => ({ calls: 0, promptTokens: 0, completionTokens: 0, chars: 0, unbilled: 0, cachedTokens: 0, cachedReported: 0 });
+  const zero = (): Meter => ({
+    calls: 0,
+    promptTokens: 0,
+    completionTokens: 0,
+    chars: 0,
+    unbilled: 0,
+    cachedTokens: 0,
+    cachedReported: 0,
+    reasoningTokens: 0,
+    reasoningReported: 0,
+  });
   // One ledger, two views: the totals are accumulated beside the buckets at the same point rather
   // than recounted later, and a test holds them to the property that makes the share meaningful —
   // the buckets add up to the total. Recounting would be a second implementation of the same sum.
@@ -595,6 +664,16 @@ export function withCallCounter(provider: LlmProvider): {
           totals.cachedTokens += cached;
           totals.cachedReported += 1;
         }
+        // Same rule one column over: counted per answer, and only when the endpoint said
+        // something. A reasoning count that arrived on a third of the answers is an endpoint that
+        // reports unevenly, and averaging it over all of them would divide one fact by another.
+        const reasoning = response.usage.reasoningTokens;
+        if (reasoning !== undefined) {
+          meter.reasoningTokens += reasoning;
+          meter.reasoningReported += 1;
+          totals.reasoningTokens += reasoning;
+          totals.reasoningReported += 1;
+        }
         return response;
       },
     },
@@ -606,6 +685,8 @@ export function withCallCounter(provider: LlmProvider): {
       unbilled: totals.unbilled,
       cachedTokens: totals.cachedTokens,
       cachedReported: totals.cachedReported,
+      reasoningTokens: totals.reasoningTokens,
+      reasoningReported: totals.reasoningReported,
     }),
     byPurpose: () => new Map(purposes),
     unlabelled: () => purposes.get(UNLABELLED)?.calls ?? 0,

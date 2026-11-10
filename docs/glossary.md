@@ -680,3 +680,12 @@ endpoint named deepseek-flash — only the second field answered` — and the on
 the alias changed anything is indirect: completion tokens per case went 55 → 594 across the two runs.
 `modelCapabilities` records the half the harness owns; this field is the half it cannot, and both are
 in the artifact so neither is mistaken for the other.
+
+**Reasoning tokens** — The part of a completion bill an endpoint spent deliberating before it wrote
+the answer, reported as `completion_tokens_details.reasoning_tokens` (OpenAI's spelling) or
+`reasoning_tokens` (some gateways). Already inside `completion_tokens`, so the column decomposes the
+bill rather than adding to it: 594 completion tokens can be 594 of SQL or 54 of SQL and 540 of
+thinking, and a report that prints only the total cannot say which. It is the **only direct evidence
+an artifact can hold that a request reached a model that thinks**, because the response's `model`
+field names the serving deployment (`deepseek-flash` answered both aliases). Absent, never zero, on an
+endpoint that reports no counter — `0` is reserved for an endpoint that said "I thought for nothing".

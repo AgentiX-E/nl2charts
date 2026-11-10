@@ -10746,3 +10746,34 @@ effect on this split.
 rate — `gate:bird` refuses the floor for exactly this reason (`the minidev floors were taken on the
 full sample, so they do not apply to 120 of 498 questions`) — and any statement about which model
 answered.
+
+### The counter that turns the inference into a reading
+
+The 10.8× above was read off `completion_tokens`, and that is an inference: a chat model writing SQL
+also has a completion bill. What the artifact could not say is how much of the 594 was *thinking*,
+because the meter read `completion_tokens` and nothing else — and that is the one number that
+separates "this alias deliberated" from "this alias wrote a longer answer".
+
+`reasoning_tokens` closes it. Two spellings are read (OpenAI nests it under
+`completion_tokens_details`, gateways put it at the top of `usage`), it is metered per answer like the
+cache count, and it reaches the artifact twice: per case as `tokens.reasoning`, and per arm as the
+mean over the cases whose endpoint reported one.
+
+| field | on a chat endpoint | on a thinking endpoint | after this change |
+| --- | --- | --- | --- |
+| `tokens.completion` | the whole answer | thought + answer | unchanged |
+| `tokens.reasoning` | **absent** — nobody reported | the deliberate part | present, `0` if it said zero |
+| `tokens.cached` | absent unless reported | absent unless reported | unchanged |
+
+Three rules came with it, and each is a test:
+
+1. **Absent is not zero.** An endpoint with no reasoning counter has not claimed it thought for
+   nothing, so the field is dropped rather than written as `0`. A reported `0` *is* written: that is
+   an endpoint saying the model did not deliberate, which is a measurement.
+2. **It decomposes the bill, it does not extend it.** `completion` is unchanged, so a run measured
+   before this column existed is still comparable with one measured after.
+3. **Averaged over reporters, not over cases.** An endpoint that reports the counter on a third of
+   its answers has measured a third, and dividing that by every case would understate all three.
+
+The same rule the cache column follows, one field over — and it is the one column that can answer the
+question the serving name cannot.
