@@ -370,6 +370,12 @@
       "functions": 100,
       "branches": 98.24
     },
+    "eval/bird/surplus.ts": {
+      "lines": 99.35,
+      "statements": 99.35,
+      "functions": 100,
+      "branches": 97.01
+    },
     "eval/bird/synthesize.ts": {
       "lines": 100,
       "statements": 100,

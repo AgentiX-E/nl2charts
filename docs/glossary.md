@@ -689,3 +689,26 @@ thinking, and a report that prints only the total cannot say which. It is the **
 an artifact can hold that a request reached a model that thinks**, because the response's `model`
 field names the serving deployment (`deepseek-flash` answered both aliases). Absent, never zero, on an
 endpoint that reports no counter — `0` is reserved for an endpoint that said "I thought for nothing".
+
+**Counterfactual graft** — The device `bench:bird:surplus` uses to split `filter-wide`: keep the
+prediction's `from` and `join`, put the *gold's* `where` clause in place of its own, and run the
+result. If the grafted statement matches, the filter was the whole defect (`predicate`); if it does
+not, no edit to a condition reaches the case (`elsewhere`). The alternative — reading the text for a
+one-to-many join over the declared keys — is wrong in both directions, because a `from a, b` fan-out
+declares no key and a missing `distinct` is not structural at all. The graft asks the engine what the
+case would be under the fix, which is the premise rather than a proxy for it. Its ceiling is stated
+with the reading: replacing a whole clause is an oracle's edit, so `predicate` is what a
+condition-coverage lever *could* reach and not what one would earn.
+
+**Row-count failure** — The `filter-wide` rung of `values-gap`, and the largest of the 425 dev
+arithmetic failures at 102 cases (24.0%). It is a shape and not a cause: a predicate that is too weak
+and a `from` that multiplies rows produce the same symptom, and they need opposite fixes. On the dev
+split's five arms, a gold-filter graft repairs 4–18 cases (6.2%–22.0% of the rung) while 31–39 remain
+wrong with the gold's filter in place (52.5%–60.0%) — which is why this bucket's next lever is about
+which rows the statement reads, not about which conditions it writes.
+
+**Duplicates (official judge)** — A case the counterfactual only repairs under BIRD's official rule,
+because that rule compares `set()` of the tuples and collapses repeated rows. A fan-out that returns
+one row per order therefore *scores*: 13 of `names`' 82 `filter-wide` cases are this shape (15.9%).
+The strict multiset rule (`judgeStrict`) is what separates them, and the class exists so the count is
+not read as condition-coverage work: these cases need a `distinct` nobody wrote.

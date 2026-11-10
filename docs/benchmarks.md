@@ -10777,3 +10777,144 @@ Three rules came with it, and each is a test:
 
 The same rule the cache column follows, one field over — and it is the one column that can answer the
 question the serving name cannot.
+
+## The missing half of a capability declaration: `glm-4.6` on 150 questions
+
+An earlier section left a hypothesis and no way to test it. Run `4269…` sent `glm-4.6` twenty-eight
+questions with no `capabilities` block, and **fourteen of them came back empty after 8.5 seconds** —
+not a timeout, not an error, a successful reply with no content. The reading offered was that a
+thinking model was being asked the way a chat model is asked: a `temperature` it ignores, a
+`max_tokens` of 4096 that cuts the deliberation off, and no thinking switch at all.
+
+That hypothesis had one prediction: declare the family and the empty replies stop. `42733442619` is
+the test — the same endpoint, `glm-4.6`, **150 questions**, concurrency 2, a 7,200-second budget, and
+`capabilities: {"family": "reasoning", "thinkingSwitch": true, "maxOutputTokens": 16384}`
+recorded in the artifact as `modelCapabilities`.
+
+| reading | run without `capabilities` | run with it |
+| --- | --- | --- |
+| questions asked | 28 | **150** |
+| empty replies | **14 (50%)** | **0** |
+| LLM failures | 14 | **1 (0.67%)** — `llm call timed out` |
+| `format.replies` | 14 of 28 | **149 of 150** |
+| `samplingOmitted.temperature` | absent | **149** — the parameter was not sent |
+| accuracy | not publishable | **62.0%** (93/150, Wilson [54.0, 69.4]) |
+
+The failure shape is gone, and it is gone together with the two facts that explain it: the request
+no longer carries a sampling parameter, and it now carries a thinking budget. **A model that ignores
+`temperature` and needs room to think is a model that returns an empty string when both are wrong**,
+and that is what a missing capability block was telling the harness to do.
+
+### What it does not prove
+
+Two limits, both stated because the number is easy to over-read.
+
+**The bill cannot confirm the deliberation.** `tokens.reasoning` is **absent from both arms** — the
+endpoint reports no reasoning counter at all. Under the rule this repository wrote for that field,
+absent means "nobody reported", not "it thought for nothing", so the artifact says nothing about how
+much of the 1,237 completion tokens were thought. What changed is observable in the *shape* of the
+answer, not in its decomposition: 1,237 completion tokens across a case that finishes, against a
+reply that was empty.
+
+**150 questions is a draw, not the split.** `selection` records `sampled: true`, a seeded order within
+each difficulty stratum, and a mix of 44 simple / 74 moderate / 32 challenging against the split's
+148 / 248 / 102. The Wilson interval on 93/150 is ±7.7pp, which is wider than the difference between
+any two arms on the board — so `62.0%` is a statement about this draw and not a ranking.
+
+What it does establish is the thing that was blocking every other `glm-4.6` reading: **the arm can now
+be measured at all.** A harness that loses half its cases to an empty reply is not measuring a model.
+
+## What `filter-wide` is made of: a counterfactual, not a reading
+
+`filter-wide` is the largest rung under `values` — 102 of 425 arithmetic failures on the dev split,
+24.0% — and it is the only one whose name hides two defects with **opposite** fixes. A predicate that
+is too weak needs condition coverage; a `from` that multiplies rows needs grain. A lever built for one
+does nothing for the other, and the two are indistinguishable in the syntax: both are "the statement
+differs", which is where `values-gap`'s ladder stops.
+
+`bench:bird:surplus` separates them by counterfactual rather than by a rule: **keep the prediction's
+`from`, put the gold's `where` in place of its own, and run it.**
+
+| outcome | what the engine showed |
+| --- | --- |
+| `predicate` | the grafted statement matches the gold under the strict multiset rule: the filter was the whole defect |
+| `duplicates` | it matches under the *official* rule only — the judge's `set()` folded repeated rows, so this is a missing `distinct` |
+| `elsewhere` | it still does not match: no edit to a condition reaches this case |
+| `tables` | the gold's filter compares a column of a table the prediction never reads — a `tables` finding the ladder placed here |
+| `selfJoin` | the statement reads one table under two aliases, so a qualifier no longer names a role |
+| `nested` | a derived table or a subquery: the clause the graft edits is not the one that decides the answer |
+
+### The reading, on five arms and one artifact
+
+Run `42563674600`, dev split, 1,532 questions, `deepseek-chat`, all five arms in one artifact:
+
+| arm | `row-count` cases | `predicate` | `duplicates` | `elsewhere` | `tables` | `selfJoin` | `nested` |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `names` | 82 | **18 (22.0%)** | 13 (15.9%) | 32 (39.0%) | 6 (7.3%) | 4 (4.9%) | 9 (11.0%) |
+| `inline+evidence` | 65 | 4 (6.2%) | 4 (6.2%) | **39 (60.0%)** | 7 (10.8%) | 4 (6.2%) | 7 (10.8%) |
+| `metadata+evidence` | 59 | 6 (10.2%) | 5 (8.5%) | **31 (52.5%)** | 7 (11.9%) | 3 (5.1%) | 7 (11.9%) |
+| `select` | 58 | 8 (13.8%) | 4 (6.9%) | **32 (55.2%)** | 5 (8.6%) | 2 (3.4%) | 7 (12.1%) |
+| `select-mixed` | 62 | 7 (11.3%) | 4 (6.5%) | **35 (56.5%)** | 7 (11.3%) | 3 (4.8%) | 6 (9.7%) |
+
+Four readings, and the first one is the reason the tool exists.
+
+**1. Condition coverage is not where the bucket is.** Replacing the whole filter with the gold's — an
+oracle's edit no prompt can make — repairs **4 to 18 cases depending on the arm**. On the three arms
+that carry a semantic card it is 6 to 8: **0.39 to 0.52pp of 1,532.** That is the ceiling of every
+condition-coverage lever this project could build, and it is under the dev split's own resolution.
+
+**2. `names` is the exception that proves the rule.** The bare-column card reaches 22.0% by predicate,
+three to five times the rate of the arms that carry descriptions and evidence. Stated the other way:
+the metadata card did not *fail* to fix conditions, it **moved the failures into the row source** —
+`elsewhere` goes from 39.0% on `names` to 52.5–60.0% on the arms that have one. A better prompt does
+not make predicates righter; it makes them right often enough that what is left is the `from`.
+
+**3. `elsewhere` is the stable majority.** 31 to 39 cases on every arm, 52.5% to 60.0% of the bucket.
+The graft put the gold's filter in place and the answer was *still* wrong, which means the statement
+is reading the wrong rows rather than filtering the right ones badly. **This is where the next lever
+is**, and it is 2.0–2.5pp of the split.
+
+**4. The judge is carrying five to thirteen cases.** `duplicates` is a case the official rule credits
+because `set()` collapses repeated rows — on `names`, 13 of 82 (15.9%). Those are fan-outs that score
+while answering with more rows than the question asked for. Counting them as `predicate` would have
+sent a condition lever after a `distinct` that was never written.
+
+### Two things the ladder is doing that it does not say
+
+The tool counts what it *cannot* attribute, and two of those counts are findings about `values-gap`
+rather than about the arm.
+
+**`tables` lands here.** The ladder places `tables` below `filter-wide`, so a case whose gold filters
+on a table the prediction never reads is filed as a row-count first and reaches this tool. Five to
+seven cases per arm — **the same five to seven on every arm**, which says they are a property of the
+corpus and not of the prompt. A rung that absorbs a rung below it understates the lower one.
+
+**29 to 34 cases are `row-count` with the wrong grain.** Both statements return a different number of
+rows *and* answer at different grains — an aggregate against a row set, or a projection two columns
+wide against one. Those are `aggregate` and `projection` cases wearing `filter-wide`'s name. They are
+counted as `another grain` and kept out of the denominator, because a graft would have reported "the
+predicate was not the whole story" for a case that has no predicate problem.
+
+### What it closes
+
+**No further literal or condition edit will move this bucket.** 41 of 57 `filter-narrow` sites were
+literals the column does not store (71.9%), and 31 to 39 `filter-wide` cases remain wrong with the
+gold's filter in place (52.5–60.0%). Read together those two numbers say the same thing from both
+ends: **the defects are about which column and which rows, not about which value or which condition.**
+
+That also settles the question the previous round left open from the other side. Column-level evidence
+— every column's stored values on the card, MAC-SQL's block — was worth **+2.82pp** against a card
+with neither source, and **+1.21pp at p = 0.2379** once the curated notes are on it, with an exact
+A/A. It was a substitute for the descriptions, not a complement. This tool says why: the values were
+never the missing information in the cases that remained.
+
+```bash
+BIRD_SPLIT=dev pnpm bench:bird:surplus --artifact eval/out/bird-eval.json --arm metadata+evidence
+```
+
+It re-executes the artifact's own statements against the split's databases and writes
+`eval/out/surplus-<arm>.json`. Two conditions fail the build rather than being printed and ignored: an
+empty bucket, because `0 of 0` prints as `0.0%` and reads like a measured zero, and a gold the engine
+refuses. A refused *graft* is counted in the tally instead of failing the run — eleven of fifty-nine
+dev cases are unreadable by construction, and **a gate that goes red on a property of the corpus is a
+gate nobody reads.**
