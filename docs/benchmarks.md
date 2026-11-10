@@ -10832,6 +10832,13 @@ is too weak needs condition coverage; a `from` that multiplies rows needs grain.
 does nothing for the other, and the two are indistinguishable in the syntax: both are "the statement
 differs", which is where `values-gap`'s ladder stops.
 
+One thing about that 102, stated before any table, because the numbers below are smaller and the
+difference is not a correction. It is `deepseek-v4-pro`'s wide base on `42250903916`; the reading this
+tool publishes is `deepseek-chat` on `42563674600`, where the rung holds 54 to 82 cases depending on
+the arm. **The rung's size is a property of the model and the prompt; its composition is the thing
+being compared**, which is why every arm below is on one artifact and one model, and why none of them
+is set against the 102.
+
 `bench:bird:surplus` separates them by counterfactual rather than by a rule: **keep the prediction's
 `from`, put the gold's `where` in place of its own, and run it.**
 
