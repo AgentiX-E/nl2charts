@@ -2405,13 +2405,71 @@ export function assertArmProducedResults(armName: string, runs: readonly { error
  * different problems. The timeout hint rides in the same sentence for the same reason: a reader who
  * sees "429" in one place and "timed out" in the other learns nothing from either.
  */
-function outageSentence(failures: number, seen: number, maxShare: number, first: string): string {
-  const hint = first.includes('timed out')
-    ? ' Every failure is a timeout, so the deadline (BIRD_LLM_TIMEOUT_MS) may be shorter than the model needs.'
-    : '';
+/**
+ * A failure's shape, read from its own message.
+ *
+ * The reader of a 59% failure rate needs to know *which* fault it is, and the message already says:
+ * a timeout, an HTTP status, a body that is not JSON, an endpoint that never answered. `42723786747`
+ * stopped with `first error: llm call timed out` over sixteen failures when only two of the
+ * twenty-eight cases that landed had taken the full deadline — the sentence named the wrong fault
+ * because one message out of sixteen was all it had.
+ *
+ * Text rather than the error's `code` because `scoreOne` stores a message, not an object: the code
+ * is already folded into `errorKind`, and this is the level below it.
+ */
+export function failureLabel(error: string | undefined): string {
+  const text = (error ?? '').toLowerCase();
+  if (text.includes('timed out')) return 'timeout';
+  const status = /\breturned (\d{3})\b/u.exec(text);
+  if (status !== null) return `HTTP ${String(status[1])}`;
+  if (text.includes('not json')) return 'not JSON';
+  if (text.includes('unreachable')) return 'unreachable';
+  return 'other';
+}
+
+/**
+ * How many failures of each shape, largest group first.
+ *
+ * A tally is the cheapest sentence that cannot be misled by its own first element, and the tie-break
+ * by label keeps two runs with the same counts printing the same line.
+ */
+export function failureTally(errors: readonly (string | undefined)[]): string {
+  const counts = new Map<string, number>();
+  for (const error of errors) {
+    const label = failureLabel(error);
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  }
+  return [...counts]
+    .sort((one, two) => two[1] - one[1] || one[0].localeCompare(two[0]))
+    .map(([label, count]) => `${label} × ${String(count)}`)
+    .join(', ');
+}
+
+function outageSentence(failures: number, seen: number, maxShare: number, errors: readonly (string | undefined)[]): string {
+  const first = errors[0] ?? 'no error text';
+  const labels = errors.map((error) => failureLabel(error));
+  const timeouts = labels.filter((label) => label === 'timeout').length;
+  const throttled = labels.filter((label) => label === 'HTTP 429').length;
+  const refused = labels.filter((label) => /^HTTP 4\d\d$/u.test(label) && label !== 'HTTP 429').length;
+  const hints: string[] = [];
+  // The hint is chosen from the tally, not from the first message: the two disagree exactly when a
+  // run fails for two reasons, and that is when a single hint is most likely to be wrong.
+  if (timeouts > 0 && timeouts === labels.length) {
+    hints.push('Every failure is a timeout, so the deadline (BIRD_LLM_TIMEOUT_MS) may be shorter than the model needs.');
+  }
+  if (refused > 0) {
+    hints.push(
+      `${String(refused)} are refusals (4xx), so the endpoint rejected the request: check the model name, the key and the ` +
+        'request shape (BIRD_CAPABILITIES declares what this endpoint accepts, and a wrong guess there sends a parameter it refuses).',
+    );
+  }
+  if (throttled > 0) {
+    hints.push(`${String(throttled)} are 429s, so the account is being rate limited: lower BIRD_CONCURRENCY or raise the limit.`);
+  }
   return (
     `${String(failures)} of ${String(seen)} calls (${((failures / seen) * 100).toFixed(1)}%) failed at the model, ` +
-    `above the ${(maxShare * 100).toFixed(0)}% this harness treats as an outage (first error: ${first}).${hint}`
+    `above the ${(maxShare * 100).toFixed(0)}% this harness treats as an outage (first error: ${first}). ` +
+    `Shapes: ${failureTally(errors)}.${hints.length === 0 ? '' : ` ${hints.join(' ')}`}`
   );
 }
 
@@ -2426,9 +2484,8 @@ export function assertFailureRate(
   if (share <= maxShare) return;
   // The first message, not a summary of them: "65% failed" without the reason sends the
   // reader to the workflow file when the answer is in the provider's reply.
-  const first = failures.find((run) => run.error !== undefined)?.error ?? 'no error text';
   throw new Error(
-    `arm ${armName}: ${outageSentence(failures.length, runs.length, maxShare, first)} ` +
+    `arm ${armName}: ${outageSentence(failures.length, runs.length, maxShare, failures.map((run) => run.error))} ` +
       'The accuracy would be a function of how busy the endpoint was.',
   );
 }
@@ -2468,7 +2525,7 @@ export interface FailureBreaker {
 export function createFailureBreaker(armName: string, total: number, maxShare = 0.1): FailureBreaker {
   let seen = 0;
   let failures = 0;
-  let first = '';
+  const errors: (string | undefined)[] = [];
   let stopped: string | null = null;
   return {
     observe(run) {
@@ -2478,7 +2535,7 @@ export function createFailureBreaker(armName: string, total: number, maxShare = 
       // bad SQL" as "the endpoint is down", which is the confusion `escapeKind` exists to prevent.
       if (run.errorKind !== 'llm') return null;
       failures += 1;
-      if (first === '') first = run.error ?? 'no error text';
+      errors.push(run.error);
       if (stopped !== null) return null;
       // Nothing left to save on the last case, and the guards that read the finished table have a
       // better sentence for a run that never reached the database: `assertArmProducedResults` says
@@ -2487,7 +2544,7 @@ export function createFailureBreaker(armName: string, total: number, maxShare = 
       if (!outageDecided(failures, total, maxShare)) return null;
       stopped =
         `arm ${armName}: stopped after ${String(seen)} of ${String(total)} calls — ` +
-        `${outageSentence(failures, seen, maxShare, first)} ` +
+        `${outageSentence(failures, seen, maxShare, errors)} ` +
         `The remaining ${String(Math.max(0, total - seen))} calls were not spent.`;
       return stopped;
     },

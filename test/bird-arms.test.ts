@@ -22,6 +22,8 @@ import {
   assertArmProducedResults,
   assertFailureRate,
   createFailureBreaker,
+  failureLabel,
+  failureTally,
   outageDecided,
   assertHarnessClean,
   escapeKind,
@@ -1479,6 +1481,39 @@ describe('the outage guard reads the run while it is still running', () => {
     const breaker = createFailureBreaker('names', 20);
     for (let call = 0; call < 3; call += 1) breaker.observe({ errorKind: 'llm' });
     expect(breaker.verdict()).toContain('first error: no error text');
+  });
+
+  it('counts the shapes of the failures, because one message out of sixteen is not a diagnosis', () => {
+    // `42723786747` stopped with "first error: llm call timed out" over sixteen failures — and two
+    // of the twenty-eight cases that landed had taken the full 300-second deadline, so the other
+    // fourteen were not timeouts. The sentence named the wrong fault because it read only the first
+    // message of sixteen. A tally is the cheapest thing that cannot be misled that way.
+    // Interleaved so the verdict lands with both shapes in hand: the breaker seals the moment a
+    // tenth of a hundred cases have failed, which is the eleventh failure.
+    const breaker = createFailureBreaker('names', 100);
+    for (let call = 0; call < 5; call += 1) {
+      breaker.observe({ errorKind: 'llm', error: 'llm returned 400: invalid request' });
+      breaker.observe({ errorKind: 'llm', error: 'llm call timed out' });
+    }
+    breaker.observe({ errorKind: 'llm', error: 'llm returned 400: invalid request' });
+    const verdict = breaker.verdict() as string;
+    expect(verdict).toContain('HTTP 400 × 6');
+    expect(verdict).toContain('timeout × 5');
+    // And the hint follows the shape: a 4xx is the endpoint refusing the request, which sends the
+    // reader to the model name and the capability declaration rather than to the deadline.
+    expect(verdict).toContain('BIRD_CAPABILITIES');
+    expect(verdict).not.toContain('BIRD_LLM_TIMEOUT_MS');
+  });
+
+  it('reads a failure shape from its own message, and says `other` when it cannot', () => {
+    expect(failureLabel('llm call timed out')).toBe('timeout');
+    expect(failureLabel('llm returned 429')).toBe('HTTP 429');
+    expect(failureLabel('llm returned 400: bad')).toBe('HTTP 400');
+    expect(failureLabel('llm response is not JSON')).toBe('not JSON');
+    expect(failureLabel(undefined)).toBe('other');
+    expect(failureTally(['a', 'a', 'b'].map((kind) => (kind === 'a' ? 'llm returned 500' : 'llm call timed out')))).toBe(
+      'HTTP 500 × 2, timeout × 1',
+    );
   });
 });
 
