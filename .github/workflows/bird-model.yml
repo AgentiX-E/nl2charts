@@ -53,6 +53,10 @@ on:
         description: Milliseconds any one arm may spend (blank = no limit; 0 is refused)
         required: false
         default: '7200000'
+      capabilities:
+        description: JSON declaration of what the endpoint does with a request (blank = guess from the name)
+        required: false
+        default: ''
       aa:
         description: Arm to run twice as an A/A control (blank = none)
         required: false
@@ -120,6 +124,16 @@ jobs:
       # 300 minutes, or the cap arrives before any reading does. Two hours covers a single arm of
       # 496 cases at eighteen seconds a case with room for the tail.
       BIRD_RUN_BUDGET_MS: ${{ inputs.budget_ms }}
+      # What the endpoint does with a request, when its name does not say.
+      #
+      # The guess is deliberately narrow — `reasoner`, `thinking`, `r1`, `qwq`, `magistral`, `o1`-`o9`
+      # — because a wrong guess towards `chat` sends a parameter the endpoint ignores, and a wrong
+      # guess towards `reasoning` removes one it would have honoured. `glm-4.6` falls outside it: it
+      # is a model that deliberates, its name says nothing, and reading it as a chat model produced
+      # 8.5-second completions with empty content on 59% of the cases that landed. A dispatch that
+      # knows better says so here rather than renaming the model:
+      #   {"family":"reasoning","maxOutputTokens":16384,"thinkingSwitch":true}
+      BIRD_CAPABILITIES: ${{ inputs.capabilities }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

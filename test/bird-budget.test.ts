@@ -58,6 +58,9 @@ describe('suggestedLimit', () => {
 
   it('has no suggestion when no case finished, because there is no rate to extrapolate', () => {
     expect(suggestedLimit(10_000_000, 10_000_000, 0)).toBeUndefined();
+    // A clock that has not moved is the same absence read from the other side: no elapsed time over
+    // a positive case count is a rate of zero, and a subset sized from it would be infinite.
+    expect(suggestedLimit(10_000_000, 0, 5)).toBeUndefined();
   });
 });
 

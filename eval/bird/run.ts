@@ -24,6 +24,7 @@ import { pathToFileURL } from 'node:url';
 import { createHttpProvider } from '@agentix-e/nl2charts-ai';
 import type { LlmProvider, PromptOptions, SchemaTable } from '@agentix-e/nl2charts-ai';
 import { applySelection, attachDefinitions, buildAskMessages, buildReconcilePrompt, buildSelectionPrompt, chooseCandidateByRule, chooseCandidatePairwise, buildSqlPrompt, choosePromptProfile, createPipeline, emptyRetryMessages, extractSql, formatProfile, renderDefinitions, renderEvidence, renderSchemaCard, resultGroups, withCallCounter } from '@agentix-e/nl2charts-ai';
+import { capabilitiesOf } from '@agentix-e/nl2charts-ai';
 import type { FormatProfile, ModelCapabilities, PurposeUsage, ReplyShape, SelectionRule, ValueGap } from '@agentix-e/nl2charts-ai';
 // The retry turn writes a statement outside the pipeline, so it goes through the same
 // guard the pipeline applies. Skipping it here would let the one arm that retries be the
@@ -4176,6 +4177,16 @@ export interface BirdSettings {
   readonly model: string;
   readonly baseUrl: string;
   readonly apiKey: string;
+  /**
+   * What the primary endpoint does with a request, when its name does not say.
+   *
+   * The second endpoint has had this since the capability contract was written and the primary one
+   * never did, which left `glm-4.6` unreadable: nothing in its name says "this endpoint deliberates
+   * before it answers", so it was sent a chat request — sampling, a 4,096-token answer budget, no
+   * thinking switch — and answered in 8.5 seconds with nothing in it. A caller that knows its own
+   * endpoint must be able to say so without renaming the model.
+   */
+  readonly capabilities?: Partial<ModelCapabilities>;
   readonly second: {
     readonly model: string;
     readonly baseUrl: string;
@@ -4250,7 +4261,9 @@ export function resolveSettings(
     env.BIRD_DBS !== undefined
       ? env.BIRD_DBS
       : (fromManifest.length > 0 ? fromManifest : databasesFromQuestions(layout.questionsFile)).join(',');
+  const capabilities = parseCapabilityOverrides(env.BIRD_CAPABILITIES, 'BIRD_CAPABILITIES');
   return {
+    ...(capabilities === undefined ? {} : { capabilities }),
     layout,
     dryRun: argv.includes('--dry-run'),
     limit: parseLimit(env.BIRD_LIMIT),
@@ -5602,6 +5615,16 @@ export function baseReport(prepared: PreparedRun, provenance: Provenance = {}): 
     // ...and which model judged, when an arm asks the second one to. A judge swap is the one
     // experiment whose result is unreadable without this field.
     judgeModel: judgeModelName(settings.arms, settings.second),
+    /**
+     * What the run told the endpoint it could do.
+     *
+     * Without it a reader cannot say whether a difference between two runs is the model or the
+     * request: `glm-4.6` read as a chat model is sent a temperature and a 4,096-token budget, and
+     * read as a reasoning model is sent neither. The resolved row rather than the declaration,
+     * because the row is what `adaptRequest` acted on — a declaration merged onto the wrong base
+     * produced records that contradicted themselves once already.
+     */
+    modelCapabilities: capabilitiesOf(settings.model, settings.capabilities),
     // The instrument's own settings. Same argument as the model: two runs of "the same"
     // configuration can differ by the deadline, the concurrency or the retry budget, and a
     // report that omits them cannot say whether a difference is the pipeline or the harness.
@@ -6929,7 +6952,8 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
    * difference is what a stop means — a breaker stop says the endpoint refused a tenth of the calls,
    * and a budget stop says nothing failed and the run simply outgrew its clock.
    */
-  const expired = (): boolean => settings.budgetMs !== undefined && Date.now() - startedAt > settings.budgetMs;
+  const budgetMs = settings.budgetMs;
+  const expired = (): boolean => budgetMs !== undefined && Date.now() - startedAt > budgetMs;
   await pool(cases, settings.concurrency, async (question, index) => {
     if (breaker.verdict() !== null || expired()) return;
     const caseStartedAt = Date.now();
@@ -6949,11 +6973,13 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
   // not: the rate would be computed from the cases that happened to fit, which is a different
   // population from the one the run declared. What it *does* have is the number the next dispatch
   // needs, and that is what this message is.
-  if (expired()) {
+  // Narrowed here rather than defaulted in the call: `expired()` answers true only when a budget
+  // exists, and a `?? 0` on this line would be a branch no run can take.
+  if (budgetMs !== undefined && Date.now() - startedAt > budgetMs) {
     throw new Error(
       budgetExhaustedMessage({
         arm: name,
-        budgetMs: settings.budgetMs ?? 0,
+        budgetMs,
         elapsedMs: Date.now() - startedAt,
         casesDone: finished,
         total: cases.length,
@@ -7727,6 +7753,7 @@ export function createProviders(settings: BirdSettings): {
     baseUrl: settings.baseUrl,
     apiKey: settings.apiKey,
     model: settings.model,
+    ...(settings.capabilities === undefined ? {} : { capabilities: settings.capabilities }),
     retries: settings.retries,
     retryDelayMs: settings.retryDelayMs,
     timeoutMs: settings.timeoutMs,

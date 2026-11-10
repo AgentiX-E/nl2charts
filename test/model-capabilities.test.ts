@@ -311,3 +311,46 @@ describe('the declaration the run hands its second provider', () => {
     expect(createProviders(plain).second?.capabilities).toEqual(CHAT_CAPABILITIES);
   });
 });
+
+/**
+ * The same declaration, for the endpoint the run was actually pointed at.
+ *
+ * The block above exists because a declaration honoured in a test and dropped at the one call site
+ * that matters is the failure mode of a contract. That block was written for the *second* provider
+ * and the primary one was left out, which is the same defect one level over: a caller pointing the
+ * harness at a reasoning endpoint had no way to say so, and the name is the only thing left to
+ * guess from.
+ *
+ * `glm-4.6` is what that costs. Its name matches none of the documented families, so it is read as
+ * a chat model: sampling sent, 4,096-token answer budget, no thinking switch — and a request shaped
+ * for a model that answers immediately, sent to one that deliberates first. `42723786747` stopped at
+ * 59.3% failures with answers arriving in 8.5 seconds, which is the shape of an empty completion
+ * rather than a slow one.
+ */
+describe('the declaration the run hands its primary provider', () => {
+  const PRIMARY = { LLM_MODEL: 'glm-4.6', LLM_API_KEY: 'k', LLM_BASE_URL: 'http://127.0.0.1:1/v1' };
+
+  it('carries a declared family from the environment onto the provider', () => {
+    const settings = resolveSettings({ ...PRIMARY, BIRD_CAPABILITIES: '{"family":"reasoning","maxOutputTokens":16384}' }, [], '/repo');
+    expect(settings.capabilities).toEqual({ family: 'reasoning', maxOutputTokens: 16384 });
+    // The whole row, not the two fields that were typed: `adaptRequest` reads the row, and a row
+    // assembled from the chat base beside a declared reasoning family contradicts itself.
+    expect(createProviders(settings).provider.capabilities).toEqual({ ...REASONING_CAPABILITIES, maxOutputTokens: 16384 });
+  });
+
+  it('refuses a declaration it cannot read instead of guessing', () => {
+    // The same rule as the second provider's: a typo must not fall back to the guess, because the
+    // guess is what the declaration exists to replace.
+    expect(() => resolveSettings({ ...PRIMARY, BIRD_CAPABILITIES: '{' }, [], '/repo')).toThrow(/is not JSON/);
+    expect(() => resolveSettings({ ...PRIMARY, BIRD_CAPABILITIES: '{"family":"reasoner"}' }, [], '/repo')).toThrow(/family/);
+  });
+
+  it('guesses from the name when nothing was declared, and reads glm-4.6 as a chat model', () => {
+    // The guess is documented and unchanged: a wrong guess in the chat direction sends a parameter
+    // the endpoint ignores, and this test pins which way the guess goes so that a later widening of
+    // the name pattern is a decision rather than a drift.
+    expect(createProviders(resolveSettings(PRIMARY, [], '/repo')).provider.capabilities).toEqual(CHAT_CAPABILITIES);
+    const reasoner = createProviders(resolveSettings({ ...PRIMARY, LLM_MODEL: 'deepseek-reasoner' }, [], '/repo'));
+    expect(reasoner.provider.capabilities).toEqual(REASONING_CAPABILITIES);
+  });
+});

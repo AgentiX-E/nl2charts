@@ -1626,6 +1626,46 @@ describe('the second model as a judge', () => {
     }
   });
 
+  it('records the clock it was given, so a reader can tell a cut run from a slow one', async () => {
+    // The budget is provenance, not a coordinate: a run that fires it publishes no artifact, so it
+    // can never be a silent difference between two tables. Recording it anyway is what lets a
+    // reader of a *finished* run say whether a clock was watching at all.
+    const bounded = await run({ plan: { first: correct }, env: { BIRD_ARMS: 'names', BIRD_RUN_BUDGET_MS: '600000' } });
+    expect((bounded.report.run as { budgetMs?: number }).budgetMs).toBe(600_000);
+    const unbounded = await run({ plan: { first: correct }, env: { BIRD_ARMS: 'names' } });
+    // Absent rather than zero: "no clock" and "a clock of zero" are different configurations, and
+    // only one of them is a deployment mistake.
+    expect((unbounded.report.run as { budgetMs?: number }).budgetMs).toBeUndefined();
+    expect(bounded.printed).toContain('budget: 600 s per arm, deadline 60 s, concurrency 8');
+  });
+
+  it('shapes the primary request from the declaration, not from the model name', async () => {
+    // `glm-4.6` matches none of the documented families, so it is read as a chat model: a
+    // temperature the endpoint may ignore, a 4,096-token answer budget, no thinking switch. Sent
+    // to an endpoint that deliberates before it answers, that produced 8.5-second completions with
+    // nothing in them. `BIRD_CAPABILITIES` is how a caller says which endpoint it is talking to.
+    const result = await run({
+      plan: { first: correct },
+      env: { BIRD_ARMS: 'names', BIRD_CAPABILITIES: '{"family":"reasoning","maxOutputTokens":16384}' },
+    });
+    expect(result.code).toBe(0);
+    const asked = result.requests.find((request) => request.prompt.includes(QUESTIONS[0]?.question ?? '\u0000'));
+    expect(asked).toBeDefined();
+    // Sampling is not sent to an endpoint that ignores it, and the answer budget is the declared
+    // one rather than the chat default.
+    expect(asked?.body.temperature).toBeUndefined();
+    expect(asked?.body.max_tokens).toBe(16384);
+    // The artifact says what it told the endpoint, because a request shape is part of the reading.
+    expect(result.report.modelCapabilities).toEqual({
+      family: 'reasoning',
+      sampling: 'ignored',
+      jsonMode: false,
+      maxOutputTokens: 16384,
+      thinksAloud: true,
+      thinkingSwitch: false,
+    });
+  });
+
   it('leaves the chat judge on the instruction it was measured with', async () => {
     const second = await startEndpoint({ reply: (request) => replyFor(request, { first: correct }) });
     try {

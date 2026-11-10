@@ -1505,15 +1505,29 @@ describe('the outage guard reads the run while it is still running', () => {
     expect(verdict).not.toContain('BIRD_LLM_TIMEOUT_MS');
   });
 
+  it('exempts an empty table from the share guard rather than dividing by its length', () => {
+    // A dry run and a run that stopped before the first case both hand this guard no rows, and a
+    // share over no rows is a missing reading rather than a rate.
+    expect(() => assertFailureRate('names', [])).not.toThrow();
+    expect(outageDecided(1, 0)).toBe(false);
+    expect(outageDecided(1, Number.NaN)).toBe(false);
+    expect(failureTally([])).toBe('');
+  });
+
   it('reads a failure shape from its own message, and says `other` when it cannot', () => {
     expect(failureLabel('llm call timed out')).toBe('timeout');
     expect(failureLabel('llm returned 429')).toBe('HTTP 429');
     expect(failureLabel('llm returned 400: bad')).toBe('HTTP 400');
     expect(failureLabel('llm response is not JSON')).toBe('not JSON');
+    // A connection that never opened is not a refusal and not a timeout: it is the one shape that
+    // sends the reader at the network rather than at the request.
+    expect(failureLabel('llm endpoint unreachable')).toBe('unreachable');
     expect(failureLabel(undefined)).toBe('other');
     expect(failureTally(['a', 'a', 'b'].map((kind) => (kind === 'a' ? 'llm returned 500' : 'llm call timed out')))).toBe(
       'HTTP 500 × 2, timeout × 1',
     );
+    // Equal counts are ordered by label, so two runs with the same tally print the same line.
+    expect(failureTally(['llm call timed out', 'llm returned 429'])).toBe('HTTP 429 × 1, timeout × 1');
   });
 });
 

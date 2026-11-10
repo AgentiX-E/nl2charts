@@ -654,3 +654,29 @@ question in the split. `crossPair` restricts both rates to the shared ids and te
 McNemar, so the questions' own difficulty cancels: at 150 questions near 0.58 with 20 flips the
 interval is ±5.8pp, against ±11.2pp for the same two rates read side by side. Two artifacts' own
 totals must never be compared directly — that was a difference between two populations.
+
+**Capability declaration** — What an endpoint does with a request, stated rather than guessed:
+`BIRD_CAPABILITIES` for the primary endpoint, `BIRD_SECOND_CAPABILITIES` for the second. The guess
+from the model name matches only documented families (`reasoner`, `thinking`, `r1`, `qwq`, `magistral`,
+`o1`-`o9`) because a wrong guess towards `chat` sends a parameter the endpoint ignores while a wrong
+guess towards `reasoning` removes one it would have honoured. `glm-4.6` falls outside the pattern and
+was therefore sent a chat request — temperature, a 4,096-token answer budget, no thinking switch — to
+a model that deliberates; it answered in 8.5 seconds with nothing in it on fourteen of twenty-eight
+cases. The artifact records the resolved row as `modelCapabilities`, so a difference between two runs
+can be attributed to the request rather than to the model.
+
+**Failure shape** — The tally the outage verdict prints beside its first message: `HTTP 400 × 13,
+timeout × 2`. A verdict built from one message out of sixteen named the wrong fault on `42723786747` —
+it said every failure was a timeout when two of twenty-eight cases had taken the full deadline. The
+hint is chosen from the tally, so a 4xx sends the reader to the model name and the capability
+declaration, a 429 to the concurrency, and only an all-timeout run to `BIRD_LLM_TIMEOUT_MS`.
+
+**Serving deployment** — The name the endpoint puts in a response's `model` field, which is *not* the
+alias that was requested. Both `deepseek-chat` and `deepseek-reasoner` came back as `deepseek-flash`
+from this account, so a reader holding the artifact has the request (a declaration the harness owns)
+and the serving name (a field the provider owns) and no way to derive which model answered.
+`gate:bird` prints the mismatch rather than smoothing it — `the run asked for deepseek-reasoner and the
+endpoint named deepseek-flash — only the second field answered` — and the only in-file evidence that
+the alias changed anything is indirect: completion tokens per case went 55 → 594 across the two runs.
+`modelCapabilities` records the half the harness owns; this field is the half it cannot, and both are
+in the artifact so neither is mistaken for the other.

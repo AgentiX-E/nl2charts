@@ -10570,3 +10570,179 @@ DeepSeek artifacts of 2026-11-09, thirteen arms, 496 questions — puts the cros
 the shipped arm at **+0.81pp, 9 up and 5 down, p = 0.424**, and no arm outside its own interval. Two
 runs of one generator disagree on 2.8% of the split, so the noise a *model* comparison has to clear
 is about a point; the interval at 150 questions is what says whether it cleared it.
+
+## The endpoint a model name cannot describe
+
+`42723786747` was the first run to use the clock and the progress line. It printed its budget, then a
+line per case, and stopped itself at case 27:
+
+```
+budget: 7200 s per arm, deadline 300 s, concurrency 2
+  [  1/150] 100.0%  35.1 s/case  case 35.1 s  elapsed 35 s
+  ...
+  [  8/150]  25.0%  17.0 s/case  case 15.7 s  elapsed 136 s
+  [  9/150]  22.2%  47.8 s/case  case 300.0 s  elapsed 430 s
+  [ 10/150]  20.0%  43.6 s/case  case 300.0 s  elapsed 436 s
+  [ 11/150]  18.2%  40.5 s/case  case 8.8 s  elapsed 445 s
+  ...
+Error: arm metadata+evidence: stopped after 27 of 150 calls — 16 of 27 calls (59.3%) failed at the
+model, above the 10% this harness treats as an outage (first error: llm call timed out). Every
+failure is a timeout, so the deadline (BIRD_LLM_TIMEOUT_MS) may be shorter than the model needs.
+```
+
+Read the two halves against each other. **Two** of the twenty-eight cases that landed took the full
+300-second deadline, and the sentence says *every* failure is a timeout — because it had one message
+out of sixteen and generalised from it. The other fourteen cases failed in **8.5 seconds**, and 8.5
+seconds is not a timeout.
+
+That is a defect in the instrument, not in the run: a verdict composed from the first message of a
+sixteen-message pile can name the wrong fault, and it did. The verdict now tallies the shapes — `HTTP
+400 × 13, timeout × 2` — and picks its hint from the tally rather than from its first element: 4xx
+sends the reader to the model name and the capability declaration, 429 to the concurrency, and only
+an all-timeout run to the deadline.
+
+The tally is also what makes the next question askable, because the shape of this failure is
+**a fast completion with nothing in it**:
+
+| the case | what it looks like |
+| --- | --- |
+| cases 1-8 | 15-54 s, four correct — the endpoint answering |
+| cases 9-10 | 300 s — the endpoint thinking until the deadline |
+| cases 11-15 | **8.5 s each** — neither of those |
+
+An 8.5-second completion on a 7.5k-character prompt is roughly a full answer budget spent and no
+answer returned, which is what a reasoning model does when it is asked to answer immediately. And
+`glm-4.6` **is** read as an immediately-answering model here: the family guess matches `reasoner`,
+`thinking`, `r1`, `qwq`, `magistral` and `o1`-`o9`, and nothing in `glm-4.6` matches any of them. So
+the request carries a temperature, a 4,096-token answer budget and no thinking switch — the shape of a
+chat model sent to one that deliberates.
+
+That asymmetry was the gap: the second endpoint has had a capability declaration since the contract
+was written (`BIRD_SECOND_CAPABILITIES`), and the primary endpoint never did. A caller pointing this
+harness at a private reasoning endpoint could rename the model or nothing. `BIRD_CAPABILITIES` closes
+it, the artifact records the resolved row as `modelCapabilities`, and the workflow takes it as an
+input:
+
+```json
+{"family":"reasoning","maxOutputTokens":16384,"thinkingSwitch":true}
+```
+
+The hypothesis that this explains the 8.5-second completions is a hypothesis. It is stated as one
+because the instrument that would confirm it — the tally — did not exist when the run was spent, and
+the next dispatch with the declaration is what will say whether the fast failures were empty
+completions or refusals. **A defect found by an instrument that was built after the money was gone is
+still a defect found; it is not a result.**
+
+### The account, measured twice
+
+| run | configuration | preflight |
+| --- | --- | --- |
+| `42645923773` | concurrency 2, 300 s | 12/12 clean |
+| `42726866491` | concurrency 2, 300 s | **2 of 12 refused with 429**, run not started |
+| `42645162071` | concurrency 4, 300 s | 3 of 12 refused with 429 |
+
+Same account, same model, same concurrency, two hours apart: clean, then refused. The preflight's own
+sentence is the reading — `2 of 12 calls were refused with 429 at 2 concurrent, which is the run's own
+concurrency` — and what it establishes is that **this account's limit at two calls in flight is not a
+constant**. A benchmark dispatched against it is measuring the queue, and the harness now refuses
+before spending anything rather than after five hours. Three of the four `glm-4.6` dispatches this
+week were stopped by an instrument before producing a table; the fourth was stopped by a job cap that
+now has a clock in front of it.
+
+## What a reasoning alias buys, and the field that cannot confirm it
+
+`42727868711` is the first dispatch that asked for a reasoning model: `deepseek-reasoner`, Mini-Dev,
+120 of 498 questions, the shipped arm plus an A/A duplicate, concurrency 8, deadline 300 s, budget
+7,200 s per arm. It finished both arms in **101 seconds**, wrote its artifact, and passed every gate:
+
+```
+budget: 7200 s per arm, deadline 300 s, concurrency 8
+  [  1/120] 0.0%  2.6 s/case  case 2.6 s  elapsed 3 s
+  ...
+  [120/120] 58.3%  0.8 s/case  case 61.9 s  elapsed 101 s
+inline+evidence#2 70/120  58.3%  strict 66  llm-failed 1
+gates: gold runnable, controls, signal and no regression all hold
+```
+
+### The reading, on the same 120 questions
+
+The anchor is the 496-question `deepseek-chat` run (`2026-11-08T21:16`), restricted to the 120
+questions both runs hold. Restricting matters: the full-sample figure for that arm is 58.9%, and
+reading it beside a 120-question figure would compare two populations.
+
+| arm | model | n | passed | accuracy | exact | strict | prompt/case | completion/case |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `metadata+evidence` | `deepseek-chat` | 120 | 72 | 60.0% | — | — | 1,551 | 55 |
+| `metadata+evidence` | `deepseek-reasoner` | 120 | 69 | 57.5% | 56.7% | 68 | 1,576 | **594** |
+| `inline+evidence#2` | `deepseek-reasoner` | 120 | 70 | 58.3% | 55.0% | 66 | 654 | 557 |
+
+Paired, question by question:
+
+| comparison | delta | up | down | p | interval |
+| --- | --- | --- | --- | --- | --- |
+| reasoner vs chat, same arm, same 120 | **+2.5pp for chat** | 13 | 10 | 0.678 | ±7.8pp |
+| reasoner A/A duplicate | +0.8pp | 5 | 4 | 1.000 | ±4.9pp |
+
+A 2.5-point difference at a 19% disagreement rate needs about 2,400 paired questions to clear its own
+interval, and Mini-Dev holds 496. **The two models are indistinguishable here, and the run does not
+say the reasoner is worse — it says this sample cannot see the difference either way.**
+
+### What the alias did change is the bill
+
+Completion tokens per case went from **55 to 594** — 10.8× — while prompt tokens stayed in the same
+band (1,551 → 1,576). Nothing about the question changed: same corpus, same card, same arm, one call
+per case. So the routing did happen, and the behaviour it changed is the one that costs money: the
+endpoint spent an answer's worth of deliberation before writing 55 tokens of SQL. 71,292 output tokens
+bought +0.8pp that its own interval (4.9pp) does not support.
+
+That is the shape this campaign keeps finding: **the lever with the largest visible cost is not the
+lever with the largest measured effect.** The same table from the anchor's 496 questions, read the
+same way, says the same thing about the audit turn:
+
+| arm | calls/case | prompt/case | completion/case | delta vs `metadata+evidence` | p | interval |
+| --- | --- | --- | --- | --- | --- | --- |
+| `metadata+evidence` | 1.0 | 1,718 | 58 | — | — | — |
+| `inline+evidence` | 1.0 | **698** | 58 | **−3.8pp** | 0.011 | ±2.8pp |
+| `inline+evidence+audit` | 2.0 | 1,676 | **131** | −1.2pp | 0.480 | ±2.8pp |
+
+The metadata card is the only arm on that table whose win is larger than its own interval: it pays
+2.46× the prompt of the inline card and buys 3.8pp that survives pairing. The audit turn pays twice
+the calls and 2.3× the completion for 1.2pp it cannot show — so the next round's order is *the card,
+not the audit*, and that order is now a reading rather than a preference.
+
+### The field that cannot confirm what was asked
+
+Both artifacts record the same thing about the endpoint:
+
+```
+"model": "deepseek-reasoner",     "servedModels": [{"deepseek-flash": 120}, {"deepseek-flash": 119}]
+"model": "deepseek-chat",         "servedModels": [{"deepseek-flash": 496}, ...]
+```
+
+`gate:bird` has printed this since the field existed, and on this run it read:
+
+```
+BIRD1: the run asked for deepseek-reasoner and the endpoint named deepseek-flash — only the second field answered
+```
+
+The response's `model` field names the **serving deployment**, not the alias that was requested, and
+this account's endpoint answers `deepseek-flash` whatever it is asked for. A reader of the artifact
+therefore holds two facts and cannot derive the one that matters: what ran. The reasoner's 10.8×
+completion count is the only evidence in the file that the request changed behaviour, and it is
+indirect — it says *something* deliberated, not *which* model.
+
+This is the same boundary as the capability declaration at the other end of the request. The harness
+can record exactly what it asked for — that is a declaration it owns — and it cannot read back what it
+got from a field the provider controls. `modelCapabilities` was added for the half it owns; the
+serving name is the half it cannot, and recording both in the same artifact is what keeps a reader
+from mistaking one for the other.
+
+**What this licenses:** a claim that the shipped arm is worth its prompt, since 3.8pp with 16 up and
+35 down at p=0.011 is outside its own interval; a claim that the audit turn has not yet earned its
+second call; and a claim that swapping in a reasoning alias at 10× the output tokens has no measured
+effect on this split.
+
+**What it does not license:** any accuracy figure for a 120-question subset presented as a Mini-Dev
+rate — `gate:bird` refuses the floor for exactly this reason (`the minidev floors were taken on the
+full sample, so they do not apply to 120 of 498 questions`) — and any statement about which model
+answered.
