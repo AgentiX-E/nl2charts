@@ -9,6 +9,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { DEFAULT_ARMS } from '../eval/bird/run.js';
 
 describe('a benchmark workflow publishes what a failed run produced', () => {
   const workflows = ['.github/workflows/bird-dev.yml', '.github/workflows/bird-model.yml', '.github/workflows/ci.yml'];
@@ -144,5 +145,42 @@ describe('every workflow input is declared, and every declaration is read', () =
     expect(budget).toBeGreaterThan(0);
     // Per arm, and the A/A arm is another arm: the comparison is against the cap divided by two.
     expect(budget / 60_000).toBeLessThan(cap / 2);
+  });
+});
+
+describe('a workflow step reads an arm the chain actually runs', () => {
+  const files = ['.github/workflows/ci.yml', '.github/workflows/bird-dev.yml', '.github/workflows/bird-model.yml'];
+
+  /**
+   * Every `--arm <name>` a workflow passes, with the step it sits in.
+   *
+   * `ci.yml` reads the artifact its own Min-Dev job produces, and that job runs `DEFAULT_ARMS`.
+   * A step naming any other arm fails on every push with "no arm X" — which is what happened when
+   * the audit turn left the chain on its own dev reading and one step here kept asking for it. The
+   * arm was still defined, and still runnable by hand, so nothing that checks *arms* could see it:
+   * the arm existed, the artifact did not contain it. The only set that matters is the chain's.
+   */
+  function armArguments(file: string): { readonly arm: string; readonly step: string }[] {
+    const text = readFileSync(resolve(process.cwd(), file), 'utf8');
+    const found: { arm: string; step: string }[] = [];
+    for (const block of text.split(/\n {6}- /).slice(1)) {
+      const step = block.split(/\n {6}(?=- )/)[0] as string;
+      for (const match of step.matchAll(/--arm\s+([a-z0-9+_-]+)/gi)) found.push({ arm: match[1] as string, step });
+    }
+    return found;
+  }
+
+  it('passes only arms the default chain runs', () => {
+    for (const file of files) {
+      for (const entry of armArguments(file)) {
+        expect(DEFAULT_ARMS, `${file}: --arm ${entry.arm}`).toContain(entry.arm);
+      }
+    }
+  });
+
+  it('finds the arm arguments it is meant to check', () => {
+    // A parser that silently matched nothing would pass the check above on any workflow at all.
+    const found = files.flatMap((file) => armArguments(file));
+    expect(found.length).toBeGreaterThan(0);
   });
 });

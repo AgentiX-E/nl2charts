@@ -406,15 +406,16 @@ jobs:
       # joins in so the reading is per bucket.
       - name: Which condition the statement never wrote
         run: pnpm bench:bird:conditions eval/out/bird-eval.json --arm select --ladder eval/out/values-gap-select-all.json --strict
-      # The same census on the pair the audit arm was built for: the arm it was added to, and the
-      # arm with the turn. The population is defined by the first reading (a gold filter whose
-      # column is absent) and the second is the only number that says whether the turn closed
-      # any of it. No ladder here: both arms generate once per case, so the bucket a failure
-      # falls in is the ladder's `select` reading rather than its own.
-      - name: The same census on the arm the audit was added to
+      # The same census on the arm the audit turn was priced against. The pair used to have a
+      # second step here, for `inline+evidence+audit` — and that step outlived the arm: the dev
+      # split priced the turn at +1.2pp for 2x calls and 2.3x completion tokens (p = 0.48), the arm
+      # left `DEFAULT_ARMS`, and this job then failed on every push with "no arm
+      # inline+evidence+audit" because the artifact it reads is produced by the very chain the arm
+      # had left. A step that demands an arm no run produces is red forever, which is the same
+      # failure the corpus-property gates are written to avoid — and it took a scheduled run to
+      # say so, because the artifact this job reads is only built on the workflow's own schedule.
+      - name: The same census on the arm the audit turn was priced against
         run: pnpm bench:bird:conditions eval/out/bird-eval.json --arm inline+evidence --strict
-      - name: The same census after the audit turn
-        run: pnpm bench:bird:conditions eval/out/bird-eval.json --arm inline+evidence+audit --strict
       # Where the prompt's characters go, and what a smaller card could save. The card is
       # three quarters of every call and one case in six had a linker that named nothing at
       # all, so the two numbers that matter are the oracle ceiling and the coverage of the
