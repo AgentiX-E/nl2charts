@@ -712,3 +712,25 @@ because that rule compares `set()` of the tuples and collapses repeated rows. A 
 one row per order therefore *scores*: 13 of `names`' 82 `filter-wide` cases are this shape (15.9%).
 The strict multiset rule (`judgeStrict`) is what separates them, and the class exists so the count is
 not read as condition-coverage work: these cases need a `distinct` nobody wrote.
+
+**Residue (`elsewhere`)** — The cases `bench:bird:surplus` leaves after replacing the prediction's
+filter with the gold's and running it: 31 to 39 per dev arm, 52.5%–60.0% of the row-count rung. The
+name is deliberate — it is what a measurement did not explain, not a category somebody chose.
+`bench:bird:residue` splits it by the direction the read-set is wrong in, and the result is that two
+thirds of it is rows *missing* rather than rows gained: siphoning `over` alone would have aimed a
+grain lever at a sixth of the bucket.
+
+**Row-set direction (`over` / `under` / `mixed`)** — Which side of a failed answer contains the
+other. `over`: every gold row is present and more besides. `under`: the answer's rows are all there
+and some are missing. `mixed`: neither contains the other, so the statement is built on a different
+relation rather than a wider or narrower reading of the same one. Containment is decided through
+`resultKey`, the devkit's canonical identity for a result set, by comparing the key of the
+concatenation with the key of each side — so the normalisation is the judge's own and the comparison
+is a set comparison, not a size comparison.
+
+**Capped answer** — A statement that carries a top-level `limit` the gold does not have. It is the
+only kind in the residue that names a *repair* rather than a symptom: strip the clause, run the
+statement again, and if it matches the gold then the answer was right and only its length was wrong.
+Eight to thirteen dev cases per arm are capped, and stripping repairs 5 to 8 — 0.33 to 0.52pp of the
+split for a rule that needs no model, which is why it is priced before any prompt work. A `limit`
+inside a subquery is not a cap: a top-N per group is part of the answer.

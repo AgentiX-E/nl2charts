@@ -71,6 +71,7 @@
     "bench:bird:agents": "tsx eval/bird/agents.ts",
     "bench:bird:card": "tsx eval/bird/card.ts",
     "bench:bird:selectivity": "tsx eval/bird/selectivity.ts",
+    "bench:bird:residue": "tsx eval/bird/residue.ts",
     "bench:bird:join": "tsx eval/bird/join.ts",
     "bird:stratify": "node tools/stratify-mixed.mjs",
     "bench:bird:drift": "tsx eval/bird/drift.ts",

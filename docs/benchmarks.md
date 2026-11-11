@@ -10925,3 +10925,88 @@ empty bucket, because `0 of 0` prints as `0.0%` and reads like a measured zero, 
 refuses. A refused *graft* is counted in the tally instead of failing the run — eleven of fifty-nine
 dev cases are unreadable by construction, and **a gate that goes red on a property of the corpus is a
 gate nobody reads.**
+
+## What is actually under `elsewhere`: the read-set has a direction
+
+The previous section split `filter-wide` by a counterfactual — keep the prediction's `from`, put the
+gold's `where` in its place, run it — and left 31 to 39 cases per arm that are still wrong with the
+gold's filter in place. It called those `elsewhere` and pointed the next lever at "the row source".
+That was a direction as much as a measurement: it assumed the statement was reading *too many* rows.
+
+`bench:bird:residue` asks the question that assumption skipped, and it needs no statement executed
+that the previous tool has not already executed. **When the gold's filter is in place and the rows
+still differ, is the statement reading more distinct rows than the answer, fewer, or the wrong ones
+in both directions?** Containment is tested through the devkit's canonical identity for a result set,
+comparing the key of the concatenation with the key of each side, so the normalisation is the judge's
+own and the answer is order-free and duplicate-free like the rule it is built on.
+
+### The finding: the residue is not a fan-out
+
+Run `42563674600`, dev split, 1,532 questions, `deepseek-chat`, all five arms of one artifact:
+
+| arm | residue | `capped` | `over` | `under` | `mixed` | capped at all | stripping repairs |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `names` | 32 | 6 (18.8%) | 6 (18.8%) | 11 (34.4%) | 9 (28.1%) | 11 (34.4%) | **6** |
+| `inline+evidence` | 39 | 6 (15.4%) | 5 (12.8%) | 13 (33.3%) | 15 (38.5%) | 12 (30.8%) | **6** |
+| `metadata+evidence` | 31 | 8 (25.8%) | 3 (9.7%) | 10 (32.3%) | 10 (32.3%) | 10 (32.3%) | **8** |
+| `select` | 32 | 5 (15.6%) | 5 (15.6%) | 10 (31.3%) | 12 (37.5%) | 8 (25.0%) | **5** |
+| `select-mixed` | 35 | 7 (20.0%) | 4 (11.4%) | 13 (37.1%) | 11 (31.4%) | 13 (37.1%) | **7** |
+
+**`over` is 3 to 6 cases per arm, 9.7% to 18.8% of the residue.** The hypothesis the plan inherited —
+that `elsewhere` is a `from` multiplying rows — holds for at most a sixth of it. `under` (10–13) and
+`mixed` (9–15) together are two thirds: **the statement is reading fewer rows than the answer, or a
+different set, and no edit to a condition or a join fan-out reaches that.** A lever built for a
+surplus of rows would have spent its budget on the smallest part of the bucket.
+
+### Why the fan-out question did not need its own instrument
+
+The plan also asked to separate "one-to-many fan-out" from "a missing `distinct`". That split is
+already made, and the arithmetic is the reason:
+
+> a fan-out repeats rows and preserves the row **set**; the official judge compares `set()`; so a
+> case whose only defect is repetition **scores** unless the gold's own answer repeats a row.
+
+Which is the `duplicates` bucket: 4 to 13 cases per arm, credited by the judge because `set()` folded
+them. **A case that reaches `elsewhere` cannot be a pure fan-out** — if it were, the set would match
+and the case would be a win. Both candidate edits were therefore tried on paper before any of them
+was built: a `distinct` view of an `elsewhere` case cannot match its gold (the set already differs
+and the view does not change the set), and removing a piece of a `from` clause cannot repair a
+statement whose rows are missing as well as extra. Shipping a query whose answer is known is how a
+zero gets read as a measurement.
+
+### The cheapest lever this project has found, and it is mechanical
+
+`capped` is not a direction; it is a repair. A statement that answers the question and then keeps
+fewer rows than asked is truncating a right answer, and **stripping its own `limit` proves which it
+was with one query** — the probe runs on the statement the model wrote, not on the graft, because
+the claim is about that statement.
+
+Eight to thirteen cases per arm carry a top-level `limit` the gold does not have, and stripping it
+repairs **5 to 8**. On 1,532 questions that is 0.33 to 0.52pp, for a rule that needs no model, no
+prompt and no card — and the half of the caps that do *not* repair stay in the residue, which is why
+the number is a floor of the guard rather than a forecast of one.
+
+```bash
+BIRD_SPLIT=dev pnpm bench:bird:residue --artifact eval/out/bird-eval.json --arm metadata+evidence
+```
+
+### Two audits the file carries, one of which clears the previous section
+
+**The `where` graft carried everything.** A gold that states conditions in a `having` clause, or in a
+join's `on` clause beside its key, cannot be repaired by a graft that only carries a `where` — and
+had that been common, the previous section's 52.5%–60.0% would have been an artifact of the
+instrument rather than a finding about the arms. It is **0 of 31 to 0 of 39 on every arm**. The
+denominator was clean, and the residue is what it says it is.
+
+**`under` is a stricter join, not a narrower question.** Predictions read a table the gold never does
+in 6 to 9 cases per arm, and 5 to 6 of those are `under`: one more join is one more intersection, and
+an inner join over a table the answer never needed can only remove rows. The residual floor —
+`over`, same tables, the gold's own filter, no condition outside the `where` — is 0 to 3 cases per
+arm (0.0%–9.4%), and it is reported as a floor rather than assigned to a clause.
+
+### What it does not prove
+
+It does not price a lever. Stripping a `limit` makes the statement match, which proves the cap was
+the whole defect for those cases; it does not prove that a question-side rule can tell a justified
+cap from an unjustified one without the gold. Every number here is a ceiling of the same kind as
+`literal-gap`'s and `surplus`'s, and the report prints the ceiling next to the count.

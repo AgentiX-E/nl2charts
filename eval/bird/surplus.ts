@@ -28,8 +28,10 @@
  * The outcomes are named `predicate`, `duplicates` and `elsewhere`, and the asymmetry is
  * deliberate: the first names a cause the counterfactual established, the other two only name what
  * the cause is *not*. A fan-out, a missing `distinct` and a `limit` that truncates all land in the
- * last two, and this tool does not separate them further — that is `bench:bird:join`'s question,
- * asked on a different denominator.
+ * last two, and this tool does not separate them further — that is `bench:bird:grain`'s question,
+ * asked on the residue this file leaves. (`bench:bird:join` is a different instrument entirely: it
+ * walks the foreign-key graph to price which tables a card has to show, and it reads no statement's
+ * rows.)
  *
  * `duplicates` exists because BIRD's official judge compares `set()` of the tuples: a fan-out that
  * repeats a row collapses to the gold's answer and the case *scores*. A graft that only looks like
