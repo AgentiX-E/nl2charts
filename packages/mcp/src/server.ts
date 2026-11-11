@@ -2,6 +2,8 @@ import type { Runner } from '@agentix-e/nl2charts-core';
 import { isNl2ChartsError } from '@agentix-e/nl2charts-spec';
 import type { JsonRpcRequest, JsonRpcResponse } from './jsonrpc.js';
 import { encodeMessage } from './jsonrpc.js';
+import { ASK_TOOL, askQuestion } from './ask.js';
+import type { AskOptions } from './ask.js';
 import { SEMANTIC_TOOLS, explainMetric, runQueryMetric } from './semantic.js';
 import type { ToolFailure } from './semantic.js';
 
@@ -15,9 +17,18 @@ export interface McpServerOptions {
   readonly runner: Runner;
   readonly name?: string;
   readonly version?: string;
+  /**
+   * The question-to-SQL pipeline, when the deployment has an endpoint to call.
+   *
+   * Absent means the server offers the three tools it can answer without a model, which is
+   * a real deployment: a server configured with no key must not advertise a tool whose
+   * every call would fail. Present means `ask_question` is listed and callable, and the
+   * list is built from the same value that dispatches the call so the two cannot disagree.
+   */
+  readonly ask?: AskOptions;
 }
 
-const TOOLS: readonly ToolDefinition[] = [
+const BASE_TOOLS: readonly ToolDefinition[] = [
   {
     name: 'run_sql',
     description: 'Run one read-only SQL statement and return rows.',
@@ -35,6 +46,19 @@ const TOOLS: readonly ToolDefinition[] = [
   },
   ...SEMANTIC_TOOLS,
 ];
+
+/**
+ * The tool list, and the only place the list is built.
+ *
+ * `ask_question` is first-class rather than always-present-with-an-error: a client reads
+ * `tools/list` to decide what it may call, so a tool that is listed and then fails on every
+ * call is a capability the server claimed and does not have. The list is derived from the
+ * same `options` the dispatcher reads, which is the property a second array would lose.
+ */
+export function toolsFor(options: McpServerOptions): readonly ToolDefinition[] {
+  if (options.ask === undefined) return BASE_TOOLS;
+  return [BASE_TOOLS[0] as ToolDefinition, ASK_TOOL, ...BASE_TOOLS.slice(1)];
+}
 
 /** A tool error becomes a JSON-RPC error, never a thrown exception. */
 function failureResponse(id: JsonRpcResponse['id'], failed: ToolFailure): JsonRpcResponse {
@@ -60,8 +84,18 @@ export function createMcpServer(options: McpServerOptions): {
 } {
   const name = options.name ?? 'nl2charts';
   const version = options.version ?? '0.1.0';
+  const tools = toolsFor(options);
 
   const callTool = async (toolName: string, args: Record<string, unknown>, id: JsonRpcResponse['id']): Promise<JsonRpcResponse> => {
+    if (toolName === 'ask_question') {
+      // Unreachable while the list is built from `options`, and checked anyway: a client
+      // may call a tool it never listed, and the alternative to this branch is a call
+      // that falls through to `unknown tool` and reads like the tool does not exist.
+      if (options.ask === undefined) return errorResponse(id, -32602, 'ask_question requires a configured endpoint');
+      const payload = await askQuestion({ runner: options.runner, ask: options.ask }, args);
+      if (isFailure(payload)) return failureResponse(id, payload);
+      return { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: JSON.stringify(payload) }], isError: false } };
+    }
     if (toolName === 'engine_info') {
       return {
         jsonrpc: '2.0',
@@ -106,7 +140,7 @@ export function createMcpServer(options: McpServerOptions): {
   };
 
   return {
-    tools: TOOLS,
+    tools,
     async handle(request) {
       if (request.jsonrpc !== '2.0') return errorResponse(request.id ?? null, -32600, 'jsonrpc must be "2.0"');
       const id = request.id ?? null;
@@ -124,7 +158,7 @@ export function createMcpServer(options: McpServerOptions): {
             },
           };
         case 'tools/list':
-          return { jsonrpc: '2.0', id, result: { tools: TOOLS } };
+          return { jsonrpc: '2.0', id, result: { tools } };
         case 'tools/call': {
           const params = (request.params ?? {}) as { name?: unknown; arguments?: unknown };
           if (typeof params.name !== 'string') return errorResponse(id, -32602, 'tools/call requires a tool name');

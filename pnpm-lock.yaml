@@ -108,6 +108,9 @@ importers:
 
   packages/mcp:
     dependencies:
+      '@agentix-e/nl2charts-ai':
+        specifier: workspace:*
+        version: link:../ai
       '@agentix-e/nl2charts-core':
         specifier: workspace:*
         version: link:../core

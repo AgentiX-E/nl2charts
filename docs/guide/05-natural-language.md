@@ -330,4 +330,56 @@ are examples and only stated filters may be used; samples are off by default.
   user message, so they can be regenerated without touching the system prompt.
 - `temperature` defaults to `0`: the pipeline is not a creative task.
 
+## Serving the pipeline as an MCP tool
+
+A client that speaks MCP can now ask a question instead of writing SQL. The server
+gains one tool when — and only when — the deployment has an endpoint to call:
+
+```ts
+import { createMcpServer } from '@agentix-e/nl2charts-mcp';
+import { createHttpProvider } from '@agentix-e/nl2charts-ai';
+
+const server = createMcpServer({
+  runner,                                   // the same guarded runner as run_sql
+  ask: { provider: createHttpProvider({ baseUrl: '/api/llm', model: 'your-model' }) },
+});
+```
+
+`tools/list` then carries `ask_question` beside `run_sql`, and a deployment with no
+key carries `run_sql` alone. The list and the dispatcher read the same option, so a
+tool is never advertised that every call would fail.
+
+```json
+{
+  "name": "ask_question",
+  "arguments": {
+    "question": "which region had the most refunded orders last quarter",
+    "schema": [{ "table": "orders", "columns": [
+      { "name": "region", "type": "VARCHAR" },
+      { "name": "status", "type": "VARCHAR", "samples": ["completed", "refunded"] },
+      { "name": "order_date", "type": "DATE" }
+    ] }],
+    "evidence": "A refunded order is one whose status is refunded.",
+    "preview": 50
+  }
+}
+```
+
+Three things the tool does that a wrapper around `buildSqlPrompt` would not:
+
+- **It executes before it answers.** The statement is run, and a statement the engine
+  refuses becomes a repair turn rather than a returned string. `attempts`, `failures`
+  and `diagnoses` come back with the rows so a caller can tell a first-try statement
+  from an exhausted loop.
+- **The schema is the caller's.** Reading a live catalog needs a driver, and the server
+  does not depend on one; a call with no tables is refused instead of guessed, and a
+  table with no columns is refused because an empty card invites invented columns.
+- **The row cap is the runner's.** `preview` is a request; `maxRows` is the permission.
+  A caller that asks for 5,000 rows from a server configured for 1,000 gets 1,000, and
+  the statement itself is not rewritten to say so.
+
+The cost of a call is the same as the pipeline's: one generation, plus one repair per
+refusal (default at most three), plus one execution to verify. Set `maxRepairs: 0` to
+serve a single-shot statement and keep the execution.
+
 Next: [semantic layer](06-semantic-layer.md).

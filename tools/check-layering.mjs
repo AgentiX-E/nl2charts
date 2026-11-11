@@ -14,6 +14,10 @@ const FORBIDDEN = {
   chart: ['core', 'ai', 'node', 'mcp', 'studio', 'devkit'],
   node: ['chart', 'ai', 'mcp', 'studio', 'devkit'],
   ai: ['chart', 'node', 'mcp', 'studio', 'devkit'],
+  // `ai` is not listed: the server exposes the question-to-SQL pipeline as a tool, and
+  // `ai` depends only on `core` and `spec`, so the runtime graph stays acyclic. `node`
+  // stays forbidden — the engine reaches the server as a `Runner` from `core`, which is
+  // what keeps a database driver out of the server's bundle.
   mcp: ['chart', 'node', 'studio', 'devkit'],
   studio: ['core', 'ai', 'node', 'chart', 'mcp', 'devkit'],
   devkit: ['chart', 'node', 'mcp', 'studio'],

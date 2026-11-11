@@ -22,6 +22,7 @@
     "build": "tsup src/index.ts --format esm,cjs --dts --clean"
   },
   "dependencies": {
+    "@agentix-e/nl2charts-ai": "workspace:*",
     "@agentix-e/nl2charts-core": "workspace:*",
     "@agentix-e/nl2charts-spec": "workspace:*"
   },

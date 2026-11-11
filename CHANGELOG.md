@@ -7,6 +7,20 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **The server can answer a question, not only run a statement.** `packages/ai` builds the
+  question-to-SQL pipeline and no package imported it: `mcp` exposed `run_sql`, `query_metric` and
+  `explain_metric`, so a client could ask "run this SQL" and "compile this metric" and could not
+  ask the thing the project is named for. `ask_question` closes that edge — it generates, guards,
+  repairs on the engine's refusal, executes, and returns the statement beside its rows and its
+  attempt count. The tool is listed only when `ask.provider` is configured, because a tool that is
+  advertised and then fails every call is a capability the server claimed and does not have; the
+  list and the dispatcher read the same option so the two cannot drift. The schema is the caller's
+  (reading a live catalog needs a driver, and `mcp` must not depend on `node`), a call naming no
+  table or a table with no columns is refused rather than guessed, and `preview` is clamped by the
+  runner's `maxRows` rather than granted. `mcp`'s bundle budget moves 7,000 → 10,500 B gzip
+  (measured 9,518) with the reason in `budgets.json`. 20 tests, including a repair that takes two
+  attempts and a provider failure that keeps its `NL2C_E_` code.
+
 - **A zero-call contrast between two artifacts, and the two denominators it refuses to choose
   between.** `pair.ts` refuses to join two artifacts, correctly: a join across runs puts the
   endpoint's displacement into a delta that was supposed to have none. Comparing two *base models*
