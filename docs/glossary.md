@@ -734,3 +734,21 @@ statement again, and if it matches the gold then the answer was right and only i
 Eight to thirteen dev cases per arm are capped, and stripping repairs 5 to 8 — 0.33 to 0.52pp of the
 split for a rule that needs no model, which is why it is priced before any prompt work. A `limit`
 inside a subquery is not a cap: a top-N per group is part of the answer.
+
+**Unfounded cap** — A top-level `limit` a statement cannot justify: its rows are not ordered, the
+question names no rank, the cap is a plain positive integer, and there is no `offset` beside it.
+An unordered relation has no first k rows, so such a cap selects an arbitrary subset of the rows the
+question asked for and removing it cannot drop a row that was asked for. This is the rule the
+pipeline ships (`stripUnfoundedCap`), and it is the only rewrite in the repository whose licence is
+syntax rather than data: across four Mini-Dev arms it fires 49 times, repairs 11 and breaks none,
+which is +0.20 to +0.81pp per arm and 0.00049 by a sign test on the 11-to-0 split. A `limit` inside
+a subquery is not a cap — a top-N per group is part of the answer — and neither is `limit 0`, which
+asks for a result's columns and none of its rows.
+
+**Ceiling (oracle rule)** — A rule that reads the gold statement. It cannot ship, because a
+deployment does not have the gold, but it bounds what an edit could ever be worth: if the ceiling is
+small, no version of the rule is worth building. `oracle-drop-limit` is the ceiling for the cap edit
+— remove the cap whenever the gold states none — and it fires 103 times across four Mini-Dev arms,
+repairing 12 and breaking 23. The shipped rule fires 49 times, repairs 11 and breaks none. A ceiling
+that knows more than a rule and does worse is the clearest evidence a rule can have that its
+conditions are doing the work rather than getting in the way.

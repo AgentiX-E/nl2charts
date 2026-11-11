@@ -525,10 +525,19 @@ export function resolveResidueSettings(
   return { root, artifact: artifact ?? layout.out, arm: arm ?? DEFAULT_RESIDUE_ARM, layout };
 }
 
-/** Where the artifact goes, named by the arm so two arms do not overwrite each other. */
-export function residuePath(settings: { readonly root: string; readonly arm: string }): string {
+/**
+ * Where the artifact goes, named by the arm **and the split**, so neither overwrites the other.
+ *
+ * The split is in the name because it is a second population, not a second formatting of the first:
+ * a Mini-Dev reading of an arm holds about a third of the cases a dev reading holds, and a name
+ * that leaves it out lets the smaller run replace the larger one silently. It did: the first dev
+ * residue reading in `eval/out/` was replaced by a test-suite run of the same arm on Mini-Dev, and
+ * nothing in the file said so. The artifact carries `split` inside as well, which is what a reader
+ * should trust; this is what keeps a reader from having to.
+ */
+export function residuePath(settings: { readonly root: string; readonly arm: string; readonly split: string }): string {
   const safe = settings.arm.replace(/[^a-z0-9+-]/gi, '_');
-  return join(settings.root, 'eval', 'out', `residue-${safe}.json`);
+  return join(settings.root, 'eval', 'out', `residue-${safe}-${settings.split}.json`);
 }
 
 export interface ResidueDrops {
@@ -770,7 +779,7 @@ export async function runResidue(settings: ResidueSettings): Promise<ResidueOutc
 }
 
 export function writeResidueArtifact(settings: ResidueSettings, outcome: ResidueOutcome): string {
-  const path = residuePath({ root: settings.root, arm: outcome.arm });
+  const path = residuePath({ root: settings.root, arm: outcome.arm, split: outcome.split });
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify(outcome, null, 2)}\n`);
   return path;

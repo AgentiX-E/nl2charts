@@ -45,7 +45,6 @@ import {
 } from '../eval/bird/residue.js';
 import { MINI_DB, writeMiniBirdDataset } from './helpers/bird-dataset.js';
 
-const ROOT = process.cwd();
 const ARM = DEFAULT_RESIDUE_ARM;
 
 /**
@@ -131,7 +130,10 @@ function fixture(): { readonly data: string; readonly artifact: string; readonly
   const dir = mkdtempSync(join(tmpdir(), 'residue-'));
   const { data } = writeFixture(dir);
   const artifact = join(dir, 'artifact.json');
-  const settings = resolveResidueSettings(['--artifact', artifact, '--arm', ARM], ROOT, env(data));
+  // The root is the fixture's own directory, not the repository: a harness that writes its artifact
+  // under the root it was given wrote into `eval/out/` when the suite ran, and a Mini-Dev run of
+  // this arm replaced the dev reading that was sitting there. A test owns its output directory.
+  const settings = resolveResidueSettings(['--artifact', artifact, '--arm', ARM], dir, env(data));
   return { data, artifact, settings };
 }
 
@@ -422,9 +424,12 @@ describe('the settings this harness accepts', () => {
     expect(() => resolveResidueSettings(['--artifact', '--arm', 'x'], '/root', layoutEnv)).toThrow(/needs a value/);
   });
 
-  it('names the artifact by the arm, so two arms do not overwrite each other', () => {
-    expect(residuePath({ root: '/root', arm: 'select-mixed' })).toBe('/root/eval/out/residue-select-mixed.json');
-    expect(residuePath({ root: '/root', arm: 'a/b' })).toBe('/root/eval/out/residue-a_b.json');
+  it('names the artifact by the arm and the split, so neither replaces the other', () => {
+    expect(residuePath({ root: '/root', arm: 'select-mixed', split: 'dev' })).toBe('/root/eval/out/residue-select-mixed-dev.json');
+    expect(residuePath({ root: '/root', arm: 'a/b', split: 'minidev' })).toBe('/root/eval/out/residue-a_b-minidev.json');
+    // The two splits are two populations: a Mini-Dev run of an arm holds a third of the cases a dev
+    // run holds, and a name that leaves the split out lets the smaller one replace the larger.
+    expect(residuePath({ root: '/root', arm: 'names', split: 'dev' })).not.toBe(residuePath({ root: '/root', arm: 'names', split: 'minidev' }));
   });
 });
 
@@ -599,21 +604,21 @@ describe('the residue of a real artifact against a real database', () => {
     artifactOf(artifact, [{ id: 202, sql: 'select i.id from items i limit 2' }]);
     const outcome = await runResidue(settings);
     const path = writeResidueArtifact(settings, outcome);
-    expect(path).toBe(residuePath({ root: ROOT, arm: ARM }));
+    expect(path).toBe(residuePath({ root: settings.root, arm: ARM, split: 'minidev' }));
     const reread = JSON.parse(readFileSync(path, 'utf8')) as { tally: { total: number } };
     expect(reread.tally.total).toBe(1);
   });
 
   it('exits zero on a residue it can read', async () => {
-    const { data, artifact } = fixture();
+    const { data, artifact, settings } = fixture();
     artifactOf(artifact, [{ id: 202, sql: 'select i.id from items i limit 2' }]);
-    expect(await main(['--artifact', artifact], ROOT, env(data))).toBe(0);
+    expect(await main(['--artifact', artifact], settings.root, env(data))).toBe(0);
   });
 
   it('exits non-zero on an artifact with no residue, because 0 of 0 is not a reading', async () => {
-    const { data, artifact } = fixture();
+    const { data, artifact, settings } = fixture();
     artifactOf(artifact, [{ id: 202, passed: true }]);
-    expect(await main(['--artifact', artifact], ROOT, env(data))).toBe(1);
+    expect(await main(['--artifact', artifact], settings.root, env(data))).toBe(1);
   });
 });
 

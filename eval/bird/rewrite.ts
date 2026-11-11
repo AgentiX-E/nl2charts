@@ -13,8 +13,12 @@
  * 1. **`null-order`** — an ascending sort that carries a row cap puts unknown values first in
  *    SQLite and MySQL, so a question asking for "the lowest score" is answered by the school whose
  *    score is missing. `IS NULL` in front of the sort key is the statement the question meant.
- *    This is the rule the product ships (`guardNullOrder` in the AI package); this harness is how
- *    it was priced and how a future engine-specific variant will be priced.
+ *    The rule lives in the AI package (`guardNullOrder`) and the pipeline does not call it: it was
+ *    priced here and never wired, and wiring it is a change of its own because the null ordering it
+ *    guards against is a property of the dialect — `null-order.ts` treats every engine it does not
+ *    name as SQLite, and DuckDB sorts the other way, so a caller that passed `duckdb` through would
+ *    introduce the defect the rule exists to remove. This harness is how it was priced and how a
+ *    future engine-specific variant will be priced.
  * 2. **`drop-limit-on-count`** — the reverse suspicion: a row cap left in a statement whose
  *    question asks "how many". It is here because the suspicion is wrong, and a rule that is
  *    wrong at 1,532 questions is worth one line of code that says so: it fires 35 times, wins 1
@@ -65,7 +69,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { mcnemarExact, pairedResolution } from '@agentix-e/nl2charts-devkit';
 import type { MatchReason } from '@agentix-e/nl2charts-devkit';
-import { applyGrounding, guardNullOrder } from '@agentix-e/nl2charts-ai';
+import { applyGrounding, clauseAt, guardNullOrder, stripUnfoundedCap } from '@agentix-e/nl2charts-ai';
 import { domainsOf, groundLiteralAbsence, groundLiteralCase } from './literal-repair.js';
 import { aliasTable, spliceWhereClause, whereClauseSpan } from './sql-shape.js';
 import type { ColumnDomain, GroundableKind } from './literal-repair.js';
@@ -179,6 +183,23 @@ function integerDivision(input: RewriteInput): string | undefined {
   return changed ? rewritten.join('') : undefined;
 }
 
+/**
+ * The statement with its top-level cap removed, and nothing else asked.
+ *
+ * The ceiling's edit. It reads no condition and refuses nothing, which is exactly what makes it a
+ * ceiling: the number it prints is the whole of what removing caps could ever be worth, before any
+ * question of whether a given cap should be removed.
+ */
+function stripCapOnly(sql: string): string | undefined {
+  const end = clauseAt(sql, 'limit');
+  if (end === undefined) return undefined;
+  const start = end - 'limit'.length;
+  const rest = sql.slice(end);
+  const terminator = rest.indexOf(';');
+  const head = sql.slice(0, start).replace(/\s+$/, '');
+  return `${head}${terminator < 0 ? '' : rest.slice(terminator)}`;
+}
+
 /** The grounding edit, or nothing when the column cannot name exactly one spelling. */
 function groundCase(input: RewriteInput): string | undefined {
   const edit = groundLiteralCase(input.sql, input.domains);
@@ -211,6 +232,16 @@ export const REWRITE_RULES: readonly RewriteRule[] = [
       // the statement unchanged, and the caller already skips a rewrite that changed nothing.
       return input.sql.replace(/\s+limit\s+\d+\s*;?\s*$/i, ';');
     },
+  },
+  {
+    // The third reading of the same suspicion, and the only one that pays. `drop-limit-on-count`
+    // gates the edit on the question saying "how many" and `drop-limit` gates it on the gold; this
+    // one gates it on the two things a deployment can see — whether the cap ranks its rows and
+    // whether the question asked for a ranking. It is the rule the AI package ships, priced as
+    // itself rather than as its idea.
+    name: 'drop-unordered-limit',
+    claim: 'a cap on an unordered statement answering a question that names no rank',
+    apply: (input) => stripUnfoundedCap(input.sql, input.question)?.sql,
   },
   { name: 'integer-division', claim: 'a rate divided by an integer column truncates to zero', apply: integerDivision },
   {
@@ -310,6 +341,19 @@ export const ORACLE_RULES: readonly RewriteRule[] = [
     claim: 'one same-column value from the gold repairs the case',
     oracle: true,
     apply: transplantGoldLiterals,
+  },
+  {
+    // The gross form of the same edit: remove the cap whenever the gold states none. It is a
+    // ceiling because it reads the gold, and it is here because it is the reading that refutes
+    // "the cheapest lever": it repairs three and breaks eight on the same arm, which is what a rule
+    // looks like when the cases it can hurt were never counted.
+    name: 'oracle-drop-limit',
+    claim: 'the cap removed whenever the gold states none, which is the rule without its conditions',
+    oracle: true,
+    apply: (input) => {
+      if (clauseAt(input.goldSql, 'limit') !== undefined) return undefined;
+      return stripCapOnly(input.sql);
+    },
   },
   {
     name: 'oracle-predicate',

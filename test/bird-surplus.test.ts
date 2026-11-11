@@ -13,6 +13,7 @@
  * engine counted differently" and a stubbed result set would agree with whatever the tool expected.
  */
 import { execFileSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -255,8 +256,8 @@ describe('the entry', () => {
   });
 
   it('names the artifact after the arm so two arms do not overwrite each other', () => {
-    expect(surplusPath({ root: ROOT, arm: 'metadata+evidence' })).toBe(join(ROOT, 'eval', 'out', 'surplus-metadata+evidence.json'));
-    expect(surplusPath({ root: ROOT, arm: 'select/mixed' })).toBe(join(ROOT, 'eval', 'out', 'surplus-select_mixed.json'));
+    expect(surplusPath({ root: ROOT, arm: 'metadata+evidence', split: 'dev' })).toBe(join(ROOT, 'eval', 'out', 'surplus-metadata+evidence-dev.json'));
+    expect(surplusPath({ root: ROOT, arm: 'select/mixed', split: 'dev' })).toBe(join(ROOT, 'eval', 'out', 'surplus-select_mixed-dev.json'));
   });
 
   it('recognises its own module and nothing else', () => {
@@ -323,7 +324,9 @@ describe('splitting a real artifact against a real database', () => {
     const built = writeQuestions(dir);
     return {
       built,
-      settings: { root: ROOT, artifact: built.artifact, arm: DEFAULT_SURPLUS_ARM, layout: { data: built.data, databaseRoot: built.databaseRoot } as never },
+      // `root` is the fixture's directory so the write path stays inside it: a test that inherits
+      // the repository root writes its artifact into `eval/out/`, where a real reading lives.
+      settings: { root: dir, artifact: built.artifact, arm: DEFAULT_SURPLUS_ARM, layout: { data: built.data, databaseRoot: built.databaseRoot } as never },
     };
   };
 
@@ -441,7 +444,7 @@ describe('splitting a real artifact against a real database', () => {
     ]);
     const outcome = await runSurplus(settings);
     const path = writeSurplusArtifact(settings, outcome);
-    expect(path).toBe(surplusPath({ root: ROOT, arm: DEFAULT_SURPLUS_ARM }));
+    expect(path).toBe(surplusPath({ root: settings.root, arm: DEFAULT_SURPLUS_ARM, split: 'minidev' }));
     const reread = JSON.parse(readFileSync(path, 'utf8')) as { tally: { total: number } };
     expect(reread.tally.total).toBe(2);
   });
@@ -523,7 +526,7 @@ describe('the entry point as a process', () => {
     const data = writeMiniBirdDataset(join(dir, 'MINIDEV'));
     const artifact = join(dir, 'artifact.json');
     writeFileSync(artifact, JSON.stringify({ split: 'minidev', cases: [] }));
-    const code = await main(['--artifact', artifact], ROOT, {
+    const code = await main(['--artifact', artifact], dir, {
       BIRD_SPLIT: 'minidev',
       BIRD_DATA: data,
       BIRD_DATABASES: join(data, 'dev_databases'),
@@ -546,7 +549,7 @@ describe('the entry point as a process', () => {
         cases: [{ arm: DEFAULT_SURPLUS_ARM, id: 3, passed: false, reason: 'values', sql: 'select name from items where items.id = 1' }],
       }),
     );
-    const code = await main(['--artifact', artifact], ROOT, {
+    const code = await main(['--artifact', artifact], dir, {
       BIRD_SPLIT: 'minidev',
       BIRD_DATA: data,
       BIRD_DATABASES: join(data, 'dev_databases'),
@@ -571,8 +574,12 @@ describe('the script as a process', () => {
         cases: [{ arm: DEFAULT_SURPLUS_ARM, id: 3, passed: false, reason: 'values', sql: 'select name from items where items.id = 1' }],
       }),
     );
-    const out = execFileSync(process.execPath, ['--import', 'tsx', join(ROOT, 'eval/bird/surplus.ts'), '--artifact', artifact], {
-      cwd: ROOT,
+    // The loader is named by its resolved URL rather than by package name: the child's working
+    // directory is the fixture's, and a bare `tsx` would be looked for there and not found.
+    const out = execFileSync(process.execPath, ['--import', createRequire(import.meta.url).resolve('tsx'), join(ROOT, 'eval/bird/surplus.ts'), '--artifact', artifact], {
+      // The working directory is the fixture's, so the artifact this run writes lands beside the
+      // fixture rather than in `eval/out/` on top of a reading that took a model to produce.
+      cwd: dir,
       encoding: 'utf8',
       env: { ...process.env, BIRD_SPLIT: 'minidev', BIRD_DATA: data, BIRD_DATABASES: join(data, 'dev_databases') },
     });

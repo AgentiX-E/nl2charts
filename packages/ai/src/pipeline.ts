@@ -9,6 +9,7 @@ import { buildPlanPrompt, parsePlan } from './plan.js';
 import { DECOMPOSE_RULES, parseDecomposed } from './decompose.js';
 import { emptyRetryMessages } from './empty.js';
 import { groundLiterals } from './ground.js';
+import { stripUnfoundedCap } from './unfounded-cap.js';
 import type { ColumnValues } from './ground.js';
 import { auditMessages, countNamedConditions } from './audit.js';
 import { replyShape } from './format.js';
@@ -263,6 +264,14 @@ export interface AskResult {
    * and reporting it is what keeps a silent no-op from reading like a mechanism that fired.
    */
   readonly grounding?: { readonly substitutions: number; readonly refused: number };
+  /**
+   * The row cap this turn removed, when the statement could not justify it.
+   *
+   * Reported rather than inferred from the statement, for the reason `grounding` is: an edit that
+   * fires and an edit that silently does nothing leave the same SQL shape here, and only one of
+   * them is a mechanism. `cap` is the clause as the model wrote it.
+   */
+  readonly capStripped?: string;
   /**
    * How many sub-statements the reply wrote, when the pipeline asked for a decomposition.
    *
@@ -566,10 +575,19 @@ export function createPipeline(options: PipelineOptions): {
           // and a rule that only reached the first would price itself on the turns it never saw.
           const grounded =
             options.readColumnValues === undefined ? undefined : await groundLiterals(written, options.readColumnValues);
-          const stated = grounded === undefined || grounded.substitutions.length === 0 ? written : grounded.sql;
+          const substituted = grounded === undefined || grounded.substitutions.length === 0 ? written : grounded.sql;
           const grounding =
             grounded === undefined ? {} : { grounding: { substitutions: grounded.substitutions.length, refused: grounded.refused.length } };
-          if (!options.execute) return { sql: stated, attempts: spent, linked, failures, diagnoses, ...audit, ...grounding, ...steps, ...shape };
+          // The second engine-level rewrite, and the one that needs no data: a statement that keeps
+          // the first k rows of an unordered relation is not answering the question it was asked,
+          // and the clause it keeps the rows with is the only part of it that says so. It runs on
+          // the statement that is about to execute, after the literals are grounded, because the two
+          // edits touch different spans and a rule that ran before grounding would be measured on a
+          // statement the run did not execute.
+          const capped = stripUnfoundedCap(substituted, request.question);
+          const stated = capped === undefined ? substituted : capped.sql;
+          const cap = capped === undefined ? {} : { capStripped: capped.cap };
+          if (!options.execute) return { sql: stated, attempts: spent, linked, failures, diagnoses, ...audit, ...grounding, ...cap, ...steps, ...shape };
           try {
             const outcome = await options.execute(stated);
             const rows = rowCountOf(outcome);
@@ -584,11 +602,12 @@ export function createPipeline(options: PipelineOptions): {
                 emptyRetry: { fired: true, recovered: retried.recovered },
                 ...audit,
                 ...grounding,
+                ...cap,
                 ...steps,
                 ...shape,
               };
             }
-            return { sql: stated, attempts: spent, linked, failures, diagnoses, ...audit, ...grounding, ...steps, ...shape };
+            return { sql: stated, attempts: spent, linked, failures, diagnoses, ...audit, ...grounding, ...cap, ...steps, ...shape };
           } catch (error) {
             const diagnosis = diagnoseFailure({
               sql: stated,

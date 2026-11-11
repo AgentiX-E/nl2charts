@@ -11010,3 +11010,78 @@ It does not price a lever. Stripping a `limit` makes the statement match, which 
 the whole defect for those cases; it does not prove that a question-side rule can tell a justified
 cap from an unjustified one without the gold. Every number here is a ceiling of the same kind as
 `literal-gap`'s and `surplus`'s, and the report prints the ceiling next to the count.
+
+## The cheapest lever, priced: a cap the statement cannot justify
+
+The section above ends with a floor and says so: `bench:bird:residue` sees only the cases an arm got
+*wrong*, because a case it got right never reaches the residue. Stripping a `limit` repaired 5 to 8
+of 8 to 13 capped failures per dev arm, and that is a **ceiling over the failures**, not the net
+worth of a rule. A rule is priced by the cases it can hurt, and the cases it can hurt are the ones
+the judge already credited.
+
+`bench:bird:rewrite` is the instrument for that: it re-executes each case with and without the edit
+and requires the re-execution to reproduce the arm's published pass count before it prints anything
+(a baseline that cannot be reproduced is a bug in one of two judges, not a reading). Two rules were
+added to it.
+
+- **`drop-unordered-limit`** — the rule that ships. Remove a top-level `limit` when the statement has
+  no top-level `order by` (so the cap is not a ranking), the question names no rank (so the cap is
+  not the answer to a question about "the top 3"), the cap is a plain positive integer (so it is not
+  `limit 0`, which asks for columns and no rows), and there is no `offset` beside it.
+- **`oracle-drop-limit`** — the same edit with none of those conditions: remove the cap whenever the
+  gold states none. It reads the gold, so it is a ceiling and not a candidate, and it is here because
+  it is the reading that refutes the ceiling above.
+
+Mini-Dev, 496 questions per arm, four arms, one artifact, no model called:
+
+| arm | baseline | `drop-unordered-limit` | `oracle-drop-limit` (ceiling) |
+|---|---|---|---|
+| `metadata+evidence` | 292 (58.87%) | 8 fired · **2 won · 0 lost** · +0.40pp · p=0.500 | 24 fired · 3 won · **8 lost** · −1.01pp |
+| `names` | 179 (36.09%) | 16 fired · **4 won · 0 lost** · +0.81pp · p=0.125 | 30 fired · 4 won · **3 lost** · +0.20pp |
+| `inline+evidence` | 273 (55.04%) | 15 fired · **4 won · 0 lost** · +0.81pp · p=0.125 | 29 fired · 4 won · **6 lost** · −0.40pp |
+| `select` | 286 (57.66%) | 10 fired · **1 won · 0 lost** · +0.20pp · p=1.000 | 20 fired · 1 won · **6 lost** · −1.01pp |
+
+Across the four arms the shipped rule fires 49 times, repairs 11 and breaks none; the ceiling fires
+103 times, repairs 12 and breaks 23. The sign test on 11 repairs and 0 losses is p=0.00049, and it is
+the only number here that is significant on its own — each arm separately cannot resolve 0.2 to
+0.8pp, which is why the table prints the interval rather than the verdict.
+
+**The finding is the column on the right.** Reading the gold buys nothing: the ceiling knows strictly
+more than the shipped rule and does worse on three of four arms, because the conditions it skips are
+the cases where a cap is how a model expresses a correct answer. The repository has one such rule
+already — `drop-limit-on-count` fires 8 to 11 times per arm and loses 3 to 4 every time — and the
+gross form is the same shape at a larger size.
+
+**Why removing an unordered cap is sound at all.** An unordered relation has no first k rows. A cap
+without an ordering selects an arbitrary subset of the rows the question asked for, so removing it
+cannot drop a row that was asked for; it can only stop matching when the answer happens to have
+exactly k rows, and that is what the two conditions above exclude. This is a fact about SQL rather
+than about models, which is why it holds on four arms with four different score levels.
+
+### Where the rule runs
+
+In the pipeline, on the statement about to execute — after the literals are grounded, before the
+engine sees it — and on every turn, not only the first: a repair's statement and the audit turn's
+statement are statements the model wrote from the same prompt. The answer reports `capStripped` with
+the clause the model wrote, so an artifact can tell a rule that fired from one that had nothing to
+do. It costs no call, no token and no candidate.
+
+```bash
+pnpm bench:bird:rewrite --artifact eval/out/bird-eval.json --arm metadata+evidence --oracle
+```
+
+### What it does not prove
+
+The conditions are two claims of different kinds. "No `order by`" is syntactic and exact. "The
+question names no rank" is a word list, and its error rate is one-directional by construction: a
+false positive (`at least three`, which contains `least`) makes the rule decline and costs a repair;
+a false negative would let it fire on a question that wanted a ranking. The list was not tuned on
+these four arms, and the number of cases where it declines wrongly is printed as the difference
+between the rule's firings and the caps that carry no ordering at all.
+
+It also does not settle the rule's interaction with the one rewrite the pipeline already ran. A
+statement with `order by x asc limit 1` is exactly the shape `guardNullOrder` was written for, and
+that module is not called by the pipeline at all — it was priced here at 6 wins and 0 losses on dev
+and never wired, and wiring it is a separate change because the direction it guards is a property of
+the dialect (`null-order.ts` treats every engine it does not name as SQLite, and DuckDB sorts the
+other way). Two free rules do not compose for free.

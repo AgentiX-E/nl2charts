@@ -61,7 +61,7 @@ const AGGREGATE = /\b(?:count|sum|avg|max|min|total|group_concat|string_agg|arra
  * answer. Reading only depth zero is what keeps the two apart, and the same walk keeps a literal
  * containing the words "order by" from being mistaken for the clause.
  */
-function clauseAt(sql: string, word: string, from = 0): number | undefined {
+export function clauseAt(sql: string, word: string, from = 0): number | undefined {
   let depth = 0;
   let quote: string | undefined;
   const lower = sql.toLowerCase();

@@ -175,6 +175,23 @@ describe('REWRITE_RULES', () => {
     expect(rule('drop-limit-on-count').apply(at('select count(*) from t', { question: 'how many' }))).toBeUndefined();
   });
 
+  it('drops a cap that neither ranks its rows nor answers a question that names a rank', () => {
+    // The rule the AI package ships. Every refusal below is a case the gross form of the same edit
+    // used to break: an ordered cap is a top-N, a capped answer to "the highest score" is a top-N
+    // the statement forgot to order, and a cap of zero asks for columns and no rows.
+    const apply = (sql: string, question = 'which items are there'): unknown => rule('drop-unordered-limit').apply(at(sql, { question }));
+    expect(apply('select id from t limit 3')).toBe('select id from t');
+    expect(apply('select id from t limit 3;')).toBe('select id from t;');
+    expect(apply('select id from t order by id limit 3')).toBeUndefined();
+    expect(apply('select id from t limit 3', 'what is the top 3 by price')).toBeUndefined();
+    expect(apply('select id from t limit 0')).toBeUndefined();
+    expect(apply('select id from t limit 3 offset 1')).toBeUndefined();
+    expect(apply('select id from (select id from t limit 2) d')).toBeUndefined();
+    expect(apply('select id from t')).toBeUndefined();
+    // A cap written as an arithmetic expression is not one this rule can read without evaluating it.
+    expect(apply('select id from t limit 1 + 2')).toBeUndefined();
+  });
+
   it('scales an integer numerator and leaves everything else alone', () => {
     const typeOf = (name: string): string | undefined => (name === 'a' || name === 'b' ? 'INTEGER' : 'REAL');
     // A single statement in, a single statement out: this rule never proposes a second edit, and
@@ -324,6 +341,23 @@ describe('the ceilings', () => {
       "select id from items where name in ('cup', 'Cup')",
       "select id from items where name in ('cup', 'Lid')",
     ]);
+  });
+
+  it('prices the gross form of the cap edit, which is the rule without its conditions', () => {
+    // The reading that refutes "the cheapest lever": this fires on ordered caps and on questions
+    // that wanted a ranking, and those are the cases it breaks.
+    const gross = ORACLE_RULES.find((entry) => entry.name === 'oracle-drop-limit');
+    const apply = (sql: string, goldSql = 'select id from t'): unknown => gross?.apply(at(sql, { goldSql }));
+    expect(apply('select id from t limit 3')).toBe('select id from t');
+    // The terminator is the statement's, so a ceiling that removed it would be a different edit
+    // from the one it claims to price.
+    expect(apply('select id from t limit 3;')).toBe('select id from t;');
+    // The ordering is the statement's and survives: only the cap is removed, which is exactly why
+    // an ordered statement stops matching its answer once the cap is gone.
+    expect(apply('select id from t order by id limit 3')).toBe('select id from t order by id');
+    expect(apply('select id from t limit 3', 'select id from t limit 3')).toBeUndefined();
+    expect(apply('select id from t')).toBeUndefined();
+    expect(gross?.oracle).toBe(true);
   });
 
   it('is silent on a case that already passes, because it is a ceiling and not a guess', () => {

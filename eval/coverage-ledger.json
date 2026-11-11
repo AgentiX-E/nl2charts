@@ -317,10 +317,10 @@
       "branches": 100
     },
     "eval/bird/rewrite.ts": {
-      "lines": 99.57,
-      "statements": 99.57,
+      "lines": 99.59,
+      "statements": 99.59,
       "functions": 100,
-      "branches": 99.17
+      "branches": 99.2
     },
     "eval/bird/route.ts": {
       "lines": 100,

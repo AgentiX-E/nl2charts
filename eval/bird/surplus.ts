@@ -360,9 +360,10 @@ export function resolveSurplusSettings(
 }
 
 /** Where the artifact goes, named by the arm so two arms do not overwrite each other. */
-export function surplusPath(settings: { readonly root: string; readonly arm: string }): string {
+/** Where the artifact goes, named by the arm **and the split**: two populations, two files. */
+export function surplusPath(settings: { readonly root: string; readonly arm: string; readonly split: string }): string {
   const safe = settings.arm.replace(/[^a-z0-9+-]/gi, '_');
-  return join(settings.root, 'eval', 'out', `surplus-${safe}.json`);
+  return join(settings.root, 'eval', 'out', `surplus-${safe}-${settings.split}.json`);
 }
 
 export interface SurplusDrops {
@@ -561,7 +562,7 @@ export async function runSurplus(settings: SurplusSettings): Promise<SurplusOutc
 }
 
 export function writeSurplusArtifact(settings: SurplusSettings, outcome: SurplusOutcome): string {
-  const path = surplusPath({ root: settings.root, arm: outcome.arm });
+  const path = surplusPath({ root: settings.root, arm: outcome.arm, split: outcome.split });
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify(outcome, null, 2)}\n`);
   return path;
