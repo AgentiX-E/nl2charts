@@ -89,9 +89,24 @@ export function compare(report, baseline) {
   } else if (typeof corpus.digest !== 'string' || corpus.digest === '') {
     issues.push('BIRD1: the report has a corpus block with no digest in it');
   } else if (pinned !== undefined && corpus.digest !== pinned) {
-    issues.push(
-      `BIRD1: the report read corpus ${corpus.digest} and the floors were set on ${pinned}; the questions changed under the floors`,
-    );
+    // A declared subset reads a subset of the split, so its digest is a digest of *that* subset.
+    // Comparing it with a pin taken over the whole split would fail a run for the sample it
+    // declared in `selection.requested` — the same mistake the floors above were fixed for — and
+    // passing it silently would compare a sample's rate against floors taken on questions it never
+    // read. The comparison is switched off out loud instead, and only when the artifact declares
+    // the subset: an undeclared shortfall is a changed sample, which is the case below.
+    const asked = report?.selection?.requested;
+    const total = report?.selection?.available;
+    const subset = typeof asked === 'number' && typeof total === 'number' && asked < total;
+    if (subset) {
+      notes.push(
+        `BIRD1: this run asked for ${String(asked)} of ${String(total)} ${split} questions, so its corpus (${String(corpus.digest)}) is a digest of that subset and is not compared with the pin for ${split}`,
+      );
+    } else {
+      issues.push(
+        `BIRD1: the report read corpus ${corpus.digest} and the floors were set on ${pinned}; the questions changed under the floors`,
+      );
+    }
   }
   // A report that declares its arms is a report from a runner that also knows its corpus. The
   // exemption above is for artifacts written before the field existed, and this is what keeps
@@ -1673,6 +1688,24 @@ function selfTest() {
   fail(compare(declaredRun(undefined), baseline), 1, 'BIRD1 does not notice a report that declares its arms and not its corpus');
   fail(compare(declaredRun({ digest: 'bbb' }), { ...baseline, corpus: { minidev: 'aaa' } }), 1, 'BIRD1 compares a run against floors pinned to a different corpus');
   fail(compare(declaredRun({}), baseline), 1, 'BIRD1 accepts a corpus block with no digest in it');
+  // ...and a subset of the split is a subset of the corpus. Its digest cannot be the split's, so a
+  // pinned corpus is left uncompared — said out loud, because "not checked" and "checked and equal"
+  // are two different states and only one of them is a pass.
+  const subsetCorpus = (corpus) => {
+    const base = declaredRun(corpus);
+    return { ...base, selection: { ...base.selection, requested: 300, available: 500 } };
+  };
+  const subsetCorpusRun = compare(subsetCorpus({ digest: 'bbb' }), { ...baseline, corpus: { minidev: 'aaa' } });
+  if (subsetCorpusRun.issues.some((issue) => issue.includes('corpus'))) {
+    issues.push('BIRD1 fails a declared subset for the corpus it never read');
+  }
+  if (!subsetCorpusRun.notes.some((note) => note.includes('digest of that subset'))) {
+    issues.push('BIRD1 does not say that a subset corpus was left uncompared');
+  }
+  const sameCorpusSubset = compare(subsetCorpus({ digest: 'aaa' }), { ...baseline, corpus: { minidev: 'aaa' } });
+  if (sameCorpusSubset.issues.length !== 0) {
+    issues.push('BIRD1 fails a declared subset that happens to carry the pinned corpus');
+  }
 
   // Who answered. The pin is the base the endpoint named, not the alias the run asked for, and
   // the two are separate fields because a provider can rename its own model under a stable alias.
@@ -1848,7 +1881,7 @@ if (process.argv[2] === '--record-fingerprint') {
   const issues = selfTest();
   for (const issue of issues) console.error(issue);
   if (issues.length > 0) process.exit(1);
-  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, a dev run measured against its own sample, two split fields that disagree, a dataset name that disagrees with the split, other split, other model, unfloored arm, empty lever, a funnel that does not add up, a split-specific arm list, an uncounted selector call, a majority vote that spends exactly its samples, a pooled arm that pays for its decision and for no candidates, one that leaves a decision unpriced, one that never says whether its selector was counted, one that redrew the pool it claims to share, a pooled majority vote that costs nothing and the same two counts on a generating arm, a reconcile funnel that an adopting arm and a handing-back arm both satisfy, one that never says which policy it was read under, one that adopted more replies than it received, an adopting arm that did not score what it ran and a novel-only arm that scored a restatement, a repair count without a loop, an unpriced arm, an unnamed model, floors from an unnamed model and a cross-model arm with no second model named, a judge swap with no judge named, an arm with harness errors, a candidate set that lost a third of itself to an endpoint, a failure corpus that stopped at a cap without saying so, an empty-result lever with no funnel or an impossible yield or nothing behind it, a decomposition arm whose prompt the model ignored, an unrecorded instrument, a samples arm with no values behind it, a truncated schema card, a prompt with no table in it, a declared arm subset, a declared arm whose row was dropped, an undeclared row, an empty declaration and a floor that a declaration does not weaken, a declared sample subset, a subset that cannot clear a floor, a sample that shrank undeclared, an impossible declaration and a row count above the request, a cross-arm floor with a matching second model, a swapped one and an unattributed one, and a ceiling that held, a ceiling that fell while the score held, a ceiling inside the noise threshold, a sampling arm with no ceiling at all, a ceiling whose two fields disagree, a ceiling floor on an arm the split does not run, a score that fell while the ceiling held, a ceiling with no floor yet, a corpus that was named, unnamed, replaced under pinned floors or present without a digest, and a base model that matched the pin, answered as another one, or answered a run of another model, was never named, changed mid-run or was never pinned, and a base fingerprint that matched its pin, moved under the same name, was never read, answered nothing, came back unstable or arrived over another probe set, and a declared pair that was read, was never read, lost an arm it names, lost an arm the run skipped, spanned no question or arrived malformed, and a declared pair a subset run never asked for all behave');
+  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, a dev run measured against its own sample, two split fields that disagree, a dataset name that disagrees with the split, other split, other model, unfloored arm, empty lever, a funnel that does not add up, a split-specific arm list, an uncounted selector call, a majority vote that spends exactly its samples, a pooled arm that pays for its decision and for no candidates, one that leaves a decision unpriced, one that never says whether its selector was counted, one that redrew the pool it claims to share, a pooled majority vote that costs nothing and the same two counts on a generating arm, a reconcile funnel that an adopting arm and a handing-back arm both satisfy, one that never says which policy it was read under, one that adopted more replies than it received, an adopting arm that did not score what it ran and a novel-only arm that scored a restatement, a repair count without a loop, an unpriced arm, an unnamed model, floors from an unnamed model and a cross-model arm with no second model named, a judge swap with no judge named, an arm with harness errors, a candidate set that lost a third of itself to an endpoint, a failure corpus that stopped at a cap without saying so, an empty-result lever with no funnel or an impossible yield or nothing behind it, a decomposition arm whose prompt the model ignored, an unrecorded instrument, a samples arm with no values behind it, a truncated schema card, a prompt with no table in it, a declared arm subset, a declared arm whose row was dropped, an undeclared row, an empty declaration and a floor that a declaration does not weaken, a declared sample subset, a subset that cannot clear a floor, a sample that shrank undeclared, an impossible declaration and a row count above the request, a cross-arm floor with a matching second model, a swapped one and an unattributed one, and a ceiling that held, a ceiling that fell while the score held, a ceiling inside the noise threshold, a sampling arm with no ceiling at all, a ceiling whose two fields disagree, a ceiling floor on an arm the split does not run, a score that fell while the ceiling held, a ceiling with no floor yet, a corpus that was named, unnamed, replaced under pinned floors, present without a digest or read by a declared subset under a full-split pin, and a base model that matched the pin, answered as another one, or answered a run of another model, was never named, changed mid-run or was never pinned, and a base fingerprint that matched its pin, moved under the same name, was never read, answered nothing, came back unstable or arrived over another probe set, and a declared pair that was read, was never read, lost an arm it names, lost an arm the run skipped, spanned no question or arrived malformed, and a declared pair a subset run never asked for all behave');
 } else {
   const reportPath = resolve(ROOT, 'eval/out/bird-eval.json');
   const baseline = JSON.parse(readFileSync(resolve(ROOT, 'eval/baseline/bird.json'), 'utf8'));
