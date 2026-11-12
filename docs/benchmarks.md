@@ -11363,6 +11363,23 @@ The four-case subset is smaller still. **Not implemented**, and recorded here so
 not re-derive it: the `style` check that reads as the most mechanical of the three alignment kinds is
 worth at most a point on this split.
 
+### A fourth check that looked free and is not: the answer's shape
+
+The one prior that costs nothing to compute is the shape of the result. A question that says "how
+many" or "what is the average" wants one number, and a candidate that returns one row of one column
+is the only one that answers it. The predicate is accurate: of 115 Mini-Dev questions that ask for a
+scalar and name no grouping ("each", "per"), **104 have a gold of exactly 1×1** — 90.4%.
+
+Used as a *selection* rule over three candidate statements written by three different prompts
+(`inline+evidence`, `metadata+evidence`, `values`) on 453 questions, it changed the choice
+**once**. `shortest` scored 294 and the shape rule scored 294.
+
+The reason is structural and worth stating, because it is the same reason the selector's 6.1pp has
+not moved: **candidates rarely disagree about shape.** Three statements that read the same question
+return the same width, so a prior on shape has nothing to separate. It is not that the predicate is
+wrong — 90.4% is high enough to act on — it is that the defect it describes is not where the
+candidates differ. Recorded so the next round does not implement it.
+
 ### What this leaves, and why the next lever is generation rather than a rule
 
 Three mechanical checks have now been priced on the same 496 questions: the cap (already shipped,
