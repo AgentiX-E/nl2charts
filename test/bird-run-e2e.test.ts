@@ -20,12 +20,12 @@
  */
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { CHAIN_QUESTIONS, MINI_DB, MINI_GOLD, MINI_QUESTIONS, writeChainBirdDataset, writeMiniBirdDataset } from './helpers/bird-dataset.js';
 import { startEndpoint } from './helpers/endpoint.js';
 import type { EndpointRequest } from './helpers/endpoint.js';
-import { assertSamplesRan, assertSecondModel, judgeModelName, main, resolveSettings } from '../eval/bird/run.js';
+import { assertSamplesRan, assertSecondModel, judgeModelName, main, partialPath, readPartialRun, resolveSettings } from '../eval/bird/run.js';
 import { INTENT_RULE } from '../eval/bird/intent.js';
 import { questionDigest } from '../eval/bird/data.js';
 
@@ -1168,6 +1168,99 @@ describe('inputs an arm needs and does not have', () => {
       logs.mockRestore();
       await endpoint.close();
     }
+  });
+});
+
+describe('a run that outlives its clock', () => {
+  it('keeps the cases a dead clock bought, and the next dispatch continues them', async () => {
+    // A budget stop used to be total: the message named the sample the next dispatch should ask
+    // for, and every case behind the stop was spent for nothing. `43262574193` ran for fifty
+    // minutes on a reasoning base; had its clock run out, all of it would have been lost. One case
+    // at 40 ms against a 1 ms budget is the smallest version of that loss.
+    const out = join(root, `out-resume-${String(Math.random()).slice(2, 8)}.json`);
+    const partial = partialPath(out);
+    const slow = await startEndpoint({ reply: () => ({ content: 'select id from items', delayMs: 40 }) });
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const logs = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      const thrown: unknown = await main(
+        {
+          BIRD_DATA: data,
+          BIRD_DBS: 'shop',
+          BIRD_OUT: out,
+          LLM_BASE_URL: slow.url,
+          LLM_API_KEY: 'test-key',
+          LLM_MODEL: 'stub-model',
+          BIRD_ARMS: 'names',
+          BIRD_CONCURRENCY: '1',
+          BIRD_LLM_RETRIES: '1',
+          BIRD_RUN_BUDGET_MS: '1',
+        },
+        [],
+        root,
+      ).catch((error: Error) => error);
+      // The message carries the path, because a file nobody is told about is a file nobody resumes.
+      expect((thrown as Error).message).toContain(`BIRD_RESUME_FROM=${partial}`);
+    } finally {
+      errors.mockRestore();
+      logs.mockRestore();
+      await slow.close();
+    }
+    const saved = JSON.parse(readFileSync(partial, 'utf8')) as {
+      arm: string;
+      split: string;
+      model: string;
+      questionIds: number[];
+      cases: { questionId: number; run: { passed: boolean } }[];
+    };
+    expect(saved.arm).toBe('names');
+    expect(saved.split).toBe('minidev');
+    expect(saved.model).toBe('stub-model');
+    expect(saved.questionIds).toHaveLength(7);
+    expect(saved.cases).toHaveLength(1);
+
+    // The same seven questions, minus the one already paid for: the resumed run asks six, spends
+    // six cases' worth of calls, and still publishes a table over seven — which is the only shape a
+    // rate may be computed from.
+    const whole = await run({ plan: { first: correct }, env: { BIRD_ARMS: 'names' } });
+    const resumed = await run({ plan: { first: correct }, env: { BIRD_ARMS: 'names', BIRD_RESUME_FROM: partial }, out });
+    const row = (resumed.report.arms as { total: number; passed: number }[])[0];
+    expect(row?.total).toBe(7);
+    expect(resumed.requests.length).toBeLessThan(whole.requests.length);
+    // A table built by two processes says so, because the first part was scored before whatever
+    // happened between the dispatches — including a model alias moving under the same name.
+    expect((resumed.report.run as { resumedFrom?: string }).resumedFrom).toBe(basename(partial));
+  });
+});
+
+describe('a partial run refuses to be welded to a different one', () => {
+  const expected = { arm: 'names', split: 'minidev' as const, model: 'stub-model', questionIds: [1, 2, 3] };
+  const write = (overrides: Record<string, unknown>): string => {
+    const path = join(root, `partial-${String(Math.random()).slice(2, 8)}.json`);
+    writeFileSync(path, JSON.stringify({ ...expected, cases: [{ questionId: 1, run: { passed: true } }], ...overrides }));
+    return path;
+  };
+
+  it('reads a file that matches on all four fields', () => {
+    expect([...readPartialRun(write({}), expected).keys()]).toEqual([1]);
+  });
+
+  it('refuses another arm, split, model or question set, and says which', () => {
+    // Each of these would otherwise produce an accuracy that mixes two runs, which is
+    // indistinguishable from a real reading once it is in the artifact.
+    expect(() => readPartialRun(write({ arm: 'metadata' }), expected)).toThrow(/arm metadata != names/);
+    expect(() => readPartialRun(write({ split: 'dev' }), expected)).toThrow(/split dev != minidev/);
+    expect(() => readPartialRun(write({ model: 'deepseek-flash' }), expected)).toThrow(
+      /model deepseek-flash != stub-model/,
+    );
+    expect(() => readPartialRun(write({ questionIds: [1, 2] }), expected)).toThrow(/2 questions != 3/);
+    expect(() => readPartialRun(write({ questionIds: [1, 2, 4] }), expected)).toThrow(/3 questions != 3/);
+  });
+
+  it('refuses a file that is not a partial run at all', () => {
+    const path = join(root, `partial-${String(Math.random()).slice(2, 8)}.json`);
+    writeFileSync(path, JSON.stringify({ arm: 'names' }));
+    expect(() => readPartialRun(path, expected)).toThrow(/carries no cases and questionIds arrays/);
   });
 });
 

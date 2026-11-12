@@ -40,6 +40,29 @@ cannot be argued with.
   **Not claimed:** no external benchmark reading. What changed is which inputs the
   package refuses and why; no chart-quality score moved, and none was measured.
 
+### Changed
+- **A run that outgrows its clock leaves the cases it finished behind, instead of spending them
+  twice.** The budget stop was total: it printed the sample size the next dispatch should ask for
+  and threw away everything it had bought. A Mini-Dev arm on a reasoning base has been running for
+  seventy minutes at four in flight, so a clock that ends before the last case now costs a whole
+  attempt rather than the tail of one. `BIRD_RESUME_FROM` names a partial run, and the cases in it
+  are counted instead of re-asked — the table still covers the questions the run declared, which is
+  the only shape a rate may be computed from.
+  The file is refused, with the difference named, when the arm, the split, the model or the exact
+  question set does not match: a resume that trusted the file's own header would graft a
+  `deepseek-flash` arm onto a `deepseek-v4-pro` reading and publish an accuracy nobody could
+  reproduce. A table built by two processes says so — `run.resumedFrom` carries the file name —
+  because the first part was scored before whatever happened between the dispatches, including a
+  model alias moving under the same name.
+  **Measured:** four tests: an end-to-end stop at one of seven cases writes a partial the resumed
+  dispatch completes over all seven while spending fewer endpoint calls than the run that never
+  stopped, and three cases covering the match, the four refusals and a file that is not a partial at
+  all. `eval/bird/run.ts` stays above 95% on all four dimensions; 4,483 tests passing with no skips
+  against real PG16 and MariaDB 10.11.
+  **Not claimed:** a partial run is not a reading. The gate still refuses a table that does not cover
+  its declared population, and this file changes nothing about that — it only stops the next
+  dispatch from paying for the same cases twice.
+
 ### Added
 - **The chart is chosen from the question, and every refusal says what was missing.**
   `enumerateCandidates` reads a profile and nothing else, so it could only ever
