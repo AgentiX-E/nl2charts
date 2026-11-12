@@ -1198,6 +1198,11 @@ export const ARMS: readonly Arm[] = [
   // placement under the examples, which is the interaction `inline+icl` never measured because it
   // had no hint to interact with.
   { name: 'inline+evidence+icl', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', demonstrations: true },
+  // The same stacking with the steps in each example. `inline+icl-cot` priced the block on an arm
+  // that had already lost the dataset's hint (41% -> 48%), so the delta it produced was a delta
+  // between two weak prompts. This pair prices the same block on the strongest single-call arm,
+  // which is the configuration both competitors describe.
+  { name: 'inline+evidence+icl-cot', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', demonstrations: true, cotDemonstrations: true },
   // The same stacking with the schema masked out of the examples and their dialect canonicalised —
   // DAIL-SQL's masked variant. One lever from `metadata+evidence+icl`, which `I-83` read as a
   // two-sided move: 30 fewer wrong-width statements and fifteen new execution errors naming another
@@ -1293,6 +1298,7 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   // because the round that introduces a mechanism asks for one number at a time: the few-shot
   // shape is in the chain, and these two wait for it to come back before spending 496 calls each.
   'inline+reasoning': 'the labelled step block in the prompt, without any few-shot change: run it beside `inline+icl-cot` to separate the format from the position it sits in',
+  'inline+evidence+icl-cot': 'the steps inside the examples, on the arm that keeps the dataset hint: the position `inline+icl-cot` could not price, because its parent had already traded the hint for retrieval',
   'inline+icl-cot+reasoning': 'both positions at once: it is the pair that says whether the format is additive or the second copy is redundant, and it is not worth 496 calls until the two single-position arms have readings',
   vote: 'majority over the same three candidates: the selector control, measured 17:17 against `select` (p = 1) — running it every push re-derives a tie at 2,092 tokens',
   'inline+evidence+ground': 'the one rewrite the data proves, applied before the statement runs: priced offline on the parent arm\'s own artifact at 22 fires, 14 wins, 0 losses (+0.91pp, p = 0.0001) with the pairs disjoint from every other rule — run it when the domain reader or the prompt changes, and move it into the chain once the dispatch reproduces the offline count',
@@ -1477,6 +1483,10 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   ['inline+icl', 'inline+icl-cot'],
   // The same format in the other position: the block is in the prompt instead of in the examples.
   ['inline+evidence', 'inline+reasoning'],
+  // The block, and then the block with its steps, both on top of the dataset's hint: two levers,
+  // each priced against the arm directly below it rather than against the retrieval arm.
+  ['inline+evidence', 'inline+evidence+icl'],
+  ['inline+evidence+icl', 'inline+evidence+icl-cot'],
   ['inline+evidence', 'inline+repair'],
   // Same three retries, same prompt, same cost — only the text differs. The pair with
   // `inline+evidence` would change two fields (`repairs` and `repairFeedback`), and a
