@@ -11284,3 +11284,99 @@ land within 1.5pp of each other, and the four published no-training competitors 
 us by 3 to 7. **The gap is not in how the question is worded to the model.** Naming what it *is* in
 requires the next measurement — an execution-time alignment layer, which is what OpenSearch-SQL's
 Refinement and Alignment modules actually do — rather than another prompt shape.
+
+## The largest failure class is not the literals: 160 `values` cases, decomposed
+
+Every arm's biggest bucket on Mini-Dev is `values`, and the name invites a specific reading — the
+statement ran, returned rows, and the rows were not the gold's, therefore a value was written
+wrongly, therefore value handling is the gap. The count is real: on `inline+evidence`, 496
+questions, 273 pass and 223 fail, of which **160 are `values`** (71.7%), 52 are `column-count`
+(23.3%) and 11 are execution errors.
+
+The decomposition is what decides whether a rule can reach them. Each case was read for the
+syntactic shape that distinguishes it from its gold, and the classes are not exclusive:
+
+| shape | cases | what a deterministic rewrite could do |
+| --- | --- | --- |
+| the two statements read different tables | **60** | nothing — the choice of `from` is the question's meaning |
+| a different aggregate | **41** | nothing — `COUNT` against `SUM` is a reading of the question |
+| the prediction reads *fewer* tables | 30 | nothing; it is the case above, one direction |
+| `CAST`/`CASE WHEN` arithmetic against a plain aggregate | 28 | nothing |
+| the prediction carries an `distinct` the gold does not | 25 | nothing — removing it changes the row set |
+| the prediction reads *more* tables | 17 | nothing |
+| the prediction is missing a `distinct` the gold has | 12 | nothing |
+| grouping present on one side only | 10 | nothing |
+| deeper nesting than the gold | 5 | nothing |
+
+**Not one of these is a literal.** They are readings of the question, and no rule that does not
+understand English can choose between a `COUNT` and a `SUM` or decide that a join is missing. The
+class name was a description of the symptom — the values differed — and reading it as a diagnosis of
+the literal layer is the mistake this section exists to prevent.
+
+### What the literal layer can still reach, priced at zero calls
+
+Two rules were priced offline, by executing the archive's own statements against the cached
+databases with the rewrite applied and comparing to the gold result under the official judge. No
+model was called, which is why the numbers are exact rather than sampled.
+
+**Calendar notation.** The question says 9 September 2019, the column stores `2019-09-09`, and the
+statement says `'9/9/2019'`. `ground.ts` already settled case; this round adds the second reading —
+the same calendar day in another notation — with three refusals that are the whole of its safety:
+
+- **A numeric date that could be read two ways.** `3/4/2019` is 4 March or 3 April and the statement
+  never said which. The rule declines; a first component above 12, a second above 12, or two equal
+  components are the three cases where the numbers settle it.
+- **A day the calendar does not have.** `2019-02-30` parses as three numbers. Month range, day range
+  and month length are checked, including the century exception that `year % 4` alone would miss.
+- **A precision that differs.** A day is not an instant. Writing `'2019-09-09 08:00:00'` into a
+  statement that asked about a day narrows it to one row, and writing `'2019-09-09'` into a
+  comparison against a timestamp column matches nothing, so the rule only answers within one
+  precision.
+
+| reading | on 496 Mini-Dev questions |
+| --- | --- |
+| statements the rule changed | **2** |
+| cases it repaired | **2** |
+| cases it broke | **0** |
+| net | **+0.40pp** |
+
+Both repaired cases are one database and one column: `expense.expense_date` and
+`income.date_received`, written as `2019-8-20` and `9/9/2019` against columns that store
+`2019-08-20` and `2019-09-09`. The rule is kept because it is exact, costs nothing, and cannot lose a
+case; it is not a lever. **+0.40pp is inside the interval of any arm this repository runs**, and the
+honest statement is that the literal layer is close to exhausted rather than that it was improved.
+
+**Top-K absence.** A question that asks for a ranking and a statement that carries no `limit` is
+OpenSearch-SQL's `style` alignment check, and it is the reverse of the `stripUnfoundedCap` rule this
+repository already ships. Priced the same way:
+
+| reading | cases |
+| --- | --- |
+| failing questions whose text names a rank and whose statement has no `limit` | 19 |
+| of those, gold statements that carry a `limit` | **6** |
+| failing questions whose statement has neither `order by` nor `limit` | 14 |
+| of those, gold statements that carry a `limit` | 4 |
+
+Six cases is a ceiling of +1.21pp before any cost, and the rule is not free: a `limit` has to be
+placed after the right `order by`, and a statement that ranks nothing has no clause to attach it to.
+The four-case subset is smaller still. **Not implemented**, and recorded here so the next round does
+not re-derive it: the `style` check that reads as the most mechanical of the three alignment kinds is
+worth at most a point on this split.
+
+### What this leaves, and why the next lever is generation rather than a rule
+
+Three mechanical checks have now been priced on the same 496 questions: the cap (already shipped,
++0.40pp), the calendar (+0.40pp), and top-K absence (≤1.21pp, not shipped). Together they bound the
+deterministic layer at roughly two points, and each is a rewrite of a statement whose *reading* was
+already right.
+
+The failure decomposition says where the rest is: 60 cases read the wrong tables and 41 use a
+different aggregate. Neither is reachable by an edit that does not know what the question asked. The
+`select` arm's own numbers say the same thing from the other side — on the same corpus `agreement`
+is **0.901**, so three samples of one prompt agree on nine tenths of the questions, and a vote over
+them cannot separate the cases that disagree. A selector is choosing among near-copies on 90% of the
+set, which is why its 6.1pp of `selectionLoss` has resisted every rule tried against it.
+
+The reading this leaves is uncomfortable and is written down as a reading: **the gap to the
+systems that train nothing is in what the prompt makes the model write, not in what this repository
+does to what it wrote.**

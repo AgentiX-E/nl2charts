@@ -39,5 +39,5 @@ export { clauseAt, guardNullOrder, splitKeys } from './null-order.js';
 export { asksForRanking, stripUnfoundedCap } from './unfounded-cap.js';
 export type { UnfoundedCap } from './unfounded-cap.js';
 export { applyGrounding, groundLiterals } from './ground.js';
-export type { ColumnQuery, ColumnValues, Grounding, GroundingRefusal, GroundingRefusalReason, GroundingSubstitution } from './ground.js';
+export type { ColumnQuery, ColumnValues, Grounding, GroundingMatch, GroundingRefusal, GroundingRefusalReason, GroundingSubstitution } from './ground.js';
 export type { NullOrderGuard } from './null-order.js';
