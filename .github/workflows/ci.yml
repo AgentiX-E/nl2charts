@@ -148,6 +148,11 @@ jobs:
         run: node tools/check-platform.mjs
       - name: Platform checker mutations (7/7 must be detected)
         run: node tools/check-platform.mjs --self-test
+      # A workflow is the one file in this repository whose mistakes arrive as a run with no job
+      # and no log. `resume_run` was wired into a job-level `env:`, which GitHub rejects outright;
+      # actionlint saw it, `yaml.safe_load` did not, and nothing here asked.
+      - name: Workflow expression contexts and references
+        run: node tools/check-workflows.mjs --self-test && node tools/check-workflows.mjs
       - name: Public API snapshot
         run: pnpm gate:exports
       - name: Bundle budgets
