@@ -46,6 +46,64 @@ Candidates are *structurally valid* options, not a decision. A pie is offered
 only when the category count is small enough to read and the measure is
 non-negative.
 
+## 2b. Or let the question choose
+
+`enumerateCandidates` reads the profile alone, so it can only ever suggest five
+marks — bar, line, pie, scatter, heatmap. The other seventeen series types in the
+contract were reachable by hand only. `recommendChart` closes that gap without a
+model: it reads the phrases that name a shape, and the preconditions that a
+column set can witness.
+
+```ts
+import { recommendChart } from '@agentix-e/nl2charts-chart';
+
+const choice = recommendChart('What share of revenue does each region hold?', profiles);
+// { recommendations: [ { mark: 'pie', score: 5,
+//       cues: ['share'],
+//       reasons: ['profile:one-named-category-and-a-measure', 'cue:share "share"'] }, … ],
+//   refused: [ { mark: 'scatter', reason: 'a scatter needs two measures' }, … ] }
+```
+
+Two properties make the answer auditable rather than persuasive:
+
+- **The score is counted, not weighed.** Three points for the first mark a cue
+  names, two for the rest, plus the structural prior. A reader can recompute
+  `score: 5` from the two facts printed next to it, which is not true of `0.83`.
+- **Every rejection is reported.** `refused` carries the sentence that explains
+  what the result set lacks — `a boxplot reads five numbers per row and this
+  result has 1` — so a caller that prefers another mark knows what would have to
+  change, and a wrong choice has a trace instead of a mystery.
+
+Seven marks can be chosen this way on top of the original five: funnel, boxplot,
+candlestick, radar, parallel, gauge, and pie over an explicit slice limit. The set
+is bounded on purpose: a map needs geometry no result set carries, a tree needs a
+hierarchy a flat table does not describe, and a custom series needs a `renderItem`
+function that cannot travel in a contract. Those stay hand-specified.
+
+To go straight to a renderable contract, use `toChartIR`. It picks the winner,
+orders tuple columns the way the renderer reads them (a candlestick is
+`[open, close, low, high]`, not "the first four numbers"), fills the title with the
+question and the alt text with the mark and row count:
+
+```ts
+import { toChartIR } from '@agentix-e/nl2charts-chart';
+
+const ir = toChartIR('Daily open and close prices', rows);
+lint(ir); // no errors
+```
+
+It throws `NL2C_E_NOT_SUPPORTED` for an empty result set, or for one no mark can
+encode, and names the columns it saw.
+
+> **What this is not.** There is no Text2Vis, nvBench or VisEval reading behind
+> this layer in this repository. The tests pin the behaviour of the rule table
+> against a named fixture, and that fixture is a regression corpus, not a
+> benchmark: the chart-choice numbers this project has quoted were produced by
+> harnesses that are not in this tree, so they are not reproducible from it and
+> are not claimed here. A layer that says which mark it chose and why is worth
+> having before the instrument that scores it exists; the reverse order produces a
+> score nobody can audit.
+
 ## 3. Build the IR
 
 ```ts

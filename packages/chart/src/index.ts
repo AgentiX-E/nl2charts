@@ -8,3 +8,15 @@ export { compileToECharts } from './compile.js';
 export type { EChartsOption } from './compile.js';
 export { MARKS, describeMark } from './marks.js';
 export type { MarkSpec } from './marks.js';
+export { CHART_CUES, readCues, recommendChart, toChartIR } from './recommend.js';
+export type {
+  ChartChoice,
+  ChartIROptions,
+  Cue,
+  CueKind,
+  CueRule,
+  RecommendableMark,
+  Recommendation,
+  RecommendOptions,
+  Refusal,
+} from './recommend.js';
