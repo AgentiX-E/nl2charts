@@ -7,6 +7,11 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **`ask_question` gives a deployment the same switch, one layer up.** `AskOptions.linkEvidence`
+  reaches the pipeline's option of the same name, so a server whose callers always pass `evidence`
+  can have the hint built from it. Off by default, and the third test is the one that matters: with
+  the switch on and no `evidence` in the request, the hint is the one the server already sent.
+
 - **The linker can read the evidence, and the hint it builds has finally been measured.** The
   `Likely columns` hint was built from the question alone. RSL-SQL's bidirectional linking — the
   mechanism its paper credits for a 94% strict recall — reads its own preliminary statement, the
@@ -14,7 +19,8 @@ cannot be argued with.
   scan over text this repository already puts in the prompt and never showed the linker. On 500
   Mini-Dev questions the shipped hint names 7.4 columns a question of which **29.8% are columns the
   answer uses**, and covers 39.3% of them; reading the evidence at the same twelve slots covers
-  **55.2%** (68.3% at thirty) at 31.4% precision. `PipelineOptions.linkEvidence` and
+  **55.2%** (68.3% at thirty) at 31.4% precision — and on the 1,534-question dev split, 41.5% →
+  55.2%. `PipelineOptions.linkEvidence` and
   `AskMessagesInput.linkEvidence` turn it on; the default does not move, because a linker that
   started reading the evidence because it was in the prompt would change every arm at once and each
   published reading would describe a prompt nobody had run. Two arms price it —
