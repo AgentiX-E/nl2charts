@@ -206,6 +206,50 @@ becomes `null` rather than `0` — a zero in a quartile is a claim about the dat
 Two marks cannot be satisfied from a result set alone, and the compiler says so
 instead of emitting a series that throws inside the renderer:
 
+## What each mark reads, before anything is drawn
+
+The twenty-two series types are not twenty-two styles of the same picture. Each
+reads a different number of columns per row, from different channels, so an
+encoding that draws one correctly draws another as something else. `supportOf`
+answers the question first, and answers it in the same terms the compiler and the
+linter use:
+
+```ts
+import { supportOf, compileToECharts } from '@agentix-e/nl2charts-chart';
+
+supportOf(ir);   // { supported: false, missing: ['a boxplot reads 5 numbers per row from y and was given 2'] }
+```
+
+| Family | Marks | Reads | Refused when |
+| --- | --- | --- | --- |
+| Cartesian | `bar` `line` `scatter` `effectScatter` `pictorialBar` | a measure from `y` or `theta` | neither is encoded |
+| Radial | `pie` `funnel` | a category (`theta` or `x`) and a measure (`y` or `color`) | either is missing |
+| Single value | `gauge` | one measure from `y` or `theta` | neither is encoded |
+| Tuple | `boxplot` `candlestick` | 5 and 4 numbers per row, positionally, from `y` | fewer than that many columns |
+| Matrix | `heatmap` | two dimensions from `x` and `y`; the measure from `color`, `size` or `y` | either axis is missing |
+| River | `themeRiver` | time from `x`, a measure from `y`, a stack from `series` or `color` | any of the three is missing |
+| Profile | `radar` | a metric name (`theta` or `x`) and a measure (`y`) | either is missing |
+| Coordinates | `parallel` | two axes: `x` plus one `y`, or two `y` | fewer than two |
+| Grouped route | `lines` | `x` and one measure from `y` | either is missing |
+| Regions | `map` | `ir.map` naming registered geometry, plus a region name (`x` or `theta`) | either is missing |
+| Hierarchy | `tree` `treemap` `sunburst` | a name (`theta` or `x`); a measure from `y` is optional | the name is missing |
+| Network | `graph` `sankey` | a source (`x`) and a target (`series` or `color`) | either end is missing |
+| Function | `custom` | a `renderItem` function, which cannot travel in a strict IR | always, and the option carries no series |
+
+Two consequences are worth stating because they are product behaviour rather than
+implementation detail:
+
+- **A refusal is an error, not a warning.** `lint(ir)` reports every gap above as
+  `encoding-unsupported` at `error` severity, and `isRenderable` therefore returns
+  `false`. A chart the linter clears with no errors is one the compiler will draw.
+- **Nothing is drawn for a refused mark.** The option carries an empty `series`
+  instead of a placeholder with a null value, because a gauge with a null needle
+  and a pie with one unnamed slice look like a rendering bug rather than a
+  contract violation.
+
+The two marks above that need something the contract cannot hold are worth
+separating from the rest:
+
 | Mark | What it needs | What happens without it |
 | --- | --- | --- |
 | `map` | `registerMap` plus `ir.map` naming the registered geometry | the option carries no series |

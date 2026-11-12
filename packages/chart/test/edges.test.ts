@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ChartIR } from '@agentix-e/nl2charts-spec';
-import { compileToECharts, lint, profileRows, refFor } from '../src/index.js';
+import { compileToECharts, isRenderable, lint, profileRows, refFor, supportOf } from '../src/index.js';
 
 const data = [{ a: 'x', b: 1, c: 2 }];
 
@@ -9,11 +9,15 @@ function chart(mark: ChartIR['mark'], encoding: ChartIR['encoding'], extra: Part
 }
 
 describe('compilation edges', () => {
-  it('defaults both axes to category when nothing is encoded', () => {
-    const option = compileToECharts(chart('bar', {}));
-    expect(option.xAxis).toEqual({ type: 'category' });
-    expect(option.yAxis).toEqual({ type: 'category' });
-    expect(option.series).toEqual([{ type: 'bar', encode: { x: undefined, y: [] } }]);
+  it('refuses a bar that encodes no measure, and names the channel it needs', () => {
+    // This used to compile into two unnamed axes and an empty encode block: a
+    // chart of nothing, indistinguishable from a chart whose data failed to load.
+    const ir = chart('bar', {});
+    expect(compileToECharts(ir).series).toEqual([]);
+    expect(supportOf(ir)).toEqual({
+      supported: false,
+      missing: ['a bar needs a measure from y or theta and was given none'],
+    });
   });
 
   it('uses a value axis for a quantitative x', () => {
@@ -39,15 +43,18 @@ describe('compilation edges', () => {
     expect(option.series).toEqual([{ type: 'gauge', name: 'b', data: [{ value: 1, name: 'b' }] }]);
   });
 
-  it('emits placeholders when a gauge has no measure at all', () => {
-    const option = compileToECharts(chart('gauge', {}));
-    expect(option.series).toEqual([{ type: 'gauge', name: 'value', data: [{ value: null, name: 'value' }] }]);
+  it('refuses a gauge with no measure instead of drawing a null needle', () => {
+    const ir = chart('gauge', {});
+    expect(compileToECharts(ir).series).toEqual([]);
+    expect(supportOf(ir).missing).toEqual(['a gauge reads one measure from y or theta and was given none']);
   });
 
-  it('emits placeholders for a pie without encodings', () => {
-    const option = compileToECharts(chart('pie', {}));
-    expect(option.series).toEqual([
-      { type: 'pie', name: 'pie', encode: { itemName: undefined, value: undefined }, data: [{ name: '', value: null }] },
+  it('refuses a pie with no encoding and reports both channels it needs', () => {
+    const ir = chart('pie', {});
+    expect(compileToECharts(ir).series).toEqual([]);
+    expect(supportOf(ir).missing).toEqual([
+      'a pie needs a category from theta or x and was given none',
+      'a pie needs a measure from y or color and was given none',
     ]);
   });
 
@@ -71,9 +78,15 @@ describe('compilation edges', () => {
     expect(option.visualMap).toEqual({ min: 0, max: 1, calculable: false });
   });
 
-  it('emits an empty graph when the endpoints are not encoded', () => {
-    const option = compileToECharts(chart('graph', {}));
-    expect(option.series).toEqual([{ type: 'graph', layout: 'circular', roam: false, data: [], links: [] }]);
+  it('refuses a graph whose endpoints are not encoded, rather than drawing an empty network', () => {
+    // A graph with no source and no target is an empty canvas that reads as a
+    // layout failure, so the contract refuses it and says which columns are gone.
+    const ir = chart('graph', {});
+    expect(compileToECharts(ir).series).toEqual([]);
+    expect(supportOf(ir).missing).toEqual([
+      'a graph needs a source column from x and was given none',
+      'a graph needs a target column from series or color and was given none',
+    ]);
   });
 
   it('omits the aria description when there is no alt text and keeps a subtitle', () => {
@@ -84,8 +97,10 @@ describe('compilation edges', () => {
 });
 
 describe('lint edges', () => {
-  it('handles a pie without a theta encoding', () => {
-    expect(lint(chart('pie', {}, { title: 't', alt: 'a' }))).toEqual([]);
+  it('reports a pie that carries no encoding instead of calling it clean', () => {
+    const issues = lint(chart('pie', {}, { title: 't', alt: 'a' }));
+    expect(issues.map((issue) => issue.rule)).toEqual(['encoding-unsupported']);
+    expect(isRenderable(issues)).toBe(false);
   });
 
   it('handles a funnel whose value comes only from colour', () => {
@@ -143,17 +158,48 @@ describe('specialised marks', () => {
     ]);
   });
 
-  it('emits the cells it was given when fewer tuple columns are encoded', () => {
-    // Two of four candlestick columns: the chart draws less, not something else.
-    const option = compileToECharts({
+  it('refuses a candlestick given two of its four columns', () => {
+    // "The chart draws less, not something else" was wrong: ECharts reads the
+    // tuple positionally, so two of four columns is not a shorter candle, it is a
+    // candle whose open is a close and whose low is a high. The contract refuses.
+    const ir: ChartIR = {
       version: '3.0',
       mark: 'candlestick',
       encoding: { x: nom('region'), y: [num('lo'), num('q1')] },
       data: box,
+    };
+    expect(compileToECharts(ir).series).toEqual([]);
+    expect(supportOf(ir).missing).toEqual(['a candlestick reads 4 numbers per row from y and was given 2']);
+  });
+
+  it('names a radial chart after its mark and takes its value from colour', () => {
+    const option = compileToECharts({
+      version: '3.0',
+      mark: 'funnel',
+      encoding: { theta: nom('region'), color: num('lo') },
+      data: box,
     });
-    expect(series0(option)[0]?.data).toEqual([
-      [1, 2],
-      [2, 3],
+    expect(series0(option)[0]).toMatchObject({
+      type: 'funnel',
+      name: 'funnel',
+      encode: { itemName: 'region', value: 'lo' },
+      data: [
+        { name: 'n', value: 1 },
+        { name: 's', value: 2 },
+      ],
+    });
+  });
+
+  it('weighs a network link by one when no measure column is encoded', () => {
+    const option = compileToECharts({
+      version: '3.0',
+      mark: 'sankey',
+      encoding: { x: nom('region'), series: nom('region') },
+      data: box,
+    });
+    expect(series0(option)[0]?.links).toEqual([
+      { source: 'n', target: 'n', value: 1 },
+      { source: 's', target: 's', value: 1 },
     ]);
   });
 
@@ -302,9 +348,10 @@ describe('specialised marks', () => {
     expect(series0(option)[0]).toMatchObject({ type: 'map', map: 'geo', data: [{ name: 'n' }] });
   });
 
-  it('emits an empty map data list when no region field is encoded', () => {
-    const option = compileToECharts({ version: '3.0', mark: 'map', map: 'geo', encoding: {}, data: [{ a: 'n' }] });
-    expect(series0(option)[0]?.data).toEqual([]);
+  it('refuses a map with geometry but no region column', () => {
+    const ir: ChartIR = { version: '3.0', mark: 'map', map: 'geo', encoding: {}, data: [{ a: 'n' }] };
+    expect(compileToECharts(ir).series).toEqual([]);
+    expect(supportOf(ir).missing).toEqual(['a map needs a region name from x or theta and was given none']);
   });
 
   it('reads the first axis when x is given as a list', () => {

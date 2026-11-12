@@ -386,6 +386,7 @@
     "readCues",
     "recommendChart",
     "refFor",
+    "supportOf",
     "toChartIR",
     "type Candidate",
     "type ChartChoice",
@@ -402,7 +403,8 @@
     "type RecommendableMark",
     "type Recommendation",
     "type Refusal",
-    "type Severity"
+    "type Severity",
+    "type SupportVerdict"
   ],
   "mcp": [
     "ASK_TOOL",

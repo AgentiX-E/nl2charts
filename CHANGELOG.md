@@ -6,6 +6,40 @@ cannot be argued with.
 
 ## Unreleased
 
+### Fixed
+- **A chart of nothing used to compile, and the linter called it renderable.**
+  Nothing in the package knew what each of the twenty-two series types reads, so
+  `{ mark: 'gauge', encoding: {} }` produced a gauge with a null needle,
+  `{ mark: 'pie', encoding: {} }` produced one unnamed slice of null, and
+  `{ mark: 'bar', encoding: {} }` produced two unnamed axes. All three passed
+  `lint` with no errors — `isRenderable` said yes — and all three render as a
+  picture that looks like a rendering bug rather than a contract violation. Eight
+  tests asserted those placeholders as correct behaviour, including one whose
+  comment read *"the chart draws less, not something else"* about a candlestick
+  given two of its four columns: ECharts reads a tuple positionally, so two of
+  four is not a shorter candle, it is a candle whose open is a close and whose low
+  is a high.
+  `supportOf(ir)` closes it. One rule table, twelve families, twenty-two marks,
+  each answering `{ supported, missing }` where every `missing` entry names the
+  channel and the count (`a boxplot reads 5 numbers per row from y and was given
+  2`). The compiler asks it once before reading any channel and emits no series
+  when the answer is negative; `lint` reports the same sentences as
+  `encoding-unsupported` at `error` severity. The two can no longer disagree,
+  because they read one function — which is what makes `isRenderable` mean "the
+  compiler will draw it" rather than "no rule objected".
+  Eleven hand-written `undefined` guards came out of `compile.ts` in exchange,
+  along with the guards' unreachable branches, and a tie-breaker in
+  `enumerateCandidates` whose seven scores are distinct by construction.
+  **Measured:** 17 new tests over 242 mark-shape pairs (22 marks x 11 encodings),
+  asserting the invariant in both directions — a series exactly when the verdict
+  approves — plus agreement with the linter and a per-family reading table.
+  `support.ts` at 100/100/100/100 and the chart package now **100.00 / 100.00 /
+  100.00 / 100.00**, 162 tests, whole suite 4,477 passing with no skips against
+  real PG16 and MariaDB 10.11. Budget 16,752 -> 17,895 B gzip; ceiling raised to
+  18,400 with the reason recorded.
+  **Not claimed:** no external benchmark reading. What changed is which inputs the
+  package refuses and why; no chart-quality score moved, and none was measured.
+
 ### Added
 - **The chart is chosen from the question, and every refusal says what was missing.**
   `enumerateCandidates` reads a profile and nothing else, so it could only ever

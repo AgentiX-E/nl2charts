@@ -107,12 +107,13 @@ describe('lint', () => {
     expect(isRenderable(lint(clean))).toBe(true);
   });
 
-  it('reports each of the fourteen rules', () => {
+  it('reports each of the fifteen rules', () => {
     const issues = new Set<string>();
     const collect = (chart: ChartIR): void => {
       for (const issue of lint(chart)) issues.add(issue.rule);
     };
     collect(ir({ mark: 'bar', data: [] }));
+    collect(ir({ mark: 'pie', encoding: {} }));
     collect(ir({ mark: 'bar', title: undefined }));
     collect(ir({ mark: 'bar', alt: undefined }));
     collect(
@@ -200,6 +201,7 @@ describe('lint', () => {
         'series-overflow',
         'tuple-columns-missing',
         'tuple-not-numeric',
+        'encoding-unsupported',
       ].sort(),
     );
   });

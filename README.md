@@ -34,6 +34,7 @@ these numbers do and do not mean.
 | Guarded SQL execution | `@agentix-e/nl2charts-core` | `createRunner({ engine }).sql('select 1')` |
 | Native DuckDB, file cache | `@agentix-e/nl2charts-node` | `createDuckDbEngine()` |
 | Profiling, lint, ECharts option | `@agentix-e/nl2charts-chart` | `compileToECharts(ir)` |
+| Drawability check per mark, with reasons | `@agentix-e/nl2charts-chart` | `supportOf(ir)` |
 | Question-aware chart choice, zero model | `@agentix-e/nl2charts-chart` | `recommendChart(question, profiles)` |
 | Prompting, schema linking, repair loop | `@agentix-e/nl2charts-ai` | `createPipeline({ provider }).ask(...)` |
 | Metric compiler (Plan→Optimize→Lower→Render) | `@agentix-e/nl2charts-core/semantic` | `compileQuery({ metrics: ['revenue'] }, model)` |
