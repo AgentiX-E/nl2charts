@@ -143,8 +143,6 @@ jobs:
       # knows better says so here rather than renaming the model:
       #   {"family":"reasoning","maxOutputTokens":16384,"thinkingSwitch":true}
       BIRD_CAPABILITIES: ${{ inputs.capabilities }}
-      # Empty when nothing is being continued, which `parseResumeFrom` reads as "start fresh".
-      BIRD_RESUME_FROM: ${{ steps.resume.outputs.path }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -202,6 +200,11 @@ jobs:
         run: pnpm bench:bird
         env:
           BIRD_LIMIT: ${{ inputs.limit }}
+          # Empty when nothing is being continued, which `parseResumeFrom` reads as "start fresh".
+          # Step-level rather than job-level: a job environment block is evaluated before any step
+          # runs, so `steps.resume` does not exist there and the workflow is rejected outright —
+          # a failure with no job, no log and nothing in the run list to read.
+          BIRD_RESUME_FROM: ${{ steps.resume.outputs.path }}
       - name: Structural gate
         # Accuracy floors are skipped when the model differs from `floorModel`; everything
         # else — expected arms, funnel arithmetic, cost provenance, empty levers, A/A — is
