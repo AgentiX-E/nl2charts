@@ -7,6 +7,30 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **The linker can read the evidence, and the hint it builds has finally been measured.** The
+  `Likely columns` hint was built from the question alone. RSL-SQL's bidirectional linking — the
+  mechanism its paper credits for a 94% strict recall — reads its own preliminary statement, the
+  dataset's hint line, and an LLM's column list, and unions them; the middle source is a substring
+  scan over text this repository already puts in the prompt and never showed the linker. On 500
+  Mini-Dev questions the shipped hint names 7.4 columns a question of which **29.8% are columns the
+  answer uses**, and covers 39.3% of them; reading the evidence at the same twelve slots covers
+  **55.2%** (68.3% at thirty) at 31.4% precision. `PipelineOptions.linkEvidence` and
+  `AskMessagesInput.linkEvidence` turn it on; the default does not move, because a linker that
+  started reading the evidence because it was in the prompt would change every arm at once and each
+  published reading would describe a prompt nobody had run. Two arms price it —
+  `inline+evidence+link-evidence` and, for the first time in this repository,
+  `inline+evidence-nolink`, because every arm here has always shipped the hint and what it is worth
+  has never been a measurement.
+
+- **Column pruning refused by its own kill criterion, with the layer that fails identified.** The
+  previous round's plan was to cut the card to the columns a question needs. Measured offline
+  against gold references on 500 Mini-Dev questions: linked columns plus foreign-key columns keep
+  28.8% of a case's gold columns, adding `*id` 30.2%, adding `*name*` 43.8%, and with column values
+  supplied to the `value` recaller at `topK` 30, **54.0%** — against a 94% criterion. The split says
+  why: gold **tables** survive 98.11%, gold **columns** 52.84%, and the linker names only **46.75%**
+  of the columns the answer uses, so no rule that keeps what the linker names can keep more. Pruning
+  is refused until that recall moves, and `docs/benchmarks.md` records the three RSL-SQL sources that
+  move it.
 - **The second reading the data can prove: the same day, written the way the column writes it.**
   `ground.ts` settled case and called everything else `absent`, so a statement that wrote
   `'9/9/2019'` against a column storing `2019-09-09` was reported as a literal the column does not

@@ -60,6 +60,73 @@ describe('the hint that travels with the question', () => {
   });
 });
 
+describe('the hint when the linker is allowed to read the evidence', () => {
+  const HINTLESS_QUESTION = 'what did they buy last year';
+
+  it('names a column the question never mentions and the evidence does', () => {
+    // The question says "they"; the evidence says "each customer segment". A hint built from the
+    // question alone has nothing to rank, and the model is left to find `segment` in a card of six
+    // columns — which on BIRD is a card of two hundred.
+    const built = buildAskMessages({
+      question: HINTLESS_QUESTION,
+      schema,
+      linking: true,
+      linkEvidence: true,
+      prompt: { dialect: 'SQLite', evidence: 'Consider the segment of each customer.' },
+    });
+    expect(built.messages[1]?.content).toContain('customers.segment');
+    expect(built.messages[1]?.content.endsWith(HINTLESS_QUESTION)).toBe(true);
+  });
+
+  it('falls back to the question alone when the arm carries no evidence', () => {
+    // An arm that sets the switch on a pipeline with no evidence must send what every other arm
+    // sends: the switch says where to look, and there is nowhere else to look.
+    const withSwitch = buildAskMessages({ question: 'revenue by region', schema, linking: true, linkEvidence: true });
+    const without = buildAskMessages({ question: 'revenue by region', schema, linking: true });
+    expect(withSwitch.messages[1]?.content).toBe(without.messages[1]?.content);
+  });
+
+  it('falls back when the evidence is present but empty', () => {
+    // `evidence: '   '` is the shape a caller writes when the dataset has a field but no content.
+    // Joining it would add a separator and nothing else, and a hint that differs by a space is a
+    // second prompt with no second lever.
+    const built = buildAskMessages({
+      question: 'revenue by region',
+      schema,
+      linking: true,
+      linkEvidence: true,
+      prompt: { dialect: 'SQLite', evidence: '   ' },
+    });
+    expect(built.messages[1]?.content.startsWith('Likely columns: ')).toBe(true);
+    expect(built.messages[1]?.content).not.toContain('  ');
+  });
+
+  it('does not read the evidence unless the arm asked for it', () => {
+    // The default is the prompt every measured arm has sent. A linker that started reading the
+    // evidence because it was in the prompt would change all of them at once, and each published
+    // reading would describe a prompt nobody had run.
+    const built = buildAskMessages({
+      question: HINTLESS_QUESTION,
+      schema,
+      linking: true,
+      prompt: { dialect: 'SQLite', evidence: 'Consider the segment of each customer.' },
+    });
+    expect(built.messages[1]?.content).toBe('No column matched; use the schema above.\nwhat did they buy last year');
+  });
+
+  it('sends no hint at all when linking is off, whatever the switch says', () => {
+    const built = buildAskMessages({
+      question: HINTLESS_QUESTION,
+      schema,
+      linking: false,
+      linkEvidence: true,
+      prompt: { dialect: 'SQLite', evidence: 'Consider the segment of each customer.' },
+    });
+    expect(built.messages[1]?.content).toBe('Use the schema above.\nwhat did they buy last year');
+    expect(built.linked).toEqual([]);
+  });
+});
+
 describe('schema linking', () => {
   it('ranks the measure and the dimension first', () => {
     const linked = linkSchema('revenue by region', schema);
