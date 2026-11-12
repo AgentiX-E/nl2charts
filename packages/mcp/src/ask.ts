@@ -95,6 +95,16 @@ export interface AskOptions {
   readonly maxRepairs?: number;
   /** Fixed dialect, when the deployment knows it and the caller should not choose. */
   readonly dialect?: string;
+  /**
+   * Let the column linker read the caller's `evidence` as well as the question.
+   *
+   * Off by default, and for the reason the pipeline gives: turning it on changes the hint, so a
+   * deployment that enables it is running a different prompt from one that does not. A caller that
+   * always supplies evidence — a product with a glossary, say — can turn it on and measure the
+   * result; the tool's own `evidence` argument decides what the linker reads, so a request that
+   * omits it behaves exactly as before.
+   */
+  readonly linkEvidence?: boolean;
 }
 
 export interface AskContext {
@@ -197,6 +207,7 @@ export async function askQuestion(
       provider: context.ask.provider,
       ...(context.ask.topK === undefined ? {} : { topK: context.ask.topK }),
       ...(context.ask.maxRepairs === undefined ? {} : { maxRepairs: context.ask.maxRepairs }),
+      ...(context.ask.linkEvidence === undefined ? {} : { linkEvidence: context.ask.linkEvidence }),
       prompt: { dialect, ...(evidence === undefined ? {} : { evidence }) },
       // The repair loop needs the engine's verdict, and the verdict is the only thing
       // that separates "the statement is wrong" from "the statement is unreadable".
