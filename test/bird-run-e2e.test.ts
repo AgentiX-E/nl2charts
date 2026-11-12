@@ -3948,3 +3948,61 @@ describe('a few-shot block that carries its steps', () => {
     expect(asked[0]).not.toContain('one statement, no comments');
   });
 });
+
+describe('the arm that lets the linker read the evidence', () => {
+  /**
+   * The hint that reaches the endpoint, per request.
+   *
+   * Read out of the request rather than out of the report because the claim is about what the
+   * model was sent: a report that recorded the switch would say what the harness intended, and
+   * this file's history has one arm that declared a mechanism, was paired for it, and never
+   * executed it.
+   */
+  const hints = (requests: readonly EndpointRequest[]): string[] =>
+    requests
+      .map((request) => /Likely columns: ([^\n]*)/.exec(request.prompt)?.[1])
+      .filter((hint): hint is string => hint !== undefined);
+
+  it('names a column the evidence mentions and the question does not', async () => {
+    // `qty` appears nowhere in "How many items are there?" and is the only column the evidence
+    // names. An arm that reads the question alone cannot put it in the hint; an arm that reads
+    // the evidence cannot leave it out — unless the switch never reached the linker, which is
+    // the failure this test exists to catch.
+    const dir = mkdtempSync(join(tmpdir(), 'nl2charts-link-evidence-'));
+    const fixture = writeMiniBirdDataset(join(dir, 'MINIDEV'), {
+      evidence: { 1: 'The units on a line are stored in qty, and this question does not ask for them.' },
+    });
+    try {
+      const plain = await run({
+        plan: { first: correct },
+        env: { BIRD_DATA: fixture, BIRD_ARMS: 'inline+evidence' },
+        out: join(dir, 'plain.json'),
+      });
+      const reads = await run({
+        plan: { first: correct },
+        env: { BIRD_DATA: fixture, BIRD_ARMS: 'inline+evidence+link-evidence' },
+        out: join(dir, 'reads.json'),
+      });
+      expect(plain.code).toBe(0);
+      expect(reads.code).toBe(0);
+      // The first draw is question 1 in both runs, and both hints exist: a test whose control
+      // produced no hint at all would pass the negative half by accident.
+      const plainHint = hints(plain.requests)[0] ?? '';
+      const readsHint = hints(reads.requests)[0] ?? '';
+      expect(plainHint.length).toBeGreaterThan(0);
+      expect(plainHint).not.toContain('orders.qty');
+      expect(readsHint).toContain('orders.qty');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('removes the hint entirely on the arm that turns linking off', async () => {
+    // The other new arm. `Use the schema above.` is the whole user-turn prefix, so a hint that
+    // survived the switch would show up as a `Likely columns` line that should not exist.
+    const result = await run({ plan: { first: correct }, env: { BIRD_ARMS: 'inline+evidence-nolink' } });
+    expect(result.code).toBe(0);
+    expect(hints(result.requests)).toEqual([]);
+    expect(result.requests.some((request) => request.prompt.includes('Use the schema above.'))).toBe(true);
+  });
+});

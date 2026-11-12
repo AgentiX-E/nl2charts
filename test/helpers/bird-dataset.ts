@@ -182,7 +182,7 @@ export function writeChainBirdDataset(dir: string): string {
  *
  * `dir` is the split directory (`…/MINIDEV` in BIRD's own layout), not a parent of it.
  */
-export function writeMiniBirdDataset(dir: string): string {
+export function writeMiniBirdDataset(dir: string, options: { readonly evidence?: Readonly<Record<number, string>> } = {}): string {
   const db = join(dir, 'dev_databases', MINI_DB);
   const descriptions = join(db, 'database_description');
   mkdirSync(descriptions, { recursive: true });
@@ -201,7 +201,7 @@ export function writeMiniBirdDataset(dir: string): string {
         question_id: entry.id,
         db_id: MINI_DB,
         question: entry.question,
-        evidence: '',
+        evidence: options.evidence?.[entry.id] ?? '',
         SQL: entry.sql,
         difficulty: entry.difficulty,
       })),
