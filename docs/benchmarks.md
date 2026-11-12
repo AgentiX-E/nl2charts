@@ -11582,3 +11582,65 @@ budget, not the whole-row dump. That test is the next round's, and the predictio
 before it runs: if the pairing hypothesis is right, the gain concentrates on questions whose gold
 literal the `values` block never found; if it is wrong, the arm lands inside ±1.7pp of its parent and
 the schema layer is closed entirely rather than at both ends.
+
+### The third arm, measured: new information that does not move the answer
+
+Run `43198451668`, dev split, 1,532 scored questions, one call per question, `served: deepseek-flash`
+on 1,532 of 1,532 cases.
+
+| arm | accuracy | delta vs parent | discordant | p | 95% CI | MDE |
+| --- | ---: | ---: | ---: | ---: | --- | ---: |
+| `inline+evidence` | 939/1,532 · **61.29%** | — | — | — | — | — |
+| `inline+evidence+rows` | 944/1,532 · **61.62%** | **+0.33pp** | 52 : 57 | 0.702 | [−1.01, +1.66] | 1.91 |
+
+What it cost:
+
+| | parent | rows arm | change |
+| --- | ---: | ---: | ---: |
+| prompt characters (mean) | 2,568 | 3,144 | **+22.4%** |
+| prompt tokens (mean, endpoint's own count) | 676 | 887 | **+31.2%** |
+| cached prompt tokens (mean) | 484 | 633 | +30.8% |
+| completion tokens (mean) | 49 | 53 | +8.2% |
+
+By difficulty, the whole of the movement is in the hardest bucket, and it is three cases:
+
+| difficulty | parent | rows arm | delta |
+| --- | ---: | ---: | ---: |
+| simple (925) | 620 | 622 | +0.22pp |
+| moderate (463) | 248 | 248 | 0 |
+| challenging (144) | 71 | 74 | +2.08pp |
+
+**Read the parent's own row first.** The same arm, unchanged, scored 934 on `43185842566` and 939 on
+`43198451668` — **+0.33pp of run-to-run drift on the identical prompt**, which is exactly the size of
+the delta this round was dispatched to detect. The samples are drawn at the endpoint's default
+temperature, and at 1,532 questions one arm's own resampling moves it by five cases. Any effect
+smaller than that is not visible in one run of this harness, whatever the pairing arithmetic says.
+
+**So the verdict is the pre-registered one.** The prediction registered before this arm ran (§ *What
+RSL-SQL's prompt has that this one does not*) was: the gain concentrates on questions whose gold
+literal the `values` block never found, or the arm lands inside ±1.7pp of its parent and the schema
+layer is closed **entirely** rather than at both of its ends. The arm landed at +0.33pp with a
+confidence interval that contains zero and a discordant split (52 : 57) that points the wrong way for
+a pairing effect. The schema layer is closed.
+
+**That closure is stronger than the hint's, and this is why it matters.** The hint result could be
+explained away — the card shows all 1,534 identifiers (`controls.schemaMissingTotal: 0`), so a hint
+can only re-order a list the model already has. A row sample is not a re-ordering. It is **text that
+was not in the prompt before**: which values occur on the same line, the one property no per-column
+block can carry. Under a complete schema, that was the last candidate for information the model was
+missing. It is worth +0.33pp and +31% of the prompt, which is indistinguishable from the arm
+resampling itself.
+
+Three levers have now been measured against the same parent and all three land inside the noise:
+
+| lever | delta | 95% CI | verdict |
+| --- | ---: | --- | --- |
+| the hint, removed | +0.52pp | [−0.78, +1.83] | neutral: the card already shows every column |
+| the hint, reading the evidence | +0.20pp | [−0.97, +1.36] | neutral: same reason |
+| three stored rows per table | +0.33pp | [−1.01, +1.66] | neutral: new information, same answer |
+
+The next lever cannot be another block in the prompt. The failures the artifact records are the
+pointer: `values` 160 of 223 on Mini-Dev, and **none of them a wrong literal** — 60 read a different
+table, 41 group differently, 30 read fewer tables. Those are decisions about the *statement*, taken
+once per question, and the prompt is not where they are made. The row-sample arm is kept in the
+catalogue as the ablation reference that closed the layer, not as a candidate to adopt.
