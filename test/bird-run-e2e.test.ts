@@ -4006,3 +4006,25 @@ describe('the arm that lets the linker read the evidence', () => {
     expect(result.requests.some((request) => request.prompt.includes('Use the schema above.'))).toBe(true);
   });
 });
+
+describe('the arm that shows three stored rows', () => {
+  it('puts the rows of the tables it can read into the prompt', async () => {
+    // The block has no unit test that can prove it reached the request: `renderRowSamples` is pure
+    // and its own file tests it, and the arm's declaration is a number on an object. What is left
+    // is the wiring — and this file's history has one arm that declared a mechanism and never
+    // executed it, which is why the assertion is on the prompt the endpoint received.
+    const result = await run({ plan: { first: correct }, env: { BIRD_ARMS: 'inline+evidence+rows' } });
+    expect(result.code).toBe(0);
+    const withRows = result.requests.filter((request) => request.prompt.includes('Rows in this database:'));
+    expect(withRows.length).toBe(QUESTIONS.length);
+    // `items` is the only table in the fixture with a text column, and `pen` is in its first row:
+    // a block that arrived empty, or that sampled a numeric column, would fail here.
+    expect(withRows[0]?.prompt).toContain('items: name=pen');
+  });
+
+  it('sends nothing of the kind on the arm that did not ask for it', async () => {
+    const result = await run({ plan: { first: correct }, env: { BIRD_ARMS: 'inline+evidence' } });
+    expect(result.code).toBe(0);
+    expect(result.requests.some((request) => request.prompt.includes('Rows in this database:'))).toBe(false);
+  });
+});

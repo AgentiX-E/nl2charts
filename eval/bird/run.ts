@@ -36,7 +36,8 @@ import { graphForDatabase } from './join-graph.js';
 import { INTENT_RULE, intentFunnel, readIntentReply } from './intent.js';
 import type { IntentRecord } from './intent.js';
 import { ppPerExtraCall, repairFunnel } from './metrics.js';
-import { pruneSchema } from './prune.js';
+import { SHIPPED_RECALLERS, linkedTables, pruneSchema } from './prune.js';
+import { renderRowSamples, sampleableColumns } from './row-samples.js';
 import { applyColumnChoice, buildColumnPrompt, parseColumnChoice } from './columns.js';
 import type { ColumnApplication } from './columns.js';
 import { applyDenseChoice } from './dense.js';
@@ -178,6 +179,20 @@ export interface Arm {
    * invented filters — which is why it is a lever and not a default.
    */
   readonly samples?: 'profile' | 'example';
+  /**
+   * Whole rows of the tables the question names, this many per table.
+   *
+   * Not `samples`, which samples a **column**: a column sample shows the domain of one value, and
+   * both samplers this repository ships were closed at a 2.22pp ceiling. A row sample shows which
+   * values occur **together**, which is a property no per-column block can carry. It is the one
+   * input in RSL-SQL's prompt — "the first three rows of values in the table" — that this
+   * repository has never put in front of a model.
+   *
+   * The number is rows, not a switch, because the cost is linear in it: three rows of the text
+   * columns of the tables a gold statement reads is 1,058 characters at the mean and 483 at the
+   * median on 1,534 dev questions. `ROW_SAMPLE_BUDGET` caps the tail, which is where the cost is.
+   */
+  readonly rowSamples?: number;
   /**
    * Which columns carry the block, when `samples` is set.
    *
@@ -799,6 +814,16 @@ export function assertMixedSources(sources: readonly string[] = MIXED_SOURCES): 
   }
 }
 
+/**
+ * Characters the rows block may spend on one question.
+ *
+ * Three rows of the text columns of the tables a question names costs 1,058 characters at the mean
+ * and 3,244 at p90 on the dev split. Against a prompt of about 2,700 characters the mean is
+ * affordable and the tail is not, so the rule ships with a ceiling: 800 keeps the median question
+ * whole (483) and cuts the p90, which is where the cost lives.
+ */
+export const ROW_SAMPLE_BUDGET = 800;
+
 export const ARMS: readonly Arm[] = [
   { name: 'names', notes: false, repairs: 0, linking: true },
   { name: 'definitions', notes: false, repairs: 0, linking: true, definitions: 'structural' },
@@ -821,6 +846,16 @@ export const ARMS: readonly Arm[] = [
   // the prompt without ever showing it to the linker. Offline, at the same twelve slots, the
   // hint's column recall moves 39.3% → 55.2% and its precision 29.8% → 31.4%.
   { name: 'inline+evidence+link-evidence', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', linkEvidence: true },
+  // Three stored rows per table, on the prompt the two arms above were measured on. This is the
+  // input RSL-SQL's `Instruction.py` names five times and this repository has never sent: a column
+  // sample shows a value's domain, a row sample shows which values occur together, and only the
+  // second can say that `status = 'Banned'` belongs with `currency = 'EUR'`.
+  //
+  // The prediction was registered before this arm ran, in `docs/benchmarks.md`: if the pairing
+  // hypothesis is right the gain concentrates on questions whose gold literal the `values` block
+  // never found; if it is wrong the arm lands within ±1.7pp of its parent and the schema layer is
+  // closed entirely rather than at both of its ends.
+  { name: 'inline+evidence+rows', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', rowSamples: 3 },
   // The same prompt with the card carrying each categorical column's stored values. One
   // lever from `inline+evidence`, one call, no extra block: the instance knowledge sits on
   // the column line instead of in a list built from the question's wording.
@@ -1324,6 +1359,7 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'inline+evidence+ground': 'the one rewrite the data proves, applied before the statement runs: priced offline on the parent arm\'s own artifact at 22 fires, 14 wins, 0 losses (+0.91pp, p = 0.0001) with the pairs disjoint from every other rule — run it when the domain reader or the prompt changes, and move it into the chain once the dispatch reproduces the offline count',
   'inline+evidence-nolink': 'the same prompt with the column hint removed: every arm in this file sets `linking: true`, so what the hint is worth has never been measured, and on 500 Mini-Dev questions it names 7.4 columns of which 29.8% are columns the gold statement uses — this is the only arm that can say whether a 30%-precise hint beats no hint, and it costs one flag',
   'inline+evidence+link-evidence': 'the hint built from the question and the dataset hint together, which is the middle source of RSL-SQL\'s bidirectional linking (its `extract_from_hint` scans the evidence for column names and unions the result): offline the same twelve slots move from 39.3% to 55.2% column recall at 29.8% → 31.4% precision, so this arm prices what that recall is worth at the answer rather than at the hint',
+  'inline+evidence+rows': 'three stored rows per table on the same prompt: the one input RSL-SQL\'s `Instruction.py` names five times and this repository has never sent — a column sample shows a value\'s domain, a row sample shows which values occur together, and only the second can say that `status = \'Banned\'` belongs with `currency = \'EUR\'`; priced before it was built at 1,058 characters a question at the mean and 483 at the median on dev, with the prediction registered in `docs/benchmarks.md` (gain concentrates on questions whose gold literal `values` never found, or the schema layer closes entirely),',
   'select-prune': 'the card cut to the join closure: measured −1.4pp, and the loss is the ceiling rather than the selector (1,008 → 980 reachable cases), so it is priced; run it when the card changes',
   'inline+evidence+llm-select': 'the card cut to the columns the model names: measured −5.65pp against its parent (53:25, p = 0.0020, MDE 4.99pp) on 496 questions at `41190457163`, with the choice deciding 495 of 496 cases and keeping 10.8% of the columns for +39% prompt tokens — the mechanism fires and is a net loss, so it is kept as the ablation reference for relevance-by-model rather than run on every push',
   // Measured on `41290647076` in the same run as its parent and the column arm, so the three
@@ -1470,6 +1506,7 @@ export const COMPARISONS: readonly (readonly [string, string, string])[] = [
   ['inline+evidence+samples', 'inline+evidence+samples-gold', 'the same sampler on every profiled column versus on the columns the gold statement filters on: an oracle for what a column rule could be worth'],
   ['inline+evidence', 'inline+evidence-nolink', 'the column hint removed from the same prompt: the first reading of what the hint is worth, on a hint that is 30% precise'],
   ['inline+evidence', 'inline+evidence+link-evidence', 'the same hint built from the question and the dataset hint together: what the linker gains when it reads the text the model already reads'],
+  ['inline+evidence', 'inline+evidence+rows', 'three stored rows per table: the one input in RSL-SQL\'s prompt this repository never had, priced at 800 characters a question'],
   ['inline+evidence', 'inline+evidence+empty', 'the turn after a statement returns nothing: the one refiner trigger whose message carries something true, priced on the arm the empty trigger actually fires on'],
   ['inline+evidence', 'metadata+evidence', 'generated definitions on the column line versus 798 curated notes'],
   ['inline+evidence', 'select-mixed', 'three decompositions and a selector versus a single sample: four calls instead of one'],
@@ -4626,6 +4663,8 @@ export interface PromptBlocks {
   readonly demonstrations?: string;
   /** Values from this database that the question names. */
   readonly values?: string;
+  /** A few stored rows per table, in the tables the question names. */
+  readonly rows?: string;
 }
 
 /**
@@ -4735,7 +4774,7 @@ export function narrowFields(
 }
 
 export function promptFor(arm: Arm, question: BirdQuestion, blocks: PromptBlocks = {}): PromptOptions {
-  const { synthesized, definitions, retrieved, demonstrations, values } = blocks;
+  const { synthesized, definitions, retrieved, demonstrations, values, rows } = blocks;
   const profile = arm.profile === 'adaptive' ? choosePromptProfile(question.question) : undefined;
   const evidence =
     arm.evidence === 'dataset'
@@ -4768,6 +4807,7 @@ export function promptFor(arm: Arm, question: BirdQuestion, blocks: PromptBlocks
       ? { demonstrations }
       : {}),
     ...(arm.values === true && values !== undefined && values.length > 0 ? { values } : {}),
+    ...(arm.rowSamples === undefined || rows === undefined ? {} : { rowSamples: rows }),
     // The decomposition is part of the prompt, not a block written in an earlier call, so
     // it belongs here: the size this harness reports for the arm, and the distinct-prompt
     // count a mixed arm is checked against, both read this object.
@@ -5566,6 +5606,69 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
   };
 
   /**
+   * Rows for the arms that ask for them, read once per (database, table).
+   *
+   * One query per table is the whole cost of the lever. Reading per question would be 1,532 times
+   * the work for text that does not change between questions, and it would also make the block a
+   * different thing on two runs of the same arm if a driver ever returned rows in another order.
+   */
+  const rowCache = new Map<string, Map<string, readonly (readonly unknown[])[]>>();
+  // `settings.arms` holds names, including an A/A copy's `#2` suffix, so the arm is looked up here
+  // rather than assumed: a filter over strings would compare `undefined` to `undefined` and load
+  // nothing while reporting that it had.
+  const rowArms = settings.arms
+    .map((name) => ARMS.find((arm) => arm.name === name.split('#')[0]))
+    .filter((arm): arm is Arm => arm?.rowSamples !== undefined);
+  if (rowArms.length > 0) {
+    const wanted = Math.max(...rowArms.map((arm) => arm.rowSamples ?? 0));
+    for (const [db, schema] of schemas) {
+      const perTable = new Map<string, readonly (readonly unknown[])[]>();
+      for (const table of schema) {
+        const columns = sampleableColumns(table).map((column) => column.name);
+        if (columns.length === 0) continue;
+        const quote = (name: string): string => `"${name.replace(/"/g, '""')}"`;
+        const statement = `SELECT ${columns.map(quote).join(', ')} FROM ${quote(table.table)} LIMIT ${String(wanted)}`;
+        // A table the engine refuses comes back with no rows, which is a table with no sample
+        // rather than an error: the block is an extra, and an arm whose prompt is shorter because
+        // one view is unreadable is still a prompt the run can score. Storing the empty result
+        // rather than skipping the table is what keeps this loop free of a branch nothing can test.
+        const result = await io.oracle.run(db, statement);
+        perTable.set(table.table, result.rows);
+      }
+      rowCache.set(db, perTable);
+    }
+  }
+
+  /**
+   * The rows block for one question, or nothing when the arm did not ask or nothing was readable.
+   *
+   * The tables are the ones the arm's own linker names — the same set `prune` closes over — so the
+   * block and the hint cannot describe two different schemas. A question that names no table gets
+   * the card's first three, which is the same cap the budget imposes on every other question.
+   */
+  const rowsFor = (arm: Arm, question: BirdQuestion): string | undefined => {
+    if (arm.rowSamples === undefined) return undefined;
+    // Absent means the arm has the switch and the run loaded nothing, which cannot happen: the
+    // cache is filled for every database when any arm asks. The fallback exists so the read is
+    // total, not because there is a case behind it.
+    const perTable = rowCache.get(question.db_id) ?? new Map<string, readonly (readonly unknown[])[]>();
+    const schema = schemas.get(question.db_id) ?? [];
+    const named = linkedTables(question.question, schema, SHIPPED_RECALLERS);
+    const seeded = schema.filter((table) => named.has(table.table.toLowerCase()));
+    // A linker that names only numeric tables leaves the block with nothing to show, and the tables
+    // it names are exactly the ones whose contents the model can least infer from a type. So the
+    // fallback is not "no block" but "the card's first tables", which is what a question that names
+    // nothing already gets.
+    const chosen = seeded.some((table) => sampleableColumns(table).length > 0) ? seeded : schema.slice(0, 3);
+    // An empty render is passed through rather than turned into `undefined`: the prompt builder
+    // already refuses to print an empty block, and a second guard here would be a second rule.
+    return renderRowSamples(chosen, (table) => perTable.get(table) ?? [], {
+      rows: arm.rowSamples,
+      budget: ROW_SAMPLE_BUDGET,
+    });
+  };
+
+  /**
    * What this arm's prompt may use. One builder for every call site, so the prompt
    * that is measured and the prompt that is sent cannot disagree.
    */
@@ -5583,6 +5686,7 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
             ?.text,
         }),
     ...(valuesFor(question) === undefined ? {} : { values: valuesFor(question) }),
+    ...(rowsFor(arm, question) === undefined ? {} : { rows: rowsFor(arm, question) }),
   });
 
   const controls: Controls = {

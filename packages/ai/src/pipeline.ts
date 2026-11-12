@@ -43,6 +43,20 @@ export interface PromptOptions extends SchemaCardOptions {
    */
   readonly values?: string;
   /**
+   * A few stored rows per table, as text.
+   *
+   * The other data-derived block, and the one that carries something `values` cannot: a value's
+   * domain is a column property, while the fact that `status = 'Banned'` occurs on the same row as
+   * `currency = 'EUR'` is a property of the row and of nothing smaller. RSL-SQL's prompt asks for
+   * "the first three rows of values in the table" five times; this is that block, rendered by the
+   * caller because the pipeline has no engine.
+   *
+   * Priced before it was added: three rows of the text columns of every table a gold statement
+   * reads costs 1,058 characters at the mean and 483 at the median on 1,534 dev questions, against
+   * a prompt of about 2,700. The caller owns the budget for that reason.
+   */
+  readonly rowSamples?: string;
+  /**
    * A query plan written before the statement: scan, filter, join, group, answer.
    * Distinct from `interpretation`, which says what the question means rather than how
    * the engine would answer it.
@@ -368,6 +382,12 @@ export function buildSqlPrompt(
   if (resolved.decompose === true) rules.push(...DECOMPOSE_RULES);
   if (resolved.reasoning === 'sql-like') rules.push(...SQL_LIKE_RULES);
   const context: string[] = [];
+  if (resolved.rowSamples !== undefined && resolved.rowSamples.trim().length > 0) {
+    // First among the data blocks, and immediately after the schema it describes: the rows are a
+    // property of the tables above, and a block that arrived after the evidence would read as
+    // counter-evidence to a hint rather than as the same database's contents.
+    context.push(['Rows in this database:', resolved.rowSamples.trim()].join('\n'));
+  }
   if (resolved.definitions !== undefined && resolved.definitions.trim().length > 0) {
     // The block arrives without its heading so that a caller cannot add a
     // heading for an empty block; the prompt owns the heading.
