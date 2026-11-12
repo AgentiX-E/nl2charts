@@ -76,6 +76,14 @@ export interface Arm {
   readonly evidence?: 'dataset' | 'synthetic' | 'retrieved';
   readonly repairs: number;
   readonly linking: boolean;
+  /**
+   * Let the linker read the arm's evidence text as well as the question.
+   *
+   * One lever, because the two ways of building the hint differ in exactly one thing: which text
+   * the linker is given. An arm that also changed `topK` would move the slot count and the input
+   * together, and the delta would belong to neither.
+   */
+  readonly linkEvidence?: boolean;
   /** 'adaptive' lets the question shape choose the schema card and notes. */
   readonly profile?: 'adaptive';
   /**
@@ -801,6 +809,18 @@ export const ARMS: readonly Arm[] = [
   // tell coverage apart from source quality.
   { name: 'dataset-subset', notes: false, repairs: 0, linking: true, definitions: 'dataset-subset' },
   { name: 'inline+evidence', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline' },
+  // The hint removed, everything else identical. Every arm this repository has ever run sets
+  // `linking: true`, so "the hint helps" has never been a measurement — and the hint it ships
+  // names 7.4 columns a question of which 29.8% are columns the gold statement uses, which is a
+  // list that is wrong more often than it is right. This arm asks whether the prompt is better
+  // or worse without it, and it is the cheapest experiment in the file: one flag, no new code.
+  { name: 'inline+evidence-nolink', notes: false, evidence: 'dataset', repairs: 0, linking: false, definitions: 'inline' },
+  // The hint built from the question *and* the evidence line. RSL-SQL's bidirectional linking
+  // unions the columns its preliminary statement named, the columns the dataset's hint named and
+  // an LLM's list; the middle one is a text scan, and this repository already puts that hint in
+  // the prompt without ever showing it to the linker. Offline, at the same twelve slots, the
+  // hint's column recall moves 39.3% → 55.2% and its precision 29.8% → 31.4%.
+  { name: 'inline+evidence+link-evidence', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', linkEvidence: true },
   // The same prompt with the card carrying each categorical column's stored values. One
   // lever from `inline+evidence`, one call, no extra block: the instance knowledge sits on
   // the column line instead of in a list built from the question's wording.
@@ -1302,6 +1322,8 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'inline+icl-cot+reasoning': 'both positions at once: it is the pair that says whether the format is additive or the second copy is redundant, and it is not worth 496 calls until the two single-position arms have readings',
   vote: 'majority over the same three candidates: the selector control, measured 17:17 against `select` (p = 1) — running it every push re-derives a tie at 2,092 tokens',
   'inline+evidence+ground': 'the one rewrite the data proves, applied before the statement runs: priced offline on the parent arm\'s own artifact at 22 fires, 14 wins, 0 losses (+0.91pp, p = 0.0001) with the pairs disjoint from every other rule — run it when the domain reader or the prompt changes, and move it into the chain once the dispatch reproduces the offline count',
+  'inline+evidence-nolink': 'the same prompt with the column hint removed: every arm in this file sets `linking: true`, so what the hint is worth has never been measured, and on 500 Mini-Dev questions it names 7.4 columns of which 29.8% are columns the gold statement uses — this is the only arm that can say whether a 30%-precise hint beats no hint, and it costs one flag',
+  'inline+evidence+link-evidence': 'the hint built from the question and the dataset hint together, which is the middle source of RSL-SQL\'s bidirectional linking (its `extract_from_hint` scans the evidence for column names and unions the result): offline the same twelve slots move from 39.3% to 55.2% column recall at 29.8% → 31.4% precision, so this arm prices what that recall is worth at the answer rather than at the hint',
   'select-prune': 'the card cut to the join closure: measured −1.4pp, and the loss is the ceiling rather than the selector (1,008 → 980 reachable cases), so it is priced; run it when the card changes',
   'inline+evidence+llm-select': 'the card cut to the columns the model names: measured −5.65pp against its parent (53:25, p = 0.0020, MDE 4.99pp) on 496 questions at `41190457163`, with the choice deciding 495 of 496 cases and keeping 10.8% of the columns for +39% prompt tokens — the mechanism fires and is a net loss, so it is kept as the ablation reference for relevance-by-model rather than run on every push',
   // Measured on `41290647076` in the same run as its parent and the column arm, so the three
@@ -1446,6 +1468,8 @@ export const COMPARISONS: readonly (readonly [string, string, string])[] = [
   // order and the call count, and changes only which columns carry a bracket — so the delta is the
   // price of narrowing, and the character column beside it is the price of not narrowing.
   ['inline+evidence+samples', 'inline+evidence+samples-gold', 'the same sampler on every profiled column versus on the columns the gold statement filters on: an oracle for what a column rule could be worth'],
+  ['inline+evidence', 'inline+evidence-nolink', 'the column hint removed from the same prompt: the first reading of what the hint is worth, on a hint that is 30% precise'],
+  ['inline+evidence', 'inline+evidence+link-evidence', 'the same hint built from the question and the dataset hint together: what the linker gains when it reads the text the model already reads'],
   ['inline+evidence', 'inline+evidence+empty', 'the turn after a statement returns nothing: the one refiner trigger whose message carries something true, priced on the arm the empty trigger actually fires on'],
   ['inline+evidence', 'metadata+evidence', 'generated definitions on the column line versus 798 curated notes'],
   ['inline+evidence', 'select-mixed', 'three decompositions and a selector versus a single sample: four calls instead of one'],
@@ -6342,6 +6366,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
           // a loop that can never hear the engine, which is the defect `emptyRetry` had.
           maxRepairs: overrides.repairs ?? target.repairs,
           linking: overrides.linking ?? target.linking,
+          ...(target.linkEvidence === undefined ? {} : { linkEvidence: target.linkEvidence }),
           interpret: target.interpret === true,
           plan: target.plan === true,
           // The plan call is the one the arm moves to the second model; the statement stays on

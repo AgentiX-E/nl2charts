@@ -11397,3 +11397,94 @@ set, which is why its 6.1pp of `selectionLoss` has resisted every rule tried aga
 The reading this leaves is uncomfortable and is written down as a reading: **the gap to the
 systems that train nothing is in what the prompt makes the model write, not in what this repository
 does to what it wrote.**
+
+## The lever that was never switched: the column hint
+
+The round before this one ended with a plan: cut the schema card down to the columns the question
+needs, the way RSL-SQL does when it reports a 94% strict recall. The plan had a kill criterion — if
+strict recall came in under 94%, the path is refused. It came in at **52.8%**, and the reason turns
+out to be more useful than the lever would have been.
+
+### The pruning measurement, and the layer it fails in
+
+Every number below is offline: the gold statement is read for the columns it names, a pruning rule
+is applied to the schema, and the result is checked for whether every one of those columns survived.
+No model is called.
+
+| rule (500 Mini-Dev questions) | strict recall | reference recall | columns kept |
+| --- | ---: | ---: | ---: |
+| linked columns + foreign-key columns | 28.8% | 78.6% | 26.4% |
+| … plus every `*id` column | 30.2% | 81.1% | 32.9% |
+| … plus every `*name*` column | 43.8% | 86.4% | 36.5% |
+| the last rule, with column values supplied to the `value` recaller, `topK` 30 | **54.0%** | 90.6% | 38.9% |
+
+The last row is the ceiling of the family, and it is 40 points short of the criterion. Splitting it
+says why:
+
+| layer | rate |
+| --- | ---: |
+| gold **tables** all kept | **98.11%** |
+| gold **columns** all kept | 52.84% |
+| gold columns the linker names at all (`topK` 30, all three recallers) | **46.75%** |
+| gold columns all kept, with the gold's own tables given as a starting point | 52.21% |
+
+Table selection is not the problem — one hop over the declared foreign keys keeps the gold's tables
+98% of the time. The problem is one layer below: **the linker names 46.75% of the columns the answer
+uses**, so any rule that keeps only what the linker names can keep at most 46.75% of what is needed.
+Pruning is not a lever that was tuned wrong; it is a lever behind a linker that has to get better
+first, and the card is 100% covered today precisely because nothing prunes it.
+
+### What RSL-SQL actually does, read from its source
+
+`src/bid_schema_linking.py` in [Laqcce-cao/RSL-SQL](https://github.com/Laqcce-cao/RSL-SQL) is the
+"bidirectional" linking its paper credits. It is shorter than the name suggests, and the three
+sources it unions are:
+
+1. **The statement it already wrote.** `extract_from_sql` scans the preliminary SQL for every column
+   name in the database: `if column in sql`. Not a question-to-column model — a substring scan of
+   its own output.
+2. **The dataset's hint.** `extract_from_hint` does the same over `dev_set[i]['evidence']`:
+   `if column in hint.lower()`. Also a substring scan, over text this repository already places in
+   the prompt.
+3. **An LLM's own column list**, in a separate file.
+
+Then `merge` unions the three and `filter` keeps only names the database has. The 94% is what three
+scans recover when one of them reads a statement the model already wrote — not a retrieval model
+beating ours. The first source is unavailable before generation. **The second is available and this
+repository never used it.**
+
+### The hint, measured as an asset
+
+The hint is the line `Likely columns: …` placed above the question. On 500 Mini-Dev questions, with
+the linker the prompt uses (`topK` 12, name/alias/value):
+
+| hint built from | precision | recall | columns named | characters |
+| --- | ---: | ---: | ---: | ---: |
+| the question (shipped) | **29.82%** | 39.26% | 7.4 | 147 |
+| question + evidence | 31.39% | **55.15%** | 9.8 | 195 |
+| question + evidence, `topK` 30 | 31.39% | **68.30%** | — | — |
+
+Read the first row twice. The hint names 7.4 columns a question, and **fewer than a third of them
+are columns the answer uses** — a list that is wrong about two entries in three, printed above the
+question, on every arm this repository has ever run. And the second row says the fix is not to
+sharpen the linker: it is to give it the text the model is already reading, which recovers 16 points
+of recall at the same twelve slots and at no extra precision cost.
+
+Which raises the question the file has never asked: **is the hint worth having at all?** Every arm
+in `eval/bird/run.ts` sets `linking: true`. There is no arm with it off. Two arms are added here —
+`inline+evidence-nolink` and `inline+evidence+link-evidence` — and they are the cheapest experiment
+in the catalogue: one flag each, no new mechanism, and a parent whose reading already exists on both
+splits.
+
+### What this changes about the plan
+
+The remaining steps, in the order the numbers support:
+
+1. **Does the hint help?** (`inline+evidence-nolink`, one call, 1,532 questions.) A 30%-precise list
+   in front of a question is as likely to be a distractor as a hint. If it is one, deleting it is a
+   gain that costs tokens as well as accuracy, and every future arm inherits it.
+2. **Does reading the evidence help?** (`inline+evidence+link-evidence`.) The offline delta is
+   +16pp of recall; whether that reaches the answer is the measurement.
+3. **Pruning stays refused** until the linker's column recall passes the criterion, and the way to
+   raise it is now known: the third RSL-SQL source, the model's own preliminary statement, is
+   already in this pipeline on the repair and selection arms.
