@@ -7,6 +7,20 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **Three stored rows per table: the input RSL-SQL's prompt names five times and this one never
+  sent.** A column sample shows a value's domain; three rows show which values occur *together* —
+  `status = 'Banned'` on the same line as `currency = 'EUR'` — and no per-column block can carry a
+  pairing. `eval/bird/row-samples.ts` renders it as a pure function (`renderRowSamples`, given the
+  caller's reader), `PromptOptions.rowSamples` carries it, and the arm `inline+evidence+rows` prices
+  it. Priced before it was built, on 1,534 dev questions: text columns only, 1,058 characters at the
+  mean and 483 at the median against a prompt of about 2,700, with a 3,244-character p90. The mean
+  is affordable and the tail is not, so `ROW_SAMPLE_BUDGET` caps the block at 800 and drops whole
+  tables rather than cutting one in half — half a table reads as a table that stores one row, which
+  is a claim about the data. A linker that names only numeric tables falls back to the card's first
+  three rather than to no block at all. The prediction was registered in `docs/benchmarks.md` before
+  the arm ran: the gain concentrates on questions whose gold literal `values` never found, or the
+  schema layer closes entirely rather than at both of its ends.
+
 - **`ask_question` gives a deployment the same switch, one layer up.** `AskOptions.linkEvidence`
   reaches the pipeline's option of the same name, so a server whose callers always pass `evidence`
   can have the hint built from it. Off by default, and the third test is the one that matters: with
