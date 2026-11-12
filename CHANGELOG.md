@@ -134,6 +134,17 @@ cannot be argued with.
   from `GH_TOKEN` rather than an argument, because this repository has a gate that reads for
   exactly that.
 
+### Changed
+- **The dev split is pinned to the base that produced its floors.** It carried floors and no base
+  pin: `served`, `corpus` and `baseFingerprint` existed for Mini-Dev only, so a dev run was
+  compared by *name* — and a name is the one thing an alias does not keep. All three are recorded
+  from `43198451668` (`deepseek-flash` on 1,532 of 1,532 cases, fingerprint `170d0beaa768594b` over
+  3 probes, probe set `ac0c70152695fb20`, corpus `db9e8a1aba23ddd9`), and the gate now refuses a dev
+  reading whose base answered as another model, whose fixed probes came back with other weights, or
+  whose questions are not the ones the floors were taken on. A declared subset of the split is left
+  uncompared out loud rather than failed for a corpus it never read — a dispatch with `limit` reads
+  a subset by design, and the digest of a subset is not the digest of the split.
+
 ### Measured
 - **The row-sample arm: +0.33pp for +31% of the prompt, and the schema layer is closed entirely.**
   `43198451668`, dev split, 1,532 scored questions, one call each, `served: deepseek-flash` on every
