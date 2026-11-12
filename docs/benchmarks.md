@@ -11241,8 +11241,46 @@ So a third arm was added and three are dispatched on the same 1,532 questions:
 | `inline+evidence+icl` | `inline+evidence` | the same few-shot shape the competitors use, on the hint |
 | `inline+evidence+icl-cot` | `inline+evidence+icl` | the same block with its steps |
 
-**Nothing in that table has a reading yet**, and this file will carry the three numbers and the two
-paired deltas when the run lands. What the round establishes is narrower and already checkable: the
-step block costs nothing to build, does not fire on 13.8% of BIRD's own statements, and on the arm
-where it was first tried it moved nothing — while the few-shot mechanism it decorates is worth
-+7pp there and has never been priced where the competition puts it.
+### The three arms, and the path they close
+
+Same split, same run, one call a case:
+
+| Arm | Passed | Accuracy | Examples | Mean prompt |
+|---|---|---|---|---|
+| `inline+evidence` | 933 / 1,532 | **60.90%** | — | 2,568 chars |
+| `inline+evidence+icl` | 945 / 1,532 | **61.68%** | 4,553 | 4,056 chars |
+| `inline+evidence+icl-cot` | 949 / 1,532 | **61.95%** | 4,553 | 4,090 chars |
+
+| Comparison | Delta | Discordant | p | CI | MDE |
+|---|---|---|---|---|---|
+| hint → hint + few-shot | **+0.78pp** | 72 : 84 | 0.379 | [−0.81, +2.38] | 2.28pp |
+| → + steps in each example | **+0.26pp** | 40 : 44 | 0.744 | [−0.91, +1.43] | 1.68pp |
+| retrieval → retrieval + steps (earlier) | **−0.78pp** | 53 : 41 | 0.256 | [−2.02, +0.46] | 1.77pp |
+
+**Every delta is inside its own interval.** The sign of the step block even flips between its two
+positions — negative on the retrieval arm, positive on the hint arm — which is what a null effect
+looks like when it is measured twice. Since the two arms differ only in the block (4553 examples
+against 4553, 34 characters of prompt), the honest verdict is **no measurable effect**, and the
+decision that follows is to close the path rather than to keep tuning it.
+
+What it closes is narrower than "few-shot does not work", and the narrower statement is the one the
+data supports:
+
+- **The mechanism is not worthless.** On the retrieval arm the neighbours were worth +7pp
+  (41% → 48%). What fails is the decoration: reading a gold statement back into eight labelled
+  steps adds nothing a model can use, on either arm.
+- **The competitors' gain cannot be borrowed by copying the shape.** OpenSearch-SQL credits
+  self-taught CoT — reasoning *generated* by a strong model, which can say why an aggregation is a
+  count. Reading the steps *back* from the statement cannot say that, by construction, and this is
+  the measurement of that limit rather than an argument about it.
+- **The wall is not in the prompt.** `inline+evidence+icl-cot` is 61.95% at one call; the four-call
+  `select-mixed` is 62.34% on this split. **Three more calls buy 0.4pp.** That is the number to
+  carry into the next round: the candidates are correlated, so sampling more of them is not a
+  lever, and no rearrangement of the prompt has moved this split by more than noise since the
+  chain was cut.
+
+A last observation that is a reading rather than a plan: these three arms and the four-call arm all
+land within 1.5pp of each other, and the four published no-training competitors are separated from
+us by 3 to 7. **The gap is not in how the question is worded to the model.** Naming what it *is* in
+requires the next measurement — an execution-time alignment layer, which is what OpenSearch-SQL's
+Refinement and Alignment modules actually do — rather than another prompt shape.
