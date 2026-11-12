@@ -11517,3 +11517,68 @@ The remaining steps, in the order the numbers support:
 3. **Pruning stays refused** until the linker's column recall passes the criterion, and the way to
    raise it is now known: the third RSL-SQL source, the model's own preliminary statement, is
    already in this pipeline on the repair and selection arms.
+
+### The two arms, measured: the hint is neutral, and the evidence does not reach the answer
+
+Run `43185842566`, dev split, 1,532 scored questions, one call per question, `served: deepseek-flash`.
+
+| arm | accuracy | delta vs parent | discordant | p | 95% CI | MDE |
+| --- | ---: | ---: | ---: | ---: | --- | ---: |
+| `inline+evidence` | 934/1,532 · **60.97%** | — | — | — | — | — |
+| `inline+evidence-nolink` | 942/1,532 · **61.49%** | **+0.52pp** | 48 : 56 | 0.493 | [−0.78, +1.83] | 1.86 |
+| `inline+evidence+link-evidence` | 937/1,532 · **61.16%** | **+0.20pp** | 40 : 43 | 0.826 | [−0.97, +1.36] | 1.67 |
+
+Both deltas are positive and both are far inside their own intervals. Read as verdicts: **the hint is
+not an asset, and it is not a liability either** — removing a list that is wrong two entries in three
+moves the score by eight cases in 1,532. And **raising the hint's recall by fourteen points does not
+move the answer** by more than three cases.
+
+That is not a failed experiment; it is the closure of an argument the last two rounds were building
+toward. The card shows every column of every table — `controls.schemaMissingTotal: 0` on this run,
+1,534 identifiers for 1,534. Under that condition the hint cannot add information; it can only
+**re-order a list the model has already been given**. Re-ordering a complete list is worth nothing,
+which is exactly what both arms measure, one from each side.
+
+So the hint becomes a lever only when it stops being a re-ordering and starts being a **filter** —
+and a filter is the pruned card, which the previous section refused at 52.8% strict recall. The two
+readings agree, and together they say the same thing from opposite ends:
+
+> **The schema layer is exhausted at both of its ends.** You cannot prune (the linker loses half the
+> required columns), and you cannot re-order (the model already sees everything). What is left is
+> what the model writes *given* a complete schema.
+
+### What RSL-SQL's prompt has that this one does not
+
+The refusal points at the linker, so the prompt templates were read next. `src/configs/Instruction.py`
+names its inputs five times, and one of them is not on this repository's card:
+
+> *The first three rows of values in the table: sample data for understanding the content and data
+> distribution of the table.*
+
+That is a **row sample**, not a column sample. This repository ships two column samplers (`profile`
+and MAC-SQL's `example`) and both were closed at a 2.22pp ceiling — but a column sample shows a
+value's domain, while three rows show **which values occur together**: `status = 'Banned'` in the
+same row as `currency = 'EUR'`, the pairing no per-column block can express. It is the one input in
+RSL-SQL's prompt that this repository has never put in front of a model, and unlike its other
+signature mechanism it needs no training and no second call.
+
+**Its price, measured before building it** — the rule this file has been paying for since the
+alignment layer. Three rows of every table the gold statement reads, rendered `table: col=val, …`,
+on the 1,534-question dev split:
+
+| form | characters per question (mean / median / p90) | gold literals present | questions with any |
+| --- | --- | ---: | ---: |
+| every column | 1,642 / 948 / 4,888 | 37.2% | 549 / 1,534 |
+| text columns only | **1,058 / 483 / 3,244** | 33.8% | 499 / 1,534 |
+
+Against a prompt of 676 tokens (≈2,700 characters) the narrow form is **+39% at the mean and +18% at
+the median**, and it makes the prompt's cost tail much fatter — p90 triples. The literal coverage is
+not the reason to build it: `values` already resolves 600 of the question's own literals at almost no
+cost. The reason is the one thing no column block can carry — **which values occur together**. A row
+sample is the only form in which `status='Banned'` and `currency='EUR'` appear on the same line.
+
+So the lever is real, its price is bounded, and the form to test is the narrow one with a per-question
+budget, not the whole-row dump. That test is the next round's, and the prediction is registered here
+before it runs: if the pairing hypothesis is right, the gain concentrates on questions whose gold
+literal the `values` block never found; if it is wrong, the arm lands inside ±1.7pp of its parent and
+the schema layer is closed entirely rather than at both ends.
