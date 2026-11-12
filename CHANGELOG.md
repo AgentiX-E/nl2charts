@@ -146,6 +146,15 @@ cannot be argued with.
   a subset by design, and the digest of a subset is not the digest of the split.
 
 ### Measured
+- **The audit turn on dev: two calls a question, and −0.85pp.** `43211382444`, dev, 1,532 scored,
+  `served: deepseek-flash` on every case: `inline+evidence` 943 (61.55%), `inline+evidence+audit`
+  930 (60.70%), **−13 cases**. Prompt tokens 676 → 1,611 (×2.4) for one extra call a question, and
+  every difficulty bucket moved the same way (simple 617→610, moderate 250→247, challenging 76→73).
+  The turn fired on 1,507 cases (98.4%), named a missing condition on **30** (2.0%) and rewrote 43
+  (2.8%) — the same shape as its Mini-Dev funnel at three times the sample — while the failure
+  buckets it targets got slightly worse (`values` 439→447, `columnCount` 126→130). The catalogue
+  already carried a dev reading of +1.2pp (p = 0.48) for this arm, so the two readings bracket zero;
+  the arm stays as the ablation reference for "ask the model to check its own conditions".
 - **The row-sample arm: +0.33pp for +31% of the prompt, and the schema layer is closed entirely.**
   `43198451668`, dev split, 1,532 scored questions, one call each, `served: deepseek-flash` on every
   case: `inline+evidence` 939 (61.29%), `inline+evidence+rows` 944 (61.62%), delta **+0.33pp**,

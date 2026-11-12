@@ -4908,6 +4908,47 @@ a statement makes the mistake visible to the model that made it. On this split t
 and the audit turn is the cleaner experiment: same model, same prompt, one question, and the answer
 is "nothing missing".
 
+### The same turn on the split that decides adoption: 2× the calls, and a sign flip
+
+The Mini-Dev reading above was `+1.01pp, p = 0.27, MDE 2.04` — inside its own interval, which the
+section already said. What was missing is the split with the sample to resolve it. `43211382444`,
+dev, 1,532 scored questions, `served: deepseek-flash` on every case:
+
+| | `inline+evidence` | `+audit` | change |
+|---|---:|---:|---:|
+| correct | 943 / 1,532 | **930 / 1,532** | **−13 cases** |
+| accuracy | **61.55%** | 60.70% | **−0.85pp** |
+| calls a case | 1.00 | 2.00 | ×2 |
+| prompt tokens a case | 676 | 1,611 | **×2.4** |
+| prompt characters a case | 2,568 | 2,568 | 0 |
+
+Every difficulty bucket moved the same way, which is what separates a small real loss from a
+stratum that got unlucky: simple 617 → 610, moderate 250 → 247, challenging 76 → 73.
+
+The funnel is the same shape at three times the sample, and slightly worse:
+
+| | Mini-Dev (496) | dev (1,532) |
+|---|---:|---:|
+| turns fired | 488 (98.4%) | 1,507 (98.4%) |
+| missing conditions named | 24 (4.9%) | **30 (2.0%)** |
+| statements rewritten | 19 (3.9%) | 43 (2.8%) |
+
+And the failure buckets the turn exists to move moved the other way: `values` 439 → 447,
+`columnCount` 126 → 130, `execution` 24 → 25. **One extra call per question, 2.4× the prompt
+tokens, and the bucket it targets gets slightly worse.**
+
+The catalogue carried a dev reading of `+1.2pp (p = 0.48)` for this arm before today. Two dev
+readings of the same lever now bracket zero — +1.2 and −0.85 — which is what "no effect" looks
+like when it is measured twice instead of once. The arm stays as the ablation reference for
+"ask the model to check its own conditions", and it is not a candidate.
+
+**This is the second time in this file that a Mini-Dev reading did not survive the split.** On
+Mini-Dev the same arm read +1.01pp paired (MDE 2.04) in its declared run, and +2.62pp unpaired in
+the committed artifact (286 against 273 of 496, a different run of the same split); on 1,532
+questions it reads −0.85pp. The parent arm's own scores across three dev runs are 934, 939 and
+943 — a 0.59pp span on an unchanged prompt. A 496-question split has an MDE near 2pp and cannot
+promote a lever of that size; it can only nominate one for the split that can.
+
 ## The floor is enforced, not remembered
 
 A benchmark that only produces a report gets read once. The BIRD arms have a
