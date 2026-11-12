@@ -257,3 +257,37 @@ describe('a contract error keeps its code', () => {
     expect((payload as { message: string }).message).toContain('NL2C_E_LLM_REJECTED');
   });
 });
+
+describe('the hint the server sends', () => {
+  /** The user turn's first line, which is where the linker's hint is printed. */
+  const hintOf = (request: LlmRequest): string => {
+    const user = request.messages.find((message) => message.role === 'user');
+    return (user?.content ?? '').split('\n')[0] ?? '';
+  };
+
+  it('does not read the caller evidence unless the deployment asked for it', async () => {
+    // The default. A server whose hint started reading `evidence` because a caller supplied it
+    // would answer one question two different ways depending on a switch nobody flipped.
+    const provider = scripted(['SELECT count(*) FROM greetings']);
+    await askQuestion(
+      { runner, ask: { provider } },
+      { question: 'How many rows are there?', schema, evidence: 'The word column holds the greeting.' },
+    );
+    expect(hintOf(provider.requests[0] as LlmRequest)).toBe('No column matched; use the schema above.');
+  });
+
+  it('names a column the evidence mentions when the deployment turned it on', async () => {
+    const provider = scripted(['SELECT count(*) FROM greetings']);
+    await askQuestion(
+      { runner, ask: { provider, linkEvidence: true } },
+      { question: 'How many rows are there?', schema, evidence: 'The word column holds the greeting.' },
+    );
+    expect(hintOf(provider.requests[0] as LlmRequest)).toContain('greetings.word');
+  });
+
+  it('behaves as before when the switch is on and the request carries no evidence', async () => {
+    const provider = scripted(['SELECT count(*) FROM greetings']);
+    await askQuestion({ runner, ask: { provider, linkEvidence: true } }, { question: 'How many rows are there?', schema });
+    expect(hintOf(provider.requests[0] as LlmRequest)).toBe('No column matched; use the schema above.');
+  });
+});

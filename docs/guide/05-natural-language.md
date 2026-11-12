@@ -195,6 +195,31 @@ Measured on 25 questions over the benchmark fixture (recall@3): name 20%,
 +alias 56%, +value 84%. The value profiler is worth 28pp on its own. See
 [benchmarks](../benchmarks.md).
 
+### Letting the linker read the evidence
+
+The hint the pipeline prints above the question (`Likely columns: …`) is built
+from the question alone. If you already have a sentence of context about the
+question — the dataset's hint, a glossary line, a note from whoever asked — the
+linker can read that too:
+
+```ts
+const pipeline = createPipeline({
+  provider,
+  linkEvidence: true,
+  prompt: { dialect: 'SQLite', evidence: 'The units on a line are stored in qty.' },
+});
+```
+
+The switch is off by default, and the reason is comparison rather than caution:
+turning it on changes the hint, so a measurement taken before it and one taken
+after it are measurements of two prompts. Turn it on when you have evidence and
+are measuring from a clean baseline.
+
+What it buys, on 1,534 BIRD dev questions with no model calls: the hint covers
+41.5% of the columns the answer uses when built from the question, and 55.2%
+when it also reads the evidence. The evidence is not a paraphrase of the
+question — read alone it covers 48.1%, more than the question does.
+
 ## The pipeline, including repair
 
 ```ts
