@@ -11434,6 +11434,19 @@ uses**, so any rule that keeps only what the linker names can keep at most 46.75
 Pruning is not a lever that was tuned wrong; it is a lever behind a linker that has to get better
 first, and the card is 100% covered today precisely because nothing prunes it.
 
+The refusal reproduces on the dev split (1,452 questions with a parseable gold column set, all
+eleven databases, values supplied to the third recaller):
+
+| layer | Mini-Dev | dev |
+| --- | ---: | ---: |
+| gold **tables** all kept | 98.11% | **98.35%** |
+| gold **columns** all kept | 52.84% | **55.79%** |
+| gold columns the linker names | 46.75% | **49.41%** |
+| columns kept by the widest rule | 38.9% | 38.5% |
+
+Three points of difference on 1,452 questions, and the same conclusion at both sizes: the ceiling is
+the linker, not the pruning rule.
+
 ### What RSL-SQL actually does, read from its source
 
 `src/bid_schema_linking.py` in [Laqcce-cao/RSL-SQL](https://github.com/Laqcce-cao/RSL-SQL) is the
@@ -11456,7 +11469,8 @@ repository never used it.**
 ### The hint, measured as an asset
 
 The hint is the line `Likely columns: …` placed above the question. On 500 Mini-Dev questions, with
-the linker the prompt uses (`topK` 12, name/alias/value):
+the linker the prompt uses (`topK` 12, name/alias/value) — precision can only be measured against a
+gold statement, so this table is the sample:
 
 | hint built from | precision | recall | columns named | characters |
 | --- | ---: | ---: | ---: | ---: |
@@ -11469,6 +11483,21 @@ are columns the answer uses** — a list that is wrong about two entries in thre
 question, on every arm this repository has ever run. And the second row says the fix is not to
 sharpen the linker: it is to give it the text the model is already reading, which recovers 16 points
 of recall at the same twelve slots and at no extra precision cost.
+
+Both rows reproduce on the split that decides adoption. On the 1,534-question dev split (7,672 gold
+columns, no model calls):
+
+| hint built from | column recall | questions fully covered |
+| --- | ---: | ---: |
+| the question, `topK` 12 (shipped) | 41.45% | 10.72% |
+| the question, `topK` 30 | 47.11% | 15.03% |
+| question + evidence, `topK` 12 | **55.20%** | 20.92% |
+| question + evidence, `topK` 30 | 66.50% | 33.33% |
+| evidence alone, `topK` 30 | 48.10% | 17.39% |
+
+The last row is the one that rules out a confound: the evidence is not a hint about *this* question
+that the question already carries, it is a second source. Read alone it covers 48.10% of the gold
+columns — more than the question does.
 
 Which raises the question the file has never asked: **is the hint worth having at all?** Every arm
 in `eval/bird/run.ts` sets `linking: true`. There is no arm with it off. Two arms are added here —
