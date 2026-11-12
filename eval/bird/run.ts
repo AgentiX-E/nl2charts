@@ -1486,6 +1486,11 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
  * experiment.
  */
 export const COMPARISONS: readonly (readonly [string, string, string])[] = [
+  // The audit turn was dispatched to dev twice without a declared pair, so both readings were
+  // printed as two accuracies and the interval between them was left to the reader. 943 / 930
+  // here, and the Mini-Dev run that first promoted it was +1.01pp against a 2.04pp MDE. Declaring
+  // the pair costs nothing and turns the next dispatch into a paired test.
+  ['inline+evidence', 'inline+evidence+audit', 'the condition audit as a second call: fired on 1,507 of 1,532 dev cases, named a missing condition on 30 and rewrote 43, and scored below its parent'],
   ['inline+evidence', 'select', 'selection over three samples versus a single sample: four calls instead of one'],
   ['inline+evidence', 'select5', 'selection over five samples versus a single sample: six calls instead of one'],
   ['inline+evidence', 'values', 'value grounding on top of the hint: does instance knowledge add anything the hint lacks'],
