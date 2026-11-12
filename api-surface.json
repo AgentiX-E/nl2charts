@@ -372,6 +372,7 @@
     "type FileCacheOptions"
   ],
   "chart": [
+    "CHART_CUES",
     "LINT_RULES",
     "MARKS",
     "compileToECharts",
@@ -382,13 +383,25 @@
     "isRenderable",
     "lint",
     "profileRows",
+    "readCues",
+    "recommendChart",
     "refFor",
+    "toChartIR",
     "type Candidate",
+    "type ChartChoice",
+    "type ChartIROptions",
+    "type Cue",
+    "type CueKind",
+    "type CueRule",
     "type EChartsOption",
     "type FieldProfile",
     "type LintIssue",
     "type LintRule",
     "type MarkSpec",
+    "type RecommendOptions",
+    "type RecommendableMark",
+    "type Recommendation",
+    "type Refusal",
     "type Severity"
   ],
   "mcp": [

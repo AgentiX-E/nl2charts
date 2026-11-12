@@ -7,6 +7,45 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **The chart is chosen from the question, and every refusal says what was missing.**
+  `enumerateCandidates` reads a profile and nothing else, so it could only ever
+  suggest five of the contract's twenty-two series types — bar, line, pie,
+  scatter, heatmap — and the other seventeen were reachable by hand only. That is
+  a capability gap in a package whose selling point is "22 types": the compiler
+  could draw all of them and the assistant could name five. `recommendChart`
+  closes it without a model, because the preconditions of the missing marks are
+  visible in column types: a boxplot needs five numbers per row, a candlestick
+  four on a date axis, a gauge exactly one and no category, a radar three and a
+  named row. Eleven marks are now choosable, and each choice carries the counted
+  facts that produced it — three points for the first mark a cue names, two for
+  the rest, plus the structural prior — so `score: 5` can be recomputed from the
+  reasons printed next to it instead of trusted. Two facts travel with every
+  answer: `cues`, the phrases that fired (`trend`, `share`, `distribution`,
+  `volatility`, eleven in all, each also with Chinese spellings, because a product
+  that answers only English questions has a speaking defect), and `refused`, one
+  sentence per considered mark saying what the result set lacks
+  (`a boxplot reads five numbers per row and this result has 1`). A rejection that
+  is not reported is a wrong choice with no trace. `toChartIR` turns the winner
+  into a contract-valid IR with the question as its title and the mark in its alt
+  text, and orders a candlestick tuple as `[open, close, low, high]` rather than
+  "the first four numbers", which would draw a picture whose shape depends on the
+  column order of the result set.
+  **Measured:** 45 tests, `recommend.ts` at 100/100/100/100, chart package
+  100.00 statements / 97.79 branches / 100.00 functions, whole suite 4,460 passing
+  with no skips against a real PG16 and MariaDB 10.11. The budget moves
+  10,855 -> 16,752 B gzip over both module formats, and the ceiling is raised to
+  17,600 with the reason recorded in `budgets.json`; the old ceiling had 645 B of
+  headroom, less than the smallest form this layer could take.
+  **Not claimed:** no Text2Vis, nvBench or VisEval reading is behind this. The
+  chart-choice numbers this repository has quoted came from harnesses that are not
+  in this tree, so they cannot be reproduced from it, and this entry adds a
+  behaviour with a fixture rather than a benchmark score. Two branches were
+  deleted rather than covered on the way in — a third sort key that could never
+  fire because `PREFERENCE` already breaks every tie, and a `maxCategories` option
+  that nothing read — and the guards `encodingFor` would otherwise have needed are
+  casts with the argument written down, because every field they read was proven
+  present by the admission that selected the mark.
+
 - **Three stored rows per table: the input RSL-SQL's prompt names five times and this one never
   sent.** A column sample shows a value's domain; three rows show which values occur *together* —
   `status = 'Banned'` on the same line as `currency = 'EUR'` — and no per-column block can carry a
