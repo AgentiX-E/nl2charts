@@ -419,6 +419,27 @@ describe('prompt composition', () => {
     expect(buildSqlPrompt('q', schema, { definitions: '   ' })).not.toContain('Semantics:');
     expect(buildSqlPrompt('q', schema, {})).not.toContain('Semantics:');
   });
+
+  it('puts stored rows first among the data blocks, under the schema they describe', () => {
+    const prompt = buildSqlPrompt('q', schema, {
+      rowSamples: 'orders: id | status\n1 | shipped',
+      definitions: '- orders: one row per order.',
+      evidence: 'Data profile:',
+    });
+    expect(prompt).toContain('Rows in this database:\norders: id | status\n1 | shipped');
+    // After the schema: the rows are a property of the tables above them. Before the evidence: a
+    // block of stored values that arrived after a hint would read as counter-evidence to it.
+    expect(prompt.indexOf('Rows in this database:')).toBeGreaterThan(prompt.indexOf('Schema:'));
+    expect(prompt.indexOf('Rows in this database:')).toBeLessThan(prompt.indexOf('Evidence:'));
+  });
+
+  it('prints no rows block when the caller rendered nothing', () => {
+    // A caller whose tables held no textual column renders the empty string rather than omitting
+    // the field, so the heading must be owned here: a heading with nothing under it would read as
+    // a table that stores no rows.
+    expect(buildSqlPrompt('q', schema, { rowSamples: '   ' })).not.toContain('Rows in this database:');
+    expect(buildSqlPrompt('q', schema, {})).not.toContain('Rows in this database:');
+  });
 });
 
 describe('schema card quoting', () => {

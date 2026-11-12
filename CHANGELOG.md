@@ -134,6 +134,19 @@ cannot be argued with.
   from `GH_TOKEN` rather than an argument, because this repository has a gate that reads for
   exactly that.
 
+### Measured
+- **The row-sample arm: +0.33pp for +31% of the prompt, and the schema layer is closed entirely.**
+  `43198451668`, dev split, 1,532 scored questions, one call each, `served: deepseek-flash` on every
+  case: `inline+evidence` 939 (61.29%), `inline+evidence+rows` 944 (61.62%), delta **+0.33pp**,
+  discordant 52 : 57, p = 0.702, 95% CI [−1.01, +1.66], MDE 1.91 — and the price is a prompt of
+  2,568 → 3,144 characters and 676 → 887 tokens (+22.4% and +31.2%). The number that decides it is
+  not the interval but the parent's own drift: the same unchanged arm scored 934 on `43185842566`
+  and 939 here, **+0.33pp of run-to-run resampling, exactly the size of the effect**. The
+  pre-registered prediction therefore fails, and the schema layer closes entirely rather than at
+  both of its ends — the hint could be dismissed because it only re-ordered a complete card, but a
+  row sample is text the prompt did not contain, so nothing is left to add at that layer. The arm
+  stays in the catalogue as the ablation reference that closed it.
+
 ### Fixed
 - **A case that never produced a result set no longer claims a verdict.** The five no-answer
   branches (model timeout, guard refusal, empty pool, engine error, unusable reply) each wrote

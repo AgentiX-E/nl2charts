@@ -5612,30 +5612,40 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
    * the work for text that does not change between questions, and it would also make the block a
    * different thing on two runs of the same arm if a driver ever returned rows in another order.
    */
+  // Every database gets an entry before any arm is looked at, and every table gets one when the
+  // rows are read. Both exist so the read below is total: a `?? new Map()` fallback there would be
+  // a branch no run can take, and an untestable guard is the thing this file keeps removing.
   const rowCache = new Map<string, Map<string, readonly (readonly unknown[])[]>>();
+  for (const db of schemas.keys()) rowCache.set(db, new Map());
   // `settings.arms` holds names, including an A/A copy's `#2` suffix, so the arm is looked up here
   // rather than assumed: a filter over strings would compare `undefined` to `undefined` and load
-  // nothing while reporting that it had.
-  const rowArms = settings.arms
-    .map((name) => ARMS.find((arm) => arm.name === name.split('#')[0]))
-    .filter((arm): arm is Arm => arm?.rowSamples !== undefined);
+  // nothing while reporting that it had. The row count travels with the arm that asked for it, so
+  // nothing below reads `rowSamples` a second time and decides again what `undefined` means.
+  const rowArms = settings.arms.flatMap((name) => {
+    const arm = ARMS.find((candidate) => candidate.name === name.split('#')[0]);
+    return arm?.rowSamples === undefined ? [] : [{ arm, rows: arm.rowSamples }];
+  });
   if (rowArms.length > 0) {
-    const wanted = Math.max(...rowArms.map((arm) => arm.rowSamples ?? 0));
+    const wanted = Math.max(...rowArms.map((entry) => entry.rows));
     for (const [db, schema] of schemas) {
-      const perTable = new Map<string, readonly (readonly unknown[])[]>();
+      const perTable = rowCache.get(db) as Map<string, readonly (readonly unknown[])[]>;
       for (const table of schema) {
         const columns = sampleableColumns(table).map((column) => column.name);
-        if (columns.length === 0) continue;
         const quote = (name: string): string => `"${name.replace(/"/g, '""')}"`;
-        const statement = `SELECT ${columns.map(quote).join(', ')} FROM ${quote(table.table)} LIMIT ${String(wanted)}`;
+        // A table with no textual column stores nothing: three numbers say no more than the type
+        // does, and asking the engine for them would be a query whose answer is discarded. The
+        // table still gets an entry, so the renderer reads a block rather than a missing key.
+        //
         // A table the engine refuses comes back with no rows, which is a table with no sample
         // rather than an error: the block is an extra, and an arm whose prompt is shorter because
-        // one view is unreadable is still a prompt the run can score. Storing the empty result
-        // rather than skipping the table is what keeps this loop free of a branch nothing can test.
-        const result = await io.oracle.run(db, statement);
-        perTable.set(table.table, result.rows);
+        // one view is unreadable is still a prompt the run can score.
+        perTable.set(
+          table.table,
+          columns.length === 0
+            ? []
+            : (await io.oracle.run(db, `SELECT ${columns.map(quote).join(', ')} FROM ${quote(table.table)} LIMIT ${String(wanted)}`)).rows,
+        );
       }
-      rowCache.set(db, perTable);
     }
   }
 
@@ -5648,11 +5658,11 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
    */
   const rowsFor = (arm: Arm, question: BirdQuestion): string | undefined => {
     if (arm.rowSamples === undefined) return undefined;
-    // Absent means the arm has the switch and the run loaded nothing, which cannot happen: the
-    // cache is filled for every database when any arm asks. The fallback exists so the read is
-    // total, not because there is a case behind it.
-    const perTable = rowCache.get(question.db_id) ?? new Map<string, readonly (readonly unknown[])[]>();
-    const schema = schemas.get(question.db_id) ?? [];
+    // Both reads are total by construction, and the casts say it once instead of twice: `schemas`
+    // throws for a database its manifest has no entry for, and every database in `schemas` has a
+    // cache entry. The alternative was two `??` fallbacks, neither of which any run can reach.
+    const schema = schemas.get(question.db_id) as SchemaTable[];
+    const perTable = rowCache.get(question.db_id) as ReadonlyMap<string, readonly (readonly unknown[])[]>;
     const named = linkedTables(question.question, schema, SHIPPED_RECALLERS);
     const seeded = schema.filter((table) => named.has(table.table.toLowerCase()));
     // A linker that names only numeric tables leaves the block with nothing to show, and the tables
@@ -5662,7 +5672,7 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
     const chosen = seeded.some((table) => sampleableColumns(table).length > 0) ? seeded : schema.slice(0, 3);
     // An empty render is passed through rather than turned into `undefined`: the prompt builder
     // already refuses to print an empty block, and a second guard here would be a second rule.
-    return renderRowSamples(chosen, (table) => perTable.get(table) ?? [], {
+    return renderRowSamples(chosen, (table) => perTable.get(table) as readonly (readonly unknown[])[], {
       rows: arm.rowSamples,
       budget: ROW_SAMPLE_BUDGET,
     });

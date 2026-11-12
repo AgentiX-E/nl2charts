@@ -4027,4 +4027,79 @@ describe('the arm that shows three stored rows', () => {
     expect(result.code).toBe(0);
     expect(result.requests.some((request) => request.prompt.includes('Rows in this database:'))).toBe(false);
   });
+
+  it('shows the text table and no rows for the table that has only numbers', async () => {
+    // `orders` in this fixture is three integer columns, so there is nothing to store that the type
+    // does not already say. It must not appear as an empty row block: "orders:" followed by nothing
+    // reads as a table that stores no rows, which is a claim about the data.
+    const result = await run({ plan: { first: correct }, env: { BIRD_ARMS: 'inline+evidence+rows' } });
+    expect(result.code).toBe(0);
+    const blocks = result.requests
+      .map((request) => request.prompt.slice(request.prompt.indexOf('Rows in this database:')))
+      .map((tail) => tail.slice(0, tail.indexOf('\n\n')));
+    expect(blocks.some((block) => block.includes('items: name=pen'))).toBe(true);
+    expect(blocks.some((block) => block.includes('orders:'))).toBe(false);
+  });
+});
+
+describe('the arm that prints stored values on the column line', () => {
+  it('shows the domain of the bounded column and leaves the numbers alone', async () => {
+    // The samples arm attaches the profile to the card itself rather than as a separate block, so
+    // the assertion is on the card syntax: `[pen|cup]` after the type. A run that built the profile
+    // and never attached it would send the parent's card byte for byte, which is the failure this
+    // file exists to catch.
+    const result = await run({ plan: { first: correct }, env: { BIRD_ARMS: 'inline+evidence+samples' } });
+    expect(result.code).toBe(0);
+    const cards = result.requests.filter((request) => request.prompt.includes('[pen|cup]'));
+    expect(cards.length).toBeGreaterThan(0);
+    // `price` is real-valued: a sampler that attached every column would put numbers here.
+    expect(result.requests.some((request) => request.prompt.includes('[1.5|3.25]'))).toBe(false);
+  });
+});
+
+describe('the arm whose card is cut to the columns the answer names', () => {
+  it('drops a column the gold statement does not read', async () => {
+    // An oracle arm, kept as the ceiling on what a perfect linker is worth. On this fixture the
+    // question `What is the total price of every item?` reads `items.price` and nothing else, so a
+    // card that kept `name` would be the parent's card under another name.
+    const result = await run({ plan: { first: correct }, env: { BIRD_ARMS: 'inline+evidence+card-gold' } });
+    expect(result.code).toBe(0);
+    const narrowed = result.requests.filter(
+      (request) => request.prompt.includes('items(') && request.prompt.includes('price') && !request.prompt.includes('name'),
+    );
+    expect(narrowed.length).toBeGreaterThan(0);
+  });
+});
+
+describe('the arm that draws three samples and selects among them', () => {
+  it('records the selector\'s own funnel beside the samples it drew', async () => {
+    // The selection arm is the four-call tier, and its cost is the number this file can check
+    // without a leaderboard: three samples plus the call that chooses. A run whose selector was
+    // never counted would publish a delta that paid for three samples and one decision.
+    const result = await run({ plan: { first: correct }, env: { BIRD_ARMS: 'select' } });
+    expect(result.code).toBe(0);
+    // The selector's own instruction reached the endpoint once per case: an arm that drew three
+    // samples and never asked which one answers would send the generation prompt only, and its
+    // four-call price would be a declaration rather than a measurement.
+    const selectors = result.requests.filter((request) =>
+      request.prompt.includes('You choose which candidate statement answers the question.'),
+    );
+    expect(selectors.length).toBe(QUESTIONS.length);
+    const arm = (result.report.arms as readonly { arm: string; calls: { mean: number; max: number } }[])[0];
+    expect(arm?.calls.mean).toBe(4);
+    expect(arm?.calls.max).toBe(4);
+  });
+});
+
+describe('the arm whose evidence is read out of the database', () => {
+  it('sends the profile it built over the question set', async () => {
+    // The dataset hint is empty in this fixture, so a block that appears here can only be the one
+    // `profileDatabase` produced. The assertion is on the request for the same reason the rows test
+    // is: a declared mechanism that never reaches the prompt has shipped in this repository before.
+    const result = await run({ plan: { first: correct }, env: { BIRD_ARMS: 'synthetic' } });
+    expect(result.code).toBe(0);
+    const withEvidence = result.requests.filter((request) => request.prompt.includes('Evidence: Data profile:'));
+    expect(withEvidence.length).toBe(QUESTIONS.length);
+    expect(withEvidence[0]?.prompt).toContain('items.name');
+  });
 });

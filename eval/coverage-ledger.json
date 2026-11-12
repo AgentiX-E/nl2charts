@@ -4,8 +4,8 @@
   "tolerancePp": 0.2,
   "measuredAt": "2026-11-12",
   "totals": {
-    "lines": 99.51,
-    "statements": 99.51,
+    "lines": 99.53,
+    "statements": 99.53,
     "functions": 100,
     "branches": 98.31
   },
@@ -335,10 +335,10 @@
       "branches": 100
     },
     "eval/bird/run.ts": {
-      "lines": 99.44,
-      "statements": 99.44,
+      "lines": 99.47,
+      "statements": 99.47,
       "functions": 100,
-      "branches": 95.97
+      "branches": 96.06
     },
     "eval/bird/samples.ts": {
       "lines": 100,
