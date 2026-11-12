@@ -30,7 +30,7 @@ cannot be argued with.
   text, and orders a candlestick tuple as `[open, close, low, high]` rather than
   "the first four numbers", which would draw a picture whose shape depends on the
   column order of the result set.
-  **Measured:** 45 tests, `recommend.ts` at 100/100/100/100, chart package
+  **Measured:** 47 tests, `recommend.ts` at 100/100/100/100, chart package
   100.00 statements / 97.79 branches / 100.00 functions, whole suite 4,460 passing
   with no skips against a real PG16 and MariaDB 10.11. The budget moves
   10,855 -> 16,752 B gzip over both module formats, and the ceiling is raised to
