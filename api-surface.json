@@ -278,6 +278,7 @@
     "type FirstContact",
     "type FormatProfile",
     "type Grounding",
+    "type GroundingMatch",
     "type GroundingRefusal",
     "type GroundingRefusalReason",
     "type GroundingSubstitution",

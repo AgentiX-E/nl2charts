@@ -7,6 +7,32 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **The second reading the data can prove: the same day, written the way the column writes it.**
+  `ground.ts` settled case and called everything else `absent`, so a statement that wrote
+  `'9/9/2019'` against a column storing `2019-09-09` was reported as a literal the column does not
+  contain. It does contain it, in one notation. The rule now reads a literal as a calendar day and
+  rewrites it to the spelling the column stores, with three refusals that are the whole of its
+  safety: a numeric date that could be read day-first or month-first (`3/4/2019` and nothing in the
+  statement settles it), a day the calendar does not have (`2019-02-30`, checked against month
+  length including the century exception), and a precision that differs (a day is not an instant, so
+  a timestamp column is never matched). `GroundingSubstitution.match` reports which of the two rules
+  found the value, so a reading can tell the edits apart. Priced offline at zero model calls by
+  executing the archive's own 496 Mini-Dev statements against the cached databases: **2 changed, 2
+  repaired, 0 broken, +0.40pp**. Both are one database, two date columns. `ground.ts` reaches
+  100/95.95/100/100 across the four dimensions; 33 new tests, each one a way the rule could be
+  wrong. `GroundingMatch` is exported, so `api-surface.json` moves 447 → 448.
+
+- **The failure class everyone reads as "literals", decomposed, and a bound on what a rule can
+  reach.** On `inline+evidence` over 496 Mini-Dev questions, 223 fail and 160 of those are filed
+  under `values` — which reads as a literal defect and is not one. Reading each case for the
+  syntactic shape that separates it from its gold: **60** read different tables, **41** use a
+  different aggregate, 30 read fewer tables, 25 carry an `distinct` the gold does not, 12 are missing
+  one, and not one is a literal. Three mechanical checks have now been priced on the same questions
+  — the cap (shipped, +0.40pp), the calendar (+0.40pp) and top-K absence (19 failing cases name a
+  rank and carry no `limit`, of which **6** have a gold with a `limit`; ceiling +1.21pp, not
+  shipped). `docs/benchmarks.md` records the decomposition, the offline method, and the reading it
+  forces: the deterministic layer is close to exhausted, and the `select` arm's own `agreement` of
+  **0.901** says why the selector's 6.1pp of loss has resisted every rule applied to it.
 - **The few-shot shape two leading no-training systems share, implemented in both positions.**
   `packages/ai/src/sql-like.ts` reads a statement back into the eight labelled steps that produced
   it, and three arms carry it: `inline+icl-cot` (the same neighbours as `inline+icl`, each block

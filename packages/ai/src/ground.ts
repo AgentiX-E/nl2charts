@@ -60,6 +60,15 @@ export type ColumnValues = (query: ColumnQuery) => Promise<readonly string[] | u
 /** Why a literal was left as the model wrote it. */
 export type GroundingRefusalReason = 'unknown' | 'absent' | 'ambiguous';
 
+/**
+ * How a literal was resolved to the value the column stores.
+ *
+ * `case` is the same spelling in another case. `format` is the same calendar day in another
+ * notation, which is a different claim: the literal and the value are not equal ignoring case, and
+ * only the column's own values could say which of the two spellings it stores.
+ */
+export type GroundingMatch = 'case' | 'format';
+
 /** One literal replaced, and the spelling it was replaced with. */
 export interface GroundingSubstitution {
   /** As the model wrote it, unescaped. */
@@ -68,6 +77,8 @@ export interface GroundingSubstitution {
   readonly column: string;
   /** The spelling the column stores. */
   readonly value: string;
+  /** Which rule found it, so a reading can tell the two edits apart. */
+  readonly match: GroundingMatch;
 }
 
 /** One literal that was left alone, with the reason. */
@@ -90,6 +101,15 @@ interface Region {
   readonly end: number;
   readonly kind: 'comment' | 'literal' | 'quoting';
 }
+
+/**
+ * A date a literal could be, in the three shapes the calendar rule reads, and nothing else.
+ *
+ * Anchored at both ends and given no alternative branches: a literal with a time of day, a bare
+ * year, or a trailing qualifier does not match, and a pattern that matched a prefix would answer
+ * about a different day than the one the statement compares.
+ */
+const CALENDAR = /^\s*(?:(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})|(\d{1,2})[-/](\d{1,2})[-/](\d{4}))\s*$/;
 
 const BARE = /^[A-Za-z_][A-Za-z0-9_$]*/;
 
@@ -267,14 +287,111 @@ function skipSpace(sql: string, from: number): number {
   return index;
 }
 
+/**
+ * What the data said about one site.
+ *
+ * A discriminated pair rather than three optional fields, because the two outcomes carry different
+ * facts and the caller needs both of them: a match has a spelling and the rule that found it, a
+ * refusal has a reason. Written as optional fields, every read site would need a fallback for the
+ * field the other branch cannot have, and `match ?? 'case'` is a branch no input can reach —
+ * a fallback that reports a rule that never ran rather than a case that never happened.
+ */
+type Decision =
+  | { readonly kind: 'match'; readonly value: string; readonly match: GroundingMatch }
+  | { readonly kind: 'refuse'; readonly reason: GroundingRefusalReason };
+
 /** One spelling, ignoring case, or the refusal that says why there is not one. */
-function decide(values: readonly string[] | undefined, literal: string): { readonly value?: string; readonly reason?: GroundingRefusalReason } {
-  if (values === undefined) return { reason: 'unknown' };
+function decide(values: readonly string[] | undefined, literal: string): Decision {
+  if (values === undefined) return { kind: 'refuse', reason: 'unknown' };
   const lower = literal.toLowerCase();
   const spellings = new Set(values.filter((value) => value.toLowerCase() === lower));
-  if (spellings.size === 0) return { reason: 'absent' };
-  if (spellings.size > 1) return { reason: 'ambiguous' };
-  return { value: [...spellings][0] as string };
+  if (spellings.size > 1) return { kind: 'refuse', reason: 'ambiguous' };
+  if (spellings.size === 1) return { kind: 'match', value: [...spellings][0] as string, match: 'case' };
+  // No spelling matches ignoring case. The second reading is the calendar: the same day written
+  // the way the column writes it. It is tried only after the case rule has failed, so a literal the
+  // column stores exactly keeps the cheaper reason, and only a pure date is read this way — see
+  // `calendarDay` for the precisions it refuses.
+  const day = calendarDay(literal);
+  if (day === undefined) return { kind: 'refuse', reason: 'absent' };
+  const sameDay = new Set(values.filter((value) => {
+    const stored = calendarDay(value);
+    return stored !== undefined && stored.year === day.year && stored.month === day.month && stored.day === day.day;
+  }));
+  if (sameDay.size > 1) return { kind: 'refuse', reason: 'ambiguous' };
+  if (sameDay.size === 1) return { kind: 'match', value: [...sameDay][0] as string, match: 'format' };
+  return { kind: 'refuse', reason: 'absent' };
+}
+
+/** One calendar day as the three numbers that name it. */
+interface CalendarDay {
+  readonly year: number;
+  readonly month: number;
+  readonly day: number;
+}
+
+/**
+ * A year-first date, or a numeric date whose reading is not in doubt, and nothing else.
+ *
+ * The pattern is deliberately intolerant. It accepts `2019-09-09`, `2019/9/9`, `2019.9.9` and the
+ * numeric `9/9/2019`, and it refuses every other shape a literal could have — a bare year, a
+ * time of day, a partial date, an ISO timestamp. A timestamp is refused because a day and an
+ * instant are different questions: writing `'2019-09-09 08:00:00'` into a statement that asked
+ * about a day narrows it to one row, and writing `'2019-09-09'` into a comparison against a
+ * timestamp column matches nothing.
+ *
+ * The numeric form is the one that carries a real ambiguity, and the rule is to read it only when
+ * the numbers settle it: a first component above 12 can only be a day, a second component above 12
+ * can only be a month, and two equal components name the same day either way. `3/4/2019` is left
+ * unread, and the literal is reported as absent — the same answer a column that stores neither
+ * spelling would give, which is the honest one when the statement never said which it meant.
+ *
+ * Month and day ranges are checked, including the length of the month, because `2019-13-01` parses
+ * as three numbers and is not a date; without the check it would be rewritten against a column that
+ * stores `2019-01-13`.
+ */
+function calendarDay(text: string): CalendarDay | undefined {
+  const match = CALENDAR.exec(text);
+  if (match === null) return undefined;
+  const yearFirst = match[1] !== undefined;
+  const first = Number(yearFirst ? match[1] : match[4]);
+  const second = Number(yearFirst ? match[2] : match[5]);
+  const third = Number(yearFirst ? match[3] : match[6]);
+  let year: number;
+  let month: number;
+  let day: number;
+  if (yearFirst) {
+    year = first;
+    month = second;
+    day = third;
+  } else if (first > 12) {
+    day = first;
+    month = second;
+    year = third;
+  } else if (second > 12) {
+    month = first;
+    day = second;
+    year = third;
+  } else if (first === second) {
+    month = first;
+    day = second;
+    year = third;
+  } else {
+    return undefined;
+  }
+  if (month < 1 || month > 12) return undefined;
+  if (day < 1 || day > daysInMonth(year, month)) return undefined;
+  return { year, month, day };
+}
+
+/** A month's length, so that `2019-02-30` is refused rather than rewritten. */
+function daysInMonth(year: number, month: number): number {
+  if (month === 2) return isLeapYear(year) ? 29 : 28;
+  return month === 4 || month === 6 || month === 9 || month === 11 ? 30 : 31;
+}
+
+/** The Gregorian rule, including the century exception a rule that only knew `% 4` would miss. */
+function isLeapYear(year: number): boolean {
+  return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
 }
 
 /** One site's decision, turned into the edit list the statement is rebuilt from. */
@@ -288,13 +405,18 @@ function finish(
   const edits: { readonly start: number; readonly end: number; readonly text: string }[] = [];
   for (const [index, site] of sites.entries()) {
     const decision = decide(values[index], site.literal.value);
-    if (decision.value === undefined) {
-      refused.push({ literal: site.literal.value, column: site.column, reason: decision.reason ?? 'absent' });
+    if (decision.kind === 'refuse') {
+      refused.push({ literal: site.literal.value, column: site.column, reason: decision.reason });
       continue;
     }
     // The column stores exactly this spelling already: nothing to edit, and nothing to report.
     if (decision.value === site.literal.value) continue;
-    substitutions.push({ literal: site.literal.value, column: site.column, value: decision.value });
+    substitutions.push({
+      literal: site.literal.value,
+      column: site.column,
+      value: decision.value,
+      match: decision.match,
+    });
     edits.push({ start: site.literal.start, end: site.literal.end, text: `'${decision.value.replace(/'/g, "''")}'` });
   }
   if (edits.length === 0) return { sql, substitutions, refused };
