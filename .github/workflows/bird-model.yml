@@ -61,6 +61,15 @@ on:
         description: Arm to run twice as an A/A control (blank = none)
         required: false
         default: 'inline+evidence'
+      resume_run:
+        # A run that outgrew its clock writes the cases it finished beside its artifact and names
+        # the path in its own failure message. Passing that run id here spends the remaining cases
+        # instead of starting again at zero: a reasoning base at fifty minutes an arm cannot finish
+        # a split inside one job, and re-buying the cases it did finish is the difference between a
+        # reading and a second attempt.
+        description: Workflow run id whose unfinished cases this dispatch continues (blank = start fresh)
+        required: false
+        default: ''
 
 jobs:
   model:
@@ -134,6 +143,8 @@ jobs:
       # knows better says so here rather than renaming the model:
       #   {"family":"reasoning","maxOutputTokens":16384,"thinkingSwitch":true}
       BIRD_CAPABILITIES: ${{ inputs.capabilities }}
+      # Empty when nothing is being continued, which `parseResumeFrom` reads as "start fresh".
+      BIRD_RESUME_FROM: ${{ steps.resume.outputs.path }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -168,6 +179,19 @@ jobs:
         run: pnpm bench:bird:fetch
       - name: Fetch the training corpus
         run: pnpm bench:bird:fetch:train
+      - name: Fetch the cases an earlier dispatch already paid for
+        id: resume
+        if: inputs.resume_run != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p eval/out
+          gh run download "${{ inputs.resume_run }}" -n bird-eval-model -D /tmp/resume
+          # Named explicitly rather than globbed: a partial from a different arm is refused by the
+          # runner itself, and a glob would decide by whichever file the shell listed first.
+          test -f /tmp/resume/bird-eval.json.partial.json
+          cp /tmp/resume/bird-eval.json.partial.json eval/out/bird-eval.json.partial.json
+          echo "path=eval/out/bird-eval.json.partial.json" >> "$GITHUB_OUTPUT"
       # This is where a wrong key, a wrong model name or a throttled account shows up
       # in thirty seconds instead of an arm.
       - name: Provider preflight
@@ -198,6 +222,7 @@ jobs:
           name: bird-eval-model
           path: |
             eval/out/bird-eval.json
+            eval/out/bird-eval.json.partial.json
             eval/out/bird-summary.md
           if-no-files-found: warn
           retention-days: 30

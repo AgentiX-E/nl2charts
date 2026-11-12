@@ -19,7 +19,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHttpProvider } from '@agentix-e/nl2charts-ai';
 import type { LlmProvider, PromptOptions, SchemaTable } from '@agentix-e/nl2charts-ai';
@@ -2782,10 +2782,89 @@ export function parseBudgetMs(raw: string | undefined): number | undefined {
  *
  * Rounded down and floored at one, because a suggestion of zero is not a suggestion.
  */
+/**
+ * The partial run a dispatch was told to continue, or nothing.
+ *
+ * An empty string is `undefined` rather than a path: a workflow input that the operator cleared
+ * arrives as `""`, and `readFileSync("")` fails with a message about a directory instead of about
+ * the value that was wrong.
+ */
+export function parseResumeFrom(raw: string | undefined): string | undefined {
+  if (raw === undefined) return undefined;
+  const trimmed = raw.trim();
+  return trimmed === '' ? undefined : trimmed;
+}
+
 export function suggestedLimit(budgetMs: number, elapsedMs: number, casesDone: number): number | undefined {
   if (casesDone <= 0 || elapsedMs <= 0) return undefined;
   const perCaseMs = elapsedMs / casesDone;
   return Math.max(1, Math.floor((budgetMs * 0.75) / perCaseMs));
+}
+
+/**
+ * Where a run that outgrew its clock leaves the cases it had already scored.
+ *
+ * The budget message used to be the only thing a long arm produced, and every case behind the stop
+ * was spent for nothing: a 498-case arm that reached 300 had to start again at zero, and the arm
+ * before it had already shown that a reasoning model cannot finish the split inside one job. This
+ * file is the progress the message could not carry.
+ *
+ * It is not a reading. The gate refuses a partial table for the same reason it refuses a refused
+ * one — a rate over the cases that happened to fit is a rate over a different population — and
+ * nothing reads this file except the next dispatch of the same arm.
+ */
+export function partialPath(out: string): string {
+  return `${out}.partial.json`;
+}
+
+/** A partial run on disk: what produced it, over which questions, and what it finished. */
+export interface PartialRun {
+  readonly arm: string;
+  readonly split: string;
+  readonly model: string;
+  /** Every question the interrupted run set out to score, so a resumed run cannot mix populations. */
+  readonly questionIds: readonly number[];
+  readonly cases: readonly { readonly questionId: number; readonly run: CaseRun }[];
+}
+
+/**
+ * Read what a previous dispatch finished, refusing to weld two different runs together.
+ *
+ * A resume that trusted only the file's own arm name would graft a `deepseek-flash` arm onto a
+ * `deepseek-v4-pro` reading, and the result would be an accuracy nobody could reproduce. The four
+ * fields checked here are the four that decide whether a case's answer means the same thing in
+ * both runs: the arm (which levers fired), the split, the model, and the exact question set.
+ */
+export function readPartialRun(
+  path: string,
+  expected: {
+    readonly arm: string;
+    readonly split: string;
+    readonly model: string;
+    readonly questionIds: readonly number[];
+  },
+): Map<number, CaseRun> {
+  const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<PartialRun>;
+  if (!Array.isArray(parsed.cases) || !Array.isArray(parsed.questionIds)) {
+    throw new Error(`${path} is not a partial run: it carries no cases and questionIds arrays`);
+  }
+  const drift: string[] = [];
+  if (parsed.arm !== expected.arm) drift.push(`arm ${String(parsed.arm)} != ${expected.arm}`);
+  if (parsed.split !== expected.split) drift.push(`split ${String(parsed.split)} != ${expected.split}`);
+  if (parsed.model !== expected.model) drift.push(`model ${String(parsed.model)} != ${expected.model}`);
+  const sameSet =
+    parsed.questionIds.length === expected.questionIds.length &&
+    parsed.questionIds.every((id, index) => id === expected.questionIds[index]);
+  if (!sameSet) {
+    drift.push(`${String(parsed.questionIds.length)} questions != ${String(expected.questionIds.length)}`);
+  }
+  if (drift.length > 0) {
+    throw new Error(
+      `${path} was written by a different run (${drift.join('; ')}). A case's answer means the same thing only when ` +
+        'the arm, the split, the model and the question set match, so this file cannot be resumed into this run.',
+    );
+  }
+  return new Map(parsed.cases.map((entry) => [entry.questionId, entry.run]));
 }
 
 /**
@@ -2804,8 +2883,10 @@ export function budgetExhaustedMessage(state: {
   readonly casesDone: number;
   readonly total: number;
   readonly concurrency: number;
+  /** Where the cases that did finish were written, when the runner kept them. */
+  readonly resumePath?: string;
 }): string {
-  const { arm, budgetMs, elapsedMs, casesDone, total, concurrency } = state;
+  const { arm, budgetMs, elapsedMs, casesDone, total, concurrency, resumePath } = state;
   const budgetS = (budgetMs / 1000).toFixed(0);
   const elapsedS = (elapsedMs / 1000).toFixed(0);
   const remaining = Math.max(0, total - casesDone);
@@ -2827,7 +2908,11 @@ export function budgetExhaustedMessage(state: {
     `${head}; no call failed, the clock did. ${String(casesDone)} case(s) took ${elapsedS} s at concurrency ` +
     `${String(concurrency)} (${perCaseS} s/case), so a full split at this rate needs ${projectionH} h. Dispatch again ` +
     `with BIRD_LIMIT=${String(suggestion ?? 1)} (about ${(budgetMs * 0.75 / 1000).toFixed(0)} s of the same clock), or a ` +
-    `longer budget, or a faster model. The remaining ${String(remaining)} cases were not spent.`
+    `longer budget, or a faster model. The remaining ${String(remaining)} cases were not spent.` +
+    (resumePath === undefined
+      ? ''
+      : ` The ${String(casesDone)} that finished are in ${resumePath}; dispatch the same arm with ` +
+        `BIRD_RESUME_FROM=${resumePath} to keep them.`)
   );
 }
 
@@ -4396,6 +4481,14 @@ export interface BirdSettings {
    * This can, because it measures the thing that ran out.
    */
   readonly budgetMs: number | undefined;
+  /**
+   * A partial run to continue, or `undefined` to start from zero.
+   *
+   * The cases it holds are not re-asked: they were paid for by a dispatch that ran out of clock,
+   * and the file's own header is checked first so a run can never be welded to a different arm,
+   * split, model or question set.
+   */
+  readonly resumeFrom: string | undefined;
   readonly valuesForce: boolean;
   readonly definitionsForce: boolean;
 }
@@ -4477,6 +4570,7 @@ export function resolveSettings(
     retries: Number(env.BIRD_LLM_RETRIES ?? 3),
     retryDelayMs: Number(env.BIRD_LLM_RETRY_DELAY_MS ?? 1000),
     budgetMs: parseBudgetMs(env.BIRD_RUN_BUDGET_MS),
+    resumeFrom: parseResumeFrom(env.BIRD_RESUME_FROM),
     valuesForce: env.BIRD_VALUES_FORCE === '1',
     definitionsForce: env.BIRD_DEFINITIONS_FORCE === '1',
   };
@@ -5927,6 +6021,16 @@ export function baseReport(prepared: PreparedRun, provenance: Provenance = {}): 
       // for — and adding it there would mark every comparison against a run from before this field
       // as `harness DIFFERS` for a field that never acted.
       ...(settings.budgetMs === undefined ? {} : { budgetMs: settings.budgetMs }),
+      /**
+       * Which dispatch this table continued, when it continued one.
+       *
+       * A resumed reading is a table built by two processes, and a reader holding the JSON is
+       * entitled to know that without diffing it against a run log: the cases in the first part were
+       * scored before whatever happened between the dispatches, including a model alias moving. The
+       * file name rather than the path, because the path is a runner's scratch directory and the
+       * name is the only part that names the run.
+       */
+      ...(settings.resumeFrom === undefined ? {} : { resumedFrom: basename(settings.resumeFrom) }),
     },
     generatedAt: new Date().toISOString(),
     // Which run produced this file, when it can say.
@@ -7232,6 +7336,21 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
    * their rejections unhandled. A flag they all read costs one comparison and stops the spending.
    */
   const results = new Array<CaseRun | undefined>(cases.length);
+  /**
+   * The cases a previous dispatch finished, keyed by question.
+   *
+   * Read before the pool starts rather than inside it, because a file that names a different arm
+   * must stop the run before a single call is spent, not after four hundred.
+   */
+  const resumed =
+    settings.resumeFrom === undefined
+      ? new Map<number, CaseRun>()
+      : readPartialRun(settings.resumeFrom, {
+          arm: name,
+          split: settings.layout.split,
+          model: settings.model,
+          questionIds: cases.map((question) => question.question_id),
+        });
   const startedAt = Date.now();
   let finished = 0;
   let passing = 0;
@@ -7246,6 +7365,16 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
   const budgetMs = settings.budgetMs;
   const expired = (): boolean => budgetMs !== undefined && Date.now() - startedAt > budgetMs;
   await pool(cases, settings.concurrency, async (question, index) => {
+    // A case the previous dispatch already paid for is not re-asked. It is not skipped either: it
+    // is counted, because the table this run publishes has to cover the same population the whole
+    // split would have — which is the one thing a partial table cannot do.
+    const prior = resumed.get(question.question_id);
+    if (prior !== undefined) {
+      results[index] = prior;
+      finished += 1;
+      if (prior.passed) passing += 1;
+      return;
+    }
     if (breaker.verdict() !== null || expired()) return;
     const caseStartedAt = Date.now();
     const run = await scoreOne(question);
@@ -7267,6 +7396,27 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
   // Narrowed here rather than defaulted in the call: `expired()` answers true only when a budget
   // exists, and a `?? 0` on this line would be a branch no run can take.
   if (budgetMs !== undefined && Date.now() - startedAt > budgetMs) {
+    // Written before the throw, because the throw is the end of the process: the cases that did
+    // finish are the only thing this dispatch bought, and the next one cannot re-buy them without
+    // spending the same clock twice.
+    const resumePath = partialPath(settings.layout.out);
+    writeFileSync(
+      resumePath,
+      `${JSON.stringify(
+        {
+          arm: name,
+          split: settings.layout.split,
+          model: settings.model,
+          questionIds: cases.map((question) => question.question_id),
+          cases: cases.flatMap((question, index) => {
+            const run = results[index];
+            return run === undefined ? [] : [{ questionId: question.question_id, run }];
+          }),
+        } satisfies PartialRun,
+        null,
+        2,
+      )}\n`,
+    );
     throw new Error(
       budgetExhaustedMessage({
         arm: name,
@@ -7275,6 +7425,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
         casesDone: finished,
         total: cases.length,
         concurrency: settings.concurrency,
+        resumePath,
       }),
     );
   }
