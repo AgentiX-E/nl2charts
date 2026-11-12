@@ -3883,3 +3883,68 @@ describe('the grounding arm', () => {
     expect(grounded.every((sql) => !sql.includes("'hangzhou'"))).toBe(true);
   });
 });
+
+/**
+ * The two positions the SQL-Like block can sit in.
+ *
+ * The training split is written into this file's own temporary root — `main` resolves
+ * `eval/.cache/bird/train/train.json` against the root it is handed, and the root here is a
+ * `mkdtempSync` — so the corpus is three rows over three databases that the fixture does not
+ * contain, which is the property the runner asserts before it will use retrieval at all.
+ */
+describe('a few-shot block that carries its steps', () => {
+  const trainDir = join(root, 'eval/.cache/bird/train');
+  beforeAll(() => {
+    mkdirSync(trainDir, { recursive: true });
+    writeFileSync(
+      join(trainDir, 'train.json'),
+      JSON.stringify([
+        { db_id: 'train_a', question: 'How many items are in the catalogue?', evidence: '', SQL: 'SELECT count(*) FROM items' },
+        { db_id: 'train_b', question: 'How many orders were placed overall?', evidence: '', SQL: 'SELECT count(*) FROM orders' },
+        { db_id: 'train_c', question: 'What is the total price of all the items?', evidence: '', SQL: 'SELECT sum(price) FROM items' },
+        // A statement the reader cannot decompose: it is here so the skip is exercised by the
+        // same run that prices the block, rather than by a fixture that only holds easy shapes.
+        { db_id: 'train_d', question: 'Which items cost more than the average item price?', evidence: '', SQL: 'SELECT name FROM items WHERE price > (SELECT avg(price) FROM items)' },
+      ]),
+    );
+  });
+
+  it('sends the steps in the neighbours, and counts the questions that carried them', async () => {
+    const result = await run({
+      plan: { first: correct },
+      env: { BIRD_ARMS: 'inline+icl,inline+icl-cot' },
+    });
+    expect(result.code).toBe(0);
+    const controls = result.report.controls as { demonstrationBlocks: number; stepDemonstrationBlocks: number; retrievalCorpus: number };
+    expect(controls.demonstrationBlocks).toBeGreaterThan(0);
+    // The step block is a different text over the same neighbours, so this count is what tells a
+    // reader the arm ran its lever rather than sending its parent's prompt.
+    expect(controls.stepDemonstrationBlocks).toBeGreaterThan(0);
+
+    const prompts = result.requests.map((request) => request.prompt);
+    const withExamples = prompts.filter((prompt) => prompt.includes('Examples from other databases'));
+    const stepped = withExamples.filter((prompt) => prompt.includes('Reasoning:'));
+    const plain = withExamples.filter((prompt) => !prompt.includes('Reasoning:'));
+    expect(stepped.length).toBeGreaterThan(0);
+    expect(plain.length).toBeGreaterThan(0);
+    // The steps are the eight labels, in the order the renderer emits them.
+    const [block] = stepped;
+    expect(block).toContain('Intent: count');
+    expect(block?.indexOf('Tables:')).toBeLessThan(block?.indexOf('SQL:') ?? 0);
+    // The un-decomposable neighbour is skipped rather than rendered without steps: a block whose
+    // examples disagree about whether the section exists teaches that it is optional.
+    expect(block).not.toContain('Which items cost more than the average item price?');
+  });
+
+  it('asks for the same block in the prompt when the arm names the reasoning shape', async () => {
+    const result = await run({ plan: { first: correct }, env: { BIRD_ARMS: 'inline+reasoning' } });
+    expect(result.code).toBe(0);
+    const prompts = result.requests.map((request) => request.prompt);
+    const asked = prompts.filter((prompt) => prompt.includes('Then write the statement in a ```sql block'));
+    expect(asked.length).toBeGreaterThan(0);
+    expect(asked[0]).toContain('Intent: rows|count|sum|avg|max|min');
+    // The plain rule is replaced, not stacked: two statements about statements is a prompt whose
+    // last instruction wins by accident.
+    expect(asked[0]).not.toContain('one statement, no comments');
+  });
+});
