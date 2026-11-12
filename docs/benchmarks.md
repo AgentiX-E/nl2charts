@@ -11203,8 +11203,46 @@ SQL, and the retrieval adds a filter (a neighbour without a statement is not usa
 demonstration), so 86.2% is the ceiling for this reader on this corpus rather than a prediction of
 what a run will carry.
 
-**There is no reading yet.** The arms are registered, the chain runs them, and this file will carry
-the numbers when the run that produces them lands. Nothing above is a claim about accuracy; the
-claim is narrower and checkable: the mechanism the other two systems credit for their lead is now
-implemented here, in the position the paper puts it in, behind a switch a run can turn on and off
-one lever at a time.
+### The reading, and what it corrected
+
+The dev split, 1,532 questions, one call a case, both arms in one run:
+
+| Arm | Passed | Accuracy | Examples in the block | Mean prompt |
+|---|---|---|---|---|
+| `inline+icl` | 737 / 1,532 | **48.11%** | 4,553 | 4,512 chars |
+| `inline+icl-cot` | 725 / 1,532 | **47.32%** | 4,550 | 4,546 chars |
+
+**The step block did not help: −0.78pp, 53 cases only in the parent against 41 only in the child,
+p = 0.256, CI [−2.02, +0.46], MDE 1.77pp.** The comparison is clean — the example count is three
+apart on 1,532 questions, the prompt is 34 characters longer, both arms cost one call and both were
+answered by the same served model — so the delta is the block and nothing else. The block is inside
+its own confidence interval, which means the honest reading is *no effect measured*, not *harm*.
+
+**The number to look at is 48.11%, not the delta.** `inline+retrieval` — the same arm without the
+examples — reads 40.9 to 41.9% on this split across four published runs, so the neighbours are worth
+**+7pp** over retrieval alone. Cross-database demonstrations are not the weak part of that arm. What
+is weak is the arm: `inline+retrieval` *replaces* BIRD's per-question evidence with retrieved
+definitions, and `inline+evidence` reads 61.10%. The examples have been priced only on a prompt that
+had already traded away 20 points of hint.
+
+That is the defect this round's second half is about. `inline+evidence+icl` has been in the
+catalogue since the retrieval experiments, paired and registered, and **it has never been run** —
+the same failure mode as `inline+retrieval` before it, and the reason `test/bird-arms.test.ts` now
+holds the chain's arm list against the baseline's. Every competitor stacks few-shot on the complete
+pipeline, hint included: CHASE-SQL retries with demonstrations, OpenSearch-SQL retrieves `Query-CoT-SQL`
+triples into a prompt that carries the evidence. Our +0.91pp for `inline+icl` was measured in the one
+position none of them use.
+
+So a third arm was added and three are dispatched on the same 1,532 questions:
+
+| Arm | Parent | What it is |
+|---|---|---|
+| `inline+evidence` | — | the strongest single-call arm, 61.10% |
+| `inline+evidence+icl` | `inline+evidence` | the same few-shot shape the competitors use, on the hint |
+| `inline+evidence+icl-cot` | `inline+evidence+icl` | the same block with its steps |
+
+**Nothing in that table has a reading yet**, and this file will carry the three numbers and the two
+paired deltas when the run lands. What the round establishes is narrower and already checkable: the
+step block costs nothing to build, does not fire on 13.8% of BIRD's own statements, and on the arm
+where it was first tried it moved nothing — while the few-shot mechanism it decorates is worth
++7pp there and has never been priced where the competition puts it.
