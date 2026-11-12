@@ -11177,6 +11177,32 @@ Three arms carry it, and the default chain gained exactly one rung:
 this round spends. The other two are the second position and the composition, and a position is not
 worth 496 calls until the first one has a reading.
 
+### Does the reader fire at all? 86.2%, measured before the run
+
+An arm whose mechanism refuses most of its inputs is its parent with a different name, and this
+repository has paid for that lesson twice (`inline+retrieval` with an empty corpus, the `values`
+block with no matches). So the reader was measured against the corpus before any arm ran it: over
+Mini-Dev's 500 gold statements, **431 decompose (86.2%)** and 69 are refused.
+
+| Refusal | Count | Share of refusals |
+|---|---|---|
+| subquery | 57 | 82.6% |
+| not a `SELECT` | 6 | 8.7% |
+| window function | 3 | 4.3% |
+| `EXCEPT` | 2 | 2.9% |
+| `UNION` | 1 | 1.4% |
+
+Subqueries dominate, which is what a corpus of analytical questions should look like and what the
+conservative rule costs. At `k = 3` neighbours, a 13.8% refusal rate means a block usually carries
+two or three examples rather than three — and `controls.stepDemonstrationBlocks` reports the count
+per question, so a run that quietly lost its examples is visible as a number rather than inferred
+from a flat delta.
+
+The measurement is on gold statements, not on retrieved neighbours. Both are BIRD's own annotated
+SQL, and the retrieval adds a filter (a neighbour without a statement is not usable as a
+demonstration), so 86.2% is the ceiling for this reader on this corpus rather than a prediction of
+what a run will carry.
+
 **There is no reading yet.** The arms are registered, the chain runs them, and this file will carry
 the numbers when the run that produces them lands. Nothing above is a claim about accuracy; the
 claim is narrower and checkable: the mechanism the other two systems credit for their lead is now
