@@ -68,7 +68,7 @@ import type { BirdQuestion } from '../eval/bird/data.js';
  * delta cannot be attributed to anything else. A future edit that adds a second
  * change to a pair turns this red before it turns the benchmark unreadable.
  */
-const LEVERS = ['notes', 'evidence', 'repairs', 'linking', 'profile', 'definitions', 'focus', 'interpret', 'vote', 'demonstrations', 'select', 'values', 'plan', 'planBy', 'repairFeedback', 'shapeGuard', 'mixed', 'pool', 'pairwise', 'sourcesVisible', 'judge', 'judgeFormat', 'emptyRetry', 'audit', 'decompose', 'samples', 'canonical', 'shuffle', 'prune', 'columnSelect', 'agreement', 'sourceLinking', 'sourceRepairs', 'reconcile', 'reconcileAdopt', 'sampleColumns', 'cardColumns', 'dissent', 'dissentVerify', 'masked', 'intent', 'selectRule', 'projection', 'ground'] as const;
+const LEVERS = ['notes', 'evidence', 'repairs', 'linking', 'profile', 'definitions', 'focus', 'interpret', 'vote', 'demonstrations', 'select', 'values', 'plan', 'planBy', 'repairFeedback', 'shapeGuard', 'mixed', 'pool', 'pairwise', 'sourcesVisible', 'judge', 'judgeFormat', 'emptyRetry', 'audit', 'decompose', 'samples', 'canonical', 'shuffle', 'prune', 'columnSelect', 'agreement', 'sourceLinking', 'sourceRepairs', 'reconcile', 'reconcileAdopt', 'sampleColumns', 'cardColumns', 'dissent', 'dissentVerify', 'masked', 'intent', 'selectRule', 'projection', 'ground', 'cotDemonstrations', 'reasoning'] as const;
 
 function changedLevers(left: Arm, right: Arm): string[] {
   const levers = LEVERS.filter((lever) => left[lever] !== right[lever]);
@@ -262,12 +262,20 @@ describe('the chain that actually runs', () => {
     // priced it at +1.2pp for 2x calls and 2.3x completion tokens (p = 0.48). It became the
     // ablation reference, so the position it frees belongs to the next lever with a reading
     // rather than to the next idea.
+    //
+    // Fifteen today, and the fifteenth is the only kind of arm that earns a rung without a
+    // reading of its own: `inline+icl-cot` reuses the neighbours `inline+icl` already retrieves
+    // and differs from it in the text of the block it sends, so it costs one call per question
+    // and no new preparation. The mechanism it carries is the one OpenSearch-SQL credits for
+    // reaching 69.3% on BIRD with no training, and this repository had priced only the
+    // (question, SQL) half of that shape — so the rung buys a mechanism, not an idea. The
+    // sixteenth position stays empty until one of these arms produces a verdict.
     const nominal = DEFAULT_ARMS.reduce((total, name) => {
       const arm = ARMS.find((entry) => entry.name === name) as Arm;
       return total + (arm.vote ?? 1) + (arm.select === true ? 1 : 0);
     }, 0);
-    expect(nominal).toBeLessThanOrEqual(15);
-    expect(nominal).toBe(14);
+    expect(nominal).toBeLessThanOrEqual(16);
+    expect(nominal).toBe(15);
   });
 
   it('gives the demonstration arm statements and the textual arm only text', () => {

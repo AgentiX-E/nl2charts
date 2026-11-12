@@ -9,6 +9,7 @@ import { buildPlanPrompt, parsePlan } from './plan.js';
 import { DECOMPOSE_RULES, parseDecomposed } from './decompose.js';
 import { emptyRetryMessages } from './empty.js';
 import { groundLiterals } from './ground.js';
+import { SQL_LIKE_RULES } from './sql-like.js';
 import { stripUnfoundedCap } from './unfounded-cap.js';
 import type { ColumnValues } from './ground.js';
 import { auditMessages, countNamedConditions } from './audit.js';
@@ -56,6 +57,16 @@ export interface PromptOptions extends SchemaCardOptions {
    * keeps the reader and the prompt from disagreeing.
    */
   readonly decompose?: boolean;
+  /**
+   * Ask for the labelled step block before the statement.
+   *
+   * Different from `decompose` in what it constrains. `decompose` asks for free step sentences
+   * and measured at a loss; this asks for eight named lines whose labels a demonstration also
+   * carries, so the instruction and the examples describe one format. The mechanism is
+   * OpenSearch-SQL's SQL-Like intermediate language, one of the two components that system
+   * credits for reaching 69.3% on BIRD without training a single weight.
+   */
+  readonly reasoning?: 'sql-like';
   /** Maximum schema-card lines. Large schemas need more than the default 40. */
   readonly schemaLines?: number;
   /** Extra rule lines for a question shape, appended after the base rules. */
@@ -144,6 +155,14 @@ export interface PipelineOptions {
    * into a pipeline whose prompt asks for steps and whose reader takes step one.
    */
   readonly decompose?: boolean;
+  /**
+   * Generate with the labelled step block in front of the statement.
+   *
+   * One switch, one half: unlike `decompose` the reader does not change, because the statement
+   * still arrives in its own fenced block and every reader in this package already looks for
+   * that block. What changes is what the prompt asks the model to write down first.
+   */
+  readonly reasoning?: 'sql-like';
   /**
    * Sampling temperature for every call this pipeline makes.
    *
@@ -313,9 +332,14 @@ export function buildSqlPrompt(
     // step statements. Replacing it rather than appending to it keeps one instruction
     // about statements in the prompt; two would be read as permission by whichever the
     // model prefers.
-    resolved.decompose === true
-      ? 'Rules: SELECT only, no DDL or DML. The STEP lines are working notes and are not executed; the statement in the final block must be a single SELECT with no comments.'
-      : 'Rules: SELECT only, no DDL or DML, one statement, no comments.',
+    // The reasoning shape gets its own sentence for the same reason: it is a second shape of
+    // reply, and a prompt carrying both "one statement" and "write these lines first" is a
+    // prompt whose last instruction wins by accident rather than by design.
+    resolved.reasoning === 'sql-like'
+      ? 'Rules: SELECT only, no DDL or DML. The labelled lines are working notes and are not executed; the statement in the ```sql block must be a single SELECT with no comments.'
+      : resolved.decompose === true
+        ? 'Rules: SELECT only, no DDL or DML. The STEP lines are working notes and are not executed; the statement in the final block must be a single SELECT with no comments.'
+        : 'Rules: SELECT only, no DDL or DML, one statement, no comments.',
     'Use only the filters the question states. Sample values are examples, not defaults.',
   ];
   if (resolved.dialect !== undefined) {
@@ -325,6 +349,7 @@ export function buildSqlPrompt(
   // Last, after any per-shape notes: the format instruction has to be the final word on
   // what the reply looks like, or a note about window functions reads as the ending.
   if (resolved.decompose === true) rules.push(...DECOMPOSE_RULES);
+  if (resolved.reasoning === 'sql-like') rules.push(...SQL_LIKE_RULES);
   const context: string[] = [];
   if (resolved.definitions !== undefined && resolved.definitions.trim().length > 0) {
     // The block arrives without its heading so that a caller cannot add a
@@ -399,6 +424,8 @@ export interface AskMessagesInput {
   readonly plan?: string;
   /** Ask for a decomposition inside the same reply; the reader follows this switch. */
   readonly decompose?: boolean;
+  /** Ask for the labelled step block; the reader is unchanged, because the block is not one. */
+  readonly reasoning?: 'sql-like';
   readonly topK?: number;
 }
 
@@ -435,6 +462,10 @@ export function buildAskMessages(input: AskMessagesInput): {
           // switch that disagrees resolves to the pipeline's switch, which is the one the
           // reader obeys.
           decompose: input.decompose === true || input.prompt?.decompose === true,
+          // After the spread for the same reason, and one level over: a prompt profile that
+          // asks for the block and a pipeline switch that does not is a disagreement the
+          // reader cannot see either.
+          ...(input.reasoning === undefined ? {} : { reasoning: input.reasoning }),
         }),
       },
       { role: 'user', content: `${schemaHint}\n${input.question}` },
@@ -505,6 +536,7 @@ export function createPipeline(options: PipelineOptions): {
         ...(interpretation === undefined ? {} : { interpretation }),
         ...(plan === undefined ? {} : { plan }),
         decompose: options.decompose === true,
+        ...(options.reasoning === undefined ? {} : { reasoning: options.reasoning }),
         topK,
       });
       // The builder returns a pair; the repair loop appends to a copy of it.

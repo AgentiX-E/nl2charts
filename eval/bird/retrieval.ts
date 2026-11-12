@@ -216,6 +216,17 @@ export interface DemonstrationOptions {
    * dialect lives.
    */
   readonly statement?: (sql: string) => string;
+  /**
+   * A reader that turns a statement into the steps that produced it.
+   *
+   * Another function rather than a flag, for the same reason `statement` is one: what counts as
+   * a step is a decision `sql-like.ts` makes and this file only renders. What the renderer does
+   * own is the consequence of a refusal — a row whose statement the reader cannot decompose is
+   * **skipped**, not rendered without steps, because a block whose examples disagree about
+   * whether a reasoning section exists teaches that the section is optional, and the arm exists
+   * to measure the section.
+   */
+  readonly reasoning?: (sql: string) => string | undefined;
 }
 
 export function renderDemonstrationBlocks(hits: readonly Hit[], options: DemonstrationOptions = {}): readonly string[] {
@@ -224,8 +235,11 @@ export function renderDemonstrationBlocks(hits: readonly Hit[], options: Demonst
   let used = 0;
   for (const hit of hits) {
     if (hit.sql.length === 0) continue;
+    const steps = options.reasoning === undefined ? undefined : options.reasoning(hit.sql);
+    if (options.reasoning !== undefined && steps === undefined) continue;
     const lines = [`Question: ${hit.question.trim()}`];
     if (hit.evidence.length > 0) lines.push(`Evidence: ${hit.evidence}`);
+    if (steps !== undefined) lines.push('Reasoning:', steps);
     const sql = options.statement === undefined ? hit.sql : options.statement(hit.sql);
     lines.push(`SQL: ${sql}`);
     const block = lines.join('\n');

@@ -11085,3 +11085,100 @@ that module is not called by the pipeline at all — it was priced here at 6 win
 and never wired, and wiring it is a separate change because the direction it guards is a property of
 the dialect (`null-order.ts` treats every engine it does not name as SQLite, and DuckDB sorts the
 other way). Two free rules do not compose for free.
+
+## What the systems that train nothing actually do
+
+The comparison that matters is not "ours against theirs" but "ours against the ones that pay the
+same bill". Two systems sit at the top of that group and both publish enough detail to be copied
+rather than admired.
+
+**OpenSearch-SQL** (arXiv 2502.14913) reached 69.3% on BIRD's validation set and 72.28% on test,
+first place in August 2024, and states in its own readme that the framework "operates without the
+need for additional training". Its five modules are Preprocessing, Extraction, Generation,
+Refinement, Alignment. The parts that are mechanisms rather than plumbing:
+
+- **Self-taught CoT few-shot.** Examples are `(question, reasoning, SQL)` triples, not
+  `(question, SQL)` pairs. The reasoning is generated once over the training split and then
+  retrieved. The paper's own finding is that the *most similar* example is not necessarily the most
+  helpful one.
+- **SQL-Like, a constrained intermediate language.** Generation proceeds as
+  reasoning → columns → values → SELECT → SQL-Like → SQL, so the pieces of the query are named
+  before the query is written.
+- **Value retrieval over an HNSW index** of cells and column names, to survive misspellings.
+- **Error-specific few-shot in refinement**: a failed statement is repaired with examples of that
+  class of failure, not with a diagnosis string.
+- **Consistency alignment** in three kinds — agent (column and value representation, including
+  case sensitivity), function (aggregate misuse, nesting, redundant joins) and style (the dataset's
+  preference for `IS NOT NULL`, `MAX` or `ORDER BY … LIMIT 1` when the question asks for a top-k).
+
+**RSL-SQL** (arXiv 2411.00073) reports 67.2% on BIRD with GPT-4o and states that it "outperforms a
+series of GPT-4 based Text-to-SQL systems when adopting DeepSeek (much cheaper) with same intact
+prompts". Four components:
+
+- **Bidirectional schema linking** — forward and backward pruning, 94% strict recall at 83% fewer
+  input columns.
+- **Contextual augmentation** of the linked schema.
+- **Binary selection**: it hedges the risk of pruning by running one candidate on the full schema
+  and one on the pruned schema, then choosing. The hedge is the point — linking can drop an element
+  the question needed, and a single view cannot notice.
+- **Multi-turn self-correction** driven by execution.
+
+Laid against this repository, four of those nine mechanisms were absent, and the absences are
+visible in the code rather than inferred from the scores:
+
+| Mechanism | Where it would live here | State before this round |
+|---|---|---|
+| `(question, reasoning, SQL)` few-shot | `eval/bird/retrieval.ts` → `renderDemonstrationBlocks` | renders `(question, evidence, SQL)`; no reasoning section |
+| SQL-Like intermediate language | `packages/ai/src/` | absent; `decompose` asks for free step sentences and measured at a loss |
+| error-specific few-shot in repair | `packages/ai/src/diagnose.ts` | sends a diagnosis string, no examples |
+| full / pruned dual view | the arm catalogue | every arm renders the whole card: `renderSchemaCard`'s `limit` counts *tables*, not columns, so "pruned" and "full" are the same prompt |
+| value retrieval by vector | `packages/ai/src/values.ts` | exact and `LIKE` matching; the information audit put the ceiling at 3.9pp, so this is not the gap |
+
+The first three are mechanisms. The fourth is a measurement this repository believed it had and did
+not: `linking: true` adds a hint line and removes nothing, so the recall result — every gold
+identifier visible in 1,534 of 1,534 dev questions — was true and was not evidence about pruning.
+
+### This round implements the first one, in both positions
+
+`packages/ai/src/sql-like.ts` reads a statement back into the eight labelled steps that produced it:
+
+```
+Intent: count
+Tables: orders, customers
+Joins: o.customer_id = c.id
+Filters: o.status = 'refunded'
+Group: c.region
+Order: count(*) DESC
+Limit: 3
+```
+
+Read backwards rather than generated forward. The paper's version is self-taught: a strong model
+writes the reasoning for each training row, which costs a call per row and inherits that model's
+mistakes. Recovering the steps from the labelled statement costs nothing, cannot assert anything the
+gold statement does not say, and covers every row rather than the ones a budget reached. What it
+cannot do is invent a step the statement does not encode — a statement does not explain *why* its
+aggregate is a count — so the block states the shape and stops.
+
+The reader refuses five shapes outright: set operations, CTEs, subqueries, window functions, and
+anything that does not begin with `SELECT`. For a *demonstration* that refusal is load-bearing: a
+block whose examples disagree about whether a reasoning section exists teaches that the section is
+optional, so a neighbour the reader cannot decompose is **skipped**, and an arm whose neighbours
+were all skipped has no block to send and falls back to nothing rather than to its parent's prompt.
+
+Three arms carry it, and the default chain gained exactly one rung:
+
+| Arm | Parent | What changes | Where it runs |
+|---|---|---|---|
+| `inline+icl-cot` | `inline+icl` | the same neighbours, the same ranking, the same count — each block gains its steps | default chain |
+| `inline+reasoning` | `inline+evidence` | the eight-label block is asked for in the prompt; no few-shot change | on demand |
+| `inline+icl-cot+reasoning` | `inline+icl-cot` | both positions at once | on demand |
+
+`inline+icl-cot` costs one call per question and no new preparation, which is why it is the rung
+this round spends. The other two are the second position and the composition, and a position is not
+worth 496 calls until the first one has a reading.
+
+**There is no reading yet.** The arms are registered, the chain runs them, and this file will carry
+the numbers when the run that produces them lands. Nothing above is a claim about accuracy; the
+claim is narrower and checkable: the mechanism the other two systems credit for their lead is now
+implemented here, in the position the paper puts it in, behind a switch a run can turn on and off
+one lever at a time.

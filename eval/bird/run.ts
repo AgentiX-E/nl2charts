@@ -59,6 +59,7 @@ import { attachSamples, narrowSamples, sampleValuesOf } from './samples.js';
 import { conditionColumns } from './conditions.js';
 import { exampleMapOf, exampleSetFor } from './value-examples.js';
 import { buildIndex, renderDemonstrationBlocks, renderRetrieved, retrieve } from './retrieval.js';
+import { renderSqlLike } from '../../packages/ai/src/sql-like.js';
 import { MASKED_PREAMBLE, maskStatement } from './mask.js';
 import { deserializeIndex, findValues, indexCells, renderValues, serializeIndex } from './values.js';
 import type { ValueIndex } from './values.js';
@@ -281,6 +282,25 @@ export interface Arm {
    * composes them, so the composition is visible and the call count does not change.
    */
   readonly decompose?: boolean;
+  /**
+   * Render each neighbour with the steps its statement encodes.
+   *
+   * The parent is `inline+icl`, which sends (question, evidence, SQL). This sends the same
+   * neighbours with a labelled block between the evidence and the statement, which is
+   * OpenSearch-SQL's self-taught CoT few-shot shape — one of the two components that system
+   * credits for 69.3% on BIRD without training. One lever: the neighbours, the ranking and the
+   * count are the parent's, and the only difference is what each block says about its statement.
+   */
+  readonly cotDemonstrations?: boolean;
+  /**
+   * Ask the model to write the labelled step block before its statement.
+   *
+   * The parent is `inline+evidence`. Different from `decompose`, which asks for free step
+   * sentences and measured at a loss: these are eight named lines, and a demonstration written by
+   * `cotDemonstrations` carries the same eight labels, so an arm that turns both on is testing
+   * one format in two positions rather than two formats.
+   */
+  readonly reasoning?: 'sql-like';
   /**
    * What a repair turn says: a diagnosis (default) or the engine's raw error.
    * Both cost the same calls, so the pair prices the diagnosis and not the retry.
@@ -862,6 +882,9 @@ export const ARMS: readonly Arm[] = [
   // The same retrieved neighbours, but as worked examples with their statements.
   // Paired with `inline+retrieval`: one lever, so the delta prices the statements.
   { name: 'inline+icl', notes: false, evidence: 'retrieved', repairs: 0, linking: true, definitions: 'inline', demonstrations: true },
+  { name: 'inline+icl-cot', notes: false, evidence: 'retrieved', repairs: 0, linking: true, definitions: 'inline', demonstrations: true, cotDemonstrations: true },
+  { name: 'inline+reasoning', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', reasoning: 'sql-like' },
+  { name: 'inline+icl-cot+reasoning', notes: false, evidence: 'retrieved', repairs: 0, linking: true, definitions: 'inline', demonstrations: true, cotDemonstrations: true, reasoning: 'sql-like' },
   // The only text that has measured is written per question; this arm writes it.
   { name: 'interpret', notes: false, repairs: 0, linking: true, definitions: 'inline', interpret: true },
   // The card as the join closure rather than the whole schema. One lever from `select`: the
@@ -1222,6 +1245,10 @@ export const DEFAULT_ARMS: readonly string[] = [
   // 14pp from the per-question hint is knowledge or the dataset's own wording.
   'inline+retrieval',
   'inline+icl',
+  // OpenSearch-SQL's self-taught CoT few-shot shape, which that system credits for part of its
+  // 69.3% without training: the same neighbours as `inline+icl`, rendered with the steps each
+  // statement encodes. In the chain because it is the mechanism under test this round.
+  'inline+icl-cot',
   'inline+repair',
   'inline+repair-raw',
   'values',
@@ -1262,6 +1289,11 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   // MDE 3.28pp) for 2,092 tokens a case; `select-duo` −0.60pp (14:11, p = 0.690); `select-prune`
   // −1.41pp through the card's ceiling (1,008 → 980 reachable cases); `select-mixed` +0.60pp
   // inside 2.10pp; `select5` +0.40pp inside 3.33pp for the largest bill in the catalogue.
+  // Both are the same format in a position the chain does not yet price. They are on demand
+  // because the round that introduces a mechanism asks for one number at a time: the few-shot
+  // shape is in the chain, and these two wait for it to come back before spending 496 calls each.
+  'inline+reasoning': 'the labelled step block in the prompt, without any few-shot change: run it beside `inline+icl-cot` to separate the format from the position it sits in',
+  'inline+icl-cot+reasoning': 'both positions at once: it is the pair that says whether the format is additive or the second copy is redundant, and it is not worth 496 calls until the two single-position arms have readings',
   vote: 'majority over the same three candidates: the selector control, measured 17:17 against `select` (p = 1) — running it every push re-derives a tie at 2,092 tokens',
   'inline+evidence+ground': 'the one rewrite the data proves, applied before the statement runs: priced offline on the parent arm\'s own artifact at 22 fires, 14 wins, 0 losses (+0.91pp, p = 0.0001) with the pairs disjoint from every other rule — run it when the domain reader or the prompt changes, and move it into the chain once the dispatch reproduces the offline count',
   'select-prune': 'the card cut to the join closure: measured −1.4pp, and the loss is the ceiling rather than the selector (1,008 → 980 reachable cases), so it is priced; run it when the card changes',
@@ -1440,6 +1472,11 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   ['inline-definitions', 'inline+evidence'],
   ['inline-definitions', 'inline+retrieval'],
   ['inline+retrieval', 'inline+icl'],
+  // One lever: the same neighbours, the same ranking, the same count — only each block gains the
+  // steps its statement encodes. Without this pair the arm is a score with no parent.
+  ['inline+icl', 'inline+icl-cot'],
+  // The same format in the other position: the block is in the prompt instead of in the examples.
+  ['inline+evidence', 'inline+reasoning'],
   ['inline+evidence', 'inline+repair'],
   // Same three retries, same prompt, same cost — only the text differs. The pair with
   // `inline+evidence` would change two fields (`repairs` and `repairFeedback`), and a
@@ -4701,6 +4738,7 @@ export function promptFor(arm: Arm, question: BirdQuestion, blocks: PromptBlocks
     // it belongs here: the size this harness reports for the arm, and the distinct-prompt
     // count a mixed arm is checked against, both read this object.
     ...(arm.decompose === true ? { decompose: true } : {}),
+    ...(arm.reasoning === 'sql-like' ? { reasoning: 'sql-like' as const } : {}),
   };
 }
 
@@ -4779,6 +4817,13 @@ export interface Controls {
   retrievalCorpus: number;
   retrievedBlocks: number;
   demonstrationBlocks: number;
+  /**
+   * Questions whose neighbours arrived with the steps their statements encode.
+   *
+   * A different text over the same neighbours, so this is the count that tells a reader the
+   * `cotDemonstrations` arm ran its lever rather than sending its parent's prompt.
+   */
+  stepDemonstrationBlocks: number;
   valueMatches: number;
   negativeChecked: number;
   negativeFalseMatches: number;
@@ -5003,6 +5048,9 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
       readonly masked: string;
       readonly maskedExamples: number;
       readonly rewritten: number;
+      /** The same neighbours with the steps each statement encodes, and how many survived. */
+      readonly steps: string;
+      readonly stepExamples: number;
     }
   >();
   // Every arm whose prompt this run sends, which is not `settings.arms`: a mixed arm sends one
@@ -5011,6 +5059,9 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
   // The masked block is only built when an arm asks for it: it costs a string transform per
   // example, and a run of five plain arms should not pay for a prompt none of them sends.
   const needsMasking = inEffect.some((arm) => arm.masked === true);
+  // Same rule for the step block: an arm that asks for it and finds nothing would send its
+  // parent's prompt under the new name.
+  const needsSteps = inEffect.some((arm) => arm.cotDemonstrations === true);
   for (const question of selected) {
     if (retrievalIndex === undefined) break;
     const textHits = retrieve(retrievalIndex, question.question, { k: 3 });
@@ -5027,6 +5078,10 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
     const maskedBlocks = needsMasking
       ? renderDemonstrationBlocks(hits, { statement: maskStatement }).slice(0, worked.length)
       : [];
+    // The step block is built only when an arm asks for it, for the same reason the masked one
+    // is: it costs a parse per example, and the parse refuses a statement whose steps it cannot
+    // recover — so the count is a reading rather than a copy of `worked.length`.
+    const stepBlocks = needsSteps ? renderDemonstrationBlocks(hits, { reasoning: renderSqlLike }) : [];
     // Counted against the raw block rather than assumed: the masker is a text transform that can
     // stop matching, and "it rewrote nothing" is exactly the state that makes a masked arm its
     // parent under another name.
@@ -5037,15 +5092,24 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
       masked: maskedBlocks.length === 0 ? '' : `${MASKED_PREAMBLE}\n\n${maskedBlocks.join('\n\n')}`,
       maskedExamples: maskedBlocks.length,
       rewritten,
+      steps: stepBlocks.join('\n\n'),
+      stepExamples: stepBlocks.length,
     });
   }
   const retrievedFor = (question: BirdQuestion): string | undefined => retrievedByQuestion.get(question.question_id);
   const demonstrationsFor = (
     question: BirdQuestion,
-    options: { readonly masked?: boolean } = {},
+    options: { readonly masked?: boolean; readonly cot?: boolean } = {},
   ): { readonly text: string; readonly examples: number; readonly rewritten: number } | undefined => {
     const found = demonstrationsByQuestion.get(question.question_id);
     if (found === undefined) return undefined;
+    // An arm that asks for the step block and finds it missing has nothing to send, for the same
+    // reason the masked arm has nothing to send: a fallback would publish the parent's prompt
+    // under the child's name.
+    if (options.cot === true) {
+      if (found.steps.length === 0) return undefined;
+      return { text: found.steps, examples: found.stepExamples, rewritten: 0 };
+    }
     // An arm that asks for the masked block and finds it missing has nothing to send: falling back
     // to the raw text would publish the parent's prompt as the masked arm's reading.
     if (options.masked !== true) return { text: found.text, examples: found.examples, rewritten: 0 };
@@ -5478,9 +5542,12 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
     // The arm decides which block it sends, the mask decides what is in it: the pair is one lever
     // only if the same retrieval produced both, which is why the choice is a parameter here rather
     // than a second preparation.
-    ...(demonstrationsFor(question, { masked: arm.masked === true }) === undefined
+    ...(demonstrationsFor(question, { masked: arm.masked === true, cot: arm.cotDemonstrations === true }) === undefined
       ? {}
-      : { demonstrations: demonstrationsFor(question, { masked: arm.masked === true })?.text }),
+      : {
+          demonstrations: demonstrationsFor(question, { masked: arm.masked === true, cot: arm.cotDemonstrations === true })
+            ?.text,
+        }),
     ...(valuesFor(question) === undefined ? {} : { values: valuesFor(question) }),
   });
 
@@ -5491,6 +5558,9 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
     retrievalCorpus: retrievalIndex === undefined ? 0 : retrievalIndex.rows.length,
     retrievedBlocks: retrievedByQuestion.size,
     demonstrationBlocks: demonstrationsByQuestion.size,
+    // The step block is a different text over the same neighbours, so its count is what tells a
+    // reader that the arm ran the lever rather than the parent under a new name.
+    stepDemonstrationBlocks: [...demonstrationsByQuestion.values()].filter((block) => block.steps.length > 0).length,
     valueMatches: valuesByQuestion.size,
     negativeChecked,
     negativeFalseMatches,

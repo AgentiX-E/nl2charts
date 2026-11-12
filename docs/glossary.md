@@ -752,3 +752,14 @@ small, no version of the rule is worth building. `oracle-drop-limit` is the ceil
 repairing 12 and breaking 23. The shipped rule fires 49 times, repairs 11 and breaks none. A ceiling
 that knows more than a rule and does worse is the clearest evidence a rule can have that its
 conditions are doing the work rather than getting in the way.
+
+**SQL-Like** — A statement read back into the labelled steps that produced it: `Intent`, `Tables`,
+`Joins`, `Filters`, `Group`, `Having`, `Order`, `Limit`. The name and the idea are OpenSearch-SQL's,
+which reports 69.3% on BIRD without training and credits the intermediate language, together with
+`(question, reasoning, SQL)` few-shot, for part of its lead. Here it is read *backwards* from the
+gold statement rather than generated forward by a model: free, unable to assert what the statement
+does not say, and available for every training row. The reader refuses set operations, CTEs,
+subqueries, window functions and anything not beginning with `SELECT`, because a wrong
+decomposition is worse than none — it teaches the model a false plan in the position it trusts most.
+`Joins` is where an equality between two column references goes whether it was written in `ON` or in
+`WHERE`, which is the distinction models most often collapse.

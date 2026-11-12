@@ -7,6 +7,24 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **The few-shot shape two leading no-training systems share, implemented in both positions.**
+  `packages/ai/src/sql-like.ts` reads a statement back into the eight labelled steps that produced
+  it, and three arms carry it: `inline+icl-cot` (the same neighbours as `inline+icl`, each block
+  gaining its steps — in the default chain), `inline+reasoning` (the same format asked for in the
+  prompt) and `inline+icl-cot+reasoning` (both). The mechanism is OpenSearch-SQL's self-taught CoT
+  few-shot plus its SQL-Like intermediate language; that system reached 69.3% on BIRD with no
+  training of any weight and credits both. This repository had implemented only the
+  `(question, SQL)` half of the shape. Read backwards from the gold statement rather than generated
+  forward by a model: no calls, and unable to assert anything the statement does not say. Five
+  shapes are refused outright — set operations, CTEs, subqueries, window functions, and anything not
+  beginning with `SELECT` — and for demonstrations the refusal is load-bearing: a block whose
+  examples disagree about whether a reasoning section exists teaches that it is optional, so a
+  neighbour the reader cannot decompose is skipped, and an arm whose neighbours were all skipped
+  sends nothing rather than its parent's prompt. `ai`'s bundle budget moves 65,000 → 69,000 B gzip
+  (measured 67,784) and the chain's call budget 14 → 15, both with the reason recorded. 31 new
+  tests; `sql-like.ts` at 100/100/100/100. **No accuracy reading yet** — the claims are that the
+  mechanism is implemented, wired, and priced one lever at a time.
+
 - **The server can answer a question, not only run a statement.** `packages/ai` builds the
   question-to-SQL pipeline and no package imported it: `mcp` exposed `run_sql`, `query_metric` and
   `explain_metric`, so a client could ask "run this SQL" and "compile this metric" and could not

@@ -14,6 +14,8 @@ export { buildAskMessages, buildSqlPrompt, choosePromptProfile, createPipeline, 
 export { buildInterpretationPrompt, parseInterpretation } from './interpret.js';
 export { buildPlanPrompt, parsePlan } from './plan.js';
 export { countSteps, DECOMPOSE_RULES, parseDecomposed } from './decompose.js';
+export { parseSqlLike, renderSqlLike, SQL_LIKE_RULES } from './sql-like.js';
+export type { SqlLike, SqlLikeIntent } from './sql-like.js';
 export {
   buildEmptyResultFeedback,
   buildValueGapFeedback,
