@@ -1,6 +1,7 @@
 import type { ChartIR } from '@agentix-e/nl2charts-spec';
 import { describeMark } from './marks.js';
 import { distinctValues } from './profile.js';
+import { supportOf } from './support.js';
 
 export type Severity = 'error' | 'warn';
 
@@ -25,6 +26,7 @@ export const LINT_RULES = [
   'print-relies-on-color',
   'tuple-columns-missing',
   'tuple-not-numeric',
+  'encoding-unsupported',
 ] as const;
 
 export type LintRule = (typeof LINT_RULES)[number];
@@ -126,6 +128,14 @@ export function lint(ir: ChartIR): LintIssue[] {
   }
   if (ir.theme === 'print' && ir.encoding.color !== undefined && ir.encoding.series === undefined) {
     issues.push({ rule: 'print-relies-on-color', severity: 'warn', message: 'print output loses colour distinctions' });
+  }
+  // Last, because it is the summary: every rule above can still be broken on a
+  // chart that cannot be drawn at all. This one asks the same question the
+  // compiler asks, so the linter and the renderer can never disagree about
+  // whether an IR is drawable — they read one function.
+  const support = supportOf(ir);
+  if (!support.supported) {
+    issues.push({ rule: 'encoding-unsupported', severity: 'error', message: support.missing.join('; ') });
   }
 
   return issues;

@@ -47,5 +47,8 @@ export function enumerateCandidates(profiles: readonly FieldProfile[], maxSlices
       seen.add(candidate.mark);
       return true;
     })
-    .sort((left, right) => right.score - left.score || left.mark.localeCompare(right.mark));
+    // Score only: the seven scores below are distinct by construction, so a
+    // tie-breaker would be a branch no profile can reach, and `Array#sort` is
+    // stable, which keeps the insertion order deterministic if that ever changes.
+    .sort((left, right) => right.score - left.score);
 }
