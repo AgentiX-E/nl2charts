@@ -45,6 +45,15 @@ export interface EndpointReply {
    * about deliberation — which is the state of every run before the column existed.
    */
   readonly reasoningTokens?: number;
+  /**
+   * Why the endpoint says it stopped, when a test needs it to have been cut off.
+   *
+   * `stop` by default, which is what a healthy endpoint says. `length` is the one that matters:
+   * a reply cut at the answer cap is a reply the pipeline must report as truncated rather than
+   * present as the model's whole answer, and a fixture that could only ever say `stop` made that
+   * path untestable without a live endpoint that happens to overrun its budget.
+   */
+  readonly finishReason?: 'stop' | 'length' | 'content_filter';
   /** Overrides the whole body, for malformed-response tests. */
   readonly raw?: string;
 }
@@ -95,7 +104,7 @@ export async function startEndpoint(options: EndpointOptions): Promise<Endpoint>
           answer.raw ??
           JSON.stringify({
             model: body.model ?? 'test-model',
-            choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: answer.content ?? '' } }],
+            choices: [{ finish_reason: answer.finishReason ?? 'stop', message: { role: 'assistant', content: answer.content ?? '' } }],
             usage: {
               prompt_tokens: 7,
               completion_tokens: 3,
