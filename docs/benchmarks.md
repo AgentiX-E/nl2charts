@@ -11958,3 +11958,53 @@ where it is least able to.
 Verdict: neither shape is adopted. Both stay as ablation references with their funnels intact, the
 gate stays an eval mechanism, and the next lever is not "how to choose" but **"where the candidates
 come from"** — the disagreeing ceiling is still 54.5–56.4% against a best chooser of 35%.
+
+### Pre-registration: does a fourth candidate convert under a rule, or only under a model?
+
+The pool was read apart without a model call, from the artifact of `43450970534` on Mini-Dev's 496
+questions. What it says is arithmetic, and it is the reason the next experiment buys a candidate
+instead of a chooser:
+
+| reading | n | share |
+| --- | --- | --- |
+| questions whose pool held at least one correct statement | 328 | 66.13% |
+| questions the shipped rule answered correctly | 300 | 60.48% |
+| **questions whose pool held no correct statement** | **168** | **33.87%** |
+| of those, pools where all three candidates executed | 156 | 92.9% |
+| of those, filed by the judge as `values` | 119 of 167 | 71.3% |
+| questions where all three candidates share one fingerprint | 352 | 71.0% |
+
+A chooser cannot reach the 168: there is nothing in the pool to choose. So the ceiling is the only
+number a fourth candidate can move, and the closed-form price of a fourth candidate is one call.
+
+What the repository already knows about that purchase is one reading and one gap. `select-intent`
+bought a fourth candidate on the dev split and moved the ceiling **+2.22pp** (66.84 → 69.06, 41 up 7
+down, p < 0.0001) — and then the **paid selector gave the gain back**, its conversion falling 3.50pp
+because a model reading four candidates does not read them as well as it reads three. The gap is
+that the shipped chooser is not a model: `shortest` has never ranked a four-candidate pool, and the
+dev artifact cannot answer the question because it stored a *selector's* choice rather than a rule's
+ranking. That is a run, not a derivation.
+
+Two arms, one call each, no new prompt:
+
+| arm | sources | why this source |
+| --- | --- | --- |
+| `select-mixed-rule-rows` | the trio + `inline+evidence+rows` | differs in **knowledge**: three stored rows per table can say a literal belongs to a column the question never names, which is what seven filter sites in ten need |
+| `select-mixed-rule-intent` | the trio + `intent` | differs in **grammar**: the only candidate whose statement is rendered rather than written, and the source whose ceiling effect is already measured |
+
+Read against `select-mixed-rule` they are two conversion tests; read against each other they say
+which *kind* of difference a fourth candidate has to be.
+
+| # | criterion | bar |
+| --- | --- | --- |
+| ① | pool ceiling, same run, same 496 questions | **≥ +3.0pp** (66.13 → 69.13) |
+| ② | `shortest` on the four-candidate pool | **≥ +1.0pp** (60.48 → 61.48) |
+| ③ | conversion (`score` ÷ `candidateRecall`) | within **1.0pp** of the parent's |
+| ④ | `calls.mean` | **≤ 4.05** |
+| ⑤ | noise | A/A of `select-mixed-rule` as the fifth arm; every delta above is read against its resolution |
+
+Pass ①②③ ⇒ the fourth candidate is adopted and the pool is the new default, and the next round
+writes the value-anchored source with a measured bar to beat. Pass ① and fail ②③ ⇒ the `select-intent`
+finding is reproduced on the free rule, the resolution is a chooser that reads four candidates, and
+the source question closes to *knowledge* differences only. Fail ① ⇒ that source adds nothing and
+the candidate side is closed for it.

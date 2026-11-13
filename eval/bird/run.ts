@@ -717,6 +717,25 @@ export const MIXED_SOURCES: readonly string[] = ['inline+evidence', 'metadata+ev
 export const INTENT_SOURCES: readonly string[] = [...MIXED_SOURCES, 'intent'];
 
 /**
+ * The trio plus the one candidate whose prompt shows stored rows instead of stored columns.
+ *
+ * The pool was read apart without a model call, from the artifact of `43450970534`: of 496 Mini-Dev
+ * questions, **168 (33.9%) held no correct candidate at all**, and 156 of those had all three
+ * candidates execute, so the miss was not an execution failure. 71.3% of those pools were filed by
+ * the judge as `values` — the class where the shape, the row count and the column count are right
+ * and the figures are not — and the corpus's own literal analysis says what those figures are:
+ * seven sites in ten are a predicate aimed at a column that has never held the value.
+ *
+ * A column sample cannot answer that, because the question is which values occur *together*.
+ * `inline+evidence+rows` is three stored rows per table, which is the only input in the catalogue
+ * that can say `status = 'Banned'` belongs with `currency = 'EUR'` rather than with the column the
+ * question's words point at. It is therefore the fourth source that differs in **knowledge**,
+ * while `intent` differs in **grammar** — and the pair of candidates asks which kind of difference
+ * a fourth candidate has to be, at one call each with no new prompt to write.
+ */
+export const ROWS_SOURCES: readonly string[] = [...MIXED_SOURCES, 'inline+evidence+rows'];
+
+/**
  * The trio plus a fourth candidate written by decomposition.
  *
  * The routing analysis left one question open: not which candidate to pick, but whether a
@@ -1118,6 +1137,28 @@ export const ARMS: readonly Arm[] = [
   // one run — the score, the recorded candidates, and `bench:bird:consensus` over those
   // candidates — and the identity between the last two is exact or something is wrong.
   { name: 'select-mixed-rule', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, selectRule: 'shortest', mixed: MIXED_SOURCES },
+  // The shipped three candidates and the shipped free rule, with one more candidate bought from a
+  // source that differs in knowledge: three stored rows per table on the same prompt.
+  //
+  // This is the question the dev split left open and nobody asked. `select-intent` moved the pool
+  // ceiling +2.22pp at p < 0.0001 and then *lost* the gain, because the paid selector's conversion
+  // fell 3.50pp reading four candidates instead of three (`41767687844`). The shipped arm does not
+  // read the pool with a model — `shortest` ranks it — so whether that arm inherits the ceiling or
+  // the conversion loss is not derivable from the old artifact: the rule was never run on a
+  // four-candidate pool. That is the only thing this arm measures, and it costs one call.
+  //
+  // Pre-registered against `select-mixed-rule`, same 496 questions, same run: ceiling ≥ +3.0pp,
+  // `shortest` on four candidates ≥ +1.0pp, conversion (score ÷ `candidateRecall`) within 1.0pp of
+  // the parent's, and `calls.mean` ≤ 4.05. A ceiling that rises while the score does not is the
+  // `select-intent` finding reproduced on the free rule; a ceiling that does not rise retires the
+  // source, and either outcome is a reading the next round can spend.
+  { name: 'select-mixed-rule-rows', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 4, select: true, selectRule: 'shortest', mixed: ROWS_SOURCES },
+  // The same purchase from the source that differs in grammar instead of in knowledge: a fourth
+  // candidate rendered from a query intent. Same pool size, same rule, same calls as the arm above,
+  // so the delta between the two arms is *which kind of difference* a fourth candidate has to be —
+  // and read against `select-mixed-rule` it is the conversion test `select-intent` never got,
+  // because that arm was measured with the paid selector and this one is not.
+  { name: 'select-mixed-rule-intent', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 4, select: true, selectRule: 'shortest', mixed: INTENT_SOURCES },
   // The parent arm with the adjudication spent only where there is something to adjudicate.
   //
   // At temperature 0.7, 350 of Mini-Dev's 479 three-candidate questions (73.1%) returned one
@@ -1588,6 +1629,8 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'inline+evidence+llm-select-dense': "the same reply applied their way: a table the model named nothing in keeps its first six columns instead of vanishing, which is what MAC-SQL's `drop_all` does — measured 261/496 against the column rule's 253 and the parent's 278 (`41290647076`), so it recovers 1.61pp of the 5.04pp loss (p=0.416, unresolved at 14.9% discordance) and still loses 3.43pp to the parent (p=0.0241); the card lever is closed at both granularities",
   'select-mixed': 'three decompositions instead of three samples: within its MDE of a single call on this split, and the decomposition question needs the dev split to be answered',
   'select-mixed-rule': "the parent's own candidates chosen by `shortest` instead of by the model: three calls instead of four, and the offline device already priced the rule at 63.64% against the selector's 62.79% on 1,532 dev questions (63.71% against 61.42% on the strong pool, +2.29pp, p = 0.0030) — this arm is the derivation becoming a measurement, and its artifact is what `bench:bird:consensus` must reproduce exactly",
+  'select-mixed-rule-rows': "the shipped arm plus a fourth candidate drawn from three stored rows per table: the pool read apart offline says the missing statements are `values` failures (71.3% of the 168 questions whose pool held no correct candidate) and that seven filter sites in ten aim at a column that has never held the value, which is a fact about rows rather than about columns — the arm that asks whether a fourth candidate differing in knowledge converts under a rule instead of under a selector",
+  'select-mixed-rule-intent': 'the same fourth call spent on a candidate rendered from a query intent: same pool size, same free rule, same price as `select-mixed-rule-rows`, so the two arms together say which kind of difference a fourth candidate has to be — and the delta against `select-mixed-rule` is the conversion test `select-intent` could not give, because that arm read four candidates with the paid selector and lost 3.50pp doing it',
   'select-samples': "the trio's third slot given to the sampled card rather than the value index: the same four calls, and the block it replaces is empty on 60.9% of the split",
   intent: 'the same card one rule longer, answering with a query object the renderer turns into SQL: the only arm whose output grammar is enforced, and the only one that cannot be dispatched alone — its statement is rendered on the candidate-source path, so `assertIntentRule` refuses a run that names it as an arm of its own',
   'select-intent': 'the shipped trio plus a fourth candidate rendered from a query intent: one call more than `select-mixed`, and the only arm on the board that can raise the pool ceiling rather than redistribute it — its verdict is the ceiling, pre-registered at +2.0pp (67.75 → 69.75) on dev',
@@ -1908,6 +1951,15 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   // One lever: what the arm does with a reply that restates a candidate — adopt the paraphrase, or
   // hand it back to the vote. Same prompt, same call, same pool.
   ['select-mixed-gated-reconcile', 'select-mixed-gated-reconcile-novel'],
+  // One lever: the same three candidates, the same free rule, one more candidate bought from a
+  // source that differs in knowledge. The dev split already showed what a fourth candidate does to
+  // the *ceiling* (+2.22pp, p < 0.0001) and what the paid selector did to the gain (−3.50pp of
+  // conversion); neither number is a prediction for a rule that ranks the pool.
+  ['select-mixed-rule', 'select-mixed-rule-rows'],
+  // The same purchase from the source that differs in grammar, at the same price. Read against the
+  // parent it is a second conversion test; read against the arm above it, it is a comparison of two
+  // kinds of difference rather than of two prompts.
+  ['select-mixed-rule', 'select-mixed-rule-intent'],
   // One lever: the same candidates and selector, with an empty result treated as a
   // failure — dropped before the vote and retried once when nothing survives.
   ['select-mixed', 'select-mixed+empty'],

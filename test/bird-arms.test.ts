@@ -10,7 +10,9 @@ import {
   ARMS,
   COMPARISONS,
   DUO_SOURCES,
+  INTENT_SOURCES,
   MIXED_SOURCES,
+  ROWS_SOURCES,
   CROSS_SOURCES,
   BALANCED_SOURCES,
   DEFAULT_ARMS,
@@ -1145,7 +1147,7 @@ describe('mixed arms declare their own sources', () => {
   const mixed = ARMS.filter((arm) => arm.mixed !== undefined);
 
   it('has at least the two arms under test', () => {
-    expect(mixed.map((arm) => arm.name).sort()).toEqual(['select-balanced', 'select-cross', 'select-cross-agree', 'select-cross-canon', 'select-cross-empty', 'select-cross-judge', 'select-cross-judge-canon', 'select-cross-judge-reasoning', 'select-cross-pooled', 'select-cross-pooled-agree', 'select-cross-pooled-dissent', 'select-cross-pooled-dissent-pair', 'select-cross-pooled-judge-reasoning', 'select-cross-pooled-reconcile', 'select-cross-pooled-reconcile-novel', 'select-cross-pooled-vote', 'select-cross-repair-all', 'select-cross-repair-second', 'select-cross-shuffled', 'select-cross-unhinted', 'select-dc', 'select-duo', 'select-intent', 'select-mixed', 'select-mixed+agree', 'select-mixed+dc', 'select-mixed+empty', 'select-mixed+empty-blind', 'select-mixed+values', 'select-mixed-cold', 'select-mixed-gated', 'select-mixed-gated-evidence', 'select-mixed-gated-pair', 'select-mixed-gated-reconcile', 'select-mixed-gated-reconcile-novel', 'select-mixed-hot', 'select-mixed-pooled', 'select-mixed-pooled-vote', 'select-mixed-rule', 'select-mixed-spread2', 'select-mixed-spread3', 'select-samples', 'select-tagged', 'vote-cross', 'vote-mixed']);
+    expect(mixed.map((arm) => arm.name).sort()).toEqual(['select-balanced', 'select-cross', 'select-cross-agree', 'select-cross-canon', 'select-cross-empty', 'select-cross-judge', 'select-cross-judge-canon', 'select-cross-judge-reasoning', 'select-cross-pooled', 'select-cross-pooled-agree', 'select-cross-pooled-dissent', 'select-cross-pooled-dissent-pair', 'select-cross-pooled-judge-reasoning', 'select-cross-pooled-reconcile', 'select-cross-pooled-reconcile-novel', 'select-cross-pooled-vote', 'select-cross-repair-all', 'select-cross-repair-second', 'select-cross-shuffled', 'select-cross-unhinted', 'select-dc', 'select-duo', 'select-intent', 'select-mixed', 'select-mixed+agree', 'select-mixed+dc', 'select-mixed+empty', 'select-mixed+empty-blind', 'select-mixed+values', 'select-mixed-cold', 'select-mixed-gated', 'select-mixed-gated-evidence', 'select-mixed-gated-pair', 'select-mixed-gated-reconcile', 'select-mixed-gated-reconcile-novel', 'select-mixed-hot', 'select-mixed-pooled', 'select-mixed-pooled-vote', 'select-mixed-rule', 'select-mixed-rule-intent', 'select-mixed-rule-rows', 'select-mixed-spread2', 'select-mixed-spread3', 'select-samples', 'select-tagged', 'vote-cross', 'vote-mixed']);
   });
 
   it.each(mixed.map((arm) => [arm.name, arm] as const))('%s: candidates are a whole number of passes over the sources', (name, arm) => {
@@ -1194,6 +1196,60 @@ describe('mixed arms declare their own sources', () => {
     // does not have, the comparison would no longer be "the same prompts, one fewer".
     for (const source of DUO_SOURCES) expect(MIXED_SOURCES).toContain(source);
     expect(DUO_SOURCES.length).toBe(MIXED_SOURCES.length - 1);
+  });
+});
+
+describe('the fourth candidate, bought by a rule instead of by a selector', () => {
+  const parent = resolveArm('select-mixed-rule') as Arm;
+  const bought = [resolveArm('select-mixed-rule-rows') as Arm, resolveArm('select-mixed-rule-intent') as Arm];
+
+  it('adds exactly one source and exactly one call to the shipped arm', () => {
+    // The pair is only one lever if the pool grows by one candidate and nothing else: a fourth
+    // source bought with a fifth call would be two levers, and a fourth source that replaced one
+    // of the trio would be a different pool rather than a larger one.
+    expect(parent.vote).toBe(3);
+    for (const arm of bought) {
+      expect(arm.vote, arm.name).toBe(4);
+      expect(arm.mixed, arm.name).toHaveLength(4);
+      expect(arm.selectRule, arm.name).toBe('shortest');
+      expect(arm.gate, arm.name).toBeUndefined();
+      // The trio is a prefix, not a subset: a source that reordered the pool would make the
+      // slot index the rule reads mean something else on one arm than on the other.
+      expect(arm.mixed?.slice(0, 3), arm.name).toEqual([...MIXED_SOURCES]);
+      expect(() => assertCandidatePasses(arm)).not.toThrow();
+    }
+    expect(bought[0]?.mixed?.[3]).toBe('inline+evidence+rows');
+    expect(bought[1]?.mixed?.[3]).toBe('intent');
+    expect(ROWS_SOURCES).toEqual([...MIXED_SOURCES, 'inline+evidence+rows']);
+    expect(INTENT_SOURCES).toEqual([...MIXED_SOURCES, 'intent']);
+  });
+
+  it('differs from its parent by the pool, and from its sibling by the same one field', () => {
+    // Two readings ride on this: parent → arm is the conversion test, arm → arm is "which kind of
+    // difference a fourth candidate has to be". Both are single-lever comparisons only if the
+    // pools differ and everything else is shared, including the judge, the card and the price.
+    expect(changedLevers(parent, bought[0] as Arm)).toEqual(['mixed']);
+    expect(changedLevers(parent, bought[1] as Arm)).toEqual(['mixed']);
+    expect(changedLevers(bought[0] as Arm, bought[1] as Arm)).toEqual(['mixed']);
+    expect(bought[0]?.notes).toBe(parent.notes);
+    expect(bought[0]?.linking).toBe(parent.linking);
+    expect(bought[1]?.linking).toBe(parent.linking);
+  });
+
+  it('renders the row block, so the source is not its parent under another name', () => {
+    // The arm is named for a block it has to actually send. `promptFor` is read here and not the
+    // pipeline because the report's size column and the distinct-prompt count both read this
+    // object — an arm whose block failed to render would publish a fourth candidate that was the
+    // first candidate again, and the pool would look larger while being the same size.
+    const arm = resolveArm('inline+evidence+rows') as Arm;
+    const schema = [{ table: 'orders', columns: [{ name: 'id', type: 'INTEGER' }, { name: 'status', type: 'TEXT' }] }];
+    const rendered = buildSqlPrompt(question.question, schema, promptFor(arm, question, { rows: 'id | status\n1 | Banned' }));
+    expect(rendered).toContain('Rows in this database:');
+    expect(rendered).toContain('1 | Banned');
+    // And the same arm with no rows supplied sends the parent's prompt, which is why the block is
+    // the lever rather than the arm's name.
+    const without = buildSqlPrompt(question.question, schema, promptFor(resolveArm('inline+evidence') as Arm, question));
+    expect(without).not.toContain('Rows in this database:');
   });
 });
 
