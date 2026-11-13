@@ -11914,3 +11914,47 @@ No score is published from this corpus yet. The loader exists so that the first 
 measurement of the engine rather than of a download, and the cache is written under a temporary name
 and renamed, so a run that dies mid-transfer leaves nothing a later run would parse as half a
 benchmark.
+
+### Deliberation, measured: the two shapes lose to a rule that reads length
+
+The pre-registration above was run in one dispatch — five arms, Mini-Dev 496, `deepseek-chat`,
+temperature 0.7, A/A +0.60 points (18:21, p = 0.75) at a **resolution of 3.53 points**.
+
+| arm | calls / question | prompt tokens | accuracy | tokens per correct answer | ceiling, disagreeing pool |
+|---|---|---|---|---|---|
+| `select-mixed-rule` (`shortest`) | **3.00** | **3,121** | **60.48%** | **5,452** | 54.55% |
+| `select-mixed-gated` | 3.26 | 3,255 | 59.07% | 5,812 | 56.15% |
+| `select-mixed-gated-pair` | 3.59 | 3,359 | 58.87% | 6,008 | 56.38% |
+| `select-mixed-gated-reconcile-novel` | 3.28 | 3,274 | 59.48% | 5,876 | 54.61% |
+| A/A (`select-mixed-gated` twice) | 3.29 | 3,271 | 59.68% | 5,779 | 53.52% |
+
+**Two of the four bars passed, one failed, and one was written wrong.** The cost bars held — 1.96
+and 1.00 calls per disagreeing question — and 35.5% of the reconcile replies carried a statement no
+candidate had written. The accuracy bar did not: on the disagreeing pool the knockout is 4.8 points
+below `shortest` and the reconcile turn 3.1 points below it. And `pairwise.comparisons` came back
+292 against 298, which is not a bug: 143 cases drew three candidates and 6 drew two, and
+`143 x 2 + 6 x 1 = 292`. The closed form is `sum(k - 1)`; writing it as "twice the asked cases"
+turned a runtime fact into a design constant, and the funnel caught it.
+
+**What the two shapes are worth is not zero, and it is not here.** Restricted to the questions whose
+candidate pools *both* disagreed — same cases, same judge, same pool — the knockout beats the
+absolute ranking **+5.77 points** (31.73% against 25.96%, 10:16, p = 0.33). That is the third
+independent reading in favour of CHASE-SQL's binary selector shape, and the first taken on a matched
+pool. Meanwhile `shortest` is 5.13 points ahead of the knockout and 6.67 ahead of the reconcile turn
+on the same subsets, so the shape is a real effect inside a layer that is not where the loss lives.
+
+The knockout also has a nameable bias: **67% of its winners are the first slot**, against 55.6% for
+`shortest`. Its prompt says "if both would be judged correct, answer 1", which over a `k - 1` chain
+makes the incumbent a strong prior. That is a mechanism to fix — randomise the order, or run both
+directions and keep the agreement — not a verdict on the model.
+
+Two explanations were closed on the way. **Length is not a proxy for the strongest prompt**: picking
+one source every time scores 56.76% (inline), 58.37% (metadata) and 58.93% (values) against
+`shortest`'s 60.61%, so the rule reads something inside the pool that source identity does not
+carry. And the reconcile turn is **adverse selection**: of 47 adopted statements, 9 were correct
+(19.1%), while the 94 replies handed back to the vote scored 38.3% — the model rewrites exactly
+where it is least able to.
+
+Verdict: neither shape is adopted. Both stay as ablation references with their funnels intact, the
+gate stays an eval mechanism, and the next lever is not "how to choose" but **"where the candidates
+come from"** — the disagreeing ceiling is still 54.5–56.4% against a best chooser of 35%.

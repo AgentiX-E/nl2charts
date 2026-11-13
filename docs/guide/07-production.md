@@ -211,41 +211,64 @@ Four things worth knowing before you turn it on:
 
 A candidate pool splits into two populations, and only one of them contains a decision. Group the
 executed candidates by the judge's own equality — same rows, same answer — and on Mini-Dev at
-temperature 0.7, **350 of 479 three-candidate questions returned one result**. On those questions the
-model selector, the `shortest` rule and the `modal` rule score **70.57%, the same number to the
-case**, because the result is the answer and the statement is not. A fourth call there is not cheap;
-it has nothing to decide.
+temperature 0.7, **352 of 495 three-candidate questions returned one result**. On those questions the
+model selector, the `shortest` rule and the `modal` rule score **the same number to the case**,
+because the result is the answer and the statement is not. A fourth call there is not cheap; it has
+nothing to decide.
 
-The 27% that disagree are the only population a paid selector can change, and there the pool's
-ceiling is 62.02% while the best chooser reaches 44.19% — which is where the remaining 4.8 points of
+The 29% that disagree are the only population a paid selector can change, and there the pool's
+ceiling is 54.55% while the free rule reaches 34.97% — that is where the remaining 5.4 points of
 overall score live, and also where every cheap trick has failed: the text-level rules (fewest joins,
 fewest predicates, literal grounding, group-by matching) all land within one point of `shortest`.
 
-The chooser that wins on that population is not stable between artifacts: `shortest` reaches 44.19%
-on one pool and 31.11% on the next, the model selector 35.66% and 34.27%. Read that as the honest
-state of the art here rather than as an ordering — 130-odd disagreeing questions cannot rank two
-choosers, and the ordering flips. What is stable is that **no chooser currently gets close to the
-62% the pool contains**, and that is the reserve the next mechanism has to reach.
+The chooser that wins on that population is not stable between artifacts: `shortest` reaches 34.97%
+on this pool and 44.19% on an earlier one. Read that as the honest state of the art here rather than
+as an ordering — 130-odd disagreeing questions cannot rank two choosers, and the ordering flips. What
+is stable is that **no chooser currently gets close to the 54% the pool contains**, and that is the
+reserve the next mechanism has to reach.
 
-Run `43421692582` (five arms in one dispatch, A/A −0.81pp at a resolution of 3.20pp) prices the
-configurations rather than arguing about them:
+Run `43450970534` (five arms in one dispatch, A/A +0.60pp at a resolution of 3.53pp) prices the
+configurations — and, for the first time, the two ways of *paying for a second opinion*:
 
-| configuration | calls / question | accuracy | tokens per correct answer |
-| --- | --- | --- | --- |
-| three candidates + `shortest` (`aimed-3`) | **3.00** | 59.07% | **5,283** |
-| three candidates, judge called only on a disagreeing pool | 3.30 | 59.48% | 5,499 |
-| three candidates, judge called on every question (`aimed-4`) | 3.99 | 60.08% | 5,939 |
+| configuration | calls / question | accuracy | tokens per correct answer | disagreeing subset |
+| --- | --- | --- | --- | --- |
+| three candidates + `shortest` (`select-mixed-rule`) | **3.00** | **60.48%** | **5,452** | 34.97% |
+| judge called only on a disagreeing pool (`select-mixed-gated`) | 3.26 | 59.07% | 5,812 | 33.08% |
+| gated, then a knockout over the pool (`select-mixed-gated-pair`) | 3.59 | 58.87% | 6,008 | 30.20% |
+| gated, then one reconcile turn (`select-mixed-gated-reconcile-novel`) | 3.28 | 59.48% | 5,876 | 31.91% |
+| A/A (gated, second run) | 3.29 | 59.68% | 5,779 | 28.87% |
 
-**No accuracy difference in that table survives the split's own resolution.** What survives is cost:
-`aimed-3` is 25% fewer calls and 11% fewer tokens per correct answer than `aimed-4`. That is why it
-is the default, and the reason is worth stating precisely — not "the rule is better", but **"the
-split cannot tell them apart, and one of them is a quarter cheaper"**.
+**Four readings, one direction: the free rule wins on every coordinate** — most accurate, fewest
+calls, fewest tokens per correct answer. No accuracy difference in that table survives the split's
+own resolution; the cost column is the discriminator. That is why the rule is the default, and the
+reason is worth stating precisely — not "the rule is better", but **"the split cannot tell them
+apart, and one of them is a fifth cheaper in calls and a tenth cheaper per correct answer"**.
 
-If you want to keep a model in the loop, spend it where a decision exists: group the executed
+The two shapes of deliberation are priced on the same run, so neither comparison crosses artifacts:
+
+1. **A knockout carries signal, but not enough of it — and it carries a fixable prior.** Restrict
+   both arms to the questions whose pools disagreed in both (same question, same pool, same judge;
+   n=104): the knockout scores 31.73%, the single ranking call 25.96% — **+5.77pp for the pairwise
+   shape** (10:16, p=0.33). The same restriction against the free rule is −5.13pp (21:15). The
+   mechanism is alive; this is the wrong layer. It also has a bias you can name: on a `k−1` chain,
+   the prompt's "if both are correct, answer 1" makes the first slot a strong prior, and **67% of
+   knockout winners land in slot 0** against 55.6% for `shortest`. Randomise the order, or run both
+   orders and take the agreement, before reading a knockout's number as a ceiling.
+2. **Asking the model to rewrite a statement is adverse selection.** Of 141 disagreeing questions the
+   reconcile turn wrote a novel statement on 50 (35.5%) and 47 were adopted — and of those 47,
+   **9 were correct (19.1%)**, while the 94 it handed back to the vote were correct 36 times (38.3%).
+   The turn rewrites exactly where the model is least sure, and the rewrites are wrong 81% of the
+   time. A rewrite lever on a temperature-0.7 pool does not pay for itself.
+
+If you want to keep a model in the loop anyway, spend it where a decision exists: group the executed
 candidates by result before adjudicating, and skip the call when there is one group. In the harness
-that policy is `Arm.gate: 'results'`; it removes 17% of the calls with accuracy inside a one-point
-invariance, and it reports both counts (`selectorRule.decided`, `spend.asked`) so the saving is
-attributable rather than inferred.
+that policy is `Arm.gate: 'results'`; it removes 18% of the calls with accuracy inside a one-point
+invariance, and it reports the counts (`selectorRule.decided`, `spend.asked`) so the saving is
+attributable rather than inferred. A knockout behind the same gate reports `pairwise.asked`,
+`pairwise.comparisons` and `pairwise.unreadable`, and the price is `Σ(k−1)` over live candidates, not
+`2 × asked` — a pool whose third candidate dies after a failed generation costs one comparison less
+per death, and the artifact's own arithmetic says so: 143 questions with three live candidates plus
+6 with two is `143×2 + 6×1 = 292`, not 298.
 
 ### If you will not pay the fourth call
 
