@@ -11895,3 +11895,22 @@ An unreadable comparison is the failure mode both shapes share and neither could
 round: the incumbent is kept, so a tournament that parsed nothing returns the pool's first candidate
 and scores exactly what the vote scored. `assertPairwiseFired` refuses that state above the sample
 floor, which makes "the knockout did not run" a bug rather than a null result.
+
+### Text2Vis: the corpus is a file, and the loader is a parser
+
+The chart side of this project has one external benchmark that scores a *visualization* rather than a
+result set: Text2Vis (EMNLP 2025), one CSV in a public Hugging Face repository, with the question, the
+answer, the reference matplotlib source and the chart type the authors judged correct for each row.
+
+`pnpm bench:text2vis:dataset` downloads it once into `eval/.cache/text2vis` and prints what it holds —
+the row count, how many rows carry reference code, and the chart types most frequent first. The
+command is the whole loader: the CSV is parsed by `parseCsv`, which honours quoted commas, quoted
+newlines, doubled quotes, CRLF and a byte-order mark, because the file is prose and a parser that
+splits on the delimiter returns the right number of rows and the wrong ones. A header without
+`Prompt` is refused by name rather than answered with an empty string: a corpus of blank questions
+produces an accuracy that is a number about nothing.
+
+No score is published from this corpus yet. The loader exists so that the first reading is a
+measurement of the engine rather than of a download, and the cache is written under a temporary name
+and renamed, so a run that dies mid-transfer leaves nothing a later run would parse as half a
+benchmark.

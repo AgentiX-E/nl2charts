@@ -7,6 +7,13 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **The Text2Vis corpus has a loader, and the loader is a parser.** The chart side of this project
+  had one external benchmark and no way to read it without a Python dependency: `mizanurr/Text2Vis`
+  is one CSV of prose, so `eval/text2vis/dataset.ts` parses it itself -- quoted commas, quoted
+  newlines, doubled quotes, CRLF, a byte-order mark -- rather than splitting on the delimiter, which
+  returns the right number of rows and the wrong ones. A header without `Prompt` is refused by name;
+  the download is written under a temporary name and renamed, so a run that dies mid-transfer leaves
+  nothing a later run would parse as half a benchmark. `pnpm bench:text2vis:dataset` is the command.
 - **The gate now admits the choosers it was built for: a knockout, and a reconcile turn.** The gate
   was written to refuse a paid chooser behind it, on the argument that two levers behind one number
   would be priced as one. That argument had the sign wrong. A paid adjudication is exactly the thing
