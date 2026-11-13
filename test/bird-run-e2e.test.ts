@@ -671,6 +671,43 @@ describe('a sampling arm', () => {
     expect(pen?.winnerSource).toBe('inline+evidence');
   });
 
+  it('draws each source twice when the arm buys six candidates', async () => {
+    // `vote` is the number of candidates an arm buys, and the source list is walked
+    // round-robin, so six over three sources has to be two full passes — in that order, and
+    // with one selector call on top. The alternative this rules out is the defect the old
+    // declaration-time assertion was written for: three draws billed as six, which would have
+    // produced a row that looked like a larger candidate set and was the parent renamed.
+    const result = await run({ plan: {}, env: { BIRD_ARMS: 'select-mixed-spread2' } });
+    const cases = result.report.cases as {
+      id: string;
+      calls?: number;
+      candidates?: { source: string; correct: boolean }[];
+    }[];
+    const recorded = cases.filter((row) => row.candidates !== undefined);
+    expect(recorded.length).toBeGreaterThan(0);
+    for (const row of recorded) {
+      // Two passes, same order, so the second draw of a prompt sits four slots from the first
+      // rather than beside it: what differs between them is temperature, and a report that
+      // interleaved them would invite reading the pair as a second opinion.
+      expect(row.candidates?.map((verdict) => verdict.source)).toEqual([
+        'inline+evidence',
+        'metadata+evidence',
+        'values',
+        'inline+evidence',
+        'metadata+evidence',
+        'values',
+      ]);
+      // Six generations and the selector: the cost line is the claim, so it is asserted.
+      expect(row.calls).toBe(7);
+    }
+    // The ceiling has to be read off the same population the score is: six draws that repeat
+    // an answer add no recall, and a spread arm whose recall is identical to its parent is the
+    // reading this arm exists to produce — so it is recorded, not assumed away.
+    for (const row of recorded) {
+      expect(row.candidates?.length).toBe(6);
+    }
+  });
+
   it('counts a candidate the guard refused instead of letting the set shrink quietly', async () => {
     // A candidate that never arrives is not a candidate that was wrong: the set is smaller,
     // the case still answers, and the ceiling falls for a reason that is not in the arm. The
