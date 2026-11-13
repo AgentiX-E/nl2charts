@@ -6,6 +6,7 @@ export { LINT_RULES, isRenderable, lint } from './lint.js';
 export type { LintIssue, LintRule, Severity } from './lint.js';
 export { compileToECharts } from './compile.js';
 export type { EChartsOption } from './compile.js';
+export { compileToMatplotlib } from './matplotlib.js';
 export { supportOf } from './support.js';
 export type { SupportVerdict } from './support.js';
 export { MARKS, describeMark } from './marks.js';
