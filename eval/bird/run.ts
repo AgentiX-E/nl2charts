@@ -159,6 +159,34 @@ export interface Arm {
    */
   readonly selectRule?: SelectionRule;
   /**
+   * Spend the adjudication only on the questions that have something to adjudicate.
+   *
+   * `'results'` reads the pool before the selector does: the executed candidates are grouped by
+   * the judge's own equality, and when they all returned the same rows there is nothing to decide
+   * — every member of the pool is scored by the same result, so any member is worth exactly what
+   * any other is worth. The arm then chooses by `gateRule` and spends no call. When the pool
+   * disagrees it calls the selector exactly as its parent does, on the same candidates and the
+   * same prompt, so the delta between a gated arm and its parent is cost and nothing else.
+   *
+   * The reading that puts this here is the shape of the pool on Mini-Dev at temperature 0.7: 350
+   * of 479 three-candidate questions (73.1%) returned one result, and on those cases the model
+   * selector, the `shortest` rule and the `modal` rule all score **70.57%** — the same number to
+   * the case. The fourth call is not wrong there, it is unspendable. On the 129 that disagree the
+   * three choosers separate (44.2% / 35.7% / 26.4%), which is where a call can buy something.
+   */
+  readonly gate?: 'results';
+  /** Who picks when the gate did not spend. Defaults to `shortest`, the rule this pool prefers. */
+  readonly gateRule?: SelectionRule;
+  /**
+   * Show the judge the columns of the tables its candidates read.
+   *
+   * `'columns'` renders the schema of exactly the tables the candidate statements name, so the
+   * judge can rule out a name that does not exist and can see the column a question describes
+   * living somewhere other than where a candidate looked. The selector prompt has never carried
+   * the schema; the generator's always has.
+   */
+  readonly selectorEvidence?: 'columns';
+  /**
    * Column values the question names, resolved against the database under test.
    * The instance-specific counterpart to retrieved knowledge, which is generic.
    */
@@ -1090,6 +1118,31 @@ export const ARMS: readonly Arm[] = [
   // one run — the score, the recorded candidates, and `bench:bird:consensus` over those
   // candidates — and the identity between the last two is exact or something is wrong.
   { name: 'select-mixed-rule', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, selectRule: 'shortest', mixed: MIXED_SOURCES },
+  // The parent arm with the adjudication spent only where there is something to adjudicate.
+  //
+  // At temperature 0.7, 350 of Mini-Dev's 479 three-candidate questions (73.1%) returned one
+  // result under the judge's own equality, and on those cases the model selector, `shortest` and
+  // `modal` all score 70.57% — the same number, because the result is the answer and the statement
+  // is not. The fourth call is not cheap there, it is unspendable. On the 129 that disagree the
+  // three separate (44.2% / 35.7% / 26.4%), which is the only population a call can change.
+  //
+  // Pre-registered: accuracy within one point of the parent (the invariance is a construction, so a
+  // departure is a defect in the gate and not a result about it), `calls.mean` at or below 3.35,
+  // and `spend.asked` at or below 0.30 of the cases — the three readings that would make the paid
+  // adjudication proportional to the questions that have something to decide.
+  { name: 'select-mixed-gated', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: MIXED_SOURCES, gate: 'results' },
+  // The same gate, with the judge shown the columns its candidates use.
+  //
+  // The selector has never read the schema; the generator always has. That costs nothing while the
+  // pool agrees, and on a disagreeing pool it is the evidence the decision turns on — the failures
+  // there are the shape where a candidate reads a column that exists in the wrong table, and a
+  // preview cannot expose it because a plausible column returns a plausible result.
+  //
+  // Pre-registered, against `select-mixed-gated` on the same pool: accuracy at least +2pp, and on
+  // the disagreeing subset the model's share of the ceiling at least 5pp higher than the parent's
+  // 35.7/62.0. A block that changes nothing closes the "the judge was blind" explanation and points
+  // the next mechanism at deliberation (pairwise, or a second reading) rather than at evidence.
+  { name: 'select-mixed-gated-evidence', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: MIXED_SOURCES, gate: 'results', selectorEvidence: 'columns' },
   // The arm this split ships, plus one candidate that is a query description instead of a
   // statement. One lever from `select-mixed` in the sense that matters — same three prompts, same
   // card, same selector — and one call more, which the report publishes rather than hides.
@@ -1587,6 +1640,8 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'select-mixed+dc': 'the adopted arm with a fourth candidate written by decomposition: the only addition that can create a statement the three prompts cannot, which is what the routing analysis left open',
   'select-dc': 'the third candidate written by decomposition instead of by the value index: same count, same four calls, and the slot values actually won 5.3% of the time',
   'select-mixed-spread2': 'the three prompts drawn twice each: six candidates and seven calls, which is the rung this repository has never climbed and the one the strongest training-free competitor stands on (it draws 21 at temperature 0.7 and votes on executed results). On demand rather than in the chain because its verdict is a ceiling reading on 1,532 dev questions — 498 cannot resolve two points of ceiling, and the arm costs 7 calls a question. Run it beside `select-mixed` and read `candidateRecall`, not the score: the question is whether a second pass over the same prompts widens the set at all',
+  'select-mixed-gated': 'the parent arm with its fourth call conditional on the pool: 73.1% of Mini-Dev three-candidate questions at temperature 0.7 return one result, and on those the selector, `shortest` and `modal` all score 70.57%, so the call is unspendable rather than cheap. The gate reads the pool with the judge\'s own equality, picks by rule when it agreed, and calls the selector unchanged when it did not — so the delta from `select-mixed` is cost and nothing else. Read `calls.mean` (bar: at most 3.35), `spend.asked` (bar: at most 0.30 of cases) and accuracy (bar: within one point, because the invariance is a construction and a departure is a defect)',
+  'select-mixed-gated-evidence': 'the gated arm with the judge shown the columns of the tables its candidates read: the selector has never seen the schema and the generator always has, which costs nothing on an agreeing pool and is the whole decision on a disagreeing one. Against `select-mixed-gated` the bar is +2pp overall, and on the disagreeing subset a model share of the ceiling at least 5pp above the parent\'s 35.7/62.0. A block that moves nothing retires the "the judge was blind" explanation and points the next mechanism at deliberation',
   'select-mixed-cold': 'the same three prompts and the same four calls at temperature 0: the coordinate every multi-prompt arm was silently measured at, kept as the control rather than as a claim. It is the arm a "more candidates help" hypothesis has to beat, and it costs nothing beyond its four calls — dispatch it beside `select-mixed` and `select-mixed-hot` so the three rungs share one split, one judge and one bill',
   'select-mixed-hot': 'the same three prompts and the same four calls drawn at temperature 1 instead of 0.7: the one experiment that separates "0.7 is too cold for this endpoint" from "the three prompts already know the answer", at no extra cost. On demand because it is a ceiling reading and it must share a dispatch with `select-mixed` to be paired — 498 questions resolve about two points of ceiling and nothing finer. Read `candidateRecall` (bar: 64.3% + 2pp) and the distinct-results-per-question line from `bench:bird:diversity` (bar: 1.26 -> 1.50). A ceiling that does not move closes the sampling family: draw count, source count and temperature are then one measurement',
   'select-mixed-spread3': 'three passes, nine candidates, ten calls: the rung that says whether the ceiling curve is still rising at double digits. Read against `spread2`, not against the parent — a slope that halves between six and nine closes the competitor\'s 21-candidate configuration as an explanation and moves the question to its prompt family',
@@ -3691,6 +3746,84 @@ export function decideByRule(
 }
 
 /**
+ * The columns of exactly the tables a candidate set reads, rendered for the judge.
+ *
+ * The selector is asked which statement answers the question and shown the question, the
+ * statements and three preview rows of each result. It has never been shown the schema. On a pool
+ * that agrees that omission is free; on the 27% that disagree it is the evidence the decision turns
+ * on, and the readings say the decision is being made without it: at temperature 0.7 the pool keeps
+ * a correct candidate on 62.0% of its disagreeing questions, the model picks it on 35.7%, and a
+ * rule that reads nothing but statement length picks it on 44.2%.
+ *
+ * Only the tables the candidates name are rendered, and a name that matches no table in the card is
+ * dropped rather than shown: BIRD's golds open CTEs, and a CTE is not a table with columns. The
+ * budget is characters, not tables, because the block is a prompt and a prompt is a bill — a card
+ * with forty tables would cost more than the call it informs.
+ */
+export function columnEvidence(
+  schema: readonly SchemaTable[],
+  candidates: readonly { readonly sql: string }[],
+  budget = 1200,
+): string | undefined {
+  const named = new Set<string>();
+  for (const candidate of candidates) {
+    for (const reference of tableRefs(candidate.sql)) named.add(reference.table.toLowerCase());
+  }
+  const lines: string[] = [];
+  let used = 0;
+  let omitted = 0;
+  for (const table of schema) {
+    if (!named.has(table.table.toLowerCase())) continue;
+    const line = `${table.table}(${table.columns.map((column) => column.name).join(', ')})`;
+    if (used + line.length > budget) {
+      omitted += 1;
+      continue;
+    }
+    lines.push(line);
+    used += line.length + 1;
+  }
+  if (lines.length === 0) return undefined;
+  return omitted === 0 ? lines.join('\n') : `${lines.join('\n')}\n(${String(omitted)} more tables omitted for length)`;
+}
+
+/**
+ * A gate in front of a chooser that spends nothing is a rename, and a gate whose pool agreed is the
+ * only state it can save a call in.
+ *
+ * Refused at the declaration for `assertRuleSelection`'s reason: the wrong combination compiles,
+ * runs, is billed, and reports a number that reads as a measurement of the gate.
+ */
+export function assertResultGate(arm: Pick<Arm, 'name' | 'select' | 'gate' | 'gateRule' | 'selectRule' | 'reconcile' | 'pairwise' | 'vote'>): void {
+  if (arm.gate === undefined) return;
+  if (arm.select !== true) {
+    throw new Error(`arm ${arm.name} gates a decision it never asks for; \`select: true\` is what draws a candidate set and what a gate saves a call on`);
+  }
+  if (arm.selectRule !== undefined) {
+    throw new Error(`arm ${arm.name} gates the ${arm.selectRule} rule, which spends no call either way — the gate would be a second name for the same arm`);
+  }
+  if (arm.reconcile !== undefined || arm.pairwise === true) {
+    throw new Error(`arm ${arm.name} gates the ${arm.reconcile === undefined ? 'pairwise' : 'reconcile'} turn, whose cost and whose prompt this gate does not govern — the two levers would be priced as one`);
+  }
+  if ((arm.vote ?? 1) < 2) {
+    throw new Error(`arm ${arm.name} draws ${String(arm.vote ?? 1)} candidate, so its pool cannot agree or disagree and the gate would spend on every case`);
+  }
+}
+
+/**
+ * Evidence for a judge that is never asked is a block that is built, billed as a declaration and
+ * never read — the shape `assertRuleSelection` refuses on the other side of the same call.
+ */
+export function assertEvidence(arm: Pick<Arm, 'name' | 'select' | 'selectRule' | 'reconcile' | 'selectorEvidence'>): void {
+  if (arm.selectorEvidence === undefined) return;
+  if (arm.select !== true || arm.selectRule !== undefined) {
+    throw new Error(`arm ${arm.name} declares ${arm.selectorEvidence} evidence for a selector that never reads it: the block is rendered into the model selector's prompt, and this arm chooses by ${arm.selectRule === undefined ? 'nothing' : `the ${arm.selectRule} rule`}`);
+  }
+  if (arm.reconcile !== undefined) {
+    throw new Error(`arm ${arm.name} asks for a reconcile turn, whose prompt does not render the evidence block — the lever would be declared and never run`);
+  }
+}
+
+/**
  * How many of an arm's decisions carry a counted call.
  *
  * The one number its cost cannot be inferred from. `calls.mean` is a mean over cases that did not
@@ -4449,7 +4582,16 @@ export function assertReportComplete(report: { readonly arms?: readonly ArmRepor
         `arm ${row.arm} decides with the model and its row does not say how many of those decisions were priced: the selector call is one per decision and a mean cannot show it`,
       );
     }
-    if (arm.selectRule !== undefined && row.selectorRule === undefined && row.total >= MINIMUM_INSTRUMENT_SAMPLE) {
+    if (arm.gate !== undefined && arm.selectRule === undefined && row.spend === undefined && row.total >= MINIMUM_INSTRUMENT_SAMPLE) {
+      // A gated arm's saving is a count, and the two counts that make it readable are the cases the
+      // gate stopped (`selectorRule.decided`) and the cases that still reached a selector
+      // (`spend.asked`). A row with neither reports an arm whose call mean moved for no stated
+      // reason, which is the defect this whole function exists for one lever over.
+      throw new Error(
+        `arm ${row.arm} gates its adjudication and its row says neither how many cases the gate decided nor how many reached the selector, so the saving cannot be told from a mechanism that never ran`,
+      );
+    }
+    if ((arm.selectRule !== undefined || arm.gate !== undefined) && row.selectorRule === undefined && row.total >= MINIMUM_INSTRUMENT_SAMPLE) {
       // The same question for a selector that spends nothing, and the one that a mean cannot
       // answer for the same reason: a rule arm's `calls.mean` equals its candidate count whether
       // the rule ran or the vote did. The funnel is the only record of the lever acting.
@@ -6763,6 +6905,11 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
   assertSampleRule(arm);
   // ...and a card decided by two rules is a delta about which one ran last.
   assertCardRule(arm);
+  // ...and a gate in front of a chooser that spends nothing, or a pool of one, is a second name
+  // for the arm it gates.
+  assertResultGate(arm);
+  // ...and evidence rendered into a prompt no judge reads is a declaration, not a lever.
+  assertEvidence(arm);
   // ...and a mask with no examples under it is a name for the parent arm.
   assertMaskingRule(arm);
   // ...and a temperature on an arm that draws once is one draw with noise, refused before the run
@@ -7259,7 +7406,18 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
         // per-candidate record below is written from, because a verdict is only attributable if
         // it is filed under the slot the judge actually saw.
         const ordered = arm.shuffle === true ? shuffleByCase(considered, question.question_id) : considered;
-        if (arm.select === true && arm.selectRule !== undefined) {
+        if (arm.gate === 'results' && majority.groups === 1) {
+          // The pool agreed, so the adjudication has nothing to decide and the call is not cheap,
+          // it is unspendable: every member returned the same rows under the judge's own equality,
+          // so every member is worth exactly what the model would have picked. The choice is made
+          // by a rule that costs nothing, and `selectedByRule` records it, which is what keeps the
+          // row readable as "the gate fired" rather than as "the selector answered cheaply".
+          //
+          // `spendOf` is the instrument: it counts the cases that reached a selector, so a gated
+          // arm's `spend.asked` is the number of questions that had something to ask about.
+          selectedByRule = decideByRule(arm.gateRule ?? 'shortest', ordered);
+          winner = ordered[selectedByRule.index] as typeof winner;
+        } else if (arm.select === true && arm.selectRule !== undefined) {
           // The choice the fourth call was buying. Every input is already in hand — the executed
           // rows and the statement text — so this branch spends nothing and cannot fail: there is
           // no reply to read, no index to parse and no endpoint to be down. That is the whole
@@ -7381,9 +7539,14 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
               arm.pairwise === true
                 ? await chooseCandidatePairwise(judge, question.question, readable)
                 : await (async () => {
+                    // The evidence is rendered from the arm's own card and the candidates it is
+                    // about to show: the columns of the tables those statements name, and nothing
+                    // else. `undefined` when the card names none of them, which leaves the prompt
+                    // byte-identical to the one the unmarked arms were measured with.
+                    const evidence = arm.selectorEvidence === 'columns' ? columnEvidence(schema, readable) : undefined;
                     const reply = await judge.complete({
                       messages: [
-                        { role: 'system', content: buildSelectionPrompt(question.question, offered, { reasoning: judgeReasoning }) },
+                        { role: 'system', content: buildSelectionPrompt(question.question, offered, { reasoning: judgeReasoning, ...(evidence === undefined ? {} : { evidence }) }) },
                         { role: 'user', content: question.question },
                       ],
                       temperature: 0,
@@ -8169,11 +8332,14 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
           // candidates the rule could rank, and `emptyPool` counts the sets where it had none to
           // prefer — the state in which every candidate returned nothing, which is a wrong set on
           // this corpus and the only correct one on a corpus whose answers are sometimes empty.
-          ...(arm.selectRule === undefined
+          // A gated arm makes a free decision too, on the cases its gate stopped: the rule it
+          // names there is the one the gate fell back to, and publishing the same funnel for it
+          // keeps "the gate fired" countable instead of leaving it to be inferred from a call mean.
+          ...(arm.selectRule === undefined && arm.gate === undefined
             ? {}
             : {
                 selectorRule: {
-                  rule: arm.selectRule,
+                  rule: arm.selectRule ?? arm.gateRule ?? 'shortest',
                   decided: runs.filter((run) => run.selectedByRule !== undefined).length,
                   eligible: runs.reduce((total, run) => total + (run.selectedByRule?.eligible ?? 0), 0),
                   emptyPool: runs.filter((run) => run.selectedByRule?.emptyPool === true).length,

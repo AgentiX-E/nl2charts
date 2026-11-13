@@ -25,6 +25,9 @@ import {
   assertMaskingFired,
   assertMaskingRule,
   assertTemperature,
+  assertResultGate,
+  assertEvidence,
+  columnEvidence,
   assertRuleSelection,
   assertDissentFired,
   assertDissentRule,
@@ -1694,6 +1697,77 @@ describe('a mask declared with nothing to mask', () => {
       expect(arm.demonstrations, arm.name).toBe(true);
     }
   });
+
+describe('a gate in front of the adjudication', () => {
+  it('refuses a gate on an arm that asks no selector, spends nothing, or cannot disagree', () => {
+    // Each of the three is a gate that cannot save a call: no candidate set to read, a rule that
+    // already spends nothing, or a pool of one that can never agree or disagree. All three compile,
+    // run, are billed, and publish a number that reads as a measurement of the gate.
+    expect(() => assertResultGate({ name: 'x', gate: 'results' })).toThrow(/gates a decision it never asks for/);
+    expect(() => assertResultGate({ name: 'x', select: true, gate: 'results', selectRule: 'shortest', vote: 3 })).toThrow(/second name for the same arm/);
+    expect(() => assertResultGate({ name: 'x', select: true, gate: 'results', reconcile: 'groups', vote: 3 })).toThrow(/does not govern/);
+    expect(() => assertResultGate({ name: 'x', select: true, gate: 'results', pairwise: true, vote: 3 })).toThrow(/does not govern/);
+    expect(() => assertResultGate({ name: 'x', select: true, gate: 'results', vote: 1 })).toThrow(/cannot agree or disagree/);
+  });
+
+  it('accepts a gated arm over two candidates or more, and an arm with no gate', () => {
+    expect(() => assertResultGate({ name: 'x', select: true, gate: 'results', vote: 3 })).not.toThrow();
+    expect(() => assertResultGate({ name: 'x', select: true, gate: 'results', gateRule: 'modal', vote: 2 })).not.toThrow();
+    expect(() => assertResultGate({ name: 'x', select: true, vote: 3 })).not.toThrow();
+    expect(() => assertResultGate({ name: 'x' })).not.toThrow();
+  });
+
+  it('holds for every arm in the catalogue', () => {
+    // The catalogue is where the mistake is cheap and a dispatch is where it costs a run.
+    for (const arm of ARMS) {
+      if (arm.gate === undefined) continue;
+      expect(arm.select, arm.name).toBe(true);
+      expect(arm.selectRule, arm.name).toBeUndefined();
+      expect(arm.reconcile, arm.name).toBeUndefined();
+      expect(arm.vote ?? 1, arm.name).toBeGreaterThanOrEqual(2);
+    }
+  });
+});
+
+describe('evidence for a judge', () => {
+  const card = [
+    { table: 'orders', columns: [{ name: 'id', type: 'INT' }, { name: 'qty', type: 'INT' }] },
+    { table: 'items', columns: [{ name: 'id', type: 'INT' }, { name: 'price', type: 'REAL' }] },
+    { table: 'unused', columns: [{ name: 'id', type: 'INT' }] },
+  ];
+
+  it('renders the columns of exactly the tables the candidates read', () => {
+    // Only what the statements name: a card of forty tables rendered whole would cost more than the
+    // call it informs, and a table nobody's statement touches is not evidence about them.
+    expect(columnEvidence(card, [{ sql: 'select count(*) from orders' }])).toBe('orders(id, qty)');
+    // Card order, not statement order, so the block is stable across a permuted candidate set.
+    expect(columnEvidence(card, [{ sql: 'select 1 from items' }, { sql: 'select 2 from orders' }])).toBe('orders(id, qty)\nitems(id, price)');
+  });
+
+  it('matches a table whatever case the statement wrote it in, and drops a name the card does not hold', () => {
+    // SQL is case-insensitive and BIRD's golds are upper case; a CTE name is defined by the
+    // statement and is not a table, which is why a name that matches no table is dropped rather
+    // than rendered as a table with no columns.
+    expect(columnEvidence(card, [{ sql: 'SELECT * FROM ORDERS' }])).toBe('orders(id, qty)');
+    expect(columnEvidence(card, [{ sql: 'with orders as (select 1) select * from orders' }])).toBe('orders(id, qty)');
+    expect(columnEvidence(card, [{ sql: 'select * from nowhere' }])).toBeUndefined();
+  });
+
+  it('prices the block in characters and says how many tables it left out', () => {
+    // The budget is what keeps the evidence from costing more than the call. A silently truncated
+    // block would read as "this database has two tables".
+    const tight = columnEvidence(card, [{ sql: 'select 1 from items join orders on 1 = 1' }], 16);
+    expect(tight).toBe('orders(id, qty)\n(1 more tables omitted for length)');
+  });
+
+  it('refuses evidence that no judge would read', () => {
+    expect(() => assertEvidence({ name: 'x', selectorEvidence: 'columns' })).toThrow(/selector that never reads it/);
+    expect(() => assertEvidence({ name: 'x', select: true, selectRule: 'shortest', selectorEvidence: 'columns' })).toThrow(/selector that never reads it/);
+    expect(() => assertEvidence({ name: 'x', select: true, reconcile: 'groups', selectorEvidence: 'columns' })).toThrow(/does not render the evidence block/);
+    expect(() => assertEvidence({ name: 'x', select: true, selectorEvidence: 'columns' })).not.toThrow();
+    expect(() => assertEvidence({ name: 'x', select: true })).not.toThrow();
+  });
+});
 
 describe('a temperature on an arm that draws once', () => {
   it('refuses a single draw, because nothing would be drawn apart', () => {

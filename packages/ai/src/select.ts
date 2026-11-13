@@ -126,6 +126,22 @@ export interface SelectionPromptOptions {
    * written for a model that answers in one token.
    */
   readonly reasoning?: boolean;
+  /**
+   * The columns the candidates' own tables hold, rendered by the caller.
+   *
+   * The selector is shown the question, the statements and three preview rows of each result, and
+   * it has never been shown the schema. On a pool that agrees that omission costs nothing — the
+   * result settles the question, not the statement — but on a pool that disagrees it is the
+   * evidence the decision turns on: `select-mixed` at temperature 0.7 keeps a correct candidate on
+   * 62.0% of its disagreeing questions and the model picks it on 35.7%, below the free rule that
+   * keeps the shortest statement (44.2%). Reading the wrong column is the failure the previews
+   * cannot expose, because a plausible column returns plausible rows.
+   *
+   * Absent is byte-identical to the prompt every published reading was taken with: the block is
+   * emitted only when a caller renders one, so the delta between the two arms is the evidence and
+   * not a rewritten instruction.
+   */
+  readonly evidence?: string;
 }
 
 export function buildSelectionPrompt(
@@ -154,6 +170,11 @@ export function buildSelectionPrompt(
       : 'Answer with the number of the chosen candidate and nothing else.',
     '',
     `Question: ${question}`,
+    // The evidence block sits between the question and the candidates because it is about them:
+    // which of the names they use exist, and in which table.
+    ...(options.evidence === undefined
+      ? []
+      : ['Columns of the tables these statements read (a name that is not listed does not exist):', options.evidence]),
     'Candidates:',
     candidates.map((candidate, index) => renderCandidate(candidate, String(index + 1))).join('\n'),
   ].join('\n');
