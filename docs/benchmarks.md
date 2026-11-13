@@ -11758,3 +11758,22 @@ twenty-one requests: the same tokens, twenty-one times the failure surface. That
 its candidate set is all-or-nothing on a timeout, while this harness records survival per source
 (`candidateSurvival`) and can score a set that lost one draw. A larger candidate set is the one
 place where the absence of `n` is not purely a cost.
+
+### The dose-response curve for temperature
+
+Run `43404099480`, Mini-Dev 496 questions, `deepseek-chat`, four arms in one dispatch differing only in `temperature`, three candidates and 3.99 calls each.
+
+| arm | T | accuracy | candidateRecall | realization | distinct answers / question | unanimous questions |
+|---|---|---|---|---|---|---|
+| `select-mixed-cold` | 0 | **59.88%** | 64.52% | **92.81%** | 1.256 | 77.0% |
+| `select-mixed` | 0.7 | 59.68% | 66.53% | 89.70% | 1.316 | 73.4% |
+| `select-mixed-hot` | 1 | 59.48% | **67.54%** | 88.06% | **1.440** | 65.2% |
+| A/A of the middle rung | 0.7 | 58.27% | 64.72% | 90.03% | 1.347 | 70.8% |
+
+Paired across questions, cold to hot: `candidateRecall` **5 wins 20 losses, p = 0.0041** — the pool really did widen. Accuracy **16 wins 14 losses, p = 0.8555**, inside the A/A resolution of 3.44pp — the score did not move. **Fifteen more questions had a correct candidate in the pool and two fewer were answered correctly**, because realization fell from 92.81% to 88.06%.
+
+That is the pre-registered branch "a ceiling that rises while accuracy does not belongs to the selector", and it is the cleanest evidence this repository has for it: same split, same card, same judge, same bill, one variable. The mechanism is not mysterious — the selector was measured on a narrow pool where 77% of questions had all three candidates returning the same rows, and a wider pool turns "which statement answers the question" into a choice between three genuinely different readings.
+
+Two things it also measures. **Unanimity is a knob now**: 77.0% at temperature 0, 65.2% at 1, which explains why repeating a prompt does nothing (a repeat does not change the distribution) and raising the temperature does. And **temperature is free**: 3,566 / 3,569 / 3,567 prompt tokens and 176 / 179 / 179 completion tokens across the three arms, against the +75% of the six-draw arm. Widening a pool by temperature costs nothing; widening it by draws costs 75%.
+
+The next arm follows from that arithmetic rather than from taste: `select-mixed-hot-rule` — temperature 1 with a zero-call rule choosing, three calls a question instead of four, and a bar of 92.81% realization (the cold arm's) with accuracy at or above 62.0%.
