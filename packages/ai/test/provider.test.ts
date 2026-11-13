@@ -1176,6 +1176,24 @@ describe('an answer the budget did not leave room for', () => {
     expect(budgets).toEqual([4096]);
   });
 
+  it('says so when there was no budget of ours to raise', async () => {
+    // `maxOutputTokens: 0` is a declaration that asks for no cap, and an endpoint that then cuts
+    // the reply did so at a number this library never named. Printing an empty arrow would read as
+    // a defect in the message; the honest sentence is that the cap was the endpoint's.
+    const { fetchImpl, budgets } = scripted([() => cutReply(4096)]);
+    const provider = createHttpProvider({
+      baseUrl: 'https://example.test/v1',
+      model: 'private-prod-a',
+      capabilities: { family: 'chat', maxOutputTokens: 0, answerBudgetCeiling: 8192 },
+      fetchImpl,
+    });
+    const error = await provider.complete({ messages: [{ role: 'user', content: 'q' }] }).catch((reason: unknown) => reason);
+    expect(isNl2ChartsError(error) && error.code).toBe('NL2C_E_LLM_TRUNCATED');
+    expect((error as Error).message).toContain('none — the endpoint applied its own cap');
+    // And nothing was invented: no request named a budget, because none was declared.
+    expect(budgets).toEqual([]);
+  });
+
   it('keeps an empty reply that stopped for another reason an invalid response', async () => {
     // `content_filter` is not a budget and no larger budget fixes it. Naming it a truncation would
     // send the reader at the cap and the deployment at a number for a reply the endpoint withheld.

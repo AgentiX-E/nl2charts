@@ -599,10 +599,15 @@ export function createHttpProvider(options: HttpProviderOptions): LlmProvider {
         const finish = typeof choice?.finish_reason === 'string' ? choice.finish_reason : 'unknown';
         const present = Object.keys(choice?.message ?? {});
         if (truncated) {
+          // The budgets can be empty, and that is a reading rather than a gap: a deployment that
+          // declared `maxOutputTokens: 0` asked for no cap, so the endpoint's own default was the
+          // budget and there is no number of ours to raise. Named here instead of printing an
+          // empty arrow, because "budgets tried: " reads as a bug in this message.
+          const tried = budgets.length === 0 ? 'none — the endpoint applied its own cap' : budgets.join(' -> ');
           throw toNl2ChartsError(
             'NL2C_E_LLM_TRUNCATED',
             `llm response was cut at the answer budget with nothing left ` +
-              `(finish_reason=${finish}, budgets tried: ${budgets.join(' -> ')})`,
+              `(finish_reason=${finish}, budgets tried: ${tried})`,
             undefined,
             { finishReason: finish, budget, budgets, attempts, fields: present },
           );
