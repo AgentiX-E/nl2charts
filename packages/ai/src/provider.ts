@@ -239,6 +239,16 @@ export interface HttpProviderOptions {
   readonly retries?: number;
   /** Base delay for exponential backoff, in milliseconds. Zero waits not at all. */
   readonly retryDelayMs?: number;
+  /**
+   * How many times a reply cut at the answer budget is asked again with a larger budget.
+   *
+   * A truncation is not an answer and not an outage: the endpoint answered, and the number this
+   * library named was too small for what it had to say. Asking again with more room is the repair,
+   * and it is bounded by `capabilities.answerBudgetCeiling` — a deployment that has not declared a
+   * ceiling is never asked for a budget it might refuse. Zero disables escalation, which is what a
+   * priced ablation of the mechanism needs.
+   */
+  readonly budgetEscalations?: number;
   /** Injection point for tests; defaults to a real timer. */
   readonly sleep?: (ms: number) => Promise<void>;
   /**
@@ -373,6 +383,15 @@ export function createHttpProvider(options: HttpProviderOptions): LlmProvider {
   const timeoutMs = options.timeoutMs ?? 60_000;
   const retries = Math.max(1, options.retries ?? 1);
   const retryDelayMs = options.retryDelayMs ?? 500;
+  /**
+   * How many times a truncated reply may be asked again with a larger budget.
+   *
+   * Two, not one: a reasoning endpoint's deliberation is not bounded by a doubling, and the
+   * measured reply that overran 4,096 was billed for 21,932 tokens. Two also keeps the arithmetic
+   * legible — 4,096 becomes 8,192 becomes 16,384, and a chat endpoint's declared ceiling of 8,192
+   * stops it at the second step.
+   */
+  const budgetEscalations = Math.max(0, options.budgetEscalations ?? 2);
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const endpoint = `${options.baseUrl.replace(/\/$/, '')}/chat/completions`;
   const capabilities = capabilitiesOf(options.model, options.capabilities);
@@ -418,8 +437,51 @@ export function createHttpProvider(options: HttpProviderOptions): LlmProvider {
       let response: Response | undefined;
       let attempts = 0;
       let transport: unknown;
+      // The answer budget is a floor, not a ceiling.
+      //
+      // A reply that comes back empty *because the endpoint spent the whole budget* is the one
+      // fact that justifies naming a bigger number, and `max_tokens` is a limit rather than a
+      // reservation: the bigger number costs nothing unless the model uses the room. So the
+      // expensive direction is to keep sending a budget already proven too small — measured, a
+      // 4,096-token budget against an endpoint whose single reply ran to 21,932 completion tokens,
+      // where 13.7% of a run came back with no content at all. The loop is bounded twice, by the
+      // declared ceiling and by `budgetEscalations`, because the cap exists to stop a rambling
+      // model and an unbounded retry would remove the thing it was for.
+      let budget = adapted.request.maxTokens;
+      // `0` and absent both mean "this deployment has not told me a ceiling", which is the same
+      // spelling `maxOutputTokens` already uses for "no cap declared". Guessing above an
+      // undisclosed limit would trade a truncation for a refused request, which is the worse of
+      // the two: a truncated reply is at least a reply.
+      const proposed = capabilities.answerBudgetCeiling ?? 0;
+      const ceiling = budget === undefined || proposed <= 0 ? undefined : Math.max(budget, proposed);
+      const budgets: number[] = budget === undefined ? [] : [budget];
+      let truncated = false;
+      // What the endpoint charged for this call, which is not the same as what its last response
+      // says. A discarded truncated attempt spent a whole budget and produced nothing, and a cost
+      // column that read only the reply it kept would report the escalation as free — the exact
+      // shape of a number that looks like a measurement and is a hole. `calls` stays one (a retry
+      // inside the provider is one logical call, as it always was); tokens are what was billed.
+      const spend = { prompt: 0, completion: 0, cached: 0, reasoning: 0, cachedSeen: false, reasoningSeen: false };
+      const bill = (body: CompletionBody | undefined): void => {
+        if (body === undefined) return;
+        spend.prompt += Number(body.usage?.prompt_tokens ?? 0);
+        spend.completion += Number(body.usage?.completion_tokens ?? 0);
+        const cached = cachedTokensOf(body.usage);
+        if (cached !== undefined) {
+          spend.cached += cached;
+          spend.cachedSeen = true;
+        }
+        const reasoning = reasoningTokensOf(body.usage);
+        if (reasoning !== undefined) {
+          spend.reasoning += reasoning;
+          spend.reasoningSeen = true;
+        }
+      };
       try {
-        for (let attempt = 1; attempt <= retries; attempt += 1) {
+        for (let step = 0; ; step += 1) {
+          if (budget !== undefined && step > 0) body.max_tokens = budget;
+          payload = undefined;
+          for (let attempt = 1; attempt <= retries; attempt += 1) {
           attempts = attempt;
           try {
             response = await doFetch(endpoint, {
@@ -474,6 +536,23 @@ export function createHttpProvider(options: HttpProviderOptions): LlmProvider {
             }
             await sleep(retryDelayMs * 2 ** (attempt - 1));
           }
+          }
+          // Whether the endpoint used the whole budget and had nothing left to say. Content is the
+          // test, not the stop reason: an endpoint can cut a reply *after* the statement it needed
+          // to write, and paying twice for that would make a working case look expensive. Read
+          // after the transport loop, never inside it: inside, a reply that was not cut would fall
+          // through and ask the endpoint the same question again.
+          const cut = payload?.choices?.[0];
+          const wrote = cut?.message?.content;
+          truncated = (typeof wrote !== 'string' || wrote.length === 0) && cut?.finish_reason === 'length';
+          bill(payload);
+          if (!truncated) break;
+          const current = budget;
+          if (current === undefined || ceiling === undefined || step >= budgetEscalations) break;
+          const next = Math.min(current * 2, ceiling);
+          if (next <= current) break;
+          budget = next;
+          budgets.push(budget);
         }
       } finally {
         clearTimeout(timer);
@@ -512,11 +591,22 @@ export function createHttpProvider(options: HttpProviderOptions): LlmProvider {
       const choice = payload.choices?.[0];
       const content = choice?.message?.content;
       if (typeof content !== 'string' || content.length === 0) {
-        // A reasoning model with a small token budget spends all of it thinking and
-        // returns an empty answer with finish_reason=length. Saying so turns "no
-        // content" into a diagnosis: the budget, not the endpoint.
+        // Two faults used to share this one branch and one code, and the repairs are opposite. A
+        // reply cut at the cap is a fact about a number this library chose: the fix is a larger
+        // number, and the escalation above has already tried every number it is allowed to name.
+        // Anything else empty is a fact about the endpoint. Reporting the first as the second is
+        // how a harness came to count a budget as an outage and throw away 130 unmade calls.
         const finish = typeof choice?.finish_reason === 'string' ? choice.finish_reason : 'unknown';
         const present = Object.keys(choice?.message ?? {});
+        if (truncated) {
+          throw toNl2ChartsError(
+            'NL2C_E_LLM_TRUNCATED',
+            `llm response was cut at the answer budget with nothing left ` +
+              `(finish_reason=${finish}, budgets tried: ${budgets.join(' -> ')})`,
+            undefined,
+            { finishReason: finish, budget, budgets, attempts, fields: present },
+          );
+        }
         throw toNl2ChartsError(
           'NL2C_E_LLM_INVALID_RESPONSE',
           `llm response has no content (finish_reason=${finish}${present.length === 0 ? '' : `, message fields: ${present.join(',')}`})`,
@@ -524,14 +614,14 @@ export function createHttpProvider(options: HttpProviderOptions): LlmProvider {
           { finishReason: finish, fields: present },
         );
       }
-      const promptTokens = Number(payload.usage?.prompt_tokens ?? 0);
-      const completionTokens = Number(payload.usage?.completion_tokens ?? 0);
-      const cachedPromptTokens = cachedTokensOf(payload.usage);
-      // Read at the same point as the cache figure and for the same reason: a reasoning alias's
-      // deliberation is billed inside `completion_tokens`, so without this column "594 tokens"
-      // cannot be split into "thought for 540, wrote 54" — which is the whole question a
-      // reasoning-alias comparison asks.
-      const reasoningTokens = reasoningTokensOf(payload.usage);
+      // Every attempt this call paid for, not the one it kept: see `bill` above. Read at the same
+      // point as the cache figure and for the same reason — a reasoning alias's deliberation is
+      // billed inside `completion_tokens`, so without that column "594 tokens" cannot be split
+      // into "thought for 540, wrote 54", which is the whole question a reasoning comparison asks.
+      const promptTokens = Number.isFinite(spend.prompt) ? spend.prompt : 0;
+      const completionTokens = Number.isFinite(spend.completion) ? spend.completion : 0;
+      const cachedPromptTokens = spend.cachedSeen ? spend.cached : undefined;
+      const reasoningTokens = spend.reasoningSeen ? spend.reasoning : undefined;
       // Read on the success path as well as the failure path. The failure path above already
       // names the finish reason in its message; here it is the answer's own property, and the
       // reply that most needs it — twenty thousand tokens of deliberation that never reached a
@@ -543,8 +633,8 @@ export function createHttpProvider(options: HttpProviderOptions): LlmProvider {
         model,
         ...(finishReason === undefined ? {} : { finishReason }),
         usage: {
-          promptTokens: Number.isFinite(promptTokens) ? promptTokens : 0,
-          completionTokens: Number.isFinite(completionTokens) ? completionTokens : 0,
+          promptTokens,
+          completionTokens,
           ...(cachedPromptTokens === undefined ? {} : { cachedPromptTokens }),
           ...(reasoningTokens === undefined ? {} : { reasoningTokens }),
         },

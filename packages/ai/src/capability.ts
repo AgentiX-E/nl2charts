@@ -41,13 +41,28 @@ export interface ModelCapabilities {
   /**
    * The cap on the *answer*, in tokens.
    *
-   * For a reasoning model this is the final response only — the chain of thought has its own
-   * budget and does not count against it. It is declared here because the endpoint's default is
-   * a number the pipeline never chose and cannot see, and it is *sent* on every request that
-   * names no budget of its own: a declared ceiling that never reaches the wire is a number the
-   * report prints and the endpoint never reads.
+   * This is the budget the first request names, and for a reasoning endpoint it is the *whole*
+   * completion: the chain of thought is billed and counted inside `max_tokens`, so a budget sized
+   * for the answer alone is a budget the deliberation can exhaust before writing a word. That is
+   * not a theory here. `deepseek-v4-pro` was declared a chat endpoint, sent 4,096, and answered 50
+   * of 366 calls with `content: null` and `finish_reason: "length"` — the tokens were spent
+   * thinking. It is declared here because the endpoint's default is a number the pipeline never
+   * chose and cannot see, and it is *sent* on every request that names no budget of its own: a
+   * declared ceiling that never reaches the wire is a number the report prints and the endpoint
+   * never reads.
    */
   readonly maxOutputTokens: number;
+  /**
+   * The largest budget this endpoint accepts, when the deployment knows it.
+   *
+   * Present, it lets the provider answer a truncated reply with a bigger budget instead of a
+   * failure: `max_tokens` is a limit rather than a reservation, so raising it costs nothing unless
+   * the model uses the room. Absent means "do not guess" — a self-hosted endpoint with an
+   * undocumented limit would answer the guess with a 400, turning a truncation into a refusal.
+   * Never below `maxOutputTokens`: a ceiling under the first budget would only make the first
+   * request invalid.
+   */
+  readonly answerBudgetCeiling?: number;
   /**
    * Whether the prompt may ask for reasoning before the answer.
    *
@@ -74,6 +89,10 @@ export const CHAT_CAPABILITIES: ModelCapabilities = {
   sampling: 'honoured',
   jsonMode: true,
   maxOutputTokens: 4096,
+  // 8,192 is the largest `max_tokens` the chat endpoints this repository benchmarks document.
+  // Named as a ceiling so that a reply cut at 4K can be asked again with room, rather than
+  // reported as an answer that does not exist.
+  answerBudgetCeiling: 8192,
   thinksAloud: false,
   thinkingSwitch: false,
 };
@@ -81,15 +100,19 @@ export const CHAT_CAPABILITIES: ModelCapabilities = {
 /**
  * A reasoning endpoint, as documented by the vendors that serve one.
  *
- * 8,192 is DeepSeek's documented ceiling for the final answer of `deepseek-reasoner`; OpenAI's
- * o-series accepts more, and a deployment that knows its own ceiling should say so. The value
- * here is the conservative one that is valid for the endpoint this repository benchmarks.
+ * 8,192 is what this repository sends first — a budget small enough that a model which decides to
+ * deliberate for twenty thousand tokens cannot do it unnoticed. The ceiling is 32,768, and the
+ * evidence for it is this repository's own artifact rather than a vendor page: one
+ * `deepseek-v4-pro` reply was billed for **21,932 completion tokens**, so an endpoint that serves
+ * that model accepts at least that much output, and a ceiling below it would refuse the very reply
+ * the escalation exists to buy. Above the ceiling the answer is a truncation, reported as one.
  */
 export const REASONING_CAPABILITIES: ModelCapabilities = {
   family: 'reasoning',
   sampling: 'ignored',
   jsonMode: false,
   maxOutputTokens: 8192,
+  answerBudgetCeiling: 32768,
   thinksAloud: true,
   // A mode is not a switch: `deepseek-reasoner` is *always* thinking, and the endpoint that
   // can choose is a different one. Declaring it here would send the field to an endpoint that

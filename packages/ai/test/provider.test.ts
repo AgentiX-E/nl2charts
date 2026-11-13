@@ -296,10 +296,14 @@ describe('retrying a rate-limited call', () => {
 });
 
 describe('an empty answer that is not an outage', () => {
-  it('names the finish reason and the fields it saw', async () => {
+  it('names the finish reason, the fields it saw and every budget it tried', async () => {
     // Zhipu's reasoning models return content: null with reasoning_content filled and
     // finish_reason=length when the token budget is spent thinking. "no content" alone
-    // sends the reader to the endpoint's status page instead of its token budget.
+    // sends the reader to the endpoint's status page instead of its token budget — and this
+    // reply is now its own fault (`NL2C_E_LLM_TRUNCATED`) rather than an invalid response,
+    // because the harness counts `NL2C_E_LLM*` as an outage and a budget this library chose
+    // is not the endpoint going away. Only the first sentence survives from the old reading:
+    // the same cause, now with an identity and a repair.
     const fetchImpl = (async () =>
       new Response(
         JSON.stringify({ choices: [{ finish_reason: 'length', message: { content: null, reasoning_content: 'thinking…' } }] }),
@@ -307,7 +311,7 @@ describe('an empty answer that is not an outage', () => {
       )) as unknown as typeof fetch;
     const provider = createHttpProvider({ baseUrl: 'https://example.test/v1', model: 'm', fetchImpl });
     await expect(provider.complete({ messages: [{ role: 'user', content: 'q' }] })).rejects.toThrow(
-      /finish_reason=length, message fields: content,reasoning_content/,
+      /finish_reason=length, budgets tried: 4096 -> 8192/,
     );
   });
 });
@@ -1019,5 +1023,170 @@ describe('the answer cap the declaration names', () => {
     });
     await provider.complete({ messages: [{ role: 'user', content: 'q' }] });
     expect(bodies[0]).not.toHaveProperty('max_tokens');
+  });
+});
+
+describe('an answer the budget did not leave room for', () => {
+  /**
+   * A reply the endpoint says it cut at the cap, with nothing left to say.
+   *
+   * The shape is the one measured on `deepseek-v4-pro`: `content: null`, `finish_reason: "length"`,
+   * `reasoning_content` filled. It is the only reply that should cost a second call.
+   */
+  const cutReply = (spent: number): Response =>
+    new Response(
+      JSON.stringify({
+        model: 'm',
+        choices: [{ finish_reason: 'length', message: { content: null, reasoning_content: 'thinking' } }],
+        usage: { prompt_tokens: 10, completion_tokens: spent },
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    );
+  const answer = (text: string): Response =>
+    new Response(JSON.stringify({ model: 'm', choices: [{ finish_reason: 'stop', message: { content: text } }] }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+
+  /** A fetch that records the budget each call named and plays the script for that call. */
+  const scripted = (steps: readonly ((call: number) => Response)[]): { fetchImpl: typeof fetch; budgets: number[] } => {
+    const budgets: number[] = [];
+    let call = 0;
+    const fetchImpl = (async (_url: unknown, init?: { body?: unknown }) => {
+      const body = JSON.parse(String(init?.body)) as { max_tokens?: number };
+      if (typeof body.max_tokens === 'number') budgets.push(body.max_tokens);
+      const step = steps[Math.min(call, steps.length - 1)] ?? (() => cutReply(0));
+      call += 1;
+      return step(call);
+    }) as unknown as typeof fetch;
+    return { fetchImpl, budgets };
+  };
+
+  it('raises the budget once the endpoint proves it was cut, and answers', async () => {
+    // The measured motive: 4,096 was sent to an endpoint whose one reply ran to 21,932 completion
+    // tokens, and 50 of 366 calls came back with no content at all. `max_tokens` is a limit, not a
+    // reservation — raising it costs nothing unless the model uses it — so the expensive direction
+    // is to keep sending a budget that has already been proven too small.
+    const { fetchImpl, budgets } = scripted([
+      () => cutReply(4096),
+      () => answer('SELECT 1'),
+    ]);
+    const provider = createHttpProvider({ baseUrl: 'https://example.test/v1', model: 'chat-model', fetchImpl });
+    const reply = await provider.complete({ messages: [{ role: 'user', content: 'q' }] });
+    expect(reply.text).toBe('SELECT 1');
+    expect(budgets).toEqual([4096, 8192]);
+  });
+
+  it('stops at the declared ceiling instead of doubling past it', async () => {
+    // A cap exists so a rambling model cannot run away. Escalation has to end somewhere, and the
+    // end is a number the deployment declared rather than one this loop invented.
+    const { fetchImpl, budgets } = scripted([() => cutReply(8192)]);
+    const provider = createHttpProvider({ baseUrl: 'https://example.test/v1', model: 'deepseek-reasoner', fetchImpl });
+    const error = await provider.complete({ messages: [{ role: 'user', content: 'q' }] }).catch((reason: unknown) => reason);
+    expect(isNl2ChartsError(error) && error.code).toBe('NL2C_E_LLM_TRUNCATED');
+    // 8,192 -> 16,384 -> 32,768, which is the reasoning ceiling; three calls, no fourth.
+    expect(budgets).toEqual([8192, 16384, 32768]);
+    expect((error as { details: { budget: number; budgets: number[] } }).details.budgets).toEqual([8192, 16384, 32768]);
+  });
+
+  it('reports the truncation as its own fault, with the budget it died on', async () => {
+    // The code is the point. It used to arrive as `NL2C_E_LLM_INVALID_RESPONSE`, which the harness
+    // counts as an outage — so a budget this repository chose was reported as an endpoint that had
+    // gone away, and the outage guard threw away a run that had 130 paid calls left in it.
+    const { fetchImpl } = scripted([() => cutReply(4096)]);
+    const provider = createHttpProvider({ baseUrl: 'https://example.test/v1', model: 'chat-model', fetchImpl });
+    const error = await provider.complete({ messages: [{ role: 'user', content: 'q' }] }).catch((reason: unknown) => reason);
+    expect(isNl2ChartsError(error) && error.code).toBe('NL2C_E_LLM_TRUNCATED');
+    expect(isNl2ChartsError(error) && error.message).toContain('finish_reason=length');
+    expect((error as { details: { finishReason: string } }).details.finishReason).toBe('length');
+  });
+
+  it('does not raise a budget when the declaration names no ceiling', async () => {
+    // Absent means "do not guess": a deployment with its own endpoint knows its own limit, and a
+    // loop that doubled past an unknown limit would turn a truncation into a refused request.
+    const { fetchImpl, budgets } = scripted([() => cutReply(4096)]);
+    const provider = createHttpProvider({
+      baseUrl: 'https://example.test/v1',
+      model: 'private-prod-a',
+      capabilities: { family: 'chat', maxOutputTokens: 4096, answerBudgetCeiling: 0 },
+      fetchImpl,
+    });
+    await expect(provider.complete({ messages: [{ role: 'user', content: 'q' }] })).rejects.toSatisfy(
+      (error: unknown) => isNl2ChartsError(error) && error.code === 'NL2C_E_LLM_TRUNCATED',
+    );
+    expect(budgets).toEqual([4096]);
+  });
+
+  it('starts from a caller budget and escalates from there', async () => {
+    const { fetchImpl, budgets } = scripted([
+      () => cutReply(64),
+      () => cutReply(128),
+      () => answer('SELECT 1'),
+    ]);
+    const provider = createHttpProvider({ baseUrl: 'https://example.test/v1', model: 'chat-model', fetchImpl });
+    const reply = await provider.complete({ messages: [{ role: 'user', content: 'q' }], maxTokens: 64 });
+    expect(reply.text).toBe('SELECT 1');
+    expect(budgets).toEqual([64, 128, 256]);
+  });
+
+  it('bills the attempt it discarded, because the endpoint did', async () => {
+    // A retry inside the provider is one logical call and `calls` stays one, but the tokens are
+    // what the endpoint charged: the attempt that spent 4,000 tokens thinking and wrote nothing is
+    // the single most expensive thing this mechanism does, and a usage figure that read only the
+    // reply it kept would report an escalation as free.
+    const { fetchImpl } = scripted([
+      () =>
+        new Response(
+          JSON.stringify({
+            model: 'm',
+            choices: [{ finish_reason: 'length', message: { content: null, reasoning_content: 'x' } }],
+            usage: { prompt_tokens: 900, completion_tokens: 4000, completion_tokens_details: { reasoning_tokens: 3990 } },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      () =>
+        new Response(
+          JSON.stringify({
+            model: 'm',
+            choices: [{ finish_reason: 'stop', message: { content: 'SELECT 1' } }],
+            usage: { prompt_tokens: 900, completion_tokens: 20 },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+    ]);
+    const provider = createHttpProvider({ baseUrl: 'https://example.test/v1', model: 'chat-model', fetchImpl });
+    const reply = await provider.complete({ messages: [{ role: 'user', content: 'q' }] });
+    expect(reply.usage).toMatchObject({ promptTokens: 1800, completionTokens: 4020, reasoningTokens: 3990 });
+  });
+
+  it('does not retry a cut reply that still carried a statement', async () => {
+    // Content is the test, not the stop reason: an endpoint can cut a reply after the statement it
+    // needed to write, and paying twice for that would make a working case look expensive.
+    const { fetchImpl, budgets } = scripted([
+      () =>
+        new Response(JSON.stringify({ model: 'm', choices: [{ finish_reason: 'length', message: { content: 'SELECT 1' } }] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    ]);
+    const provider = createHttpProvider({ baseUrl: 'https://example.test/v1', model: 'chat-model', fetchImpl });
+    const reply = await provider.complete({ messages: [{ role: 'user', content: 'q' }] });
+    expect(reply.text).toBe('SELECT 1');
+    expect(reply.finishReason).toBe('length');
+    expect(budgets).toEqual([4096]);
+  });
+
+  it('keeps an empty reply that stopped for another reason an invalid response', async () => {
+    // `content_filter` is not a budget and no larger budget fixes it. Naming it a truncation would
+    // send the reader at the cap and the deployment at a number for a reply the endpoint withheld.
+    const fetchImpl = (async () =>
+      new Response(JSON.stringify({ model: 'm', choices: [{ finish_reason: 'content_filter', message: { content: '' } }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })) as unknown as typeof fetch;
+    const provider = createHttpProvider({ baseUrl: 'https://example.test/v1', model: 'chat-model', fetchImpl });
+    await expect(provider.complete({ messages: [{ role: 'user', content: 'q' }] })).rejects.toSatisfy(
+      (error: unknown) => isNl2ChartsError(error) && error.code === 'NL2C_E_LLM_INVALID_RESPONSE',
+    );
   });
 });

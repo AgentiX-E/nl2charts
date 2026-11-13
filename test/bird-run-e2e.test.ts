@@ -144,6 +144,17 @@ interface Plan {
    */
   readonly cut?: readonly string[];
   /**
+   * Questions answered with nothing at all: empty content, `finish_reason: length`.
+   *
+   * The reply the pro endpoint gave 50 times in 366 calls. It is not `cut`: `cut` asserts that a
+   * complete statement survives the truncation and is still scored, while this one has nothing in
+   * it at all — the call that costs a bigger budget, and the case that has to be reported as a
+   * budget rather than as an endpoint that went away. The budget is passed in because the whole
+   * question is whether a bigger one changes the answer: a predicate that ignored it could only
+   * ever test the failure.
+   */
+  readonly starved?: (question: string, asked: EndpointRequest) => boolean;
+  /**
    * The reply a prompt that asks for a query object gets, keyed on the question.
    *
    * Separate from `first` because the intent source is asked with the same question text as the
@@ -264,6 +275,9 @@ function replyFor(
   // The answer cap, on the questions a scenario says overran it. Only the first attempt: a repair
   // turn is the model answering again, and a fixture that cut every turn would be testing the cap
   // rather than the report.
+  // Nothing was written at all: the endpoint spent the budget deliberating. The provider raises
+  // the budget and asks once more, which is why this fixture answers the same way twice.
+  if (plan.starved?.(question, request) === true) return { ...send(''), finishReason: 'length' as const };
   const cut = plan.cut?.includes(question) === true;
   const sent = send(body);
   return cut ? { ...sent, finishReason: 'length' as const } : sent;
@@ -1208,6 +1222,44 @@ describe('an answer the endpoint says it cut', () => {
   });
 });
 
+describe('a reply the endpoint cut before it wrote anything', () => {
+  const firstQuestion = (): string => Object.keys(GOLD)[0] ?? '';
+
+  it('turns a certain failure into an answer by raising the budget, and says nothing about outages', async () => {
+    // The measured reading: `deepseek-v4-pro` declared as a chat endpoint, 50 of 366 calls empty
+    // at 4,096 tokens. Here the endpoint answers the same question as soon as the budget grows,
+    // which is the whole claim of the mechanism — 4,096 was the fault, not the model.
+    const first = firstQuestion();
+    const result = await run({
+      plan: { first: correct, starved: (question, asked) => question === first && (asked.body.max_tokens ?? 0) < 8192 },
+      env: { BIRD_ARMS: 'names' },
+    });
+    expect(result.code).toBe(0);
+    const cases = result.report.cases as { id: string; passed: boolean; errorKind?: string }[];
+    const rescued = cases.find((row) => row.id === String(QUESTIONS[0]?.id));
+    expect(rescued?.passed).toBe(true);
+    expect(rescued?.errorKind).toBeUndefined();
+    // Two requests reached the endpoint for that question: 4,096, then 8,192 — the chat ceiling.
+    // Asserted on the wire rather than on the artifact's `calls` column, which counts logical
+    // calls by design: the harness asked once, and the escalation is the provider's own business.
+    const wire = result.requests.filter((request) => request.prompt.includes(first));
+    expect(wire.map((request) => request.body.max_tokens)).toEqual([4096, 8192]);
+    // And nothing in the summary calls it a forfeit or a cut, because it is neither.
+    const printed = result.printed.join('\n');
+    expect(printed).not.toContain('cut-at-budget');
+    expect(printed).not.toContain('llm-failed');
+  });
+
+  it('refuses the run when the budget is what is wrong, with the budget sentence', async () => {
+    // Every budget the declaration allows, and nothing comes back. This arm did not measure the
+    // model, so its accuracy is not published — and the sentence names a number the harness chose
+    // rather than an endpoint that went away, which is the repair the reader can act on.
+    await expect(
+      run({ plan: { first: correct, starved: () => true }, env: { BIRD_ARMS: 'names' } }),
+    ).rejects.toThrow(/cut at the answer budget/);
+  });
+});
+
 describe('a run that outlives its clock', () => {
   it('keeps the cases a dead clock bought, and the next dispatch continues them', async () => {
     // A budget stop used to be total: the message named the sample the next dispatch should ask
@@ -1853,6 +1905,9 @@ describe('the second model as a judge', () => {
       sampling: 'ignored',
       jsonMode: false,
       maxOutputTokens: 16384,
+      // The reasoning row's ceiling travels with the row, and it is the one field a deployment
+      // cannot leave to the family default: it is the largest request the endpoint accepts.
+      answerBudgetCeiling: 32768,
       thinksAloud: true,
       thinkingSwitch: false,
     });

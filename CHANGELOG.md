@@ -7,6 +7,38 @@ cannot be argued with.
 ## Unreleased
 
 ### Fixed
+- **An answer budget is a floor now, and a reply cut at one is its own fault rather than an
+  outage.** `NL2C_E_LLM_INVALID_RESPONSE` held two opposite situations: "the endpoint answered
+  with something that is not a completion" and "the endpoint spent the whole answer budget
+  thinking and had nothing left". The harness counts `NL2C_E_LLM*` as an outage, so the second —
+  a number *this library* chose — was reported as an endpoint that had gone away, and the outage
+  guard ended a run that still had 130 calls in it. Measured on `deepseek-v4-pro` (Mini-Dev, run
+  `43339353252`): **50 of 366 calls (13.7%)** returned `content: null` with
+  `finish_reason: "length"` and `reasoning_content` filled, at the 4,096-token budget the chat
+  family declares, on an endpoint whose single reply had already been billed for **21,932**
+  completion tokens.
+  Three things change. `NL2C_E_LLM_TRUNCATED` gives the fault its own identity, so the repair
+  ("a larger number") is nameable. The provider answers a truncation by asking again with
+  **double the budget**, bounded by a new `capabilities.answerBudgetCeiling` (`8,192` for the
+  chat row, `32,768` for the reasoning row — the latter justified by this repository's own
+  artifact, not by a vendor page) and by `budgetEscalations` (two by default); raising a budget
+  costs nothing unless the model uses the room, since `max_tokens` is a limit rather than a
+  reservation. And the tokens the **discarded** attempt spent are summed into `usage`, because
+  the endpoint charged for them: a cost column that read only the reply it kept would report an
+  escalation as free.
+  The harness follows: `errorKind: 'truncated'` is its own bucket, `cut-at-budget` is its own
+  column beside `llm-failed`, and the tenth-it-will-not-publish rule applies to it with its own
+  sentence — a run whose replies were cut is not an accuracy, but it is not an outage either.
+  Two declarations were corrected in the same pass, both wrong in the same direction: the
+  `maxOutputTokens` doc claimed a chain of thought "does not count against" the cap (on the
+  endpoint benchmarked it is billed inside it), and the comment on the chat row called 4,096
+  "the vendor's usual 4K" without saying it is not a maximum.
+  **Measured:** 13 new provider tests, 5 new harness tests, 2 end-to-end cases (an escalated
+  case turning a certain failure into a correct answer on the second request, and a run refused
+  with the budget sentence when every budget is too small); suite 4,564 passing with no skips
+  against real PG16 and MariaDB 10.11; eight packages at or above 95% on all four dimensions;
+  eval ledger 88/88; api surface unchanged at 469; `ai` bundle 70,500 -> 73,000 B gzip (72,063
+  measured, reason in `budgets.json`).
 - **A refusal now names what it refused, and a reply that is not a statement is no longer
   reported as an unsafe one.** `extractSql` reads a reply with no fenced block as the whole
   reply, which is right for a model that writes bare SQL and wrong for a model that writes

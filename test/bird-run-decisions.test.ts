@@ -535,6 +535,24 @@ describe('what an arm row says about itself', () => {
     expect(armSummaryLine('names', resolveArm('names') as Arm, [outcome('1', true)])).not.toContain('llm-failed');
   });
 
+  it('says when an answer was cut at the budget, in words that are not an outage', () => {
+    // Two columns for two faults. `llm-failed` sends its reader at the network; these calls were
+    // answered and ran out of room, and the number that fixes them is one this harness names.
+    const starved: CaseRun = {
+      id: '3',
+      passed: false,
+      predicted: '',
+      strict: false,
+      attempts: 1,
+      calls: 1,
+      errorKind: 'truncated',
+      error: 'llm response was cut at the answer budget with nothing left (finish_reason=length, budgets tried: 4096 -> 8192)',
+    };
+    const line = armSummaryLine('names', resolveArm('names') as Arm, [outcome('1', true), starved]);
+    expect(line).toContain('cut-at-budget 1');
+    expect(line).not.toContain('llm-failed');
+  });
+
   it('leaves the recall column off an arm that generates once', () => {
     // `names` draws one statement, so a ceiling would be a column that always reads 100%
     // and a selector loss that is always zero. The column is absent, not zero.
