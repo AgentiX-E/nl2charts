@@ -2194,6 +2194,39 @@ export function meanReported<T>(costs: readonly T[], pick: (cost: T) => number |
   return Math.round(values.reduce((total, value) => total + value, 0) / values.length);
 }
 
+/**
+ * How much of the completion bill was deliberation, over one population.
+ *
+ * The two columns it replaces could not answer this. `completion` is averaged over every case and
+ * `reasoning` only over the cases whose endpoint reported a counter, so the printed pair reads
+ * `completion 1,650, reasoning 1,691` on a run whose true share is 94% — a ratio above 100%, which
+ * is not a rounding artefact but a division between two denominators. Measured on
+ * `43343813778` (`deepseek-v4-pro`, reasoning declaration, 496 cases, 40 with no answer): the arm
+ * row said 1650 and 1691, and summed over the cases that reported both counters, completion came to
+ * 818,438 against 771,295 of deliberation — 94.2%. Both sums are the same population; the two means
+ * were not. Those three figures hold each other up: 818,438 over the 496 scored cases is the row's
+ * 1650, and the ratio is the 94.2% the row could not state.
+ *
+ * So the share is computed here, where both sums are over the same cases, and it carries its own
+ * count. Absent rather than zero when nothing reported: a chat endpoint has not measured a share
+ * of nothing.
+ */
+export function thinkingShare(
+  costs: readonly { readonly completion: number; readonly reasoning?: number }[],
+): { readonly share: number; readonly cases: number } | undefined {
+  let completion = 0;
+  let reasoning = 0;
+  let cases = 0;
+  for (const cost of costs) {
+    if (cost.reasoning === undefined) continue;
+    completion += cost.completion;
+    reasoning += cost.reasoning;
+    cases += 1;
+  }
+  if (cases === 0 || completion === 0) return undefined;
+  return { share: reasoning / completion, cases };
+}
+
 export function mergePurposes(
   first: ReadonlyMap<string, PurposeUsage>,
   second?: ReadonlyMap<string, PurposeUsage>,
@@ -2413,7 +2446,40 @@ export interface ArmReportRow {
      * the meter cannot distinguish a cache that never hit from an endpoint that never said.
      */
     readonly cached?: number;
-    readonly byPurpose?: Readonly<Record<string, { readonly calls: number; readonly prompt: number; readonly completion: number; readonly chars: number; readonly cached?: number }>>;
+    /**
+     * Completion tokens the endpoint said it spent deliberating, as `CaseTokens.reasoning` defines
+     * that figure — averaged over the cases that reported one.
+     *
+     * Absent, rather than zero, on a chat endpoint and on any endpoint that reports no reasoning
+     * counter. That distinction is the point of the field: every reading published before this
+     * column existed came from an endpoint that said nothing, and `0` would have claimed the
+     * deliberation had been measured and found empty.
+     */
+    readonly reasoning?: number;
+    /**
+     * The same fact as a ratio over the cases that reported both numbers.
+     *
+     * Not `reasoning / completion` from the two fields above: those are averages over two
+     * populations — a case that answered without a usage block counts in neither, and an endpoint
+     * that reports completion on every answer but reasoning on three quarters of them makes the
+     * two denominators different. Dividing them once produced a share of 102% on an arm whose
+     * deliberation was 94% of its output. `cases` is carried alongside so a reader can see how
+     * many cases the ratio actually rests on. See `thinkingShare`.
+     */
+    readonly thinking?: { readonly share: number; readonly cases: number };
+    readonly byPurpose?: Readonly<
+      Record<
+        string,
+        {
+          readonly calls: number;
+          readonly prompt: number;
+          readonly completion: number;
+          readonly chars: number;
+          readonly cached?: number;
+          readonly reasoning?: number;
+        }
+      >
+    >;
     /** The bases that answered these cases, as the endpoint named them. See `CaseTokens.served`. */
     readonly served?: readonly string[];
   };
@@ -7757,6 +7823,7 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
   // subset, and dividing it by the whole would understate the ones it did answer.
   const cachedFigure = meanReported(metered, (cost) => cost.cached);
   const reasoningFigure = meanReported(metered, (cost) => cost.reasoning);
+  const thinking = thinkingShare(metered);
   // How many cases each base model served. Counted from the rows rather than from a side
   // ledger for the same reason every other column here is: a figure that has one definition
   // cannot disagree with the rows it is reported beside. The alias that was requested is in
@@ -7820,6 +7887,11 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
             // that reports no reasoning counter — the state every published reading before this
             // column was written in, and a state a reader has to be able to tell from `0`.
             ...(reasoningFigure === undefined ? {} : { reasoning: reasoningFigure }),
+            // The same fact as a ratio, over the cases that reported both numbers, because the two
+            // averages above are over two populations and their ratio is not one. `thinking` is the
+            // sentence a reader wanted: "94% of the completion tokens on this arm were deliberation,
+            // over 456 cases". See `thinkingShare`.
+            ...(thinking === undefined ? {} : { thinking }),
             ...(byPurpose === undefined ? {} : { byPurpose }),
           },
         }),
