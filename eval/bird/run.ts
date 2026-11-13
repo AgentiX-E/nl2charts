@@ -815,6 +815,36 @@ export function assertMixedSources(sources: readonly string[] = MIXED_SOURCES): 
 }
 
 /**
+ * A mixed arm's candidate count, checked against the sources it draws from.
+ *
+ * A source may be drawn more than once. `vote` is the number of candidates the arm buys and the
+ * generation loop walks the source list round-robin, so `vote = 6` over three sources is each
+ * prompt sampled twice: two draws of one prompt differ only by temperature, and a draw of two
+ * different prompts differs by what is in front of the model — and the second kind was measured
+ * to buy more per call here (`select-mixed`'s three prompts reached a 65.8% ceiling against
+ * `select5`'s 64.7% on five samples, with two fewer calls).
+ *
+ * What must not happen is a count that is not a whole number of passes. Four candidates over
+ * three sources would make the cost line true and the set askew — one prompt drawn twice while
+ * the other two are drawn once — and the arm would be a different experiment than its name and
+ * its price both say. It lives here rather than inside `runArm` because a rule that only a run
+ * can trip is a rule no unit test can hold: the field would compile, the arm would look right,
+ * and the first time anyone noticed would be in a report whose candidate set had already been
+ * drawn unevenly.
+ */
+export function assertCandidatePasses(arm: Arm): void {
+  const sources = arm.mixed;
+  if (sources === undefined) return;
+  assertMixedSources(sources);
+  const declared = arm.vote ?? 1;
+  if (declared % sources.length !== 0) {
+    throw new Error(
+      `arm ${arm.name} draws ${String(sources.length)} sources but declares ${String(declared)} candidates, which is not a whole number of passes over them; the candidate set would be askew and the cost claim unsupported`,
+    );
+  }
+}
+
+/**
  * Characters the rows block may spend on one question.
  *
  * Three rows of the text columns of the tables a question names costs 1,058 characters at the mean
@@ -965,6 +995,32 @@ export const ARMS: readonly Arm[] = [
   // narrow set. The sources are arms already measured on their own, so the candidate
   // set is a combination of known parts rather than a new invention.
   { name: 'select-mixed', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: MIXED_SOURCES },
+  // The same three prompts, drawn twice each. Six candidates, seven calls.
+  //
+  // This is the one lever the strongest training-free competitor has and this repository has
+  // never measured. `OpenSearch-AI/OpenSearch-SQL` (MIT, first place on BIRD in August 2024,
+  // 69.3% dev / 72.28% test, no training and no fine-tuning) runs `"n": 21` at
+  // `"temperature": 0.7` in `candidate_generate` and aggregates by *executed result* rather
+  // than by statement (`vote.py` compares `set(tuple(row))` per candidate). Six candidates is
+  // not twenty-one, and the reason is not thrift: this repository's own readings say the
+  // second draw of one prompt is worth less than a draw of a second prompt (`select-mixed`
+  // 65.8% ceiling on 3 prompts beat `select5`'s 64.7% on 5 samples, with two fewer calls), so
+  // the ladder to twenty-one should climb by prompt first and repeat second.
+  //
+  // Pre-registered: the ceiling has to move. `select-mixed`'s pool reaches 67.75% on dev, and
+  // a second pass over the same three prompts that does not add at least two points of ceiling
+  // is a repetition the temperature paid for and the diversity did not — in which case the
+  // remaining distance to the competitor is not candidate count and this ladder stops at one
+  // rung instead of pretending to climb.
+  { name: 'select-mixed-spread2', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 6, select: true, mixed: MIXED_SOURCES },
+  // Three passes, nine candidates, ten calls: the rung that decides whether the curve is still
+  // rising when it reaches double digits. Read against `spread2` rather than against the parent,
+  // because two points between six and nine is the same slope that bought six over three, and a
+  // slope that halves between the two rungs puts the twenty-one-candidate configuration of the
+  // competitor out of reach on this prompt family — which would be a finding about *its*
+  // candidate family, not about its candidate count, and the honest response would be to price
+  // its prompts rather than to buy more draws.
+  { name: 'select-mixed-spread3', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 9, select: true, mixed: MIXED_SOURCES },
   // `select-mixed` with its fourth call replaced by a rule that reads what that call was given.
   //
   // One lever in the only sense this repository counts: same three prompts, same card, same
@@ -1473,6 +1529,8 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   decompose: 'the statement composed from steps written in the same reply: one lever from `inline+evidence` at the same call count, so it prices a shape of generation rather than a budget',
   'select-mixed+dc': 'the adopted arm with a fourth candidate written by decomposition: the only addition that can create a statement the three prompts cannot, which is what the routing analysis left open',
   'select-dc': 'the third candidate written by decomposition instead of by the value index: same count, same four calls, and the slot values actually won 5.3% of the time',
+  'select-mixed-spread2': 'the three prompts drawn twice each: six candidates and seven calls, which is the rung this repository has never climbed and the one the strongest training-free competitor stands on (it draws 21 at temperature 0.7 and votes on executed results). On demand rather than in the chain because its verdict is a ceiling reading on 1,532 dev questions — 498 cannot resolve two points of ceiling, and the arm costs 7 calls a question. Run it beside `select-mixed` and read `candidateRecall`, not the score: the question is whether a second pass over the same prompts widens the set at all',
+  'select-mixed-spread3': 'three passes, nine candidates, ten calls: the rung that says whether the ceiling curve is still rising at double digits. Read against `spread2`, not against the parent — a slope that halves between six and nine closes the competitor\'s 21-candidate configuration as an explanation and moves the question to its prompt family',
 };
 
 /**
@@ -6631,14 +6689,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
   const collected = new Map<string, readonly PooledCandidate[]>();
   // A mixed arm runs three configurations under one label; if one of them repairs or
   // samples, the reported cost is wrong and the comparison loses its meaning.
-  if (arm.mixed !== undefined) {
-    assertMixedSources(arm.mixed);
-    if (arm.mixed.length !== arm.vote) {
-      throw new Error(
-        `arm ${name} draws ${String(arm.mixed.length)} sources but declares ${String(arm.vote ?? 1)} candidates; the cost claim would be false`,
-      );
-    }
-  }
+  if (arm.mixed !== undefined) assertCandidatePasses(arm);
   /**
    * What this case's prompt carried of the worked examples, when it carried any.
    *

@@ -49,6 +49,7 @@ const NOT_A_MECHANISM: Readonly<Record<string, string>> = {
   assertHarnessClean: 'a verdict on the run: a bug in the runner is not a wrong answer',
   assertMixedFeasible: 'declaration-time: two candidate sources must be able to differ',
   assertMixedSources: 'declaration-time: every named source must resolve to an arm',
+  assertCandidatePasses: 'declaration-time: a candidate count that is not a whole number of passes over the sources draws one prompt more often than the others, so the arm is not the experiment its price describes',
   assertDissentRule: 'declaration-time: a fourth opinion must come from somewhere else',
   assertSampleRule: 'declaration-time: a column rule needs a sampler to read',
   assertCardRule: 'declaration-time: a card decided by two rules reports the order of operations',

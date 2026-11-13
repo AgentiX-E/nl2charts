@@ -11685,3 +11685,53 @@ pointer: `values` 160 of 223 on Mini-Dev, and **none of them a wrong literal** �
 table, 41 group differently, 30 read fewer tables. Those are decisions about the *statement*, taken
 once per question, and the prompt is not where they are made. The row-sample arm is kept in the
 catalogue as the ablation reference that closed the layer, not as a candidate to adopt.
+
+## How many candidates, and why the answer was never "as many as the competitor"
+
+The strongest training-free system on this benchmark is
+[`OpenSearch-AI/OpenSearch-SQL`](https://github.com/OpenSearch-AI/OpenSearch-SQL) (MIT): first
+place on BIRD in August 2024, **69.3% dev / 72.28% test / 69.36% R-VES**, and by its own README it
+"operates without the need for additional training". Its `run/run_main.sh` declares
+`"n": 21, "temperature": 0.7` for candidate generation and aggregates by *executed result* —
+`vote.py` compares `set(tuple(row))` per candidate and breaks ties on the fastest query, so two
+different statements that return the same rows count as one opinion.
+
+This repository implements the same equality (`resultFingerprint` hashes `resultKey`, the official
+judge's own notion of a match) and had never fed it more than five candidates. That gap, not the
+backbone, is what the readings in this file have been pointing at:
+
+| arm | candidates | calls | accuracy | ceiling | conversion |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `select-mixed` | 3, three prompts | 4 | 62.34–63.3% | 65.5–65.8% | 96.1% |
+| `select-cross` | 3, two models | 4 | **64.1%** | 67.0–68.33% | 94.7% |
+| `vote-cross` | 3, two models | 3 | 62.9% | **69.6%** | **90.2%** |
+
+`vote-cross`'s set holds a correct statement 69.6% of the time — the highest ceiling measured here,
+and the same level as the competitor's published score — and returns 90.2% of it. Converting at
+`select-mixed`'s 96.1% would be 67.8%. The remaining distance to 69.3% is therefore not "a stronger
+model"; it is forty-odd questions already drawn, executed, and thrown away.
+
+### The ladder climbs by prompt, then by repetition
+
+| arm | sources | candidates | calls |
+| --- | --- | ---: | ---: |
+| `select-mixed` | 3 prompts × 1 | 3 | 4 |
+| `select-mixed-spread2` | 3 prompts × 2 | 6 | 7 |
+| `select-mixed-spread3` | 3 prompts × 3 | 9 | 10 |
+
+Three prompts reached a 65.8% ceiling where five samples of one prompt reached 64.7%, with two
+fewer calls — three samples of one prompt agree about 90% of the time, and agreement is not a
+second opinion. The competitor's twenty-one draws are one prompt, so its ladder is the second kind.
+**Pre-registered:** `spread2` must raise `candidateRecall` at least two points above 67.75% on dev;
+`spread3` at least one point above `spread2`. A halved slope closes candidate count as the
+explanation and moves the question to the competitor's prompt family. A ceiling that rises while
+accuracy does not belongs to the selector, not to the generator.
+
+### What the competitor's cost actually is, in requests
+
+Its `n: 21` is one HTTP request that returns twenty-one completions (`src/llm/model.py` puts `n`
+straight into the request body). This endpoint has no `n`, so twenty-one candidates are
+twenty-one requests: the same tokens, twenty-one times the failure surface. That cuts both ways —
+its candidate set is all-or-nothing on a timeout, while this harness records survival per source
+(`candidateSurvival`) and can score a set that lost one draw. A larger candidate set is the one
+place where the absence of `n` is not purely a cost.

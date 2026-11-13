@@ -94,6 +94,40 @@ cannot be argued with.
   reading of it exists yet.
 
 ### Added
+- **`vote` means what its documentation says again: candidates bought per question, not the length
+  of the source list.** A mixed arm draws its candidates round-robin over its sources
+  (`sources[sample % sources.length]`), so `vote: 6` over three sources was always going to be
+  each prompt sampled twice. What blocked it was a declaration-time assertion, `arm.mixed.length
+  !== arm.vote`, whose message — "the cost claim would be false" — was about a defect that could
+  not happen: the cost is `vote` calls, and the loop draws exactly that many. The rule is now a
+  whole number of passes, and it lives in an exported `assertCandidatePasses` instead of inside
+  `runArm`, because a rule only a real run can trip is a rule no unit test holds: three branches
+  (no sources, whole passes, fractional passes) are now reachable, which is the same discipline as
+  deleting a branch no input reaches, seen from the other side.
+  Two arms: `select-mixed-spread2` (six candidates, seven calls) and `select-mixed-spread3` (nine,
+  ten). They exist because the strongest training-free competitor — `OpenSearch-AI/OpenSearch-SQL`,
+  MIT, first on BIRD in August 2024 at 69.3% dev and 72.28% test with no training and no
+  fine-tuning — draws `"n": 21` at `temperature 0.7` and aggregates by *executed result*
+  (`vote.py` compares `set(tuple(row))`, not statements). This repository has never measured a
+  candidate set above five, so the distance to that number had never been attributed to anything.
+  **It is not the backbone, and the readings already in this file say so:** `vote-cross`'s set
+  contains a correct statement 69.6% of the time — the highest ceiling measured here, and the same
+  level as the competitor's score — and it returns 62.9%, converting 90.2% of it. Lifting that
+  conversion to `select-mixed`'s 96.1% is 67.8%, which sits on 69.3%.
+  The ladder climbs by prompt first and repetition second, on a reading this file already carries:
+  three prompts reached a 65.8% ceiling against five samples of one prompt at 64.7%, with two
+  fewer calls. Two draws of one prompt differ by temperature; a draw of a second prompt differs by
+  what is in front of the model.
+  **Pre-registered, before the runs:** `spread2` has to move `candidateRecall` at least two points
+  above `select-mixed`'s 67.75% on dev, and `spread3` at least one point above `spread2` — a
+  halved slope closes the twenty-one-candidate configuration as an explanation and moves the
+  question to the competitor's prompt family. A ceiling that rises while accuracy does not is
+  attributed to the selector, and the next call is not another candidate.
+  **Cost, stated so it is not underestimated:** the competitor sends `n` once and receives
+  twenty-one completions in one HTTP response; this endpoint has no `n`, so twenty-one candidates
+  are twenty-one requests. Same tokens, twenty-one times the failure surface — which is also the
+  one asymmetry in our favour, because its candidate set is all-or-nothing and ours survives
+  partially (`candidateSurvival` counts per source).
 - **`compileToMatplotlib` — a chart IR becomes Python source, because a public benchmark scores
   the code rather than the picture.** Text2Vis (EMNLP 2025) computes its pass rate from four
   conditions, and one of them is `execution_result`: the generated code has to run and save a
