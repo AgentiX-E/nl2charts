@@ -120,6 +120,15 @@ interface Plan {
    */
   readonly pairPick?: (question: string) => number;
   /**
+   * A raw reply to the pairwise prompt, when the scenario needs one the parser cannot read.
+   *
+   * `pairPick` can only produce `1` or `2`, so it can show which candidate a comparison chose and
+   * never what happens when the reply is prose: an unreadable comparison keeps the incumbent, which
+   * is the state that turns a knockout into the pool's own order. That state is a reading of the
+   * funnel (`unreadable`) and would otherwise be unreachable from a fixture.
+   */
+  readonly pairReply?: (question: string) => string;
+  /**
    * The answer to the audit turn: what the statement left out, then a statement.
    *
    * Absent means the model reports nothing missing and repeats the gold statement, which is
@@ -212,6 +221,8 @@ function replyFor(
   // different answer, so the same `1` would be counted as an unreadable reply.
   if (prompt.includes('Two statements were written for the same question')) {
     const asked = Object.keys(golds).find((entry) => prompt.includes(entry)) ?? '';
+    const raw = plan.pairReply?.(asked);
+    if (raw !== undefined) return send(raw);
     return send(String(plan.pairPick?.(asked) ?? 1));
   }
   // The reconcile turn. Read before the statement branches below, because its prompt carries the
@@ -4212,6 +4223,122 @@ describe('the gate in front of the adjudication', () => {
     expect(rows.find((row) => row.arm === 'select-mixed-gated-evidence')?.calls.mean).toBe(
       rows.find((row) => row.arm === 'select-mixed-gated')?.calls.mean,
     );
+  });
+});
+
+/**
+ * The knockout behind the gate: two comparisons where there is something to compare.
+ *
+ * The absolute prompt asks for one number out of three and has to hold the whole set in mind; a
+ * knockout asks two questions with two candidates on the page, and its price is `k - 1` — known
+ * before it runs, which is what makes it composable with the gate. On the 73% of the split whose
+ * candidates return the same rows the comparison would be between two identical results, so the
+ * gate answers those by rule and the tournament only sees the rest.
+ *
+ * The three readings below are the mechanism and its two failure modes: the price follows the pool
+ * (`2 x asked`), the comparison reaches the answer (pick the challenger and the answer moves), and
+ * an unreadable comparison keeps the incumbent (the answer does not move, and the funnel says why).
+ */
+describe('a knockout behind the gate', () => {
+  const PAIR_PROMPT = 'Two statements were written for the same question';
+
+  it('spends two comparisons per disagreeing case, and none on the cases the gate answers', async () => {
+    // The value-grounded candidate cannot answer the questions whose literals resolved, so the pool
+    // disagrees there and agrees everywhere else: one run, both states, and the parent's own spend
+    // is the population the knockout is expected to see.
+    const result = await run({
+      plan: { first: correct, whenValues: IMPOSSIBLE_SHORT },
+      env: { BIRD_ARMS: 'select-mixed-gated,select-mixed-gated-pair' },
+    });
+    expect(result.code, result.printed.join('\n')).toBe(0);
+    const rows = result.report.arms as {
+      readonly arm: string;
+      readonly passed: number;
+      readonly calls: { readonly mean: number };
+      readonly spend?: { readonly asked: number };
+      readonly pairwise?: { readonly asked: number; readonly comparisons: number; readonly unreadable: number };
+    }[];
+    const gated = rows.find((row) => row.arm === 'select-mixed-gated');
+    const knockout = rows.find((row) => row.arm === 'select-mixed-gated-pair');
+    const asked = gated?.spend?.asked ?? 0;
+    expect(asked).toBeGreaterThan(0);
+    expect(asked).toBeLessThan(QUESTIONS.length);
+    // The price is the pool size, twice: one comparison to unseat the incumbent, one to defend it,
+    // and nothing on the cases the gate decided. A comparison count that did not match `2 x asked`
+    // would be a tournament comparing something other than the candidates it drew.
+    expect(knockout?.pairwise).toEqual({ asked, comparisons: asked * 2, unreadable: 0 });
+    // The bill, from the other side: the same three generations, plus two calls on the cases with
+    // something to decide. An arm that reported the funnel and not the calls would be a mechanism
+    // with no price.
+    expect(knockout?.calls.mean).toBeCloseTo(3 + (asked * 2) / QUESTIONS.length, 3);
+    expect(gated?.calls.mean).toBeCloseTo(3 + asked / QUESTIONS.length, 3);
+    // And the log agrees with the artifact: two pairwise prompts per disagreeing case, no pairwise
+    // prompt on the cases the gate answered by rule.
+    expect(result.requests.filter((request) => request.prompt.includes(PAIR_PROMPT))).toHaveLength(asked * 2);
+    // A knockout that agreed with the vote on every case is still the same accuracy: the turn is
+    // not what decides a case whose first candidate is the answer, which is what makes the pair a
+    // comparison of shapes rather than of budgets.
+    expect(knockout?.passed).toBe(gated?.passed);
+  });
+
+  it('lets the comparison move the answer, and files it under the slot the judge saw', async () => {
+    // Run alone: an adversarial comparison makes this arm trail its parent by more than the
+    // harness's 5pp child rule, and the refusal is the correct behaviour rather than something to
+    // arrange around. What this checks is the mechanism — the second comparison decided.
+    const result = await run({
+      plan: { first: correct, whenValues: IMPOSSIBLE_SHORT, pairPick: () => 2 },
+      env: { BIRD_ARMS: 'select-mixed-gated-pair' },
+    });
+    expect(result.code, result.printed.join('\n')).toBe(0);
+    const cases = result.report.cases as {
+      readonly arm: string;
+      readonly passed: boolean;
+      readonly sql?: string;
+      readonly pairwise?: { readonly comparisons: number; readonly unreadable: number };
+    }[];
+    const decided = cases.filter((row) => row.pairwise !== undefined);
+    expect(decided.length).toBeGreaterThan(0);
+    expect(decided.length).toBeLessThan(QUESTIONS.length);
+    // Every case that reached the tournament took the challenger twice, so the last candidate — the
+    // one the pool disagreed about — became the answer. The statement was returned, not merely
+    // chosen: the case's `predicted` is the candidate the comparison picked.
+    for (const row of decided) {
+      expect(row.sql).toBe(IMPOSSIBLE_SHORT);
+      expect(row.pairwise).toEqual({ comparisons: 2, unreadable: 0 });
+      expect(row.passed).toBe(false);
+    }
+    // The gate's own cases are untouched: nothing was compared, and the rule's answer stands.
+    expect(cases.filter((row) => row.pairwise === undefined).every((row) => row.passed)).toBe(true);
+  });
+
+  it('the knockout arm, whose price is two calls per disagreeing case and whose failure is a silent one', async () => {
+    // The failure this funnel exists for. A reply that carries neither `1` nor `2` keeps the
+    // incumbent, so a tournament that read nothing returns the pool's first candidate and scores
+    // what the vote scored; without `unreadable` in the row that arm is indistinguishable from a
+    // comparison that looked at both candidates and agreed.
+    const result = await run({
+      plan: { first: correct, whenValues: IMPOSSIBLE_SHORT, pairReply: () => 'Both look plausible to me.' },
+      env: { BIRD_ARMS: 'select-mixed-gated-pair' },
+    });
+    expect(result.code, result.printed.join('\n')).toBe(0);
+    const cases = result.report.cases as {
+      readonly passed: boolean;
+      readonly pairwise?: { readonly comparisons: number; readonly unreadable: number };
+    }[];
+    const decided = cases.filter((row) => row.pairwise !== undefined);
+    expect(decided.length).toBeGreaterThan(0);
+    for (const row of decided) {
+      expect(row.pairwise?.comparisons).toBe(2);
+      expect(row.pairwise?.unreadable).toBe(2);
+      // The incumbent is the first candidate, which is the gold statement: an unreadable tournament
+      // answers what the pool's own order answers, which is why it cannot be published as a result.
+      expect(row.passed).toBe(true);
+    }
+    const rows = result.report.arms as { readonly pairwise?: { readonly asked: number; readonly comparisons: number; readonly unreadable: number } }[];
+    // Both comparisons of every asked case are counted as unreadable, which is the state
+    // `assertPairwiseFired` refuses above the sample floor — seven questions licence the shape of
+    // the record, not the refusal.
+    expect(rows[0]?.pairwise).toEqual({ asked: decided.length, comparisons: decided.length * 2, unreadable: decided.length * 2 });
   });
 });
 

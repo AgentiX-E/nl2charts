@@ -1143,6 +1143,42 @@ export const ARMS: readonly Arm[] = [
   // 35.7/62.0. A block that changes nothing closes the "the judge was blind" explanation and points
   // the next mechanism at deliberation (pairwise, or a second reading) rather than at evidence.
   { name: 'select-mixed-gated-evidence', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: MIXED_SOURCES, gate: 'results', selectorEvidence: 'columns' },
+  // The same gate, with the adjudication turned from a ranking into a knockout.
+  //
+  // The absolute prompt asks for one number out of three and has to hold the whole set in mind; the
+  // knockout asks two questions with two candidates on the page and `k - 1` calls. CHASE-SQL's
+  // selector is a binary comparison for this reason, and this harness priced the shape once
+  // (`select-pair`, +0.8pp at 17/20) on the pool where every case pays for it. What it has never
+  // been is *conditional*: on the 73% of Mini-Dev questions whose three candidates return the same
+  // rows the comparison would be between two identical results, which is not a cheap call but an
+  // unspendable one.
+  //
+  // Pre-registered against `select-mixed-gated`, on the disagreeing subset only (the population
+  // both arms spend on): accuracy at least +5pp over `shortest`'s 44.2% there, `calls.mean` at or
+  // below 3.65, and `pairwise.comparisons` exactly twice `pairwise.asked` — the closed form is the
+  // instrument, and an arm whose comparisons are not `k - 1` per case compared something it did not
+  // draw.
+  { name: 'select-mixed-gated-pair', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: MIXED_SOURCES, gate: 'results', pairwise: true },
+  // The same gate, with the adjudication asked for a statement instead of a choice.
+  //
+  // An index cannot name an answer none of the candidates contains, and on the cross pool that was
+  // the whole 6.5pp the ceiling held and the decision missed. Here the population is narrower — the
+  // disagreeing pool at temperature 0.7, where the candidates at least disagree about *something* —
+  // but the shape is the same: the result groups go in, one statement comes back, and the arm pays
+  // one call for it.
+  //
+  // Pre-registered against `select-mixed-gated`: accuracy at least +5pp on the disagreeing subset
+  // over `shortest`'s 44.2%, and `reconcile.novel` at least 10% of the replies — the `always` policy
+  // is what the last reconcile reading lost to, so this arm is read with `-novel` beside it rather
+  // than instead of it.
+  { name: 'select-mixed-gated-reconcile', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: MIXED_SOURCES, gate: 'results', reconcile: 'groups' },
+  // The same prompt and the same one call, handing a restatement back to the vote.
+  //
+  // `select-cross-pooled-reconcile` adopted all 595 replies it could run and 514 of them restated a
+  // candidate; it scored 359 against the free count's 380, and the loss is where the restatements
+  // are. This is that finding applied to the gated pool: only a statement nobody wrote becomes the
+  // answer, so the delta is the corrections and nothing else.
+  { name: 'select-mixed-gated-reconcile-novel', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: MIXED_SOURCES, gate: 'results', reconcile: 'groups', reconcileAdopt: 'novel' },
   // The arm this split ships, plus one candidate that is a query description instead of a
   // statement. One lever from `select-mixed` in the sense that matters — same three prompts, same
   // card, same selector — and one call more, which the report publishes rather than hides.
@@ -1642,6 +1678,9 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'select-mixed-spread2': 'the three prompts drawn twice each: six candidates and seven calls, which is the rung this repository has never climbed and the one the strongest training-free competitor stands on (it draws 21 at temperature 0.7 and votes on executed results). On demand rather than in the chain because its verdict is a ceiling reading on 1,532 dev questions — 498 cannot resolve two points of ceiling, and the arm costs 7 calls a question. Run it beside `select-mixed` and read `candidateRecall`, not the score: the question is whether a second pass over the same prompts widens the set at all',
   'select-mixed-gated': 'the parent arm with its fourth call conditional on the pool: 73.1% of Mini-Dev three-candidate questions at temperature 0.7 return one result, and on those the selector, `shortest` and `modal` all score 70.57%, so the call is unspendable rather than cheap. The gate reads the pool with the judge\'s own equality, picks by rule when it agreed, and calls the selector unchanged when it did not — so the delta from `select-mixed` is cost and nothing else. Read `calls.mean` (bar: at most 3.35), `spend.asked` (bar: at most 0.30 of cases) and accuracy (bar: within one point, because the invariance is a construction and a departure is a defect)',
   'select-mixed-gated-evidence': 'the gated arm with the judge shown the columns of the tables its candidates read: the selector has never seen the schema and the generator always has, which costs nothing on an agreeing pool and is the whole decision on a disagreeing one. Against `select-mixed-gated` the bar is +2pp overall, and on the disagreeing subset a model share of the ceiling at least 5pp above the parent\'s 35.7/62.0. A block that moves nothing retires the "the judge was blind" explanation and points the next mechanism at deliberation',
+  'select-mixed-gated-pair': 'the gate with the adjudication turned into a knockout: two candidates on the page, two calls, and nothing spent on the 73% of the pool that agreed with itself. The absolute prompt has to hold three statements in mind and emit one number; CHASE-SQL\'s selector is binary for that reason. Bar, on the disagreeing subset: +5pp over `shortest`\'s 44.2%, `calls.mean` at most 3.65, and `pairwise.comparisons` exactly twice `pairwise.asked` — a knockout that compared anything but its own pool is a bill nobody can attribute',
+  'select-mixed-gated-reconcile': 'the gate with the adjudication asked for a statement: the result groups go in, one statement comes back, and the arm pays one call only where the pool disagreed. An index cannot name an answer none of the candidates contains, which is the population the ceiling holds and the decision misses. Read `reconcile.novel` beside the delta: an arm whose replies all restate a candidate is a selector with a longer prompt',
+  'select-mixed-gated-reconcile-novel': 'the same prompt and the same one call as `select-mixed-gated-reconcile`, handing a restatement back to the vote: the cross-pool reading adopted every runnable reply and 514 of 600 were paraphrases, which is where its 5pp loss lives. This arm isolates the corrections, so its delta is the statements nobody wrote',
   'select-mixed-cold': 'the same three prompts and the same four calls at temperature 0: the coordinate every multi-prompt arm was silently measured at, kept as the control rather than as a claim. It is the arm a "more candidates help" hypothesis has to beat, and it costs nothing beyond its four calls — dispatch it beside `select-mixed` and `select-mixed-hot` so the three rungs share one split, one judge and one bill',
   'select-mixed-hot': 'the same three prompts and the same four calls drawn at temperature 1 instead of 0.7: the one experiment that separates "0.7 is too cold for this endpoint" from "the three prompts already know the answer", at no extra cost. On demand because it is a ceiling reading and it must share a dispatch with `select-mixed` to be paired — 498 questions resolve about two points of ceiling and nothing finer. Read `candidateRecall` (bar: 64.3% + 2pp) and the distinct-results-per-question line from `bench:bird:diversity` (bar: 1.26 -> 1.50). A ceiling that does not move closes the sampling family: draw count, source count and temperature are then one measurement',
   'select-mixed-spread3': 'three passes, nine candidates, ten calls: the rung that says whether the ceiling curve is still rising at double digits. Read against `spread2`, not against the parent — a slope that halves between six and nine closes the competitor\'s 21-candidate configuration as an explanation and moves the question to its prompt family',
@@ -1860,6 +1899,15 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   // a rule that ranks them. The rule arm is the derivation from the parent's own artifact turned
   // into a run, so this pair is also the test of the offline device.
   ['select-mixed', 'select-mixed-rule'],
+  // One lever: the same gated pool, and a different question to the same judge — one ranking of
+  // three candidates, or two comparisons of two. The delta is the shape of the question, priced on
+  // the population where the gate actually spends.
+  ['select-mixed-gated', 'select-mixed-gated-pair'],
+  // One lever: the same gate and the same one call, with the reply a statement instead of a choice.
+  ['select-mixed-gated', 'select-mixed-gated-reconcile'],
+  // One lever: what the arm does with a reply that restates a candidate — adopt the paraphrase, or
+  // hand it back to the vote. Same prompt, same call, same pool.
+  ['select-mixed-gated-reconcile', 'select-mixed-gated-reconcile-novel'],
   // One lever: the same candidates and selector, with an empty result treated as a
   // failure — dropped before the vote and retried once when nothing survives.
   ['select-mixed', 'select-mixed+empty'],
@@ -2255,6 +2303,18 @@ export interface CaseRun extends CaseOutcome {
    * is candidate 1 copied verbatim is indistinguishable from one that reconciled and was wrong.
    */
   readonly reconcile?: { readonly returned: boolean; readonly novel: boolean; readonly executable: boolean; readonly adopted: boolean };
+  /**
+   * What the knockout did on this case, on an arm that compares two statements at a time.
+   *
+   * `comparisons` is `k - 1` by construction, so it prices the turn without the counter and is the
+   * only place the price of a pairwise arm can be checked against the pool it was drawn from.
+   * `unreadable` is the half that cannot be derived: a comparison whose reply carried neither `1`
+   * nor `2` keeps the incumbent, so a tournament that read nothing returns the pool's own first
+   * candidate and scores whatever the vote scored — a lever that did not run, published under a
+   * comparison's name. The row counts it, `pairwiseFunnel` sums it, and `assertPairwiseFired`
+   * refuses the arm whose every comparison came back unreadable.
+   */
+  readonly pairwise?: { readonly comparisons: number; readonly unreadable: number };
   readonly candidateFailures?: CandidateFailures;
   /**
    * Per source: how many candidates it was asked for, and how many arrived.
@@ -2541,6 +2601,16 @@ export interface ArmReportRow {
     readonly adopted: number;
   };
   readonly decomposition?: { readonly asked: number; readonly fired: number; readonly share: number; readonly meanSteps: number };
+  /**
+   * What the knockout spent, on the arm that compares two statements at a time.
+   *
+   * Published as the arm's own funnel rather than folded into `spend`, because the three numbers
+   * answer three different questions: `asked` is how many cases reached the tournament (a gated arm
+   * spends here only where the pool disagreed), `comparisons` is the bill and has a closed form
+   * (`k - 1` per case), and `unreadable` is the share of that bill which bought nothing. A pairwise
+   * arm without this row is a call count nothing can attribute to a comparison.
+   */
+  readonly pairwise?: { readonly asked: number; readonly comparisons: number; readonly unreadable: number };
   readonly candidateRecall?: number;
   readonly emptyRetry?: { readonly mode: string; readonly dropped: number; readonly fired: number; readonly recovered: number };
   /**
@@ -3545,6 +3615,60 @@ export function assertReconcileFired(armName: string, runs: readonly CaseRun[], 
 }
 
 /**
+ * What the knockout spent across the arm's cases, and how much of it came back readable.
+ *
+ * Two counts rather than one, because a pairwise arm has two ways to be a lever that did not run
+ * and they need different repairs. `asked === 0` means no case reached the tournament — a
+ * gated arm whose pool never disagreed, or a branch that returned before the comparison. Every
+ * comparison unreadable means the tournament was paid for and read nothing, which is an outage of
+ * the prompt or the parser wearing the arm's name. The price is published beside them
+ * (`comparisons`) because it is the only number that lets a reader check the bill against the pool:
+ * a knockout spends exactly `k - 1` calls, so an arm reporting three comparisons on a pool of three
+ * is an arm that compared a candidate with itself.
+ */
+export function pairwiseFunnel(runs: readonly CaseRun[]): {
+  readonly asked: number;
+  readonly comparisons: number;
+  readonly unreadable: number;
+} {
+  const records = runs.map((run) => run.pairwise).filter((record) => record !== undefined);
+  return {
+    asked: records.length,
+    comparisons: records.reduce((total, record) => total + record.comparisons, 0),
+    unreadable: records.reduce((total, record) => total + record.unreadable, 0),
+  };
+}
+
+/**
+ * A tournament that read nothing is the pool's own order under a comparison's name.
+ *
+ * The guard refuses the two states in which the arm's accuracy cannot be attributed to comparing
+ * anything, and publishes the third: a tournament that read its comparisons and lost them anyway is
+ * a measurement, and a measurement of zero is the finding. `MINIMUM_INSTRUMENT_SAMPLE` applies for
+ * the same reason it does everywhere else here — on four questions nothing can be concluded about
+ * whether a mechanism fires, so nothing is refused either.
+ */
+export function assertPairwiseFired(armName: string, runs: readonly CaseRun[], minimumSample = MINIMUM_INSTRUMENT_SAMPLE): void {
+  if (runs.length < minimumSample) return;
+  const funnel = pairwiseFunnel(runs);
+  if (funnel.asked === 0) {
+    throw new Error(
+      `arm ${armName}: the knockout ran on none of ${String(runs.length)} questions, so the arm measured whatever chose the answer before it`,
+    );
+  }
+  if (funnel.comparisons === 0) {
+    throw new Error(
+      `arm ${armName}: ${String(funnel.asked)} cases carry a comparison record with no comparison in it, so the turn was declared and never sent`,
+    );
+  }
+  if (funnel.unreadable === funnel.comparisons) {
+    throw new Error(
+      `arm ${armName}: all ${String(funnel.comparisons)} comparisons came back unreadable, so the incumbent — the pool's own first candidate — became the answer on every case`,
+    );
+  }
+}
+
+/**
  * An empty lever is a bug, not a null result.
  *
  * The same reasoning as `assertRepairPathFired`: on a split where 37% of cases are wrong,
@@ -3787,13 +3911,23 @@ export function columnEvidence(
 }
 
 /**
- * A gate in front of a chooser that spends nothing is a rename, and a gate whose pool agreed is the
- * only state it can save a call in.
+ * A gate in front of a chooser that spends nothing is a rename, and a gate in front of a chooser
+ * that fires only where the gate does is a chooser that can never run.
  *
  * Refused at the declaration for `assertRuleSelection`'s reason: the wrong combination compiles,
  * runs, is billed, and reports a number that reads as a measurement of the gate.
+ *
+ * What the gate is *for* is the composition it used to refuse. A paid adjudication — the model
+ * selector, a knockout, a reconcile turn — is exactly the thing whose price should be proportional
+ * to the questions that have something to decide, and the gate is the reading of the pool that
+ * makes it so: zero calls on the 73% where every candidate returned the same rows, the arm's own
+ * chooser unchanged on the rest. The two levers are then priced as one only in the sense that the
+ * arm's total bill is one number, which is what a deployment pays. So `pairwise` and `reconcile`
+ * are admitted here, and the refusal that remains is the one that is a real contradiction:
+ * `dissent` buys an opinion *because* the pool was unanimous, which is the case the gate answers
+ * by rule before the dissent branch is reached — the arm would pay for a call it cannot make.
  */
-export function assertResultGate(arm: Pick<Arm, 'name' | 'select' | 'gate' | 'gateRule' | 'selectRule' | 'reconcile' | 'pairwise' | 'vote'>): void {
+export function assertResultGate(arm: Pick<Arm, 'name' | 'select' | 'gate' | 'gateRule' | 'selectRule' | 'reconcile' | 'pairwise' | 'vote' | 'dissent'>): void {
   if (arm.gate === undefined) return;
   if (arm.select !== true) {
     throw new Error(`arm ${arm.name} gates a decision it never asks for; \`select: true\` is what draws a candidate set and what a gate saves a call on`);
@@ -3801,8 +3935,8 @@ export function assertResultGate(arm: Pick<Arm, 'name' | 'select' | 'gate' | 'ga
   if (arm.selectRule !== undefined) {
     throw new Error(`arm ${arm.name} gates the ${arm.selectRule} rule, which spends no call either way — the gate would be a second name for the same arm`);
   }
-  if (arm.reconcile !== undefined || arm.pairwise === true) {
-    throw new Error(`arm ${arm.name} gates the ${arm.reconcile === undefined ? 'pairwise' : 'reconcile'} turn, whose cost and whose prompt this gate does not govern — the two levers would be priced as one`);
+  if (arm.dissent !== undefined) {
+    throw new Error(`arm ${arm.name} gates a pool it also buys a dissent for: the gate answers the unanimous pool by rule, which is the only pool the dissent turn fires on, so the bought opinion would be unreachable`);
   }
   if ((arm.vote ?? 1) < 2) {
     throw new Error(`arm ${arm.name} draws ${String(arm.vote ?? 1)} candidate, so its pool cannot agree or disagree and the gate would spend on every case`);
@@ -4523,6 +4657,14 @@ export function assertReportComplete(report: { readonly arms?: readonly ArmRepor
     }
     if (arm.audit !== undefined && row.audit === undefined) {
       throw new Error(`arm ${row.arm} runs the audit turn and its row carries no audit funnel, so the call cannot be priced`);
+    }
+    if (arm.pairwise === true && row.pairwise === undefined) {
+      // A knockout's bill is `k - 1` per case and its failure is silent, so the row without the
+      // funnel is a call count with nothing behind it: the accuracy would be read as a comparison's
+      // result on an arm that may have compared nothing.
+      throw new Error(
+        `arm ${row.arm} decides by knockout and its row carries no pairwise funnel, so its accuracy cannot be attributed to a comparison`,
+      );
     }
     if (arm.ground === true && row.grounding === undefined) {
       // The rewrite is invisible in the accuracy when it does nothing, so the row has to carry the
@@ -6749,6 +6891,17 @@ export const MECHANISMS: readonly Mechanism[] = [
     quiet: () => quietBank({ reconcile: { returned: true, novel: false, executable: false, adopted: false } }),
   },
   {
+    lever: 'pairwise',
+    declares: (arm) => arm.pairwise === true,
+    // The price of a knockout is derivable (`k - 1`) and its failure is not: a comparison nobody
+    // could read keeps the incumbent, so the arm returns the pool's own first candidate and scores
+    // what the vote scored. Without the count that arm is indistinguishable from a tournament.
+    guard: ({ armName, runs }) => assertPairwiseFired(armName, runs),
+    records: 'pairwise',
+    scenarios: ['the knockout arm, whose price is two calls per disagreeing case and whose failure is a silent one'],
+    quiet: () => quietBank({ pairwise: { comparisons: 2, unreadable: 2 } }),
+  },
+  {
     lever: 'repairs',
     declares: (arm) => arm.repairs > 0,
     // On a split where the parent arm fails 40% of the cases, a repair path that never ran is the
@@ -7400,6 +7553,9 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
         // Declared here rather than inside the select branch because the case row is built after
         // it: the funnel is a property of the answer, and the answer is assembled at the end.
         let reconciled: CaseRun['reconcile'];
+        // The tournament's own record, declared here for the same reason: what the knockout spent
+        // is a property of the answer, and the answer is assembled at the end of this block.
+        let pairwiseTurn: CaseRun['pairwise'];
         // The order the selector will read, which is the raw order unless the arm permutes it.
         // The vote above deliberately ran on the unpermuted set, so a tie it breaks is broken the
         // same way in both arms; only the selector's information changes. `ordered` is what the
@@ -7537,7 +7693,11 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
           try {
             decision =
               arm.pairwise === true
-                ? await chooseCandidatePairwise(judge, question.question, readable)
+                ? await (async () => {
+                    const turn = await chooseCandidatePairwise(judge, question.question, readable);
+                    pairwiseTurn = { comparisons: turn.comparisons, unreadable: turn.unreadable };
+                    return turn;
+                  })()
                 : await (async () => {
                     // The evidence is rendered from the arm's own card and the candidates it is
                     // about to show: the columns of the tables those statements name, and nothing
@@ -7718,6 +7878,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
           ...(selectedByRule === undefined ? {} : { selectedByRule }),
           ...(selectionFailed === undefined ? {} : { selectionFailed }),
           ...(reconciled === undefined ? {} : { reconcile: reconciled }),
+          ...(pairwiseTurn === undefined ? {} : { pairwise: pairwiseTurn }),
           ...(retryFailed === undefined ? {} : { retryFailed }),
           ...(firstShape === undefined ? {} : { shape: firstShape }),
           ...(arm.mixed === undefined ? {} : { winnerSource: winner.source }),
@@ -8251,6 +8412,11 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
       : {}),
     ...(arm.emptyRetry === undefined ? {} : { emptyRetry: { mode: arm.emptyRetry, ...emptyRetryFunnel(runs) } }),
     ...(arm.reconcile === undefined ? {} : { reconcile: { policy: arm.reconcileAdopt ?? 'always', ...reconcileFunnel(runs) } }),
+    // The knockout's own bill, on the arm that runs one. Read from the cases rather than computed
+    // from the arm, because the pool size is a runtime fact: a case whose candidate died is a case
+    // with fewer comparisons to make, and an arm whose `k - 1` never matched its pool was comparing
+    // something other than what it drew.
+    ...(arm.pairwise === true ? { pairwise: pairwiseFunnel(runs) } : {}),
     ...(arm.audit === undefined ? {} : { audit: auditFunnel(runs) }),
     ...(arm.ground === undefined ? {} : { grounding: groundingFunnel(runs) }),
     // The fourth candidate's whole mechanism, on the arm that draws it: how often the vocabulary
@@ -8526,6 +8692,10 @@ export function caseRows(
       // name the cases where adopting one turned a right answer wrong. A funnel says how many; a
       // row says which, and a pair of arms is tested on the second.
       ...(run.reconcile === undefined ? {} : { reconcile: run.reconcile }),
+      // What the knockout compared on this case, and how much of it was readable. Per case for the
+      // reason the reconcile record is per case: the funnel prices the turn, and only the row can
+      // say *which* comparisons carried no answer — the population a prompt fix has to be aimed at.
+      ...(run.pairwise === undefined ? {} : { pairwise: run.pairwise }),
       // What the value block put on this case's card, on an arm that declares a sampler.
       //
       // The narrowed arm published its funnel and not its record on its first dispatch, so "the

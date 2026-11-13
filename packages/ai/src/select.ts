@@ -368,17 +368,26 @@ export function parsePairwise(text: string): number {
  * An unreadable reply keeps the incumbent. That is the same conservative reading the
  * absolute selector takes, and it is reported: `decided` counts the comparisons that
  * produced no answer, so a broken pairwise prompt cannot hide behind a plausible result.
+ *
+ * `comparisons` and `unreadable` are the same fact as two counts rather than one flag. A
+ * knockout on three candidates is exactly two calls, so the price of the turn is derivable
+ * from the size of the set — but *whether the turn acted* is not: a tournament whose every
+ * reply was unreadable keeps the first candidate and returns an answer that is a copy of the
+ * pool's own order, indistinguishable in accuracy from a tournament that looked at two
+ * comparisons and agreed with the vote. `decided` says "something was not read"; these two say
+ * "nothing was read at all", which is the state a caller has to refuse to publish.
  */
 export async function chooseCandidatePairwise(
   provider: LlmProvider,
   question: string,
   executed: readonly ExecutedCandidate[],
   temperature?: number | null,
-): Promise<SelectionDecision & { readonly sql: string }> {
+): Promise<SelectionDecision & { readonly sql: string; readonly comparisons: number; readonly unreadable: number }> {
   if (executed.length === 0) throw new Error('chooseCandidatePairwise needs at least one executed candidate');
   const offered = executed.map((candidate) => toCandidate(candidate));
   let best = 0;
   let decided = true;
+  let unreadable = 0;
   for (let challenger = 1; challenger < offered.length; challenger += 1) {
     const reply = await provider.complete({
       messages: [
@@ -391,11 +400,12 @@ export async function chooseCandidatePairwise(
     const choice = parsePairwise(reply.text);
     if (choice === -1) {
       decided = false;
+      unreadable += 1;
       continue;
     }
     if (choice === 1) best = challenger;
   }
-  return { index: best, decided, sql: (offered[best] as Candidate).sql };
+  return { index: best, decided, sql: (offered[best] as Candidate).sql, comparisons: offered.length - 1, unreadable };
 }
 
 /**

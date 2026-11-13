@@ -238,6 +238,10 @@ describe('pairwise selection', () => {
     // 1 vs 2 → 2 wins; then 2 vs 3 → 3 wins.
     expect(decision.index).toBe(2);
     expect(decision.sql).toBe('SELECT 3');
+    // The price, reported rather than inferred: a knockout spends exactly `k - 1` calls, and a
+    // caller that reads the count can check the bill against the pool it drew.
+    expect(decision.comparisons).toBe(2);
+    expect(decision.unreadable).toBe(0);
   });
 
   it('keeps the incumbent when the challenger loses', async () => {
@@ -254,6 +258,10 @@ describe('pairwise selection', () => {
     expect(decision.index).toBe(0);
     expect(decision.decided).toBe(true);
     expect(scripted.seen).toHaveLength(0);
+    // Zero comparisons is a reading, not a missing field: it is the price of a pool of one, and it
+    // is the number that says a tournament on this set could not have decided anything.
+    expect(decision.comparisons).toBe(0);
+    expect(decision.unreadable).toBe(0);
   });
 
   it('reports an unreadable comparison instead of treating it as a vote for the challenger', async () => {
@@ -263,6 +271,10 @@ describe('pairwise selection', () => {
     // and picks candidate 3.
     expect(decision.index).toBe(2);
     expect(decision.decided).toBe(false);
+    // Which comparison bought nothing, counted apart from how many were made: `decided` alone
+    // cannot tell a call that was never sent from a reply nobody could read.
+    expect(decision.comparisons).toBe(2);
+    expect(decision.unreadable).toBe(1);
   });
 
   it('shows the question and both statements, one of which is labelled 1', () => {

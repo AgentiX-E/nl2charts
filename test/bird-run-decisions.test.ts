@@ -21,6 +21,8 @@ import {
   poolReadOf,
   spendOf,
   assertReconcileFired,
+  assertPairwiseFired,
+  pairwiseFunnel,
   assertDemonstrationsFired,
   assertMaskingFired,
   assertMaskingRule,
@@ -1389,6 +1391,57 @@ describe('what a reconcile turn produced', () => {
 });
 
 /**
+ * What a knockout spent, and the guard that refuses the tournament that read nothing.
+ *
+ * A pairwise arm is the one chooser whose price is known before it runs (`k - 1` comparisons) and
+ * whose failure is silent: an unreadable reply keeps the incumbent, so a tournament that parsed
+ * nothing returns the pool's own first candidate and scores exactly what the vote scored. The
+ * funnel separates the three states — never asked, asked and empty, asked and unreadable — because
+ * they call for different repairs, and only the third is an outage wearing the arm's name.
+ */
+describe('what a knockout spent', () => {
+  const record = (comparisons: number, unreadable = 0): CaseRun => ({
+    id: '1',
+    passed: true,
+    predicted: '',
+    reason: 'match',
+    strict: true,
+    attempts: 1,
+    calls: 1,
+    pairwise: { comparisons, unreadable },
+  });
+  const sample = (count: number, make: (index: number) => CaseRun): CaseRun[] =>
+    Array.from({ length: count }, (_unused, index) => ({ ...make(index), id: String(index) }));
+
+  it('sums the comparisons and the ones that bought nothing', () => {
+    expect(pairwiseFunnel([record(2), record(2, 1), record(1)])).toEqual({ asked: 3, comparisons: 5, unreadable: 1 });
+    // A case that never reached the tournament has no record: the gate answered it by rule, and
+    // counting it would make `asked` a case count rather than a spend.
+    expect(pairwiseFunnel([{ ...record(2), pairwise: undefined }])).toEqual({ asked: 0, comparisons: 0, unreadable: 0 });
+  });
+
+  it('refuses a tournament that never ran, compared nothing, or read nothing', () => {
+    expect(() => assertPairwiseFired('knockout', sample(120, () => ({ ...record(2), pairwise: undefined })))).toThrow(/ran on none of 120 questions/);
+    expect(() => assertPairwiseFired('knockout', sample(120, () => record(0)))).toThrow(/no comparison in it/);
+    // The whole bill unreadable: the incumbent is the answer on every case, so the arm published
+    // the vote's accuracy under a comparison's name.
+    expect(() => assertPairwiseFired('knockout', sample(120, () => record(2, 2)))).toThrow(/all 240 comparisons came back unreadable/);
+  });
+
+  it('accepts a tournament that read one comparison in a hundred, and one that read all but one', () => {
+    // The guard asks whether the mechanism exists, not whether it works often: a tournament that
+    // read two hundred and thirty-nine of its two hundred and forty comparisons is a reading with
+    // one unreadable reply in it, which the funnel publishes and the guard does not refuse.
+    expect(() => assertPairwiseFired('knockout', sample(120, (index) => (index === 0 ? record(2, 1) : record(2, 2))))).not.toThrow();
+    expect(() => assertPairwiseFired('knockout', sample(120, (index) => (index === 0 ? record(2) : record(2, 2))))).not.toThrow();
+  });
+
+  it('says nothing below the sample floor, where a share describes the fixture', () => {
+    expect(() => assertPairwiseFired('knockout', sample(7, () => ({ ...record(2), pairwise: undefined })))).not.toThrow();
+  });
+});
+
+/**
  * What the block of stored values actually carried, on the arm that narrows it.
  *
  * `controls.sampledColumns` is a total over every database the run touched, so it cannot say
@@ -1705,13 +1758,26 @@ describe('a gate in front of the adjudication', () => {
     // run, are billed, and publish a number that reads as a measurement of the gate.
     expect(() => assertResultGate({ name: 'x', gate: 'results' })).toThrow(/gates a decision it never asks for/);
     expect(() => assertResultGate({ name: 'x', select: true, gate: 'results', selectRule: 'shortest', vote: 3 })).toThrow(/second name for the same arm/);
-    expect(() => assertResultGate({ name: 'x', select: true, gate: 'results', reconcile: 'groups', vote: 3 })).toThrow(/does not govern/);
-    expect(() => assertResultGate({ name: 'x', select: true, gate: 'results', pairwise: true, vote: 3 })).toThrow(/does not govern/);
     expect(() => assertResultGate({ name: 'x', select: true, gate: 'results', vote: 1 })).toThrow(/cannot agree or disagree/);
   });
 
-  it('accepts a gated arm over two candidates or more, and an arm with no gate', () => {
+  it('refuses a gate on the one chooser that fires where the gate rules', () => {
+    // `dissent` buys an opinion *because* the pool was unanimous, and the gate answers exactly that
+    // pool by rule before the dissent branch is reached. The arm would price a call it cannot make,
+    // and its accuracy would be the free rule's under a name that says a fourth model was asked.
+    expect(() => assertResultGate({ name: 'x', select: true, gate: 'results', dissent: 'decompose', vote: 3 })).toThrow(
+      /the bought opinion would be unreachable/,
+    );
+  });
+
+  it('accepts a paid chooser behind the gate, because proportionality is what the gate is for', () => {
+    // The composition the gate exists to make possible: zero calls where the pool agreed, the arm's
+    // own adjudication unchanged where it did not. A ranking, a knockout and a reconcile turn are
+    // the three shapes that adjudication takes in this file, and all three are admitted.
     expect(() => assertResultGate({ name: 'x', select: true, gate: 'results', vote: 3 })).not.toThrow();
+    expect(() => assertResultGate({ name: 'x', select: true, gate: 'results', pairwise: true, vote: 3 })).not.toThrow();
+    expect(() => assertResultGate({ name: 'x', select: true, gate: 'results', reconcile: 'groups', vote: 3 })).not.toThrow();
+    expect(() => assertResultGate({ name: 'x', select: true, gate: 'results', reconcile: 'groups', vote: 3 })).not.toThrow();
     expect(() => assertResultGate({ name: 'x', select: true, gate: 'results', gateRule: 'modal', vote: 2 })).not.toThrow();
     expect(() => assertResultGate({ name: 'x', select: true, vote: 3 })).not.toThrow();
     expect(() => assertResultGate({ name: 'x' })).not.toThrow();
@@ -1723,7 +1789,7 @@ describe('a gate in front of the adjudication', () => {
       if (arm.gate === undefined) continue;
       expect(arm.select, arm.name).toBe(true);
       expect(arm.selectRule, arm.name).toBeUndefined();
-      expect(arm.reconcile, arm.name).toBeUndefined();
+      expect(arm.dissent, arm.name).toBeUndefined();
       expect(arm.vote ?? 1, arm.name).toBeGreaterThanOrEqual(2);
     }
   });

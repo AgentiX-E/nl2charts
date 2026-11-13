@@ -11852,3 +11852,46 @@ behind the call and costs 25% less" is withdrawn to **"costs 25% less, and no sp
 tell its accuracy from the selector's"**. Four of five readings lean toward the rule and one leans
 away; the votes are all inside their own resolutions, and a claim built on them would be a claim about
 noise.
+
+### The next mechanism is deliberation on the disagreeing pool, not another card
+
+The four arms above close the text-level question. The reserve that is left is not in the pool and
+not in the prompt: on the 27% of the split whose candidates disagree, the ceiling is 62.02%, the best
+chooser that reads only statement text reaches 44.19%, and the model selector asked to rank three
+absolute candidates reaches 35.66%. Every call-free rule this repository has tried at that level —
+fewer joins, fewer predicates, literal grounding, group-by matching — landed within one point of
+`shortest`, which is the signature of a family that has nothing more to say. What none of them does
+is read the *result* beside the question, and that is the only information the disagreeing pool has
+that the agreeing pool does not.
+
+So the next two arms are the same gate with a different adjudication behind it:
+
+| arm | what the judge is asked | calls on a disagreeing question |
+|---|---|---|
+| `select-mixed-gated-pair` | two candidates, one at a time — a knockout | 2 |
+| `select-mixed-gated-reconcile-novel` | the result groups, for a statement to run | 1 |
+
+The knockout is CHASE-SQL's selector shape — a binary comparison rather than an absolute ranking —
+made conditional for the first time. Its price is a closed form, `k - 1` comparisons per case, which
+is why the harness can check the bill against the pool instead of trusting a counter. The reconcile
+turn is the shape that reached the 6.5 points of ceiling an index cannot name on the cross pool,
+carried over with the policy correction that reading earned: a reply that restates a candidate is
+handed back to the vote rather than scored.
+
+Four bars are pre-registered, and they are the ones a paid decision has to clear:
+
+1. **On the disagreeing subset, at least +5 points over `shortest`.** Below that the turn is the
+   free rule with a bill attached.
+2. **At most two calls per disagreeing question.** The knockout is exactly two; a shape that needed
+   three would be the fourth call made twice, and the gate's whole reading is that the fourth call
+   is only worth making where it can change the answer.
+3. **`pairwise.comparisons` exactly `2 x pairwise.asked`.** Not a target but an identity: a
+   tournament that compared anything other than the pool it drew is a bill nobody can attribute.
+4. **`reconcile.novel` at least 10% of the replies.** An arm whose statements are all paraphrases of
+   its own candidates is a selector with a longer prompt, and the funnel now says so before the
+   delta is read.
+
+An unreadable comparison is the failure mode both shapes share and neither could report until this
+round: the incumbent is kept, so a tournament that parsed nothing returns the pool's first candidate
+and scores exactly what the vote scored. `assertPairwiseFired` refuses that state above the sample
+floor, which makes "the knockout did not run" a bug rather than a null result.

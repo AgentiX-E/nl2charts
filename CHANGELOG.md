@@ -7,6 +7,21 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **The gate now admits the choosers it was built for: a knockout, and a reconcile turn.** The gate
+  was written to refuse a paid chooser behind it, on the argument that two levers behind one number
+  would be priced as one. That argument had the sign wrong. A paid adjudication is exactly the thing
+  whose price should be proportional to the questions that have something to decide, so
+  `select-mixed-gated-pair` (a knockout, `k - 1` comparisons on the disagreeing pool and nothing
+  elsewhere) and `select-mixed-gated-reconcile-novel` (one statement on the same pool, adopting only
+  a reply nobody wrote) are now expressible. The refusal that remains is the one that is a real
+  contradiction: `dissent` buys an opinion *because* the pool was unanimous, which is the pool the
+  gate answers by rule, so the bought call would be unreachable.
+- **A knockout reports what it spent and what it could read.** `chooseCandidatePairwise` returns
+  `comparisons` and `unreadable` beside the choice, the runner files them per case as `pairwise`, the
+  row sums them as `pairwise.asked / comparisons / unreadable`, and `assertPairwiseFired` refuses the
+  two states in which the arm measured the vote: a tournament that ran on no case, and one whose
+  every comparison came back unreadable — the latter because an unreadable reply keeps the incumbent,
+  which returns the pool's own first candidate under a comparison's name.
 - **The adjudication is bought only where there is something to adjudicate.** On Mini-Dev at
   temperature 0.7, 350 of 479 three-candidate questions (73.1%) returned one result under the
   judge's own equality, and on those cases the model selector, the `shortest` rule and the `modal`
