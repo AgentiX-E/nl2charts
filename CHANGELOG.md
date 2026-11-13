@@ -94,6 +94,66 @@ cannot be argued with.
   reading of it exists yet.
 
 ### Added
+- **`compileToMatplotlib` — a chart IR becomes Python source, because a public benchmark scores
+  the code rather than the picture.** Text2Vis (EMNLP 2025) computes its pass rate from four
+  conditions, and one of them is `execution_result`: the generated code has to run and save a
+  figure. This repository produces a `ChartIR` and an ECharts option object, so an IR that cannot
+  reach Python cannot be scored on that benchmark at all. Four marks are drawable from the encoding
+  this compiler reads (`bar`, `line`, `scatter`, `effectScatter` as scatter, `pie`); every other
+  series type is refused rather than approximated — a bar chart standing in for a candlestick is a
+  picture that answers a different question, which is the failure this repository keeps finding in
+  other people's harnesses.
+  Two codes, because the repairs differ: `NL2C_E_NOT_SUPPORTED` for a mark with no counterpart or
+  an IR missing a channel its mark reads, `NL2C_E_INVALID_IR` when the linter reports an error (a
+  pie with a negative slice, an empty result set). Both are asked of the two functions that already
+  own those judgements — `supportOf` and `lint` — rather than re-deciding them in an emitter.
+  **Values are quoted with the JSON rules**, which Python and JSON agree on for every escape that
+  matters, and the three keywords that differ (`null`, `true`, `false`) are spelled `None`, `True`,
+  `False`. The reference harness runs the source with `exec`, so a category holding
+  `'); import os; os.system(...)` has to stay a category; a value JSON cannot represent keeps its
+  text instead of throwing, because whether the code runs is one of the four criteria and a
+  `TypeError` here is a zero with no visible cause.
+  **Verified by running it, not by matching strings:** all four marks compiled and executed against
+  matplotlib 3.6 in this container with `plt.show` replaced by a saver, and every one produced a
+  PNG. 17 tests; `packages/chart/src/matplotlib.ts` at 100% statements, 96.4% branches; bundle
+  18,400 -> 20,000 B (19,625 measured, reason in `budgets.json` as capability rather than drift);
+  api surface 469 -> 470.
+- **An arm row states what share of its bill was thinking, over one population.** The row printed
+  `completion` averaged over every scored case and `reasoning` averaged only over the cases whose
+  endpoint reported a counter — two means over two populations — and a reader divides them,
+  because that is what two numbers side by side invite. On `deepseek-v4-pro` (Mini-Dev, run
+  `43343813778`, reasoning declaration) the row said **1,650** and **1,691**: 102% of a bill. The
+  sum over the cases that reported both counters is **818,438** completion against **771,295** of
+  deliberation, so the sentence the reader wanted is **94.2%**, over 456 of the 496 cases. Those
+  figures hold each other up — 818,438 over 496 is the 1,650 the row printed, and the ratio is the
+  94.2% it could not state. `tokens.thinking` now carries `{share, cases}` and is absent, not
+  zero, on an endpoint that reports no counter, which is where every reading before this one was
+  taken. `tokens.reasoning` and `tokens.thinking` are also declared on `ArmReportRow`: the row has
+  been writing `reasoning` since the meter learned to report it and the type never said so, and a
+  type that omits a written field is the same defect as a column that reports two numbers under
+  one meaning. `byPurpose` gains `reasoning` for the same reason.
+  **Measured, and the reason this column exists:** the chat declaration and the reasoning
+  declaration were run on the same 496 questions and the same arm, differing in `capabilities`.
+  Reasoning won **24** of the cases the chat declaration lost and lost **25** it won (arm
+  `inline+evidence`; net −1 on the same questions) and spent **34% fewer** completion tokens
+  (818,438 against 1,237,135) — the declaration that says it thinks is cheaper per case and no
+  better. It also returned **71 empty answers across its two arms**, where the chat run returned
+  none. That last comparison is not a property of either declaration, and it is the reason the next
+  paragraph exists.
+  **The two runs are not two request shapes, they are two measurement regimes.** `afb4164d` ("the
+  declared cap reaches the wire") made `max_tokens` be sent for every family; before it the line
+  read `else if (capabilities.family === 'reasoning')`, so the chat run (`43262574193`) sent **no
+  cap at all** and the endpoint applied its own. Its zero empty answers are therefore not evidence
+  that the chat declaration is safer — nothing could be truncated. The 13.7% that started this line
+  of work (`43339353252`) is the first run in which a 4,096 cap was actually on the wire, and the
+  first time this repository could measure truncation at all. A cut answer reads as a wrong one, so
+  the cap surfaced the fault rather than caused it: `deepseek-v4-pro` has answered with
+  `reasoning_content` in every run, and no declaration changed that.
+  **Its own A/A pair is the noise floor.** On the chat run, the *same* configuration twice disagreed
+  on 39 of 496 cases and was published at **p = 0.024** — the harness's own control crossed the
+  significance line its arm comparisons are read against. On the reasoning run the same pair gave
+  **p ≈ 1.0** (22 against 23). Both are what the endpoint does and neither is a property of a
+  declaration: it is why one run cannot separate a 3-point difference from a repeat.
 - **`finishReason` travels from the endpoint to the artifact, and a truncated answer says so.**
   A reply cut at the token cap and a reply the model chose to end are the same bytes up to the
   cut, and the difference is the whole question. `LlmResponse.finishReason` carries

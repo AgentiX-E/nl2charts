@@ -382,6 +382,7 @@
     "LINT_RULES",
     "MARKS",
     "compileToECharts",
+    "compileToMatplotlib",
     "describeMark",
     "distinctValues",
     "enumerateCandidates",
