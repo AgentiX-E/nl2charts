@@ -619,6 +619,45 @@ describe('A/A pairs', () => {
     expect(() => assertFailureRate('names', [{ errorKind: 'execution' }, { errorKind: 'guard' }])).not.toThrow();
   });
 
+  it('refuses an arm whose every case was cut at the answer budget, and says which fault it was', () => {
+    // A run that never reached the database is not an accuracy of zero, whichever way it failed.
+    // The sentence differs because the repair differs: this one is a number, not a network.
+    expect(() =>
+      assertArmProducedResults('names', [
+        { errorKind: 'truncated', error: 'llm response was cut at the answer budget with nothing left (finish_reason=length)' },
+      ]),
+    ).toThrow(/budget the endpoint spent thinking/);
+    expect(() => assertArmProducedResults('names', [{ errorKind: 'truncated' }, { errorKind: 'execution' }])).not.toThrow();
+  });
+
+  it('refuses a run where a tenth of the cases were cut at the budget, in its own words', () => {
+    // The measured run: `deepseek-v4-pro` declared as a chat endpoint, 50 of 366 calls empty at
+    // 4,096 tokens. It arrived as `llm`, so the outage guard printed "failed at the model" and
+    // killed a run with 130 calls left in it. Same tenth, different sentence, different repair.
+    const cut = Array.from({ length: 10 }, () => ({
+      errorKind: 'truncated',
+      error: 'llm response was cut at the answer budget with nothing left (finish_reason=length, budgets tried: 4096 -> 8192)',
+    }));
+    expect(() => assertFailureRate('names', cut)).toThrow(/cut at the answer budget/);
+    // The repair is named, because a reader who sees a share without a repair raises the deadline.
+    expect(() => assertFailureRate('names', cut)).toThrow(/answerBudgetCeiling/);
+    // And it never borrows the outage's sentence: an endpoint that answered every one of these
+    // calls is the one thing this arm cannot blame.
+    expect(() => assertFailureRate('names', cut)).not.toThrow(/outage/);
+    expect(() => assertFailureRate('names', [{ errorKind: 'truncated' }, ...Array.from({ length: 19 }, () => ({}))])).not.toThrow();
+  });
+
+  it('does not let the two failure kinds add up to an outage', () => {
+    // Each under the tenth, together over it. Summing them would print "the endpoint is down"
+    // about a run in which nine calls in ten were answered.
+    const runs: { errorKind?: string; error?: string }[] = [
+      ...Array.from({ length: 5 }, () => ({ errorKind: 'llm', error: 'llm returned 429' })),
+      ...Array.from({ length: 5 }, () => ({ errorKind: 'truncated', error: 'cut at the answer budget' })),
+      ...Array.from({ length: 90 }, () => ({})),
+    ];
+    expect(() => assertFailureRate('names', runs)).not.toThrow();
+  });
+
   it('refuses a report where two arms share a label', () => {
     expect(() => assertUniqueArmLabels(['names', 'inline+evidence', 'inline+evidence'])).toThrow(/#2 name/);
     expect(() => assertUniqueArmLabels(['names', 'inline+evidence', 'inline+evidence#2'])).not.toThrow();
@@ -1385,6 +1424,9 @@ describe('balanced authorship', () => {
 describe('escaped errors', () => {
   it('classifies by who threw: the provider or this file', () => {
     expect(escapeKind(Object.assign(new Error('429'), { code: 'NL2C_E_LLM_UNAVAILABLE' }))).toBe('llm');
+    // A call that ran out of budget escaped exactly like an outage did, and the two cannot share a
+    // bucket: one is fixed by waiting, the other by naming a larger number.
+    expect(escapeKind(Object.assign(new Error('cut'), { code: 'NL2C_E_LLM_TRUNCATED' }))).toBe('truncated');
     expect(escapeKind(Object.assign(new Error('bad json'), { code: 'NL2C_E_LLM_INVALID_RESPONSE' }))).toBe('llm');
     // Anything else — a TypeError, a missing field, a bug in the arm table — is ours.
     expect(escapeKind(new TypeError('x is not a function'))).toBe('harness');
@@ -1456,6 +1498,19 @@ describe('the outage guard reads the run while it is still running', () => {
     const breaker = createFailureBreaker('names', 1);
     expect(breaker.observe({ errorKind: 'llm', error: 'llm returned 500' })).toBeNull();
     expect(breaker.verdict()).toBeNull();
+  });
+
+  it("stops a run that is being cut at the budget, with the budget's own sentence", () => {
+    const breaker = createFailureBreaker('names', 496);
+    for (let call = 0; call < 49; call += 1) {
+      expect(breaker.observe({ errorKind: 'truncated', error: 'cut at 4096' })).toBeNull();
+    }
+    const verdict = breaker.observe({ errorKind: 'truncated', error: 'cut at 4096' });
+    expect(verdict).toContain('stopped after 50 of 496 calls');
+    expect(verdict).toContain('cut at the answer budget');
+    expect(verdict).toContain('answerBudgetCeiling');
+    // The word the other fault owns, absent: this run's calls were all answered.
+    expect(verdict).not.toContain('outage');
   });
 
   it('counts only the provider, so a run of engine refusals is not stopped', () => {

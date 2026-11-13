@@ -464,6 +464,7 @@ One class, closed code list, data payload:
 | `NL2C_E_LLM_UNAVAILABLE` | provider network/timeout/429/5xx/408 |
 | `NL2C_E_LLM_REJECTED` | provider refused the request (4xx that is not 408/429) |
 | `NL2C_E_LLM_INVALID_RESPONSE` | provider body |
+| `NL2C_E_LLM_TRUNCATED` | provider: reply cut at `max_tokens` with no content, after every budget the declaration allows |
 | `NL2C_E_CONTRACT_VIOLATION` | consumer misuse |
 | `NL2C_E_NOT_SUPPORTED` | capability negotiation |
 

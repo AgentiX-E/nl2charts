@@ -29,7 +29,20 @@ refusal is not.
 | --- | --- |
 | Network error, timeout, 408, 429, 5xx | `NL2C_E_LLM_UNAVAILABLE` |
 | 4xx the endpoint will refuse again — wrong model name, bad key, a field it does not accept | `NL2C_E_LLM_REJECTED` |
-| Body is not JSON, or parses to something that is not an object, or has no content | `NL2C_E_LLM_INVALID_RESPONSE` |
+| Body is not JSON, parses to something that is not an object, or has no content and no budget to blame | `NL2C_E_LLM_INVALID_RESPONSE` |
+| The reply was cut at the answer budget with nothing in it — `finish_reason: length`, empty content | `NL2C_E_LLM_TRUNCATED` |
+
+The last row is the one worth reading twice. A truncation is not an outage and
+not an invalid response: the endpoint answered, and the number this library
+named — `capabilities.maxOutputTokens`, or the `maxTokens` you passed — was too
+small for what it had to say. A reasoning endpoint spends that budget thinking,
+so a cap sized for the answer alone can leave nothing to write into. The
+provider answers it by asking again with **double the budget**, up to
+`capabilities.answerBudgetCeiling` and at most `budgetEscalations` times (two by
+default), and only the code travels if every attempt is cut too. Raising a
+budget costs nothing unless the model uses the room, because `max_tokens` is a
+limit rather than a reservation — and the tokens the discarded attempt spent are
+still reported in `usage`, because the endpoint billed them.
 
 A `NL2C_E_LLM_REJECTED` carries the endpoint's own sentence in
 `details.detail` when the body had one, so the error reads
@@ -87,6 +100,26 @@ const pipeline = createPipeline({ provider, temperature: null });
 `retries` and `retryDelayMs` on the provider are worth raising for a model with
 a tight rate limit — a 429 retried inside the provider is a call, and a 429
 returned to the caller is a failed case.
+
+**The answer budget is a floor, not a ceiling.** A reasoning model can spend the
+whole `max_tokens` on deliberation and return nothing, which reads as
+`NL2C_E_LLM_TRUNCATED`. The provider asks again with double the budget before it
+gives up, so the number to declare is the largest one your endpoint accepts:
+
+```ts
+const provider = createHttpProvider({
+  baseUrl: 'https://api.example.com/v1',
+  model: 'my-reasoning-endpoint',
+  capabilities: { family: 'reasoning', maxOutputTokens: 8192, answerBudgetCeiling: 32768 },
+  budgetEscalations: 2, // the default: 8,192 → 16,384 → 32,768, then stop
+});
+```
+
+Two numbers rather than one because they answer two questions: `maxOutputTokens`
+is how much you are willing to pay for a *typical* answer, and
+`answerBudgetCeiling` is the largest request the endpoint will accept. Leave the
+ceiling out and no escalation happens — a guess above an undisclosed limit
+trades a truncation for a 400, and a truncated reply is at least a reply.
 
 **Choosing the mode by request, not by model name.** If your endpoint serves a
 thinking and a non-thinking mode under one model, say which one you want instead

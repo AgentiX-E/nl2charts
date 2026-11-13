@@ -99,6 +99,25 @@ describe('capabilitiesOf', () => {
     expect(declared.sampling).toBe('honoured');
   });
 
+  it('carries the ceiling an escalated budget may reach, and never below the first budget', () => {
+    // The ceiling is what lets a truncated reply be asked again instead of failing. It is a field
+    // on the declaration rather than a constant in the provider for the same reason every other
+    // field is: an endpoint's limit is a fact about the endpoint, and a library that guesses it
+    // upward trades a truncation for a refused request.
+    expect(CHAT_CAPABILITIES.answerBudgetCeiling).toBe(8192);
+    expect(REASONING_CAPABILITIES.answerBudgetCeiling).toBe(32768);
+    expect(capabilitiesOf('deepseek-reasoner').answerBudgetCeiling).toBe(32768);
+    // The declaration that produced 13.7% empty replies: nothing in this name says the endpoint
+    // thinks, so it gets the chat row — and the measured reply ran to 21,932 completion tokens.
+    // Pinned here because the repair is `capabilities: {family: 'reasoning'}`, and a reader has to
+    // be able to see what the default was.
+    expect(capabilitiesOf('deepseek-v4-pro')).toEqual(CHAT_CAPABILITIES);
+    expect(capabilitiesOf('deepseek-v4-pro', { answerBudgetCeiling: 16384 }).answerBudgetCeiling).toBe(16384);
+    // `0` is "do not name a budget above the first one", spelled the way `maxOutputTokens` spells
+    // "no cap". A deployment whose endpoint refuses a larger request says so with a number.
+    expect(capabilitiesOf('deepseek-chat', { answerBudgetCeiling: 0 }).answerBudgetCeiling).toBe(0);
+  });
+
   it('returns a fresh object when overrides are given, so callers cannot mutate the defaults', () => {
     const declared = capabilitiesOf('deepseek-chat', { maxOutputTokens: 1024 });
     expect(declared).not.toBe(CHAT_CAPABILITIES);

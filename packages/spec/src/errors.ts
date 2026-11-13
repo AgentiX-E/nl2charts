@@ -17,6 +17,16 @@ export const ERROR_CODES = [
   'NL2C_E_LLM_UNAVAILABLE',
   'NL2C_E_LLM_REJECTED',
   'NL2C_E_LLM_INVALID_RESPONSE',
+  /**
+   * The endpoint spent the whole answer budget and had nothing left to say.
+   *
+   * Distinct from `NL2C_E_LLM_INVALID_RESPONSE` because the repairs are opposite. An invalid
+   * response is a property of the endpoint; a truncation is a property of a number this library
+   * chose, and the repair is a larger number. Folding the two together cost a measured run: the
+   * harness counts `NL2C_E_LLM*` as an outage, so a 4,096-token budget reported itself as an
+   * endpoint that had gone away and the outage guard discarded 130 calls that were never made.
+   */
+  'NL2C_E_LLM_TRUNCATED',
   'NL2C_E_CONTRACT_VIOLATION',
   'NL2C_E_NOT_SUPPORTED',
 ] as const;

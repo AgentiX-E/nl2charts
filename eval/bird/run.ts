@@ -1842,12 +1842,12 @@ export interface CaseRun extends CaseOutcome {
    * generated its own candidates". The two are opposite diagnoses, so the case is now scored by
    * the vote it already had and the failure is recorded here instead of erasing the evidence.
    */
-  readonly selectionFailed?: 'llm' | 'harness';
+  readonly selectionFailed?: 'llm' | 'truncated' | 'harness';
   /**
    * The same, for the empty-result turn: a rewrite that never arrived is a lever that did not
    * run, not a case without a candidate set.
    */
-  readonly retryFailed?: 'llm' | 'harness';
+  readonly retryFailed?: 'llm' | 'truncated' | 'harness';
   /**
    * What the value lookup found on a zero-row case, and what it settled without a call.
    *
@@ -2103,7 +2103,16 @@ export interface CaseRun extends CaseOutcome {
    */
   readonly decomposition?: { readonly candidates: number; readonly steps: number };
   readonly error?: string;
-  readonly errorKind?: 'execution' | 'guard' | 'llm' | 'shape' | 'harness' | 'other';
+  /**
+   * `truncated` is its own kind, not a flavour of `llm`.
+   *
+   * `llm` means the endpoint did not answer, and the repairs are a bigger deadline, a lower
+   * concurrency, a working key. `truncated` means it answered and the answer budget this harness
+   * named was too small — the repair is a number, and a run that reports it as an outage sends its
+   * reader at the network. Measured: `deepseek-v4-pro` declared as a chat endpoint, 50 of 366 calls
+   * empty at 4,096 tokens, the outage guard killed a run that had 130 calls left in it.
+   */
+  readonly errorKind?: 'execution' | 'guard' | 'llm' | 'truncated' | 'shape' | 'harness' | 'other';
   /** Classes of the rejected attempts, in order; empty when the first one ran. */
   readonly failures?: readonly string[];
   /** Generations the repair loop spent. The funnel's unit, not the cost's. */
@@ -2562,19 +2571,33 @@ export function assertMixedFeasible(
  * distinction is the difference between "the run did not happen" and "the run is wrong", and
  * only one of them should be retried.
  */
-export function escapeKind(error: unknown): 'llm' | 'harness' {
+export function escapeKind(error: unknown): 'llm' | 'truncated' | 'harness' {
   const code = (error as { code?: string } | undefined)?.code;
-  return typeof code === 'string' && code.startsWith('NL2C_E_LLM') ? 'llm' : 'harness';
+  if (typeof code !== 'string' || !code.startsWith('NL2C_E_LLM')) return 'harness';
+  // A call that ran out of budget escaped the per-sample catch exactly like an outage did, and
+  // filing it under `llm` let a run that never had room to answer pass the outage guard while
+  // reporting itself as an endpoint problem. Third kind, third sentence.
+  return code === 'NL2C_E_LLM_TRUNCATED' ? 'truncated' : 'llm';
 }
 
 export function assertArmProducedResults(armName: string, runs: readonly { errorKind?: string; error?: string }[]): void {
   if (runs.length === 0) return;
   const allFailed = runs.every((run) => run.errorKind === 'llm');
-  if (!allFailed) return;
+  if (allFailed) {
+    const first = runs.find((run) => run.error !== undefined)?.error ?? 'no error text';
+    throw new Error(
+      `arm ${armName}: every case failed before reaching the database — the model provider refused all ${String(runs.length)} calls ` +
+        `(first error: ${first}). This is not an accuracy of zero; it is a run that did not happen.`,
+    );
+  }
+  // The same verdict for the other way a run produces no answer at all, with the other repair:
+  // an arm cut at the budget on every case did not measure the model either, and reporting it as
+  // "0%" would send its reader at the prompt.
+  if (!runs.every((run) => run.errorKind === 'truncated')) return;
   const first = runs.find((run) => run.error !== undefined)?.error ?? 'no error text';
   throw new Error(
-    `arm ${armName}: every case failed before reaching the database — the model provider refused all ${String(runs.length)} calls ` +
-      `(first error: ${first}). This is not an accuracy of zero; it is a run that did not happen.`,
+    `arm ${armName}: every case was cut at the answer budget and no case reached the database ` +
+      `(first error: ${first}). This is not an accuracy of zero; it is a budget the endpoint spent thinking.`,
   );
 }
 
@@ -2668,6 +2691,20 @@ export function assertFailureRate(
   maxShare = 0.1,
 ): void {
   if (runs.length === 0) return;
+  // Checked before the outage, and never folded into it. An arm whose replies are cut at the
+  // answer budget still answers some questions, so its score looks like a score; the repairs are
+  // also opposite — an outage is fixed by waiting, a truncation by naming a bigger number.
+  const cut = runs.filter((run) => run.errorKind === 'truncated');
+  if (cut.length / runs.length > maxShare) {
+    throw new Error(
+      `arm ${armName}: ${String(cut.length)} of ${String(runs.length)} calls ` +
+        `(${((cut.length / runs.length) * 100).toFixed(1)}%) were cut at the answer budget, above the ` +
+        `${(maxShare * 100).toFixed(0)}% this harness treats as a measurement of the budget rather than of the model ` +
+        `(first error: ${cut[0]?.error ?? 'no error text'}). Every one of these calls was answered and ran out of room, ` +
+        'so the accuracy would be a function of a number this harness named. Declare the family the endpoint actually is, ' +
+        'or raise its answerBudgetCeiling in BIRD_CAPABILITIES.',
+    );
+  }
   const failures = runs.filter((run) => run.errorKind === 'llm');
   const share = failures.length / runs.length;
   if (share <= maxShare) return;
@@ -2714,14 +2751,35 @@ export interface FailureBreaker {
 export function createFailureBreaker(armName: string, total: number, maxShare = 0.1): FailureBreaker {
   let seen = 0;
   let failures = 0;
+  let cuts = 0;
   const errors: (string | undefined)[] = [];
+  const cutErrors: (string | undefined)[] = [];
   let stopped: string | null = null;
   return {
     observe(run) {
       seen += 1;
-      // Only the provider can end a run early. `execution`, `guard`, `shape` and a harness bug are
-      // output quality or this file's own defect; stopping on them would report "the model writes
-      // bad SQL" as "the endpoint is down", which is the confusion `escapeKind` exists to prevent.
+      // Two faults can end a run early, and they are counted apart. `execution`, `guard`, `shape`
+      // and a harness bug are output quality or this file's own defect; stopping on them would
+      // report "the model writes bad SQL" as "the endpoint is down", which is the confusion
+      // `escapeKind` exists to prevent.
+      if (run.errorKind === 'truncated') {
+        cuts += 1;
+        cutErrors.push(run.error);
+        if (stopped !== null) return null;
+        if (seen >= total) return null;
+        if (!outageDecided(cuts, total, maxShare)) return null;
+        // The same tenth, the opposite repair. A cut reply is an answered call that ran out of
+        // room, so the run is stoppable for the same reason an outage is: the number it would
+        // print is a function of the budget. What it must not say is "the endpoint is down".
+        stopped =
+          `arm ${armName}: stopped after ${String(seen)} of ${String(total)} calls — ` +
+          `${String(cuts)} of ${String(seen)} calls (${((cuts / seen) * 100).toFixed(1)}%) were cut at the answer budget, ` +
+          `above the ${(maxShare * 100).toFixed(0)}% this harness treats as a measurement of the budget ` +
+          `(first error: ${cutErrors[0] ?? 'no error text'}, budgets tried: see the message). ` +
+          'Declare the family the endpoint actually is, or raise its answerBudgetCeiling. ' +
+          `The remaining ${String(Math.max(0, total - seen))} calls were not spent.`;
+        return stopped;
+      }
       if (run.errorKind !== 'llm') return null;
       failures += 1;
       errors.push(run.error);
@@ -6916,8 +6974,8 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
         let winner = majority.winner as { sql: string; rows: readonly (readonly unknown[])[]; source: string };
         let selectedByModel: boolean | undefined;
         let selectedByRule: CaseRun['selectedByRule'];
-        let selectionFailed: 'llm' | 'harness' | undefined;
-        let retryFailed: 'llm' | 'harness' | undefined;
+        let selectionFailed: 'llm' | 'truncated' | 'harness' | undefined;
+        let retryFailed: 'llm' | 'truncated' | 'harness' | undefined;
         // Declared here rather than inside the select branch because the case row is built after
         // it: the funnel is a property of the answer, and the answer is assembled at the end.
         let reconciled: CaseRun['reconcile'];
@@ -7326,9 +7384,11 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
                 ? 'guard'
                 : code === 'NL2C_E_ENGINE_FAILED'
                   ? 'execution'
-                  : code.startsWith('NL2C_E_LLM')
-                    ? 'llm'
-                    : 'other',
+                  : code === 'NL2C_E_LLM_TRUNCATED'
+                    ? 'truncated'
+                    : code.startsWith('NL2C_E_LLM')
+                      ? 'llm'
+                      : 'other',
         };
       }
     });
@@ -7506,6 +7566,9 @@ export function armSummaryLine(label: string, arm: Arm, runs: readonly CaseRun[]
   // questions is not the same population as one that did not, and the arm row that reports the
   // score is where a reader looks before comparing it with anything.
   const forfeits = runs.filter((run) => run.errorKind === 'llm').length;
+  // Printed beside the forfeits and never merged with them: a reader who sees `llm-failed 50`
+  // looks at the network, and these fifty calls were answered.
+  const cuts = runs.filter((run) => run.errorKind === 'truncated').length;
   return (
     `${label.padEnd(9)} ${summary.passed}/${summary.total}  ${(summary.accuracy * 100).toFixed(1)}%  ` +
     `strict ${runs.filter((run) => run.strict).length}` +
@@ -7514,6 +7577,7 @@ export function armSummaryLine(label: string, arm: Arm, runs: readonly CaseRun[]
     `${failed === 0 ? '' : `  select-failed ${String(failed)}`}` +
     `${bases.size < 2 ? '' : `  served-by ${String(bases.size)}`}` +
     `${forfeits === 0 ? '' : `  llm-failed ${String(forfeits)}`}` +
+    `${cuts === 0 ? '' : `  cut-at-budget ${String(cuts)}`}` +
     `${vote === undefined ? '' : ceilingColumn(vote, candidateCeiling(runs))}`
   );
 }
@@ -7623,6 +7687,7 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
     execution: runs.filter((run) => kindOf(run) === 'execution').length,
     guard: runs.filter((run) => kindOf(run) === 'guard').length,
     llm: runs.filter((run) => kindOf(run) === 'llm').length,
+    truncated: runs.filter((run) => kindOf(run) === 'truncated').length,
     shape: runs.filter((run) => kindOf(run) === 'shape').length,
     harness: runs.filter((run) => kindOf(run) === 'harness').length,
     other: runs.filter((run) => kindOf(run) === 'other').length,
@@ -7843,6 +7908,8 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
     errors,
     topErrors: [...messages.entries()].sort((left, right) => right[1] - left[1]).slice(0, 5),
     llmFailureShare: runs.filter((run) => run.errorKind === 'llm').length / Math.max(1, runs.length),
+    // Beside the outage share and never inside it: the two say opposite things about where to look.
+    truncatedShare: runs.filter((run) => run.errorKind === 'truncated').length / Math.max(1, runs.length),
     // The ungrouped first failure. `topErrors` replaces digits to group messages,
     // which is right for counting and wrong for diagnosis: "llm returned N" hides
     // the status code that says whether the key is dead or the balance is empty.
