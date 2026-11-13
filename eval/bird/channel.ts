@@ -110,6 +110,19 @@ function contradiction(record: ChannelCase, kind: ChannelKind): string | undefin
   if (claimed === 'shape' && /no statement|token cap/i.test(error) && kind === 'statement' && record.truncated !== true) {
     return 'shape names a reply with no statement, and the reply holds one';
   }
+  // The third claim, and the one this repository only recently became able to make. `truncated`
+  // means the endpoint said it ran out of budget; the message has to say so, because the reader's
+  // next move is a number rather than a network. A case published as `truncated` without
+  // `finish_reason=length` in its text is a budget fault being named as something else — which is
+  // exactly how 13.7% of a run came to be reported as "the endpoint went away".
+  if (claimed === 'truncated' && !/finish_reason=length/i.test(error)) {
+    return `truncated names a reply cut at the answer budget, and its message says "${error.slice(0, 60)}"`;
+  }
+  // And the reverse: a message that blames the budget while the case claims an outage. The two
+  // sentences lead to opposite repairs, so a file that has both is a file whose columns disagree.
+  if (claimed === 'llm' && /finish_reason=length/i.test(error)) {
+    return 'llm names an endpoint that did not answer, and the message is a budget cut';
+  }
   return undefined;
 }
 
