@@ -31,7 +31,7 @@ cannot be argued with.
   **Measured:** 13 tests in `reply-shape.test.ts` over prose, empty, inline-SQL-with-preamble,
   a banned head, a placeholder, a cut reply and a provider that reports no reason; 7 in
   `guard.test.ts` including the invariant that nothing `inspectSql` accepts is called prose.
-  Reverting the classification turns 7 of the 13 red. Suite 4,545 passing with no skips against
+  Reverting the classification turns 7 of the 13 red. Suite 4,548 passing with no skips against
   real PG16 and MariaDB 10.11; the chart package unchanged at 100/100/100/100.
   **Not claimed:** no accuracy moved. All six cases were failures before and after; what changed
   is the sentence the report prints and the turn the model is given. A misspelled statement head
@@ -81,7 +81,12 @@ cannot be argued with.
   more. One defect in the instrument itself was caught by that second run: counting only the
   channel kinds reported 210 unexplained failures on the pro artifact, when 210 of those cases
   were explained by their result reason (`values` / `column-count`). Both taxonomies are
-  attributions, and the rule now says so.
+  attributions, and the rule now says so. A second gap was caught by CI rather than by review:
+  the reporting code landed with no case that reached it, and the eval ratchet read
+  `eval/bird/run.ts` branches at 95.83% against 96.06%. The endpoint fixture could only ever
+  answer `finish_reason: stop`, so `EndpointReply.finishReason` and a `cut` list on a scenario
+  plan were added, and the new end-to-end case asserts the cut case carries `truncated: true`
+  while the others carry no key at all.
 
 - **A chart of nothing used to compile, and the linter called it renderable.**
   Nothing in the package knew what each of the twenty-two series types reads, so
