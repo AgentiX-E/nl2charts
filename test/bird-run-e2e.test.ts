@@ -708,6 +708,45 @@ describe('a sampling arm', () => {
     }
   });
 
+  it('draws at the temperature the arm declares, and at the constant every sampling arm was written against', async () => {
+    // The temperature used to be a literal in the request builder: 0 for a single draw, 0.7 for
+    // anything sampled. That made "the candidates are correlated" a name with no experiment — an
+    // arm could buy more draws but not move them apart. The three readings this asserts are the
+    // whole lever: the sampled arm still sends 0.7, the hot arm sends what it declares, and the
+    // deterministic arm still sends 0. A regression in any one of them turns the arm into a
+    // rename of its parent, which is a paid run that measures nothing.
+    const asked = (result: { readonly requests: readonly { prompt: string; body: Record<string, unknown> }[] }, question: string) =>
+      result.requests.find((request) => request.prompt.includes(question));
+    const question = QUESTIONS[0]?.question ?? '\u0000';
+
+    // Three rungs of one variable, each asserted from the request the endpoint actually received
+    // rather than from the declaration: 0 is the repeat, 0.7 the rule for a sampled arm, 1 the
+    // dose above it. The repair this guards is the one the six-draw arm exposed — a mixed arm read
+    // its temperature off the *source* it was drawing from, a source declares no `vote`, and so
+    // every multi-prompt arm in the catalogue went out at 0 while its comment said 0.7.
+    const cold = await run({ plan: { first: correct }, env: { BIRD_ARMS: 'select-mixed-cold' } });
+    expect(cold.code).toBe(0);
+    expect(asked(cold, question)?.body.temperature).toBe(0);
+
+    const parent = await run({ plan: { first: correct }, env: { BIRD_ARMS: 'select-mixed' } });
+    expect(asked(parent, question)?.body.temperature).toBe(0.7);
+
+    const hot = await run({ plan: { first: correct }, env: { BIRD_ARMS: 'select-mixed-hot' } });
+    expect(hot.code).toBe(0);
+    expect(asked(hot, question)?.body.temperature).toBe(1);
+
+    // Same bill on all three: three candidates, four calls. A temperature that quietly cost or
+    // saved a draw would make the three a two-lever comparison and the curve unreadable.
+    for (const result of [cold, parent, hot]) {
+      const rows = result.report.cases as { calls?: number; candidates?: unknown[] }[];
+      expect(new Set(rows.map((row) => row.calls))).toEqual(new Set([4]));
+      expect(new Set(rows.map((row) => row.candidates?.length))).toEqual(new Set([3]));
+    }
+
+    const single = await run({ plan: { first: correct }, env: { BIRD_ARMS: 'names' } });
+    expect(asked(single, question)?.body.temperature).toBe(0);
+  });
+
   it('counts a candidate the guard refused instead of letting the set shrink quietly', async () => {
     // A candidate that never arrives is not a candidate that was wrong: the set is smaller,
     // the case still answers, and the ceiling falls for a reason that is not in the arm. The

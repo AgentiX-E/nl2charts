@@ -7,6 +7,39 @@ cannot be argued with.
 ## Unreleased
 
 ### Fixed
+- **A sampled candidate is drawn at the temperature its arm declares — until now no multi-prompt
+  arm sampled at all.** The request builder resolved the temperature as
+  `target.vote === undefined ? 0 : 0.7`, where `target` is the arm that owns the turn. On a mixed
+  arm that is the *source* being drawn from, not the arm buying the candidates, and a source
+  declares no `vote` by contract (`assertMixedSources` requires it to write exactly one statement).
+  Every candidate of every multi-prompt arm therefore went out at **0**: `select-mixed`'s "three
+  samples at temperature 0.7", written in its comment, its catalogue note and the plan, was three
+  identical deterministic requests.
+  The measurement that caught it is the six-draw run `43379716079` (Mini-Dev, `deepseek-chat`):
+  doubling the draws moved `candidateRecall` from 64.31% to 65.93% (+1.62pp, below the +2pp bar)
+  and distinct executed results per question from **1.264 to 1.331**, with **462 of 493 questions
+  gaining no new answer at all** — a repeat, which is what a temperature of zero predicts and what
+  three prompts of one opinion produce (74.85% of questions unanimous, 110 of them wrong).
+  Three things change. `Arm.temperature` is a declared field, range `[0, 2]`, where **0 is legal**
+  and means "send the same request again" — the coordinate the whole family was silently measured
+  at, kept as a control rather than as a claim. The resolution order is
+  `overrides.temperature ?? target.temperature ?? (target.vote === undefined ? 0 : 0.7)`, and the
+  mixed path passes the **arm's** temperature down to every source pipeline (and to the dissent
+  vote). `assertTemperature` refuses, at the declaration, a temperature on an arm that draws once
+  and a value the endpoint would reject — neither is worth learning from a paid run.
+  Two arms go with the repair so the lever can be read as a dose-response curve instead of a point:
+  `select-mixed-cold` (0) and `select-mixed-hot` (1) beside `select-mixed` (0.7), all at three
+  candidates and four calls.
+  **Readings taken before this repair are coordinate-bound.** Every `mixed` arm in this repository
+  was scored at temperature 0, including the dev numbers 62.34% / 63.12% / 63.97%. They remain
+  comparable to each other and are no longer comparable to a sampled single-prompt arm, and
+  `docs/benchmarks.md` withdraws the "prompt diversity beats sampling diversity" claim to *no
+  evidence* rather than to a refutation: it was a two-variable comparison whose variables were
+  hidden at runtime where `changedLevers` — which compares declarations — could not see them. The
+  new end-to-end test asserts the three request bodies (0, 0.7, 1) and that all three arms spend
+  four calls on three candidates, because a declaration that is true and a mechanism that never ran
+  look identical in a report.
+
 - **An answer budget is a floor now, and a reply cut at one is its own fault rather than an
   outage.** `NL2C_E_LLM_INVALID_RESPONSE` held two opposite situations: "the endpoint answered
   with something that is not a completion" and "the endpoint spent the whole answer budget

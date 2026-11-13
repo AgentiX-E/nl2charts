@@ -24,6 +24,7 @@ import {
   assertDemonstrationsFired,
   assertMaskingFired,
   assertMaskingRule,
+  assertTemperature,
   assertRuleSelection,
   assertDissentFired,
   assertDissentRule,
@@ -1693,6 +1694,46 @@ describe('a mask declared with nothing to mask', () => {
       expect(arm.demonstrations, arm.name).toBe(true);
     }
   });
+
+describe('a temperature on an arm that draws once', () => {
+  it('refuses a single draw, because nothing would be drawn apart', () => {
+    // The field exists to move two or more draws away from each other. One request at 1.0 is one
+    // request with noise: the arm would report a difference from a deterministic draw and call it
+    // a reading about sampling, which is `assertSampleRule`'s shape one lever along.
+    expect(() => assertTemperature({ name: 'x', temperature: 1 })).toThrow(/nothing would be drawn apart/);
+    expect(() => assertTemperature({ name: 'x', temperature: 1, vote: 1 })).toThrow(/nothing would be drawn apart/);
+  });
+
+  it('refuses a value the endpoint would reject rather than spending a run to hear it', () => {
+    expect(() => assertTemperature({ name: 'x', temperature: -0.5, vote: 3 })).toThrow(/outside the range/);
+    expect(() => assertTemperature({ name: 'x', temperature: 2.5, vote: 3 })).toThrow(/outside the range/);
+    expect(() => assertTemperature({ name: 'x', temperature: Number.NaN, vote: 3 })).toThrow(/outside the range/);
+    expect(() => assertTemperature({ name: 'x', temperature: Number.POSITIVE_INFINITY, vote: 3 })).toThrow(/outside the range/);
+  });
+
+  it('accepts two draws or more at a value in range, zero included, and an arm that declares none', () => {
+    // Zero is legal and it is not a sample: it is the repeat the historical multi-prompt arms were
+    // drawn at, and the control a sampling arm is read against. Refusing it would leave the
+    // catalogue unable to reproduce its own past readings.
+    expect(() => assertTemperature({ name: 'x', temperature: 0, vote: 3 })).not.toThrow();
+    expect(() => assertTemperature({ name: 'x', temperature: 0.7, vote: 2 })).not.toThrow();
+    expect(() => assertTemperature({ name: 'x', temperature: 1, vote: 3 })).not.toThrow();
+    expect(() => assertTemperature({ name: 'x', temperature: 2, vote: 9 })).not.toThrow();
+    expect(() => assertTemperature({ name: 'x' })).not.toThrow();
+    expect(() => assertTemperature({ name: 'x', vote: 3 })).not.toThrow();
+  });
+
+  it('holds for every arm in the catalogue', () => {
+    // The catalogue is where the mistake is cheap and a dispatch is where it costs a run: an arm
+    // that names a temperature and forgets to ask for two draws would publish one draw's noise.
+    for (const arm of ARMS) {
+      if (arm.temperature === undefined) continue;
+      expect(arm.vote ?? 1, arm.name).toBeGreaterThanOrEqual(2);
+      expect(arm.temperature, arm.name).toBeGreaterThanOrEqual(0);
+      expect(arm.temperature, arm.name).toBeLessThanOrEqual(2);
+    }
+  });
+});
 });
 
 /**
