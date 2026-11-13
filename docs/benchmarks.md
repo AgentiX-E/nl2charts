@@ -11815,14 +11815,40 @@ the selector on the whole split, at each coordinate:
 | `select-mixed-hot` | 56.25% | **60.08%** | 56.85% | 59.48% | 67.54% | 28 / 25, p = 0.78 |
 
 `shortest` is ahead of the paid selector at all three coordinates and its lead shrinks as the pool
-widens (+1.61, +2.22, +0.60 points) — which is the same story as the table above from the other
-side: a wider pool is harder for every chooser, and the free one is the one that degrades least.
-None of the three deltas is significant at 496 questions (this artifact resolves 3.44 points), so
-the claim this repository is entitled to is the cheaper one: **a rule that spends no call is never
-behind the call and costs 25% less**, measured four times (dev +0.85, Mini-Dev cold +1.61, Mini-Dev
-0.7 +2.22, Mini-Dev 1 +0.60).
+widens (+1.61, +2.22, +0.60 points) — the same story as the table above from the other side: a wider
+pool is harder for every chooser, and the free one degrades least. None of the three deltas is
+significant at 496 questions, and **that is the point**: every reading in this table is a
+*counterfactual*, taken by re-scoring the candidates one arm already drew. At temperature 0.7 the
+pool is itself a draw, so a counterfactual understates the variance of an arm.
 
-Two mechanisms follow from the first table rather than from taste, and both are arms now:
-`select-mixed-gated` spends the call only on the questions that disagree, and
-`select-mixed-gated-evidence` shows the judge the columns of the tables its candidates read, since
-the selector has never been given the schema the generator always has.
+**The arm disagrees with the counterfactual, and the arm wins the argument.** Run `43421692582`
+(five arms in one dispatch, A/A −0.81pp at a resolution of 3.20pp):
+
+| arm | calls / question | accuracy | realization | prompt tokens | selector share | tokens per correct answer |
+|---|---|---|---|---|---|---|
+| `select-mixed` (0.7 + model, control) | 3.99 | 60.08% | 91.41% | 3,568 | 99.4% | 5,939 |
+| `select-mixed-rule` (0.7 + `shortest`) | **3.00** | 59.07% | 90.43% | **3,121** | 0% | **5,283** |
+| `select-mixed-gated` | **3.30** | 59.48% | 90.21% | 3,271 | **29.8%** | 5,499 |
+| `select-mixed-gated-evidence` | 3.31 | **60.89%** | **91.79%** | 3,318 | 30.6% | 5,449 |
+
+Paired against the control: the rule arm is **−1.01 points (23 wins, 18 losses, p = 0.53)**, inside
+the resolution, and its own pool differs in structure from the control's (358 agreeing questions
+against 350; the A/A has 345). Three arms, three pools — which is why the counterfactual's +2.22 and
+the arm's −1.01 are not in conflict: **neither is a measurement of an accuracy difference.** What the
+dispatch does measure is cost, and it is unambiguous: **−25% calls, −12.5% prompt tokens, −11.0%
+tokens per correct answer, with no accuracy difference this split can resolve.**
+
+The gate passes all three of its pre-registered bars — accuracy −0.60 points (inside the one-point
+invariance, p = 0.74), 3.30 calls, 29.8% of questions reaching a selector — and its accounting closes:
+346 questions stopped by the gate plus 148 that reached the selector is 494, the number of questions
+that had a candidate at all. The evidence arm is the best of the four on two of three readings
+(60.89% accuracy, 91.79% realization) for 1.4% more prompt tokens, but its +1.41 points over the gate
+(p = 0.28) falls below the pre-registered two-point bar, so it is **not adopted**: the hypothesis that
+the judge is blind is neither confirmed nor refuted at 496 questions, where 143–152 disagreeing
+questions cannot resolve a two-point effect (the A/A itself moves 2.08 points on that subset).
+
+A correction this round owes its own past: the previous entry's "a rule that spends no call is never
+behind the call and costs 25% less" is withdrawn to **"costs 25% less, and no split measured here can
+tell its accuracy from the selector's"**. Four of five readings lean toward the rule and one leans
+away; the votes are all inside their own resolutions, and a claim built on them would be a claim about
+noise.
