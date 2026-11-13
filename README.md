@@ -5,7 +5,7 @@ TypeScript toolkit that turns **rows into charts** and **questions into guarded 
 Two rules shape the whole design:
 
 1. **The runtime does not need a model.** `core` executes SQL and returns rows. Natural language lives in a separate package (`ai`) that you install only if you want it.
-2. **Every statement passes a lexical guard.** The guard refuses what it cannot classify instead of rewriting it. Read-only is enforced before the engine sees the query.
+2. **Every statement passes a lexical guard.** The guard refuses what it cannot classify instead of rewriting it. Read-only is enforced before the engine sees the query. The refusal names what it refused: a statement the guard bans is `NL2C_E_GUARD_REJECTED`, and a reply that was never a statement is a `shape:` failure on `NL2C_E_ENGINE_FAILED` — two failures with opposite fixes, which is why they are not one code (see [concepts](docs/guide/01-concepts.md#unsafe-statement-and-no-statement-are-different-answers)).
 
 > **Status: 1.0.0.** Eight packages, a four-stage metric compiler, three engines with real integration tests (DuckDB, SQLite, PostgreSQL — plus MySQL), 22 chart types with a structural regression baseline, an MCP surface that speaks metrics, and gates for coverage, layering, API drift, bundle size, credentials and benchmark regression.
 >

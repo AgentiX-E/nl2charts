@@ -210,6 +210,22 @@ jobs:
         # else — expected arms, funnel arithmetic, cost provenance, empty levers, A/A — is
         # not, and applies to any model.
         run: pnpm gate:bird
+      - name: Whether each refusal matched the reply behind it
+        # This job exists to try unknown endpoints, so the reading that most needs auditing here
+        # is the taxonomy: six of this job's own 992 rows (run 43262574193) were prose published
+        # as `guard` rejections, and it took a reader with the artifact open to notice.
+        #
+        # After the structural gate, because the score is already final: a red step here means
+        # the taxonomy regressed, not that the model did worse. Guarded on the file rather than
+        # `continue-on-error`, so a run that never wrote an artifact says so instead of inventing
+        # an audit of nothing.
+        if: always()
+        run: |
+          if [ -f eval/out/bird-eval.json ]; then
+            pnpm bench:bird:channel eval/out/bird-eval.json --strict
+          else
+            echo 'no artifact was written, so there is no taxonomy to audit'
+          fi
       - name: Publish summary
         if: always()
         run: |

@@ -1,4 +1,4 @@
-import { inspectSql } from '@agentix-e/nl2charts-core';
+import { attemptsStatement, inspectSql } from '@agentix-e/nl2charts-core';
 import { toNl2ChartsError } from '@agentix-e/nl2charts-spec';
 import type { LlmMessage, LlmProvider } from './provider.js';
 import { turnTemperature } from './provider.js';
@@ -340,6 +340,16 @@ export interface AskResult {
    * arm also carries.
    */
   readonly shape?: ReplyShape;
+  /**
+   * The endpoint stopped at the token cap, and the statement still parsed.
+   *
+   * Present only when both are true, which is the only case that needs saying: a truncated reply
+   * with no statement in it already fails as `shape`, and an untruncated reply has nothing to
+   * report. Reporting the pair keeps a cap from being invisible — an arm with a tight cap and an
+   * arm with a generous one score differently, and without this column the difference reads as a
+   * difference in the model.
+   */
+  readonly truncated?: boolean;
 }
 
 const SQL_FENCE = /```(?:sql)?\s*([\s\S]*?)```/i;
@@ -616,7 +626,28 @@ export function createPipeline(options: PipelineOptions): {
         if (firstShape === undefined) firstShape = replyShape(response.text);
         const sql = read.sql;
         const steps = options.decompose === true ? { decomposedSteps: read.steps } : {};
+        // Two facts about the channel, read before the guard sees anything, because both of
+        // them decide *whether this is a statement* rather than whether it is a safe one.
+        //
+        // `truncated` is the endpoint saying it stopped at the cap. `attempted` is whether the
+        // reply opens with a word the guard's policy names as SQL. A reply that is neither is
+        // prose, and prose must not reach `inspectSql`: the gate would reject it for whichever
+        // character it happened to trip on and the report would call that reason a safety
+        // finding. Sending a model "your statement was unsafe" about a paragraph it wrote instead
+        // of a statement spends the repair turn on a defect it does not have.
+        const truncated = response.finishReason === 'length';
+        const attempted = attemptsStatement(sql);
+        // A cut-off reply is never diagnosed as an unsafe one, even when it opens with `select`:
+        // the bytes are a prefix of what the model meant to write, so whatever the gate objects
+        // to is a property of the cut. `shaped` is therefore `truncated || !attempted`, and the
+        // guard speaks only for an untruncated reply that tried to be a statement.
+        const shaped = truncated || !attempted;
         const verdict = inspectSql(sql);
+        // Reported on the answer as well as refused when there is nothing to report on: a reply
+        // the cap cut, whose statement still parsed, is a statement the caller should know is a
+        // prefix. Counting these is how a cap gets priced — `truncated && passed` is the cost of
+        // a cap too tight, and `truncated && !passed` is the cost of a reply too long.
+        const cut = truncated ? { truncated: true as const } : {};
         if (verdict.ok) {
           // Read once, where the guard says yes: this is the reply the arm's own prompt
           // produced, and the turns appended below belong to levers the arm may or may not
@@ -665,7 +696,7 @@ export function createPipeline(options: PipelineOptions): {
           const capped = stripUnfoundedCap(substituted, request.question);
           const stated = capped === undefined ? substituted : capped.sql;
           const cap = capped === undefined ? {} : { capStripped: capped.cap };
-          if (!options.execute) return { sql: stated, attempts: spent, linked, failures, diagnoses, ...audit, ...grounding, ...cap, ...steps, ...shape };
+          if (!options.execute) return { sql: stated, attempts: spent, linked, failures, diagnoses, ...audit, ...grounding, ...cap, ...steps, ...shape, ...cut };
           try {
             const outcome = await options.execute(stated);
             const rows = rowCountOf(outcome);
@@ -685,7 +716,7 @@ export function createPipeline(options: PipelineOptions): {
                 ...shape,
               };
             }
-            return { sql: stated, attempts: spent, linked, failures, diagnoses, ...audit, ...grounding, ...cap, ...steps, ...shape };
+            return { sql: stated, attempts: spent, linked, failures, diagnoses, ...audit, ...grounding, ...cap, ...steps, ...shape, ...cut };
           } catch (error) {
             const diagnosis = diagnoseFailure({
               sql: stated,
@@ -706,7 +737,15 @@ export function createPipeline(options: PipelineOptions): {
           sql,
           schema: request.schema,
           ...(options.prompt?.dialect === undefined ? {} : { dialect: options.prompt.dialect }),
-          guard: { reason: verdict.reason, detail: verdict.detail },
+          ...(shaped
+            ? {
+                replyShape: {
+                  kind: truncated ? ('truncated' as const) : ('no-statement' as const),
+                  chars: response.text.trim().length,
+                  ...(response.finishReason === undefined ? {} : { finishReason: response.finishReason }),
+                },
+              }
+            : { guard: { reason: verdict.reason, detail: verdict.detail } }),
         });
         failures.push(diagnosis.failureClass);
         diagnoses.push(diagnosis.summary);

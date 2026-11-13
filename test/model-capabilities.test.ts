@@ -107,12 +107,25 @@ describe('capabilitiesOf', () => {
 });
 
 describe('adaptRequest', () => {
-  it('leaves a chat request byte-identical', () => {
+  it('gives a chat request the answer budget the declaration names', () => {
+    // This test used to assert the opposite, with the reason written down: "the default that was
+    // never a decision: a chat endpoint's own cap stays its own". That sentence was the bug. The
+    // field's own documentation says it exists because "the endpoint's default is a number the
+    // pipeline never chose and cannot see" — and the pipeline still could not see it, because the
+    // number was sent only to `reasoning`. Measured on `deepseek-v4-pro` (Mini-Dev, run
+    // 43262574193): one reply ran to 21,932 completion tokens, 83,036 characters of deliberation
+    // and no statement, because nothing in the request named a cap.
     const adapted = adaptRequest({ messages: [{ role: 'user', content: 'q' }], temperature: 0, purpose: 'generate' }, CHAT_CAPABILITIES);
-    expect(adapted.request).toEqual({ messages: [{ role: 'user', content: 'q' }], temperature: 0, purpose: 'generate' });
+    expect(adapted.request).toEqual({ messages: [{ role: 'user', content: 'q' }], temperature: 0, purpose: 'generate', maxTokens: 4096 });
     expect(adapted.ignored).toEqual([]);
-    // The default that was never a decision: a chat endpoint's own cap stays its own.
-    expect(adapted.request.maxTokens).toBeUndefined();
+  });
+
+  it('keeps everything else about a chat request as it was', () => {
+    // The half of the old claim that still holds, asserted separately so the cap change cannot
+    // take a second parameter with it unnoticed.
+    const adapted = adaptRequest({ messages: [{ role: 'user', content: 'q' }], json: true }, CHAT_CAPABILITIES);
+    expect(adapted.request).toEqual({ messages: [{ role: 'user', content: 'q' }], temperature: 0, json: true, maxTokens: 4096 });
+    expect(adapted.ignored).toEqual([]);
   });
 
   it('drops a sampling parameter the endpoint ignores, and says so', () => {
@@ -191,12 +204,14 @@ describe('the provider on the wire', () => {
     expect(provider.capabilities?.family).toBe('reasoning');
   });
 
-  it('keeps the chat request exactly as it was', async () => {
+  it('puts the declared cap on the wire for a chat model too', async () => {
+    // The capability contract is only worth what reaches the endpoint. `deepseek-chat` is a chat
+    // family, and the cap used to be dropped for exactly that reason.
     endpoint = await startEndpoint({ reply: () => 'SELECT 1' });
     const provider = createHttpProvider({ baseUrl: endpoint.url, model: 'deepseek-chat', apiKey: 'k' });
     const reply = await provider.complete({ messages: [{ role: 'user', content: 'q' }], temperature: 0 });
     expect(endpoint.requests[0]?.body.temperature).toBe(0);
-    expect(endpoint.requests[0]?.body.max_tokens).toBeUndefined();
+    expect(endpoint.requests[0]?.body.max_tokens).toBe(4096);
     expect(reply.ignored).toBeUndefined();
   });
 

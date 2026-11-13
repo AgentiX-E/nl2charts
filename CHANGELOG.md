@@ -7,6 +7,82 @@ cannot be argued with.
 ## Unreleased
 
 ### Fixed
+- **A refusal now names what it refused, and a reply that is not a statement is no longer
+  reported as an unsafe one.** `extractSql` reads a reply with no fenced block as the whole
+  reply, which is right for a model that writes bare SQL and wrong for a model that writes
+  prose — and the prose was handed to the lexical guard as if it were SQL. The guard rejected
+  it on whichever character it could not classify, and that character became the diagnosis.
+  Measured on `deepseek-v4-pro` (Mini-Dev, run `43262574193`, 992 case-scored rows, two
+  repeats): **six** replies were prose and **all six** were published as `guard` failures with
+  `unsupported character "?"` as the reason — the question mark in the model's own aside
+  ("Is it 2012? Let me recall…"). One of them was **83,036 characters**. The six points were
+  not the cost; the cost was the repair turn, which told the model its *statement* was unsafe,
+  so a model that had written no statement spent three more calls on a safety problem it did
+  not have. The committed dev artifact holds three more, on the chat model and in three
+  different arms (`names`, `synth-definitions`, `inline+retrieval`), so this is a property of
+  the report and not of one endpoint.
+  `attemptsStatement(sql, policy)` closes it: a reply is a statement attempt when its first
+  word is one the guard's policy names — the kinds it accepts **and** the words it bans — so
+  `insert` is a statement this guard refuses and `let` is not a statement at all. The list is
+  derived from the policy rather than copied beside it, because a second copy drifts the first
+  time someone bans a word. `diagnoseFailure` gained `replyShape: { kind, chars, finishReason }`
+  and reports `shape: the reply holds no statement (1,214 chars)`, with a repair sentence that
+  asks for the fenced block instead of for a safer statement.
+  **Measured:** 13 tests in `reply-shape.test.ts` over prose, empty, inline-SQL-with-preamble,
+  a banned head, a placeholder, a cut reply and a provider that reports no reason; 7 in
+  `guard.test.ts` including the invariant that nothing `inspectSql` accepts is called prose.
+  Reverting the classification turns 7 of the 13 red. Suite 4,545 passing with no skips against
+  real PG16 and MariaDB 10.11; the chart package unchanged at 100/100/100/100.
+  **Not claimed:** no accuracy moved. All six cases were failures before and after; what changed
+  is the sentence the report prints and the turn the model is given. A misspelled statement head
+  (`DELETETE FROM students`) is now classified as prose rather than as an unsafe statement,
+  which is a deliberate trade recorded in the design note: the observed population of unreadable
+  replies is prose (nine rows across 7,440 case-scored rows in two artifacts), the theoretical
+  one is a misspelled head (none observed), and the wrong-feedback direction is the expensive one.
+
+- **The answer cap a deployment declares is now the cap the endpoint is given.** `maxOutputTokens`
+  documented itself as the number the pipeline chooses because "the endpoint's default is a
+  number the pipeline never chose and cannot see" — and `adaptRequest` sent it only to a
+  `reasoning` family, so for a chat model the number was declared, printed in the artifact, and
+  never put on the wire. Measured on the same run: one reply ran to **21,932 completion tokens**
+  (83,036 characters) because nothing in the request named a cap. The field is now sent for
+  every family when the caller names no budget of its own, and `0` still means "do not send",
+  because several endpoints refuse a zero budget as invalid.
+  **Measured:** 6 tests in `provider.test.ts` (chat 4096, reasoning 8192, caller override, a
+  declared ceiling of zero, and the wire body itself) plus the two capability tests that used to
+  assert the opposite — one of them carried the reason as a comment: *"the default that was never
+  a decision: a chat endpoint's own cap stays its own"*. Reverting the rule turns both red.
+  **Not claimed:** a tighter cap can only remove runaway replies, not make a short one shorter;
+  whether it costs a legitimate long reply is priced by the `truncated` column below, and no
+  reading of it exists yet.
+
+### Added
+- **`finishReason` travels from the endpoint to the artifact, and a truncated answer says so.**
+  A reply cut at the token cap and a reply the model chose to end are the same bytes up to the
+  cut, and the difference is the whole question. `LlmResponse.finishReason` carries
+  `stop | length | content_filter | other` (`undefined` when the endpoint said nothing, which is
+  not the same as `stop`), and the pipeline reports `truncated: true` on an answer whose
+  statement parsed under a cut. A cut reply is never diagnosed as an unsafe one, even when it
+  opens with `select`: the bytes are a prefix of what the model meant to write, so whatever the
+  gate objects to is a property of the cut.
+- **`bench:bird:channel` — the instrument that reads a report's taxonomy back against its own
+  evidence.** Zero model calls, zero database: it opens an artifact, compares each refusal's
+  claim with the bytes the case holds, and refuses to let a report be published whose taxonomy
+  disagrees with its evidence — a `guard` failure whose reply holds no statement, a `shape`
+  failure whose reply holds one. It prints the per-arm table, names every contradiction with the
+  case id and the character count, and exits non-zero under `--strict`, which is what the two
+  workflows use: `ci.yml` after the readings chain, and `bird-model.yml` after the structural
+  gate, because that job's whole purpose is to try unknown endpoints and the taxonomy is what
+  needs auditing there. The default mode is a report and exits zero, since the artifacts kept in
+  this repository are historical — a tool that fails on a file it did not write teaches its
+  reader to add `|| true`.
+  **Measured:** 25 tests; `channel.ts` at 98.7 lines / 95.7 branches / 100 functions. Run on
+  `43262574193` it reproduces the six rows above and on the committed dev artifact it finds three
+  more. One defect in the instrument itself was caught by that second run: counting only the
+  channel kinds reported 210 unexplained failures on the pro artifact, when 210 of those cases
+  were explained by their result reason (`values` / `column-count`). Both taxonomies are
+  attributions, and the rule now says so.
+
 - **A chart of nothing used to compile, and the linter called it renderable.**
   Nothing in the package knew what each of the twenty-two series types reads, so
   `{ mark: 'gauge', encoding: {} }` produced a gauge with a null needle,

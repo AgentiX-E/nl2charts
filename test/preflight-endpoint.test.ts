@@ -48,7 +48,9 @@ describe('preflight', () => {
     // The key travels in the header, not the body: one assertion on the wire keeps that true.
     expect(endpoint.requests[0]?.authorization).toBe('Bearer not-a-real-key');
     expect(endpoint.requests[0]?.body.temperature).toBe(0);
-    expect(endpoint.requests[0]?.body.max_tokens).toBeUndefined();
+    // The probe now carries the declared answer cap, because every request does: a preflight that
+    // measured a request shape the run never sends would be checking a contract nobody uses.
+    expect(endpoint.requests[0]?.body.max_tokens).toBe(4096);
   });
 
   it('fails when one call of three is refused, and names the status', async () => {

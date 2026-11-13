@@ -1,4 +1,4 @@
-export { DEFAULT_POLICY, inspectSql, tokenize, withRowLimit } from './guard.js';
+export { attemptsStatement, DEFAULT_POLICY, inspectSql, statementHeads, tokenize, withRowLimit } from './guard.js';
 export type { GuardPolicy, GuardVerdict, RejectReason, StatementKind } from './guard.js';
 export { canonicalRow, canonicalValue, hashRows, isDecimalLike, resultSetsEqual } from './normalize.js';
 export type { CanonicalValue } from './normalize.js';

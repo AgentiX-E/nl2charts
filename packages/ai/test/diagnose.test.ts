@@ -332,3 +332,44 @@ describe('a statement that ran but answered a different question', () => {
     expect(diagnosis.feedback).toContain('1436 row(s)');
   });
 });
+
+describe('a reply that held no statement', () => {
+  it('names the absence, not a character the reader tripped on', () => {
+    // The reason this exists: the same reply used to arrive as a guard rejection with
+    // `unsupported character "?"` — the question mark in the model's own aside — which named a
+    // cause that was not the cause and sent the repair turn after a safety problem.
+    const diagnosis = diagnoseFailure({ sql: 'Why 2012? Let me recall…', schema, replyShape: { kind: 'no-statement', chars: 26 } });
+    expect(diagnosis.failureClass).toBe('shape');
+    expect(diagnosis.summary.startsWith('shape: ')).toBe(true);
+    expect(diagnosis.summary).toContain('holds no statement');
+    expect(diagnosis.summary).toContain('26 chars');
+    expect(diagnosis.summary).not.toContain('unsupported character');
+    expect(diagnosis.feedback).toContain('contained no SQL statement');
+    expect(diagnosis.feedback).toContain('```sql block');
+  });
+
+  it('names the cap when the endpoint cut the reply off', () => {
+    const diagnosis = diagnoseFailure({
+      sql: 'SELECT region FROM orders WHERE region = \'nor',
+      schema,
+      replyShape: { kind: 'truncated', chars: 42, finishReason: 'length' },
+    });
+    expect(diagnosis.failureClass).toBe('shape');
+    expect(diagnosis.summary).toContain('stopped at the token cap');
+    expect(diagnosis.summary).toContain('finish=length');
+    // The one fact a rambling model can act on.
+    expect(diagnosis.feedback).toContain('under 42 characters');
+  });
+
+  it('reports the finish reason when the endpoint gave one on a plain empty reply', () => {
+    const diagnosis = diagnoseFailure({ sql: '', schema, replyShape: { kind: 'no-statement', chars: 0, finishReason: 'stop' } });
+    expect(diagnosis.summary).toContain('finish=stop');
+    expect(diagnosis.feedback).not.toContain('under 0 characters');
+  });
+
+  it("keeps the guard's own sentence for a statement the gate refused", () => {
+    const diagnosis = diagnoseFailure({ sql: 'DROP TABLE students', schema, guard: { reason: 'unclassified-statement', detail: 'statement must start with select' } });
+    expect(diagnosis.failureClass).toBe('guard');
+    expect(diagnosis.summary.startsWith('guard: ')).toBe(true);
+  });
+});

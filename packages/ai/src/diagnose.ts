@@ -321,6 +321,26 @@ const INSTRUCTIONS: Readonly<Record<FailureClass, string>> = {
   unknown: 'Fix the engine\'s complaint and change nothing else about the question.',
 };
 
+/**
+ * What a reader saw when it looked for a statement and found none.
+ *
+ * Two kinds, because the fix differs: a reply cut off at the token cap needs a shorter answer,
+ * and a reply that is prose needs an answer at all. Both used to arrive here as `guard`
+ * rejections — the prose was handed to the lexical gate as if it were SQL, and the gate's first
+ * complainable character became the diagnosis. Measured on `deepseek-v4-pro` (Mini-Dev, run
+ * 43262574193): six of 992 replies were prose and every one of them was reported as an unsafe
+ * statement, with `unsupported character "?"` as the reason the report gave.
+ */
+export interface ReplyShapeRefusal {
+  readonly kind: 'no-statement' | 'truncated';
+  /** Characters of reply there were, so a report can separate a sentence from a runaway. */
+  readonly chars: number;
+  readonly finishReason?: string;
+}
+
+const SHAPE_REPLY_INSTRUCTION =
+  'The reply must contain exactly one fenced ```sql block holding one read-only SELECT. Do not explain, and do not write the statement in prose.';
+
 function clip(text: string, limit: number): string {
   return text.length <= limit ? text : `${text.slice(0, limit - 1)}…`;
 }
@@ -334,6 +354,14 @@ export interface FailureInput {
   readonly error?: unknown;
   /** A refusal from `inspectSql`, which never reaches the engine. */
   readonly guard?: { readonly reason: string; readonly detail: string };
+  /**
+   * The reply held no statement, or held one the endpoint cut off.
+   *
+   * Kept apart from `guard` because the classes are not the same fact and do not share a fix.
+   * The summary still begins `shape: ` — that prefix is what every artifact reader already
+   * switches on — so this adds a true name without adding a taxonomy.
+   */
+  readonly replyShape?: ReplyShapeRefusal;
   /**
    * `diagnosed` (default) sends the engine's words plus what the schema and the class
    * add. `raw` sends the engine's words alone — the baseline this module is measured
@@ -351,6 +379,34 @@ export interface FailureInput {
  * really has.
  */
 export function diagnoseFailure(input: FailureInput): Diagnosis {
+  if (input.replyShape !== undefined) {
+    const { kind, chars, finishReason } = input.replyShape;
+    // Both halves of the summary are the reader's own words. A reason invented from the reply's
+    // first unparsable character — which is what the guard path produces for prose — names a
+    // cause that is not the cause, and the model spends its repair turn fixing a safety problem
+    // it does not have.
+    const why =
+      kind === 'truncated'
+        ? `the reply stopped at the token cap before it wrote a statement (finish=${finishReason ?? 'length'}, ${chars} chars)`
+        : `the reply holds no statement (${chars} chars${finishReason === undefined ? '' : `, finish=${finishReason}`})`;
+    const summary = `shape: ${why}`;
+    const feedback = [
+      kind === 'truncated'
+        ? 'That reply was cut off before it contained a statement.'
+        : 'That reply contained no SQL statement.',
+      '',
+      why,
+      '',
+      SHAPE_REPLY_INSTRUCTION,
+      // A model that rambled does not know it rambled; the length it wrote is the one fact it
+      // can act on, and it is what turns "write less" from advice into an instruction.
+      kind === 'truncated' ? `Write the statement in under ${chars} characters, without preamble.` : '',
+    ]
+      .filter((line) => line !== '')
+      .join('\n');
+    return { failureClass: 'shape', summary, feedback: clip(feedback, MAX_FEEDBACK), suggestions: [] };
+  }
+
   if (input.guard !== undefined) {
     const summary = `guard: ${input.guard.reason} (${input.guard.detail})`;
     const feedback = [

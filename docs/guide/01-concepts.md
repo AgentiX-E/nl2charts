@@ -118,6 +118,37 @@ Use `isNl2ChartsError`, never `instanceof`: two copies of the library in one
 process must still recognize each other's errors. The brand is registered with
 `Symbol.for`.
 
+### "Unsafe statement" and "no statement" are different answers
+
+A pipeline can fail before an endpoint or an engine ever sees it, and the two
+failures need opposite fixes:
+
+| What happened | Code | What the caller should do |
+| --- | --- | --- |
+| The model wrote a statement this library refuses — DML, DDL, a second statement, a file function | `NL2C_E_GUARD_REJECTED` | Narrow the question, or loosen the policy deliberately |
+| The model wrote prose, or the endpoint cut the reply off before a statement | `NL2C_E_ENGINE_FAILED`, `details.lastError` starting `shape: ` | Ask for the statement again — the last one was not one |
+
+The distinction exists because the second failure used to arrive as the first.
+A reply of pure prose was handed to the guard as if it were SQL, the guard
+objected to whichever character it could not classify, and the message read
+`guard: unclassified-statement (unsupported character "?")` — a `?` that was in
+the model's own aside. The repair turn then told the model its *statement* was
+unsafe, which is a true sentence about a document that does not exist.
+
+`details.lastShape` carries the shape of the reply that failed (`fenced`,
+`index`, `steps`, `named`), and `details.failureClasses` carries one class per
+attempt, so a caller can tell a one-off from a channel that never worked:
+
+```ts
+const error = await pipeline.ask({ question, schema }).catch((reason) => reason);
+console.log(error.details.failureClasses);  // ['shape', 'shape', 'shape']
+```
+
+A reply the endpoint cut at its token cap is also part of this contract:
+`LlmResponse.finishReason` carries `'length'`, and an answer whose statement
+still parsed under the cut is returned with `truncated: true` rather than
+silently presented as the model's whole answer.
+
 ## What "no model in core" buys you
 
 - A deterministic, testable runtime with no network dependency.

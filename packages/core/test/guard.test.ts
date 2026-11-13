@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_POLICY, inspectSql, tokenize, withRowLimit } from '../src/guard.js';
+import { attemptsStatement, DEFAULT_POLICY, inspectSql, statementHeads, tokenize, withRowLimit } from '../src/guard.js';
 
 interface Case {
   readonly name: string;
@@ -155,5 +155,72 @@ describe('backtick identifiers', () => {
 
   it('still refuses a write hidden behind a backtick', () => {
     expect(inspectSql('delete from `orders`')).toMatchObject({ ok: false, reason: 'unclassified-statement' });
+  });
+});
+
+describe('whether a reply is a statement at all', () => {
+  it('reads the statement kinds the policy accepts', () => {
+    for (const sql of ['SELECT 1', '  select * from t', '(SELECT 1) UNION (SELECT 2)', 'WITH x AS (SELECT 1) SELECT * FROM x', 'VALUES (1)']) {
+      expect(attemptsStatement(sql), sql).toBe(true);
+    }
+  });
+
+  it('reads the words the policy bans as statements too', () => {
+    // A reply that opens with `insert` is a write attempt and the guard must refuse it as one.
+    // Calling it prose would hide a write inside a channel failure, which is the wrong way round:
+    // the dangerous reply would be reported as an unreadable one.
+    for (const sql of ['INSERT INTO t VALUES (1)', 'delete from t', 'drop table t', 'PRAGMA database_list']) {
+      expect(attemptsStatement(sql), sql).toBe(true);
+    }
+  });
+
+  it('does not read prose as a statement', () => {
+    for (const text of ['Let me think about this.', 'The answer needs a subquery.', 'Actually: SELECT 1 would work', '']) {
+      expect(attemptsStatement(text), text).toBe(false);
+    }
+  });
+
+  it('does not throw on the replies the tokenizer refuses', () => {
+    // The input is exactly what `tokenize` throws on — a stray `?`, an unclosed quote — because
+    // the classifier is consulted *because* the gate refused. A classifier that throws on its own
+    // input reports nothing, and the refusal becomes a crash.
+    expect(() => attemptsStatement('Is it 2012?')).not.toThrow();
+    expect(attemptsStatement("Don't use the 2012 rows")).toBe(false);
+    expect(attemptsStatement("SELECT 'open")).toBe(true);
+  });
+
+  it('accepts the prefix the statement reader accepts', () => {
+    // `extractSql` strips `sql:`, so a reply carrying it is a statement to the reader. A
+    // classifier that disagreed would call a statement prose and refuse it after the reader had
+    // already found it.
+    expect(attemptsStatement('sql: SELECT 1')).toBe(true);
+  });
+
+  it('agrees with the guard: nothing it accepts is prose', () => {
+    // The invariant that makes the classification safe rather than a second opinion. Every
+    // statement the gate accepts must be one the classifier calls a statement attempt; a single
+    // disagreement would mean an accepted statement was refused as unreadable.
+    const accepted = [
+      'SELECT 1',
+      'select `a` from t',
+      'WITH RECURSIVE r AS (SELECT 1) SELECT * FROM r',
+      'SELECT "weird;name" FROM t',
+      "SELECT replace(a,'x','y') FROM t",
+      'VALUES (1)',
+    ];
+    for (const sql of accepted) {
+      expect(inspectSql(sql).ok, sql).toBe(true);
+      expect(attemptsStatement(sql), sql).toBe(true);
+    }
+  });
+
+  it('derives its words from the policy rather than from a second copy', () => {
+    // A policy that bans a word the classifier does not know would classify a write attempt as
+    // prose. Narrowing the policy in one place is the test: the classifier must follow it.
+    const narrowed = { ...DEFAULT_POLICY, bannedWords: ['insert'] };
+    expect(statementHeads(narrowed).has('insert')).toBe(true);
+    expect(statementHeads(narrowed).has('truncate')).toBe(false);
+    expect(attemptsStatement('truncate t')).toBe(true);
+    expect(attemptsStatement('truncate t', narrowed)).toBe(false);
   });
 });
