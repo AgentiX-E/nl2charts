@@ -100,6 +100,24 @@ export interface Arm {
   /** Samples per question; the modal executed result wins. */
   readonly vote?: number;
   /**
+   * The temperature a sampled candidate is drawn at.
+   *
+   * Sampling is what makes several candidates different *attempts* rather than one attempt typed
+   * out several times, and 0.7 was written into the request builder as a constant — the value
+   * every sampling arm here used, and the competitor's too. A constant made the question
+   * unaskable: an arm could change how many draws it bought but never how far apart they landed,
+   * so "the candidates are correlated" had a name and no experiment.
+   *
+   * The reading that made it a field: on Mini-Dev the six-draw arm returned **1.33 distinct
+   * executed results per question** against the three-draw arm's **1.26**, and on **462 of 493
+   * questions the second pass added no new answer at all** — the third and fourth calls bought a
+   * restatement. Three different prompts at 0.7 are one opinion counted three times (74.85% of
+   * questions unanimous, and 29.8% of those unanimous answers wrong). Whether that is the
+   * endpoint's sampling or the prompts' shared information is exactly what a temperature arm
+   * answers, at the same number of calls rather than three more.
+   */
+  readonly temperature?: number;
+  /**
    * Retrieved (question, evidence, SQL) triples from the training split, rendered as
    * worked examples. This is the lever DAIL-SQL and CHASE-SQL build on; here it is one
    * switch away from `inline+retrieval`, which supplies the same neighbours as text.
@@ -995,6 +1013,45 @@ export const ARMS: readonly Arm[] = [
   // narrow set. The sources are arms already measured on their own, so the candidate
   // set is a combination of known parts rather than a new invention.
   { name: 'select-mixed', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: MIXED_SOURCES },
+  // The same three prompts and the same four calls, drawn with the temperature the whole
+  // multi-prompt family was in fact drawn at: zero.
+  //
+  // This arm is not a new idea. It is the coordinate `select-mixed` was measured at for a hundred
+  // rounds without anyone choosing it: a mixed arm's candidates come from *source* arms, a source
+  // declares no `vote`, and the pipeline read its temperature off the source — so `select-mixed`
+  // sent 0 to every candidate while its comment, the catalogue and the plan all said "three
+  // samples at temperature 0.7". The fix routes the arm's temperature to every candidate it buys,
+  // and this arm is the control that keeps the historical reading reproducible in the same
+  // dispatch as the repaired one: 0 against 0.7 against 1 is a dose-response curve for the one
+  // variable, on one split, with one bill.
+  //
+  // Pre-registered: distinct executed results per question must rise from the cold arm's 1.26 to
+  // at least 1.50 at 0.7; if it does not, the correlation is in what the three prompts share and
+  // not in the endpoint, and every "buy more candidates" plan is closed for good.
+  { name: 'select-mixed-cold', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: MIXED_SOURCES, temperature: 0 },
+  // The same three prompts, the same four calls, drawn further apart.
+  //
+  // One lever in the only sense this repository counts: `select-mixed` with `temperature: 1`
+  // instead of the 0.7 every sampling arm here was written against. Nothing else changes — same
+  // card, same linker, same selector, same three sources, same cost — so the delta is the price of
+  // asking the endpoint to move.
+  //
+  // It exists because the six-draw arm answered a different question than the one it was built for.
+  // `select-mixed-spread2` bought three more draws and returned **1.33 distinct executed results
+  // per question against 1.26** for three: on **462 of 493 questions the second pass added no new
+  // answer at all**, and six questions in the whole split changed from "no correct candidate" to
+  // "one". More draws at 0.7 are restatements, so the candidate-count ladder is not a lever on
+  // this endpoint — but that reading cannot say *why*. Either 0.7 is too cold for this model, or
+  // the three prompts share the information that decides the answer. This arm separates the two at
+  // the same bill: if the pool widens and the ceiling moves, the temperature was the constraint and
+  // the competitor's 21 draws are reachable here; if it does not, the constraint is what the
+  // prompts know, and the next lever must change that rather than buy more of it.
+  //
+  // Pre-registered on Mini-Dev, beside `select-mixed` in one dispatch: `candidateRecall` must rise
+  // from 64.3% by at least two points, and distinct results per question from 1.26 to at least
+  // 1.50. A ceiling that moves by less than two points closes the sampling family — temperature,
+  // draw count and source count are then one measurement, and the only lever left is information.
+  { name: 'select-mixed-hot', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: MIXED_SOURCES, temperature: 1 },
   // The same three prompts, drawn twice each. Six candidates, seven calls.
   //
   // This is the one lever the strongest training-free competitor has and this repository has
@@ -1530,6 +1587,8 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'select-mixed+dc': 'the adopted arm with a fourth candidate written by decomposition: the only addition that can create a statement the three prompts cannot, which is what the routing analysis left open',
   'select-dc': 'the third candidate written by decomposition instead of by the value index: same count, same four calls, and the slot values actually won 5.3% of the time',
   'select-mixed-spread2': 'the three prompts drawn twice each: six candidates and seven calls, which is the rung this repository has never climbed and the one the strongest training-free competitor stands on (it draws 21 at temperature 0.7 and votes on executed results). On demand rather than in the chain because its verdict is a ceiling reading on 1,532 dev questions — 498 cannot resolve two points of ceiling, and the arm costs 7 calls a question. Run it beside `select-mixed` and read `candidateRecall`, not the score: the question is whether a second pass over the same prompts widens the set at all',
+  'select-mixed-cold': 'the same three prompts and the same four calls at temperature 0: the coordinate every multi-prompt arm was silently measured at, kept as the control rather than as a claim. It is the arm a "more candidates help" hypothesis has to beat, and it costs nothing beyond its four calls — dispatch it beside `select-mixed` and `select-mixed-hot` so the three rungs share one split, one judge and one bill',
+  'select-mixed-hot': 'the same three prompts and the same four calls drawn at temperature 1 instead of 0.7: the one experiment that separates "0.7 is too cold for this endpoint" from "the three prompts already know the answer", at no extra cost. On demand because it is a ceiling reading and it must share a dispatch with `select-mixed` to be paired — 498 questions resolve about two points of ceiling and nothing finer. Read `candidateRecall` (bar: 64.3% + 2pp) and the distinct-results-per-question line from `bench:bird:diversity` (bar: 1.26 -> 1.50). A ceiling that does not move closes the sampling family: draw count, source count and temperature are then one measurement',
   'select-mixed-spread3': 'three passes, nine candidates, ten calls: the rung that says whether the ceiling curve is still rising at double digits. Read against `spread2`, not against the parent — a slope that halves between six and nine closes the competitor\'s 21-candidate configuration as an explanation and moves the question to its prompt family',
 };
 
@@ -2632,6 +2691,33 @@ export function assertMaskingRule(arm: Pick<Arm, 'name' | 'masked' | 'demonstrat
   throw new Error(
     `arm ${arm.name} masks the names in its worked examples and carries none, so the mask would never run`,
   );
+}
+
+/**
+ * A temperature on an arm that draws once is a single draw with noise, not a lever.
+ *
+ * The field exists to move two or more draws apart, so an arm that declares it without a sample
+ * count would send one request at that temperature and report the difference as a reading about
+ * sampling. The range is the endpoint's: nothing outside [0, 2] is accepted, and a request outside
+ * it is refused by the endpoint rather than by us — which would spend the run to learn a number
+ * the declaration already had.
+ *
+ * Zero is legal and it means something specific: *repeat the same request*, which is the control a
+ * sampling arm is read against rather than a sampling arm. It is the coordinate every multi-prompt
+ * arm in this catalogue was silently measured at before the `temperature` override existed, so an
+ * arm that declares it is the historical reading made reproducible instead of a claim about noise.
+ *
+ * Refused at the declaration, next to `assertSampleRule` and for its reason: the alternative is a
+ * paid run that measures nothing.
+ */
+export function assertTemperature(arm: Pick<Arm, 'name' | 'temperature' | 'vote'>): void {
+  if (arm.temperature === undefined) return;
+  if (!Number.isFinite(arm.temperature) || arm.temperature < 0 || arm.temperature > 2) {
+    throw new Error(`arm ${arm.name} draws at temperature ${String(arm.temperature)}, which is outside the range an endpoint accepts [0, 2]`);
+  }
+  if ((arm.vote ?? 1) < 2) {
+    throw new Error(`arm ${arm.name} declares a temperature but draws ${String(arm.vote ?? 1)} candidate, so nothing would be drawn apart`);
+  }
 }
 
 export function resolveArm(name: string): Arm | undefined {
@@ -6679,12 +6765,25 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
   assertCardRule(arm);
   // ...and a mask with no examples under it is a name for the parent arm.
   assertMaskingRule(arm);
+  // ...and a temperature on an arm that draws once is one draw with noise, refused before the run
+  // reports it as a reading about sampling.
+  assertTemperature(arm);
   // ...and a dissent that names one of the arm's own sources is a fourth vote, refused before a
   // single call is spent on it.
   assertDissentRule(arm);
   // ...and a rule that is declared beside a lever only the model selector reads is a lever that
   // would be published without ever being wired.
   assertRuleSelection(arm);
+  /**
+   * The temperature every candidate this arm draws is sent at.
+   *
+   * It is the arm's own when it declares one and 0.7 otherwise, and it is resolved here rather
+   * than at each pipeline because a candidate's temperature belongs to the arm that buys it: a
+   * mixed arm's three candidates come from three *source* arms, a source declares no `vote`, and
+   * the pipeline used to read the temperature off the source — which sent 0 and turned every
+   * "sample" in the catalogue into a repeated deterministic request.
+   */
+  const samplerTemperature = arm.temperature ?? 0.7;
   /** What this arm drew per case, in the shape a pooled arm reads. */
   const collected = new Map<string, readonly PooledCandidate[]>();
   // A mixed arm runs three configurations under one label; if one of them repairs or
@@ -6805,7 +6904,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
       const pipelineFor = (
         target: Arm,
         which: 'primary' | 'second' = 'primary',
-        overrides: { readonly linking?: boolean; readonly repairs?: number } = {},
+        overrides: { readonly linking?: boolean; readonly repairs?: number; readonly temperature?: number } = {},
       ): ReturnType<typeof createPipeline> =>
         createPipeline({
           provider: providerFor(which),
@@ -6842,7 +6941,20 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
           ...(target.ground === true
             ? { readColumnValues: groundingReader((sql: string) => oracle.run(question.db_id, sql), question.db_id) }
             : {}),
-          temperature: target.vote === undefined ? 0 : 0.7,
+          // The temperature is resolved in this order and the order is the repair: the caller's
+          // override, then the arm that owns the turn, then the rule — 0.7 for a sampled arm, 0 for
+          // a single draw, where sampling would be a cost with no second opinion to average.
+          //
+          // The override exists because a mixed arm's candidates are drawn from *source* arms, and
+          // a source declares no `vote`: `pipelineFor(sourceArm, …)` therefore read the source's
+          // `vote` as undefined and sent **0** to every candidate of every multi-prompt arm. Three
+          // prompts drawn at 0 are three deterministic requests, so the arms named "three samples"
+          // were three draws of the same answer and the whole sampling family was measured at the
+          // wrong coordinate. Mini-Dev 496 is where it surfaced: `select-mixed-spread2` returned
+          // 1.33 distinct executed results per question against 1.26 for three, and 462 of 493
+          // questions gained no new answer from the second pass — a repeat, exactly what a
+          // temperature of zero predicts.
+          temperature: overrides.temperature ?? target.temperature ?? (target.vote === undefined ? 0 : 0.7),
           prompt: promptFor(target, question, prepared.blocksFor(target, question)),
           // Two mechanisms need the engine's answer, not one: the repair loop and the empty-result
           // turn. The hook used to be attached only when `repairs > 0`, so `inline+evidence+empty`
@@ -6967,10 +7079,14 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
             // The pre-built pipeline is only good for the case nothing about this source was
             // overridden; once either override is present the pipeline is built for it, because a
             // reused pipeline would apply the parent's count to a source that asked for another.
+            // The temperature belongs to the arm that buys the candidates, not to the source
+            // that writes one of them: a source is a prompt, and `vote` — the number of draws —
+            // is the mixed arm's. Passing it explicitly is what makes "three samples" true of a
+            // mixed arm; without it every candidate went out at the single-draw temperature.
             const sampler =
               sources === undefined && hinted === undefined && repairs === undefined
                 ? pipeline
-                : pipelineFor(sourceArm, spec.provider, { linking: hinted, repairs });
+                : pipelineFor(sourceArm, spec.provider, { linking: hinted, repairs, temperature: samplerTemperature });
             const candidateSchema = sources === undefined ? schema : prepared.schemaForSource(sourceArm, question);
             candidateColumns = Math.max(candidateColumns, prepared.samplesOn(candidateSchema));
             // The one source whose statement is rendered rather than written. It reads the same
@@ -7095,7 +7211,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
             const drawn = (survival[arm.dissent] ??= { generated: 0, survived: 0 });
             drawn.generated += 1;
             try {
-              const sampler = pipelineFor(resolveArm(spec.arm) as Arm, spec.provider);
+              const sampler = pipelineFor(resolveArm(spec.arm) as Arm, spec.provider, { temperature: samplerTemperature });
               const reply = await sampler.ask({ question: question.question, schema });
               const executed = await oracle.run(question.db_id, reply.sql);
               if (executed.ok) {

@@ -11719,13 +11719,36 @@ model"; it is forty-odd questions already drawn, executed, and thrown away.
 | `select-mixed-spread2` | 3 prompts × 2 | 6 | 7 |
 | `select-mixed-spread3` | 3 prompts × 3 | 9 | 10 |
 
-Three prompts reached a 65.8% ceiling where five samples of one prompt reached 64.7%, with two
-fewer calls — three samples of one prompt agree about 90% of the time, and agreement is not a
-second opinion. The competitor's twenty-one draws are one prompt, so its ladder is the second kind.
-**Pre-registered:** `spread2` must raise `candidateRecall` at least two points above 67.75% on dev;
-`spread3` at least one point above `spread2`. A halved slope closes candidate count as the
-explanation and moves the question to the competitor's prompt family. A ceiling that rises while
-accuracy does not belongs to the selector, not to the generator.
+**Withdrawn.** This section used to say that three prompts reached a 65.8% ceiling where five
+samples of one prompt reached 64.7%, with two fewer calls — evidence that prompt diversity beats
+sampling diversity. The two sides of that comparison were not measured at the same coordinate.
+Every multi-prompt arm drew its candidates at **temperature 0**: the request builder read the
+temperature off the `target` arm, and a mixed arm's `target` is the *source* it is drawing from,
+which declares no `vote` and so resolved to the single-draw constant. `select5` samples at 0.7 and
+`select-mixed` was repeating a deterministic request three times, so the 1.1pp was a difference
+between two variables, not one. The claim is withdrawn to "no evidence" rather than refuted: it has
+not been measured.
+
+What the artifact from the six-draw run (`43379716079`, Mini-Dev 496, `deepseek-chat`) does
+measure, at one coordinate, is how little a second pass over a temperature-zero pool buys:
+
+| reading | three draws | six draws |
+|---|---|---|
+| distinct executed results per question | 1.264 | 1.331 |
+| questions the second pass added no answer to | — | 462 of 493 (93.7%) |
+| questions converted from "no correct candidate" to "one" | — | 6 |
+| `candidateRecall` | 64.31% | 65.93% (+1.62pp, bar was +2pp) |
+
+Unanimity is 74.85% of questions and 29.8% of those unanimous answers are wrong, so the pool
+carried one opinion most of the time and the added draws restated it. The defect and its repair are
+in the changelog; the arms that now measure the coordinate properly are `select-mixed-cold` (0),
+`select-mixed` (0.7 after the repair) and `select-mixed-hot` (1), all at three candidates and four
+calls.
+
+**Pre-registered:** distinct executed results per question must reach 1.50 at 0.7 from the cold
+arm's 1.26, and `candidateRecall` must rise at least two points. A ceiling that does not move
+closes the sampling family — draw count, source count and temperature are then one measurement.
+A ceiling that rises while accuracy does not belongs to the selector, not to the generator.
 
 ### What the competitor's cost actually is, in requests
 
