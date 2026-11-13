@@ -71,10 +71,10 @@
       "branches": 99.36
     },
     "eval/bird/channel.ts": {
-      "lines": 98.72,
-      "statements": 98.72,
+      "lines": 98.77,
+      "statements": 98.77,
       "functions": 100,
-      "branches": 95.69
+      "branches": 95.95
     },
     "eval/bird/columns.ts": {
       "lines": 100,
@@ -344,7 +344,7 @@
       "lines": 99.48,
       "statements": 99.48,
       "functions": 100,
-      "branches": 96.06
+      "branches": 96.07
     },
     "eval/bird/samples.ts": {
       "lines": 100,
@@ -537,6 +537,12 @@
       "statements": 98.74,
       "functions": 100,
       "branches": 97.95
+    },
+    "eval/text2vis/dataset.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 100
     }
   }
 }
