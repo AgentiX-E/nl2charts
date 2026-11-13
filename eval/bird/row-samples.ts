@@ -66,10 +66,19 @@ function cell(value: unknown, maxValue: number): string {
  *    that is a claim about the data rather than a shorter sample of it.
  * 2. **A value that is not there is not printed.** `status=NULL` describes the storage; a row that
  *    is entirely NULL disappears rather than becoming a blank line.
+ *
+ * The reader is allowed to answer `undefined`, and that is a third rule rather than a convenience:
+ * the rows are cached per `(database, table)` for the arms a run requested, and a mixed arm's
+ * *source* is not one of those arms — so a table the cache never read is a table this renderer can
+ * be asked about. It used to be typed as total behind a cast, and the first mixed arm with a row
+ * source crashed the dispatch (`Cannot read properties of undefined (reading 'slice')`, run
+ * `43466869878`) because the cast was a promise the cache could not keep. A table nobody read is
+ * dropped exactly like a table with nothing to show: the block is an extra, and a prompt that is
+ * shorter by one table is still a prompt the run can score.
  */
 export function renderRowSamples(
   tables: readonly RowSampleTable[],
-  read: (table: string, columns: readonly string[]) => readonly (readonly unknown[])[],
+  read: (table: string, columns: readonly string[]) => readonly (readonly unknown[])[] | undefined,
   options: RowSampleOptions = {},
 ): string {
   const rows = options.rows ?? 3;
@@ -81,7 +90,7 @@ export function renderRowSamples(
     if (columns.length === 0) continue;
     const names = columns.map((column) => column.name);
     const bodies: string[] = [];
-    for (const row of read(table.table, names).slice(0, rows)) {
+    for (const row of (read(table.table, names) ?? []).slice(0, rows)) {
       const pairs = names
         .map((name, index) => {
           const value = cell(row[index], maxValue);
@@ -103,7 +112,7 @@ export function renderRowSamples(
   const first = tables.find((table) => sampleableColumns(table).length > 0);
   if (first === undefined) return '';
   const names = sampleableColumns(first).map((column) => column.name);
-  const row = read(first.table, names)[0];
+  const row = (read(first.table, names) ?? [])[0];
   if (row === undefined) return '';
   const pairs = names.map((name, index) => {
     const value = cell(row[index], maxValue);
