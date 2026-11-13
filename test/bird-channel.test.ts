@@ -162,6 +162,22 @@ describe('the table, and what makes it unpublishable', () => {
     expect(channelProblems([arm!])).toEqual([]);
   });
 
+  it('tests the truncation claim against its own message', () => {
+    // `truncated` is the one bucket whose repair is a number, so its message has to carry the fact
+    // that makes a number the repair. Published without it, the reader is sent to the endpoint —
+    // which is what the report did for 50 of 366 calls under the old single code.
+    const named = rowsOf([
+      row({ id: '1', sql: '', errorKind: 'truncated', error: 'cut at the answer budget (finish_reason=length, budgets tried: 4096 -> 8192)' }),
+    ]);
+    expect(channelProblems(named)).toEqual([]);
+    const anonymous = rowsOf([row({ id: '2', sql: '', errorKind: 'truncated', error: 'llm response is empty' })]);
+    expect(channelProblems(anonymous)[0]).toContain('truncated names a reply cut at the answer budget');
+    // ...and the reverse, because a budget cut filed under the outage bucket is the defect this
+    // instrument was extended for.
+    const misfiled = rowsOf([row({ id: '3', sql: '', errorKind: 'llm', error: 'llm response was cut (finish_reason=length)' })]);
+    expect(channelProblems(misfiled)[0]).toContain('the message is a budget cut');
+  });
+
   it('keeps arms apart', () => {
     const rows = channelTable({
       cases: [
