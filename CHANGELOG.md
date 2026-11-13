@@ -123,6 +123,11 @@ cannot be argued with.
   halved slope closes the twenty-one-candidate configuration as an explanation and moves the
   question to the competitor's prompt family. A ceiling that rises while accuracy does not is
   attributed to the selector, and the next call is not another candidate.
+  **Verified end to end, not by reading the loop:** a six-candidate arm draws its sources in the
+  order `[inline+evidence, metadata+evidence, values, inline+evidence, metadata+evidence, values]`
+  and records `calls: 7` — six generations and the selector — on every case of the fixture run.
+  That is the assertion the old rule could not have survived: three draws billed as six would have
+  produced a row indistinguishable from the parent's.
   **Cost, stated so it is not underestimated:** the competitor sends `n` once and receives
   twenty-one completions in one HTTP response; this endpoint has no `n`, so twenty-one candidates
   are twenty-one requests. Same tokens, twenty-one times the failure surface — which is also the
