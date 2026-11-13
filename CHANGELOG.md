@@ -6,7 +6,21 @@ cannot be argued with.
 
 ## Unreleased
 
-### Fixed
+### Added
+- **The adjudication is bought only where there is something to adjudicate.** On Mini-Dev at
+  temperature 0.7, 350 of 479 three-candidate questions (73.1%) returned one result under the
+  judge's own equality, and on those cases the model selector, the `shortest` rule and the `modal`
+  rule all score **70.57%** — the same number to the case, because the result is the answer and the
+  statement is not. The fourth call is not cheap there, it is unspendable. `Arm.gate: 'results'`
+  reads the pool before the selector does, chooses by `gateRule` when the pool agreed, and calls the
+  selector unchanged when it did not; `select-mixed-gated` is that arm beside its parent.
+- **The judge can read the columns its candidates use.** The selector has never been shown the
+  schema — the generator always has. `buildSelectionPrompt` gains an opt-in `evidence` block and
+  `columnEvidence` renders the columns of exactly the tables the candidate statements name, within a
+  character budget. Absent is byte-identical to the prompt every published reading was taken with,
+  so the pair `select-mixed-gated` / `select-mixed-gated-evidence` prices the information rather
+  than a rewritten instruction.
+
 - **A sampled candidate is drawn at the temperature its arm declares — until now no multi-prompt
   arm sampled at all.** The request builder resolved the temperature as
   `target.vote === undefined ? 0 : 0.7`, where `target` is the arm that owns the turn. On a mixed

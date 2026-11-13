@@ -55,6 +55,8 @@ const NOT_A_MECHANISM: Readonly<Record<string, string>> = {
   assertCardRule: 'declaration-time: a card decided by two rules reports the order of operations',
   assertMaskingRule: 'declaration-time: a mask needs worked examples to act on',
   assertTemperature: 'declaration-time: a temperature needs two draws to move apart, and a request the endpoint refuses is a number the declaration already had',
+  assertResultGate: 'declaration-time: a gate in front of a chooser that spends nothing is a second name for the arm it gates, and a pool of one cannot agree or disagree',
+  assertEvidence: 'declaration-time: evidence rendered into a prompt no judge reads is a declaration rather than a lever',
   assertRuleSelection: 'declaration-time: a free rule needs a candidate set, and cannot sit beside a lever only the model selector reads',
   assertIntentRule: 'declaration-time: an arm whose statement is rendered on the candidate path cannot be dispatched alone',
   assertSecondModel: 'declaration-time: an arm that needs a second endpoint has to have one',

@@ -11777,3 +11777,52 @@ That is the pre-registered branch "a ceiling that rises while accuracy does not 
 Two things it also measures. **Unanimity is a knob now**: 77.0% at temperature 0, 65.2% at 1, which explains why repeating a prompt does nothing (a repeat does not change the distribution) and raising the temperature does. And **temperature is free**: 3,566 / 3,569 / 3,567 prompt tokens and 176 / 179 / 179 completion tokens across the three arms, against the +75% of the six-draw arm. Widening a pool by temperature costs nothing; widening it by draws costs 75%.
 
 The next arm follows from that arithmetic rather than from taste: `select-mixed-hot-rule` — temperature 1 with a zero-call rule choosing, three calls a question instead of four, and a bar of 92.81% realization (the cold arm's) with accuracy at or above 62.0%.
+
+### Where the ceiling goes: agreeing and disagreeing pools
+
+Run `43404099480`, Mini-Dev 496, `deepseek-chat`, one dispatch, three arms differing only in
+`temperature`. The artifact's own candidate records can be re-read at no cost — the question every
+later mechanism has to answer is not "how high is the ceiling" but "where does the distance between
+the ceiling and the score live". Grouping each question's three candidates by the judge's equality
+answers it:
+
+| arm | temperature | questions with one result | ceiling there | realized there | questions that disagree | ceiling there | realized there |
+|---|---|---|---|---|---|---|---|
+| `select-mixed-cold` | 0 | 372 | 69.35% | 69.35% | 112 | 54.46% | — |
+| `select-mixed` | 0.7 | 350 | 70.57% | 70.57% | 129 | 62.02% | 35.66% |
+| `select-mixed-hot` | 1 | 309 | 74.76% | 74.76% | 165 | 61.21% | 36.97% |
+
+Two facts follow, and both are arithmetic rather than argument.
+
+**On an agreeing pool the choice is worth nothing.** The realized column equals the ceiling column
+exactly, for every arm, because every candidate returns the same rows and the judge scores rows. On
+350 of 479 questions at temperature 0.7 the model selector, `shortest` and `modal` all score
+70.57% — the same number to the case. The fourth call is not cheap there; it cannot be spent.
+
+**On a disagreeing pool the choice is worth 26 points and is not being made.** The ceiling is
+62.02% and the best chooser reaches 44.19% (the `shortest` rule), the model selector 35.66% and
+`modal` 26.36%. That population is 27% of the split, so 17.8 points unrealized there is 4.8 points
+of overall score — the largest measured reserve in this repository, and the one every "add a
+candidate" or "add a card" lever has been failing to reach.
+
+Reading the same artifact through `bench:bird:consensus` prices the three call-free rules against
+the selector on the whole split, at each coordinate:
+
+| arm | `first` | `shortest` | `modal` | model | oracle | paired, `shortest` vs model |
+|---|---|---|---|---|---|---|
+| `select-mixed-cold` | 57.86% | **61.49%** | 58.67% | 59.88% | 64.52% | 15 / 7, p = 0.13 |
+| `select-mixed` | 57.26% | **61.90%** | 58.06% | 59.68% | 66.53% | 24 / 13, p = 0.10 |
+| `select-mixed-hot` | 56.25% | **60.08%** | 56.85% | 59.48% | 67.54% | 28 / 25, p = 0.78 |
+
+`shortest` is ahead of the paid selector at all three coordinates and its lead shrinks as the pool
+widens (+1.61, +2.22, +0.60 points) — which is the same story as the table above from the other
+side: a wider pool is harder for every chooser, and the free one is the one that degrades least.
+None of the three deltas is significant at 496 questions (this artifact resolves 3.44 points), so
+the claim this repository is entitled to is the cheaper one: **a rule that spends no call is never
+behind the call and costs 25% less**, measured four times (dev +0.85, Mini-Dev cold +1.61, Mini-Dev
+0.7 +2.22, Mini-Dev 1 +0.60).
+
+Two mechanisms follow from the first table rather than from taste, and both are arms now:
+`select-mixed-gated` spends the call only on the questions that disagree, and
+`select-mixed-gated-evidence` shows the judge the columns of the tables its candidates read, since
+the selector has never been given the schema the generator always has.

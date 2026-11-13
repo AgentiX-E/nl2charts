@@ -4101,6 +4101,121 @@ describe('the free selector', () => {
 });
 
 /**
+ * The gate: the adjudication is bought only where there is something to adjudicate.
+ *
+ * On Mini-Dev at temperature 0.7, 350 of 479 three-candidate questions returned one result, and on
+ * those the model selector, `shortest` and `modal` all score 70.57% — the same number to the case,
+ * because the result is the answer and the statement is not. A fourth call there is not cheap, it
+ * is unspendable. The arm reads the pool with the judge's own equality, picks by rule when it
+ * agreed, and calls the selector unchanged when it did not.
+ *
+ * Both readings below are identities rather than thresholds: the request log has to agree with the
+ * artifact, and the accuracy has to be the parent's exactly, because the invariance is a
+ * construction and a departure from it is a defect in the gate.
+ */
+describe('the gate in front of the adjudication', () => {
+  const SELECT_PROMPT = 'which candidate statement answers the question';
+
+  it('spends no call on a pool that agreed, and reports the saving as two counts', async () => {
+    // Every candidate writes the gold statement, so the pool is unanimous on all seven questions.
+    const result = await run({ plan: { first: correct }, env: { BIRD_ARMS: 'select-mixed,select-mixed-gated' } });
+    expect(result.code, result.printed.join('\n')).toBe(0);
+    const rows = result.report.arms as {
+      readonly arm: string;
+      readonly passed: number;
+      readonly total: number;
+      readonly calls: { readonly mean: number };
+      readonly spend?: { readonly asked: number; readonly priced: number };
+      readonly selectorRule?: { readonly rule: string; readonly decided: number; readonly eligible: number; readonly emptyPool: number };
+    }[];
+    const parent = rows.find((row) => row.arm === 'select-mixed');
+    const gated = rows.find((row) => row.arm === 'select-mixed-gated');
+
+    expect(parent?.calls.mean).toBe(4);
+    expect(gated?.calls.mean).toBe(3);
+    // The call that was not made, as the artifact counts it: no case reached a selector, and the
+    // gate decided all of them by rule.
+    expect(parent?.spend).toEqual({ asked: QUESTIONS.length, priced: QUESTIONS.length });
+    expect(gated?.spend).toEqual({ asked: 0, priced: 0 });
+    expect(gated?.selectorRule).toEqual({ rule: 'shortest', decided: QUESTIONS.length, eligible: QUESTIONS.length * 3, emptyPool: 0 });
+    // The invariance: a unanimous pool is scored by its result, so removing the choice cannot move
+    // the score. If this ever fails, the gate is choosing between results rather than within one.
+    expect(gated?.passed).toBe(parent?.passed);
+    expect(gated?.passed).toBe(QUESTIONS.length);
+    // And the log agrees: the only selection prompts are the parent's.
+    expect(result.requests.filter((request) => request.prompt.includes(SELECT_PROMPT))).toHaveLength(QUESTIONS.length);
+  });
+
+  it('calls the selector on exactly the cases whose candidates disagree', async () => {
+    // The value-grounded candidate answers with a statement that cannot run, so the pool disagrees
+    // on the questions whose literals were resolved and agrees on the rest: one arm, both states.
+    const result = await run({
+      plan: { first: correct, whenValues: IMPOSSIBLE_SHORT },
+      env: { BIRD_ARMS: 'select-mixed,select-mixed-gated' },
+    });
+    expect(result.code, result.printed.join('\n')).toBe(0);
+    const cases = result.report.cases as {
+      readonly arm: string;
+      readonly id: string;
+      readonly candidates?: readonly { readonly fingerprint?: string }[];
+      readonly selectedByRule?: { readonly rule: string; readonly index: number };
+    }[];
+    const rows = result.report.arms as {
+      readonly arm: string;
+      readonly calls: { readonly mean: number };
+      readonly spend?: { readonly asked: number; readonly priced: number };
+    }[];
+    const gatedCases = cases.filter((row) => row.arm === 'select-mixed-gated');
+    const split = gatedCases.filter((row) => new Set((row.candidates ?? []).map((candidate) => candidate.fingerprint)).size > 1);
+    // The fixture has to exercise both states or the test is about one of them.
+    expect(split.length).toBeGreaterThan(0);
+    expect(split.length).toBeLessThan(QUESTIONS.length);
+
+    const gated = rows.find((row) => row.arm === 'select-mixed-gated');
+    expect(gated?.spend).toEqual({ asked: split.length, priced: split.length });
+    // The call mean is the arithmetic on that count, one call per disagreeing case.
+    // Three generations plus one adjudication per disagreeing case, to the three decimals the
+    // report rounds to.
+    expect(gated?.calls.mean).toBeCloseTo(3 + split.length / QUESTIONS.length, 3);
+    // ...and the request log is the same fact from the other side: the parent asked every case, the
+    // gate asked the ones the artifact names.
+    expect(result.requests.filter((request) => request.prompt.includes(SELECT_PROMPT))).toHaveLength(QUESTIONS.length + split.length);
+    // The cases the gate decided carry the rule's own record, so "the gate fired" is countable in
+    // the case file and not only in the arm row.
+    expect(gatedCases.filter((row) => row.selectedByRule !== undefined)).toHaveLength(QUESTIONS.length - split.length);
+    expect(new Set(gatedCases.filter((row) => row.selectedByRule !== undefined).map((row) => row.selectedByRule?.rule))).toEqual(new Set(['shortest']));
+  });
+
+  it('shows the judge the columns its candidates read, and only on the arm that declares it', async () => {
+    // The selector has never read the schema; the generator always has. The block is opt-in so the
+    // two arms below are the evidence and nothing else — same candidates, same call count.
+    const result = await run({
+      plan: { first: correct, whenValues: IMPOSSIBLE_SHORT },
+      env: { BIRD_ARMS: 'select-mixed-gated,select-mixed-gated-evidence' },
+    });
+    expect(result.code, result.printed.join('\n')).toBe(0);
+    const asked = result.requests.filter((request) => request.prompt.includes(SELECT_PROMPT));
+    const withEvidence = asked.filter((request) => request.prompt.includes('Columns of the tables these statements read'));
+    // Half the calls belong to the evidence arm and every one of them carries the block; none of
+    // the other arm's does. A block that reached only some of its calls would make the arm's delta
+    // a difference between prompts rather than between mechanisms.
+    expect(withEvidence).toHaveLength(asked.length / 2);
+    expect(withEvidence.length).toBeGreaterThan(0);
+    // The block is about the candidates: the tables they name appear, with their columns.
+    expect(withEvidence[0]?.prompt).toMatch(/orders\(/);
+    // The columns of that table, and not the whole card: the block is the candidate's evidence,
+    // not the database's description.
+    expect(withEvidence[0]?.prompt).toMatch(/orders\(id, item_id, qty\)/);
+    const rows = result.report.arms as { readonly arm: string; readonly calls: { readonly mean: number }; readonly passed: number }[];
+    // Evidence is not a call: the two arms cost the same and answer the same cases, which is what
+    // makes the pair a comparison of information rather than of budget.
+    expect(rows.find((row) => row.arm === 'select-mixed-gated-evidence')?.calls.mean).toBe(
+      rows.find((row) => row.arm === 'select-mixed-gated')?.calls.mean,
+    );
+  });
+});
+
+/**
  * The one rewrite that needs no model judgement, priced end to end.
  *
  * The chain fixture's third question filters `cities.name` to a stored spelling — `Hangzhou` — and
