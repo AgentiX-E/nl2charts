@@ -33,6 +33,7 @@ import {
   cacheFieldOf,
   reasoningFieldOf,
   meanReported,
+  thinkingShare,
   mergePurposes,
   demonstrationsFunnel,
   dissentFunnel,
@@ -696,6 +697,43 @@ describe('what an arm row says about itself', () => {
     const row = armReportRow(preparedWith([question(1, 'simple')]), resolveArm('select') as Arm, [priced('1', true)], 'select');
     expect(row.tokens?.byPurpose?.generate?.prompt).toBe(100);
     expect(row.tokens?.byPurpose?.select).toMatchObject({ calls: 1, prompt: 30, completion: 2 });
+  });
+
+  it('answers "how much of the bill is thinking" over one population', () => {
+    // The two averages are over two populations, and their ratio is not a share: on run
+    // `43343813778` the row printed `completion 1650, reasoning 1691` — 102% of a bill — because
+    // the two means were taken over different sets of cases. The share is computed where both sums
+    // are over the same cases, and it carries its own count.
+    const priced = (id: string, completion: number, reasoning?: number): CaseRun => ({
+      ...outcome(id, true),
+      tokens: {
+        prompt: 100,
+        completion,
+        chars: 400,
+        unbilled: 0,
+        ...(reasoning === undefined ? {} : { reasoning }),
+      },
+    });
+    const row = armReportRow(
+      preparedWith([question(1, 'simple')]),
+      resolveArm('names') as Arm,
+      [priced('1', 100, 90), priced('2', 300), priced('3', 0)],
+      'names',
+    );
+    // The old pair, kept: 90 of 400 would read as 22.5% and 90 against 133 as 68%.
+    expect(row.tokens?.reasoning).toBe(90);
+    expect(row.tokens?.completion).toBe(133);
+    // The answer: nine tenths of the completion tokens on the case that deliberated were thinking.
+    expect(row.tokens?.thinking).toEqual({ share: 0.9, cases: 1 });
+  });
+
+  it('reports no thinking share when nothing reported deliberation', () => {
+    // Absent, not zero: a chat endpoint has not measured a share of nothing, and every published
+    // reading before the column existed was taken there.
+    expect(thinkingShare([])).toBeUndefined();
+    expect(thinkingShare([{ completion: 10 }, { completion: 20 }])).toBeUndefined();
+    expect(thinkingShare([{ completion: 0, reasoning: 0 }])).toBeUndefined();
+    expect(thinkingShare([{ completion: 10, reasoning: 4 }, { completion: 30 }])).toEqual({ share: 0.4, cases: 1 });
   });
 
   it('publishes a metered cost with no purpose breakdown, and keeps the breakdown absent', () => {
