@@ -207,6 +207,46 @@ Four things worth knowing before you turn it on:
   statement 65.6% of the time and it returns 62.9%. That gap is the honest description of
   what this mechanism has not yet solved.
 
+### When a paid selector cannot pay for itself
+
+A candidate pool splits into two populations, and only one of them contains a decision. Group the
+executed candidates by the judge's own equality — same rows, same answer — and on Mini-Dev at
+temperature 0.7, **350 of 479 three-candidate questions returned one result**. On those questions the
+model selector, the `shortest` rule and the `modal` rule score **70.57%, the same number to the
+case**, because the result is the answer and the statement is not. A fourth call there is not cheap;
+it has nothing to decide.
+
+The 27% that disagree are the only population a paid selector can change, and there the pool's
+ceiling is 62.02% while the best chooser reaches 44.19% — which is where the remaining 4.8 points of
+overall score live, and also where every cheap trick has failed: the text-level rules (fewest joins,
+fewest predicates, literal grounding, group-by matching) all land within one point of `shortest`.
+
+The chooser that wins on that population is not stable between artifacts: `shortest` reaches 44.19%
+on one pool and 31.11% on the next, the model selector 35.66% and 34.27%. Read that as the honest
+state of the art here rather than as an ordering — 130-odd disagreeing questions cannot rank two
+choosers, and the ordering flips. What is stable is that **no chooser currently gets close to the
+62% the pool contains**, and that is the reserve the next mechanism has to reach.
+
+Run `43421692582` (five arms in one dispatch, A/A −0.81pp at a resolution of 3.20pp) prices the
+configurations rather than arguing about them:
+
+| configuration | calls / question | accuracy | tokens per correct answer |
+| --- | --- | --- | --- |
+| three candidates + `shortest` (`aimed-3`) | **3.00** | 59.07% | **5,283** |
+| three candidates, judge called only on a disagreeing pool | 3.30 | 59.48% | 5,499 |
+| three candidates, judge called on every question (`aimed-4`) | 3.99 | 60.08% | 5,939 |
+
+**No accuracy difference in that table survives the split's own resolution.** What survives is cost:
+`aimed-3` is 25% fewer calls and 11% fewer tokens per correct answer than `aimed-4`. That is why it
+is the default, and the reason is worth stating precisely — not "the rule is better", but **"the
+split cannot tell them apart, and one of them is a quarter cheaper"**.
+
+If you want to keep a model in the loop, spend it where a decision exists: group the executed
+candidates by result before adjudicating, and skip the call when there is one group. In the harness
+that policy is `Arm.gate: 'results'`; it removes 17% of the calls with accuracy inside a one-point
+invariance, and it reports both counts (`selectorRule.decided`, `spend.asked`) so the saving is
+attributable rather than inferred.
+
 ### If you will not pay the fourth call
 
 **This is the shipped default.** `aimed-3` is three candidates and the free rule; `aimed-4` is the
