@@ -25,7 +25,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { CHAIN_QUESTIONS, MINI_DB, MINI_GOLD, MINI_QUESTIONS, writeChainBirdDataset, writeMiniBirdDataset } from './helpers/bird-dataset.js';
 import { startEndpoint } from './helpers/endpoint.js';
 import type { EndpointRequest } from './helpers/endpoint.js';
-import { assertSamplesRan, assertSecondModel, judgeModelName, main, partialPath, readPartialRun, resolveSettings } from '../eval/bird/run.js';
+import { assertSamplesRan, assertSecondModel, declarationDigest, judgeModelName, main, partialPath, readPartialRun, resolveSettings } from '../eval/bird/run.js';
 import { INTENT_RULE } from '../eval/bird/intent.js';
 import { questionDigest } from '../eval/bird/data.js';
 
@@ -1323,7 +1323,13 @@ describe('a run that outlives its clock', () => {
 });
 
 describe('a partial run refuses to be welded to a different one', () => {
-  const expected = { arm: 'names', split: 'minidev' as const, model: 'stub-model', questionIds: [1, 2, 3] };
+  const expected = {
+    arm: 'names',
+    split: 'minidev' as const,
+    model: 'stub-model',
+    declaration: declarationDigest('stub-model'),
+    questionIds: [1, 2, 3],
+  };
   const write = (overrides: Record<string, unknown>): string => {
     const path = join(root, `partial-${String(Math.random()).slice(2, 8)}.json`);
     writeFileSync(path, JSON.stringify({ ...expected, cases: [{ questionId: 1, run: { passed: true } }], ...overrides }));
@@ -1344,6 +1350,30 @@ describe('a partial run refuses to be welded to a different one', () => {
     );
     expect(() => readPartialRun(write({ questionIds: [1, 2] }), expected)).toThrow(/2 questions != 3/);
     expect(() => readPartialRun(write({ questionIds: [1, 2, 4] }), expected)).toThrow(/3 questions != 3/);
+  });
+
+  it('refuses the same arm, split and model under a different request shape', () => {
+    // The measured case: `deepseek-v4-pro` runs as `{family: 'chat'}` and as `{family: 'reasoning'}`
+    // under one name. The first declares a 4,096-token budget and sends sampling; the second
+    // declares 8,192, drops sampling and enables the thinking format. Every other lock matches, so
+    // without this one a resume would publish a table whose two halves were written under two
+    // budgets — a reading that depends on which half ran when.
+    const other = declarationDigest('stub-model', { family: 'reasoning' });
+    expect(other).not.toBe(expected.declaration);
+    expect(() => readPartialRun(write({ declaration: other }), expected)).toThrow(/declaration/);
+    // Absent is a mismatch too: a file written before the field existed cannot say what it declared,
+    // and "cannot say" is not "declared the same".
+    expect(() => readPartialRun(write({ declaration: undefined }), expected)).toThrow(/declaration undefined/);
+  });
+
+  it('keeps the digest stable across the fields that do not change the request', () => {
+    // A digest that moved when an unrelated field was added would refuse every old partial for no
+    // reason; one that ignored a budget change would accept two different requests. Pinned at the
+    // granularity of the request itself.
+    expect(declarationDigest('m', { family: 'chat' })).toBe(declarationDigest('m'));
+    expect(declarationDigest('m', { maxOutputTokens: 1024 })).not.toBe(declarationDigest('m'));
+    expect(declarationDigest('m', { family: 'reasoning' })).not.toBe(declarationDigest('m'));
+    expect(declarationDigest('m')).toMatch(/^[0-9a-f]{16}$/);
   });
 
   it('refuses a file that is not a partial run at all', () => {

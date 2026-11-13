@@ -48,11 +48,16 @@ cannot be argued with.
   repeats): **six** replies were prose and **all six** were published as `guard` failures with
   `unsupported character "?"` as the reason — the question mark in the model's own aside
   ("Is it 2012? Let me recall…"). One of them was **83,036 characters**. The six points were
-  not the cost; the cost was the repair turn, which told the model its *statement* was unsafe,
-  so a model that had written no statement spent three more calls on a safety problem it did
-  not have. The committed dev artifact holds three more, on the chat model and in three
-  different arms (`names`, `synth-definitions`, `inline+retrieval`), so this is a property of
-  the report and not of one endpoint.
+  not the cost — they were already wrong answers, and they stayed wrong. What the artifact
+  could not do was say *why*, and both its readers act on that sentence: a person looking for
+  an unsafe statement, and the repair turn, which is told what to fix. `inline+evidence`
+  repairs zero times by design (`repairs: 0`), so **no repair call was spent in that run** —
+  this is a correction to an earlier draft of this entry, which claimed three. The claim is
+  about every arm that does repair, and about the library's own default of three: there the
+  next call is spent on a safety problem the reply does not have. The committed dev artifact
+  holds three more of these, on the chat model and in three different arms (`names`,
+  `synth-definitions`, `inline+retrieval`), so the wrong sentence is a property of the report
+  and not of one endpoint.
   `attemptsStatement(sql, policy)` closes it: a reply is a statement attempt when its first
   word is one the guard's policy names — the kinds it accepts **and** the words it bans — so
   `insert` is a statement this guard refuses and `let` is not a statement at all. The list is
