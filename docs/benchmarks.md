@@ -12008,3 +12008,49 @@ writes the value-anchored source with a measured bar to beat. Pass ① and fail 
 finding is reproduced on the free rule, the resolution is a chooser that reads four candidates, and
 the source question closes to *knowledge* differences only. Fail ① ⇒ that source adds nothing and
 the candidate side is closed for it.
+
+### The fourth candidate does not arrive: both sources are inside the pool's noise
+
+`43473626220`, Mini-Dev's 496 questions, `deepseek-chat`, four arms in one dispatch, the shipped arm
+run twice as the A/A (`−0.81pp`, 22 : 18, p = 0.636, **MDE 3.57pp**, discordance 8.06%):
+
+| arm | calls / question | ceiling | accuracy | conversion | tokens per correct answer |
+| --- | --- | --- | --- | --- | --- |
+| `select-mixed-rule` (the shipped arm) | **3.00** | 66.13% | **61.29%** | **92.68%** | **5,381** |
+| `…-rule-rows` (trio + stored rows) | 4.00 | 66.53% | **61.29%** | 92.12% | 6,939 |
+| `…-rule-intent` (trio + rendered intent) | 4.00 | 66.73% | 60.08% | 90.03% | 7,312 |
+| A/A (`select-mixed-rule`, second run) | 3.00 | 64.92% | 60.48% | 93.17% | 5,451 |
+
+The pre-registered bars were a ceiling of **+3.0pp**, a score of **+1.0pp**, conversion within 1.0pp
+and a price of at most 4.05 calls. The ceiling moved **+0.40pp** for the row source and **+0.60pp** for
+the intent source; the score moved **0.00pp** and **−1.21pp**; conversion lost 0.56pp and 2.65pp; the
+price was 4.00 calls each. Every accuracy criterion failed.
+
+**The A/A is what makes that a verdict rather than a disappointment.** The same arm, run twice in the
+same dispatch, moved its own pool ceiling **−1.21pp** (64.92% against 66.13%) and its own score
+−0.81pp. So the quantity a fourth candidate is supposed to move is already moving by ±1.2pp between
+two draws of one arm: a +0.4 or +0.6pp ceiling delta is not a small gain, it is **indistinguishable
+from resampling**, and even the direction of the two sources disagrees.
+
+**The mechanism reading says why.** The fourth candidate was correct on 56.25% of questions (rows) and
+44.96% (intent) — it is a perfectly good candidate. But it was the *only* correct candidate on **10**
+questions (2.02%) and **7** questions (1.41%), and the rule adopted it on 5 of each. A fourth prompt
+from the same model is ~80% redundant with the three prompts that preceded it: the trio already
+returns one distinct fingerprint on 71.0% of questions, so what the fourth prompt mostly adds is a
+paraphrase. That is the same redundancy `select-intent`'s dev reading measured in a different way
+(87.4% rendering, 2.22pp of ceiling at 1,532 questions — a rate that would predict eleven cases on
+496 questions; this run found three).
+
+Two costs are worth naming for anyone about to buy a fourth prompt anyway: **+29% tokens per correct
+answer** for the row source and **+36%** for intent, against a 3-call parent. The row block also
+carries a real prompt expense (3,121 → 4,018 prompt tokens per question) because three stored rows per
+table is text.
+
+**Verdict.** The candidate side closes for *prompt-family* sources: a fourth prompt from the same base
+model cannot reach the 33.87% of questions whose pool holds no correct statement, because it is the
+same model making the same mistake with different instructions. What is left is a candidate that
+differs in **weights** rather than in words — a second base model in the pool, which the harness
+already supports (`Arm.secondModel`, `CROSS_SOURCES`) — or a generation that spends two calls on one
+question instead of one call on a fourth prompt. Neither is a prompt change, and both are priced
+before they are built: the second-model candidate has to lift the ceiling by ≥ 3pp while staying
+inside 4 calls, which is the same bar this run failed.
