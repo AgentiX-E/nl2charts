@@ -153,7 +153,12 @@ describe('http provider', () => {
     });
     expect(lastAuth).toBe('Bearer secret');
     expect(lastBody).toMatchObject({ model: 'test-model', temperature: 0 });
-    expect(lastBody).not.toHaveProperty('max_tokens');
+    // The answer cap is sent on a chat family too, from the declared ceiling. It used to be sent
+    // only to a reasoning endpoint, and the consequence was measured: `deepseek-v4-pro` answered
+    // one Mini-Dev question with 21,932 completion tokens and no statement, because nothing in
+    // the request named a cap and the endpoint applied its own. The field documents itself as the
+    // number the pipeline chooses — a number the pipeline never sent is a declaration.
+    expect(lastBody.max_tokens).toBe(4096);
     expect(lastBody).not.toHaveProperty('response_format');
   });
 
@@ -922,5 +927,97 @@ describe('a refusal this layer cannot read', () => {
     await expect(provider.complete({ messages: [] })).rejects.toSatisfy(
       (error: unknown) => isNl2ChartsError(error) && error.code === 'NL2C_E_LLM_REJECTED' && !('detail' in error.details),
     );
+  });
+});
+
+describe('why the endpoint stopped', () => {
+  const answer = (body: unknown): typeof fetch =>
+    (async () => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })) as unknown as typeof fetch;
+
+  const reply = (finish: unknown): Record<string, unknown> => ({
+    model: 'm',
+    choices: [{ finish_reason: finish, message: { content: 'SELECT 1' } }],
+    usage: { prompt_tokens: 4, completion_tokens: 2 },
+  });
+
+  it('carries the stop reason the endpoint reported', async () => {
+    const provider = createHttpProvider({ baseUrl: 'https://example.test/v1', model: 'm', fetchImpl: answer(reply('stop')) });
+    await expect(provider.complete({ messages: [{ role: 'user', content: 'q' }] })).resolves.toMatchObject({ finishReason: 'stop' });
+  });
+
+  it('carries a cut, which is the one reason the pipeline acts on', async () => {
+    const provider = createHttpProvider({ baseUrl: 'https://example.test/v1', model: 'm', fetchImpl: answer(reply('length')) });
+    await expect(provider.complete({ messages: [{ role: 'user', content: 'q' }] })).resolves.toMatchObject({ finishReason: 'length' });
+  });
+
+  it.each([
+    ['content_filter', 'content_filter'],
+    ['tool_calls', 'other'],
+    ['function_call', 'other'],
+    ['', undefined],
+    [undefined, undefined],
+    [null, undefined],
+  ] as const)('maps %s to %s', async (raw, expected) => {
+    // `other` rather than dropped: a reply that ended for an unmodelled reason still ended, and a
+    // column that reads `undefined` for it would fold it into "the endpoint said nothing".
+    const provider = createHttpProvider({ baseUrl: 'https://example.test/v1', model: 'm', fetchImpl: answer(reply(raw)) });
+    const response = await provider.complete({ messages: [{ role: 'user', content: 'q' }] });
+    expect(response.finishReason).toBe(expected);
+  });
+
+  it('omits the field rather than inventing a stop for a provider that says nothing', async () => {
+    const provider = createHttpProvider({
+      baseUrl: 'https://example.test/v1',
+      model: 'm',
+      fetchImpl: answer({ model: 'm', choices: [{ message: { content: 'SELECT 1' } }] }),
+    });
+    const response = await provider.complete({ messages: [{ role: 'user', content: 'q' }] });
+    expect('finishReason' in response).toBe(false);
+  });
+});
+
+describe('the answer cap the declaration names', () => {
+  const bodies: Record<string, unknown>[] = [];
+  const capture = (async (_url: unknown, init?: { body?: unknown }) => {
+    bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+    return new Response(JSON.stringify({ model: 'm', choices: [{ finish_reason: 'stop', message: { content: 'SELECT 1' } }] }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  }) as unknown as typeof fetch;
+
+  it('sends it on a chat family, which is where the leak was measured', async () => {
+    bodies.length = 0;
+    const provider = createHttpProvider({ baseUrl: 'https://example.test/v1', model: 'chat-model', fetchImpl: capture });
+    await provider.complete({ messages: [{ role: 'user', content: 'q' }] });
+    expect(bodies[0]?.max_tokens).toBe(4096);
+  });
+
+  it('sends it on a reasoning family, from its own declared ceiling', async () => {
+    bodies.length = 0;
+    const provider = createHttpProvider({ baseUrl: 'https://example.test/v1', model: 'deepseek-reasoner', fetchImpl: capture });
+    await provider.complete({ messages: [{ role: 'user', content: 'q' }] });
+    expect(bodies[0]?.max_tokens).toBe(8192);
+  });
+
+  it('lets the caller name its own budget, and sends that instead', async () => {
+    bodies.length = 0;
+    const provider = createHttpProvider({ baseUrl: 'https://example.test/v1', model: 'chat-model', fetchImpl: capture });
+    await provider.complete({ messages: [{ role: 'user', content: 'q' }], maxTokens: 64 });
+    expect(bodies[0]?.max_tokens).toBe(64);
+  });
+
+  it('sends nothing when the declaration names no ceiling, rather than zero', async () => {
+    // Zero is not "no cap": several endpoints refuse it as an invalid budget, and one that
+    // accepted it would answer with an empty reply. The absent field is the honest spelling.
+    bodies.length = 0;
+    const provider = createHttpProvider({
+      baseUrl: 'https://example.test/v1',
+      model: 'custom',
+      capabilities: { family: 'chat', sampling: 'honoured', jsonMode: true, maxOutputTokens: 0, thinksAloud: false, thinkingSwitch: false },
+      fetchImpl: capture,
+    });
+    await provider.complete({ messages: [{ role: 'user', content: 'q' }] });
+    expect(bodies[0]).not.toHaveProperty('max_tokens');
   });
 });

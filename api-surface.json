@@ -43,6 +43,7 @@
     "RouteDecision",
     "Runtime",
     "StatementKind",
+    "attemptsStatement",
     "canonicalRow",
     "canonicalValue",
     "createCapabilities",
@@ -52,6 +53,7 @@
     "isDecimalLike",
     "negotiate",
     "resultSetsEqual",
+    "statementHeads",
     "tokenize",
     "type Engine",
     "type EngineResult",
@@ -64,7 +66,9 @@
   ],
   "core/guard": [
     "DEFAULT_POLICY",
+    "attemptsStatement",
     "inspectSql",
+    "statementHeads",
     "tokenize",
     "type GuardAccepted",
     "type GuardPolicy",
@@ -323,6 +327,7 @@
   ],
   "ai/llm": [
     "CallPurpose",
+    "FinishReason",
     "HttpProviderOptions",
     "LlmMessage",
     "LlmProvider",
@@ -334,6 +339,7 @@
     "UNLABELLED",
     "cachedTokensOf",
     "createHttpProvider",
+    "finishReasonOf",
     "reasoningTokensOf",
     "turnTemperature",
     "withCallCounter"

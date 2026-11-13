@@ -383,6 +383,22 @@ jobs:
       # 34pp column nothing had ever measured and the 4.6pp column everything had been.
       - name: Where the candidate set had no answer
         run: pnpm bench:bird:gap
+      # The taxonomy's own audit, and the only step in this chain that reads a *refusal* rather
+      # than a result.
+      #
+      # A report states why each case failed, and the names are the whole value of the column: a
+      # `guard` failure says an unsafe statement was refused, a `shape` failure says a reply held
+      # no statement. Until this step existed, nothing checked that the name matched the bytes,
+      # and on `deepseek-v4-pro` (run 43262574193) six of 992 rows were prose published as
+      # `guard` rejections with `unsupported character "?"` as the reason — the question mark was
+      # in the model's own aside. The committed dev artifact holds three more, on the chat model
+      # and in three different arms, so this is a property of the report and not of one endpoint.
+      #
+      # `--strict` because this file is this run's own output: a contradiction here is a
+      # regression in the fix, and the fix is what keeps a repair turn from being spent on a
+      # safety problem the model does not have.
+      - name: Whether each refusal matched the reply behind it
+        run: pnpm bench:bird:channel eval/out/bird-eval.json --strict
       # The next level down, and now a gate rather than a measurement: the values bucket is
       # split into the clause a fix would change, and on both splits it reaches a named cause
       # for more than 99% of the bucket. `--strict` says what a drop below four fifths would

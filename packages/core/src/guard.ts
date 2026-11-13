@@ -246,6 +246,41 @@ export function tokenize(sql: string): Token[] {
   return tokens;
 }
 
+/**
+ * The words a statement may begin with, as the policy itself names them.
+ *
+ * Both lists, deliberately. `select` is a statement this guard accepts and `insert` is one it
+ * refuses, but a reply that begins with either is a reply that *attempted* a statement — and
+ * that is a different fact from a reply that never attempted one. The two failures have
+ * different fixes: an unsafe statement is fixed by writing a safer one, and prose is fixed by
+ * writing a statement at all. Telling a model its prose "was rejected before it ran" sends it
+ * looking for a safety problem it does not have.
+ *
+ * Derived from the policy rather than written out again, because a second copy of this list
+ * would drift the first time someone adds a banned word: the guard would know `replace` is SQL
+ * and the classifier would call it prose.
+ */
+export function statementHeads(policy: GuardPolicy = DEFAULT_POLICY): ReadonlySet<string> {
+  return new Set([...policy.allowedKinds, ...policy.bannedWords]);
+}
+
+/**
+ * Whether a reply begins with the first word of a statement.
+ *
+ * Read rather than tokenized: `tokenize` refuses a character it cannot classify, and the
+ * replies this answers for are exactly the ones it refuses — prose, a stray `?`, an apostrophe
+ * the model forgot to close. A classifier that throws on its own input reports nothing.
+ *
+ * `(` is skipped because `(SELECT …) UNION (SELECT …)` is a statement; `sql:` is skipped
+ * because `extractSql` accepts it as a prefix and two readers that disagree about what a
+ * statement looks like would classify the same reply in two directions.
+ */
+export function attemptsStatement(sql: string, policy: GuardPolicy = DEFAULT_POLICY): boolean {
+  const head = /^[(\s]*(?:sql:\s*)?([A-Za-z_][A-Za-z0-9_$]*)/i.exec(sql);
+  if (head?.[1] === undefined) return false;
+  return statementHeads(policy).has(head[1].toLowerCase());
+}
+
 function hasTopLevelLimit(tokens: readonly Token[]): boolean {
   let depth = 0;
   for (const token of tokens) {

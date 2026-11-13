@@ -157,10 +157,46 @@ export interface LlmUsage {
   readonly reasoningTokens?: number;
 }
 
+/**
+ * Why the endpoint stopped writing.
+ *
+ * Four values rather than the vendor's open string set, because the pipeline has exactly three
+ * uses for it: `length` means the reply was cut off and cannot be the whole answer, `stop` means
+ * the model chose to end, `content_filter` means the vendor ended it, and everything else is a
+ * reason this code cannot act on. Keeping the vendor's own vocabulary would give a caller a
+ * string it has to pattern-match, which is how a taxonomy becomes a guess.
+ *
+ * `undefined` is not `stop`: an endpoint that says nothing about why it stopped has not said it
+ * finished. That difference is what lets a report count truncations instead of assuming them.
+ */
+export type FinishReason = 'stop' | 'length' | 'content_filter' | 'other';
+
+/**
+ * The vendor's stop reason, mapped onto the four this package acts on.
+ *
+ * `tool_calls` and the vendors' other extensions land in `other` rather than being dropped: a
+ * reply that ended for an unmodelled reason is still a reply that ended, and a column that reads
+ * `undefined` for it would fold it into "the endpoint said nothing".
+ */
+export function finishReasonOf(raw: unknown): FinishReason | undefined {
+  if (typeof raw !== 'string' || raw.length === 0) return undefined;
+  if (raw === 'stop' || raw === 'length' || raw === 'content_filter') return raw;
+  return 'other';
+}
+
 export interface LlmResponse {
   readonly text: string;
   readonly model: string;
   readonly usage?: LlmUsage;
+  /**
+   * Why the endpoint stopped, when it said.
+   *
+   * Carried on the response rather than folded into the text because the text cannot show it: a
+   * statement cut at the token cap and a statement the model chose to end are the same bytes up
+   * to the cut, and the difference is the whole question. Optional so a hand-written provider
+   * still compiles — absent means "this provider does not report it", which is a third fact.
+   */
+  readonly finishReason?: FinishReason;
   /**
    * Parameters the request carried that this endpoint does not honour.
    *
@@ -496,10 +532,16 @@ export function createHttpProvider(options: HttpProviderOptions): LlmProvider {
       // cannot be split into "thought for 540, wrote 54" — which is the whole question a
       // reasoning-alias comparison asks.
       const reasoningTokens = reasoningTokensOf(payload.usage);
+      // Read on the success path as well as the failure path. The failure path above already
+      // names the finish reason in its message; here it is the answer's own property, and the
+      // reply that most needs it — twenty thousand tokens of deliberation that never reached a
+      // statement — arrives with status 200 and content.
+      const finishReason = finishReasonOf(choice?.finish_reason);
       const model = typeof payload.model === 'string' ? payload.model : options.model;
       return {
         text: content,
         model,
+        ...(finishReason === undefined ? {} : { finishReason }),
         usage: {
           promptTokens: Number.isFinite(promptTokens) ? promptTokens : 0,
           completionTokens: Number.isFinite(completionTokens) ? completionTokens : 0,

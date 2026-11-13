@@ -43,7 +43,9 @@ export interface ModelCapabilities {
    *
    * For a reasoning model this is the final response only — the chain of thought has its own
    * budget and does not count against it. It is declared here because the endpoint's default is
-   * a number the pipeline never chose and cannot see.
+   * a number the pipeline never chose and cannot see, and it is *sent* on every request that
+   * names no budget of its own: a declared ceiling that never reaches the wire is a number the
+   * report prints and the endpoint never reads.
    */
   readonly maxOutputTokens: number;
   /**
@@ -143,13 +145,17 @@ export interface AdaptedRequest {
  *
  * 1. A sampling parameter the endpoint ignores is removed, because sending it makes the meter
  *    lie. `temperature: null` is already absent by contract and is not reported.
- * 2. A reasoning endpoint is given an answer budget when the caller named none. The vendor's
- *    default is not a decision this repository made, and a truncated answer reads as a wrong
- *    one (`finish_reason=length` with empty content is diagnosed in `provider.ts`).
+ * 2. Every endpoint is given an answer budget when the caller named none, from
+ *    `maxOutputTokens`. The vendor's default is not a decision this repository made, and a
+ *    truncated answer reads as a wrong one (`finish_reason=length` with empty content is
+ *    diagnosed in `provider.ts`). The rule used to apply to `reasoning` alone, which left the
+ *    family the field was written for with no cap at all.
  * 3. JSON mode on an endpoint that does not serve it is refused here, with the feature named,
  *    rather than sent and answered with a 400 that reads as a bad key.
- * 4. Nothing else is touched. In particular a chat request is returned byte-identical, so every
- *    published reading taken before this file existed remains reproducible.
+ * 4. Nothing else is touched. A chat request gains `max_tokens` and is otherwise unchanged, so
+ *    the readings taken before this file existed are reproducible by reading the column that
+ *    says which cap was in force — which is why the cap is a declared field and not a constant
+ *    in the request builder.
  */
 export function adaptRequest(request: LlmRequest, capabilities: ModelCapabilities): AdaptedRequest {
   if (request.json === true && !capabilities.jsonMode) {
@@ -187,7 +193,14 @@ export function adaptRequest(request: LlmRequest, capabilities: ModelCapabilitie
   }
 
   if (request.maxTokens !== undefined) next.maxTokens = request.maxTokens;
-  else if (capabilities.family === 'reasoning') next.maxTokens = capabilities.maxOutputTokens;
+  // Sent for every family, from the number the declaration already carries. The field's own
+  // documentation says it exists because "the endpoint's default is a number the pipeline never
+  // chose and cannot see" — and until this line, that number was sent only for `reasoning`,
+  // so the pipeline still could not see it for the family that needs it most. Measured on
+  // `deepseek-v4-pro` (Mini-Dev, run 43262574193): one reply ran to 21,932 completion tokens
+  // — 83,036 characters of deliberation that never reached a statement — because no `max_tokens`
+  // accompanied the request and the endpoint applied its own ceiling.
+  else if (capabilities.maxOutputTokens > 0) next.maxTokens = capabilities.maxOutputTokens;
 
   if (request.json !== undefined) next.json = request.json;
   // The mode selector. Sent only where the endpoint declared it serves one, and counted when it

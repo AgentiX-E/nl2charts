@@ -614,10 +614,29 @@ describe('what a repair turn is told', () => {
   });
 
   it('records the class of every rejected attempt', async () => {
+    // `DELETETE` is a misspelling, so the reply opens with a word the policy does not name as SQL
+    // and is classified as prose rather than as an unsafe statement. That is a deliberate trade and
+    // the class now says `shape`: the observed population of unreadable replies is prose (nine rows
+    // across 7,440 case-scored rows in two artifacts), the theoretical one is a misspelled head
+    // (none), and a model told "that reply contained no statement" writes one, while a model told
+    // "your statement was unsafe" about prose spends the turn on a defect it does not have. The
+    // statement itself is still carried on the failure, so the write attempt stays visible in the
+    // artifact — only the sentence the model is given changed.
     const { provider } = fixed('DELETETE FROM students');
     const pipeline = createPipeline({ provider, maxRepairs: 2, prompt: { dialect: 'SQLite' } });
     const error = await pipeline.ask({ question: 'students', schema: tables }).catch((reason: unknown) => reason);
-    expect((error as { details: { failureClasses: string[] } }).details.failureClasses).toEqual(['guard', 'guard', 'guard']);
+    const details = (error as { details: { failureClasses: string[]; lastSql: string } }).details;
+    expect(details.failureClasses).toEqual(['shape', 'shape', 'shape']);
+    expect(details.lastSql).toBe('DELETETE FROM students');
+  });
+
+  it('still calls a real write attempt what it is', async () => {
+    // The other side of that trade, pinned: a head the policy does name is refused as a guard
+    // rejection, because the reply *is* a statement and the refusal *is* about safety.
+    const { provider } = fixed('DELETE FROM students');
+    const pipeline = createPipeline({ provider, maxRepairs: 1, prompt: { dialect: 'SQLite' } });
+    const error = await pipeline.ask({ question: 'students', schema: tables }).catch((reason: unknown) => reason);
+    expect((error as { details: { failureClasses: string[] } }).details.failureClasses).toEqual(['guard', 'guard']);
   });
 
   it('spends three repairs by default, so four attempts in total', async () => {

@@ -1958,6 +1958,15 @@ export interface CaseRun extends CaseOutcome {
    * a three-sample arm's profile look more stable than its first call is.
    */
   readonly shape?: ReplyShape;
+  /**
+   * The endpoint stopped at the answer cap while the statement still parsed.
+   *
+   * The one flag that separates "this arm wrote a shorter statement" from "this arm's endpoint
+   * cut it off": with a cap now sent on every request, a difference between two arms can be a
+   * difference between two caps, and without this column that difference would be read as a
+   * difference in the model.
+   */
+  readonly truncated?: boolean;
   /** Candidates the selector was not offered because their result was empty. */
   readonly emptyDropped?: number;
   /** True when the winner returned nothing and one more turn was spent. */
@@ -7234,6 +7243,11 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
         // engine refused are the same prompt behaving the same way, and a profile that only
         // counted the successes would describe the failures as a different model.
         const shape = asked.shape === undefined ? {} : { shape: asked.shape };
+        // Carried beside the shape for the same reason the shape is carried: the endpoint said it
+        // stopped at the cap, and a statement that still parsed under a cut is a statement the
+        // artifact should not present as the whole answer. Per case, because the arm-level reading
+        // is a sum of these and a second definition here would be a second number.
+        const cut = asked.truncated === true ? { truncated: true } : {};
         const predicted = await oracle.run(question.db_id, asked.sql);
         if (!predicted.ok) {
           return {
@@ -7251,6 +7265,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
             ...(asked.decomposedSteps === undefined ? {} : { decomposition: { candidates: 1, steps: asked.decomposedSteps } }),
             ...demonstrationsOf(question),
             ...shape,
+            ...cut,
             error: `execution: ${predicted.error ?? 'unknown'}`,
           };
         }
@@ -7275,6 +7290,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
           ...(asked.decomposedSteps === undefined ? {} : { decomposition: { candidates: 1, steps: asked.decomposedSteps } }),
           ...demonstrationsOf(question),
           ...shape,
+          ...cut,
         };
       } catch (error) {
         // A repair arm reports the statement it gave up on, so a failure is
@@ -8020,6 +8036,11 @@ export function caseRows(
       // and it was one field away.
       ...(run.errorKind === undefined ? {} : { errorKind: run.errorKind }),
       ...(run.error === undefined ? {} : { error: run.error.slice(0, 160) }),
+      // The cut, on the cases it reached. It is written at the case level rather than summed into
+      // the arm because a cap is priced per case: "twelve cases came back truncated" is a fact
+      // about a run, and "these twelve" is the only form in which it can be paired against a
+      // second arm or re-read against a second cap.
+      ...(run.truncated === undefined ? {} : { truncated: run.truncated }),
       // What the zero-row lever did on this case, when the arm declares it.
       //
       // The arm funnel says how many cases triggered; a reading of "the lookup answered this one
