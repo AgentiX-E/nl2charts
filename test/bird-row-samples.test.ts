@@ -95,6 +95,27 @@ describe('rendering the block', () => {
   it('returns nothing when the tables are empty', () => {
     expect(renderRowSamples([items], reader({}))).toBe('');
   });
+
+  it('drops a table the reader never filled instead of throwing', () => {
+    // The cache behind this reader is keyed on the tables the run priced, and the tables a prompt
+    // asks for are not always those: a mixed arm's source falls back to the card's first three
+    // when its linker names nothing, and a fallback table can be outside the set the cache filled.
+    // Run `43466869878` threw here — `Cannot read properties of undefined (reading 'slice')` — and
+    // a dispatch that dies in the prompt builder publishes no number at all.
+    const partial = (table: string): readonly (readonly unknown[])[] | undefined =>
+      table === 'items' ? [['pen', 'active']] : undefined;
+    const onCourse: RowSampleTable = { table: 'courses', columns: [{ name: 'title', type: 'text' }] };
+    expect(renderRowSamples([items, onCourse], partial)).toBe('items: name=pen, status=active');
+  });
+
+  it('returns nothing, rather than throwing, when the reader filled no table at all', () => {
+    // The same fault on every table: the "nothing fits" branch reads the first table's first row
+    // and would throw on the same undefined, so the guard has to be in both places or the block is
+    // safe only while the budget is generous.
+    const empty = (): readonly (readonly unknown[])[] | undefined => undefined;
+    expect(renderRowSamples([items], empty, { budget: 5 })).toBe('');
+    expect(renderRowSamples([items], empty)).toBe('');
+  });
 });
 
 describe('the budget', () => {

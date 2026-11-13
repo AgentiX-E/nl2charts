@@ -880,6 +880,24 @@ export function assertMixedSources(sources: readonly string[] = MIXED_SOURCES): 
 }
 
 /**
+ * The row cap a run has to read its cache at, across the arms it requested *and their sources*.
+ *
+ * A mixed arm declares no `rowSamples` of its own: the block belongs to the source that sends it,
+ * and that source is an arm. Reading the cap off the requested arms alone answered `undefined` for
+ * `select-mixed-rule-rows`, so the cache stayed empty and the first render of that source's prompt
+ * threw on a table nobody had read — `Cannot read properties of undefined (reading 'slice')`, run
+ * `43466869878`. The cap is the maximum over both, because one cache serves every arm and the
+ * largest request decides how deep it goes; the caller resolves the `#2` suffix of an A/A copy
+ * before asking, since a name is not an arm.
+ */
+export function rowSampleRows(arms: readonly Arm[]): number | undefined {
+  const caps = arms
+    .flatMap((arm) => [arm, ...(arm.mixed ?? []).map((source) => resolveArm(parseMixedSource(source).arm))])
+    .flatMap((arm) => (arm === undefined || arm.rowSamples === undefined ? [] : [arm.rowSamples]));
+  return caps.length === 0 ? undefined : Math.max(...caps);
+}
+
+/**
  * A mixed arm's candidate count, checked against the sources it draws from.
  *
  * A source may be drawn more than once. `vote` is the number of candidates the arm buys and the
@@ -6366,20 +6384,22 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
    * different thing on two runs of the same arm if a driver ever returned rows in another order.
    */
   // Every database gets an entry before any arm is looked at, and every table gets one when the
-  // rows are read. Both exist so the read below is total: a `?? new Map()` fallback there would be
-  // a branch no run can take, and an untestable guard is the thing this file keeps removing.
+  // rows are read. Both exist so the read below is total *for the tables it filled* — and which
+  // tables those are is `rowSampleRows`'s answer, not the requested arms' own flags: a mixed arm
+  // carries no `rowSamples`, its source does, and reading the cap off the parent left this cache
+  // empty for every mixed arm with a row source (run `43466869878`).
   const rowCache = new Map<string, Map<string, readonly (readonly unknown[])[]>>();
   for (const db of schemas.keys()) rowCache.set(db, new Map());
   // `settings.arms` holds names, including an A/A copy's `#2` suffix, so the arm is looked up here
   // rather than assumed: a filter over strings would compare `undefined` to `undefined` and load
   // nothing while reporting that it had. The row count travels with the arm that asked for it, so
   // nothing below reads `rowSamples` a second time and decides again what `undefined` means.
-  const rowArms = settings.arms.flatMap((name) => {
+  const requestedArms = settings.arms.flatMap((name) => {
     const arm = ARMS.find((candidate) => candidate.name === name.split('#')[0]);
-    return arm?.rowSamples === undefined ? [] : [{ arm, rows: arm.rowSamples }];
+    return arm === undefined ? [] : [arm];
   });
-  if (rowArms.length > 0) {
-    const wanted = Math.max(...rowArms.map((entry) => entry.rows));
+  const wanted = rowSampleRows(requestedArms);
+  if (wanted !== undefined) {
     for (const [db, schema] of schemas) {
       const perTable = rowCache.get(db) as Map<string, readonly (readonly unknown[])[]>;
       for (const table of schema) {
@@ -6411,9 +6431,11 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
    */
   const rowsFor = (arm: Arm, question: BirdQuestion): string | undefined => {
     if (arm.rowSamples === undefined) return undefined;
-    // Both reads are total by construction, and the casts say it once instead of twice: `schemas`
-    // throws for a database its manifest has no entry for, and every database in `schemas` has a
-    // cache entry. The alternative was two `??` fallbacks, neither of which any run can reach.
+    // The database read is total by construction: `schemas` throws for a database its manifest has
+    // no entry for, and every database in `schemas` has a cache entry. The table read is *not* —
+    // the cache holds the tables `rowSampleRows` priced, and a mixed arm's fallback can name a table
+    // outside that set — so it is typed as partial and the renderer treats a missing table as one
+    // with nothing to show.
     const schema = schemas.get(question.db_id) as SchemaTable[];
     const perTable = rowCache.get(question.db_id) as ReadonlyMap<string, readonly (readonly unknown[])[]>;
     const named = linkedTables(question.question, schema, SHIPPED_RECALLERS);
@@ -6425,7 +6447,10 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
     const chosen = seeded.some((table) => sampleableColumns(table).length > 0) ? seeded : schema.slice(0, 3);
     // An empty render is passed through rather than turned into `undefined`: the prompt builder
     // already refuses to print an empty block, and a second guard here would be a second rule.
-    return renderRowSamples(chosen, (table) => perTable.get(table) as readonly (readonly unknown[])[], {
+    // No cast on the read: a table this cache never filled is a table the renderer drops, which is
+    // what it does with a table that stores no sample. The cast that used to be here claimed the
+    // read was total and the first mixed arm with a row source proved it was not.
+    return renderRowSamples(chosen, (table) => perTable.get(table), {
       rows: arm.rowSamples,
       budget: ROW_SAMPLE_BUDGET,
     });

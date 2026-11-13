@@ -57,6 +57,7 @@ import {
   parseMixedSource,
   promptFor,
   PROJECTION_RULE,
+  rowSampleRows,
   readPinnedDefinitions,
   repairAccounting,
   resolveArm,
@@ -1234,6 +1235,20 @@ describe('the fourth candidate, bought by a rule instead of by a selector', () =
     expect(bought[0]?.notes).toBe(parent.notes);
     expect(bought[0]?.linking).toBe(parent.linking);
     expect(bought[1]?.linking).toBe(parent.linking);
+  });
+
+  it('prices the row cache from the sources, not from the mixed arm that carries none', () => {
+    // This is the defect the first dispatch of these arms found, and it is a defect of derivation
+    // rather than of rendering: a mixed arm has no `rowSamples` of its own, so a cap read off the
+    // requested arms answered `undefined` for the arm whose *source* asks for rows. The cache was
+    // then never filled and the prompt builder crashed on a table nobody had read.
+    expect(rowSampleRows([parent])).toBeUndefined();
+    expect(rowSampleRows([bought[0] as Arm, bought[1] as Arm])).toBe(3);
+    expect(rowSampleRows([resolveArm('inline+evidence+rows') as Arm])).toBe(3);
+    // One cache serves every arm, so the deepest request decides how far it goes.
+    expect(rowSampleRows([resolveArm('inline+evidence+rows') as Arm, { ...(parent as Arm), rowSamples: 7 }])).toBe(7);
+    // A set with no row source anywhere still asks for nothing, which is every run before today.
+    expect(rowSampleRows([resolveArm('select-mixed') as Arm, resolveArm('select-cross') as Arm])).toBeUndefined();
   });
 
   it('renders the row block, so the source is not its parent under another name', () => {
