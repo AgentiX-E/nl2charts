@@ -136,6 +136,14 @@ interface Plan {
    */
   readonly gold?: Readonly<Record<string, string>>;
   /**
+   * Questions whose first answer the endpoint says it cut at the answer cap.
+   *
+   * The statement is complete in the fixture — the point is not to send half a statement but to
+   * make `finish_reason: 'length'` arrive beside one, which is the case the pipeline has to report
+   * as `truncated` instead of presenting as the model's whole answer.
+   */
+  readonly cut?: readonly string[];
+  /**
    * The reply a prompt that asks for a query object gets, keyed on the question.
    *
    * Separate from `first` because the intent source is asked with the same question text as the
@@ -160,7 +168,10 @@ interface Plan {
  * selection, a repair turn, an empty-result turn, a semantics request. Keying on the
  * prompt is what makes one endpoint serve all of them.
  */
-function replyFor(request: EndpointRequest, plan: Plan): { status?: number; content: string; delayMs?: number; reasoningTokens?: number } {
+function replyFor(
+  request: EndpointRequest,
+  plan: Plan,
+): { status?: number; content: string; delayMs?: number; reasoningTokens?: number; finishReason?: 'length' } {
   const delayMs = plan.delayMs?.(request);
   const reasoningTokens = plan.reasoning?.(request);
   const status = plan.fail?.(request);
@@ -250,7 +261,12 @@ function replyFor(request: EndpointRequest, plan: Plan): { status?: number; cont
     ? plan.decompose(question)
     : undefined) ?? plan.first?.(question) ?? gold;
   const body = plan.steps === true ? `STEP 1: ${answer}\nSTEP 2: select 1\n\n` + fenced(answer) : fenced(answer);
-  return send(body);
+  // The answer cap, on the questions a scenario says overran it. Only the first attempt: a repair
+  // turn is the model answering again, and a fixture that cut every turn would be testing the cap
+  // rather than the report.
+  const cut = plan.cut?.includes(question) === true;
+  const sent = send(body);
+  return cut ? { ...sent, finishReason: 'length' as const } : sent;
 }
 
 interface Scenario {
@@ -1168,6 +1184,27 @@ describe('inputs an arm needs and does not have', () => {
       logs.mockRestore();
       await endpoint.close();
     }
+  });
+});
+
+describe('an answer the endpoint says it cut', () => {
+  it('reports the cut on the case instead of presenting the statement as the whole answer', async () => {
+    // The pipeline keeps a statement that parsed under a cut — refusing it would turn a possible
+    // correct answer into a certain wrong one because of a cap this repository chose — and the
+    // artifact has to say so, or a difference between two arms can be a difference between two
+    // caps read as a difference in the model. Measured motive: one `deepseek-v4-pro` reply ran to
+    // 21,932 completion tokens with no statement in it, and nothing in the report could say it had
+    // been cut because the endpoint's stop reason was dropped on the success path.
+    const first = Object.keys(GOLD)[0] ?? '';
+    const result = await run({ plan: { first: correct, cut: [first] }, env: { BIRD_ARMS: 'names' } });
+    const cases = result.report.cases as { id: string; passed: boolean; truncated?: boolean }[];
+    const cut = cases.find((row) => row.truncated === true);
+    expect(cut).toBeDefined();
+    // The statement still parsed and still counted: the flag is a footnote, not a verdict.
+    expect(cut?.passed).toBe(true);
+    // And the cases that were not cut carry no key at all, because absent is not `false`.
+    const uncut = cases.filter((row) => row.truncated === undefined);
+    expect(uncut.length).toBe(cases.length - 1);
   });
 });
 
