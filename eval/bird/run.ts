@@ -2884,11 +2884,43 @@ export function partialPath(out: string): string {
   return `${out}.partial.json`;
 }
 
+/**
+ * What this run told the endpoint to do with its request, as one short string.
+ *
+ * The four locks on a resume name the arm, the split, the model and the question set, and all four
+ * can match while the *request* differs: `deepseek-v4-pro` takes `{family: 'chat'}` and
+ * `{family: 'reasoning'}` under one name, and a run that changed its declaration halfway through
+ * would publish a table in which half the answers were written under a 4,096-token budget and half
+ * under 8,192 with sampling removed. That is not two halves of one reading; it is two readings with
+ * one label. Measured motive: an acceptance run was stopped at 366 of 496 calls by a declaration
+ * that was wrong, and its 366 paid cases were deliberately not resumed for exactly this reason.
+ *
+ * A digest rather than the record itself: the fields are the thing being compared, and the JSON
+ * beside them is noise in a file whose purpose is a short refusal message. Written in a fixed field
+ * order, never by iterating the object, so a field added later cannot reorder two equal records into
+ * two different digests.
+ */
+export function declarationDigest(model: string, overrides?: Partial<ModelCapabilities>): string {
+  const declared = capabilitiesOf(model, overrides);
+  const canonical = JSON.stringify([
+    declared.family,
+    declared.sampling,
+    declared.jsonMode,
+    declared.maxOutputTokens,
+    String(declared.answerBudgetCeiling),
+    declared.thinksAloud,
+    declared.thinkingSwitch,
+  ]);
+  return createHash('sha256').update(canonical).digest('hex').slice(0, 16);
+}
+
 /** A partial run on disk: what produced it, over which questions, and what it finished. */
 export interface PartialRun {
   readonly arm: string;
   readonly split: string;
   readonly model: string;
+  /** `declarationDigest` of the request shape, so a resume cannot straddle two of them. */
+  readonly declaration: string;
   /** Every question the interrupted run set out to score, so a resumed run cannot mix populations. */
   readonly questionIds: readonly number[];
   readonly cases: readonly { readonly questionId: number; readonly run: CaseRun }[];
@@ -2908,6 +2940,7 @@ export function readPartialRun(
     readonly arm: string;
     readonly split: string;
     readonly model: string;
+    readonly declaration: string;
     readonly questionIds: readonly number[];
   },
 ): Map<number, CaseRun> {
@@ -2919,6 +2952,13 @@ export function readPartialRun(
   if (parsed.arm !== expected.arm) drift.push(`arm ${String(parsed.arm)} != ${expected.arm}`);
   if (parsed.split !== expected.split) drift.push(`split ${String(parsed.split)} != ${expected.split}`);
   if (parsed.model !== expected.model) drift.push(`model ${String(parsed.model)} != ${expected.model}`);
+  // The fifth lock, and the one no other field covers: same arm, same split, same model name, and a
+  // different request. `parsed.declaration` is `undefined` on a file written before this field
+  // existed, and an absent declaration is a mismatch rather than a pass — a run that cannot say
+  // what it declared cannot be welded to one that can.
+  if (parsed.declaration !== expected.declaration) {
+    drift.push(`declaration ${String(parsed.declaration)} != ${expected.declaration}`);
+  }
   const sameSet =
     parsed.questionIds.length === expected.questionIds.length &&
     parsed.questionIds.every((id, index) => id === expected.questionIds[index]);
@@ -2928,7 +2968,8 @@ export function readPartialRun(
   if (drift.length > 0) {
     throw new Error(
       `${path} was written by a different run (${drift.join('; ')}). A case's answer means the same thing only when ` +
-        'the arm, the split, the model and the question set match, so this file cannot be resumed into this run.',
+        'the arm, the split, the model, the request shape and the question set all match, so this file cannot be ' +
+        'resumed into this run.',
     );
   }
   return new Map(parsed.cases.map((entry) => [entry.questionId, entry.run]));
@@ -7425,6 +7466,9 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
           arm: name,
           split: settings.layout.split,
           model: settings.model,
+          // The shape of the request, not its name: a resume that straddled two declarations would
+          // publish one table over answers written under two budgets.
+          declaration: declarationDigest(settings.model, settings.capabilities),
           questionIds: cases.map((question) => question.question_id),
         });
   const startedAt = Date.now();
@@ -7483,6 +7527,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
           arm: name,
           split: settings.layout.split,
           model: settings.model,
+          declaration: declarationDigest(settings.model, settings.capabilities),
           questionIds: cases.map((question) => question.question_id),
           cases: cases.flatMap((question, index) => {
             const run = results[index];

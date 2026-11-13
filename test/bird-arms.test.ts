@@ -628,6 +628,9 @@ describe('A/A pairs', () => {
       ]),
     ).toThrow(/budget the endpoint spent thinking/);
     expect(() => assertArmProducedResults('names', [{ errorKind: 'truncated' }, { errorKind: 'execution' }])).not.toThrow();
+    // And the file has to survive a run whose failures carry no message at all, which is what a
+    // provider that threw a bare error produces: the guard still refuses, it just cannot quote one.
+    expect(() => assertArmProducedResults('names', [{ errorKind: 'truncated' }])).toThrow(/no error text/);
   });
 
   it('refuses a run where a tenth of the cases were cut at the budget, in its own words', () => {
@@ -644,6 +647,10 @@ describe('A/A pairs', () => {
     // And it never borrows the outage's sentence: an endpoint that answered every one of these
     // calls is the one thing this arm cannot blame.
     expect(() => assertFailureRate('names', cut)).not.toThrow(/outage/);
+    // A truncated case with no message: the sentence has to hold without quoting one.
+    expect(() => assertFailureRate('names', Array.from({ length: 10 }, () => ({ errorKind: 'truncated' })))).toThrow(
+      /first error: no error text/,
+    );
     expect(() => assertFailureRate('names', [{ errorKind: 'truncated' }, ...Array.from({ length: 19 }, () => ({}))])).not.toThrow();
   });
 
@@ -1511,6 +1518,12 @@ describe('the outage guard reads the run while it is still running', () => {
     expect(verdict).toContain('answerBudgetCeiling');
     // The word the other fault owns, absent: this run's calls were all answered.
     expect(verdict).not.toContain('outage');
+    // The same verdict when the failures carry no text: the count is the evidence, and a missing
+    // message must not turn into a missing verdict.
+    const quiet = createFailureBreaker('names', 100);
+    let last: string | null = null;
+    for (let call = 0; call < 11; call += 1) last = quiet.observe({ errorKind: 'truncated' }) ?? last;
+    expect(last).toContain('no error text');
   });
 
   it('counts only the provider, so a run of engine refusals is not stopped', () => {
