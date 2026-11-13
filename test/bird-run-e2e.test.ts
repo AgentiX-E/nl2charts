@@ -4343,6 +4343,86 @@ describe('a knockout behind the gate', () => {
 });
 
 /**
+ * The reconcile turn behind the gate: one statement, only where the pool disagreed.
+ *
+ * The cross-pool reading bought this turn on every question and lost to the free vote, and the
+ * funnel said why: 514 of 600 replies restated a candidate. Behind the gate the turn is not asked
+ * on the 73% of questions whose candidates returned the same rows -- there is nothing to reconcile
+ * -- and the `-novel` policy hands a restatement back rather than scoring a paraphrase.
+ */
+describe('a reconcile turn behind the gate', () => {
+  it('asks for a statement on the disagreeing cases only, and records what came back', async () => {
+    const result = await run({
+      plan: { first: correct, whenValues: IMPOSSIBLE_SHORT },
+      env: { BIRD_ARMS: 'select-mixed-gated,select-mixed-gated-reconcile' },
+    });
+    expect(result.code, result.printed.join('\n')).toBe(0);
+    const rows = result.report.arms as {
+      readonly arm: string;
+      readonly passed: number;
+      readonly calls: { readonly mean: number };
+      readonly spend?: { readonly asked: number };
+      readonly reconcile?: { readonly policy: string; readonly asked: number; readonly returned: number; readonly novel: number; readonly adopted: number };
+    }[];
+    const gated = rows.find((row) => row.arm === 'select-mixed-gated');
+    const reconciled = rows.find((row) => row.arm === 'select-mixed-gated-reconcile');
+    const asked = gated?.spend?.asked ?? 0;
+    expect(asked).toBeGreaterThan(0);
+    expect(asked).toBeLessThan(QUESTIONS.length);
+    // The same population as the selector's, and the same price: one call per question that had
+    // something to decide, nothing on the questions the gate answered by rule.
+    // The default plan answers with the gold statement, which is one of the candidates: a
+    // restatement, so `novel` is zero and the adopting policy scores it -- the null case of the
+    // lever, published rather than hidden.
+    expect(reconciled?.reconcile).toEqual({ policy: 'always', asked, returned: asked, novel: 0, executable: asked, adopted: asked });
+    expect(reconciled?.calls.mean).toBeCloseTo(3 + asked / QUESTIONS.length, 3);
+    // The default plan restates a candidate -- here the gold statement, which is one of them -- so
+    // nothing novel was written and the policy had nothing to adopt. That is the null case, and it
+    // is published rather than hidden: an arm whose funnel said `novel > 0` on this plan would be
+    // reading a reply the fixture never wrote.
+    expect(result.requests.filter((request) => request.prompt.includes('Write the statement that answers the question'))).toHaveLength(asked);
+    expect(reconciled?.passed).toBe(gated?.passed);
+  });
+
+  it('lets a statement nobody wrote become the answer, on the -novel policy', async () => {
+    // The lever's whole claim: a statement the candidates did not contain can be right where the
+    // pool was wrong. The fixture writes one (`select -1`, which runs and is wrong) so the two
+    // policies are distinguishable: the adopting arm scores it, the novel arm scores it as well --
+    // because it *is* novel -- and the vote's answer stands only on a restatement.
+    const result = await run({
+      plan: {
+        first: correct,
+        whenValues: IMPOSSIBLE_SHORT,
+        // A statement nobody wrote, with the rows a candidate already returned: the shape of a
+        // correction that keeps what one group got right.
+        reconcile: (question) => `select * from (${GOLD[question] ?? 'select 1'}) as reconciled`,
+      },
+      env: { BIRD_ARMS: 'select-mixed-gated-reconcile-novel' },
+    });
+    expect(result.code, result.printed.join('\n')).toBe(0);
+    const rows = result.report.arms as {
+      readonly passed: number;
+      readonly reconcile?: { readonly asked: number; readonly novel: number; readonly adopted: number };
+    }[];
+    const decided = rows[0];
+    expect(decided?.reconcile?.asked).toBeGreaterThan(0);
+    // Every reply is a statement no candidate wrote, so the policy adopts all of them -- and the
+    // arm's score is the statement's, not the vote's.
+    // Every reply is a statement no candidate wrote and every one of them runs, so the policy
+    // adopts all of them: the delta this arm publishes is the corrections and nothing else.
+    expect(decided?.reconcile).toEqual({
+      policy: 'novel',
+      asked: decided?.reconcile?.asked,
+      returned: decided?.reconcile?.asked,
+      novel: decided?.reconcile?.asked,
+      executable: decided?.reconcile?.asked,
+      adopted: decided?.reconcile?.asked,
+    });
+    expect(decided?.reconcile?.adopted).toBe(decided?.reconcile?.asked);
+  });
+});
+
+/**
  * The one rewrite that needs no model judgement, priced end to end.
  *
  * The chain fixture's third question filters `cities.name` to a stored spelling — `Hangzhou` — and
