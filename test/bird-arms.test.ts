@@ -29,6 +29,7 @@ import {
   escapeKind,
   assertMixedFeasible,
   assertMixedSources,
+  assertCandidatePasses,
   assertCandidateSurvival,
   assertDecompositionFired,
   assertEmptyRetryFired,
@@ -1144,12 +1145,48 @@ describe('mixed arms declare their own sources', () => {
   const mixed = ARMS.filter((arm) => arm.mixed !== undefined);
 
   it('has at least the two arms under test', () => {
-    expect(mixed.map((arm) => arm.name).sort()).toEqual(['select-balanced', 'select-cross', 'select-cross-agree', 'select-cross-canon', 'select-cross-empty', 'select-cross-judge', 'select-cross-judge-canon', 'select-cross-judge-reasoning', 'select-cross-pooled', 'select-cross-pooled-agree', 'select-cross-pooled-dissent', 'select-cross-pooled-dissent-pair', 'select-cross-pooled-judge-reasoning', 'select-cross-pooled-reconcile', 'select-cross-pooled-reconcile-novel', 'select-cross-pooled-vote', 'select-cross-repair-all', 'select-cross-repair-second', 'select-cross-shuffled', 'select-cross-unhinted', 'select-dc', 'select-duo', 'select-intent', 'select-mixed', 'select-mixed+agree', 'select-mixed+dc', 'select-mixed+empty', 'select-mixed+empty-blind', 'select-mixed+values', 'select-mixed-pooled', 'select-mixed-pooled-vote', 'select-mixed-rule', 'select-samples', 'select-tagged', 'vote-cross', 'vote-mixed']);
+    expect(mixed.map((arm) => arm.name).sort()).toEqual(['select-balanced', 'select-cross', 'select-cross-agree', 'select-cross-canon', 'select-cross-empty', 'select-cross-judge', 'select-cross-judge-canon', 'select-cross-judge-reasoning', 'select-cross-pooled', 'select-cross-pooled-agree', 'select-cross-pooled-dissent', 'select-cross-pooled-dissent-pair', 'select-cross-pooled-judge-reasoning', 'select-cross-pooled-reconcile', 'select-cross-pooled-reconcile-novel', 'select-cross-pooled-vote', 'select-cross-repair-all', 'select-cross-repair-second', 'select-cross-shuffled', 'select-cross-unhinted', 'select-dc', 'select-duo', 'select-intent', 'select-mixed', 'select-mixed+agree', 'select-mixed+dc', 'select-mixed+empty', 'select-mixed+empty-blind', 'select-mixed+values', 'select-mixed-pooled', 'select-mixed-pooled-vote', 'select-mixed-rule', 'select-mixed-spread2', 'select-mixed-spread3', 'select-samples', 'select-tagged', 'vote-cross', 'vote-mixed']);
   });
 
-  it.each(mixed.map((arm) => [arm.name, arm] as const))('%s: candidates equal sources, and every source generates once', (name, arm) => {
-    expect(arm.vote, name).toBe(arm.mixed?.length);
+  it.each(mixed.map((arm) => [arm.name, arm] as const))('%s: candidates are a whole number of passes over the sources', (name, arm) => {
+    // A pass is a source drawn once. `vote = 6` over three sources is two passes: every prompt
+    // sampled twice, which is the only shape a repetition can take without making the candidate
+    // set askew — four candidates over three sources would draw one prompt twice and the other
+    // two once, and the arm would be a different experiment than its price says.
+    expect(arm.vote !== undefined && arm.mixed !== undefined && arm.vote % arm.mixed.length === 0, name).toBe(true);
     expect(() => assertMixedSources(arm.mixed)).not.toThrow();
+  });
+
+  it('counts a repeated source as a candidate, so the price is the number of draws', () => {
+    // The field the report prices is `vote`, and the loop draws exactly that many times:
+    // the source list is walked round-robin. A spread arm whose `vote` had been left at the
+    // source count would have been `select-mixed` under a new name — three calls, three
+    // candidates, and a comment claiming six.
+    const spread2 = resolveArm('select-mixed-spread2');
+    const spread3 = resolveArm('select-mixed-spread3');
+    expect(spread2?.vote).toBe((spread2?.mixed?.length ?? 0) * 2);
+    expect(spread3?.vote).toBe((spread3?.mixed?.length ?? 0) * 3);
+    // and they differ from the parent by that count and by nothing else: same prompts, same
+    // card, same selector, so the delta is about repetition rather than about a second lever.
+    const parent = resolveArm('select-mixed');
+    expect(spread2?.mixed).toEqual(parent?.mixed);
+    expect(spread3?.mixed).toEqual(parent?.mixed);
+    expect(spread2?.select).toBe(true);
+  });
+
+  it('refuses a candidate count that is not a whole number of passes', () => {
+    // Four candidates over three sources is the shape that looks affordable and is not: the
+    // round-robin draws the first prompt twice and the other two once, so the extra call buys a
+    // repetition of one prompt rather than a second opinion from three, and the arm is not the
+    // experiment its name and its price both describe.
+    const uneven = { ...(resolveArm('select-mixed') as Arm), name: 'select-mixed-uneven', vote: 4 };
+    expect(() => assertCandidatePasses(uneven)).toThrow(/whole number of passes/);
+    // The source rule still travels through it, so one list cannot be checked and the other not.
+    expect(() => assertCandidatePasses({ ...uneven, mixed: ['inline+evidence'] })).toThrow(/at least two sources/);
+    // And the shapes that are legal are silent — including the arm with no sources at all, which
+    // is every one-call arm in the catalogue and the case a guard that assumed `mixed` would miss.
+    expect(() => assertCandidatePasses(resolveArm('select-mixed') as Arm)).not.toThrow();
+    expect(() => assertCandidatePasses(resolveArm('inline+evidence') as Arm)).not.toThrow();
   });
 
   it('keeps the duo strictly inside the trio, so the comparison is a subset', () => {
