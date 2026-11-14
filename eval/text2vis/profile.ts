@@ -317,11 +317,9 @@ export function describeProfile(report: ProfileReport, cue: RuleReport): readonl
   // family, so the first published version printed `bar +142, scatter -26, bar -27, …` on the real
   // corpus — eight bars, one number each, and no column a reader could add up.
   const byFamily = new Map<ChartFamily, number>();
-  for (const entry of report.perLabel) {
-    byFamily.set(entry.family, (byFamily.get(entry.family) ?? 0) + (entry.top1 - cueOf(entry.family)));
-  }
+  for (const entry of report.perLabel) byFamily.set(entry.family, (byFamily.get(entry.family) ?? 0) + entry.top1);
   const moved = [...byFamily.entries()]
-    .map(([family, delta]) => ({ family, delta }))
+    .map(([family, top1]) => ({ family, delta: top1 - cueOf(family) }))
     .filter((entry) => entry.delta !== 0)
     .sort((left, right) => right.delta - left.delta || left.family.localeCompare(right.family));
   const lines = [

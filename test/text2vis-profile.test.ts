@@ -224,18 +224,23 @@ describe('the reading', () => {
     expect(lines).not.toContain('delta by family');
   });
 
-  it('sums a family once, even when several labels map to it', () => {
-    // The first published version of this line printed `bar +142, scatter -26, bar -27, scatter -30`
-    // on the real corpus: `perLabel` is keyed by *label* and the line is titled by *family*, so a
-    // family with eight labels appeared eight times and a reader could not add the column up.
+  it('sums a family once, and subtracts the cue total once, not once per label', () => {
+    // Two defects lived in this one line. `perLabel` is keyed by *label* and the line is titled by
+    // *family*, so a family with eight labels printed eight times; and `cueOf` returns the whole
+    // family's cue total, so subtracting it per label multiplied the negative side by the label count
+    // — the real corpus read `line -864` where the honest number is a few dozen.
+    //
+    // Both rows are `bar` labels on a share question, which the cue table answers `pie`: profile 0 of
+    // 2, cue 2 of 2, so the family's delta is exactly -2 and not -4.
     const inputs = [
-      row('Which region leads?', 'Bar Chart', regions(5)),
-      row('Which region leads?', 'Stacked Bar', regions(5)),
+      row('How has revenue changed over time?', 'Line Chart', regions(5)),
+      row('How has revenue changed over time?', 'Line  Chart', regions(5)),
     ];
     const lines = describeProfile(scoreProfile(inputs), scoreRule(inputs)).join('\n');
     const line = lines.split('\n').find((entry) => entry.includes('delta by family')) as string;
-    expect(line).toContain('bar +');
-    expect(line.match(/bar /g)?.length).toBe(1);
+    // Two line labels, cue right on both, profile wrong on both: -2, not -4.
+    expect(line).toContain('line -2');
+    expect(line.match(/line /g)?.length).toBe(1);
   });
 
   it('prints a family the result set made worse with a minus', () => {
