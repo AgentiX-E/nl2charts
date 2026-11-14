@@ -89,7 +89,8 @@
     "bench:bird:reasoning": "tsx eval/bird/reasoning.ts",
     "bench:bird:contrast": "tsx eval/bird/contrast.ts",
     "gate:dispatch": "node tools/bird-dispatch.mjs --self-test",
-    "bench:text2vis:rule": "tsx eval/text2vis/rule.ts"
+    "bench:text2vis:rule": "tsx eval/text2vis/rule.ts",
+    "bench:text2vis:profile": "tsx eval/text2vis/profile.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

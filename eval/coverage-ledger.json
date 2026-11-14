@@ -556,6 +556,12 @@
       "functions": 100,
       "branches": 100
     },
+    "eval/text2vis/profile.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 96.22
+    },
     "eval/text2vis/rule.ts": {
       "lines": 100,
       "statements": 100,
