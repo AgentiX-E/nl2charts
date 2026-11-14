@@ -42,6 +42,8 @@ export interface PairCase {
   readonly id: string | number;
   readonly passed?: boolean;
   readonly reason?: string;
+  /** What the case's calls sent, when the artifact recorded it. Read only by `reachSplit`. */
+  readonly tokens?: { readonly prompt?: number };
 }
 
 /** The part of a run artifact this instrument reads. */
@@ -228,6 +230,124 @@ export function summaries(cases: readonly PairCase[], arms: readonly string[]): 
     for (const [shape, count] of sorted) rows.push({ arm, shape, cases: count });
   }
   return rows;
+}
+
+/**
+ * One side of a reach split: the cases a lever did or did not change, read as a paired test.
+ *
+ * `p` is exact McNemar over that side's own discordant cases, so the control's movement is quoted
+ * with the same statistic as the lever's rather than with a different one applied to a subset.
+ */
+export interface ReachSide {
+  readonly cases: number;
+  readonly leftPassed: number;
+  readonly rightPassed: number;
+  readonly wins: number;
+  readonly losses: number;
+  readonly deltaPp: number;
+  readonly p: number;
+}
+
+/** A pair split by whether the right arm sent a different prompt from the left one. */
+export interface ReachSplit {
+  readonly left: string;
+  readonly right: string;
+  /** Cases whose prompts differ, where a delta can be the lever's. */
+  readonly moved: ReachSide;
+  /** Cases whose prompt tokens are identical, where a delta is the run's own displacement. */
+  readonly unchanged: ReachSide;
+  /** Cases carrying no prompt tokens on one side, which belong to neither. */
+  readonly unmeasured: number;
+}
+
+/**
+ * The pair's examined cases split by reach: did the lever change what was sent?
+ *
+ * A paired test assumes the two arms differ by the lever and by nothing else, and a lever with a
+ * *condition* — a block that renders only where a column can carry it — breaks that assumption in a
+ * way the totals hide. `select-mixed-rule-narrow` sends a value block on 1,173 of dev's 1,532
+ * questions; on the other 359 the two arms send byte-identical prompts, answer the same three calls,
+ * and differ only by temperature. That subset is a free A/A control, and on it the pair moved
+ * **+2.23pp** (15 wins, 7 losses, p = 0.1330) — more than the +0.52pp the round was going to adopt —
+ * while the 1,173 cases the block actually reached moved **exactly nothing** (757 against 757, 43 wins
+ * and 43 losses). The number a paired reading reports is the sum of the two, so the reading is only
+ * attributable to the lever once the control side has been printed beside it.
+ *
+ * The test for "the same prompt" is the per-case `tokens.prompt` the artifact already records: equal
+ * totals across the same call count is the only evidence an artifact can carry without storing the
+ * prompt itself. Equal tokens do not prove equal bytes, which is why the report calls this side the
+ * run's *own displacement* rather than an unmoved lever: the claim it supports is that a delta there
+ * cannot be the lever's, not that the two prompts were compared character by character.
+ *
+ * `undefined` when no case was unchanged. An arm pair with no reach gap has no control in it, and an
+ * empty control table would read as agreement rather than as an absent measurement. The other
+ * asymmetric case is kept rather than refused: a split whose *moved* side is empty is an arm that
+ * changed nothing that was sent, which is the parent under another name and the loudest reading this
+ * instrument can produce.
+ */
+export function reachSplit(
+  report: Pick<PairArtifact, 'cases'>,
+  left: string,
+  right: string,
+): ReachSplit | undefined {
+  const cases = report.cases ?? [];
+  const leftIndex = new Map<string, PairCase>();
+  const rightIndex = new Map<string, PairCase>();
+  for (const entry of cases) {
+    if (entry.arm === left) leftIndex.set(String(entry.id), entry);
+    if (entry.arm === right) rightIndex.set(String(entry.id), entry);
+  }
+  const sides: Record<'moved' | 'unchanged', PairCase[]> = { moved: [], unchanged: [] };
+  let unmeasured = 0;
+  for (const [id, one] of leftIndex) {
+    const other = rightIndex.get(id);
+    if (other === undefined) continue;
+    const sent = one.tokens?.prompt;
+    const sentOther = other.tokens?.prompt;
+    if (sent === undefined || sentOther === undefined) unmeasured += 1;
+    else sides[sent === sentOther ? 'unchanged' : 'moved'].push(other);
+  }
+  if (sides.unchanged.length === 0) return undefined;
+  const side = (rows: readonly PairCase[]): ReachSide => {
+    const paired = rows.map((entry) => [leftIndex.get(String(entry.id)) as PairCase, entry] as const);
+    const wins = paired.filter(([one, other]) => one.passed !== true && other.passed === true).length;
+    const losses = paired.filter(([one, other]) => one.passed === true && other.passed !== true).length;
+    const leftPassed = paired.filter(([one]) => one.passed === true).length;
+    const rightPassed = paired.filter(([, other]) => other.passed === true).length;
+    return {
+      cases: paired.length,
+      leftPassed,
+      rightPassed,
+      wins,
+      losses,
+      deltaPp: paired.length === 0 ? 0 : ((rightPassed - leftPassed) / paired.length) * 100,
+      p: mcnemarExact(losses, wins),
+    };
+  };
+  return { left, right, moved: side(sides.moved), unchanged: side(sides.unchanged), unmeasured };
+}
+
+/**
+ * The reach split as a report block.
+ *
+ * Printed as a table of two deltas rather than as a verdict, because the arithmetic is the finding:
+ * the reader can see that the control carries more of the movement than the population the lever
+ * reached, and no sentence in this file has to assert a mechanism on top of that.
+ */
+export function reachLines(split: ReachSplit): string[] {
+  const total = split.moved.cases + split.unchanged.cases;
+  const lines = [`  the lever changed what ${String(split.moved.cases)} of ${String(total)} paired question(s) sent:`];
+  const row = (label: string, side: ReachSide): string =>
+    `    ${label.padEnd(10)} ${String(side.cases).padStart(5)}  ${String(side.leftPassed).padStart(5)} -> ${String(side.rightPassed).padStart(5)}` +
+    `  ${side.deltaPp >= 0 ? '+' : ''}${side.deltaPp.toFixed(2)}pp  (${String(side.wins)} won, ${String(side.losses)} lost, p = ${side.p.toFixed(4)})`;
+  lines.push(row('reached', split.moved));
+  if (split.moved.cases === 0) {
+    lines.push('    nothing that was sent changed on any paired question: this arm is its parent under another name');
+  }
+  lines.push(row('unchanged', split.unchanged));
+  if (split.unmeasured > 0) lines.push(`    ${'unmeasured'.padEnd(10)} ${String(split.unmeasured).padStart(5)}  no prompt tokens on one side, so the pair cannot say whether the lever reached them`);
+  lines.push('    where the prompt is unchanged the pair sends the same bytes twice, so a delta there is the run\u2019s own displacement and not the lever\u2019s');
+  return lines;
 }
 
 /** A count with its share of the pairs examined, so a reader does not divide by hand. */
@@ -505,6 +625,13 @@ export function main(argv: readonly string[] = process.argv.slice(2), root = pro
   const outcome = pairOutcome(report, settings.left as string, settings.right as string);
   console.log(`  ${relative(root, settings.report)}${report.split === undefined ? '' : ` (${report.split}${report.model === undefined ? '' : `, ${report.model}`})`}`);
   for (const line of pairLines(outcome)) console.log(line);
+  // How much of the delta the lever could have caused. Printed before the bill, because a delta the
+  // lever did not reach is not a purchase at any price.
+  const reach = reachSplit(report, settings.left as string, settings.right as string);
+  if (reach !== undefined) {
+    console.log('');
+    for (const line of reachLines(reach)) console.log(line);
+  }
   // The price of the lever, from the same artifact: the delta above says the score moved, and this
   // block says what the move cost. Both are read, neither is inferred from a second run.
   const bills: ArmBill[] = [];

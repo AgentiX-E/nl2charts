@@ -14,12 +14,14 @@ import {
   pairLines,
   pairOutcome,
   pairProblems,
+  reachLines,
+  reachSplit,
   readDeclared,
   resolvePairSettings,
   shapeOf,
   summaries,
 } from '../eval/bird/pair.js';
-import type { PairArtifact, PairCase, PairOutcome } from '../eval/bird/pair.js';
+import type { PairArtifact, PairCase, PairOutcome, ReachSplit } from '../eval/bird/pair.js';
 
 const case_ = (arm: string, id: number, shape: string): PairCase =>
   shape === MATCH ? { arm, id, passed: true, reason: 'match' } : { arm, id, passed: false, reason: shape };
@@ -625,5 +627,161 @@ describe('what the paired arms paid', () => {
     expect(text).toContain('what each call cost');
     expect(text).toContain('280');
     expect(text).toContain('1000');
+  });
+});
+
+describe('how much of the pair the lever actually reached', () => {
+  /**
+   * The reading this instrument exists for, taken from `43606308056`.
+   *
+   * `select-mixed-rule` and `select-mixed-rule-narrow` differ by a value block that lands on a
+   * candidate's card only where the schema has a column to carry one. On the 359 dev questions where
+   * it has none, the two arms send the same prompt, answer the same number of calls, and differ only
+   * by the temperature — an A/A control that no dispatch had to pay for, sitting inside the artifact.
+   * That subset moved **+2.23pp**, and the subset the block actually reached moved exactly nothing.
+   * A pair read as one number cannot see this; a pair split by reach can.
+   */
+  const reached = (leftPrompt: number, rightPrompt: number, leftPassed: boolean, rightPassed: boolean, id: number): PairCase[] => [
+    { arm: 'a', id, passed: leftPassed, reason: leftPassed ? 'match' : 'values', tokens: { prompt: leftPrompt } },
+    { arm: 'b', id, passed: rightPassed, reason: rightPassed ? 'match' : 'values', tokens: { prompt: rightPrompt } },
+  ];
+
+  it('splits the pairs by whether the lever changed what was sent', () => {
+    const split = reachSplit(
+      {
+        cases: [
+          ...reached(1000, 1000, false, true, 1),
+          ...reached(1000, 1000, false, false, 2),
+          ...reached(1000, 1248, true, true, 3),
+          ...reached(1000, 1248, true, false, 4),
+        ],
+      },
+      'a',
+      'b',
+    );
+    expect(split?.unchanged.cases).toBe(2);
+    expect(split?.moved.cases).toBe(2);
+    expect(split?.unchanged.wins).toBe(1);
+    expect(split?.unchanged.losses).toBe(0);
+    expect(split?.moved.losses).toBe(1);
+  });
+
+  it('reads a delta on each side, so the one the lever did not touch cannot hide in the total', () => {
+    const split = reachSplit(
+      {
+        cases: [
+          ...reached(1000, 1000, false, true, 1),
+          ...reached(1000, 1000, false, false, 2),
+          ...reached(1000, 1248, true, true, 3),
+          ...reached(1000, 1248, true, false, 4),
+        ],
+      },
+      'a',
+      'b',
+    );
+    expect(split?.unchanged.deltaPp).toBe(50);
+    expect(split?.moved.deltaPp).toBe(-50);
+  });
+
+  it('counts a case whose prompt it cannot compare as unmeasured rather than as unchanged', () => {
+    // An absent token column is not a zero-length prompt: reading it as "unchanged" would put a case
+    // the lever provably reached into the control and dilute the control with real lever effect.
+    const split = reachSplit(
+      {
+        cases: [
+          ...reached(1000, 1000, true, true, 1),
+          { arm: 'b', id: 2, passed: true, reason: 'match', tokens: { prompt: 1200 } },
+          { arm: 'a', id: 2, passed: true, reason: 'match' },
+        ],
+      },
+      'a',
+      'b',
+    );
+    expect(split?.unchanged.cases).toBe(1);
+    expect(split?.moved.cases).toBe(0);
+    expect(split?.unmeasured).toBe(1);
+    // And the block says which cases it could not place, rather than folding them into a side.
+    expect(reachLines(split as ReachSplit).join('\n')).toContain('no prompt tokens on one side');
+  });
+
+  it('has no split at all when every case was reached, because then there is no control to read', () => {
+    expect(reachSplit({ cases: [...reached(1000, 1200, true, false, 1)] }, 'a', 'b')).toBeUndefined();
+  });
+
+  it('says the reach in the report, and puts the two deltas beside each other', () => {
+    const split = reachSplit(
+      {
+        cases: [
+          ...reached(1000, 1000, false, true, 1),
+          ...reached(1000, 1000, false, false, 2),
+          ...reached(1000, 1248, true, true, 3),
+          ...reached(1000, 1248, true, false, 4),
+        ],
+      },
+      'a',
+      'b',
+    );
+    const lines = reachLines(split as ReachSplit).join('\n');
+    expect(lines).toContain('the lever changed what 2 of 4 paired question(s) sent');
+    expect(lines).toContain('reached');
+    expect(lines).toContain('+50.00pp');
+    expect(lines).toContain('-50.00pp');
+    // The control is the reading, not a footnote: it is labelled as the one subset where a delta is
+    // the run's own displacement rather than the lever's.
+    expect(lines).toContain('own displacement');
+  });
+
+  it('prints the reach under the paired reading, on a real artifact shape', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pair-reach-'));
+    const file = join(dir, 'bird-eval.json');
+    writeFileSync(
+      file,
+      JSON.stringify({
+        split: 'dev',
+        cases: [
+          ...reached(1000, 1000, false, true, 1),
+          ...reached(1000, 1000, false, false, 2),
+          ...reached(1000, 1248, true, true, 3),
+          ...reached(1000, 1248, true, false, 4),
+        ],
+      }),
+    );
+    const printed: string[] = [];
+    const log = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      printed.push(args.map(String).join(' '));
+    });
+    try {
+      expect(main([file, '--pair', 'a,b'], dir)).toBe(0);
+    } finally {
+      log.mockRestore();
+    }
+    expect(printed.join('\n')).toContain('the lever changed what 2 of 4');
+  });
+});
+
+describe('an arm that changed nothing it sent', () => {
+  it('says so in the loudest sentence the instrument has', () => {
+    // The failure this repository keeps finding one level down: an arm whose lever never reached the
+    // prompt reports as its parent with a different name and a fresh artifact. Here the artifact
+    // itself carries the evidence, because the two arms sent the same number of prompt tokens on
+    // every case they share.
+    const split = reachSplit(
+      {
+        cases: [
+          { arm: 'a', id: 1, passed: true, reason: 'match', tokens: { prompt: 1000 } },
+          { arm: 'b', id: 1, passed: true, reason: 'match', tokens: { prompt: 1000 } },
+        ],
+      },
+      'a',
+      'b',
+    );
+    expect(split?.moved.cases).toBe(0);
+    expect(reachLines(split as ReachSplit).join('\n')).toContain('its parent under another name');
+  });
+
+  it('still refuses a split when there is no case in it at all', () => {
+    expect(reachSplit({}, 'a', 'b')).toBeUndefined();
+    expect(reachSplit({ cases: [] }, 'a', 'b')).toBeUndefined();
+    expect(reachSplit({ cases: [{ arm: 'a', id: 1, passed: true, tokens: { prompt: 1 } }] }, 'a', 'b')).toBeUndefined();
   });
 });
