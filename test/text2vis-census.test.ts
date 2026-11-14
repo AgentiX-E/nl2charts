@@ -301,6 +301,18 @@ describe('the census over a population', () => {
     expect(report.refusals.map((entry) => entry.mark)).toEqual(['line', 'pie']);
   });
 
+  it('groups each refusal by the shape it was refused against, which is what picks the repair', () => {
+    // Two refusals, two different files: the line was refused on a table with no axis at all (two
+    // measures and a column of years the profiler called a measure), and the pie was refused on a
+    // table that has a category axis and eight too many slices. A single "2 refused" sends the next
+    // round to neither.
+    const report = censusOf(population);
+    expect(report.shapes).toEqual([
+      { family: 'line', mark: 'line', dims: 0, ordered: 0, measures: 2, timeLike: true, n: 1, withFallback: 1 },
+      { family: 'pie', mark: 'pie', dims: 1, ordered: 0, measures: 1, timeLike: false, n: 1, withFallback: 1 },
+    ]);
+  });
+
   it('counts the time-formatted columns the refusals point at', () => {
     const report = censusOf(population);
     expect(report.timeLikeRows).toBe(1);
@@ -321,6 +333,8 @@ describe('the census over a population', () => {
     expect(lines).toContain('time-formatted columns the profiler did not call temporal: 1 rows');
     expect(lines).toContain('Year (quantitative, 1 rows, first value 2019)');
     expect(lines).toContain('refused line for line: 1 (1 answered by another mark) — a line needs an ordered axis and a measure');
+    expect(lines).toContain('refused line for line: 1 (1 answered elsewhere) at dims 0 / ordered 0 / measures 2, time-formatted column present');
+    expect(lines).toContain('refused pie for pie: 1 (1 answered elsewhere) at dims 1 / ordered 0 / measures 1');
     expect(lines).toContain('lost bar to heatmap: 1 (on preference 0, cue named and lost 1');
     expect(lines).toContain('lost heatmap to bar: 1 (on preference 1, cue named and lost 0');
   });
@@ -333,6 +347,19 @@ describe('the census over a population', () => {
     expect(censusInputs({ rows: [{ prompt: TREND, chartType: 'Line Chart', raw: {} }] })).toEqual([
       { prompt: TREND, label: 'Line Chart', tableData: '' },
     ]);
+  });
+
+  it('orders equal-sized refusals by the detail that differs, so two runs read the same', () => {
+    // The shape table is read as a decision, so its order has to be a fact and not an insertion
+    // order. Marks tie first by count, then by name, then by the count that differs between them.
+    const report = censusOf([
+      input(TREND, 'Line Chart', YEARS),
+      input(TREND, 'Line Chart', table('Price, Revenue', ['10, 1', '20, 2', '30, 3', '40, 4'])),
+      input('Show the price range', 'Candlestick Chart', table('Date, Open, Close', ['2019-01-01, 1, 2', '2019-01-02, 2, 3', '2019-01-03, 3, 4'])),
+      input('Show the price range', 'Candlestick Chart', table('Region, Open, Close', ['A, 1, 2', 'B, 2, 3', 'C, 3, 4'])),
+    ]);
+    expect(report.shapes.filter((entry) => entry.mark === 'line').map((entry) => entry.timeLike)).toEqual([false, true]);
+    expect(report.shapes.filter((entry) => entry.mark === 'candlestick').map((entry) => entry.ordered)).toEqual([0, 1]);
   });
 
   it('orders two losses of the same family by the mark that beat it, so the tally is stable', () => {
