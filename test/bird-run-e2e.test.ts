@@ -2324,6 +2324,28 @@ describe('the same candidates in an order that does not follow authorship', () =
   });
 });
 
+describe('a block every candidate inherits', () => {
+  it('renders the stored values on the cards a mixed arm sends, and on none of its parent\'s', async () => {
+    // The one thing the unit tests cannot see: whether the values the arm declares ever reach the
+    // prompt. `withSamples` attaches nothing when the loaded map is empty, so a run that loaded no
+    // example values sends the parent's card under the new name — and the first dispatch of this
+    // arm was cancelled on that analysis rather than paid for. The dry run renders the same
+    // prompts the run would send, so the check costs no model call.
+    const parent = await run({ plan: {}, argv: ['--dry-run'], env: { BIRD_ARMS: 'select-mixed-rule' } });
+    const narrow = await run({ plan: {}, argv: ['--dry-run'], env: { BIRD_ARMS: 'select-mixed-rule-narrow' } });
+    expect(parent.code).toBe(0);
+    expect(narrow.code).toBe(0);
+    const chars = (result: ScenarioResult): number =>
+      (result.report.prompts as { arms: { chars: number }[] }[]).reduce((total, entry) => total + (entry.arms[0]?.chars ?? 0), 0);
+    // Strictly larger on every question, because the block is on the card rather than in a block
+    // that only some questions carry: the sampler is unconditional, the narrowing is not.
+    expect(chars(narrow)).toBeGreaterThan(chars(parent));
+    const controls = narrow.report.controls as { sampledColumns: number; sampledValues: number };
+    expect(controls.sampledColumns).toBeGreaterThan(0);
+    expect(controls.sampledValues).toBeGreaterThan(0);
+  });
+});
+
 describe('the artifact', () => {
   it('records the harness settings that a difference between runs could come from', async () => {
     const result = await run({

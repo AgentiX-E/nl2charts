@@ -776,6 +776,56 @@ export function resolveSource(arm: Pick<Arm, 'sourceSamples'>, source: string): 
 }
 
 /**
+ * The samplers a run has to load values for, from every arm it names and every source those arms
+ * draw on.
+ *
+ * The loader asked `arm.samples` of the arms a run names, which was the whole answer until an arm
+ * could inherit a sampler for its candidates: `select-mixed-rule-narrow` declares none of its own,
+ * so `exampleValues` stayed empty, `withSamples` attached nothing, and the arm would have been its
+ * parent under a new name — measured, reported and wrong in the flattering direction. The same
+ * class of defect `armsInEffect` was written for one level down (`select-samples` put the sampler in
+ * a source and the loader never saw it).
+ *
+ * So the question "which samplers does this run need" gets one answer, and the loader and the guard
+ * both read it. A sampler that is declared and not loaded is refused by `assertSamplesLoaded`
+ * instead of being measured as a lever that did nothing.
+ */
+export function sampleRulesInEffect(names: readonly string[]): Set<'profile' | 'example'> {
+  const rules = new Set<'profile' | 'example'>();
+  for (const arm of armsInEffect(names)) {
+    if (arm.samples !== undefined) rules.add(arm.samples);
+    if (arm.sourceSamples !== undefined) rules.add(arm.sourceSamples.samples);
+  }
+  return rules;
+}
+
+/**
+ * A declared sampler with no values behind it.
+ *
+ * `withSamples` returns the card unchanged when the map for that database is missing, which is the
+ * right behaviour for one database the profile could not cover and the wrong one for a run that
+ * loaded nothing at all: every case then carries a plain card while the arm's name and its pair
+ * describe a block. The counts come from the run rather than from the maps so the guard is a pure
+ * function of a number that the artifact also reports.
+ */
+export function assertSamplesLoaded(
+  names: readonly string[],
+  loaded: { readonly example: number; readonly profile: number },
+): void {
+  const rules = sampleRulesInEffect(names);
+  if (rules.has('example') && loaded.example === 0) {
+    throw new Error(
+      'an arm in this run carries the competitor\'s value examples and none were loaded, so every candidate would be sent a card without a block and the arm would be its parent under another name',
+    );
+  }
+  if (rules.has('profile') && loaded.profile === 0) {
+    throw new Error(
+      'an arm in this run carries the profiled values on its card and no profile contributed a value, so the block would be empty on every case',
+    );
+  }
+}
+
+/**
  * Each arm differs from its parent by exactly one thing, so a delta belongs to
  * one module:
  *
@@ -6004,6 +6054,17 @@ export interface PreparedRun {
    * falls back to the arm's card without a choice, which the preview labels.
    */
   readonly cardOf: (arm: Arm, question: BirdQuestion) => CardOutcome;
+  /**
+   * The prompt this arm would send for one case, as text.
+   *
+   * One function for the dry run's preview and for the report's prompt-size column, because they
+   * were two and they disagreed: the preview rendered the arm's own card for a mixed arm, whose
+   * candidates are sent on their sources' cards, so the preview of an arm that overrides its
+   * candidates' cards showed the parent's prompt — the same drift `select-samples` was caught in
+   * one layer up. For a mixed arm the text is the *widest* candidate's, because that is the prompt
+   * the arm is priced at.
+   */
+  readonly promptTextFor: (arm: Arm, question: BirdQuestion) => string;
   /** Per-arm distinct-prompt audit for the arms that declare a candidate set. */
   readonly mixedCandidatePrompts: readonly unknown[];
 }
@@ -6205,8 +6266,12 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
   const sampleValues = new Map<string, Map<string, readonly string[]>>();
   const exampleValues = new Map<string, Map<string, readonly string[]>>();
   const sampled = { columns: 0, values: 0 };
-  const widen = inEffect.some((arm) => arm.samples === 'example');
-  if (inEffect.some((arm) => arm.samples === 'profile')) {
+  // The samplers this run has to load values for, read from the one function that answers it: an
+  // arm can inherit a sampler for its candidates (`sourceSamples`), and asking only the arms for
+  // their own left `exampleValues` empty while the arm's name promised a block.
+  const sampleRules = sampleRulesInEffect(settings.arms);
+  const widen = sampleRules.has('example');
+  if (sampleRules.has('profile')) {
     for (const [db, profile] of profiles) {
       const byColumn = sampleValuesOf(profile);
       sampled.columns += byColumn.size;
@@ -6224,6 +6289,11 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
     for (const values of byColumn.values()) sampled.values += values.length;
     exampleValues.set(db, byColumn);
   }
+
+  // A sampler that was declared and loaded nothing is refused before the first case is sent: the
+  // card is built per case from these maps, and an empty one turns the arm into its parent without
+  // changing a single number the artifact would show.
+  assertSamplesLoaded(settings.arms, { example: exampleValues.size, profile: sampleValues.size });
 
   const withSamples = (
     schema: readonly SchemaTable[],
@@ -6821,7 +6891,11 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
     // mix a database with dictionaries and one without, and the first is not the run.
     demonstrationsFor,
     sampledFor: (arm: Arm) => {
-      const maps = arm.samples === 'example' ? exampleValues : sampleValues;
+      // The sampler the arm sends, whether it declared it itself or inherited it for its candidates:
+      // reading only `arm.samples` here made an inheriting arm look like a profiled one whose map is
+      // empty, which is the wrong error for a real defect and a false one for a correct run.
+      const rule = arm.samples ?? arm.sourceSamples?.samples;
+      const maps = rule === 'example' ? exampleValues : sampleValues;
       let columns = 0;
       let values = 0;
       for (const db of settings.dbs) {
@@ -6833,6 +6907,21 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
     },
     schemaForSource,
     samplesOn,
+    promptTextFor: (target: Arm, question: BirdQuestion): string => {
+      const sources = target.mixed;
+      const render = (arm: Arm, schema: readonly SchemaTable[]): string =>
+        buildSqlPrompt(question.question, schema, promptFor(arm, question, blocksFor(arm, question)));
+      if (sources === undefined) return render(target, cardOf(target, question).schema);
+      // The widest candidate, resolved through the one entry point so an inherited card is the one
+      // measured: the arm's cost is the prompt the model actually reads, and on a mixed arm that is
+      // the largest of its candidates rather than the first source's.
+      return sources
+        .map((source) => {
+          const candidate = resolveSource(target, source).arm;
+          return render(candidate, schemaForSource(candidate, question));
+        })
+        .reduce((widest, text) => (text.length > widest.length ? text : widest), '');
+    },
     cardFor,
     cardOf,
     mixedCandidatePrompts,
@@ -6996,11 +7085,9 @@ export function previewPrompts(prepared: PreparedRun, report: Record<string, unk
   report.prompts = prepared.cases.slice(0, 3).map((question) => ({
     id: question.question_id,
     arms: preview.map((arm) => {
-      const rendered = buildSqlPrompt(
-        question.question,
-        prepared.cardOf(arm, question).schema,
-        promptFor(arm, question, prepared.blocksFor(arm, question)),
-      );
+      // The same renderer the report's size column uses, for the reason that column exists: a
+      // preview that renders the arm's own card on a mixed arm shows a prompt nobody sends.
+      const rendered = prepared.promptTextFor(arm, question);
       // A dry run spends no calls, so an arm whose card is decided by a model call cannot show
       // the card it would send. Saying so is the only honest option: a preview presented as the
       // sent prompt while the sent prompt is smaller is the drift this harness exists to avoid.
@@ -7234,7 +7321,10 @@ export const MECHANISMS: readonly Mechanism[] = [
   },
   {
     lever: 'samples',
-    declares: (arm) => arm.samples !== undefined,
+    // An arm can carry the block on its own card or give it to every candidate's: both spend the
+    // same values, and an arm of the second kind that attached nothing would be its parent renamed
+    // in exactly the way this guard refuses.
+    declares: (arm) => arm.samples !== undefined || arm.sourceSamples !== undefined,
     // An arm that asks for samples and gets none is its parent under another name.
     guard: ({ armName, arm, sampledFor }) => assertSamplesRan(armName, sampledFor(arm)),
     // The control the runner takes, not the row's block funnel: the samples arm is priced by how
@@ -8544,23 +8634,11 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
   // of them: a column that reported the arm's own card would price a prompt nobody sent, which is
   // how `select-samples` and `select-mixed` both came to publish 2,568 mean characters while one
   // of them was sending 16,109 columns of stored values on a third of every case's calls.
-  const promptSizeOf = (question: (typeof cases)[number]): number => {
-    const sources = arm.mixed;
-    const sizeFor = (target: Arm): number =>
-      buildSqlPrompt(
-        question.question,
-        // The card that was sent, not the card the arm would build now: on a column-choosing
-        // arm those differ, and the prompt-size column exists to say what the model read.
-        sources === undefined ? prepared.cardOf(arm, question).schema : prepared.schemaForSource(target, question),
-        promptFor(target, question, prepared.blocksFor(target, question)),
-      ).length;
-    if (sources === undefined) return sizeFor(arm);
-    // Resolved through the one entry point: an arm that gives every candidate a sampler sends a
-    // larger prompt than its sources do, and a size column read off the un-inherited card would
-    // report the block as free on exactly the arm that pays for it three times.
-    return Math.max(...sources.map((source) => sizeFor(resolveSource(arm, source).arm)));
-  };
-  const promptSizes = cases.map(promptSizeOf);
+  // The card that was sent, not the card the arm would build now: on a column-choosing arm those
+  // differ, and the prompt-size column exists to say what the model read. `promptTextFor` is the
+  // same function the dry run's preview renders with, so a preview cannot describe a prompt the
+  // run would not send.
+  const promptSizes = cases.map((question) => prepared.promptTextFor(arm, question).length);
   // A repair arm is priced by its funnel, not only by its accuracy: an arm that
   // fixes 30 cases and breaks 25 has the same accuracy as one that does nothing.
   const repair =

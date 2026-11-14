@@ -21,11 +21,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   ARMS,
+  MECHANISMS,
   MIXED_SOURCES,
+  assertSamplesLoaded,
   assertSourceSampleRule,
   parseMixedSource,
   resolveArm,
   resolveSource,
+  sampleRulesInEffect,
   withSourceSamples,
 } from '../eval/bird/run.js';
 import type { Arm } from '../eval/bird/run.js';
@@ -135,8 +138,7 @@ describe('a candidate override that would be silent', () => {
   });
 });
 
-describe('the arm that inherits the block', () => {
-  it('is the shipping arm with one field added', () => {
+describe('the arm that inherits the block', () => {  it('is the shipping arm with one field added', () => {
     const parent = resolveArm('select-mixed-rule') as Arm;
     const arm = resolveArm(NARROW) as Arm;
     expect(arm.vote).toBe(parent.vote);
@@ -166,5 +168,59 @@ describe('the arm that inherits the block', () => {
 
   it('holds the declaration rule for every arm in the catalogue', () => {
     for (const arm of ARMS) assertSourceSampleRule(arm);
+  });
+});
+
+/**
+ * The half of the lever that is not in the arm table: the values the block is built from.
+ *
+ * `withSamples` attaches nothing when the sampler's map is empty, so an arm that declares a block
+ * and a run that never loaded the values produce a prompt without one — and the arm then answers at
+ * its parent's score while wearing the new name. This is not hypothetical: the widen condition read
+ * `arm.samples` off the arms a run names, an inheriting arm declares its sampler one field further
+ * out, and the first dispatch of `select-mixed-rule-narrow` was cancelled after this analysis
+ * rather than paid for. The guard below is the detector, and `sampleRulesInEffect` is the one
+ * answer the loader and the guard share.
+ */
+describe('what a run has to load for an inherited block', () => {
+  it('names the sampler an arm inherits for its candidates', () => {
+    expect([...sampleRulesInEffect([NARROW])]).toEqual(['example']);
+  });
+
+  it('names the sampler a source declares', () => {
+    // `select-samples` puts `inline+evidence+samples` in its third slot: the sampler is one level
+    // down in the source list and the loader has to see it there too.
+    expect([...sampleRulesInEffect(['select-samples'])]).toEqual(['profile']);
+  });
+
+  it('names nothing for an arm whose cards carry no values', () => {
+    expect([...sampleRulesInEffect(['select-mixed-rule'])]).toEqual([]);
+  });
+
+  it('names both when two arms of one run ask for two rules', () => {
+    expect([...sampleRulesInEffect(['inline+evidence+samples', NARROW])].sort()).toEqual(['example', 'profile']);
+  });
+
+  it('refuses a run whose inherited block would be built from nothing', () => {
+    expect(() => assertSamplesLoaded([NARROW], { example: 0, profile: 0 })).toThrow(/examples/);
+  });
+
+  it('refuses a profiled block with no profile behind it', () => {
+    expect(() => assertSamplesLoaded(['inline+evidence+samples'], { example: 0, profile: 0 })).toThrow(/profile/);
+  });
+
+  it('accepts a run whose values are loaded, and one that asks for none', () => {
+    expect(() => assertSamplesLoaded([NARROW], { example: 12, profile: 0 })).not.toThrow();
+    expect(() => assertSamplesLoaded(['select-mixed-rule'], { example: 0, profile: 0 })).not.toThrow();
+  });
+
+  it('is a samples mechanism, so the funnel guard reads it', () => {
+    // Without this, an arm that inherits its sampler is invisible to the guard that refuses an
+    // empty block — the arm with the strongest claim to the block would be the one arm nothing
+    // checks, and its zero would be published as "the values do not help on a pool".
+    const samples = MECHANISMS.find((mechanism) => mechanism.lever === 'samples');
+    expect(samples?.declares(resolveArm(NARROW) as Arm)).toBe(true);
+    expect(samples?.declares(resolveArm('select-mixed-rule') as Arm)).toBe(false);
+    expect(samples?.declares(resolveArm('inline+evidence+samples') as Arm)).toBe(true);
   });
 });
