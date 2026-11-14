@@ -381,6 +381,7 @@
     "CHART_CUES",
     "LINT_RULES",
     "MARKS",
+    "RECOMMENDABLE_MARKS",
     "compileToECharts",
     "compileToMatplotlib",
     "describeMark",
@@ -411,6 +412,7 @@
     "type Recommendation",
     "type Refusal",
     "type Severity",
+    "type ShapeCounts",
     "type SupportVerdict"
   ],
   "mcp": [
