@@ -313,10 +313,17 @@ export function describeProfile(report: ProfileReport, cue: RuleReport): readonl
   // and this one is per family, so the two are compared on the unit they share.
   const cueOf = (family: ChartFamily): number =>
     cue.perLabel.filter((entry) => entry.family === family).reduce((sum, entry) => sum + entry.top1, 0);
-  const moved = report.perLabel
-    .map((entry) => ({ family: entry.family, delta: entry.top1 - cueOf(entry.family) }))
+  // Summed by family, not listed by label: `perLabel` is keyed by label and this line is titled by
+  // family, so the first published version printed `bar +142, scatter -26, bar -27, …` on the real
+  // corpus — eight bars, one number each, and no column a reader could add up.
+  const byFamily = new Map<ChartFamily, number>();
+  for (const entry of report.perLabel) {
+    byFamily.set(entry.family, (byFamily.get(entry.family) ?? 0) + (entry.top1 - cueOf(entry.family)));
+  }
+  const moved = [...byFamily.entries()]
+    .map(([family, delta]) => ({ family, delta }))
     .filter((entry) => entry.delta !== 0)
-    .sort((left, right) => right.delta - left.delta);
+    .sort((left, right) => right.delta - left.delta || left.family.localeCompare(right.family));
   const lines = [
     `text2vis: ${String(report.scored)} scored of ${String(report.rows)} rows (${String(report.unmapped.count)} unmapped labels)`,
     `  cue-only  top-1 ${share(cue.top1Share)} (${String(cue.top1)}), shortlist ${share(cue.shortlistShare)} (${String(cue.shortlist)})`,

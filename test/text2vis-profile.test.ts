@@ -224,6 +224,20 @@ describe('the reading', () => {
     expect(lines).not.toContain('delta by family');
   });
 
+  it('sums a family once, even when several labels map to it', () => {
+    // The first published version of this line printed `bar +142, scatter -26, bar -27, scatter -30`
+    // on the real corpus: `perLabel` is keyed by *label* and the line is titled by *family*, so a
+    // family with eight labels appeared eight times and a reader could not add the column up.
+    const inputs = [
+      row('Which region leads?', 'Bar Chart', regions(5)),
+      row('Which region leads?', 'Stacked Bar', regions(5)),
+    ];
+    const lines = describeProfile(scoreProfile(inputs), scoreRule(inputs)).join('\n');
+    const line = lines.split('\n').find((entry) => entry.includes('delta by family')) as string;
+    expect(line).toContain('bar +');
+    expect(line.match(/bar /g)?.length).toBe(1);
+  });
+
   it('prints a family the result set made worse with a minus', () => {
     // The delta line signs both directions, because the reading is not a sales document: a cue that
     // names the trend and a profile that then names a bar is a family this half *lost*, and a line
