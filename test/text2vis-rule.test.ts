@@ -17,16 +17,23 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { TEXT2VIS_FIELDS } from '../eval/text2vis/dataset.js';
 import {
   assertRuleReport,
+  CUE_VARIANTS,
+  cueAnswer,
   cueMarks,
   describeRule,
+  describeSweep,
   entryRule,
   familiesOfMark,
   familyOfLabel,
+  familyRows,
   parseRuleArgs,
   percentiles,
   ruleInputs,
   scoreRule,
+  sweepRule,
+  withHistogramCue,
   type RuleReport,
+  type VariantReading,
 } from '../eval/text2vis/rule.js';
 
 const root = mkdtempSync(join(tmpdir(), 'nl2charts-text2vis-rule-'));
@@ -371,6 +378,15 @@ describe('the arm, run as a command', () => {
     }
   });
 
+  it('falls back to its own argv and the real corpus when it is given no options', async () => {
+    // The two defaults the workflow depends on and no test had executed: a dispatch passes `--artifact`
+    // through `process.argv`, and the corpus URL comes from the loader's own default.
+    const lines: string[] = [];
+    const code = await entryRule(ENTRY, MODULE_URL, (line) => lines.push(line));
+    expect(code).toBe(1);
+    expect(lines.join('\n')).not.toBe('');
+  });
+
   it('returns nothing when it is imported rather than run', async () => {
     // Every test in this file imports the module, so this is the branch that keeps them from
     // setting an exit code on the test process.
@@ -433,5 +449,188 @@ describe('the lines a reader gets', () => {
     expect(text).toContain('baseline: always bar');
     expect(text).toContain('cue path');
     expect(text).toContain('unmapped labels: Treemap (1)');
+  });
+});
+
+describe('the cue that named a mark', () => {
+  it('travels with the mark, because one family claim depends on it', () => {
+    // The word "histogram" fires two cues in the shipped table's order: `distribution` (which names
+    // boxplot first) and nothing else, so a bar cannot appear at all. The variant inserts its cue
+    // ahead of `distribution`, and the answer says which cue put the bar there.
+    const shipped = cueAnswer('show a histogram of order totals');
+    expect(shipped[0]).toEqual({ mark: 'boxplot', cue: 'distribution' });
+    const swept = cueAnswer('show a histogram of order totals', withHistogramCue(CUE_VARIANTS[0]!.cues));
+    expect(swept[0]).toEqual({ mark: 'bar', cue: 'histogram' });
+    // The boxplot is still offered, one place down: the change is an order and not a deletion.
+    expect(swept.map((answer) => answer.mark)).toEqual(['bar', 'boxplot']);
+  });
+
+  it('keeps the first cue that named a mark rather than the last', () => {
+    // `trend` names line then bar, `ranking` names bar. A bar is named twice and the answer has to
+    // be one cue, so it is the strongest one — the table's order, read once.
+    const answers = cueAnswer('the trend of revenue by month, top 5 highest');
+    const bar = answers.find((answer) => answer.mark === 'bar');
+    expect(bar).toEqual({ mark: 'bar', cue: 'trend' });
+    expect(cueMarks('the trend of revenue by month, top 5 highest')).toEqual(['line', 'bar']);
+  });
+
+  it('reads the table it is given, so a variant is a table and not a fork', () => {
+    const reversed = [...CUE_VARIANTS[0]!.cues].reverse();
+    // A question that fires `trend` and `share` leads with the cue the table lists first, so
+    // reversing the table reverses the answer. This is the assertion that the parameter is live:
+    // the marks inside a cue are untouched, and only their order in the table moved.
+    expect(cueMarks('the share of revenue over time')[0]).toBe('line');
+    expect(cueMarks('the share of revenue over time', reversed)[0]).toBe('pie');
+    expect(cueMarks('the candlestick of open and close prices')).toEqual(['candlestick', 'line']);
+  });
+});
+
+describe('a bar that answers for a histogram, when the table said so', () => {
+  it('widens only under the histogram cue', () => {
+    // One claim, stated once: a histogram is a bar with the measure binned. It is conditional
+    // because a bar recommended for a ranking question is a ranking bar, and crediting it for a
+    // histogram label would be the table grading itself.
+    expect(familiesOfMark('bar', 'histogram')).toEqual(['bar', 'histogram']);
+    expect(familiesOfMark('bar')).toEqual(['bar']);
+    expect(familiesOfMark('bar', 'ranking')).toEqual(['bar']);
+    expect(familiesOfMark('boxplot', 'histogram')).toEqual(['boxplot']);
+  });
+
+  it('scores a histogram question as a hit only in the table that names the intent', () => {
+    const rows = [{ prompt: 'draw a histogram of order totals', label: 'Histogram' }];
+    const shipped = scoreRule(rows);
+    expect(shipped.top1).toBe(0);
+    const named = scoreRule(rows, { cues: withHistogramCue(CUE_VARIANTS[0]!.cues), variant: 'histogram' });
+    expect(named.top1).toBe(1);
+    // Not even the shortlist reaches the label in the shipped table, and that is the honest reading
+    // of a scoped claim: a bar is only a histogram when a cue said so, so a `distribution` cue that
+    // happens to offer a bar second does not credit it.
+    expect(shipped.shortlist).toBe(0);
+    expect(named.variant).toBe('histogram');
+  });
+});
+
+describe('the table a variant constructs', () => {
+  it('inserts the histogram cue ahead of distribution, and only once', () => {
+    const table = withHistogramCue(CUE_VARIANTS[0]!.cues);
+    const kinds = table.map((rule) => rule.kind);
+    expect(kinds.indexOf('histogram')).toBe(kinds.indexOf('distribution') - 1);
+    expect(kinds.filter((kind) => kind === 'histogram')).toHaveLength(1);
+    // Nothing else moved: the same cues, one more of them.
+    expect(table.length).toBe(CUE_VARIANTS[0]!.cues.length + 1);
+  });
+
+  it('appends the cue to a table that has no distribution rule rather than dropping it', () => {
+    // A variant that silently lost a cue would be measured as if it had it; the guard is that the
+    // cue is always present, whatever the table it was built from.
+    const without = CUE_VARIANTS[0]!.cues.filter((rule) => rule.kind !== 'distribution');
+    const table = withHistogramCue(without);
+    expect(table.at(-1)?.kind).toBe('histogram');
+    expect(table.length).toBe(without.length + 1);
+  });
+
+  it('states one lever per variant, and the first is the table the package exports', () => {
+    expect(CUE_VARIANTS[0]).toMatchObject({ name: 'shipped' });
+    expect(CUE_VARIANTS.map((variant) => variant.name)).toEqual(['shipped', 'bar-share', 'histogram', 'bar-share+histogram']);
+    for (const variant of CUE_VARIANTS) expect(variant.note.length).toBeGreaterThan(20);
+  });
+});
+
+describe('the sweep: every table, the same rows', () => {
+  const rows = [
+    { prompt: 'show the share of orders by status', label: 'Pie Chart' },
+    { prompt: 'show the share of revenue by region', label: 'Bar Chart' },
+    { prompt: 'draw a histogram of order totals', label: 'Histogram' },
+    { prompt: 'what is the trend of revenue over time', label: 'Line Chart' },
+    { prompt: 'show the hierarchy of accounts', label: 'Treemap' },
+  ];
+
+  it('prices every table on the same population, control first', () => {
+    const report = sweepRule(rows);
+    expect(report.sweep.map((reading) => reading.variant)).toEqual(CUE_VARIANTS.map((variant) => variant.name));
+    expect(report.sweep.every((reading) => reading.scored === report.scored)).toBe(true);
+    expect(report.sweep[0]?.top1).toBe(report.top1);
+    expect(() => assertRuleReport(report)).not.toThrow();
+  });
+
+  it('publishes the per-family rows a change has to move and the one it must not', () => {
+    const report = sweepRule(rows);
+    const shipped = report.sweep[0];
+    const barShare = report.sweep[1];
+    // The bar-first share table trades one pie row for one bar row on this corpus, and the pie row
+    // it loses is printed rather than absorbed into a single top-1 number.
+    expect(barShare?.byFamily.find((cell) => cell.family === 'bar')?.top1).toBe(
+      (shipped?.byFamily.find((cell) => cell.family === 'bar')?.top1 ?? 0) + 1,
+    );
+    expect(barShare?.byFamily.find((cell) => cell.family === 'pie')?.top1).toBe(0);
+    // The histogram table moves its own label and leaves the other four where they were.
+    const histogram = report.sweep[2];
+    expect(histogram?.byFamily.find((cell) => cell.family === 'histogram')?.top1).toBe(1);
+    expect(histogram?.byFamily.find((cell) => cell.family === 'line')?.top1).toBe(
+      shipped?.byFamily.find((cell) => cell.family === 'line')?.top1,
+    );
+  });
+
+  it('counts a family from the per-label rows rather than from a second pass', () => {
+    const report = scoreRule(rows);
+    const family = familyRows(report);
+    expect(family.reduce((total, cell) => total + cell.n, 0)).toBe(report.scored);
+    expect(family[0]?.n).toBeGreaterThanOrEqual(family[1]?.n ?? 0);
+    expect(family.map((cell) => cell.family)).toContain('histogram');
+  });
+
+  it('prints one line per table and nothing when there is no sweep', () => {
+    const report = sweepRule(rows);
+    const lines = describeSweep(report);
+    expect(lines).toHaveLength(CUE_VARIANTS.length + 1);
+    expect(lines[0]).toContain(`${String(CUE_VARIANTS.length)} tables over the same ${String(report.scored)} rows`);
+    expect(lines[1]).toContain('shipped');
+    expect(lines[2]).toContain('bar +');
+    // A report that priced one table says nothing about a sweep instead of claiming an empty one.
+    expect(describeSweep(scoreRule(rows))).toEqual([]);
+  });
+
+  it('refuses a reading whose population is not the one the report scored', () => {
+    const report = sweepRule(rows);
+    const first = report.sweep[0] as VariantReading;
+    expect(() => assertRuleReport({ ...report, sweep: [{ ...first, scored: first.scored + 1 }] })).toThrow(/not the same population/);
+    expect(() => assertRuleReport({ ...report, sweep: [{ ...first, byFamily: [] }] })).toThrow(/per-family rows summing to/);
+    expect(() => assertRuleReport({ ...report, sweep: [{ ...first, top1: first.shortlist + 1 }] })).toThrow(/above its shortlist/);
+  });
+
+  it('prints a table with no bar row as a zero rather than crashing on the share', () => {
+    // A variant that never answers bar is a legal table, and the line has to divide something.
+    const report = sweepRule(rows);
+    const first = report.sweep[0] as VariantReading;
+    const lines = describeSweep({ ...report, sweep: [{ ...first, byFamily: [{ family: 'line', n: 3, top1: 2 }] }] });
+    expect(lines[1]).toContain('bar 0.00%');
+  });
+
+  it('prints a bar family with no rows as a zero share instead of dividing by it', () => {
+    const report = sweepRule(rows);
+    const first = report.sweep[0] as VariantReading;
+    const lines = describeSweep({ ...report, sweep: [{ ...first, byFamily: [{ family: 'bar', n: 0, top1: 0 }] }] });
+    expect(lines[1]).toContain('bar 0.00%');
+  });
+
+  it('reads a family the control never had as zero rather than as a missing cell', () => {
+    // A variant that adds a cue can make a family appear that the control has no row for. The delta
+    // is then measured from zero, which is the only reading that does not silently drop the gain.
+    const report = sweepRule(rows);
+    const first = report.sweep[0] as VariantReading;
+    const lines = describeSweep({
+      ...report,
+      sweep: [
+        { ...first, byFamily: [{ family: 'line', n: 3, top1: 2 }] },
+        { ...first, variant: 'with-histogram', byFamily: [{ family: 'line', n: 3, top1: 2 }, { family: 'histogram', n: 1, top1: 1 }] },
+      ],
+    });
+    expect(lines[2]).toContain('histogram +1');
+  });
+
+  it('names the variant on the report it produced, so an artifact says which table it read', () => {
+    expect(scoreRule(rows).variant).toBe('shipped');
+    expect(scoreRule(rows, { cues: CUE_VARIANTS[1]!.cues, variant: 'bar-share' }).variant).toBe('bar-share');
+    expect(scoreRule(rows).sweep).toEqual([]);
   });
 });

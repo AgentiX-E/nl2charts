@@ -97,6 +97,18 @@ describe('reading chart cues out of the question', () => {
     expect(readCues('How many orders shipped')).toEqual([]);
   });
 
+  it('reads a table it is given, and resets a global pattern so the second call can match', () => {
+    // The parameter exists for `eval/text2vis`, which prices an alternative ordering against the
+    // corpus. A caller that supplies a table with a `/g` pattern would otherwise see every other
+    // question match nothing, because `exec` carries `lastIndex` between calls — a silent miss that
+    // looks like a cue that does not fire.
+    const table = [{ kind: 'ranking' as const, marks: ['bar'] as const, pattern: /\btop\b/g }];
+    expect(readCues('top five by revenue', table).map((cue) => cue.kind)).toEqual(['ranking']);
+    expect(readCues('top five by revenue', table).map((cue) => cue.kind)).toEqual(['ranking']);
+    // The shipped table is untouched by a call that named another one.
+    expect(readCues('Top ten products by revenue')[0]?.kind).toBe('ranking');
+  });
+
   it('declares which marks every cue speaks for, and every one is in the contract', () => {
     for (const cue of CHART_CUES) {
       expect(cue.marks.length).toBeGreaterThan(0);

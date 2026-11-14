@@ -19,10 +19,18 @@ import { profileRows } from './profile.js';
  * visible in the column types, and the question usually names the shape it wants.
  */
 
+/**
+ * The kinds a cue can be. The vocabulary is the product's, and one member of it — `histogram` — is
+ * not emitted by `CHART_CUES`: the contract has no histogram series, a histogram is a bar with the
+ * measure binned, and whether the table should *name* that intent is a question the corpus in
+ * `eval/text2vis` prices as a variant before the shipped table changes. It is in the union so the
+ * variant is written against the same type as the table it re-orders rather than against a cast.
+ */
 export type CueKind =
   | 'trend'
   | 'share'
   | 'distribution'
+  | 'histogram'
   | 'correlation'
   | 'ranking'
   | 'matrix'
@@ -114,11 +122,24 @@ export interface Cue {
   readonly phrase: string;
 }
 
-/** Every cue the question fires, in table order, one entry per rule. */
-export function readCues(question: string): Cue[] {
+/**
+ * Every cue the question fires, in table order, one entry per rule.
+ *
+ * `table` defaults to the shipped `CHART_CUES` and exists for the reading in `eval/text2vis`, which
+ * has to price an alternative ordering against the corpus before anyone changes the shipped one.
+ * A second exported table would be a second opinion about which cues exist; a parameter is the same
+ * table under a different order, and the only thing a variant may change is the order and the
+ * membership of `marks` — never the patterns, because a variant that also rewrote the phrases would
+ * be measuring a different cue table rather than the same one re-ordered.
+ */
+export function readCues(question: string, table: readonly CueRule[] = CHART_CUES): Cue[] {
   const text = question.toLowerCase();
+  // `exec` on a shared RegExp object advances `lastIndex` when the pattern is global; none of the
+  // shipped patterns is, and a variant supplied with one would silently skip every other question.
+  // Resetting per call makes the function total over the tables it accepts.
   const cues: Cue[] = [];
-  for (const rule of CHART_CUES) {
+  for (const rule of table) {
+    rule.pattern.lastIndex = 0;
     const match = rule.pattern.exec(text);
     if (match !== null) cues.push({ kind: rule.kind, marks: rule.marks, phrase: match[0] });
   }

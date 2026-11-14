@@ -1,4 +1,4 @@
-import { readCues, type RecommendableMark } from '@agentix-e/nl2charts-chart';
+import { CHART_CUES, readCues, type CueKind, type CueRule, type RecommendableMark } from '@agentix-e/nl2charts-chart';
 import { applyExitCode, isEntry, loadText2Vis, type LoadOptions, type Text2VisRow } from './dataset.js';
 
 /**
@@ -84,11 +84,16 @@ export function familyOfLabel(label: string): ChartFamily | undefined {
 /**
  * The families a product mark can stand in for.
  *
- * One entry per mark, and the two widenings are argued rather than convenient: a line covers an
- * area because an area chart is that line filled, and a bar covers a histogram's *shape* only when
- * the question asked for one -- which is why `histogram` is absent here. Keeping it absent is what
- * makes the confusion table able to report "the cue table never recommends a histogram" as a fact
- * instead of hiding it inside a match.
+ * One entry per mark, and two widenings that are argued rather than convenient: a line covers an
+ * area because an area chart is that line filled, and a bar covers a histogram because a histogram
+ * is that bar's shape with the measure binned.
+ *
+ * The histogram widening is **conditional on the cue that produced the mark**, and the condition is
+ * the whole reason it is honest. The first reading of this corpus reported "a bar does not answer
+ * for a histogram" as a fact about the table — 90 histogram rows, 0.00%, answered `boxplot` — and
+ * the fix is a cue that *names* the intent, not a blanket claim that every bar is a histogram. So
+ * the widening lives in `familiesOfMark` below and only fires when the leading cue is `histogram`:
+ * a bar recommended for a ranking question still answers for `bar` and nothing else.
  */
 const MARK_FAMILIES: Readonly<Record<RecommendableMark, readonly ChartFamily[]>> = {
   bar: ['bar'],
@@ -104,9 +109,16 @@ const MARK_FAMILIES: Readonly<Record<RecommendableMark, readonly ChartFamily[]>>
   gauge: ['gauge'],
 };
 
-/** The families a mark is allowed to answer for. */
-export function familiesOfMark(mark: RecommendableMark): readonly ChartFamily[] {
-  return MARK_FAMILIES[mark];
+/**
+ * The families a mark is allowed to answer for, given the cue that named it.
+ *
+ * `cue` is optional because most callers are asking a question about the mark alone ("does a line
+ * cover an area"), and the one widening that is not a property of the mark needs the cue to be
+ * stated. A caller that omits it gets the unconditional table, which is the conservative answer.
+ */
+export function familiesOfMark(mark: RecommendableMark, cue?: CueKind): readonly ChartFamily[] {
+  const base = MARK_FAMILIES[mark];
+  return mark === 'bar' && cue === 'histogram' ? [...base, 'histogram'] : base;
 }
 
 /** One question and the chart the corpus says is right. */
@@ -116,22 +128,33 @@ export interface RuleInput {
 }
 
 /**
- * The cue table's answer for one question: every mark it would offer, best first.
+ * The cue table's answer for one question: every mark it would offer, best first, with the cue that
+ * named it.
  *
  * The order is the cue table's own -- cues are listed strongest first and the first mark of the
  * first cue leads -- because a second ordering here would be a second opinion about the same table,
- * and the two would drift apart silently.
+ * and the two would drift apart silently. The cue travels with the mark because one family claim is
+ * conditional on it: `bar` answers for `histogram` only when a `histogram` cue put it there, and a
+ * scorer that kept only the mark could not tell that bar from the one a ranking question asked for.
  */
-export function cueMarks(question: string): readonly RecommendableMark[] {
-  const marks: RecommendableMark[] = [];
-  for (const cue of readCues(question)) {
+export function cueAnswer(
+  question: string,
+  table?: readonly CueRule[],
+): readonly { readonly mark: RecommendableMark; readonly cue: CueKind }[] {
+  const answers: { mark: RecommendableMark; cue: CueKind }[] = [];
+  for (const cue of readCues(question, table)) {
     for (const mark of cue.marks) {
       // The cue table types its marks as contract `ChartType`, which is wider than what this layer
       // chooses between; a cue naming a type this layer does not recommend is not a recommendation.
-      if (isRecommendable(mark) && !marks.includes(mark)) marks.push(mark);
+      if (isRecommendable(mark) && !answers.some((answer) => answer.mark === mark)) answers.push({ mark, cue: cue.kind });
     }
   }
-  return marks;
+  return answers;
+}
+
+/** The marks alone, in the same order. */
+export function cueMarks(question: string, table?: readonly CueRule[]): readonly RecommendableMark[] {
+  return cueAnswer(question, table).map((answer) => answer.mark);
 }
 
 function isRecommendable(mark: string): mark is RecommendableMark {
@@ -181,6 +204,31 @@ export interface RuleReport {
   readonly confusion: readonly { readonly expected: ChartFamily; readonly answered: RecommendableMark; readonly n: number }[];
   /** Milliseconds per question on the cue path: no model, no renderer, no database. */
   readonly latency: { readonly p50: number; readonly p95: number; readonly max: number };
+  /** Which cue table this report scored. `shipped` is the one the package exports. */
+  readonly variant: string;
+  /**
+   * The same corpus, scored against every other table this build can construct.
+   *
+   * Scoring is free — a fifth of a millisecond per question, no model, no query — so the choice
+   * between two orderings is a reading rather than an argument. One run prices all of them, and the
+   * criterion a candidate has to clear (top-1, and the per-family rows that must not fall) is read
+   * off `byFamily` instead of being asserted in a commit message.
+   */
+  readonly sweep: readonly VariantReading[];
+}
+
+/** One cue table's reading on the same corpus. */
+export interface VariantReading {
+  readonly variant: string;
+  /** What this table changes, in one line, so the sweep is read without the source. */
+  readonly note: string;
+  readonly scored: number;
+  readonly top1: number;
+  readonly top1Share: number;
+  readonly shortlist: number;
+  readonly shortlistShare: number;
+  /** Top-1 hits per labelled family. A family with a smaller `n` than the shipped run has left the population. */
+  readonly byFamily: readonly { readonly family: ChartFamily; readonly n: number; readonly top1: number }[];
 }
 
 /**
@@ -191,7 +239,10 @@ export interface RuleReport {
  * `assertRuleReport`, because a share computed on the wrong denominator is exactly the defect a
  * reader cannot see.
  */
-export function scoreRule(rows: readonly RuleInput[], options: { readonly clock?: () => number } = {}): RuleReport {
+export function scoreRule(
+  rows: readonly RuleInput[],
+  options: { readonly clock?: () => number; readonly cues?: readonly CueRule[]; readonly variant?: string } = {},
+): RuleReport {
   const clock = options.clock ?? ((): number => performance.now());
   const unmappedLabels = new Map<string, number>();
   const perLabel = new Map<string, { family: ChartFamily; n: number; top1: number; shortlist: number; answered: Map<RecommendableMark | 'declined', number> }>();
@@ -205,7 +256,7 @@ export function scoreRule(rows: readonly RuleInput[], options: { readonly clock?
 
   for (const row of rows) {
     const started = clock();
-    const marks = cueMarks(row.prompt);
+    const answers = cueAnswer(row.prompt, options.cues);
     durations.push(clock() - started);
 
     const family = familyOfLabel(row.label);
@@ -218,24 +269,24 @@ export function scoreRule(rows: readonly RuleInput[], options: { readonly clock?
     const entry = perLabel.get(row.label) ?? { family, n: 0, top1: 0, shortlist: 0, answered: new Map() };
     entry.n += 1;
 
-    const first = marks[0];
-    entry.answered.set(first ?? 'declined', (entry.answered.get(first ?? 'declined') ?? 0) + 1);
+    const first = answers[0];
+    entry.answered.set(first?.mark ?? 'declined', (entry.answered.get(first?.mark ?? 'declined') ?? 0) + 1);
     if (first === undefined) {
       declined += 1;
       perLabel.set(row.label, entry);
       continue;
     }
-    const covered = new Set(marks.flatMap((mark) => familiesOfMark(mark)));
+    const covered = new Set(answers.flatMap((answer) => familiesOfMark(answer.mark, answer.cue)));
     if (covered.has(family)) {
       shortlist += 1;
       entry.shortlist += 1;
     }
-    if (familiesOfMark(first).includes(family)) {
+    if (familiesOfMark(first.mark, first.cue).includes(family)) {
       top1 += 1;
       entry.top1 += 1;
     }
-    const key = `${family} -> ${first}`;
-    const cell = confusion.get(key) ?? { expected: family, answered: first, n: 0 };
+    const key = `${family} -> ${first.mark}`;
+    const cell = confusion.get(key) ?? { expected: family, answered: first.mark, n: 0 };
     cell.n += 1;
     confusion.set(key, cell);
     perLabel.set(row.label, entry);
@@ -284,7 +335,114 @@ export function scoreRule(rows: readonly RuleInput[], options: { readonly clock?
       .sort((left, right) => right.n - left.n || left.label.localeCompare(right.label)),
     confusion: [...confusion.values()].sort((left, right) => right.n - left.n),
     latency: percentiles(durations),
+    variant: options.variant ?? 'shipped',
+    // Filled by `sweepRule`, which is the only caller that prices more than one table. A report from
+    // `scoreRule` valued exactly one table and says so rather than implying the sweep found nothing.
+    sweep: [],
   };
+}
+
+/**
+ * The histogram cue, inserted ahead of `distribution`.
+ *
+ * Ahead, and that is the whole mechanism: the leading mark is the first mark of the first fired cue,
+ * so a table in which `distribution` comes first can only ever answer a histogram question with a
+ * boxplot. Its pattern is narrow on purpose — the words that mean *binned* and nothing else — and
+ * `distribution` keeps its own `histogram` alternative, which then fires second and puts `boxplot`
+ * on the shortlist where a reader can see it.
+ */
+const HISTOGRAM_CUE: CueRule = {
+  kind: 'histogram',
+  marks: ['bar'],
+  pattern: /\bhistograms?\b|\bfrequency (?:distribution|counts?)\b|\bbinned\b/,
+};
+
+/**
+ * The same table with the histogram cue inserted before `distribution`.
+ *
+ * A membership change and not a pattern edit: the variant discipline is that only `marks` and the
+ * presence of a cue may differ, so a reading can be attributed to the order rather than to a
+ * rewritten phrase.
+ */
+export function withHistogramCue(table: readonly CueRule[]): readonly CueRule[] {
+  const at = table.findIndex((rule) => rule.kind === 'distribution');
+  // A table without `distribution` still gets the cue: appended rather than dropped, because a
+  // variant that silently lost a cue would be measured as if it had it.
+  const index = at === -1 ? table.length : at;
+  return [...table.slice(0, index), HISTOGRAM_CUE, ...table.slice(index)];
+}
+
+/**
+ * Every cue table this build can construct, and what each one changes.
+ *
+ * Three rules, and the discipline is that a variant may re-order or re-membership `marks` and may
+ * add a cue, but may never edit a pattern: a variant that rewrote the phrases would be a different
+ * cue table rather than the same one re-ordered, and its reading could not be attributed.
+ *
+ * `shipped` comes first and is the table the package exports, so the sweep always contains the
+ * control it is a sweep of.
+ */
+export const CUE_VARIANTS: readonly { readonly name: string; readonly note: string; readonly cues: readonly CueRule[] }[] = [
+  { name: 'shipped', note: 'the table `@agentix-e/nl2charts-chart` exports', cues: CHART_CUES },
+  {
+    name: 'bar-share',
+    note: "the `share` cue leads with a bar: the corpus drew 194 bars for questions this table answers `pie`",
+    cues: CHART_CUES.map((rule) => (rule.kind === 'share' ? { ...rule, marks: ['bar', 'pie'] } : rule)),
+  },
+  {
+    name: 'histogram',
+    note: 'a cue that names the binned measure, so a histogram question is answered with a bar instead of a boxplot',
+    cues: withHistogramCue(CHART_CUES),
+  },
+  {
+    name: 'bar-share+histogram',
+    note: 'both changes at once, because they touch different labels and a reader will ask',
+    cues: withHistogramCue(CHART_CUES.map((rule) => (rule.kind === 'share' ? { ...rule, marks: ['bar', 'pie'] } : rule))),
+  },
+];
+
+/**
+ * The corpus, priced against every variant.
+ *
+ * One table per variant, the same rows, the same denominator. The per-family rows are what makes
+ * the sweep decidable: a variant that raises `bar` by 8 rows and lowers `pie` by 145 has not
+ * improved, and a top-1 share alone cannot say which happened.
+ */
+export function sweepRule(rows: readonly RuleInput[], options: { readonly clock?: () => number } = {}): RuleReport {
+  const readings: VariantReading[] = CUE_VARIANTS.map((variant) => {
+    const report = scoreRule(rows, { ...options, cues: variant.cues, variant: variant.name });
+    return {
+      variant: variant.name,
+      note: variant.note,
+      scored: report.scored,
+      top1: report.top1,
+      top1Share: report.top1Share,
+      shortlist: report.shortlist,
+      shortlistShare: report.shortlistShare,
+      byFamily: familyRows(report),
+    };
+  });
+  return { ...scoreRule(rows, options), sweep: readings };
+}
+
+/**
+ * Top-1 hits per labelled family, from a report's own per-label rows.
+ *
+ * Summed from `perLabel` rather than counted twice: a family total computed by a second pass is a
+ * second definition of the population, and the two would disagree exactly when a label changed
+ * family.
+ */
+export function familyRows(report: RuleReport): readonly { readonly family: ChartFamily; readonly n: number; readonly top1: number }[] {
+  const byFamily = new Map<ChartFamily, { n: number; top1: number }>();
+  for (const entry of report.perLabel) {
+    const cell = byFamily.get(entry.family) ?? { n: 0, top1: 0 };
+    cell.n += entry.n;
+    cell.top1 += entry.top1;
+    byFamily.set(entry.family, cell);
+  }
+  return [...byFamily.entries()]
+    .map(([family, cell]) => ({ family, n: cell.n, top1: cell.top1 }))
+    .sort((left, right) => right.n - left.n || left.family.localeCompare(right.family));
 }
 
 /**
@@ -328,6 +486,21 @@ export function assertRuleReport(report: RuleReport): void {
   if (report.rows !== report.scored + report.unmapped.count) {
     throw new Error(`the corpus holds ${String(report.rows)} rows but ${String(report.scored)} + ${String(report.unmapped.count)} do not sum to it`);
   }
+  // Each variant is scored on the same corpus, so a reading whose population is a different size was
+  // computed by a second definition of the denominator — the one defect a sweep makes easy to miss,
+  // because the tables differ and the rows must not.
+  for (const reading of report.sweep) {
+    if (reading.scored !== report.scored) {
+      throw new Error(`variant ${reading.variant} scored ${String(reading.scored)} rows against ${String(report.scored)} for ${report.variant}, so the two are not the same population`);
+    }
+    const sum = reading.byFamily.reduce((total, cell) => total + cell.n, 0);
+    if (sum !== reading.scored) {
+      throw new Error(`variant ${reading.variant} publishes per-family rows summing to ${String(sum)} against ${String(reading.scored)} scored rows`);
+    }
+    if (reading.top1 > reading.shortlist || reading.shortlist > reading.scored) {
+      throw new Error(`variant ${reading.variant} reports top-1 ${String(reading.top1)} above its shortlist ${String(reading.shortlist)} or above its scored rows`);
+    }
+  }
 }
 
 /** The corpus, as the rows this arm reads. */
@@ -360,7 +533,44 @@ export function describeRule(report: RuleReport): readonly string[] {
         .join(', ')}`,
     );
   }
+  lines.push(...describeSweep(report));
   return lines;
+}
+
+/**
+ * The sweep, one line per table, with what moved against the control.
+ *
+ * The control is the first table in the sweep — `shipped` — so every delta on these lines is a
+ * difference the reader can check against a table the product actually exports. Only families whose
+ * top-1 *count* moved are printed: a family that changed by zero is one line of noise per table,
+ * and a family that moved is the whole reason the line exists.
+ */
+export function describeSweep(report: RuleReport): readonly string[] {
+  if (report.sweep.length === 0) return [];
+  const lines = [`  sweep: ${String(report.sweep.length)} tables over the same ${String(report.scored)} rows`];
+  // The control is the table before this one, carried in the loop rather than read by index: the
+  // first table is its own control and prints no delta, and a second `report.sweep[0]` read would be
+  // a branch for a state the type system cannot rule out and the data cannot reach.
+  let control: VariantReading | undefined;
+  for (const reading of report.sweep) {
+    const reference = control;
+    control = reading;
+    const moved = reading.byFamily
+      .map((cell) => ({ family: cell.family, delta: reference === undefined ? 0 : cell.top1 - top1Of(reference, cell.family) }))
+      .filter((cell) => cell.delta !== 0)
+      .sort((left, right) => right.delta - left.delta)
+      .map((cell) => `${cell.family} ${cell.delta > 0 ? '+' : ''}${String(cell.delta)}`);
+    const bar = reading.byFamily.find((cell) => cell.family === 'bar');
+    const barShare = bar === undefined || bar.n === 0 ? 0 : bar.top1 / bar.n;
+    const head = `    ${reading.variant.padEnd(20)} top-1 ${(reading.top1Share * 100).toFixed(2)}% (${String(reading.top1)}), bar ${(barShare * 100).toFixed(2)}%`;
+    lines.push(`${head}${moved.length === 0 ? '' : `  |  ${moved.join(', ')}`}`);
+  }
+  return lines;
+}
+
+/** A family's top-1 count in one reading, or zero when that reading has no row for it. */
+function top1Of(reading: VariantReading, family: ChartFamily): number {
+  return reading.byFamily.find((cell) => cell.family === family)?.top1 ?? 0;
 }
 
 /** The flags this command takes, and nothing else. */
@@ -421,7 +631,7 @@ export async function entryRule(
     const args = parseRuleArgs(options.argv ?? []);
     const { corpus, source, path } = await loadText2Vis(options.load ?? {});
     log(`text2vis: ${source} ${path}`);
-    const report = scoreRule(ruleInputs(corpus));
+    const report = sweepRule(ruleInputs(corpus));
     assertRuleReport(report);
     if (args.json) {
       log(JSON.stringify(report, null, 2));
