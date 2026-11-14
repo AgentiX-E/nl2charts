@@ -13136,8 +13136,18 @@ does not decline:
 | Donut | 69 | **0.00%** | declined 36, bar 33 |
 | Stacked Bar | 56 | 42.86% | bar 24, declined 19, scatter 12 |
 
-`pie` hits are **0 of 113**, and 0 of the 69 donuts. The delta by family is one line: **bar +142,
-pie −145, line −216**.
+`pie` hits are **0 of 113**, and 0 of the 69 donuts. The delta by family is one line: **bar +170,
+heatmap +2, scatter −26, boxplot −44, area −59, pie −145, line −216**.
+
+That line was published wrong twice before it was published right, and both defects are the same
+kind — an instrument printing a number it had not checked. The first version listed one row per
+*label* (`bar +142, scatter −26, bar −27, scatter −30, …`, 23 rows) because `perLabel` is keyed by
+label and the line is titled by family. Summing by family fixed the repetition and left the
+subtraction inside the loop: `cueOf(family)` returns the whole family's cue total, so a family with
+eight labels took that total away eight times and the real corpus printed `line −864`. The line above
+has one subtraction per family, and the test that pins the arithmetic is two `line` labels where the
+cue is right on both and the profile wrong on both — the family's delta is −2, and the version that
+ships −4 fails it.
 
 Two mechanisms are consistent with this table, and the artifact cannot separate them yet:
 
