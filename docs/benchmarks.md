@@ -12301,6 +12301,68 @@ opinions agree because they are the same opinion. Across 496 questions the nine-
 averages **1.68 distinct result sets per case**, and on **302 of 496** questions all nine candidates
 return the same result. Nine calls, one hypothesis.
 
+### The resolution on the split that decides adoption is 1.77pp, and the 4.23 points did not reproduce
+
+Everything above is a statement about 496 questions. The split a leaderboard reports is 1,532, so
+the same pair was run there — one arm, twice, in one dispatch (`43557304930`, `select-mixed`,
+`deepseek-chat`, served as `deepseek-flash` on all 1,532 questions):
+
+| reading | Mini-Dev (496) | dev (1,532) |
+| --- | ---: | ---: |
+| accuracy | 58.06% | **62.86%** |
+| the same arm again | 62.30% | **63.12%** |
+| A/A score delta | **+4.23pp** (11 : 32, p = 0.0019) | **+0.26pp** (45 : 49, p = 0.757) |
+| A/A ceiling delta | +2.62pp | **−0.33pp** (42 : 37) |
+| paired MDE — the resolution | 3.70pp | **1.77pp** |
+| ceiling MDE | — | 1.63pp |
+| discordant share | 8.67% | 6.14% |
+| distinct result sets per question | 1.34 | 1.30 |
+| questions with one result set | 66.9% | **74.2%** |
+| selection loss | 7.3% | 5.6% |
+| pool ceiling | 69.2% | 68.47% |
+
+Two predictions were registered before the dispatch and they land differently, which is the point
+of registering them:
+
+- **The ceiling delta lands inside the ±1.0pp band** the lottery predicted for this n (−0.33pp).
+- **The resolution came in at 1.77pp, not the 2.0–2.3pp predicted.** The prediction scaled 3.7pp by
+  1/√n and held the *discordant share* fixed, and the share is the other half of the arithmetic:
+  it is 6.14% on dev against 8.67% on Mini-Dev. A design's resolution is `(1.96 + 0.84)·√(share/n)`,
+  so a split that also disagrees less often is better than 1/√n twice over. The estimate was wrong
+  in the direction that costs nothing, and the formula is now the stated one rather than a scaling
+  rule.
+
+**The 4.23 points did not reproduce.** At three times the questions the same pair separates by
+0.26pp with p = 0.76. That is the strongest available evidence for the reading above: the Mini-Dev
+delta was a draw from a distribution whose tail the 496-question design can reach, not a harness
+that is noisy by four points. It also means the honest summary of `43535849969` is not "our
+instrument is broken" but "a 496-question A/A can wander that far, which is why it is not the split
+to decide anything on".
+
+**What it unlocks.** A mechanism worth 2pp is now measurable with two arms on dev for 1,532 × 4
+calls. That is the same bill as the Mini-Dev runs that could not resolve it, and it is the only
+change in this document that alters what the next round can claim.
+
+#### The instrument's first external failure, found on the artifact it was pointed at
+
+`select-mixed` draws three candidates and keeps three, so on dev there is no pool wider than the
+draw and the lottery band is a constant zero. The verdict printed at that artifact was **"the A/A
+ceiling delta of −0.3pp is 0.3pp beyond the ±0.0pp the offered pool can produce, so the draw
+distribution itself moved"** — a claim about a moved distribution produced from no evidence at all,
+because a zero band makes every delta "beyond" it. The reading was caught within a minute of the
+artifact landing, which is what a verdict sentence is for, and the third state is now explicit:
+
+| kind | condition | what it means |
+| --- | --- | --- |
+| `inside` | the graded delta is inside the band | the pair read the draw |
+| `beyond` | it is outside the band | the draw distribution moved |
+| `unpriced` | the widest pool is exactly the draw | nothing about composition can be separated; only the pair's own interval grades a delta |
+| `unmeasured` | the run carried no A/A | no pair to grade |
+
+So a dev dispatch that wants its band priced has to include a wider arm in the same run — the
+dispatch after this one carries `select-mixed-rule-spread3` beside `select-mixed` for exactly that
+reason, and `--arm` on the instrument names which arm supplies the universe.
+
 ### Text2Vis: the cue table, scored against the one corpus that labels a chart
 
 The chart half of the product ships a deterministic decision — `readCues` reads the question and
