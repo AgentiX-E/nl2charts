@@ -5,19 +5,23 @@ import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import {
   MATCH,
+  armBill,
   declaredLines,
   declaredPairs,
   isEntry,
   main,
+  paidLines,
   pairLines,
   pairOutcome,
   pairProblems,
+  reachLines,
+  reachSplit,
   readDeclared,
   resolvePairSettings,
   shapeOf,
   summaries,
 } from '../eval/bird/pair.js';
-import type { PairArtifact, PairCase, PairOutcome } from '../eval/bird/pair.js';
+import type { PairArtifact, PairCase, PairOutcome, ReachSplit } from '../eval/bird/pair.js';
 
 const case_ = (arm: string, id: number, shape: string): PairCase =>
   shape === MATCH ? { arm, id, passed: true, reason: 'match' } : { arm, id, passed: false, reason: shape };
@@ -486,5 +490,298 @@ describe('declared pairs', () => {
     expect(resolvePairSettings(['x.json', '--declared'], '/root')).toEqual({ report: '/root/x.json', declared: true });
     expect(() => resolvePairSettings(['x.json', '--declared', '--pair', 'a,b'], '/root')).toThrow('two different readings');
     expect(() => resolvePairSettings(['--declared'], '/root')).toThrow('usage: pair.ts');
+  });
+});
+
+describe('what the paired arms paid', () => {
+  /**
+   * The artifact this reading was written against: `43606308056`, dev, 1,532 paired questions.
+   *
+   * Both arms sent three cards and answered three times, so the comparison is one lever's price and
+   * nothing else. The columns are the artifact's own `tokens` block, not a re-measurement — the
+   * point of the instrument is that the adoption question ("did it pay?") is answerable from the
+   * artifact that already answered the accuracy question.
+   */
+  it('bills a cached prefix at the rate the endpoint charges, not at list', () => {
+    const bill = armBill({ arm: 'a', tokens: { prompt: 1000, cached: 800 } });
+    expect(bill).toEqual({ arm: 'a', prompt: 1000, cached: 800, charged: 280, at: 'reported' });
+  });
+
+  it('bills an arm that reported no cache at list price, and says so rather than guessing a discount', () => {
+    const bill = armBill({ arm: 'a', tokens: { prompt: 1000 } });
+    expect(bill).toEqual({ arm: 'a', prompt: 1000, cached: 0, charged: 1000, at: 'list' });
+  });
+
+  it('has no bill for an arm whose artifact predates the token columns', () => {
+    // A missing column and a zero column are different readings: the first says the cost is
+    // unread, the second says the call was free.
+    expect(armBill({ arm: 'a' })).toBeUndefined();
+    expect(armBill({ arm: 'a', tokens: {} })).toBeUndefined();
+  });
+
+  it('bills a row whose arm name is absent under a name a reader can find', () => {
+    // The row exists and carries tokens, so the bill is readable; only its label is missing. Pricing
+    // it and then printing an empty column would hide which row the number belongs to.
+    expect(armBill({ tokens: { prompt: 100 } })).toEqual({ arm: '?', prompt: 100, cached: 0, charged: 100, at: 'list' });
+  });
+
+  it('reads a lever that lost accuracy as a minus, so the pair of numbers cannot be read backwards', () => {
+    const lines = paidLines(
+      [
+        { arm: 'a', prompt: 1000, cached: 0, charged: 1000, at: 'list' },
+        { arm: 'b', prompt: 1000, cached: 0, charged: 1000, at: 'list' },
+      ],
+      { wins: 1, losses: 3, examined: 100 },
+    ).join('\n');
+    expect(lines).toContain('0.0% more per call and is -2.00pp more accurate');
+  });
+
+  it('prices the two arms of the G1c pair at what they were billed', () => {
+    const left = armBill({ arm: 'select-mixed-rule', tokens: { prompt: 3137, cached: 2558 } });
+    const right = armBill({ arm: 'select-mixed-rule-narrow', tokens: { prompt: 3327, cached: 2137 } });
+    expect(left?.charged).toBe(835);
+    expect(right?.charged).toBe(1404);
+    // The block is paid three times and it also breaks the prefix: prompt tokens rose 6.0% while
+    // cache hits fell 16.5%, which is why the charged unit moves by far more than either.
+    expect(right?.charged as number).toBeGreaterThan((left?.charged as number) * 1.6);
+  });
+
+  it('names the price of the lever beside the accuracy it bought', () => {
+    const lines = paidLines(
+      [
+        { arm: 'select-mixed-rule', prompt: 3137, cached: 2558, charged: 835, at: 'reported' },
+        { arm: 'select-mixed-rule-narrow', prompt: 3327, cached: 2137, charged: 1404, at: 'reported' },
+      ],
+      { wins: 58, losses: 50, examined: 1532 },
+    ).join('\n');
+    expect(lines).toContain('select-mixed-rule');
+    expect(lines).toContain('835');
+    expect(lines).toContain('1404');
+    expect(lines).toContain('81.5%');
+    expect(lines).toContain('64.2%');
+    expect(lines).toContain('68.1% more per call');
+    expect(lines).toContain('+0.52pp');
+  });
+
+  it('reads a cost that fell as a fall, and says so in the same sentence', () => {
+    const lines = paidLines(
+      [
+        { arm: 'a', prompt: 2000, cached: 0, charged: 2000, at: 'list' },
+        { arm: 'b', prompt: 2000, cached: 1800, charged: 380, at: 'reported' },
+      ],
+      { wins: 10, losses: 10, examined: 100 },
+    ).join('\n');
+    expect(lines).toContain('81.0% less per call');
+    expect(lines).toContain('+0.00pp');
+    expect(lines).toContain('at list price');
+  });
+
+  it('refuses to state a price ratio against an arm that sent no prompt', () => {
+    const lines = paidLines(
+      [
+        { arm: 'a', prompt: 1000, cached: 0, charged: 1000, at: 'reported' },
+        { arm: 'b', prompt: 0, cached: 0, charged: 0, at: 'reported' },
+      ],
+      { wins: 1, losses: 2, examined: 4 },
+    ).join('\n');
+    // A ratio against a zero is not a large number, it is an absent one: the arm sent no prompt,
+    // so what it "cost per call" divides by a call that is not in the artifact.
+    expect(lines).not.toContain('per call');
+    expect(lines).toContain('b');
+  });
+
+  it('names the arm whose artifact carries no token columns, instead of pricing it at zero', () => {
+    const lines = paidLines(
+      [{ arm: 'a', prompt: 1000, cached: 0, charged: 1000, at: 'reported' }],
+      { wins: 1, losses: 0, examined: 1 },
+      ['b'],
+    ).join('\n');
+    expect(lines).toContain('b: no token columns in this artifact');
+    expect(lines).not.toContain('per call');
+  });
+
+  it('prints the bill under the paired reading, and prices the arms it was asked for', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pair-bill-'));
+    const file = join(dir, 'bird-eval.json');
+    writeFileSync(
+      file,
+      JSON.stringify({
+        ...artifact([MATCH, 'values'], ['values', MATCH]),
+        arms: [
+          { arm: 'a', tokens: { prompt: 1000, cached: 800 } },
+          { arm: 'b', tokens: { prompt: 1000, cached: 0 } },
+        ],
+      }),
+    );
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const printed: string[] = [];
+    log.mockImplementation((...args: unknown[]) => {
+      printed.push(args.map(String).join(' '));
+    });
+    try {
+      expect(main([file, '--pair', 'a,b'], dir)).toBe(0);
+    } finally {
+      log.mockRestore();
+    }
+    const text = printed.join('\n');
+    expect(text).toContain('what each call cost');
+    expect(text).toContain('280');
+    expect(text).toContain('1000');
+  });
+});
+
+describe('how much of the pair the lever actually reached', () => {
+  /**
+   * The reading this instrument exists for, taken from `43606308056`.
+   *
+   * `select-mixed-rule` and `select-mixed-rule-narrow` differ by a value block that lands on a
+   * candidate's card only where the schema has a column to carry one. On the 359 dev questions where
+   * it has none, the two arms send the same prompt, answer the same number of calls, and differ only
+   * by the temperature — an A/A control that no dispatch had to pay for, sitting inside the artifact.
+   * That subset moved **+2.23pp**, and the subset the block actually reached moved exactly nothing.
+   * A pair read as one number cannot see this; a pair split by reach can.
+   */
+  const reached = (leftPrompt: number, rightPrompt: number, leftPassed: boolean, rightPassed: boolean, id: number): PairCase[] => [
+    { arm: 'a', id, passed: leftPassed, reason: leftPassed ? 'match' : 'values', tokens: { prompt: leftPrompt } },
+    { arm: 'b', id, passed: rightPassed, reason: rightPassed ? 'match' : 'values', tokens: { prompt: rightPrompt } },
+  ];
+
+  it('splits the pairs by whether the lever changed what was sent', () => {
+    const split = reachSplit(
+      {
+        cases: [
+          ...reached(1000, 1000, false, true, 1),
+          ...reached(1000, 1000, false, false, 2),
+          ...reached(1000, 1248, true, true, 3),
+          ...reached(1000, 1248, true, false, 4),
+        ],
+      },
+      'a',
+      'b',
+    );
+    expect(split?.unchanged.cases).toBe(2);
+    expect(split?.moved.cases).toBe(2);
+    expect(split?.unchanged.wins).toBe(1);
+    expect(split?.unchanged.losses).toBe(0);
+    expect(split?.moved.losses).toBe(1);
+  });
+
+  it('reads a delta on each side, so the one the lever did not touch cannot hide in the total', () => {
+    const split = reachSplit(
+      {
+        cases: [
+          ...reached(1000, 1000, false, true, 1),
+          ...reached(1000, 1000, false, false, 2),
+          ...reached(1000, 1248, true, true, 3),
+          ...reached(1000, 1248, true, false, 4),
+        ],
+      },
+      'a',
+      'b',
+    );
+    expect(split?.unchanged.deltaPp).toBe(50);
+    expect(split?.moved.deltaPp).toBe(-50);
+  });
+
+  it('counts a case whose prompt it cannot compare as unmeasured rather than as unchanged', () => {
+    // An absent token column is not a zero-length prompt: reading it as "unchanged" would put a case
+    // the lever provably reached into the control and dilute the control with real lever effect.
+    const split = reachSplit(
+      {
+        cases: [
+          ...reached(1000, 1000, true, true, 1),
+          { arm: 'b', id: 2, passed: true, reason: 'match', tokens: { prompt: 1200 } },
+          { arm: 'a', id: 2, passed: true, reason: 'match' },
+        ],
+      },
+      'a',
+      'b',
+    );
+    expect(split?.unchanged.cases).toBe(1);
+    expect(split?.moved.cases).toBe(0);
+    expect(split?.unmeasured).toBe(1);
+    // And the block says which cases it could not place, rather than folding them into a side.
+    expect(reachLines(split as ReachSplit).join('\n')).toContain('no prompt tokens on one side');
+  });
+
+  it('has no split at all when every case was reached, because then there is no control to read', () => {
+    expect(reachSplit({ cases: [...reached(1000, 1200, true, false, 1)] }, 'a', 'b')).toBeUndefined();
+  });
+
+  it('says the reach in the report, and puts the two deltas beside each other', () => {
+    const split = reachSplit(
+      {
+        cases: [
+          ...reached(1000, 1000, false, true, 1),
+          ...reached(1000, 1000, false, false, 2),
+          ...reached(1000, 1248, true, true, 3),
+          ...reached(1000, 1248, true, false, 4),
+        ],
+      },
+      'a',
+      'b',
+    );
+    const lines = reachLines(split as ReachSplit).join('\n');
+    expect(lines).toContain('the lever changed what 2 of 4 paired question(s) sent');
+    expect(lines).toContain('reached');
+    expect(lines).toContain('+50.00pp');
+    expect(lines).toContain('-50.00pp');
+    // The control is the reading, not a footnote: it is labelled as the one subset where a delta is
+    // the run's own displacement rather than the lever's.
+    expect(lines).toContain('own displacement');
+  });
+
+  it('prints the reach under the paired reading, on a real artifact shape', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pair-reach-'));
+    const file = join(dir, 'bird-eval.json');
+    writeFileSync(
+      file,
+      JSON.stringify({
+        split: 'dev',
+        cases: [
+          ...reached(1000, 1000, false, true, 1),
+          ...reached(1000, 1000, false, false, 2),
+          ...reached(1000, 1248, true, true, 3),
+          ...reached(1000, 1248, true, false, 4),
+        ],
+      }),
+    );
+    const printed: string[] = [];
+    const log = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      printed.push(args.map(String).join(' '));
+    });
+    try {
+      expect(main([file, '--pair', 'a,b'], dir)).toBe(0);
+    } finally {
+      log.mockRestore();
+    }
+    expect(printed.join('\n')).toContain('the lever changed what 2 of 4');
+  });
+});
+
+describe('an arm that changed nothing it sent', () => {
+  it('says so in the loudest sentence the instrument has', () => {
+    // The failure this repository keeps finding one level down: an arm whose lever never reached the
+    // prompt reports as its parent with a different name and a fresh artifact. Here the artifact
+    // itself carries the evidence, because the two arms sent the same number of prompt tokens on
+    // every case they share.
+    const split = reachSplit(
+      {
+        cases: [
+          { arm: 'a', id: 1, passed: true, reason: 'match', tokens: { prompt: 1000 } },
+          { arm: 'b', id: 1, passed: true, reason: 'match', tokens: { prompt: 1000 } },
+        ],
+      },
+      'a',
+      'b',
+    );
+    expect(split?.moved.cases).toBe(0);
+    expect(reachLines(split as ReachSplit).join('\n')).toContain('its parent under another name');
+  });
+
+  it('still refuses a split when there is no case in it at all', () => {
+    expect(reachSplit({}, 'a', 'b')).toBeUndefined();
+    expect(reachSplit({ cases: [] }, 'a', 'b')).toBeUndefined();
+    expect(reachSplit({ cases: [{ arm: 'a', id: 1, passed: true, tokens: { prompt: 1 } }] }, 'a', 'b')).toBeUndefined();
   });
 });

@@ -12952,4 +12952,146 @@ the gap, and the term is now affordable. A second term has to be found in the ha
 the card: their selector reads *their* card, their refiner runs on top of it, and the part this
 repository has never reproduced is the pipeline that puts their description, their examples and their
 refiner in one arm — with the narrowed block on every candidate, which is the adoption test registered
-above.
+above and read in the next section, where it fails.
+
+## The block paid three times, and the control that was already in the artifact
+
+**Registration.** `select-mixed-rule-narrow` is `select-mixed-rule` with one field added:
+`sourceSamples: { samples: 'example', sampleColumns: 'link' }`, which rides every candidate's card
+instead of the arm's own. The arm's `notes`, `evidence`, `repairs`, `linking`, `definitions`, `vote`,
+`selectRule` and `mixed` list are the parent's; the block is the whole diff. Registered before the
+dispatch: accuracy **at least +1.0pp** against the parent on the same 1,532 questions, `calls.mean`
+unchanged at 3.00, prompt tokens read from the artifact's own column rather than from the
+single-prompt arm's +9.17%, and a delta inside the split's resolution (1.64pp on this pair's
+disagreement rate) read as **the block does not survive being paid per candidate**. One dispatch,
+`43606308056`, dev, 1,532 scored questions, both arms in the same artifact against the same judge.
+
+| quantity | `select-mixed-rule` | `-narrow` | delta |
+|---|---:|---:|---:|
+| passed | 993 (**64.82%**) | 1,001 (**65.34%**) | **+0.52pp** |
+| pool ceiling (`candidateRecall`) | 1,053 (68.73%) | 1,057 (68.99%) | +0.26pp |
+| strict (no duplicate credit) | 919 | 924 | +5 |
+| selection loss (ceiling − passed) | 60 | 56 | −4 |
+| calls a question | 3.00 | 3.00 | 0 |
+| prompt characters a question | 7,261 | 7,435 | +2.4% |
+| prompt tokens a call | 3,137 | 3,327 | +6.1% |
+| cached prompt tokens a call | 2,558 (81.5%) | 2,137 (64.2%) | **−16.5%** |
+| **charged prompt tokens a call** | **835** | **1,404** | **+68.1%** |
+| questions carrying a block | 0 | 1,173 (76.6%) | — |
+| columns in that block | 0 | 4,311 | — |
+
+Paired: **58 won, 50 lost, exact McNemar p = 0.5008** — 8 net cases, and 0.52pp is a third of the
+1.64pp the split resolves at. Against its registered bar the arm failed on the accuracy column and
+failed on the cost column: 6.1% more prompt tokens is not 68.1% more bill, and the difference is the
+block sitting in front of the prefix the endpoint was discounting.
+
+### The reach split: the delta is not where the lever is
+
+A paired test assumes the two arms differ by the lever and by nothing else. A lever with a
+*condition* breaks that quietly. The narrowed block renders only on the columns a join reads, and on
+359 of dev's 1,532 questions the schema offers none of them — so on those the two arms send the same
+prompt, answer the same three calls, and differ by temperature alone. That subset is an A/A control
+nobody had to pay for, and it was sitting in the artifact the whole time.
+
+`bench:bird:pair` now reads it, from the per-case token column the artifact already records:
+
+```
+  the lever changed what 1173 of 1532 paired question(s) sent:
+    reached     1173    757 ->   757  +0.00pp  (43 won, 43 lost, p = 1.0000)
+    unchanged    359    236 ->   244  +2.23pp  (15 won,  7 lost, p = 0.1338)
+```
+
+Equal prompt tokens on exactly 359 cases, and those 359 are exactly the cases with a zero-column
+block — the two sets coincide one for one, and no case the block reached has an unchanged token
+count (the smallest increase is 9 tokens a question, the mean 248). So:
+
+- **Where the block acted, it moved nothing.** 757 against 757, 43 wins against 43 losses. Not
+  "small": equal.
+- **Where it did not act, the pair moved 2.23pp.** Fifteen wins to seven losses on identical prompts.
+  That is the run's own displacement, it is larger than the +0.52pp the round was going to adopt, and
+  it is consistent with zero (p = 0.1338 on 22 discordant cases, where the standard error is ~5pp).
+
+The +0.52pp is the sum of a null and a control, and the control carried it. Had this round been read
+off the accuracy column — which is how every previous prompt lever in this document was read — the
+block would have been adopted on a +0.52pp that came entirely from questions it never touched.
+
+The shape transitions say the same thing in the other instrument: `values → match` 47 against
+`match → values` 40, `column-count → match` 10 against `match → column-count` 9. A repair shows up as
+a one-way transition; this is churn with a 7-case tilt, and the tilt is on the population the reach
+split already prices at zero.
+
+Two channels had to be ruled out before that reading was accepted. The chooser ranks by length, and
+the block lengthens three cards by different amounts, so `shortest` picked a different source on 67
+questions (`metadata+evidence` 317 → 351, `values` 322 → 295). And the diversity audit
+(`mixedCandidatePrompts`) is blind to this lever by construction: a block appended to all three
+candidates leaves pairwise distinctness untouched, and it reads **0.609** degenerate on both arms to
+the digit. Neither channel can produce the split above, because the split is on the population where
+the prompts were identical and no chooser could move.
+
+### The price, now in the same report as the delta
+
+`bench:bird:pair` bills both arms through `cacheBill` and `DEFAULT_CACHE_RATE` — the same rate and the
+same function the cache report uses — so the number beside a delta is the number the endpoint charged
+rather than the number the prompt grew by:
+
+```
+  what each call cost, a cached prompt token billed at 0.1x:
+    select-mixed-rule                 835 charged of   3137 prompt    2558 cached (81.5%)
+    select-mixed-rule-narrow         1404 charged of   3327 prompt    2137 cached (64.2%)
+    the second arm costs 68.1% more per call and is +0.52pp more accurate on 1532 paired question(s)
+```
+
+The block is paid three times because there are three cards, and it costs more than the sum of the
+three because it breaks the cached prefix: 81.5% of the parent's prompt was billed at the cache rate,
+64.2% of the narrow arm's was. In prompt tokens — the unit this document has always quoted — the
+lever is +6.1%. In the unit the invoice uses it is +68.1%, and no report in this repository could say
+so before this round.
+
+### Verdict
+
+**Not adopted, and the family is closed.** The block does not survive being paid per candidate: it
+reaches 76.6% of the split, moves exactly zero on the cases it reaches, and the only movement in the
+run is the temperature. The single-prompt reading keeps its own verdict unchanged — the narrowed
+block bought **+1.50pp** at 738 tokens against 676 on `inline+evidence+samples-wide-link`, on one card
+and one call — and what this round adds is where that gain lives: it is a *per-prompt* gain that does
+not compose into a pool, because a pool of three already holds three chances to be right and the
+marginal candidate the block rescues is the only case it can buy. That is the arithmetic the
+registration stated in advance, and it is now measured rather than assumed.
+
+This also answers the composition question the previous section left open — the competitor's
+description, examples and refiner in one arm, *with the narrowed block on every candidate*. The
+answer is that the block contributes nothing there, so the 3.1pp this repository is short of MAC-SQL
+is not in the card. It has to be in the harness: their selector reads their card, their refiner runs
+on top of it, and neither of those is a per-candidate sample.
+
+### Where the gap stands after this round
+
+| quantity | value | where it comes from |
+|---|---:|---|
+| shipped arm, dev, this artifact | **64.82%** | `select-mixed-rule`, 3.00 calls, 835 charged tokens |
+| shipped arm, dev, `41947376305` | 63.97% | same arm, earlier run — a **0.85pp** displacement |
+| its pool's ceiling | 68.99% | this artifact, re-read for the pair |
+| the block on every candidate | 65.34% | `-narrow`, +68.1% a call, not adopted |
+| the block on one card | 64.31% | `inline+evidence+samples-wide-link`, 738 tokens, +1.50pp over its parent |
+| MAC-SQL, our harness, our model, dev | **67.89%** | 1,040/1,532 |
+| ours against MAC-SQL | **−3.1pp** | and −2.6pp of it is pool, not card |
+
+The displacement is worth naming because it moves the headline: the same arm, unchanged, reads
+64.82% here and 63.97% on the run this document has been quoting. The gap to MAC-SQL is therefore
+3.1pp under the more recent reading and 3.9pp under the older one, and every later comparison is
+against this artifact's parent rather than against a number from a different run.
+
+### What changes in the method, not just in the table
+
+1. **Every pair prints its reach before its delta is read.** A lever with a condition has a control
+   subset inside its own artifact, and the control moved 4× further than the lever this round. The
+   instrument is `reachSplit`, it spends no call, and it now runs by default in `bench:bird:pair`.
+2. **A delta is quoted with the population it was measured on.** 58/50 on 1,532 and 43/43 on 1,173 are
+   the same artifact and different sentences, and only one of them is about the block.
+3. **A cost column is quoted in charged tokens.** Prompt tokens say what was sent; charged tokens say
+   what was paid. Every lever that touches the front of the prompt moves the second more than the
+   first, and the ordering of the document's cost tables has been wrong by that factor until now.
+4. **A null on the reached population retires the mechanism, not the arm.** The block stays in the
+   catalogue as the priced ceiling of the value family, on one card, where it is still the cheapest
+   +1.50pp in the table — and it stops being a candidate for the pool, which is where the next three
+   rounds would otherwise have spent dispatches.

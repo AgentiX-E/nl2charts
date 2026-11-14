@@ -59,6 +59,13 @@ jobs:
       - name: Score the cue table
         run: pnpm bench:text2vis:rule --artifact eval/out/text2vis-rule.json
 
+      # The other half of the product's decision, on the same rows: `recommendChart` ranks marks by
+      # the question *and* the result set's shape, and the cue reading has only ever priced the
+      # first. The corpus ships the result set (`Table Data`), so the second half costs no model —
+      # and the number it produces is the ceiling a query side has to hit, not a score.
+      - name: Score the recommender with the result set in front of it
+        run: pnpm bench:text2vis:profile --artifact eval/out/text2vis-profile.json
+
       # The artifact carries the report the log printed, so a later reader can recompute the shares
       # from the counters rather than from a sentence.
       - name: Upload the reading
@@ -66,7 +73,9 @@ jobs:
         uses: actions/upload-artifact@v5
         with:
           name: text2vis-rule
-          path: eval/out/text2vis-rule.json
+          path: |
+            eval/out/text2vis-rule.json
+            eval/out/text2vis-profile.json
           if-no-files-found: warn
           retention-days: 30
 

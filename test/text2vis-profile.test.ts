@@ -1,0 +1,351 @@
+/**
+ * The chart half, with the result set in front of the recommender.
+ *
+ * `text2vis-rule.test.ts` pins the cue table; this file pins the half the cue table cannot see. The
+ * cases are chosen to be the ones the cue-only reading fails on: a share question over twenty
+ * categories (the corpus labels it `Bar` and the cue table answers `pie`), a share question over
+ * five (labelled `Pie`, where the cue table is already right and the profile must not break it), and
+ * a table the profiler cannot read at all.
+ *
+ * Nothing here touches the network: the corpus is strings, and the one end-to-end case serves a CSV
+ * from a local socket the way every other instrument's end-to-end case does.
+ */
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { afterAll, describe, expect, it } from 'vitest';
+import { applyExitCode } from '../eval/text2vis/dataset.js';
+import {
+  assertProfileReport,
+  describeProfile,
+  entryProfile,
+  parseProfileArgs,
+  parseResultSet,
+  profileAnswer,
+  profileInputs,
+  profilesOf,
+  scoreProfile,
+  typedRows,
+} from '../eval/text2vis/profile.js';
+import { scoreRule } from '../eval/text2vis/rule.js';
+import { TEXT2VIS_FIELDS } from '../eval/text2vis/dataset.js';
+
+const root = mkdtempSync(join(tmpdir(), 'nl2charts-text2vis-profile-'));
+afterAll(() => {
+  rmSync(root, { recursive: true, force: true });
+});
+
+const ENTRY = resolve('eval/text2vis/profile.ts');
+const MODULE_URL = pathToFileURL(ENTRY).href;
+// Five columns, because this reading needs the fifth: `Table Data` is the result set, and a corpus
+// without the column is a corpus this command can only decline on.
+const HEADER = `${TEXT2VIS_FIELDS.prompt},${TEXT2VIS_FIELDS.answer},${TEXT2VIS_FIELDS.code},${TEXT2VIS_FIELDS.chartType},Table Data`;
+
+/**
+ * One CSV cell holding a whole table.
+ *
+ * Quoted, with the newlines left real: `JSON.stringify` would escape them to the two characters
+ * `\n`, and the field would then be a single line of commas — the table would parse as its own
+ * header and nothing else, which is the failure this fixture exists to avoid.
+ */
+function cell(text: string): string {
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+/** A table of `count` regions, so one fixture answers both the refusal and the admission. */
+function regions(count: number): string {
+  const names = ['North', 'South', 'East', 'West', 'Central', 'Northeast', 'Southwest', 'Midwest', 'Coastal', 'Inland', 'Delta', 'Highland', 'Lowland', 'Border', 'Capital', 'Island', 'Valley', 'Forest', 'Desert', 'Plains'];
+  const lines = ['Region, Revenue'];
+  for (let index = 0; index < count; index += 1) lines.push(`${names[index % names.length] as string} ${String(index + 1)}, ${String(100 - index * 3)}`);
+  return lines.join('\n');
+}
+
+async function serve(body: string): Promise<{ url: string; close: () => Promise<void> }> {
+  const server = createServer((_request, response) => {
+    response.writeHead(200, { 'content-type': 'text/csv' });
+    response.end(body);
+  });
+  await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
+  const { port } = server.address() as AddressInfo;
+  return {
+    url: `http://127.0.0.1:${String(port)}/Text2Vis.csv`,
+    close: () => new Promise<void>((done) => server.close(() => done())),
+  };
+}
+
+describe('a result set, as the corpus spells it', () => {
+  it('reads a header and its rows', () => {
+    const set = parseResultSet('Country, Value\nNigeria, 43.54\nIndia, 0.76');
+    expect(set.columns).toEqual(['Country', 'Value']);
+    expect(set.rows).toEqual([
+      ['Nigeria', '43.54'],
+      ['India', '0.76'],
+    ]);
+  });
+
+  it('keeps a quoted comma inside one cell, and drops the trailing newline', () => {
+    // The corpus holds names like `Korea, Rep.`, which is why the parser is the file's own rather
+    // than a split on commas: the same rules parse both files or the profile of one is wrong.
+    const set = parseResultSet('Country, Value\n"Korea, Rep.", 12\n\n');
+    expect(set.rows).toEqual([['Korea, Rep.', '12']]);
+  });
+
+  it('types numbers, leaves a missing cell null, and keeps a leading zero as text', () => {
+    const set = parseResultSet('Code, Value\n007, 12\nA1, ');
+    expect(typedRows(set)).toEqual([
+      { Code: '007', Value: 12 },
+      { Code: 'A1', Value: null },
+    ]);
+  });
+
+  it('profiles the columns the recommender ranks on', () => {
+    const profiles = profilesOf(parseResultSet(regions(5)));
+    const revenue = profiles.find((profile) => profile.name === 'Revenue');
+    const region = profiles.find((profile) => profile.name === 'Region');
+    expect(revenue?.type).toBe('quantitative');
+    expect(revenue?.max).toBe(100);
+    expect(region?.type).toBe('nominal');
+    expect(region?.distinct).toBe(5);
+  });
+
+  it('answers nothing for a table with no rows', () => {
+    expect(profilesOf(parseResultSet('Region, Revenue'))).toEqual([]);
+  });
+});
+
+describe('the recommender, with a table in front of it', () => {
+  it('refuses a pie over twenty categories and answers bar', () => {
+    // The row the cue-only reading gets wrong most often: `what percentage` names a share, the cue
+    // table answers pie, and twenty categories cannot be sliced into one.
+    const answer = profileAnswer('What percentage of revenue does each region contribute?', regions(20));
+    expect(answer.mark).toBe('bar');
+    expect(answer.families).toContain('bar');
+  });
+
+  it('answers pie for the same question over five categories', () => {
+    // The other half of the same rule: a profile that only ever refuses pie would buy bar accuracy
+    // by giving away the 145 pie rows the cue table already gets right.
+    const answer = profileAnswer('What percentage of revenue does each region contribute?', regions(5));
+    expect(answer.mark).toBe('pie');
+  });
+
+  it('declines a table it cannot profile rather than answering its first mark', () => {
+    const answer = profileAnswer('What percentage of revenue does each region contribute?', '');
+    expect(answer.mark).toBe('declined');
+    expect(answer.reasons).toEqual(['profile:none']);
+  });
+
+  it('declines a table every admission refuses', () => {
+    // One nominal column and no measure: a bar needs a measure, a line needs an ordered axis, a pie
+    // needs a measure, and the two marks that read several numbers need columns that are not there.
+    // The reading has to say *this* rather than blame the ranking, which is why the reason travels.
+    const answer = profileAnswer('How many rows are there?', 'Label\nalpha\nbeta');
+    expect(answer.mark).toBe('declined');
+    expect(answer.reasons).toEqual(['profile:refused']);
+  });
+});
+
+describe('the reading', () => {
+  const row = (prompt: string, label: string, tableData: string): { prompt: string; label: string; tableData: string } => ({ prompt, label, tableData });
+
+  it('counts a hit, a shortlist miss and a refusal separately', () => {
+    const report = scoreProfile([
+      row('What percentage of revenue does each region contribute?', 'Bar Chart', regions(20)),
+      row('What percentage of revenue does each region contribute?', 'Pie Chart', regions(5)),
+      row('What percentage of revenue does each region contribute?', 'Bar Chart', ''),
+    ]);
+    expect(report.scored).toBe(3);
+    expect(report.top1).toBe(2);
+    expect(report.shortlist).toBe(2);
+    expect(report.declined).toBe(1);
+    expect(() => assertProfileReport(report)).not.toThrow();
+  });
+
+  it('excludes an unmapped label and publishes it with its count', () => {
+    const report = scoreProfile([row('Show the hierarchy', 'Treemap', regions(5))]);
+    expect(report.scored).toBe(0);
+    expect(report.unmapped.count).toBe(1);
+    expect(report.unmapped.labels).toEqual([{ label: 'Treemap', n: 1 }]);
+  });
+
+  it('prints the cue-only reading beside it, so the delta has a control', () => {
+    const inputs = [row('What percentage of revenue does each region contribute?', 'Bar Chart', regions(20))];
+    const report = scoreProfile(inputs);
+    const cue = scoreRule(inputs);
+    const lines = describeProfile(report, cue);
+    expect(lines.join('\n')).toContain('cue-only');
+    expect(lines.join('\n')).toContain('+profile');
+    // The control is the same rows: one question here, and the cue table answers it pie.
+    expect(cue.scored).toBe(1);
+    expect(lines.join('\n')).toContain('bar +1');
+  });
+
+  it('counts two rows of one family and one answer twice', () => {
+    // The counters are keyed by `family -> answer`, and the second row of a pair is the case where
+    // the key already exists: a reading whose increments only work for a new key would report one
+    // answer for two rows and pass every per-label sum.
+    const report = scoreProfile([
+      row('Which region leads?', 'Bar Chart', regions(5)),
+      row('Which region leads?', 'Bar Chart', regions(5)),
+    ]);
+    expect(report.top1).toBe(2);
+    expect(report.confusion).toEqual([{ expected: 'bar', answered: 'bar', n: 2 }]);
+  });
+
+  it('counts two refusals of one family twice', () => {
+    const report = scoreProfile([
+      row('Which region leads?', 'Bar Chart', ''),
+      row('Which region leads?', 'Bar Chart', ''),
+    ]);
+    expect(report.declined).toBe(2);
+    expect(report.confusion).toEqual([{ expected: 'bar', answered: 'declined', n: 2 }]);
+  });
+
+  it('reports an empty corpus as an empty report rather than dividing by zero', () => {
+    const report = scoreProfile([]);
+    expect(report.scored).toBe(0);
+    expect(report.top1Share).toBe(0);
+    expect(report.baseline.mostFrequent).toBe('bar');
+    expect(report.baseline.share).toBe(0);
+    expect(() => assertProfileReport(report)).not.toThrow();
+  });
+
+  it('omits the delta line when the two readings agree', () => {
+    // A profile that changes nothing is a fact, and the line that says so is silence rather than a
+    // row of zeroes — the reader then knows the difference was not filtered away.
+    const inputs = [row('What percentage of revenue does each region contribute?', 'Pie Chart', regions(5))];
+    const report = scoreProfile(inputs);
+    const cue = scoreRule(inputs);
+    const lines = describeProfile(report, cue).join('\n');
+    expect(lines).toContain('+profile');
+    expect(lines).not.toContain('delta by family');
+  });
+
+  it('refuses more hits than shortlist hits', () => {
+    const report = scoreProfile([row('Which region leads?', 'Bar Chart', regions(5))]);
+    expect(() => assertProfileReport({ ...report, top1: report.shortlist + 1 })).toThrow(/more than/);
+  });
+
+  it('refuses a report where a row fell out of the counters', () => {
+    const report = scoreProfile([row('Which region leads?', 'Bar Chart', regions(5))]);
+    expect(() => assertProfileReport({ ...report, top1: 0, shortlist: 0, declined: 0 })).toThrow(/fell out/);
+  });
+
+  it('refuses per-label rows that do not sum to the score', () => {
+    const report = scoreProfile([row('Which region leads?', 'Bar Chart', regions(5))]);
+    expect(() => assertProfileReport({ ...report, perLabel: [] })).toThrow(/sum to/);
+  });
+
+  it('refuses a report whose rows are not scored plus unmapped', () => {
+    const report = scoreProfile([row('Which region leads?', 'Bar Chart', regions(5))]);
+    expect(() => assertProfileReport({ ...report, rows: report.rows + 1 })).toThrow(/is not the/);
+  });
+});
+
+describe('the command', () => {
+  it('refuses an unknown argument by name', () => {
+    expect(() => parseProfileArgs(['--artfacts', 'x'])).toThrow(/unknown argument/);
+    expect(() => parseProfileArgs(['--artifact'])).toThrow(/needs a path/);
+    expect(parseProfileArgs([])).toEqual({ json: false });
+    expect(parseProfileArgs(['--json', '--artifact', 'a.json'])).toEqual({ json: true, artifact: 'a.json' });
+  });
+
+  it('scores a served corpus and writes both reports', async () => {
+    const body = [
+      HEADER,
+      `What percentage of revenue does each region contribute?,,plt.pie([1]),Bar Chart,${cell(`${regions(20)}\n`)}`,
+      `What percentage of revenue does each region contribute?,,plt.pie([1]),Pie Chart,${cell(`${regions(5)}\n`)}`,
+      `Show the hierarchy of accounts,,plt.bar([1]),Treemap,${cell('Region, Revenue\nA, 1\n')}`,
+    ].join('\n');
+    const server = await serve(`${body}\n`);
+    const artifact = join(root, 'out', 'text2vis-profile.json');
+    const lines: string[] = [];
+    try {
+      const code = await entryProfile(ENTRY, MODULE_URL, (line) => lines.push(line), {
+        argv: ['--artifact', artifact],
+        load: { cacheDir: join(root, 'served'), url: server.url },
+      });
+      expect(code).toBe(0);
+      const payload = JSON.parse(readFileSync(artifact, 'utf8')) as { cue: { scored: number }; profile: { scored: number; top1: number; unmapped: { count: number } } };
+      expect(payload.profile.scored).toBe(2);
+      expect(payload.profile.unmapped.count).toBe(1);
+      // Bar over twenty categories and pie over five: both are the profile half's own claim.
+      expect(payload.profile.top1).toBe(2);
+      expect(payload.cue.scored).toBe(2);
+      expect(lines.join('\n')).toContain('+profile');
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('takes no arguments at all, and reads the corpus it is given', async () => {
+    // A dispatch that runs the command bare is the default in the workflow, and `argv` absent is a
+    // state the harness must not turn into an exception: the argument list defaults, the artifact
+    // stays unwritten, and the reading is still printed.
+    const server = await serve(`${HEADER}\nWhich region leads?,,plt.bar([1]),Bar Chart,${cell(`${regions(5)}\n`)}\n`);
+    const lines: string[] = [];
+    try {
+      const code = await entryProfile(ENTRY, MODULE_URL, (line) => lines.push(line), { load: { cacheDir: join(root, 'bare'), url: server.url } });
+      expect(code).toBe(0);
+      expect(lines.join('\n')).toContain('cue-only');
+      expect(lines.join('\n')).not.toContain('wrote');
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('prints JSON when asked, and returns nothing when imported', async () => {
+    const server = await serve(`${HEADER}\nWhich region leads?,,plt.bar([1]),Bar Chart,${cell(`${regions(5)}\n`)}\n`);
+    const lines: string[] = [];
+    try {
+      const code = await entryProfile(ENTRY, MODULE_URL, (line) => lines.push(line), {
+        argv: ['--json'],
+        load: { cacheDir: join(root, 'json'), url: server.url },
+      });
+      expect(code).toBe(0);
+      expect(lines.some((line) => line.startsWith('{'))).toBe(true);
+      expect(await entryProfile(undefined, MODULE_URL, () => undefined)).toBeUndefined();
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('reports a corpus it could not read as a failure, not a score', async () => {
+    const server = await serve('not a corpus at all\n');
+    const lines: string[] = [];
+    try {
+      const code = await entryProfile(ENTRY, MODULE_URL, (line) => lines.push(line), {
+        argv: [],
+        load: { cacheDir: join(root, 'broken'), url: server.url },
+      });
+      expect(code).toBe(1);
+      expect(lines.join('\n')).toContain('text2vis:');
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('hands the exit code to the process and answers for an empty corpus', () => {
+    // A run that scored nothing is a run whose denominator is zero, and zero is not a score.
+    const report = scoreProfile([{ prompt: '', label: 'Bar Chart', tableData: '' }]);
+    expect(report.scored).toBe(1);
+    expect(report.top1).toBe(0);
+    expect(applyExitCode(undefined, { exitCode: 0 } as unknown as NodeJS.Process)).toBeUndefined();
+  });
+});
+
+describe('the corpus rows this command reads', () => {
+  it('takes the table the corpus ships, and leaves a row without one empty', () => {
+    const inputs = profileInputs({
+      rows: [
+        { prompt: 'q', answer: '', code: '', chartType: 'Bar Chart', raw: { 'Table Data': 'A, B\n1, 2' } },
+        { prompt: 'q', answer: '', code: '', chartType: 'Bar Chart', raw: {} },
+      ],
+    });
+    expect(inputs[0]?.tableData).toBe('A, B\n1, 2');
+    expect(inputs[1]?.tableData).toBe('');
+  });
+});
