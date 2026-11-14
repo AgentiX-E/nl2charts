@@ -12528,3 +12528,117 @@ Two things this does **not** fix. A join whose conditions are written as `a = b 
 writes the pair in a subquery and the gold outside it still lands in `tables`. And the rungs are
 still counted over cases whose candidate set held no answer: 118 of the no-answer cases sit
 outside the `values` scope and are not in this table at all.
+
+### The free selectors, exhaustively: 64.20% is the ceiling, and the paid one is worse than three of the four
+
+`select-mixed-rule` ships `shortest` — the candidate with the fewest characters of SQL — and it
+replaced a model call on the strength of a reading, not a preference. The question this round asked
+is whether `shortest` is the *best* call-free rule or only the first one that happened to be tried.
+Four signals that had never been priced were added to the offline device, all of them functions of
+data already in the artifact's candidate records, so the whole scan spends no model call:
+
+| rule | what it reads | correct | accuracy |
+|---|---|---:|---:|
+| `oracle` *(not a rule)* | any candidate correct | 1,049 | 68.65% |
+| **`complex`** | fewest structural units — tables + subqueries, then `and`/`or`, then aggregates and `case`; length breaks ties | **981** | **64.20%** |
+| `shortest` *(shipped)* | fewest characters | 976 | 63.87% |
+| `struct` | the most common structure — tables, aggregates, `group by`, `over`, `limit`, `distinct` — then shortest inside it | 967 | 63.29% |
+| `nomultiline` | fewest newlines, then length | 967 | 63.29% |
+| `model` *(the paid selector)* | the LLM's own choice | 963 | 63.02% |
+| `short-tie-modal` | shortest, and when two are the same length the result set most candidates agree on | 952 | 62.30% |
+
+Three of the four new signals **lose to a character count**, and the shipped rule is beaten by 5
+cases only when the count is replaced by a structural one. The paid selector is beaten by three of
+the five call-free rules. That is the same finding the shipping decision rested on, now with the
+rest of the space filled in: **on this pool, reading the statements buys about a point over reading
+the results, and nothing buys the 4.78 points to the ceiling.**
+
+Two readings this table needs, because both are ways it could be quoted wrongly:
+
+- **Every column above is measured under one judge.** The five free rules are priced with the
+  artifact's stored `correct` flags, which the run wrote with `judgeOfficial`; nothing here
+  re-executes. The `shortest` row reads 63.87% here against `bench:bird:consensus`'s **64.56%** on
+  the same artifact, and the 0.69pp between them is not a disagreement — it is the candidate that
+  returned nothing, which the consensus device rules out before ranking and this scan does not. The
+  comparison inside the table is between rules, and it is measured on one judge.
+- **The ceiling moved between two runs of the same pool.** `oracle` is 68.65% here and the shipped
+  arm's artifact recorded **66.91%** on 1,532 questions. Same three prompts, same temperature, a
+  different draw. So the "2.94pp the selector loses" that this table's last column implies is
+  itself a difference between two draws, not a stable property — which is the second reason not to
+  read any of these rows as a gain until a run reproduces it.
+
+#### The signal that was calibrated before it was priced, and did not survive
+
+The idea worth stating is the one that failed cleanly. A question that asks "how many" is answered
+by one row of one column; a candidate that returns forty rows is wrong for a reason no majority of
+identical mistakes will reveal, and the shape costs nothing to read because the candidate has
+already been executed. The rule would be: keep the candidates whose result shape matches the
+question's intent, then take the shortest.
+
+It was calibrated against the golds first, and that is what refused it: of the 519 dev questions
+this phrasing matches, only **460 (88.63%)** have a 1×1 gold. Eleven percent of the population the
+rule would act on does not obey the rule. Applied to the pool it then changed **nothing** — 976
+before, 976 after — because on a "how many" question the shortest statement is usually the
+aggregated one already. A rule that is wrong on 11% of its own population and never changes an
+answer is not underpowered; it is not a rule.
+
+### `count(distinct)` is not a defect the product can see: 36 wins against 23 losses
+
+The `values` bucket is 365 of the split's 569 failures, and 27 of those sit one rung above the
+literal: the aggregate is wrong, not the condition. Reading them produced a direction — **13 of 14
+`distinct` cases were the model adding one**, `count(distinct t.account_id)` where the gold counts
+plain rows — and a rule that follows from the engine rather than from a judgement: remove the word.
+
+`drop-count-distinct` is now in the rewrite catalogue, priced by re-execution with `judgeOfficial`
+on `select-mixed`'s 1,532 dev questions:
+
+| | value |
+|---|---:|
+| fired | 162 (10.6% of selected statements count distinct rows) |
+| won | 36 |
+| lost | **23** |
+| broken | 0 |
+| **net** | **+0.85pp** (+13 cases) |
+| exact McNemar | p = 0.1175 |
+| resolves | 1.4pp |
+
+**The gain is below this instrument's own resolution, so the rule is not adopted.** What makes it
+worth writing down is the structure of the loss, which is not noise:
+
+| group | count | gold contains `count(distinct …)` | what removing the word does |
+|---|---:|---|---|
+| won | 36 | **0 of 36** | the over-count was the failure |
+| lost | 23 | **23 of 23** | the under-count becomes the failure |
+
+Every case the rule loses is a case where the gold counts distinct rows. It is the same statement
+as the prediction — same tables, same conditions, same join direction — and the only difference is
+the word. So the rule is not repairing a mistake; it is **taking a side on a convention BIRD does
+not apply consistently**. Some of its annotators counted rows and some counted entities, and 33 of
+the 1,532 golds contain a `count(distinct …)` at all.
+
+That is the honest form of the finding: the `distinct` direction is a real 59-case disagreement
+(36 + 23) that no product can adjudicate without the answer. It is kept in the catalogue as the
+ablation reference for the `values` rung — the same role `drop-limit-on-count` plays for caps at 1
+win against 19 losses.
+
+### What is left, and why it is a composition and not a lever
+
+The gap to the strongest training-free system is now attributable, and the attribution says the
+remaining work is a *pipeline*, not a prompt:
+
+| quantity | value | where it comes from |
+|---|---:|---|
+| shipped arm, dev | **63.97%** | `select-mixed-rule`, 3.00 calls, 3,137 prompt tokens |
+| its pool's ceiling | 66.91% | same artifact |
+| the same pool, another draw | 68.65% | this round's re-read of `43557304930` |
+| MAC-SQL, our harness, our model, dev | **67.89%** | 1,040/1,532 |
+| MAC-SQL, our harness, our model, Mini-Dev | 65.12% | — |
+| our single best single-call arm, Mini-Dev | **59.44%** | `metadata+evidence` |
+
+The last two rows are the ones that move the plan. MAC-SQL's pipeline is **5.7 points above our
+best single-call arm on the split where both were measured**, and every one of its parts has been
+priced here separately: value examples (`values`, 56.63%), their dense schema description
+(`dense.ts`), their refiner (`inline+repair`, +0.41pp at 1.02 calls), their decomposer (−1.1pp).
+**The composition has never been priced as one arm.** Nothing in this document measures
+`values` + `repairs` + their dense card together, which is what their `MAC-SQL` actually runs, and
+that is the next dispatch rather than another rule.
