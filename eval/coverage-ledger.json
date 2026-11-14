@@ -221,10 +221,10 @@
       "branches": 98.64
     },
     "eval/bird/lottery.ts": {
-      "lines": 99.24,
-      "statements": 99.24,
+      "lines": 99.26,
+      "statements": 99.26,
       "functions": 100,
-      "branches": 96.57
+      "branches": 96.62
     },
     "eval/bird/mask.ts": {
       "lines": 100,

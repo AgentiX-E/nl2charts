@@ -347,6 +347,23 @@ describe('the verdict', () => {
     expect(verdictOf(read).kind).toBe('unmeasured');
   });
 
+  it('refuses to grade a pair whose pool is exactly the draw', () => {
+    // The first dev artifact this instrument read had three candidates and kept three, so the band
+    // was a constant zero and a -0.33pp pair read as "beyond" it. A zero band is not evidence of a
+    // moved distribution, it is the absence of a lottery.
+    const verdict = verdictOf({
+      ...read,
+      widest: 3,
+      wide: false,
+      lottery: { cases: 1532, draws: 3, replicates: 2000, mean: 0, sd: 0, low: 0, high: 0 },
+      observed: { score: 0.0026, ceiling: -0.0033, mde: 0.0177, cases: 1532 },
+    });
+    expect(verdict.kind).toBe('unpriced');
+    expect(verdict.sentence).toContain('exactly the draw');
+    expect(verdict.sentence).toContain('1.8pp');
+    expect(verdict.resolution).toBeCloseTo(0.0177, 10);
+  });
+
   it('prints the resolution a claim has to clear', () => {
     // A claim has to clear both the pair's own paired resolution and the widest the lottery produced.
     expect(verdictOf({ ...read, observed: { score: 0.0423, ceiling: 0.0262, mde: 0.037, cases: 496 } }).resolution).toBeCloseTo(0.037, 10);
