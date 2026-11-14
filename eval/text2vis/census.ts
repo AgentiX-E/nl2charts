@@ -28,7 +28,7 @@ import type { FieldProfile, RecommendableMark, ShapeCounts } from '@agentix-e/nl
 import { RECOMMENDABLE_MARKS, readCues, recommendChart } from '@agentix-e/nl2charts-chart';
 import { applyExitCode, isEntry, loadText2Vis, type LoadOptions } from './dataset.js';
 import { familiesOfMark, familyOfLabel, type ChartFamily } from './rule.js';
-import { parseResultSet, profilesOf, type ProfileInput, type ResultSet } from './profile.js';
+import { numericCell, parseResultSet, profilesOf, type ProfileInput, type ResultSet } from './profile.js';
 
 /**
  * The marks that could have answered a family, derived from `familiesOfMark` rather than restated.
@@ -92,6 +92,32 @@ export interface TimeLike {
   readonly sample: string;
   /** Rows whose table carries this column. */
   readonly n: number;
+}
+
+/**
+ * A column whose cells are numbers only after the result set's formatting is read.
+ *
+ * Counted with `numericCell` — the same function the reading uses — against what `Number` alone
+ * accepts, so the count says exactly which columns the coercion rescues rather than how many columns
+ * look numeric to a person. On Text2Vis these columns were typed `nominal`, which left the table with
+ * no measure at all and refused every mark that needs one.
+ */
+export interface CoercedColumn {
+  readonly column: string;
+  /** One cell that needed the coercion, so a reader can see the format that caused it. */
+  readonly sample: string;
+  readonly n: number;
+}
+
+export function coercedColumns(set: ResultSet): CoercedColumn[] {
+  const found: CoercedColumn[] = [];
+  for (const [index, name] of set.columns.entries()) {
+    const cells = set.rows.map((row) => (row[index] as string).trim()).filter((cell) => cell.length > 0);
+    const coerced = cells.filter((cell) => numericCell(cell) !== undefined && !Number.isFinite(Number(cell)));
+    if (coerced.length === 0) continue;
+    found.push({ column: name, sample: coerced[0] as string, n: 1 });
+  }
+  return found;
 }
 
 export interface FamilyCensus {
@@ -168,6 +194,10 @@ export interface CensusReport {
   readonly timeLike: readonly TimeLike[];
   /** Rows whose table carries at least one such column. */
   readonly timeLikeRows: number;
+  /** Columns that are numbers only after their formatting is read, most rows first. */
+  readonly coerced: readonly CoercedColumn[];
+  /** Rows whose table carries at least one such column. */
+  readonly coercedRows: number;
   readonly variant: string;
 }
 
@@ -302,6 +332,12 @@ interface TimeLikeTally {
   n: number;
 }
 
+interface CoercedTally {
+  column: string;
+  sample: string;
+  n: number;
+}
+
 interface ShapeTally {
   family: ChartFamily;
   mark: RecommendableMark;
@@ -331,9 +367,11 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
   >();
   const timeLike = new Map<string, TimeLikeTally>();
   const shapes = new Map<string, ShapeTally>();
+  const coerced = new Map<string, CoercedTally>();
   let scored = 0;
   let unmapped = 0;
   let timeLikeRows = 0;
+  let coercedRows = 0;
 
   for (const row of rows) {
     if (familyOfLabel(row.label) === undefined) {
@@ -364,6 +402,13 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
       const entry = timeLike.get(column.column) ?? { ...column, n: 0 };
       entry.n += 1;
       timeLike.set(column.column, entry);
+    }
+    const rescued = coercedColumns(set);
+    if (rescued.length > 0) coercedRows += 1;
+    for (const column of rescued) {
+      const entry = coerced.get(column.column) ?? { ...column, n: 0 };
+      entry.n += 1;
+      coerced.set(column.column, entry);
     }
 
     if (classified.outcome === 'refused') {
@@ -458,6 +503,8 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
       (left, right) => right.n - left.n || left.column.localeCompare(right.column),
     ),
     timeLikeRows,
+    coerced: [...coerced.values()].sort((left, right) => right.n - left.n || left.column.localeCompare(right.column)),
+    coercedRows,
     variant: options.variant ?? 'census',
   };
 }
@@ -503,7 +550,11 @@ export function describeCensus(report: CensusReport): readonly string[] {
     `text2vis census: ${String(report.scored)} scored of ${String(report.rows)} rows (${String(report.unmapped)} unmapped labels)`,
     `  hit ${String(outcome.hit)} (${share(outcome.hit)}), refused ${String(outcome.refused)} (${share(outcome.refused)}), outranked ${String(outcome.outranked)} (${share(outcome.outranked)}), uncovered ${String(outcome.uncovered)}, no profile ${String(outcome.noProfile)}`,
     `  time-formatted columns the profiler did not call temporal: ${String(report.timeLikeRows)} rows`,
+    `  columns that are numbers only after their formatting is read: ${String(report.coercedRows)} rows`,
   ];
+  for (const column of report.coerced.slice(0, 4)) {
+    lines.push(`    ${column.column} (${String(column.n)} rows, first value ${column.sample})`);
+  }
   for (const column of report.timeLike.slice(0, 6)) {
     lines.push(`    ${column.column} (${column.typed}, ${String(column.n)} rows, first value ${column.sample})`);
   }

@@ -23,6 +23,7 @@ import type { ChartType } from '@agentix-e/nl2charts-spec';
 import { TEXT2VIS_FIELDS } from '../eval/text2vis/dataset.js';
 import {
   assertCensusReport,
+  coercedColumns,
   type CensusRow,
   censusInputs,
   censusOf,
@@ -169,6 +170,33 @@ describe('a column that formats as time', () => {
     expect(timeLikeColumns(prices, profilesOf(prices))).toEqual([]);
     const single = parseResultSet('Year\n2019');
     expect(timeLikeColumns(single, profilesOf(single))).toEqual([]);
+  });
+});
+
+describe('a column that is a number only after its formatting is read', () => {
+  it('names it, with the cell that needed the coercion', () => {
+    const set = parseResultSet(table('Region, Revenue', ['North, "1,234"', 'South, "2,345"', 'East, "3,456"']));
+    expect(coercedColumns(set)).toEqual([{ column: 'Revenue', sample: '1,234', n: 1 }]);
+  });
+
+  it('leaves a plain number alone, because the coercion bought nothing there', () => {
+    const set = parseResultSet(table('Region, Revenue', ['North, 1234', 'South, 2345']));
+    expect(coercedColumns(set)).toEqual([]);
+  });
+
+  it('does not mistake a category for a rescued measure', () => {
+    const set = parseResultSet(table('Region, Revenue', ['North, a', 'South, b']));
+    expect(coercedColumns(set)).toEqual([]);
+  });
+
+  it('counts the rows a formatted column refused, so the repair has a size', () => {
+    const report = censusOf([
+      input('Which region leads?', 'Bar Chart', table('Region, Revenue', ['North, "1,234"', 'South, "2,345"', 'East, "3,456"', 'West, "4,567"'])),
+      input(TREND, 'Line Chart', QUARTERLY),
+    ]);
+    expect(report.coercedRows).toBe(1);
+    expect(report.coerced).toEqual([{ column: 'Revenue', sample: '1,234', n: 1 }]);
+    expect(describeCensus(report).join('\n')).toContain('columns that are numbers only after their formatting is read: 1 rows');
   });
 });
 

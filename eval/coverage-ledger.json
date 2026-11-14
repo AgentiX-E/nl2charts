@@ -4,8 +4,8 @@
   "tolerancePp": 0.2,
   "measuredAt": "2026-11-14",
   "totals": {
-    "lines": 99.53,
-    "statements": 99.53,
+    "lines": 99.54,
+    "statements": 99.54,
     "functions": 100,
     "branches": 98.31
   },
@@ -550,6 +550,12 @@
       "functions": 100,
       "branches": 97.95
     },
+    "eval/text2vis/census.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 98.56
+    },
     "eval/text2vis/dataset.ts": {
       "lines": 100,
       "statements": 100,
@@ -560,7 +566,7 @@
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 98.18
+      "branches": 98.44
     },
     "eval/text2vis/rule.ts": {
       "lines": 100,
