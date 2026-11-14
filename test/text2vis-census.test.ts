@@ -338,8 +338,8 @@ describe('the census over a population', () => {
     // round to neither.
     const report = censusOf(population);
     expect(report.shapes).toEqual([
-      { family: 'line', mark: 'line', dims: 0, ordered: 0, measures: 2, timeLike: true, n: 1, withFallback: 1 },
-      { family: 'pie', mark: 'pie', dims: 1, ordered: 0, measures: 1, timeLike: false, n: 1, withFallback: 1 },
+      { family: 'line', mark: 'line', dims: 0, ordered: 0, measures: 2, timeLike: true, n: 1, withFallback: 1, samples: [TREND] },
+      { family: 'pie', mark: 'pie', dims: 1, ordered: 0, measures: 1, timeLike: false, n: 1, withFallback: 1, samples: ['What percentage of revenue does each region contribute?'] },
     ]);
   });
 
@@ -376,6 +376,19 @@ describe('the census over a population', () => {
     // classify it, and a throw here would take the whole run down on one malformed row.
     expect(censusInputs({ rows: [{ prompt: TREND, chartType: 'Line Chart', raw: {} }] })).toEqual([
       { prompt: TREND, label: 'Line Chart', tableData: '' },
+    ]);
+  });
+
+  it('keeps three questions from each bucket, because the words decide which repair it needs', () => {
+    const rows = Array.from({ length: 5 }, (_, index) =>
+      input(`What percentage of revenue does region ${String(index + 1)} contribute?`, 'Pie Chart', regions(20)),
+    );
+    const report = censusOf(rows);
+    expect(report.shapes[0]?.n).toBe(5);
+    expect(report.shapes[0]?.samples).toEqual([
+      'What percentage of revenue does region 1 contribute?',
+      'What percentage of revenue does region 2 contribute?',
+      'What percentage of revenue does region 3 contribute?',
     ]);
   });
 
