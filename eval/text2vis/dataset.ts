@@ -275,6 +275,12 @@ export function describeCorpus(corpus: Text2VisCorpus): readonly string[] {
     `column names ${corpus.columns.join(' | ')}`,
     `with reference code ${String(withCode)}`,
     `with an answer ${String(withAnswer)}`,
+    // Two samples, because the next reading is a question about *format*: the corpus ships the
+    // result set itself (`Table Data`), so a profile — column types, cardinality, ranges — can be
+    // recovered without asking a model, and how that field is spelled decides whether the recovery
+    // is a parser or a guess. One line each, escaped: a workflow log splits on newlines.
+    `table data sample ${JSON.stringify((corpus.rows[0]?.raw['Table Data'] ?? '').slice(0, 240))}`,
+    `question sample ${JSON.stringify((corpus.rows[0]?.raw.Question ?? '').slice(0, 240))}`,
     ...chartTypeCounts(corpus).map(([name, count]) => `${name} ${String(count)}`),
   ];
 }
