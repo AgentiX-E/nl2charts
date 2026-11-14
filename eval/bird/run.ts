@@ -1687,10 +1687,12 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'inline+evidence+samples-gold': 'the same sampler narrowed to the columns the gold statement filters on: an oracle, so its delta is a ceiling for the family and not an achievable one — run it when a column rule is proposed, never as a candidate',
   'inline+evidence+card-gold': 'the same prompt with the card cut down to the fields the gold statement names: an oracle for what a perfect linker is worth in accuracy, not in characters — run it to price the linker, never as a candidate',
   'inline+evidence+samples-wide': "the same lever with MAC-SQL's rule instead of ours: six most-frequent values of every non-key column, a small numeric dictionary included, a date collapsed to one, NULL first — measured on dev at +2.02pp (972/1532 against 941, p=0.0035, above the 1.89pp resolution) for +74.9% prompt tokens, so it is the priced ceiling of the value family and not a candidate: the shipped form of this mechanism has to fit a quarter of that budget",
-  // Its note is a question until the run that answers it lands. The criterion was registered before
-  // the dispatch: at least +1.5pp against the parent (three quarters of the wide block's gain) and at
-  // most +25% prompt tokens, with the `literal-case` bucket not rising back.
-  'inline+evidence+samples-wide-link': "the same sampler narrowed to the columns the prompt's own hint names, which is the only width at which the block can fit a quarter of the budget the wide block spent — dispatched against its parent on dev to answer whether the values still buy a point and a half when only the columns the model is already pointed at carry them",
+  // Measured against its parent inside one dev artifact (`43591209696`), against a criterion
+  // registered before the dispatch: +1.5pp and +25% tokens. Both were cleared, and the mechanism's
+  // own bucket is the reason to believe it: `literal-case` fell 13 → 1 on a block an eighth the size
+  // of the wide one. Its adoption is still open, because the arm this product ships is
+  // `select-mixed-rule` and a block on one call is not a block on three.
+  'inline+evidence+samples-wide-link': "the same sampler narrowed to the columns the prompt's own hint names: measured on dev at +1.50pp (960/1532 against 937, 52 wins to 29 losses, p=0.0140) for +9.17% prompt tokens, against a registered bar of +1.5pp and +25% — the wide block's two points cost three quarters of the prompt and this one costs a tenth of it, and `literal-case` fell 13 → 1 with it",
   // The verdict was recorded after the run, and it is the one the pre-registered criterion returns:
   // `column-count` fell 129 → 124 and `values` rose 462 → 469, so the rule moved failures rather
   // than repairing them, and 64 gains against 66 losses is a tie at p = 0.93. The transition table
