@@ -13171,3 +13171,148 @@ This is also a correction to how the chart half has been reported for three roun
 quoted as the product's number. It is the *cue table's* number; the product's entry point, on the
 same rows and with the result set in front of it, reads `15.71%`. Both numbers are now in the table
 above, and the next reading has to move the second one.
+
+## Why the chart half was wrong: a census of 1,470 questions, and five levers that had to be separated
+
+`15.71%` was the product's reading with the result set in front of it, against `37.35%` for the cue
+table alone. A number that far below its own component is a symptom, and the repairs it admits live
+in different files — an admission rule that refuses the mark the label names, a ranking that admits it
+and loses, a family no mark covers, a table that will not profile. One "missed 684" cannot choose
+between them, so the first deliverable of this round is an instrument that can.
+
+```bash
+pnpm bench:text2vis:census --artifact eval/out/text2vis-census.json
+```
+
+It classifies every scored row into exactly one of five outcomes and prints, for each refusal, the
+admission rule's own sentence; for each loss, the score gap and the cue position; for each shape, the
+three counts the rules were applied to; and for each of those, up to three of the questions it holds.
+Zero model calls — the corpus ships its tables.
+
+| outcome | rows | share |
+|---|---:|---:|
+| hit | 231 | 15.71% |
+| refused (every mark that could cover the family was ruled out) | 890 | 60.54% |
+| outranked (a covering mark was admitted and lost) | 182 | 12.38% |
+| uncovered (no mark in this product covers the family) | 3 | 0.20% |
+| no profile (the table would not parse) | 164 | 11.16% |
+
+The counters reconcile with `profile.ts` row for row — hits equal top-1, and losses plus uncovered
+families plus refusals that were answered by another mark equal missed. The test asserts both, so the
+two instruments cannot drift into explaining different corpora.
+
+### The refusals were not what the rule said they were
+
+Grouping the 890 by the shape they were refused against was the whole point, and it produced a fact no
+reading had:
+
+| shape | rows | what it means |
+|---|---:|---|
+| measures **0** | 389 | a table with numbers that has no measure at all |
+| category axis + measure, no ordered axis | 350 | the mark exists but the rule demanded an order |
+| measures only, no axis | 158 | nothing to group by |
+| ordered axis + measure | 18 | admitted for one rule, refused by another |
+
+`measures: 0` on 389 rows is not a corpus limit. `Number('1,234')` is `NaN`, so a revenue column
+written with thousands separators typed `nominal`, and every mark that needs a measure was ruled out
+before the question was read. **The product was being scored on its parser.**
+
+### Lever 1: a formatted number is a measure (+1.70pp, adopted)
+
+`numericCell` reads the formatting a result set is displayed with — grouped digits, a leading currency
+sign, a trailing percent, an accounting negative in parentheses — and refuses what it cannot read
+without guessing (a space-grouped number is two words; `1.234,56` needs a decision about which
+separator is decimal). The census counts the columns it rescues with the same function.
+
+| reading | before | after |
+|---|---:|---:|
+| top-1 | 15.71% (231) | **17.41% (256)** |
+| declined | 555 | 437 |
+| refused | 890 | 831 |
+| rows with a formatted-number column | — | 186 |
+
+### Lever 2: the tie-break (+0.00pp, reverted)
+
+The census said `line: 394 rows, 0 hits` and `area: 138 rows, 0 hits` — 532 rows, 36% of the
+population, never once answered. `bar` and `line` both scored their prior of two and `PREFERENCE`
+broke the tie for the bar, so a line could only win a question that said "trend". Registered: making
+a line the default over an ordered axis should raise top-1 by at least 2.0pp.
+
+Measured: **17.41% → 17.41%, every counter bit-identical across 1,470 rows.** The prior fires on every
+row where a line is already admissible, and those are 33 of the 394 — the other 323 are refused before
+any ranking happens. The lever was aimed at the wrong term, and it is reverted because the bar was
+written before the dispatch.
+
+### Lever 3: a period written as text is a time axis (+0.00pp on hits, kept)
+
+`ISO_DATE` accepted only `2026-01-01`, so a timeline spelled `Dec`, `Q1 2019` or `2019-01` typed
+`nominal`, `shape.ordered` was empty, and every line and area over it was refused. The evidence for
+"this is time" is the formatting: a **string** written as a period is a period. A number is not —
+`[2019, 2020]` stays a measure, because a column of prices in the 2000s is indistinguishable from a
+column of years.
+
+Refusals 831 → 809 and outranked 216 → 238: twenty-two rows became reachable and none became a hit.
+The measure of this lever is reachability, not score.
+
+### Lever 4: honour the mark a question names, and let a line carry a category axis (+0.41pp, kept)
+
+The shape buckets carried their questions on the fourth dispatch, and the questions ended the
+argument:
+
+> Based on the given dataset, calculate the percentage contribution of each 'Entity' to the total
+> 'Value' and plot these percentages in order of increasing 'Value' **on a line chart**.
+
+The corpus states the mark it wants. This table had no rule that read "line chart" — so a user who
+named a chart type was given a bar — and the mark itself was refused, because a line was required to
+have an ordered axis, which a category axis sorted by the measure is. Two changes, registered together
+against `c8cce6ca` at **+6.0pp**:
+
+1. an `explicit` cue per mark: the mark word beside `chart`, `plot`, `graph` or `diagram`, which keeps
+   it off the instruction boilerplate those same prompts carry;
+2. a line admitted on any axis with a measure.
+
+| reading | before | after | delta |
+|---|---:|---:|---:|
+| **cue table alone** (shipped `CHART_CUES`) | 37.35% (549) | **40.20% (591)** | **+2.85pp** |
+| top-1 with the result set | 17.41% (256) | 17.82% (262) | **+0.41pp** |
+| refused | 831 | **597** | **−234** |
+| outranked | 216 | **443** | **+227** |
+
+**The registered bar was +6.0pp and the measured delta is +0.41pp: the registration failed.** What it
+bought is visible in the other two columns — 234 rows that could not be answered at all are now
+ranked, and the cue table gained 2.85pp because a question that names a mark is a request and not a
+suggestion. It is kept on those two readings, and the failure is recorded rather than explained away:
+the registration assumed the ranking would take the rows the admission freed, and it did not.
+
+### Where the chart half now stands, and what the next lever is
+
+The census after four levers, on the same 1,470 rows:
+
+| outcome | rows | share |
+|---|---:|---:|
+| hit | 262 | 17.82% |
+| refused | **597** | **40.61%** |
+| outranked | **443** | **30.14%** |
+| uncovered | 3 | 0.20% |
+| no profile | 164 | 11.16% |
+
+The population has moved from "one third reachable" to "two thirds reachable", and the bottleneck has
+moved with it: **443 rows are now admitted and ranked below something else**, against 182 when the
+round began. The next lever is the ranking, not the card — which is the same place the BIRD half
+found its 3.9pp of selection loss, and the same lesson: a pool that contains the answer is only worth
+what the chooser takes from it.
+
+`no profile` (164 rows, 11.16%) is the second named bucket and it is not a ranking question at all:
+those tables fail `profilesOf` outright, which is a parsing defect with a measurement of its own.
+
+### What changes in the method
+
+1. **A reading below its own component is a bug report, not a result.** `15.71%` against `37.35%` said
+   the product was worse than one of its parts, and the only honest response was to census the gap
+   rather than to tune anything.
+2. **A count of refusals is not a diagnosis; the shape and the question are.** `890 refused` became
+   three repairs once grouped by `dims/ordered/measures`, and two of those groups reversed the first
+   hypothesis: the largest was not an admission rule but a parser.
+3. **Three nulls are a finding.** Each of the first three levers was measured alone and moved nothing
+   on the score; the fourth moved 234 rows out of "unanswerable". Had they been shipped together on
+   their merits, the round would have reported the sum and learned nothing about which term mattered.
