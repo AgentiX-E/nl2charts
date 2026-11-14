@@ -1679,7 +1679,7 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   // the number exists is how an arm acquires a verdict it never earned.
   'inline+evidence+samples-gold': 'the same sampler narrowed to the columns the gold statement filters on: an oracle, so its delta is a ceiling for the family and not an achievable one — run it when a column rule is proposed, never as a candidate',
   'inline+evidence+card-gold': 'the same prompt with the card cut down to the fields the gold statement names: an oracle for what a perfect linker is worth in accuracy, not in characters — run it to price the linker, never as a candidate',
-  'inline+evidence+samples-wide': "the same lever with MAC-SQL's rule instead of ours: six most-frequent values of every non-key column, a small numeric dictionary included, a date collapsed to one, NULL first — dispatched to price the competitor's block on our cases, and until that artifact exists this note is the question rather than the verdict",
+  'inline+evidence+samples-wide': "the same lever with MAC-SQL's rule instead of ours: six most-frequent values of every non-key column, a small numeric dictionary included, a date collapsed to one, NULL first — measured on dev at +2.02pp (972/1532 against 941, p=0.0035, above the 1.89pp resolution) for +74.9% prompt tokens, so it is the priced ceiling of the value family and not a candidate: the shipped form of this mechanism has to fit a quarter of that budget",
   // The verdict was recorded after the run, and it is the one the pre-registered criterion returns:
   // `column-count` fell 129 → 124 and `values` rose 462 → 469, so the rule moved failures rather
   // than repairing them, and 64 gains against 66 losses is a tie at p = 0.93. The transition table

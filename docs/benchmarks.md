@@ -12642,3 +12642,114 @@ priced here separately: value examples (`values`, 56.63%), their dense schema de
 **The composition has never been priced as one arm.** Nothing in this document measures
 `values` + `repairs` + their dense card together, which is what their `MAC-SQL` actually runs, and
 that is the next dispatch rather than another rule.
+
+### The competitor's value block is worth two points, not 5.7: `samples-wide` on dev
+
+The section above ends with a claim that had never been tested: the 5.7-point gap between MAC-SQL's
+pipeline and this repository's best single-call arm is a *composition*. The first block of that
+composition is now priced. It is their value-example rule, ported with the quirks kept
+(`eval/bird/value-examples.ts`, cross-checked against `core/agents.py` at sha `31a9df5e` over three
+databases and 87 columns with zero disagreements): six most-frequent values of every non-key column,
+a numeric column dropped above ten distinct values, a text column dropped whole when any stored value
+is longer than 50 characters or is a URL or an email, a date collapsed to one example, and `NULL`
+emitted first when the column stores one.
+
+One dispatch, `43579551678`, the dev split, the same endpoint and the same model, one call per
+question and nothing else changed:
+
+| arm | passed | accuracy | prompt tokens | prompt chars | calls |
+|---|---:|---:|---:|---:|---:|
+| `inline+evidence` | 941 / 1,532 | 61.42% | 676 | 2,781 | 1.00 |
+| `inline+evidence+samples-wide` | **972 / 1,532** | **63.45%** | **1,182** | 3,950 | 1.00 |
+| difference | +31 | **+2.02pp** | **+74.9%** | +42.0% | 0 |
+
+Both arms ran inside one artifact, so the delta is a paired reading on the same 1,532 rows and not a
+subtraction across two runs:
+
+| quantity | value |
+|---|---:|
+| right only under the value block | 69 |
+| right only without it | **38** |
+| net | **+31 cases** |
+| exact McNemar (two-sided) | **p = 0.0035** |
+| disagreement share | 6.98% |
+| instrument resolution `R = 2.8·√(share/n)` | **1.89pp** |
+
+**The delta is beyond the instrument's own resolution and the direction is registered**, so the
+mechanism is real: showing a column's stored spellings buys about two points on the split a
+leaderboard is compared against. It is not, however, the 5.7 points, and the remainder is therefore
+not in this block.
+
+Three readings decide what happens next, and only one of them says yes.
+
+**The accuracy bar was cleared as a delta and missed as a level.** The criterion registered before
+the dispatch was `≥ 63.5%` — the historical `inline+evidence` reading of 61.16% plus the split's
+2.3pp resolution. The block landed at 63.45%, five hundredths of a point short. The reason is not the
+block: the parent re-measured **61.42%** in this run, 0.26pp above its own historical value, so the
+level the criterion was written against moved. The delta, which is the quantity that survives a
+move, is +2.02pp against a 1.89pp floor. Both numbers are recorded because a pre-registered level
+that is missed *and* a pre-registered delta that is cleared is a state a reader has to be told about
+rather than resolved by whoever is reporting it.
+
+**The cost bar was not cleared, and it is not close.** The block adds **74.9%** to the prompt — three
+times the 25% the plan allowed — for a 42% increase in characters. The gap between those two numbers
+is itself a finding: the block tokenizes at 3.34 characters per token against the card's 4.11, because
+it is a list of short quoted values separated by punctuation, and a budget computed in characters
+would under-count it by a fifth. A gain priced in accuracy and not in tokens is half a reading.
+
+**The bucket the block is aimed at fell, which is the mechanism's fingerprint.** The same instrument
+that names the missing fix, run on both arms of the same artifact (zero model calls, one oracle query
+per case):
+
+| bucket | `inline+evidence` | `samples-wide` | reading |
+|---|---:|---:|---|
+| `literal-case` | 11 (2.5%) | **1 (0.2%)** | the block's own claim: a stored spelling is now on the card |
+| `literal-missing` | 42 (9.7%) | 34 (8.1%) | a literal the card never held |
+| `filter-narrow` | 78 (18.0%) | 60 (14.4%) | |
+| `filter-wide` | 89 (20.6%) | 94 (22.5%) | |
+| `tables` | 77 (17.8%) | 79 (18.9%) | |
+| `predicate` | 65 (15.0%) | 71 (17.0%) | |
+| `aggregate` | 37 (8.5%) | 41 (9.8%) | |
+| `projection` | 21 (4.8%) | 30 (7.2%) | |
+| in-scope failures | 433 | 418 | of 591 and 560 |
+
+Eleven case-mismatched literals became one. That is what a block of stored spellings is for, and it
+is the reason the accuracy gain is credible rather than a draw that moved. The buckets that *rose* are
+all in the third family — what the statement computed, not what it read — and they rose as shares of a
+smaller population: `aggregate` + `projection` are 58 of 433 (13.4%) before and 71 of 418 (17.0%)
+after. **The next lever is generation-side, and this run makes that quantitative rather than a hunch.**
+
+The gain is also not concentrated in the easy stratum, which is the other way a prompt change can look
+real and be worthless:
+
+| difficulty | `inline+evidence` | `samples-wide` | delta |
+|---|---:|---:|---:|
+| simple (925) | 619 (66.9%) | 628 (67.9%) | +1.0pp |
+| moderate (463) | 248 (53.6%) | 262 (56.6%) | +3.0pp |
+| challenging (144) | 74 (51.4%) | 82 (56.9%) | **+5.6pp** |
+
+**Verdict: not adopted as it stands.** A +2.02pp gain that costs 75% more prompt is not a trade a
+product ships when the same budget buys a candidate; the arm stays in the table as the priced ceiling
+of the value family, the way `samples-gold` is the ceiling of the column-sampling family. What the
+result licenses is a **narrow** block: the same rule restricted to the columns a question can plausibly
+filter on, which is the one form in which the mechanism can survive its own cost.
+
+### Where the gap stands after the block
+
+The table the previous section left open, with the row this dispatch adds:
+
+| quantity | value | where it comes from |
+|---|---:|---|
+| shipped arm, dev | **63.97%** | `select-mixed-rule`, 3.00 calls, 3,137 prompt tokens |
+| its pool's ceiling | 66.91% | same artifact |
+| the same pool, another draw | 68.65% | this round's re-read of `43557304930` |
+| **the competitor's value block, alone** | **63.45%** | `samples-wide`, 1 call, 1,182 tokens |
+| MAC-SQL, our harness, our model, dev | **67.89%** | 1,040/1,532 |
+| MAC-SQL, our harness, our model, Mini-Dev | 65.12% | — |
+| our single best single-call arm, Mini-Dev | **59.44%** | `metadata+evidence` |
+
+The block is 2.02 of the 5.7 points and costs three times the prompt budget, so the composition is
+real but its first term is smaller than the gap. A second term has to be found in the harness rather
+than in the card: their selector reads *their* card, their refiner runs on top of it, and the part
+this repository has never reproduced is the pipeline that puts their description, their examples and
+their refiner in one arm. That is the next dispatch.
