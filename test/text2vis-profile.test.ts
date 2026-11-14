@@ -224,14 +224,46 @@ describe('the reading', () => {
     expect(lines).not.toContain('delta by family');
   });
 
+  it('prints a family the result set made worse with a minus', () => {
+    // The delta line signs both directions, because the reading is not a sales document: a cue that
+    // names the trend and a profile that then names a bar is a family this half *lost*, and a line
+    // that only prints `+` would make the two halves of the table agree by construction.
+    const inputs = [row('How has revenue changed over time?', 'Line Chart', regions(5))];
+    const cue = scoreRule(inputs);
+    const report = scoreProfile(inputs);
+    expect(cue.top1).toBe(1);
+    expect(report.top1).toBe(0);
+    expect(describeProfile(report, cue).join('\n')).toContain('line -1');
+  });
+
   it('refuses more hits than shortlist hits', () => {
     const report = scoreProfile([row('Which region leads?', 'Bar Chart', regions(5))]);
     expect(() => assertProfileReport({ ...report, top1: report.shortlist + 1 })).toThrow(/more than/);
   });
 
+  it('counts a named mark that misses the expected family as a miss, not as a row that vanished', () => {
+    // The bucket this reading forgot, and the corpus found it: a question about the leading region
+    // is answered `bar`, the label is `line`, and the row is neither a shortlist hit nor a refusal.
+    // On Text2Vis that is the *largest* bucket — 684 of 1,470 rows — so a report that only carries
+    // two of the three refused to publish at all, which is how the omission was caught.
+    const report = scoreProfile([row('Which region leads?', 'Line Chart', regions(5))]);
+    expect(report.scored).toBe(1);
+    expect(report.shortlist).toBe(0);
+    expect(report.declined).toBe(0);
+    expect(report.missed).toBe(1);
+    expect(report.confusion).toEqual([{ expected: 'line', answered: 'bar', n: 1 }]);
+    expect(() => assertProfileReport(report)).not.toThrow();
+  });
+
+  it('prints the misses, because a bucket that is not printed is a bucket that can be forgotten', () => {
+    const inputs = [row('Which region leads?', 'Line Chart', regions(5))];
+    const lines = describeProfile(scoreProfile(inputs), scoreRule(inputs)).join('\n');
+    expect(lines).toContain('missed 1');
+  });
+
   it('refuses a report where a row fell out of the counters', () => {
     const report = scoreProfile([row('Which region leads?', 'Bar Chart', regions(5))]);
-    expect(() => assertProfileReport({ ...report, top1: 0, shortlist: 0, declined: 0 })).toThrow(/fell out/);
+    expect(() => assertProfileReport({ ...report, top1: 0, shortlist: 0, declined: 0, missed: 0 })).toThrow(/fell out/);
   });
 
   it('refuses per-label rows that do not sum to the score', () => {
@@ -292,6 +324,20 @@ describe('the command', () => {
       expect(code).toBe(0);
       expect(lines.join('\n')).toContain('cue-only');
       expect(lines.join('\n')).not.toContain('wrote');
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('fails the run when nothing was scored, because a zero denominator is not a score', async () => {
+    // Every row carries a label with no family, so the reading has no denominator. Returning 0 here
+    // would put an empty table in the job summary and a green tick next to it.
+    const server = await serve(`${HEADER}\nShow the hierarchy,,plt.bar([1]),Treemap,${cell('Region, Revenue\nA, 1\n')}\n`);
+    const lines: string[] = [];
+    try {
+      const code = await entryProfile(ENTRY, MODULE_URL, (line) => lines.push(line), { load: { cacheDir: join(root, 'empty'), url: server.url } });
+      expect(code).toBe(1);
+      expect(lines.join('\n')).toContain('0 scored of 1 rows');
     } finally {
       await server.close();
     }
