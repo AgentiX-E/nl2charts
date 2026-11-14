@@ -12282,3 +12282,28 @@ The confusion table is where the work is, and it names three defects rather than
 The next reading is one change: `share → ['bar', 'pie']`, with the bar registered in advance —
 top-1 ≥ 45.0% and `Bar` top-1 ≥ 60.0%, on the same corpus, with the same two baselines printed
 alongside. A change to the cue table that does not clear its own baseline is not a change.
+
+#### What the 515 excluded rows are, and the correction that makes
+
+The block now prints the rows behind each unmapped label, and the second run (`43546926456`) is what
+that was for. The 515 excluded rows are not a long tail of odd spellings:
+
+| label | rows | why it is excluded |
+| --- | ---: | --- |
+| `Subplot` | **200** | a **layout**, not a mark: the reference is a multi-panel figure, and a `ChartIR` is one plot |
+| `Waterfall` | 108 | a real chart type with no member in the contract's 22 series types |
+| `Treemap` | 92 | in the contract, but not among the marks the recommender chooses between (it needs a hierarchy the result set does not carry) |
+| `Dot` | 81 | a lollipop/dot plot; the contract has no such series |
+| `Dot Plot` | 15 | the same, spelled differently — which is why the table matches on families rather than on strings |
+| `Choropleth Map` | 14 | a map, which needs geometry rather than rows |
+| `<empty>` | 5 | rows whose authors left the column blank |
+
+So **13.5% of this corpus is a multi-panel figure or a chart the contract cannot represent**, and the
+37.4% is the agreement on the 74% that remains. That is the bound on how far this number generalizes,
+and it belongs beside the score rather than under it.
+
+The same run also corrects a claim made one paragraph too early: mapping `Barh` moved **one row**
+(1,469 → 1,470 scored, top-1 unchanged at 549). The label was worth naming — it is a bar — but it was
+worth one row, and the reason it looked more important is that the first version of this block printed
+eight labels without saying how many rows each accounted for. **A list of labels is not a priority
+order; that was the defect, and it was in the instrument rather than in the table.**
