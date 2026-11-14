@@ -12200,6 +12200,107 @@ sources at +0.40 and +0.60pp of ceiling, both inside the noise), six and nine (h
 that reads more than length** — and the free rule that beats a vote on three candidates is exactly
 the wrong tool for nine, which is why its conversion fell to 87.83% while its ceiling rose.
 
+### What a repeated run can explain about itself: the pool's own lottery
+
+The previous section ends with a defect of design: four arms ran to completion one after another, so
+arm identity and clock time were the same variable, and the plan that followed was to interleave
+them so that a drifting endpoint could not be mistaken for a lever. That plan was pre-registered
+with a criterion — *the same-arm A/A ceiling noise falls to ≤1.5pp* — and it was killed before it
+was built, by the artifact it was meant to re-measure.
+
+The first question was whether the +4.23pp was anything this repository did. It is not:
+
+| what was compared | run 1 | run 2 (the A/A half) |
+| --- | ---: | ---: |
+| cases whose `tokens.prompt` matched | 496 of 496 | — |
+| calls per case | 3.000 | 3.000, identical on 496 of 496 |
+| cached prompt tokens | 1,261,504 | 1,261,504 |
+| base that answered | `deepseek-flash` | `deepseek-flash`, on every case |
+| correlation between case position and passing | −0.093 | −0.076 |
+
+No prompt differed, no call count differed, nothing was served by another base. The per-decile pass
+rates of the two halves trace the same profile — 59/59, 69/80, 53/51, 74/78, 43/49, 82/88, 55/53,
+55/67, 57/59, 41/47 — which is the split's difficulty order, not a warm-up: a run that was getting
+better as it warmed would show a trend, and the trend is −0.09.
+
+So the difference is in *which statements the model wrote*. That is a claim about a distribution, and
+an artifact can price it without spending a call. Hold the widest pool an arm kept fixed — the nine
+shapes `select-mixed-rule-spread3` drew on each case — and draw three of them twice, which is exactly
+the lottery a three-candidate arm plays:
+
+```
+pnpm bench:bird:lottery eval/out/bird-eval.json --draws 3
+```
+
+| reading | value |
+| --- | --- |
+| the lottery, k = 3 of a pool of up to 9 | **±1.8pp at 95%** (sd 0.9pp, 4,000 seeded replicates, 496 cases) |
+| the A/A pair's ceiling delta, observed | 2.6pp |
+| the part the offered pool cannot explain | **0.8pp** |
+| the smallest delta a claim from this run can rest on | **3.7pp** |
+
+Two conclusions follow, and the second is the one that changes the plan:
+
+- **The draw distribution moved.** Under a stable distribution the pair's ceiling could not have
+  separated by more than 1.8pp; it separated by 2.6pp. The shapes the endpoint offers on a question
+  are not a fixed set that a re-run samples from — the set itself shifts. This is one draw of that
+  shift, not a law, and it is the only reading in this document that rests on a single pair.
+- **Interleaving cannot reach the pre-registered bar.** The lottery band is a property of the model
+  choosing among its own shapes, and *no ordering of the arms removes it*: even a perfectly
+  interleaved pair against a frozen endpoint inherits ±1.8pp at k = 3. A criterion of ≤1.5pp was
+  therefore below the floor of the quantity it was written about, and the honest thing to do with a
+  pre-registration that is impossible is to retire it in the open rather than to run it and explain
+  the miss. What interleaving would still buy is the 0.8pp residual, if that residual is
+  clock-correlated — a question that is now priced at 0.8pp rather than assumed at 4pp.
+
+#### The number that reorders the candidate work
+
+`3.7pp` is the resolution of this design: the paired McNemar interval of the A/A pair (43 discordant
+cases of 496) is wider than the lottery band, so it is what every arm-to-arm delta in the artifact
+has to clear. The candidate-side readings of the last two rounds were **+0.40pp, +0.60pp, +1.81pp and
++3.22pp of ceiling** — all four below it. The word for them is not "negative" and not "inside the
+noise"; it is **unmeasurable at this n**, and the difference matters because an unmeasurable effect is
+not evidence against a mechanism, it is evidence about the instrument.
+
+The same arithmetic says where the instrument becomes usable. Both numbers scale as 1/√n, and the
+discordant share is a per-question rate:
+
+| split | questions | resolution (paired MDE) | lottery band at k = 3 |
+| --- | ---: | ---: | ---: |
+| Mini-Dev | 496 | 3.7pp | ±1.8pp |
+| dev | 1,532 | **2.1pp** | ±1.0pp |
+
+So the split that decides adoption is also the cheapest way to make a 2pp claim measurable, and the
+one place this project has been taking its readings — 496 questions, three candidates — cannot
+resolve the mechanisms it has been testing. That is a statement about the instrument, and it is now
+printed by every BIRD dispatch in both workflows rather than inferred from a failed gate.
+
+#### Where the 30.8% actually goes
+
+The same artifact prices the other side of the product, and it says the candidate work has been
+aimed at the smaller half. At nine candidates on 496 questions:
+
+| quantity | cases | share |
+| --- | ---: | ---: |
+| the pool held a correct candidate | 343 | 69.2% |
+| the pool held one and the rule returned it | 307 | 61.9% |
+| the pool held one and the rule returned something else | 36 | 7.3% |
+| **the pool held none** | **153** | **30.8%** |
+
+and the shape of every failure, from the judge's own verdict:
+
+| defect | out-of-pool (153) | in-pool selection loss (36) |
+| --- | ---: | ---: |
+| `values` — right width, wrong numbers | **110 (71.9%)** | **32 (88.9%)** |
+| `column-count` — a different projection | 43 (28.1%) | 4 (11.1%) |
+
+Three quarters of everything this arm gets wrong is the same defect: the statement is structurally
+right and the numbers are not. That is not a candidate-width problem and it is not a selection
+problem — it is arithmetic and grounding — and it is why "more opinions" has been buying nothing: the
+opinions agree because they are the same opinion. Across 496 questions the nine-candidate arm
+averages **1.68 distinct result sets per case**, and on **302 of 496** questions all nine candidates
+return the same result. Nine calls, one hypothesis.
+
 ### Text2Vis: the cue table, scored against the one corpus that labels a chart
 
 The chart half of the product ships a deterministic decision — `readCues` reads the question and

@@ -294,6 +294,15 @@ enforces all three:
    (three fixed questions, two draws each, temperature zero) and now again after the last arm
    (`endFingerprint`, six calls). Equal digests mean the window was stable and your delta is sampling;
    different digests mean the arms were measured against two models and the artifact is refused.
+4. **The resolution of the design, which is not the A/A delta.** A repeated run differs even when
+   nothing about the endpoint moved, because the model chooses *which* of its own statements to write:
+   hold the widest pool an arm kept fixed and draw its candidate count from it twice and the pair still
+   separates. `pnpm bench:bird:lottery` prices that floor from any artifact (no model call, no
+   database) and prints the number a claim has to clear. On the run above it is **±1.8pp of lottery
+   against a 3.7pp paired resolution**, so the +0.40 and +1.81 points of ceiling this repository spent
+   two rounds chasing were not small, they were *unmeasurable*, and a lever that cannot be measured is
+   not evidence for or against a mechanism. Both numbers fall as 1/√n: the same design on 1,532
+   questions resolves 2.1pp instead of 3.7pp.
 
 If your arms differ in *cost* as well as in accuracy — and a wide pool always does — read the delta
 against the control and the price against the parent, in that order. Nine candidates cost 2.82× the
