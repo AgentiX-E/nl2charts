@@ -35,6 +35,7 @@ import {
   timeLikeColumns,
 } from '../eval/text2vis/census.js';
 import { parseResultSet, profilesOf, scoreProfile, type ProfileInput } from '../eval/text2vis/profile.js';
+import { familiesOfMark } from '../eval/text2vis/rule.js';
 
 const root = mkdtempSync(join(tmpdir(), 'nl2charts-text2vis-census-'));
 afterAll(() => {
@@ -112,13 +113,31 @@ async function serve(body: string): Promise<{ url: string; close: () => Promise<
 describe('which marks could have answered a family', () => {
   it('derives the coverage from the product instead of restating it', () => {
     expect(coveringMarks('area')).toEqual(['line']);
-    expect(coveringMarks('histogram')).toEqual(['bar']);
     expect(coveringMarks('bar')).toEqual(['bar']);
     expect(coveringMarks('heatmap')).toEqual(['heatmap']);
   });
 
   it('has no mark for a family the contract cannot draw, so the gap is countable', () => {
     expect(coveringMarks('violin')).toEqual([]);
+  });
+
+  it('leaves the cue-conditional widening to the row, because a bar is a histogram only when told', () => {
+    // `familiesOfMark('bar', 'histogram')` is `['bar', 'histogram']`: the widening exists, it is just
+    // conditional on a cue naming the mark. Asking it of the table made every histogram row's covering
+    // mark the bar that answered it — 43 rows reported as "lost histogram to bar" with bar on both
+    // sides, a loss to itself. The table answers what a mark *is*; the row answers what this question
+    // said.
+    expect(coveringMarks('histogram')).toEqual([]);
+    expect(familiesOfMark('bar', 'histogram')).toEqual(['bar', 'histogram']);
+  });
+
+  it('reads an uncovered family as uncovered when the answer never claimed it', () => {
+    // A histogram label over a single measure, asked with no word that names the mark: the bar is the
+    // only thing the product can draw and it does not claim to be a histogram.
+    // `expectOutcome` narrows to a single-literal arm, and `uncovered` shares its arm with `hit` and
+    // `noProfile` (all three carry nothing but the family), so the outcome is read directly here.
+    const row = classify(input('Show the total revenue', 'Histogram', table('Revenue', ['12', '18', '31', '44'])));
+    expect(row).toEqual({ expected: 'histogram', outcome: 'uncovered' });
   });
 
   it('lists every mark the recommender can return, so a new mark cannot go uncounted', () => {
