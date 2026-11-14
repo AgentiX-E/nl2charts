@@ -1,0 +1,98 @@
+name: text2vis-rule
+
+# The chart half, scored against the one public corpus that labels a chart.
+#
+# Text2Vis (EMNLP 2025) states a question and the chart type its authors judged correct, so the cue
+# table this product ships can be scored without a model, a database or a renderer: the run reads one
+# CSV and compares the mark the question names against the label. That makes it the cheapest
+# external reading this repository has -- and the only one whose failure mode cannot be an outage.
+#
+# It is a separate workflow because it shares nothing with the BIRD jobs: no provider, no key, no
+# concurrency slot. Running it inside `ci.yml` would put a 6.7 MB download on every push in exchange
+# for a number that changes only when the cue table does.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      # The table itself, the scorer and the corpus loader: a measurement is worth re-taking when
+      # what it measures changes, and not otherwise.
+      - 'packages/chart/src/recommend.ts'
+      - 'eval/text2vis/**'
+      - 'test/text2vis-rule.test.ts'
+      - '.github/workflows/text2vis-rule.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: text2vis-rule-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rule:
+    name: the cue table against Text2Vis
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # The corpus, kept between runs: the file is immutable upstream, and a benchmark whose first
+      # step is a download reports a network as a score when the network is what failed.
+      - name: Cache the corpus
+        uses: actions/cache@v4
+        with:
+          path: eval/.cache/text2vis
+          key: text2vis-corpus-v1
+
+      # The instrument, not the score: how many rows, which chart types, how many carry reference
+      # code. A run over a truncated file has to say so before anyone reads a percentage.
+      - name: Read the corpus
+        run: pnpm bench:text2vis:dataset
+
+      - name: Score the cue table
+        run: pnpm bench:text2vis:rule --artifact eval/out/text2vis-rule.json
+
+      # The artifact carries the report the log printed, so a later reader can recompute the shares
+      # from the counters rather than from a sentence.
+      - name: Upload the reading
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: text2vis-rule
+          path: eval/out/text2vis-rule.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Publish the summary
+        if: always()
+        run: |
+          if [ -f eval/out/text2vis-rule.json ]; then
+            node -e "
+              const report = require('./eval/out/text2vis-rule.json');
+              const pct = (value) => (value * 100).toFixed(2) + '%';
+              const lines = [
+                '### Text2Vis: the cue table, ' + report.scored + ' scored of ' + report.rows + ' rows',
+                '',
+                '| reading | value |',
+                '| --- | --- |',
+                '| top-1 | ' + pct(report.top1Share) + ' (' + report.top1 + ') |',
+                '| shortlist | ' + pct(report.shortlistShare) + ' (' + report.shortlist + ') |',
+                '| baseline: always ' + report.baseline.mostFrequent + ' | ' + pct(report.baseline.share) + ' |',
+                '| baseline: always bar | ' + pct(report.baseline.bar) + ' |',
+                '| unmapped labels | ' + report.unmapped.count + ' |',
+                '| cue path p50 / p95 | ' + report.latency.p50.toFixed(2) + ' ms / ' + report.latency.p95.toFixed(2) + ' ms |',
+                '',
+                'No model call: this is the question-to-mark half, scored against the label the corpus states.'
+              ];
+              require('fs').appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join('\n') + '\n');
+            "
+          else
+            echo 'no report was written, so there is nothing to summarise' >> "$GITHUB_STEP_SUMMARY"
+          fi

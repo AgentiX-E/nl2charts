@@ -27,6 +27,7 @@ import {
   assertMaskingFired,
   assertMaskingRule,
   assertTemperature,
+  assertReportComplete,
   assertResultGate,
   assertEvidence,
   columnEvidence,
@@ -290,6 +291,89 @@ describe('the paired comparisons', () => {
   });
 });
 
+describe('the noise of the quantity a candidate buys', () => {
+  const run = (id: string, passed: boolean, candidateRecall?: boolean): CaseRun => ({
+    id,
+    passed,
+    predicted: 'select 1',
+    reason: 'values',
+    strict: false,
+    attempts: 1,
+    calls: 1,
+    ...(candidateRecall === undefined ? {} : { candidateRecall }),
+  });
+
+  it('prices the pool ceiling on the same pair, beside the score', () => {
+    // The two statistics are not the same number and this is the case that shows it: the score is
+    // identical on both draws (one pass each) while the ceiling moves a quarter of the pool. A round
+    // that reads only the first column calls that "no effect"; the second column is why it is not.
+    const paired = pairedComparisons(
+      new Map<string, readonly CaseRun[]>([
+        [
+          'select-mixed',
+          [run('1', true, true), run('2', false, true), run('3', false, false), run('4', false, false)],
+        ],
+        [
+          'select-mixed#2',
+          [run('1', true, true), run('2', false, false), run('3', false, false), run('4', false, false)],
+        ],
+      ]),
+    );
+    expect(paired.aa).toMatchObject({ delta: 0 });
+    expect(paired.aa?.ceiling).toMatchObject({ first: 0.5, second: 0.25, delta: -0.25 });
+    // One case flipped, so the paired resolution is computed on one discordant pair rather than on
+    // a difference of two shares: the A/A must use the same machinery as the score.
+    expect((paired.aa?.ceiling as { discordantShare: number }).discordantShare).toBe(0.25);
+    expect((paired.aa?.ceiling as { mde: number }).mde).toBeGreaterThan(0);
+  });
+
+  it('says nothing about a ceiling for an arm that does not sample', () => {
+    // A single-candidate arm has no pool. Reporting 0.00% twice would be a reading of nothing, and
+    // a reader would take it as "this arm has no ceiling headroom".
+    const paired = pairedComparisons(
+      new Map<string, readonly CaseRun[]>([
+        ['inline', [run('1', true), run('2', false)]],
+        ['inline#2', [run('1', true), run('2', true)]],
+      ]),
+    );
+    expect(paired.aa).toBeDefined();
+    expect(paired.aa?.ceiling).toBeUndefined();
+  });
+
+  it('reads an unmeasured case as a pool without an answer, not as a missing row', () => {
+    // `candidateRecall === true` is the convention the rest of the harness already uses
+    // (`candidateCeiling`), and an error case genuinely had no pool to hold an answer. The
+    // alternative -- skipping undefined -- would price the ceiling on the cases that succeeded,
+    // which is the population where a ceiling is easiest to clear.
+    const paired = pairedComparisons(
+      new Map<string, readonly CaseRun[]>([
+        ['select-mixed', [run('1', true, true), run('2', false)]],
+        ['select-mixed#2', [run('1', true, true), run('2', false)]],
+      ]),
+    );
+    expect(paired.aa?.ceiling).toMatchObject({ first: 0.5, second: 0.5, delta: 0 });
+  });
+
+  it('refuses an artifact whose A/A lost the ceiling noise on a sampling arm', () => {
+    // The block is cheap to compute and easy to drop; dropping it is how two rounds read
+    // resampling as a gain.
+    expect(() =>
+      assertReportComplete({ arms: [], aa: { arm: 'select-mixed-rule', delta: -0.0081 } }),
+    ).toThrow(/carries no ceiling noise/);
+    // And a non-sampling arm is not asked for one.
+    expect(() => assertReportComplete({ arms: [], aa: { arm: 'inline', delta: -0.0081 } })).not.toThrow();
+  });
+
+  it('refuses a ceiling block whose numbers are not numbers', () => {
+    expect(() =>
+      assertReportComplete({
+        arms: [],
+        aa: { arm: 'select-mixed-rule', delta: 0, ceiling: { first: 0.66, second: Number.NaN, delta: -0.01 } },
+      }),
+    ).toThrow(/without a numeric `second`/);
+  });
+});
+
 describe('what a delta is resolved to', () => {
   const run = (id: string, passed: boolean): CaseRun => ({
     id,
@@ -391,6 +475,27 @@ describe('the gate', () => {
 
   it('passes a run whose controls hold and whose best arm sees a signal', () => {
     expect(evaluateGate(report())).toEqual([]);
+  });
+
+  it('fails a run whose base answered its own probes differently at the end', () => {
+    // The window test. Round 133 measured the same arm twice in one dispatch at 4.2pp (p = 0.002)
+    // with byte-identical prompts -- 496 of 496 cases carried the same prompt tokens, the same
+    // three calls and the same completion length -- so the difference came back from the endpoint.
+    // Two explanations survive that evidence, and only one of them leaves the artifact readable:
+    // a drifted serving stack (noise, to be published) or two sets of weights (no delta at all).
+    // The probes are the same three fixed questions at temperature zero, so the digest answers which.
+    const problems = evaluateGate({ ...report(), baseFingerprint: { digest: 'aaaa', probes: 3 }, endFingerprint: { digest: 'bbbb', probes: 3 } });
+    expect(problems.join('\n')).toContain('two different models');
+    expect(problems.join('\n')).toContain('bbbb');
+  });
+
+  it('passes a run whose end digest matches, and one whose instrument never ran', () => {
+    expect(evaluateGate({ ...report(), baseFingerprint: { digest: 'aaaa', probes: 3 }, endFingerprint: { digest: 'aaaa', probes: 3 } })).toEqual([]);
+    // Two digests of `''` agree while saying nothing, so a probe set that answered nothing is not
+    // a window measurement and must not be read as one.
+    expect(evaluateGate({ ...report(), baseFingerprint: { digest: '', probes: 0 }, endFingerprint: { digest: '', probes: 0 } })).toEqual([]);
+    // A dry run fingerprints once and never closes the window; it has no arms to compare either.
+    expect(evaluateGate({ ...report(), baseFingerprint: { digest: 'aaaa', probes: 3 } })).toEqual([]);
   });
 
   it('fails a gold set that does not run', () => {

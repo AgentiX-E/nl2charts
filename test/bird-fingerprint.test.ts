@@ -10,7 +10,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { createHttpProvider } from '@agentix-e/nl2charts-ai';
-import { attachFingerprint } from '../eval/bird/run.js';
+import { attachFingerprint, recheckFingerprint } from '../eval/bird/run.js';
 import {
   FINGERPRINT_PROBES,
   fingerprintLine,
@@ -295,6 +295,56 @@ describe('attachFingerprint', () => {
     expect(reading.digest).toBe('');
     expect(reading.probes).toBe(0);
     expect(reading.failures).toHaveLength(6);
+  });
+});
+
+describe('the same base, asked again after the last arm', () => {
+  it('seals an unchanged base as unchanged, at six calls', async () => {
+    const report: Record<string, unknown> = {};
+    await attachFingerprint(report, createHttpProvider({ baseUrl: 'https://example.test/v1', model: 'm', fetchImpl: endpoint({}).fetchImpl, retries: 1, retryDelayMs: 0 }), () => {});
+    const said: string[] = [];
+    const outcome = await recheckFingerprint(
+      report,
+      createHttpProvider({ baseUrl: 'https://example.test/v1', model: 'm', fetchImpl: endpoint({}).fetchImpl, retries: 1, retryDelayMs: 0 }),
+      (line) => said.push(line),
+    );
+    expect(outcome.changed).toBe(false);
+    expect((report.endFingerprint as { calls: number }).calls).toBe(6);
+    expect(said.join('\n')).toContain('unchanged');
+  });
+
+  it('names a base that answered its own probes differently at the end', async () => {
+    // The failure this exists for: forty minutes and 4.2 points later, the only way to tell a
+    // drifted serving stack from swapped weights is whether the fixed questions still answer the same.
+    const report: Record<string, unknown> = {};
+    await attachFingerprint(report, createHttpProvider({ baseUrl: 'https://example.test/v1', model: 'm', fetchImpl: endpoint({}).fetchImpl, retries: 1, retryDelayMs: 0 }), () => {});
+    const said: string[] = [];
+    const outcome = await recheckFingerprint(
+      report,
+      createHttpProvider({ baseUrl: 'https://example.test/v1', model: 'm', fetchImpl: endpoint({ prime: ['19'] }).fetchImpl, retries: 1, retryDelayMs: 0 }),
+      (line) => said.push(line),
+    );
+    expect(outcome.changed).toBe(true);
+    expect(outcome.before).not.toBe(outcome.after);
+    expect(said.join('\n')).toContain('confounded with the clock');
+    // Both digests reach the artifact, because the gate reads them off it rather than from here.
+    expect((report.endFingerprint as { digest: string }).digest).toBe(outcome.after);
+    expect((report.baseFingerprint as { digest: string }).digest).toBe(outcome.before);
+  });
+
+  it('does not call a probe set that answered nothing a fingerprint', async () => {
+    // Two digests of `''` "agree", and a guard that compared them would certify a run whose
+    // instrument never ran.
+    const report: Record<string, unknown> = { baseFingerprint: { digest: '', probes: 0 } };
+    const dead = (async () => new Response('down', { status: 503 })) as unknown as typeof fetch;
+    const said: string[] = [];
+    const outcome = await recheckFingerprint(
+      report,
+      createHttpProvider({ baseUrl: 'https://example.test/v1', model: 'm', fetchImpl: dead, retries: 1, retryDelayMs: 0 }),
+      (line) => said.push(line),
+    );
+    expect(outcome.changed).toBe(false);
+    expect(said.join('\n')).toContain('not comparable');
   });
 });
 

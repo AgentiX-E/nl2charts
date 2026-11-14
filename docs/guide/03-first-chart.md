@@ -95,14 +95,23 @@ lint(ir); // no errors
 It throws `NL2C_E_NOT_SUPPORTED` for an empty result set, or for one no mark can
 encode, and names the columns it saw.
 
-> **What this is not.** There is no Text2Vis, nvBench or VisEval reading behind
-> this layer in this repository. The tests pin the behaviour of the rule table
-> against a named fixture, and that fixture is a regression corpus, not a
-> benchmark: the chart-choice numbers this project has quoted were produced by
-> harnesses that are not in this tree, so they are not reproducible from it and
-> are not claimed here. A layer that says which mark it chose and why is worth
-> having before the instrument that scores it exists; the reverse order produces a
-> score nobody can audit.
+> **What this is not.** There is **no encoding score** behind this layer. What
+> exists is `pnpm bench:text2vis:rule`: it scores the *cue half* — the mark the
+> question names — against Text2Vis (EMNLP 2025), the one public corpus that
+> labels a chart, and it does so with no model call, no database and no renderer.
+> It prints three numbers together, because any one of them alone is a number
+> about nothing: `top-1` (the leading mark carries the labelled family), the
+> `shortlist` (some recommended mark does), and the two constants it has to beat
+> (`always <most frequent>`, `always bar`). A corpus label the table has no family
+> for is excluded from the score and **named in the log** rather than folded into
+> `bar`.
+>
+> What that leaves unmeasured is stated in the module rather than implied here:
+> whether the right mark is drawn with the right fields and aggregate (that needs
+> the corpus's tables), the recommender's data-shape half (with no result set only
+> the cue half can run), and whether any single label is more than one annotator's
+> judgement. The tests pin the rule table against a named fixture, and that
+> fixture is a regression corpus, not a benchmark.
 
 ## 3. Build the IR
 
