@@ -358,6 +358,23 @@ const HISTOGRAM_CUE: CueRule = {
 };
 
 /**
+ * The same table with one cue inserted ahead of `share`.
+ *
+ * Ahead, because the leading mark is the first mark of the first fired cue: a table in which `share`
+ * comes first can only ever answer "the share of orders by status" with a pie, whatever else it
+ * knows. The `share` cue keeps its own marks untouched, so a question the new phrase does not match
+ * is answered exactly as it was before — which is what makes the reading a delta on one phrase.
+ *
+ * A table with no `share` rule still gets the cue: appended rather than dropped, because a variant
+ * that silently lost a cue would be measured as if it had it.
+ */
+export function withCueAheadOf(table: readonly CueRule[], cue: CueRule, before: CueKind): readonly CueRule[] {
+  const at = table.findIndex((rule) => rule.kind === before);
+  const index = at === -1 ? table.length : at;
+  return [...table.slice(0, index), cue, ...table.slice(index)];
+}
+
+/**
  * The same table with the histogram cue inserted before `distribution`.
  *
  * A membership change and not a pattern edit: the variant discipline is that only `marks` and the
@@ -365,41 +382,114 @@ const HISTOGRAM_CUE: CueRule = {
  * rewritten phrase.
  */
 export function withHistogramCue(table: readonly CueRule[]): readonly CueRule[] {
-  const at = table.findIndex((rule) => rule.kind === 'distribution');
-  // A table without `distribution` still gets the cue: appended rather than dropped, because a
-  // variant that silently lost a cue would be measured as if it had it.
-  const index = at === -1 ? table.length : at;
-  return [...table.slice(0, index), HISTOGRAM_CUE, ...table.slice(index)];
+  return withCueAheadOf(table, HISTOGRAM_CUE, 'distribution');
 }
 
 /**
- * Every cue table this build can construct, and what each one changes.
+ * The cue that separates the two pictures inside `share`, at its narrowest width.
  *
- * Three rules, and the discipline is that a variant may re-order or re-membership `marks` and may
- * add a cue, but may never edit a pattern: a variant that rewrote the phrases would be a different
- * cue table rather than the same one re-ordered, and its reading could not be attributed.
+ * `share` is one phrase over two questions: "the share of revenue that is refunds" is a part of a
+ * whole and a pie is what an annotator drew; "the share of orders by status" is categories compared
+ * and the same annotator drew a bar. The previous sweep priced the blunt version of this idea —
+ * `share → ['bar','pie']` — at +196 `bar` rows for −145 `pie` rows, which is the size of the
+ * undivided cue and not of the distinction inside it.
+ *
+ * The signal is a phrase and not a keyword: a share word immediately followed by the dimension it
+ * splits on — `share by`, `breakdown across`, `percentage per`. That is the form in which the
+ * comparison is stated and cannot be read any other way, which is why it is the *narrow* width. Its
+ * marks are a single bar: a cue that offered both would answer nothing.
+ *
+ * Only the English phrase. `占比` is a share word with no `by`-analogue in the table, and a rule
+ * invented for a phrasing the corpus does not contain would be a rule no reading covers.
+ */
+const SHARE_BY_CUE: CueRule = {
+  kind: 'share-by',
+  marks: ['bar'],
+  pattern: /\b(?:share|proportion|percentage|percent|composition|breakdown|split)\s+(?:by|across|per)\b/,
+};
+
+/**
+ * The same signal at the width that also reads a measure between the two words.
+ *
+ * "The share of revenue by region" is the corpus's most natural way to ask for a comparison and it
+ * does not match the narrow cue, because four words sit between `share` and `by`. Matching a share
+ * word and a following `by` anywhere in the question is the honest wide reading of the same claim,
+ * and it is registered *before* the sweep rather than after it: two widths of one signal, priced on
+ * the same rows, so which one ships is a reading and not a choice made while looking at the result.
+ *
+ * It is not free of false positives and does not claim to be: "the share of orders by status that are
+ * banned" names a comparison *and* a filter, and a cue table cannot tell which one the answer should
+ * be drawn for. That is exactly what `pie` must not fall by to be worth the trade.
+ */
+const SHARE_BY_ANY_CUE: CueRule = {
+  kind: 'share-by-any',
+  marks: ['bar'],
+  pattern: /\b(?:share|proportion|percentage|percent|composition|breakdown|split)\b[\s\S]*\bby\b/,
+};
+
+/** The narrow width: a share word followed immediately by the dimension. */
+export function withShareByCue(table: readonly CueRule[]): readonly CueRule[] {
+  return withCueAheadOf(table, SHARE_BY_CUE, 'share');
+}
+
+/** The wide width: a share word followed by `by` anywhere later in the question. */
+export function withShareByAnyCue(table: readonly CueRule[]): readonly CueRule[] {
+  return withCueAheadOf(table, SHARE_BY_ANY_CUE, 'share');
+}
+
+/**
+ * The tables this build prices, and what each one changes.
+ *
+ * The discipline is that a variant may re-order or re-membership `marks` and may add a cue, but may
+ * never edit a pattern: a variant that rewrote the phrases would be a different cue table rather
+ * than the same one re-ordered, and its reading could not be attributed.
+ *
+ * The two `share` widths and the histogram cue are the levers, and every lever is also priced on top
+ * of the other family — six variants from three changes — because a reader will ask whether they
+ * compose and answering it after the fact costs another run of the corpus.
  *
  * `shipped` comes first and is the table the package exports, so the sweep always contains the
  * control it is a sweep of.
  */
-export const CUE_VARIANTS: readonly { readonly name: string; readonly note: string; readonly cues: readonly CueRule[] }[] = [
-  { name: 'shipped', note: 'the table `@agentix-e/nl2charts-chart` exports', cues: CHART_CUES },
-  {
-    name: 'bar-share',
-    note: "the `share` cue leads with a bar: the corpus drew 194 bars for questions this table answers `pie`",
-    cues: CHART_CUES.map((rule) => (rule.kind === 'share' ? { ...rule, marks: ['bar', 'pie'] } : rule)),
-  },
-  {
-    name: 'histogram',
-    note: 'a cue that names the binned measure, so a histogram question is answered with a bar instead of a boxplot',
-    cues: withHistogramCue(CHART_CUES),
-  },
-  {
-    name: 'bar-share+histogram',
-    note: 'both changes at once, because they touch different labels and a reader will ask',
-    cues: withHistogramCue(CHART_CUES.map((rule) => (rule.kind === 'share' ? { ...rule, marks: ['bar', 'pie'] } : rule))),
-  },
-];
+export const CUE_VARIANTS: readonly { readonly name: string; readonly note: string; readonly cues: readonly CueRule[] }[] =
+  [
+    { name: 'shipped', note: 'the table `@agentix-e/nl2charts-chart` exports', cues: CHART_CUES },
+    {
+      name: 'bar-share',
+      note: 'the `share` cue leads with a bar: the corpus drew 194 bars for questions this table answers `pie`',
+      cues: CHART_CUES.map((rule) => (rule.kind === 'share' ? { ...rule, marks: ['bar', 'pie'] } : rule)),
+    },
+    {
+      name: 'histogram',
+      note: 'a cue that names the binned measure, so a histogram question is answered with a bar instead of a boxplot',
+      cues: withHistogramCue(CHART_CUES),
+    },
+    {
+      name: 'bar-share+histogram',
+      note: 'both changes at once, because they touch different labels and a reader will ask',
+      cues: withHistogramCue(CHART_CUES.map((rule) => (rule.kind === 'share' ? { ...rule, marks: ['bar', 'pie'] } : rule))),
+    },
+    {
+      name: 'share-by',
+      note: 'the distinction inside `share` at its narrowest: "share by X" compares categories and gets a bar, everything else keeps the pie',
+      cues: withShareByCue(CHART_CUES),
+    },
+    {
+      name: 'share-by+histogram',
+      note: 'the narrow discriminator and the histogram cue together, which is what a table would carry if both cleared their bars',
+      cues: withHistogramCue(withShareByCue(CHART_CUES)),
+    },
+    {
+      name: 'share-by-any',
+      note: 'the same signal at the width that also reads a measure between the words, so "the share of revenue by region" is a bar',
+      cues: withShareByAnyCue(CHART_CUES),
+    },
+    {
+      name: 'share-by-any+histogram',
+      note: 'the wide discriminator and the histogram cue together',
+      cues: withHistogramCue(withShareByAnyCue(CHART_CUES)),
+    },
+  ];
 
 /**
  * The corpus, priced against every variant.

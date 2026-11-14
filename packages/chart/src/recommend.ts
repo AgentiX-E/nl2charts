@@ -29,6 +29,8 @@ import { profileRows } from './profile.js';
 export type CueKind =
   | 'trend'
   | 'share'
+  | 'share-by'
+  | 'share-by-any'
   | 'distribution'
   | 'histogram'
   | 'correlation'
