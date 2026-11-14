@@ -817,6 +817,18 @@ describe('a measurement over a real split', () => {
     expect(outcome.drops.unknownQuestion).toBe(1);
   });
 
+  it('refuses an arm that sends one card per candidate', async () => {
+    // The instrument renders one card per arm and this arm sends three, so a single render would
+    // be the parent's card with the block missing — the defect this file was written about, one
+    // field further out. The number exists in the run's own `promptChars` column.
+    const outcome = await runCard(
+      settingsFor(dataset(), reportBody([1], {}, 'select-mixed-rule-narrow'), 'select-mixed-rule-narrow'),
+    );
+    expect(outcome.drops.unrenderable).toBe(1);
+    expect(outcome.problems).toHaveLength(1);
+    expect(outcome.problems[0]).toContain('not the one that was sent');
+  });
+
   it('refuses an arm whose prompt it cannot rebuild, by name', async () => {
     const outcome = await runCard(settingsFor(dataset(), reportBody([1], {}, 'inline+retrieval'), 'inline+retrieval'));
     expect(outcome.drops.unrenderable).toBe(1);

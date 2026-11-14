@@ -5699,6 +5699,11 @@ export interface PromptBlocks {
  * instrument would have measured a prompt with the retrieved text missing and reported it as
  * the prompt that was sent. No gate ran that arm — the gates run `select` — which is why the
  * hole survived.
+ *
+ * The fifth is a card rather than a block: an arm that hands every candidate its own card sends
+ * three prompts whose widths differ per case, and an instrument that renders one would report the
+ * arm's own card — which, on an arm that inherits its sampler, is the parent's card with the block
+ * absent. That reading exists in the run's own `promptChars` column, per case and from the run.
  */
 export function renderableArm(arm: Arm): boolean {
   return (
@@ -5706,7 +5711,8 @@ export function renderableArm(arm: Arm): boolean {
     arm.evidence !== 'retrieved' &&
     arm.values !== true &&
     arm.demonstrations !== true &&
-    arm.decompose !== true
+    arm.decompose !== true &&
+    arm.sourceSamples === undefined
   );
 }
 
