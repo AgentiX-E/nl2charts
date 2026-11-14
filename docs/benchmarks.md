@@ -13095,3 +13095,69 @@ against this artifact's parent rather than against a number from a different run
    catalogue as the priced ceiling of the value family, on one card, where it is still the cheapest
    +1.50pp in the table — and it stops being a candidate for the pool, which is where the next three
    rounds would otherwise have spent dispatches.
+
+## What the result set did to the recommender: −21.6pp, and the mark it collapsed to
+
+The chart half's cue table has been scored against Text2Vis for several rounds, and it has only ever
+measured the question. `recommendChart(question, profiles)` is the shipped entry point, and it ranks
+marks by the question **and** the result set's shape. The corpus ships the result set (`Table Data`),
+so that second half costs no model call — `bench:text2vis:profile` reads the same 1,985 rows, scores
+both halves on the rows whose label has a family, and prices the difference.
+
+Registered before the first dispatch: **top-1 ≥ 45.0%** and **`pie` ≥ 145 hits**, with the cue-only
+reading printed beside it as the control.
+
+| reading | cue only | with the result set | delta |
+|---|---:|---:|---:|
+| top-1 | **549 (37.35%)** | **231 (15.71%)** | **−21.64pp** |
+| shortlist | 1,000 (68.03%) | 231 (15.71%) | −52.32pp |
+| declined | — | 555 (37.76%) | — |
+| missed (a mark that cannot cover the label) | — | 684 (46.53%) | — |
+| scored rows | 1,470 of 1,985 (515 unmapped labels) | same | — |
+| baseline: always the most frequent family | line 26.60% | — | — |
+| baseline: always bar | 24.29% | — | — |
+
+**Both registered lines failed, and the second one failed in the direction nobody registered.** The
+reading is not "45.0% was optimistic": the shipped recommender is **21.64pp worse than its own cue
+table** on the same rows, and it is worse than *always answering bar* by 8.58pp.
+
+The confusion says what it does instead. Given the result set, it answers `bar` for every question it
+does not decline:
+
+| label | n | top-1 | what it answered |
+|---|---:|---:|---|
+| Bar | 357 | 54.06% | bar 193, declined 132, heatmap 21 |
+| Line | 391 | **0.00%** | bar 193, declined 140, scatter 49 |
+| Area | 137 | **0.00%** | bar 64, scatter 49, declined 23 |
+| Pie | 113 | **0.00%** | bar 67, declined 39, heatmap 4 |
+| Scatter | 93 | 4.30% | bar 34, declined 32, heatmap 23 |
+| Histogram | 90 | **0.00%** | declined 49, bar 30, scatter 7 |
+| Boxplot | 89 | 3.37% | declined 35, bar 31, scatter 15 |
+| Donut | 69 | **0.00%** | declined 36, bar 33 |
+| Stacked Bar | 56 | 42.86% | bar 24, declined 19, scatter 12 |
+
+`pie` hits are **0 of 113**, and 0 of the 69 donuts. The delta by family is one line: **bar +142,
+pie −145, line −216**.
+
+Two mechanisms are consistent with this table, and the artifact cannot separate them yet:
+
+1. **The expected mark was refused by an admission rule.** `recommendChart` returns a `refused` list
+   beside its ranking, and 555 rows have *no recommendation at all* — that is the case where the
+   profiler could not type the columns or no mark admitted. On a Line label with no parseable date
+   column, `line` is admitted only if the profile carries one, and the table then becomes a bar chart
+   by default rather than a refusal.
+2. **The expected mark was named by a cue that lost to a prior.** The score is `prior + 3` for a cue
+   naming the mark first and `+2` otherwise, and priors run 1 to 3 — so a cue that names a mark
+   *second* can be cancelled exactly by the gap between two priors, and `PREFERENCE` then decides. If
+   bar sits earlier in `PREFERENCE`, bar wins the tie.
+
+The instrument that separates them is already in the artifact's reach: `recommendChart` returns
+`refused` with a reason per mark, so a per-family refusal census costs zero model calls and answers
+question 1 outright. Until it runs, the honest statement is the one the table supports: **as shipped,
+the result set makes the recommendation three times worse than the words alone**, and the failure is
+concentrated where the product's own admission rules and prior arithmetic decide.
+
+This is also a correction to how the chart half has been reported for three rounds. `37.35%` was
+quoted as the product's number. It is the *cue table's* number; the product's entry point, on the
+same rows and with the result set in front of it, reads `15.71%`. Both numbers are now in the table
+above, and the next reading has to move the second one.
