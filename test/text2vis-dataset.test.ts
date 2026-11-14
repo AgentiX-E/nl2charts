@@ -179,6 +179,7 @@ describe('what the corpus holds', () => {
     expect(describeCorpus(readText2Vis(MINIMAL))).toEqual([
       'rows 1',
       'columns 4',
+      `column names Prompt | Answer | Visualization Code | Chart Type`,
       'with reference code 1',
       'with an answer 1',
       'Bar Chart 1',
