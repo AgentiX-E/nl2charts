@@ -632,6 +632,10 @@ describe('what an arm row says about itself', () => {
       // size column never calls it and the stub only has to exist.
       schemaForSource: () => [],
       blocksFor: () => ({}),
+      // The prompt-size column now reads one function for the run and for the dry run's preview;
+      // this fixture has no prompt, so the column reads zero exactly as it did when the row called
+      // the renderer itself on an empty card.
+      promptTextFor: () => '',
     }) as unknown as PreparedRun;
 
   it('says on the summary line when an answer never arrived', () => {
