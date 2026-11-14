@@ -40,7 +40,8 @@ export type CueKind =
   | 'stages'
   | 'multi-metric'
   | 'profile'
-  | 'volatility';
+  | 'volatility'
+  | 'explicit';
 
 export interface CueRule {
   readonly kind: CueKind;
@@ -59,7 +60,83 @@ export interface CueRule {
  * product that answers only English questions has a speaking defect, and a cue
  * table is the cheapest place to fix one.
  */
+/**
+ * The mark a question names outright, which is not a suggestion but a request.
+ *
+ * The corpus made this rule unavoidable: `plot these percentages in order of increasing 'Value' on a
+ * line chart` is a Text2Vis question, and the shipped table had nothing that read "line chart", so a
+ * reader who stated the answer they wanted was given a bar instead — 350 rows of that corpus, plus
+ * every user who ever typed "draw me a pie chart".
+ *
+ * The pattern requires the mark word beside `chart`, `plot`, `graph` or `diagram`, which is what
+ * keeps it from firing on the instruction boilerplate those same prompts carry ("generate matplotlib
+ * code", "include axis labels"). It is listed first so that a named mark leads the cue list.
+ */
+const EXPLICIT: readonly CueRule[] = [
+  {
+    kind: 'explicit',
+    marks: ['line'],
+    pattern: /\bline (?:chart|plot|graph|diagram)\b/,
+  },
+  {
+    kind: 'explicit',
+    marks: ['line'],
+    pattern: /\barea (?:chart|plot|graph|diagram)\b/,
+  },
+  {
+    kind: 'explicit',
+    marks: ['bar'],
+    pattern: /\b(?:bar|column) (?:chart|plot|graph|diagram)\b/,
+  },
+  {
+    kind: 'explicit',
+    marks: ['pie'],
+    pattern: /\b(?:pie|donut|doughnut) (?:chart|plot|graph|diagram)?\b/,
+  },
+  {
+    kind: 'explicit',
+    marks: ['scatter'],
+    pattern: /\b(?:scatter|bubble) (?:plot|chart|graph|diagram)\b/,
+  },
+  {
+    kind: 'explicit',
+    marks: ['boxplot'],
+    pattern: /\bbox ?plot\b|\bbox ?and ?whisker\b/,
+  },
+  {
+    kind: 'explicit',
+    marks: ['heatmap'],
+    pattern: /\bheat ?map\b/,
+  },
+  {
+    kind: 'explicit',
+    marks: ['radar'],
+    pattern: /\bradar (?:chart|plot|graph|diagram)?\b|\bspider (?:chart|plot)\b/,
+  },
+  {
+    kind: 'explicit',
+    marks: ['funnel'],
+    pattern: /\bfunnel (?:chart|plot|diagram)?\b/,
+  },
+  {
+    kind: 'explicit',
+    marks: ['gauge'],
+    pattern: /\bgauge (?:chart|plot|diagram)?\b/,
+  },
+  {
+    kind: 'explicit',
+    marks: ['candlestick'],
+    pattern: /\bcandlestick (?:chart|plot)?\b/,
+  },
+  {
+    kind: 'explicit',
+    marks: ['parallel'],
+    pattern: /\bparallel coordinates\b/,
+  },
+];
+
 export const CHART_CUES: readonly CueRule[] = [
+  ...EXPLICIT,
   {
     kind: 'trend',
     marks: ['line', 'bar'],
@@ -238,9 +315,15 @@ const ADMISSIONS: readonly Admission[] = [
   {
     mark: 'line',
     prior: 2,
-    reason: 'profile:ordered-axis-and-measure',
+    // A line needs an axis to run along and a measure to draw; whether that axis carries its own
+    // order is a property of how the line is *drawn*, not of whether it can be. Text2Vis labels 350
+    // rows a line or an area over a category axis — `plot these percentages in order of increasing
+    // Value ... on a line chart` is one of its questions verbatim — and the ordered form is the
+    // categories sorted by the measure, which `encodingFor` can order. Refusing them was this
+    // layer stating a rule about reading order where the corpus states a fact about the data.
+    reason: 'profile:axis-and-measure',
     admit: (shape) =>
-      shape.ordered.length >= 1 && shape.measures.length >= 1 ? null : 'a line needs an ordered axis and a measure',
+      shape.dims.length >= 1 && shape.measures.length >= 1 ? null : 'a line needs an axis and a measure',
   },
   {
     mark: 'pie',

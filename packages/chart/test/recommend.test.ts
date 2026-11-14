@@ -73,9 +73,9 @@ describe('reading chart cues out of the question', () => {
     ['Top ten products by revenue', ['ranking']],
     ['Revenue by region and quarter', ['matrix']],
     ['How are we tracking against target this quarter?', ['progress']],
-    ['Conversion funnel by stage', ['stages']],
+    ['Conversion funnel by stage', ['explicit', 'stages']],
     ['Compare the metrics in parallel across products', ['multi-metric']],
-    ['Show a radar profile of the metrics', ['profile']],
+    ['Show a radar profile of the metrics', ['explicit', 'profile']],
     ['Daily open and close prices', ['volatility']],
   ];
 
@@ -91,6 +91,28 @@ describe('reading chart cues out of the question', () => {
   it('reads the same cues in Chinese, because the question is not always English', () => {
     expect(readCues('各区域销售额占比').map((cue) => cue.kind)).toEqual(['share']);
     expect(readCues('每月的销售趋势').map((cue) => cue.kind)).toEqual(['trend']);
+  });
+
+  it('reads the mark a question names, because a reader who says "pie chart" wants a pie', () => {
+    // The gap the corpus found: Text2Vis questions say `plot these percentages ... on a line chart`,
+    // and this table had no rule for it. A user who names a chart type is not asking for a
+    // recommendation, they are stating the answer, and the product ranked a bar instead. The rule
+    // requires the mark word next to chart/plot/graph, so the instruction boilerplate ("generate
+    // matplotlib code") cannot fire it.
+    expect(readCues('Plot revenue as a pie chart').map((cue) => cue.marks[0])).toEqual(['pie']);
+    expect(readCues('Show this on a line chart').map((cue) => cue.kind)).toEqual(['explicit']);
+    expect(readCues('Draw a bar chart of revenue by region')[0]?.kind).toBe('explicit');
+    expect(readCues('Show a scatter plot of price and rating')[0]?.marks).toEqual(['scatter']);
+    expect(readCues('Generate matplotlib code that visualizes the result')).toEqual([]);
+  });
+
+  it('honours the named mark over the shape it would otherwise prefer', () => {
+    // A category axis with one measure: the recommender's default is a bar, and a question that names
+    // a line still gets the line — which is the case 350 corpus rows are labelled for.
+    const choice = recommendChart('Plot these percentages on a line chart', profiles(regions));
+    expect(choice.recommendations[0]?.mark).toBe('line');
+    const named = recommendChart('Show a bar chart of this', profiles(monthly));
+    expect(named.recommendations[0]?.mark).toBe('bar');
   });
 
   it('finds nothing in a question that names no shape', () => {
@@ -147,7 +169,7 @@ describe('recommending a chart from the question and the result set', () => {
     const choice = recommendChart('How did revenue trend over time?', profiles(monthly));
     const line = choice.recommendations.find((item) => item.mark === 'line');
     expect(line?.score).toBe(5);
-    expect(line?.reasons).toEqual(['profile:ordered-axis-and-measure', 'cue:trend "trend"']);
+    expect(line?.reasons).toEqual(['profile:axis-and-measure', 'cue:trend "trend"']);
   });
 
   it('is deterministic, including the order of equal scores', () => {
@@ -221,7 +243,8 @@ describe('recommending a chart from the question and the result set', () => {
     const choice = recommendChart('Conversion funnel by stage', profiles(stages));
     const funnel = choice.recommendations.find((item) => item.mark === 'funnel');
     const pie = choice.recommendations.find((item) => item.mark === 'pie');
-    expect(funnel?.cues).toEqual(['stages']);
+    // Two cues name the funnel now: the explicit `funnel` in the phrase and the stage vocabulary.
+    expect(funnel?.cues).toEqual(['explicit', 'stages']);
     expect(pie?.cues).toEqual([]);
   });
 });
