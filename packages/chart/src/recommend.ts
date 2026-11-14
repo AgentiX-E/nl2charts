@@ -337,20 +337,6 @@ export const RECOMMENDABLE_MARKS: readonly RecommendableMark[] = [
 /** Order that decides ties, so two marks that fit equally well always rank the same way. */
 const PREFERENCE: readonly RecommendableMark[] = RECOMMENDABLE_MARKS;
 
-/**
- * What a mark is worth when the result set has an ordered axis, over and above the table's prior.
- *
- * A line over a time series is the canonical picture of one — the mark a reader expects to see — and
- * without this the prior could not say so: `bar` and `line` both scored two, `PREFERENCE` broke the
- * tie for the bar, and a line could only ever win a question that *said* "trend". On Text2Vis that
- * left `line` and `area` at zero hits across 532 labelled rows.
- *
- * One point, because it is a default and not a rule: a first-named cue is worth three, so a question
- * that names a bar still gets one, and a trend question still gets its line. Only marks listed here
- * move; every other mark keeps its table prior.
- */
-const ORDERED_PRIOR: Partial<Record<RecommendableMark, number>> = { line: 3 };
-
 function shapeOf(profiles: readonly FieldProfile[], options: Resolved): Shape {
   const dims = profiles.filter((profile) => profile.type !== 'quantitative');
   const ordered = dims.filter((profile) => profile.type === 'temporal' || profile.type === 'ordinal');
@@ -388,11 +374,7 @@ export function recommendChart(
     }
     const named = cues.filter((cue) => cue.marks.includes(admission.mark));
     const reasons = [admission.reason];
-    // The prior a mark is worth on *this* result set: the table's own, raised for the marks whose
-    // canonical form the shape implies.
-    const prior = (shape.ordered.length > 0 ? ORDERED_PRIOR[admission.mark] : undefined) ?? admission.prior;
-    if (prior !== admission.prior) reasons.push('profile:ordered-axis-default');
-    let score = prior;
+    let score = admission.prior;
     for (const cue of named) {
       score += cue.marks.indexOf(admission.mark) === 0 ? 3 : 2;
       reasons.push(`cue:${cue.kind} "${cue.phrase}"`);

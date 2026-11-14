@@ -12,6 +12,30 @@ export interface FieldProfile {
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?)?/;
 
+/**
+ * A period written as text: a year, a year and month, a quarter, a month name, or a month and a year.
+ *
+ * `ISO_DATE` alone accepted only `2026-01-01`, so a result set that spells its timeline `Dec` or
+ * `Q1 2019` or `2019-01` typed `nominal`, no column was ordered, and every line or area the corpus
+ * labels over such a table was refused before the question was read — 532 rows of Text2Vis, none of
+ * them ever answered. The evidence for "this is time" is the *formatting*: a string written as a
+ * period is a period. A number is not, which is why `[2019, 2020]` stays a measure — a column of
+ * prices in the 2000s is indistinguishable from a column of years, and guessing from the magnitude
+ * alone would turn a measure into an axis.
+ */
+const PERIOD = new RegExp(
+  '^(?:' +
+    [
+      '(?:19|20)\\d{2}', // 2019
+      '(?:19|20)\\d{2}[-/]\\d{1,2}', // 2019-01
+      '(?:19|20)\\d{2}[-/]?[qQ][1-4]', // 2019-Q1
+      '[qQ][1-4](?:\\s*(?:19|20)\\d{2})?', // Q1, Q1 2019
+      '(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\\.?(?:\\s+(?:19|20)\\d{2})?', // Dec, March 2014
+    ].join('|') +
+    ')$',
+  'i',
+);
+
 export function inferType(values: readonly unknown[]): FieldType {
   const present = values.filter((value) => value !== null && value !== undefined);
   if (present.length === 0) return 'nominal';
@@ -21,7 +45,9 @@ export function inferType(values: readonly unknown[]): FieldType {
       ? 'ordinal'
       : 'quantitative';
   }
-  if (present.every((value) => typeof value === 'string' && ISO_DATE.test(value))) return 'temporal';
+  if (present.every((value) => typeof value === 'string' && (ISO_DATE.test(value) || PERIOD.test(value)))) {
+    return 'temporal';
+  }
   return 'nominal';
 }
 

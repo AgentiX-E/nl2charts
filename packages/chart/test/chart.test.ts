@@ -32,6 +32,27 @@ describe('profiling', () => {
     expect(profiles.find((profile) => profile.name === 'region')?.type).toBe('nominal');
   });
 
+  it('reads a period written as text as a time axis, because the formatting is the evidence', () => {
+    // The census counted 223 corpus rows whose time column was typed as something else, and the
+    // largest group was a month written as `Dec`: `ISO_DATE` only accepted `2026-01-01`, so a column
+    // of month names was `nominal`, `shape.ordered` was empty, and every line and area label over it
+    // was refused — 532 corpus rows, none of them ever answered. A string that is written as a
+    // period is a period; a *number* is not, which is why `[2019, 2020]` stays a measure below.
+    expect(inferType(['Dec', 'Jan', 'Feb'])).toBe('temporal');
+    expect(inferType(['December', 'Jan 2026', 'March 2014'])).toBe('temporal');
+    expect(inferType(['Q1 2019', 'Q2 2019', 'Q3 2019'])).toBe('temporal');
+    expect(inferType(['2019-01', '2019-02'])).toBe('temporal');
+    expect(inferType(['2019-01-01', '2019-02-01'])).toBe('temporal');
+    expect(inferType(['2019', '2020'])).toBe('temporal');
+  });
+
+  it('leaves a number a number and a label a label, so the widening cannot swallow either', () => {
+    expect(inferType([2019, 2020, 2021])).toBe('quantitative');
+    expect(inferType(['North', 'South'])).toBe('nominal');
+    // A column that is half month and half region is a label column, not a broken axis.
+    expect(inferType(['Dec', 'North'])).toBe('nominal');
+  });
+
   it('treats low-cardinality numbers as ordinal', () => {
     expect(inferType([1, 2, 1, 2])).toBe('ordinal');
     expect(inferType([1, 2, 3, 4, 5, 6, 7, 8, 9])).toBe('quantitative');
