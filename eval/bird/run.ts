@@ -672,6 +672,107 @@ export interface Arm {
    * amounts of it and the difference belongs to the model rather than to the arm.
    */
   readonly sourceRepairs?: Readonly<Record<string, number>>;
+  /**
+   * A sampler every candidate inherits, applied to the source's own card.
+   *
+   * The value block has only ever been priced as a single-prompt lever: `samples-wide-link` bought
+   * +1.50pp on dev for +9.17% prompt tokens against `inline+evidence` (`43591209696`). The arm that
+   * ships is a three-candidate pool, so the block would be paid three times and would arrive on a
+   * pool that already holds three chances to be right — and neither of those facts is derivable
+   * from the single-prompt reading. This field is how that question is asked without a second
+   * catalogue: the sources stay `MIXED_SOURCES`, one field adds the block to each of their cards.
+   *
+   * It exists on the arm rather than in the source list because a source is a *prompt* and the
+   * prompt does not change here; `sourceLinking` and `sourceRepairs` are the same idea one layer
+   * down. A source that already samples its own card is refused by `assertSourceSampleRule` rather
+   * than overridden, because an override that replaces a declaration publishes its own reading
+   * under the source's name.
+   */
+  readonly sourceSamples?: SourceSamples;
+}
+
+/**
+ * What a mixed arm hands every candidate's card: whether to sample, and which columns carry it.
+ *
+ * Both fields together, because `sampleColumns` without `samples` is a rule with nothing under it —
+ * the defect `assertSampleRule` refuses on a plain arm, and it would be the same defect here one
+ * indirection further out.
+ */
+export interface SourceSamples {
+  readonly samples: 'profile' | 'example';
+  readonly sampleColumns?: BlockRule;
+}
+
+/**
+ * The source's arm with the inheriting arm's sampler laid over it.
+ *
+ * A spread rather than a mutation: the same source is resolved once per candidate and the catalogue
+ * entry has to survive the run unchanged, or the second candidate would be drawn on a card the first
+ * one already modified.
+ */
+export function withSourceSamples(source: Arm, samples: SourceSamples | undefined): Arm {
+  if (samples === undefined) return source;
+  return {
+    ...source,
+    samples: samples.samples,
+    ...(samples.sampleColumns === undefined ? {} : { sampleColumns: samples.sampleColumns }),
+  };
+}
+
+/**
+ * A candidate whose card is decided twice.
+ *
+ * Three ways to get here, and each of them is a run that would report a number about the wrong
+ * thing: an arm with no source list (nothing inherits the override, so the plain card is sent under
+ * a name that promises a block), an arm that samples its own card as well (one of the two samplers
+ * is silently the only one), and a source whose own card already carries a sampler (the override
+ * replaces a declaration rather than adding to it).
+ */
+export function assertSourceSampleRule(
+  arm: Pick<Arm, 'name' | 'mixed' | 'samples' | 'sampleColumns' | 'sourceSamples'>,
+): void {
+  const override = arm.sourceSamples;
+  if (override === undefined) return;
+  if (arm.mixed === undefined) {
+    throw new Error(`arm ${arm.name} gives every candidate a sampled card and draws no candidates, so the block would never be built`);
+  }
+  if (arm.samples !== undefined || arm.sampleColumns !== undefined) {
+    throw new Error(
+      `arm ${arm.name} samples its own card and also gives every candidate one, so one of the two samplers would run and the other would be a declaration`,
+    );
+  }
+  for (const name of arm.mixed) {
+    const resolved = resolveArm(parseMixedSource(name).arm);
+    if (resolved !== undefined && (resolved.samples !== undefined || resolved.sampleColumns !== undefined)) {
+      throw new Error(
+        `arm ${arm.name} overrides ${name}'s card, which already carries a sampler, so the source's own reading would be discarded in silence`,
+      );
+    }
+  }
+}
+
+/** A candidate source, resolved once: the arm it names, the model it asks, and its overridden card. */
+export interface ResolvedSource {
+  readonly arm: Arm;
+  readonly provider: 'primary' | 'second';
+  readonly name: string;
+}
+
+/**
+ * The one place a candidate source becomes an arm.
+ *
+ * It was four places: the feasibility guard, the generation loop, the empty-result retry and the
+ * prompt-size measurement each resolved a source for themselves, and the last two rounds were spent
+ * on defects that existed precisely because two of them disagreed about what a source was — the
+ * guard counted three distinct prompts while the run sent two, and the size column priced the arm's
+ * card instead of the candidate's. An override is the third field to be inherited by a source, so
+ * it gets one entry point rather than a third opportunity to drift.
+ */
+export function resolveSource(arm: Pick<Arm, 'sourceSamples'>, source: string): ResolvedSource {
+  const spec = parseMixedSource(source);
+  const resolved = resolveArm(spec.arm);
+  if (resolved === undefined) throw new Error(`candidate source ${source} names no arm`);
+  return { arm: withSourceSamples(resolved, arm.sourceSamples), provider: spec.provider, name: source };
 }
 
 /**
@@ -1182,6 +1283,25 @@ export const ARMS: readonly Arm[] = [
   // one run — the score, the recorded candidates, and `bench:bird:consensus` over those
   // candidates — and the identity between the last two is exact or something is wrong.
   { name: 'select-mixed-rule', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, selectRule: 'shortest', mixed: MIXED_SOURCES },
+  // The shipping arm with the narrowed value block on every candidate's card.
+  //
+  // The block has only ever been priced as a single-prompt lever, and it cleared its own bar there:
+  // `inline+evidence+samples-wide-link` bought +1.50pp on dev (960/1,532 against 937, 52 wins to 29
+  // losses, p = 0.0140) for +9.17% prompt tokens, against a registered bar of +1.5pp and +25%. What
+  // that reading cannot say is whether the block still pays where the product would spend it. On a
+  // three-candidate pool it is paid three times, and it arrives on a set that already holds three
+  // chances to be right — so the marginal candidate the block rescues is the *only* case it can buy,
+  // and the same block that moves a single prompt by 1.5pp can move a pool by nothing.
+  //
+  // One lever: same sources, same prompt wording, same chooser, same judge, and every candidate's
+  // card carries the same sampler over the same narrowed columns. `sourceSamples` is the whole diff.
+  //
+  // Pre-registered against `select-mixed-rule` on the same 1,532 cases in one dispatch: accuracy at
+  // least **+1.0pp**, `calls.mean` unchanged at 3.00, and the prompt-token column read from the
+  // artifact's own `promptChars` rather than from the single-prompt arm's +9.17%. A delta inside the
+  // split's own resolution (1.64pp on this pair's disagreement rate) is a reading that the block does
+  // not survive being paid per candidate, and the single-prompt arm keeps its own verdict either way.
+  { name: 'select-mixed-rule-narrow', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, selectRule: 'shortest', mixed: MIXED_SOURCES, sourceSamples: { samples: 'example', sampleColumns: 'link' } },
   // The shipped three candidates and the shipped free rule, with one more candidate bought from a
   // source that differs in knowledge: three stored rows per table on the same prompt.
   //
@@ -1675,6 +1795,7 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'select-mixed': 'three decompositions instead of three samples: within its MDE of a single call on this split, and the decomposition question needs the dev split to be answered',
   'select-mixed-rule': "the parent's own candidates chosen by `shortest` instead of by the model: three calls instead of four, and the offline device already priced the rule at 63.64% against the selector's 62.79% on 1,532 dev questions (63.71% against 61.42% on the strong pool, +2.29pp, p = 0.0030) — this arm is the derivation becoming a measurement, and its artifact is what `bench:bird:consensus` must reproduce exactly",
   'select-mixed-rule-rows': "the shipped arm plus a fourth candidate drawn from three stored rows per table: the pool read apart offline says the missing statements are `values` failures (71.3% of the 168 questions whose pool held no correct candidate) and that seven filter sites in ten aim at a column that has never held the value, which is a fact about rows rather than about columns — the arm that asks whether a fourth candidate differing in knowledge converts under a rule instead of under a selector",
+  'select-mixed-rule-narrow': "the shipping arm with the narrowed value block on all three candidate cards: the block cleared its single-prompt bar at +1.50pp for +9.17% tokens (`43591209696`), and this arm is the one that says whether it survives being paid once per candidate on a pool that already holds three chances to be right — one field (`sourceSamples`), same sources, same chooser, three calls",
   'select-mixed-rule-intent': 'the same fourth call spent on a candidate rendered from a query intent: same pool size, same free rule, same price as `select-mixed-rule-rows`, so the two arms together say which kind of difference a fourth candidate has to be — and the delta against `select-mixed-rule` is the conversion test `select-intent` could not give, because that arm read four candidates with the paid selector and lost 3.50pp doing it',
   'select-samples': "the trio's third slot given to the sampled card rather than the value index: the same four calls, and the block it replaces is empty on 60.9% of the split",
   intent: 'the same card one rule longer, answering with a query object the renderer turns into SQL: the only arm whose output grammar is enforced, and the only one that cannot be dispatched alone — its statement is rendered on the candidate-source path, so `assertIntentRule` refuses a run that names it as an arm of its own',
@@ -2014,6 +2135,7 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   // the *ceiling* (+2.22pp, p < 0.0001) and what the paid selector did to the gain (−3.50pp of
   // conversion); neither number is a prediction for a rule that ranks the pool.
   ['select-mixed-rule', 'select-mixed-rule-rows'],
+  ['select-mixed-rule', 'select-mixed-rule-narrow'],
   // The same purchase from the source that differs in grammar, at the same price. Read against the
   // parent it is a second conversion test; read against the arm above it, it is a comparison of two
   // kinds of difference rather than of two prompts.
@@ -6626,7 +6748,7 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
   // guard's mistake, in the same family as applying one split's arm list to another.
   // What must hold is that the sources *can* differ; how often they cannot is measured
   // here and reported as a cost, not assumed away.
-  const distinctShare = (sources: readonly string[]): { distinct: string[]; degenerate: string[] } => {
+  const distinctShare = (arm: Arm, sources: readonly string[]): { distinct: string[]; degenerate: string[] } => {
     const distinct: string[] = [];
     const degenerate: string[] = [];
     for (const question of cases) {
@@ -6634,8 +6756,11 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
       // a different opinion, not a duplicate, and counting it as one would misreport the
       // cost of exactly the arm that exists to test model diversity.
       const built = sources.map((source) => {
-        const spec = parseMixedSource(source);
-        const sourceArm = resolveArm(spec.arm) as Arm;
+        // Resolved through the one entry point, so the guard and the run inherit the same
+        // candidate card: an arm that overrides its sources' cards would otherwise send a
+        // sampled prompt and have this function count the unsampled one, which is the
+        // disagreement `select-samples` was refused for.
+        const { arm: sourceArm, provider: sourceProvider } = resolveSource(arm, source);
         // The source's card, not the arm's: the run sends each candidate on the card its own
         // source asks for, and a guard that counted a different card would be measuring a
         // prompt nobody sends — which is how `select-samples` produced three distinct prompts
@@ -6645,7 +6770,7 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
           schemaForSource(sourceArm, question),
           promptFor(sourceArm, question, blocksFor(sourceArm, question)),
         );
-        return `${spec.provider}\u0000${prompt}`;
+        return `${sourceProvider}\u0000${prompt}`;
       });
       (new Set(built).size === sources.length ? distinct : degenerate).push(String(question.question_id));
     }
@@ -6656,7 +6781,7 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
     .filter((arm): arm is Arm => arm !== undefined && arm.mixed !== undefined)
     .map((arm) => {
       const sources = arm.mixed as readonly string[];
-      const counted = distinctShare(sources);
+      const counted = distinctShare(arm, sources);
       // `selected.length`, not `cases.length`: two questions whose gold statements refused do not
       // make a full run a sample, and the guard below must not be skipped because of them.
       const note = assertMixedFeasible(arm.name, sources, counted, selected.length === questions.length);
@@ -7210,6 +7335,8 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
   const arm = resolveArm(name);
   if (arm === undefined) throw new Error(`unknown arm ${name}`);
   assertSampleRule(arm);
+  // ...and a sampler every candidate inherits, on an arm that draws none, is a card nobody builds.
+  assertSourceSampleRule(arm);
   // ...and a card decided by two rules is a delta about which one ran last.
   assertCardRule(arm);
   // ...and a gate in front of a chooser that spends nothing, or a pool of one, is a second name
@@ -7519,7 +7646,6 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
             // candidate is always one generation and the cost stays three calls.
             const sources = arm.mixed;
             const source = sources === undefined ? name : (sources[sample % sources.length] as string);
-            const spec = parseMixedSource(source);
             const drawn = (survival[source] ??= { generated: 0, survived: 0 });
             drawn.generated += 1;
             // The hint override is keyed by the *source*, not by the arm that resolves it: two
@@ -7529,7 +7655,9 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
             const repairs = arm.sourceRepairs?.[source];
             // Resolved once: the loop reads the source arm four times (sampler, card, prompt,
             // linker answer) and a second `resolveArm` per read is four chances to disagree.
-            const sourceArm = resolveArm(spec.arm) as Arm;
+            // The card is the source's *inherited* one — an arm that gives every candidate a
+            // sampler would otherwise generate on a card the guard counted as unsampled.
+            const { arm: sourceArm, provider: sourceProvider } = resolveSource(arm, source);
             // The pre-built pipeline is only good for the case nothing about this source was
             // overridden; once either override is present the pipeline is built for it, because a
             // reused pipeline would apply the parent's count to a source that asked for another.
@@ -7540,7 +7668,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
             const sampler =
               sources === undefined && hinted === undefined && repairs === undefined
                 ? pipeline
-                : pipelineFor(sourceArm, spec.provider, { linking: hinted, repairs, temperature: samplerTemperature });
+                : pipelineFor(sourceArm, sourceProvider, { linking: hinted, repairs, temperature: samplerTemperature });
             const candidateSchema = sources === undefined ? schema : prepared.schemaForSource(sourceArm, question);
             candidateColumns = Math.max(candidateColumns, prepared.samplesOn(candidateSchema));
             // The one source whose statement is rendered rather than written. It reads the same
@@ -7549,7 +7677,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
             const askedSample: { sql: string; shape?: ReplyShape; decomposedSteps?: number } =
               sources !== undefined && sourceArm.intent === 'query'
                 ? await (async () => {
-                    const read = await askIntent(providerFor(spec.provider), {
+                    const read = await askIntent(providerFor(sourceProvider), {
                       question: question.question,
                       schema: candidateSchema,
                       prompt: promptFor(sourceArm, question, prepared.blocksFor(sourceArm, question)),
@@ -8427,7 +8555,10 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
         promptFor(target, question, prepared.blocksFor(target, question)),
       ).length;
     if (sources === undefined) return sizeFor(arm);
-    return Math.max(...sources.map((source) => sizeFor(resolveArm(parseMixedSource(source).arm) as Arm)));
+    // Resolved through the one entry point: an arm that gives every candidate a sampler sends a
+    // larger prompt than its sources do, and a size column read off the un-inherited card would
+    // report the block as free on exactly the arm that pays for it three times.
+    return Math.max(...sources.map((source) => sizeFor(resolveSource(arm, source).arm)));
   };
   const promptSizes = cases.map(promptSizeOf);
   // A repair arm is priced by its funnel, not only by its accuracy: an arm that

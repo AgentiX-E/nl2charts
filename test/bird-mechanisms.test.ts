@@ -52,6 +52,7 @@ const NOT_A_MECHANISM: Readonly<Record<string, string>> = {
   assertCandidatePasses: 'declaration-time: a candidate count that is not a whole number of passes over the sources draws one prompt more often than the others, so the arm is not the experiment its price describes',
   assertDissentRule: 'declaration-time: a fourth opinion must come from somewhere else',
   assertSampleRule: 'declaration-time: a column rule needs a sampler to read',
+  assertSourceSampleRule: 'declaration-time: a sampler every candidate inherits needs candidates, cannot sit beside a sampler on the arm itself, and cannot replace a source that already declares one — all three are cards nobody builds rather than levers that did not fire',
   assertCardRule: 'declaration-time: a card decided by two rules reports the order of operations',
   assertMaskingRule: 'declaration-time: a mask needs worked examples to act on',
   assertTemperature: 'declaration-time: a temperature needs two draws to move apart, and a request the endpoint refuses is a number the declaration already had',
