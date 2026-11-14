@@ -547,7 +547,7 @@ export function describeRule(report: RuleReport): readonly string[] {
  */
 export function describeSweep(report: RuleReport): readonly string[] {
   if (report.sweep.length === 0) return [];
-  const lines = [`  sweep: ${String(report.sweep.length)} tables over the same ${String(report.scored)} rows`];
+  const lines = [`  sweep: ${String(report.sweep.length)} tables over the same ${String(report.scored)} rows, each delta against the table above`];
   // The control is the table before this one, carried in the loop rather than read by index: the
   // first table is its own control and prints no delta, and a second `report.sweep[0]` read would be
   // a branch for a state the type system cannot rule out and the data cannot reach.

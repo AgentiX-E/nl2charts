@@ -9,7 +9,7 @@
  */
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -378,13 +378,25 @@ describe('the arm, run as a command', () => {
     }
   });
 
-  it('falls back to its own argv and the real corpus when it is given no options', async () => {
-    // The two defaults the workflow depends on and no test had executed: a dispatch passes `--artifact`
-    // through `process.argv`, and the corpus URL comes from the loader's own default.
+  it('falls back to its own argv and to the corpus cache when it is given no options', async () => {
+    // The two defaults the workflow depends on and no test had executed: `argv` becomes an empty
+    // list and `load` becomes `{}`, which resolves the cache from `TEXT2VIS_CACHE`. The first version
+    // of this test called it with no arguments *and* no cache, so it passed here on a warm directory
+    // and downloaded the corpus in CI — a test whose verdict was the network's.
+    const cacheDir = join(root, 'defaults');
+    mkdirSync(cacheDir, { recursive: true });
+    writeFileSync(join(cacheDir, 'Text2Vis.csv'), `${HEADER}\nTop 5 by revenue,,"plt.bar([1],[2])",Bar Chart\n`);
+    const previous = process.env.TEXT2VIS_CACHE;
+    process.env.TEXT2VIS_CACHE = cacheDir;
     const lines: string[] = [];
-    const code = await entryRule(ENTRY, MODULE_URL, (line) => lines.push(line));
-    expect(code).toBe(1);
-    expect(lines.join('\n')).not.toBe('');
+    try {
+      const code = await entryRule(ENTRY, MODULE_URL, (line) => lines.push(line));
+      expect(code).toBe(0);
+      expect(lines.join('\n')).toContain('1 scored of 1 rows');
+    } finally {
+      if (previous === undefined) delete process.env.TEXT2VIS_CACHE;
+      else process.env.TEXT2VIS_CACHE = previous;
+    }
   });
 
   it('returns nothing when it is imported rather than run', async () => {

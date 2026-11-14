@@ -12446,6 +12446,54 @@ The next reading is one change: `share → ['bar', 'pie']`, with the bar registe
 top-1 ≥ 45.0% and `Bar` top-1 ≥ 60.0%, on the same corpus, with the same two baselines printed
 alongside. A change to the cue table that does not clear its own baseline is not a change.
 
+#### The sweep: four cue tables, one run, and the bar none of them clears
+
+`share → ['bar', 'pie']` was registered with two numbers attached — top-1 ≥ 45.0% and `Bar` top-1 ≥
+60.0% — and the reading that decides it now costs nothing to take: a table is scored in a fifth of a
+millisecond, so the arm prices the shipped table and every table this build can construct on the same
+rows, in one run over the same 1,470 scored questions. The denominator moved from the 1,469 of the
+first reading because `Barh` is now mapped, and the shipped table reads 37.35% against the 37.37% it
+read on 1,469 — the same **549** hits, so the two readings are the same reading.
+
+| table | top-1 | Δ vs shipped | `bar` family | `pie` family | `histogram` | shortlist |
+|---|---:|---:|---:|---:|---:|---:|
+| `shipped` | **37.35%** (549) | — | 51/420 (12.14%) | 145/182 | 0/90 | 1,000 |
+| `bar-share` | 40.82% (600) | +3.47pp | **247/420 (58.81%)** | **0/182** | 0/90 | 1,000 |
+| `histogram` | 39.46% (580) | +2.11pp | 51/420 | 145/182 | **31/90 (34.44%)** | 1,031 |
+| `bar-share+histogram` | **42.93%** (631) | **+5.58pp** | 247/420 (58.81%) | 0/182 | 31/90 | 1,031 |
+
+Three things this table says that a single number could not.
+
+**The mechanism is exactly the size the corpus said it was, and the cost is the one nobody priced.**
+The `bar` family is 420 questions and the shipped table answers 51 of them; flipping the cue answers
+**247**, which is the 196 rows the previous round counted as bars answered `pie`. The price is
+**all 145** of the pie rows that family had: `share` now leads with a bar for every question that
+fires it, and the 182 pie-and-donut questions are inside that set. The gain was predicted to the row
+and the loss was not priced at all, which is exactly why the bar was registered at 45.0% and not at
+"better than before".
+
+**The histogram cue is a real but smaller fix, and it is scoped.** It recovers **31 of 90** histogram
+questions (0.00% → 34.44%), lifts the shortlist from 1,000 to 1,031, and leaves `boxplot` at 47 of 90
+and every other family where it was — because a question that says "histogram" does not say
+"boxplot". The other 59 histogram rows never use the word, and that is the finding: the label is an
+annotator's choice of *shape*, and 59 of them ask for a distribution in words a cue table cannot
+separate from a boxplot's.
+
+**None of the three registered bars is cleared.** 40.82% against the required 45.0%, `Bar` 58.81%
+against 60.0%, `Histogram` 34.44% against 40.0%. The combined table reaches **42.93%**, which is
++5.58pp on the shipped table — an exact, census-wide gain, since the corpus is not a sample and this
+delta carries no sampling noise at all — and still 2.07pp short of the number registered before the
+run.
+
+**So the shipped table does not change.** A pre-registration that is missed by two points and then
+adopted anyway is not a pre-registration; it is a note taken after the fact, and the next change would
+be measured against a bar that had already been moved once. What the sweep buys is the diagnosis:
+the loss is not in the ordering, it is in the *cue*. `share` is one phrase covering two pictures, and
+196 + 145 = 341 of the corpus's questions are the evidence that it cannot be one line. The next
+experiment is a discriminator inside `share` — pie when the question names a whole it is a part of,
+bar when it names categories to compare — registered before it is run, with the two numbers this
+sweep fixes as its floor: top-1 ≥ 45.0% **and** `pie` no lower than the 145 the shipped table keeps.
+
 #### What the 515 excluded rows are, and the correction that makes
 
 The block now prints the rows behind each unmapped label, and the second run (`43546926456`) is what
