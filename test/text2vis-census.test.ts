@@ -207,6 +207,25 @@ describe('what became of one question', () => {
     expect(classify(input(TREND, 'Line Chart', QUARTERLY))).toEqual({ expected: 'line', outcome: 'hit' });
   });
 
+  it('reads a substitution when the winner covers the family as its second claim', () => {
+    // A line is a line and, filled, an area, so `familiesOfMark('line')` is `['line', 'area']` and a
+    // line answers an `area` label second. `profile.ts` publishes that row in its shortlist and not
+    // in its top-1, so the census has to split it out: reading the whole family list as a hit made
+    // the census read 263 where the product reads 262 on the 1,470-row corpus.
+    const row = expectOutcome(input(TREND, 'Area Chart', QUARTERLY), 'substituted');
+    expect(row).toEqual({ expected: 'area', outcome: 'substituted', answered: 'line', ownFamily: 'line' });
+  });
+
+  it('reconciles with the profile file as shortlist = hit + substituted, which is why the split exists', () => {
+    const rows = [input(TREND, 'Area Chart', QUARTERLY), input(TREND, 'Line Chart', QUARTERLY)];
+    const report = censusOf(rows);
+    const profile = scoreProfile(rows);
+    expect(profile.shortlist).toBe(2);
+    expect(profile.top1).toBe(1);
+    expect(report.outcomes.hit).toBe(profile.top1);
+    expect(report.outcomes.hit + report.outcomes.substituted).toBe(profile.shortlist);
+  });
+
   it('names the admission rule that refused a line over a year column', () => {
     // The reading this instrument exists for. The table cell says `2019`, the profiler stores a
     // number, `shape.ordered` is empty, and the sentence below is the product's own refusal — not a
@@ -305,7 +324,7 @@ describe('the census over a population', () => {
     expect(report.rows).toBe(9);
     expect(report.unmapped).toBe(1);
     expect(report.scored).toBe(8);
-    expect(report.outcomes).toEqual({ hit: 2, refused: 2, outranked: 2, uncovered: 1, noProfile: 1 });
+    expect(report.outcomes).toEqual({ hit: 2, substituted: 0, refused: 2, outranked: 2, uncovered: 1, noProfile: 1 });
     expect(() => assertCensusReport(report)).not.toThrow();
   });
 
@@ -351,7 +370,7 @@ describe('the census over a population', () => {
 
   it('refuses a report whose counters do not add up', () => {
     const report = censusOf(population);
-    expect(() => assertCensusReport({ ...report, outcomes: { ...report.outcomes, hit: 0 } })).toThrow(/five outcomes/);
+    expect(() => assertCensusReport({ ...report, outcomes: { ...report.outcomes, hit: 0 } })).toThrow(/six outcomes/);
     expect(() => assertCensusReport({ ...report, byFamily: [] })).toThrow(/per-family rows/);
     expect(() => assertCensusReport({ ...report, unmapped: 0 })).toThrow(/unmapped/);
   });
