@@ -26,6 +26,7 @@ import {
   parseResultSet,
   profileAnswer,
   profileInputs,
+  numericCell,
   profilesOf,
   scoreProfile,
   typedRows,
@@ -75,6 +76,54 @@ async function serve(body: string): Promise<{ url: string; close: () => Promise<
     close: () => new Promise<void>((done) => server.close(() => done())),
   };
 }
+
+describe('the number a cell holds', () => {
+  /**
+   * The formats a result set writes numbers in.
+   *
+   * The corpus ships `Table Data` as text — a table copied out of a database, formatted for a reader
+   * — and `Number('1,234')` is `NaN`. Every column of grouped numbers was therefore typed `nominal`,
+   * the table had no measure, and every mark that needs one was refused: 389 of the 890 refusals the
+   * census counted on Text2Vis. A driver with a typed schema would hand the product a number, so
+   * reading the formatting is this instrument modelling that layer rather than the product being
+   * lenient.
+   */
+  it('reads the grouping, currency and percent a table is displayed with', () => {
+    expect(numericCell('1,234')).toBe(1234);
+    expect(numericCell('1,234.56')).toBe(1234.56);
+    expect(numericCell('$1,234')).toBe(1234);
+    expect(numericCell('€1,234')).toBe(1234);
+    expect(numericCell('12.5%')).toBe(12.5);
+    expect(numericCell(' 42 ')).toBe(42);
+    expect(numericCell('-5')).toBe(-5);
+    expect(numericCell('0')).toBe(0);
+  });
+
+  it('reads an accounting negative, because a result set writes one that way', () => {
+    expect(numericCell('(1,234)')).toBe(-1234);
+    expect(numericCell('(42)')).toBe(-42);
+  });
+
+  it('refuses what is not a number, rather than coercing a word to zero', () => {
+    expect(numericCell('')).toBeUndefined();
+    expect(numericCell('North')).toBeUndefined();
+    expect(numericCell('1,2')).toBeUndefined();
+    expect(numericCell('NaN')).toBeUndefined();
+    expect(numericCell('Infinity')).toBeUndefined();
+    expect(numericCell('1 234')).toBeUndefined();
+  });
+
+  it('keeps a leading zero a code and not a quantity', () => {
+    expect(numericCell('007')).toBeUndefined();
+    expect(numericCell('0123')).toBeUndefined();
+  });
+
+  it('turns a formatted column into a measure, which is what the refusal was missing', () => {
+    const set = parseResultSet('Region, Revenue\nNorth, "1,234"\nSouth, "2,345"\nEast, "3,456"\nWest, "4,567"');
+    expect(profilesOf(set).find((profile) => profile.name === 'Revenue')?.type).toBe('quantitative');
+    expect(typedRows(set)[0]?.Revenue).toBe(1234);
+  });
+});
 
 describe('a result set, as the corpus spells it', () => {
   it('reads a header and its rows', () => {

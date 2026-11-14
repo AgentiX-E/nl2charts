@@ -67,15 +67,50 @@ export function parseResultSet(text: string): ResultSet {
   return { columns, rows };
 }
 
+/** A currency sign a result set may prefix a measure with. */
+const CURRENCY = /^[$€£¥₹]\s?/;
+
+/** Groups of three digits, which is the only comma placement that means a thousands separator. */
+const GROUPED = /^\d{1,3}(?:,\d{3})+(?:\.\d+)?$/;
+
+/**
+ * The number a cell holds, including the formatting a result set is displayed with.
+ *
+ * `Number('1,234')` is `NaN`, and that one fact refused 389 of the 890 refusals the census counted on
+ * Text2Vis: a revenue column formatted with thousands separators typed `nominal`, the table had no
+ * measure, and every mark that needs one — bar, line, pie, scatter, boxplot — was ruled out. The
+ * corpus ships `Table Data` as text copied out of a database, and a driver with a typed schema would
+ * hand the product numbers instead, so reading the formatting here is this instrument modelling the
+ * layer the corpus omits rather than the product being lenient about its input.
+ *
+ * The formats are the ones a result set actually writes: grouped digits, a leading currency sign, a
+ * trailing percent (kept as written — a chart cares about relative height, not about the unit), and
+ * an accounting negative in parentheses. What is not read is deliberately not read: a space-grouped
+ * number is indistinguishable from two words, and a European `1.234,56` would require guessing which
+ * separator is the decimal one, so both stay text and the column stays a category.
+ */
+export function numericCell(cell: string): number | undefined {
+  const text = cell.trim();
+  if (text.length === 0) return undefined;
+  const parenthesised = /^\((.*)\)$/.exec(text);
+  const body = (parenthesised?.[1] ?? text).replace(CURRENCY, '').replace(/%$/, '').trim();
+  const plain = GROUPED.test(body) ? body.replace(/,/g, '') : body;
+  // A leading zero is a code — a zip, an account number — and not a quantity. This is the rule the
+  // unformatted path applied before any formatting was read, kept in one place for both.
+  if (plain.length === 0 || /^0\d/.test(plain)) return undefined;
+  const value = Number(plain);
+  if (!Number.isFinite(value)) return undefined;
+  return parenthesised === null ? value : -value;
+}
+
 /**
  * The table as the profiler wants it: one object per row, cells typed by what they hold.
  *
  * Numbers are converted because the profiler's type inference reads JavaScript types: a column of
  * `"43.54"` strings would be `nominal` and every measure would disappear from the profile, which
- * turns every bar into a refusal and the whole reading into a number about parsing. The test for
- * "is this a number" is the one `Number` and `Number.isFinite` agree on, with the empty cell left
- * as the empty string rather than coerced to zero — a missing value is not a value of zero, and a
- * measure whose minimum is an artefact of missing data would decide a range-based rule wrongly.
+ * turns every bar into a refusal and the whole reading into a number about parsing. The empty cell
+ * stays `null` rather than becoming zero — a missing value is not a value of zero, and a measure
+ * whose minimum is an artefact of missing data would decide a range-based rule wrongly.
  */
 export function typedRows(set: ResultSet): Record<string, unknown>[] {
   return set.rows.map((cells) => {
@@ -86,8 +121,8 @@ export function typedRows(set: ResultSet): Record<string, unknown>[] {
         row[name] = null;
         continue;
       }
-      const numeric = Number(cell);
-      row[name] = Number.isFinite(numeric) && !/^0\d/.test(cell) ? numeric : cell;
+      const numeric = numericCell(cell);
+      row[name] = numeric === undefined ? cell : numeric;
     }
     return row;
   });
