@@ -192,6 +192,26 @@ describe('REWRITE_RULES', () => {
     expect(apply('select id from t limit 1 + 2')).toBeUndefined();
   });
 
+  it('counts the same rows without the distinct, and changes nothing else', () => {
+    const apply = (sql: string): unknown => rule('drop-count-distinct').apply(at(sql));
+    expect(apply('select count(distinct t.id) from t')).toBe('select count(t.id) from t');
+    // The function's own spelling is the caller's and is left alone: this rule removes one word.
+    expect(apply('select COUNT(DISTINCT t.id) from t')).toBe('select COUNT(t.id) from t');
+    expect(apply('select count(distinct coalesce(a, b)) from t')).toBe('select count(coalesce(a, b)) from t');
+    expect(apply('select count(distinct a), count(distinct b) from t')).toBe('select count(a), count(b) from t');
+    // A `distinct` on the select list is a claim about which rows come back, not about how many
+    // rows a count reads, and this rule is about the second.
+    expect(apply('select distinct count(distinct a) from t')).toBe('select distinct count(a) from t');
+    // Statements that do not count distinct rows are not this rule's business.
+    expect(apply('select count(*) from t')).toBeUndefined();
+    expect(apply('select distinct a from t')).toBeUndefined();
+    expect(apply('select count(a) from t')).toBeUndefined();
+    // The word inside a literal is text.
+    expect(apply("select count(distinct a) from t where note = 'count(distinct b)'")).toBe(
+      "select count(a) from t where note = 'count(distinct b)'",
+    );
+  });
+
   it('scales an integer numerator and leaves everything else alone', () => {
     const typeOf = (name: string): string | undefined => (name === 'a' || name === 'b' ? 'INTEGER' : 'REAL');
     // A single statement in, a single statement out: this rule never proposes a second edit, and

@@ -184,6 +184,42 @@ function integerDivision(input: RewriteInput): string | undefined {
 }
 
 /**
+ * The same count over the same rows, with `distinct` removed.
+ *
+ * This is the one edit here that is not a repair of a defect the engine can prove — it is a
+ * reversal of a habit. On the dev split 162 of 1,532 selected statements count distinct rows
+ * (10.6%), and the gold counts plain rows on most of those: a `count(distinct t.id)` written over a
+ * table whose `id` is already unique, or over a join the statement invented. The failure class it
+ * lands in is `values` — the statement ran, the width matched, the number did not — which is 365
+ * of the split's 569 failures, the largest block left after every prompt lever was closed.
+ *
+ * Only the word is removed. The function's spelling, the argument, the surrounding statement and
+ * every literal are left as written, because a rule that normalized more than the claim it makes
+ * would be two edits priced as one. `select distinct` is untouched: that `distinct` decides which
+ * rows come back, not how many rows a count reads.
+ *
+ * ## Why a rule that can lose is still a rule
+ *
+ * Removing `distinct` can only over-count when the statement's rows repeat: a join that multiplies
+ * a parent row, or a column that is not unique. Those cases exist and this rule will get them
+ * wrong. The instrument therefore prices wins *and* losses and prints the net, which is what makes
+ * this publishable as an unconditional rule rather than as a candidate: `drop-limit-on-count` was
+ * refused at 1 win against 19 losses on the same instrument, and this one is the same measurement
+ * in the other direction.
+ */
+function dropCountDistinct(input: RewriteInput): string | undefined {
+  // Split at the literals so a value like `'count(distinct b)'` is never read as a count. The edit
+  // is then "did the text change", compared rather than flagged: a separate `changed` boolean needs
+  // a second regex to stay in agreement with this one, and the two disagree on the first statement
+  // their difference admits (`count(distinct)` with no argument to count).
+  const rewritten = input.sql
+    .split(/('(?:''|[^'])*')/g)
+    .map((part) => (part.startsWith("'") ? part : part.replace(/\b(count\s*\(\s*)distinct\s+/gi, '$1')))
+    .join('');
+  return rewritten === input.sql ? undefined : rewritten;
+}
+
+/**
  * The statement with its top-level cap removed, and nothing else asked.
  *
  * The ceiling's edit. It reads no condition and refuses nothing, which is exactly what makes it a
@@ -244,6 +280,11 @@ export const REWRITE_RULES: readonly RewriteRule[] = [
     apply: (input) => stripUnfoundedCap(input.sql, input.question)?.sql,
   },
   { name: 'integer-division', claim: 'a rate divided by an integer column truncates to zero', apply: integerDivision },
+  {
+    name: 'drop-count-distinct',
+    claim: 'a count over distinct rows where the question counts rows',
+    apply: dropCountDistinct,
+  },
   {
     name: 'ground-case-empty',
     claim: 'a value written in the question\'s case, grounded only when the statement returned nothing',
