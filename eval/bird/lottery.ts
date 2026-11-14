@@ -284,7 +284,16 @@ export function readLottery(report: LotteryArtifact, options: LotteryOptions, so
 }
 
 export interface LotteryVerdict {
-  readonly kind: 'inside' | 'beyond' | 'unmeasured';
+  /**
+   * `unpriced` is the state a run is in when its widest pool is exactly the draw.
+   *
+   * It was found on the first artifact this instrument was pointed at outside Mini-Dev: a dev
+   * dispatch runs three candidates and keeps three, so every case is drawn whole, the band is a
+   * constant zero, and a -0.33pp pair difference reads as "beyond the band" — a sentence about a
+   * moved distribution produced from no evidence at all. A zero band cannot grade anything, and
+   * saying so is the whole point of reporting the band beside the delta.
+   */
+  readonly kind: 'inside' | 'beyond' | 'unpriced' | 'unmeasured';
   readonly sentence: string;
   /** How far beyond the band the observed delta sits, when it does. */
   readonly residual?: number;
@@ -310,6 +319,18 @@ export function verdictOf(read: LotteryRead): LotteryVerdict {
   }
   const graded = observed.ceiling ?? observed.score;
   const what = observed.ceiling === undefined ? 'score' : 'ceiling';
+  // Before the comparison rather than after it: a band of zero makes every delta "beyond", and the
+  // verdict that follows would be a claim about a distribution drawn from a pool that never had a
+  // subset to choose between.
+  if (!read.wide) {
+    return {
+      kind: 'unpriced',
+      sentence:
+        `the widest pool this run kept is ${String(read.widest)}, which is exactly the draw, so nothing about composition can be separated from the draw; ` +
+        `the pair's own interval (${pp(resolution)}) is the only thing that grades a delta from this run, and the run shows ${pp(graded)}`,
+      resolution,
+    };
+  }
   if (Math.abs(graded) <= band) {
     return {
       kind: 'inside',
