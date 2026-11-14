@@ -1143,6 +1143,25 @@ export const ARMS: readonly Arm[] = [
   // candidate family, not about its candidate count, and the honest response would be to price
   // its prompts rather than to buy more draws.
   { name: 'select-mixed-spread3', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 9, select: true, mixed: MIXED_SOURCES },
+  // The wide rungs with the free rule reading them instead of the model.
+  //
+  // The ladder above was built to climb to the competitor's `n: 21`, and it has only ever been
+  // climbed by a chooser that costs a call. `select-mixed-rule` is the reading that matters at
+  // three candidates — the rule beats the model selector by 2.29pp on 1,532 dev questions — and
+  // it has never been pointed at a pool deeper than four, which is the one combination this
+  // repository has documented as unmeasured rather than rejected.
+  //
+  // What it is for is arithmetic the artifact already contains. Rebuilt by subset over the
+  // twelve candidates of `43473626220`'s four arms, the pool's ceiling rises with depth
+  // (3 → 64.92%, 6 → 68.55%, 9 → 69.96%, 12 → 71.33%) while majority-by-result stays flat
+  // (58.19%, 59.01%, 59.27%, 60.10%) and `shortest` at three candidates returns 61.29%. So
+  // depth buys the pool and the *aggregator* throws it away, and the conversion these two arms
+  // measure is the one number that decides whether depth is worth its calls: 92.7% of the
+  // three-candidate ceiling is what the rule converts, and at that rate six draws are 63.6% and
+  // nine are 64.8%. A conversion that falls with depth kills the configuration at 9 calls
+  // instead of 21, which is the cheapest way this project can learn the answer.
+  { name: 'select-mixed-rule-spread2', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 6, select: true, selectRule: 'shortest', mixed: MIXED_SOURCES },
+  { name: 'select-mixed-rule-spread3', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 9, select: true, selectRule: 'shortest', mixed: MIXED_SOURCES },
   // `select-mixed` with its fourth call replaced by a rule that reads what that call was given.
   //
   // One lever in the only sense this repository counts: same three prompts, same card, same
@@ -1745,6 +1764,8 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'select-mixed-cold': 'the same three prompts and the same four calls at temperature 0: the coordinate every multi-prompt arm was silently measured at, kept as the control rather than as a claim. It is the arm a "more candidates help" hypothesis has to beat, and it costs nothing beyond its four calls — dispatch it beside `select-mixed` and `select-mixed-hot` so the three rungs share one split, one judge and one bill',
   'select-mixed-hot': 'the same three prompts and the same four calls drawn at temperature 1 instead of 0.7: the one experiment that separates "0.7 is too cold for this endpoint" from "the three prompts already know the answer", at no extra cost. On demand because it is a ceiling reading and it must share a dispatch with `select-mixed` to be paired — 498 questions resolve about two points of ceiling and nothing finer. Read `candidateRecall` (bar: 64.3% + 2pp) and the distinct-results-per-question line from `bench:bird:diversity` (bar: 1.26 -> 1.50). A ceiling that does not move closes the sampling family: draw count, source count and temperature are then one measurement',
   'select-mixed-spread3': 'three passes, nine candidates, ten calls: the rung that says whether the ceiling curve is still rising at double digits. Read against `spread2`, not against the parent — a slope that halves between six and nine closes the competitor\'s 21-candidate configuration as an explanation and moves the question to its prompt family',
+  'select-mixed-rule-spread2': 'six candidates from the three prompts, read by the free rule: the same pool as `spread2` with the model selector removed, so the pair prices what the fourth call buys on a wide pool and this arm prices what the rule costs. Read it against `select-mixed-rule`, not against its sibling: the ceiling went up (64.92 → 68.55% by subset on the previous artifact) and the only question is how much of it an aggregator that reads length can still return',
+  'select-mixed-rule-spread3': 'nine candidates, nine calls, one rule. This is the rung where a decreasing conversion is visible as a number rather than as a trend, because the pool is three times the width the rule was measured on and `shortest` has no way to prefer a longer statement that a wider pool makes more likely to be right',
 };
 
 /**
