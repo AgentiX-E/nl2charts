@@ -13,7 +13,8 @@
  *
  * - `tables` — which base tables are read. A fix here is join selection or foreign-key hints.
  * - `predicates` — the atoms of every `where` and `on` clause. A fix here is condition
- *   coverage: a missing `is not null`, a range that should have been inclusive.
+ *   coverage: a missing `is not null`, a range that should have been inclusive. Comparison
+ *   goes through `predicateKeys`, because two spellings of one condition are one condition.
  * - `aggregates` — the aggregate calls, with `distinct` folded in. A fix here is which
  *   function answers the question.
  * - `groups` — the `group by` columns. A fix here is the grain hint.
@@ -188,6 +189,128 @@ export function predicateAtoms(sql: string): string[] {
     )
     .filter((atom) => atom !== '');
   return [...new Set(atoms)].sort();
+}
+
+/**
+ * The operator each comparison becomes when its operands swap places.
+ *
+ * `a = b` and `b = a` are one condition; `a > b` and `b < a` are one condition. `!=` and `<>`
+ * map to themselves because the relation is symmetric already, and mapping them to a flip
+ * would be a second way to spell the same thing.
+ */
+const FLIPPED_OPERATOR = {
+  '=': '=',
+  '!=': '!=',
+  '<>': '<>',
+  '>': '<',
+  '<': '>',
+  '>=': '<=',
+  '<=': '>=',
+} as const;
+
+/** The six operators `firstComparison` can return. */
+type ComparisonOperator = keyof typeof FLIPPED_OPERATOR;
+
+/**
+ * Where the first comparison operator sits, ignoring operators inside a string literal.
+ *
+ * Two characters are tested before one so that `>=` is not read as `>` followed by `=`, which
+ * would put `=` in the left operand and make one condition compare unequal to itself.
+ */
+function firstComparison(text: string): { readonly index: number; readonly operator: ComparisonOperator } | null {
+  let quoted = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index] as string;
+    if (character === "'") {
+      quoted = !quoted;
+      continue;
+    }
+    if (quoted) continue;
+    const pair = text.slice(index, index + 2);
+    if (pair === '>=' || pair === '<=' || pair === '!=' || pair === '<>') return { index, operator: pair };
+    if (character === '=' || character === '>' || character === '<') return { index, operator: character };
+  }
+  return null;
+}
+
+/** Whether an operand is a value rather than a column: a quoted string or a number. */
+function isLiteral(operand: string): boolean {
+  return /^-?\d+(?:\.\d+)?$/.test(operand) || /^'[^']*'$/.test(operand);
+}
+
+/**
+ * A column reference without its table qualifier.
+ *
+ * Only a bare `table.column` is rewritten. An expression keeps every qualifier it has, because
+ * `cast(scores.raw as real) / scores.total` is not the same expression as
+ * `cast(other.raw as real) / other.total`, and stripping inside it would merge two statements
+ * that differ in which table they read.
+ */
+function unqualified(operand: string): string {
+  return /^[a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*$/.test(operand) ? operand.slice(operand.indexOf('.') + 1) : operand;
+}
+
+/**
+ * One condition, in a form where two spellings of it compare equal.
+ *
+ * `predicateAtoms` answers "which conditions does this statement write". That is the wrong
+ * question for a taxonomy: two statements that answer the same question with the same
+ * conditions in a different spelling were filed under condition coverage, and the fix that
+ * rung names could not have changed the answer. On BIRD's dev split a quarter of the largest
+ * rung was one of three spellings — an equality written the other way round, a column with
+ * the table qualifier dropped, an `in` list in another order.
+ *
+ * What is normalized, and what is deliberately not:
+ *
+ * - **Direction** — `a = b` and `b = a` are one condition; `a > b` and `b < a` too.
+ * - **Qualifier against a literal** — `schools.charternum is not null` and
+ *   `charternum is not null` are one condition when the statement reads `schools`. The
+ *   qualifier is a spelling; the column is the meaning.
+ * - **`in` lists** — read as a set, because `in (a, b)` is `in (b, a)`.
+ * - **Not normalized**: qualifiers in a column-to-column comparison (dropping them there
+ *   would make every join equal to every other join), and the bounds of `between` (they are
+ *   ordered, so swapping them is a different condition).
+ */
+export function predicateKey(atom: string): string {
+  const text = atom.replace(/\s+/g, ' ').trim();
+  const comparison = firstComparison(text);
+  // An atom carries one form, and a comparison operator decides which: neither `in (...)`,
+  // `like` nor `is null` can contain one, so an atom that has one is a comparison and any
+  // keyword-looking text around it is inside a literal (`status = 'a in b'`).
+  if (comparison === null) {
+    const inMatch = /^(.*?) (not in|in) (.+)$/.exec(text);
+    if (inMatch !== null) {
+      const items = (inMatch[3] as string)
+        .split(',')
+        .map((item) => item.trim())
+        .filter((item) => item !== '')
+        .sort();
+      return `${unqualified(inMatch[1] as string)} ${inMatch[2] as string} ${items.join(',')}`;
+    }
+    const likeMatch = /^(.*?) (not like|like|not glob|glob) (.+)$/.exec(text);
+    if (likeMatch !== null) {
+      return `${unqualified(likeMatch[1] as string)} ${likeMatch[2] as string} ${likeMatch[3] as string}`;
+    }
+    const isMatch = /^(.*?) (is not null|is null|is not|is)$/.exec(text);
+    if (isMatch !== null) return `${unqualified(isMatch[1] as string)} ${isMatch[2] as string}`;
+    return text;
+  }
+  const left = text.slice(0, comparison.index).trim();
+  const right = text.slice(comparison.index + comparison.operator.length).trim();
+  const flipped = FLIPPED_OPERATOR[comparison.operator];
+  if (isLiteral(right) && !isLiteral(left)) return `${unqualified(left)} ${comparison.operator} ${right}`;
+  if (isLiteral(left) && !isLiteral(right)) return `${unqualified(right)} ${flipped} ${left}`;
+  return left <= right ? `${left} ${comparison.operator} ${right}` : `${right} ${flipped} ${left}`;
+}
+
+/**
+ * The condition set of a statement, in the form two statements can be compared in.
+ *
+ * A set, not a list: the order of conditions in a `where` clause is not part of the answer,
+ * and the same condition written twice is one condition.
+ */
+export function predicateKeys(atoms: readonly string[]): string[] {
+  return [...new Set(atoms.map(predicateKey))].sort();
 }
 
 /**

@@ -12470,3 +12470,61 @@ The same run also corrects a claim made one paragraph too early: mapping `Barh` 
 worth one row, and the reason it looked more important is that the first version of this block printed
 eight labels without saying how many rows each accounted for. **A list of labels is not a priority
 order; that was the defect, and it was in the instrument rather than in the table.**
+
+### The largest bucket was counting spellings: a quarter of `predicate` was one condition written two ways
+
+`bench:bird:gap:values` splits the `values` bucket — the statement ran, the width matched, the
+numbers did not — into the fix each case asks for. On the dev split it named `predicate` as the
+largest rung at **100 of 365** cases (27.4%), and the fix that rung names is *condition coverage*:
+write the conditions the question implies. Before spending a run on that, three cases were read
+line by line, and all three were the same statement as the gold with the join written the other
+way round:
+
+```
+gold  ... from schools as t1 inner join frpm as t2 on t1.cdscode = t2.cdscode
+pred  ... from frpm join schools on frpm.cdscode = schools.cdscode
+
+gold  select count(t1.account_id) ... where t1.balance < 0
+pred  select count(distinct t.account_id) ... where t.balance < 0
+```
+
+`a.id = b.id` and `b.id = a.id` are one condition. The ladder compared the atom lists as text, so
+they were two, and the case was filed under a rung whose fix could not have changed the answer.
+Three spellings account for the error: an equality written in the other direction, a column with
+its table qualifier dropped in front of a literal (`charternum is not null` against
+`schools.charternum is not null`), and an `in` list in another order.
+
+`predicateKeys` now compares conditions as keys. It canonicalizes direction (`a > b` is `b < a`),
+drops the qualifier when the other side is a value, and reads an `in` list as a set. It keeps the
+qualifier when **both** sides are columns, because stripping it there would make every join equal
+to every other join, and it keeps `between`'s bounds in order, because swapping them is a
+different question. A literal that contains the word — `status = 'like new'` — is still an
+equality; the operator is read outside quotes.
+
+The same 365 cases, before and after:
+
+| rung | before | after | the fix it names |
+|---|---:|---:|---|
+| `filter-wide` | 78 | **78** | the filter is too weak, or a join multiplied rows |
+| `predicate` | 100 | **70** | condition coverage |
+| `tables` | 62 | 62 | join selection |
+| `filter-narrow` | 54 | 54 | a predicate matched nothing |
+| `literal-missing` | 34 | 34 | a value the question named is not in the statement |
+| `aggregate` | 16 | **27** | which function answers the question |
+| `projection` | 12 | **23** | which columns, in what order |
+| `literal-case` | 5 | 5 | the value is in another case |
+| `window` | 2 | **5** | which window of the same rows |
+| `grain` | 0 | **4** | the aggregation level |
+| `unclassified` | 2 | **3** | nothing the shape can name |
+
+Thirty cases moved, and the correction changes the order of the work: the largest rung is no
+longer `predicate` but `filter-wide`, and `aggregate` + `projection` together went from 28 to 50
+cases. Those name a different mechanism than condition coverage — one of them is arithmetic over
+the right rows, the other is which column holds the answer — and neither had been visible while a
+quarter of the bucket sat one rung too early.
+
+Two things this does **not** fix. A join whose conditions are written as `a = b and c = d` against
+`c = d and a = b` still compares equal (the set is sorted), which is correct, but a join that
+writes the pair in a subquery and the gold outside it still lands in `tables`. And the rungs are
+still counted over cases whose candidate set held no answer: 118 of the no-answer cases sit
+outside the `values` scope and are not in this table at all.

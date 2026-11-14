@@ -23,7 +23,10 @@
  *    case-sensitively, so this is a wrong answer produced by a right-looking statement, and
  *    the fix is in what the prompt shows the model about stored values.
  * 7. `tables` — the two statements read different base tables: join selection.
- * 8. `predicate` — same tables, different condition atoms: condition coverage.
+ * 8. `predicate` — same tables, different condition *keys*: condition coverage. Two spellings of
+ *    one condition (`a.id = b.id` against `b.id = a.id`, a column with its qualifier dropped in
+ *    front of a literal, an `in` list in another order) are one condition, and comparing the
+ *    atoms as text filed a quarter of this rung under a fix that could not change the answer.
  * 9. `aggregate` — different aggregate calls: which function answers the question.
  * 10. `grain` — different `group by`: the aggregation level.
  * 11. `projection` — different select list, in order: which columns, and in what order.
@@ -49,9 +52,9 @@ import { SHIPPED_ARM, requireArm } from './presence.js';
 import { resolveLayout } from './run.js';
 import type { BirdLayout } from './run.js';
 import type { GapReportShape } from './gap.js';
-import { statementShape, withoutWindow } from './sql-shape.js';
+import { predicateKeys, statementShape, withoutWindow } from './sql-shape.js';
 
-export { aggregateCalls, groupingColumns, predicateAtoms, projectionItems, statementShape } from './sql-shape.js';
+export { aggregateCalls, groupingColumns, predicateAtoms, predicateKey, predicateKeys, projectionItems, statementShape } from './sql-shape.js';
 
 /**
  * The buckets, in the order of the ladder.
@@ -147,7 +150,10 @@ export function classifyValuesGap(input: {
   const gold = statementShape(input.gold);
   const predicted = statementShape(input.predicted);
   if (gold.tables.join(',') !== predicted.tables.join(',')) return 'tables';
-  if (gold.predicates.join('\u0001') !== predicted.predicates.join('\u0001')) return 'predicate';
+  // Compared as condition *keys*, not as text: `on a.id = b.id` and `on b.id = a.id` are one
+  // condition, and a ladder that stops here files the case under a fix that could not have
+  // changed the answer. On the dev split that was a quarter of the largest rung.
+  if (predicateKeys(gold.predicates).join('\u0001') !== predicateKeys(predicted.predicates).join('\u0001')) return 'predicate';
   if (gold.aggregates.join(',') !== predicted.aggregates.join(',')) return 'aggregate';
   if (gold.groups.join(',') !== predicted.groups.join(',')) return 'grain';
   if (gold.projection.join('\u0001') !== predicted.projection.join('\u0001')) return 'projection';
