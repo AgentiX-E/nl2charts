@@ -162,6 +162,16 @@ export interface ShapeCensus {
   readonly timeLike: boolean;
   readonly n: number;
   readonly withFallback: number;
+  /**
+   * Up to three questions from this bucket, verbatim.
+   *
+   * A count says a shape was refused 350 times; it cannot say whether those questions asked for a
+   * line ("over time", "monthly") or merely arrived with a time-shaped table. The two repairs are
+   * different — a cue that the table has no axis for, against an admission rule that is too strict —
+   * and the words are the evidence that separates them. Three is enough to read the intent and few
+   * enough to keep the artifact small.
+   */
+  readonly samples: readonly string[];
 }
 
 export interface RefusalCensus {
@@ -347,6 +357,7 @@ interface ShapeTally {
   timeLike: boolean;
   n: number;
   withFallback: number;
+  samples: string[];
 }
 
 /** Tally a classified population into the report a document quotes. */
@@ -422,9 +433,11 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
         timeLike: mistyped.length > 0,
         n: 0,
         withFallback: 0,
+        samples: [],
       };
       entry.n += 1;
       if (classified.answered !== undefined) entry.withFallback += 1;
+      if (entry.samples.length < 3) entry.samples.push(row.prompt);
       shapes.set(key, entry);
     }
 
@@ -565,7 +578,7 @@ export function describeCensus(report: CensusReport): readonly string[] {
   }
   for (const entry of report.shapes.slice(0, 10)) {
     lines.push(
-      `  refused ${entry.mark} for ${entry.family}: ${String(entry.n)} (${String(entry.withFallback)} answered elsewhere) at dims ${String(entry.dims)} / ordered ${String(entry.ordered)} / measures ${String(entry.measures)}${entry.timeLike ? ', time-formatted column present' : ''}`,
+      `  refused ${entry.mark} for ${entry.family}: ${String(entry.n)} (${String(entry.withFallback)} answered elsewhere) at dims ${String(entry.dims)} / ordered ${String(entry.ordered)} / measures ${String(entry.measures)}${entry.timeLike ? ', time-formatted column present' : ''}${entry.samples.length === 0 ? '' : ` — e.g. "${entry.samples[0] as string}"`}`,
     );
   }
   for (const entry of report.outranked.slice(0, 8)) {
