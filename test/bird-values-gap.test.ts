@@ -73,6 +73,19 @@ describe('which fix the difference asks for', () => {
     expect(gap('select qty from orders', 'select qty * 2 from orders', 'scale')).toBe('scale');
   });
 
+  it('does not file a join written the other way round under condition coverage', () => {
+    // `schools.cdscode = frpm.cdscode` and `frpm.cdscode = schools.cdscode` are one condition.
+    // Counting them as two made `predicate` the largest rung on dev, and the fix it names —
+    // write the conditions the question implies — cannot change a statement that already has
+    // every condition it needs.
+    expect(
+      gap(
+        "select schools.name from schools join frpm on schools.cdscode = frpm.cdscode where schools.county = 'lake'",
+        "select schools.mailstreet from frpm join schools on frpm.cdscode = schools.cdscode where schools.county = 'lake'",
+      ),
+    ).toBe('projection');
+  });
+
   it('reads a statement the model never wrote as no statement, before spending a query on it', () => {
     // `shape` is irrelevant here: an empty statement has no result set to measure, and filing
     // it under a shape would be filing a generation failure under retrieval.

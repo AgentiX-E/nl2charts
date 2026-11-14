@@ -12,6 +12,7 @@ import {
   aliasTable,
   normaliseSql,
   predicateAtoms,
+  predicateKeys,
   projectionItems,
   rewriteAliases,
   spliceWhereClause,
@@ -87,6 +88,68 @@ describe('conditions', () => {
   it('stops a condition at the next clause rather than swallowing the rest of the statement', () => {
     expect(predicateAtoms('select * from a where x = 1 group by y order by 1 limit 2')).toEqual(['x = 1']);
     expect(predicateAtoms('select * from a join b on a.id = b.id join c on c.id = a.id where 1 = 1')).toHaveLength(3);
+  });
+});
+
+describe('two spellings of one condition', () => {
+  // The taxonomy compares predicate lists to decide whether a failure belongs to condition
+  // coverage or to a later rung. `a.id = b.id` and `b.id = a.id` are one condition, and until
+  // this was named the comparison called them two — which filed a quarter of the largest rung
+  // under a fix that could not have changed the answer.
+  it('reads an equality in either direction as one condition', () => {
+    expect(predicateKeys(['schools.cdscode = frpm.cdscode'])).toEqual(predicateKeys(['frpm.cdscode = schools.cdscode']));
+  });
+
+  it('flips a relational operator when it swaps the operands', () => {
+    expect(predicateKeys(['a.x > 1'])).toEqual(predicateKeys(['1 < a.x']));
+    expect(predicateKeys(['a.x >= 1'])).toEqual(predicateKeys(['1 <= a.x']));
+  });
+
+  it('does not flip an inequality, which is symmetric already', () => {
+    expect(predicateKeys(['a.x != 1'])).toEqual(predicateKeys(['1 != a.x']));
+    expect(predicateKeys(['a.x <> 1'])).toEqual(predicateKeys(['1 <> a.x']));
+  });
+
+  it('drops a table qualifier when the other side is a literal', () => {
+    // `schools.charternum is not null` and `charternum is not null` are one condition when the
+    // statement reads `schools`; the qualifier is a spelling, and the model that omitted it
+    // meant the same column.
+    expect(predicateKeys(['schools.charternum is not null'])).toEqual(predicateKeys(['charternum is not null']));
+    expect(predicateKeys(['t.status = \'banned\''])).toEqual(predicateKeys(['status = \'banned\'']));
+  });
+
+  it('keeps qualifiers when both sides are columns, because a join is not a column test', () => {
+    expect(predicateKeys(['a.id = b.id'])).not.toEqual(predicateKeys(['c.id = d.id']));
+    expect(predicateKeys(['a.id = b.id'])).not.toEqual(predicateKeys(['id = id']));
+  });
+
+  it('still tells two different columns apart', () => {
+    expect(predicateKeys(['a.x = 1'])).not.toEqual(predicateKeys(['a.y = 1']));
+  });
+
+  it('drops a qualifier in front of like, and keeps the pattern', () => {
+    expect(predicateKeys(["t.name like 'riverside%'"])).toEqual(predicateKeys(["name like 'riverside%'"]));
+    expect(predicateKeys(["t.name like 'riverside%'"])).not.toEqual(predicateKeys(["t.name like 'riverside'"]));
+  });
+
+  it('does not read an operator out of a literal that contains the word', () => {
+    // `status = 'like new'` is an equality; treating it as a `like` would drop the operator and
+    // make the condition compare equal to one it has nothing to do with.
+    const key = predicateKeys(["t.status = 'like new'"]);
+    expect(key).toEqual(["status = 'like new'"]);
+    expect(key).not.toEqual(predicateKeys(["t.status like 'like new'"]));
+  });
+
+  it('reads an in-list as a set', () => {
+    expect(predicateKeys(["statustype in 'active' , 'closed'"])).toEqual(predicateKeys(["statustype in 'closed' , 'active'"]));
+  });
+
+  it('reads a between clause in the order it was written, because the bounds are ordered', () => {
+    expect(predicateKeys(['x between 1 and 2'])).not.toEqual(predicateKeys(['x between 2 and 1']));
+  });
+
+  it('is a set: duplicates collapse and order does not matter', () => {
+    expect(predicateKeys(['a.x = 1', 'b.y = 2', '1 = a.x'])).toEqual(predicateKeys(['b.y = 2', 'a.x = 1']));
   });
 });
 
