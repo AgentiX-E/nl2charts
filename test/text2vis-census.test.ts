@@ -214,7 +214,7 @@ describe('what became of one question', () => {
     const row = expectOutcome(input(TREND, 'Line Chart', YEARS), 'refused');
     expect(row.outcome).toBe('refused');
     expect(row.covering).toBe('line');
-    expect(row.reason).toBe('a line needs an ordered axis and a measure');
+    expect(row.reason).toBe('a line needs an axis and a measure');
   });
 
   it('names the slice limit that refused a pie over twenty categories', () => {
@@ -362,7 +362,7 @@ describe('the census over a population', () => {
     expect(lines).toContain('hit 2 (25.00%)');
     expect(lines).toContain('time-formatted columns the profiler did not call temporal: 1 rows');
     expect(lines).toContain('Year (quantitative, 1 rows, first value 2019)');
-    expect(lines).toContain('refused line for line: 1 (1 answered by another mark) — a line needs an ordered axis and a measure');
+    expect(lines).toContain('refused line for line: 1 (1 answered by another mark) — a line needs an axis and a measure');
     expect(lines).toContain('refused line for line: 1 (1 answered elsewhere) at dims 0 / ordered 0 / measures 2, time-formatted column present');
     expect(lines).toContain('refused pie for pie: 1 (1 answered elsewhere) at dims 1 / ordered 0 / measures 1');
     expect(lines).toContain('lost bar to heatmap: 1 (on preference 0, cue named and lost 1');

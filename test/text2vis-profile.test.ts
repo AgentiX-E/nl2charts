@@ -281,27 +281,30 @@ describe('the reading', () => {
     //
     // Both rows are `bar` labels on a share question, which the cue table answers `pie`: profile 0 of
     // 2, cue 2 of 2, so the family's delta is exactly -2 and not -4.
+    // Two pie labels over twenty categories: the cue table names the pie on both, and the profile
+    // refuses it for having more slices than a reader can name, so the family loses two. (A line
+    // fixture cannot carry this test any more: a line over a category axis is admitted now.)
     const inputs = [
-      row('How has revenue changed over time?', 'Line Chart', regions(5)),
-      row('How has revenue changed over time?', 'Line  Chart', regions(5)),
+      row('What percentage of revenue does each region contribute?', 'Pie Chart', regions(20)),
+      row('What percentage of revenue does each region contribute?', 'Donut Chart', regions(20)),
     ];
     const lines = describeProfile(scoreProfile(inputs), scoreRule(inputs)).join('\n');
     const line = lines.split('\n').find((entry) => entry.includes('delta by family')) as string;
-    // Two line labels, cue right on both, profile wrong on both: -2, not -4.
-    expect(line).toContain('line -2');
-    expect(line.match(/line /g)?.length).toBe(1);
+    // Two pie labels, cue right on both, profile wrong on both: -2, not -4.
+    expect(line).toContain('pie -2');
+    expect(line.match(/pie /g)?.length).toBe(1);
   });
 
   it('prints a family the result set made worse with a minus', () => {
     // The delta line signs both directions, because the reading is not a sales document: a cue that
     // names the trend and a profile that then names a bar is a family this half *lost*, and a line
     // that only prints `+` would make the two halves of the table agree by construction.
-    const inputs = [row('How has revenue changed over time?', 'Line Chart', regions(5))];
+    const inputs = [row('What percentage of revenue does each region contribute?', 'Pie Chart', regions(20))];
     const cue = scoreRule(inputs);
     const report = scoreProfile(inputs);
     expect(cue.top1).toBe(1);
     expect(report.top1).toBe(0);
-    expect(describeProfile(report, cue).join('\n')).toContain('line -1');
+    expect(describeProfile(report, cue).join('\n')).toContain('pie -1');
   });
 
   it('refuses more hits than shortlist hits', () => {

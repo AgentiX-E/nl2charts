@@ -578,7 +578,7 @@ export function describeCensus(report: CensusReport): readonly string[] {
   }
   for (const entry of report.shapes.slice(0, 10)) {
     lines.push(
-      `  refused ${entry.mark} for ${entry.family}: ${String(entry.n)} (${String(entry.withFallback)} answered elsewhere) at dims ${String(entry.dims)} / ordered ${String(entry.ordered)} / measures ${String(entry.measures)}${entry.timeLike ? ', time-formatted column present' : ''}${entry.samples.length === 0 ? '' : ` — e.g. "${entry.samples[0] as string}"`}`,
+      `  refused ${entry.mark} for ${entry.family}: ${String(entry.n)} (${String(entry.withFallback)} answered elsewhere) at dims ${String(entry.dims)} / ordered ${String(entry.ordered)} / measures ${String(entry.measures)}${entry.timeLike ? ', time-formatted column present' : ''} — e.g. "${entry.samples[0] as string}"`,
     );
   }
   for (const entry of report.outranked.slice(0, 8)) {
