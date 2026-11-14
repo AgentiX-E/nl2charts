@@ -270,6 +270,36 @@ attributable rather than inferred. A knockout behind the same gate reports `pair
 per death, and the artifact's own arithmetic says so: 143 questions with three live candidates plus
 6 with two is `143×2 + 6×1 = 292`, not 298.
 
+#### Measure the window, not just the arms
+
+The single most expensive mistake in this kind of measurement is not a wrong arm; it is an arm whose
+comparison is really a comparison of two times of day. `43535849969` ran three arms and then repeated
+the first one, and **the repeat scored 4.23 points above the original** (11 : 32, p = 0.0019) with
+byte-identical inputs: 496 of 496 cases carried the same prompt-token count, the same 3.000 calls and
+the same completion length. A nine-candidate arm in that dispatch beat the parent by 3.84 points and
+was 0.40 points from the *repeat*, at three times the tokens. Had the dispatch contained no control,
+3.84 points at p = 0.005 would have been published as a win.
+
+So when you compare two configurations yourself, three things have to be true, and the harness now
+enforces all three:
+
+1. **A second run of one configuration, in the same dispatch.** `BIRD_AA=<arm>`. It is the only
+   number that says how much of your delta is the clock. The baseline gate fails a run whose own
+   repeat moves more than 4 points, because at that size no arm-to-arm difference in it can be cited.
+2. **The noise of the quantity you are arguing about**, not only of the score. A candidate-side lever
+   is argued for on the pool ceiling, and that ceiling has its own sampling noise — 2.62pp in the run
+   above, against 1.21pp measured on an earlier one. It is in the artifact as `aa.ceiling`, with its
+   own resolution, so "+0.4pp of ceiling" can be read as resampling in one glance.
+3. **Evidence that the base did not change under you.** The run fingerprints its endpoint at the start
+   (three fixed questions, two draws each, temperature zero) and now again after the last arm
+   (`endFingerprint`, six calls). Equal digests mean the window was stable and your delta is sampling;
+   different digests mean the arms were measured against two models and the artifact is refused.
+
+If your arms differ in *cost* as well as in accuracy — and a wide pool always does — read the delta
+against the control and the price against the parent, in that order. Nine candidates cost 2.82× the
+tokens per correct answer for a difference of 0.40 points, which is a description of the same
+distribution, not a description of a better system.
+
 ### If you will not pay the fourth call
 
 **This is the shipped default.** `aimed-3` is three candidates and the free rule; `aimed-4` is the

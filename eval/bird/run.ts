@@ -53,6 +53,7 @@ import { canonicalSql } from './canonical.js';
 import { shapeFailure, shapeMismatch } from './shape.js';
 import { FAILURE_SAMPLE, failureCorpus } from './failures.js';
 import { fingerprintLine, probeBase } from './fingerprint.js';
+import type { BaseFingerprint } from './fingerprint.js';
 import type { Oracle, OracleResult } from './oracle.js';
 import { profileDatabase } from './profile.js';
 import { BIRD_SCHEMA_LINES } from './prompt-shape.js';
@@ -4727,7 +4728,32 @@ export function armDecomposition(runs: readonly CaseRun[]): { decomposition?: Re
  * mechanism that never ran — the wrong cause, in the one artifact a 90-minute run produces.
  * This runs before the file is written and names the arm and the missing field.
  */
-export function assertReportComplete(report: { readonly arms?: readonly ArmReportRow[] }): void {
+export function assertReportComplete(report: {
+  readonly arms?: readonly ArmReportRow[];
+  readonly aa?: Record<string, unknown>;
+}): void {
+  // An A/A that reports the score's noise and not the ceiling's is the artifact that let two rounds
+  // read resampling as a gain: the mechanism was argued for on a quantity whose noise was never
+  // measured. The block carries it whenever the arm samples, so an artifact that lost it is refused
+  // here rather than discovered by whoever reads the delta next.
+  const ceiling = report.aa?.ceiling as { first?: unknown; second?: unknown; delta?: unknown } | undefined;
+  // The requirement is keyed on whether the arm samples, not on whether the field happens to be
+  // there: an artifact that dropped the block is exactly the one this guard has to refuse.
+  const aaName = typeof report.aa?.arm === 'string' ? report.aa.arm : undefined;
+  const aaArm = aaName === undefined ? undefined : resolveArm(aaName);
+  if (report.aa !== undefined && (aaArm?.vote ?? 1) > 1 && ceiling === undefined) {
+    throw new Error(
+      `the A/A block prices ${String(aaName)}, an arm that samples, and carries no ceiling noise: ` +
+        'the quantity a candidate buys has a noise of its own and this artifact does not state it',
+    );
+  }
+  if (report.aa !== undefined && ceiling !== undefined) {
+    for (const key of ['first', 'second', 'delta'] as const) {
+      if (typeof ceiling[key] !== 'number' || Number.isNaN(ceiling[key])) {
+        throw new Error(`the A/A block reports a ceiling noise without a numeric \`${key}\`, so the quantity it prices cannot be read`);
+      }
+    }
+  }
   for (const row of report.arms ?? []) {
     const arm = resolveArm(row.arm);
     if (arm === undefined) {
@@ -8671,6 +8697,51 @@ export function resolutionFields(comparison: PairedComparison): {
 }
 
 /**
+ * The sampling noise of the quantity a candidate-side mechanism claims to move.
+ *
+ * Every A/A in this project priced the *score* and stopped there, and that is how a ceiling delta
+ * of +0.4pp was allowed to read as a small gain twice (rounds 131 and 132). The score and the pool
+ * ceiling are different statistics: the ceiling is `candidateRecall` per case, so on an A/A pair —
+ * same arm, same questions, same temperature, twice — it has its own noise, and a mechanism whose
+ * whole argument is "this lifts the ceiling" has to clear the ceiling's noise rather than the
+ * score's.
+ *
+ * It is computed by the same paired machinery as the score, on purpose: `candidateRecall` is a
+ * per-case boolean, so `compareArms` and `pairedResolution` apply verbatim and the two numbers in
+ * one artifact cannot come from two definitions of "the same case twice".
+ *
+ * Returns `undefined` when the arm does not sample — a single-candidate arm has no pool to widen
+ * and reporting 0.00% twice would be a reading of nothing.
+ */
+export function ceilingNoise(
+  base: string,
+  first: readonly CaseRun[],
+  second: readonly CaseRun[],
+): { first: number; second: number; delta: number; mde: number; discordantShare: number } | undefined {
+  const asOutcomes = (runs: readonly CaseRun[]): CaseOutcome[] =>
+    runs.map((run) => ({ id: run.id, passed: run.candidateRecall === true }));
+  // Two guards, both about there being nothing to price: an arm that does not sample has no pool,
+  // and a pair with no cases has no ceiling either -- a share over zero rows is a division this
+  // function should not be the one to make.
+  if (first.length === 0 || !first.some((run) => run.candidateRecall !== undefined)) return undefined;
+  const comparison = compareArms(
+    summarise(`${base}#ceiling`, asOutcomes(first)),
+    summarise(`${base}#2#ceiling`, asOutcomes(second)),
+  );
+  const resolution = pairedResolution(comparison.onlyFirst, comparison.onlySecond, comparison.total);
+  const four = (value: number): number => Number(value.toFixed(4));
+  const share = (runs: readonly CaseRun[]): number =>
+    runs.filter((run) => run.candidateRecall === true).length / runs.length;
+  return {
+    first: four(share(first)),
+    second: four(share(second)),
+    delta: four(comparison.delta),
+    mde: four(resolution.mde),
+    discordantShare: four(resolution.discordantShare),
+  };
+}
+
+/**
  * The paired comparisons the run is allowed to make.
  *
  * Every pair here is two arms measured on the same cases, so a delta is a paired outcome
@@ -8693,6 +8764,7 @@ export function pairedComparisons(outcomes: ReadonlyMap<string, readonly CaseRun
           const second = outcomes.get(aaPair);
           if (first === undefined || second === undefined) return undefined;
           const comparison = compareArms(summarise(base, first), summarise(aaPair, second));
+          const ceiling = ceilingNoise(base, first, second);
           return {
             arm: base,
             delta: comparison.delta,
@@ -8700,6 +8772,9 @@ export function pairedComparisons(outcomes: ReadonlyMap<string, readonly CaseRun
             onlySecond: comparison.onlySecond,
             p: mcnemarExact(comparison.onlyFirst, comparison.onlySecond),
             ...resolutionFields(comparison),
+            // The noise of the quantity a candidate-side mechanism is argued for, beside the noise
+            // of the score. Absent only when the arm does not sample, where there is no pool.
+            ...(ceiling === undefined ? {} : { ceiling }),
           };
         })();
 
@@ -8886,6 +8961,48 @@ export async function attachFingerprint(
 }
 
 /**
+ * Ask the same probes again after the last arm, because a run is a forty-minute window.
+ *
+ * Round 133 measured something this harness could not explain: the same arm, twice in one dispatch,
+ * differed by **4.2 points** (11:32, p = 0.002) while its prompts were byte-identical — 496 of 496
+ * cases carried the same prompt-token count, the same three calls and the same completion length.
+ * The bytes leaving this process did not change; the bytes coming back did. Two explanations survive
+ * that evidence, and they call for opposite responses:
+ *
+ * 1. **The base drifted.** A serving stack under changing load answers the same prompt differently.
+ *    Nothing to fix here; the run just has to publish the size of the window it measured in.
+ * 2. **The base was swapped.** Weights changed mid-day, and every arm ran against a different
+ *    model — which would make the whole artifact's arm-to-arm deltas meaningless.
+ *
+ * `probeBase` already asks three fixed questions twice each at temperature zero and digests the
+ * answers, which is exactly a "is this still the same base" test. Asking it a second time at the
+ * end costs six calls against the thousands the run spent, and it turns the ambiguity into one
+ * field: an equal digest means the base held and the number is sampling noise; a different digest
+ * means the run is confounded and `evaluateGate` refuses it.
+ */
+export async function recheckFingerprint(
+  report: Record<string, unknown>,
+  provider: LlmProvider,
+  log: (line: string) => void,
+): Promise<{ readonly changed: boolean; readonly before: string; readonly after: string }> {
+  const first = report.baseFingerprint as BaseFingerprint | undefined;
+  const again = await probeBase(provider);
+  report.endFingerprint = again;
+  const before = first?.digest ?? '';
+  const after = again.digest;
+  // A digest over zero probes is not a fingerprint: it is a probe set that answered nothing, and
+  // two of those "agree" while saying nothing about the base.
+  const comparable = first !== undefined && first.probes > 0 && again.probes > 0;
+  const changed = comparable && before !== after;
+  log(
+    changed
+      ? `base fingerprint changed during the run: ${before} -> ${after} after ${String(again.calls)} call(s) — every arm-to-arm delta in this artifact is confounded with the clock`
+      : `base fingerprint after the last arm: ${after} (${comparable ? 'unchanged' : 'not comparable'}), ${String(again.calls)} call(s)`,
+  );
+  return { changed, before, after };
+}
+
+/**
  * The artifact, written once and only after the reporters have agreed with the arms.
  *
  * Before the file is written: an instrument that ran and did not reach the artifact is
@@ -8922,6 +9039,23 @@ export function evaluateGate(report: Record<string, unknown>): string[] {
   const controls = report.controls as Controls;
   const arms = report.arms as { arm: string; accuracy: number }[];
   const problems: string[] = [];
+  // The window test, and the one failure no amount of sampling can be read past: if the base
+  // answered its own fixed probes differently at the end of the run than at the start, the arms did
+  // not all run against the same model and their deltas are differences of bases rather than of
+  // mechanisms. Refusing here is what keeps a swap from being published as a lever.
+  const opened = (report.baseFingerprint as { digest?: string; probes?: number } | undefined);
+  const closed = (report.endFingerprint as { digest?: string; probes?: number } | undefined);
+  if (
+    opened !== undefined &&
+    closed !== undefined &&
+    (opened.probes ?? 0) > 0 &&
+    (closed.probes ?? 0) > 0 &&
+    opened.digest !== closed.digest
+  ) {
+    problems.push(
+      `the base answered its fixed probes as ${String(closed.digest)} at the end of the run and ${String(opened.digest)} at the start, so the arms were measured against two different models`,
+    );
+  }
   if (goldRate < 0.98) problems.push(`gold runnable rate ${(goldRate * 100).toFixed(1)}% is below 98%`);
   if (controls.selfConsistency < 1) {
     problems.push(`self-consistency ${(controls.selfConsistency * 100).toFixed(1)}% is not 100%`);
@@ -9131,6 +9265,10 @@ export async function runBird(settings: BirdSettings, options: BirdRunOptions = 
     // Every arm must keep its own row: two rows with the same label would let a
     // duplicate stand in for the arm it duplicates.
     assertUniqueArmLabels(armReports.map((entry) => entry.arm));
+    // The window the arms were measured in, closed and sealed before anything is compared: the
+    // probes are the same three fixed questions the run opened with, and the only way their digest
+    // can differ is that the endpoint answered differently forty minutes later.
+    await recheckFingerprint(report, provider, log);
     const paired = pairedComparisons(outcomes);
     if (paired.aa !== undefined) {
       const aa = paired.aa as {
@@ -9141,6 +9279,7 @@ export async function runBird(settings: BirdSettings, options: BirdRunOptions = 
         p: number;
         mde: number;
         ci: { low: number; high: number };
+        ceiling?: { first: number; second: number; delta: number; mde: number };
       };
       report.aa = paired.aa;
       // The noise floor is not a single number: a 0pp A/A on 120 cases still leaves a
@@ -9149,6 +9288,15 @@ export async function runBird(settings: BirdSettings, options: BirdRunOptions = 
         `A/A ${aa.arm}: ${(aa.delta * 100).toFixed(1)}pp (${String(aa.onlyFirst)}/${String(aa.onlySecond)}, p=${aa.p.toFixed(3)}, ` +
           `95% CI [${(aa.ci.low * 100).toFixed(1)}, ${(aa.ci.high * 100).toFixed(1)}]pp, resolves ${(aa.mde * 100).toFixed(1)}pp) — the harness's own noise`,
       );
+      // The second half of that sentence. A candidate-side mechanism is argued for on the ceiling,
+      // so its noise has to be in the log beside the score's — otherwise the next +0.4pp reading
+      // has to be compared against a number nobody published.
+      if (aa.ceiling !== undefined) {
+        log(
+          `A/A ${aa.arm} ceiling: ${(aa.ceiling.first * 100).toFixed(2)}% vs ${(aa.ceiling.second * 100).toFixed(2)}% ` +
+            `(${(aa.ceiling.delta * 100).toFixed(2)}pp, resolves ${(aa.ceiling.mde * 100).toFixed(2)}pp) — the noise of the quantity a candidate buys`,
+        );
+      }
     }
     report.comparisons = paired.comparisons;
     report.ablations = paired.ablations;
@@ -9157,7 +9305,7 @@ export async function runBird(settings: BirdSettings, options: BirdRunOptions = 
     const { failures, failureSample } = failureSection(prepared, outcomes);
     report.failures = failures;
     report.failureSample = failureSample;
-    assertReportComplete({ arms: armReports });
+    assertReportComplete({ arms: armReports, ...(paired.aa === undefined ? {} : { aa: paired.aa }) });
     writeArtifact(settings, report, log);
     return report;
   } finally {

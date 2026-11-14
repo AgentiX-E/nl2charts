@@ -634,6 +634,22 @@ describe('a full run', () => {
     expect(result.printed.some((line) => line.startsWith('A/A names:') && /resolves \d/.test(line))).toBe(true);
   });
 
+  it('prices the ceiling noise on an A/A of a sampling arm, beside the score', async () => {
+    // The instrument round 133 needed and did not have. The same arm twice moved the *ceiling* by
+    // 2.62pp that day and the score by 4.23pp, and only the score's noise had ever been published --
+    // so a +0.4pp ceiling gain read as a small win instead of as resampling. A sampling arm's A/A
+    // has to carry both numbers, and the artifact has to carry the block for anyone to check it.
+    const result = await run({ plan: { first: correct }, env: { BIRD_ARMS: 'select-mixed', BIRD_AA: 'select-mixed' } });
+    expect(result.code).toBe(0);
+    const aa = result.report.aa as { arm: string; ceiling?: { first: number; second: number; delta: number; mde: number } };
+    expect(aa.arm).toBe('select-mixed');
+    // The same answers twice: the pool ceiling is the same set, so the delta is zero and the
+    // resolution is still a positive number -- a zero-noise floor is not a zero reading.
+    expect(aa.ceiling).toMatchObject({ first: 1, second: 1, delta: 0 });
+    expect(aa.ceiling?.mde).toBeGreaterThanOrEqual(0);
+    expect(result.printed.some((line) => line.includes('ceiling:') && line.includes('the noise of the quantity a candidate buys'))).toBe(true);
+  });
+
   it('refuses to publish a run whose arms see no signal', async () => {
     const result = await run({ plan: { first: () => wrong() }, env: { BIRD_ARMS: 'names' } });
     // The gate is a threshold, not a report: a run that trips one must fail CI, and the

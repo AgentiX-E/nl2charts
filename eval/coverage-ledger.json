@@ -2,7 +2,7 @@
   "note": "Per-file eval coverage. Enforced by tools/check-eval-coverage.mjs: a number may rise freely and may only fall with an explicit, reviewed edit. `target` is the standard every file must reach before eval/ joins the main gate.",
   "target": 95,
   "tolerancePp": 0.2,
-  "measuredAt": "2026-11-13",
+  "measuredAt": "2026-11-14",
   "totals": {
     "lines": 99.53,
     "statements": 99.53,
@@ -543,6 +543,12 @@
       "statements": 100,
       "functions": 100,
       "branches": 100
+    },
+    "eval/text2vis/rule.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 97.95
     }
   }
 }

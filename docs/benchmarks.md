@@ -12120,3 +12120,111 @@ repository has priced — and it is the competitor's own lever, applied with a c
 Fail ③ with a rising ① is the finding that closes candidate depth for this aggregator — and it would
 close it at nine calls instead of the competitor's twenty-one, which is the cheapest form that
 answer can take.
+
+### Depth does not convert, and the reason this run can say so is the A/A
+
+The strongest training-free system on this benchmark draws 21 candidates at temperature 0.7. The
+reading above showed the *pool* widening with depth — the ceiling at n = 1, 3, 6, 9, 12 is 57.21,
+64.92, 68.55, 69.96 and 71.33% — while the competitor's aggregator does worse on our pool than a
+free rule does on three candidates. Neither of those settles the question a product has to answer:
+**can the shipped rule read a wide pool?** It had never been asked, because `shortest` had never
+ranked more than four candidates.
+
+`43535849969`, Mini-Dev 496, `deepseek-chat`, temperature 0.7, three arms plus the parent run twice:
+
+| arm | order | calls / question | accuracy | ceiling | conversion | tokens per correct answer |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `select-mixed-rule` | 1st | **3.00** | 58.06% | 64.72% | 89.72% | 5,678 |
+| `…-rule-spread2` (6 candidates) | 2nd | 6.00 | 59.68% | 67.94% | 87.83% | 11,049 |
+| `…-rule-spread3` (9 candidates) | 3rd | 9.00 | 61.90% | 69.15% | 89.50% | 15,986 |
+| `select-mixed-rule#2` (the A/A) | 4th | 3.00 | **62.30%** | **67.34%** | 92.51% | 5,291 |
+
+Read as totals, the nine-candidate arm beats the parent by 3.84 points at p = 0.005 — a result this
+repository would have written down as a win three rounds ago. The A/A is why it is not one:
+
+| pair | delta | cases | p |
+| --- | ---: | ---: | ---: |
+| parent → A/A *(same arm, same prompts, twice)* | **+4.23pp** | 11 : 32 | **0.0019** |
+| `spread2` → A/A | +2.62pp | 15 : 28 | 0.066 |
+| **`spread3` → A/A** | **+0.40pp** | 15 : 17 | **0.860** |
+| parent → `spread2` | +1.61pp | 17 : 25 | 0.280 |
+| parent → `spread3` | +3.83pp | 12 : 31 | 0.0054 |
+| `spread2` → `spread3` | +2.22pp | 10 : 21 | 0.071 |
+
+**Nine candidates are 0.40 points from a second run of three candidates, at three times the tokens.**
+Every point the wide arm appeared to gain over the parent is inside the +4.23 the parent gained over
+itself. The pre-registered bars: ceiling ≥ +2.0pp over the parent — 3.22pp, *and 0.60pp over the
+control*; score ≥ +1.0pp paired — 1.61pp at p = 0.28 against the parent, −2.62pp against the control;
+conversion ≥ 90% — 87.83% and 89.50%, both below it; cost ≤ 2.2× — 1.95× at six candidates but
+**2.82× at nine**.
+
+#### What the 4.23 points are, and what they are not
+
+The obvious suspicion is a defect here, so it was checked before the number was believed. The two
+runs of the parent are byte-identical at the input: **496 of 496 cases carried the same prompt-token
+count**, the same 3.000 calls, and completion lengths of 175.8 against 175.1 tokens. The 32 cases the
+second run won have **0 statements in common** with the first run's, and 24 of them drew a different
+candidate set. Nothing this process sent changed; what came back did. That is the endpoint, not the
+harness.
+
+It is still a defect of *this repository's design*, and a sharper one than a bug: the four arms ran
+**to completion one after another**, so over a forty-minute window arm identity and clock time were
+the same variable. A drifting endpoint is then indistinguishable from a real effect, and the whole
+artifact's arm-to-arm deltas inherit it. Three things are now in the harness because of that:
+
+- **The A/A already refuses the run.** The baseline gate failed this dispatch with
+  *"the same arm twice differs by 4.2pp, more than the 4pp the gate treats as noise"*. The artifact
+  is still written and still worth reading; it just cannot be cited as a comparison.
+- **`aa.ceiling` prices the noise of the quantity a candidate buys.** The same pair moved the pool
+  ceiling by 2.62pp (67.34 against 64.72). Any future "this lifts the ceiling by half a point" claim
+  is read against that number rather than against the score's.
+- **`endFingerprint` closes the window.** The run already fingerprints its base at the start — three
+  fixed questions, twice each, at temperature zero, digested. Asking the same probes again after the
+  last arm costs six calls and separates the two explanations that survive the evidence: a serving
+  stack that answered differently under load (publish the size of the window) or weights that changed
+  (refuse the artifact, because its arms were measured against two models).
+
+#### The correction this forces on the previous round
+
+The 33.87 / 5.65 split of Mini-Dev's misses — pool ceiling 66.13%, rule 60.48% — was computed from a
+single draw. The same pool's ceiling now moves 2.62pp between two draws of one arm, so that
+decomposition is **5.65 ± 2.6pp inside the pool** against **33.87pp outside it**. The direction is
+untouched and the decision it drove stands; the precision was overstated, and the error bar is now a
+number in the artifact rather than a caveat in prose.
+
+#### Verdict
+
+The candidate side closes for this aggregator at every width: three prompts (round 132: two fourth
+sources at +0.40 and +0.60pp of ceiling, both inside the noise), six and nine (here: +0.60 and
++1.81pp of ceiling, both inside the 2.62pp the control moved). **What a wide pool needs is a chooser
+that reads more than length** — and the free rule that beats a vote on three candidates is exactly
+the wrong tool for nine, which is why its conversion fell to 87.83% while its ceiling rose.
+
+### Text2Vis: the cue table, scored against the one corpus that labels a chart
+
+The chart half of the product ships a deterministic decision — `readCues` reads the question and
+ranks the marks that can carry it — and until now nothing external had ever scored it. Text2Vis
+states, per row, a question and the chart type its authors judged correct, so the cue half can be
+scored with **no model call, no database and no renderer**:
+
+```
+pnpm bench:text2vis:rule                 # download once, score, print
+pnpm bench:text2vis:rule --artifact out/text2vis-rule.json
+```
+
+The unit is a **family**, because the corpus writes `Bar Chart` and the contract writes `bar`; the
+mapping is a table, and a label it has no family for is **excluded from the score and named in the
+log** rather than folded into `bar`. Three numbers are always printed together, because any one of
+them alone is a number about nothing:
+
+| reading | what it is for |
+| --- | --- |
+| top-1 | the leading mark carries the labelled family |
+| shortlist | some recommended mark does — a different claim, reported separately |
+| baseline: always *X*, always bar | the two constants a cue table has to beat |
+
+Two widenings are argued rather than convenient: a `line` answers for an `area` because an area chart
+is that line filled, and a `bar` does **not** answer for a `histogram` — a histogram is one measure
+binned, and folding them together would hide the finding the confusion table exists to surface.
+What this does not measure is stated in the module: encoding (which fields, which aggregate), the
+recommender's data-shape half, and whether a label is one annotator's judgement.
