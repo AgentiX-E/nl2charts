@@ -12054,3 +12054,69 @@ already supports (`Arm.secondModel`, `CROSS_SOURCES`) — or a generation that s
 question instead of one call on a fourth prompt. Neither is a prompt change, and both are priced
 before they are built: the second-model candidate has to lift the ceiling by ≥ 3pp while staying
 inside 4 calls, which is the same bar this run failed.
+
+### Depth buys the pool and the vote throws it away: the one part of the competitor's harness we never priced
+
+The strongest training-free system on this benchmark draws **21 candidates at temperature 0.7 and
+aggregates them by executed result**. This repository measured its own aggregator at three
+candidates (`vote-mixed`, `vote-cross`) and measured its ladder's *ceiling* at six and nine, but it
+never pointed the free rule at a wide pool — which is the combination the competitor's score
+actually stands on, and the one place a seven-point gap could still be hiding.
+
+It can be priced offline from an artifact that already exists. `43473626220` ran four arms on the
+same 496 questions; pooling each question's candidates across those arms gives a set of 1–14
+statements per question with the judge's own correctness flag on each, and every subset of size *n*
+is a question about what a pool of depth *n* would have produced. Averaging over subsets:
+
+| depth *n* | pool ceiling at *n* | majority by executed result at *n* |
+| ---: | ---: | ---: |
+| 1 | 57.21% | 57.21% |
+| 3 | 64.92% | 58.19% |
+| 6 | 68.55% | 59.01% |
+| 9 | 69.96% | 59.27% |
+| 12 | **71.33%** | **60.10%** |
+
+Read the two columns together and the verdict is not about candidate count at all. **Depth works:
+the ceiling rises 6.4 points from one candidate to twelve.** The competitor's 69.3% sits inside what
+a twelve-candidate pool already contains. What fails is the *aggregator*: majority-by-result climbs
+1.3 points over the same range and never reaches the 61.29% the free `shortest` rule returns at
+three candidates. The same pool, read by the same run's rule arms, says the same thing in one line
+per arm:
+
+| arm (same run, same questions) | ceiling | `shortest` | majority by result | delta |
+| --- | ---: | ---: | ---: | ---: |
+| `select-mixed-rule` | 66.13% | **61.29%** | 59.68% | −1.61 |
+| `…-rule-rows` | 66.53% | **61.29%** | 56.05% | −5.24 |
+| `…-rule-intent` | 66.73% | 60.08% | 56.85% | −3.23 |
+| A/A | 64.92% | 60.48% | 59.88% | −0.60 |
+
+**A majority can only remove noise that is zero-mean.** The competitor's samples disagree randomly
+and their mode converges on the truth; ours disagree *systematically* — 71.0% of questions return a
+single fingerprint, and 71.3% of the misses are `values` failures — so the mode converges on the
+model's most common mistake and more draws make it converge harder. That is why the competitor's
+aggregation is not borrowable and their *depth* is: the pool widens regardless of who reads it.
+
+So the open question is not "how many candidates" but **"how much of a wide pool can a chooser that
+reads length still return"**. Two arms answer it, and neither introduces a prompt, a card or a judge:
+
+| arm | candidates | calls | what it is |
+| --- | ---: | ---: | --- |
+| `select-mixed-rule-spread2` | 6 (3 prompts × 2) | 6 | `select-mixed-spread2`'s pool, free rule |
+| `select-mixed-rule-spread3` | 9 (3 prompts × 3) | 9 | `select-mixed-spread3`'s pool, free rule |
+
+At the parent's measured conversion (92.7%) the arithmetic predicts **63.6%** at six candidates and
+**64.8%** at nine, against 61.29% at three. If the conversion holds, depth is the best lever this
+repository has priced — and it is the competitor's own lever, applied with a cheaper aggregator.
+
+| # | criterion | bar |
+| --- | --- | --- |
+| ① | ceiling at six, same run | **≥ +2.0pp** over the parent (68.55 from 64.92 by subset) |
+| ② | score at six | **≥ +1.0pp** over the parent, read paired on the same questions |
+| ③ | conversion at six | **≥ 90.0%** (parent 92.68%; a fall below 90% is the aggregator giving depth back) |
+| ④ | cost at six | **≤ 2.2×** the parent's tokens per correct answer |
+| ⑤ | the slope between six and nine | conversion at nine **≥** conversion at six − 2.0pp, else depth closes at six |
+| ⑥ | noise | the parent run twice in the same dispatch; every delta read against its own A/A |
+
+Fail ③ with a rising ① is the finding that closes candidate depth for this aggregator — and it would
+close it at nine calls instead of the competitor's twenty-one, which is the cheapest form that
+answer can take.
