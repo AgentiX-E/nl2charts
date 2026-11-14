@@ -56,6 +56,9 @@ describe('a label, as a family', () => {
   it('reads the corpus spellings of every family it knows', () => {
     expect(familyOfLabel('Bar Chart')).toBe('bar');
     expect(familyOfLabel('Column Chart')).toBe('bar');
+    // The corpus's own spelling of a horizontal bar, found by the first real reading: 516 rows were
+    // unmapped and this was the one label in that list which is unambiguously a bar.
+    expect(familyOfLabel('Barh')).toBe('bar');
     expect(familyOfLabel('Line Chart')).toBe('line');
     expect(familyOfLabel('Pie Chart')).toBe('pie');
     expect(familyOfLabel('Donut Chart')).toBe('pie');
@@ -86,6 +89,12 @@ describe('a label, as a family', () => {
     // The corpus carries labels this build has never seen, and the log is where a reader finds out
     // which. A list cut at twelve without a mark reads as "twelve labels" when it is forty.
     const many = Array.from({ length: 14 }, (_, index) => ({ prompt: 'top 5 by revenue', label: `Shape${String(index)}` }));
+    // One of the corpus's unmapped labels is the empty string -- a row whose authors left the column
+    // blank -- and printing `labels: ` with nothing after it reads as a formatting bug rather than
+    // as a row with no label.
+    const report0 = scoreRule([...many, { prompt: 'top 5 by revenue', label: '' }]);
+    expect(report0.unmapped.labels[0]).toEqual({ label: '', n: 1 });
+    expect(describeRule(report0).join('\n')).toContain('<empty> (1)');
     const report = scoreRule(many);
     expect(report.unmapped.count).toBe(14);
     const text = describeRule(report).join('\n');
@@ -167,7 +176,7 @@ describe('scoring the rule against the corpus', () => {
     ]);
     expect(report.rows).toBe(2);
     expect(report.scored).toBe(1);
-    expect(report.unmapped).toEqual({ count: 1, labels: ['Treemap'] });
+    expect(report.unmapped).toEqual({ count: 1, labels: [{ label: 'Treemap', n: 1 }] });
     // The identity that makes the exclusion visible in one line rather than two tables apart.
     expect(report.rows).toBe(report.scored + report.unmapped.count);
   });
@@ -319,7 +328,7 @@ describe('the arm, run as a command', () => {
       const report = JSON.parse(readFileSync(artifact, 'utf8')) as RuleReport;
       expect(report.rows).toBe(3);
       expect(report.scored).toBe(2);
-      expect(report.unmapped.labels).toEqual(['Treemap']);
+      expect(report.unmapped.labels).toEqual([{ label: 'Treemap', n: 1 }]);
       // The artifact is the same report the log described, not a second computation of it.
       expect(() => assertRuleReport(report)).not.toThrow();
       expect(lines.join('\n')).toContain('top-1');
@@ -423,6 +432,6 @@ describe('the lines a reader gets', () => {
     expect(text).toContain('top-1');
     expect(text).toContain('baseline: always bar');
     expect(text).toContain('cue path');
-    expect(text).toContain('unmapped labels: Treemap');
+    expect(text).toContain('unmapped labels: Treemap (1)');
   });
 });

@@ -12228,3 +12228,57 @@ is that line filled, and a `bar` does **not** answer for a `histogram` — a his
 binned, and folding them together would hide the finding the confusion table exists to surface.
 What this does not measure is stated in the module: encoding (which fields, which aggregate), the
 recommender's data-shape half, and whether a label is one annotator's judgement.
+
+#### The first reading of the cue table, and the three defects it names
+
+`text2vis-rule` ran for the first time in CI (`43545023250`, the corpus downloaded over the network,
+not from a cache), on the whole corpus: **1,985 rows**, of which **1,469** carry a label this build
+has a family for. No model call, no database, no renderer.
+
+| reading | value | what it is compared against |
+| --- | ---: | --- |
+| top-1 | **37.37%** (549) | **always bar: 28.52%** — the constant a cue table has to beat |
+| shortlist | 68.01% (999) | a different claim: the family is in the recommended set |
+| declined | 0 | every question in this corpus fires at least one cue |
+| cue path, p50 / p95 / max | **0.11 / 0.16 / 5.59 ms** | per question, over 1,985 questions |
+
+So the table beats the constant by **8.85 points**, and the shortlist says the *right answer is
+usually one of the marks it names* — the loss is in the ordering, not in the vocabulary. The cost is
+what a rule is supposed to cost: a fifth of a millisecond per question, four orders of magnitude
+inside the one-second budget the chart path is held to.
+
+The confusion table is where the work is, and it names three defects rather than a score:
+
+| label in the corpus | rows | top-1 | what the table answered instead |
+| --- | ---: | ---: | --- |
+| Line | 391 | 54.48% | pie (81), heatmap (63) |
+| **Bar** | **357** | **12.32%** | **pie (164)**, heatmap (61), line (54) |
+| Area | 137 | 42.34% | line (58), heatmap (38) |
+| Pie | 113 | 78.76% | pie (89) |
+| Scatter | 93 | 31.18% | scatter (29), line (25) |
+| **Histogram** | **90** | **0.00%** | **boxplot (53)**, pie (24) |
+| Boxplot | 89 | 51.69% | boxplot (46) |
+| Donut | 69 | 81.16% | pie (56) |
+| Stacked Bar | 56 | 12.50% | **pie (30)** |
+| Heatmap | 20 | 5.00% | line (8), scatter (5) |
+| Funnel | 11 | 0.00% | **pie (11)** |
+| Bubble | 10 | 10.00% | bar (5) |
+
+1. **The `share` cue leads with `pie`, and the corpus draws bars.** 164 bar questions and 30 stacked
+   bars were answered `pie` — **194 rows, 13.2% of the scored population**, which is where most of the
+   8.85-point gap to a *perfect* ordering lives. The table's own justification for pie-leading was
+   never measured; it is now.
+2. **`histogram` is unreachable by construction.** The contract has 22 series types and none of them
+   is a histogram, so the honest product answer to a histogram question is a binned bar — but the
+   `distribution` cue prefers `boxplot`, and 90 rows score zero. This is the case the family table
+   deliberately *kept* visible instead of folding `bar` over `histogram`; the reading is the argument
+   for changing the cue, not for changing the table.
+3. **Two labels the build could not name are worth naming.** `Barh` (the corpus's horizontal bar) is
+   the same decision as a bar, and it is now mapped. `Dot`, `Dot Plot`, `Choropleth Map`, `Subplot`,
+   `Treemap`, `Waterfall` and one empty label stay unmapped and are **printed with the rows they
+   account for**, because "516 rows are unmapped" and a list of eight names do not tell a reader which
+   one to fix first.
+
+The next reading is one change: `share → ['bar', 'pie']`, with the bar registered in advance —
+top-1 ≥ 45.0% and `Bar` top-1 ≥ 60.0%, on the same corpus, with the same two baselines printed
+alongside. A change to the cue table that does not clear its own baseline is not a change.
