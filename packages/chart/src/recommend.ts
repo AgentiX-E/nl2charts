@@ -176,12 +176,31 @@ export interface Refusal {
   readonly reason: string;
 }
 
+/**
+ * What the result set can carry, counted.
+ *
+ * The three numbers every admission rule reads, reported beside the ranking for the same reason the
+ * score is: a refusal a caller cannot explain is a refusal a caller cannot act on, and "a line needs
+ * an ordered axis and a measure" is only actionable once the reader knows how many ordered columns
+ * the table had. `eval/text2vis` counts refusals by this shape rather than re-deriving it, so the
+ * two cannot disagree about what a table could carry.
+ */
+export interface ShapeCounts {
+  /** Columns that are not measures: the axes a mark can group by. */
+  readonly dims: number;
+  /** The dims a line can order along: temporal and ordinal, never nominal. */
+  readonly ordered: number;
+  readonly measures: number;
+}
+
 export interface ChartChoice {
   readonly question: string;
   /** Admissible marks, best first. Empty when no mark can encode the result set. */
   readonly recommendations: readonly Recommendation[];
   /** Every considered mark that was ruled out, so the audit trail is complete. */
   readonly refused: readonly Refusal[];
+  /** The counts those rules were applied to. */
+  readonly shape: ShapeCounts;
 }
 
 export interface RecommendOptions {
@@ -293,8 +312,15 @@ const ADMISSIONS: readonly Admission[] = [
   },
 ];
 
-/** Order that decides ties, so two marks that fit equally well always rank the same way. */
-const PREFERENCE: readonly RecommendableMark[] = [
+/**
+ * Every mark this layer can recommend, in the order that decides ties.
+ *
+ * One list rather than two: the set of marks and the tie-break between them are the same fact, and a
+ * second list of "the marks we consider" would be a second answer to it. Exported because a reading
+ * that counts *why* a mark was refused has to iterate the same set the recommender does — a mark
+ * added here without being added there would fall out of every count and read as a smaller corpus.
+ */
+export const RECOMMENDABLE_MARKS: readonly RecommendableMark[] = [
   'bar',
   'line',
   'scatter',
@@ -307,6 +333,9 @@ const PREFERENCE: readonly RecommendableMark[] = [
   'parallel',
   'gauge',
 ];
+
+/** Order that decides ties, so two marks that fit equally well always rank the same way. */
+const PREFERENCE: readonly RecommendableMark[] = RECOMMENDABLE_MARKS;
 
 function shapeOf(profiles: readonly FieldProfile[], options: Resolved): Shape {
   const dims = profiles.filter((profile) => profile.type !== 'quantitative');
@@ -358,7 +387,12 @@ export function recommendChart(
       right.score - left.score || PREFERENCE.indexOf(left.mark) - PREFERENCE.indexOf(right.mark),
   );
 
-  return { question, recommendations, refused };
+  return {
+    question,
+    recommendations,
+    refused,
+    shape: { dims: shape.dims.length, ordered: shape.ordered.length, measures: shape.measures.length },
+  };
 }
 
 export interface ChartIROptions extends RecommendOptions {

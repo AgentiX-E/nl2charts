@@ -11,7 +11,7 @@ export { supportOf } from './support.js';
 export type { SupportVerdict } from './support.js';
 export { MARKS, describeMark } from './marks.js';
 export type { MarkSpec } from './marks.js';
-export { CHART_CUES, readCues, recommendChart, toChartIR } from './recommend.js';
+export { CHART_CUES, RECOMMENDABLE_MARKS, readCues, recommendChart, toChartIR } from './recommend.js';
 export type {
   ChartChoice,
   ChartIROptions,
@@ -22,4 +22,5 @@ export type {
   Recommendation,
   RecommendOptions,
   Refusal,
+  ShapeCounts,
 } from './recommend.js';

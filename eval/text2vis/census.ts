@@ -24,32 +24,11 @@
  * years or quarters that the profiler typed as a measure, the defect is in type inference; if they
  * carry nothing that reads as time, the label asks for a picture the result set cannot witness.
  */
-import type { FieldProfile, RecommendableMark } from '@agentix-e/nl2charts-chart';
-import { readCues, recommendChart } from '@agentix-e/nl2charts-chart';
+import type { FieldProfile, RecommendableMark, ShapeCounts } from '@agentix-e/nl2charts-chart';
+import { RECOMMENDABLE_MARKS, readCues, recommendChart } from '@agentix-e/nl2charts-chart';
 import { applyExitCode, isEntry, loadText2Vis, type LoadOptions } from './dataset.js';
 import { familiesOfMark, familyOfLabel, type ChartFamily } from './rule.js';
 import { parseResultSet, profilesOf, type ProfileInput, type ResultSet } from './profile.js';
-
-/**
- * Every mark this product can recommend, in the order its type declares them.
- *
- * A local copy is unavoidable without exporting the list from the package, and it is checked rather
- * than trusted: `text2vis-census.test.ts` asserts it is the same set the recommender admits, so a
- * mark added to the product without being added here fails a test instead of going uncounted.
- */
-const MARKS: readonly RecommendableMark[] = [
-  'bar',
-  'line',
-  'pie',
-  'funnel',
-  'scatter',
-  'heatmap',
-  'boxplot',
-  'candlestick',
-  'radar',
-  'parallel',
-  'gauge',
-];
 
 /**
  * The marks that could have answered a family, derived from `familiesOfMark` rather than restated.
@@ -61,7 +40,7 @@ const MARKS: readonly RecommendableMark[] = [
  * answers for — `violin` — comes back empty, which is what makes it its own outcome.
  */
 export function coveringMarks(family: ChartFamily): readonly RecommendableMark[] {
-  return MARKS.filter(
+  return RECOMMENDABLE_MARKS.filter(
     (mark) => familiesOfMark(mark).includes(family) || familiesOfMark(mark, 'histogram').includes(family),
   );
 }
@@ -88,6 +67,8 @@ export type CensusRow =
       readonly reason: string;
       /** What the product drew instead, when it drew anything: `profile.ts` counts that as a miss. */
       readonly answered?: RecommendableMark;
+      /** The counts the admission rule was applied to, reported by the product rather than re-derived. */
+      readonly shape: ShapeCounts;
     }
   | {
       readonly expected: ChartFamily;
@@ -135,6 +116,28 @@ export interface OutrankedCensus {
   readonly gaps: readonly { readonly gap: number; readonly n: number }[];
 }
 
+/**
+ * A refusal, grouped by the shape it was refused against.
+ *
+ * The count that decides a repair. "454 rows were refused a line for an area label" names two
+ * different defects: a table with a category axis and no ordered one is a rule that may be too strict
+ * (a line over categories is drawable), and a table with no axis at all is a label asking for a
+ * picture nothing can witness — unless the missing axis is a column of years the profiler typed as a
+ * measure, which is `timeLike` beside it. Those are three files to open, and one number cannot choose
+ * between them.
+ */
+export interface ShapeCensus {
+  readonly family: ChartFamily;
+  readonly mark: RecommendableMark;
+  readonly dims: number;
+  readonly ordered: number;
+  readonly measures: number;
+  /** The table carries a column that formats as time and was not typed temporal. */
+  readonly timeLike: boolean;
+  readonly n: number;
+  readonly withFallback: number;
+}
+
 export interface RefusalCensus {
   readonly mark: RecommendableMark;
   readonly expected: ChartFamily;
@@ -158,6 +161,8 @@ export interface CensusReport {
   readonly outcomes: Readonly<Record<CensusOutcome, number>>;
   readonly byFamily: readonly FamilyCensus[];
   readonly refusals: readonly RefusalCensus[];
+  /** The same refusals by shape, largest first: the table that decides which file to open. */
+  readonly shapes: readonly ShapeCensus[];
   readonly outranked: readonly OutrankedCensus[];
   /** Columns that format as time and were not typed temporal, most rows first. */
   readonly timeLike: readonly TimeLike[];
@@ -234,6 +239,7 @@ export function classify(row: ProfileInput): CensusRow {
       expected,
       outcome: 'refused',
       covering: coveringMark,
+      shape: choice.shape,
       // A mark is either recommended or refused, so a covering mark that is not recommended has a
       // refusal, and `admitted.length === 0` says it is not recommended.
       reason: sentence === undefined ? 'profile:refused' : sentence.reason,
@@ -296,6 +302,17 @@ interface TimeLikeTally {
   n: number;
 }
 
+interface ShapeTally {
+  family: ChartFamily;
+  mark: RecommendableMark;
+  dims: number;
+  ordered: number;
+  measures: number;
+  timeLike: boolean;
+  n: number;
+  withFallback: number;
+}
+
 /** Tally a classified population into the report a document quotes. */
 export function censusOf(rows: readonly ProfileInput[], options: { readonly variant?: string } = {}): CensusReport {
   const outcomes: Record<CensusOutcome, number> = { hit: 0, refused: 0, outranked: 0, uncovered: 0, noProfile: 0 };
@@ -313,6 +330,7 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
     }
   >();
   const timeLike = new Map<string, TimeLikeTally>();
+  const shapes = new Map<string, ShapeTally>();
   let scored = 0;
   let unmapped = 0;
   let timeLikeRows = 0;
@@ -337,6 +355,33 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
     family.n += 1;
     family[classified.outcome] += 1;
     byFamily.set(classified.expected, family);
+
+    const set = parseResultSet(row.tableData);
+    const profiles = profilesOf(set);
+    const mistyped = profiles.length === 0 ? [] : timeLikeColumns(set, profiles);
+    if (mistyped.length > 0) timeLikeRows += 1;
+    for (const column of mistyped) {
+      const entry = timeLike.get(column.column) ?? { ...column, n: 0 };
+      entry.n += 1;
+      timeLike.set(column.column, entry);
+    }
+
+    if (classified.outcome === 'refused') {
+      const key = `${classified.expected}\u0000${classified.covering}\u0000${String(classified.shape.dims)}x${String(classified.shape.ordered)}x${String(classified.shape.measures)}\u0000${String(mistyped.length > 0)}`;
+      const entry = shapes.get(key) ?? {
+        family: classified.expected,
+        mark: classified.covering,
+        dims: classified.shape.dims,
+        ordered: classified.shape.ordered,
+        measures: classified.shape.measures,
+        timeLike: mistyped.length > 0,
+        n: 0,
+        withFallback: 0,
+      };
+      entry.n += 1;
+      if (classified.answered !== undefined) entry.withFallback += 1;
+      shapes.set(key, entry);
+    }
 
     if (classified.outcome === 'refused' && classified.reason !== undefined && classified.covering !== undefined) {
       const key = `${classified.covering}\u0000${classified.reason}`;
@@ -371,17 +416,6 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
       outranked.set(key, entry);
     }
 
-    const set = parseResultSet(row.tableData);
-    const profiles = profilesOf(set);
-    if (profiles.length > 0) {
-      const mistyped = timeLikeColumns(set, profiles);
-      if (mistyped.length > 0) timeLikeRows += 1;
-      for (const column of mistyped) {
-        const entry = timeLike.get(column.column) ?? { ...column, n: 0 };
-        entry.n += 1;
-        timeLike.set(column.column, entry);
-      }
-    }
   }
 
   return {
@@ -394,6 +428,14 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
     ),
     refusals: [...refusals.values()].sort(
       (left, right) => right.n - left.n || left.reason.localeCompare(right.reason),
+    ),
+    shapes: [...shapes.values()].sort(
+      (left, right) =>
+        right.n - left.n ||
+        left.mark.localeCompare(right.mark) ||
+        left.dims - right.dims ||
+        left.ordered - right.ordered ||
+        Number(left.timeLike) - Number(right.timeLike),
     ),
     outranked: [...outranked.values()]
       .map((entry) => ({
@@ -468,6 +510,11 @@ export function describeCensus(report: CensusReport): readonly string[] {
   for (const entry of report.refusals.slice(0, 6)) {
     lines.push(
       `  refused ${entry.mark} for ${entry.expected}: ${String(entry.n)} (${String(entry.withFallback)} answered by another mark) — ${entry.reason}`,
+    );
+  }
+  for (const entry of report.shapes.slice(0, 10)) {
+    lines.push(
+      `  refused ${entry.mark} for ${entry.family}: ${String(entry.n)} (${String(entry.withFallback)} answered elsewhere) at dims ${String(entry.dims)} / ordered ${String(entry.ordered)} / measures ${String(entry.measures)}${entry.timeLike ? ', time-formatted column present' : ''}`,
     );
   }
   for (const entry of report.outranked.slice(0, 8)) {

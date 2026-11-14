@@ -156,6 +156,26 @@ describe('recommending a chart from the question and the result set', () => {
     expect(first).toBe(second);
   });
 
+  it('reports the shape its rules were applied to, so a refusal can be explained without re-deriving it', () => {
+    // The three counts every admission rule reads. A caller that disagrees with a refusal can point
+    // at the number that caused it — "a line needs an ordered axis and a measure" is not actionable
+    // until the reader knows the table had no ordered column — and `eval/text2vis` counts refusals by
+    // this shape rather than restating `shapeOf` in a second place.
+    expect(recommendChart('How did revenue trend over time?', profiles(monthly)).shape).toEqual({
+      dims: 1,
+      ordered: 1,
+      measures: 1,
+    });
+    // A category axis and no time: the same dims, one fewer ordered dimension.
+    expect(recommendChart('Revenue by region', profiles(regions)).shape).toEqual({ dims: 1, ordered: 0, measures: 1 });
+    // Two measures and nothing to group them by.
+    expect(recommendChart('Is price correlated with rating?', profiles(twoMeasures)).shape).toEqual({
+      dims: 0,
+      ordered: 0,
+      measures: 2,
+    });
+  });
+
   it('never ranks a mark the data cannot encode, and says why it refused', () => {
     const choice = recommendChart('What share of revenue does each region hold?', profiles(regions));
     expect(choice.recommendations.map((item) => item.mark)).not.toContain('scatter');
