@@ -9,12 +9,20 @@
  * no model, no database, no renderer, just the corpus's own tables and the profiles the product
  * derives from them.
  *
- * **The five outcomes are exhaustive by construction, not by inspection.** A scored row is a hit, a
+ * **The outcomes are exhaustive by construction, not by inspection.** A scored row is a hit, a
  * refusal (every mark that could cover the family was ruled out), a loss (a covering mark was
- * admitted and ranked below something else), a family no mark can cover, or a table that would not
- * profile. The counters are asserted to sum to the scored population, the same discipline `rule.ts`
- * and `profile.ts` apply, for the same reason: a share taken over the wrong denominator is the defect
- * a reader cannot see.
+ * admitted and ranked below something else), a substitution (the winner covers the family as its
+ * *second* claim — a line answering an `area` row), a family no mark can cover, or a table that would
+ * not profile. The counters are asserted to sum to the scored population, the same discipline
+ * `rule.ts` and `profile.ts` apply, for the same reason: a share taken over the wrong denominator is
+ * the defect a reader cannot see.
+ *
+ * **A hit is the published first choice, not the shortlist.** The census exists to explain the number
+ * the product publishes — `profile.ts`'s top-1 — so its hit test has to be that test and not a wider
+ * one. Counting a mark that covers the family second would have made the census read 263 where the
+ * product reads 262, and a census one row ahead of the product is explaining a corpus nobody
+ * published. The widening is not discarded: it is the `substituted` outcome, so the two readings
+ * reconcile as `hit + substituted === shortlist`.
  *
  * **What a refusal means.** The instrument reports the admission rule's own sentence, not a
  * paraphrase, because the sentence names the missing fact ("a line needs an ordered axis and a
@@ -46,7 +54,7 @@ export function coveringMarks(family: ChartFamily): readonly RecommendableMark[]
 }
 
 /** What became of one scored question. */
-export type CensusOutcome = 'hit' | 'refused' | 'outranked' | 'uncovered' | 'noProfile';
+export type CensusOutcome = 'hit' | 'substituted' | 'refused' | 'outranked' | 'uncovered' | 'noProfile';
 
 /**
  * One scored question, classified, with the facts the classification was made from.
@@ -58,6 +66,19 @@ export type CensusOutcome = 'hit' | 'refused' | 'outranked' | 'uncovered' | 'noP
  */
 export type CensusRow =
   | { readonly expected: ChartFamily; readonly outcome: 'hit' | 'uncovered' | 'noProfile' }
+  | {
+      readonly expected: ChartFamily;
+      readonly outcome: 'substituted';
+      /**
+       * The mark the product drew. It covers the label's family through its *second* family claim —
+       * a line is a line and, filled, an area — so `profile.ts` counts the row in its shortlist and
+       * not in its top-1, and the census has to make the same distinction or the two disagree about
+       * one row out of 1,470.
+       */
+      readonly answered: RecommendableMark;
+      /** The family the mark answered as, which is the one the label did not ask for. */
+      readonly ownFamily: ChartFamily;
+    }
   | {
       readonly expected: ChartFamily;
       readonly outcome: 'refused';
@@ -124,6 +145,7 @@ export interface FamilyCensus {
   readonly family: ChartFamily;
   readonly n: number;
   readonly hit: number;
+  readonly substituted: number;
   readonly refused: number;
   readonly outranked: number;
   readonly uncovered: number;
@@ -247,11 +269,12 @@ export function timeLikeColumns(set: ResultSet, profiles: readonly FieldProfile[
 /**
  * Classify one question.
  *
- * The hit test is `profileAnswer`'s, deliberately: a mark covers a family through `familiesOfMark`,
- * widened by the leading cue so a bar named by a histogram question answers for a histogram. A
- * different test here would make the two instruments disagree about the same row, and the census
- * would then be explaining a count nobody published — `text2vis-census.test.ts` asserts the two
- * agree row for row.
+ * The hit test is `profileAnswer`'s, deliberately: `profile.ts` counts a hit when the *first* family
+ * the answer covers is the label's, so a mark that covers the family second is a shortlist hit and
+ * not a top-1 hit. Reading the whole family list here would have counted one `area` row answered by a
+ * line as a hit while the published reading called it a shortlist-only row, and the census would then
+ * be explaining a count nobody published — `text2vis-census.test.ts` asserts the two agree row for
+ * row, and `substituted` is the outcome that makes them agree.
  */
 export function classify(row: ProfileInput): CensusRow {
   const expected = familyOfLabel(row.label);
@@ -265,8 +288,15 @@ export function classify(row: ProfileInput): CensusRow {
   if (covering.length === 0) return { expected, outcome: 'uncovered' };
   const choice = recommendChart(row.prompt, profiles);
   const top = choice.recommendations[0];
-  if (top !== undefined && familiesOfMark(top.mark, top.cues[0]).includes(expected)) {
+  const lead = top === undefined ? undefined : familiesOfMark(top.mark, top.cues[0]);
+  if (top !== undefined && lead !== undefined && lead[0] === expected) {
     return { expected, outcome: 'hit' };
+  }
+  if (top !== undefined && lead !== undefined && lead.includes(expected)) {
+    // The answer covers the family, but as its second claim. It is neither a hit (the label asked for
+    // the other picture) nor a loss (nothing outranked the covering mark: the covering mark *is* what
+    // answered), so it gets the name of what happened.
+    return { expected, outcome: 'substituted', answered: top.mark, ownFamily: lead[0] as ChartFamily };
   }
   const admitted = choice.recommendations.filter((entry) => covering.includes(entry.mark));
   if (admitted.length === 0) {
@@ -321,6 +351,7 @@ interface FamilyTally {
   family: ChartFamily;
   n: number;
   hit: number;
+  substituted: number;
   refused: number;
   outranked: number;
   uncovered: number;
@@ -362,7 +393,7 @@ interface ShapeTally {
 
 /** Tally a classified population into the report a document quotes. */
 export function censusOf(rows: readonly ProfileInput[], options: { readonly variant?: string } = {}): CensusReport {
-  const outcomes: Record<CensusOutcome, number> = { hit: 0, refused: 0, outranked: 0, uncovered: 0, noProfile: 0 };
+  const outcomes: Record<CensusOutcome, number> = { hit: 0, substituted: 0, refused: 0, outranked: 0, uncovered: 0, noProfile: 0 };
   const byFamily = new Map<ChartFamily, FamilyTally>();
   const refusals = new Map<string, RefusalTally>();
   const outranked = new Map<
@@ -396,6 +427,7 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
       family: classified.expected,
       n: 0,
       hit: 0,
+      substituted: 0,
       refused: 0,
       outranked: 0,
       uncovered: 0,
@@ -525,14 +557,14 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
 /**
  * The arithmetic a report can be wrong about, refused rather than published.
  *
- * Every scored row lands in exactly one of the five outcomes, and the per-family rows sum to the
+ * Every scored row lands in exactly one of the six outcomes, and the per-family rows sum to the
  * scored population. A report that breaks either is a share computed on the wrong denominator.
  */
 export function assertCensusReport(report: CensusReport): void {
   const sum = Object.values(report.outcomes).reduce((total, count) => total + count, 0);
   if (sum !== report.scored) {
     throw new Error(
-      `census report: the five outcomes sum to ${String(sum)} and ${String(report.scored)} rows were scored`,
+      `census report: the six outcomes sum to ${String(sum)} and ${String(report.scored)} rows were scored`,
     );
   }
   const perFamily = report.byFamily.reduce((total, entry) => total + entry.n, 0);
@@ -561,7 +593,8 @@ export function describeCensus(report: CensusReport): readonly string[] {
   const outcome = report.outcomes;
   const lines = [
     `text2vis census: ${String(report.scored)} scored of ${String(report.rows)} rows (${String(report.unmapped)} unmapped labels)`,
-    `  hit ${String(outcome.hit)} (${share(outcome.hit)}), refused ${String(outcome.refused)} (${share(outcome.refused)}), outranked ${String(outcome.outranked)} (${share(outcome.outranked)}), uncovered ${String(outcome.uncovered)}, no profile ${String(outcome.noProfile)}`,
+    `  hit ${String(outcome.hit)} (${share(outcome.hit)}), substituted ${String(outcome.substituted)}, refused ${String(outcome.refused)} (${share(outcome.refused)}), outranked ${String(outcome.outranked)} (${share(outcome.outranked)}), uncovered ${String(outcome.uncovered)}, no profile ${String(outcome.noProfile)}`,
+    `  hit + substituted is the shortlist the profile file publishes: ${String(outcome.hit + outcome.substituted)} of ${String(report.scored)}`,
     `  time-formatted columns the profiler did not call temporal: ${String(report.timeLikeRows)} rows`,
     `  columns that are numbers only after their formatting is read: ${String(report.coercedRows)} rows`,
   ];
