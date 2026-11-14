@@ -31,6 +31,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { mcnemarExact } from '@agentix-e/nl2charts-devkit';
+import { DEFAULT_CACHE_RATE, cacheBill } from './cache.js';
 
 /** The reason an arm is credited with on a case it got right. */
 export const MATCH = 'match';
@@ -47,10 +48,41 @@ export interface PairCase {
 export interface PairArtifact {
   readonly split?: string;
   readonly model?: string;
-  /** The arms, for the per-arm base model a header line names. Nothing here reads `passed` from it. */
-  readonly arms?: readonly { readonly arm?: string; readonly servedModels?: Readonly<Record<string, number>> }[];
+  /** The arms, for the per-arm base model a header line names and the bill a paired reading prices. */
+  readonly arms?: readonly {
+    readonly arm?: string;
+    readonly servedModels?: Readonly<Record<string, number>>;
+    readonly tokens?: ArmTokens;
+  }[];
   readonly cases?: readonly PairCase[];
   readonly failures?: unknown;
+}
+
+/**
+ * The token columns a bill is read from, as the artifact files them.
+ *
+ * Per call, not per run: `tokens.prompt` is the mean of what one generation call sent, and that is
+ * the unit the arms differ in once both send the same number of calls.
+ */
+export interface ArmTokens {
+  readonly prompt?: number;
+  readonly cached?: number;
+}
+
+/** What one arm paid for a call, in the unit the endpoint bills rather than the unit it sends. */
+export interface ArmBill {
+  readonly arm: string;
+  readonly prompt: number;
+  readonly cached: number;
+  readonly charged: number;
+  /**
+   * `reported` when the artifact named a cached count, `list` when it did not.
+   *
+   * The distinction is the whole reason the bill is derived here rather than averaged from a paper
+   * price list: an arm whose prompts change shape loses the prefix the endpoint was discounting, and
+   * that loss does not show up in the prompt-token column at all.
+   */
+  readonly at: 'reported' | 'list';
 }
 
 /** One row of the transition table: a shape in the left arm, a shape in the right one. */
@@ -201,6 +233,81 @@ export function summaries(cases: readonly PairCase[], arms: readonly string[]): 
 /** A count with its share of the pairs examined, so a reader does not divide by hand. */
 function share(count: number, total: number): string {
   return total === 0 ? '  -  ' : `${((count / total) * 100).toFixed(1)}%`;
+}
+
+/**
+ * What one arm paid for a call, from the artifact's own token columns.
+ *
+ * `cacheBill` is not re-implemented here: the rate a cached prompt token is billed at is a single
+ * number with a single definition (`DEFAULT_CACHE_RATE`), and a second copy of it in a second
+ * instrument is how two reports start disagreeing about the same run. What this function adds is the
+ * *missing* case — an arm that reported no cached count is charged at list price and labelled `list`,
+ * because a discount nobody measured is the one direction a cost reading must not guess in.
+ *
+ * An arm with no `tokens.prompt` has no bill at all rather than a bill of zero: the artifact predates
+ * the column, and "the cost is unread" is not "the cost was nothing".
+ */
+export function armBill(arm: { readonly arm?: string; readonly tokens?: ArmTokens }): ArmBill | undefined {
+  const prompt = arm.tokens?.prompt;
+  if (prompt === undefined) return undefined;
+  const reported = arm.tokens?.cached;
+  const cached = Math.min(reported ?? 0, prompt);
+  // A prefix share of zero is not a claim that nothing is cacheable: `chargedTokens` is
+  // `prompt - cached + cached * rate` and does not read the share at all. The share only moves
+  // `ceilingTokens`, which is what the cache report prices and what this instrument does not print —
+  // a per-candidate card is not one string, so there is no single prefix whose ceiling it could be.
+  const bill = cacheBill({ promptTokens: prompt, cachedTokens: cached }, 0);
+  return {
+    arm: arm.arm ?? '?',
+    prompt,
+    cached,
+    charged: bill.chargedTokens,
+    at: reported === undefined ? 'list' : 'reported',
+  };
+}
+
+/**
+ * The paired reading's second half: what the delta cost.
+ *
+ * A paired test says whether a lever moved the score and by how much of the denominator it can be
+ * trusted to. It says nothing about whether the move is worth having, and this repository has now
+ * twice adopted a reading on the accuracy column alone and priced the consequence afterwards. The
+ * price belongs in the same report as the delta, in the unit the endpoint bills, because the two
+ * columns can move in opposite directions without either one looking wrong on its own: a block that
+ * adds 6.0% of prompt tokens while breaking the cached prefix it sits in front of costs far more
+ * than 6.0%.
+ *
+ * The ratio line is withheld rather than divided when either arm sent no prompt, and when one arm has
+ * no bill the block names it. Both are the same rule: an instrument does not print a number it cannot
+ * read.
+ */
+export function paidLines(
+  bills: readonly ArmBill[],
+  bought: { readonly wins: number; readonly losses: number; readonly examined: number },
+  missing: readonly string[] = [],
+): string[] {
+  const lines: string[] = [`  what each call cost, a cached prompt token billed at ${String(DEFAULT_CACHE_RATE)}x:`];
+  for (const bill of bills) {
+    const cachedShare = bill.prompt === 0 ? '  -  ' : `${((bill.cached / bill.prompt) * 100).toFixed(1)}%`;
+    lines.push(
+      `    ${bill.arm.padEnd(30)} ${String(bill.charged).padStart(6)} charged of ${String(bill.prompt).padStart(6)} prompt` +
+        `  ${String(bill.cached).padStart(6)} cached (${cachedShare})${bill.at === 'list' ? '  no cache reported, so this row is at list price' : ''}`,
+    );
+  }
+  for (const arm of missing) lines.push(`    ${arm.padEnd(30)}       - ${arm}: no token columns in this artifact`);
+  const [left, right] = bills;
+  if (left === undefined || right === undefined || left.prompt === 0 || right.prompt === 0 || bills.length !== 2) {
+    return lines;
+  }
+  const move = ((right.charged - left.charged) / left.charged) * 100;
+  const direction = move >= 0 ? 'more' : 'less';
+  const pp = ((bought.wins - bought.losses) / bought.examined) * 100;
+  const sign = pp >= 0 ? '+' : '';
+  lines.push(
+    `    the second arm costs ${Math.abs(move).toFixed(1)}% ${direction} per call and is ${sign}${pp.toFixed(2)}pp more accurate` +
+      ` on ${String(bought.examined)} paired question(s)`,
+  );
+  return lines;
 }
 
 export function pairLines(outcome: PairOutcome): string[] {
@@ -398,6 +505,18 @@ export function main(argv: readonly string[] = process.argv.slice(2), root = pro
   const outcome = pairOutcome(report, settings.left as string, settings.right as string);
   console.log(`  ${relative(root, settings.report)}${report.split === undefined ? '' : ` (${report.split}${report.model === undefined ? '' : `, ${report.model}`})`}`);
   for (const line of pairLines(outcome)) console.log(line);
+  // The price of the lever, from the same artifact: the delta above says the score moved, and this
+  // block says what the move cost. Both are read, neither is inferred from a second run.
+  const bills: ArmBill[] = [];
+  const missing: string[] = [];
+  for (const name of [settings.left as string, settings.right as string]) {
+    const row = (report.arms ?? []).find((entry) => entry.arm === name);
+    const bill = row === undefined ? undefined : armBill(row);
+    if (bill === undefined) missing.push(name);
+    else bills.push(bill);
+  }
+  console.log('');
+  for (const line of paidLines(bills, outcome, missing)) console.log(line);
   for (const problem of outcome.problems) console.error(`PAIR: ${problem}`);
   return outcome.problems.length === 0 ? 0 : 1;
 }

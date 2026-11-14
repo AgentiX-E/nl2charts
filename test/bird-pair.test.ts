@@ -5,10 +5,12 @@ import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import {
   MATCH,
+  armBill,
   declaredLines,
   declaredPairs,
   isEntry,
   main,
+  paidLines,
   pairLines,
   pairOutcome,
   pairProblems,
@@ -486,5 +488,142 @@ describe('declared pairs', () => {
     expect(resolvePairSettings(['x.json', '--declared'], '/root')).toEqual({ report: '/root/x.json', declared: true });
     expect(() => resolvePairSettings(['x.json', '--declared', '--pair', 'a,b'], '/root')).toThrow('two different readings');
     expect(() => resolvePairSettings(['--declared'], '/root')).toThrow('usage: pair.ts');
+  });
+});
+
+describe('what the paired arms paid', () => {
+  /**
+   * The artifact this reading was written against: `43606308056`, dev, 1,532 paired questions.
+   *
+   * Both arms sent three cards and answered three times, so the comparison is one lever's price and
+   * nothing else. The columns are the artifact's own `tokens` block, not a re-measurement — the
+   * point of the instrument is that the adoption question ("did it pay?") is answerable from the
+   * artifact that already answered the accuracy question.
+   */
+  it('bills a cached prefix at the rate the endpoint charges, not at list', () => {
+    const bill = armBill({ arm: 'a', tokens: { prompt: 1000, cached: 800 } });
+    expect(bill).toEqual({ arm: 'a', prompt: 1000, cached: 800, charged: 280, at: 'reported' });
+  });
+
+  it('bills an arm that reported no cache at list price, and says so rather than guessing a discount', () => {
+    const bill = armBill({ arm: 'a', tokens: { prompt: 1000 } });
+    expect(bill).toEqual({ arm: 'a', prompt: 1000, cached: 0, charged: 1000, at: 'list' });
+  });
+
+  it('has no bill for an arm whose artifact predates the token columns', () => {
+    // A missing column and a zero column are different readings: the first says the cost is
+    // unread, the second says the call was free.
+    expect(armBill({ arm: 'a' })).toBeUndefined();
+    expect(armBill({ arm: 'a', tokens: {} })).toBeUndefined();
+  });
+
+  it('bills a row whose arm name is absent under a name a reader can find', () => {
+    // The row exists and carries tokens, so the bill is readable; only its label is missing. Pricing
+    // it and then printing an empty column would hide which row the number belongs to.
+    expect(armBill({ tokens: { prompt: 100 } })).toEqual({ arm: '?', prompt: 100, cached: 0, charged: 100, at: 'list' });
+  });
+
+  it('reads a lever that lost accuracy as a minus, so the pair of numbers cannot be read backwards', () => {
+    const lines = paidLines(
+      [
+        { arm: 'a', prompt: 1000, cached: 0, charged: 1000, at: 'list' },
+        { arm: 'b', prompt: 1000, cached: 0, charged: 1000, at: 'list' },
+      ],
+      { wins: 1, losses: 3, examined: 100 },
+    ).join('\n');
+    expect(lines).toContain('0.0% more per call and is -2.00pp more accurate');
+  });
+
+  it('prices the two arms of the G1c pair at what they were billed', () => {
+    const left = armBill({ arm: 'select-mixed-rule', tokens: { prompt: 3137, cached: 2558 } });
+    const right = armBill({ arm: 'select-mixed-rule-narrow', tokens: { prompt: 3327, cached: 2137 } });
+    expect(left?.charged).toBe(835);
+    expect(right?.charged).toBe(1404);
+    // The block is paid three times and it also breaks the prefix: prompt tokens rose 6.0% while
+    // cache hits fell 16.5%, which is why the charged unit moves by far more than either.
+    expect(right?.charged as number).toBeGreaterThan((left?.charged as number) * 1.6);
+  });
+
+  it('names the price of the lever beside the accuracy it bought', () => {
+    const lines = paidLines(
+      [
+        { arm: 'select-mixed-rule', prompt: 3137, cached: 2558, charged: 835, at: 'reported' },
+        { arm: 'select-mixed-rule-narrow', prompt: 3327, cached: 2137, charged: 1404, at: 'reported' },
+      ],
+      { wins: 58, losses: 50, examined: 1532 },
+    ).join('\n');
+    expect(lines).toContain('select-mixed-rule');
+    expect(lines).toContain('835');
+    expect(lines).toContain('1404');
+    expect(lines).toContain('81.5%');
+    expect(lines).toContain('64.2%');
+    expect(lines).toContain('68.1% more per call');
+    expect(lines).toContain('+0.52pp');
+  });
+
+  it('reads a cost that fell as a fall, and says so in the same sentence', () => {
+    const lines = paidLines(
+      [
+        { arm: 'a', prompt: 2000, cached: 0, charged: 2000, at: 'list' },
+        { arm: 'b', prompt: 2000, cached: 1800, charged: 380, at: 'reported' },
+      ],
+      { wins: 10, losses: 10, examined: 100 },
+    ).join('\n');
+    expect(lines).toContain('81.0% less per call');
+    expect(lines).toContain('+0.00pp');
+    expect(lines).toContain('at list price');
+  });
+
+  it('refuses to state a price ratio against an arm that sent no prompt', () => {
+    const lines = paidLines(
+      [
+        { arm: 'a', prompt: 1000, cached: 0, charged: 1000, at: 'reported' },
+        { arm: 'b', prompt: 0, cached: 0, charged: 0, at: 'reported' },
+      ],
+      { wins: 1, losses: 2, examined: 4 },
+    ).join('\n');
+    // A ratio against a zero is not a large number, it is an absent one: the arm sent no prompt,
+    // so what it "cost per call" divides by a call that is not in the artifact.
+    expect(lines).not.toContain('per call');
+    expect(lines).toContain('b');
+  });
+
+  it('names the arm whose artifact carries no token columns, instead of pricing it at zero', () => {
+    const lines = paidLines(
+      [{ arm: 'a', prompt: 1000, cached: 0, charged: 1000, at: 'reported' }],
+      { wins: 1, losses: 0, examined: 1 },
+      ['b'],
+    ).join('\n');
+    expect(lines).toContain('b: no token columns in this artifact');
+    expect(lines).not.toContain('per call');
+  });
+
+  it('prints the bill under the paired reading, and prices the arms it was asked for', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pair-bill-'));
+    const file = join(dir, 'bird-eval.json');
+    writeFileSync(
+      file,
+      JSON.stringify({
+        ...artifact([MATCH, 'values'], ['values', MATCH]),
+        arms: [
+          { arm: 'a', tokens: { prompt: 1000, cached: 800 } },
+          { arm: 'b', tokens: { prompt: 1000, cached: 0 } },
+        ],
+      }),
+    );
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const printed: string[] = [];
+    log.mockImplementation((...args: unknown[]) => {
+      printed.push(args.map(String).join(' '));
+    });
+    try {
+      expect(main([file, '--pair', 'a,b'], dir)).toBe(0);
+    } finally {
+      log.mockRestore();
+    }
+    const text = printed.join('\n');
+    expect(text).toContain('what each call cost');
+    expect(text).toContain('280');
+    expect(text).toContain('1000');
   });
 });
