@@ -13184,7 +13184,7 @@ between them, so the first deliverable of this round is an instrument that can.
 pnpm bench:text2vis:census --artifact eval/out/text2vis-census.json
 ```
 
-It classifies every scored row into exactly one of five outcomes and prints, for each refusal, the
+It classifies every scored row into exactly one of six outcomes and prints, for each refusal, the
 admission rule's own sentence; for each loss, the score gap and the cue position; for each shape, the
 three counts the rules were applied to; and for each of those, up to three of the questions it holds.
 Zero model calls — the corpus ships its tables.
@@ -13290,11 +13290,49 @@ The census after four levers, on the same 1,470 rows:
 
 | outcome | rows | share |
 |---|---:|---:|
-| hit | 262 | 17.82% |
+| hit (the label's family is the answer's *first* claim) | 262 | 17.82% |
+| substituted (it is the answer's second claim: a line answering an `area` row) | 1 | 0.07% |
 | refused | **597** | **40.61%** |
 | outranked | **443** | **30.14%** |
 | uncovered | 3 | 0.20% |
 | no profile | 164 | 11.16% |
+
+`262 + 1 + 597 + 443 + 3 + 164 = 1,470`, and every earlier table in this chapter is the same
+population read with one more lever in place.
+
+### One row out of 1,470: the census read ahead of the product
+
+The four levers left two instruments one row apart, printed by the same job:
+
+```
+census:   hit 263 (17.89%), refused 597, outranked 443, uncovered 3, no profile 164
+profile:  +profile top-1 17.82% (262), shortlist 17.89% (263)
+```
+
+`263` is the product's **shortlist**, not its top-1. `familiesOfMark('line')` is `['line', 'area']` — a
+line is a line and, filled, an area — so a line answering an `area` row covers the label's family
+*second*. `profile.ts` counts a top-1 hit only when the covering family is the answer's first claim
+(otherwise a bar named by a histogram cue would answer two questions at once), and the census tested
+`.includes()`, which is the shortlist test. It called that row a hit.
+
+The row is new: relaxing the line's admission in lever 4 is what first let a line answer an `area`
+question over a category axis. The reconciliation test — *"agrees with the profile reading about the
+same rows, or it is explaining another corpus"* — had passed for four dispatches because every fixture
+it held was an agreeing row. A test that only sees rows where two instruments agree cannot show that
+they agree.
+
+The repair is not a tolerance. The census's headline has to **be** the number the product publishes,
+so `hit` now means the published first choice and the widened row gets the name of what happened:
+
+```
+outcomes: hit | substituted | refused | outranked | uncovered | noProfile
+invariant: hit + substituted === shortlist
+```
+
+`substituted` says the answer covered the family as its second claim, which is neither a hit (the label
+asked for the other picture) nor a loss (nothing outranked the covering mark — it is what answered).
+The report prints the sum as the shortlist, so the two files reconcile by an equation instead of by a
+claim, and the fixture added for it holds an `area` label over a quarterly table.
 
 The population has moved from "one third reachable" to "two thirds reachable", and the bottleneck has
 moved with it: **443 rows are now admitted and ranked below something else**, against 182 when the
@@ -13316,3 +13354,8 @@ those tables fail `profilesOf` outright, which is a parsing defect with a measur
 3. **Three nulls are a finding.** Each of the first three levers was measured alone and moved nothing
    on the score; the fourth moved 234 rows out of "unanswerable". Had they been shipped together on
    their merits, the round would have reported the sum and learned nothing about which term mattered.
+4. **An instrument one row ahead of the product is a defect, not a rounding.** `263` against `262` came
+   from the census using the shortlist test where the product publishes the top-1 test. The number an
+   instrument prints at the top of its report has to be the number the file beside it publishes, or the
+   census is explaining a corpus nobody published — and the disagreement appeared exactly in the round
+   where a lever created the first row the two tests read differently.
