@@ -147,13 +147,15 @@ describe('a column that formats as time', () => {
     expect(timeLikeColumns(set, profilesOf(set))).toEqual([]);
   });
 
-  it('recognises the other shapes a result set writes time in', () => {
-    const quarters = parseResultSet(table('Quarter, Revenue', ['Q1 2019, 10', 'Q2 2019, 12', 'Q3 2019, 14']));
-    expect(timeLikeColumns(quarters, profilesOf(quarters)).map((entry) => entry.column)).toEqual(['Quarter']);
-    const months = parseResultSet(table('Month, Revenue', ['Jan 2019, 10', 'Feb 2019, 12', 'Mar 2019, 14']));
-    expect(timeLikeColumns(months, profilesOf(months)).map((entry) => entry.column)).toEqual(['Month']);
-    const yearMonth = parseResultSet(table('Month, Revenue', ['2019-01, 10', '2019-02, 12', '2019-03, 14']));
-    expect(timeLikeColumns(yearMonth, profilesOf(yearMonth)).map((entry) => entry.column)).toEqual(['Month']);
+  it('stops reporting a column once the profiler reads it as time', () => {
+    // The diagnostic measures the gap between "a person reads a date" and "the profiler did", so it
+    // has to shrink when the profiler widens: quarters, month names and a year-and-month are now
+    // typed temporal, and only the shape the profiler still cannot read is left — a bare year, which
+    // is indistinguishable from a measure of the same magnitude and stays one on purpose.
+    for (const text of ['Q1 2019, 10\nQ2 2019, 12\nQ3 2019, 14', 'Jan 2019, 10\nFeb 2019, 12\nMar 2019, 14', '2019-01, 10\n2019-02, 12\n2019-03, 14']) {
+      const set = parseResultSet(table('Period, Revenue', text.split('\n')));
+      expect(timeLikeColumns(set, profilesOf(set))).toEqual([]);
+    }
   });
 
   it('calls a column it has no profile for nominal, which is the profiler default and not a guess', () => {

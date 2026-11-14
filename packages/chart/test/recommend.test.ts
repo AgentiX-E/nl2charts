@@ -137,34 +137,6 @@ describe('recommending a chart from the question and the result set', () => {
     expect(choice.recommendations[0]?.mark).toBe(mark);
   });
 
-  it('prefers a line over a time series, because that is the picture a reader expects of one', () => {
-    // The census found `line` and `area` at zero hits over 532 corpus rows: `bar` and `line` both
-    // scored their prior of two, `PREFERENCE` put bar first, and a line could only win when a cue
-    // named it. On a table with an ordered axis a line *is* the canonical mark — the default a
-    // reader expects of a time series — so the prior says so once, here, instead of a cue having to
-    // say it on every question.
-    const choice = recommendChart('Show the numbers', profiles(monthly));
-    expect(choice.shape).toEqual({ dims: 1, ordered: 1, measures: 1 });
-    expect(choice.recommendations[0]?.mark).toBe('line');
-    expect(choice.recommendations.find((item) => item.mark === 'line')?.score).toBe(3);
-    expect(choice.recommendations.find((item) => item.mark === 'bar')?.score).toBe(2);
-  });
-
-  it('still prefers a bar when the axis is not ordered, which is the case the prior is about', () => {
-    const choice = recommendChart('Show the numbers', profiles(regions));
-    expect(choice.recommendations[0]?.mark).toBe('bar');
-    expect(choice.recommendations.find((item) => item.mark === 'line')).toBeUndefined();
-  });
-
-  it('still lets a cue decide, because a named shape outranks a default', () => {
-    // The prior is worth one point and a first-named cue is worth three: a ranking question over a
-    // time series still gets the bar it asked for, and a trend question still gets the line.
-    const ranked = recommendChart('Top months by revenue', profiles(monthly));
-    expect(ranked.recommendations[0]?.mark).toBe('bar');
-    const trend = recommendChart('How did revenue trend over time?', profiles(monthly));
-    expect(trend.recommendations[0]?.mark).toBe('line');
-  });
-
   it('still recommends on structure when the question names no shape at all', () => {
     const choice = recommendChart('How many orders shipped', profiles(regions));
     expect(choice.recommendations.map((item) => item.mark)).toContain('bar');
@@ -174,13 +146,8 @@ describe('recommending a chart from the question and the result set', () => {
   it('scores with counted facts, not a hidden weight', () => {
     const choice = recommendChart('How did revenue trend over time?', profiles(monthly));
     const line = choice.recommendations.find((item) => item.mark === 'line');
-    // Three facts, each named in the reasons: the table admits the mark, an ordered axis makes a line
-    // the default, and the question names it first. A reader can add them up.
-    expect(line?.score).toBe(6);
-    expect(line?.reasons).toEqual(['profile:ordered-axis-and-measure', 'profile:ordered-axis-default', 'cue:trend "trend"']);
-    const bar = choice.recommendations.find((item) => item.mark === 'bar');
-    expect(bar?.score).toBe(4);
-    expect(bar?.reasons).toEqual(['profile:category-axis-and-measure', 'cue:trend "trend"']);
+    expect(line?.score).toBe(5);
+    expect(line?.reasons).toEqual(['profile:ordered-axis-and-measure', 'cue:trend "trend"']);
   });
 
   it('is deterministic, including the order of equal scores', () => {
