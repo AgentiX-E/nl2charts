@@ -268,6 +268,11 @@ export function describeCorpus(corpus: Text2VisCorpus): readonly string[] {
   return [
     `rows ${String(corpus.rows.length)}`,
     `columns ${String(corpus.columns.length)}`,
+    // The header itself, not only its length. Every reading this repository takes from the corpus
+    // asks a new question of a field it has not read yet, and the count says nothing about which
+    // fields exist: the question "can a profile be recovered from this file" is answered by the
+    // names, and a log that prints four of twenty-four makes the next instrument a download.
+    `column names ${corpus.columns.join(' | ')}`,
     `with reference code ${String(withCode)}`,
     `with an answer ${String(withAnswer)}`,
     ...chartTypeCounts(corpus).map(([name, count]) => `${name} ${String(count)}`),
