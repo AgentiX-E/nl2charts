@@ -182,6 +182,8 @@ describe('what the corpus holds', () => {
       `column names Prompt | Answer | Visualization Code | Chart Type`,
       'with reference code 1',
       'with an answer 1',
+      'table data sample ""',
+      'question sample ""',
       'Bar Chart 1',
     ]);
   });
