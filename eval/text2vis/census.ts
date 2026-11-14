@@ -42,15 +42,19 @@ import { numericCell, parseResultSet, profilesOf, type ProfileInput, type Result
  * The marks that could have answered a family, derived from `familiesOfMark` rather than restated.
  *
  * A second table here would be a second opinion about which mark covers `area` (a line, because an
- * area chart is that line filled) and about `histogram` (a bar, but only when the leading cue is
- * `histogram`). Both widenings already live in the product, so they are asked for rather than copied:
- * `familiesOfMark(mark, 'histogram')` is the widest answer a mark can give, and a family nobody
- * answers for — `violin` — comes back empty, which is what makes it its own outcome.
+ * area chart is that line filled), so it is asked for instead of copied. `familiesOfMark` with no cue
+ * is the conservative table — what a mark *is*, before any question names anything — and a family no
+ * mark is comes back empty, which is what makes it its own outcome.
+ *
+ * **The cue-conditional widening is deliberately not applied here.** `bar` answers for `histogram`
+ * only when a histogram cue named it, and that is a fact about a row, not about the table. Asking the
+ * widest question of every row made 43 histogram rows read as `lost histogram to bar` with `bar` as
+ * both the covering mark and the winner: a loss to itself, which no ranking can produce and no lever
+ * can repair. With the widening left to the row, those rows are `substituted` when the cue fired and
+ * `uncovered` when it did not — and `outranked` holds losses again.
  */
 export function coveringMarks(family: ChartFamily): readonly RecommendableMark[] {
-  return RECOMMENDABLE_MARKS.filter(
-    (mark) => familiesOfMark(mark).includes(family) || familiesOfMark(mark, 'histogram').includes(family),
-  );
+  return RECOMMENDABLE_MARKS.filter((mark) => familiesOfMark(mark).includes(family));
 }
 
 /** What became of one scored question. */
@@ -284,11 +288,17 @@ export function classify(row: ProfileInput): CensusRow {
   const set = parseResultSet(row.tableData);
   const profiles = profilesOf(set);
   if (profiles.length === 0) return { expected, outcome: 'noProfile' };
-  const covering = coveringMarks(expected);
-  if (covering.length === 0) return { expected, outcome: 'uncovered' };
+  // The row's own answer is read before the family's coverage, because a mark can cover a family
+  // through the cue that named it and no mark can be that family at all — a bar is a histogram only
+  // when the question says so. Testing coverage first would file that row as `uncovered` and lose the
+  // one fact that explains it.
   const choice = recommendChart(row.prompt, profiles);
   const top = choice.recommendations[0];
   const lead = top === undefined ? undefined : familiesOfMark(top.mark, top.cues[0]);
+  const covering = coveringMarks(expected);
+  if (covering.length === 0 && (lead === undefined || !lead.includes(expected))) {
+    return { expected, outcome: 'uncovered' };
+  }
   if (top !== undefined && lead !== undefined && lead[0] === expected) {
     return { expected, outcome: 'hit' };
   }
