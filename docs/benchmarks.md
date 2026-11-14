@@ -13292,13 +13292,15 @@ The census after four levers, on the same 1,470 rows:
 |---|---:|---:|
 | hit (the label's family is the answer's *first* claim) | 262 | 17.82% |
 | substituted (it is the answer's second claim: a line answering an `area` row) | 1 | 0.07% |
-| refused | **597** | **40.61%** |
-| outranked | **443** | **30.14%** |
-| uncovered | 3 | 0.20% |
+| refused | **568** | **38.64%** |
+| outranked | **399** | **27.14%** |
+| uncovered | 76 | 5.17% |
 | no profile | 164 | 11.16% |
 
-`262 + 1 + 597 + 443 + 3 + 164 = 1,470`, and every earlier table in this chapter is the same
-population read with one more lever in place.
+`262 + 1 + 568 + 399 + 76 + 164 = 1,470`, and every earlier table in this chapter is the same
+population read with one more lever in place. Two corrections move the last three rows — the shortlist
+test and the self-comparison below — and both were found after the levers were measured, which is why
+the tables in this chapter quote the numbers their dispatch printed rather than a later revision.
 
 ### One row out of 1,470: the census read ahead of the product
 
@@ -13335,13 +13337,44 @@ The report prints the sum as the shortlist, so the two files reconcile by an equ
 claim, and the fixture added for it holds an `area` label over a quarterly table.
 
 The population has moved from "one third reachable" to "two thirds reachable", and the bottleneck has
-moved with it: **443 rows are now admitted and ranked below something else**, against 182 when the
-round began. The next lever is the ranking, not the card — which is the same place the BIRD half
+moved with it: **399 rows are admitted and ranked below something else**, against 182 when the
+round began — and 30 of those 182 were the self-comparison described below, so the like-for-like
+move is **152 to 399**. The next lever is the ranking, not the card — which is the same place the BIRD half
 found its 3.9pp of selection loss, and the same lesson: a pool that contains the answer is only worth
 what the chooser takes from it.
 
 `no profile` (164 rows, 11.16%) is the second named bucket and it is not a ranking question at all:
 those tables fail `profilesOf` outright, which is a parsing defect with a measurement of its own.
+
+### 44 of the 443 losses were losses to themselves
+
+The corrected census also put a line in the ranking table that cannot be a ranking result:
+
+```
+lost histogram to bar: 43 (on preference 43, cue named and lost 43, gaps 0x43)
+```
+
+`coveringMarks` had been asked for the *widest* coverage a mark can give, which includes
+`bar -> histogram` — a widening the product grants only when a histogram cue named the bar. Asking it
+of the table made every histogram row's covering mark the bar that answered it, so the row was read as
+a loss with `bar` on both sides: gap 0, decided on preference, by itself.
+
+The table now answers what a mark **is**; the row keeps the cue. A bar that answers a histogram row
+after the question named one is `substituted`; one that answers without it is `uncovered`, because no
+mark in this contract is a histogram until the question says the word. That, plus one row that was a
+genuine loss to a boxplot and is now also `uncovered`, is the whole 443 -> 399:
+
+| bucket | before | after |
+|---|---:|---:|
+| refused | 597 | **568** |
+| outranked | 443 | **399** |
+| uncovered | 3 | **76** |
+
+What is left is a ranking bucket with one story in it: **355 of the 399 losses are losses to a bar**
+(line 199, pie 81, area 64, scatter 11), 253 of them in rows where a cue named the covering mark, and
+exactly **one** decided on preference. Bar is second in every cue list the table has, so it accumulates
+a point from every cue that fires; that is a scoring property, not a tie-break one, and no
+`PREFERENCE` change can touch it. That is the next round's lever, and this is the number it aims at.
 
 ### What changes in the method
 
@@ -13359,3 +13392,8 @@ those tables fail `profilesOf` outright, which is a parsing defect with a measur
    instrument prints at the top of its report has to be the number the file beside it publishes, or the
    census is explaining a corpus nobody published — and the disagreement appeared exactly in the round
    where a lever created the first row the two tests read differently.
+5. **A loss to itself is an instrument defect, and it hides inside a plausible count.** `443 outranked`
+   behaved like a bucket: it had gaps, cue positions and preferences to read. Forty-four of those rows
+   had the same mark on both sides, and the test that catches it is one line — a covering mark that *is*
+   the answer is not a loser. It was missed because the coverage table had been allowed to answer a
+   question only the row can answer: what did *this* question call the chart.
