@@ -58,7 +58,11 @@ const LABEL_FAMILIES: readonly (readonly [RegExp, ChartFamily])[] = [
   [/\bscatter\b|\bbubble\b/, 'scatter'],
   [/\bpie\b|\bdonut\b|\bdoughnut\b/, 'pie'],
   [/\barea\b/, 'area'],
-  [/\bbar\b|\bcolumn\b/, 'bar'],
+  // `Barh` is the corpus's horizontal bar and is the same decision as a bar with the axes swapped,
+  // which the contract expresses through the encoding rather than through a second mark. It is in
+  // this table because the first real reading of the corpus found 516 rows whose label this build
+  // could not name, and a label that is *this* unambiguous should not be one of them.
+  [/\bbar\b|\bbarh\b|\bcolumn\b/, 'bar'],
   [/\bline\b/, 'line'],
 ];
 
@@ -147,8 +151,14 @@ export interface LabelReading {
 
 export interface RuleReport {
   readonly rows: number;
-  /** Labels this build has no family for, with the labels themselves. */
-  readonly unmapped: { readonly count: number; readonly labels: readonly string[] };
+  /**
+   * Labels this build has no family for, each with the rows it accounts for.
+   *
+   * The count and the list were two facts with no bridge between them, so the first real reading
+   * could say "516 rows are unmapped" and name eight labels without saying which one to fix first.
+   * Ordered by size, because that is the order a reader should act in.
+   */
+  readonly unmapped: { readonly count: number; readonly labels: readonly { readonly label: string; readonly n: number }[] };
   /** Rows the score is computed on: the rows whose label has a family. */
   readonly scored: number;
   readonly top1: number;
@@ -183,7 +193,7 @@ export interface RuleReport {
  */
 export function scoreRule(rows: readonly RuleInput[], options: { readonly clock?: () => number } = {}): RuleReport {
   const clock = options.clock ?? ((): number => performance.now());
-  const unmappedLabels = new Set<string>();
+  const unmappedLabels = new Map<string, number>();
   const perLabel = new Map<string, { family: ChartFamily; n: number; top1: number; shortlist: number; answered: Map<RecommendableMark | 'declined', number> }>();
   const confusion = new Map<string, { expected: ChartFamily; answered: RecommendableMark; n: number }>();
   const durations: number[] = [];
@@ -201,7 +211,7 @@ export function scoreRule(rows: readonly RuleInput[], options: { readonly clock?
     const family = familyOfLabel(row.label);
     if (family === undefined) {
       unmapped += 1;
-      unmappedLabels.add(row.label);
+      unmappedLabels.set(row.label, (unmappedLabels.get(row.label) ?? 0) + 1);
       continue;
     }
     scored += 1;
@@ -241,7 +251,12 @@ export function scoreRule(rows: readonly RuleInput[], options: { readonly clock?
 
   return {
     rows: rows.length,
-    unmapped: { count: unmapped, labels: [...unmappedLabels].sort() },
+    unmapped: {
+      count: unmapped,
+      labels: [...unmappedLabels.entries()]
+        .map(([label, n]) => ({ label, n }))
+        .sort((left, right) => right.n - left.n || left.label.localeCompare(right.label)),
+    },
     scored,
     top1,
     top1Share: scored === 0 ? 0 : top1 / scored,
@@ -330,7 +345,12 @@ export function describeRule(report: RuleReport): readonly string[] {
     `  cue path: p50 ${report.latency.p50.toFixed(2)}ms, p95 ${report.latency.p95.toFixed(2)}ms, max ${report.latency.max.toFixed(2)}ms`,
   ];
   if (report.unmapped.labels.length > 0) {
-    lines.push(`  unmapped labels: ${report.unmapped.labels.slice(0, 12).join(', ')}${report.unmapped.labels.length > 12 ? ', ...' : ''}`);
+    lines.push(
+      `  unmapped labels: ${report.unmapped.labels
+        .slice(0, 12)
+        .map((entry) => `${entry.label === '' ? '<empty>' : entry.label} (${String(entry.n)})`)
+        .join(', ')}${report.unmapped.labels.length > 12 ? ', ...' : ''}`,
+    );
   }
   for (const entry of report.perLabel.slice(0, 12)) {
     lines.push(
