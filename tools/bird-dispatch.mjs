@@ -21,6 +21,7 @@
  *
  *   node tools/bird-dispatch.mjs --model deepseek-flash --timeout 300000
  *   node tools/bird-dispatch.mjs --model deepseek-v4-pro --wait   # queue behind, never into
+ *   node tools/bird-dispatch.mjs --model deepseek-chat --limit 200 --aa select-mixed
  *   node tools/bird-dispatch.mjs --self-test
  *
  * The token is read from `GH_TOKEN`, never from an argument: a token in `argv` lands in shell
@@ -52,12 +53,16 @@ export function busyRuns(runs) {
 }
 
 /** The dispatch body, as the workflow's `inputs` declare them. */
-export function dispatchBody({ model, timeoutMs, arms, limit }) {
+export function dispatchBody({ model, timeoutMs, arms, limit, aa }) {
   const inputs = {};
   if (model !== undefined) inputs.model = model;
   if (timeoutMs !== undefined) inputs.timeout_ms = String(timeoutMs);
   if (arms !== undefined) inputs.arms = arms;
   if (limit !== undefined) inputs.limit = String(limit);
+  // The control the split that decides adoption could not be given until `bird-dev` declared the
+  // input: a dev reading with no A/A has no noise of its own, so it inherits one measured on 496
+  // questions. Passed through rather than defaulted, because "no A/A" is a legitimate dispatch.
+  if (aa !== undefined) inputs.aa = aa;
   return { ref: 'master', inputs };
 }
 
@@ -166,6 +171,12 @@ function selfTest() {
   same('the body carries only what was asked for', dispatchBody({ model: 'deepseek-flash' }), {
     ref: 'master',
     inputs: { model: 'deepseek-flash' },
+  });
+  // The control is an ordinary input now, so the body has to carry it: a dispatch that asked for an
+  // A/A and silently got none would read as a stable pair that was never run.
+  same('the control is passed through, and its absence stays an absence', dispatchBody({ model: 'm', aa: 'select-mixed' }), {
+    ref: 'master',
+    inputs: { model: 'm', aa: 'select-mixed' },
   });
   // The workflow spells the input `timeout_ms` and takes a string; a number here is silently
   // dropped by Actions, which would run the default 120 s that cost 94 cases.
@@ -281,6 +292,8 @@ async function main(argv) {
   }
   const timeout = value(argv, '--timeout');
   const arms = value(argv, '--arms');
+  const limit = value(argv, '--limit');
+  const aa = value(argv, '--aa');
   const wait = argv.includes('--wait');
   const listPath = `/repos/${REPO}/actions/runs?per_page=20`;
 
@@ -330,7 +343,7 @@ async function main(argv) {
 
     const dispatched = await call(`/repos/${REPO}/actions/workflows/${WORKFLOW}/dispatches`, token, {
       method: 'POST',
-      body: JSON.stringify(dispatchBody({ model, timeoutMs: timeout, arms })),
+      body: JSON.stringify(dispatchBody({ model, timeoutMs: timeout, arms, limit, aa })),
     });
     if (dispatched.status !== 204) {
       console.error(`bird-dispatch: dispatch failed (HTTP ${String(dispatched.status)}) ${JSON.stringify(dispatched.body ?? {}).slice(0, 200)}`);

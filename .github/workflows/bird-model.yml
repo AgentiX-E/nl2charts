@@ -226,6 +226,25 @@ jobs:
           else
             echo 'no artifact was written, so there is no taxonomy to audit'
           fi
+      - name: What the pool itself can explain of the A/A delta
+        # The gate refuses a run whose A/A pair disagrees by more than its tolerance, and that
+        # refusal is the only thing the run says about its own resolution. This step prices the
+        # *pool*: hold the widest set of statements an arm kept fixed and draw the arm's own
+        # candidate count from it twice, and the delta that comes out is what a stable draw
+        # distribution would have produced. A pair inside that band measured the draw; a pair
+        # beyond it measured a draw distribution that moved, which no ordering of the arms removes.
+        #
+        # After the taxonomy and before the summary, because the number it prints — the smallest
+        # delta a claim from this run can rest on — belongs beside the scores rather than below
+        # them, and `always()` because a run the gate refused is exactly the run whose resolution
+        # a reader needs.
+        if: always()
+        run: |
+          if [ -f eval/out/bird-eval.json ]; then
+            pnpm bench:bird:lottery eval/out/bird-eval.json
+          else
+            echo 'no artifact was written, so there is no pool to price'
+          fi
       - name: Publish summary
         if: always()
         run: |
