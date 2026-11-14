@@ -39,6 +39,7 @@
     "bench:bird:route": "tsx eval/bird/route.ts",
     "bench:bird:pool": "tsx eval/bird/pool.ts",
     "bench:bird:diversity": "tsx eval/bird/diversity.ts",
+    "bench:bird:lottery": "tsx eval/bird/lottery.ts",
     "bench:bird:consensus": "tsx eval/bird/consensus.ts",
     "bench:adversarial": "tsx eval/adversarial/run.ts",
     "bench:guard": "tsx eval/guard/redteam.ts --strict",

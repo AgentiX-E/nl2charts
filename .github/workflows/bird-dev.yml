@@ -35,6 +35,16 @@ on:
         # whose MDE (2.30pp) can decide the four-call tier; `select-cross` is not, because it
         # needs a second model that a routine dispatch does not configure.
         default: 'names,inline+evidence,metadata+evidence,select,select-mixed'
+      aa:
+        # This split decides adoption, and until now it had no control of its own: Mini-Dev runs
+        # carry `BIRD_AA` and this one could not, so the noise of the numbers a leaderboard is
+        # compared against was inherited from a 496-question split rather than measured here.
+        # A repeated run differs even when the endpoint is stable — the model chooses which of its
+        # statements to write — and `pnpm bench:bird:lottery` prices that floor from the artifact.
+        # Blank means no control, which is what every earlier dev reading was.
+        description: Arm to run twice as an A/A control (blank = none)
+        required: false
+        default: ''
       second_model:
         description: Model for `@second` candidate sources (blank = none)
         required: false
@@ -80,6 +90,7 @@ jobs:
       BIRD_SPLIT: dev
       BIRD_ARMS: ${{ inputs.arms }}
       BIRD_CONCURRENCY: '8'
+      BIRD_AA: ${{ inputs.aa }}
       # Only read when an arm names an `@second` source. The key is the second provider's
       # own secret, never the primary model's: a run that silently used the primary key
       # against another endpoint would measure the endpoint's auth error, not the model.
@@ -244,6 +255,12 @@ jobs:
       # run only on success: `40534288883` failed the floor gate and the artifact — the only
       # copy of the per-case rows and the McNemar p-values — was never uploaded, so the run
       # could not be read at all. The summary states the absence instead of crashing on it.
+      # The resolution of everything above it: hold the widest pool this run kept fixed, draw the
+      # arm's own candidate count from it twice, and the delta that comes out is what a stable draw
+      # distribution would have shown. A pair inside that band read the draw; a pair beyond it read a
+      # distribution that moved, which is the part of the noise no ordering of the arms removes.
+      - name: What the pool itself can explain of the A/A delta
+        run: pnpm bench:bird:lottery eval/out/bird-eval.json
       - name: Publish summary
         if: always()
         run: |
