@@ -52,6 +52,12 @@
       "functions": 100,
       "branches": 100
     },
+    "eval/bird/block-columns.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 100
+    },
     "eval/bird/cache.ts": {
       "lines": 99.21,
       "statements": 99.21,
@@ -329,10 +335,10 @@
       "branches": 100
     },
     "eval/bird/rewrite.ts": {
-      "lines": 99.59,
-      "statements": 99.59,
+      "lines": 99.6,
+      "statements": 99.6,
       "functions": 100,
-      "branches": 99.2
+      "branches": 99.22
     },
     "eval/bird/route.ts": {
       "lines": 100,
@@ -554,7 +560,7 @@
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 98.05
+      "branches": 100
     }
   }
 }

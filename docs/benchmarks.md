@@ -12446,6 +12446,131 @@ The next reading is one change: `share → ['bar', 'pie']`, with the bar registe
 top-1 ≥ 45.0% and `Bar` top-1 ≥ 60.0%, on the same corpus, with the same two baselines printed
 alongside. A change to the cue table that does not clear its own baseline is not a change.
 
+#### The sweep: four cue tables, one run, and the bar none of them clears
+
+`share → ['bar', 'pie']` was registered with two numbers attached — top-1 ≥ 45.0% and `Bar` top-1 ≥
+60.0% — and the reading that decides it now costs nothing to take: a table is scored in a fifth of a
+millisecond, so the arm prices the shipped table and every table this build can construct on the same
+rows, in one run over the same 1,470 scored questions. The denominator moved from the 1,469 of the
+first reading because `Barh` is now mapped, and the shipped table reads 37.35% against the 37.37% it
+read on 1,469 — the same **549** hits, so the two readings are the same reading.
+
+| table | top-1 | Δ vs shipped | `bar` family | `pie` family | `histogram` | shortlist |
+|---|---:|---:|---:|---:|---:|---:|
+| `shipped` | **37.35%** (549) | — | 51/420 (12.14%) | 145/182 | 0/90 | 1,000 |
+| `bar-share` | 40.82% (600) | +3.47pp | **247/420 (58.81%)** | **0/182** | 0/90 | 1,000 |
+| `histogram` | 39.46% (580) | +2.11pp | 51/420 | 145/182 | **31/90 (34.44%)** | 1,031 |
+| `bar-share+histogram` | **42.93%** (631) | **+5.58pp** | 247/420 (58.81%) | 0/182 | 31/90 | 1,031 |
+
+Three things this table says that a single number could not.
+
+**The mechanism is exactly the size the corpus said it was, and the cost is the one nobody priced.**
+The `bar` family is 420 questions and the shipped table answers 51 of them; flipping the cue answers
+**247**, which is the 196 rows the previous round counted as bars answered `pie`. The price is
+**all 145** of the pie rows that family had: `share` now leads with a bar for every question that
+fires it, and the 182 pie-and-donut questions are inside that set. The gain was predicted to the row
+and the loss was not priced at all, which is exactly why the bar was registered at 45.0% and not at
+"better than before".
+
+**The histogram cue is a real but smaller fix, and it is scoped.** It recovers **31 of 90** histogram
+questions (0.00% → 34.44%), lifts the shortlist from 1,000 to 1,031, and leaves `boxplot` at 47 of 90
+and every other family where it was — because a question that says "histogram" does not say
+"boxplot". The other 59 histogram rows never use the word, and that is the finding: the label is an
+annotator's choice of *shape*, and 59 of them ask for a distribution in words a cue table cannot
+separate from a boxplot's.
+
+**None of the three registered bars is cleared.** 40.82% against the required 45.0%, `Bar` 58.81%
+against 60.0%, `Histogram` 34.44% against 40.0%. The combined table reaches **42.93%**, which is
++5.58pp on the shipped table — an exact, census-wide gain, since the corpus is not a sample and this
+delta carries no sampling noise at all — and still 2.07pp short of the number registered before the
+run.
+
+**So the shipped table does not change.** A pre-registration that is missed by two points and then
+adopted anyway is not a pre-registration; it is a note taken after the fact, and the next change would
+be measured against a bar that had already been moved once. What the sweep buys is the diagnosis:
+the loss is not in the ordering, it is in the *cue*. `share` is one phrase covering two pictures, and
+196 + 145 = 341 of the corpus's questions are the evidence that it cannot be one line. The next
+experiment is a discriminator inside `share` — pie when the question names a whole it is a part of,
+bar when it names categories to compare — registered before it is run, with the two numbers this
+sweep fixes as its floor: top-1 ≥ 45.0% **and** `pie` no lower than the 145 the shipped table keeps.
+
+#### The discriminator inside `share`, priced at two widths — and both of them miss
+
+The criterion above was registered with two numbers: top-1 ≥ 45.0% and `pie` no lower than 145. The
+discriminator was registered at **two widths** before either ran, so that which one ships is a
+reading rather than a choice made while looking at the result:
+
+- `share-by` — a share word immediately followed by the dimension it splits on (`share by`,
+  `breakdown across`, `percentage per`).
+- `share-by-any` — the same signal with a measure between the words, so "the share of revenue by
+  region", the corpus's most natural way to ask for a comparison, is also a bar.
+
+Both carry a single bar as their only mark, and both are inserted ahead of `share`, because the
+leading mark is the first mark of the first fired cue. One dispatch of the rule arm prices all six
+tables on the same 1,470 scored questions, no model call (`43591108214`):
+
+| table | top-1 | Δ vs shipped | `bar` | `pie` | `histogram` | shortlist |
+|---|---:|---:|---:|---:|---:|---:|
+| `shipped` | 549 (37.35%) | — | 51/420 | 145/182 | 0/90 | 1,000 |
+| `bar-share` | 600 (40.82%) | +51 | 247/420 | 0/182 | 0/90 | 1,000 |
+| `histogram` | 580 (39.46%) | +31 | 51/420 | 145/182 | 31/90 | 1,031 |
+| `bar-share+histogram` | **631 (42.93%)** | +82 | 247/420 | 0/182 | 31/90 | 1,031 |
+| **`share-by`** | 554 (37.69%) | **+5** | 61/420 | 140/182 | 0/90 | 1,000 |
+| **`share-by-any`** | 599 (40.75%) | **+50** | 246/420 | **0/182** | 0/90 | 1,000 |
+| `share-by+histogram` | 585 (39.80%) | +36 | 61/420 | 140/182 | 31/90 | 1,031 |
+| `share-by-any+histogram` | 630 (42.86%) | +81 | 246/420 | 0/182 | 31/90 | 1,031 |
+
+**Both widths miss, and they miss in opposite directions, which is the finding.**
+
+`share-by` moves **ten** rows and loses **five**: the phrase is rare in this corpus. Ten rows out of
+420 bar questions say "share by" with nothing in between, so the narrow reading of the signal is
+almost never the corpus's way of asking, and its 37.69% is a measurement of that rarity rather than
+of the idea. It also fails the second clause — `pie` 140 against the required 145 — which is the one
+number a discriminator must not spend.
+
+`share-by-any` moves **195** rows and loses **all 145**: every single pie question in the corpus
+contains a share word and a `by` somewhere after it. It lands at 40.75% with `pie` 0/182, which is
+`bar-share` (40.82%, `pie` 0/182) reproduced to within one row. Two different mechanisms producing
+the same table is not a coincidence to be explained away: at this width the "discriminator" *is* the
+blunt flip, because the phrase it keys on is present in the questions it was meant to exclude.
+
+**So the distinction is not in the words around `share`.** That is what a cue table can see, and it
+cannot see it, at either width. The honest statement of the position:
+
+| family | n | shipped top-1 | reading |
+|---|---:|---:|---|
+| `pie` | 182 | 145 (79.7%) | the one family the shipped table answers well |
+| `bar` | 420 | 51 (12.1%) | the largest family in the corpus and the worst served |
+| `line` | 394 | 216 (54.8%) | |
+| `area` | 138 | 59 (42.8%) | |
+| `scatter` | 104 | 30 (28.8%) | |
+| `histogram` | 90 | 0 (0.0%) | the cue names no binned measure |
+| `boxplot` | 90 | 47 (52.2%) | |
+| `heatmap` | 20 | 1 (5.0%) | the `matrix` cue fires on `by … and …` and almost nothing else |
+| `funnel` / `violin` / `candlestick` / `radar` | 32 | 0 | four families with no cue that reaches them |
+
+The confusion table says where the mass is. The shipped table answers `pie` for **529** of the 1,470
+scored questions and only **145** of them are pies: `bar → pie` is 196 rows, `line → pie` 81,
+`area → pie` 35, `histogram → pie` 24, and 48 more from five smaller families. The cue is not a shape
+word at all — "what percentage of orders…" asks for a **number**, and the corpus's annotators drew a
+bar for most of those. That is why every table that leads `share` with a bar lands within a row of
+every other one: the choice is not between two pictures inside a cue, it is between a cue that
+over-claims and a cue that over-claims less.
+
+**The shipped table does not change, and the cue-only path is now closed as a lever.** Three
+different tables — the blunt flip, the wide discriminator, and the two of them plus the histogram cue
+— land at 40.75%, 40.82% and 42.93%, inside 2.2pp of each other while differing by 195 rows. A
+mechanism that produces the same score three ways is at its ceiling, and the ceiling is 42.93% against
+a registered 45.0%.
+
+What the next experiment has to be is therefore not a fourth phrase. The corpus ships the reference
+`code` for every row, so the *shape of the answer* — how many categories the statement groups by,
+whether the measure is a part of a stated total — is recoverable without a model. That is a
+**profile** decision rather than a lexical one, it is what `recommendChart(profile, question)` already
+does in the product, and the rule arm has only ever scored the cue half of it. Registering it here:
+score the full recommender on the same 1,470 rows, cue-only as the control, and require top-1 ≥
+45.0% with `pie` not below 145 before the shipped path changes.
+
 #### What the 515 excluded rows are, and the correction that makes
 
 The block now prints the rows behind each unmapped label, and the second run (`43546926456`) is what
@@ -12621,6 +12746,78 @@ That is the honest form of the finding: the `distinct` direction is a real 59-ca
 ablation reference for the `values` rung — the same role `drop-limit-on-count` plays for caps at 1
 win against 19 losses.
 
+### The same two points for a tenth of the prompt: `samples-wide-link` on dev
+
+The section above ends with a budget rather than a verdict: the competitor's value block buys
++2.02pp for +74.9% of the prompt, which no product ships. The block's cost is not its bracket but
+**the number of columns that carry one** — the sampler, the order, the values and the call count are
+identical whether one column carries a bracket or eighty. So the next dispatch held all of that fixed
+and changed only the set: MAC-SQL's rule, applied to the columns the prompt's **own hint** already
+names.
+
+That rule is not a fitted allow-list. `buildAskMessages` renders `Likely columns: t.c, …` as the first
+line of the user message, so the block lands on columns the model is already pointed at, and both the
+hint and the block are read from the question and the schema. The oracle version of the same idea —
+the columns the gold statement filters on — has been in the table for rounds as a ceiling; this is the
+first runnable member of the family.
+
+One dispatch (`43591209696`), the dev split, both arms inside one artifact, one call each:
+
+| arm | passed | accuracy | prompt tokens | prompt chars | calls |
+|---|---:|---:|---:|---:|---:|
+| `inline+evidence` | 937 / 1,532 | 61.16% | 676 | 2,781 | 1.00 |
+| `inline+evidence+samples-wide-link` | **960 / 1,532** | **62.66%** | **738** | 2,965 | 1.00 |
+| difference | +23 | **+1.50pp** | **+9.17%** | +6.62% | 0 |
+
+| quantity | value |
+|---|---:|
+| right only with the block | 52 |
+| right only without it | 29 |
+| net | **+23 cases** |
+| exact McNemar (two-sided) | **p = 0.0140** |
+| disagreement share | 5.29% |
+| instrument resolution `R = 2.8·√(share/n)` | 1.64pp |
+
+**The registered bar was two numbers, and both were cleared.** `≥ +1.5pp` — met at +1.50pp — and
+`≤ +25%` prompt tokens — met at +9.17%. The oracle for the same family (`samples-gold`) sits in the
+table as the ceiling; this is within half a point of the wide block's +2.02pp at **an eighth of its
+cost**, which is the trade the family needed.
+
+**A delta at the bar has to be read with its resolution, not instead of it.** `R` is 1.64pp, so the
+*magnitude* here is not resolved — this run can say the sign is positive (52:29, p = 0.0140) and
+cannot say whether the true gain is 1.0pp or 2.5pp. The reason to believe it is not a draw that moved
+is the bucket reading below, which is the same instrument that names the fix, run on both arms of the
+same artifact (zero model calls, one oracle query per case):
+
+| bucket | `inline+evidence` | `samples-wide-link` | `samples-wide` (last round) |
+|---|---:|---:|---:|
+| `literal-case` | 13 (3.0%) | **1 (0.2%)** | 1 (0.2%) |
+| `literal-missing` | 42 (9.6%) | 39 (9.2%) | 34 (8.1%) |
+| `filter-narrow` | 74 (16.9%) | 62 (14.6%) | 60 (14.4%) |
+| `filter-wide` | 94 (21.5%) | 95 (22.4%) | 94 (22.5%) |
+| `tables` | 76 (17.4%) | 81 (19.1%) | 79 (18.9%) |
+| `predicate` | 71 (16.2%) | 73 (17.2%) | 71 (17.0%) |
+| `aggregate` | 35 (8.0%) | 35 (8.3%) | 41 (9.8%) |
+| `projection` | 21 (4.8%) | 29 (6.8%) | 30 (7.2%) |
+| in-scope failures | 435 of 591 | 422 of 560 | 418 of 560 |
+
+Twelve of the thirteen case-mismatched literals become one, with a block an eighth the size of the
+block that bought the same twelve. That is the mechanism arriving at the same place from a much
+smaller card, and it is why the gain is attributable rather than merely significant.
+
+**The two instruments agree exactly**, which is the other half of the claim. `bench:bird:card`
+recomputes the prompt from the schema, the pinned definitions and the same narrowing rule, and prints
+**2,965 characters and 738 tokens** for the arm — the numbers the endpoint billed, to the unit. That
+agreement is what a card instrument is for: it priced these arms as their parents for four rounds
+because it rendered a card the run never sent, and the rule it needed was shared rather than copied.
+
+**Adoption is open, and deliberately.** The arm this product ships is `select-mixed-rule` — three
+candidates, one rule, 63.97% on dev — and a block on one call is not a block on three: the same
++9.17% would be paid on every candidate, and the selector would see a pool drawn from a different
+card. Registering that test now: `select-mixed-rule` against `select-mixed-rule` with the narrowed
+block on every candidate, on dev, requiring **≥ +1.0pp** (a third of this arm's gain, because a pool's
+ceiling moves less than one draw's accuracy) with the token increase on the artifact's own meter.
+
 ### What is left, and why it is a composition and not a lever
 
 The gap to the strongest training-free system is now attributable, and the attribution says the
@@ -12642,3 +12839,117 @@ priced here separately: value examples (`values`, 56.63%), their dense schema de
 **The composition has never been priced as one arm.** Nothing in this document measures
 `values` + `repairs` + their dense card together, which is what their `MAC-SQL` actually runs, and
 that is the next dispatch rather than another rule.
+
+### The competitor's value block is worth two points, not 5.7: `samples-wide` on dev
+
+The section above ends with a claim that had never been tested: the 5.7-point gap between MAC-SQL's
+pipeline and this repository's best single-call arm is a *composition*. The first block of that
+composition is now priced. It is their value-example rule, ported with the quirks kept
+(`eval/bird/value-examples.ts`, cross-checked against `core/agents.py` at sha `31a9df5e` over three
+databases and 87 columns with zero disagreements): six most-frequent values of every non-key column,
+a numeric column dropped above ten distinct values, a text column dropped whole when any stored value
+is longer than 50 characters or is a URL or an email, a date collapsed to one example, and `NULL`
+emitted first when the column stores one.
+
+One dispatch, `43579551678`, the dev split, the same endpoint and the same model, one call per
+question and nothing else changed:
+
+| arm | passed | accuracy | prompt tokens | prompt chars | calls |
+|---|---:|---:|---:|---:|---:|
+| `inline+evidence` | 941 / 1,532 | 61.42% | 676 | 2,781 | 1.00 |
+| `inline+evidence+samples-wide` | **972 / 1,532** | **63.45%** | **1,182** | 3,950 | 1.00 |
+| difference | +31 | **+2.02pp** | **+74.9%** | +42.0% | 0 |
+
+Both arms ran inside one artifact, so the delta is a paired reading on the same 1,532 rows and not a
+subtraction across two runs:
+
+| quantity | value |
+|---|---:|
+| right only under the value block | 69 |
+| right only without it | **38** |
+| net | **+31 cases** |
+| exact McNemar (two-sided) | **p = 0.0035** |
+| disagreement share | 6.98% |
+| instrument resolution `R = 2.8·√(share/n)` | **1.89pp** |
+
+**The delta is beyond the instrument's own resolution and the direction is registered**, so the
+mechanism is real: showing a column's stored spellings buys about two points on the split a
+leaderboard is compared against. It is not, however, the 5.7 points, and the remainder is therefore
+not in this block.
+
+Three readings decide what happens next, and only one of them says yes.
+
+**The accuracy bar was cleared as a delta and missed as a level.** The criterion registered before
+the dispatch was `≥ 63.5%` — the historical `inline+evidence` reading of 61.16% plus the split's
+2.3pp resolution. The block landed at 63.45%, five hundredths of a point short. The reason is not the
+block: the parent re-measured **61.42%** in this run, 0.26pp above its own historical value, so the
+level the criterion was written against moved. The delta, which is the quantity that survives a
+move, is +2.02pp against a 1.89pp floor. Both numbers are recorded because a pre-registered level
+that is missed *and* a pre-registered delta that is cleared is a state a reader has to be told about
+rather than resolved by whoever is reporting it.
+
+**The cost bar was not cleared, and it is not close.** The block adds **74.9%** to the prompt — three
+times the 25% the plan allowed — for a 42% increase in characters. The gap between those two numbers
+is itself a finding: the block tokenizes at 3.34 characters per token against the card's 4.11, because
+it is a list of short quoted values separated by punctuation, and a budget computed in characters
+would under-count it by a fifth. A gain priced in accuracy and not in tokens is half a reading.
+
+**The bucket the block is aimed at fell, which is the mechanism's fingerprint.** The same instrument
+that names the missing fix, run on both arms of the same artifact (zero model calls, one oracle query
+per case):
+
+| bucket | `inline+evidence` | `samples-wide` | reading |
+|---|---:|---:|---|
+| `literal-case` | 11 (2.5%) | **1 (0.2%)** | the block's own claim: a stored spelling is now on the card |
+| `literal-missing` | 42 (9.7%) | 34 (8.1%) | a literal the card never held |
+| `filter-narrow` | 78 (18.0%) | 60 (14.4%) | |
+| `filter-wide` | 89 (20.6%) | 94 (22.5%) | |
+| `tables` | 77 (17.8%) | 79 (18.9%) | |
+| `predicate` | 65 (15.0%) | 71 (17.0%) | |
+| `aggregate` | 37 (8.5%) | 41 (9.8%) | |
+| `projection` | 21 (4.8%) | 30 (7.2%) | |
+| in-scope failures | 433 | 418 | of 591 and 560 |
+
+Eleven case-mismatched literals became one. That is what a block of stored spellings is for, and it
+is the reason the accuracy gain is credible rather than a draw that moved. The buckets that *rose* are
+all in the third family — what the statement computed, not what it read — and they rose as shares of a
+smaller population: `aggregate` + `projection` are 58 of 433 (13.4%) before and 71 of 418 (17.0%)
+after. **The next lever is generation-side, and this run makes that quantitative rather than a hunch.**
+
+The gain is also not concentrated in the easy stratum, which is the other way a prompt change can look
+real and be worthless:
+
+| difficulty | `inline+evidence` | `samples-wide` | delta |
+|---|---:|---:|---:|
+| simple (925) | 619 (66.9%) | 628 (67.9%) | +1.0pp |
+| moderate (463) | 248 (53.6%) | 262 (56.6%) | +3.0pp |
+| challenging (144) | 74 (51.4%) | 82 (56.9%) | **+5.6pp** |
+
+**Verdict: not adopted as it stands.** A +2.02pp gain that costs 75% more prompt is not a trade a
+product ships when the same budget buys a candidate; the arm stays in the table as the priced ceiling
+of the value family, the way `samples-gold` is the ceiling of the column-sampling family. What the
+result licenses is a **narrow** block: the same rule restricted to the columns a question can plausibly
+filter on, which is the one form in which the mechanism can survive its own cost.
+
+### Where the gap stands after the block
+
+The table the previous section left open, with the row this dispatch adds:
+
+| quantity | value | where it comes from |
+|---|---:|---|
+| shipped arm, dev | **63.97%** | `select-mixed-rule`, 3.00 calls, 3,137 prompt tokens |
+| its pool's ceiling | 66.91% | same artifact |
+| the same pool, another draw | 68.65% | this round's re-read of `43557304930` |
+| the competitor's value block, alone | 63.45% | `samples-wide`, 1 call, 1,182 tokens |
+| **the same block on the hint's columns** | **62.66%** | `samples-wide-link`, 1 call, **738 tokens** |
+| MAC-SQL, our harness, our model, dev | **67.89%** | 1,040/1,532 |
+| MAC-SQL, our harness, our model, Mini-Dev | 65.12% | — |
+| our single best single-call arm, Mini-Dev | **59.44%** | `metadata+evidence` |
+
+The block is 1.50 of the 5.7 points at a price a product can carry (738 tokens against the parent's
+676, and against the wide block's 1,182), so the composition is real, its first term is smaller than
+the gap, and the term is now affordable. A second term has to be found in the harness rather than in
+the card: their selector reads *their* card, their refiner runs on top of it, and the part this
+repository has never reproduced is the pipeline that puts their description, their examples and their
+refiner in one arm — with the narrowed block on every candidate, which is the adoption test registered
+above.
