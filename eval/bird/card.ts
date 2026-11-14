@@ -30,7 +30,7 @@ import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { attachDefinitions, buildAskMessages, renderSchemaCard } from '@agentix-e/nl2charts-ai';
 import type { DatabaseProfile, PromptOptions, Recaller, SchemaTable } from '@agentix-e/nl2charts-ai';
-import { conditionColumns } from './conditions.js';
+import { blockColumns } from './block-columns.js';
 import { buildSchema, loadDescriptions, loadQuestions, loadTables } from './data.js';
 import type { BirdQuestion, BirdTable, ColumnNote } from './data.js';
 import type { CaseRecord } from './gap.js';
@@ -994,9 +994,24 @@ export function promptOf(
   if (arm.samples !== undefined && values === undefined) {
     throw new Error(`arm ${arm.name} carries the stored values on its card and this instrument was given none, so the prompt it would measure is not the one sent`);
   }
-  // The narrowing is the arm's, applied the way the run applies it: on the gold's filtered
-  // columns for the oracle arm, on everything the profile kept for the rest.
-  const wanted = arm.sampleColumns === 'gold' ? conditionColumns(question.SQL) : undefined;
+  // The narrowing is the arm's, applied the way the run applies it: on the gold's filtered columns
+  // for the oracle arm, on the hint's own columns for the arm that has to be runnable, on everything
+  // the profile kept for the rest. The decision is imported rather than restated: this instrument
+  // priced the block arms as their parents for four rounds because it rendered a card the run never
+  // sent, and a second copy of the rule is how that happens again.
+  const wanted =
+    arm.sampleColumns === undefined
+      ? undefined
+      : blockColumns({
+          rule: arm.sampleColumns,
+          question: question.question,
+          sql: question.SQL,
+          schema: card.schema as SchemaTable[],
+          // The same overlay the run passes: the hint's `value` recaller reads it, and a rule read on
+          // a card without it names one column fewer than the prompt does. `values` is defined
+          // whenever an arm declares a block — the guard above refuses the case where it is not.
+          values,
+        });
   const block = values === undefined ? undefined : wanted === undefined ? values : narrowSamples(values, wanted);
   // Before the prune, because the run layers the block on the resolved card and prunes after it.
   const layered = block === undefined ? (card.schema as SchemaTable[]) : attachSamples(card.schema as SchemaTable[], block);

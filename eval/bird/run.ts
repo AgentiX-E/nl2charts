@@ -58,7 +58,8 @@ import type { Oracle, OracleResult } from './oracle.js';
 import { profileDatabase } from './profile.js';
 import { BIRD_SCHEMA_LINES } from './prompt-shape.js';
 import { attachSamples, narrowSamples, sampleValuesOf } from './samples.js';
-import { conditionColumns } from './conditions.js';
+import { blockColumns } from './block-columns.js';
+import type { BlockRule } from './block-columns.js';
 import { exampleMapOf, exampleSetFor } from './value-examples.js';
 import { buildIndex, renderDemonstrationBlocks, renderRetrieved, retrieve } from './retrieval.js';
 import { renderSqlLike } from '../../packages/ai/src/sql-like.js';
@@ -262,7 +263,7 @@ export interface Arm {
    * `prune` is a property of the question, and an arm that carried a per-database allow-list would
    * be fitted on the split it is measured on.
    */
-  readonly sampleColumns?: 'gold';
+  readonly sampleColumns?: BlockRule;
   /**
    * Keep only the fields the gold statement names, and count what that removed.
    *
@@ -979,6 +980,12 @@ export const ARMS: readonly Arm[] = [
   // NULL first when the column stores one. It exists to put the block MAC-SQL's selector reads
   // on our card, so the 6.45pp can be attributed to a block and not to "their pipeline".
   { name: 'inline+evidence+samples-wide', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', samples: 'example' },
+  // The same block on the columns the prompt's own hint names, and on no other. This is the only
+  // form of the value mechanism that can survive its own price: `samples-wide` bought +2.02pp for
+  // +74.9% of the prompt, and the block's cost is its width rather than its bracket, so the
+  // experiment is "how few columns still buy the gain". The rule reads the hint `buildAskMessages`
+  // already renders, which makes it computable before the model is called and free of the answer.
+  { name: 'inline+evidence+samples-wide-link', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', samples: 'example', sampleColumns: 'link' },
   // The same profiler on the columns the gold statement filters on, and on no other. An oracle
   // arm: it reads the answer, so it cannot be adopted, and it exists to bound the family.
   //
@@ -1680,6 +1687,10 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'inline+evidence+samples-gold': 'the same sampler narrowed to the columns the gold statement filters on: an oracle, so its delta is a ceiling for the family and not an achievable one — run it when a column rule is proposed, never as a candidate',
   'inline+evidence+card-gold': 'the same prompt with the card cut down to the fields the gold statement names: an oracle for what a perfect linker is worth in accuracy, not in characters — run it to price the linker, never as a candidate',
   'inline+evidence+samples-wide': "the same lever with MAC-SQL's rule instead of ours: six most-frequent values of every non-key column, a small numeric dictionary included, a date collapsed to one, NULL first — measured on dev at +2.02pp (972/1532 against 941, p=0.0035, above the 1.89pp resolution) for +74.9% prompt tokens, so it is the priced ceiling of the value family and not a candidate: the shipped form of this mechanism has to fit a quarter of that budget",
+  // Its note is a question until the run that answers it lands. The criterion was registered before
+  // the dispatch: at least +1.5pp against the parent (three quarters of the wide block's gain) and at
+  // most +25% prompt tokens, with the `literal-case` bucket not rising back.
+  'inline+evidence+samples-wide-link': "the same sampler narrowed to the columns the prompt's own hint names, which is the only width at which the block can fit a quarter of the budget the wide block spent — dispatched against its parent on dev to answer whether the values still buy a point and a half when only the columns the model is already pointed at carry them",
   // The verdict was recorded after the run, and it is the one the pre-registered criterion returns:
   // `column-count` fell 129 → 124 and `values` rose 462 → 469, so the rule moved failures rather
   // than repairing them, and 64 gains against 66 losses is a tie at p = 0.93. The transition table
@@ -1799,6 +1810,11 @@ export const COMPARISONS: readonly (readonly [string, string, string])[] = [
   ['inline+evidence', 'inline+evidence+samples', 'stored values on the card, sampled by our profiler: the information, before any question of which values'],
   ['inline+evidence', 'inline+evidence+samples-wide', "the competitor's value examples on our card: the block MAC-SQL's selector reads, priced against the card without it"],
   ['inline+evidence+samples', 'inline+evidence+samples-wide', 'the same lever under two samplers: which columns are shown and what a shown column says'],
+  // The width half of the same question, and the pair that decides whether the mechanism ships:
+  // the sampler, the values, the order and the call count are held, and only the set of columns
+  // carrying a bracket changes.
+  ['inline+evidence', 'inline+evidence+samples-wide-link', "the competitor's values on the columns the hint names: the block at the width that could ship, against the card without it"],
+  ['inline+evidence+samples-wide', 'inline+evidence+samples-wide-link', 'the same block on every profiled column versus on the columns the hint names: the delta is what narrowing costs in accuracy and the character column is what it saves'],
   // The block's width, which is the whole of its cost. The pair keeps the sampler, the values, the
   // order and the call count, and changes only which columns carry a bracket — so the delta is the
   // price of narrowing, and the character column beside it is the price of not narrowing.
@@ -6272,10 +6288,22 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
     // Samples are layered on whatever the arm resolved to, not on the plain schema: an arm
     // can ask for both, and silently dropping one is a two-lever comparison nobody wrote.
     //
-    // The gold's own conditions decide the columns on the one arm that narrows the block. Read
-    // from the question rather than from an artifact on purpose: an allow-list fitted on the split
-    // would price the fit, and this arm's whole claim is the ceiling of the family.
-    const wanted = arm.sampleColumns === 'gold' ? conditionColumns(question.SQL) : undefined;
+    // The gold's own conditions decide the columns on the oracle arm; the prompt's own hint decides
+    // them on the arm that has to be runnable. Both read the question and the card, neither reads the
+    // answer, and the decision itself lives in `block-columns.ts` because the card instrument
+    // (`card.ts`) has to make the same one.
+    const wanted =
+      arm.sampleColumns === undefined
+        ? undefined
+        : blockColumns({
+            rule: arm.sampleColumns,
+            question: question.question,
+            sql: question.SQL,
+            schema: base,
+            // The hint's third recaller reads stored values, so the rule reads the card that carries
+            // them — the same card the prompt's hint is rendered from, one step before the bracket.
+            values: (arm.samples === 'example' ? exampleValues : sampleValues).get(db),
+          });
     // Field selection runs before the block is layered, and after nothing else: the block is a
     // property of the columns that survived, so an arm that both narrowed the card and sampled it
     // would otherwise print values on columns its own rule removed.
