@@ -151,6 +151,16 @@ export interface ProfileReport {
   readonly shortlist: number;
   readonly shortlistShare: number;
   readonly declined: number;
+  /**
+   * Rows where the recommender named a mark that cannot cover the expected family.
+   *
+   * The bucket this report did not have at first, and Text2Vis found it on the first paid run: a
+   * question about the leading region is answered `bar`, the label is `line`, and the row is neither
+   * a shortlist hit nor a refusal. On the 1,470 scored rows it is **684** — the largest of the three
+   * — so `shortlist + declined < scored` and the report refused to publish, which is the whole reason
+   * the identity is asserted instead of described.
+   */
+  readonly missed: number;
   readonly baseline: { readonly mostFrequent: ChartFamily; readonly share: number; readonly bar: number };
   readonly perLabel: readonly { readonly label: string; readonly family: ChartFamily; readonly n: number; readonly top1: number; readonly shortlist: number; readonly answered: readonly { readonly mark: RecommendableMark | 'declined'; readonly n: number }[] }[];
   readonly confusion: readonly { readonly expected: ChartFamily; readonly answered: RecommendableMark | 'declined'; readonly n: number }[];
@@ -160,10 +170,12 @@ export interface ProfileReport {
 /**
  * Price one cue table with the result set in front of the recommender.
  *
- * The arithmetic identity is the instrument, as it is in `rule.ts`: `top1 + shortlistMisses +
- * declined === scored`, and a report that breaks it is refused rather than published. The identity
- * is checked here instead of in a second pass because the two scorers disagree about nothing else:
- * a row is scored when its label has a family, and every scored row is exactly one of the three.
+ * The arithmetic identity is the instrument, as it is in `rule.ts`: every scored row is a shortlist
+ * hit, a refusal, or a miss — `shortlist + declined + missed === scored` — and a report that breaks
+ * it is refused rather than published. The identity is checked here instead of in a second pass
+ * because the two scorers disagree about nothing else: a row is scored when its label has a family,
+ * and every scored row is exactly one of the three. The middle bucket was missing from the first
+ * version of this function and the assertion is what caught it.
  */
 export function scoreProfile(rows: readonly ProfileInput[], options: { readonly variant?: string } = {}): ProfileReport {
   const perLabel = new Map<
@@ -176,6 +188,7 @@ export function scoreProfile(rows: readonly ProfileInput[], options: { readonly 
   let top1 = 0;
   let shortlist = 0;
   let declined = 0;
+  let missed = 0;
 
   for (const row of rows) {
     const family = familyOfLabel(row.label);
@@ -198,7 +211,11 @@ export function scoreProfile(rows: readonly ProfileInput[], options: { readonly 
     // The shortlist is the families the answer can cover, which is why it travels with the mark:
     // a bar named by a histogram cue covers `histogram` and a bar named by a ranking question does
     // not, and one number for both would hide the difference the sweep exists to price.
-    if (answer.families.includes(family)) {
+    if (!answer.families.includes(family)) {
+      // A named mark that cannot cover the label's family. Not a refusal — the recommender answered,
+      // it answered something the label disagrees with — and the largest bucket of the three.
+      missed += 1;
+    } else {
       shortlist += 1;
       bucket.shortlist += 1;
       // A hit is the *first* family the answer covers: a bar named by a histogram cue covers
@@ -228,6 +245,7 @@ export function scoreProfile(rows: readonly ProfileInput[], options: { readonly 
     shortlist,
     shortlistShare: total === 0 ? 0 : shortlist / total,
     declined,
+    missed,
     baseline: {
       mostFrequent: mostFrequent === undefined ? 'bar' : mostFrequent[1].family,
       share: mostFrequent === undefined ? 0 : mostFrequent[1].n / Math.max(1, total),
@@ -265,9 +283,9 @@ export function assertProfileReport(report: ProfileReport): void {
   if (report.top1 > report.shortlist) {
     throw new Error(`profile report: ${String(report.top1)} top-1 hits is more than ${String(report.shortlist)} shortlist hits`);
   }
-  if (report.shortlist + report.declined < report.scored) {
+  if (report.shortlist + report.declined + report.missed !== report.scored) {
     throw new Error(
-      `profile report: ${String(report.shortlist)} shortlist + ${String(report.declined)} declined < ${String(report.scored)} scored, so a row fell out of the counters`,
+      `profile report: ${String(report.shortlist)} shortlist + ${String(report.declined)} declined + ${String(report.missed)} missed is not ${String(report.scored)} scored, so a row fell out of the counters`,
     );
   }
   const perLabel = report.perLabel.reduce((sum, entry) => sum + entry.n, 0);
@@ -302,7 +320,7 @@ export function describeProfile(report: ProfileReport, cue: RuleReport): readonl
   const lines = [
     `text2vis: ${String(report.scored)} scored of ${String(report.rows)} rows (${String(report.unmapped.count)} unmapped labels)`,
     `  cue-only  top-1 ${share(cue.top1Share)} (${String(cue.top1)}), shortlist ${share(cue.shortlistShare)} (${String(cue.shortlist)})`,
-    `  +profile  top-1 ${share(report.top1Share)} (${String(report.top1)}), shortlist ${share(report.shortlistShare)} (${String(report.shortlist)}), declined ${String(report.declined)}`,
+    `  +profile  top-1 ${share(report.top1Share)} (${String(report.top1)}), shortlist ${share(report.shortlistShare)} (${String(report.shortlist)}), declined ${String(report.declined)}, missed ${String(report.missed)}`,
     `  baseline: always ${report.baseline.mostFrequent} ${share(report.baseline.share)}, always bar ${share(report.baseline.bar)}`,
   ];
   if (moved.length > 0) {
