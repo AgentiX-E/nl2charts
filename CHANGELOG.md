@@ -7,6 +7,26 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **The slice cap is twelve, and it is the first value that was measured.** `maxSlices` defaulted to
+  seven and no reading had ever priced it. The census now prices the cap at 7, 8, 9, 10, 12 and
+  unbounded on the 1,470 Text2Vis rows, and the curve is not monotone: **eight and nine read three rows
+  below seven**, because the cap admits a pie only where one category is narrow enough, so raising it
+  admits the tables the corpus drew as bars while still refusing the ones it drew as pies. Twelve is
+  the first value where the pie a question asks for is not overruled by a constant: **358 → 362
+  (24.35% → 24.63%)**, bar −10 and pie +14 published together, both halves of the corpus up. No cap
+  buys nothing beyond twelve. `DEFAULT_MAX_SLICES` is exported to the package and not from it.
+- **Thirty-four one-edit readings of the product, generated rather than hand-written.** Every cue that
+  names a fallback is priced with that fallback moved first (8 new), every cue is priced removed (12
+  new), and the admission cap beside them (3). Removing `trend` costs 70 rows; removing `ranking`
+  costs 13 and changes 205 answers; and four cues — `progress`, `multi-metric`, `profile`,
+  `volatility` — change **nothing at all**, which says they are unexercised by this corpus rather than
+  useless. Every candidate also carries its hits split over two halves fixed before the reading, and
+  `assertCensusReport` refuses a table whose halves do not add up. On that split `matrix-bar-first`
+  fails (+5 on one half, −3 on the other), which is why it is still refused — and its published
+  reason (−34) is re-priced at +2, because the table it was measured on no longer exists.
+- **A candidate now reports how many answers it changes, not only how many hits it costs.** A cue over
+  eleven rows that are all misses is worth zero hits either way while every one of those answers moves;
+  the ablation would have called those cues inert.
 - **A per-cue reading that says which cue fired beside a wrong order, and the finding that a reorder
   is invisible to the product.** `cuePrecision` could say that `share` gets the family right and the
   order wrong on 177 rows; it could not say which row to move, because the repair is not in the cue
