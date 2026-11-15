@@ -165,6 +165,40 @@ describe('recommending a chart from the question and the result set', () => {
     expect(choice.recommendations[0]?.cues).toEqual([]);
   });
 
+  it('ranks a mark the question names above a mark that only collects second places', () => {
+    // Bar is the second mark of seven of the twelve cues, so a prompt carrying three cue phrases pays
+    // it twice each and it outranks a mark the question named outright. Text2Vis states the row:
+    // `line 5 [trend] < bar 6 [trend matrix]`. Naming is a request, so it is the primary key.
+    const choice = recommendChart('What is the trend of revenue by month and region?', profiles(regions));
+    expect(choice.recommendations[0]?.mark).toBe('line');
+    expect(choice.recommendations[0]?.cues).toEqual(['trend']);
+    const bar = choice.recommendations.find((entry) => entry.mark === 'bar');
+    // The score still says what the cues paid, so a reader can see that the bar scored higher and
+    // why it did not win: two cues name it second, and none names it first.
+    expect(bar?.score).toBe(6);
+    expect(bar?.cues).toEqual(['trend', 'matrix']);
+  });
+
+  it('pays for that key when the label wants the collector, and says so rather than hiding it', () => {
+    // The same rule read the other way: a bar label over a question that names a pie, a line and a
+    // heatmap. The bar collected all three as a fallback and now it loses. This is the cost of the
+    // ordering, and the reason it was measured on 1,470 rows before it was shipped.
+    const choice = recommendChart('What percentage of revenue is trending by region and channel?', profiles(matrix));
+    expect(choice.recommendations[0]?.mark).not.toBe('bar');
+    expect(choice.recommendations.find((entry) => entry.mark === 'bar')?.score).toBeGreaterThan(
+      choice.recommendations[0]?.score ?? 0,
+    );
+  });
+
+  it('keeps the score order among marks named first the same number of times', () => {
+    // Two keys, not one: `distribution` names the boxplot first, and the bar collects its second
+    // place. Neither is named first twice, so the counted score decides between them.
+    const choice = recommendChart('Show the distribution of order values', profiles(fiveNumbers));
+    expect(choice.recommendations[0]?.mark).toBe('boxplot');
+    const scores = choice.recommendations.map((entry) => entry.score);
+    expect([...scores].sort((left, right) => right - left)).toEqual(scores);
+  });
+
   it('scores with counted facts, not a hidden weight', () => {
     const choice = recommendChart('How did revenue trend over time?', profiles(monthly));
     const line = choice.recommendations.find((item) => item.mark === 'line');

@@ -241,7 +241,13 @@ export type RecommendableMark =
 
 export interface Recommendation {
   readonly mark: RecommendableMark;
-  /** Counted points: a structural prior plus three or two per cue that names the mark. */
+  /**
+   * Counted points: a structural prior plus three or two per cue that names the mark.
+   *
+   * The second key of the order, not the first: it breaks a tie between marks that an equal number
+   * of cues name *first*. Reading it as the whole ranking is a misreading the contract does not
+   * allow — see `recommendChart`.
+   */
   readonly score: number;
   readonly cues: readonly CueKind[];
   readonly reasons: readonly string[];
@@ -272,9 +278,13 @@ export interface ShapeCounts {
 
 export interface ChartChoice {
   readonly question: string;
-  /** Admissible marks, best first. Empty when no mark can encode the result set. */
-  readonly recommendations: readonly Recommendation[];
-  /** Every considered mark that was ruled out, so the audit trail is complete. */
+  /**
+   * Admissible marks, best first.
+   *
+   * Ordered by cues naming the mark first, then by `score`, then by the fixed preference order — the
+   * three keys `recommendChart` documents. Empty when no mark can encode the result set.
+   */
+  readonly recommendations: readonly Recommendation[];  /** Every considered mark that was ruled out, so the audit trail is complete. */
   readonly refused: readonly Refusal[];
   /** The counts those rules were applied to. */
   readonly shape: ShapeCounts;
@@ -431,12 +441,37 @@ function shapeOf(profiles: readonly FieldProfile[], options: Resolved): Shape {
 }
 
 /**
+ * How many cues name a mark first.
+ *
+ * The primary key of the ranking, and a count rather than a weight. A cue that fires states a
+ * preference between the marks it speaks for, and the first one is what the phrase is *about*:
+ * `share` is a pie question a bar can answer, `matrix` is a heatmap question a bar can answer. Bar is
+ * the second mark of seven of the twelve shipped cues, so on a prompt carrying three cue phrases it
+ * collects six points without being named — and outranks a mark the question named outright. The
+ * corpus states the row: `line 5 [trend] < bar 6 [trend matrix]`.
+ *
+ * No weight can state this. Any value large enough to make one first claim beat three second places
+ * would be a tuned number that the next corpus measurement could move; a lexicographic key says
+ * "being named outranks being collected" exactly, and it is read off the same cue table the points
+ * are.
+ */
+function firstClaims(cues: readonly Cue[], mark: RecommendableMark): number {
+  return cues.filter((cue) => cue.marks[0] === mark).length;
+}
+
+/**
  * Rank the marks that can encode this result set, given the question.
  *
- * The score is counted in points a reader can reproduce from the reasons: three for
- * the first mark a cue names, two for the rest, plus the structural prior. Nothing
- * is normalised, so `score: 5` means "this result set fits the mark and one cue
- * named it", and a caller can recompute it from the two facts reported alongside.
+ * Three keys, in order: **how many cues name the mark first**, then the counted score, then the fixed
+ * preference order. The first key is what keeps a mark the question asked for from losing to a mark
+ * that only ever arrives second; the second keeps "named once and named by three points' worth of
+ * cue" apart from "named once as a fallback"; the third makes two marks that fit equally well rank
+ * the same way on every run.
+ *
+ * The score is counted in points a reader can reproduce from the reasons: three for the first mark a
+ * cue names, two for the rest, plus the structural prior. Nothing is normalised, so `score: 5` means
+ * "this result set fits the mark and one cue named it", and a caller can recompute it from the two
+ * facts reported alongside.
  */
 export function recommendChart(
   question: string,
@@ -467,7 +502,9 @@ export function recommendChart(
 
   recommendations.sort(
     (left, right) =>
-      right.score - left.score || PREFERENCE.indexOf(left.mark) - PREFERENCE.indexOf(right.mark),
+      firstClaims(cues, right.mark) - firstClaims(cues, left.mark) ||
+      right.score - left.score ||
+      PREFERENCE.indexOf(left.mark) - PREFERENCE.indexOf(right.mark),
   );
 
   return {
