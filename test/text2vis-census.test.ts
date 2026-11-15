@@ -418,15 +418,24 @@ describe('a question, cut to the words that decide', () => {
 });
 
 describe('a number the reader declined', () => {
-  it('names a cell made of digits that nothing read, which is the shape behind 389 refusals', () => {
-    // The typographic minus, the space group and the unit suffix: three formats, three repairs, and
-    // a table with no measure in any of them refuses every mark that needs one.
+  it('names a decimal that nothing read, which is the shape a mis-formatted quantity takes', () => {
+    // The typographic minus and the European separator: two formats, two repairs, and a table with
+    // no measure in either refuses every mark that needs one.
     expect(unreadNumerals(parseResultSet(table('Year, Anomaly', ['2019, −0.04', '2020, 0.12', '2021, 0.31'])))).toEqual([
       { column: 'Anomaly', cell: '−0.04', n: 1 },
     ]);
-    expect(unreadNumerals(parseResultSet(table('Region, Revenue', ['North, 1 234', 'South, 2 345'])))).toEqual([
-      { column: 'Revenue', cell: '1 234', n: 1 },
-    ]);
+    // Quoted, because an unquoted `1.234,56` is three CSV fields: a European decimal is only a cell
+    // when the table says where the cell ends.
+    const european = table('Region, Revenue', [`North, ${cell('1.234,56')}`, `South, ${cell('2.345,67')}`]);
+    expect(unreadNumerals(parseResultSet(european))).toEqual([{ column: 'Revenue', cell: '1.234,56', n: 1 }]);
+  });
+
+  it('does not call a categorical code a number the reader declined', () => {
+    // The corpus answered the first version of this — which asked only for a digit and no letter —
+    // with `71+`, `18-25` and `2018*`: age bands and footnote-marked years, typed as categories and
+    // correctly so. Reporting them sends the next round to the parser with a list of age brackets.
+    expect(unreadNumerals(parseResultSet(table('Entity, Age', ['Nigeria, 18-25', 'Ghana, 71+'])))).toEqual([]);
+    expect(unreadNumerals(parseResultSet(table('Characteristic, Value', ['2018*, 12', '2019*, 15'])))).toEqual([]);
   });
 
   it('leaves a label alone and leaves a number it already read alone', () => {
