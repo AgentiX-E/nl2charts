@@ -4,8 +4,8 @@
   "tolerancePp": 0.2,
   "measuredAt": "2026-11-15",
   "totals": {
-    "lines": 99.54,
-    "statements": 99.54,
+    "lines": 99.56,
+    "statements": 99.56,
     "functions": 100,
     "branches": 98.31
   },
@@ -104,7 +104,7 @@
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 99.52
+      "branches": 99.53
     },
     "eval/bird/contrast.ts": {
       "lines": 100,
@@ -352,6 +352,12 @@
       "functions": 100,
       "branches": 100
     },
+    "eval/bird/rules.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 98.89
+    },
     "eval/bird/run.ts": {
       "lines": 99.48,
       "statements": 99.48,
@@ -554,7 +560,7 @@
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 98.88
+      "branches": 98.95
     },
     "eval/text2vis/dataset.ts": {
       "lines": 100,
@@ -566,7 +572,7 @@
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 98.46
+      "branches": 98.48
     },
     "eval/text2vis/rule.ts": {
       "lines": 100,

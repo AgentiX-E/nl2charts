@@ -129,7 +129,7 @@ const EMPTY_FINGERPRINT = resultFingerprint([]);
  * evidence is not evidence of an empty result — an old artifact must not silently lose candidates
  * to a field it never wrote.
  */
-function eligibleIndices(candidates: readonly Recorded[]): readonly number[] {
+export function eligibleIndices(candidates: readonly Recorded[]): readonly number[] {
   const answered = candidates
     .map((_candidate, index) => index)
     .filter((index) => (candidates[index] as Recorded).fingerprint !== EMPTY_FINGERPRINT);

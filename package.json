@@ -41,6 +41,7 @@
     "bench:bird:diversity": "tsx eval/bird/diversity.ts",
     "bench:bird:lottery": "tsx eval/bird/lottery.ts",
     "bench:bird:consensus": "tsx eval/bird/consensus.ts",
+    "bench:bird:rules": "tsx eval/bird/rules.ts",
     "bench:adversarial": "tsx eval/adversarial/run.ts",
     "bench:guard": "tsx eval/guard/redteam.ts --strict",
     "bench:adversarial:dry": "tsx eval/adversarial/run.ts --dry-run",

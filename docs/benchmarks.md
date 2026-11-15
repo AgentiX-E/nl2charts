@@ -14268,3 +14268,102 @@ last dev run with every coordinate equal, a +0.91pp drift on an unchanged arm; t
 1.64pp resolution and it is why every delta above is read inside the run rather than across two. And
 the prompt does not grow: each candidate is generated from the same prompt, so 7,261 against 7,312
 characters is noise, and the price of the fourth candidate is a call and not a longer card.
+
+## The rule space, closed at zero cost
+
+The fourth candidate left a question sharper than the one it answered. The intent pool's ceiling is
+**70.10%** against the shipped arm's **65.14%**, and the shipped rule converted 92.92% of it: 76
+questions where a correct statement existed and `shortest` returned a different one. Three
+candidate pool: ceiling 68.08%, score 64.88%, **49** such questions. The obvious next experiment is
+another rule, and the obvious way to run it is an arm — 1,532 questions times four calls for a rule
+that might be worse than the one in production.
+
+`pnpm bench:bird:rules --artifact eval/out/bird-eval.json` prices that whole space for nothing. Every
+rule below reads two fields the artifact already writes: the statement, and a fingerprint of the
+result set. Fifteen variants, three of them the shipped rules read through `consensus.pick` (which a
+test holds to `chooseCandidateByRule`), and twelve that no pipeline runs.
+
+| family | variant | what it reads | `select-mixed-rule` | `-intent` |
+| --- | --- | --- | ---: | ---: |
+| agreement | `first`\* | the slot the pool was offered in | 62.21% (953) | 63.45% (972) |
+| length | `shortest`\* | characters | **64.88% (994)** | **65.14% (998)** |
+| agreement | `modal`\* | the result most candidates returned | 63.12% (967) | 63.71% (976) |
+| length | `longest` | characters, from the other end | 59.33% (909) | 58.09% (890) |
+| length | `second-shortest` | the second slot by length | 61.81% (947) | 63.51% (973) |
+| length | `nonspace` | characters with whitespace collapsed | 64.75% (992) | 64.82% (993) |
+| length | `tokens` | token count | 64.23% (984) | 64.10% (982) |
+| length | `identifiers` | identifier count | 64.43% (987) | 64.49% (988) |
+| length | `chars-no-quoted` | characters with quoted spans elided | 64.88% (994) | 64.82% (993) |
+| length | `chars-no-alias` | characters with `as` aliases elided | 64.75% (992) | 65.01% (996) |
+| agreement | `modal-then-shortest` | majority group, shortest inside it | 63.84% (978) | 64.30% (985) |
+| agreement | `majority-longest` | majority group, longest inside it | 62.08% (951) | 62.79% (962) |
+| structure | `central` | total token overlap with the rest | 61.95% (949) | 62.73% (961) |
+| structure | `superset` | whose tokens cover the others' | 61.95% (949) | 62.73% (961) |
+| structure | `clauses-then-shortest` | clause count, then length | 64.30% (985) | 64.75% (992) |
+
+\* shipped. `model` and `oracle` are not rule columns and are not priced here: `consensus.ts` owns
+both.
+
+**No variant beats the shipped rule.** On the three-candidate arm the closest call is
+`chars-no-quoted` at exactly 994 — a tie, which is not a finding; every other variant is behind, and
+`longest` is behind by 5.55pp (won 37 / lost 122, p < 0.0001). On the intent arm nothing leads at
+all. The only arm where anything leads is the four-candidate knowledge arm, where `identifiers`
+reads 64.56% against 64.16% (won 25 / lost 19, p = 0.4514) — inside the noise, and inside the
+Bonferroni bound of 0.0042 that twelve variants cost. The harness prints that bound rather than the
+raw p, because the smallest p-value in a family of twelve is the one most likely to be noise.
+
+**The direction of the length axis is a fact about the answers, not about the rule.** On the 49
+questions where the pool held an answer and `shortest` returned a different statement, the shortest
+correct candidate ranked **second on 34 and third on 15 — never first**. The right statement is
+longer by a median of 21 characters (p75 44, max 119). A wrong statement is usually a *shorter* one:
+a clause omitted, a join dropped, an aggregate left out. That is why `longest` loses 5.55pp and why
+`second-shortest` — the rule that would win those 49 if the pool always contained exactly the right
+length — loses 3.07pp: on the other 1,483 questions the second-shortest statement is a wrong one.
+
+Three things this closes:
+
+1. **The fourth call.** `consensus.ts` reaches the same verdict from the same artifact: `shortest` is
+   within 0.32pp of the selector, and 0.32pp is what this pairing resolves. A model that reads the
+   statements and the result previews adds nothing a character count does not already have.
+2. **The rule as a lever.** Fifteen rules over three pools, 45 readings, and the shipped one is the
+   best of them. The 3.20pp the three-candidate arm loses to its own ceiling is not recoverable from
+   anything the artifact records.
+3. **Tuning the length measure.** Whitespace, tokens, identifiers, quoted spans and aliases are five
+   ways of asking whether "shortest" is measuring the wrong thing. None of them moves more than
+   0.40pp, and the one that ties does so by agreeing on every question it changes.
+
+A negative result is only useful if it names where to go next, and the same artifact answers that
+too. Of the 538 questions the shipped arm gets wrong, **489 have no correct candidate at all** — a
+generation failure, not a selection one:
+
+| judge reason | wrong | ceiling held no answer |
+| --- | ---: | ---: |
+| `values` | 410 | 368 |
+| `column-count` | 122 | 115 |
+| none | 6 | 6 |
+
+Splitting the `values` bucket by the fix it asks for (`pnpm bench:bird:gap:values <artifact> --arm
+<arm>`, 121 questions
+classifiable out of 489 — the other 247 name a question the local dataset copy does not carry):
+`predicate` 27, `tables` 24, `filter-wide` 21, `filter-narrow` 16, `literal-missing` 14, `aggregate`
+8, `projection` 7, `literal-case` 2, unclassified 2. **51 of 121 are a wrong condition or a wrong
+table**, which is the bucket a schema-aware prompt can reach; the rest are predicate strength and
+literal retrieval.
+
+So the next lever is generation, and the first instrument it needs is a dataset copy that carries all
+489 questions rather than 121 of them. Both are work this round does not spend a call on.
+
+### What the alignment check said
+
+The rule harness reads `consensus.pick` rather than a third copy of the shipped rules, and a test
+holds `pick` to `chooseCandidateByRule`. That is a fixture-level claim. On the dispatch's own
+artifact it is a fact: replaying `shortest` through `pick` on `43725927611` reproduces
+`selectedByRule.index` on **4,586 of 4,586** cases across the three arms, and `eligible` on all
+4,586 as well — two implementations, one reading rows and one reading stored fingerprints, agreeing
+question by question.
+
+That check is also how a hand-written estimate was caught last round. A Python transcription of
+"shortest" disagreed with the recorded `passed` flag on 8 of 200 questions, and the cause was the
+transcription: the recorded rule drops candidates whose result was empty before it ranks, and a
+paraphrase that ranked every candidate was answering a different question. `pick` was right; the
+copy was wrong.
