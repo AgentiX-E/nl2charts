@@ -174,6 +174,14 @@ export function cueMarks(question: string, table?: readonly CueRule[]): readonly
  *
  * Rows no cue fired on are not here at all: they are `RuleReport.declined`, and a cue cannot be
  * scored on a question it did not read.
+ *
+ * **What this reading is not.** It scores the cue that fired *first*, and the product does not rank
+ * that way: `recommendChart` counts how many cues name a mark *first* and weighs each cue's own mark
+ * order, so the order of the cue table is invisible to it. The gap was measured rather than argued —
+ * a table that only moves `ranking` in front of `share` scores **+39 here and 0 on the product**, to
+ * the row — and `packages/chart/test/recommend.test.ts` holds the assertion. So a reorder is a repair
+ * this reading can see and no caller can; a repair worth shipping has to be argued on both, and the
+ * two files are deliberately one directory apart.
  */
 export interface CueReading {
   readonly kind: CueKind;
