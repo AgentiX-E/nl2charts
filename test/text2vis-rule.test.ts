@@ -36,7 +36,6 @@ import {
   ruleInputs,
   scoreRule,
   sweepRule,
-  withHistogramCue,
   withCueAheadOf,
   withMarkFirst,
   withCueMoved,
@@ -481,15 +480,14 @@ describe('the lines a reader gets', () => {
 
 describe('the cue that named a mark', () => {
   it('travels with the mark, because one family claim depends on it', () => {
-    // The word "histogram" fires two cues in the shipped table's order: `distribution` (which names
-    // boxplot first) and nothing else, so a bar cannot appear at all. The variant inserts its cue
-    // ahead of `distribution`, and the answer says which cue put the bar there.
+    // The word "histogram" fires two cues in the shipped table's order: `histogram` first, which
+    // names a bar, and `distribution` second, which names the boxplot. Both answers are offered and
+    // the answer says which cue put each mark there — that is what makes `familiesOfMark` able to
+    // credit the bar for a histogram label without crediting every bar.
     const shipped = cueAnswer('show a histogram of order totals');
-    expect(shipped[0]).toEqual({ mark: 'boxplot', cue: 'distribution' });
-    const swept = cueAnswer('show a histogram of order totals', withHistogramCue(CUE_VARIANTS[0]!.cues));
-    expect(swept[0]).toEqual({ mark: 'bar', cue: 'histogram' });
-    // The boxplot is still offered, one place down: the change is an order and not a deletion.
-    expect(swept.map((answer) => answer.mark)).toEqual(['bar', 'boxplot']);
+    expect(shipped[0]).toEqual({ mark: 'bar', cue: 'histogram' });
+    // The boxplot is still offered, one place down: the cue is an order and not a deletion.
+    expect(shipped.map((answer) => answer.mark)).toEqual(['bar', 'boxplot']);
   });
 
   it('keeps the first cue that named a mark rather than the last', () => {
@@ -523,39 +521,26 @@ describe('a bar that answers for a histogram, when the table said so', () => {
     expect(familiesOfMark('boxplot', 'histogram')).toEqual(['boxplot']);
   });
 
-  it('scores a histogram question as a hit only in the table that names the intent', () => {
+  it('scores a histogram question as a shortlist hit once the table names the intent', () => {
+    // The cue shipped, so this is now the control. The row is a shortlist hit and not a top-1 hit,
+    // and that difference is the whole honesty of a scoped claim: a bar is only a histogram because
+    // a cue said so, and the bar still leads with `bar`, so the corpus's label is answered as a
+    // picture of the distribution rather than as *the* picture it named.
     const rows = [{ prompt: 'draw a histogram of order totals', label: 'Histogram' }];
     const shipped = scoreRule(rows);
-    expect(shipped.top1).toBe(0);
-    const named = scoreRule(rows, { cues: withHistogramCue(CUE_VARIANTS[0]!.cues), variant: 'histogram' });
-    expect(named.top1).toBe(1);
-    // Not even the shortlist reaches the label in the shipped table, and that is the honest reading
-    // of a scoped claim: a bar is only a histogram when a cue said so, so a `distribution` cue that
-    // happens to offer a bar second does not credit it.
-    expect(shipped.shortlist).toBe(0);
-    expect(named.variant).toBe('histogram');
+    expect(shipped.shortlist).toBe(1);
+    // `scoreRule` reads coverage — "did the answer name the label's family at all" — where the census
+    // reads the *first* family the mark leads with. The two are different questions and both are
+    // published: this one is the question half, and `census`'s `hit` is the product half.
+    expect(shipped.top1).toBe(1);
+    // A question the cue does not match still reaches the boxplot, because `distribution` keeps its
+    // own alternative for the word.
+    const other = scoreRule([{ prompt: 'draw a box plot of order totals', label: 'Box Plot' }]);
+    expect(other.top1).toBe(1);
   });
 });
 
 describe('the table a variant constructs', () => {
-  it('inserts the histogram cue ahead of distribution, and only once', () => {
-    const table = withHistogramCue(CUE_VARIANTS[0]!.cues);
-    const kinds = table.map((rule) => rule.kind);
-    expect(kinds.indexOf('histogram')).toBe(kinds.indexOf('distribution') - 1);
-    expect(kinds.filter((kind) => kind === 'histogram')).toHaveLength(1);
-    // Nothing else moved: the same cues, one more of them.
-    expect(table.length).toBe(CUE_VARIANTS[0]!.cues.length + 1);
-  });
-
-  it('appends the cue to a table that has no distribution rule rather than dropping it', () => {
-    // A variant that silently lost a cue would be measured as if it had it; the guard is that the
-    // cue is always present, whatever the table it was built from.
-    const without = CUE_VARIANTS[0]!.cues.filter((rule) => rule.kind !== 'distribution');
-    const table = withHistogramCue(without);
-    expect(table.at(-1)?.kind).toBe('histogram');
-    expect(table.length).toBe(without.length + 1);
-  });
-
   it('states one lever per variant, and the first is the table the package exports', () => {
     expect(CUE_VARIANTS[0]).toMatchObject({ name: 'shipped' });
     // The list is generated from the table, so it is asserted by construction rather than by
@@ -634,24 +619,26 @@ describe('the distinction inside one cue, now that it shipped', () => {
     expect(inserted.map((rule) => rule.kind).indexOf('ranking')).toBe(
       inserted.map((rule) => rule.kind).indexOf('distribution') - 1,
     );
-    // `histogram` is not in the shipped table, so a cue placed before it lands at the end: the
-    // fallback is "somewhere it is present", never "dropped".
-    expect(withCueAheadOf(shipped, marker, 'histogram').at(-1)?.kind).toBe('ranking');
-    const kinds = withHistogramCue(shipped).map((rule) => rule.kind);
+    // A cue the table does not have lands at the end: the fallback is "somewhere it is present",
+    // never "dropped". `share-ranked` is the one kind no shipped table contains.
+    expect(withCueAheadOf(shipped, marker, 'share-ranked').at(-1)?.kind).toBe('ranking');
+    // And the shipped table names the binned measure itself, ahead of the distribution cue: the
+    // merge that used to be a variant.
+    const kinds = shipped.map((rule) => rule.kind);
     expect(kinds.indexOf('histogram')).toBe(kinds.indexOf('distribution') - 1);
+    expect(kinds.filter((kind) => kind === 'histogram')).toHaveLength(1);
   });
 
-  it('keeps the refused widths and drops the one that shipped', () => {
+  it('keeps the refused widths and drops the ones that shipped', () => {
     const names = CUE_VARIANTS.map((variant) => variant.name);
-    for (const name of ['share-by-any', 'share-by-any+histogram', 'bar-share']) expect(names).toContain(name);
-    // A candidate for a rule the product already has is a second copy of the control, so the shipped
-    // lever is not a variant: the sweep's control *is* the narrow cue now.
-    for (const name of ['share-by', 'share-by+histogram', 'matrix-window', 'matrix-window+share-by']) {
+    for (const name of ['share-by-any', 'bar-share']) expect(names).toContain(name);
+    // A candidate for a rule the product already has is a second copy of the control, so a shipped
+    // lever is not a variant: the sweep's control *is* that cue now. `share-by` and `histogram` both
+    // left the sweep this way, and the two tables built on top of them left with them.
+    for (const name of ['share-by', 'share-by+histogram', 'histogram', 'share-by-any+histogram', 'matrix-window', 'matrix-window+share-by']) {
       expect(names).not.toContain(name);
     }
-    expect(CUE_VARIANTS.find((variant) => variant.name === 'share-by-any+histogram')?.cues).toEqual(
-      withHistogramCue(withShareByAnyCue(shipped)),
-    );
+    expect(CUE_VARIANTS.find((variant) => variant.name === 'share-by-any')?.cues).toEqual(withShareByAnyCue(shipped));
   });
 });
 
@@ -684,12 +671,11 @@ describe('the sweep: every table, the same rows', () => {
       (shipped?.byFamily.find((cell) => cell.family === 'bar')?.top1 ?? 0) + 1,
     );
     expect(barShare?.byFamily.find((cell) => cell.family === 'pie')?.top1).toBe(0);
-    // The histogram table moves its own label and leaves the other four where they were.
-    const histogram = report.sweep.find((reading) => reading.variant === 'histogram');
-    expect(histogram?.byFamily.find((cell) => cell.family === 'histogram')?.top1).toBe(1);
-    expect(histogram?.byFamily.find((cell) => cell.family === 'line')?.top1).toBe(
-      shipped?.byFamily.find((cell) => cell.family === 'line')?.top1,
-    );
+    // The histogram row is the control's now, so the table that carries it is the shipped one and
+    // the assertion is that the cue names the label at all: this is the row the sweep priced for two
+    // rounds as "±0, therefore nothing", and it is worth a family cell.
+    expect(shipped?.byFamily.find((cell) => cell.family === 'histogram')?.top1).toBe(1);
+    expect(shipped?.byFamily.find((cell) => cell.family === 'line')?.top1).toBe(1);
   });
 
   it('counts a family from the per-label rows rather than from a second pass', () => {
@@ -903,9 +889,9 @@ describe('the delta a sweep prints', () => {
     { prompt: 'the share of orders by status', label: 'Bar Chart' },
     { prompt: 'the share of revenue that is refunds', label: 'Pie Chart' },
     { prompt: 'revenue over time', label: 'Line Chart' },
-    // No shipped cue reads this one, so the control declines it and the table that adds the
-    // histogram cue answers it: the only shape in which a variant declines *fewer* rows.
-    { prompt: 'show the binned counts of order totals', label: 'Histogram' },
+    // No shipped cue reads this one, so the control declines it and the table the test builds
+    // answers it: the only shape in which a variant declines *fewer* rows.
+    { prompt: 'show the hierarchy of accounts', label: 'Radar' },
     // And one only `matrix` answers, which is the shape in which removing that cue declines more.
     { prompt: 'average revenue by region and channel', label: 'Heatmap' },
   ];
@@ -924,13 +910,20 @@ describe('the delta a sweep prints', () => {
   });
 
   const barFirst = CUE_VARIANTS[1]!.cues;
+  // A cue no shipped table carries, so this fixture can still say what a *table that answers more*
+  // looks like — the shape `histogram` had while it was a candidate. It is built here rather than
+  // imported because nothing in the product needs it: the lever it stood for shipped.
+  const RADAR = { kind: 'profile' as const, marks: ['radar' as const], pattern: /\bhierarchy\b/ };
   const shipped = scoreRule(rows);
   const flipped = scoreRule(rows, { cues: barFirst, variant: 'bar-share' });
-  const histogram = scoreRule(rows, { cues: withHistogramCue(CUE_VARIANTS[0]!.cues), variant: 'histogram' });
+  const answering = scoreRule(rows, {
+    cues: withCueAheadOf(CUE_VARIANTS[0]!.cues, RADAR, 'distribution'),
+    variant: 'with-hierarchy',
+  });
   const removed = scoreRule(rows, { cues: withoutMatrix(CUE_VARIANTS[0]!.cues), variant: 'no-matrix' });
 
   it('measures every table against the control and not against the line above it', () => {
-    const lines = describeSweep({ ...shipped, sweep: [reading(shipped), reading(flipped), reading(histogram)] });
+    const lines = describeSweep({ ...shipped, sweep: [reading(shipped), reading(flipped), reading(answering)] });
     expect(lines[0]).toContain('against shipped');
     // `histogram` follows `bar-share` in this order and still reports its delta against `shipped`:
     // the pie row it restores is +0 against the control and −1 against the line above it.
@@ -940,12 +933,12 @@ describe('the delta a sweep prints', () => {
   it('reports the same delta for a table wherever it is listed', () => {
     // The defect this closes: a delta against the previous row is a fact about the list, so moving
     // one variant changes the published number while no cue table changed at all.
-    const forward = describeSweep({ ...shipped, sweep: [reading(shipped), reading(flipped), reading(histogram)] });
-    const backward = describeSweep({ ...shipped, sweep: [reading(shipped), reading(histogram), reading(flipped)] });
+    const forward = describeSweep({ ...shipped, sweep: [reading(shipped), reading(flipped), reading(answering)] });
+    const backward = describeSweep({ ...shipped, sweep: [reading(shipped), reading(answering), reading(flipped)] });
     const deltaOf = (lines: readonly string[], variant: string): string =>
       (lines.find((line) => line.trimStart().startsWith(variant)) ?? '').split('|')[1]?.trim() ?? '';
     expect(deltaOf(forward, 'bar-share')).toBe(deltaOf(backward, 'bar-share'));
-    expect(deltaOf(forward, 'histogram')).toBe(deltaOf(backward, 'histogram'));
+    expect(deltaOf(forward, 'with-hierarchy')).toBe(deltaOf(backward, 'with-hierarchy'));
     expect(deltaOf(forward, 'shipped')).toBe('');
   });
 
@@ -953,7 +946,7 @@ describe('the delta a sweep prints', () => {
     // A cue removal declines what the control answered and a cue addition answers what the control
     // declined. Both are one number apart from the control and neither is a share of it, so the line
     // carries the count and the direction rather than leaving the reader to subtract.
-    const lines = describeSweep({ ...shipped, sweep: [reading(shipped), reading(histogram), reading(removed)] });
+    const lines = describeSweep({ ...shipped, sweep: [reading(shipped), reading(answering), reading(removed)] });
     expect(lines[2]).toContain('declined 0 (-1)');
     expect(lines[3]).toContain('declined 2 (+1)');
     // The control's own line says nothing about it, because there is nothing to compare it to.
