@@ -35,6 +35,7 @@ import {
   sweepRule,
   withHistogramCue,
   withCueAheadOf,
+  withMatrixBarFirst,
   withMatrixWindow,
   withShareByAnyCue,
   withShareByCue,
@@ -561,6 +562,8 @@ describe('the table a variant constructs', () => {
       'share-by-any+histogram',
       'matrix-window',
       'matrix-window+share-by',
+      'matrix-bar-first',
+      'matrix-window+bar-first',
       'no-matrix',
     ]);
     for (const variant of CUE_VARIANTS) expect(variant.note.length).toBeGreaterThan(20);
@@ -975,5 +978,39 @@ describe('the delta a sweep prints', () => {
     expect(lines[3]).toContain('declined 2 (+1)');
     // The control's own line says nothing about it, because there is nothing to compare it to.
     expect(lines[1]).not.toContain('declined');
+  });
+});
+
+describe('the order of the matrix marks', () => {
+  const shipped = CUE_VARIANTS[0]!.cues;
+  const reversed = withMatrixBarFirst(shipped);
+
+  it('leads a crossing with the bar the corpus draws for it, and keeps the heatmap beside it', () => {
+    // `matrix` decided 223 questions and was right about one: the label is a bar 49 times to a
+    // heatmap's 6, and the cue puts the heatmap first. The reversal is a re-membership, not a phrase
+    // change, so the cue still speaks for both marks and can still be answered by either.
+    const question = 'average revenue by region and channel';
+    expect(cueMarks(question)).toEqual(['heatmap', 'bar']);
+    expect(cueMarks(question, reversed)).toEqual(['bar', 'heatmap']);
+    expect(reversed.find((rule) => rule.kind === 'matrix')?.pattern).toBe(
+      shipped.find((rule) => rule.kind === 'matrix')?.pattern,
+    );
+  });
+
+  it('changes nothing but the order of that one cue', () => {
+    const before = shipped.find((rule) => rule.kind === 'matrix');
+    const after = reversed.find((rule) => rule.kind === 'matrix');
+    expect(after?.marks).toEqual(['bar', 'heatmap']);
+    expect(before?.marks).toEqual(['heatmap', 'bar']);
+    expect(reversed.map((rule) => rule.kind)).toEqual(shipped.map((rule) => rule.kind));
+    // A question the cue does not fire on is answered exactly as before.
+    expect(cueMarks('revenue over time', reversed)).toEqual(cueMarks('revenue over time'));
+  });
+
+  it('is priced alone and on top of the window, so neither reading has to be guessed', () => {
+    expect(CUE_VARIANTS.find((variant) => variant.name === 'matrix-bar-first')?.cues).toEqual(reversed);
+    expect(CUE_VARIANTS.find((variant) => variant.name === 'matrix-window+bar-first')?.cues).toEqual(
+      withMatrixBarFirst(withMatrixWindow(shipped)),
+    );
   });
 });
