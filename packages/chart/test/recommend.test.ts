@@ -493,6 +493,26 @@ describe('the cue table a caller hands in', () => {
     expect(recommendChart(question, profileRows(matrix), { cues: CHART_CUES })).toEqual(shipped);
   });
 
+  it('does not depend on where a cue sits in the table, which is what `firstClaims` counts', () => {
+    // The product ranks by how many cues name a mark *first*, not by which cue fired first, so moving
+    // a cue changes nothing here. That is why a reorder scores +39 on the cue reading and 0 on the
+    // product: the two instruments are two different functions, and reading one as a forecast of the
+    // other is how a table change gets shipped for a gain no caller can see.
+    const reverseOrder = [...CHART_CUES].reverse();
+    const forward = recommendChart(question, profileRows(matrix));
+    const reversed = recommendChart(question, profileRows(matrix), { cues: reverseOrder });
+    expect(reversed.recommendations.map((entry) => entry.mark)).toEqual(forward.recommendations.map((entry) => entry.mark));
+    expect(reversed.recommendations.map((entry) => entry.score)).toEqual(forward.recommendations.map((entry) => entry.score));
+    // What the order *inside* a cue does move: three points for the first mark it names, two for the
+    // rest, and `firstClaims` counts the leading mark. Both are the same lever the product can feel.
+    const flipped = CHART_CUES.map((rule) => (rule.kind === 'matrix' ? { ...rule, marks: ['bar', 'heatmap'] as const } : rule));
+    const choice = recommendChart(question, profileRows(matrix), { cues: flipped });
+    expect(forward.recommendations[0]?.mark).toBe('heatmap');
+    expect(choice.recommendations[0]?.mark).toBe('bar');
+    // Same question, same rows, same cue: the only change is which mark it names first.
+    expect(choice.recommendations[0]?.cues).toContain('matrix');
+  });
+
   it('takes the table alongside the other options rather than instead of them', () => {
     // `maxSlices` decides what a pie may carry and the table decides what the question asks for; a
     // caller that passes both gets both, so a variant cannot silently lose the option beside it.
