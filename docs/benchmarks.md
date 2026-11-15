@@ -14032,3 +14032,185 @@ than of the commit that introduced it.
 5. **An ablation that runs once is a claim about a commit.** The un-typing is now a field of the census,
    asserted against the hit count, so the price of the rule is on every log line instead of in a
    chapter.
+
+## A rule that could not fire: three of sixteen labels, and a dash
+
+This round's plan was the SQL side — combine MAC-SQL's four components into one arm. The first hour
+was spent checking whether that arm could resolve its own effect, and the answer was no: the four
+components have been priced three times over across earlier rounds, two of them at a loss, and the
+only one left unpriced in combination (`repairs`) carries a +0.41pp single-arm reading on a
+3.92pp gap. That reading is recorded at the end of this chapter as a decision rather than an
+experiment, because a dispatch that cannot resolve its own effect spends 496 questions to report
+noise.
+
+What the round did instead was open the largest bucket on the chart side — *tables with no measure*
+— and the bucket turned out to hold two defects and one measurement question that had been answered
+wrongly for two rounds.
+
+### The rule that was written, argued, tested, and could not fire
+
+`familiesOfMark` has said since it was written that a bar stands in for a histogram:
+
+```ts
+export function familiesOfMark(mark: RecommendableMark, cue?: CueKind): readonly ChartFamily[] {
+  const base = MARK_FAMILIES[mark];
+  return mark === 'bar' && cue === 'histogram' ? [...base, 'histogram'] : base;
+}
+```
+
+The condition is the honest half of the claim — a bar recommended for a ranking question is a
+ranking bar, and crediting it for a histogram label would be the table grading itself. The problem
+was the other half: **no cue in `CHART_CUES` emits the kind `histogram`.** The kind was in the
+`CueKind` union, a variant was written against it, two tests exercised the function by passing the
+kind by hand, and the branch had never once executed on a question.
+
+So the 73 corpus rows labelled `Histogram` were read as `uncovered` — "the product has no answer for
+this family" — when the product had been answering them all along with a bar it was forbidden to
+name. The word "histogram" fired `distribution`, which leads with `boxplot`, so a question about a
+binned measure was answered with a picture of five summary numbers.
+
+The candidate that fixes it has existed in the sweep for two rounds and been rejected twice, on the
+reading that it moves nothing:
+
+| round | `histogram` variant, top-1 | verdict |
+| --- | --- | --- |
+| 145 | 362 → 362 | "moves nothing, therefore nothing" |
+| 146 | 411 → 411 | same reading, same verdict |
+| 147 | 414 → 414 (**shortlist 453 → 477**) | shipped |
+
+The missing column was the shortlist. A row can leave `uncovered` for `substituted` — the product
+answers the label's family as its *second* claim — without moving a single hit, and `ProductVariant`
+published only `hit`. Shipping the cue moved **24 rows into the shortlist with no change in top-1**,
+and the honest description of that is "the product draws a bar where the corpus drew a histogram and
+now says so", which is exactly what a second family means.
+
+Two things follow, and the second is the one that changes a habit:
+
+1. **A candidate with a zero delta is not a candidate with no effect.** It is a candidate whose
+   effect the report does not have a column for. Before the next sweep concludes "nothing", the
+   question is which column would show it.
+2. **A branch no input can reach is not covered by a test that constructs the input by hand.** The
+   two tests that exercised `familiesOfMark('bar', 'histogram')` were green, the function was at
+   100%, and the path was dead in the product. The fix was not another test of the function; it was a
+   cue, and the coverage number moved for the right reason.
+
+The cue's ablation is now part of the report beside the cue tables, for the reason the calendar
+rule's is: `no-histogram` reads **414 → 414 on hits and −24 on the shortlist**, on every run, so the
+price of the rule is a measurement of the tree rather than a claim about a commit.
+
+### The other half of the bucket: a dash is not a value
+
+`tables with no measure at all` was 277 rows, and the largest single reason a question was answered
+with nothing. Reading the cells turned up the smallest possible defect: a result set prints NULL as
+`-`, and `-` reached the profiler as the *string* `'-'`. One dash in a column of fifteen numbers made
+the whole column nominal, the table lost its measure, and every bar, line, pie and scatter over it
+was refused.
+
+`numericCell` could not be widened to fix this, and that is the interesting part. It answers "is this
+a number", and a printed absence is *not* a number — the accounting negative `(1,234)` is, and it
+already returned `-1234` for that. Widening it to return `0` for `-` would have made a missing value
+a value of the measure, moved the minimum to a number no row carries, and decided a range-based rule
+wrongly. So the absence got its own predicate:
+
+```ts
+const MISSING = /^(?:-+|—|–|n\/?a|null|none|\.)$/i;
+```
+
+and `typedRows` now asks it before it asks `numericCell`. Whole-cell, deliberately: `5-10` is a band
+and `2019-01-01` is a date, and a rule that matched a dash anywhere would read both as absent.
+
+The measured effect is small and the round nearly reported it as large:
+
+| quantity | before | after |
+| --- | ---: | ---: |
+| rows whose table carries a printed absence | — | 29 |
+| of those, tables that gained a measure | — | 9 |
+| `tables with no measure at all` | 277 | 268 |
+| top-1 | 411 | **414 (28.16%)** |
+
+**The 192 that got away.** The probe that priced this fix said it would recover 192 rows, and I
+believed it for one measurement. The probe counted a table as having a measure when it had a
+`quantitative` *or* an `ordinal` column; `census` counts only `quantitative`, because an ordinal
+column is a ranking and not a quantity. The 183-row difference was the two definitions, not the fix.
+It was caught by comparing the probe's number against the census's own `measureless` line after the
+fix landed, which is the only reason it is a paragraph here instead of a claim in a commit message.
+
+### Three of sixteen labels, and the denominator nobody was quoting
+
+With those two shipped, the census can ask a question it could not ask before: **which labels can
+this contract answer at all?** The answer is derived rather than declared — a family is reachable
+when some mark leads with it under some cue, which is the same predicate the hit test applies:
+
+| family | rows | what became of them | drawn as |
+| --- | ---: | --- | --- |
+| `area` | 138 | substituted 39, outranked 77, refused 16, no profile 6 | a line |
+| `histogram` | 90 | substituted 24, uncovered 49, no profile 17 | a bar |
+| `violin` | 9 | uncovered 3, no profile 6 | nothing |
+
+**237 of 1,470 rows — 16.1% of the corpus — are labels this product cannot lead with**, whatever the
+question says, because the contract has no area, histogram or violin series. That is not a ranking
+loss and it never was. Publishing it as a population changes the denominator every other number is
+quoted against:
+
+| reading | before this round | after |
+| --- | ---: | ---: |
+| top-1 over the corpus | 28.16% (414/1,470) | 28.16% (414/1,470) |
+| **top-1 over the labels the contract can draw** | — | **33.58% (414/1,233)** |
+| shortlist | 450 | **477 (32.45%)** |
+
+Both numbers are published and `assertCensusReport` holds them to one partition (`renderable +
+unreachable.rows === scored`, each family's rows summing to the population, each family's outcome
+counts equal to the census's own). The reason for two numbers rather than a wider one: a product
+that draws a line where the corpus drew an area has answered a nearby question, and calling that a
+hit would make the score say the product draws an area chart. The reason for the second number at
+all: a reader comparing 28.16% against a competitor's published number is comparing it against a
+corpus the competitor was also scored on, and needs to know how much of it is out of reach for a
+reason that has nothing to do with ranking.
+
+### The SQL side: a dispatch that could not resolve its own effect, and what replaced it
+
+G2 was registered as "combine MAC-SQL's four components into one arm", against a bar of
+`Mini-Dev ≥ 62.0%, calls ≤ 1.3`. Both halves of that bar fail on inspection, and the numbers are the
+reason the round spent nothing:
+
+| component | its own reading | in a combined arm |
+| --- | --- | --- |
+| `samples-wide` (their value block) | +2.02pp on one call, for +74.9% prompt tokens | refused on cost; the narrowed form on three candidates read **+0.52pp for +68.1% charged tokens** (`43606308056`), and the reach split showed the block moved nothing where it fired |
+| `dense.ts` (their row transcription) | — | measured **−5.65pp** as an arm (`41190457163`) |
+| their decomposer | **−1.1pp** | refused |
+| their refiner | +0.41pp against its parent on the same split | the only component left, and it fires on the 7% of questions whose first statement does not execute |
+
+So the ceiling of the composition is ~+0.4pp on a 3.92pp gap, on a split that resolves 3.7pp. **A
+combined arm cannot resolve its own effect**, which is the same conclusion the harness has reached
+about five other arms and written into `ON_DEMAND_ARMS`.
+
+The `calls ≤ 1.3` half is wrong as written and worth recording as such: `select-mixed-rule` is three
+calls a question, so a combined arm is three calls plus whatever the refiner fires — 1.3 is not a
+count, it is a *ratio* to three, and the bar should have said `≤ 3.9`. A criterion that cannot be
+met by construction is a criterion no dispatch can fail correctly.
+
+What replaces it is the ceiling the attribution instrument already computed: a perfect selector over
+this pool lands at **67.30%**, which is **0.59pp behind** MAC-SQL's 67.89%. **Selection cannot close
+this gap even if it were perfect.** Every point above that ceiling has to come from a statement the
+pool does not contain, which makes the next lever a fourth candidate — `select-mixed-rule-rows` (a
+candidate differing in *knowledge*) or `-intent` (differing in *grammar*) — and not a fifth
+component bolted onto the same three.
+
+### What changes in the method
+
+1. **A zero delta is a fact about the report, not about the candidate.** Before rejecting on ±0,
+   name the column that would show the effect. `shortlist` existed as a concept in the published
+   reading and not as a field in the sweep, and that gap cost two rounds of a 24-row lever.
+2. **Coverage that a test supplies by hand is not coverage of a reachable path.** A conditional whose
+   antecedent no input produces is dead code with a green checkmark. The question is not "is this
+   branch tested" but "can the product reach it".
+3. **A probe and the instrument can disagree about a word.** My probe said a table with an ordinal
+   column had a measure; the census says only `quantitative` counts. The 183-row gap was the
+   definition, and only comparing the two after the fix caught it.
+4. **A printed absence is not a zero.** `-` is a missing value, `(1,234)` is a negative number, and
+   one predicate cannot answer both without turning the first into the second.
+5. **A criterion that cannot be met by construction is worse than no criterion**, because the
+   dispatch that fails it reports noise instead of refusing. `calls ≤ 1.3` on a three-call arm was
+   that kind of bar.
+6. **The denominator is a reading too.** 16.1% of this corpus names a picture the contract does not
+   have; quoting a share without it invites a comparison against systems whose contracts do.

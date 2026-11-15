@@ -100,6 +100,25 @@ export function isChartReading(file) {
 }
 
 /**
+ * A gate's own configuration: the two files at the repository root that `tools/check-*.mjs` read.
+ *
+ * `budgets.json` is a bundle ceiling and `api-surface.json` is a snapshot of what each package
+ * exports. The readers are `tools/check-budgets.mjs` and `tools/check-exports.mjs`, both run by the
+ * `quality` job, which is never skipped — and neither file is opened by a prompt builder. A round
+ * that moved a budget therefore bought thirteen arms over 496 questions and three live passes over
+ * 210 cases to re-measure a SQL pipeline that had not changed a byte, and the round before that
+ * escaped it only because a second commit cancelled the first run. **The saving was luck, not
+ * design**, which is why this is a rule and not a note.
+ *
+ * Two names rather than a suffix, for the reason `isTest` gives: `package.json` in the same
+ * directory changes what runs and what is installed, and a rule written as "any JSON at the root"
+ * would swallow it. A new root-level configuration has to be argued for here instead of inherited.
+ */
+export function isToolConfig(file) {
+  return file === 'budgets.json' || file === 'api-surface.json';
+}
+
+/**
  * Whether a change set has to be measured, and why.
  *
  * The reason is returned rather than logged because it is what the workflow prints: a
@@ -117,7 +136,9 @@ export function needsModel(files) {
       reason: `the list holds ${paths.length} files and the commit endpoint stops at ${TRUNCATED_AT}, so the .ts may be in the part that was cut`,
     };
   }
-  const code = paths.filter((path) => !isDocumentation(path) && !isTest(path) && !isChartReading(path));
+  const code = paths.filter(
+    (path) => !isDocumentation(path) && !isTest(path) && !isChartReading(path) && !isToolConfig(path),
+  );
   if (code.length === 0) {
     // Three sentences, one per class the filter can have removed, because the sentence is what a
     // reader sees instead of a measurement and "all files are Markdown" would be a lie about a push
@@ -130,7 +151,9 @@ export function needsModel(files) {
         ? `all ${paths.length} changed file(s) are Markdown, which no prompt reads`
         : tested
           ? `all ${paths.length} changed file(s) are Markdown or tests, and neither is read by a prompt`
-          : `all ${paths.length} changed file(s) are Markdown, tests or the chart reading, and the chart reading is re-taken by \`text2vis-rule\` without a model call`,
+          : !paths.every((path) => isDocumentation(path) || isTest(path) || isChartReading(path))
+        ? `all ${paths.length} changed file(s) are Markdown, tests, the chart reading or a gate's own configuration, and each is read by a job that never skips`
+        : `all ${paths.length} changed file(s) are Markdown, tests or the chart reading, and the chart reading is re-taken by \`text2vis-rule\` without a model call`,
     };
   }
   return {
