@@ -13397,3 +13397,159 @@ a point from every cue that fires; that is a scoring property, not a tie-break o
    had the same mark on both sides, and the test that catches it is one line — a covering mark that *is*
    the answer is not a loser. It was missed because the coverage table had been allowed to answer a
    question only the row can answer: what did *this* question call the chart.
+
+## Naming outranks collecting: +3.40pp, and the number was predicted before it shipped
+
+`outranked 399` was the last bucket the census could name but not explain, and the samples it printed
+made the mechanism visible in three lines:
+
+```
+e.g. line 5 [trend]       < bar 6 [trend matrix]
+e.g. pie  5 [share]       < bar 9 [share ranking matrix]
+e.g. line 2 []            < bar 9 [share ranking matrix]
+```
+
+The first line is the whole defect. The question named a trend, which pays the line three points; it
+also said "by … and …", which fires the matrix cue and pays the bar two; and the bar is the *second*
+mark of seven of the twelve cues — `trend`, `share`, `matrix`, `ranking`, `distribution`, `progress`,
+`stages` — so it collects a point from every phrase the prompt happens to contain, whether or not
+any phrase was about a bar. A mark the question named outright lost to a mark it never named.
+
+### The rule, and why it is a key rather than a weight
+
+`recommendChart` now orders by three keys:
+
+```
+1. how many cues name the mark first
+2. the counted score (a prior plus three or two per cue)
+3. the fixed preference order
+```
+
+The first key cannot be expressed as a weight. Making one first claim beat three second places takes a
+value above six; making it beat *any* number of second places takes no finite value at all, and a
+number chosen to be "large enough" is exactly the tuned constant this file's last six chapters have
+been removing. A lexicographic key states the rule instead of approximating it, and the score keeps its
+old job — it separates two marks that an equal number of cues named first, and it still tells a caller
+what the cues paid.
+
+### It was priced before it shipped
+
+The census gained a counterfactual: re-rank the same 1,470 rows under the candidate rule and report
+both sides. For this rule the reading was
+
+```
+as if a mark a cue names first outranks a mark no cue names first:
+  hit 262 -> 312 (converted 106, lost 56)
+```
+
+312. The dispatch that shipped the rule read:
+
+| bucket | before | after | delta |
+|---|---:|---:|---:|
+| **hit** (the label's family is the answer's first claim) | 262 (17.82%) | **312 (21.22%)** | **+50 (+3.40pp)** |
+| substituted (the answer's second claim) | 1 | 24 | +23 |
+| refused | 568 (38.64%) | 568 (38.64%) | 0 |
+| outranked | 399 (27.14%) | **326 (22.18%)** | −73 |
+| uncovered | 76 (5.17%) | 76 (5.17%) | 0 |
+| no profile | 164 (11.16%) | 164 (11.16%) | 0 |
+
+`312` is what the model said, to the row, and the two instruments agree on it: `profile.ts` publishes
+`top-1 21.22% (312), shortlist 22.86% (336)`, and the census publishes `hit 312, hit + substituted 336`.
+
+A prediction that can be checked is worth more than a result that cannot. Had the run read 300, the gap
+would have been a defect in the model — the same class of finding as the `263` against `262` two
+sections above — and the next hour would have gone into the model rather than into the product.
+
+### The cost is in the same table, which is why the model counted it
+
+| pair | rows |
+|---|---:|
+| line → bar | 93 |
+| bar → heatmap | 49 |
+| area → bar | 38 |
+| pie → bar | 38 |
+| bar → pie | 22 |
+| line → heatmap | 18 |
+| line → pie | 16 |
+| pie → heatmap | 16 |
+
+The four `bar →` rows are the price: 71 rows where the label wants a bar and a cue named a pie or a
+heatmap first. They are not a defect of the new key — they were already being answered wrongly, only
+the other way round — but they are the rows a cue-precision round would have to win back, and the
+model priced them before anyone could claim the rule was free.
+
+### The next lever was priced and rejected in the same round
+
+The obvious successor is to stop paying a cue's second mark at all — read `marks: ['pie', 'bar']` as
+"a pie, or a bar if a pie cannot be drawn" — so that `share` stops paying a bar two points on every
+question that says "percentage". The census priced it:
+
+```
+as if a cue pays only the first mark it can admit: hit 312 -> 260 (converted 40, lost 92)
+```
+
+**−52 rows.** The rule is not obviously wrong; it is wrong *here*, because when the preferred mark is
+refused the fallback is the only mark that can answer, and removing the second-mark payment removes the
+signal that says so. A round spent implementing it would have been a round spent reverting it. This is
+what a counterfactual is for, and it is the first time in this project that a lever died before it was
+written.
+
+### Three ways the instrument was wrong, found by reading its own output
+
+1. **`snippet` cut the wrong end, twice.** The corpus wraps every prompt as instruction block,
+   question, output-format spec. The first cut kept the last 160 characters — the spec. The second cut
+   the spec off and kept the last 160 of what remained — the sentence introducing the spec. Both printed
+   the same three hundred samples. The third version prefers the last sentence that ends in `?`, which
+   is what every question in this corpus is, and falls back to cutting the code instruction and then to
+   the tail.
+2. **`unreadNumerals` named 273 tables as parser defects, and its own samples said otherwise.** The
+   first version asked for a cell with a digit and no letter; the corpus answered with `71+`, `18-25`
+   and `2018*` — age bands and footnote-marked years, typed as categories and correctly so. The
+   requirement is now a decimal shape (`\d`, a separator, `\d`), and the remaining question is honest:
+   **273 of the 1,470 rows carry no measure at all**, and no formatting repair would give them one.
+3. **A counterfactual of a shipped rule measures nothing.** The model that priced this round's lever now
+   re-ranks an already re-ranked list and returns zero conversions; it was re-aimed at the next
+   candidate in the same commit that shipped the rule, which is the only way the instrument stays one
+   step ahead of the product.
+
+### What the denominator actually is
+
+`1,470` was doing two jobs. Of those rows:
+
+| class | rows |
+|---|---:|
+| the table carries no measure at all | 273 |
+| the family is one no mark in the contract draws (violin, word cloud, …) | 76 |
+| carries a measure and a mark that could draw it | **≈ 1,121** |
+
+312 of 1,121 is **27.8%**. Both numbers are true and they answer different questions; the reading this
+project publishes stays `21.22% of the labelled rows that carry a table`, because a denominator chosen
+after the fact is how a benchmark stops being one. The number that matters for planning is the 27.8%:
+the remaining 809 rows are where a lever can still land.
+
+### The instrument was buying a benchmark it could not move
+
+`tools/ci-scope.mjs` measured every push that was not Markdown or a test, which meant a census commit
+re-priced thirteen BIRD arms over 496 questions and three live passes over 210 cases — about 7,000
+completions to re-time a chart reading that `.github/workflows/text2vis-rule.yml` had already taken on
+the same push, without a model call and without a key. The rule has a third class now: `eval/text2vis/`
+is a leaf, its sources import the chart package and each other and nothing imports them back (checked,
+not assumed), and `eval/bird/` — the harness that spends the calls — is not covered. A push that also
+touches the product still measures.
+
+### What changes in the method
+
+1. **A rule that says "naming is a request" has to be a key, not a weight.** The previous round made a
+   named mark win a tie; this round made naming outrank collecting. The first was a comparator term
+   worth three points and it could not do the job, because the competing term is unbounded.
+2. **A lever can be priced before it is written, and the price can be a refusal.** 106 rows won against
+   56 lost was a ship; 40 against 92 was a rejection. Neither number required the code to exist.
+3. **An instrument's own samples are evidence about the instrument.** `71+` and `18-25` were the corpus
+   telling this round that its definition of "a number nothing read" was wrong. The definition changed;
+   the count did not.
+4. **Every bucket that is used as a target has to be explained row by row first.** `outranked 399` was
+   one number for two rounds; the three samples that took it apart cost one dispatch and redirected the
+   next two.
+5. **Cost is a line in the report.** A chart-side dispatch was paying for a SQL benchmark on every push
+   for two rounds, and no gate would ever have caught it: `quality gates` was green, and the money was
+   in a job that did not need to run.

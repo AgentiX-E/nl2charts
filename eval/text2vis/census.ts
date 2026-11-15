@@ -234,15 +234,19 @@ export function coercedColumns(set: ResultSet): CoercedColumn[] {
 }
 
 /**
- * A cell that is made of digits and punctuation, and that `numericCell` still refuses.
+ * A cell that holds a decimal number, and that `numericCell` still refuses.
  *
- * The other half of the same question. `coercedColumns` names the columns a *format* rescued;
- * this names the cells nothing rescued, on tables that ended up with no measure at all — and those
- * tables refuse every mark that needs one, which is the largest single shape in the refusal table.
- * A cell with a letter in it is a label and is skipped; a cell with a digit and no letter is a number
- * the reader declined, and the string is the evidence: `−0.04` with a typographic minus, `1 234` with
- * a space, `0.04 °C` with a unit. Three formats, three repairs, and one count of 389 could not tell
- * them apart.
+ * The other half of the same question. `coercedColumns` names the columns a *format* rescued; this
+ * names the cells nothing rescued, on tables that ended up with no measure at all — the tables that
+ * refuse every mark needing one, which is the largest single shape in the refusal table.
+ *
+ * **The first version of this asked for a cell with a digit and no letter, and the corpus answered
+ * with `71+`, `18-25` and `2018*`** — age bands and footnote-marked years, which are categories and
+ * were typed as categories, correctly. The requirement is now a *decimal shape*, `\d` followed by a
+ * separator and another digit, because that is what a mis-formatted quantity looks like: `−0.04` with
+ * a typographic minus, `1.234,56` with the separators the other way round, `0.04 °C` with a unit.
+ * A categorical code is not a number the reader declined, and an instrument that calls it one sends
+ * the next round to the parser with a list of football scores and age brackets.
  */
 export interface UnreadNumeral {
   readonly column: string;
@@ -256,7 +260,7 @@ export function unreadNumerals(set: ResultSet): UnreadNumeral[] {
   for (const [index, name] of set.columns.entries()) {
     const cells = set.rows.map((row) => (row[index] as string).trim()).filter((cell) => cell.length > 0);
     const offender = cells.find(
-      (cell) => /\d/.test(cell) && !/\p{L}/u.test(cell) && numericCell(cell) === undefined,
+      (cell) => /\d[.,]\d/.test(cell) && !/\p{L}/u.test(cell) && numericCell(cell) === undefined,
     );
     if (offender === undefined) continue;
     found.push({ column: name, cell: offender, n: 1 });
