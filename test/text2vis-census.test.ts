@@ -31,7 +31,9 @@ import {
   coveringMarks,
   describeCensus,
   entryCensus,
+  noProfileReason,
   parseCensusArgs,
+  snippet,
   timeLikeColumns,
 } from '../eval/text2vis/census.js';
 import { parseResultSet, profilesOf, scoreProfile, type ProfileInput } from '../eval/text2vis/profile.js';
@@ -325,6 +327,63 @@ describe('what became of one question', () => {
   });
 });
 
+describe('a question, cut to the words that decide', () => {
+  it('keeps the end of the prompt, because the corpus puts the question there', () => {
+    const prompt = [
+      'You are a data science assistant.',
+      'Generate matplotlib code to answer the question below.',
+      'The table has already been loaded into a pandas dataframe named df.',
+      'Include axis labels, a legend and a title in the figure.',
+      'Use the colour column where the table has one, and sort the categories.',
+      'Do not print the dataframe; only the figure is inspected.',
+      'Which region has the highest revenue?',
+    ].join('\n');
+    const cut = snippet(prompt);
+    expect(cut.startsWith('…')).toBe(true);
+    expect(cut.endsWith('Which region has the highest revenue?')).toBe(true);
+    expect(cut).not.toContain('You are a data science assistant');
+  });
+
+  it('collapses the whitespace a wrapped question carries', () => {
+    expect(snippet('What is\nthe trend   of revenue?')).toBe('What is the trend of revenue?');
+  });
+
+  it('leaves a short prompt alone, so a sample reads as the corpus wrote it', () => {
+    expect(snippet('  Revenue by region  ')).toBe('Revenue by region');
+  });
+
+  it('cuts from the left rather than the right, because the boilerplate is at the front', () => {
+    const long = `${'Include axis labels. '.repeat(20)}what is the trend?`;
+    const cut = snippet(long);
+    expect(cut.length).toBeLessThanOrEqual(161);
+    expect(cut.endsWith('what is the trend?')).toBe(true);
+  });
+});
+
+describe('a table that would not profile, by the reason it would not', () => {
+  const set = (text: string) => parseResultSet(text);
+
+  it('calls an empty cell empty, which is a corpus gap and not a parser defect', () => {
+    expect(noProfileReason('', set(''))).toBe('empty');
+    expect(noProfileReason('  \n \n', set('  \n \n'))).toBe('empty');
+  });
+
+  it('calls a line with no delimiter prose, because it is not a header either', () => {
+    expect(noProfileReason('There is no table here.', set('There is no table here.'))).toBe('not-tabular');
+  });
+
+  it('calls a header with no record below it header-only, blanks included', () => {
+    expect(noProfileReason('Region, Revenue', set('Region, Revenue'))).toBe('header-only');
+    expect(noProfileReason('Region, Revenue\n,\n, ', set('Region, Revenue\n,\n, '))).toBe('header-only');
+  });
+
+  it('refuses to name a defect for a table that profiles', () => {
+    // The precondition is the contract: this classifier is called from the `noProfile` bucket and
+    // nowhere else, so a table with a record is a caller defect rather than a fourth reason.
+    expect(() => noProfileReason('Region, Revenue\nNorth, 4', set('Region, Revenue\nNorth, 4'))).toThrow(/profiles/);
+  });
+});
+
 describe('the census over a population', () => {
   const population: readonly ProfileInput[] = [
     input(TREND, 'Line Chart', QUARTERLY),
@@ -405,6 +464,8 @@ describe('the census over a population', () => {
     expect(lines).toContain('refused pie for pie: 1 (1 answered elsewhere) at dims 1 / ordered 0 / measures 1');
     expect(lines).toContain('lost bar to heatmap: 1 (on preference 0, cue named and lost 1');
     expect(lines).toContain('lost heatmap to bar: 1 (on preference 1, cue named and lost 0');
+    expect(lines).toContain('tables that would not profile: empty 1');
+    expect(lines).toContain('e.g. bar 4 [matrix] < heatmap 5 [matrix] — "Revenue by region and channel"');
   });
 
   it('maps a corpus the way the other instruments do', () => {
@@ -430,6 +491,17 @@ describe('the census over a population', () => {
     ]);
   });
 
+  it('prints what the corpus put there instead of a table, when there was something to print', () => {
+    const lines = describeCensus(
+      censusOf([input(TREND, 'Line Chart', ''), input(TREND, 'Line Chart', 'Region, Revenue')]),
+    ).join('\n');
+    expect(lines).toContain('tables that would not profile: empty 1, header-only 1');
+    expect(lines).toContain('header-only: e.g. "Region, Revenue"');
+    // An empty cell has nothing to quote, and a line saying `empty: e.g. ""` is a line that teaches
+    // a reader to skip the section.
+    expect(lines).not.toContain('empty: e.g.');
+  });
+
   it('orders equal-sized refusals by the detail that differs, so two runs read the same', () => {
     // The shape table is read as a decision, so its order has to be a fact and not an insertion
     // order. Marks tie first by count, then by name, then by the count that differs between them.
@@ -441,6 +513,52 @@ describe('the census over a population', () => {
     ]);
     expect(report.shapes.filter((entry) => entry.mark === 'line').map((entry) => entry.timeLike)).toEqual([false, true]);
     expect(report.shapes.filter((entry) => entry.mark === 'candlestick').map((entry) => entry.ordered)).toEqual([0, 1]);
+  });
+
+  it('keeps the arithmetic of a loss, because the gap alone says who won and not why', () => {
+    // The ranked scores are already in the row; what the tally adds is which cues paid them. A bar
+    // that collected four cues beating a line that collected one is a different defect from a bar
+    // that beat a line on the tie-break, and `namedButLost` cannot tell them apart.
+    const report = censusOf([
+      input(
+        'What is the trend of revenue by month and region, as a percentage?',
+        'Line Chart',
+        table('Region, Channel, Revenue', ['North, Online, 40', 'South, Retail, 55', 'East, Online, 31', 'West, Retail, 63']),
+      ),
+    ]);
+    const loss = report.outranked[0];
+    expect(loss?.expected).toBe('line');
+    expect(loss?.winner).toBe('bar');
+    expect(loss?.samples).toHaveLength(1);
+    expect(loss?.samples[0]?.coveringScore).toBe(5);
+    expect(loss?.samples[0]?.answeredScore).toBeGreaterThan(5);
+    expect(loss?.samples[0]?.coveringCues).toEqual(['trend']);
+    expect(loss?.samples[0]?.answeredCues.length).toBeGreaterThan(1);
+  });
+
+  it('keeps three losses from a pair, because three questions are enough to read the intent', () => {
+    const rows = Array.from({ length: 4 }, (_, index) =>
+      input(`What is the trend of revenue by month and region? (${String(index + 1)})`, 'Line Chart', regions(5)),
+    );
+    const report = censusOf(rows);
+    expect(report.outranked[0]?.n).toBe(4);
+    expect(report.outranked[0]?.samples).toHaveLength(3);
+  });
+
+  it('names the reason a table would not profile, because the repairs are in three files', () => {
+    const report = censusOf([
+      input(TREND, 'Line Chart', ''),
+      input(TREND, 'Line Chart', 'Region, Revenue'),
+      input(TREND, 'Line Chart', 'No table accompanies this question.'),
+    ]);
+    expect(report.outcomes.noProfile).toBe(3);
+    expect(report.noProfile.map((entry) => `${entry.reason}:${String(entry.n)}`)).toEqual([
+      'empty:1',
+      'header-only:1',
+      'not-tabular:1',
+    ]);
+    expect(() => assertCensusReport(report)).not.toThrow();
+    expect(() => assertCensusReport({ ...report, noProfile: [] })).toThrow(/no-profile reasons/);
   });
 
   it('orders two losses of the same family by the mark that beat it, so the tally is stable', () => {
