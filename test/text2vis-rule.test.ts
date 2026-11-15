@@ -20,6 +20,8 @@ import {
   CUE_VARIANTS,
   cueAnswer,
   cueMarks,
+  cuePrecision,
+  describeCues,
   describeRule,
   describeSweep,
   entryRule,
@@ -33,8 +35,10 @@ import {
   sweepRule,
   withHistogramCue,
   withCueAheadOf,
+  withMatrixWindow,
   withShareByAnyCue,
   withShareByCue,
+  withoutMatrix,
   type RuleReport,
   type VariantReading,
 } from '../eval/text2vis/rule.js';
@@ -555,6 +559,9 @@ describe('the table a variant constructs', () => {
       'share-by+histogram',
       'share-by-any',
       'share-by-any+histogram',
+      'matrix-window',
+      'matrix-window+share-by',
+      'no-matrix',
     ]);
     for (const variant of CUE_VARIANTS) expect(variant.note.length).toBeGreaterThan(20);
   });
@@ -762,5 +769,177 @@ describe('the sweep: every table, the same rows', () => {
     expect(scoreRule(rows).variant).toBe('shipped');
     expect(scoreRule(rows, { cues: CUE_VARIANTS[1]!.cues, variant: 'bar-share' }).variant).toBe('bar-share');
     expect(scoreRule(rows).sweep).toEqual([]);
+  });
+});
+
+describe('which cue is wrong, read cue by cue', () => {
+  const rows = [
+    // `share` leads both of these and is right about one of them: the second is a comparison the
+    // corpus drew as a bar, and the cue puts a pie first with the bar still on its list.
+    { prompt: 'the share of revenue that is refunds', label: 'Pie Chart' },
+    { prompt: 'the share of orders by status', label: 'Bar Chart' },
+    { prompt: 'revenue over time', label: 'Line Chart' },
+    { prompt: 'average revenue by region and channel', label: 'Heatmap' },
+    // Unmapped and cue-less rows, which no cue may be scored on.
+    { prompt: 'show the hierarchy of accounts', label: 'Treemap' },
+    { prompt: 'how many orders were placed', label: 'Bar Chart' },
+  ];
+
+  it('scores a cue on the rows it decided first, and separates the two ways it can be wrong', () => {
+    const share = cuePrecision(rows).find((cue) => cue.kind === 'share');
+    expect(share).toMatchObject({ first: 'pie', leads: 2, hits: 1, inside: 2 });
+    expect(share?.precision).toBe(0.5);
+    // `inside` covers both, because the bar is the cue's second mark: the loss is an order and not a
+    // phrase, and the two columns are what tell a reader which file to open.
+    expect(share?.coverage).toBe(1);
+  });
+
+  it('never scores a cue on a question it did not fire on, or on a label with no family', () => {
+    const readings = cuePrecision(rows);
+    // Six rows: one unmapped and one with no cue at all, so four are decidable — two `share`, one
+    // `trend`, one `matrix`.
+    expect(readings.reduce((total, cue) => total + cue.leads, 0)).toBe(4);
+    expect(readings.map((cue) => cue.kind)).toEqual(['share', 'matrix', 'trend']);
+  });
+
+  it('orders the cues by the rows they decided, so the repair list is in reading order', () => {
+    const readings = cuePrecision(rows);
+    const leads = readings.map((cue) => cue.leads);
+    expect(leads).toEqual([...leads].sort((left, right) => right - left));
+    // `share` decided half the population and leads the list; a table sorted by precision would put
+    // the cue that fired twice on top for being right both times.
+    expect(readings[0]?.kind).toBe('share');
+    // The two cues that decided one row each are ordered by name, not by insertion: a tie broken by
+    // the order the rules happen to sit in the table is a reading that moves when the table does.
+    expect(leads.slice(1)).toEqual([1, 1]);
+  });
+
+  it('reports a cue that speaks for nothing this layer recommends, rather than dropping it', () => {
+    // A cue naming only `sankey` is a cue the recommender cannot answer with, and it is still a
+    // finding: silence would read as "this cue never fired".
+    const table = [{ kind: 'matrix' as const, marks: ['sankey' as const], pattern: /\bflow\b/ }];
+    const readings = cuePrecision([{ prompt: 'the flow between accounts', label: 'Heatmap' }], table);
+    expect(readings).toEqual([{ kind: 'matrix', first: undefined, leads: 1, hits: 0, inside: 0, precision: 0, coverage: 0 }]);
+  });
+
+  it('carries the per-cue reading on the report the artifact keeps', () => {
+    const report = scoreRule(rows);
+    expect(report.cues.length).toBeGreaterThan(0);
+    expect(report.cues).toEqual(cuePrecision(rows));
+    // And on every variant, because a candidate's question is whether the cue it changed improved.
+    expect(report.sweep).toEqual([]);
+    expect(sweepRule(rows).sweep.every((reading) => reading.cues.length > 0)).toBe(true);
+  });
+
+  it('refuses a reading whose per-cue leads do not partition the answered rows', () => {
+    const report = scoreRule(rows);
+    const first = report.cues[0]!;
+    expect(() => assertRuleReport({ ...report, cues: [{ ...first, leads: first.leads + 1 }] })).toThrow(/per-cue leads sum to/);
+    // A one-cue population, so the partition identity holds and the ordering identity is what fails.
+    const single = scoreRule([
+      { prompt: 'revenue over time', label: 'Line Chart' },
+      { prompt: 'how many orders were placed', label: 'Bar Chart' },
+    ]);
+    expect(single.cues).toHaveLength(1);
+    const cue = single.cues[0]!;
+    expect(() => assertRuleReport({ ...single, cues: [{ ...cue, inside: cue.leads + 1 }] })).toThrow(/leads$/);
+    expect(() => assertRuleReport({ ...single, cues: [{ ...cue, hits: cue.inside + 1 }] })).toThrow(/hits inside/);
+  });
+
+  it('prints one line per cue, and nothing when there is none', () => {
+    const lines = describeCues(cuePrecision(rows));
+    expect(lines[0]).toContain('cue precision');
+    expect(lines).toHaveLength(1 + cuePrecision(rows).length);
+    expect(lines[1]).toContain('share');
+    // A cue that speaks for no mark this layer recommends still gets a line, and the line says so
+    // rather than leaving the column blank.
+    const silent = cuePrecision(
+      [{ prompt: 'the flow between accounts', label: 'Heatmap' }],
+      [{ kind: 'matrix', marks: ['sankey'], pattern: /\bflow\b/ }],
+    );
+    expect(describeCues(silent)[1]).toContain('first none');
+    expect(describeCues([])).toEqual([]);
+  });
+});
+
+describe('the width of the matrix cue', () => {
+  const shipped = CUE_VARIANTS[0]!.cues;
+  const windowed = withMatrixWindow(shipped);
+
+  it('reads a crossing stated in one clause and stops reading one across a full stop', () => {
+    // The shipped pattern is `\bby\b[\s\S]*\band\b`: unbounded in both directions, so a question
+    // carrying "by" and, three sentences later, "and" leads with a heatmap.
+    const across = 'average revenue by region. plot it and label the axes';
+    expect(cueMarks(across)).toEqual(['heatmap', 'bar']);
+    expect(cueMarks(across, windowed)).toEqual([]);
+    // And the cue it was reached for still fires: same words, same order, a bound on the distance.
+    expect(cueMarks('average revenue by region and channel', windowed)).toEqual(['heatmap', 'bar']);
+    expect(cueMarks('revenue by region and by channel', windowed)).toEqual(['heatmap', 'bar']);
+  });
+
+  it('changes one rule and leaves the rest of the table where it was', () => {
+    expect(windowed.length).toBe(shipped.length);
+    const kinds = windowed.map((rule) => rule.kind);
+    expect(kinds).toEqual(shipped.map((rule) => rule.kind));
+    expect(windowed.find((rule) => rule.kind === 'matrix')?.marks).toEqual(
+      shipped.find((rule) => rule.kind === 'matrix')?.marks,
+    );
+    expect(windowed.find((rule) => rule.kind === 'matrix')?.pattern).not.toBe(
+      shipped.find((rule) => rule.kind === 'matrix')?.pattern,
+    );
+  });
+
+  it('prices the removal beside the window, so a rewrite has a floor to clear', () => {
+    const without = withoutMatrix(shipped);
+    expect(without).toHaveLength(shipped.length - 1);
+    expect(without.some((rule) => rule.kind === 'matrix')).toBe(false);
+    expect(cueMarks('average revenue by region and channel', without)).toEqual([]);
+    expect(CUE_VARIANTS.find((variant) => variant.name === 'no-matrix')?.cues).toEqual(without);
+    expect(CUE_VARIANTS.find((variant) => variant.name === 'matrix-window')?.cues).toEqual(windowed);
+  });
+});
+
+describe('the delta a sweep prints', () => {
+  const rows = [
+    { prompt: 'the share of orders by status', label: 'Bar Chart' },
+    { prompt: 'the share of revenue that is refunds', label: 'Pie Chart' },
+    { prompt: 'revenue over time', label: 'Line Chart' },
+  ];
+
+  const reading = (report: RuleReport): VariantReading => ({
+    variant: report.variant,
+    note: 'built by the test',
+    scored: report.scored,
+    top1: report.top1,
+    top1Share: report.top1Share,
+    shortlist: report.shortlist,
+    shortlistShare: report.shortlistShare,
+    byFamily: familyRows(report),
+    cues: report.cues,
+  });
+
+  const barFirst = CUE_VARIANTS[1]!.cues;
+  const shipped = scoreRule(rows);
+  const flipped = scoreRule(rows, { cues: barFirst, variant: 'bar-share' });
+  const histogram = scoreRule(rows, { cues: withHistogramCue(CUE_VARIANTS[0]!.cues), variant: 'histogram' });
+
+  it('measures every table against the control and not against the line above it', () => {
+    const lines = describeSweep({ ...shipped, sweep: [reading(shipped), reading(flipped), reading(histogram)] });
+    expect(lines[0]).toContain('against shipped');
+    // `histogram` follows `bar-share` in this order and still reports its delta against `shipped`:
+    // the pie row it restores is +0 against the control and −1 against the line above it.
+    expect(lines[3]).not.toContain('pie');
+  });
+
+  it('reports the same delta for a table wherever it is listed', () => {
+    // The defect this closes: a delta against the previous row is a fact about the list, so moving
+    // one variant changes the published number while no cue table changed at all.
+    const forward = describeSweep({ ...shipped, sweep: [reading(shipped), reading(flipped), reading(histogram)] });
+    const backward = describeSweep({ ...shipped, sweep: [reading(shipped), reading(histogram), reading(flipped)] });
+    const deltaOf = (lines: readonly string[], variant: string): string =>
+      (lines.find((line) => line.trimStart().startsWith(variant)) ?? '').split('|')[1]?.trim() ?? '';
+    expect(deltaOf(forward, 'bar-share')).toBe(deltaOf(backward, 'bar-share'));
+    expect(deltaOf(forward, 'histogram')).toBe(deltaOf(backward, 'histogram'));
+    expect(deltaOf(forward, 'shipped')).toBe('');
   });
 });

@@ -157,6 +157,82 @@ export function cueMarks(question: string, table?: readonly CueRule[]): readonly
   return cueAnswer(question, table).map((answer) => answer.mark);
 }
 
+/**
+ * One cue, scored by the rows it decided.
+ *
+ * The report above scores the *table*: a top-1 share over the corpus. That number cannot say which
+ * phrase is wrong, because it is an average over twelve rules and the corpus's whole weight sits on
+ * three of them. This reading is per cue, and it is read on the only population where a cue is
+ * answerable: the rows where it fired **first**, since a cue that fired second never decided anything.
+ *
+ * Two counts, because a cue can be wrong in two different ways and they are repaired in different
+ * files. `hits` is the rows where the cue's first mark covers the label — the cue named the right
+ * picture. `inside` is the rows where *any* of its marks covers the label — the cue identified the
+ * right family but put another mark first, which is a `marks` ordering defect and not a phrase
+ * defect. The gap between `inside` and `hits` is therefore a lever that costs nothing but a reorder,
+ * and the gap between `leads` and `inside` is what a narrower pattern could only ever buy back.
+ *
+ * Rows no cue fired on are not here at all: they are `RuleReport.declined`, and a cue cannot be
+ * scored on a question it did not read.
+ */
+export interface CueReading {
+  readonly kind: CueKind;
+  /** The mark this cue puts first, which is the claim being scored. */
+  readonly first: RecommendableMark | undefined;
+  /** Rows where this cue was the first cue to fire. */
+  readonly leads: number;
+  /** Of those, rows whose label family is this cue's first mark. */
+  readonly hits: number;
+  /** Of those, rows whose label family is any mark this cue speaks for. */
+  readonly inside: number;
+  /** `hits / leads`: named the right picture. */
+  readonly precision: number;
+  /** `inside / leads`: named the right family, possibly in the wrong position. */
+  readonly coverage: number;
+}
+
+/**
+ * Score every cue by the rows it decided.
+ *
+ * Ordered by `leads` descending, and that order is the point: the cue that decides the most rows is
+ * the one worth repairing first, and a table sorted by precision would put a cue that fired twice at
+ * the top. Same argument as the unmapped-label list — a reader should be able to act in reading order.
+ *
+ * A cue whose only marks are types this layer does not recommend has `first: undefined` and cannot
+ * hit: it is reported rather than dropped, because a cue that speaks for nothing is a finding.
+ */
+export function cuePrecision(rows: readonly RuleInput[], table: readonly CueRule[] = CHART_CUES): readonly CueReading[] {
+  const tallies = new Map<CueKind, { first: RecommendableMark | undefined; leads: number; hits: number; inside: number }>();
+  for (const row of rows) {
+    const family = familyOfLabel(row.label);
+    // An unmapped label is outside every denominator in this file, at every level: it is a family
+    // this build cannot name, so neither a cue nor the table can be right or wrong about it.
+    if (family === undefined) continue;
+    const lead = readCues(row.prompt, table)[0];
+    if (lead === undefined) continue;
+    const first = lead.marks.find((mark) => isRecommendable(mark));
+    const entry = tallies.get(lead.kind) ?? { first, leads: 0, hits: 0, inside: 0 };
+    entry.leads += 1;
+    if (first !== undefined && familiesOfMark(first, lead.kind).includes(family)) entry.hits += 1;
+    if (lead.marks.some((mark) => isRecommendable(mark) && familiesOfMark(mark, lead.kind).includes(family))) entry.inside += 1;
+    tallies.set(lead.kind, entry);
+  }
+  return [...tallies.entries()]
+    .map(([kind, entry]) => ({
+      kind,
+      first: entry.first,
+      leads: entry.leads,
+      hits: entry.hits,
+      inside: entry.inside,
+      // No guard for `leads === 0`: an entry exists only because a row incremented it, so the
+      // denominator is at least one by construction and a branch for it would be one no input can
+      // reach — a branch whose only caller is a coverage report.
+      precision: entry.hits / entry.leads,
+      coverage: entry.inside / entry.leads,
+    }))
+    .sort((left, right) => right.leads - left.leads || left.kind.localeCompare(right.kind));
+}
+
 function isRecommendable(mark: string): mark is RecommendableMark {
   return mark in MARK_FAMILIES;
 }
@@ -202,6 +278,14 @@ export interface RuleReport {
   readonly perLabel: readonly LabelReading[];
   /** `expected -> answered`, rows where the rule produced a mark, most frequent first. */
   readonly confusion: readonly { readonly expected: ChartFamily; readonly answered: RecommendableMark; readonly n: number }[];
+  /**
+   * Each cue scored by the rows it decided.
+   *
+   * A top-1 share is an average over every rule in the table and the corpus's weight sits on three of
+   * them, so it can name a number and not a phrase. This is the per-phrase version of the same
+   * measurement, on the same population minus the rows no cue fired on.
+   */
+  readonly cues: readonly CueReading[];
   /** Milliseconds per question on the cue path: no model, no renderer, no database. */
   readonly latency: { readonly p50: number; readonly p95: number; readonly max: number };
   /** Which cue table this report scored. `shipped` is the one the package exports. */
@@ -229,6 +313,14 @@ export interface VariantReading {
   readonly shortlistShare: number;
   /** Top-1 hits per labelled family. A family with a smaller `n` than the shipped run has left the population. */
   readonly byFamily: readonly { readonly family: ChartFamily; readonly n: number; readonly top1: number }[];
+  /**
+   * The same per-cue scoring as `RuleReport.cues`, for this table.
+   *
+   * Carried because the question a candidate raises is not only "did the total move" but "did the cue
+   * I changed get better, or did it get worse while another cue paid for it". Both can be true of a
+   * table that gains a row.
+   */
+  readonly cues: readonly CueReading[];
 }
 
 /**
@@ -334,6 +426,7 @@ export function scoreRule(
       }))
       .sort((left, right) => right.n - left.n || left.label.localeCompare(right.label)),
     confusion: [...confusion.values()].sort((left, right) => right.n - left.n),
+    cues: cuePrecision(rows, options.cues ?? CHART_CUES),
     latency: percentiles(durations),
     variant: options.variant ?? 'shipped',
     // Filled by `sweepRule`, which is the only caller that prices more than one table. A report from
@@ -438,15 +531,50 @@ export function withShareByAnyCue(table: readonly CueRule[]): readonly CueRule[]
 }
 
 /**
+ * The `matrix` cue with its window bounded to one clause.
+ *
+ * The shipped pattern is `\bby\b[\s\S]*\band\b`, which is unbounded in both directions: it spans the
+ * whole question, newlines included, so any question carrying "by" anywhere and "and" anywhere later
+ * leads with a heatmap. The corpus's questions are instructions — a sentence of data, a sentence of
+ * "generate matplotlib code", a sentence of axis rules — and a crossing across sentence boundaries is
+ * not a crossing. `[^.;?!\n]{0,60}` is the same signal read inside one clause and nothing else: same
+ * two words, same order, a bound on the distance between them.
+ *
+ * The number is not tuned and must not be read as tuned: 60 characters is what it takes to hold
+ * "by region and channel" with a measure in between, and the reading that follows says whether the
+ * bound helps, so the only thing a different bound would buy is another run.
+ */
+const MATRIX_WINDOW: RegExp = /\bby\b[^.;?!\n]{0,60}\band\b|交叉|矩阵/;
+
+/** The `matrix` cue, read inside one clause. */
+export function withMatrixWindow(table: readonly CueRule[]): readonly CueRule[] {
+  return table.map((rule) => (rule.kind === 'matrix' ? { ...rule, pattern: MATRIX_WINDOW } : rule));
+}
+
+/**
+ * The table with no `matrix` cue at all.
+ *
+ * Priced beside the window because the two answer different questions. The window asks "is the cue
+ * right when it only reads a clause"; the removal asks "is the cue worth its leads at all", which is
+ * the ceiling a narrower pattern can reach and the floor a rewrite has to clear. A table that loses
+ * rows when the cue is removed is a table in which `by … and` really does identify a crossing.
+ */
+export function withoutMatrix(table: readonly CueRule[]): readonly CueRule[] {
+  return table.filter((rule) => rule.kind !== 'matrix');
+}
+
+/**
  * The tables this build prices, and what each one changes.
  *
- * The discipline is that a variant may re-order or re-membership `marks` and may add a cue, but may
- * never edit a pattern: a variant that rewrote the phrases would be a different cue table rather
- * than the same one re-ordered, and its reading could not be attributed.
+ * The discipline is that a variant changes one thing and says what it is in one line: the order of
+ * the cues, the membership of a cue's `marks`, the presence of a cue, or the width of exactly one
+ * pattern. What it may never do is rewrite a phrase *and* reorder the table in the same entry — a
+ * variant that changed two things could not be attributed, and the sweep exists so that a change is
+ * attributable before it ships.
  *
- * The two `share` widths and the histogram cue are the levers, and every lever is also priced on top
- * of the other family — six variants from three changes — because a reader will ask whether they
- * compose and answering it after the fact costs another run of the corpus.
+ * The two `share` widths, the two `matrix` widths and the histogram cue are the levers, and each is
+ * also priced on top of another family — because a reader will ask whether they compose, and
+ * answering it after the fact costs another run of the corpus.
  *
  * `shipped` comes first and is the table the package exports, so the sweep always contains the
  * control it is a sweep of.
@@ -489,6 +617,21 @@ export const CUE_VARIANTS: readonly { readonly name: string; readonly note: stri
       note: 'the wide discriminator and the histogram cue together',
       cues: withHistogramCue(withShareByAnyCue(CHART_CUES)),
     },
+    {
+      name: 'matrix-window',
+      note: '`matrix` reads "by … and" inside one clause instead of across the whole question',
+      cues: withMatrixWindow(CHART_CUES),
+    },
+    {
+      name: 'matrix-window+share-by',
+      note: 'both discriminators at once: the two cues this round suspects of leading on a phrase that is not a request',
+      cues: withMatrixWindow(withShareByCue(CHART_CUES)),
+    },
+    {
+      name: 'no-matrix',
+      note: '`matrix` removed outright: the ceiling a narrower pattern could reach and the floor a rewrite has to clear',
+      cues: withoutMatrix(CHART_CUES),
+    },
   ];
 
 /**
@@ -510,6 +653,7 @@ export function sweepRule(rows: readonly RuleInput[], options: { readonly clock?
       shortlist: report.shortlist,
       shortlistShare: report.shortlistShare,
       byFamily: familyRows(report),
+      cues: report.cues,
     };
   });
   return { ...scoreRule(rows, options), sweep: readings };
@@ -576,6 +720,10 @@ export function assertRuleReport(report: RuleReport): void {
   if (report.rows !== report.scored + report.unmapped.count) {
     throw new Error(`the corpus holds ${String(report.rows)} rows but ${String(report.scored)} + ${String(report.unmapped.count)} do not sum to it`);
   }
+  // Every row that fired a cue fired exactly one cue first, so the per-cue lead counts are a
+  // partition of the answered rows. A cue counted twice, or a row dropped because its label was
+  // unmapped twice over, shows up here rather than in a share nobody can re-derive.
+  assertCueReadings(report.cues, report.scored - report.declined, report.variant);
   // Each variant is scored on the same corpus, so a reading whose population is a different size was
   // computed by a second definition of the denominator — the one defect a sweep makes easy to miss,
   // because the tables differ and the rows must not.
@@ -589,6 +737,26 @@ export function assertRuleReport(report: RuleReport): void {
     }
     if (reading.top1 > reading.shortlist || reading.shortlist > reading.scored) {
       throw new Error(`variant ${reading.variant} reports top-1 ${String(reading.top1)} above its shortlist ${String(reading.shortlist)} or above its scored rows`);
+    }
+    assertCueReadings(reading.cues, reading.scored - report.declined, reading.variant);
+  }
+}
+
+/**
+ * The three per-cue counts, checked against the population they were read on.
+ *
+ * `leads` is a partition of the rows a cue decided, and `hits ⊆ inside ⊆ leads` holds because a cue's
+ * first mark is one of its marks. Neither identity can fail by a small amount: both are true of every
+ * row or the reading counted a row twice.
+ */
+function assertCueReadings(cues: readonly CueReading[], answered: number, variant: string): void {
+  const leads = cues.reduce((total, cue) => total + cue.leads, 0);
+  if (leads !== answered) {
+    throw new Error(`variant ${variant}: the per-cue leads sum to ${String(leads)} against ${String(answered)} rows that fired a cue`);
+  }
+  for (const cue of cues) {
+    if (cue.hits > cue.inside || cue.inside > cue.leads) {
+      throw new Error(`variant ${variant}: cue ${cue.kind} reports ${String(cue.hits)} hits inside ${String(cue.inside)} covered inside ${String(cue.leads)} leads`);
     }
   }
 }
@@ -623,36 +791,59 @@ export function describeRule(report: RuleReport): readonly string[] {
         .join(', ')}`,
     );
   }
+  lines.push(...describeCues(report.cues));
   lines.push(...describeSweep(report));
+  return lines;
+}
+
+/**
+ * The per-cue reading, one line per cue that decided at least one question.
+ *
+ * `hits` is the cue naming the right picture and `inside` the cue naming the right family in the wrong
+ * position, so the gap between the two columns is the part of a cue's loss a reorder would recover and
+ * the gap to `leads` is the part only a narrower phrase could. Printed for every cue rather than for
+ * the worst one: which cue is worst depends on the corpus, and choosing it here would be this function
+ * deciding which file to open.
+ */
+export function describeCues(cues: readonly CueReading[]): readonly string[] {
+  if (cues.length === 0) return [];
+  const lines = [`  cue precision, by the rows each cue decided first:`];
+  for (const cue of cues) {
+    const mark = cue.first ?? 'none';
+    lines.push(
+      `    ${cue.kind.padEnd(12)} ${String(cue.leads).padStart(4)} leads  first ${mark.padEnd(11)} hit ${(cue.precision * 100).toFixed(2).padStart(6)}% (${String(cue.hits)})  family ${(cue.coverage * 100).toFixed(2)}%`,
+    );
+  }
   return lines;
 }
 
 /**
  * The sweep, one line per table, with what moved against the control.
  *
- * The control is the first table in the sweep — `shipped` — so every delta on these lines is a
- * difference the reader can check against a table the product actually exports. Only families whose
- * top-1 *count* moved are printed: a family that changed by zero is one line of noise per table,
- * and a family that moved is the whole reason the line exists.
+ * The control is `shipped` — the table the product actually exports — and not the line above it. The
+ * distinction is not cosmetic: a delta against the previous row is a position in a list, so reordering
+ * `CUE_VARIANTS` would change every published delta while no cue table changed at all. A reading whose
+ * value depends on the order the reader is shown the alternatives in is a reading about the list.
+ *
+ * Only families whose top-1 *count* moved are printed: a family that changed by zero is one line of
+ * noise per table, and a family that moved is the whole reason the line exists.
  */
 export function describeSweep(report: RuleReport): readonly string[] {
   if (report.sweep.length === 0) return [];
-  const lines = [`  sweep: ${String(report.sweep.length)} tables over the same ${String(report.scored)} rows, each delta against the table above`];
-  // The control is the table before this one, carried in the loop rather than read by index: the
-  // first table is its own control and prints no delta, and a second `report.sweep[0]` read would be
-  // a branch for a state the type system cannot rule out and the data cannot reach.
-  let control: VariantReading | undefined;
+  const control = report.sweep[0] as VariantReading;
+  const lines = [`  sweep: ${String(report.sweep.length)} tables over the same ${String(report.scored)} rows, each delta against ${control.variant}`];
   for (const reading of report.sweep) {
-    const reference = control;
-    control = reading;
-    const moved = reading.byFamily
-      .map((cell) => ({ family: cell.family, delta: reference === undefined ? 0 : cell.top1 - top1Of(reference, cell.family) }))
-      .filter((cell) => cell.delta !== 0)
-      .sort((left, right) => right.delta - left.delta)
-      .map((cell) => `${cell.family} ${cell.delta > 0 ? '+' : ''}${String(cell.delta)}`);
+    const moved =
+      reading === control
+        ? []
+        : reading.byFamily
+            .map((cell) => ({ family: cell.family, delta: cell.top1 - top1Of(control, cell.family) }))
+            .filter((cell) => cell.delta !== 0)
+            .sort((left, right) => right.delta - left.delta)
+            .map((cell) => `${cell.family} ${cell.delta > 0 ? '+' : ''}${String(cell.delta)}`);
     const bar = reading.byFamily.find((cell) => cell.family === 'bar');
     const barShare = bar === undefined || bar.n === 0 ? 0 : bar.top1 / bar.n;
-    const head = `    ${reading.variant.padEnd(20)} top-1 ${(reading.top1Share * 100).toFixed(2)}% (${String(reading.top1)}), bar ${(barShare * 100).toFixed(2)}%`;
+    const head = `    ${reading.variant.padEnd(22)} top-1 ${(reading.top1Share * 100).toFixed(2)}% (${String(reading.top1)}), bar ${(barShare * 100).toFixed(2)}%`;
     lines.push(`${head}${moved.length === 0 ? '' : `  |  ${moved.join(', ')}`}`);
   }
   return lines;

@@ -293,6 +293,20 @@ export interface ChartChoice {
 export interface RecommendOptions {
   /** Slices a pie or a funnel may carry before it stops being readable. */
   readonly maxSlices?: number;
+  /**
+   * The cue table to read the question against. Defaults to the shipped `CHART_CUES`.
+   *
+   * It exists for exactly one caller: the reading in `eval/text2vis`, which has to price a candidate
+   * table on the *product* path before it ships. Without it the only table the product could be
+   * measured on was the one already compiled in, so "does this cue change help the product" was a
+   * question no run could answer — every cue decision rested on the cue-only reading, which never
+   * sees an admission rule and therefore cannot see the difference between a mark the question named
+   * and a mark the result set refused.
+   *
+   * A parameter rather than a second exported table, for the reason `readCues` gives: a second table
+   * would be a second answer to which cues exist, and this is the same table under a different order.
+   */
+  readonly cues?: readonly CueRule[];
 }
 
 interface Resolved {
@@ -480,7 +494,7 @@ export function recommendChart(
 ): ChartChoice {
   const resolved: Resolved = { maxSlices: options.maxSlices ?? 7 };
   const shape = shapeOf(profiles, resolved);
-  const cues = readCues(question);
+  const cues = readCues(question, options.cues);
   const recommendations: Recommendation[] = [];
   const refused: Refusal[] = [];
 

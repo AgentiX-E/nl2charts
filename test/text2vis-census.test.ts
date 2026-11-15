@@ -30,6 +30,7 @@ import {
   classify,
   coveringMarks,
   describeCensus,
+  describeProduct,
   entryCensus,
   firstAdmissibleWinner,
   noProfileReason,
@@ -839,5 +840,71 @@ describe('the cue table the census reads', () => {
     const marks: readonly ChartType[] = readCues('Revenue by region and channel')[0]?.marks ?? [];
     expect(marks.indexOf('heatmap')).toBe(0);
     expect(marks.indexOf('bar')).toBe(1);
+  });
+});
+
+describe('every cue table, priced on the product', () => {
+  /** Three regions and one measure: a pie is admitted, a bar is admitted, and the label decides. */
+  const REGIONS = table('Region, Revenue', ['North, 100', 'South, 80', 'East, 60']);
+  /** `share by X` — the phrase the narrow discriminator reads, on a label drawn as a pie. */
+  const SHARE_BY = 'the share by category of refunds';
+
+  const rows = [input(SHARE_BY, 'Pie Chart', REGIONS), input(TREND, 'Line Chart', QUARTERLY)];
+
+  it('prices the shipped table through a second code path, and holds the two equal', () => {
+    const report = censusOf(rows);
+    expect(report.outcomes.hit).toBe(2);
+    // Two computations of one number: `classify` decides the outcome of a row, and the sweep asks the
+    // same question again from the row loop with the same table. A disagreement is a defect in one of
+    // them, which is why `assertCensusReport` compares them rather than trusting either.
+    expect(report.product[0]).toMatchObject({ variant: 'shipped', hit: 2, hitShare: 1 });
+    expect(() => assertCensusReport(report)).not.toThrow();
+  });
+
+  it('shows a candidate losing a row the cue-only reading cannot see', () => {
+    // The narrow `share-by` cue rewards the question and costs the answer: the phrase is a comparison
+    // and the table could have carried the pie the label asks for, so the product loses the row the
+    // cue-only sweep would have scored as a gain.
+    const report = censusOf(rows);
+    const narrow = report.product.find((variant) => variant.variant === 'share-by');
+    expect(narrow?.hit).toBe(1);
+    expect(narrow?.byFamily.find((cell) => cell.family === 'pie')).toEqual({ family: 'pie', n: 1, hit: 0 });
+    // Every table is priced on the same population, or the comparison is between two corpora.
+    expect(report.product.every((variant) => variant.byFamily.reduce((total, cell) => total + cell.n, 0) === report.scored)).toBe(true);
+  });
+
+  it('refuses a sweep whose control is not the table that ships', () => {
+    const report = censusOf(rows);
+    const shipped = report.product[0]!;
+    expect(() =>
+      assertCensusReport({ ...report, product: [{ ...shipped, variant: 'bar-share' }, ...report.product.slice(1)] }),
+    ).toThrow(/must begin with the shipped table/);
+  });
+
+  it('refuses a sweep that disagrees with the census about the shipped table', () => {
+    const report = censusOf(rows);
+    const shipped = report.product[0]!;
+    expect(() =>
+      assertCensusReport({ ...report, product: [{ ...shipped, hit: shipped.hit + 1 }, ...report.product.slice(1)] }),
+    ).toThrow(/one of the two is not the product/);
+  });
+
+  it('refuses a variant priced on a different number of rows', () => {
+    const report = censusOf(rows);
+    const shipped = report.product[0]!;
+    expect(() =>
+      assertCensusReport({ ...report, product: [{ ...shipped, byFamily: [] }, ...report.product.slice(1)] }),
+    ).toThrow(/two corpora/);
+  });
+
+  it('prints one line per table with its delta against the control, and nothing when there is none', () => {
+    const report = censusOf(rows);
+    const lines = describeProduct(report);
+    expect(lines[0]).toContain(`the same rows on the product, ${String(report.product.length)} tables`);
+    expect(lines).toHaveLength(1 + report.product.length);
+    const narrow = lines.find((line) => line.trimStart().startsWith('share-by '));
+    expect(narrow).toContain('pie -1');
+    expect(lines.find((line) => line.trimStart().startsWith('shipped '))).not.toContain('|');
+    expect(describeProduct({ ...report, product: [] })).toEqual([]);
   });
 });
