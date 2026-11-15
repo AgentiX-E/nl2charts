@@ -440,3 +440,30 @@ describe('the properties every recommendation has to hold, over generated result
     }
   });
 });
+
+describe('the cue table a caller hands in', () => {
+  const question = 'average revenue by region and channel';
+  const shipped = recommendChart(question, profileRows(matrix));
+
+  it('answers against the table it is given, and the default is the table that ships', () => {
+    // The seam exists so a candidate table can be priced on the product before it ships: without it
+    // the only table the product could be measured on was the one already compiled in.
+    expect(shipped.recommendations[0]?.mark).toBe('heatmap');
+    expect(readCues(question).map((cue) => cue.kind)).toContain('matrix');
+    const without = CHART_CUES.filter((rule) => rule.kind !== 'matrix');
+    const choice = recommendChart(question, profileRows(matrix), { cues: without });
+    expect(choice.recommendations[0]?.mark).toBe('bar');
+    expect(choice.recommendations[0]?.cues).not.toContain('matrix');
+    // The default is not a copy of the table: a call with no option and a call with the exported
+    // table are the same reading, which is the only way a sweep's control is the product.
+    expect(recommendChart(question, profileRows(matrix), { cues: CHART_CUES })).toEqual(shipped);
+  });
+
+  it('takes the table alongside the other options rather than instead of them', () => {
+    // `maxSlices` decides what a pie may carry and the table decides what the question asks for; a
+    // caller that passes both gets both, so a variant cannot silently lose the option beside it.
+    const narrow = recommendChart(question, profileRows(matrix), { maxSlices: 1, cues: CHART_CUES });
+    expect(narrow.refused.map((entry) => entry.mark)).toContain('pie');
+    expect(narrow.refused.some((entry) => entry.reason.includes('at most 1 slices'))).toBe(true);
+  });
+});

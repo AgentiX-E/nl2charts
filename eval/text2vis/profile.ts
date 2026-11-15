@@ -160,9 +160,11 @@ export function profileAnswer(prompt: string, tableData: string): ProfileAnswer 
   const set = parseResultSet(tableData);
   const profiles = profilesOf(set);
   if (profiles.length === 0) return { mark: 'declined', families: [], reasons: ['profile:none'] };
-  // The shipped cue table, and only it: `recommendChart` reads `CHART_CUES` internally, so the
-  // sweep in `rule.ts` — which is about which words name which mark — is a different instrument.
-  // A profile reading against a variant table would be two levers in one number.
+  // The shipped cue table, and only it. `recommendChart` now takes a table as an option, and the
+  // census is where that seam is used: it prices every candidate on the product path, against the
+  // same rows, so a cue change is decided by both readings rather than by the one that ignores
+  // admission. This function stays single-table because it is the *published* reading of the product
+  // that ships, and a reading that could be run against a candidate would stop being that.
   const choice = recommendChart(prompt, profiles);
   const top = choice.recommendations[0];
   if (top === undefined) return { mark: 'declined', families: [], reasons: ['profile:refused'] };

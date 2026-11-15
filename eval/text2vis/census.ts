@@ -43,7 +43,7 @@ import type {
 } from '@agentix-e/nl2charts-chart';
 import { RECOMMENDABLE_MARKS, readCues, recommendChart } from '@agentix-e/nl2charts-chart';
 import { applyExitCode, isEntry, loadText2Vis, type LoadOptions } from './dataset.js';
-import { familiesOfMark, familyOfLabel, type ChartFamily } from './rule.js';
+import { CUE_VARIANTS, familiesOfMark, familyOfLabel, type ChartFamily } from './rule.js';
 import { numericCell, parseResultSet, profilesOf, type ProfileInput, type ResultSet } from './profile.js';
 
 /**
@@ -414,7 +414,29 @@ export interface CensusReport {
   readonly measureless: { readonly tables: number; readonly refused: number };
   /** Cells made of digits that nothing read, on the tables that ended up with no measure. */
   readonly numerals: readonly UnreadNumeral[];
+  /**
+   * Every cue table this build can construct, priced on the *product* — admission rules and all.
+   *
+   * The cue-only sweep in `rule.ts` scores the question against the label and never sees a result set,
+   * so it cannot tell a mark the question named from a mark the table refused. That is enough to rank
+   * two phrase tables and not enough to ship one: a cue change that gains on the question can lose on
+   * the shape, and only this reading can see it. Every candidate is priced here *before* it ships, on
+   * the same rows and the same hit test the published `hit` count uses, so `product[0]` is a second
+   * computation of `outcomes.hit` and `assertCensusReport` holds the two equal.
+   */
+  readonly product: readonly ProductVariant[];
   readonly variant: string;
+}
+
+/** One cue table, priced on the product's own hit test. */
+export interface ProductVariant {
+  readonly variant: string;
+  /** Rows whose label family the product's leading mark covers first. */
+  readonly hit: number;
+  /** `hit / scored`, with `scored` the same denominator every other reading uses. */
+  readonly hitShare: number;
+  /** Per-family hits, so a table that trades one family for another cannot pass as a gain. */
+  readonly byFamily: readonly { readonly family: ChartFamily; readonly n: number; readonly hit: number }[];
 }
 
 /** A year, a quarter, a month name, or a year-and-month — the shapes a result set writes time in. */
@@ -652,6 +674,11 @@ interface NoProfileTally {
   samples: string[];
 }
 
+interface ProductTally {
+  hit: number;
+  byFamily: Map<ChartFamily, { n: number; hit: number }>;
+}
+
 /** Tally a classified population into the report a document quotes. */
 export function censusOf(rows: readonly ProfileInput[], options: { readonly variant?: string } = {}): CensusReport {
   const outcomes: Record<CensusOutcome, number> = { hit: 0, substituted: 0, refused: 0, outranked: 0, uncovered: 0, noProfile: 0 };
@@ -663,6 +690,12 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
   const shapes = new Map<string, ShapeTally>();
   const coerced = new Map<string, CoercedTally>();
   const numerals = new Map<string, NumeralTally>();
+  // Seeded from the variant list rather than filled on demand: a table that hit nothing is a reading
+  // of zero, and a table missing from the report because nobody added a key would be a reading of
+  // nothing — the two are indistinguishable to a reader, and only one of them is true.
+  const product = new Map<string, ProductTally>(
+    CUE_VARIANTS.map((variant) => [variant.name, { hit: 0, byFamily: new Map() }]),
+  );
   let scored = 0;
   let unmapped = 0;
   let timeLikeRows = 0;
@@ -697,6 +730,22 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
 
     const set = parseResultSet(row.tableData);
     const profiles = profilesOf(set);
+    // Every candidate table, on the product path, against the same rows. The profiles are computed
+    // once per row and handed to each variant, so what differs between the numbers is the cue table
+    // and nothing else — a second `profilesOf` per variant would make the readings differ by the
+    // profiler as well, and the sweep would be measuring two things at once.
+    for (const variant of CUE_VARIANTS) {
+      const tally = product.get(variant.name) as ProductTally;
+      const cell = tally.byFamily.get(classified.expected) ?? { n: 0, hit: 0 };
+      cell.n += 1;
+      const top = recommendChart(row.prompt, profiles, { cues: variant.cues }).recommendations[0];
+      const lead = top === undefined ? undefined : familiesOfMark(top.mark, top.cues[0]);
+      if (lead !== undefined && lead[0] === classified.expected) {
+        tally.hit += 1;
+        cell.hit += 1;
+      }
+      tally.byFamily.set(classified.expected, cell);
+    }
     // The counterfactual is counted here, not inside `classify`: `classify` reports what happened,
     // and this is a prediction about a ranking that does not exist yet. It is computed on the same
     // population and the same hit test, so `hit` and `counterfactual.hit` are the same measurement
@@ -872,6 +921,17 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
     numerals: [...numerals.values()].sort(
       (left, right) => right.n - left.n || left.column.localeCompare(right.column) || left.cell.localeCompare(right.cell),
     ),
+    product: CUE_VARIANTS.map((variant) => {
+      const tally = product.get(variant.name) as ProductTally;
+      return {
+        variant: variant.name,
+        hit: tally.hit,
+        hitShare: scored === 0 ? 0 : tally.hit / scored,
+        byFamily: [...tally.byFamily.entries()]
+          .map(([family, cell]) => ({ family, n: cell.n, hit: cell.hit }))
+          .sort((left, right) => right.n - left.n || left.family.localeCompare(right.family)),
+      };
+    }),
     variant: options.variant ?? 'census',
   };
 }
@@ -915,6 +975,28 @@ export function assertCensusReport(report: CensusReport): void {
     throw new Error(
       `census report: the counterfactual reads ${String(report.counterfactual.hit)} hits, which is not ${String(report.outcomes.hit)} + ${String(converted)} converted - ${String(lost)} lost`,
     );
+  }
+  // The product sweep's first entry is the table that ships, scored through a second code path: the
+  // census classifies a row once inside `classify` and the sweep asks the same question again from
+  // the row loop. Two computations of one number, so a disagreement is a defect in whichever one
+  // drifted — and the alternative, publishing a candidate's gain against a control nobody
+  // re-measured, is the defect this identity exists to make impossible.
+  const shipped = report.product[0];
+  if (shipped === undefined || shipped.variant !== 'shipped') {
+    throw new Error('census report: the product sweep must begin with the shipped table, which is the control every delta is read against');
+  }
+  if (shipped.hit !== report.outcomes.hit) {
+    throw new Error(
+      `census report: the product sweep reads ${String(shipped.hit)} hits for the shipped table and the census reads ${String(report.outcomes.hit)}, so one of the two is not the product`,
+    );
+  }
+  for (const variant of report.product) {
+    const population = variant.byFamily.reduce((total, cell) => total + cell.n, 0);
+    if (population !== report.scored) {
+      throw new Error(
+        `census report: variant ${variant.variant} was priced on ${String(population)} rows against ${String(report.scored)} scored, so the comparison is between two corpora`,
+      );
+    }
   }
 }
 
@@ -983,7 +1065,41 @@ export function describeCensus(report: CensusReport): readonly string[] {
   lines.push(
     `  as if ${under.rule}: hit ${String(outcome.hit)} -> ${String(under.hit)} (converted ${String(under.converted)}, lost ${String(under.lost)}) — predicted, not shipped`,
   );
+  lines.push(...describeProduct(report));
   return lines;
+}
+
+/**
+ * Every cue table on the product path, each delta against the table that ships.
+ *
+ * This is the half the cue-only sweep cannot see, and the reason a phrase change is no longer decided
+ * on the question alone: a table can gain rows where the question named the right picture and lose
+ * more where the result set refused it. The per-family columns are printed for the families that
+ * moved, because "hit +2" and "bar +2, pie −2" are the same total and not the same product.
+ */
+export function describeProduct(report: CensusReport): readonly string[] {
+  const control = report.product[0];
+  if (control === undefined) return [];
+  const lines = [`  the same rows on the product, ${String(report.product.length)} tables, each delta against ${control.variant}:`];
+  for (const variant of report.product) {
+    const moved =
+      variant === control
+        ? []
+        : variant.byFamily
+            .map((cell) => ({ family: cell.family, delta: cell.hit - hitOf(control, cell.family) }))
+            .filter((cell) => cell.delta !== 0)
+            .sort((left, right) => right.delta - left.delta)
+            .map((cell) => `${cell.family} ${cell.delta > 0 ? '+' : ''}${String(cell.delta)}`);
+    lines.push(
+      `    ${variant.variant.padEnd(22)} hit ${String(variant.hit).padStart(4)} (${(variant.hitShare * 100).toFixed(2)}%)${moved.length === 0 ? '' : `  |  ${moved.join(', ')}`}`,
+    );
+  }
+  return lines;
+}
+
+/** A family's hit count in one product reading, or zero when that reading has no row for it. */
+function hitOf(variant: ProductVariant, family: ChartFamily): number {
+  return variant.byFamily.find((cell) => cell.family === family)?.hit ?? 0;
 }
 
 /** The flags this command takes, and nothing else. */
