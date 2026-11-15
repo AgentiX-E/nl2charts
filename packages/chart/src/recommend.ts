@@ -143,6 +143,20 @@ export const CHART_CUES: readonly CueRule[] = [
     pattern: /\b(?:trend|trending|over time|growth|time series|monthly|yearly|quarterly|weekly|by month|by year|by quarter|by week)\b|趋势|每月|按月|按年/,
   },
   {
+    /**
+     * A share word followed immediately by the dimension it splits on: a comparison, not a part.
+     *
+     * "The share of revenue that is refunds" is a part of a whole and the corpus drew a pie; "share by
+     * status" is categories compared and it drew a bar. Listed ahead of `share` because the first mark
+     * of the first fired cue leads — `share` keeps its marks untouched, so a question this does not
+     * match is answered exactly as before. Priced before it shipped at 10 bar rows won, 5 pie rows
+     * lost, and +3 on the product.
+     */
+    kind: 'share-by',
+    marks: ['bar'],
+    pattern: /\b(?:share|proportion|percentage|percent|composition|breakdown|split)\s+(?:by|across|per)\b/,
+  },
+  {
     kind: 'share',
     marks: ['pie', 'bar'],
     pattern: /\b(?:share|proportion|percentage|percent|composition|breakdown|split|makeup)\b|占比|比例|构成/,
@@ -163,9 +177,18 @@ export const CHART_CUES: readonly CueRule[] = [
     pattern: /\b(?:top|bottom|rank\w*|highest|lowest|largest|smallest|best|worst)\b|排名|最高|最低/,
   },
   {
+    /**
+     * A crossing: two dimensions named inside one clause.
+     *
+     * It was `\bby\b[\s\S]*\band\b`, which spans the whole question, so "average revenue by region.
+     * Generate matplotlib code and label the axes" was a heatmap question. That cue decided 223
+     * corpus questions and was right about one; the bound is the same two words with a limit on the
+     * distance between them. Bounded rather than reordered: reversing the marks scores +66 on the
+     * question half and −34 on the product, and the bound is worth +43 there.
+     */
     kind: 'matrix',
     marks: ['heatmap', 'bar'],
-    pattern: /\bby\b[\s\S]*\band\b|交叉|矩阵/,
+    pattern: /\bby\b[^.;?!\n]{0,60}\band\b|交叉|矩阵/,
   },
   {
     kind: 'progress',

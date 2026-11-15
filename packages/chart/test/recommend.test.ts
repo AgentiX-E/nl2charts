@@ -83,6 +83,34 @@ describe('reading chart cues out of the question', () => {
     expect(readCues(question).map((cue) => cue.kind)).toEqual(kinds);
   });
 
+  it('tells a comparison from a part of a whole, because the corpus draws them differently', () => {
+    // One cue for two questions was the defect: "the share of orders by status" is categories
+    // compared and the corpus drew a bar; "the share of revenue that is refunds" is a part of a whole
+    // and it drew a pie. The narrow cue is listed first, so the comparison leads and the part falls
+    // through to `share` with its marks untouched.
+    expect(readCues('share by status').map((cue) => cue.kind)).toEqual(['share-by', 'share']);
+    expect(readCues('the share of revenue that is refunds').map((cue) => cue.kind)).toEqual(['share']);
+    expect(readCues('a breakdown across regions').map((cue) => cue.kind)).toEqual(['share-by', 'share']);
+    // The narrow width reads the phrase and not the thought: a measure between the two words
+    // ("the share **of orders** by status") is out of reach, which is the limitation the wide width
+    // was priced for and refused — it answered 186 more bar rows and lost 142 pies, which is the
+    // blunt "a share is a bar" rule wearing a phrase.
+    expect(readCues('the share of orders by status').map((cue) => cue.kind)).toEqual(['share']);
+    // Both pictures are still on the list under the narrow cue, in its order.
+    expect(readCues('share by status').flatMap((cue) => cue.marks)).toEqual(['bar', 'pie', 'bar']);
+  });
+
+  it('reads a crossing inside one clause, and stops reading one across a full stop', () => {
+    // The unbounded pattern decided 223 questions on the corpus and was right about one: its `by` and
+    // its `and` were in different sentences, which is how "average revenue by region. Plot it and
+    // label the axes" became a heatmap question.
+    expect(readCues('average revenue by region and channel').map((cue) => cue.kind)).toEqual(['matrix']);
+    expect(readCues('average revenue by region. Plot it and label the axes').map((cue) => cue.kind)).toEqual([]);
+    // The two words, in that order, one clause apart, is the whole rule; a bound of a sentence and not
+    // a word count, so a measure named between them still reads as a crossing.
+    expect(readCues('the share of revenue by region and the count of orders').map((cue) => cue.kind)).toContain('matrix');
+  });
+
   it('carries the phrase it matched, so the choice can be quoted back', () => {
     const [cue] = readCues('Top ten products by revenue');
     expect(cue?.phrase).toBe('top');
@@ -163,6 +191,12 @@ describe('recommending a chart from the question and the result set', () => {
     const choice = recommendChart('How many orders shipped', profiles(regions));
     expect(choice.recommendations.map((item) => item.mark)).toContain('bar');
     expect(choice.recommendations[0]?.cues).toEqual([]);
+  });
+
+  it('answers a comparison with the bar the corpus drew for it, and a part with the pie', () => {
+    // The shipped table's own reading of the two: same result set, two questions, two marks.
+    expect(recommendChart('share by status', profiles(regions)).recommendations[0]?.mark).toBe('bar');
+    expect(recommendChart('the share of revenue that is refunds', profiles(regions)).recommendations[0]?.mark).toBe('pie');
   });
 
   it('ranks a mark the question names above a mark that only collects second places', () => {

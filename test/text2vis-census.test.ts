@@ -846,10 +846,10 @@ describe('the cue table the census reads', () => {
 describe('every cue table, priced on the product', () => {
   /** Three regions and one measure: a pie is admitted, a bar is admitted, and the label decides. */
   const REGIONS = table('Region, Revenue', ['North, 100', 'South, 80', 'East, 60']);
-  /** `share by X` — the phrase the narrow discriminator reads, on a label drawn as a pie. */
-  const SHARE_BY = 'the share by category of refunds';
+  /** A part of a whole, which the product answers with a pie and the blunt flip answers with a bar. */
+  const PART = 'the share of revenue that is refunds';
 
-  const rows = [input(SHARE_BY, 'Pie Chart', REGIONS), input(TREND, 'Line Chart', QUARTERLY)];
+  const rows = [input(PART, 'Pie Chart', REGIONS), input(TREND, 'Line Chart', QUARTERLY)];
 
   it('prices the shipped table through a second code path, and holds the two equal', () => {
     const report = censusOf(rows);
@@ -862,13 +862,13 @@ describe('every cue table, priced on the product', () => {
   });
 
   it('shows a candidate losing a row the cue-only reading cannot see', () => {
-    // The narrow `share-by` cue rewards the question and costs the answer: the phrase is a comparison
-    // and the table could have carried the pie the label asks for, so the product loses the row the
-    // cue-only sweep would have scored as a gain.
+    // The blunt flip rewards the question and costs the answer: a share word is a comparison on 186
+    // more rows and a part of a whole on 142 fewer, and this row is one of the 142 — the table could
+    // carry the pie the label asks for, and the flip answers a bar.
     const report = censusOf(rows);
-    const narrow = report.product.find((variant) => variant.variant === 'share-by');
-    expect(narrow?.hit).toBe(1);
-    expect(narrow?.byFamily.find((cell) => cell.family === 'pie')).toEqual({ family: 'pie', n: 1, hit: 0 });
+    const flipped = report.product.find((variant) => variant.variant === 'bar-share');
+    expect(flipped?.hit).toBe(1);
+    expect(flipped?.byFamily.find((cell) => cell.family === 'pie')).toEqual({ family: 'pie', n: 1, hit: 0 });
     // Every table is priced on the same population, or the comparison is between two corpora.
     expect(report.product.every((variant) => variant.byFamily.reduce((total, cell) => total + cell.n, 0) === report.scored)).toBe(true);
   });
@@ -902,8 +902,8 @@ describe('every cue table, priced on the product', () => {
     const lines = describeProduct(report);
     expect(lines[0]).toContain(`the same rows on the product, ${String(report.product.length)} tables`);
     expect(lines).toHaveLength(1 + report.product.length);
-    const narrow = lines.find((line) => line.trimStart().startsWith('share-by '));
-    expect(narrow).toContain('pie -1');
+    const flipped = lines.find((line) => line.trimStart().startsWith('bar-share '));
+    expect(flipped).toContain('pie -1');
     expect(lines.find((line) => line.trimStart().startsWith('shipped '))).not.toContain('|');
     expect(describeProduct({ ...report, product: [] })).toEqual([]);
   });

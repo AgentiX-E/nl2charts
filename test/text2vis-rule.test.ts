@@ -36,9 +36,8 @@ import {
   withHistogramCue,
   withCueAheadOf,
   withMatrixBarFirst,
-  withMatrixWindow,
+  withMatrixWide,
   withShareByAnyCue,
-  withShareByCue,
   withoutMatrix,
   type RuleReport,
   type VariantReading,
@@ -553,100 +552,79 @@ describe('the table a variant constructs', () => {
     expect(CUE_VARIANTS[0]).toMatchObject({ name: 'shipped' });
     expect(CUE_VARIANTS.map((variant) => variant.name)).toEqual([
       'shipped',
-      'bar-share',
-      'histogram',
-      'bar-share+histogram',
-      'share-by',
-      'share-by+histogram',
-      'share-by-any',
-      'share-by-any+histogram',
-      'matrix-window',
-      'matrix-window+share-by',
+      'matrix-wide',
       'matrix-bar-first',
-      'matrix-window+bar-first',
+      'matrix-wide+bar-first',
       'no-matrix',
+      'bar-share',
+      'share-by-any',
+      'histogram',
+      'share-by-any+histogram',
     ]);
     for (const variant of CUE_VARIANTS) expect(variant.note.length).toBeGreaterThan(20);
   });
 });
 
-describe('the distinction inside one cue', () => {
+describe('the distinction inside one cue, now that it shipped', () => {
   const shipped = CUE_VARIANTS[0]!.cues;
-  const narrow = withShareByCue(shipped);
   const wide = withShareByAnyCue(shipped);
 
   it('answers an adjacent comparison with a bar and a part of a whole with a pie', () => {
     // The signal is a phrase about what the reader is asked to do: "share by" names the dimension to
-    // compare across, "share of" names a denominator. The shipped table answers both with the same
-    // mark because it cannot see the difference.
-    expect(cueAnswer('breakdown by region')[0]).toEqual({ mark: 'pie', cue: 'share' });
-    expect(cueAnswer('breakdown by region', narrow)[0]).toEqual({ mark: 'bar', cue: 'share-by' });
-    // Both marks of the cue are still offered under the shipped table, in its order: the failure is
-    // the order, not the membership.
-    expect(cueAnswer('breakdown by region').map((answer) => answer.mark)).toEqual(['pie', 'bar']);
-    expect(cueAnswer('the share of revenue that is refunds', narrow)[0]).toEqual({ mark: 'pie', cue: 'share' });
+    // compare across, "share of" names a denominator. The product answered both with a pie until the
+    // narrow cue was priced (+10 bar rows for −5 pie rows) and shipped.
+    expect(cueAnswer('breakdown by region')).toEqual([
+      { mark: 'bar', cue: 'share-by' },
+      { mark: 'pie', cue: 'share' },
+    ]);
+    expect(cueAnswer('the share of revenue that is refunds')[0]).toEqual({ mark: 'pie', cue: 'share' });
+    // The `share` cue's own marks are untouched: what changed is which cue fires first.
+    expect(shipped.find((rule) => rule.kind === 'share')?.marks).toEqual(['pie', 'bar']);
   });
 
-  it('reads a measure between the words only at the wide width', () => {
-    // The corpus asks "the share of revenue by region", which the narrow cue cannot see. The two
-    // widths are registered before the sweep rather than chosen after it.
+  it('reads the phrase and not the thought, which is the width that was refused', () => {
+    // "The share of revenue by region" puts four words between the two the narrow cue needs, and the
+    // wide width that reads it anyway was priced at bar +186 / pie −142 — the blunt "a share is a
+    // bar" rule wearing a phrase. It stays in the sweep so the refusal stays a reading.
     const question = 'show the share of revenue by region';
-    expect(cueAnswer(question, narrow)[0]).toEqual({ mark: 'pie', cue: 'share' });
+    expect(cueAnswer(question)[0]).toEqual({ mark: 'pie', cue: 'share' });
     expect(cueAnswer(question, wide)[0]).toEqual({ mark: 'bar', cue: 'share-by-any' });
     expect(cueMarks(question, wide)).toEqual(['bar', 'pie']);
   });
 
   it('reads five spellings of the same comparison and no spelling of a part', () => {
-    for (const question of [
-      'percentage by status',
-      'breakdown across regions',
-      'split per segment',
-      'proportion by country',
-      'composition by category',
-    ]) {
-      expect(cueMarks(question, narrow)[0]).toBe('bar');
+    for (const question of ['percentage by status', 'breakdown across regions', 'split per segment', 'proportion by country', 'composition by category']) {
+      expect(cueMarks(question)[0]).toBe('bar');
+      expect(cueMarks(question, wide)[0]).toBe('bar');
     }
-    for (const question of [
-      'the proportion of orders that were refunded',
-      'percentage of total revenue',
-      'the composition of the customer base',
-    ]) {
-      expect(cueMarks(question, narrow)[0]).toBe('pie');
+    for (const question of ['the proportion of orders that were refunded', 'percentage of total revenue', 'the composition of the customer base']) {
+      expect(cueMarks(question)[0]).toBe('pie');
       expect(cueMarks(question, wide)[0]).toBe('pie');
     }
   });
 
-  it('leaves a question it does not match exactly as the shipped table answered it', () => {
-    // The claim is a delta on one phrase. A variant that moved anything else would be measuring a
-    // rewritten table, and the reading would belong to nobody.
-    for (const question of ['the trend of revenue over time', 'draw a histogram of order totals', 'top 10 customers']) {
-      expect(cueMarks(question, narrow)).toEqual(cueMarks(question));
-      expect(cueMarks(question, wide)).toEqual(cueMarks(question));
+  it('leaves a question neither cue matches exactly as the table answered it before', () => {
+    // The claim is a delta on one phrase. For the shipped rule that means: the questions the narrow
+    // cue does not match must read exactly as `share` alone would read them.
+    const without = shipped.filter((rule) => rule.kind !== 'share-by');
+    for (const question of ['the share of revenue that is refunds', 'the trend of revenue over time', 'top 10 customers']) {
+      expect(cueMarks(question)).toEqual(cueMarks(question, without));
     }
   });
 
-  it('inserts the cue ahead of share, once, and appends it to a table without one', () => {
-    for (const table of [narrow, wide]) {
-      const kinds = table.map((rule) => rule.kind);
-      expect(kinds.indexOf('share')).toBe(kinds.indexOf('share', kinds.indexOf('share')));
-      expect(kinds.filter((kind) => kind === 'share-by' || kind === 'share-by-any')).toHaveLength(1);
-      expect(kinds.indexOf('share-by') === -1 ? kinds.indexOf('share-by-any') : kinds.indexOf('share-by')).toBe(
-        kinds.indexOf('share') - 1,
-      );
-      expect(table.length).toBe(shipped.length + 1);
-      // The `share` cue's own marks are untouched: the change is an order, not a re-membership.
-      expect(table.find((rule) => rule.kind === 'share')).toEqual(shipped.find((rule) => rule.kind === 'share'));
-    }
-
-    const without = shipped.filter((rule) => rule.kind !== 'share');
-    expect(withShareByCue(without).at(-1)?.kind).toBe('share-by');
-    expect(withShareByAnyCue(without).at(-1)?.kind).toBe('share-by-any');
-    expect(withShareByCue(without).length).toBe(without.length + 1);
+  it('sits ahead of share, once, and the wide width is the same mechanism', () => {
+    const kinds = shipped.map((rule) => rule.kind);
+    expect(kinds.filter((kind) => kind === 'share-by')).toHaveLength(1);
+    expect(kinds.indexOf('share-by')).toBe(kinds.indexOf('share') - 1);
+    const widened = wide.map((rule) => rule.kind);
+    expect(widened.filter((kind) => kind === 'share-by-any')).toHaveLength(1);
+    expect(widened.indexOf('share-by-any')).toBe(widened.indexOf('share') - 1);
+    expect(wide.length).toBe(shipped.length + 1);
   });
 
   it('places a cue ahead of another, and appends it when the table has no such cue', () => {
-    // `withHistogramCue` and the two share helpers are one mechanism: a cue inserted before another.
-    // Written once so a fourth lever cannot quietly implement "appended" instead of "ahead".
+    // Every insertion in this file — shipped and priced — is one mechanism, written once so a fourth
+    // lever cannot quietly implement "appended" instead of "ahead".
     const marker = { kind: 'ranking' as const, marks: ['bar' as const], pattern: /x/ };
     const inserted = withCueAheadOf(shipped, marker, 'distribution');
     expect(inserted.map((rule) => rule.kind).indexOf('ranking')).toBe(
@@ -655,21 +633,18 @@ describe('the distinction inside one cue', () => {
     // `histogram` is not in the shipped table, so a cue placed before it lands at the end: the
     // fallback is "somewhere it is present", never "dropped".
     expect(withCueAheadOf(shipped, marker, 'histogram').at(-1)?.kind).toBe('ranking');
-    // And the histogram helper is the same rule with the same argument.
     const kinds = withHistogramCue(shipped).map((rule) => rule.kind);
     expect(kinds.indexOf('histogram')).toBe(kinds.indexOf('distribution') - 1);
   });
 
-  it('is priced in the sweep beside the blunt flip and the histogram cue', () => {
+  it('keeps the refused widths and drops the one that shipped', () => {
     const names = CUE_VARIANTS.map((variant) => variant.name);
-    for (const name of ['share-by', 'share-by+histogram', 'share-by-any', 'share-by-any+histogram']) {
-      expect(names).toContain(name);
+    for (const name of ['share-by-any', 'share-by-any+histogram', 'bar-share']) expect(names).toContain(name);
+    // A candidate for a rule the product already has is a second copy of the control, so the shipped
+    // lever is not a variant: the sweep's control *is* the narrow cue now.
+    for (const name of ['share-by', 'share-by+histogram', 'matrix-window', 'matrix-window+share-by']) {
+      expect(names).not.toContain(name);
     }
-    // Both changes, and both still membership changes: a combined table is the histogram cue on the
-    // discriminator's table, not a third table written by hand.
-    expect(CUE_VARIANTS.find((variant) => variant.name === 'share-by+histogram')?.cues).toEqual(
-      withHistogramCue(withShareByCue(shipped)),
-    );
     expect(CUE_VARIANTS.find((variant) => variant.name === 'share-by-any+histogram')?.cues).toEqual(
       withHistogramCue(withShareByAnyCue(shipped)),
     );
@@ -696,7 +671,9 @@ describe('the sweep: every table, the same rows', () => {
   it('publishes the per-family rows a change has to move and the one it must not', () => {
     const report = sweepRule(rows);
     const shipped = report.sweep[0];
-    const barShare = report.sweep[1];
+    // By name, not by index: the sweep is a list of alternatives and its order is not a fact about
+    // the corpus, so a test that reads `sweep[1]` asserts something only this file controls.
+    const barShare = report.sweep.find((reading) => reading.variant === 'bar-share');
     // The bar-first share table trades one pie row for one bar row on this corpus, and the pie row
     // it loses is printed rather than absorbed into a single top-1 number.
     expect(barShare?.byFamily.find((cell) => cell.family === 'bar')?.top1).toBe(
@@ -704,7 +681,7 @@ describe('the sweep: every table, the same rows', () => {
     );
     expect(barShare?.byFamily.find((cell) => cell.family === 'pie')?.top1).toBe(0);
     // The histogram table moves its own label and leaves the other four where they were.
-    const histogram = report.sweep[2];
+    const histogram = report.sweep.find((reading) => reading.variant === 'histogram');
     expect(histogram?.byFamily.find((cell) => cell.family === 'histogram')?.top1).toBe(1);
     expect(histogram?.byFamily.find((cell) => cell.family === 'line')?.top1).toBe(
       shipped?.byFamily.find((cell) => cell.family === 'line')?.top1,
@@ -741,7 +718,9 @@ describe('the sweep: every table, the same rows', () => {
     expect(lines).toHaveLength(CUE_VARIANTS.length + 1);
     expect(lines[0]).toContain(`${String(CUE_VARIANTS.length)} tables over the same ${String(report.scored)} rows`);
     expect(lines[1]).toContain('shipped');
-    expect(lines[2]).toContain('bar +');
+    // Read by name rather than by position: which alternative sits second is this file's order and
+    // not a fact about the corpus.
+    expect(lines.find((line) => line.trimStart().startsWith('bar-share'))).toContain('bar +');
     // A report that priced one table says nothing about a sweep instead of claiming an empty one.
     expect(describeSweep(scoreRule(rows))).toEqual([]);
   });
@@ -881,40 +860,37 @@ describe('which cue is wrong, read cue by cue', () => {
   });
 });
 
-describe('the width of the matrix cue', () => {
+describe('the width of the matrix cue, now that it shipped', () => {
   const shipped = CUE_VARIANTS[0]!.cues;
-  const windowed = withMatrixWindow(shipped);
+  const wide = withMatrixWide(shipped);
 
-  it('reads a crossing stated in one clause and stops reading one across a full stop', () => {
-    // The shipped pattern is `\bby\b[\s\S]*\band\b`: unbounded in both directions, so a question
-    // carrying "by" and, three sentences later, "and" leads with a heatmap.
+  it('reads a crossing stated in one clause and not one across a full stop', () => {
+    // The retired pattern was `\bby\b[\s\S]*\band\b`: unbounded in both directions, so a question
+    // carrying "by" and, three sentences later, "and" led with a heatmap — 223 questions decided, one
+    // of them right. The shipped pattern is the same two words with a bound on the distance.
     const across = 'average revenue by region. plot it and label the axes';
-    expect(cueMarks(across)).toEqual(['heatmap', 'bar']);
-    expect(cueMarks(across, windowed)).toEqual([]);
-    // And the cue it was reached for still fires: same words, same order, a bound on the distance.
-    expect(cueMarks('average revenue by region and channel', windowed)).toEqual(['heatmap', 'bar']);
-    expect(cueMarks('revenue by region and by channel', windowed)).toEqual(['heatmap', 'bar']);
+    expect(cueMarks(across)).toEqual([]);
+    expect(cueMarks(across, wide)).toEqual(['heatmap', 'bar']);
+    // And the phrase the cue was reached for still fires, measure in between and all.
+    for (const question of ['average revenue by region and channel', 'revenue by region and by channel', 'the share of revenue by region and the count of orders']) {
+      expect(cueMarks(question)).toContain('heatmap');
+    }
   });
 
-  it('changes one rule and leaves the rest of the table where it was', () => {
-    expect(windowed.length).toBe(shipped.length);
-    const kinds = windowed.map((rule) => rule.kind);
-    expect(kinds).toEqual(shipped.map((rule) => rule.kind));
-    expect(windowed.find((rule) => rule.kind === 'matrix')?.marks).toEqual(
-      shipped.find((rule) => rule.kind === 'matrix')?.marks,
-    );
-    expect(windowed.find((rule) => rule.kind === 'matrix')?.pattern).not.toBe(
-      shipped.find((rule) => rule.kind === 'matrix')?.pattern,
-    );
+  it('keeps the retired width priced, because the rows it lost are only attributable while it runs', () => {
+    expect(wide.length).toBe(shipped.length);
+    expect(wide.map((rule) => rule.kind)).toEqual(shipped.map((rule) => rule.kind));
+    expect(wide.find((rule) => rule.kind === 'matrix')?.marks).toEqual(shipped.find((rule) => rule.kind === 'matrix')?.marks);
+    expect(wide.find((rule) => rule.kind === 'matrix')?.pattern).not.toBe(shipped.find((rule) => rule.kind === 'matrix')?.pattern);
+    expect(CUE_VARIANTS.find((variant) => variant.name === 'matrix-wide')?.cues).toEqual(wide);
   });
 
-  it('prices the removal beside the window, so a rewrite has a floor to clear', () => {
+  it('prices the removal beside the width, so a rewrite has a floor to clear', () => {
     const without = withoutMatrix(shipped);
     expect(without).toHaveLength(shipped.length - 1);
     expect(without.some((rule) => rule.kind === 'matrix')).toBe(false);
     expect(cueMarks('average revenue by region and channel', without)).toEqual([]);
     expect(CUE_VARIANTS.find((variant) => variant.name === 'no-matrix')?.cues).toEqual(without);
-    expect(CUE_VARIANTS.find((variant) => variant.name === 'matrix-window')?.cues).toEqual(windowed);
   });
 });
 
@@ -1007,10 +983,10 @@ describe('the order of the matrix marks', () => {
     expect(cueMarks('revenue over time', reversed)).toEqual(cueMarks('revenue over time'));
   });
 
-  it('is priced alone and on top of the window, so neither reading has to be guessed', () => {
+  it('is priced alone and on the retired width, which is where it scored best and lost most', () => {
     expect(CUE_VARIANTS.find((variant) => variant.name === 'matrix-bar-first')?.cues).toEqual(reversed);
-    expect(CUE_VARIANTS.find((variant) => variant.name === 'matrix-window+bar-first')?.cues).toEqual(
-      withMatrixBarFirst(withMatrixWindow(shipped)),
+    expect(CUE_VARIANTS.find((variant) => variant.name === 'matrix-wide+bar-first')?.cues).toEqual(
+      withMatrixBarFirst(withMatrixWide(shipped)),
     );
   });
 });
