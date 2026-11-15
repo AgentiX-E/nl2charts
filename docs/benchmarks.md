@@ -13804,3 +13804,126 @@ reading ran `quality` and `text2vis-rule` and skipped both model jobs; the commi
 5. **The exemption and the trigger are one edit.** A path the expensive chain stops measuring and the
    cheap chain does not start measuring is a path nobody measures — and that failure looks like a green
    build.
+
+## Thirty-four one-edit neighbours, and the first cap that was measured
+
+Two rounds of cue work ended with the same shape of result: a lever priced at +39 on the question half
+and 0 on the product, then three more levers priced at zero. The repair list was not wrong; it was
+*small*. Eleven candidate tables existed, and every one of them had been written by hand for the round
+that wanted it — two reversals, one removal, two widths of one phrase. A list assembled that way is a
+list of the repairs somebody already imagined.
+
+So the list is now generated for every edit that is an *instance* of a uniform change.
+
+| edit | how many | what it says |
+| --- | --- | --- |
+| `<cue>-<mark>-first` | 8 (10 cues name a fallback; two were already published) | the mark a cue names second, moved in front of the one it prefers |
+| `no-<cue>` | 12 (13 cue kinds; `matrix` was already published) | the cue removed, which is the only honest statement of its contribution |
+| `slices-<n>` | 3 | the admission cap, which is a number `recommendChart` already takes as an option |
+
+Thirty-four readings of the product, on the same 1,470 rows, against the same hit test, with one
+control. Two entries keep the names their rounds published (`bar-share`, `matrix-bar-first`) and the
+generator skips those cues: two names for one table is a reading that looks like corroboration and is
+one measurement taken twice. A test reads the whole list for that collision — and it caught one on its
+first run, in itself: a `RegExp` serialises to `{}` under `JSON.stringify`, so two tables whose patterns
+differ compared equal, and a check that cannot tell two patterns apart is a check that would have
+called a rewritten phrase a reordering.
+
+### What each cue is worth
+
+Every cue removed, one at a time, with two numbers: what the score loses, and how many answers change.
+
+| cue removed | product hit | Δ | answers changed | families lost |
+| --- | --- | --- | --- | --- |
+| `trend` | 292 | **−70** | 123 | line −74 |
+| `share` | 344 | −18 | 158 | pie −56, bar +37 |
+| `ranking` | 349 | −13 | **205** | bar −85, line +39, pie +28 |
+| `correlation` | 350 | −12 | 21 | scatter −10, heatmap −2 |
+| `explicit` | 355 | −7 | 7 | heatmap −2, line −1, pie −2, scatter −1, boxplot −1 |
+| `share-by` | 360 | −2 | 4 | bar −3 |
+| `matrix` | 361 | −1 | 7 | heatmap −1 |
+| `distribution` | 364 | **+2** | 5 | line +2 |
+| `progress` | 362 | 0 | **0** | — |
+| `stages` | 362 | 0 | 1 | — |
+| `multi-metric` | 362 | 0 | **0** | — |
+| `profile` | 362 | 0 | **0** | — |
+| `volatility` | 362 | 0 | **0** | — |
+
+The control is 362 of 1,470 (24.63%).
+
+Two columns, because one is not enough. `trend` is worth 70 rows and moves 123 answers — the cue that
+carries the corpus's largest family. `ranking` is worth 13 and moves **205**, the most of any cue: it
+decides where a bar goes on one question in seven and wins only a few of them. And four cues —
+`progress`, `multi-metric`, `profile`, `volatility` — change *nothing*: not a hit, not an answer. They
+are not proven useless; they are **unexercised by this corpus**, which has six radar rows and six
+candlestick rows and no question that a gauge answers. A table that published only the delta would have
+called them "cues that do nothing", which is a claim about the product that the reading does not
+support.
+
+One cue has a *negative* contribution: removing `distribution` gains 2 rows, because it fires on two
+questions the corpus drew as lines. It is kept, and the reason is worth stating because it is the first
+time this project has argued against its own number: a distribution question with one measure and no
+five-column tuple is exactly the question `boxplot` exists for, the corpus has 90 boxplot rows of which
+6 are hits, and buying 2 lines by deleting the only cue that names a boxplot is a trade the corpus
+cannot see. The repair the number suggests is a *narrower* pattern, not a removed cue.
+
+### The flip that was refused for the wrong reason
+
+`matrix-bar-first` has been in this table for two rounds and was refused on a published number: −34 on
+the product. That number was true of the table it was measured on. The `matrix` pattern was bounded in
+the round after, and on the bounded table the same flip reads **+2** (364 against 362; bar +8, pie −4).
+The rejection still stands, but the reason has changed, and the old reason was no longer a fact.
+
+What refuses it now is the split.
+
+| candidate | hit | Δ | first half | second half | refused because |
+| --- | --- | --- | --- | --- | --- |
+| `matrix-bar-first` | 364 | +2 | 174 (**+5**) | 190 (**−3**) | the gain is one half's |
+| `progress-bar-first` | 363 | +1 | 169 (±0) | 194 (+1) | not a gain on both |
+| `no-distribution` | 364 | +2 | 170 (+1) | 194 (+1) | a real gain, refused on product grounds (above) |
+| `slices-any` | 362 | ±0 | 168 (−1) | 194 (+1) | no gain at all, and eleven answers change |
+
+Every candidate now carries its hits split over two disjoint halves of the scored population, by row
+parity, fixed before the reading. A sweep of thirty-four candidates will always have a winner; the
+split is what separates a lever that gains from a lever that fits. `assertCensusReport` refuses a table
+whose halves do not add up to its own count, so the split cannot drift from the number it partitions.
+
+### The cap: eight and nine are worse than seven
+
+`maxSlices` defaulted to seven and had never been measured. It is priced at 7, 8, 9, 10, 12 and
+unbounded:
+
+| cap | hit | Δ | bar | pie | first half | second half |
+| --- | --- | --- | --- | --- | --- | --- |
+| 7 (retired) | 358 | −4 | +10 | −14 | 166 (−3) | 192 (−1) |
+| 9 | 355 | −7 | +5 | −12 | 165 (−4) | 190 (−3) |
+| **12 (shipped)** | **362** | **—** | — | — | 169 | 193 |
+| unbounded | 362 | ±0 | −2 | +2 | 168 (−1) | 194 (+1) |
+
+The curve is not monotone, and the mechanism is the shape rather than the number: the cap admits a pie
+only where one category is narrow enough, so raising it to eight admits the tables the corpus drew as
+**bars** at eight and nine categories while still refusing the ones it drew as **pies** at ten and
+twelve. A cap in that interval is strictly worse than the one it replaces. Twelve is the first value
+where the pie the cue table asks for is not overruled by a constant, and unbounded buys nothing beyond
+it — eleven answers would change and no number would.
+
+**Shipped: 358 → 362 (24.35% → 24.63%).** Ten questions the corpus drew as bars are now answered with
+a pie, which is published with the gain: that is the cue's pie claim showing through a cap that had been
+suppressing it, not a better claim.
+
+### What changes in the method
+
+1. **A candidate list written by hand is a list of the repairs already imagined.** The enumeration is
+   part of the reading: eight reversals and twelve ablations cost no model call and found the four
+   unexercised cues, which no amount of thinking about the table had surfaced.
+2. **A delta alone cannot tell "worthless" from "unexercised".** Two numbers per candidate — hits lost
+   and answers changed — and four cues read zero on both, which is a statement about the corpus rather
+   than about the product.
+3. **A published rejection expires.** `matrix-bar-first` was refused on −34 and reads +2 on the table
+   that replaced it. Re-pricing a refused lever costs one dispatch; quoting it costs a round spent on a
+   lever whose reason no longer exists.
+4. **A sweep needs a holdout, and the holdout has to be fixed first.** Both halves were computed for
+   every candidate in the same pass, which is only honest because the split was by row parity and
+   stated before the reading — not chosen after seeing which candidate won.
+5. **A negative contribution can be a true number and a bad trade.** The corpus is one corpus: it has 90
+   boxplot rows and 6 hits, and it cannot price what a user asking for quartiles needs.

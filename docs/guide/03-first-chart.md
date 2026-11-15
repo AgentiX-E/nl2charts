@@ -37,14 +37,24 @@ the `ChartIR` by hand with the type you know.
 ```ts
 import { enumerateCandidates } from '@agentix-e/nl2charts-chart';
 
-const candidates = enumerateCandidates(profiles, 7);
+const candidates = enumerateCandidates(profiles);
 // [ { mark: 'line', score: 0.9, reason: 'temporal-x-quantitative-y' },
 //   { mark: 'bar',  score: 0.8, reason: 'category-x-quantitative-y' }, … ]
 ```
 
 Candidates are *structurally valid* options, not a decision. A pie is offered
-only when the category count is small enough to read and the measure is
-non-negative.
+only when the measure is non-negative and one category has at most twelve
+slices — twelve is the default, a second argument to `enumerateCandidates` and
+the `maxSlices` option of `recommendChart` override it.
+
+The twelve is a reading rather than a round number. Seven was the limit this
+library shipped until it was measured against
+[Text2Vis](https://huggingface.co/datasets/mizanurr/Text2Vis), a corpus of 1,470
+questions with the chart its authors judged correct. A cap of eight or nine
+scores *worse* than seven — it admits the tables the corpus drew as bars at eight
+and nine categories while still refusing the ones it drew as pies at ten and
+twelve — and twelve is the first value where the pie a question asks for is no
+longer overruled by a constant. `docs/benchmarks.md` carries the whole curve.
 
 ## 2b. Or let the question choose
 
@@ -75,7 +85,7 @@ Two properties make the answer auditable rather than persuasive:
   change, and a wrong choice has a trace instead of a mystery.
 
 Seven marks can be chosen this way on top of the original five: funnel, boxplot,
-candlestick, radar, parallel, gauge, and pie over an explicit slice limit. The set
+candlestick, radar, parallel, gauge, and pie over a twelve-slice limit. The set
 is bounded on purpose: a map needs geometry no result set carries, a tree needs a
 hierarchy a flat table does not describe, and a custom series needs a `renderItem`
 function that cannot travel in a contract. Those stay hand-specified.
