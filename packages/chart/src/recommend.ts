@@ -20,12 +20,19 @@ import { profileRows } from './profile.js';
  */
 
 /**
- * The kinds a cue can be. The vocabulary is the product's, and three members of it are not emitted by
- * `CHART_CUES`: `histogram` (the contract has no histogram series — a histogram is a bar with the
- * measure binned), and the two `share` discriminator widths that the corpus in `eval/text2vis` prices
+ * The kinds a cue can be. The vocabulary is the product's, and two members of it are not emitted by
+ * `CHART_CUES`: the two `share` discriminator widths that the corpus in `eval/text2vis` prices
  * before the shipped table changes — `share-by-any` and `share-ranked`. They are in the union so a
  * variant is written against the same type as the table it re-orders rather than against a cast, and
  * so a cue that ships later does not have to widen a type the readings already use.
+ *
+ * `histogram` used to be a third such member, and the reading that shipped it is the reason this
+ * comment is shorter: `familiesOfMark` has said since it was written that a bar covers a histogram,
+ * but only when a cue that *names* the intent put the bar there — and no cue did. So the widening was
+ * unreachable, a histogram question was answered `boxplot` by the `distribution` cue, and 73 corpus
+ * rows sat in `uncovered` where the product had answered but could not say what. Shipping the cue
+ * moved 24 of them into the shortlist without moving a single hit, which is the whole distinction the
+ * census's `shortlist` column exists to make.
  */
 export type CueKind =
   | 'trend'
@@ -162,6 +169,17 @@ export const CHART_CUES: readonly CueRule[] = [
     kind: 'share',
     marks: ['pie', 'bar'],
     pattern: /\b(?:share|proportion|percentage|percent|composition|breakdown|split|makeup)\b|占比|比例|构成/,
+  },
+  {
+    /**
+     * The binned measure, named. Ahead of `distribution` because the leading mark is the first mark
+     * of the first fired cue; narrow, because `distribution` keeps its own alternative and a question
+     * this does not match is answered exactly as before. Priced before it shipped: 24 corpus rows
+     * left `uncovered` for the shortlist and no hit moved.
+     */
+    kind: 'histogram',
+    marks: ['bar'],
+    pattern: /\bhistograms?\b|\bfrequency (?:distribution|counts?)\b|\bbinned\b/,
   },
   {
     kind: 'distribution',

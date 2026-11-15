@@ -548,21 +548,6 @@ export function scoreRule(
 }
 
 /**
- * The histogram cue, inserted ahead of `distribution`.
- *
- * Ahead, and that is the whole mechanism: the leading mark is the first mark of the first fired cue,
- * so a table in which `distribution` comes first can only ever answer a histogram question with a
- * boxplot. Its pattern is narrow on purpose — the words that mean *binned* and nothing else — and
- * `distribution` keeps its own `histogram` alternative, which then fires second and puts `boxplot`
- * on the shortlist where a reader can see it.
- */
-const HISTOGRAM_CUE: CueRule = {
-  kind: 'histogram',
-  marks: ['bar'],
-  pattern: /\bhistograms?\b|\bfrequency (?:distribution|counts?)\b|\bbinned\b/,
-};
-
-/**
  * The same table with one cue inserted ahead of `share`.
  *
  * Ahead, because the leading mark is the first mark of the first fired cue: a table in which `share`
@@ -577,17 +562,6 @@ export function withCueAheadOf(table: readonly CueRule[], cue: CueRule, before: 
   const at = table.findIndex((rule) => rule.kind === before);
   const index = at === -1 ? table.length : at;
   return [...table.slice(0, index), cue, ...table.slice(index)];
-}
-
-/**
- * The same table with the histogram cue inserted before `distribution`.
- *
- * A membership change and not a pattern edit: the variant discipline is that only `marks` and the
- * presence of a cue may differ, so a reading can be attributed to the order rather than to a
- * rewritten phrase.
- */
-export function withHistogramCue(table: readonly CueRule[]): readonly CueRule[] {
-  return withCueAheadOf(table, HISTOGRAM_CUE, 'distribution');
 }
 
 /**
@@ -859,16 +833,6 @@ export const CUE_VARIANTS: readonly TableVariant[] = [
       name: 'share-by-any',
       note: 'the refused wide width of the share discriminator: a share word and a `by` anywhere after it',
       cues: withShareByAnyCue(CHART_CUES),
-    },
-    {
-      name: 'histogram',
-      note: 'a cue that names the binned measure, so a histogram question is answered with a bar instead of a boxplot',
-      cues: withHistogramCue(CHART_CUES),
-    },
-    {
-      name: 'share-by-any+histogram',
-      note: 'the wide share discriminator and the histogram cue together, priced as a pair',
-      cues: withHistogramCue(withShareByAnyCue(CHART_CUES)),
     },
     {
       name: 'ranking-before-share',
