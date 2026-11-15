@@ -908,3 +908,74 @@ describe('every cue table, priced on the product', () => {
     expect(describeProduct({ ...report, product: [] })).toEqual([]);
   });
 });
+
+describe('the admission cap, priced beside the cue tables', () => {
+  /** Nine slices: one more than a pie admits, and a bar answers it instead. */
+  const NINE = table('Region, Revenue', regions(9).split('\n').slice(1));
+  const PART = 'the share of revenue that is refunds';
+
+  it('admits the pie the shipped cap refuses, and leaves every cue where it was', () => {
+    // The cap is a product decision about legibility, and the corpus disagrees with it on a specific
+    // shape: a part of a whole with nine categories. Refusing the pie does not make the row a `bar`
+    // question — the cue said pie and the admission said no — so the row is counted as a refusal
+    // rather than as a wrong answer, which is the census telling a reader which file to open.
+    const report = censusOf([input(PART, 'Pie Chart', NINE)]);
+    expect(report.outcomes).toMatchObject({ hit: 0, refused: 1 });
+    expect(report.refusals[0]?.reason).toContain('at most 7 slices');
+    // The cue table is the same in both readings, so the difference is the cap and nothing else.
+    expect(report.product.find((variant) => variant.variant === 'slices-12')).toMatchObject({ hit: 1 });
+    expect(report.product.find((variant) => variant.variant === 'slices-any')).toMatchObject({ hit: 1 });
+    expect(report.product[0]).toMatchObject({ variant: 'shipped', hit: 0 });
+  });
+
+  it('prices the knobs after every cue table, so the cue axis is read first', () => {
+    const names = censusOf([input(PART, 'Pie Chart', NINE)]).product.map((variant) => variant.variant);
+    const firstKnob = names.indexOf('slices-12');
+    expect(firstKnob).toBeGreaterThan(0);
+    expect(names.slice(firstKnob)).toEqual(['slices-12', 'slices-any']);
+    // Each entry says what it changed, because a name like `slices-12` is a label and the note is the
+    // claim a reader checks.
+    expect(censusOf([input(PART, 'Pie Chart', NINE)]).product[firstKnob]?.note).toContain('twelve');
+  });
+
+  it('splits every table across two halves that sum to the whole', () => {
+    // Two disjoint halves of the same population, fixed before the reading and arbitrary with respect
+    // to content. They exist so that a candidate chosen for winning cannot be chosen for fitting: a
+    // lever that gains on one half and loses on the other has not been shown to gain at all.
+    // Ordered so that each half holds one hit and one miss: a split of two rows that both landed in
+    // the same half would let a table that only ever wins on even rows pass as a table that wins.
+    const SEVEN = table('Region, Revenue', regions(7).split('\n').slice(1));
+    const report = censusOf([
+      input(PART, 'Pie Chart', SEVEN),
+      input(TREND, 'Line Chart', QUARTERLY),
+      input(PART, 'Pie Chart', NINE),
+      input(PART, 'Pie Chart', NINE),
+    ]);
+    for (const variant of report.product) expect(variant.split.a + variant.split.b).toBe(variant.hit);
+    expect((report.product[0]?.split.a ?? -1) + (report.product[0]?.split.b ?? -1)).toBe(report.outcomes.hit);
+    // Both halves are non-empty on a corpus of four rows, or the split is a way of reporting one half
+    // twice and calling the other zero.
+    expect(report.product[0]?.split.a).toBeGreaterThan(0);
+    expect(report.product[0]?.split.b).toBeGreaterThan(0);
+  });
+
+  it('refuses a table whose halves do not add up, and one whose control does not', () => {
+    const report = censusOf([input(PART, 'Pie Chart', NINE), input(TREND, 'Line Chart', QUARTERLY)]);
+    const shipped = report.product[0]!;
+    expect(() =>
+      assertCensusReport({ ...report, product: [{ ...shipped, split: { a: shipped.split.a + 1, b: shipped.split.b } }] }),
+    ).toThrow(/half/);
+    expect(() =>
+      assertCensusReport({ ...report, product: [{ ...shipped, split: { a: shipped.split.a + 1, b: shipped.split.b - 1 } }] }),
+    ).not.toThrow();
+  });
+
+  it('prints each knob with its delta, on the same line shape as a cue table', () => {
+    const report = censusOf([input(PART, 'Pie Chart', NINE)]);
+    const lines = describeProduct(report);
+    expect(lines).toHaveLength(1 + report.product.length);
+    const knob = lines.find((line) => line.trimStart().startsWith('slices-12 '));
+    expect(knob).toContain('pie +1');
+    expect(lines.find((line) => line.trimStart().startsWith('shipped '))).not.toContain('|');
+  });
+});

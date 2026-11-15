@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
+import { CHART_CUES } from '@agentix-e/nl2charts-chart';
 import { TEXT2VIS_FIELDS } from '../eval/text2vis/dataset.js';
 import {
   assertRuleReport,
@@ -37,12 +38,14 @@ import {
   sweepRule,
   withHistogramCue,
   withCueAheadOf,
+  withMarkFirst,
   withCueMoved,
   withMatrixBarFirst,
   withMatrixWide,
   withRankingBeforeShare,
   withShareByAnyCue,
   withShareRankedCue,
+  withoutCue,
   withoutMatrix,
   type RuleReport,
   type VariantReading,
@@ -555,19 +558,13 @@ describe('the table a variant constructs', () => {
 
   it('states one lever per variant, and the first is the table the package exports', () => {
     expect(CUE_VARIANTS[0]).toMatchObject({ name: 'shipped' });
-    expect(CUE_VARIANTS.map((variant) => variant.name)).toEqual([
-      'shipped',
-      'matrix-wide',
-      'matrix-bar-first',
-      'matrix-wide+bar-first',
-      'no-matrix',
-      'bar-share',
-      'share-by-any',
-      'histogram',
-      'share-by-any+histogram',
-      'ranking-before-share',
-      'share-ranked',
-    ]);
+    // The list is generated from the table, so it is asserted by construction rather than by
+    // quoting it: the first entry is the table the package exports, and every other entry is one
+    // edit that the two tests above enumerate — a literal list would fail on every new cue and be
+    // updated without being read, which is how a change-detector becomes a rubber stamp.
+    expect(CUE_VARIANTS[0]).toMatchObject({ name: 'shipped' });
+    expect(CUE_VARIANTS[0]?.cues).toBe(CHART_CUES);
+    expect(new Set(CUE_VARIANTS.map((variant) => variant.name)).size).toBe(CUE_VARIANTS.length);
     for (const variant of CUE_VARIANTS) expect(variant.note.length).toBeGreaterThan(20);
   });
 });
@@ -1158,5 +1155,114 @@ describe('the edges of the crossing reading and the move behind it', () => {
     ]);
     const stray = { ...report.crossings[0]!, kind: 'matrix' as const };
     expect(() => assertRuleReport({ ...report, crossings: [stray] })).toThrow(/no per-cue reading/);
+  });
+});
+
+describe('the one-edit neighbourhood of the cue table, enumerated rather than chosen', () => {
+  const byName = (name: string) => {
+    const found = CUE_VARIANTS.find((variant) => variant.name === name);
+    if (found === undefined) throw new Error(`no variant named ${name}`);
+    return found;
+  };
+  /**
+   * What a table *is*, for comparison.
+   *
+   * `JSON.stringify` cannot answer this: a `RegExp` serialises to `{}`, so two tables whose patterns
+   * differ would compare equal — which is how the first version of the duplicate check called
+   * `matrix-wide` a second name for `shipped` and, worse, would have called two different patterns
+   * one edit. The pattern's own source is part of the identity.
+   */
+  const tableKey = (cues: readonly { kind: string; marks: readonly string[]; pattern: unknown }[]): string =>
+    JSON.stringify(cues.map((rule) => ({ kind: rule.kind, marks: rule.marks, pattern: String(rule.pattern) })));
+
+  it('reverses the fallback of every cue that names one, and only that cue', () => {
+    // The sweep used to hold the two reversals someone had thought of — a bar before a heatmap, a bar
+    // before a pie — and both were found by reading the corpus, which is how a repair list becomes a
+    // list of the repairs already imagined. A cue that names a fallback is stating a preference for
+    // when the first mark is not drawable, and whether that preference is right is a question about
+    // every such cue rather than about the ones that got looked at.
+    // Two of them are registered under the names their rounds published; a second name for one table
+    // is a second reading that looks like corroboration and is the same measurement twice.
+    const published: Readonly<Record<string, string>> = {
+      'share-bar-first': 'bar-share',
+      'matrix-bar-first': 'matrix-bar-first',
+    };
+    let checked = 0;
+    for (const rule of CHART_CUES.filter((entry) => entry.marks.length > 1)) {
+      const name = `${rule.kind}-${String(rule.marks[1])}-first`;
+      const variant = byName(published[name] ?? name);
+      const moved = variant.cues.filter((entry, index) => tableKey([entry]) !== tableKey([CHART_CUES[index] as (typeof CHART_CUES)[number]]));
+      expect(moved.map((entry) => entry.kind)).toEqual([rule.kind]);
+      // The mark the variant names first is the one the shipped cue named second: the flip is read
+      // from the table rather than parsed out of the name, because the name is a label and the table
+      // is the claim.
+      expect(moved[0]?.marks[0]).toBe(rule.marks[1]);
+      expect(moved[0]?.marks).toEqual([rule.marks[1], rule.marks[0], ...rule.marks.slice(2)]);
+      if (published[name] === undefined) checked += 1;
+    }
+    // The two published names are the flips they say they are, and they are the only two exempted.
+    expect(byName('bar-share').cues.find((rule) => rule.kind === 'share')?.marks).toEqual(['bar', 'pie']);
+    expect(byName('matrix-bar-first').cues.find((rule) => rule.kind === 'matrix')?.marks).toEqual(['bar', 'heatmap']);
+    expect(checked).toBe(CHART_CUES.filter((entry) => entry.marks.length > 1).length - Object.keys(published).length);
+  });
+
+  it('removes exactly one cue kind at a time, which is the contribution of that cue', () => {
+    // An ablation, not a search: a cue's contribution is what the product loses when it is gone, and
+    // the only honest way to state it is to remove it and price the table again. `no-matrix` was the
+    // only instance of this and it existed because a round happened to want it.
+    for (const kind of [...new Set(CHART_CUES.map((rule) => rule.kind))]) {
+      const removed = CHART_CUES.filter((rule) => rule.kind === kind).length;
+      const variant = byName(kind === 'matrix' ? 'no-matrix' : `no-${kind}`);
+      // The published name and the generated one are the same table for `matrix`, which is why it is
+      // the one kind that keeps its historical entry.
+      expect(variant.cues).toEqual(withoutCue(CHART_CUES, kind));
+      expect(variant.cues.some((rule) => rule.kind === kind)).toBe(false);
+      expect(CHART_CUES.length - variant.cues.length).toBe(removed);
+    }
+  });
+
+  it('never registers two names for one table', () => {
+    // Two names, one table, is a reading that looks like two confirmations and is one measurement
+    // taken twice. It is also the failure a generated list is prone to: a hand-written entry and a
+    // generated one will eventually describe the same edit.
+    const seen = new Map<string, string>();
+    for (const variant of CUE_VARIANTS) {
+      const key = tableKey(variant.cues);
+      const other = seen.get(key);
+      expect(other === undefined ? 'distinct' : `${variant.name} also names ${String(other)}`).toBe('distinct');
+      seen.set(key, variant.name);
+    }
+    // The control is first, so a sweep always contains the table it is a sweep of.
+    expect(CUE_VARIANTS[0]?.name).toBe('shipped');
+    expect(CUE_VARIANTS[0]?.cues).toBe(CHART_CUES);
+  });
+
+  it('leaves a table alone when the mark or the cue is not in it', () => {
+    // Totality, for the same reason as everywhere else in this file: a variant built from a table
+    // that lost a cue has to stay measurable, or the sweep silently drops a table instead of
+    // reporting one.
+    const noTrend = withoutCue(CHART_CUES, 'trend');
+    expect(withMarkFirst(noTrend, 'trend', 'bar')).toEqual(noTrend);
+    expect(withMarkFirst(CHART_CUES, 'share', 'scatter')).toEqual(CHART_CUES);
+    // A mark already first is not a change, so the table comes back identical rather than reordered.
+    expect(withMarkFirst(CHART_CUES, 'share', 'pie')).toEqual(CHART_CUES);
+    expect(noTrend).toHaveLength(CHART_CUES.length - 1);
+  });
+
+  it('prices every entry on the rows the control was priced on', () => {
+    const rows = [
+      { prompt: 'revenue over time', label: 'Line Chart' },
+      { prompt: 'the share of revenue that is refunds', label: 'Pie Chart' },
+    ];
+    const report = sweepRule(rows);
+    expect(report.sweep).toHaveLength(CUE_VARIANTS.length);
+    expect(report.sweep[0]?.variant).toBe('shipped');
+    expect(report.sweep.every((variant) => variant.scored === report.scored)).toBe(true);
+    // A flip cannot move `declined`: the phrases are untouched, so the same rows fire. That is what
+    // makes the flip column a comparison of orderings rather than of vocabularies — and it is why a
+    // flip that did move `declined` would mean the table lost or gained a phrase somewhere.
+    const flips = report.sweep.filter((variant) => variant.variant.endsWith('-first'));
+    expect(flips.length).toBeGreaterThan(0);
+    expect(flips.every((variant) => variant.declined === report.declined)).toBe(true);
   });
 });

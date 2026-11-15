@@ -1,4 +1,5 @@
 import { CHART_CUES, readCues, type CueKind, type CueRule, type RecommendableMark } from '@agentix-e/nl2charts-chart';
+import type { ChartType } from '@agentix-e/nl2charts-spec';
 import { applyExitCode, isEntry, loadText2Vis, type LoadOptions, type Text2VisRow } from './dataset.js';
 
 /**
@@ -699,6 +700,80 @@ export function withCueMoved(table: readonly CueRule[], kind: CueKind, before: C
 }
 
 /**
+ * One cue's fallback moved in front of the mark it prefers.
+ *
+ * The `marks` array is a cue saying "this mark, or that one if the first cannot be drawn", and the
+ * product pays the first three points and the rest two. So the order inside one cue is a claim the
+ * product reads on every question the cue fires on — unlike the order of the *table*, which
+ * `recommendChart` never reads (`firstClaims` is a count over a set) and which a round measured as
+ * the identity function on the product.
+ *
+ * A mark that is not in the cue, or is already first, leaves the table untouched: a builder that
+ * threw would drop a variant from the sweep instead of reporting it.
+ */
+export function withMarkFirst(table: readonly CueRule[], kind: CueKind, mark: ChartType): readonly CueRule[] {
+  return table.map((rule) => {
+    if (rule.kind !== kind) return rule;
+    const at = rule.marks.indexOf(mark);
+    if (at <= 0) return rule;
+    return { ...rule, marks: [mark, ...rule.marks.filter((entry) => entry !== mark)] };
+  });
+}
+
+/** The table without one cue kind: the ablation, which is the contribution of that cue. */
+export function withoutCue(table: readonly CueRule[], kind: CueKind): readonly CueRule[] {
+  return table.filter((rule) => rule.kind !== kind);
+}
+
+/**
+ * A cue table this build prices, and the one line that says what it changes.
+ *
+ * The list is generated for everything that is an *instance* of a uniform edit — every cue that names
+ * a fallback, every cue that can be removed — and hand-written only for the entries that a round
+ * published under a name of its own. A hand-written list of candidates is a list of the repairs
+ * somebody already imagined, and the point of the sweep is that the enumeration is a reading too.
+ */
+export interface TableVariant {
+  readonly name: string;
+  readonly note: string;
+  readonly cues: readonly CueRule[];
+}
+
+/**
+ * Two cues are reversed under the names their rounds published, and the generator skips them.
+ *
+ * `bar-share` and `matrix-bar-first` are the same tables a generated flip would build, and two names
+ * for one table is a reading that looks like corroboration and is one measurement taken twice. The
+ * guard is a test as well — no two entries in the sweep may hold the same table — because the
+ * collision this comment prevents is the one a future cue will cause again.
+ */
+const REVERSED_UNDER_OTHER_NAMES: ReadonlySet<CueKind> = new Set<CueKind>(['share', 'matrix']);
+
+/** Every cue that names a fallback, with that fallback moved first. */
+const FALLBACK_FLIPS: readonly TableVariant[] = CHART_CUES.filter(
+  (rule) => rule.marks.length > 1 && !REVERSED_UNDER_OTHER_NAMES.has(rule.kind),
+).map((rule) => {
+  const fallback = rule.marks[1] as ChartType;
+  return {
+    name: `${rule.kind}-${fallback}-first`,
+    note: `\`${rule.kind}\` leads with ${fallback}: the mark it names second, moved in front of the one it names first`,
+    cues: withMarkFirst(CHART_CUES, rule.kind, fallback),
+  };
+});
+
+/**
+ * Every cue removed, one at a time. `matrix` is registered as `no-matrix` already, and the same
+ * table under a second name is the collision above.
+ */
+const ABLATIONS: readonly TableVariant[] = [...new Set(CHART_CUES.map((rule) => rule.kind))]
+  .filter((kind) => kind !== 'matrix')
+  .map((kind) => ({
+    name: `no-${kind}`,
+    note: `\`${kind}\` removed: what the product loses when the cue is gone, which is its contribution`,
+    cues: withoutCue(CHART_CUES, kind),
+  }));
+
+/**
  * `ranking` in front of `share`, which is the reorder the crossing reading asks for.
  *
  * `share` decides more rows than any other cue and gets 28.01% of them right; the gap to its family
@@ -753,8 +828,7 @@ export function withShareRankedCue(table: readonly CueRule[]): readonly CueRule[
  * `shipped` comes first and is the table the package exports, so the sweep always contains the
  * control it is a sweep of.
  */
-export const CUE_VARIANTS: readonly { readonly name: string; readonly note: string; readonly cues: readonly CueRule[] }[] =
-  [
+export const CUE_VARIANTS: readonly TableVariant[] = [
     { name: 'shipped', note: 'the table `@agentix-e/nl2charts-chart` exports', cues: CHART_CUES },
     {
       name: 'matrix-wide',
@@ -806,6 +880,8 @@ export const CUE_VARIANTS: readonly { readonly name: string; readonly note: stri
       note: 'a ranked share read as one phrase: a share word and a ranking word inside one clause, answered with a bar',
       cues: withShareRankedCue(CHART_CUES),
     },
+    ...FALLBACK_FLIPS,
+    ...ABLATIONS,
   ];
 
 /**
