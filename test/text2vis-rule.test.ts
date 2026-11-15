@@ -19,8 +19,10 @@ import {
   assertRuleReport,
   CUE_VARIANTS,
   cueAnswer,
+  cueCrossings,
   cueMarks,
   cuePrecision,
+  describeCrossings,
   describeCues,
   describeRule,
   describeSweep,
@@ -35,9 +37,12 @@ import {
   sweepRule,
   withHistogramCue,
   withCueAheadOf,
+  withCueMoved,
   withMatrixBarFirst,
   withMatrixWide,
+  withRankingBeforeShare,
   withShareByAnyCue,
+  withShareRankedCue,
   withoutMatrix,
   type RuleReport,
   type VariantReading,
@@ -560,6 +565,8 @@ describe('the table a variant constructs', () => {
       'share-by-any',
       'histogram',
       'share-by-any+histogram',
+      'ranking-before-share',
+      'share-ranked',
     ]);
     for (const variant of CUE_VARIANTS) expect(variant.note.length).toBeGreaterThan(20);
   });
@@ -988,5 +995,168 @@ describe('the order of the matrix marks', () => {
     expect(CUE_VARIANTS.find((variant) => variant.name === 'matrix-wide+bar-first')?.cues).toEqual(
       withMatrixBarFirst(withMatrixWide(shipped)),
     );
+  });
+});
+
+describe('the companion a cue keeps when it got the family right and the order wrong', () => {
+  // The 187 rows behind this reading are the second kind of loss: `share` led, the label was a bar,
+  // and the bar was on the cue's own list in second place. A reorder is the repair, and which order
+  // is the repair depends on what else the question said — which is a fact about the *broken* rows
+  // and not about the cue table. These rows put one companion in the broken half and none in the
+  // right half, so the reading has a direction rather than a distribution.
+  const rows = [
+    { prompt: 'top 5 categories by share of revenue', label: 'Bar Chart' },
+    { prompt: 'the share of revenue that is refunds', label: 'Pie Chart' },
+    { prompt: 'the top 3 regions by revenue', label: 'Bar Chart' },
+    { prompt: 'revenue over time', label: 'Line Chart' },
+  ];
+
+  it('names the cue that fired beside it, counted only over the rows it got wrong', () => {
+    const crossings = cueCrossings(rows);
+    const share = crossings.find((crossing) => crossing.kind === 'share');
+    expect(share).toMatchObject({ hits: 1, ordered: 1 });
+    // `ranking` is the companion, and it is the whole finding: a share question that also ranks is a
+    // comparison, and `ranking` sits *after* `share` in the shipped table so it never gets to lead.
+    expect(share?.withCue).toEqual([{ kind: 'ranking', n: 1 }]);
+    // The control: the row this cue got right carried no companion at all, so the companion is not
+    // simply "a cue that fires often".
+    expect(share?.hitWithCue).toEqual([]);
+  });
+
+  it('agrees with the per-cue reading it is a second view of', () => {
+    const crossings = cueCrossings(rows);
+    const readings = cuePrecision(rows);
+    expect(crossings.map((crossing) => crossing.kind)).toEqual(expect.arrayContaining(readings.map((reading) => reading.kind)));
+    for (const crossing of crossings) {
+      const reading = readings.find((entry) => entry.kind === crossing.kind);
+      // Two instruments over one population: the gap a reorder can recover is `inside - hits` here
+      // and `ordered` there, and a disagreement is a second definition of "got it right".
+      expect(crossing.hits).toBe(reading?.hits);
+      expect(crossing.ordered).toBe((reading?.inside ?? 0) - (reading?.hits ?? 0));
+      expect(crossing.hits + crossing.ordered).toBeLessThanOrEqual(reading?.leads ?? 0);
+    }
+  });
+
+  it('orders the repair list by the rows each cue got wrong, which is the order to act in', () => {
+    const crossings = cueCrossings([
+      { prompt: 'top 5 categories by share of revenue', label: 'Bar Chart' },
+      { prompt: 'top 3 products by share of revenue', label: 'Bar Chart' },
+      { prompt: 'revenue over time', label: 'Line Chart' },
+    ]);
+    expect(crossings[0]?.kind).toBe('share');
+    expect(crossings[0]?.ordered).toBe(2);
+    expect(crossings[0]?.withCue).toEqual([{ kind: 'ranking', n: 2 }]);
+    // A cue that got everything right is still reported, with an empty companion list rather than a
+    // missing row: silence would read as "this cue never led".
+    expect(crossings.find((crossing) => crossing.kind === 'trend')).toMatchObject({ hits: 1, ordered: 0, withCue: [] });
+  });
+
+  it('prints the companion with its share of the broken rows, so a big cue and a common cue differ', () => {
+    const lines = describeCrossings(cueCrossings(rows));
+    expect(lines[0]).toContain('order, not phrase');
+    expect(lines[1]).toContain('share');
+    expect(lines[1]).toContain('ranking (1/1)');
+    // A cue with nothing wrong gets no line: the reading exists to name a repair, and a row of zeroes
+    // is not a repair.
+    expect(lines.join('\n')).not.toContain('trend');
+    expect(describeCrossings([])).toEqual([]);
+  });
+
+  it('refuses a crossing whose own counters do not partition the rows it led', () => {
+    const report = scoreRule(rows);
+    const first = report.crossings[0]!;
+    // The counters here are a second view of `cues`, so the assertion is that the two views cannot
+    // drift: a crossing that claims more hits than its cue did is a second reading of the same rows.
+    expect(() => assertRuleReport({ ...report, crossings: [{ ...first, hits: first.hits + 1 }] })).toThrow(/crossing/);
+  });
+});
+
+describe('the share cue, split by what the question also asked for', () => {
+  const shipped = CUE_VARIANTS[0]!.cues;
+
+  it('moves one cue and leaves every other rule where it was', () => {
+    const moved = withRankingBeforeShare(shipped);
+    expect(moved).toHaveLength(shipped.length);
+    expect(moved.findIndex((rule) => rule.kind === 'ranking')).toBeLessThan(moved.findIndex((rule) => rule.kind === 'share'));
+    // The relative order of everything else is a fact the move must not touch, or the reading would
+    // be about a reshuffled table rather than about one cue changing places.
+    const others = (table: readonly { readonly kind: string }[]): readonly string[] =>
+      table.map((rule) => rule.kind).filter((kind) => kind !== 'ranking');
+    expect(others(moved)).toEqual(others(shipped));
+    expect(moved.find((rule) => rule.kind === 'ranking')).toBe(shipped.find((rule) => rule.kind === 'ranking'));
+  });
+
+  it('lets a ranked share lead with the bar the corpus draws for it', () => {
+    const question = 'top 5 categories by share of revenue';
+    expect(cueMarks(question)[0]).toBe('pie');
+    expect(cueMarks(question, withRankingBeforeShare(shipped))[0]).toBe('bar');
+    // A share question with no ranking word is answered exactly as before: the move is worth nothing
+    // if it also repaints the pies.
+    expect(cueMarks('the share of revenue that is refunds', withRankingBeforeShare(shipped))[0]).toBe('pie');
+  });
+
+  it('reads the ranked share as one phrase, and only inside one clause', () => {
+    const ranked = withShareRankedCue(shipped);
+    expect(cueMarks('top 5 categories by share of revenue', ranked)[0]).toBe('bar');
+    expect(cueMarks('what share of revenue came from the top 3 regions', ranked)[0]).toBe('bar');
+    expect(cueMarks('the share of revenue that is refunds', ranked)[0]).toBe('pie');
+    // A full stop ends the clause: a ranking stated after one is a second question, which is the
+    // defect the unbounded `matrix` pattern cost this project 222 rows to learn.
+    expect(cueMarks('the share of revenue that is refunds. show the top 3 regions', ranked)[0]).toBe('pie');
+    // And the cue names a mark and nothing else, so it cannot repaint a line question either.
+    expect(ranked.find((rule) => rule.kind === 'share-ranked')?.marks).toEqual(['bar']);
+  });
+
+  it('is a table that knows where it sits, and one that adds a phrase instead', () => {
+    const names = CUE_VARIANTS.map((variant) => variant.name);
+    expect(CUE_VARIANTS.find((variant) => variant.name === 'ranking-before-share')?.cues).toEqual(withRankingBeforeShare(shipped));
+    expect(CUE_VARIANTS.find((variant) => variant.name === 'share-ranked')?.cues).toEqual(withShareRankedCue(shipped));
+    // Two levers, priced apart on purpose: one is a reorder that costs no phrase, the other is a new
+    // phrase that costs no order, and a reading that changed both could not say which one earned it.
+    expect(names.indexOf('ranking-before-share')).toBeLessThan(names.indexOf('share-ranked'));
+  });
+});
+
+describe('the edges of the crossing reading and the move behind it', () => {
+  it('skips a row no cue fired on and a row whose label has no family', () => {
+    // Both are outside every denominator in this file, at every level: a row the table said nothing
+    // about cannot be a companion of anything, and a label this build cannot name cannot be wrong.
+    const crossings = cueCrossings([
+      { prompt: 'how many orders were placed', label: 'Bar Chart' },
+      { prompt: 'top 3 regions by revenue', label: 'Treemap' },
+      { prompt: 'top 3 regions by revenue', label: 'Bar Chart' },
+    ]);
+    expect(crossings).toHaveLength(1);
+    expect(crossings[0]).toMatchObject({ kind: 'ranking', hits: 1, ordered: 0 });
+  });
+
+  it('says so when no cue got the order wrong, rather than printing nothing', () => {
+    // An empty reading and a clean reading are two different facts, and a section that vanishes on the
+    // clean one leaves a reader unable to tell "nothing to fix" from "the instrument did not run".
+    expect(describeCrossings([])).toEqual([]);
+    const clean = describeCrossings(cueCrossings([{ prompt: 'revenue over time', label: 'Line Chart' }]));
+    expect(clean).toHaveLength(2);
+    expect(clean[1]).toContain('no cue led a row it covered with the wrong mark first');
+  });
+
+  it('leaves a table alone when the cue to move is not in it, or is already first', () => {
+    // The totality is what keeps a variant built from a table that lost a cue measurable: a throw here
+    // would drop the variant from the sweep instead of reporting it.
+    const withoutRanking = CUE_VARIANTS[0]!.cues.filter((rule) => rule.kind !== 'ranking');
+    expect(withCueMoved(withoutRanking, 'ranking', 'share')).toEqual(withoutRanking);
+    // A `before` the table does not hold appends rather than dropping: a moved cue that disappeared
+    // would be measured as an absence rather than as a move.
+    const moved = withCueMoved(withoutRanking, 'trend', 'nowhere' as never);
+    expect(moved[moved.length - 1]?.kind).toBe('trend');
+    expect(moved).toHaveLength(withoutRanking.length);
+  });
+
+  it('refuses a crossing that names a cue the per-cue reading never saw', () => {
+    const report = scoreRule([
+      { prompt: 'the share of orders by status', label: 'Bar Chart' },
+      { prompt: 'revenue over time', label: 'Line Chart' },
+    ]);
+    const stray = { ...report.crossings[0]!, kind: 'matrix' as const };
+    expect(() => assertRuleReport({ ...report, crossings: [stray] })).toThrow(/no per-cue reading/);
   });
 });
