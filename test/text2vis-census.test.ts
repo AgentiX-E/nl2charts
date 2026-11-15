@@ -36,6 +36,7 @@ import {
   parseCensusArgs,
   snippet,
   timeLikeColumns,
+  unreadNumerals,
 } from '../eval/text2vis/census.js';
 import { parseResultSet, profilesOf, scoreProfile, type ProfileInput } from '../eval/text2vis/profile.js';
 import { familiesOfMark } from '../eval/text2vis/rule.js';
@@ -413,6 +414,45 @@ describe('a question, cut to the words that decide', () => {
     const profiles = profilesOf(parseResultSet(regions(5)));
     const choice = recommendChart('Show the numbers.', profiles);
     expect(firstAdmissibleWinner(choice, readCues('Show the numbers.'))).toEqual(choice.recommendations[0]);
+  });
+});
+
+describe('a number the reader declined', () => {
+  it('names a cell made of digits that nothing read, which is the shape behind 389 refusals', () => {
+    // The typographic minus, the space group and the unit suffix: three formats, three repairs, and
+    // a table with no measure in any of them refuses every mark that needs one.
+    expect(unreadNumerals(parseResultSet(table('Year, Anomaly', ['2019, −0.04', '2020, 0.12', '2021, 0.31'])))).toEqual([
+      { column: 'Anomaly', cell: '−0.04', n: 1 },
+    ]);
+    expect(unreadNumerals(parseResultSet(table('Region, Revenue', ['North, 1 234', 'South, 2 345'])))).toEqual([
+      { column: 'Revenue', cell: '1 234', n: 1 },
+    ]);
+  });
+
+  it('leaves a label alone and leaves a number it already read alone', () => {
+    expect(unreadNumerals(parseResultSet(table('Region, Revenue', ['North, 1234', 'South, 2345'])))).toEqual([]);
+    expect(unreadNumerals(parseResultSet(table('Region, Share', ['North, 12%', 'South, 30%'])))).toEqual([]);
+    expect(unreadNumerals(parseResultSet(table('Region, Note', ['North, 2 of 5', 'South, 1 of 4'])))).toEqual([]);
+  });
+
+  it('counts the tables that profiled into no measure, and how many of them were refused', () => {
+    // `Number('−1')` is `NaN`, so the anomaly column types `nominal`, the table has no measure, and
+    // the bar the label asks for cannot be drawn from it.
+    // The only numeric column is the one nothing could read, so the table has no measure at all. A
+    // year column would have given it one — as a measure, which is its own defect.
+    const typographic = table('Region, Anomaly', ['North, −0.04', 'South, 0.12', 'East, 0.31', 'West, 0.48']);
+    const report = censusOf([input('Which region was warmest?', 'Bar Chart', typographic)]);
+    expect(report.measureless).toEqual({ tables: 1, refused: 1 });
+    expect(report.numerals).toEqual([{ column: 'Anomaly', cell: '−0.04', n: 1 }]);
+    const lines = describeCensus(report).join('\n');
+    expect(lines).toContain('tables with no measure at all: 1 rows (1 refused every mark that needs one)');
+    expect(lines).toContain('Anomaly = "−0.04" (1 rows)');
+  });
+
+  it('does not count a table it could read', () => {
+    const report = censusOf([input(TREND, 'Line Chart', QUARTERLY)]);
+    expect(report.measureless).toEqual({ tables: 0, refused: 0 });
+    expect(report.numerals).toEqual([]);
   });
 });
 

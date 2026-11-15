@@ -15,6 +15,14 @@
  * property of the file name rather than a list of directories that drifts — one
  * `docs/*.md` added to `packages/` would break a list and not a suffix.
  *
+ * The chart reading is the third. `eval/text2vis/` is an instrument over a public corpus: its four
+ * files import `@agentix-e/nl2charts-chart` and each other, and nothing in `packages/` or `eval/bird/`
+ * imports them back — they are a leaf. What they move is the chart number, and
+ * `.github/workflows/text2vis-rule.yml` re-takes that number on every push that touches them, for no
+ * model call and no key. Paying for thirteen BIRD arms and three live passes to re-time a change the
+ * cheap job already timed is the same defect as measuring a Markdown paragraph, in the other
+ * direction: a rule that only ever widens is a rule that stops being read.
+ *
  * Tests are the second such class. The number comes from `eval/` and `packages/`, and
  * `test/` is run by the `quality` job, which is never skipped; a push whose only code is a
  * test file therefore cannot move a number, and the red step of a TDD round — the commit
@@ -68,6 +76,17 @@ export function isTest(file) {
 }
 
 /**
+ * A file the chart reading is made of, which no product path imports.
+ *
+ * The claim is checkable and was checked: `grep -rn 'eval/text2vis' packages/ eval/ tools/` finds
+ * comments and no import, so a change here cannot reach a SQL prompt. The directory is named in full
+ * rather than matched as `eval/*`, because `eval/bird/` *is* the harness that spends the calls.
+ */
+export function isChartReading(file) {
+  return /^eval\/text2vis\/[^/]+\.(?:ts|mts|json|csv)$/i.test(file);
+}
+
+/**
  * Whether a change set has to be measured, and why.
  *
  * The reason is returned rather than logged because it is what the workflow prints: a
@@ -85,19 +104,25 @@ export function needsModel(files) {
       reason: `the list holds ${paths.length} files and the commit endpoint stops at ${TRUNCATED_AT}, so the .ts may be in the part that was cut`,
     };
   }
-  const code = paths.filter((path) => !isDocumentation(path) && !isTest(path));
+  const code = paths.filter((path) => !isDocumentation(path) && !isTest(path) && !isChartReading(path));
   if (code.length === 0) {
+    // Three sentences, one per class the filter can have removed, because the sentence is what a
+    // reader sees instead of a measurement and "all files are Markdown" would be a lie about a push
+    // that changed the chart reading.
     const markdown = paths.every((path) => isDocumentation(path));
+    const tested = paths.every((path) => isDocumentation(path) || isTest(path));
     return {
       measure: false,
       reason: markdown
         ? `all ${paths.length} changed file(s) are Markdown, which no prompt reads`
-        : `all ${paths.length} changed file(s) are Markdown or tests, and neither is read by a prompt`,
+        : tested
+          ? `all ${paths.length} changed file(s) are Markdown or tests, and neither is read by a prompt`
+          : `all ${paths.length} changed file(s) are Markdown, tests or the chart reading, and the chart reading is re-taken by \`text2vis-rule\` without a model call`,
     };
   }
   return {
     measure: true,
-    reason: `${code.length} of ${paths.length} changed file(s) are neither Markdown nor tests`,
+    reason: `${code.length} of ${paths.length} changed file(s) are not Markdown, tests or the chart reading`,
     files: code,
   };
 }
