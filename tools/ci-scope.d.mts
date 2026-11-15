@@ -27,6 +27,16 @@ export function isTest(file: string): boolean;
  */
 export function isChartReading(file: string): boolean;
 
+/**
+ * A gate's own configuration: the two files at the repository root that `tools/check-*.mjs` read.
+ *
+ * `budgets.json` is a bundle ceiling and `api-surface.json` is an export snapshot. Both are read by
+ * the `quality` job, which never skips, and neither is opened by a prompt builder — so a round that
+ * moved a budget bought thirteen BIRD arms to re-measure a pipeline no byte of which had changed.
+ * Two names rather than a suffix: `package.json` changes what runs, and has to measure.
+ */
+export function isToolConfig(file: string): boolean;
+
 export interface ScopeResult {
   /** Whether the push has to be measured. */
   readonly measure: boolean;
