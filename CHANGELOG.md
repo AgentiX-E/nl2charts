@@ -7,6 +7,19 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **`bench:bird:rules`: the free-rule space, priced in one reading.** The fourth candidate left a
+  question sharper than the one it answered — 2.02pp of ceiling sits in the intent pool and
+  `shortest` converts 92.92% of it — and the obvious way to answer it was an arm, 1,532 questions
+  times four calls per rule. Every rule is a function of two fields the artifact already writes, so
+  fifteen variants are priced for nothing: the three shipped rules read through `consensus.pick`
+  (which a test holds to `chooseCandidateByRule`) and twelve that no pipeline runs. **None beats the
+  shipped rule.** `chars-no-quoted` ties at 994 on the three-candidate arm, everything else is
+  behind, and `longest` is 5.55pp behind (won 37 / lost 122). The one arm where anything leads is
+  the four-candidate knowledge arm, `identifiers` at 64.56% against 64.16%, p = 0.4514 — inside the
+  noise and inside the 0.0042 Bonferroni bound that twelve variants cost, which the harness prints
+  instead of the raw p because the smallest p in a family of twelve is the one most likely to be
+  noise. The negative result is the finding: the 3.20pp the three-candidate arm loses to its own
+  ceiling is not recoverable from anything the artifact records, so the next lever is generation.
 - **A `.d.mts` is a class of change that cannot move a number.** The push that fixed a missing
   export in `tools/ci-scope.d.mts` bought thirteen BIRD arms over 496 questions (~6,400 completions)
   and three live passes over 210 cases: a declaration is a TypeScript erase product, so nothing it
@@ -406,6 +419,14 @@ cannot be argued with.
   package refuses and why; no chart-quality score moved, and none was measured.
 
 ### Changed
+- **`consensus.eligibleIndices` is exported, because it is the predicate every rule shares.** The
+  rule harness refuses to restate which candidates a rule may choose among: "the ones that returned
+  something" decides every score in both files, and a second copy of it is a second answer to the
+  question the scores are about. The three shipped rules were already read through `pick`; their
+  eligibility is now read from the same place.
+- **`VariantScore` carries the reason its variant is on the list.** The report looked it up in
+  `VARIANTS` by name, which needed a fallback for a name that could not be missing — a branch no
+  input could reach. Carrying the sentence with the score deletes the branch instead of testing it.
 - **The fourth candidate is retired: the ceiling rose and the free rule could not convert it.** One
   dispatch, three arms, the same 1,532 dev questions (`43725927611`, 16,852 completions): the parent
   `select-mixed-rule` reads 994 (64.88%) with a 68.08% ceiling, `-rows` 983 (64.16%) at 69.32%, and
