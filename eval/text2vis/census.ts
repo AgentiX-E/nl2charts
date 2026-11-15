@@ -44,7 +44,7 @@ import type {
 import { CHART_CUES, RECOMMENDABLE_MARKS, isCalendarRun, readCues, recommendChart } from '@agentix-e/nl2charts-chart';
 import { applyExitCode, isEntry, loadText2Vis, type LoadOptions } from './dataset.js';
 import { CUE_VARIANTS, familiesOfMark, familyOfLabel, type ChartFamily, type TableVariant } from './rule.js';
-import { numericCell, parseResultSet, profilesOf, typedRows, type ProfileInput, type ResultSet } from './profile.js';
+import { isMissingCell, numericCell, parseResultSet, profilesOf, typedRows, type ProfileInput, type ResultSet } from './profile.js';
 
 /**
  * The marks that could have answered a family, derived from `familiesOfMark` rather than restated.
@@ -406,6 +406,21 @@ export interface CensusReport {
   readonly calendar: CalendarCensus;
   /** The tables no mark can group by, published as a population rather than folded into the share. */
   readonly ceiling: CeilingCensus;
+  /**
+   * The labels whose picture this contract cannot lead with, and the denominator they change.
+   *
+   * Three of the corpus's sixteen labels name a mark no admission rule can produce: `area` is a
+   * filled line, `histogram` is a binned bar, `violin` is a boxplot with a density. Each is covered
+   * as a *second* family, which is why none of them can ever be a top-1 hit — the hit test reads the
+   * first family a mark leads with. So 237 rows are outside what the product can answer at all, and
+   * the share every other number is quoted against includes them. `renderable` and
+   * `hitShareRenderable` are the same rows read against the population the contract can draw.
+   */
+  readonly unreachable: UnreachableCensus;
+  /** Rows whose label is one the contract can lead with: `scored − unreachable.rows`. */
+  readonly renderable: number;
+  /** Hits as a share of `renderable`, which is the number a ranking can actually be judged on. */
+  readonly hitShareRenderable: number;
   /** Columns that format as time and were not typed temporal, most rows first. */
   readonly timeLike: readonly TimeLike[];
   /** Rows whose table carries at least one such column. */
@@ -414,6 +429,8 @@ export interface CensusReport {
   readonly coerced: readonly CoercedColumn[];
   /** Rows whose table carries at least one such column. */
   readonly coercedRows: number;
+  /** Rows whose table carried a printed absence where a measure's value would be. */
+  readonly missingRows: number;
   /** Whether the table profiled into any measure at all, which every measure-consuming mark needs. */
   readonly measureless: { readonly tables: number; readonly refused: number };
   /** Cells made of digits that nothing read, on the tables that ended up with no measure. */
@@ -483,6 +500,18 @@ export interface CalendarCensus {
  * consecutive years the profiler was typing as a measure: the "no axis at all" bucket was mostly a
  * type-inference defect wearing its shape. What is left after the rule is the ceiling proper.
  */
+/** One unreachable family, as the census counts it. */
+interface UnreachableTally {
+  n: number;
+  outcome: Record<CensusOutcome, number>;
+  coveredBy?: RecommendableMark;
+}
+
+/** Six zeroes, one per outcome: a fresh object, because the tally mutates what it is given. */
+function emptyOutcome(): Record<CensusOutcome, number> {
+  return { hit: 0, substituted: 0, refused: 0, outranked: 0, uncovered: 0, noProfile: 0 };
+}
+
 export interface CeilingCensus {
   readonly rows: number;
   /** Of those, the rows whose covering mark was refused: the prize an index axis could compete for. */
@@ -531,6 +560,51 @@ export interface ProductVariant {
    * product that the reading does not support.
    */
   readonly moved: number;
+  /** Rows the leading mark covers the label's family with at all, first claim or second. */
+  readonly shortlist: number;
+  /** Of those, the rows covered as the *second* claim: the family the product shows instead. */
+  readonly substituted: number;
+}
+
+/**
+ * The labels whose picture no admission rule can produce, and what became of their rows.
+ *
+ * The list is *derived*, not declared: a family is unreachable when no recommendable mark leads with
+ * it under any cue, which is the same predicate the hit test applies. Declaring it would be a second
+ * opinion about which marks can lead, and the two would drift the first time a mark is added.
+ */
+export interface UnreachableCensus {
+  readonly rows: number;
+  readonly byFamily: readonly {
+    readonly family: ChartFamily;
+    readonly n: number;
+    readonly outcome: Readonly<Record<CensusOutcome, number>>;
+    /** The mark that stands in for the family, when one is admitted on those rows at all. */
+    readonly coveredBy?: RecommendableMark;
+  }[];
+}
+
+/**
+ * The families no mark can lead with, read off the product's own `familiesOfMark`.
+ *
+ * `familiesOfMark` answers "what may this mark stand for", in order, and the hit test reads the
+ * *first* entry. So the reachable set is the first entries over every mark and every cue, and its
+ * complement is the set of labels this contract cannot answer whatever the question says. On
+ * Text2Vis that is `area`, `histogram` and `violin` — three of sixteen labels, 237 of 1,470 rows.
+ *
+ * This is a reading and not a defect list. A product that draws a line where the corpus drew an area
+ * has answered a nearby question, and calling that a top-1 hit would make the score say the product
+ * draws an area chart. Publishing it separately is what lets the ranking be judged on the rows the
+ * contract can draw while the corpus's own denominator stays visible beside it.
+ */
+export function unreachableFamilies(): readonly ChartFamily[] {
+  const reachable = new Set<ChartFamily>();
+  for (const mark of RECOMMENDABLE_MARKS) {
+    reachable.add(familiesOfMark(mark)[0] as ChartFamily);
+    for (const cue of CHART_CUES) reachable.add(familiesOfMark(mark, cue.kind)[0] as ChartFamily);
+  }
+  const all: readonly ChartFamily[] = [...RECOMMENDABLE_MARKS, 'area', 'histogram', 'violin'];
+  return all.filter((family) => !reachable.has(family));
 }
 
 /** A year, a quarter, a month name, or a year-and-month — the shapes a result set writes time in. */
@@ -781,6 +855,8 @@ interface ProductTally {
   byFamily: Map<ChartFamily, { n: number; hit: number }>;
   split: { a: number; b: number };
   moved: number;
+  shortlist: number;
+  substituted: number;
 }
 
 /**
@@ -833,14 +909,21 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
   const shapes = new Map<string, ShapeTally>();
   const coerced = new Map<string, CoercedTally>();
   const numerals = new Map<string, NumeralTally>();
+  const unreachable = new Map<ChartFamily, UnreachableTally>();
+  const outOfReach = unreachableFamilies();
   // Seeded from the variant list rather than filled on demand: a table that hit nothing is a reading
   // of zero, and a table missing from the report because nobody added a key would be a reading of
   // nothing — the two are indistinguishable to a reader, and only one of them is true.
   const product = new Map<string, ProductTally>(
-    PRODUCT_CANDIDATES.map((candidate) => [candidate.name, { hit: 0, byFamily: new Map(), split: { a: 0, b: 0 }, moved: 0 }]),
+    PRODUCT_CANDIDATES.map((candidate) => [
+      candidate.name,
+      { hit: 0, byFamily: new Map(), split: { a: 0, b: 0 }, moved: 0, shortlist: 0, substituted: 0 },
+    ]),
   );
   let scored = 0;
   let unmapped = 0;
+  let unreachableRows = 0;
+  let missingRows = 0;
   let timeLikeRows = 0;
   let coercedRows = 0;
   let measurelessTables = 0;
@@ -911,6 +994,10 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
         control = top?.mark;
         controlDims = choice.shape.dims;
       } else if (top?.mark !== control) tally.moved += 1;
+      if (lead !== undefined && lead.includes(classified.expected)) {
+        tally.shortlist += 1;
+        if (lead[0] !== classified.expected) tally.substituted += 1;
+      }
       if (lead !== undefined && lead[0] === classified.expected) {
         tally.hit += 1;
         cell.hit += 1;
@@ -984,6 +1071,17 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
       }
       ceiling.byFamily.set(classified.expected, cell);
     }
+    // The labels whose picture the contract cannot lead with. Counted for every row rather than only
+    // for the misses: the point of the population is the denominator, and a denominator that dropped
+    // out when the ranking happened to be right would be a share of whatever was left.
+    if (outOfReach.includes(classified.expected)) {
+      unreachableRows += 1;
+      const cell = unreachable.get(classified.expected) ?? { n: 0, outcome: emptyOutcome(), coveredBy: undefined };
+      cell.n += 1;
+      cell.outcome[classified.outcome] += 1;
+      if (cell.coveredBy === undefined && classified.outcome === 'substituted') cell.coveredBy = classified.answered;
+      unreachable.set(classified.expected, cell);
+    }
     const mistyped = profiles.length === 0 ? [] : timeLikeColumns(set, profiles);
     if (mistyped.length > 0) timeLikeRows += 1;
     for (const column of mistyped) {
@@ -991,6 +1089,7 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
       entry.n += 1;
       timeLike.set(column.column, entry);
     }
+    if (set.rows.some((cells) => cells.some((cell) => isMissingCell(cell)))) missingRows += 1;
     const rescued = coercedColumns(set);
     if (rescued.length > 0) coercedRows += 1;
     for (const column of rescued) {
@@ -1156,12 +1255,26 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
         .sort((left, right) => right.n - left.n || left.mark.localeCompare(right.mark)),
       samples: ceiling.samples,
     },
+    unreachable: {
+      rows: unreachableRows,
+      byFamily: [...unreachable.entries()]
+        .map(([family, cell]) => ({
+          family,
+          n: cell.n,
+          outcome: cell.outcome,
+          ...(cell.coveredBy === undefined ? {} : { coveredBy: cell.coveredBy }),
+        }))
+        .sort((left, right) => right.n - left.n || left.family.localeCompare(right.family)),
+    },
+    renderable: scored - unreachableRows,
+    hitShareRenderable: scored === unreachableRows ? 0 : outcomes.hit / (scored - unreachableRows),
     timeLike: [...timeLike.values()].sort(
       (left, right) => right.n - left.n || left.column.localeCompare(right.column),
     ),
     timeLikeRows,
     coerced: [...coerced.values()].sort((left, right) => right.n - left.n || left.column.localeCompare(right.column)),
     coercedRows,
+    missingRows,
     measureless: { tables: measurelessTables, refused: measurelessRefused },
     numerals: [...numerals.values()].sort(
       (left, right) => right.n - left.n || left.column.localeCompare(right.column) || left.cell.localeCompare(right.cell),
@@ -1175,6 +1288,8 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
         hitShare: scored === 0 ? 0 : tally.hit / scored,
         split: { a: tally.split.a, b: tally.split.b },
         moved: tally.moved,
+        shortlist: tally.shortlist,
+        substituted: tally.substituted,
         byFamily: [...tally.byFamily.entries()]
           .map(([family, cell]) => ({ family, n: cell.n, hit: cell.hit }))
           .sort((left, right) => right.n - left.n || left.family.localeCompare(right.family)),
@@ -1281,6 +1396,32 @@ export function assertCensusReport(report: CensusReport): void {
       `census report: the ceiling's marks account for ${String(marksInCeiling)} refusals and the ceiling reports ${String(ceiling.refused)}`,
     );
   }
+  // The unreachable population and the renderable denominator are two readings of one partition, so
+  // they add to the scored rows and each family's rows add to the population. A report where they do
+  // not is quoting the ranking against a denominator it invented.
+  const unreachable = report.unreachable;
+  const inUnreachable = unreachable.byFamily.reduce((total, entry) => total + entry.n, 0);
+  if (inUnreachable !== unreachable.rows) {
+    throw new Error(
+      `census report: the unreachable families account for ${String(inUnreachable)} rows and the population is ${String(unreachable.rows)}`,
+    );
+  }
+  if (report.renderable + unreachable.rows !== report.scored) {
+    throw new Error(
+      `census report: ${String(report.renderable)} renderable rows and the unreachable population of ${String(unreachable.rows)} are not the ${String(report.scored)} scored rows`,
+    );
+  }
+  // A family cannot claim more of an outcome than the corpus recorded for rows with that label: the
+  // outcome counts are the same rows, read a second time.
+  for (const entry of unreachable.byFamily) {
+    const claimed = entry.outcome.hit;
+    const actual = report.byFamily.find((cell) => cell.family === entry.family)?.hit ?? 0;
+    if (claimed !== actual) {
+      throw new Error(
+        `census report: the unreachable family ${entry.family} claims ${String(claimed)} hits and the corpus has ${String(actual)}`,
+      );
+    }
+  }
   // The product sweep's first entry is the table that ships, scored through a second code path: the
   // census classifies a row once inside `classify` and the sweep asks the same question again from
   // the row loop. Two computations of one number, so a disagreement is a defect in whichever one
@@ -1305,6 +1446,19 @@ export function assertCensusReport(report: CensusReport): void {
     if (population !== report.scored) {
       throw new Error(
         `census report: variant ${variant.variant} was priced on ${String(population)} rows against ${String(report.scored)} scored, so the comparison is between two corpora`,
+      );
+    }
+    // The shortlist is the hits plus the rows covered as a second claim, so it is a partition of the
+    // rows the table answers with the label's family at all. A candidate whose shortlist is not the
+    // sum of its own two counts is publishing a number about a different population.
+    if (variant.shortlist !== variant.hit + variant.substituted) {
+      throw new Error(
+        `census report: variant ${variant.variant} reads a shortlist of ${String(variant.shortlist)} against ${String(variant.hit)} hits and ${String(variant.substituted)} substituted, which is not the sum of the two`,
+      );
+    }
+    if (variant.shortlist > report.scored) {
+      throw new Error(
+        `census report: variant ${variant.variant} shortlists ${String(variant.shortlist)} rows of ${String(report.scored)}`,
       );
     }
     // The two halves are a partition of the hits, so they add to the count they partition. A split
@@ -1334,7 +1488,21 @@ export function describeCensus(report: CensusReport): readonly string[] {
     `  hit + substituted is the shortlist the profile file publishes: ${String(outcome.hit + outcome.substituted)} of ${String(report.scored)}`,
     `  time-formatted columns the profiler did not call temporal: ${String(report.timeLikeRows)} rows`,
     `  columns that are numbers only after their formatting is read: ${String(report.coercedRows)} rows`,
+    `  cells that spell a missing value: ${String(report.missingRows)} rows`,
   ];
+  if (report.unreachable.rows > 0) {
+    const renderable = report.renderable;
+    lines.push(
+      `  labels no mark can lead with (area, histogram, violin): ${String(report.unreachable.rows)} rows, so ${String(report.outcomes.hit)} hit of ${String(renderable)} renderable rows (${(report.hitShareRenderable * 100).toFixed(2)}%), against ${String(report.outcomes.hit)} of ${String(report.scored)} (${(report.outcomes.hit / Math.max(1, report.scored) * 100).toFixed(2)}%)`,
+    );
+    for (const entry of report.unreachable.byFamily) {
+      const took = Object.entries(entry.outcome)
+        .filter(([, count]) => count > 0)
+        .map(([name, count]) => `${name} ${String(count)}`)
+        .join(', ');
+      lines.push(`    ${entry.family}: ${String(entry.n)} rows (${took})${entry.coveredBy === undefined ? '' : ` — drawn as a ${entry.coveredBy}`}`);
+    }
+  }
   for (const column of report.coerced.slice(0, 4)) {
     lines.push(`    ${column.column} (${String(column.n)} rows, first value ${column.sample})`);
   }
@@ -1428,8 +1596,14 @@ export function describeProduct(report: CensusReport): readonly string[] {
             .filter((cell) => cell.delta !== 0)
             .sort((left, right) => right.delta - left.delta)
             .map((cell) => `${cell.family} ${cell.delta > 0 ? '+' : ''}${String(cell.delta)}`);
+    // A candidate can move the shortlist without moving a hit, and printing only the hit reads as
+    // "this table does nothing": the histogram cue answers a histogram question with a bar, which
+    // covers the family as its second claim, so the row leaves `uncovered` for `substituted` and a
+    // user sees a picture of the distribution instead of a boxplot of a different question.
+    const shelf = variant === control ? 0 : variant.shortlist - control.shortlist;
+    const shelfNote = shelf === 0 ? '' : `  |  shortlist ${shelf > 0 ? '+' : ''}${String(shelf)}`;
     lines.push(
-      `    ${variant.variant.padEnd(24)} hit ${String(variant.hit).padStart(4)} (${(variant.hitShare * 100).toFixed(2)}%)${moved.length === 0 ? '' : `  |  ${moved.join(', ')}`}`,
+      `    ${variant.variant.padEnd(24)} hit ${String(variant.hit).padStart(4)} (${(variant.hitShare * 100).toFixed(2)}%)${moved.length === 0 ? '' : `  |  ${moved.join(', ')}`}${shelfNote}`,
     );
   }
   return lines;

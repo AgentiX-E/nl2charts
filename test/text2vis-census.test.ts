@@ -245,6 +245,55 @@ describe('a column that is a number only after its formatting is read', () => {
   });
 });
 
+describe('a cell that spells a missing value', () => {
+  it('is missing, not a minus sign that turns its column into text', () => {
+    // `-` is how a result set prints NULL, and reading it as a *string* made the whole column
+    // nominal: a revenue column of fifteen numbers and one dash had no measure, and every mark that
+    // needs one was refused. The census priced the defect at 192 of the 277 rows whose table offered
+    // no measure at all — the largest single reason a question was answered with nothing.
+    const set = parseResultSet(table('Year, Revenue', ['2019, 10', '2020, -', '2021, 14', '2022, 26', '2023, 31']));
+    const revenue = profilesOf(set).find((profile) => profile.name === 'Revenue');
+    expect(revenue?.type).toBe('quantitative');
+    expect(revenue?.nulls).toBe(1);
+  });
+
+  it('accepts the spellings a result set actually prints, and only those', () => {
+    // Every one of these is a NULL that reached the corpus as text. A dash, an em dash, the two
+    // spellings of "not available", the SQL word for the absence, the word "none", and the lone dot
+    // some exports write. `No data` is deliberately absent: it is two words, and a rule that read
+    // phrases would start reading `None of the above` as a missing region.
+    for (const spelling of ['-', '--', '—', '–', 'n/a', 'N/A', 'null', 'NULL', 'none', 'None', '.']) {
+      const set = parseResultSet(table('Year, Revenue', ['2019, 10', `2020, ${spelling}`, '2021, 14', '2022, 26', '2023, 31']));
+      expect(profilesOf(set).find((profile) => profile.name === 'Revenue')?.type, spelling).toBe('quantitative');
+    }
+  });
+
+  it('does not read a missing cell as zero, which would be a value of the measure', () => {
+    // A zero would move the minimum to a number no row carries, and the range-based rules read the
+    // minimum. `nulls` is the count that says the cell was absent rather than empty of meaning.
+    const set = parseResultSet(table('Year, Revenue', ['2019, 40', '2020, -', '2021, 50', '2022, 60', '2023, 70']));
+    const revenue = profilesOf(set).find((profile) => profile.name === 'Revenue');
+    expect(revenue?.min).toBe(40);
+    expect(revenue?.nulls).toBe(1);
+  });
+
+  it('leaves a date, a name and a range alone', () => {
+    // `2019-01-01` contains a dash and is not a missing value; so is a region called `North`, and so
+    // is the string `5-10` a band rather than a NULL.
+    expect(profilesOf(parseResultSet(table('Period, Revenue', ['2019-01-01, 10', '2019-02-01, 14', '2019-03-01, 18'])))?.find((p) => p.name === 'Period')?.type).toBe('temporal');
+    expect(profilesOf(parseResultSet(table('Region, Revenue', ['North, 10', 'South, 14', 'East, 18'])))?.find((p) => p.name === 'Region')?.type).toBe('nominal');
+    expect(profilesOf(parseResultSet(table('Band, Count', ['5-10, 3', '11-20, 5', '21-30, 7'])))?.find((p) => p.name === 'Band')?.type).toBe('nominal');
+  });
+
+  it('counts the rows it rescued, so the repair has a size in the report', () => {
+    const report = censusOf([
+      input('Which region leads?', 'Bar Chart', table('Region, Revenue', ['North, 40', 'South, -', 'East, 31', 'West, 63'])),
+    ]);
+    expect(report.missingRows).toBe(1);
+    expect(report.outcomes.hit).toBe(1);
+  });
+});
+
 describe('what became of one question', () => {
   it('reads a hit when the mark the label names is the one the profile admits', () => {
     expect(classify(input(TREND, 'Line Chart', QUARTERLY))).toEqual({ expected: 'line', outcome: 'hit' });
@@ -928,6 +977,102 @@ describe('the tables no mark can group by', () => {
   });
 });
 
+describe('the families no mark can lead with', () => {
+  // Three of the corpus's sixteen labels name a picture this contract does not have: an area is a
+  // filled line, a histogram is a binned bar, and a violin is a boxplot with a density. Each is
+  // covered as a *second* family, which is exactly why none of them can ever be a top-1 hit — the
+  // hit test reads the first family a mark leads with, and `line` leads with `line`.
+  //
+  // So the reading is not "the ranking lost 237 rows". It is "237 rows are outside what this
+  // contract can answer at all, and the denominator every other number is quoted against includes
+  // them". Printing the two together is what lets a share of 27.96% be read beside a share of the
+  // rows the product can actually draw.
+
+  it('derives the unreachable families from the product, not from a list', () => {
+    const report = censusOf([
+      input(TREND, 'Area Chart', QUARTERLY),
+      input('Draw a histogram of revenue.', 'Histogram', table('Revenue', ['10', '14', '18', '26', '31'])),
+      input(TREND, 'Line Chart', QUARTERLY),
+    ]);
+    expect(report.unreachable.byFamily.map((entry) => entry.family)).toEqual(['area', 'histogram']);
+    expect(report.unreachable.rows).toBe(2);
+    // A healthy report has to pass the same check that refuses a broken one, or the check is only
+    // ever exercised by the fixtures that break it.
+    expect(() => assertCensusReport(report)).not.toThrow();
+    const rows = report.unreachable.byFamily.map((entry) => entry.outcome.hit);
+    expect(rows).toEqual([0, 0]);
+  });
+
+  it('says which outcome those rows took, and which mark stands in for them', () => {
+    const report = censusOf([input(TREND, 'Area Chart', QUARTERLY)]);
+    const area = report.unreachable.byFamily[0];
+    expect(area?.family).toBe('area');
+    expect(area?.n).toBe(1);
+    // A line is the mark that covers an area, as its second claim: the row is a shortlist hit and not
+    // a top-1 hit, and it is neither refused nor outranked.
+    expect(area?.outcome.substituted).toBe(1);
+    expect(area?.coveredBy).toBe('line');
+  });
+
+  it('counts a histogram row as uncovered until a cue names the intent', () => {
+    // Without a cue that says `histogram`, the distribution cue answers a boxplot, and a boxplot
+    // covers neither family. This is the row `histogram` in the cue sweep is priced against.
+    const report = censusOf([
+      input('Draw a histogram of revenue.', 'Histogram', table('Revenue', ['10', '14', '18', '26', '31'])),
+    ]);
+    const histogram = report.unreachable.byFamily[0];
+    expect(histogram?.family).toBe('histogram');
+    expect(histogram?.outcome.uncovered).toBe(1);
+    expect(histogram?.coveredBy).toBeUndefined();
+  });
+
+  it('publishes the denominator the reachable rows are a share of', () => {
+    const report = censusOf([
+      input('Which region leads?', 'Bar Chart', table('Region, Revenue', ['North, 40', 'South, 55', 'East, 31'])),
+      input(TREND, 'Area Chart', QUARTERLY),
+      input('Draw a histogram of revenue.', 'Histogram', table('Revenue', ['10', '14', '18', '26', '31'])),
+    ]);
+    expect(report.outcomes.hit).toBe(1);
+    expect(report.unreachable.rows).toBe(2);
+    expect(report.renderable).toBe(1);
+    expect(report.hitShareRenderable).toBe(1);
+    expect(describeCensus(report).join('\n')).toContain('1 hit of 1 renderable rows (100.00%), against 1 of 3 (33.33%)');
+  });
+
+  it('reads zero when every label is one the contract can lead with', () => {
+    const report = censusOf([input('Which region leads?', 'Bar Chart', table('Region, Revenue', ['North, 40', 'South, 55']))]);
+    expect(report.unreachable.rows).toBe(0);
+    expect(report.renderable).toBe(report.outcomes.hit + report.outcomes.substituted + report.outcomes.refused + report.outcomes.outranked + report.outcomes.uncovered);
+    expect(describeCensus(report).join('\n')).not.toContain('renderable');
+  });
+
+  it('refuses a report whose two denominators are about different populations', () => {
+    const report = censusOf([
+      input('Which region leads?', 'Bar Chart', table('Region, Revenue', ['North, 40', 'South, 55', 'East, 31'])),
+      input(TREND, 'Area Chart', QUARTERLY),
+    ]);
+    expect(() => assertCensusReport({ ...report, renderable: report.renderable + 1 })).toThrow(
+      /renderable rows and the unreachable population/,
+    );
+    expect(() =>
+      assertCensusReport({
+        ...report,
+        unreachable: { ...report.unreachable, byFamily: report.unreachable.byFamily.map((entry) => ({ ...entry, n: 0 })) },
+      }),
+    ).toThrow(/unreachable families account for 0 rows/);
+    // A family cannot claim more rows of an outcome than the corpus recorded for it.
+    expect(() =>
+      assertCensusReport({
+        ...report,
+        unreachable: {
+          rows: report.unreachable.rows,
+          byFamily: report.unreachable.byFamily.map((entry) => ({ ...entry, outcome: { ...entry.outcome, hit: 9 } })),
+        },
+      }),
+    ).toThrow(/claims 9 hits/);
+  });
+});
+
 describe('the command', () => {
   it('takes --json and --artifact, and refuses anything else', () => {
     expect(parseCensusArgs([])).toEqual({ json: false });
@@ -1072,6 +1217,41 @@ describe('every cue table, priced on the product', () => {
     expect(() =>
       assertCensusReport({ ...report, product: [{ ...shipped, byFamily: [] }, ...report.product.slice(1)] }),
     ).toThrow(/two corpora/);
+  });
+
+  it('counts the shortlist a candidate puts in front of a user, which a hit count cannot see', () => {
+    // A candidate can move a row from `uncovered` to `substituted` without moving a single hit: the
+    // histogram cue answers a histogram question with a bar, and a bar covers the family as its
+    // *second* claim. The user is shown a picture of the distribution instead of a boxplot of a
+    // different question, and `hit` does not move by one — which is why the sweep publishes both.
+    const report = censusOf([input('Draw a histogram of revenue.', 'Histogram', REGIONS)]);
+    const shipped = report.product[0]!;
+    expect(shipped).toMatchObject({ hit: 0, substituted: 1, shortlist: 1 });
+    // The ablation of the cue that produces it: the same row, one hit either way, and the shortlist
+    // falls by exactly the row the cue named. This is the reading that shipped the cue — for two
+    // rounds it was priced as "±0, therefore nothing", and the number that decided it was this one.
+    const ablated = report.product.find((variant) => variant.variant === 'no-histogram');
+    expect(ablated).toMatchObject({ hit: 0, substituted: 0, shortlist: 0 });
+    // The two counts are the same population read twice, so a report where they disagree is a
+    // report whose shortlist is about a different corpus.
+    expect(() =>
+      assertCensusReport({
+        ...report,
+        product: [{ ...shipped, shortlist: shipped.shortlist + 1 }, ...report.product.slice(1)],
+      }),
+    ).toThrow(/shortlist/);
+    // And a shortlist cannot be larger than the population it is a share of, whatever its own two
+    // counts are: an answer is one row, so a table cannot put more rows in front of a user than it
+    // was shown.
+    expect(() =>
+      assertCensusReport({
+        ...report,
+        product: [
+          { ...shipped, shortlist: report.scored + 1, substituted: report.scored + 1 - shipped.hit },
+          ...report.product.slice(1),
+        ],
+      }),
+    ).toThrow(/shortlists/);
   });
 
   it('prints one line per table with its delta against the control, and nothing when there is none', () => {

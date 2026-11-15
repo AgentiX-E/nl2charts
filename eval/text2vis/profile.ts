@@ -74,6 +74,31 @@ const CURRENCY = /^[$€£¥₹]\s?/;
 const GROUPED = /^\d{1,3}(?:,\d{3})+(?:\.\d+)?$/;
 
 /**
+ * A cell a result set prints for a value that is not there.
+ *
+ * `-` is how a driver renders NULL and how this corpus carries one, and reading it as the *string*
+ * `'-'` made the whole column text: a revenue column of fifteen numbers and one dash had no
+ * measure, and every mark that needs one was refused. That is 192 of the 277 corpus rows whose table
+ * offered no measure at all — the largest single reason a question was answered with nothing, and it
+ * was not a fact about the data.
+ *
+ * The spellings are the ones a result set actually prints, and the list stops where reading would
+ * start guessing: `No data` is two words, and a rule that read phrases would read `None of the above`
+ * as a missing region. `5-10` is a band and not a NULL, which is why the match is on the whole cell.
+ */
+const MISSING = /^(?:-+|—|–|n\/?a|null|none|\.)$/i;
+
+/**
+ * Whether a cell is a printed absence rather than a value.
+ *
+ * Exported because the census counts the rows this reads, so a reader can see how many answers the
+ * repair is responsible for instead of taking the column types on trust.
+ */
+export function isMissingCell(cell: string): boolean {
+  return MISSING.test(cell.trim());
+}
+
+/**
  * The number a cell holds, including the formatting a result set is displayed with.
  *
  * `Number('1,234')` is `NaN`, and that one fact refused 389 of the 890 refusals the census counted on
@@ -117,7 +142,7 @@ export function typedRows(set: ResultSet): Record<string, unknown>[] {
     const row: Record<string, unknown> = {};
     for (const [index, name] of set.columns.entries()) {
       const cell = (cells[index] as string).trim();
-      if (cell.length === 0) {
+      if (cell.length === 0 || isMissingCell(cell)) {
         row[name] = null;
         continue;
       }
