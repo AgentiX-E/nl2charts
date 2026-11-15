@@ -17,7 +17,11 @@ on:
     paths:
       # The table itself, the scorer and the corpus loader: a measurement is worth re-taking when
       # what it measures changes, and not otherwise.
-      - 'packages/chart/src/recommend.ts'
+      # The whole chart package rather than the one file: `ci-scope.mjs` keeps `packages/chart/**` out
+      # of the BIRD chain on the strength of this trigger, and a list that names one file would let a
+      # second file in the package change unmeasured — which is the failure mode the pairing exists
+      # to prevent, arriving from the cheap side.
+      - 'packages/chart/**'
       - 'eval/text2vis/**'
       - 'test/text2vis-rule.test.ts'
       - '.github/workflows/text2vis-rule.yml'

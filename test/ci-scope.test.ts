@@ -120,10 +120,35 @@ describe('a change set that only edits the chart reading', () => {
     expect(needsModel(['eval/bird/run.ts']).measure).toBe(true);
   });
 
-  it('still measures a push that touches the reading and the product in one commit', () => {
-    const result = needsModel(['eval/text2vis/census.ts', 'packages/chart/src/recommend.ts']);
+  it('exempts the chart package on the same terms, because nothing that spends a call imports it', () => {
+    // The package is product code, which is why it was outside this rule for a round -- but the
+    // products that spend model calls are the SQL ones, and the chart package is a leaf under them:
+    // `grep -rn 'nl2charts-chart' packages/ eval/` finds one direction only, from `eval/text2vis/`.
+    // A cue-table round therefore bought thirteen BIRD arms to re-measure a pipeline no byte of
+    // which had changed.
+    const result = needsModel(['packages/chart/src/recommend.ts', 'packages/chart/package.json']);
+    expect(result.measure).toBe(false);
+    expect(result.reason).toContain('text2vis-rule');
+    // The boundary is the package, not its neighbours: the SQL packages still measure.
+    expect(isChartReading('packages/chart/src/lint.ts')).toBe(true);
+    expect(isChartReading('packages/chart/dist/index.js')).toBe(false);
+    expect(isChartReading('packages/ai/src/prompt.ts')).toBe(false);
+    expect(isChartReading('packages/chart-extra/src/x.ts')).toBe(false);
+  });
+
+  it('keeps a file out of the expensive chain only where the cheap job already runs it', () => {
+    // The exemption and the trigger are two lists, and a path in the first but not the second is a
+    // file nobody measures. Read from the workflow rather than restated here, so the check fails
+    // when either list moves alone.
+    const workflow = readFileSync(resolve('.github/workflows/text2vis-rule.yml'), 'utf8');
+    expect(workflow).toContain("'packages/chart/**'");
+    expect(workflow).toContain("'eval/text2vis/**'");
+  });
+
+  it('still measures a push that touches the reading and the SQL product in one commit', () => {
+    const result = needsModel(['eval/text2vis/census.ts', 'packages/ai/src/prompt.ts']);
     expect(result.measure).toBe(true);
-    expect(result.files).toEqual(['packages/chart/src/recommend.ts']);
+    expect(result.files).toEqual(['packages/ai/src/prompt.ts']);
   });
 
   it('says which class it exempted, because a skip that misnames itself is a skip nobody audits', () => {
