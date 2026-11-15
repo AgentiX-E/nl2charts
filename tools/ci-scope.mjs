@@ -81,9 +81,22 @@ export function isTest(file) {
  * The claim is checkable and was checked: `grep -rn 'eval/text2vis' packages/ eval/ tools/` finds
  * comments and no import, so a change here cannot reach a SQL prompt. The directory is named in full
  * rather than matched as `eval/*`, because `eval/bird/` *is* the harness that spends the calls.
+ *
+ * `packages/chart/` is the same class from the other side, and it took a round to notice. The chart
+ * package is *product* code, which is why it was left out of this rule — but the products that spend
+ * model calls are the SQL ones, and neither `packages/` nor `eval/bird/` imports it: the chart package
+ * depends on `spec` and nothing depends on it except `eval/text2vis/`. A round that changed the cue
+ * table in `packages/chart/src/recommend.ts` therefore bought thirteen BIRD arms over 496 questions
+ * and three live passes over 210 cases to re-measure a SQL pipeline that had not changed a byte — the
+ * same defect as measuring a Markdown paragraph, one directory over.
+ *
+ * What makes the exemption safe is the pairing rather than the claim: `text2vis-rule.yml` triggers on
+ * `packages/chart/**` and re-takes the chart number for no model call, so the paths this rule drops
+ * are exactly the paths that job picks up. A file in the package that the cheap job does not run is a
+ * file nobody measures, which is why the two lists are edited together.
  */
 export function isChartReading(file) {
-  return /^eval\/text2vis\/[^/]+\.(?:ts|mts|json|csv)$/i.test(file);
+  return /^eval\/text2vis\/[^/]+\.(?:ts|mts|json|csv)$/i.test(file) || /^packages\/chart\/(?:src\/[^/]+|package\.json|tsup\.config\.ts)$/i.test(file);
 }
 
 /**
