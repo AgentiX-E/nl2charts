@@ -930,12 +930,14 @@ describe('the admission cap, priced beside the cue tables', () => {
 
   it('prices the knobs after every cue table, so the cue axis is read first', () => {
     const names = censusOf([input(PART, 'Pie Chart', NINE)]).product.map((variant) => variant.variant);
-    const firstKnob = names.indexOf('slices-12');
+    const firstKnob = names.indexOf('slices-8');
     expect(firstKnob).toBeGreaterThan(0);
-    expect(names.slice(firstKnob)).toEqual(['slices-12', 'slices-any']);
+    // The frontier is a curve, not a single candidate: the smallest cap that reaches the gain is a
+    // better product than the largest one that also reaches it, and which is which is a reading.
+    expect(names.slice(firstKnob)).toEqual(['slices-8', 'slices-9', 'slices-10', 'slices-12', 'slices-any']);
     // Each entry says what it changed, because a name like `slices-12` is a label and the note is the
     // claim a reader checks.
-    expect(censusOf([input(PART, 'Pie Chart', NINE)]).product[firstKnob]?.note).toContain('twelve');
+    expect(censusOf([input(PART, 'Pie Chart', NINE)]).product[names.indexOf('slices-9')]?.note).toContain('nine');
   });
 
   it('splits every table across two halves that sum to the whole', () => {

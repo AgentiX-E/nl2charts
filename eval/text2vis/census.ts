@@ -717,8 +717,26 @@ export interface ProductCandidate extends TableVariant {
 export const PRODUCT_CANDIDATES: readonly ProductCandidate[] = [
   ...CUE_VARIANTS.map((variant) => ({ name: variant.name, note: variant.note, cues: variant.cues })),
   {
+    name: 'slices-8',
+    note: 'one slice more than the shipped cap admits: the first step of the frontier',
+    cues: CHART_CUES,
+    maxSlices: 8,
+  },
+  {
+    name: 'slices-9',
+    note: 'nine slices, which is how many the corpus draws for a part of a whole',
+    cues: CHART_CUES,
+    maxSlices: 9,
+  },
+  {
+    name: 'slices-10',
+    note: 'ten slices: the middle of the frontier the corpus and the cap disagree about',
+    cues: CHART_CUES,
+    maxSlices: 10,
+  },
+  {
     name: 'slices-12',
-    note: 'a pie of up to twelve slices, which is what the corpus draws for a part of a whole with nine',
+    note: 'twelve slices: the widest pie this build would still call legible',
     cues: CHART_CUES,
     maxSlices: 12,
   },
