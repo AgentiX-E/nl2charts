@@ -311,6 +311,17 @@ export interface VariantReading {
   readonly top1Share: number;
   readonly shortlist: number;
   readonly shortlistShare: number;
+  /**
+   * Rows this table answered with nothing.
+   *
+   * Carried per variant rather than read off the report, because it is the one number a cue change
+   * moves without moving `scored`: removing a cue declines every question that cue was the only
+   * answer to. The first run of the per-cue assertion compared a variant's lead counts against the
+   * *shipped* table's declined count and refused a legal reading of 1,260 leads against 1,470 rows —
+   * the denominator of one arm used to check another, which is the defect the assertion exists to
+   * catch and not one it may commit.
+   */
+  readonly declined: number;
   /** Top-1 hits per labelled family. A family with a smaller `n` than the shipped run has left the population. */
   readonly byFamily: readonly { readonly family: ChartFamily; readonly n: number; readonly top1: number }[];
   /**
@@ -652,6 +663,7 @@ export function sweepRule(rows: readonly RuleInput[], options: { readonly clock?
       top1Share: report.top1Share,
       shortlist: report.shortlist,
       shortlistShare: report.shortlistShare,
+      declined: report.declined,
       byFamily: familyRows(report),
       cues: report.cues,
     };
@@ -738,7 +750,7 @@ export function assertRuleReport(report: RuleReport): void {
     if (reading.top1 > reading.shortlist || reading.shortlist > reading.scored) {
       throw new Error(`variant ${reading.variant} reports top-1 ${String(reading.top1)} above its shortlist ${String(reading.shortlist)} or above its scored rows`);
     }
-    assertCueReadings(reading.cues, reading.scored - report.declined, reading.variant);
+    assertCueReadings(reading.cues, reading.scored - reading.declined, reading.variant);
   }
 }
 
@@ -843,7 +855,10 @@ export function describeSweep(report: RuleReport): readonly string[] {
             .map((cell) => `${cell.family} ${cell.delta > 0 ? '+' : ''}${String(cell.delta)}`);
     const bar = reading.byFamily.find((cell) => cell.family === 'bar');
     const barShare = bar === undefined || bar.n === 0 ? 0 : bar.top1 / bar.n;
-    const head = `    ${reading.variant.padEnd(22)} top-1 ${(reading.top1Share * 100).toFixed(2)}% (${String(reading.top1)}), bar ${(barShare * 100).toFixed(2)}%`;
+    // `declined` is printed only when it moved: it is the one counter a cue removal moves, and a
+    // variant that declines what the control answered is a different table rather than a better one.
+    const declined = reading.declined === control.declined ? '' : `, declined ${String(reading.declined)} (${reading.declined > control.declined ? '+' : ''}${String(reading.declined - control.declined)})`;
+    const head = `    ${reading.variant.padEnd(22)} top-1 ${(reading.top1Share * 100).toFixed(2)}% (${String(reading.top1)}), bar ${(barShare * 100).toFixed(2)}%${declined}`;
     lines.push(`${head}${moved.length === 0 ? '' : `  |  ${moved.join(', ')}`}`);
   }
   return lines;

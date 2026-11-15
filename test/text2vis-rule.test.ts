@@ -716,6 +716,22 @@ describe('the sweep: every table, the same rows', () => {
     expect(family.map((cell) => cell.family)).toContain('histogram');
   });
 
+  it('reads a variant that declines more rows against its own declined count', () => {
+    // The one number a cue change moves without moving `scored`: removing a cue declines every
+    // question that cue was the only answer to. Checking a variant's lead counts against the
+    // shipped table's declined count refused a legal reading of 1,260 leads against 1,470 rows on
+    // the first real corpus, so both directions are pinned here.
+    const report = sweepRule([{ prompt: 'average revenue by region and channel', label: 'Heatmap' }]);
+    const removed = report.sweep.find((reading) => reading.variant === 'no-matrix') as VariantReading;
+    expect(report.declined).toBe(0);
+    expect(removed.declined).toBe(1);
+    expect(removed.cues).toEqual([]);
+    expect(() => assertRuleReport(report)).not.toThrow();
+    // And the reading the assertion refuses: the shipped table's declined count used to check a
+    // variant that declined one row more, so the row it declined is counted as answered by nobody.
+    expect(() => assertRuleReport({ ...report, sweep: [{ ...removed, declined: 0 }] })).toThrow(/per-cue leads sum to/);
+  });
+
   it('prints one line per table and nothing when there is no sweep', () => {
     const report = sweepRule(rows);
     const lines = describeSweep(report);
@@ -904,6 +920,11 @@ describe('the delta a sweep prints', () => {
     { prompt: 'the share of orders by status', label: 'Bar Chart' },
     { prompt: 'the share of revenue that is refunds', label: 'Pie Chart' },
     { prompt: 'revenue over time', label: 'Line Chart' },
+    // No shipped cue reads this one, so the control declines it and the table that adds the
+    // histogram cue answers it: the only shape in which a variant declines *fewer* rows.
+    { prompt: 'show the binned counts of order totals', label: 'Histogram' },
+    // And one only `matrix` answers, which is the shape in which removing that cue declines more.
+    { prompt: 'average revenue by region and channel', label: 'Heatmap' },
   ];
 
   const reading = (report: RuleReport): VariantReading => ({
@@ -914,6 +935,7 @@ describe('the delta a sweep prints', () => {
     top1Share: report.top1Share,
     shortlist: report.shortlist,
     shortlistShare: report.shortlistShare,
+    declined: report.declined,
     byFamily: familyRows(report),
     cues: report.cues,
   });
@@ -922,6 +944,7 @@ describe('the delta a sweep prints', () => {
   const shipped = scoreRule(rows);
   const flipped = scoreRule(rows, { cues: barFirst, variant: 'bar-share' });
   const histogram = scoreRule(rows, { cues: withHistogramCue(CUE_VARIANTS[0]!.cues), variant: 'histogram' });
+  const removed = scoreRule(rows, { cues: withoutMatrix(CUE_VARIANTS[0]!.cues), variant: 'no-matrix' });
 
   it('measures every table against the control and not against the line above it', () => {
     const lines = describeSweep({ ...shipped, sweep: [reading(shipped), reading(flipped), reading(histogram)] });
@@ -941,5 +964,16 @@ describe('the delta a sweep prints', () => {
     expect(deltaOf(forward, 'bar-share')).toBe(deltaOf(backward, 'bar-share'));
     expect(deltaOf(forward, 'histogram')).toBe(deltaOf(backward, 'histogram'));
     expect(deltaOf(forward, 'shipped')).toBe('');
+  });
+
+  it('prints the declined count only when a table moved it, with the sign it moved', () => {
+    // A cue removal declines what the control answered and a cue addition answers what the control
+    // declined. Both are one number apart from the control and neither is a share of it, so the line
+    // carries the count and the direction rather than leaving the reader to subtract.
+    const lines = describeSweep({ ...shipped, sweep: [reading(shipped), reading(histogram), reading(removed)] });
+    expect(lines[2]).toContain('declined 0 (-1)');
+    expect(lines[3]).toContain('declined 2 (+1)');
+    // The control's own line says nothing about it, because there is nothing to compare it to.
+    expect(lines[1]).not.toContain('declined');
   });
 });
