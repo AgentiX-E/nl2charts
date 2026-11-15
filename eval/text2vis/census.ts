@@ -41,9 +41,9 @@ import type {
   RecommendableMark,
   ShapeCounts,
 } from '@agentix-e/nl2charts-chart';
-import { RECOMMENDABLE_MARKS, readCues, recommendChart } from '@agentix-e/nl2charts-chart';
+import { CHART_CUES, RECOMMENDABLE_MARKS, readCues, recommendChart } from '@agentix-e/nl2charts-chart';
 import { applyExitCode, isEntry, loadText2Vis, type LoadOptions } from './dataset.js';
-import { CUE_VARIANTS, familiesOfMark, familyOfLabel, type ChartFamily } from './rule.js';
+import { CUE_VARIANTS, familiesOfMark, familyOfLabel, type ChartFamily, type TableVariant } from './rule.js';
 import { numericCell, parseResultSet, profilesOf, type ProfileInput, type ResultSet } from './profile.js';
 
 /**
@@ -428,15 +428,32 @@ export interface CensusReport {
   readonly variant: string;
 }
 
-/** One cue table, priced on the product's own hit test. */
+/**
+ * One reading of the product, priced on the product's own hit test.
+ *
+ * "Reading" and not "table", because the axis is every one-edit change to the decision path: the
+ * order of a cue's marks, the presence of a cue, and the admission cap are all single edits a caller
+ * can make, and a gain is only attributable while the entry says which edit it was.
+ */
 export interface ProductVariant {
   readonly variant: string;
+  /** What the entry changes, in one line: the name is a label and this is the claim. */
+  readonly note: string;
   /** Rows whose label family the product's leading mark covers first. */
   readonly hit: number;
   /** `hit / scored`, with `scored` the same denominator every other reading uses. */
   readonly hitShare: number;
   /** Per-family hits, so a table that trades one family for another cannot pass as a gain. */
   readonly byFamily: readonly { readonly family: ChartFamily; readonly n: number; readonly hit: number }[];
+  /**
+   * The same hits over two disjoint halves of the scored population, split by row parity.
+   *
+   * The split is arbitrary with respect to content and fixed before the reading, and it exists
+   * because a sweep of thirty candidates will always have a winner: a lever that gains on one half
+   * and loses on the other has not been shown to gain, it has been shown to fit. Both halves are
+   * published rather than a p-value, because the reader is the one who has to decide.
+   */
+  readonly split: { readonly a: number; readonly b: number };
 }
 
 /** A year, a quarter, a month name, or a year-and-month — the shapes a result set writes time in. */
@@ -677,7 +694,41 @@ interface NoProfileTally {
 interface ProductTally {
   hit: number;
   byFamily: Map<ChartFamily, { n: number; hit: number }>;
+  split: { a: number; b: number };
 }
+
+/**
+ * Every one-edit change to the product's decision path, priced on the same rows.
+ *
+ * Two axes, one table, because a reader compares candidates and not axes. The cue tables come from
+ * `rule.ts` — the sweep that module owns is the question half's, and this is the same list asked a
+ * different question. The knobs after them are the edits that are not cue tables at all: the
+ * admission cap is a number the recommender takes as an option, so a pie with nine slices is one
+ * argument away and has been refused by a constant nobody measured.
+ *
+ * Ordered, not sorted: the control first, then the cue tables, then the knobs. A sweep whose order
+ * depends on its own numbers is a sweep a reader cannot compare with the previous round's.
+ */
+export interface ProductCandidate extends TableVariant {
+  /** The admission cap this entry uses, when the edit is the cap rather than the table. */
+  readonly maxSlices?: number;
+}
+
+export const PRODUCT_CANDIDATES: readonly ProductCandidate[] = [
+  ...CUE_VARIANTS.map((variant) => ({ name: variant.name, note: variant.note, cues: variant.cues })),
+  {
+    name: 'slices-12',
+    note: 'a pie of up to twelve slices, which is what the corpus draws for a part of a whole with nine',
+    cues: CHART_CUES,
+    maxSlices: 12,
+  },
+  {
+    name: 'slices-any',
+    note: 'no slice cap at admission at all: the ceiling the cap could ever cost, which no product would ship',
+    cues: CHART_CUES,
+    maxSlices: Number.MAX_SAFE_INTEGER,
+  },
+];
 
 /** Tally a classified population into the report a document quotes. */
 export function censusOf(rows: readonly ProfileInput[], options: { readonly variant?: string } = {}): CensusReport {
@@ -694,7 +745,7 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
   // of zero, and a table missing from the report because nobody added a key would be a reading of
   // nothing — the two are indistinguishable to a reader, and only one of them is true.
   const product = new Map<string, ProductTally>(
-    CUE_VARIANTS.map((variant) => [variant.name, { hit: 0, byFamily: new Map() }]),
+    PRODUCT_CANDIDATES.map((candidate) => [candidate.name, { hit: 0, byFamily: new Map(), split: { a: 0, b: 0 } }]),
   );
   let scored = 0;
   let unmapped = 0;
@@ -734,15 +785,24 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
     // once per row and handed to each variant, so what differs between the numbers is the cue table
     // and nothing else — a second `profilesOf` per variant would make the readings differ by the
     // profiler as well, and the sweep would be measuring two things at once.
-    for (const variant of CUE_VARIANTS) {
-      const tally = product.get(variant.name) as ProductTally;
+    // The half a row belongs to is decided by its position in the *scored* population, so the two
+    // halves are halves of the denominator the hit count is taken over and not of the file.
+    const half = scored % 2 === 0 ? 'b' : 'a';
+    for (const candidate of PRODUCT_CANDIDATES) {
+      const tally = product.get(candidate.name) as ProductTally;
       const cell = tally.byFamily.get(classified.expected) ?? { n: 0, hit: 0 };
       cell.n += 1;
-      const top = recommendChart(row.prompt, profiles, { cues: variant.cues }).recommendations[0];
+      const top = recommendChart(row.prompt, profiles, {
+        cues: candidate.cues,
+        // Only when the entry is about the cap: passing the default explicitly would make every cue
+        // table a second test of a number none of them changes.
+        ...(candidate.maxSlices === undefined ? {} : { maxSlices: candidate.maxSlices }),
+      }).recommendations[0];
       const lead = top === undefined ? undefined : familiesOfMark(top.mark, top.cues[0]);
       if (lead !== undefined && lead[0] === classified.expected) {
         tally.hit += 1;
         cell.hit += 1;
+        tally.split[half] += 1;
       }
       tally.byFamily.set(classified.expected, cell);
     }
@@ -921,12 +981,14 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
     numerals: [...numerals.values()].sort(
       (left, right) => right.n - left.n || left.column.localeCompare(right.column) || left.cell.localeCompare(right.cell),
     ),
-    product: CUE_VARIANTS.map((variant) => {
-      const tally = product.get(variant.name) as ProductTally;
+    product: PRODUCT_CANDIDATES.map((candidate) => {
+      const tally = product.get(candidate.name) as ProductTally;
       return {
-        variant: variant.name,
+        variant: candidate.name,
+        note: candidate.note,
         hit: tally.hit,
         hitShare: scored === 0 ? 0 : tally.hit / scored,
+        split: { a: tally.split.a, b: tally.split.b },
         byFamily: [...tally.byFamily.entries()]
           .map(([family, cell]) => ({ family, n: cell.n, hit: cell.hit }))
           .sort((left, right) => right.n - left.n || left.family.localeCompare(right.family)),
@@ -995,6 +1057,13 @@ export function assertCensusReport(report: CensusReport): void {
     if (population !== report.scored) {
       throw new Error(
         `census report: variant ${variant.variant} was priced on ${String(population)} rows against ${String(report.scored)} scored, so the comparison is between two corpora`,
+      );
+    }
+    // The two halves are a partition of the hits, so they add to the count they partition. A split
+    // that adds to something else is a second population wearing the first one's denominator.
+    if (variant.split.a + variant.split.b !== variant.hit) {
+      throw new Error(
+        `census report: variant ${variant.variant} reads ${String(variant.split.a)} + ${String(variant.split.b)} hits in its two halves, which is not the ${String(variant.hit)} it reports, so one of the halves is not a half`,
       );
     }
   }
@@ -1091,7 +1160,7 @@ export function describeProduct(report: CensusReport): readonly string[] {
             .sort((left, right) => right.delta - left.delta)
             .map((cell) => `${cell.family} ${cell.delta > 0 ? '+' : ''}${String(cell.delta)}`);
     lines.push(
-      `    ${variant.variant.padEnd(22)} hit ${String(variant.hit).padStart(4)} (${(variant.hitShare * 100).toFixed(2)}%)${moved.length === 0 ? '' : `  |  ${moved.join(', ')}`}`,
+      `    ${variant.variant.padEnd(24)} hit ${String(variant.hit).padStart(4)} (${(variant.hitShare * 100).toFixed(2)}%)${moved.length === 0 ? '' : `  |  ${moved.join(', ')}`}`,
     );
   }
   return lines;
