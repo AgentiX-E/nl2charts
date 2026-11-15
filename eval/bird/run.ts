@@ -1379,6 +1379,13 @@ export const ARMS: readonly Arm[] = [
   // A ceiling that rises ≥2.0pp while the score stays inside its own resolution is the `select-intent`
   // finding reproduced on the free rule; a ceiling that does not rise retires the source, and either
   // outcome is a reading the next round can spend.
+  //
+  // **Not declared for the dev split, on purpose.** The first attempt was to add both pairs to
+  // `eval/baseline/pairs.json[dev]`, and `gate:bird` refused with the sentence that matters: "declared
+  // for dev and select-mixed-rule is not in that split's arm list, so the reading it promises can
+  // never be taken". A declaration is a standing promise read on every routine run, and a routine dev
+  // run is five arms and three calls a question; these two are on-demand arms whose pairs are read by
+  // `pnpm bench:bird:pair --pair left,right` on the artifact that contains them.
   { name: 'select-mixed-rule-rows', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 4, select: true, selectRule: 'shortest', mixed: ROWS_SOURCES },
   // The same purchase from the source that differs in grammar instead of in knowledge: a fourth
   // candidate rendered from a query intent. Same pool size, same rule, same calls as the arm above,

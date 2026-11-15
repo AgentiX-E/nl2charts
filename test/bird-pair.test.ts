@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import {
   MATCH,
@@ -22,6 +22,7 @@ import {
   summaries,
 } from '../eval/bird/pair.js';
 import type { PairArtifact, PairCase, PairOutcome, ReachSplit } from '../eval/bird/pair.js';
+import { COMPARISONS, PAIRS } from '../eval/bird/run.js';
 
 const case_ = (arm: string, id: number, shape: string): PairCase =>
   shape === MATCH ? { arm, id, passed: true, reason: 'match' } : { arm, id, passed: false, reason: shape };
@@ -398,6 +399,42 @@ describe('declared pairs', () => {
       log.mockRestore();
       error.mockRestore();
     }
+  });
+
+  it('declares only pairs the catalogue argues for, so the list cannot grow an unargued delta', () => {
+    // A pair in `pairs.json` is read on every run, which is the whole point of the file; a pair
+    // there that `PAIRS` never argued for would be a delta nobody claimed a single lever for.
+    const declared = JSON.parse(readFileSync(resolve('eval/baseline/pairs.json'), 'utf8')) as Record<string, unknown>;
+    // Two lists are argued: `PAIRS` for a pair that differs by one lever, and `COMPARISONS` for a
+    // cross-level pair that carries the question it answers. A declaration may name either, and a
+    // pair in neither is a delta nobody claimed.
+    const argued = new Set([
+      ...PAIRS.map(([left, right]) => `${left}\u0000${right}`),
+      ...COMPARISONS.map(([left, right]) => `${left}\u0000${right}`),
+    ]);
+    // The file also carries a `note` string explaining where the floors came from, so the splits are
+    // read by shape rather than by iterating every key: a note is not a split, and a rule that read
+    // all keys would call it one.
+    for (const [split, entry] of Object.entries(declared)) {
+      if (!Array.isArray(entry)) continue;
+      for (const pair of entry as string[][]) {
+        const [left, right] = pair as [string, string];
+        const known = argued.has(`${left}\u0000${right}`) || argued.has(`${right}\u0000${left}`);
+        expect(known, `${split}: ${left} -> ${right} is in PAIRS`).toBe(true);
+      }
+    }
+  });
+
+  it('leaves an on-demand pair out of the split, because a declaration is a standing promise', () => {
+    // The fourth-candidate arms ran on the dev split and their two pairs are the reading of round
+    // 148 -- and declaring them for `dev` is wrong, which `gate:bird` said in one sentence:
+    // "declared for dev and select-mixed-rule is not in that split's arm list, so the reading it
+    // promises can never be taken". A routine dev run is five arms at three calls a question; these
+    // are on-demand arms read with `pair.ts --pair left,right` on the artifact that holds them.
+    // Declaring them would make every routine run owe a reading it cannot take.
+    const dev = declaredPairs(resolve('.'), 'dev');
+    expect(dev).not.toContainEqual(['select-mixed-rule', 'select-mixed-rule-rows']);
+    expect(dev).not.toContainEqual(['select-mixed-rule', 'select-mixed-rule-intent']);
   });
 
   it('renders an artifact that names neither split nor model, and one with no cases', () => {
