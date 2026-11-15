@@ -41,6 +41,62 @@ gaps in it stays one too. The reason the rule exists at all is that a `YEAR`
 column arrives as a number from most drivers and as text from most CSVs, and
 those two transports used to produce two different charts for the same data.
 
+### If you parse a result set yourself
+
+`profileRows` reads JavaScript types, so a column of strings is a label column —
+`"43.54"` is text and a bar over it has no measure. The drivers in
+`@agentix-e/nl2charts-node` hand you typed values (a `numeric` arrives as a
+`number`, a `NULL` as `null`) and need nothing from you. A result set you copied
+out of a terminal is different: two conversions decide whether the chart is
+possible, and both are worth writing down.
+
+**A printed absence is a null.** `-`, `--`, `—`, `n/a`, `null`, `none` and a lone
+`.` are how a result set prints a value that is not there. Read as text, one dash
+in a column of fifteen numbers makes the whole column nominal, the table loses its
+measure, and every chart that needs one is refused with `a bar needs a category
+axis and a measure`. The check has to be on the whole cell: `5-10` is a band and
+`2019-01-01` is a date.
+
+**A number is read from its formatting.** `1,234`, `$1,234`, `38%` (as `38` — a
+chart cares about relative height, not the unit) and the accounting negative
+`(1,234)` as `-1234` are all numbers. A space-grouped number and a European
+`1.234,56` are deliberately not: both require guessing which separator is the
+decimal one, and a guess here turns a category into a measure.
+
+```ts
+const CURRENCY = /^[$€£¥₹]\s?/;
+const GROUPED = /^\d{1,3}(?:,\d{3})+(?:\.\d+)?$/;
+const MISSING = /^(?:-+|—|–|n\/?a|null|none|\.)$/i;
+
+function cell(value: string): number | null {
+  const text = value.trim();
+  if (text.length === 0 || MISSING.test(text)) return null;
+  const parenthesised = /^\((.*)\)$/.exec(text);
+  const body = (parenthesised?.[1] ?? text).replace(CURRENCY, '').replace(/%$/, '').trim();
+  const plain = GROUPED.test(body) ? body.replace(/,/g, '') : body;
+  if (plain.length === 0 || /^0\d/.test(plain)) return null; // a leading zero is a code
+  const parsed = Number(plain);
+  if (!Number.isFinite(parsed)) return null;
+  return parenthesised === null ? parsed : -parsed;
+}
+```
+
+The leading-zero rule is the one that is easy to miss: a zip code, an account
+number and a phone prefix are digits and are not quantities, and a chart over them
+is a chart of nothing.
+
+### What the recommender can lead with
+
+The contract has eleven series: bar, line, pie, scatter, boxplot, heatmap, funnel,
+candlestick, radar, parallel and gauge. A question that names a picture outside
+that list — an area chart, a histogram, a violin plot — is answered with the
+nearest series the contract does have, and `recommendChart` says so in its
+reasoning: an area is covered by a line, a histogram by a bar **when a cue that
+names the intent put the bar there** (`"show a histogram of revenue"` does,
+`"the distribution of revenue"` does not — that one is a boxplot, which is a
+summary of five numbers rather than a picture of the bins). Nothing is covered for
+a violin plot: there is no series to stand in for it.
+
 ## 2. Ask for candidates
 
 ```ts

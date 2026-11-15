@@ -15,7 +15,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { needsModel, explain, summary, publish, isChartReading, isDocumentation, isTest, TRUNCATED_AT } from '../tools/ci-scope.mjs';
+import { needsModel, explain, summary, publish, isChartReading, isDocumentation, isTest, isToolConfig, TRUNCATED_AT } from '../tools/ci-scope.mjs';
 
 describe('a change set that only edits documentation', () => {
   it('does not need a model call', () => {
@@ -155,6 +155,33 @@ describe('a change set that only edits the chart reading', () => {
     expect(needsModel(['a.md']).reason).toContain('Markdown, which no prompt reads');
     expect(needsModel(['test/x.test.ts', 'a.md']).reason).toContain('Markdown or tests');
     expect(needsModel(['eval/text2vis/census.ts']).reason).toContain('Markdown, tests or the chart reading');
+    expect(needsModel(['budgets.json']).reason).toContain("gate's own configuration");
+  });
+});
+
+describe('a change set that only edits a gate\'s own configuration', () => {
+  it('does not buy the BIRD chain, because no prompt opens either file', () => {
+    // `budgets.json` is a bundle ceiling and `api-surface.json` is an export snapshot. Their readers
+    // are `tools/check-budgets.mjs` and `tools/check-exports.mjs`, both run by the `quality` job,
+    // which is never skipped — and no prompt builder opens either. Round 146 moved a budget on a
+    // commit that also changed the chart, the concurrency group cancelled the measurement, and the
+    // saving was luck rather than design: the same commit alone buys thirteen arms over 496
+    // questions and three live passes over 210 cases to re-measure a pipeline no byte of which moved.
+    const result = needsModel(['budgets.json', 'api-surface.json', 'docs/benchmarks.md']);
+    expect(result.measure).toBe(false);
+    expect(result.reason).toContain('never skips');
+  });
+
+  it('names two files rather than a suffix, so a new root file has to be argued for', () => {
+    expect(isToolConfig('budgets.json')).toBe(true);
+    expect(isToolConfig('api-surface.json')).toBe(true);
+    // `package.json` changes what runs and what is installed, not what a ceiling is, and a change
+    // there has to measure. A suffix would have swallowed it.
+    expect(isToolConfig('package.json')).toBe(false);
+    expect(needsModel(['package.json']).measure).toBe(true);
+    // Nor is a file of the same name inside a package a gate configuration: each package's own
+    // `package.json` is what `check-budgets` sizes, and the root one is the only entry.
+    expect(isToolConfig('packages/chart/budgets.json')).toBe(false);
   });
 });
 

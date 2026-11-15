@@ -7,6 +7,15 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **A cue that names the binned measure.** `familiesOfMark` has said since it was written that a bar
+  stands in for a histogram *when a cue that names the intent put the bar there*, and no cue emitted
+  the kind — so the widening was unreachable, `"show a histogram of revenue"` was answered `boxplot`
+  by the `distribution` cue, and 73 corpus rows sat in `uncovered` where the product had answered but
+  could not say what. The candidate fixing it had been in the sweep for two rounds and been rejected
+  twice on "±0, therefore nothing"; the missing column was the shortlist. Shipping it moves **24 rows
+  into the shortlist with no change in top-1** (`414` either way), and its ablation is now read on
+  every census run: `no-histogram` = 414 → 414 hits, −24 shortlist. Bundle +279 B gzip (both module
+  formats), budget 23,000 → 23,500 with the measurement recorded.
 - **A column of years is a time axis in either transport.** `inferType` read `'2019'` as `temporal`
   through `PERIOD` and `2019` as `quantitative`, so the same column lost its axis when a driver handed
   over a `YEAR` instead of a CSV — and every bar, line, pie and area over it was refused. The new rule
