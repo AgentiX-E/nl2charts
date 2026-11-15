@@ -13553,3 +13553,140 @@ touches the product still measures.
 5. **Cost is a line in the report.** A chart-side dispatch was paying for a SQL benchmark on every push
    for two rounds, and no gate would ever have caught it: `quality gates` was green, and the money was
    in a job that did not need to run.
+
+## One cue decided 223 questions and was right about one: the reading that made two readings necessary
+
+The previous round's cost table named three rows it could not explain: `bar → pie 22`, `bar → heatmap
+49`, `line → heatmap 18`. This round asked which *cue* produced them, and the answer required an
+instrument the project did not have: a top-1 share is an average over twelve rules, and the corpus's
+weight sits on three of them, so the number that is published cannot say which phrase is wrong.
+
+`cuePrecision` scores each cue on the rows where it fired **first** — a cue that fired second decided
+nothing — and splits its loss in two. `hits` is the cue naming the right picture; `inside` is the cue
+naming the right family in the wrong position. The gap between them is what a reorder could recover;
+the gap to `leads` is what only a narrower phrase could. It costs no model call, because the corpus
+ships the question and the label.
+
+| cue | rows decided | first mark | hit | family covered |
+| --- | --- | --- | --- | --- |
+| `share` | 507 | pie | 28.01% (142) | 64.89% |
+| `trend` | 381 | line | 70.60% (269) | 86.61% |
+| `matrix` | 223 | heatmap | **0.45% (1)** | 30.49% |
+| `distribution` | 137 | boxplot | 23.36% (32) | 50.36% |
+| `ranking` | 116 | bar | 42.24% (49) | 42.24% |
+| `explicit` | 73 | bar | 100.00% (73) | 100.00% |
+| `correlation` | 33 | scatter | 75.76% (25) | 87.88% |
+
+Two rows carry the round. `matrix` decides 223 questions — 15% of the scored corpus — and is right
+about one, because its pattern was `\bby\b[\s\S]*\band\b`: unbounded in both directions, so
+"average revenue by region. Generate matplotlib code and label the axes" carried a `by` and, two
+sentences later, an `and`. `share` is not wrong about the family (64.89%) and is wrong about the order
+on more than a third of what it decides: a cue that says "a share is a pie" answers 507 questions and
+the corpus drew bars for 187 of them.
+
+### The same lever, measured twice, in opposite directions
+
+| table | question half (top-1) | product (hit) | per-family on the product |
+| --- | --- | --- | --- |
+| shipped before this round | 591 (40.20%) | 312 (21.22%) | — |
+| `matrix` bounded to one clause | **591 (±0)** | **355 (+43)** | bar +25, pie +13, scatter +6, heatmap −1 |
+| `matrix` marks reversed | **657 (+66)** | **278 (−34)** | bar +78, line −75, pie −29 |
+| both narrowings, composed | 596 (+5) | **358 (+46)** | bar +28, pie +13, scatter +6, heatmap −1 |
+
+The first row is the lever the question half says does not exist: 591 either way. It is worth +43 rows
+on the product, because the question half scores the *leading* mark and a question whose answer moves
+from "heatmap, wrongly" to "declined" is a miss on both sides of that comparison — while the product
+re-ranks inside what the table admits, and 43 of those questions then land on the mark the label names.
+
+The second row is the lever the product says is destructive, and the question half calls it the best
+thing in the sweep: +66 rows. It buys 78 bar rows with 75 lines and 29 pies, because a bar paid three
+points by `matrix` outvotes a line the question actually named — and the question half cannot see that,
+since it only reads the first cue that fired and `trend` comes before `matrix`, so those 75 line rows
+never enter its arithmetic.
+
+Both numbers are true and neither is the answer. What decides is that only one row is positive on both:
+the clause window, with the narrow share discriminator on top of it.
+
+### Shipped: 312 → 358, and what it costs on the metric that is not the product
+
+The two rules are in `packages/chart/src/recommend.ts` now: `share-by` listed ahead of `share` with its
+marks untouched, and `matrix` bounded to `[^.;?!\n]{0,60}`. The dispatch that shipped them reproduced
+the prediction exactly — 358, 24.35%, with the per-family rows the sweep had printed.
+
+| reading | before | after | delta |
+| --- | --- | --- | --- |
+| product hit | 312 (21.22%) | **358 (24.35%)** | +46, +3.13pp |
+| product hit, of the 1,121 rows a mark can answer | 27.8% | **31.9%** | +4.1pp |
+| question half, top-1 | 591 (40.20%) | 596 (40.54%) | +5 |
+| question half, shortlist | 1,008 (68.57%) | 940 (63.95%) | **−68** |
+| `outranked` | 326 | 280 | −46 |
+| `refused` | 568 | 568 | 0 |
+
+The shortlist row is the cost, and it is stated rather than hidden: 210 questions that used to be
+answered "heatmap, with a bar on the list" are now declined by the cue table, and 68 of them had the
+right family somewhere on that list. They leave the shortlist and 43 of them become hits, because the
+product's list is not the cue table's — it is the admission rules — and a question that stops claiming a
+heatmap gets ranked among the marks the result set can actually carry.
+
+### What the cues look like after the change
+
+| cue | rows decided | hit | note |
+| --- | --- | --- | --- |
+| `share` | 489 | 28.02% (137) | 187 of its 489 are bars the pie leads |
+| `trend` | 381 | 70.60% (269) | unchanged |
+| `distribution` | 137 | 23.36% (32) | the histogram cue is priced below |
+| `ranking` | 116 | 42.24% (49) | |
+| `explicit` | 73 | 100.00% (73) | a named mark is a request |
+| `correlation` | 33 | 75.76% (25) | |
+| `share-by` | 18 | 55.56% (10) | the new rule: 10 of 18, against 28.02% for the cue it precedes |
+| `matrix` | 10 | **0.00%** | 223 → 10 claims, and none of them right |
+
+`matrix` is now a cue that costs one rule, claims ten questions and is right about none. Removing it
+outright is priced on both halves and is **+1 on the question half and 0 on the product** — a
+simplification rather than a gain, so it stays for a round that can measure a corpus where the clause
+window fires on more than ten questions. `matrix-bar-first` — the reversal, on the shipped window —
+reads +3 on the product and +3 on the question half, on ten leads, while the same reversal at the old
+width reads −80. Three rows on ten is not a measurement that can carry a rule whose sibling
+configuration is the worst lever in the sweep.
+
+Two levers are refused with numbers rather than arguments:
+
+- **The blunt share flip** (`share → ['bar','pie']`) reads +187 on the question half and **−22 on the
+  product** (336): 43 bar rows bought with 21 lines and 42 pies. The question half has been calling
+  this lever "the best available" for three rounds.
+- **The histogram cue** reads +31 on the question half and **0 on the product**: the questions it
+  answers were already answered by the bar, because the boxplot it displaces needed five measures and
+  the result set had one. It is a correct rule that changes no answer.
+
+### The instrument was wrong first: a denominator from another arm
+
+The first dispatch of the new assertion refused a legal reading: `matrix-window` reported 1,260 leads
+against 1,470 answered rows. The table was right. `declined` is the one counter a cue change moves
+without moving `scored` — removing a cue declines every question it was the only answer to — and the
+check was subtracting the *shipped* table's declined count from every variant's scored count. So
+`VariantReading` carries `declined` now, the sweep prints it when it moved with the sign it moved, and
+the test pins both directions (a table that declines fewer, a table that declines more).
+
+The sweep's deltas moved to the control in the same pass. They used to be measured against the line
+above them, which is a fact about the list: reordering `CUE_VARIANTS` changed every published delta
+while no cue table changed at all.
+
+### What changes in the method
+
+1. **A cue change has to be read twice, and the two readings disagree in both directions.** A lever that
+   changes *which questions a cue claims* is invisible to the question-half score (591 → 591, +43 on the
+   product); a lever that changes *the order of a cue's marks* is invisible to the product's cost until
+   you read the per-family rows (+66, −34). A rule requiring both readings to be positive is what
+   shipped this round — and the null on one side is not a veto, it is the instrument saying it cannot
+   see this axis.
+2. **The measurement that is a list position is not a measurement.** Every delta in the sweep is against
+   `shipped` now, and the test reorders the alternatives to prove the number does not move.
+3. **A counter for one arm may not be subtracted from another arm's population.** The first real corpus
+   refused it, and the refusal is what the assertion was for — the defect was inside the assertion.
+4. **A published number that falls has to be reported with the ones that rose.** The shortlist fell 68
+   rows and the product gained 46. A round that printed only the product would be a round that hid the
+   cost of the rule it shipped.
+5. **"Refused" is a reading that stays priced.** The unbounded `matrix` pattern, the reversal, the
+   removal, the blunt share flip and the wide share discriminator are all still in the sweep, because a
+   counterfactual that lives only in a commit message is a number nobody can re-take — and `bar-share`
+   has now been refused on three different grounds across three rounds, each time by a number.
