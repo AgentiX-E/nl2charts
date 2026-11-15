@@ -20,17 +20,19 @@ import { profileRows } from './profile.js';
  */
 
 /**
- * The kinds a cue can be. The vocabulary is the product's, and one member of it — `histogram` — is
- * not emitted by `CHART_CUES`: the contract has no histogram series, a histogram is a bar with the
- * measure binned, and whether the table should *name* that intent is a question the corpus in
- * `eval/text2vis` prices as a variant before the shipped table changes. It is in the union so the
- * variant is written against the same type as the table it re-orders rather than against a cast.
+ * The kinds a cue can be. The vocabulary is the product's, and three members of it are not emitted by
+ * `CHART_CUES`: `histogram` (the contract has no histogram series — a histogram is a bar with the
+ * measure binned), and the two `share` discriminator widths that the corpus in `eval/text2vis` prices
+ * before the shipped table changes — `share-by-any` and `share-ranked`. They are in the union so a
+ * variant is written against the same type as the table it re-orders rather than against a cast, and
+ * so a cue that ships later does not have to widen a type the readings already use.
  */
 export type CueKind =
   | 'trend'
   | 'share'
   | 'share-by'
   | 'share-by-any'
+  | 'share-ranked'
   | 'distribution'
   | 'histogram'
   | 'correlation'

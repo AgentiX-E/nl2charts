@@ -237,6 +237,88 @@ function isRecommendable(mark: string): mark is RecommendableMark {
   return mark in MARK_FAMILIES;
 }
 
+/**
+ * What a cue's wrong-order rows have in common, which is the only evidence a reorder has.
+ *
+ * The gap between `inside` and `hits` in the reading above says *how many* rows a cue got the family
+ * right and the order wrong. It cannot say *which* row to move, because the repair is not in the cue
+ * being read — it is in the cue that fired beside it. `share` leading with a pie is wrong exactly on
+ * the rows where the question also ranked, and `ranking` sits after `share` in the shipped table, so
+ * it never gets to lead. That is a fact about the broken rows, not about the cue table, and it has to
+ * be counted on the broken rows.
+ *
+ * So this reading splits a cue's covered rows in two and counts the companions separately in each
+ * half. The split is what makes it evidence: a companion that fires on both halves is a cue that
+ * fires often, and a companion that fires only on the broken half is the one to move — which is why
+ * `hitWithCue` is published beside `withCue` rather than left out as uninteresting.
+ *
+ * A row whose family the cue did not cover at all is outside this reading: its loss is a phrase and
+ * not an order, and a companion counted there would recommend a move that cannot fix it.
+ */
+export interface CueCrossing {
+  readonly kind: CueKind;
+  /** Rows this cue led where its first mark was the right family. */
+  readonly hits: number;
+  /** Rows this cue led where a later mark was the right family: the loss a reorder could recover. */
+  readonly ordered: number;
+  /** Other cues that fired on the wrong-order rows, most frequent first. */
+  readonly withCue: readonly { readonly kind: CueKind; readonly n: number }[];
+  /** The same count over the rows it got right, which is the control the comparison needs. */
+  readonly hitWithCue: readonly { readonly kind: CueKind; readonly n: number }[];
+}
+
+/**
+ * Every cue, with the companions its wrong-order rows keep.
+ *
+ * Ordered by `ordered` descending — the cue with the most recoverable rows leads the repair list —
+ * and not by `withCue`: the question this answers is "which cue to fix", and the companion is the
+ * answer to "with what". A tie is broken by name rather than by table order, because a reading that
+ * moves when the table is reordered is a reading about the list.
+ */
+export function cueCrossings(rows: readonly RuleInput[], table: readonly CueRule[] = CHART_CUES): readonly CueCrossing[] {
+  const tallies = new Map<
+    CueKind,
+    {
+      hits: number;
+      ordered: number;
+      withCue: Map<CueKind, number>;
+      hitWithCue: Map<CueKind, number>;
+    }
+  >();
+  for (const row of rows) {
+    const family = familyOfLabel(row.label);
+    if (family === undefined) continue;
+    const cues = readCues(row.prompt, table);
+    const lead = cues[0];
+    if (lead === undefined) continue;
+    const first = lead.marks.find((mark) => isRecommendable(mark));
+    const covered = lead.marks.some((mark) => isRecommendable(mark) && familiesOfMark(mark, lead.kind).includes(family));
+    if (!covered) continue;
+    const hit = first !== undefined && familiesOfMark(first, lead.kind).includes(family);
+    const entry = tallies.get(lead.kind) ?? { hits: 0, ordered: 0, withCue: new Map(), hitWithCue: new Map() };
+    // The companion list is `cues.slice(1)`: a cue is not its own companion, and the lead is already
+    // named by the row it is counted in.
+    const companions = hit ? entry.hitWithCue : entry.withCue;
+    if (hit) entry.hits += 1;
+    else entry.ordered += 1;
+    for (const cue of cues.slice(1)) companions.set(cue.kind, (companions.get(cue.kind) ?? 0) + 1);
+    tallies.set(lead.kind, entry);
+  }
+  const listed = (counts: Map<CueKind, number>): readonly { readonly kind: CueKind; readonly n: number }[] =>
+    [...counts.entries()]
+      .map(([kind, n]) => ({ kind, n }))
+      .sort((left, right) => right.n - left.n || left.kind.localeCompare(right.kind));
+  return [...tallies.entries()]
+    .map(([kind, entry]) => ({
+      kind,
+      hits: entry.hits,
+      ordered: entry.ordered,
+      withCue: listed(entry.withCue),
+      hitWithCue: listed(entry.hitWithCue),
+    }))
+    .sort((left, right) => right.ordered - left.ordered || left.kind.localeCompare(right.kind));
+}
+
 export interface LabelReading {
   readonly label: string;
   readonly family: ChartFamily;
@@ -286,6 +368,15 @@ export interface RuleReport {
    * measurement, on the same population minus the rows no cue fired on.
    */
   readonly cues: readonly CueReading[];
+  /**
+   * What each cue's wrong-order rows have in common.
+   *
+   * The reading above counts the rows a cue got the family right and the order wrong; this one names
+   * the cue that fired beside them, split by whether the row was broken. It is a second view of the
+   * same rows and is asserted against `cues` rather than trusted, because two views that can drift
+   * are two definitions of "got it right".
+   */
+  readonly crossings: readonly CueCrossing[];
   /** Milliseconds per question on the cue path: no model, no renderer, no database. */
   readonly latency: { readonly p50: number; readonly p95: number; readonly max: number };
   /** Which cue table this report scored. `shipped` is the one the package exports. */
@@ -438,6 +529,7 @@ export function scoreRule(
       .sort((left, right) => right.n - left.n || left.label.localeCompare(right.label)),
     confusion: [...confusion.values()].sort((left, right) => right.n - left.n),
     cues: cuePrecision(rows, options.cues ?? CHART_CUES),
+    crossings: cueCrossings(rows, options.cues ?? CHART_CUES),
     latency: percentiles(durations),
     variant: options.variant ?? 'shipped',
     // Filled by `sweepRule`, which is the only caller that prices more than one table. A report from
@@ -576,6 +668,67 @@ export function withoutMatrix(table: readonly CueRule[]): readonly CueRule[] {
 }
 
 /**
+ * The same table with one cue moved in front of another.
+ *
+ * The move is the cheapest lever this file prices: it costs no phrase, it cannot mis-read a question
+ * the shipped table already reads correctly, and it changes exactly one thing — which of two cues that
+ * both fired gets to lead. `withCueAheadOf` inserts a cue the table does not have; this one takes a
+ * cue the table does have and changes its place, which is a different reading and a different shape of
+ * change, so it is a different function rather than a flag.
+ *
+ * A table that does not hold `kind` comes back untouched, and so does one whose `before` is missing
+ * (the moved cue is then appended). That totality is not politeness: a variant built from a table that
+ * lost a cue must still be measurable, or the comparison silently drops a table instead of reporting
+ * one.
+ */
+export function withCueMoved(table: readonly CueRule[], kind: CueKind, before: CueKind): readonly CueRule[] {
+  const moved = table.find((rule) => rule.kind === kind);
+  if (moved === undefined) return table;
+  const rest = table.filter((rule) => rule.kind !== kind);
+  const at = rest.findIndex((rule) => rule.kind === before);
+  const index = at === -1 ? rest.length : at;
+  return [...rest.slice(0, index), moved, ...rest.slice(index)];
+}
+
+/**
+ * `ranking` in front of `share`, which is the reorder the crossing reading asks for.
+ *
+ * `share` decides more rows than any other cue and gets 28.01% of them right; the gap to its family
+ * coverage is 187 rows where the label was a bar that the cue itself lists second. The question the
+ * crossing reading answers is what those rows have in common, and the answer it counts is `ranking`:
+ * a question that both shares and ranks is a comparison, and `ranking` — which speaks for a bar and
+ * nothing else — sits *after* `share` in the shipped table, so it never leads. Moving it is a claim
+ * that the ranking is the stronger statement, priced rather than asserted.
+ */
+export function withRankingBeforeShare(table: readonly CueRule[]): readonly CueRule[] {
+  return withCueMoved(table, 'ranking', 'share');
+}
+
+/**
+ * A cue for a share that ranks, at the width that reads one clause.
+ *
+ * The rival of the move above on the same rows, and priced separately because it is the other way to
+ * fix one defect: the move changes an order and reads every question the table already reads, while
+ * this changes the table's membership and reads only questions holding both a share word and a ranking
+ * word within one clause. Which one ships is a reading — the move can repaint a share question whose
+ * ranking word means something else, and the phrase costs a new name in the vocabulary.
+ *
+ * The window is bounded on purpose. `\bby\b[\s\S]*\band\b` cost this project 222 rows because an
+ * instruction carries a full stop and then more words; the same sentence-final bound applies here.
+ */
+const SHARE_RANKED_CUE: CueRule = {
+  kind: 'share-ranked',
+  marks: ['bar'],
+  pattern:
+    /\b(?:share|proportion|percentage|percent|composition|breakdown|split|makeup)\b[^.;?!\n]{0,60}\b(?:top|bottom|ranks?|ranked|highest|lowest|largest|smallest|most|least|best|worst)\b|\b(?:top|bottom|ranks?|ranked|highest|lowest|largest|smallest|best|worst)\b[^.;?!\n]{0,60}\b(?:share|proportion|percentage|percent|composition|breakdown|split|makeup)\b/,
+};
+
+/** The same table with the ranked-share cue inserted ahead of `share`. */
+export function withShareRankedCue(table: readonly CueRule[]): readonly CueRule[] {
+  return withCueAheadOf(table, SHARE_RANKED_CUE, 'share');
+}
+
+/**
  * The tables this build prices, and what each one changes.
  *
  * The discipline is that a variant changes one thing and says what it is in one line: the order of
@@ -634,6 +787,16 @@ export const CUE_VARIANTS: readonly { readonly name: string; readonly note: stri
       name: 'share-by-any+histogram',
       note: 'the wide share discriminator and the histogram cue together, priced as a pair',
       cues: withHistogramCue(withShareByAnyCue(CHART_CUES)),
+    },
+    {
+      name: 'ranking-before-share',
+      note: '`ranking` moved in front of `share`, which is the reorder the crossing reading of the 187 wrong-order rows asks for',
+      cues: withRankingBeforeShare(CHART_CUES),
+    },
+    {
+      name: 'share-ranked',
+      note: 'a ranked share read as one phrase: a share word and a ranking word inside one clause, answered with a bar',
+      cues: withShareRankedCue(CHART_CUES),
     },
   ];
 
@@ -728,6 +891,7 @@ export function assertRuleReport(report: RuleReport): void {
   // partition of the answered rows. A cue counted twice, or a row dropped because its label was
   // unmapped twice over, shows up here rather than in a share nobody can re-derive.
   assertCueReadings(report.cues, report.scored - report.declined, report.variant);
+  assertCrossings(report.crossings, report.cues, report.variant);
   // Each variant is scored on the same corpus, so a reading whose population is a different size was
   // computed by a second definition of the denominator — the one defect a sweep makes easy to miss,
   // because the tables differ and the rows must not.
@@ -765,6 +929,58 @@ function assertCueReadings(cues: readonly CueReading[], answered: number, varian
   }
 }
 
+/**
+ * The crossing reading, checked against the per-cue reading it is a second view of.
+ *
+ * `ordered` is `inside - hits` by definition and `hits` is the same counter, so the only way the two
+ * can disagree is a second definition of the population — and this file has paid for that class of
+ * defect twice. A crossing naming a cue that has no per-cue row is the sharper failure: the two were
+ * read on different row sets.
+ */
+function assertCrossings(crossings: readonly CueCrossing[], cues: readonly CueReading[], variant: string): void {
+  const byKind = new Map(cues.map((cue) => [cue.kind, cue]));
+  for (const crossing of crossings) {
+    const cue = byKind.get(crossing.kind);
+    if (cue === undefined) {
+      throw new Error(`variant ${variant}: the crossing for ${crossing.kind} has no per-cue reading, so the two views are of different populations`);
+    }
+    if (crossing.hits !== cue.hits || crossing.ordered !== cue.inside - cue.hits) {
+      throw new Error(
+        `variant ${variant}: the crossing for ${crossing.kind} reports ${String(crossing.hits)} hits and ${String(crossing.ordered)} wrong-order rows against the per-cue reading's ${String(cue.hits)} and ${String(cue.inside - cue.hits)}`,
+      );
+    }
+  }
+}
+
+/**
+ * The repair list, one line per cue that has rows a reorder could recover.
+ *
+ * Two companion lists on one line, and the second is not decoration: a companion that fires on both
+ * halves is a cue that fires often, and only the one that fires on the broken half is a candidate to
+ * move. Printing only `withCue` would make every common cue look like the answer — which is the same
+ * defect as reporting a share without its baseline, one level down.
+ *
+ * A cue with nothing wrong gets no line. This reading exists to name a repair, and a row of zeroes is
+ * not one; the per-cue table above already reports every cue, right or wrong.
+ */
+export function describeCrossings(crossings: readonly CueCrossing[]): readonly string[] {
+  if (crossings.length === 0) return [];
+  const actionable = crossings.filter((crossing) => crossing.ordered > 0);
+  const lines = [`  order, not phrase: the rows each cue got the family right and the mark order wrong`];
+  if (actionable.length === 0) {
+    lines.push('    no cue led a row it covered with the wrong mark first');
+    return lines;
+  }
+  for (const crossing of actionable) {
+    const companions = (entries: readonly { readonly kind: CueKind; readonly n: number }[], rows: number): string =>
+      entries.length === 0 ? 'none' : entries.map((entry) => `${entry.kind} (${String(entry.n)}/${String(rows)})`).join(', ');
+    lines.push(
+      `    ${crossing.kind.padEnd(12)} ${String(crossing.ordered).padStart(4)} wrong order of ${String(crossing.ordered + crossing.hits)} covered  |  beside: ${companions(crossing.withCue, crossing.ordered)}  |  on the ${String(crossing.hits)} it got right: ${companions(crossing.hitWithCue, crossing.hits)}`,
+    );
+  }
+  return lines;
+}
+
 /** The corpus, as the rows this arm reads. */
 export function ruleInputs(corpus: { readonly rows: readonly Text2VisRow[] }): RuleInput[] {
   return corpus.rows.map((row) => ({ prompt: row.prompt, label: row.chartType }));
@@ -796,6 +1012,7 @@ export function describeRule(report: RuleReport): readonly string[] {
     );
   }
   lines.push(...describeCues(report.cues));
+  lines.push(...describeCrossings(report.crossings));
   lines.push(...describeSweep(report));
   return lines;
 }
