@@ -32,7 +32,7 @@
  * years or quarters that the profiler typed as a measure, the defect is in type inference; if they
  * carry nothing that reads as time, the label asks for a picture the result set cannot witness.
  */
-import type { FieldProfile, RecommendableMark, ShapeCounts } from '@agentix-e/nl2charts-chart';
+import type { CueKind, FieldProfile, RecommendableMark, ShapeCounts } from '@agentix-e/nl2charts-chart';
 import { RECOMMENDABLE_MARKS, readCues, recommendChart } from '@agentix-e/nl2charts-chart';
 import { applyExitCode, isEntry, loadText2Vis, type LoadOptions } from './dataset.js';
 import { familiesOfMark, familyOfLabel, type ChartFamily } from './rule.js';
@@ -55,6 +55,57 @@ import { numericCell, parseResultSet, profilesOf, type ProfileInput, type Result
  */
 export function coveringMarks(family: ChartFamily): readonly RecommendableMark[] {
   return RECOMMENDABLE_MARKS.filter((mark) => familiesOfMark(mark).includes(family));
+}
+
+/** How much of a prompt a sample keeps. Enough for a question, short enough for a log line. */
+const SNIPPET = 160;
+
+/**
+ * A prompt cut to the part that decides, which is the end.
+ *
+ * Text2Vis prompts are an instruction block followed by the question — "You are a data science
+ * assistant. Generate matplotlib code … Which region has the highest revenue?" — so a sample that
+ * keeps the *first* 160 characters prints the boilerplate every row shares and none of the words
+ * that make one row different. The first draft did exactly that: every loss in the report opened
+ * with `You are a data science assistant.` and the evidence was 300 lines of the same sentence.
+ *
+ * Whitespace is collapsed before the cut because the corpus wraps its questions across lines, and a
+ * cut from the left is marked with an ellipsis so a reader can tell a truncated prompt from a short
+ * one. Nothing is rephrased: the sample is the corpus's words, minus the part a corpus repeats.
+ */
+export function snippet(text: string): string {
+  const collapsed = text.replace(/\s+/g, ' ').trim();
+  if (collapsed.length <= SNIPPET) return collapsed;
+  return `…${collapsed.slice(collapsed.length - SNIPPET)}`;
+}
+
+/**
+ * Why a table produced no profile.
+ *
+ * `profilesOf` answers with an empty list for three different corpora, and the repair differs by
+ * which one it is: a row with no `Table Data` cell at all is a gap in the benchmark (nothing to fix
+ * in the product, and the 1,470-row denominator is the honest one), a header with no record below it
+ * is a table the corpus truncated, and a line of prose in the cell is a table written in another
+ * format that this parser does not read. One count of 164 says none of that.
+ */
+export type TableDefect = 'empty' | 'not-tabular' | 'header-only';
+
+/**
+ * The defect of a table that did not profile. Total over its domain, and only over it.
+ *
+ * The precondition is checked rather than assumed: a table that *does* profile is a caller defect,
+ * and answering "header-only" for it would be the instrument inventing a fact about a table it did
+ * not examine. The domain is the `noProfile` bucket, which is exactly the rows `profilesOf` refused.
+ */
+export function noProfileReason(text: string, set: ResultSet): TableDefect {
+  if (set.columns.length > 0 && set.rows.length > 0) {
+    throw new Error('noProfileReason: this table profiles, so it has no defect to name');
+  }
+  const body = text.trim();
+  if (body === '') return 'empty';
+  const lines = body.split(/\r?\n/).map((line) => line.trim()).filter((line) => line !== '');
+  // A separated first line is a header; a line with no separator in it is not a header of anything.
+  return /[,;\t|]/.test(lines[0] as string) ? 'header-only' : 'not-tabular';
 }
 
 /** What became of one scored question. */
@@ -106,6 +157,16 @@ export type CensusRow =
       /** Where the question's first cue placed each mark, when a cue named it at all. */
       readonly coveringCue?: number;
       readonly answeredCue?: number;
+      /**
+       * The cues that paid each score, in table order.
+       *
+       * The gap says who won; the cue lists say why. A bar that collected four cues beating a line
+       * that collected one is a scoring property — every cue the question fires pays the bar
+       * something — while a bar that beat a line on equal cues is the tie-break, and neither is
+       * repaired in the same place. Without this the report can only say "lost by 2".
+       */
+      readonly coveringCues: readonly CueKind[];
+      readonly answeredCues: readonly CueKind[];
     };
 
 /** A table column that formats as time while the profiler typed it as something else. */
@@ -166,6 +227,28 @@ export interface OutrankedCensus {
   readonly onPreference: number;
   /** The score gap, most common first. */
   readonly gaps: readonly { readonly gap: number; readonly n: number }[];
+  /**
+   * Up to three of these losses, with both sides' arithmetic.
+   *
+   * The same argument as `shapes[].samples`: a pair of marks losing 199 times is one row in a table
+   * and 199 different questions on the corpus. Whether they ask for the losing mark ("a line chart
+   * of revenue over time") or merely arrive with a table the winner fits better decides whether the
+   * next change is a cue or a weight, and only the words separate them.
+   */
+  readonly samples: readonly LossSample[];
+}
+
+/** One loss, with the facts that produced the score on both sides. */
+export interface LossSample {
+  readonly prompt: string;
+  readonly covering: RecommendableMark;
+  readonly answered: RecommendableMark;
+  readonly coveringScore: number;
+  readonly answeredScore: number;
+  /** The cues that paid the mark the label asked for. */
+  readonly coveringCues: readonly CueKind[];
+  /** The cues that paid the mark that won. */
+  readonly answeredCues: readonly CueKind[];
 }
 
 /**
@@ -216,6 +299,14 @@ export interface RefusalCensus {
   readonly withFallback: number;
 }
 
+/** The tables that would not profile, by the reason the profiler had nothing to read. */
+export interface NoProfileCensus {
+  readonly reason: TableDefect;
+  readonly n: number;
+  /** Up to three of the cells' first lines: what the corpus put there instead of a table. */
+  readonly samples: readonly string[];
+}
+
 export interface CensusReport {
   readonly rows: number;
   readonly unmapped: number;
@@ -226,6 +317,8 @@ export interface CensusReport {
   /** The same refusals by shape, largest first: the table that decides which file to open. */
   readonly shapes: readonly ShapeCensus[];
   readonly outranked: readonly OutrankedCensus[];
+  /** Why a table produced no profile, most rows first: a corpus gap and a parser gap are not the same. */
+  readonly noProfile: readonly NoProfileCensus[];
   /** Columns that format as time and were not typed temporal, most rows first. */
   readonly timeLike: readonly TimeLike[];
   /** Rows whose table carries at least one such column. */
@@ -345,6 +438,8 @@ export function classify(row: ProfileInput): CensusRow {
     answered: winner.mark,
     coveringScore: coveringEntry.score,
     answeredScore: winner.score,
+    coveringCues: coveringEntry.cues,
+    answeredCues: winner.cues,
     ...(coveringCue === undefined ? {} : { coveringCue }),
     ...(answeredCue === undefined ? {} : { answeredCue }),
   };
@@ -401,22 +496,29 @@ interface ShapeTally {
   samples: string[];
 }
 
+interface LossTally {
+  expected: ChartFamily;
+  winner: RecommendableMark;
+  n: number;
+  namedButLost: number;
+  onPreference: number;
+  gaps: Map<number, number>;
+  samples: LossSample[];
+}
+
+interface NoProfileTally {
+  reason: TableDefect;
+  n: number;
+  samples: string[];
+}
+
 /** Tally a classified population into the report a document quotes. */
 export function censusOf(rows: readonly ProfileInput[], options: { readonly variant?: string } = {}): CensusReport {
   const outcomes: Record<CensusOutcome, number> = { hit: 0, substituted: 0, refused: 0, outranked: 0, uncovered: 0, noProfile: 0 };
   const byFamily = new Map<ChartFamily, FamilyTally>();
   const refusals = new Map<string, RefusalTally>();
-  const outranked = new Map<
-    string,
-    {
-      expected: ChartFamily;
-      winner: RecommendableMark;
-      n: number;
-      namedButLost: number;
-      onPreference: number;
-      gaps: Map<number, number>;
-    }
-  >();
+  const outranked = new Map<string, LossTally>();
+  const noProfile = new Map<TableDefect, NoProfileTally>();
   const timeLike = new Map<string, TimeLikeTally>();
   const shapes = new Map<string, ShapeTally>();
   const coerced = new Map<string, CoercedTally>();
@@ -479,7 +581,7 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
       };
       entry.n += 1;
       if (classified.answered !== undefined) entry.withFallback += 1;
-      if (entry.samples.length < 3) entry.samples.push(row.prompt);
+      if (entry.samples.length < 3) entry.samples.push(snippet(row.prompt));
       shapes.set(key, entry);
     }
 
@@ -507,13 +609,38 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
         namedButLost: 0,
         onPreference: 0,
         gaps: new Map<number, number>(),
+        samples: [],
       };
       entry.n += 1;
       if (classified.coveringCue !== undefined) entry.namedButLost += 1;
       const gap = classified.answeredScore - classified.coveringScore;
       if (gap === 0) entry.onPreference += 1;
       entry.gaps.set(gap, (entry.gaps.get(gap) ?? 0) + 1);
+      if (entry.samples.length < 3) {
+        entry.samples.push({
+          prompt: snippet(row.prompt),
+          covering: classified.covering,
+          answered: classified.answered,
+          coveringScore: classified.coveringScore,
+          answeredScore: classified.answeredScore,
+          coveringCues: classified.coveringCues,
+          answeredCues: classified.answeredCues,
+        });
+      }
       outranked.set(key, entry);
+    }
+
+    if (classified.outcome === 'noProfile') {
+      const reason = noProfileReason(row.tableData, set);
+      const entry = noProfile.get(reason) ?? { reason, n: 0, samples: [] };
+      entry.n += 1;
+      // The sample is the cell's first line, not the question: the defect is in the table, and the
+      // question is the same question the rest of the corpus asks.
+      const first = row.tableData.split(/\r?\n/).map((line) => line.trim()).find((line) => line !== '') ?? '';
+      // An empty cell has no first line to quote, so it carries no sample. The report reads the
+      // difference: `empty` is a benchmark that ships no table, and there is nothing to show.
+      if (first !== '' && entry.samples.length < 3) entry.samples.push(snippet(first));
+      noProfile.set(reason, entry);
     }
 
   }
@@ -547,6 +674,7 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
         gaps: [...entry.gaps.entries()]
           .map(([gap, n]) => ({ gap, n }))
           .sort((left, right) => right.n - left.n || left.gap - right.gap),
+        samples: entry.samples,
       }))
       .sort(
         (left, right) =>
@@ -554,6 +682,9 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
           left.expected.localeCompare(right.expected) ||
           String(left.winner).localeCompare(String(right.winner)),
       ),
+    noProfile: [...noProfile.values()].sort(
+      (left, right) => right.n - left.n || left.reason.localeCompare(right.reason),
+    ),
     timeLike: [...timeLike.values()].sort(
       (left, right) => right.n - left.n || left.column.localeCompare(right.column),
     ),
@@ -586,6 +717,14 @@ export function assertCensusReport(report: CensusReport): void {
   if (report.scored + report.unmapped !== report.rows) {
     throw new Error(
       `census report: ${String(report.scored)} scored + ${String(report.unmapped)} unmapped is not the ${String(report.rows)} rows read`,
+    );
+  }
+  // A bucket that carries its own breakdown has to add up to the bucket, or the breakdown is a
+  // second opinion about the same rows and a reader who quotes it is quoting a different corpus.
+  const unexplained = report.noProfile.reduce((total, entry) => total + entry.n, 0);
+  if (unexplained !== report.outcomes.noProfile) {
+    throw new Error(
+      `census report: the no-profile reasons account for ${String(unexplained)} and ${String(report.outcomes.noProfile)} tables would not profile`,
     );
   }
 }
@@ -629,6 +768,19 @@ export function describeCensus(report: CensusReport): readonly string[] {
     lines.push(
       `  lost ${entry.expected} to ${entry.winner}: ${String(entry.n)} (on preference ${String(entry.onPreference)}, cue named and lost ${String(entry.namedButLost)}, gaps ${gaps})`,
     );
+    for (const sample of entry.samples) {
+      lines.push(
+        `    e.g. ${sample.covering} ${String(sample.coveringScore)} [${sample.coveringCues.join(' ')}] < ${sample.answered} ${String(sample.answeredScore)} [${sample.answeredCues.join(' ')}] — "${sample.prompt}"`,
+      );
+    }
+  }
+  if (report.noProfile.length > 0) {
+    const counts = report.noProfile.map((entry) => `${entry.reason} ${String(entry.n)}`).join(', ');
+    lines.push(`  tables that would not profile: ${counts}`);
+    for (const entry of report.noProfile) {
+      if (entry.samples.length === 0) continue;
+      lines.push(`    ${entry.reason}: e.g. "${entry.samples[0] as string}"`);
+    }
   }
   return lines;
 }
