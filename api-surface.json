@@ -388,6 +388,7 @@
     "distinctValues",
     "enumerateCandidates",
     "inferType",
+    "isCalendarRun",
     "isRenderable",
     "lint",
     "profileRows",

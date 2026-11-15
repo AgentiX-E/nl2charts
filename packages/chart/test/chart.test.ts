@@ -37,7 +37,7 @@ describe('profiling', () => {
     // largest group was a month written as `Dec`: `ISO_DATE` only accepted `2026-01-01`, so a column
     // of month names was `nominal`, `shape.ordered` was empty, and every line and area label over it
     // was refused — 532 corpus rows, none of them ever answered. A string that is written as a
-    // period is a period; a *number* is not, which is why `[2019, 2020]` stays a measure below.
+    // period is a period.
     expect(inferType(['Dec', 'Jan', 'Feb'])).toBe('temporal');
     expect(inferType(['December', 'Jan 2026', 'March 2014'])).toBe('temporal');
     expect(inferType(['Q1 2019', 'Q2 2019', 'Q3 2019'])).toBe('temporal');
@@ -46,8 +46,38 @@ describe('profiling', () => {
     expect(inferType(['2019', '2020'])).toBe('temporal');
   });
 
-  it('leaves a number a number and a label a label, so the widening cannot swallow either', () => {
-    expect(inferType([2019, 2020, 2021])).toBe('quantitative');
+  it('gives the same column the same type in both transports, because a column is not its formatting', () => {
+    // This assertion used to read `[2019, 2020, 2021]` -> `quantitative`, defended by "a column of
+    // prices in the 2000s is indistinguishable from a column of years". The row above shows what that
+    // defence cost: `['2019', '2020']` was a time axis and `[2019, 2020]` was a measure, so the same
+    // column typed two ways depending on whether the driver handed over a string or a number — and a
+    // year handed over as a number lost the axis, which refuses every line, bar, pie and area drawn
+    // over it. The census prices that: 182 corpus rows carry a calendar run, and typing it as time is
+    // worth 53 rows gained against 4 lost, on both halves (20/29 against 0/0 by construction).
+    expect(inferType([2019, 2020, 2021])).toBe('temporal');
+    expect(inferType(['2019', '2020', '2021'])).toBe('temporal');
+    // Written the other way round, which is how a result set orders its years descending.
+    expect(inferType([2023, 2022, 2021, 2020])).toBe('temporal');
+  });
+
+  it('reads the run, not the magnitude, so a measure that lives in the same numbers stays a measure', () => {
+    // The guard that makes the widening safe, stated as five ways to fail it. Every one of them is a
+    // column whose values sit in the calendar window and none of them is a timeline: gaps, a fraction,
+    // a repeat, a pair, and a run that starts before the window. A price column of `2019` dollars is
+    // only indistinguishable from a year by its magnitude, and magnitude is exactly what this reads
+    // last.
+    expect(inferType([2018, 2020, 2022])).toBe('quantitative');
+    expect(inferType([2019, 2019.5, 2020])).toBe('quantitative');
+    expect(inferType([2019, 2019, 2020, 2020])).toBe('ordinal');
+    expect(inferType([1999, 2000])).toBe('ordinal');
+    expect(inferType([1899, 1900, 1901])).toBe('quantitative');
+    expect(inferType([2100, 2101, 2102])).toBe('quantitative');
+    // A missing value breaks the run: the column is not a year per row, and the string path applies
+    // the same rule (`PERIOD` matches every value or the column is not a period).
+    expect(inferType([2019, 2020, 2021, 2022, null])).toBe('quantitative');
+  });
+
+  it('leaves a label a label, so the widening cannot swallow it', () => {
     expect(inferType(['North', 'South'])).toBe('nominal');
     // A column that is half month and half region is a label column, not a broken axis.
     expect(inferType(['Dec', 'North'])).toBe('nominal');

@@ -19,9 +19,7 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?)?/;
  * `Q1 2019` or `2019-01` typed `nominal`, no column was ordered, and every line or area the corpus
  * labels over such a table was refused before the question was read — 532 rows of Text2Vis, none of
  * them ever answered. The evidence for "this is time" is the *formatting*: a string written as a
- * period is a period. A number is not, which is why `[2019, 2020]` stays a measure — a column of
- * prices in the 2000s is indistinguishable from a column of years, and guessing from the magnitude
- * alone would turn a measure into an axis.
+ * period is a period.
  */
 const PERIOD = new RegExp(
   '^(?:' +
@@ -36,10 +34,57 @@ const PERIOD = new RegExp(
   'i',
 );
 
+/**
+ * Whether a column of numbers walks the calendar, one year per row.
+ *
+ * This exists because a year arrives in two transports and used to get two types. `PERIOD` reads
+ * `'2019'` as time, and the same column handed over as a *number* — which is what a driver with a
+ * `YEAR` column sends, and what the Text2Vis corpus stores — typed `quantitative`, so the table lost
+ * its axis and every bar, line, pie and area drawn over it was refused. The census prices the defect
+ * at 182 rows of the corpus and 53 hits; the fix is not to guess from magnitude, which would turn a
+ * price column of `2019` dollars into an axis, but to read the shape a timeline actually has:
+ *
+ * - every value is an integer (a year is; `2019.5` is a rating);
+ * - no value repeats (a year appears once per row — a column that repeats is a group, not a period);
+ * - the distinct values are a contiguous block, `max − min + 1` of them (a gap says the column is a
+ *   sample of numbers that happen to be large, not a run of years);
+ * - that block lies inside the calendar window;
+ * - the rows read in order — each value one year from the one above it, ascending or descending.
+ *
+ * Five conditions, each one a way for a measure to fail it, and the last is what makes the read a
+ * *timeline* rather than a block: an unsorted column of three consecutive years is a set, and a
+ * result set that prints its years out of order is one that will be re-read by a person.
+ *
+ * Exported because the census has to price this rule against the alternative on every run rather
+ * than restate it: `eval/text2vis/census.ts` un-types the columns this accepts and measures what the
+ * product loses, which is the same predicate asked the inverse question.
+ */
+export function isCalendarRun(values: readonly unknown[]): boolean {
+  // A missing cell breaks the run: the string path applies the same rule, where `PERIOD` has to
+  // match every value or the column is not a period.
+  if (values.length < 3) return false;
+  if (!values.every((value) => typeof value === 'number' && Number.isInteger(value))) return false;
+  const years = values as readonly number[];
+  const distinct = new Set(years);
+  if (distinct.size !== years.length) return false;
+  let low = Infinity;
+  let high = -Infinity;
+  for (const year of distinct) {
+    if (year < low) low = year;
+    if (year > high) high = year;
+  }
+  if (low < 1900 || high > 2100) return false;
+  if (high - low + 1 !== distinct.size) return false;
+  return years.every((year, index) => index === 0 || Math.abs(year - (years[index - 1] as number)) === 1);
+}
+
 export function inferType(values: readonly unknown[]): FieldType {
   const present = values.filter((value) => value !== null && value !== undefined);
   if (present.length === 0) return 'nominal';
   if (present.every((value) => typeof value === 'number')) {
+    // Before the cardinality rule, because a year is not an ordinal scale: `[2019, 2020, 2021]` reads
+    // as three categories of a measure otherwise, and the axis the table carries is thrown away.
+    if (isCalendarRun(values)) return 'temporal';
     const unique = new Set(present).size;
     return present.length > 1 && unique <= Math.max(2, Math.ceil(present.length * 0.5)) && unique <= 20
       ? 'ordinal'
