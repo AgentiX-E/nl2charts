@@ -14214,3 +14214,57 @@ component bolted onto the same three.
    that kind of bar.
 6. **The denominator is a reading too.** 16.1% of this corpus names a picture the contract does not
    have; quoting a share without it invites a comparison against systems whose contracts do.
+
+## The fourth candidate: a ceiling that rose, and a rule that could not convert it
+
+The attribution instrument priced the shipped pool at **67.30%** for a perfect selector — 0.59pp
+behind MAC-SQL's 67.89% — which says selection cannot close the gap and every point above it has to
+come from a statement the pool does not contain. The dev split had already shown what one more
+candidate does to the *ceiling* (+2.22pp, p < 0.0001) and what the paid selector did to the *gain*
+(−3.50pp of conversion). Neither is a prediction for a rule that ranks the pool, because the rule had
+never been run on four candidates.
+
+One dispatch (`43725927611`), three arms, the same 1,532 dev questions, `deepseek-chat` served by
+`deepseek-flash`, **16,852 completions**:
+
+| arm | calls | passed | accuracy | ceiling | conversion | prompt chars |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `select-mixed-rule` (three candidates) | 3.00 | 994/1,532 | **64.88%** | 68.08% (1,043) | **95.30%** | 7,261 |
+| `select-mixed-rule-rows` (four, differing in knowledge) | 4.00 | 983/1,532 | 64.16% | 69.32% (1,062) | 92.56% | 7,270 |
+| `select-mixed-rule-intent` (four, differing in grammar) | 4.00 | 998/1,532 | **65.14%** | **70.10%** (1,074) | 92.92% | 7,312 |
+
+Paired inside the run, exact McNemar:
+
+| pair | won | lost | delta | p |
+| --- | ---: | ---: | ---: | ---: |
+| `select-mixed-rule` → `-rows` | 50 | 61 | −0.72pp | 0.3426 |
+| `select-mixed-rule` → `-intent` | 55 | 51 | +0.26pp | 0.7709 |
+| `-rows` → `-intent` | 69 | 54 | +0.98pp | 0.2066 |
+
+Against the criteria written before the dispatch:
+
+| criterion | `-rows` | `-intent` |
+| --- | --- | --- |
+| ceiling at least +2.0pp | **fails** (+1.24pp) | passes (+2.02pp) |
+| `shortest` at least +1.5pp | fails (−0.72pp) | fails (+0.26pp) |
+| conversion within 1.0pp of the parent's 95.30% | **fails** (92.56%) | **fails** (92.92%) |
+| `calls.mean` at most 4.05 | passes (4.00) | passes (4.00) |
+
+**The reading is about the chooser, not the pool.** The intent source does raise the ceiling by
+2.02pp — 31 questions the three-candidate pool could not answer at all — and the score moves by
++0.26pp, which is inside this pair's 1.64pp resolution. The loss is in conversion: `shortest` picks
+the shortest statement, and with four candidates there is more often a short statement that is wrong.
+That is `select-intent`'s −3.50pp conversion loss reproduced without a selector call, so the loss
+belongs to the pool and not to the model that used to adjudicate it. The knowledge source does not
+even buy the ceiling (+1.24pp), so it is retired on the first criterion.
+
+What survives is a much sharper question than "is a fourth candidate worth it": **2.02pp of ceiling
+sits in the intent pool and the free rule cannot reach it.** A rule that converts can be priced
+offline on this artifact — the candidates and their results are recorded per case — for no model
+call at all, which is where the next round starts.
+
+Two numbers worth keeping honest. The parent arm read **994** here against **980 (63.97%)** on its
+last dev run with every coordinate equal, a +0.91pp drift on an unchanged arm; that is inside the
+1.64pp resolution and it is why every delta above is read inside the run rather than across two. And
+the prompt does not grow: each candidate is generated from the same prompt, so 7,261 against 7,312
+characters is noise, and the price of the fourth candidate is a call and not a longer card.

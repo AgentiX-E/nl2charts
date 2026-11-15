@@ -7,6 +7,17 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **A `.d.mts` is a class of change that cannot move a number.** The push that fixed a missing
+  export in `tools/ci-scope.d.mts` bought thirteen BIRD arms over 496 questions (~6,400 completions)
+  and three live passes over 210 cases: a declaration is a TypeScript erase product, so nothing it
+  holds survives to runtime and no prompt can read it. `ci-scope` now exempts the suffix rather than
+  a directory — the fourth entrance to this hole (empty file, non-Markdown file under `docs/`, root
+  configuration) and the first fixed by adding a class instead of a condition. Its guard is
+  `test/tool-declarations.test.ts`: both directions between every declaration and its module, plus
+  the list assertion that both directories holding one (`tools/`, `eval/bird/`) are covered, because
+  the first version of that guard scanned only where the failure happened. Verified by mutation:
+  deleting a declaration line, dropping the second directory, or removing the class from the filter
+  each turn a named test red.
 - **A cue that names the binned measure.** `familiesOfMark` has said since it was written that a bar
   stands in for a histogram *when a cue that names the intent put the bar there*, and no cue emitted
   the kind — so the widening was unreachable, `"show a histogram of revenue"` was answered `boxplot`
@@ -395,6 +406,22 @@ cannot be argued with.
   package refuses and why; no chart-quality score moved, and none was measured.
 
 ### Changed
+- **The fourth candidate is retired: the ceiling rose and the free rule could not convert it.** One
+  dispatch, three arms, the same 1,532 dev questions (`43725927611`, 16,852 completions): the parent
+  `select-mixed-rule` reads 994 (64.88%) with a 68.08% ceiling, `-rows` 983 (64.16%) at 69.32%, and
+  `-intent` 998 (65.14%) at **70.10%**. Paired: −0.72pp (p = 0.34) and +0.26pp (p = 0.77). The intent
+  source does buy 2.02pp of ceiling, and conversion falls 2.4–2.7pp doing it — `shortest` finds a
+  short wrong statement more often in a four-candidate pool. That is `select-intent`'s −3.50pp
+  conversion loss reproduced with no selector call, so the loss belongs to the pool rather than to
+  the model that used to adjudicate it. The knowledge source does not even buy the ceiling (+1.24pp).
+  `calls.mean` is 4.00 against a 4.05 bar and prompt length is unchanged, so the price was the call.
+  The reading is taken with `pnpm bench:bird:pair --pair left,right` on the artifact that holds both
+  arms, not from `pairs.json[dev]`: the first repair was to declare the two pairs for `dev`, and
+  `gate:bird` refused with the sentence that matters — "declared for dev and `select-mixed-rule` is
+  not in that split's arm list, so the reading it promises can never be taken". A declaration is a
+  standing promise read on every routine run, and a routine dev run is five arms at three calls a
+  question; a promise the configuration cannot pay is the third face of the same disease this
+  round found twice already.
 - **A run that outgrows its clock leaves the cases it finished behind, instead of spending them
   twice.** The budget stop was total: it printed the sample size the next dispatch should ask for
   and threw away everything it had bought. A Mini-Dev arm on a reasoning base has been running for
