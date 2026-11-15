@@ -563,6 +563,23 @@ export function withMatrixWindow(table: readonly CueRule[]): readonly CueRule[] 
 }
 
 /**
+ * The `matrix` cue with its marks reversed: a crossing is a bar before it is a heatmap.
+ *
+ * The per-cue reading is what asks for this. `matrix` decides 223 questions and is right about one of
+ * them, and its family coverage is 30.49% — 68 rows where the label is a heatmap *or a bar*. One of
+ * those 68 is a heatmap. So the cue is not wrong about the family; it is wrong about the order, and
+ * the order is the first mark, which is the whole of the claim it makes.
+ *
+ * Priced rather than shipped because the reversal is a strong claim in the other direction: it makes
+ * every "by X and Y" question a bar question, which is the shape of the rule the ranking contract
+ * already rejected once — bar collecting points it was never named for. What decides it is the family
+ * breakdown on the product side, not the total.
+ */
+export function withMatrixBarFirst(table: readonly CueRule[]): readonly CueRule[] {
+  return table.map((rule) => (rule.kind === 'matrix' ? { ...rule, marks: ['bar', 'heatmap'] } : rule));
+}
+
+/**
  * The table with no `matrix` cue at all.
  *
  * Priced beside the window because the two answer different questions. The window asks "is the cue
@@ -637,6 +654,16 @@ export const CUE_VARIANTS: readonly { readonly name: string; readonly note: stri
       name: 'matrix-window+share-by',
       note: 'both discriminators at once: the two cues this round suspects of leading on a phrase that is not a request',
       cues: withMatrixWindow(withShareByCue(CHART_CUES)),
+    },
+    {
+      name: 'matrix-bar-first',
+      note: '`matrix` reversed: a crossing is a bar before it is a heatmap, which is what 67 of its 68 covered rows say',
+      cues: withMatrixBarFirst(CHART_CUES),
+    },
+    {
+      name: 'matrix-window+bar-first',
+      note: 'the clause window and the reversal together, because the window removes the mass the reversal was for',
+      cues: withMatrixBarFirst(withMatrixWindow(CHART_CUES)),
     },
     {
       name: 'no-matrix',
