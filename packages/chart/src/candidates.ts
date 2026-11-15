@@ -1,5 +1,6 @@
 import type { ChartType } from '@agentix-e/nl2charts-spec';
 import type { FieldProfile } from './profile.js';
+import { DEFAULT_MAX_SLICES } from './recommend.js';
 
 export interface Candidate {
   readonly mark: ChartType;
@@ -11,7 +12,7 @@ export interface Candidate {
  * Enumerate the charts that are structurally valid for a result set. This is a
  * ranking, not a decision: linting and the caller's preference come after.
  */
-export function enumerateCandidates(profiles: readonly FieldProfile[], maxSlices = 7): Candidate[] {
+export function enumerateCandidates(profiles: readonly FieldProfile[], maxSlices = DEFAULT_MAX_SLICES): Candidate[] {
   const quantitative = profiles.filter((profile) => profile.type === 'quantitative');
   const temporal = profiles.filter((profile) => profile.type === 'temporal');
   const nominal = profiles.filter((profile) => profile.type === 'nominal' || profile.type === 'ordinal');

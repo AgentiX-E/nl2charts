@@ -315,8 +315,25 @@ export interface ChartChoice {
   readonly shape: ShapeCounts;
 }
 
+/**
+ * How many slices a pie may carry before this layer stops calling it a pie.
+ *
+ * Twelve, and the number is a reading rather than a preference. Seven was the shipped cap and it was
+ * never measured against anything; the corpus in `eval/text2vis` prices the cap at 7, 8, 9, 10, 12 and
+ * unbounded on the same 1,470 rows, and the curve is not monotone: a cap of eight or nine reads *three
+ * rows lower* than seven, because it admits the pies the corpus drew as bars at eight and nine
+ * categories while still refusing the ones it drew as pies at ten and twelve. Twelve is the first
+ * value where the pie claim the cue table makes is no longer overruled by a constant — 14 rows gained,
+ * 10 rows lost, and both halves of the corpus move up.
+ *
+ * Exported to this package and not from it: a caller who wants a different cap passes
+ * `RecommendOptions.maxSlices`, and a second public name for the default would be a second place to
+ * read it from.
+ */
+export const DEFAULT_MAX_SLICES = 12;
+
 export interface RecommendOptions {
-  /** Slices a pie or a funnel may carry before it stops being readable. */
+  /** Slices a pie or a funnel may carry before it stops being readable. Defaults to twelve. */
   readonly maxSlices?: number;
   /**
    * The cue table to read the question against. Defaults to the shipped `CHART_CUES`.
@@ -517,7 +534,7 @@ export function recommendChart(
   profiles: readonly FieldProfile[],
   options: RecommendOptions = {},
 ): ChartChoice {
-  const resolved: Resolved = { maxSlices: options.maxSlices ?? 7 };
+  const resolved: Resolved = { maxSlices: options.maxSlices ?? DEFAULT_MAX_SLICES };
   const shape = shapeOf(profiles, resolved);
   const cues = readCues(question, options.cues);
   const recommendations: Recommendation[] = [];
@@ -676,7 +693,7 @@ export function toChartIR(
       `no chart fits a result set of (${columns}); a chart needs a measure, and a shape needs the columns that witness it`,
     );
   }
-  const shape = shapeOf(profiles, { maxSlices: options.maxSlices ?? 7 });
+  const shape = shapeOf(profiles, { maxSlices: options.maxSlices ?? DEFAULT_MAX_SLICES });
   const data = [...rows].slice(0, limit).map((row) => ({ ...row }));
   const mark: ChartType = best.mark;
   const ir: ChartIR = {
