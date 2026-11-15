@@ -77,8 +77,19 @@ const QUARTERLY = table('Date, Revenue', [
   '2020-01-01, 31',
 ]);
 
-/** The same timeline written as years: four characters, and the profiler reads them as a measure. */
+/** A timeline written as years: one year per row, so the profiler reads it as the axis it is. */
 const YEARS = table('Year, Revenue', ['2019, 10', '2020, 14', '2021, 18', '2022, 26', '2023, 31']);
+
+/**
+ * The same timeline with gaps between the years.
+ *
+ * The profiler reads a *run* rather than a set of years, on purpose: a column of `2019, 2021, 2023`
+ * is indistinguishable by its values from a column of numbers in the same window, and the argument
+ * that made `2019, 2020, 2021` a calendar — a contiguous block, read one year per row — does not
+ * cover it. These rows therefore still lose the axis and are still refused a line, which is the
+ * residual the rule leaves and the fixture that keeps the refusal path exercised.
+ */
+const GAPPED = table('Year, Revenue', ['2019, 10', '2021, 14', '2023, 18', '2025, 26', '2027, 31']);
 
 /** A question that asks for the shape a line is drawn for. */
 const TREND = 'How has revenue changed over time?';
@@ -160,8 +171,11 @@ describe('which marks could have answered a family', () => {
 });
 
 describe('a column that formats as time', () => {
-  it('names a year typed as a measure, which is what refuses a line', () => {
-    const set = parseResultSet(YEARS);
+  it('names the year column a run does not cover, which is what still refuses a line', () => {
+    // A gapped column of years is still a measure, and the diagnostic exists to name that gap. The
+    // contiguous column is no longer reported because the profiler now reads it — the assertion below
+    // this file's neighbour in `packages/chart` prices what that is worth.
+    const set = parseResultSet(GAPPED);
     const found = timeLikeColumns(set, profilesOf(set));
     expect(found).toEqual([{ column: 'Year', typed: 'quantitative', sample: '2019', n: 1 }]);
   });
@@ -173,10 +187,15 @@ describe('a column that formats as time', () => {
 
   it('stops reporting a column once the profiler reads it as time', () => {
     // The diagnostic measures the gap between "a person reads a date" and "the profiler did", so it
-    // has to shrink when the profiler widens: quarters, month names and a year-and-month are now
-    // typed temporal, and only the shape the profiler still cannot read is left — a bare year, which
-    // is indistinguishable from a measure of the same magnitude and stays one on purpose.
-    for (const text of ['Q1 2019, 10\nQ2 2019, 12\nQ3 2019, 14', 'Jan 2019, 10\nFeb 2019, 12\nMar 2019, 14', '2019-01, 10\n2019-02, 12\n2019-03, 14']) {
+    // has to shrink when the profiler widens: quarters, month names, a year-and-month and — since the
+    // run rule — a contiguous column of years are typed temporal, and what is left is the shape the
+    // profiler still cannot read without guessing: a year column with gaps in it.
+    for (const text of [
+      'Q1 2019, 10\nQ2 2019, 12\nQ3 2019, 14',
+      'Jan 2019, 10\nFeb 2019, 12\nMar 2019, 14',
+      '2019-01, 10\n2019-02, 12\n2019-03, 14',
+      '2019, 10\n2020, 12\n2021, 14',
+    ]) {
       const set = parseResultSet(table('Period, Revenue', text.split('\n')));
       expect(timeLikeColumns(set, profilesOf(set))).toEqual([]);
     }
@@ -250,14 +269,21 @@ describe('what became of one question', () => {
     expect(report.outcomes.hit + report.outcomes.substituted).toBe(profile.shortlist);
   });
 
-  it('names the admission rule that refused a line over a year column', () => {
+  it('names the admission rule that refused a line over a gapped year column', () => {
     // The reading this instrument exists for. The table cell says `2019`, the profiler stores a
-    // number, `shape.ordered` is empty, and the sentence below is the product's own refusal — not a
-    // paraphrase of it, so a document can quote the rule it quotes here.
-    const row = expectOutcome(input(TREND, 'Line Chart', YEARS), 'refused');
+    // number, the block has holes in it, `shape.ordered` is empty, and the sentence below is the
+    // product's own refusal — not a paraphrase of it, so a document can quote the rule it quotes here.
+    const row = expectOutcome(input(TREND, 'Line Chart', GAPPED), 'refused');
     expect(row.outcome).toBe('refused');
     expect(row.covering).toBe('line');
     expect(row.reason).toBe('a line needs an axis and a measure');
+  });
+
+  it('reads a contiguous year column as the axis it is, which is the repair of the sentence above', () => {
+    // The other half of the same question, and the reason the rule was reversed: the same table with
+    // `2020` in it is a run, the profiler reads a period, `line` is admitted and wins, and the row is
+    // a hit. Nothing else changed — one value — so a reader can see that the rule is what decided it.
+    expect(classify(input(TREND, 'Line Chart', YEARS))).toEqual({ expected: 'line', outcome: 'hit' });
   });
 
   it('names the slice limit that refused a pie over twenty categories', () => {
@@ -495,7 +521,7 @@ describe('a table that would not profile, by the reason it would not', () => {
 describe('the census over a population', () => {
   const population: readonly ProfileInput[] = [
     input(TREND, 'Line Chart', QUARTERLY),
-    input(TREND, 'Line Chart', YEARS),
+    input(TREND, 'Line Chart', GAPPED),
     input('What percentage of revenue does each region contribute?', 'Pie Chart', regions(20)),
     input('What percentage of revenue does each region contribute?', 'Pie Chart', regions(5)),
     input(TREND, 'Violin Plot', QUARTERLY),
@@ -677,7 +703,7 @@ describe('the census over a population', () => {
     // The shape table is read as a decision, so its order has to be a fact and not an insertion
     // order. Marks tie first by count, then by name, then by the count that differs between them.
     const report = censusOf([
-      input(TREND, 'Line Chart', YEARS),
+      input(TREND, 'Line Chart', GAPPED),
       input(TREND, 'Line Chart', table('Price, Revenue', ['10, 1', '20, 2', '30, 3', '40, 4'])),
       input('Show the price range', 'Candlestick Chart', table('Date, Open, Close', ['2019-01-01, 1, 2', '2019-01-02, 2, 3', '2019-01-03, 3, 4'])),
       input('Show the price range', 'Candlestick Chart', table('Region, Open, Close', ['A, 1, 2', 'B, 2, 3', 'C, 3, 4'])),
@@ -750,6 +776,155 @@ describe('the census over a population', () => {
       input('Revenue by region and channel', 'Bar Chart', table('Region, Channel, Revenue', ['North, Online, 40', 'South, Retail, 55', 'East, Online, 31', 'West, Retail, 63'])),
     ]);
     expect(report.outranked.map((entry) => `${entry.expected}->${entry.winner}`)).toEqual(['bar->heatmap', 'bar->pie']);
+  });
+});
+
+describe('what the shipped typing is worth, measured by removing it', () => {
+  it('prices the run rule on the population that carries one, and only there', () => {
+    const report = censusOf([input(TREND, 'Line Chart', YEARS), input(TREND, 'Line Chart', GAPPED)]);
+    // One row carries a column the rule typed, and it is a hit with the rule and a refusal without
+    // it: `converted 1`, `lost 0`. The gapped row is not in the population, because the rule never
+    // fired on it — a price taken over the whole corpus would credit the rule with rows it never saw.
+    expect(report.calendar.rows).toBe(1);
+    expect(report.calendar.converted).toBe(1);
+    expect(report.calendar.lost).toBe(0);
+    expect(report.calendar.hit).toBe(report.outcomes.hit - 1);
+    expect(report.calendar.split).toEqual({ a: { converted: 1, lost: 0 }, b: { converted: 0, lost: 0 } });
+    expect(() => assertCensusReport(report)).not.toThrow();
+  });
+
+  it('reads zero when no row carries one, so the ablation cannot invent a price', () => {
+    const report = censusOf([input(TREND, 'Line Chart', QUARTERLY), input(TREND, 'Line Chart', GAPPED)]);
+    expect(report.calendar).toMatchObject({ rows: 0, converted: 0, lost: 0 });
+    expect(report.calendar.hit).toBe(report.outcomes.hit);
+  });
+
+  it('counts the rows the typing costs as well as the rows it wins', () => {
+    // A year column is also one of the numbers the table has: a boxplot needs five per row, and
+    // reading the year as an axis leaves four, so the mark the label asks for is refused where it
+    // used to be admitted. That is the −2 the corpus shows for boxplot, in one hand-built row, and
+    // the reason the price is published as a pair rather than as a gain.
+    const fiveNumbers = table('Year, A, B, C, D', ['2019, 1, 2, 3, 4', '2020, 2, 3, 4, 5', '2021, 3, 4, 5, 6', '2022, 4, 5, 6, 7', '2023, 5, 6, 7, 8']);
+    const report = censusOf([input('Show the numbers.', 'Box Plot', fiveNumbers)]);
+    expect(report.outcomes.refused).toBe(1);
+    expect(report.calendar).toMatchObject({ rows: 1, converted: 0, lost: 1, hit: 1 });
+    expect(report.calendar.split).toEqual({ a: { converted: 0, lost: 1 }, b: { converted: 0, lost: 0 } });
+    expect(() => assertCensusReport(report)).not.toThrow();
+  });
+
+  it('refuses a calendar price that does not reconcile with the hits it is quoted against', () => {
+    const report = censusOf([input(TREND, 'Line Chart', YEARS)]);
+    expect(() =>
+      assertCensusReport({ ...report, calendar: { ...report.calendar, converted: 2 } }),
+    ).toThrow(/un-typing the calendar/);
+    // The halves are a breakdown of the same two counts, so the total is checked first and the
+    // halves second: a broken total is a different defect from a total whose halves were not added,
+    // and a report that failed both should name the total.
+    expect(() =>
+      assertCensusReport({
+        ...report,
+        calendar: { ...report.calendar, converted: 1, hit: 0, split: { a: { converted: 0, lost: 0 }, b: { converted: 0, lost: 0 } } },
+      }),
+    ).toThrow(/calendar rule's two halves gain/);
+    expect(() =>
+      assertCensusReport({
+        ...report,
+        calendar: { ...report.calendar, converted: 0, lost: 1, hit: 2, split: { a: { converted: 0, lost: 0 }, b: { converted: 0, lost: 0 } } },
+      }),
+    ).toThrow(/two halves lose/);
+    // A rule cannot move more rows than carry the column it reads, and that is the third way to be
+    // inconsistent: the counts reconcile with the hits while the population they came from is empty.
+    expect(() =>
+      assertCensusReport({
+        ...report,
+        calendar: { ...report.calendar, rows: 0, hit: 0, converted: 1, split: { a: { converted: 1, lost: 0 }, b: { converted: 0, lost: 0 } } },
+      }),
+    ).toThrow(/moved 1 rows out of the 0/);
+  });
+
+  it('prints the ablation in the direction it shipped, with both halves', () => {
+    const report = censusOf([input(TREND, 'Line Chart', YEARS)]);
+    const lines = describeCensus(report).join('\n');
+    expect(lines).toContain('as if a contiguous run of years is a measure again: hit 1 -> 0');
+    expect(lines).toContain('converted 1, lost 0');
+    expect(lines).toContain('halves 1/0 and 0/0');
+  });
+});
+
+describe('the tables no mark can group by', () => {
+  const NO_AXIS = table('Revenue, Cost', ['10, 4', '14, 6', '18, 9', '26, 12']);
+
+  it('publishes them as a population with the marks they were refused, not as a score', () => {
+    const report = censusOf([input(TREND, 'Line Chart', NO_AXIS)]);
+    expect(report.ceiling.rows).toBe(1);
+    expect(report.ceiling.refused).toBe(1);
+    expect(report.ceiling.byFamily).toEqual([{ family: 'line', n: 1, refused: 1 }]);
+    expect(report.ceiling.marks).toEqual([{ mark: 'line', n: 1 }]);
+    expect(report.ceiling.samples).toHaveLength(1);
+    expect(() => assertCensusReport(report)).not.toThrow();
+  });
+
+  it('leaves a table with an axis out of it, which is what makes the count a ceiling', () => {
+    // The scatter label is answerable over the same table — two measures admit it — so the row is a
+    // hit and not a refusal; the ceiling is about the axis, and a mark that needs none is outside it.
+    const report = censusOf([input('How do revenue and cost relate?', 'Scatter Chart', NO_AXIS)]);
+    expect(report.outcomes.hit).toBe(1);
+    expect(report.ceiling.rows).toBe(1);
+    expect(report.ceiling.refused).toBe(0);
+    // A table that does carry an axis is not in the population at all, even when it is a miss.
+    const withAxis = censusOf([input(TREND, 'Line Chart', table('Region, Revenue', ['North, 10', 'South, 14']))]);
+    expect(withAxis.ceiling.rows).toBe(0);
+  });
+
+  it('puts a table that would not profile in noProfile and not in the ceiling', () => {
+    // The defect this fixture caught: `recommendChart` reports a shape of zero dims for a table it
+    // could not read at all, so counting every zero-dim shape made the ceiling 164 rows larger than
+    // the corpus and read as if a fifth of the benchmark had no axis.
+    const report = censusOf([input(TREND, 'Line Chart', ''), input(TREND, 'Line Chart', NO_AXIS)]);
+    expect(report.outcomes.noProfile).toBe(1);
+    expect(report.ceiling.rows).toBe(1);
+  });
+
+  it('refuses a ceiling larger than its own families or than the refusals that carry it', () => {
+    const report = censusOf([input(TREND, 'Line Chart', NO_AXIS), input(TREND, 'Line Chart', GAPPED)]);
+    expect(() => assertCensusReport({ ...report, ceiling: { ...report.ceiling, refused: 99 } })).toThrow(
+      /without an axis/,
+    );
+    // A ceiling cannot claim more refusals than the corpus classified as refused, even when its own
+    // arithmetic adds up: the two populations are the same rows, and a report where they disagree is
+    // a second corpus wearing the first one's denominator.
+    expect(() =>
+      assertCensusReport({
+        ...report,
+        outcomes: { ...report.outcomes, refused: 0, uncovered: report.outcomes.uncovered + report.outcomes.refused },
+      }),
+    ).toThrow(/the corpus has/);
+    expect(() =>
+      assertCensusReport({ ...report, ceiling: { ...report.ceiling, byFamily: [] } }),
+    ).toThrow(/ceiling's families account for 0 rows/);
+    expect(() =>
+      assertCensusReport({ ...report, ceiling: { ...report.ceiling, marks: [] } }),
+    ).toThrow(/ceiling's marks account for 0/);
+    // The per-family refused counts are a breakdown of the same rows, so they add to the ceiling's
+    // own count or the breakdown is about a different population.
+    expect(() =>
+      assertCensusReport({
+        ...report,
+        ceiling: { ...report.ceiling, byFamily: [...report.ceiling.byFamily.map((entry) => ({ ...entry, refused: 0 }))] },
+      }),
+    ).toThrow(/families account for 0 refusals/);
+  });
+
+  it('prints the ceiling beside the hits, so a shape nobody can encode is not read as a loss', () => {
+    const report = censusOf([input(TREND, 'Line Chart', NO_AXIS)]);
+    const lines = describeCensus(report).join('\n');
+    expect(lines).toContain('tables with no axis at all (the ceiling of an index-axis encoding): 1 rows, 1 refused');
+    expect(lines).toContain('line 1/1');
+  });
+
+  it('prints no ceiling line when every table offers an axis', () => {
+    const report = censusOf([input(TREND, 'Line Chart', QUARTERLY)]);
+    expect(describeCensus(report).join('\n')).not.toContain('no axis at all');
   });
 });
 

@@ -41,10 +41,10 @@ import type {
   RecommendableMark,
   ShapeCounts,
 } from '@agentix-e/nl2charts-chart';
-import { CHART_CUES, RECOMMENDABLE_MARKS, readCues, recommendChart } from '@agentix-e/nl2charts-chart';
+import { CHART_CUES, RECOMMENDABLE_MARKS, isCalendarRun, readCues, recommendChart } from '@agentix-e/nl2charts-chart';
 import { applyExitCode, isEntry, loadText2Vis, type LoadOptions } from './dataset.js';
 import { CUE_VARIANTS, familiesOfMark, familyOfLabel, type ChartFamily, type TableVariant } from './rule.js';
-import { numericCell, parseResultSet, profilesOf, type ProfileInput, type ResultSet } from './profile.js';
+import { numericCell, parseResultSet, profilesOf, typedRows, type ProfileInput, type ResultSet } from './profile.js';
 
 /**
  * The marks that could have answered a family, derived from `familiesOfMark` rather than restated.
@@ -402,6 +402,10 @@ export interface CensusReport {
   readonly noProfile: readonly NoProfileCensus[];
   /** What the next lever would do, counted over the same rows and not yet shipped. */
   readonly counterfactual: Counterfactual;
+  /** What the shipped typing is worth, priced on every run by un-typing it. */
+  readonly calendar: CalendarCensus;
+  /** The tables no mark can group by, published as a population rather than folded into the share. */
+  readonly ceiling: CeilingCensus;
   /** Columns that format as time and were not typed temporal, most rows first. */
   readonly timeLike: readonly TimeLike[];
   /** Rows whose table carries at least one such column. */
@@ -426,6 +430,68 @@ export interface CensusReport {
    */
   readonly product: readonly ProductVariant[];
   readonly variant: string;
+}
+
+/**
+ * What the shipped calendar rule is worth, measured by removing it.
+ *
+ * A rule that types a contiguous run of years as a period axis was shipped on a reading, and a
+ * reading that stops running is a number that can be quietly lost. This prices the rule on every run
+ * by asking the inverse question — take the columns the profiler called temporal because of a run,
+ * type them back as measures, and rank again — so the delta in `describeCensus` is always the delta
+ * of the code that is currently in the tree rather than of the commit that introduced it.
+ *
+ * `hit` is the reading *without* the rule. The identity `outcomes.hit - converted + lost === hit` is
+ * asserted, which is what makes this a counterfactual on the same rows instead of a second corpus.
+ */
+export interface CalendarCensus {
+  readonly rule: string;
+  /** Rows carrying a column the rule typed: the population the price is taken over. */
+  readonly rows: number;
+  /** Hits if those columns were measures again. */
+  readonly hit: number;
+  /** Rows the rule answers that the older typing does not. */
+  readonly converted: number;
+  /** Rows the older typing answers that the rule does not. */
+  readonly lost: number;
+  /**
+   * The same two counts over the two disjoint halves of the scored population.
+   *
+   * A lever that gains on one half and loses on the other has not been shown to gain. This one is
+   * published on every run rather than once, because the halves are cheap and the claim is not.
+   */
+  readonly split: {
+    readonly a: { readonly converted: number; readonly lost: number };
+    readonly b: { readonly converted: number; readonly lost: number };
+  };
+}
+
+/**
+ * The rows whose result set offers no axis at all.
+ *
+ * A table of two or more measures and no column a mark can group by cannot carry a bar, a line, a
+ * pie, an area, a heatmap, a radar or a parallel — every one of them groups rows. What is left is the
+ * scatter (two measures), the boxplot (five) and the gauge (one), so the only way to draw such a
+ * table as a trend is to *invent* an axis out of the row order.
+ *
+ * **This is a ceiling, not a score.** The refused count is the most an index-axis encoding could ever
+ * buy — those rows would still have to win the ranking afterwards — and it is published beside the
+ * hit share so a reader can see how much of the denominator is out of reach before reading a rule
+ * change as a ranking defect. It is not added to or subtracted from any hit count.
+ *
+ * The number was 177 rows before the calendar rule shipped, and 143 of them carried a column of
+ * consecutive years the profiler was typing as a measure: the "no axis at all" bucket was mostly a
+ * type-inference defect wearing its shape. What is left after the rule is the ceiling proper.
+ */
+export interface CeilingCensus {
+  readonly rows: number;
+  /** Of those, the rows whose covering mark was refused: the prize an index axis could compete for. */
+  readonly refused: number;
+  readonly byFamily: readonly { readonly family: ChartFamily; readonly n: number; readonly refused: number }[];
+  /** The marks that were refused on those rows, largest first: which families the axis would unlock. */
+  readonly marks: readonly { readonly mark: RecommendableMark; readonly n: number }[];
+  /** Up to three questions, verbatim, for the reason `ShapeCensus.samples` gives. */
+  readonly samples: readonly string[];
 }
 
 /**
@@ -702,6 +768,14 @@ interface NoProfileTally {
   samples: string[];
 }
 
+interface CeilingTally {
+  rows: number;
+  refused: number;
+  byFamily: Map<ChartFamily, { n: number; refused: number }>;
+  marks: Map<RecommendableMark, number>;
+  samples: string[];
+}
+
 interface ProductTally {
   hit: number;
   byFamily: Map<ChartFamily, { n: number; hit: number }>;
@@ -774,6 +848,14 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
   let underFirstClaims = 0;
   let converted = 0;
   let lost = 0;
+  const ceiling: CeilingTally = { rows: 0, refused: 0, byFamily: new Map(), marks: new Map(), samples: [] };
+  const calendar = {
+    rows: 0,
+    hit: 0,
+    converted: 0,
+    lost: 0,
+    split: { a: { converted: 0, lost: 0 }, b: { converted: 0, lost: 0 } },
+  };
 
   for (const row of rows) {
     if (familyOfLabel(row.label) === undefined) {
@@ -809,19 +891,26 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
     // The control's answer is read first and held: "changed" is only meaningful against the table
     // that ships, and the control is first in the list by construction.
     let control: RecommendableMark | undefined;
+    // The shape the product reports for this table, kept from the control's own call rather than
+    // re-derived here: the ceiling below asks "did this table offer an axis", and that answer has to
+    // be the one the admission rules read or it is a second opinion about the same table.
+    let controlDims: number | undefined;
     for (const candidate of PRODUCT_CANDIDATES) {
       const tally = product.get(candidate.name) as ProductTally;
       const cell = tally.byFamily.get(classified.expected) ?? { n: 0, hit: 0 };
       cell.n += 1;
-      const top = recommendChart(row.prompt, profiles, {
+      const choice = recommendChart(row.prompt, profiles, {
         cues: candidate.cues,
         // Only when the entry is about the cap: passing the default explicitly would make every cue
         // table a second test of a number none of them changes.
         ...(candidate.maxSlices === undefined ? {} : { maxSlices: candidate.maxSlices }),
-      }).recommendations[0];
+      });
+      const top = choice.recommendations[0];
       const lead = top === undefined ? undefined : familiesOfMark(top.mark, top.cues[0]);
-      if (candidate === PRODUCT_CANDIDATES[0]) control = top?.mark;
-      else if (top?.mark !== control) tally.moved += 1;
+      if (candidate === PRODUCT_CANDIDATES[0]) {
+        control = top?.mark;
+        controlDims = choice.shape.dims;
+      } else if (top?.mark !== control) tally.moved += 1;
       if (lead !== undefined && lead[0] === classified.expected) {
         tally.hit += 1;
         cell.hit += 1;
@@ -840,6 +929,60 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
       if (answers) underFirstClaims += 1;
       if (answers && !answered) converted += 1;
       if (!answers && answered) lost += 1;
+    }
+    // What the shipped typing is worth: the columns the profiler called temporal because they walk
+    // the calendar are typed back to measures and the row is ranked again. Asking the product's own
+    // predicate rather than restating the rule is the whole point — a copy of the rule here would be
+    // a second answer to "is this a year", and the reading would then be about the copy.
+    const runs =
+      profiles.length === 0
+        ? []
+        : (() => {
+            const typed = typedRows(set);
+            return set.columns.filter((name) => isCalendarRun(typed.map((cells) => cells[name])));
+          })();
+    if (profiles.length > 0) {
+      // `rows` is the population the price is taken *over*; `hit` is a count over the whole scored
+      // population, because the identity it has to satisfy is about the whole corpus. A row with no
+      // run keeps the answer it already had, which is what makes the ablation a re-ranking of one
+      // column rather than a second reading of the corpus.
+      if (runs.length > 0) calendar.rows += 1;
+      let under: boolean;
+      if (runs.length === 0) {
+        under = classified.outcome === 'hit';
+      } else {
+        const untyped = profiles.map((profile) =>
+          runs.includes(profile.name) ? { ...profile, type: 'quantitative' as const } : profile,
+        );
+        const top = recommendChart(row.prompt, untyped).recommendations[0];
+        under = top !== undefined && familiesOfMark(top.mark, top.cues[0])[0] === classified.expected;
+      }
+      const answered = classified.outcome === 'hit';
+      if (under) calendar.hit += 1;
+      if (answered && !under) {
+        calendar.converted += 1;
+        calendar.split[half].converted += 1;
+      }
+      if (!answered && under) {
+        calendar.lost += 1;
+        calendar.split[half].lost += 1;
+      }
+    }
+    // The ceiling: a table with no column any mark can group by is a population, not a score. Its
+    // refused rows are the most an index-axis encoding could buy, and they are published beside the
+    // hit count so that a shape nobody can encode is not read as a ranking that lost. A table that
+    // would not profile is not part of it: it has no shape to read, and `noProfile` already owns it.
+    if (profiles.length > 0 && controlDims === 0) {
+      ceiling.rows += 1;
+      const cell = ceiling.byFamily.get(classified.expected) ?? { n: 0, refused: 0 };
+      cell.n += 1;
+      if (classified.outcome === 'refused') {
+        ceiling.refused += 1;
+        cell.refused += 1;
+        ceiling.marks.set(classified.covering, (ceiling.marks.get(classified.covering) ?? 0) + 1);
+        if (ceiling.samples.length < 3) ceiling.samples.push(snippet(row.prompt));
+      }
+      ceiling.byFamily.set(classified.expected, cell);
     }
     const mistyped = profiles.length === 0 ? [] : timeLikeColumns(set, profiles);
     if (mistyped.length > 0) timeLikeRows += 1;
@@ -994,6 +1137,25 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
       converted,
       lost,
     },
+    calendar: {
+      rule: 'a contiguous run of years is a measure again',
+      rows: calendar.rows,
+      hit: calendar.hit,
+      converted: calendar.converted,
+      lost: calendar.lost,
+      split: calendar.split,
+    },
+    ceiling: {
+      rows: ceiling.rows,
+      refused: ceiling.refused,
+      byFamily: [...ceiling.byFamily.entries()]
+        .map(([family, cell]) => ({ family, n: cell.n, refused: cell.refused }))
+        .sort((left, right) => right.n - left.n || left.family.localeCompare(right.family)),
+      marks: [...ceiling.marks.entries()]
+        .map(([mark, n]) => ({ mark, n }))
+        .sort((left, right) => right.n - left.n || left.mark.localeCompare(right.mark)),
+      samples: ceiling.samples,
+    },
     timeLike: [...timeLike.values()].sort(
       (left, right) => right.n - left.n || left.column.localeCompare(right.column),
     ),
@@ -1060,6 +1222,63 @@ export function assertCensusReport(report: CensusReport): void {
   if (report.counterfactual.hit !== report.outcomes.hit + converted - lost) {
     throw new Error(
       `census report: the counterfactual reads ${String(report.counterfactual.hit)} hits, which is not ${String(report.outcomes.hit)} + ${String(converted)} converted - ${String(lost)} lost`,
+    );
+  }
+  // The same identity for the typing, and for the same reason: this one is an *ablation* rather than
+  // a prediction — it removes a shipped rule and re-ranks — so a reader quoting the price of the
+  // calendar rule is quoting a measurement, and a measurement has to reconcile with the count it is
+  // quoted against.
+  const calendar = report.calendar;
+  if (calendar.hit !== report.outcomes.hit - calendar.converted + calendar.lost) {
+    throw new Error(
+      `census report: un-typing the calendar reads ${String(calendar.hit)} hits, which is not ${String(report.outcomes.hit)} - ${String(calendar.converted)} converted + ${String(calendar.lost)} lost`,
+    );
+  }
+  if (calendar.split.a.converted + calendar.split.b.converted !== calendar.converted) {
+    throw new Error(
+      `census report: the calendar rule's two halves gain ${String(calendar.split.a.converted)} + ${String(calendar.split.b.converted)} rows, which is not the ${String(calendar.converted)} it reports`,
+    );
+  }
+  if (calendar.split.a.lost + calendar.split.b.lost !== calendar.lost) {
+    throw new Error(
+      `census report: the calendar rule's two halves lose ${String(calendar.split.a.lost)} + ${String(calendar.split.b.lost)} rows, which is not the ${String(calendar.lost)} it reports`,
+    );
+  }
+  if (calendar.converted + calendar.lost > calendar.rows) {
+    throw new Error(
+      `census report: the calendar rule moved ${String(calendar.converted + calendar.lost)} rows out of the ${String(calendar.rows)} that carry one`,
+    );
+  }
+  // The ceiling is a population and not a bucket of its own: every row in it is a scored row, and the
+  // refused rows are a subset of the refusals the report already publishes. A ceiling larger than the
+  // corpus, or a refusal count larger than the ceiling, is a share about to be taken over nothing.
+  const ceiling = report.ceiling;
+  if (ceiling.refused > ceiling.rows) {
+    throw new Error(
+      `census report: the ceiling reports ${String(ceiling.refused)} refusals out of ${String(ceiling.rows)} rows without an axis`,
+    );
+  }
+  if (ceiling.refused > report.outcomes.refused) {
+    throw new Error(
+      `census report: the ceiling claims ${String(ceiling.refused)} refusals and the corpus has ${String(report.outcomes.refused)}`,
+    );
+  }
+  const inCeiling = ceiling.byFamily.reduce((total, entry) => total + entry.n, 0);
+  if (inCeiling !== ceiling.rows) {
+    throw new Error(
+      `census report: the ceiling's families account for ${String(inCeiling)} rows and the ceiling is ${String(ceiling.rows)}`,
+    );
+  }
+  const refusedInCeiling = ceiling.byFamily.reduce((total, entry) => total + entry.refused, 0);
+  if (refusedInCeiling !== ceiling.refused) {
+    throw new Error(
+      `census report: the ceiling's families account for ${String(refusedInCeiling)} refusals and the ceiling reports ${String(ceiling.refused)}`,
+    );
+  }
+  const marksInCeiling = ceiling.marks.reduce((total, entry) => total + entry.n, 0);
+  if (marksInCeiling !== ceiling.refused) {
+    throw new Error(
+      `census report: the ceiling's marks account for ${String(marksInCeiling)} refusals and the ceiling reports ${String(ceiling.refused)}`,
     );
   }
   // The product sweep's first entry is the table that ships, scored through a second code path: the
@@ -1163,6 +1382,27 @@ export function describeCensus(report: CensusReport): readonly string[] {
   lines.push(
     `  as if ${under.rule}: hit ${String(outcome.hit)} -> ${String(under.hit)} (converted ${String(under.converted)}, lost ${String(under.lost)}) — predicted, not shipped`,
   );
+  // The ablation of a rule that already shipped, printed in the direction it was shipped: what the
+  // product would lose if the typing went back. A counterfactual that is never run again is a claim
+  // about a commit; this one is a claim about the tree.
+  const calendar = report.calendar;
+  lines.push(
+    `  as if ${calendar.rule}: hit ${String(outcome.hit)} -> ${String(calendar.hit)} (converted ${String(calendar.converted)}, lost ${String(calendar.lost)}, halves ${String(calendar.split.a.converted)}/${String(calendar.split.a.lost)} and ${String(calendar.split.b.converted)}/${String(calendar.split.b.lost)}) — the shipped typing, ablated`,
+  );
+  // The ceiling, printed after the two counterfactuals because it is not one: a row here has no
+  // candidate to rank, and the count says how much of the denominator is out of reach before any
+  // rule changes.
+  const ceiling = report.ceiling;
+  if (ceiling.rows > 0) {
+    const families = ceiling.byFamily
+      .slice(0, 4)
+      .map((entry) => `${entry.family} ${String(entry.n)}/${String(entry.refused)}`)
+      .join(', ');
+    lines.push(
+      `  tables with no axis at all (the ceiling of an index-axis encoding): ${String(ceiling.rows)} rows, ${String(ceiling.refused)} refused a mark that needs one — ${families}`,
+    );
+    for (const sample of ceiling.samples.slice(0, 2)) lines.push(`    e.g. "${sample}"`);
+  }
   lines.push(...describeProduct(report));
   return lines;
 }
