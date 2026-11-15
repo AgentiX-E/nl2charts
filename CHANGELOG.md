@@ -7,6 +7,27 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **A column of years is a time axis in either transport.** `inferType` read `'2019'` as `temporal`
+  through `PERIOD` and `2019` as `quantitative`, so the same column lost its axis when a driver handed
+  over a `YEAR` instead of a CSV — and every bar, line, pie and area over it was refused. The new rule
+  reads the shape of a timeline instead of the size of its numbers: `isCalendarRun` requires every value
+  to be an integer, no value to repeat, the distinct values to be a contiguous block inside 1900–2100,
+  and the rows to read one year apart. On the 1,470 Text2Vis rows this moves the product **362 → 411
+  (24.63% → 27.96%)**, +53 rows converted against 4 lost, both halves up (22/2 and 31/2), and the
+  diagnostic that counts time-formatted columns typed as measures falls from 165 rows to 51. The bucket
+  it came from is the point: 175 of the 209 tables registered as "no axis at all" carried a year run,
+  so the capability the plan asked for would have invented an axis for tables that already had one.
+- **The ablation of a shipped rule runs on every census, not once.** `census` now un-types the columns
+  `isCalendarRun` accepted, re-ranks the row, and publishes `converted`/`lost` with the two halves, so
+  the price of the rule is measured against the tree that ships instead of against the commit that
+  introduced it. `assertCensusReport` refuses a report where the count does not reconcile
+  (`hit − converted + lost`), where the halves do not add up, or where the rule moved more rows than
+  carry a column it reads.
+- **A ceiling, published as a population rather than as a score.** 34 tables offer no column a mark can
+  group by, and 30 of them are refused a mark that needs one (13 line, 7 area, 5 bar, 4 pie). That is
+  the most an index-axis encoding could ever buy, so it is counted and printed beside the hit share
+  without entering it — after the typing fix it is a ceiling, and before it was 177 rows that were
+  85% a type-inference defect.
 - **The slice cap is twelve, and it is the first value that was measured.** `maxSlices` defaulted to
   seven and no reading had ever priced it. The census now prices the cap at 7, 8, 9, 10, 12 and
   unbounded on the 1,470 Text2Vis rows, and the curve is not monotone: **eight and nine read three rows

@@ -13251,6 +13251,11 @@ written before the dispatch.
 `[2019, 2020]` stays a measure, because a column of prices in the 2000s is indistinguishable from a
 column of years.
 
+*Superseded, and quoted here because a reading that stops being true is worth keeping in the record
+that said it: the numeric half was priced two rounds later and reversed. A contiguous run of years read
+one year per row is a calendar, and typing it as one is worth +49 hits — see "A year is a year in either
+transport" below.*
+
 Refusals 831 → 809 and outranked 216 → 238: twenty-two rows became reachable and none became a hit.
 The measure of this lever is reachability, not score.
 
@@ -13927,3 +13932,103 @@ suppressing it, not a better claim.
    stated before the reading — not chosen after seeing which candidate won.
 5. **A negative contribution can be a true number and a bad trade.** The corpus is one corpus: it has 90
    boxplot rows and 6 hits, and it cannot price what a user asking for quartiles needs.
+
+## A year is a year in either transport: +3.33pp, and the bucket that was named after a missing capability
+
+The previous round registered its next task as a capability: 175 rows have two or more measures and no
+column a mark can group by, so nothing but a scatter, a boxplot or a gauge can be drawn over them, and
+"row order as the x axis" would be a new encoding. The plan was to publish the ceiling before building
+it. Opening the bucket first was the round's actual work, and it changed the plan.
+
+Of the 209 tables with no groupable column, **193 carry a first column of years**. `2019, 2020, 2021` in
+the corpus, `2024.0` in a spreadsheet export, and the profiler read every one of them as a measure —
+because `inferType` typed a *string* `'2019'` as `temporal` through `PERIOD` and typed the *number* `2019`
+as `quantitative`, on the argument that a column of prices in the 2000s is indistinguishable from a column
+of years. That argument is right about magnitude and wrong about the case in front of it: the same column
+was getting two types depending on whether the driver handed over a `YEAR` or a CSV.
+
+So the bucket named "no axis at all" was mostly a type-inference defect wearing that shape. 175 of the 209
+rows carry a run. The capability the plan asked for would have invented an axis for tables that already
+had one.
+
+### The rule, and the five ways to fail it
+
+`isCalendarRun` reads the shape a timeline has rather than the size of its numbers: every value an
+integer, no value repeated, the distinct values a contiguous block inside 1900–2100, and the rows one year
+apart, ascending or descending. Each condition is a way for a measure to fail it, and the last is what
+makes it a timeline rather than a set — a column of three consecutive years printed out of order is a
+sample, not a period.
+
+The frontier was swept before it shipped, on the same 1,470 rows:
+
+| rule | rows | hit | Δ | +/− | halves |
+| --- | --- | --- | --- | --- | --- |
+| none (before) | — | 362 (24.63%) | — | — | 169 / 193 |
+| **contiguous run ≥3, in row order (shipped)** | **182** | **411 (27.96%)** | **+49** | **+53 / −4** | **+22 / −2, +31 / −2 → 189 / 222** |
+| contiguous run ≥4 | 168 | 405 (27.55%) | +43 | +46 / −3 | +18 / +25 (net) |
+| contiguous run ≥5 | 161 | 405 (27.55%) | +43 | +46 / −3 | +18 / +25 (net) |
+| any constant step (2, 3, 5 …) | 207 | 413 (28.10%) | +2 over the shipped rule | +6 / −4 | +1 / +1 (net) |
+| contiguous block, row order **not** required | 182 | 411 | ±0 | 0 / 0 | — |
+
+Two things in that table decided the rule. The step-2 case (`2019, 2021, 2023`) buys six rows and costs
+four for a rule three times wider — refused, and recorded here so the next round does not rediscover it.
+And the row-order condition, which is the justification the sentence needs, costs **nothing at all** on
+this corpus: no qualifying column is out of order. A guard that is free is still worth keeping when it is
+the difference between reading a timeline and guessing from magnitude.
+
+The four lost rows are the same mechanism the corpus already shows as boxplot −2: a year column is one of
+the numbers a table has, and a boxplot needs five of them per row, so reading the year as an axis leaves
+four and refuses the mark the label asks for. The price is published as a pair, not as a gain.
+
+| family | Δ | what moved |
+| --- | --- | --- |
+| line | **+36** | a trend over years is now drawable, and wins |
+| bar | **+15** | the axis that was missing is what a bar needs too |
+| funnel | +1 | an ordered stage axis |
+| scatter | −1 | a table with two measures and no axis is a scatter, and one of them was a year |
+| boxplot | −2 | five numbers became four |
+
+### The reading moved, and so did the bucket it came from
+
+| | before | after |
+| --- | --- | --- |
+| product top-1 | 362 (24.63%) | **411 (27.96%)** |
+| shortlist | 386 | 450 (30.61%) |
+| refused | 540 | 420 |
+| outranked | 304 | 360 |
+| substituted | 24 | 39 |
+| time-formatted columns still typed as measures | 165 rows | **51 rows** |
+| tables with no axis at all | 209 rows (177 refused) | **34 rows (30 refused)** |
+
+The last row is the ceiling, and it is published as a population rather than as a score: of the 34 tables
+that genuinely offer no column to group by, 30 are refused a mark that needs one — 13 line, 7 area, 5 bar,
+4 pie. That is the most an index-axis encoding could ever buy, and the ranking would still have to win
+those rows afterwards. It is not added to the hit count and not subtracted from it; it sits beside the
+share so that a shape nobody can encode is never read as a ranking that lost.
+
+### The ablation is now part of the report, not part of a commit
+
+A rule shipped on a reading is a rule that can be quietly lost, so `census` un-types it on every run:
+take the columns the profiler called temporal because of a run, type them back as measures, rank again,
+and publish the pair. On the corpus that reads **411 → 362, converted 53, lost 4**, over halves of 22/2
+and 31/2, and `assertCensusReport` refuses a report where the count does not reconcile
+(`hit − converted + lost`). The number in this chapter is therefore a measurement of the tree rather
+than of the commit that introduced it.
+
+### What changes in the method
+
+1. **A bucket named after a missing capability can be a bug wearing that shape.** The plan said "these
+   tables need an index axis"; 175 of 209 already had an axis, typed wrongly. Open the bucket before
+   building the capability, because a capability is the expensive answer to a question nobody re-asked.
+2. **A type that depends on the transport is not a type.** `'2019'` and `2019` are the same column. When
+   two code paths disagree about a value, the disagreement is the defect, and the fix is to make one of
+   them read the evidence rather than to widen the other.
+3. **Magnitude is not evidence; shape is.** The old rule refused to guess from size and was right. The
+   new rule reads a contiguous block in row order, which is a property no price column has, and it is
+   why the rule could be shipped without turning a measure into an axis.
+4. **A guard that costs nothing on the corpus is still load-bearing.** The row-order condition moved no
+   row of this reading; it is what makes the rule's sentence true, and a rule whose sentence is not true
+   is a rule the next round has to re-derive.
+5. **An ablation that runs once is a claim about a commit.** The un-typing is now a field of the census,
+   asserted against the hit count, so the price of the rule is on every log line instead of in a
+   chapter.
