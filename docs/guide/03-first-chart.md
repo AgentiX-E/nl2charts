@@ -28,9 +28,18 @@ many nulls, and (for numbers) the range.
 ```
 
 Type inference is intentionally simple and explainable: all numbers are
-quantitative unless cardinality is very low (then ordinal); ISO-looking strings
-are temporal; everything else is nominal. If your column is misclassified, build
-the `ChartIR` by hand with the type you know.
+quantitative unless cardinality is very low (then ordinal) or the column walks
+the calendar (then temporal); ISO-looking strings are temporal; everything else
+is nominal. If your column is misclassified, build the `ChartIR` by hand with the
+type you know.
+
+A column counts as a calendar when every value is an integer, none repeats, the
+distinct values are a contiguous block inside 1900–2100, and the rows read one
+year apart. That is deliberately stricter than "four digits in the 2010s": a
+column of prices in the 2000s is a measure, and the same column of years with
+gaps in it stays one too. The reason the rule exists at all is that a `YEAR`
+column arrives as a number from most drivers and as text from most CSVs, and
+those two transports used to produce two different charts for the same data.
 
 ## 2. Ask for candidates
 
