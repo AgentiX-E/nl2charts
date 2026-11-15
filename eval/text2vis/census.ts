@@ -454,6 +454,17 @@ export interface ProductVariant {
    * published rather than a p-value, because the reader is the one who has to decide.
    */
   readonly split: { readonly a: number; readonly b: number };
+  /**
+   * Rows whose leading mark differs from the control's.
+   *
+   * The hit count answers "what does this entry cost", and that is not the same question as "what
+   * does it change": five cues in this table move nothing on the score, because the corpus has no row
+   * whose hit they could take — a funnel cue over eleven rows that are all misses is worth zero hits
+   * either way, while every one of those eleven answers changes from a funnel to a bar. An ablation
+   * that published only the delta would read as "these cues do nothing", which is a claim about the
+   * product that the reading does not support.
+   */
+  readonly moved: number;
 }
 
 /** A year, a quarter, a month name, or a year-and-month — the shapes a result set writes time in. */
@@ -695,6 +706,7 @@ interface ProductTally {
   hit: number;
   byFamily: Map<ChartFamily, { n: number; hit: number }>;
   split: { a: number; b: number };
+  moved: number;
 }
 
 /**
@@ -751,7 +763,7 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
   // of zero, and a table missing from the report because nobody added a key would be a reading of
   // nothing — the two are indistinguishable to a reader, and only one of them is true.
   const product = new Map<string, ProductTally>(
-    PRODUCT_CANDIDATES.map((candidate) => [candidate.name, { hit: 0, byFamily: new Map(), split: { a: 0, b: 0 } }]),
+    PRODUCT_CANDIDATES.map((candidate) => [candidate.name, { hit: 0, byFamily: new Map(), split: { a: 0, b: 0 }, moved: 0 }]),
   );
   let scored = 0;
   let unmapped = 0;
@@ -794,6 +806,9 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
     // The half a row belongs to is decided by its position in the *scored* population, so the two
     // halves are halves of the denominator the hit count is taken over and not of the file.
     const half = scored % 2 === 0 ? 'b' : 'a';
+    // The control's answer is read first and held: "changed" is only meaningful against the table
+    // that ships, and the control is first in the list by construction.
+    let control: RecommendableMark | undefined;
     for (const candidate of PRODUCT_CANDIDATES) {
       const tally = product.get(candidate.name) as ProductTally;
       const cell = tally.byFamily.get(classified.expected) ?? { n: 0, hit: 0 };
@@ -805,6 +820,8 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
         ...(candidate.maxSlices === undefined ? {} : { maxSlices: candidate.maxSlices }),
       }).recommendations[0];
       const lead = top === undefined ? undefined : familiesOfMark(top.mark, top.cues[0]);
+      if (candidate === PRODUCT_CANDIDATES[0]) control = top?.mark;
+      else if (top?.mark !== control) tally.moved += 1;
       if (lead !== undefined && lead[0] === classified.expected) {
         tally.hit += 1;
         cell.hit += 1;
@@ -995,6 +1012,7 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
         hit: tally.hit,
         hitShare: scored === 0 ? 0 : tally.hit / scored,
         split: { a: tally.split.a, b: tally.split.b },
+        moved: tally.moved,
         byFamily: [...tally.byFamily.entries()]
           .map(([family, cell]) => ({ family, n: cell.n, hit: cell.hit }))
           .sort((left, right) => right.n - left.n || left.family.localeCompare(right.family)),
@@ -1056,6 +1074,11 @@ export function assertCensusReport(report: CensusReport): void {
   if (shipped.hit !== report.outcomes.hit) {
     throw new Error(
       `census report: the product sweep reads ${String(shipped.hit)} hits for the shipped table and the census reads ${String(report.outcomes.hit)}, so one of the two is not the product`,
+    );
+  }
+  if (shipped.moved !== 0) {
+    throw new Error(
+      `census report: the control claims it changed ${String(shipped.moved)} answers, and a table cannot differ from itself`,
     );
   }
   for (const variant of report.product) {
