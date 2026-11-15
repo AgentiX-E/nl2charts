@@ -31,7 +31,7 @@ import {
   coveringMarks,
   describeCensus,
   entryCensus,
-  firstClaimWinner,
+  firstAdmissibleWinner,
   noProfileReason,
   parseCensusArgs,
   snippet,
@@ -329,69 +329,90 @@ describe('what became of one question', () => {
 });
 
 describe('a question, cut to the words that decide', () => {
-  it('keeps the end of the prompt, because the corpus puts the question there', () => {
+  it('finds the question in a prompt wrapped in instructions', () => {
+    // The corpus wraps every row as: instruction block, question, output-format spec. Only the middle
+    // part distinguishes one row from another, and the first two versions of this cut printed the
+    // other two — first the instructions at the front, then the schema at the back.
     const prompt = [
       'You are a data science assistant.',
       'Generate matplotlib code to answer the question below.',
       'The table has already been loaded into a pandas dataframe named df.',
       'Include axis labels, a legend and a title in the figure.',
-      'Use the colour column where the table has one, and sort the categories.',
-      'Do not print the dataframe; only the figure is inspected.',
       'Which region has the highest revenue?',
+      'Write Python code using **matplotlib only** to visualize the result.',
+      'Return your response strictly in the following JSON format **without any extra explanation**:',
+      '{"answer": "<short answer>", "code": "<matplotlib code for visualization>"}',
     ].join('\n');
-    const cut = snippet(prompt);
-    expect(cut.startsWith('…')).toBe(true);
-    expect(cut.endsWith('Which region has the highest revenue?')).toBe(true);
-    expect(cut).not.toContain('You are a data science assistant');
+    expect(snippet(prompt)).toBe('Which region has the highest revenue?');
   });
 
   it('collapses the whitespace a wrapped question carries', () => {
     expect(snippet('What is\nthe trend   of revenue?')).toBe('What is the trend of revenue?');
   });
 
-  it('cuts the output-format spec off the end, because the question sits in front of it', () => {
-    // The corpus asks for JSON in every prompt, and the schema is longer than the question it
-    // follows. Keeping the tail kept the schema: the first version of this cut printed the same
-    // `"code": "<matplotlib code for visualization>"` sentence three hundred times.
+  it('keeps the last question when a prompt asks more than one', () => {
+    // Some prompts restate the task before asking ("What is the trend? Which region leads?"), and the
+    // question the row is labelled for is the one nearest the answer request, not the first.
+    expect(snippet('What is the trend? Which region leads? Then draw it.')).toBe('Which region leads?');
+  });
+
+  it('cuts the code instruction when there is no question at all', () => {
+    // A command rather than a question: `plot these percentages in order of increasing Value on a
+    // line chart` is a Text2Vis row verbatim, and it has no `?` to find. The instruction that follows
+    // it is still boilerplate, so it is cut and the tail is kept.
     const prompt =
-      'You are a data science assistant. Question: what is the trend of revenue? Format the answer as {"answer": "<short answer>", "code": "<matplotlib code for visualization>"} The code should be complete and work without modification.';
-    const cut = snippet(prompt);
-    expect(cut.endsWith('what is the trend of revenue? Format the answer as')).toBe(true);
-    expect(cut).not.toContain('matplotlib');
+      'Plot these percentages in order of increasing Value on a line chart. Write Python code using **matplotlib only** to visualize the result.';
+    expect(snippet(prompt)).toBe('Plot these percentages in order of increasing Value on a line chart.');
   });
 
   it('leaves a short prompt alone, so a sample reads as the corpus wrote it', () => {
     expect(snippet('  Revenue by region  ')).toBe('Revenue by region');
   });
 
-  it('cuts from the left rather than the right, because the boilerplate is at the front', () => {
-    const long = `${'Include axis labels. '.repeat(20)}what is the trend?`;
+  it('keeps the tail of a long prompt that has neither a question nor a code instruction', () => {
+    // The last path in the cut, and it has to exist: a command with no `?` and no instruction block
+    // is still a prompt the census prints, and dropping it to an empty string would lose the row.
+    const long = `${'Plot the series for each region in increasing order of value. '.repeat(6)}`;
     const cut = snippet(long);
-    expect(cut.length).toBeLessThanOrEqual(161);
-    expect(cut.endsWith('what is the trend?')).toBe(true);
-  });
-  it('ranks a first claim above any number of second places, which is the lever it models', () => {
-    // Bar is the second mark of `trend`, `share`, `matrix`, `ranking`, `distribution`, `progress` and
-    // `stages`, so a prompt carrying three cue phrases pays it twice each: it can beat a mark the
-    // question named outright. This is that row, and the model of the rule that would stop it.
-    const prompt = 'What is the trend of revenue by month and region?';
-    const profiles = profilesOf(parseResultSet(regions(5)));
-    const choice = recommendChart(prompt, profiles);
-    const shipped = choice.recommendations[0];
-    const under = firstClaimWinner(choice, readCues(prompt));
-    expect(shipped?.mark).toBe('bar');
-    expect(under?.mark).toBe('line');
-    // The stable sort keeps the product's order underneath, so the model restates no weight: the
-    // line wins on the first-claim count and carries a lower score.
-    expect(under?.score).toBeLessThan(shipped?.score ?? 0);
+    expect(cut.startsWith('…')).toBe(true);
+    expect(cut).toHaveLength(161);
+    expect(cut.endsWith('in increasing order of value.')).toBe(true);
   });
 
-  it('leaves the order alone when no cue names anything first', () => {
-    // A question with no cue phrase in it cannot be re-ranked by first claims, and the model has to
-    // return the product's own order rather than reshuffling on a fact nobody stated.
+  it('cuts a long question from the left, because the end of a question is what it asks', () => {
+    const long = `${'Which of these regions '.repeat(12)}had the highest revenue?`;
+    const cut = snippet(long);
+    expect(cut.length).toBeLessThanOrEqual(161);
+    expect(cut.endsWith('had the highest revenue?')).toBe(true);
+  });
+
+  it('models a cue paying only the mark it can admit, which is the next lever', () => {
+    // `share` fires on "percentage" and pays the pie three points and the bar two, whether or not a
+    // pie was drawable. The model reads the list as what it says — "a pie, or a bar if a pie cannot
+    // be drawn" — so a question with one cue pays one mark.
+    const prompt = 'What percentage of revenue does each region hold?';
+    const choice = recommendChart(prompt, profilesOf(parseResultSet(regions(5))));
+    const under = firstAdmissibleWinner(choice, readCues(prompt));
+    expect(under?.mark).toBe('pie');
+    expect(under?.score).toBe(5);
+    // The shipped ranking already answers this row with a pie, so the model cannot take it away.
+    expect(choice.recommendations[0]?.mark).toBe('pie');
+  });
+
+  it('models the cost too, on the rows where the fallback is what the label wants', () => {
+    // A bar label over a share question: the cue names the pie first and the bar second, and the
+    // model stops paying the bar for being the fallback. A model that reported only wins would be an
+    // advertisement rather than a price.
+    const prompt = 'What percentage of revenue does each region hold?';
+    const choice = recommendChart(prompt, profilesOf(parseResultSet(regions(5))));
+    expect(choice.recommendations.map((entry) => entry.mark)).toContain('bar');
+    expect(firstAdmissibleWinner(choice, readCues(prompt))?.mark).not.toBe('bar');
+  });
+
+  it('leaves the order alone when no cue fires, because a model may not invent a fact', () => {
     const profiles = profilesOf(parseResultSet(regions(5)));
     const choice = recommendChart('Show the numbers.', profiles);
-    expect(firstClaimWinner(choice, readCues('Show the numbers.'))).toEqual(choice.recommendations[0]);
+    expect(firstAdmissibleWinner(choice, readCues('Show the numbers.'))).toEqual(choice.recommendations[0]);
   });
 });
 
@@ -495,12 +516,13 @@ describe('the census over a population', () => {
 
   it('prices the next lever on this population rather than on a claim about it', () => {
     const report = censusOf(population);
-    // Neither loss here is caused by a second place outpaying a first claim: `bar -> heatmap` loses
-    // to the only first claim in the question, and `heatmap -> bar` has no cue at all. A lever that
-    // ranks first claims higher converts nothing on this population and costs nothing, which is the
-    // honest reading of a fixture that does not contain the shape the lever targets.
+    // Neither loss here is one a fallback payment caused: `bar -> heatmap` loses to the only first
+    // claim in the question, and `heatmap -> bar` has no cue at all. A rule that pays one mark per
+    // cue converts nothing on this population and costs nothing, which is the honest reading of a
+    // fixture that does not contain the shape the rule targets — and the reason the corpus fixture
+    // for it is written by hand rather than borrowed from here.
     expect(report.counterfactual).toEqual({
-      rule: 'a mark a cue names first outranks a mark no cue names first',
+      rule: 'a cue pays only the first mark it can admit',
       hit: 2,
       converted: 0,
       lost: 0,
@@ -557,11 +579,20 @@ describe('the census over a population', () => {
   });
 
   it('counts what the lever would convert, on a row the shipped ranking loses', () => {
-    const report = censusOf([input('What is the trend of revenue by month and region?', 'Line Chart', regions(5))]);
+    // Correlation names the scatter, matrix names the heatmap, and the heatmap collects the other
+    // cue's second place (7 against 5). Paying one mark per cue removes that point and the tie goes
+    // to the scatter, which is ahead of the heatmap in the preference order.
+    const both = table('Region, Channel, Price, Rating', [
+      'North, Online, 12, 40',
+      'South, Retail, 18, 55',
+      'East, Online, 9, 31',
+      'West, Retail, 21, 63',
+    ]);
+    const report = censusOf([input('Is price related to rating, by region and channel?', 'Scatter Chart', both)]);
     expect(report.outcomes.hit).toBe(0);
     expect(report.outcomes.outranked).toBe(1);
     expect(report.counterfactual).toEqual({
-      rule: 'a mark a cue names first outranks a mark no cue names first',
+      rule: 'a cue pays only the first mark it can admit',
       hit: 1,
       converted: 1,
       lost: 0,
@@ -570,21 +601,19 @@ describe('the census over a population', () => {
   });
 
   it('counts what the lever would cost, because a rule that only ever won is a rule nobody checked', () => {
-    // Bar wins this row by being the second mark of three cue phrases (2 + 2 + 2 + 2 = 8) against
-    // three marks that hold one first claim each (5). Ranking first claims higher takes the row away
-    // from the label. A counterfactual that reported only `converted` would be an advertisement.
-    const two = table('Region, Channel, Revenue', [
-      'North, Online, 40',
-      'South, Retail, 55',
-      'East, Online, 31',
-      'West, Retail, 63',
+    // The same row labelled `Heat Map`: the shipped ranking answers it, and the model takes it away.
+    // A counterfactual that reported only `converted` would be an advertisement, and this pair is
+    // the whole trade — the rule moves rows from the heatmap to the scatter and nothing else.
+    const both = table('Region, Channel, Price, Rating', [
+      'North, Online, 12, 40',
+      'South, Retail, 18, 55',
+      'East, Online, 9, 31',
+      'West, Retail, 21, 63',
     ]);
-    const report = censusOf([
-      input('What percentage of revenue is trending by region and channel over time?', 'Bar Chart', two),
-    ]);
+    const report = censusOf([input('Is price related to rating, by region and channel?', 'Heat Map', both)]);
     expect(report.outcomes.hit).toBe(1);
     expect(report.counterfactual).toEqual({
-      rule: 'a mark a cue names first outranks a mark no cue names first',
+      rule: 'a cue pays only the first mark it can admit',
       hit: 0,
       converted: 0,
       lost: 1,
@@ -606,29 +635,38 @@ describe('the census over a population', () => {
   });
 
   it('keeps the arithmetic of a loss, because the gap alone says who won and not why', () => {
-    // The ranked scores are already in the row; what the tally adds is which cues paid them. A bar
-    // that collected four cues beating a line that collected one is a different defect from a bar
-    // that beat a line on the tie-break, and `namedButLost` cannot tell them apart.
+    // The ranked scores are in the row; what the tally adds is which cues paid them. This is the
+    // shape the ranking now produces: a bar that collected three cue phrases (8) losing to a line
+    // that one cue named first (5). The loser scored *higher* — the order is by first claims first —
+    // and a report that showed only the gap would read as though the arithmetic were broken.
+    const wide = table('Region, Channel, Revenue', [
+      'North, Online, 40',
+      'South, Retail, 55',
+      'East, Online, 31',
+      'West, Retail, 63',
+    ]);
     const report = censusOf([
-      input(
-        'What is the trend of revenue by month and region, as a percentage?',
-        'Line Chart',
-        table('Region, Channel, Revenue', ['North, Online, 40', 'South, Retail, 55', 'East, Online, 31', 'West, Retail, 63']),
-      ),
+      input('What percentage of revenue is trending by region and channel over time?', 'Bar Chart', wide),
     ]);
     const loss = report.outranked[0];
-    expect(loss?.expected).toBe('line');
-    expect(loss?.winner).toBe('bar');
+    expect(loss?.expected).toBe('bar');
+    expect(loss?.winner).toBe('line');
     expect(loss?.samples).toHaveLength(1);
-    expect(loss?.samples[0]?.coveringScore).toBe(5);
-    expect(loss?.samples[0]?.answeredScore).toBeGreaterThan(5);
-    expect(loss?.samples[0]?.coveringCues).toEqual(['trend']);
-    expect(loss?.samples[0]?.answeredCues.length).toBeGreaterThan(1);
+    expect(loss?.samples[0]?.coveringScore).toBe(8);
+    expect(loss?.samples[0]?.answeredScore).toBe(5);
+    expect(loss?.samples[0]?.coveringCues).toEqual(['trend', 'share', 'matrix']);
+    expect(loss?.samples[0]?.answeredCues).toEqual(['trend']);
   });
 
   it('keeps three losses from a pair, because three questions are enough to read the intent', () => {
+    const wide = table('Region, Channel, Revenue', [
+      'North, Online, 40',
+      'South, Retail, 55',
+      'East, Online, 31',
+      'West, Retail, 63',
+    ]);
     const rows = Array.from({ length: 4 }, (_, index) =>
-      input(`What is the trend of revenue by month and region? (${String(index + 1)})`, 'Line Chart', regions(5)),
+      input(`What percentage of revenue is trending by region and channel? (${String(index + 1)})`, 'Bar Chart', wide),
     );
     const report = censusOf(rows);
     expect(report.outranked[0]?.n).toBe(4);

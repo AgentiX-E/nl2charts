@@ -69,30 +69,41 @@ export function coveringMarks(family: ChartFamily): readonly RecommendableMark[]
 const SNIPPET = 160;
 
 /**
- * The output-format spec every Text2Vis prompt ends with.
+ * The output-format spec every Text2Vis prompt ends with, and the code instruction that introduces
+ * it: `… Python code using **matplotlib only** to visualize the result. Return your response strictly
+ * in the following JSON format **without any extra explanation**: {"answer": …`.
  *
- * `… {"answer": "<short answer>", "code": "<matplotlib code for visualization>"} The code should be
- * complete, include axis labels and a title …` — the corpus asks for JSON, and the schema is the
- * longest stable sentence in the file. Keeping the tail of a prompt therefore kept the schema and
- * not the question: the first version of this cut printed 300 samples of the same boilerplate.
+ * Cutting only at `{"answer"` was not enough. The tail of the surviving text is this sentence, which
+ * is longer than a question, so the first two cuts both printed boilerplate — first the instruction
+ * block at the front, then the schema instruction at the back. A sample is evidence; one that shows
+ * what every row shares is evidence about nothing.
  */
 const ANSWER_SPEC = /\{?\s*"answer"\s*:/;
+const CODE_INSTRUCTION = /\b(?:Write|Give me|Generate|Provide|Create)\s+Python code\b/i;
 
 /**
- * A prompt cut to the part that decides: the question, which sits between the instructions and the
- * output-format spec.
+ * A prompt cut to the part that decides: the question.
  *
- * Whitespace is collapsed first because the corpus wraps its questions across lines; the spec is cut
- * off, because it is the same in every row and it is at the end; what remains is cut from the left,
- * because the instruction block is at the front. Nothing is rephrased — the sample is the corpus's
- * own words minus the two parts a reader has already read.
+ * The corpus wraps each prompt as instruction block, question, output-format spec, and only the
+ * middle part distinguishes one row from another. Three steps, each one visible in the file: cut the
+ * spec off the end, then prefer the last sentence that ends with `?` — every question in this corpus
+ * is one, and a sample that keeps the question is worth three that keep the instructions — and fall
+ * back to cutting the code instruction, then to the tail.
+ *
+ * Nothing is rephrased: the sample is the corpus's own words, minus the parts every row repeats.
  */
 export function snippet(text: string): string {
   const collapsed = text.replace(/\s+/g, ' ').trim();
   const spec = ANSWER_SPEC.exec(collapsed);
   const body = (spec === null ? collapsed : collapsed.slice(0, spec.index)).trim();
-  if (body.length <= SNIPPET) return body;
-  return `…${body.slice(body.length - SNIPPET)}`;
+  const asked = /[^.!?:]+?\?/g;
+  const questions = body.match(asked);
+  const last = questions === null ? undefined : (questions[questions.length - 1] as string).trim();
+  if (last !== undefined) return last.length <= SNIPPET ? last : `…${last.slice(last.length - SNIPPET)}`;
+  const instruction = CODE_INSTRUCTION.exec(body);
+  const trimmed = (instruction === null ? body : body.slice(0, instruction.index)).trim();
+  if (trimmed.length <= SNIPPET) return trimmed;
+  return `…${trimmed.slice(trimmed.length - SNIPPET)}`;
 }
 
 /**
@@ -401,27 +412,50 @@ export function timeLikeColumns(set: ResultSet, profiles: readonly FieldProfile[
 }
 
 /**
- * The winner if a cue's first claim outranked every second-place claim — the next lever, priced
- * before it is shipped.
+ * The winner if a cue paid only the first mark it can actually admit — the next lever, priced before
+ * it is shipped.
  *
- * Every cue that fires pays its first mark three points and each of its other marks two, and the
- * scores are summed. A question whose prompt carries three cue phrases therefore pays the bar twice
- * per phrase — bar is the second mark of `share`, `matrix`, `ranking`, `trend`, `distribution`,
- * `progress` and `stages` — so a mark *named first* can lose to a mark *named second three times*.
- * The corpus shows it verbatim: `line 5 [trend] < bar 6 [trend matrix]`.
+ * The shipped rule still pays a cue's other marks two points, and that is what makes a fallback worth
+ * something even when the mark it falls back *from* is available: `share` pays the bar two points on
+ * every question that says "percentage", whether or not a pie was drawable. The alternative reads the
+ * cue list as what it says — "a pie, or a bar if a pie cannot be drawn" — and pays one mark per cue.
  *
- * This function is the model of the rule that would stop it: rank by how many cues name the mark
- * first, and keep every other key as it was. It restates no weight, and it does not re-sort by score
- * because `Array.prototype.sort` is stable: the list it is handed already carries the product's
- * `(score, preference)` order, so a single first-claim comparator is the whole change.
+ * The model is written from published fields only, so it cannot drift from the table it describes:
+ * `Recommendation.score` is `prior + 3·firsts + 2·seconds` and `Recommendation.cues` lists every cue
+ * that named the mark, so the prior is whatever is left after the cues are subtracted. Nothing about
+ * the admission rules is restated here.
  *
- * **It is a prediction, not a measurement.** Nothing in the product reads it. The dispatch that
- * ships the rule must reproduce `converted` and `lost` exactly, or the model is wrong and the rule
- * it describes is a different rule.
+ * **It is a prediction, not a measurement.** The dispatch that ships the rule must reproduce
+ * `converted` and `lost` exactly, or the rule it describes is a different rule.
  */
-export function firstClaimWinner(choice: ChartChoice, cues: readonly Cue[]): Recommendation | undefined {
-  const firsts = (mark: RecommendableMark): number => cues.filter((cue) => cue.marks[0] === mark).length;
-  return [...choice.recommendations].sort((left, right) => firsts(right.mark) - firsts(left.mark))[0];
+export function firstAdmissibleWinner(choice: ChartChoice, cues: readonly Cue[]): Recommendation | undefined {
+  // The marks this result can carry, as a lookup from the cue table's vocabulary: a cue names
+  // `ChartType`s and the ranking holds `RecommendableMark`s, and the intersection is what the cue can
+  // pay here. Reading it as a map avoids a cast that would let a mark the ranking never considers
+  // collect a point.
+  const admissible = new Map<string, RecommendableMark>(
+    choice.recommendations.map((entry) => [entry.mark, entry.mark]),
+  );
+  const paid = new Map<RecommendableMark, number>();
+  for (const cue of cues) {
+    const mark = cue.marks.map((candidate) => admissible.get(candidate)).find((entry) => entry !== undefined);
+    if (mark === undefined) continue;
+    paid.set(mark, (paid.get(mark) ?? 0) + 1);
+  }
+  const underRule = (entry: Recommendation): number => {
+    const firsts = firstClaims(cues, entry.mark);
+    const prior = entry.score - 3 * firsts - 2 * (entry.cues.length - firsts);
+    return prior + 3 * (paid.get(entry.mark) ?? 0);
+  };
+  return [...choice.recommendations].sort(
+    (left, right) =>
+      underRule(right) - underRule(left) || RECOMMENDABLE_MARKS.indexOf(left.mark) - RECOMMENDABLE_MARKS.indexOf(right.mark),
+  )[0];
+}
+
+/** How many cues name a mark first, read from the cue table rather than from the score. */
+function firstClaims(cues: readonly Cue[], mark: RecommendableMark): number {
+  return cues.filter((cue) => cue.marks[0] === mark).length;
 }
 
 /**
@@ -620,7 +654,7 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
     // population and the same hit test, so `hit` and `counterfactual.hit` are the same measurement
     // of two orderings rather than two measurements of one ordering.
     if (profiles.length > 0) {
-      const under = firstClaimWinner(recommendChart(row.prompt, profiles), readCues(row.prompt));
+      const under = firstAdmissibleWinner(recommendChart(row.prompt, profiles), readCues(row.prompt));
       const answers = under !== undefined && familiesOfMark(under.mark, under.cues[0])[0] === classified.expected;
       const answered = classified.outcome === 'hit';
       if (answers) underFirstClaims += 1;
@@ -762,7 +796,7 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
       (left, right) => right.n - left.n || left.reason.localeCompare(right.reason),
     ),
     counterfactual: {
-      rule: 'a mark a cue names first outranks a mark no cue names first',
+      rule: 'a cue pays only the first mark it can admit',
       hit: underFirstClaims,
       converted,
       lost,
