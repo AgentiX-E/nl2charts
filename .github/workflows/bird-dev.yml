@@ -162,7 +162,11 @@ jobs:
         run: pnpm eval:preflight
       - name: Gold queries and controls without a model
         run: pnpm bench:bird:dry
-      - name: Four-arm evaluation on the public split
+      # The name does not count: this dispatch runs three arms and the step said "Four-arm", which is
+      # the defect `ci.yml` wrote down after its own step name went stale ("a step name that counts is
+      # a step name that lies after the next retirement"). The arm list is the input, so the honest
+      # label is the one that stays true when it changes.
+      - name: Every requested arm on the public split
         run: pnpm bench:bird
         env:
           # Blank means the whole split; the runner parses it, because an empty

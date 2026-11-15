@@ -15,7 +15,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { needsModel, explain, summary, publish, isChartReading, isDocumentation, isTest, isToolConfig, TRUNCATED_AT } from '../tools/ci-scope.mjs';
+import { needsModel, explain, summary, publish, isChartReading, isDeclaration, isDocumentation, isTest, isToolConfig, TRUNCATED_AT } from '../tools/ci-scope.mjs';
 
 describe('a change set that only edits documentation', () => {
   it('does not need a model call', () => {
@@ -152,10 +152,16 @@ describe('a change set that only edits the chart reading', () => {
   });
 
   it('says which class it exempted, because a skip that misnames itself is a skip nobody audits', () => {
-    expect(needsModel(['a.md']).reason).toContain('Markdown, which no prompt reads');
+    expect(needsModel(['a.md']).reason).toContain('Markdown, and each is read by a job that never skips');
     expect(needsModel(['test/x.test.ts', 'a.md']).reason).toContain('Markdown or tests');
-    expect(needsModel(['eval/text2vis/census.ts']).reason).toContain('Markdown, tests or the chart reading');
+    expect(needsModel(['eval/text2vis/census.ts']).reason).toContain('the chart reading');
     expect(needsModel(['budgets.json']).reason).toContain("gate's own configuration");
+    expect(needsModel(['tools/ci-scope.d.mts']).reason).toContain('a type declaration');
+    // Three classes are enumerated in the order the rule names them, not in the order of the files:
+    // a sentence whose list follows the change set reads as a different rule on every push.
+    expect(needsModel(['test/x.test.ts', 'a.md', 'budgets.json']).reason).toContain(
+      'Markdown, tests or a gate\'s own configuration',
+    );
   });
 });
 
@@ -182,6 +188,43 @@ describe('a change set that only edits a gate\'s own configuration', () => {
     // Nor is a file of the same name inside a package a gate configuration: each package's own
     // `package.json` is what `check-budgets` sizes, and the root one is the only entry.
     expect(isToolConfig('packages/chart/budgets.json')).toBe(false);
+  });
+});
+
+describe('a change set that only edits a declaration', () => {
+  it('does not buy the chain, because a declaration is erased before anything runs', () => {
+    // `.d.mts` is the type of a plain-JavaScript script, not the script. Nothing it holds survives
+    // to runtime, so no prompt and no harness can read it. Round 147 learned this the expensive way:
+    // it fixed a missing export in `tools/ci-scope.d.mts` and the push re-priced thirteen arms over
+    // 496 questions and three live passes over 210 cases to typecheck a file no prompt opens.
+    const result = needsModel(['tools/ci-scope.d.mts', 'eval/bird/fetch.d.mts']);
+    expect(result.measure).toBe(false);
+    expect(result.reason).toContain('a type declaration');
+    expect(result.files).toBeUndefined();
+  });
+
+  it('recognises a declaration by its suffix, and a module that merely ends the same way is not one', () => {
+    expect(isDeclaration('tools/ci-scope.d.mts')).toBe(true);
+    expect(isDeclaration('eval/bird/fetch.d.mts')).toBe(true);
+    // `profile.mts` is a module: it is built, it runs, and a change there is a change to the reading.
+    expect(isDeclaration('eval/text2vis/profile.mts')).toBe(false);
+    // Nor is the script the declaration describes, which is the file a round actually edits.
+    expect(isDeclaration('tools/ci-scope.mjs')).toBe(false);
+    expect(isDeclaration('packages/ai/src/prompt.ts')).toBe(false);
+  });
+
+  it('keeps its guard in the job that never skips, which is what makes the exemption safe', () => {
+    // An exemption is only as good as the thing that catches the drift it could hide. The pairs are
+    // read from disk rather than restated, so deleting either half fails here.
+    expect(readFileSync(resolve('test/tool-declarations.test.ts'), 'utf8')).toContain('exportedNames');
+    const workflow = readFileSync(resolve('.github/workflows/ci.yml'), 'utf8');
+    expect(workflow).toContain('pnpm typecheck');
+  });
+
+  it('still measures a push that carries a declaration and a prompt in one commit', () => {
+    const result = needsModel(['tools/ci-scope.d.mts', 'packages/ai/src/prompt.ts']);
+    expect(result.measure).toBe(true);
+    expect(result.files).toEqual(['packages/ai/src/prompt.ts']);
   });
 });
 
@@ -224,7 +267,7 @@ describe('the two files the step needs', () => {
         expect(line).toMatch(/^[a-z_]+=[^\n]*$/u);
       }
       // The summary is the other half: Markdown, and it carries the sentence.
-      expect(readFileSync(summaryFile, 'utf8')).toContain('not Markdown, tests or the chart reading');
+      expect(readFileSync(summaryFile, 'utf8')).toContain('read by a prompt or by the harness');
       expect(readFileSync(summaryFile, 'utf8')).toContain('packages/a.ts');
     } finally {
       rmSync(directory, { recursive: true, force: true });
