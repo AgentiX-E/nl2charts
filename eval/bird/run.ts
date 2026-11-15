@@ -1362,17 +1362,34 @@ export const ARMS: readonly Arm[] = [
   // the conversion loss is not derivable from the old artifact: the rule was never run on a
   // four-candidate pool. That is the only thing this arm measures, and it costs one call.
   //
-  // Pre-registered against `select-mixed-rule`, same 496 questions, same run: ceiling ≥ +3.0pp,
-  // `shortest` on four candidates ≥ +1.0pp, conversion (score ÷ `candidateRecall`) within 1.0pp of
-  // the parent's, and `calls.mean` ≤ 4.05. A ceiling that rises while the score does not is the
-  // `select-intent` finding reproduced on the free rule; a ceiling that does not rise retires the
-  // source, and either outcome is a reading the next round can spend.
+  // Pre-registered against `select-mixed-rule` on the dev split, same 1,532 questions, same run,
+  // same model: **ceiling ≥ +2.0pp**, `shortest` on four candidates **≥ +1.5pp**, conversion
+  // (score ÷ `candidateRecall`) within 1.0pp of the parent's, and `calls.mean` ≤ 4.05.
+  //
+  // Two numbers here were re-registered before any reading of these arms existed, and the reason is
+  // the same defect this repository keeps finding: the first version asked for 496 questions — the
+  // Mini-Dev denominator, which this workflow does not run — and a +1.0pp score threshold on a pair
+  // whose measured resolution is 1.64pp. A threshold below the split's own noise floor cannot be met
+  // *or* missed: it returns "no difference" whether the effect is 0 or 1.4pp, so the arm would have
+  // cost 16,852 calls to answer nothing. The priors it quotes live on the dev split (+2.22pp ceiling,
+  // −3.50pp conversion, both 1,532 questions), so the criteria moved to the split that produced them
+  // and the thresholds moved above its resolution rather than below it. No artifact for either arm
+  // existed when this was written.
+  //
+  // A ceiling that rises ≥2.0pp while the score stays inside its own resolution is the `select-intent`
+  // finding reproduced on the free rule; a ceiling that does not rise retires the source, and either
+  // outcome is a reading the next round can spend.
   { name: 'select-mixed-rule-rows', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 4, select: true, selectRule: 'shortest', mixed: ROWS_SOURCES },
   // The same purchase from the source that differs in grammar instead of in knowledge: a fourth
   // candidate rendered from a query intent. Same pool size, same rule, same calls as the arm above,
   // so the delta between the two arms is *which kind of difference* a fourth candidate has to be —
   // and read against `select-mixed-rule` it is the conversion test `select-intent` never got,
   // because that arm was measured with the paid selector and this one is not.
+  //
+  // Same criteria, same split and same price as the arm above — that is what makes the pair a
+  // single lever on the *kind* of difference rather than on the amount of it. Read against its
+  // sibling, the reading says which fourth candidate a rule needs: one that knows a value the three
+  // prompts never saw, or one that phrases the same question a different way.
   { name: 'select-mixed-rule-intent', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 4, select: true, selectRule: 'shortest', mixed: INTENT_SOURCES },
   // The parent arm with the adjudication spent only where there is something to adjudicate.
   //

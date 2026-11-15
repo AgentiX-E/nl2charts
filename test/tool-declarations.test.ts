@@ -1,9 +1,10 @@
 /**
- * The declarations in `tools/` are written by hand, so a test has to hold them to the module.
+ * The declarations beside the plain-JavaScript scripts are written by hand, so a test has to hold
+ * them to their modules.
  *
- * Each `tools/*.d.mts` gives the suite a type for a tool that stays plain JavaScript: the workflow
- * runs those tools before `pnpm install`, so they cannot depend on what the install provides. That
- * arrangement has one failure mode, and this round hit it. `isToolConfig` was added to
+ * Each `*.d.mts` gives the suite a type for a script that stays plain JavaScript: the workflow runs
+ * those scripts before `pnpm install`, so they cannot depend on what the install provides. That
+ * arrangement has one failure mode, and round 147 hit it. `isToolConfig` was added to
  * `tools/ci-scope.mjs` and not to `tools/ci-scope.d.mts`, the local typecheck had been run before
  * that edit, and the push went through the Git Data API — which does not run hooks. **CI caught it
  * at typecheck, on a run whose other jobs were skipped**, so the round that was supposed to cost one
@@ -12,26 +13,46 @@
  * A comment cannot prevent that; a test can. This one reads both files and compares the names, in
  * both directions: a function the module exports and the declaration does not is a compile error for
  * every caller, and a name the declaration has and the module does not is a promise nothing keeps.
+ *
+ * The first version of this file scanned `tools/` only, which is the directory the failure happened
+ * in and not the directory the class lives in: `eval/bird/fetch.d.mts` declares a script that is
+ * fetched before the install for the same reason. Two directories are named, and the second one was
+ * found by grepping for the suffix rather than by remembering where the class was.
  */
 import { readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+
+/** The directories that hold a plain-JavaScript script and a hand-written declaration beside it. */
+const DIRECTORIES = ['tools', 'eval/bird'];
 
 /** The exported `const` and `function` names in a module or a declaration, in file order. */
 function exportedNames(source: string): string[] {
   return [...source.matchAll(/^export (?:const|function) (\w+)/gm)].map((match) => match[1] as string);
 }
 
-/** The `.d.mts` files in `tools/`, each of which declares one of the scripts beside it. */
-const DECLARATIONS = readdirSync(resolve('tools'))
-  .filter((file) => file.endsWith('.d.mts'))
-  .sort();
+/** Every `.d.mts` under the named directories, as repository-relative paths, sorted. */
+const DECLARATIONS = DIRECTORIES.flatMap((directory) =>
+  readdirSync(resolve(directory))
+    .filter((file) => file.endsWith('.d.mts'))
+    .map((file) => `${directory}/${file}`),
+).sort();
 
-describe('the hand-written declaration of a tool', () => {
+/** The script a declaration describes: the same path with `.mjs` where `.d.mts` was. */
+function moduleOf(declaration: string): string {
+  return declaration.replace(/\.d\.mts$/, '.mjs');
+}
+
+/** How a test in `test/` reaches a script at the repository root. */
+function importPath(module: string): string {
+  return `'../${module}'`;
+}
+
+describe('the hand-written declaration of a script', () => {
   it('exists for every script that has one, and is not empty', () => {
     expect(DECLARATIONS.length).toBeGreaterThan(0);
     for (const file of DECLARATIONS) {
-      const source = readFileSync(resolve('tools', file), 'utf8');
+      const source = readFileSync(resolve(file), 'utf8');
       expect(exportedNames(source).length, file).toBeGreaterThan(0);
     }
   });
@@ -40,9 +61,9 @@ describe('the hand-written declaration of a tool', () => {
     // Both directions, because the two defects are different: a missing name is a compile error in
     // the suite, and an extra name is a type that describes a function nobody wrote.
     for (const file of DECLARATIONS) {
-      const module = file.replace(/\.d\.mts$/, '.mjs');
-      const declared = exportedNames(readFileSync(resolve('tools', file), 'utf8')).sort();
-      const actual = exportedNames(readFileSync(resolve('tools', module), 'utf8')).sort();
+      const module = moduleOf(file);
+      const declared = exportedNames(readFileSync(resolve(file), 'utf8')).sort();
+      const actual = exportedNames(readFileSync(resolve(module), 'utf8')).sort();
       expect(declared, `${file} against ${module}`).toEqual(actual);
     }
   });
@@ -59,9 +80,18 @@ describe('the hand-written declaration of a tool', () => {
       .map((file) => readFileSync(resolve('test', file), 'utf8'))
       .join('\n');
     for (const file of DECLARATIONS) {
-      const module = file.replace(/\.d\.mts$/, '.mjs');
-      expect(suites.includes(`'../tools/${module}'`), `${module} is imported by a test`).toBe(true);
+      const wanted = importPath(moduleOf(file));
+      expect(suites.includes(wanted), `${moduleOf(file)} is imported by a test`).toBe(true);
     }
+  });
+
+  it('finds the declarations in every directory that holds one', () => {
+    // The guard is worth what its file list is worth, and a list that names one directory makes the
+    // second one an exception nobody wrote down. Both are asserted, so a third has to be added here
+    // rather than discovered by the next type error.
+    expect(DECLARATIONS.some((file) => file.startsWith('tools/'))).toBe(true);
+    expect(DECLARATIONS.some((file) => file.startsWith('eval/bird/'))).toBe(true);
+    for (const file of DECLARATIONS) expect(DIRECTORIES.some((directory) => file.startsWith(`${directory}/`))).toBe(true);
   });
 
   it('reads the same names out of a declaration and a module that differ', () => {

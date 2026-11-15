@@ -119,6 +119,45 @@ export function isToolConfig(file) {
 }
 
 /**
+ * A declaration, which TypeScript erases: `.d.mts` is a type for a script, not the script.
+ *
+ * The suffix rather than a directory, and it is the one classification here that needs no argument
+ * about imports: a `.d.mts` file emits nothing, so no runtime that spends a call can read it. What
+ * keeps it honest is the pairing — `test/tool-declarations.test.ts` compares every declaration
+ * against the module beside it in both directions, and `quality` runs that suite on every push, so a
+ * declaration that drifts is caught by the job that never skips rather than by a measurement.
+ *
+ * The round that added this read it off its own failure: `tools/ci-scope.d.mts` was missing an
+ * export, and the push that carried the fix bought thirteen BIRD arms over 496 questions and three
+ * live passes over 210 cases to re-typecheck a file no prompt opens.
+ */
+export function isDeclaration(file) {
+  return /\.d\.mts$/i.test(file);
+}
+
+/**
+ * The classes a file can belong to and still be read by no prompt, in the order the reason names
+ * them.
+ *
+ * Named as data rather than written as a chain of conditionals: the reason sentence has to enumerate
+ * the classes that were present, and the version that grew one branch per class stopped being
+ * readable at four — which is the point at which a reader stops checking that the sentence is true.
+ */
+const EXEMPT_CLASSES = [
+  { matches: isDocumentation, name: 'Markdown' },
+  { matches: isTest, name: 'tests' },
+  { matches: isChartReading, name: 'the chart reading' },
+  { matches: isToolConfig, name: "a gate's own configuration" },
+  { matches: isDeclaration, name: 'a type declaration' },
+];
+
+/** `a`, `a or b`, `a, b or c` — the shape the reason sentence puts the classes in. */
+function enumerate(names) {
+  if (names.length <= 1) return names.join('');
+  return `${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}`;
+}
+
+/**
  * Whether a change set has to be measured, and why.
  *
  * The reason is returned rather than logged because it is what the workflow prints: a
@@ -136,29 +175,23 @@ export function needsModel(files) {
       reason: `the list holds ${paths.length} files and the commit endpoint stops at ${TRUNCATED_AT}, so the .ts may be in the part that was cut`,
     };
   }
-  const code = paths.filter(
-    (path) => !isDocumentation(path) && !isTest(path) && !isChartReading(path) && !isToolConfig(path),
-  );
+  const code = paths.filter((path) => !EXEMPT_CLASSES.some((entry) => entry.matches(path)));
   if (code.length === 0) {
-    // Three sentences, one per class the filter can have removed, because the sentence is what a
-    // reader sees instead of a measurement and "all files are Markdown" would be a lie about a push
-    // that changed the chart reading.
-    const markdown = paths.every((path) => isDocumentation(path));
-    const tested = paths.every((path) => isDocumentation(path) || isTest(path));
+    // The sentence names the classes that were actually present, because a reader sees it *instead
+    // of* a measurement: "all files are Markdown" would be a lie about a push that changed the chart
+    // reading, and a reason that misnames itself is a skip nobody audits.
+    const present = EXEMPT_CLASSES.filter((entry) => paths.some((path) => entry.matches(path)));
+    const clause = !present.some((entry) => entry.matches === isChartReading)
+      ? ''
+      : '; the chart reading is re-taken by `text2vis-rule` without a model call';
     return {
       measure: false,
-      reason: markdown
-        ? `all ${paths.length} changed file(s) are Markdown, which no prompt reads`
-        : tested
-          ? `all ${paths.length} changed file(s) are Markdown or tests, and neither is read by a prompt`
-          : !paths.every((path) => isDocumentation(path) || isTest(path) || isChartReading(path))
-        ? `all ${paths.length} changed file(s) are Markdown, tests, the chart reading or a gate's own configuration, and each is read by a job that never skips`
-        : `all ${paths.length} changed file(s) are Markdown, tests or the chart reading, and the chart reading is re-taken by \`text2vis-rule\` without a model call`,
+      reason: `all ${paths.length} changed file(s) are ${enumerate(present.map((entry) => entry.name))}, and each is read by a job that never skips${clause}`,
     };
   }
   return {
     measure: true,
-    reason: `${code.length} of ${paths.length} changed file(s) are not Markdown, tests or the chart reading`,
+    reason: `${code.length} of ${paths.length} changed file(s) are read by a prompt or by the harness, so this push is measured`,
     files: code,
   };
 }

@@ -4,7 +4,7 @@
  * The tool stays plain JavaScript because the workflow runs it before `pnpm install`: it is the
  * job that decides whether the other jobs run at all, so it cannot depend on what they install.
  * Declaring the surface here keeps it out of the TypeScript build while still giving the test a
- * type — the same arrangement `stale-build.d.mts` and `check-exports.d.mts` use.
+ * type — the same arrangement `stale-build.d.mts` and `bird-arm.d.mts` use.
  */
 export const TRUNCATED_AT: number;
 
@@ -36,6 +36,16 @@ export function isChartReading(file: string): boolean;
  * Two names rather than a suffix: `package.json` changes what runs, and has to measure.
  */
 export function isToolConfig(file: string): boolean;
+
+/**
+ * A declaration, which TypeScript erases: `.d.mts` is a type for a script, not the script.
+ *
+ * The one classification that needs no argument about imports — a declaration emits nothing, so no
+ * runtime that spends a call can read it. What keeps it honest is the pairing:
+ * `test/tool-declarations.test.ts` compares each declaration with the module beside it in both
+ * directions, and `quality` runs that suite on every push.
+ */
+export function isDeclaration(file: string): boolean;
 
 export interface ScopeResult {
   /** Whether the push has to be measured. */
