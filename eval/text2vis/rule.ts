@@ -490,27 +490,16 @@ export function withHistogramCue(table: readonly CueRule[]): readonly CueRule[] 
 }
 
 /**
- * The cue that separates the two pictures inside `share`, at its narrowest width.
+ * The narrow `share` discriminator is no longer here: it shipped.
  *
- * `share` is one phrase over two questions: "the share of revenue that is refunds" is a part of a
- * whole and a pie is what an annotator drew; "the share of orders by status" is categories compared
- * and the same annotator drew a bar. The previous sweep priced the blunt version of this idea —
- * `share → ['bar','pie']` — at +196 `bar` rows for −145 `pie` rows, which is the size of the
- * undivided cue and not of the distinction inside it.
+ * `share by X` was priced against the corpus as a variant for two rounds and then became the product
+ * (`share-by` in `CHART_CUES`, ahead of `share`) on two readings that agreed: 10 bar rows won
+ * against 5 pie rows lost on the question half, and 3 more rows on the product's own hit test. A
+ * lever that becomes the table it was measured against leaves the sweep — the sweep's control is the
+ * product, and a candidate for a rule the product already has is a second copy of the control.
  *
- * The signal is a phrase and not a keyword: a share word immediately followed by the dimension it
- * splits on — `share by`, `breakdown across`, `percentage per`. That is the form in which the
- * comparison is stated and cannot be read any other way, which is why it is the *narrow* width. Its
- * marks are a single bar: a cue that offered both would answer nothing.
- *
- * Only the English phrase. `占比` is a share word with no `by`-analogue in the table, and a rule
- * invented for a phrasing the corpus does not contain would be a rule no reading covers.
+ * The width that remains is the one that was refused, kept so the refusal stays a reading:
  */
-const SHARE_BY_CUE: CueRule = {
-  kind: 'share-by',
-  marks: ['bar'],
-  pattern: /\b(?:share|proportion|percentage|percent|composition|breakdown|split)\s+(?:by|across|per)\b/,
-};
 
 /**
  * The same signal at the width that also reads a measure between the two words.
@@ -531,35 +520,28 @@ const SHARE_BY_ANY_CUE: CueRule = {
   pattern: /\b(?:share|proportion|percentage|percent|composition|breakdown|split)\b[\s\S]*\bby\b/,
 };
 
-/** The narrow width: a share word followed immediately by the dimension. */
-export function withShareByCue(table: readonly CueRule[]): readonly CueRule[] {
-  return withCueAheadOf(table, SHARE_BY_CUE, 'share');
-}
-
 /** The wide width: a share word followed by `by` anywhere later in the question. */
 export function withShareByAnyCue(table: readonly CueRule[]): readonly CueRule[] {
   return withCueAheadOf(table, SHARE_BY_ANY_CUE, 'share');
 }
 
 /**
- * The `matrix` cue with its window bounded to one clause.
+ * The `matrix` pattern the product read before this round: unbounded, and the reading that retired it.
  *
- * The shipped pattern is `\bby\b[\s\S]*\band\b`, which is unbounded in both directions: it spans the
- * whole question, newlines included, so any question carrying "by" anywhere and "and" anywhere later
- * leads with a heatmap. The corpus's questions are instructions — a sentence of data, a sentence of
- * "generate matplotlib code", a sentence of axis rules — and a crossing across sentence boundaries is
- * not a crossing. `[^.;?!\n]{0,60}` is the same signal read inside one clause and nothing else: same
- * two words, same order, a bound on the distance between them.
+ * `\bby\b[\s\S]*\band\b` spans the whole question, newlines included, so any question carrying "by"
+ * anywhere and "and" anywhere later led with a heatmap — and the corpus's questions are instructions,
+ * a sentence of data followed by "generate matplotlib code" followed by axis rules. The cue decided
+ * 223 questions and was right about one.
  *
- * The number is not tuned and must not be read as tuned: 60 characters is what it takes to hold
- * "by region and channel" with a measure in between, and the reading that follows says whether the
- * bound helps, so the only thing a different bound would buy is another run.
+ * Kept as a variant rather than deleted with the code that shipped: the 43 product rows the window
+ * recovered are only attributable while the table that lost them can still be priced. A counterfactual
+ * that lives only in a commit message is a number nobody can re-take.
  */
-const MATRIX_WINDOW: RegExp = /\bby\b[^.;?!\n]{0,60}\band\b|交叉|矩阵/;
+const MATRIX_WIDE: RegExp = /\bby\b[\s\S]*\band\b|交叉|矩阵/;
 
-/** The `matrix` cue, read inside one clause. */
-export function withMatrixWindow(table: readonly CueRule[]): readonly CueRule[] {
-  return table.map((rule) => (rule.kind === 'matrix' ? { ...rule, pattern: MATRIX_WINDOW } : rule));
+/** The same table with the retired unbounded `matrix` pattern, to price what the window bought. */
+export function withMatrixWide(table: readonly CueRule[]): readonly CueRule[] {
+  return table.map((rule) => (rule.kind === 'matrix' ? { ...rule, pattern: MATRIX_WIDE } : rule));
 }
 
 /**
@@ -570,10 +552,12 @@ export function withMatrixWindow(table: readonly CueRule[]): readonly CueRule[] 
  * those 68 is a heatmap. So the cue is not wrong about the family; it is wrong about the order, and
  * the order is the first mark, which is the whole of the claim it makes.
  *
- * Priced rather than shipped because the reversal is a strong claim in the other direction: it makes
- * every "by X and Y" question a bar question, which is the shape of the rule the ranking contract
- * already rejected once — bar collecting points it was never named for. What decides it is the family
- * breakdown on the product side, not the total.
+ * Refused by the product reading, and this is the lever that made the two-reading rule worth having.
+ * Reversing the marks scores **657 (+66)** on the question half — the largest gain in the sweep — and
+ * **278 (−34)** on the product: bar +78 bought with line −75 and pie −29. The question half cannot see
+ * that cost, because it scores the first cue that fired and `trend` comes before `matrix`, so the line
+ * rows never enter its arithmetic; the product ranks by first claims across the whole question, so a
+ * bar paid three points here outvotes a line the question actually named.
  */
 export function withMatrixBarFirst(table: readonly CueRule[]): readonly CueRule[] {
   return table.map((rule) => (rule.kind === 'matrix' ? { ...rule, marks: ['bar', 'heatmap'] } : rule));
@@ -600,9 +584,10 @@ export function withoutMatrix(table: readonly CueRule[]): readonly CueRule[] {
  * variant that changed two things could not be attributed, and the sweep exists so that a change is
  * attributable before it ships.
  *
- * The two `share` widths, the two `matrix` widths and the histogram cue are the levers, and each is
- * also priced on top of another family — because a reader will ask whether they compose, and
- * answering it after the fact costs another run of the corpus.
+ * What is left is the axis of refusals: the retired `matrix` width, the reversal of its marks, its
+ * removal, the blunt `share` flip, the wide share discriminator, and the histogram cue. The two
+ * narrow levers that shipped are not here — a candidate for a rule the product already has is a
+ * second copy of the control.
  *
  * `shipped` comes first and is the table the package exports, so the sweep always contains the
  * control it is a sweep of.
@@ -611,9 +596,34 @@ export const CUE_VARIANTS: readonly { readonly name: string; readonly note: stri
   [
     { name: 'shipped', note: 'the table `@agentix-e/nl2charts-chart` exports', cues: CHART_CUES },
     {
+      name: 'matrix-wide',
+      note: 'the retired unbounded `matrix` pattern, so the 43 product rows the clause window recovered stay a measurement',
+      cues: withMatrixWide(CHART_CUES),
+    },
+    {
+      name: 'matrix-bar-first',
+      note: '`matrix` reversed on the shipped pattern: a crossing is a bar before it is a heatmap',
+      cues: withMatrixBarFirst(CHART_CUES),
+    },
+    {
+      name: 'matrix-wide+bar-first',
+      note: 'the reversal on the pattern that made it look good: +66 on the question half, −34 on the product',
+      cues: withMatrixBarFirst(withMatrixWide(CHART_CUES)),
+    },
+    {
+      name: 'no-matrix',
+      note: '`matrix` removed outright: the ceiling a narrower pattern could reach and the floor a rewrite has to clear',
+      cues: withoutMatrix(CHART_CUES),
+    },
+    {
       name: 'bar-share',
       note: 'the `share` cue leads with a bar: the corpus drew 194 bars for questions this table answers `pie`',
       cues: CHART_CUES.map((rule) => (rule.kind === 'share' ? { ...rule, marks: ['bar', 'pie'] } : rule)),
+    },
+    {
+      name: 'share-by-any',
+      note: 'the refused wide width of the share discriminator: a share word and a `by` anywhere after it',
+      cues: withShareByAnyCue(CHART_CUES),
     },
     {
       name: 'histogram',
@@ -621,54 +631,9 @@ export const CUE_VARIANTS: readonly { readonly name: string; readonly note: stri
       cues: withHistogramCue(CHART_CUES),
     },
     {
-      name: 'bar-share+histogram',
-      note: 'both changes at once, because they touch different labels and a reader will ask',
-      cues: withHistogramCue(CHART_CUES.map((rule) => (rule.kind === 'share' ? { ...rule, marks: ['bar', 'pie'] } : rule))),
-    },
-    {
-      name: 'share-by',
-      note: 'the distinction inside `share` at its narrowest: "share by X" compares categories and gets a bar, everything else keeps the pie',
-      cues: withShareByCue(CHART_CUES),
-    },
-    {
-      name: 'share-by+histogram',
-      note: 'the narrow discriminator and the histogram cue together, which is what a table would carry if both cleared their bars',
-      cues: withHistogramCue(withShareByCue(CHART_CUES)),
-    },
-    {
-      name: 'share-by-any',
-      note: 'the same signal at the width that also reads a measure between the words, so "the share of revenue by region" is a bar',
-      cues: withShareByAnyCue(CHART_CUES),
-    },
-    {
       name: 'share-by-any+histogram',
-      note: 'the wide discriminator and the histogram cue together',
+      note: 'the wide share discriminator and the histogram cue together, priced as a pair',
       cues: withHistogramCue(withShareByAnyCue(CHART_CUES)),
-    },
-    {
-      name: 'matrix-window',
-      note: '`matrix` reads "by … and" inside one clause instead of across the whole question',
-      cues: withMatrixWindow(CHART_CUES),
-    },
-    {
-      name: 'matrix-window+share-by',
-      note: 'both discriminators at once: the two cues this round suspects of leading on a phrase that is not a request',
-      cues: withMatrixWindow(withShareByCue(CHART_CUES)),
-    },
-    {
-      name: 'matrix-bar-first',
-      note: '`matrix` reversed: a crossing is a bar before it is a heatmap, which is what 67 of its 68 covered rows say',
-      cues: withMatrixBarFirst(CHART_CUES),
-    },
-    {
-      name: 'matrix-window+bar-first',
-      note: 'the clause window and the reversal together, because the window removes the mass the reversal was for',
-      cues: withMatrixBarFirst(withMatrixWindow(CHART_CUES)),
-    },
-    {
-      name: 'no-matrix',
-      note: '`matrix` removed outright: the ceiling a narrower pattern could reach and the floor a rewrite has to clear',
-      cues: withoutMatrix(CHART_CUES),
     },
   ];
 
