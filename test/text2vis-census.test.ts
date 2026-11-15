@@ -31,6 +31,7 @@ import {
   coveringMarks,
   describeCensus,
   entryCensus,
+  firstClaimWinner,
   noProfileReason,
   parseCensusArgs,
   snippet,
@@ -348,6 +349,17 @@ describe('a question, cut to the words that decide', () => {
     expect(snippet('What is\nthe trend   of revenue?')).toBe('What is the trend of revenue?');
   });
 
+  it('cuts the output-format spec off the end, because the question sits in front of it', () => {
+    // The corpus asks for JSON in every prompt, and the schema is longer than the question it
+    // follows. Keeping the tail kept the schema: the first version of this cut printed the same
+    // `"code": "<matplotlib code for visualization>"` sentence three hundred times.
+    const prompt =
+      'You are a data science assistant. Question: what is the trend of revenue? Format the answer as {"answer": "<short answer>", "code": "<matplotlib code for visualization>"} The code should be complete and work without modification.';
+    const cut = snippet(prompt);
+    expect(cut.endsWith('what is the trend of revenue? Format the answer as')).toBe(true);
+    expect(cut).not.toContain('matplotlib');
+  });
+
   it('leaves a short prompt alone, so a sample reads as the corpus wrote it', () => {
     expect(snippet('  Revenue by region  ')).toBe('Revenue by region');
   });
@@ -357,6 +369,29 @@ describe('a question, cut to the words that decide', () => {
     const cut = snippet(long);
     expect(cut.length).toBeLessThanOrEqual(161);
     expect(cut.endsWith('what is the trend?')).toBe(true);
+  });
+  it('ranks a first claim above any number of second places, which is the lever it models', () => {
+    // Bar is the second mark of `trend`, `share`, `matrix`, `ranking`, `distribution`, `progress` and
+    // `stages`, so a prompt carrying three cue phrases pays it twice each: it can beat a mark the
+    // question named outright. This is that row, and the model of the rule that would stop it.
+    const prompt = 'What is the trend of revenue by month and region?';
+    const profiles = profilesOf(parseResultSet(regions(5)));
+    const choice = recommendChart(prompt, profiles);
+    const shipped = choice.recommendations[0];
+    const under = firstClaimWinner(choice, readCues(prompt));
+    expect(shipped?.mark).toBe('bar');
+    expect(under?.mark).toBe('line');
+    // The stable sort keeps the product's order underneath, so the model restates no weight: the
+    // line wins on the first-claim count and carries a lower score.
+    expect(under?.score).toBeLessThan(shipped?.score ?? 0);
+  });
+
+  it('leaves the order alone when no cue names anything first', () => {
+    // A question with no cue phrase in it cannot be re-ranked by first claims, and the model has to
+    // return the product's own order rather than reshuffling on a fact nobody stated.
+    const profiles = profilesOf(parseResultSet(regions(5)));
+    const choice = recommendChart('Show the numbers.', profiles);
+    expect(firstClaimWinner(choice, readCues('Show the numbers.'))).toEqual(choice.recommendations[0]);
   });
 });
 
@@ -451,6 +486,25 @@ describe('the census over a population', () => {
     expect(() => assertCensusReport({ ...report, outcomes: { ...report.outcomes, hit: 0 } })).toThrow(/six outcomes/);
     expect(() => assertCensusReport({ ...report, byFamily: [] })).toThrow(/per-family rows/);
     expect(() => assertCensusReport({ ...report, unmapped: 0 })).toThrow(/unmapped/);
+    // The counterfactual is an ordering, not a second corpus: it can move a row and it cannot create
+    // or destroy one, so its hits are the shipped hits plus what it converts minus what it loses.
+    expect(() =>
+      assertCensusReport({ ...report, counterfactual: { ...report.counterfactual, converted: 1 } }),
+    ).toThrow(/counterfactual/);
+  });
+
+  it('prices the next lever on this population rather than on a claim about it', () => {
+    const report = censusOf(population);
+    // Neither loss here is caused by a second place outpaying a first claim: `bar -> heatmap` loses
+    // to the only first claim in the question, and `heatmap -> bar` has no cue at all. A lever that
+    // ranks first claims higher converts nothing on this population and costs nothing, which is the
+    // honest reading of a fixture that does not contain the shape the lever targets.
+    expect(report.counterfactual).toEqual({
+      rule: 'a mark a cue names first outranks a mark no cue names first',
+      hit: 2,
+      converted: 0,
+      lost: 0,
+    });
   });
 
   it('prints the outcomes, the refusal sentences and the losses', () => {
@@ -500,6 +554,42 @@ describe('the census over a population', () => {
     // An empty cell has nothing to quote, and a line saying `empty: e.g. ""` is a line that teaches
     // a reader to skip the section.
     expect(lines).not.toContain('empty: e.g.');
+  });
+
+  it('counts what the lever would convert, on a row the shipped ranking loses', () => {
+    const report = censusOf([input('What is the trend of revenue by month and region?', 'Line Chart', regions(5))]);
+    expect(report.outcomes.hit).toBe(0);
+    expect(report.outcomes.outranked).toBe(1);
+    expect(report.counterfactual).toEqual({
+      rule: 'a mark a cue names first outranks a mark no cue names first',
+      hit: 1,
+      converted: 1,
+      lost: 0,
+    });
+    expect(() => assertCensusReport(report)).not.toThrow();
+  });
+
+  it('counts what the lever would cost, because a rule that only ever won is a rule nobody checked', () => {
+    // Bar wins this row by being the second mark of three cue phrases (2 + 2 + 2 + 2 = 8) against
+    // three marks that hold one first claim each (5). Ranking first claims higher takes the row away
+    // from the label. A counterfactual that reported only `converted` would be an advertisement.
+    const two = table('Region, Channel, Revenue', [
+      'North, Online, 40',
+      'South, Retail, 55',
+      'East, Online, 31',
+      'West, Retail, 63',
+    ]);
+    const report = censusOf([
+      input('What percentage of revenue is trending by region and channel over time?', 'Bar Chart', two),
+    ]);
+    expect(report.outcomes.hit).toBe(1);
+    expect(report.counterfactual).toEqual({
+      rule: 'a mark a cue names first outranks a mark no cue names first',
+      hit: 0,
+      converted: 0,
+      lost: 1,
+    });
+    expect(() => assertCensusReport(report)).not.toThrow();
   });
 
   it('orders equal-sized refusals by the detail that differs, so two runs read the same', () => {

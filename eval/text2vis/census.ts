@@ -32,7 +32,15 @@
  * years or quarters that the profiler typed as a measure, the defect is in type inference; if they
  * carry nothing that reads as time, the label asks for a picture the result set cannot witness.
  */
-import type { CueKind, FieldProfile, RecommendableMark, ShapeCounts } from '@agentix-e/nl2charts-chart';
+import type {
+  ChartChoice,
+  Cue,
+  CueKind,
+  FieldProfile,
+  Recommendation,
+  RecommendableMark,
+  ShapeCounts,
+} from '@agentix-e/nl2charts-chart';
 import { RECOMMENDABLE_MARKS, readCues, recommendChart } from '@agentix-e/nl2charts-chart';
 import { applyExitCode, isEntry, loadText2Vis, type LoadOptions } from './dataset.js';
 import { familiesOfMark, familyOfLabel, type ChartFamily } from './rule.js';
@@ -61,22 +69,30 @@ export function coveringMarks(family: ChartFamily): readonly RecommendableMark[]
 const SNIPPET = 160;
 
 /**
- * A prompt cut to the part that decides, which is the end.
+ * The output-format spec every Text2Vis prompt ends with.
  *
- * Text2Vis prompts are an instruction block followed by the question — "You are a data science
- * assistant. Generate matplotlib code … Which region has the highest revenue?" — so a sample that
- * keeps the *first* 160 characters prints the boilerplate every row shares and none of the words
- * that make one row different. The first draft did exactly that: every loss in the report opened
- * with `You are a data science assistant.` and the evidence was 300 lines of the same sentence.
+ * `… {"answer": "<short answer>", "code": "<matplotlib code for visualization>"} The code should be
+ * complete, include axis labels and a title …` — the corpus asks for JSON, and the schema is the
+ * longest stable sentence in the file. Keeping the tail of a prompt therefore kept the schema and
+ * not the question: the first version of this cut printed 300 samples of the same boilerplate.
+ */
+const ANSWER_SPEC = /\{?\s*"answer"\s*:/;
+
+/**
+ * A prompt cut to the part that decides: the question, which sits between the instructions and the
+ * output-format spec.
  *
- * Whitespace is collapsed before the cut because the corpus wraps its questions across lines, and a
- * cut from the left is marked with an ellipsis so a reader can tell a truncated prompt from a short
- * one. Nothing is rephrased: the sample is the corpus's words, minus the part a corpus repeats.
+ * Whitespace is collapsed first because the corpus wraps its questions across lines; the spec is cut
+ * off, because it is the same in every row and it is at the end; what remains is cut from the left,
+ * because the instruction block is at the front. Nothing is rephrased — the sample is the corpus's
+ * own words minus the two parts a reader has already read.
  */
 export function snippet(text: string): string {
   const collapsed = text.replace(/\s+/g, ' ').trim();
-  if (collapsed.length <= SNIPPET) return collapsed;
-  return `…${collapsed.slice(collapsed.length - SNIPPET)}`;
+  const spec = ANSWER_SPEC.exec(collapsed);
+  const body = (spec === null ? collapsed : collapsed.slice(0, spec.index)).trim();
+  if (body.length <= SNIPPET) return body;
+  return `…${body.slice(body.length - SNIPPET)}`;
 }
 
 /**
@@ -303,8 +319,27 @@ export interface RefusalCensus {
 export interface NoProfileCensus {
   readonly reason: TableDefect;
   readonly n: number;
-  /** Up to three of the cells' first lines: what the corpus put there instead of a table. */
+  /** Up to three of the cells' first lines: what the corpus put there instead of what a table is. */
   readonly samples: readonly string[];
+}
+
+/**
+ * A lever's expected effect, computed from the rows rather than argued from them.
+ *
+ * A registered prediction is a promise, and the corpus can price the promise before anyone ships it.
+ * `converted` and `lost` are the two sides — a rule that buys 40 rows and costs 12 is a different
+ * decision from one that buys 40 and costs none — and the next dispatch has to reproduce both, so
+ * the model cannot quietly become the measurement.
+ */
+export interface Counterfactual {
+  /** The rule, in the words the next dispatch will test. */
+  readonly rule: string;
+  /** Rows this rule answers with the label's family as the winner's first claim. */
+  readonly hit: number;
+  /** Rows it wins that the shipped ranking loses. */
+  readonly converted: number;
+  /** Rows it loses that the shipped ranking wins. */
+  readonly lost: number;
 }
 
 export interface CensusReport {
@@ -319,6 +354,8 @@ export interface CensusReport {
   readonly outranked: readonly OutrankedCensus[];
   /** Why a table produced no profile, most rows first: a corpus gap and a parser gap are not the same. */
   readonly noProfile: readonly NoProfileCensus[];
+  /** What the next lever would do, counted over the same rows and not yet shipped. */
+  readonly counterfactual: Counterfactual;
   /** Columns that format as time and were not typed temporal, most rows first. */
   readonly timeLike: readonly TimeLike[];
   /** Rows whose table carries at least one such column. */
@@ -361,6 +398,30 @@ export function timeLikeColumns(set: ResultSet, profiles: readonly FieldProfile[
     found.push({ column: name, typed, sample: cells[0] as string, n: 1 });
   }
   return found;
+}
+
+/**
+ * The winner if a cue's first claim outranked every second-place claim — the next lever, priced
+ * before it is shipped.
+ *
+ * Every cue that fires pays its first mark three points and each of its other marks two, and the
+ * scores are summed. A question whose prompt carries three cue phrases therefore pays the bar twice
+ * per phrase — bar is the second mark of `share`, `matrix`, `ranking`, `trend`, `distribution`,
+ * `progress` and `stages` — so a mark *named first* can lose to a mark *named second three times*.
+ * The corpus shows it verbatim: `line 5 [trend] < bar 6 [trend matrix]`.
+ *
+ * This function is the model of the rule that would stop it: rank by how many cues name the mark
+ * first, and keep every other key as it was. It restates no weight, and it does not re-sort by score
+ * because `Array.prototype.sort` is stable: the list it is handed already carries the product's
+ * `(score, preference)` order, so a single first-claim comparator is the whole change.
+ *
+ * **It is a prediction, not a measurement.** Nothing in the product reads it. The dispatch that
+ * ships the rule must reproduce `converted` and `lost` exactly, or the model is wrong and the rule
+ * it describes is a different rule.
+ */
+export function firstClaimWinner(choice: ChartChoice, cues: readonly Cue[]): Recommendation | undefined {
+  const firsts = (mark: RecommendableMark): number => cues.filter((cue) => cue.marks[0] === mark).length;
+  return [...choice.recommendations].sort((left, right) => firsts(right.mark) - firsts(left.mark))[0];
 }
 
 /**
@@ -526,6 +587,9 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
   let unmapped = 0;
   let timeLikeRows = 0;
   let coercedRows = 0;
+  let underFirstClaims = 0;
+  let converted = 0;
+  let lost = 0;
 
   for (const row of rows) {
     if (familyOfLabel(row.label) === undefined) {
@@ -551,6 +615,18 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
 
     const set = parseResultSet(row.tableData);
     const profiles = profilesOf(set);
+    // The counterfactual is counted here, not inside `classify`: `classify` reports what happened,
+    // and this is a prediction about a ranking that does not exist yet. It is computed on the same
+    // population and the same hit test, so `hit` and `counterfactual.hit` are the same measurement
+    // of two orderings rather than two measurements of one ordering.
+    if (profiles.length > 0) {
+      const under = firstClaimWinner(recommendChart(row.prompt, profiles), readCues(row.prompt));
+      const answers = under !== undefined && familiesOfMark(under.mark, under.cues[0])[0] === classified.expected;
+      const answered = classified.outcome === 'hit';
+      if (answers) underFirstClaims += 1;
+      if (answers && !answered) converted += 1;
+      if (!answers && answered) lost += 1;
+    }
     const mistyped = profiles.length === 0 ? [] : timeLikeColumns(set, profiles);
     if (mistyped.length > 0) timeLikeRows += 1;
     for (const column of mistyped) {
@@ -685,6 +761,12 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
     noProfile: [...noProfile.values()].sort(
       (left, right) => right.n - left.n || left.reason.localeCompare(right.reason),
     ),
+    counterfactual: {
+      rule: 'a mark a cue names first outranks a mark no cue names first',
+      hit: underFirstClaims,
+      converted,
+      lost,
+    },
     timeLike: [...timeLike.values()].sort(
       (left, right) => right.n - left.n || left.column.localeCompare(right.column),
     ),
@@ -725,6 +807,14 @@ export function assertCensusReport(report: CensusReport): void {
   if (unexplained !== report.outcomes.noProfile) {
     throw new Error(
       `census report: the no-profile reasons account for ${String(unexplained)} and ${String(report.outcomes.noProfile)} tables would not profile`,
+    );
+  }
+  // A counterfactual is an ordering of the same rows, so it can move a hit and cannot make one: the
+  // three counts have to satisfy the identity, or the prediction is about a different population.
+  const { converted, lost } = report.counterfactual;
+  if (report.counterfactual.hit !== report.outcomes.hit + converted - lost) {
+    throw new Error(
+      `census report: the counterfactual reads ${String(report.counterfactual.hit)} hits, which is not ${String(report.outcomes.hit)} + ${String(converted)} converted - ${String(lost)} lost`,
     );
   }
 }
@@ -782,6 +872,10 @@ export function describeCensus(report: CensusReport): readonly string[] {
       lines.push(`    ${entry.reason}: e.g. "${entry.samples[0] as string}"`);
     }
   }
+  const under = report.counterfactual;
+  lines.push(
+    `  as if ${under.rule}: hit ${String(outcome.hit)} -> ${String(under.hit)} (converted ${String(under.converted)}, lost ${String(under.lost)}) — predicted, not shipped`,
+  );
   return lines;
 }
 
