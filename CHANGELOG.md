@@ -7,6 +7,24 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **A per-cue reading that says which cue fired beside a wrong order, and the finding that a reorder
+  is invisible to the product.** `cuePrecision` could say that `share` gets the family right and the
+  order wrong on 177 rows; it could not say which row to move, because the repair is not in the cue
+  being read. `eval/text2vis/rule.ts` now also exports `cueCrossings`, which splits a cue's covered rows
+  in two and counts the companions in each half — publishing both halves, because a companion that
+  fires on both is a cue that fires often. Reading it produced the round's central result: moving
+  `ranking` in front of `share` scores **+39** on the question half (596 → 635) and **±0** on the
+  product (358 → 358), because `recommendChart` ranks by `firstClaims` — how many cues name a mark
+  first — and never reads the order of the cue table. The two ways to move the same thing are priced
+  separately (`ranking-before-share`, `share-ranked`), both are refused, and `packages/chart` now
+  asserts the identity so the next round meets the fact before it ships.
+- **`packages/chart/**` no longer buys the SQL chain.** A round that changed one cue bought thirteen
+  BIRD arms over 496 questions and three live passes over 210 cases, to re-measure a pipeline not one
+  byte of which had changed. The chart package is a leaf under the SQL products — it depends on `spec`
+  and nothing imports it except `eval/text2vis/` — so `tools/ci-scope.mjs` exempts it on the same terms
+  as the reading, and `text2vis-rule.yml` widened its trigger from one file of the package to all of it
+  in the same commit. The pairing is checked by a test that reads the workflow file, so an exemption
+  whose trigger did not follow fails the build instead of leaving a path nobody measures.
 - **The Text2Vis corpus has a loader, and the loader is a parser.** The chart side of this project
   had one external benchmark and no way to read it without a Python dependency: `mizanurr/Text2Vis`
   is one CSV of prose, so `eval/text2vis/dataset.ts` parses it itself -- quoted commas, quoted
