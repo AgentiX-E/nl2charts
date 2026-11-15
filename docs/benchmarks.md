@@ -13690,3 +13690,117 @@ while no cue table changed at all.
    removal, the blunt share flip and the wide share discriminator are all still in the sweep, because a
    counterfactual that lives only in a commit message is a number nobody can re-take — and `bar-share`
    has now been refused on three different grounds across three rounds, each time by a number.
+
+## A repair the product cannot feel: +39 on the question half, 0 on the product
+
+The previous round closed with a number it could not act on. `share` decides more corpus questions than
+any other cue and gets 28% of them right, and the gap to its *family* coverage is 177 rows where the
+label is a mark the cue itself lists — a bar, in second place. A reorder is the obvious repair, and the
+only evidence a reorder has is what the broken rows have in common.
+
+`cueCrossings` counts it. It splits a cue's covered rows in two and counts the cues that fired beside
+the lead in each half. The split is what makes the reading evidence rather than a distribution: a
+companion that fires on both halves fires often, and only the one that fires on the broken half is a
+candidate to move. Both halves are published, because printing only the broken one would make every
+common cue look like the answer — the same defect as a share without its baseline, one level down.
+
+| cue | wrong order | companion on the broken rows | companion on the rows it got right |
+| --- | --- | --- | --- |
+| `share` | 177 of 314 covered | `ranking` (93), `distribution` (18), `matrix` (13), `correlation` (5), `progress` (1) | `ranking` (53 of 137), `distribution` (19), `matrix` (14) |
+| `trend` | 61 of 330 | `ranking` (34), `share` (28), `correlation` (3), `distribution` (3) | `share` (96 of 269), `ranking` (79), `distribution` (11) |
+| `distribution` | 37 of 69 | `ranking` (8) | `ranking` (7 of 32) |
+| `correlation` | 4 of 29 | `ranking` (2), `matrix` (1) | `ranking` (3 of 25) |
+
+`ranking` is the companion on 52.5% of the broken `share` rows and on 38.7% of the ones it got right.
+That 14-point difference is the whole case for moving it — and it is thin, which is what the round
+turned out to be about.
+
+### Two ways to move one thing, priced apart
+
+The move and the phrase are two different levers and are priced separately: a reorder costs no words
+and reads every question the table already reads, while a new phrase costs a name in the vocabulary and
+reads only the questions that hold both halves of it.
+
+| table | question half (top-1) | product (hit) | per-family on the question half |
+| --- | --- | --- | --- |
+| shipped | **596 (40.54%)** | **358 (24.35%)** | — |
+| `ranking` moved in front of `share` | 635 (+39) | **358 (±0)** | bar +102, pie −53, boxplot −7, scatter −3 |
+| `share-ranked` (a share and a rank in one clause) | 627 (+31) | **357 (−1)** | bar +78, pie −47 |
+
+The third disagreement of this kind in four rounds, and the first with a mechanical explanation.
+
+`recommendChart` ranks by two keys and neither reads the order of the cue table. The first key is
+`firstClaims` — how many cues name a mark **first** — which is a count over a set and not a scan down a
+list. The second is the mark order *inside* each cue, worth three points for the first mark a cue names
+and two for the rest. So a table that only changes where a cue sits is the identity function on the
+product, and the +39 belongs to a function no caller invokes.
+
+```ts
+// packages/chart/src/recommend.ts
+function firstClaims(cues: readonly Cue[], mark: RecommendableMark): number {
+  return cues.filter((cue) => cue.marks[0] === mark).length;
+}
+```
+
+The assertion is now in the package and not in the reading:
+
+```ts
+// packages/chart/test/recommend.test.ts — "does not depend on where a cue sits in the table"
+const reversed = recommendChart(question, profileRows(matrix), { cues: [...CHART_CUES].reverse() });
+expect(reversed.recommendations.map((entry) => entry.mark)).toEqual(forward.recommendations.map((entry) => entry.mark));
+expect(reversed.recommendations.map((entry) => entry.score)).toEqual(forward.recommendations.map((entry) => entry.score));
+```
+
+### What the 177 rows are not
+
+Three repairs have now been priced against the same 177 rows and refused by the product:
+
+| repair | question half | product | why it fails |
+| --- | --- | --- | --- |
+| move `ranking` in front of `share` | +39 | ±0 | the product does not read cue order |
+| a `share-ranked` cue ahead of `share` | +31 | −1 | the bar it buys is smaller than the pie it loses |
+| `share` marks reversed (`bar` first) | +40 | ±0 | already refused for −137 pie on the question half |
+
+So the loss is not in the cue table. `pie` leads on those rows because the *result set* admits a pie —
+one category of at most seven slices, none negative — and the cue only decides among the marks that
+survive admission. A `share` question whose table holds nine categories is not answered wrongly by the
+cue table at all: it is answered by the pie admission rule, which is a file in `packages/chart` the
+readings in `eval/text2vis` price through `census.ts` and not through `rule.ts`.
+
+That is the next lever, and naming it is the point of this round: **the 177 wrong orders are a profile
+question, and every cue-side repair is now a measured zero.**
+
+### Cost: a round that measured the wrong half of the pipeline
+
+This round changed the cue table in `packages/chart/src/recommend.ts`, and the push after it bought
+thirteen BIRD arms over 496 questions and three live passes over 210 cases. None of those calls can see
+the chart package: it depends on `spec`, and nothing imports it except `eval/text2vis/`.
+
+`ci-scope.mjs` now exempts `packages/chart/**` on the same terms as the reading itself, and the
+exemption is paired rather than claimed — `text2vis-rule.yml` widened its trigger from one file of the
+package to the whole package in the same commit, so the paths the rule drops are exactly the paths the
+cheap job picks up. A test reads the workflow file rather than restating it, so the check fails when
+either list moves alone.
+
+Measured on the two pushes of this round: the commit that touched only the cue table, its tests and the
+reading ran `quality` and `text2vis-rule` and skipped both model jobs; the commit that touched
+`tools/ci-scope.mjs` measured, because a tool that decides what to measure has to be measured.
+
+### What changes in the method
+
+1. **A reading that is an average over rules cannot name a phrase, and a reading that names a phrase can
+   still name the wrong file.** `cuePrecision` names the cue; `cueCrossings` names the companion; neither
+   can say that the decision is made downstream of both. The round's useful output is a *location* — the
+   admission rule — and it took two new instruments to rule out the two obvious places.
+2. **An instrument has to state the function it scores.** `cuePrecision` scores the first cue that fired.
+   The product scores how many cues name a mark first. They are two functions, they disagree in both
+   directions by construction, and the gap is now a comment in the reading and an assertion in the
+   package rather than a surprise in a later round.
+3. **A 14-point difference between two halves is a hypothesis, not a finding.** `ranking` fires on 52.5%
+   of the broken rows and 38.7% of the correct ones; that is enough to price a lever and not enough to
+   assume the fix. It was priced, and it was zero.
+4. **The identity result is a result.** A table change that moves one instrument by 39 rows and the other
+   by none is the cheapest possible finding about where a defect lives, and it cost no model call.
+5. **The exemption and the trigger are one edit.** A path the expensive chain stops measuring and the
+   cheap chain does not start measuring is a path nobody measures — and that failure looks like a green
+   build.
