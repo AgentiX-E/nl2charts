@@ -264,7 +264,9 @@ describe('what became of one question', () => {
     const row = expectOutcome(input('What percentage of revenue does each region contribute?', 'Pie Chart', regions(20)), 'refused');
     expect(row.outcome).toBe('refused');
     expect(row.covering).toBe('pie');
-    expect(row.reason).toBe('a pie needs one category of at most 7 slices, none of them negative');
+    // The sentence carries the cap the product ships, so this expectation is also the assertion that
+    // the default is twelve: a cap changed without a reading would fail here before it reached a log.
+    expect(row.reason).toBe('a pie needs one category of at most 12 slices, none of them negative');
   });
 
   it('separates a family no mark covers from a mark a rule refused', () => {
@@ -914,30 +916,31 @@ describe('the admission cap, priced beside the cue tables', () => {
   const NINE = table('Region, Revenue', regions(9).split('\n').slice(1));
   const PART = 'the share of revenue that is refunds';
 
-  it('admits the pie the shipped cap refuses, and leaves every cue where it was', () => {
-    // The cap is a product decision about legibility, and the corpus disagrees with it on a specific
+  it('shows the retired cap refusing a pie the shipped one admits, and prices the ceiling', () => {
+    // The cap is a product decision about legibility and the corpus disagrees with it on a specific
     // shape: a part of a whole with nine categories. Refusing the pie does not make the row a `bar`
-    // question — the cue said pie and the admission said no — so the row is counted as a refusal
-    // rather than as a wrong answer, which is the census telling a reader which file to open.
+    // question — the cue said pie and the admission said no — so the row is a refusal rather than a
+    // wrong answer, which is the census telling a reader which file to open.
     const report = censusOf([input(PART, 'Pie Chart', NINE)]);
-    expect(report.outcomes).toMatchObject({ hit: 0, refused: 1 });
-    expect(report.refusals[0]?.reason).toContain('at most 7 slices');
-    // The cue table is the same in both readings, so the difference is the cap and nothing else.
-    expect(report.product.find((variant) => variant.variant === 'slices-12')).toMatchObject({ hit: 1 });
+    expect(report.outcomes).toMatchObject({ hit: 1, refused: 0 });
+    // The retired cap stays in the table rather than in a commit message: it is the only table that
+    // can still say what the four rows were worth, and its reason sentence is the product's own.
+    const retired = report.product.find((variant) => variant.variant === 'slices-7');
+    expect(retired).toMatchObject({ hit: 0 });
+    expect(censusOf([input(PART, 'Pie Chart', NINE)]).product[0]).toMatchObject({ variant: 'shipped', hit: 1 });
     expect(report.product.find((variant) => variant.variant === 'slices-any')).toMatchObject({ hit: 1 });
-    expect(report.product[0]).toMatchObject({ variant: 'shipped', hit: 0 });
   });
 
   it('prices the knobs after every cue table, so the cue axis is read first', () => {
     const names = censusOf([input(PART, 'Pie Chart', NINE)]).product.map((variant) => variant.variant);
-    const firstKnob = names.indexOf('slices-8');
+    const firstKnob = names.indexOf('slices-7');
     expect(firstKnob).toBeGreaterThan(0);
     // The frontier is a curve, not a single candidate: the smallest cap that reaches the gain is a
     // better product than the largest one that also reaches it, and which is which is a reading.
-    expect(names.slice(firstKnob)).toEqual(['slices-8', 'slices-9', 'slices-10', 'slices-12', 'slices-any']);
+    expect(names.slice(firstKnob)).toEqual(['slices-7', 'slices-9', 'slices-any']);
     // Each entry says what it changed, because a name like `slices-12` is a label and the note is the
     // claim a reader checks.
-    expect(censusOf([input(PART, 'Pie Chart', NINE)]).product[names.indexOf('slices-9')]?.note).toContain('nine');
+    expect(censusOf([input(PART, 'Pie Chart', NINE)]).product[names.indexOf('slices-9')]?.note).toContain('eight or nine');
   });
 
   it('splits every table across two halves that sum to the whole', () => {
@@ -976,8 +979,10 @@ describe('the admission cap, priced beside the cue tables', () => {
     const report = censusOf([input(PART, 'Pie Chart', NINE)]);
     const lines = describeProduct(report);
     expect(lines).toHaveLength(1 + report.product.length);
-    const knob = lines.find((line) => line.trimStart().startsWith('slices-12 '));
-    expect(knob).toContain('pie +1');
+    // The knob reads as a loss because the cap it retires is what the control replaced: the sign is
+    // the point, and a line that read `pie +1` would mean the default had not moved.
+    const knob = lines.find((line) => line.trimStart().startsWith('slices-7 '));
+    expect(knob).toContain('pie -1');
     expect(lines.find((line) => line.trimStart().startsWith('shipped '))).not.toContain('|');
   });
 });

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { SERIES_TYPES, isNl2ChartsError, parseChartIR } from '@agentix-e/nl2charts-spec';
 import type { FieldProfile } from '../src/profile.js';
 import { profileRows } from '../src/profile.js';
-import { CHART_CUES, readCues, recommendChart, toChartIR } from '../src/recommend.js';
+import { CHART_CUES, DEFAULT_MAX_SLICES, readCues, recommendChart, toChartIR } from '../src/recommend.js';
 import { compileToECharts } from '../src/compile.js';
 import { isRenderable, lint } from '../src/lint.js';
 
@@ -280,18 +280,25 @@ describe('recommending a chart from the question and the result set', () => {
     const choice = recommendChart('What share of revenue does each region hold?', profiles(negative));
     expect(choice.recommendations.map((item) => item.mark)).not.toContain('pie');
     expect(choice.refused.find((item) => item.mark === 'pie')?.reason).toBe(
-      'a pie needs one category of at most 7 slices, none of them negative',
+      'a pie needs one category of at most 12 slices, none of them negative',
     );
   });
 
-  it('refuses a pie over more slices than a reader can name', () => {
-    const wide = rows({
-      region: Array.from({ length: 9 }, (_, index) => `r${String(index)}`),
-      revenue: [1, 2, 3, 4, 5, 6, 7, 8, 9],
-    });
-    const choice = recommendChart('Share of revenue by region', profiles(wide));
-    expect(choice.recommendations.map((item) => item.mark)).not.toContain('pie');
-    expect(choice.refused.find((item) => item.mark === 'pie')?.reason).toContain('at most 7 slices');
+  it('refuses a pie over more slices than a reader can name, and admits the last one it can', () => {
+    // The boundary is read off the constant rather than restated: twelve slices is a pie and thirteen
+    // is a table, and a test that hard-coded both numbers would pass on a default nobody chose. The
+    // corpus is what chose it — a cap of eight or nine scores *worse* than seven, and twelve is the
+    // first value where the pie the cue table asks for is no longer overruled by a constant.
+    const wide = (count: number): ReturnType<typeof rows> =>
+      rows({
+        region: Array.from({ length: count }, (_, index) => `r${String(index)}`),
+        revenue: Array.from({ length: count }, (_, index) => index + 1),
+      });
+    const last = recommendChart('Share of revenue by region', profiles(wide(DEFAULT_MAX_SLICES)));
+    expect(last.recommendations[0]?.mark).toBe('pie');
+    const over = recommendChart('Share of revenue by region', profiles(wide(DEFAULT_MAX_SLICES + 1)));
+    expect(over.recommendations.map((item) => item.mark)).not.toContain('pie');
+    expect(over.refused.find((item) => item.mark === 'pie')?.reason).toContain(`at most ${String(DEFAULT_MAX_SLICES)} slices`);
   });
 
   it('refuses every mark when the result set carries no measure', () => {
