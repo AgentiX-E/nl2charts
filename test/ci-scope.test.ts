@@ -15,7 +15,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { needsModel, explain, summary, publish, isDocumentation, isTest, TRUNCATED_AT } from '../tools/ci-scope.mjs';
+import { needsModel, explain, summary, publish, isChartReading, isDocumentation, isTest, TRUNCATED_AT } from '../tools/ci-scope.mjs';
 
 describe('a change set that only edits documentation', () => {
   it('does not need a model call', () => {
@@ -96,6 +96,43 @@ describe('a change set that only edits tests', () => {
   });
 });
 
+describe('a change set that only edits the chart reading', () => {
+  it('does not buy the BIRD chain, because the cheap job already re-took the number', () => {
+    // `eval/text2vis/` imports the chart package and each other and nothing imports it back, so it
+    // is a leaf: thirteen arms over 496 questions and three passes over 210 cases cannot move
+    // because a census learned to count a new bucket. `text2vis-rule` triggers on the same paths and
+    // spends no calls, which is the measurement this push actually needs.
+    const result = needsModel(['eval/text2vis/census.ts', 'eval/text2vis/dataset.ts']);
+    expect(result.measure).toBe(false);
+    expect(result.reason).toContain('text2vis-rule');
+    expect(result.reason).toContain('chart reading');
+    expect(needsModel(['eval/text2vis/census.ts', 'CHANGELOG.md']).measure).toBe(false);
+  });
+
+  it('recognises the reading by its directory, and nothing beside it', () => {
+    expect(isChartReading('eval/text2vis/census.ts')).toBe(true);
+    expect(isChartReading('eval/text2vis/profile.mts')).toBe(true);
+    // The harness that spends the calls is the next directory over and is not covered.
+    expect(isChartReading('eval/bird/run.ts')).toBe(false);
+    expect(isChartReading('eval/text2vis/deep/census.ts')).toBe(false);
+    // Nor is a neighbour whose name merely starts the same way.
+    expect(isChartReading('eval/text2vis-old/census.ts')).toBe(false);
+    expect(needsModel(['eval/bird/run.ts']).measure).toBe(true);
+  });
+
+  it('still measures a push that touches the reading and the product in one commit', () => {
+    const result = needsModel(['eval/text2vis/census.ts', 'packages/chart/src/recommend.ts']);
+    expect(result.measure).toBe(true);
+    expect(result.files).toEqual(['packages/chart/src/recommend.ts']);
+  });
+
+  it('says which class it exempted, because a skip that misnames itself is a skip nobody audits', () => {
+    expect(needsModel(['a.md']).reason).toContain('Markdown, which no prompt reads');
+    expect(needsModel(['test/x.test.ts', 'a.md']).reason).toContain('Markdown or tests');
+    expect(needsModel(['eval/text2vis/census.ts']).reason).toContain('Markdown, tests or the chart reading');
+  });
+});
+
 describe('the two edges where the list cannot be trusted', () => {
   it('measures a push it cannot describe', () => {
     // "No files reported" is a reporting failure, not a statement that nothing changed.
@@ -135,7 +172,7 @@ describe('the two files the step needs', () => {
         expect(line).toMatch(/^[a-z_]+=[^\n]*$/u);
       }
       // The summary is the other half: Markdown, and it carries the sentence.
-      expect(readFileSync(summaryFile, 'utf8')).toContain('neither Markdown nor tests');
+      expect(readFileSync(summaryFile, 'utf8')).toContain('not Markdown, tests or the chart reading');
       expect(readFileSync(summaryFile, 'utf8')).toContain('packages/a.ts');
     } finally {
       rmSync(directory, { recursive: true, force: true });

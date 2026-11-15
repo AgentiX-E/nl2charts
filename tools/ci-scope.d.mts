@@ -18,6 +18,15 @@ export function isDocumentation(file: string): boolean;
  */
 export function isTest(file: string): boolean;
 
+/**
+ * A file the chart reading is made of, which no product path imports.
+ *
+ * `eval/text2vis/` is a leaf: its four sources import the chart package and each other, and nothing
+ * imports them back, so a change there cannot reach a SQL prompt. `eval/bird/` is the opposite and is
+ * not covered by this rule — it is the harness that spends the calls.
+ */
+export function isChartReading(file: string): boolean;
+
 export interface ScopeResult {
   /** Whether the push has to be measured. */
   readonly measure: boolean;

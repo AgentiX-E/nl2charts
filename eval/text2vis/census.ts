@@ -233,6 +233,37 @@ export function coercedColumns(set: ResultSet): CoercedColumn[] {
   return found;
 }
 
+/**
+ * A cell that is made of digits and punctuation, and that `numericCell` still refuses.
+ *
+ * The other half of the same question. `coercedColumns` names the columns a *format* rescued;
+ * this names the cells nothing rescued, on tables that ended up with no measure at all — and those
+ * tables refuse every mark that needs one, which is the largest single shape in the refusal table.
+ * A cell with a letter in it is a label and is skipped; a cell with a digit and no letter is a number
+ * the reader declined, and the string is the evidence: `−0.04` with a typographic minus, `1 234` with
+ * a space, `0.04 °C` with a unit. Three formats, three repairs, and one count of 389 could not tell
+ * them apart.
+ */
+export interface UnreadNumeral {
+  readonly column: string;
+  /** The cell as the corpus wrote it, which is the whole evidence. */
+  readonly cell: string;
+  readonly n: number;
+}
+
+export function unreadNumerals(set: ResultSet): UnreadNumeral[] {
+  const found: UnreadNumeral[] = [];
+  for (const [index, name] of set.columns.entries()) {
+    const cells = set.rows.map((row) => (row[index] as string).trim()).filter((cell) => cell.length > 0);
+    const offender = cells.find(
+      (cell) => /\d/.test(cell) && !/\p{L}/u.test(cell) && numericCell(cell) === undefined,
+    );
+    if (offender === undefined) continue;
+    found.push({ column: name, cell: offender, n: 1 });
+  }
+  return found;
+}
+
 export interface FamilyCensus {
   readonly family: ChartFamily;
   readonly n: number;
@@ -375,6 +406,10 @@ export interface CensusReport {
   readonly coerced: readonly CoercedColumn[];
   /** Rows whose table carries at least one such column. */
   readonly coercedRows: number;
+  /** Whether the table profiled into any measure at all, which every measure-consuming mark needs. */
+  readonly measureless: { readonly tables: number; readonly refused: number };
+  /** Cells made of digits that nothing read, on the tables that ended up with no measure. */
+  readonly numerals: readonly UnreadNumeral[];
   readonly variant: string;
 }
 
@@ -579,6 +614,12 @@ interface CoercedTally {
   n: number;
 }
 
+interface NumeralTally {
+  column: string;
+  cell: string;
+  n: number;
+}
+
 interface ShapeTally {
   family: ChartFamily;
   mark: RecommendableMark;
@@ -617,10 +658,13 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
   const timeLike = new Map<string, TimeLikeTally>();
   const shapes = new Map<string, ShapeTally>();
   const coerced = new Map<string, CoercedTally>();
+  const numerals = new Map<string, NumeralTally>();
   let scored = 0;
   let unmapped = 0;
   let timeLikeRows = 0;
   let coercedRows = 0;
+  let measurelessTables = 0;
+  let measurelessRefused = 0;
   let underFirstClaims = 0;
   let converted = 0;
   let lost = 0;
@@ -674,6 +718,19 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
       const entry = coerced.get(column.column) ?? { ...column, n: 0 };
       entry.n += 1;
       coerced.set(column.column, entry);
+    }
+    // A table with no measure refuses every mark that draws one, so it is a shape of its own — and
+    // the cells it declined to read are what says which repair it needs.
+    const measureless = profiles.length > 0 && !profiles.some((entry) => entry.type === 'quantitative');
+    if (measureless) {
+      measurelessTables += 1;
+      if (classified.outcome === 'refused') measurelessRefused += 1;
+      for (const unread of unreadNumerals(set)) {
+        const key = `${unread.column}\u0000${unread.cell}`;
+        const entry = numerals.get(key) ?? { ...unread, n: 0 };
+        entry.n += 1;
+        numerals.set(key, entry);
+      }
     }
 
     if (classified.outcome === 'refused') {
@@ -807,6 +864,10 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
     timeLikeRows,
     coerced: [...coerced.values()].sort((left, right) => right.n - left.n || left.column.localeCompare(right.column)),
     coercedRows,
+    measureless: { tables: measurelessTables, refused: measurelessRefused },
+    numerals: [...numerals.values()].sort(
+      (left, right) => right.n - left.n || left.column.localeCompare(right.column) || left.cell.localeCompare(right.cell),
+    ),
     variant: options.variant ?? 'census',
   };
 }
@@ -876,6 +937,14 @@ export function describeCensus(report: CensusReport): readonly string[] {
   }
   for (const column of report.timeLike.slice(0, 6)) {
     lines.push(`    ${column.column} (${column.typed}, ${String(column.n)} rows, first value ${column.sample})`);
+  }
+  if (report.measureless.tables > 0) {
+    lines.push(
+      `  tables with no measure at all: ${String(report.measureless.tables)} rows (${String(report.measureless.refused)} refused every mark that needs one)`,
+    );
+    for (const numeral of report.numerals.slice(0, 8)) {
+      lines.push(`    ${numeral.column} = "${numeral.cell}" (${String(numeral.n)} rows)`);
+    }
   }
   for (const entry of report.refusals.slice(0, 6)) {
     lines.push(
