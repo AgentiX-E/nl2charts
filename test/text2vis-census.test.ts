@@ -975,6 +975,27 @@ describe('the admission cap, priced beside the cue tables', () => {
     ).not.toThrow();
   });
 
+  it('counts the answers an entry changes, not only the hits it costs', () => {
+    // The hit delta answers "what does this cost the score"; it does not answer "what does it change".
+    // A cue whose rows are all misses can be worth zero hits either way while every one of those
+    // answers moves, and an ablation that published only the delta would read as "this cue does
+    // nothing" -- a claim about the product that the reading does not support.
+    // Three rows rather than two: a two-value column of numbers profiles as `ordinal`, so the table
+    // would carry no measure and every mark would be refused before either table was read.
+    const two = table('Region, Channel, Revenue', ['North, Web, 10', 'South, App, 20', 'East, Web, 30']);
+    const report = censusOf([input('revenue by region and channel', 'Pie Chart', two)]);
+    const control = report.product[0]!;
+    expect(control).toMatchObject({ variant: 'shipped', moved: 0 });
+    const flip = report.product.find((variant) => variant.variant === 'matrix-bar-first');
+    // The label is a pie, so neither answer can hit: the row is a miss under both tables, and the
+    // answer it gets changes from a heatmap to a bar.
+    expect(flip?.hit).toBe(control.hit);
+    expect(flip?.moved).toBe(1);
+    expect(() => assertCensusReport({ ...report, product: [{ ...control, moved: 1 }, ...report.product.slice(1)] })).toThrow(
+      /differ from itself/,
+    );
+  });
+
   it('prints each knob with its delta, on the same line shape as a cue table', () => {
     const report = censusOf([input(PART, 'Pie Chart', NINE)]);
     const lines = describeProduct(report);
