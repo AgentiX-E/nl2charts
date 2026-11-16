@@ -23,6 +23,10 @@ on:
       # to prevent, arriving from the cheap side.
       - 'packages/chart/**'
       - 'eval/text2vis/**'
+      # The gate is part of the instrument. A round that changes what "at the floor" means has to
+      # re-take the reading, and the first version of this list did not say so: a fix to the gate
+      # itself reached `main` unmeasured, which is the failure this whole trigger list exists for.
+      - 'tools/check-text2vis-baseline.mjs'
       - 'test/text2vis-rule.test.ts'
       - '.github/workflows/text2vis-rule.yml'
 
