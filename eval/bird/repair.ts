@@ -49,7 +49,7 @@ import { loadQuestions } from './data.js';
 import type { BirdQuestion } from './data.js';
 import { createOracle } from './oracle.js';
 import { requireArm } from './presence.js';
-import { resolveLayout } from './run.js';
+import { layoutForSplit, resolveLayout } from './run.js';
 import type { BirdLayout } from './run.js';
 import type { CaseRecord, GapReportShape, ReportedFailure } from './gap.js';
 
@@ -144,14 +144,17 @@ export function repairProblems(outcome: {
 
 export async function runRepair(settings: RepairSettings): Promise<RepairOutcome> {
   const report = JSON.parse(readFileSync(settings.reportPath, 'utf8')) as GapReportShape;
+  // The artifact names the split it scored; the layout names the one the environment defaults
+  // to. Reading the first against the second's questions file is silent — see `layoutForSplit`.
+  const layout = layoutForSplit(report.split, settings.layout, settings.layout.root);
   requireArm(casesOf(report), settings.arm, settings.reportPath);
-  const questions = loadQuestions(settings.layout.questionsFile);
+  const questions = loadQuestions(layout.questionsFile);
   const byId = new Map(questions.map((question) => [String(question.question_id), question]));
   const statements = new Map((report.failures?.[settings.arm] ?? []).map((entry: ReportedFailure) => [String(entry.id), entry]));
   const noAnswer = casesOf(report).filter((row) => row.arm === settings.arm && row.candidateRecall === false);
   const drops = { unretained: 0, unknownQuestion: 0, goldFailed: 0 };
   const rows: RepairRow[] = [];
-  const oracle = createOracle(settings.layout.oracleScript, settings.layout.databaseRoot);
+  const oracle = createOracle(settings.layout.oracleScript, layout.databaseRoot);
   const cache = new Map<string, readonly string[]>();
   const readers = new Map<string, ReadDomain>();
   const readerFor = (db: string): ReadDomain => {
@@ -220,7 +223,7 @@ export async function runRepair(settings: RepairSettings): Promise<RepairOutcome
     const tally = tallyRepairs(rows);
     const problems = repairProblems({ gold: { statements: statementsSeen, changed }, cases: { offered, repaired } });
     return {
-      split: settings.layout.split,
+      split: layout.split,
       arm: settings.arm,
       gold: { statements: statementsSeen, empty: goldEmpty, changed },
       cases: { offered, repaired, gated },

@@ -37,7 +37,7 @@ import type { CaseRecord } from './gap.js';
 import { graphOf } from './join-graph.js';
 import { SHIPPED_ARM, requireArm } from './presence.js';
 import { CANDIDATE_RECALLERS, SHIPPED_RECALLERS, linkedTables, pruneSchema } from './prune.js';
-import { promptFor, renderableArm, resolveArm, resolveLayout } from './run.js';
+import { layoutForSplit, promptFor, renderableArm, resolveArm, resolveLayout } from './run.js';
 import type { Arm, BirdLayout } from './run.js';
 import { attachSamples, narrowSamples, sampleValuesOf } from './samples.js';
 import { definesOwnName, referencedFields, tableRefs } from './statement.js';
@@ -1042,8 +1042,11 @@ export function promptOf(
 
 export async function runCard(settings: CardSettings): Promise<CardOutcome> {
   const report = JSON.parse(readFileSync(settings.report, 'utf8')) as CardReportShape;
+  // The artifact names the split it scored; the layout names the one the environment defaults
+  // to. Reading the first against the second's questions file is silent — see `layoutForSplit`.
+  const layout = layoutForSplit(report.split, settings.layout, settings.layout.root);
   const arm = resolveArm(settings.arm);
-  const questions = loadQuestions(settings.layout.questionsFile);
+  const questions = loadQuestions(layout.questionsFile);
   const tables = loadTables(settings.layout.tablesFile);
   const byId = new Map(questions.map((question) => [String(question.question_id), question]));
   const definitions = report.controls?.synthesizedDefinitions ?? {};
@@ -1185,7 +1188,7 @@ export async function runCard(settings: CardSettings): Promise<CardOutcome> {
     ...billedProblems(billed),
   ];
   return {
-    split: settings.layout.split,
+    split: layout.split,
     arm: settings.arm,
     rows,
     tally,

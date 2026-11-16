@@ -14343,15 +14343,18 @@ generation failure, not a selection one:
 | none | 6 | 6 |
 
 Splitting the `values` bucket by the fix it asks for (`pnpm bench:bird:gap:values <artifact> --arm
-<arm>`, 121 questions
-classifiable out of 489 — the other 247 name a question the local dataset copy does not carry):
-`predicate` 27, `tables` 24, `filter-wide` 21, `filter-narrow` 16, `literal-missing` 14, `aggregate`
-8, `projection` 7, `literal-case` 2, unclassified 2. **51 of 121 are a wrong condition or a wrong
-table**, which is the bucket a schema-aware prompt can reach; the rest are predicate strength and
-literal retrieval.
+<arm> --scope all`) reads **483 cases and classifies 481 of them (99.6%)**: `filter-wide` 116,
+`tables` 82, `predicate` 76, `projection` 54, `literal-missing` 50, `filter-narrow` 46, `aggregate`
+42, `grain` 7, `literal-case` 4, `window` 4, unclassified 2. **Three quarters of the no-answer set
+(374 of 483) is a row-selection defect** — the statement read the wrong rows — and 107 of 483 is a
+computation defect. The queue is `filter-wide` first, then `tables` and `predicate`.
 
-So the next lever is generation, and the first instrument it needs is a dataset copy that carries all
-489 questions rather than 121 of them. Both are work this round does not spend a call on.
+The first version of this paragraph said 121 of 489, and named "a question the local dataset copy does
+not carry" as the reason for the rest. Both halves were wrong, and the second one hid the first: the
+dataset copy carries all 1,534 questions and was never opened. See *the questions a reading reads*
+below — the instrument was reading Mini-Dev's questions file because the artifact's split did not
+override the environment's default, and the 170 cases it did classify were classified against another
+benchmark's gold statements.
 
 ### What the alignment check said
 
@@ -14367,3 +14370,107 @@ That check is also how a hand-written estimate was caught last round. A Python t
 transcription: the recorded rule drops candidates whose result was empty before it ranks, and a
 paraphrase that ranked every candidate was answering a different question. `pick` was right; the
 copy was wrong.
+
+## The questions a reading reads: 313 dropped, 170 read as another benchmark
+
+The previous round ended with a plan built on a number: 121 of 489 no-answer cases could be
+classified, and the other 247 could not because the local dataset copy did not carry their questions.
+The plan was to fetch them. The dataset copy carries all 1,534 dev questions, and the reason 313 were
+missing and 170 were answered is a single line: the instrument took the split from the environment
+instead of from the artifact.
+
+### The mechanism, which is arithmetic rather than inference
+
+`resolveLayout` defaults `BIRD_SPLIT` to `minidev`, because that is the split a developer runs when
+they name none. Re-running the dev artifact offline therefore loaded
+`minidev/MINIDEV/mini_dev_sqlite.json` and looked every dev case id up in it. Both splits number
+their questions from zero, so:
+
+| dev case id | Mini-Dev holds it | what the ladder did |
+| --- | --- | --- |
+| ≥ 500 | no | dropped, counted as `unknown question` |
+| < 500 | yes | looked up **successfully** — and classified against Mini-Dev's `db_id` and `SQL` |
+
+Of the 483 no-answer cases, 313 have ids ≥ 500 and were dropped; the other 170 were read against a
+different question's gold statement, executed on Mini-Dev's copy of a database that carries the same
+name and different rows. Nothing reported an error: a wrong id is a drop, and a shared id is a
+reading.
+
+The artifact had said which benchmark it was since the field was added — `"split": "dev"` — and no
+instrument consulted it.
+
+### Why the coverage criterion could not see it
+
+`valuesProblems` stated its acceptance as a share of the rows that reached a named cause, and the
+denominator was `tally.total`, which counts only rows that survived the drop. So losing 313 of 483
+cases *raised* the number the gate printed: 98.8% over 170 rows, against the 99.6% over 483 that the
+correct reading gives. A metric whose denominator shrinks when the instrument fails is not a metric,
+and the tool called it covered.
+
+The same shape appears in the previous round's table: it published 121 classified out of 489 and read
+the two numbers as "a quarter of the labelled set". The label was `98.8%` of a fifth of the set.
+
+### The corrected split, on the shipped arm
+
+`pnpm bench:bird:gap:values eval/out/bird-eval.json --arm select-mixed-rule --scope all`, one SQLite
+query per case, zero model calls:
+
+| bucket | why it is wrong | cases | share |
+| --- | --- | ---: | ---: |
+| `filter-wide` | a different number of rows: the predicate is too weak, or a join multiplied them | 116 | 24.0% |
+| `tables` | the two statements read different base tables | 82 | 17.0% |
+| `predicate` | same tables, different condition keys | 76 | 15.7% |
+| `projection` | a different select list | 54 | 11.2% |
+| `literal-missing` | a stored value the gold compares against is absent | 50 | 10.4% |
+| `filter-narrow` | the predicate matched nothing | 46 | 9.5% |
+| `aggregate` | different aggregate calls | 42 | 8.7% |
+| `grain` | a different `group by` | 7 | 1.4% |
+| `literal-case` | the value appears in another case | 4 | 0.8% |
+| `window` | a different `order by` / `limit` | 4 | 0.8% |
+| `unclassified` | nothing to name | 2 | 0.4% |
+
+The three dev arms agree on the structure, which is what makes it a property of the corpus rather
+than of one selector:
+
+| bucket | `select-mixed-rule` | `-rows` | `-intent` |
+| --- | ---: | ---: | ---: |
+| `filter-wide` | 116 | 113 | 113 |
+| `tables` | 82 | 77 | 75 |
+| `predicate` | 76 | 71 | 73 |
+| `projection` | 54 | 55 | 54 |
+| `literal-missing` | 50 | 51 | 45 |
+| `filter-narrow` | 46 | 42 | 43 |
+| `aggregate` | 42 | 43 | 34 |
+| cases read | 483 | 467 | 457 |
+
+Row selection is 77.4% of the set and computation is 22.2%. The previous round's queue named
+`predicate` + `tables` = 51 of 121 — the same direction, on a fifth of the evidence, with
+`filter-wide` undercounted by a factor of five (21 against 116). A plan can be wrong in its ranking
+and right in its direction and still spend a round on the wrong bucket; this one would have.
+
+### What did not move
+
+No published score. `bird-dev.yml` sets `BIRD_SPLIT: dev` at the job level, so every step of the
+workflow that produced the numbers on this page read the right file. What was wrong is the offline
+re-read — the one a human or an agent does when reading a shipped artifact — and that is how the
+previous round's queue was derived. The scores on this page are unchanged; the work item they justify
+is not.
+
+### What changes in the method
+
+- `layoutForSplit` in `eval/bird/run.ts` is the one place that decides which benchmark an artifact is
+  read as, and the artifact wins. Four instruments carried a hand-written copy of that decision and
+  three of them re-resolved with the caller's directory pinned as `BIRD_DATA`, which asked for
+  `dev.json` *inside* the Mini-Dev directory — a path that does not exist, so the failure would have
+  been an `ENOENT` rather than a wrong reading. Ten more instruments loaded questions without
+  consulting the artifact at all; all fourteen now call the shared function.
+- `valuesProblems` reports a case whose question the loaded split does not hold, and reports it
+  before the coverage ratio, because it is the reason the ratio is the one it is.
+- `artifactSplit` reads that field for the two tools that build an oracle before they parse the
+  artifact, so the database directory follows the split too.
+- `eval/coverage-ledger.json` is a gate's configuration, not a reading: it is the per-file record
+  `check-eval-coverage` compares against, and a push that only moves a number in it no longer buys
+  thirteen BIRD arms.
+
+The instrument that measures the instrument was the one that was wrong, and it was wrong in the
+direction that reads as success.

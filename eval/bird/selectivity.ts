@@ -40,7 +40,7 @@ import type { BirdTable, ColumnNote } from './data.js';
 import type { CaseRecord } from './gap.js';
 import { SHIPPED_ARM, requireArm } from './presence.js';
 import { CANDIDATE_RECALLERS, SHIPPED_RECALLERS } from './prune.js';
-import { renderableArm, resolveArm, resolveLayout } from './run.js';
+import { layoutForSplit, renderableArm, resolveArm, resolveLayout } from './run.js';
 import type { BirdLayout } from './run.js';
 
 /**
@@ -408,8 +408,11 @@ export async function runSelectivity(settings: SelectivitySettings): Promise<Sel
     readonly cases?: readonly CaseRecord[];
     readonly controls?: { readonly synthesizedDefinitions?: Readonly<Record<string, string>> };
   };
+  // The artifact names the split it scored; the layout names the one the environment defaults
+  // to. Reading the first against the second's questions file is silent — see `layoutForSplit`.
+  const layout = layoutForSplit(report.split, settings.layout, settings.layout.root);
   const arm = resolveArm(settings.arm);
-  const questions = loadQuestions(settings.layout.questionsFile);
+  const questions = loadQuestions(layout.questionsFile);
   const tables = loadTables(settings.layout.tablesFile);
   const byId = new Map(questions.map((question) => [String(question.question_id), question]));
   const definitions = report.controls?.synthesizedDefinitions ?? {};

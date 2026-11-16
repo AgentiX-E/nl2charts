@@ -26,7 +26,7 @@ import { loadQuestions } from './data.js';
 import type { BirdQuestion } from './data.js';
 import { createOracle } from './oracle.js';
 import type { Oracle, OracleResult } from './oracle.js';
-import { resolveLayout } from './run.js';
+import { layoutForSplit, resolveLayout } from './run.js';
 import type { BirdLayout } from './run.js';
 import { classifyError, classifyFailureShape, missingLiterals } from './failure-shape.js';
 import type { FailureShape } from './failure-shape.js';
@@ -76,6 +76,8 @@ export interface FailureSample {
 }
 
 export interface Report {
+  /** Which benchmark the run scored. Absent on an artifact written before it was recorded. */
+  readonly split?: string;
   readonly failures?: Record<string, readonly ReportedFailure[]>;
   readonly failureSample?: FailureSample;
 }
@@ -268,14 +270,17 @@ export interface DiagnosePrepared {
 export function prepareDiagnosis(settings: DiagnoseSettings): DiagnosePrepared {
   if (!existsSync(settings.report)) throw new Error(`no such report: ${settings.report}`);
   const report = JSON.parse(readFileSync(settings.report, 'utf8')) as Report;
+  // The artifact names the split it scored; the layout names the one the environment defaults
+  // to. Reading the first against the second's questions file is silent — see `layoutForSplit`.
+  const layout = layoutForSplit(report.split, settings.layout, settings.layout.root);
   if (report.failures === undefined) throw new Error('the report keeps no failing statements; nothing to diagnose');
-  const questions = loadQuestions(settings.layout.questionsFile);
+  const questions = loadQuestions(layout.questionsFile);
   const sample = report.failureSample;
   return {
     settings,
     report: { failures: report.failures, ...(sample === undefined ? {} : { sample }) },
     byId: new Map(questions.map((question) => [String(question.question_id), question])),
-    oracle: createOracle(settings.layout.oracleScript, settings.layout.databaseRoot),
+    oracle: createOracle(settings.layout.oracleScript, layout.databaseRoot),
   };
 }
 

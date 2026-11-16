@@ -76,7 +76,7 @@ import type { Tuple } from '@agentix-e/nl2charts-devkit';
 import { loadQuestions } from './data.js';
 import { classifyFailureShape } from './failure-shape.js';
 import { createOracle } from './oracle.js';
-import { resolveLayout } from './run.js';
+import { layoutForSplit, resolveLayout } from './run.js';
 import type { BirdLayout } from './run.js';
 import { graftPredicate, readsSameShape } from './surplus.js';
 import { codeOnly, definesOwnName, tableRefs } from './statement.js';
@@ -596,22 +596,7 @@ interface EvalArtifact {
 
 export async function runResidue(settings: ResidueSettings): Promise<ResidueOutcome> {
   const body = JSON.parse(readFileSync(settings.artifact, 'utf8')) as EvalArtifact;
-  const split = body.split === 'dev' || body.split === 'minidev' ? body.split : settings.layout.split;
-  // The paths stay the caller's even when the artifact names another split: a harness pointed at a
-  // dataset outside the repository must not fall back to `eval/.cache` and read a corpus it was not
-  // given. The rule `surplus.ts` follows, for the same reason.
-  const layout =
-    split === settings.layout.split
-      ? settings.layout
-      : resolveLayout(
-          {
-            ...process.env,
-            BIRD_SPLIT: split,
-            BIRD_DATA: settings.layout.data,
-            BIRD_DATABASES: settings.layout.databaseRoot,
-          },
-          settings.root,
-        );
+  const layout = layoutForSplit(body.split, settings.layout, settings.root);
   const questions = loadQuestions(layout.questionsFile);
   const byId = new Map(questions.map((question) => [String(question.question_id), question]));
 
@@ -756,7 +741,7 @@ export async function runResidue(settings: ResidueSettings): Promise<ResidueOutc
 
   const tally = tallyResidue(rows.map((row) => row.kind));
   return {
-    split,
+    split: layout.split,
     arm: settings.arm,
     tally,
     cross: {

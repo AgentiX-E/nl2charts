@@ -51,7 +51,7 @@ import { loadQuestions } from './data.js';
 import { ABSENCE_KINDS, classifyAbsence, createDomainReader, domainsOf } from './literal-repair.js';
 import type { AbsenceKind } from './literal-repair.js';
 import { createOracle } from './oracle.js';
-import { resolveLayout } from './run.js';
+import { layoutForSplit, resolveLayout } from './run.js';
 import type { BirdLayout } from './run.js';
 import { literalSites } from './statement.js';
 
@@ -206,24 +206,7 @@ interface EvalArtifact {
 
 export async function runLiteralGap(settings: LiteralGapSettings): Promise<LiteralGapOutcome> {
   const body = JSON.parse(readFileSync(settings.artifact, 'utf8')) as EvalArtifact;
-  const split = body.split === 'dev' || body.split === 'minidev' ? body.split : settings.layout.split;
-  // The artifact declares the split, and the split names the files. When the caller's environment
-  // disagrees, the artifact wins — but the *paths* stay the caller's, because a harness pointed at a
-  // dataset outside the repository must not fall back to `eval/.cache` and read a corpus that is not
-  // the one it was given. The first version re-resolved without the caller's directories and loaded
-  // a question file that did not exist.
-  const layout =
-    split === settings.layout.split
-      ? settings.layout
-      : resolveLayout(
-          {
-            ...process.env,
-            BIRD_SPLIT: split,
-            BIRD_DATA: settings.layout.data,
-            BIRD_DATABASES: settings.layout.databaseRoot,
-          },
-          settings.root,
-        );
+  const layout = layoutForSplit(body.split, settings.layout, settings.root);
   const questions = loadQuestions(layout.questionsFile);
   const byId = new Map(questions.map((question) => [String(question.question_id), question]));
 
@@ -303,7 +286,7 @@ export async function runLiteralGap(settings: LiteralGapSettings): Promise<Liter
 
   const tally = tallyAbsences(rows.map((row) => row.kind));
   return {
-    split,
+    split: layout.split,
     arm: settings.arm,
     tally,
     unread,
