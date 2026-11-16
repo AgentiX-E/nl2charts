@@ -7,6 +7,24 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **The linker of the leader no one can run, rebuilt from its paper.** `AskData` holds the top BIRD
+  row this repository compares itself to (dev 78.49%, test 83.40% as the leaderboard read it) and has
+  never had a release: the arXiv page carries no artifact link, a repository search for the name
+  returns unrelated products, and the one repository whose description names the method is a stub.
+  `eval/bird/askdata.ts` now implements the three steps of `arXiv:2505.19988` §3 that the paper
+  actually pins down — a shingle index over up to 10,000 distinct values per field, so a *literal*
+  can be resolved to the fields that store it (this repository's `values.ts` resolves only an exact
+  equality, which cannot see `'Office Of'` against `'Office of'`); the five schema variants (focused
+  or full, minimal or maximal profile, and focused-plus-full) each writing one statement, with the
+  **union** of the fields those statements read as the linked schema; and step 2.d, which refuses to
+  leave a literal in a field that cannot hold it — the fields that do hold it are added to the card
+  and the model is asked once more, up to `MaxRetry`, which is a parameter here because the paper
+  does not state its value. 36 tests, 100% of statements and lines, 95.4% of branches, no model
+  called: the loop is driven by a scripted generator, so the tests hold the call count (five, and a
+  sixth only when a literal has nowhere to live) and the text of the prompt that follows. What this
+  is worth is not claimed: the paper's own ablation prices *their* linking at +2.0pp without hints
+  and +1.8pp with them, for +6.2pp if it were perfect, so the arm that carries it is a measurement
+  and not a replication, and no number from it may be filed under their name.
 - **OpenSearch-SQL joins the competitor register, which is what makes it a task.** The strongest
   training-free system on BIRD (69.3% dev, 72.28% test) was cited twenty times in `benchmarks.md` —
   the SQL-Like intermediate language, the result-set equality vote behind `resultFingerprint` and
