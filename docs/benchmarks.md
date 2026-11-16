@@ -14211,11 +14211,18 @@ section is about remain out of reach for the same reason: the contract has no `a
 
 **Amended a third time by the object reader** (`## The instrument could not read one table in nine`),
 and a fourth by the time-axis claim (`## Bar and line tied, and the list order decided`). Today the
-entry point reads **526 (35.78%) over the 1,470** and **42.66% (526/1,233) over the labels the contract
-can draw**, with the shortlist at **618 (42.04%)** and 167 rows declined. The `renderable` denominator
-is the one thing that did not move across all four amendments, because it is a fact about the
+entry point reads **529 (35.99%) over the 1,470** and **42.90% (529/1,233) over the labels the contract
+can draw**, with the shortlist at **621 (42.24%)** and 167 rows declined. The `renderable` denominator
+is the one thing that did not move across all five amendments, because it is a fact about the
 corpus's labels rather than about the reading: 237 rows name a series this contract does not have, and
 no parser, no admission rule and no ranking key can put them back in reach.
+
+**Amended a fifth time by the column the reading was taken on** (`## The question, not the turn it
+arrived in`): every number above was measured on the corpus's `Prompt` column — the whole
+conversational turn, table inlined — and is now measured on `Question`. The entry point moved
+526 → **529**, and the cue table it is compared against moved 627 → **575**, so the gap this census
+exists to explain is **3.13pp rather than 6.87pp**. The census itself, `census.ts`, reads the same
+field the entry point does, which is why its own reproduction of 526 moved with it.
 
 ### The SQL side: a dispatch that could not resolve its own effect, and what replaced it
 
