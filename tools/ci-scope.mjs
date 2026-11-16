@@ -100,25 +100,34 @@ export function isChartReading(file) {
 }
 
 /**
- * A gate's own configuration: the files `tools/check-*.mjs` read.
+ * A gate's own configuration: the files a `tools/check-*.mjs` gate, or a `bench:*` recorder that
+ * spends no model call, reads.
  *
- * `budgets.json` is a bundle ceiling, `api-surface.json` is a snapshot of what each package
- * exports, and `eval/coverage-ledger.json` is the per-file coverage record `check-eval-coverage`
- * compares against. The third was added after four consecutive pushes that changed nothing a
- * prompt reads and bought the whole chain: the ledger lives under `eval/`, so a classifier written
- * as a list of root files read it as a reading rather than as a number the gate holds. The readers are `tools/check-budgets.mjs` and `tools/check-exports.mjs`, both run by the
- * `quality` job, which is never skipped — and neither file is opened by a prompt builder. A round
- * that moved a budget therefore bought thirteen arms over 496 questions and three live passes over
- * 210 cases to re-measure a SQL pipeline that had not changed a byte, and the round before that
- * escaped it only because a second commit cancelled the first run. **The saving was luck, not
- * design**, which is why this is a rule and not a note.
+ * - `budgets.json` is a bundle ceiling (`check-budgets`).
+ * - `api-surface.json` is a snapshot of what each package exports (`check-exports`).
+ * - `eval/coverage-ledger.json` is the per-file coverage record (`check-eval-coverage`) compares
+ *   against.
+ * - `eval/competitors/intake.json` is the register (`bench:competitors:intake`) that says what
+ *   copying each competitor would produce. It costs one file read and no dispatch.
  *
- * Two names rather than a suffix, for the reason `isTest` gives: `package.json` in the same
- * directory changes what runs and what is installed, and a rule written as "any JSON at the root"
- * would swallow it. A new root-level configuration has to be argued for here instead of inherited.
+ * All four were added the same way: a round that moved one of them bought thirteen BIRD arms over
+ * 496 questions and three live passes over 210 cases to re-measure a SQL pipeline whose bytes had
+ * not changed. A round that moves a ceiling, a ledger or a register is not a round that changed the
+ * pipeline, and **the saving was luck until this was a rule**.
+ *
+ * Every one of them lives outside the roots a prompt builder reads, except `eval/`, which is why a
+ * classifier written as "a file under `eval/` is a reading" got all four wrong. The class is a list
+ * of names rather than a suffix for the reason `isTest` gives: `package.json` in the same directory
+ * changes what runs and what is installed, and "any JSON at the root" would swallow it. A new entry
+ * has to be argued for here instead of inherited.
  */
 export function isToolConfig(file) {
-  return file === 'budgets.json' || file === 'api-surface.json' || file === 'eval/coverage-ledger.json';
+  return (
+    file === 'budgets.json' ||
+    file === 'api-surface.json' ||
+    file === 'eval/coverage-ledger.json' ||
+    file === 'eval/competitors/intake.json'
+  );
 }
 
 /**

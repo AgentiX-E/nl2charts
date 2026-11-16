@@ -191,7 +191,21 @@ describe('a change set that only edits a gate\'s own configuration', () => {
     expect(needsModel(['eval/bird/rules.ts']).measure).toBe(true);
   });
 
-  it('names three files rather than a suffix, so a new root file has to be argued for', () => {
+  it('counts the competitor register as one of them, because reading it dispatches nothing', () => {
+    // Same failure, one round later and from the other end of the tree: `eval/competitors/intake.json`
+    // is the table that says what copying each competitor would produce, and `bench:competitors:intake`
+    // reads it in one file read and zero model calls. The round that added the fourth row to it would
+    // otherwise have bought thirteen arms over 496 questions to re-measure a pipeline whose bytes did
+    // not change — for a table about other people's systems.
+    expect(isToolConfig('eval/competitors/intake.json')).toBe(true);
+    expect(needsModel(['eval/competitors/intake.json']).measure).toBe(false);
+    // The boundary again, from this side: `pins.json` sits beside it and *is* a dispatch input, since
+    // a pin is a promise that a run will start. Registering a claim is not pinning it.
+    expect(isToolConfig('eval/competitors/pins.json')).toBe(false);
+    expect(needsModel(['eval/competitors/pins.json']).measure).toBe(true);
+  });
+
+  it('names four files rather than a suffix, so a new root file has to be argued for', () => {
     expect(isToolConfig('budgets.json')).toBe(true);
     expect(isToolConfig('api-surface.json')).toBe(true);
     // `package.json` changes what runs and what is installed, not what a ceiling is, and a change
