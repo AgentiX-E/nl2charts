@@ -15273,3 +15273,92 @@ change can produce the number; the next dispatch after a top-up will.
 What none of this establishes is a score. The rehearsal — `limit: 8` — is what says whether the
 endpoint answers, how long a call takes and what a run of 1,286 of them would cost in time, and its
 artifact is the first `text2vis-judge.json` this repository can read a mean out of.
+
+## The first priced reading: 8 figures, two means, and two defects no label could see
+
+The account was topped up, the probe answered **"Red"**, and eight figures were graded for eight
+calls. The reading:
+
+```
+text2vis: judged 8/1286 charts with glm-4.5v (zhipu) — 0 failed, 1278 unselected, 184 skipped of 1470 scored
+  chart_correctness 1.75/10, readability 3.25/10
+  bar: 3/3 judged, correctness 3.67/10, readability 3.67/10
+  pie: 3/3 judged, correctness 0.33/10, readability 2.33/10
+  boxplot: 1/1 judged, correctness 1.00/10, readability 4.00/10
+  line: 1/1 judged, correctness 1.00/10, readability 4.00/10
+  calls 8, 1.000 per judged row; the vision probe answered "Red"
+  row 0: correctness 1, readability 2, 57298 ms — {"chart_correctness": 1, "readability": 2}
+  ...
+```
+
+**Every reply is a well-formed JSON object with two integers**, so nothing here is a parse artefact:
+the numbers are what the grader wrote. And the second column is the part that had never been measured
+— `readability 3.25/10` says the figures are hard to read, which the label metric cannot see because
+a chart can be the right *kind* and still be unreadable.
+
+### The figure was a 2,808-pixel ribbon
+
+Row 4's picture was 2,808 × 483 pixels: the axes occupied a fifth of the width, the tick labels were
+a smear, and the title — which the contract sets to the question — ran off the canvas in one line.
+The corpus's questions have a median length of 203 characters and a 90th percentile of 355, and
+matplotlib's `bbox_inches="tight"` grows the figure to hold whatever it is given, so an unwrapped
+title *is* the layout: the taller the question, the flatter the chart.
+
+`wrappedTitle` wraps the title at 80 characters on word boundaries, in the emitter rather than in the
+contract — `ir.title` still holds the whole question, because that is what makes a chart citable, and
+only the drawing changed. A title that already fits comes back byte-identical, which is what makes
+this free: no short title's emitted source moved. Row 4 went from 2,808 × 483 to **795 × 560**, with
+the title on four lines and the axes filling the width.
+
+### Meanwhile, the category axis was a column of nulls
+
+The same figure's source said:
+
+```python
+labels = [None, None, None, None, None]
+plt.xticks(positions, labels)
+plt.xlabel("2016")
+```
+
+The table has three columns — `Country`, `Discriminatory attitudes…`, `2016` — and the five rows fill
+only the first two. The chart was drawn against the one column that is entirely empty.
+
+**The cause is JavaScript property order.** `Object.keys` enumerates integer-like keys first, in
+ascending order, before every other key, and `2016` is a canonical array index. So a record built in
+column order as `{Country, Discriminatory…, 2016}` enumerates as `[2016, Country, Discriminatory…]`,
+`profileRows` read that order, and `shapeOf` took `dims[0]` — the language's ordering, not the
+table's. Measured over the corpus: **389 of 1,464 tables (26.6%)** had a first column that was not
+the table's first column, and **five** chose an entirely empty column as their category axis.
+
+Two repairs, both in `packages/chart`:
+
+- **`profileRows(rows, columns?)`** takes the order the caller knows. `eval/text2vis` passes
+  `set.columns`, and `toChartIR` gained `options.columns` for the same reason.
+- **A column every cell of which is null is neither a dimension nor a measure.** `shapeOf` filters
+  `distinct === 0` before choosing an axis, which is the fix that survives a caller who cannot pass an
+  order at all.
+
+### What the label metric did, and did not, do about either
+
+The title wrap moved **nothing**: 530 → 530. The column-order fix moved **one row**: 529 → 530. The
+reading is now
+
+| reading | before this round | now |
+|---|---|---|
+| the product (`profile.ts`) | 529 (35.99%) | **530 (36.05%)** |
+| the cue table | 575 (39.12%) | 575 (39.12%) |
+| the gap | 3.13pp | **3.07pp** |
+
+while 389 figures changed which column they are drawn against and every long title stopped making a
+ribbon. **That is the whole argument for buying the pixel reading**: two defects that a reader sees
+immediately are worth +1 row on a metric that counts marks, and the mark was right in both cases — a
+bar chart of nothing is still a bar chart.
+
+### The price, in wall clock
+
+The six rows that answered took between 17 and 69 seconds, and two of the first eight died on the
+provider's 60-second default. So the timeout became a field of the endpoint row (180 s), and
+`--concurrency` overlaps calls that are already independent: eight in flight finished eight rows in
+68 seconds, which makes 1,286 rows about **2½ hours** rather than seventeen and a half. One call per
+row is still an equality, and the artifact is rebuilt by index, so a faster row cannot reorder the
+report.

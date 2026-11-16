@@ -1,20 +1,23 @@
 {
   "instrument": "eval/text2vis/profile.ts",
   "corpus": "Text2Vis.csv (mizanurr/Text2Vis, 1,985 rows, 1,470 scored after unmapped labels)",
-  "recordedAt": "2026-11-16",
+  "recordedAt": "2026-11-17",
   "scored": 1470,
-  "top1": 529,
-  "shortlist": 621,
+  "top1": 530,
+  "shortlist": 623,
   "declined": 167,
-  "note": "Raised by hand, in the commit that earns it. 529 is the reading after the corpus's Question column replaced its Prompt column: every rule reading in this repository had been taken on the whole conversational turn, table inlined, so a cue matched the table's own headers (a column called `Projected share of the population` fired `share`, which names a pie). The product reads 529 (35.99%) on the question and 526 (35.78%) on the turn; the cue table reads 575 (39.12%) on the question and 627 (42.65%) on the turn, so 52 rows of that instrument's margin were the table's words rather than the ask's. The denominator is compared for identity, not for a floor: a reading over a different row set is a different question.",
+  "note": "Raised by hand, in the commit that earns it. 529 was the reading after the corpus's Question column replaced its Prompt column: every rule reading in this repository had been taken on the whole conversational turn, table inlined, so a cue matched the table's own headers (a column called `Projected share of the population` fired `share`, which names a pie). The product reads 530 (36.05%) on the question; the cue table reads 575 (39.12%), so the gap is 3.07pp. The +1 is the round that taught `profileRows` to take the table's column order: a column every cell of which is null is no longer admitted as an axis or a measure, which moved one row. The denominator is compared for identity, not for a floor: a reading over a different row set is a different question.",
   "render": {
     "rendered": 1286,
     "failed": 0
   },
   "judge": {
-    "dimensions": ["chart_correctness", "readability"],
+    "dimensions": [
+      "chart_correctness",
+      "readability"
+    ],
     "callsPerRow": 1,
     "note": "Registered before the reading is taken, and deliberately without a floor on either mean: no grader has run, and a threshold invented before the instrument is a number with nothing behind it. What is registered is the shape the reading must have - one call per attempted row (both dimensions are asked in one prompt), every row in exactly one of judged/failed/unselected/skipped, and both means on the 0-10 scale the prompt asks for. The round that takes the reading registers the means it earns."
   },
-  "renderNote": "The pixel half, recorded in the round the renderer was built: 1,286 of the 1,470 scored rows reach a PNG (87.48%), 17 are refused because a gauge states a value against a scale this contract does not carry, and 167 are the rows the recommender declines. The floor is the pair (rendered >= 1,286, failed == 0) rather than an accuracy reading: a chart that raised in Python came from this repository own emitter."
+  "renderNote": "The pixel half, recorded in the round the renderer was built: 1,286 of the 1,470 scored rows reach a PNG (87.48%), 17 are refused because a gauge states a value against a scale this contract does not carry, and 167 are the rows the recommender declines. The floor is the pair (rendered >= 1,286, failed == 0) rather than an accuracy reading: a chart that raised in Python came from this repository own emitter. Still (rendered == 1,286, failed == 0) after the column-order fix, which changed which column each figure is drawn against without changing how many figures exist: 389 of 1,464 tables were being read in JavaScript property order, five of them against an entirely empty year column."
 }

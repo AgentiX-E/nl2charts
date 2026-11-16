@@ -220,7 +220,7 @@ export function typedRows(set: ResultSet): Record<string, unknown>[] {
  */
 export function profilesOf(set: ResultSet): FieldProfile[] {
   if (set.columns.length === 0 || set.rows.length === 0) return [];
-  return profileRows(typedRows(set));
+  return profileRows(typedRows(set), set.columns);
 }
 
 /** What the recommender answered for one row, with the families the answer is allowed to cover. */

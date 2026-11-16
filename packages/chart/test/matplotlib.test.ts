@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ChartIR, ChartType, FieldRef } from '@agentix-e/nl2charts-spec';
-import { compileToMatplotlib } from '../src/index.js';
+import { compileToMatplotlib, TITLE_WIDTH, wrappedTitle } from '../src/index.js';
 
 const rows = [
   { region: 'north', total: 10.5, count: 3 },
@@ -347,5 +347,49 @@ describe('a chart IR compiled to matplotlib', () => {
             : { x: n('region'), y: q('total') };
       expect(compileToMatplotlib(ir(mark, encoding))).toContain('plt.show()');
     }
+  });
+});
+
+describe('the title a figure can hold', () => {
+  it('leaves a title that fits exactly as it was', () => {
+    // The property that makes this change free: a short title is not a title this touches, and its
+    // emitted source is byte-identical to what it was before the wrap existed.
+    expect(wrappedTitle('Revenue by region')).toBe('Revenue by region');
+    expect(wrappedTitle('x'.repeat(TITLE_WIDTH))).toBe('x'.repeat(TITLE_WIDTH));
+  });
+
+  it('wraps the question the contract uses as a title, at word boundaries', () => {
+    const question = 'Using the counts provided for presidents First Names, Surnames, and Middle Names, calculate the interquartile range';
+    const wrapped = wrappedTitle(question);
+    const lines = wrapped.split('\n');
+    expect(lines.length).toBeGreaterThan(1);
+    expect(lines.every((line) => line.length <= TITLE_WIDTH)).toBe(true);
+    // No word is lost and none is split: the same words, in the same order, in fewer columns.
+    expect(wrapped.replace(/\n/g, ' ')).toBe(question);
+  });
+
+  it('leaves a word longer than the width whole, because a broken word reads as two', () => {
+    const long = `supercalifragilisticexpialidocious-${'y'.repeat(TITLE_WIDTH)} end`;
+    expect(wrappedTitle(long).split('\n')[0]).toBe(`supercalifragilisticexpialidocious-${'y'.repeat(TITLE_WIDTH)}`);
+  });
+
+  it('collapses the runs of whitespace a question carries, so a line cannot begin with a space', () => {
+    expect(wrappedTitle(`a${' '.repeat(TITLE_WIDTH)}b`)).toBe('a b');
+  });
+
+  it('emits the wrapped title into the source, with the newline as a real one', () => {
+    const ir: ChartIR = {
+      version: '3.0',
+      mark: 'bar',
+      encoding: { x: { field: 'region', type: 'nominal' }, y: [{ field: 'total', type: 'quantitative' }] } as ChartIR['encoding'],
+      data: rows as ChartIR['data'],
+      title: 'A question long enough to need two lines, which is what most questions in the corpus are',
+      alt: 'bar chart',
+    };
+    const code = compileToMatplotlib(ir);
+    // `\n` in a JS string literal is a newline in the Python string, which is what makes the figure
+    // taller and the axes wide instead of a ribbon.
+    expect(code).toContain('\\n');
+    expect(code).toMatch(/plt\.title\("/);
   });
 });

@@ -96,10 +96,28 @@ export function inferType(values: readonly unknown[]): FieldType {
   return 'nominal';
 }
 
-export function profileRows(rows: readonly Readonly<Record<string, unknown>>[]): FieldProfile[] {
+/**
+ * One profile per column, in the order the caller named.
+ *
+ * `columns` exists because `Object.keys` does not answer "what order were these columns in?". The
+ * language puts integer-like keys first, in ascending order, before every other key — so a record
+ * keyed `{ country: 'Armenia', '2016': null }` enumerates as `['2016', 'country']`, and a result set
+ * whose columns are years is silently reordered before this function sees it. The chart reading found
+ * it the expensive way: 389 of 1,464 corpus tables had a first column that was not the table's first
+ * column, five of them chose an entirely empty year column as the category axis, and the figure that
+ * came out had `labels = [None, None, None, None, None]` — a bar chart of nothing whose mark was
+ * still `bar`, so no label-based score moved and only a reader of the picture could see it.
+ *
+ * A caller that knows the order passes it. A caller that does not — one holding plain objects — gets
+ * `Object.keys`, which is the only order a record has left.
+ */
+export function profileRows(rows: readonly Readonly<Record<string, unknown>>[], columns?: readonly string[]): FieldProfile[] {
   const first = rows[0];
   if (first === undefined) return [];
-  return Object.keys(first).map((name) => {
+  // `name in first` rather than a cast: a column named by the caller but absent from the rows would
+  // profile as a column of nulls, and a column of nulls is not a column.
+  const names = columns === undefined ? Object.keys(first) : columns.filter((name) => name in first);
+  return names.map((name) => {
     const values = rows.map((row) => row[name]);
     const type = inferType(values);
     const numbers = values.filter((value): value is number => typeof value === 'number');

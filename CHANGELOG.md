@@ -55,6 +55,22 @@ cannot be argued with.
   answer at 1,024 tokens with 16,384 declared as the escalation ceiling. The probe now carries that
   temperature too — it used to name zero, so on this endpoint the check itself would have been the
   first thing refused.
+- **A title is wrapped before it is drawn, because a question is a sentence.** The contract sets
+  `ir.title` to the question — that is what makes a chart citable — and the emitter drew it on one
+  line. The corpus's questions have a median of 203 characters and a 90th percentile of 355, and
+  matplotlib's `bbox_inches="tight"` grows the figure to hold whatever it is handed, so row 4's
+  figure was **2,808 × 483 pixels**: axes a fifth of the width, tick labels a smear. `wrappedTitle`
+  wraps at 80 characters on word boundaries; a title that already fits is returned unchanged, so no
+  short title's emitted source moved. The same figure is now 795 × 560. Found by the chart judge's
+  first priced reading (`readability 2/10`), invisible to any metric that counts marks.
+- **`profileRows(rows, columns?)` takes the table's column order, and an all-null column is not an
+  axis.** `Object.keys` enumerates integer-like keys first, so a record built as
+  `{Country, …, 2016}` enumerates as `[2016, Country, …]` — and a table with a year column was read
+  in that order. **389 of the corpus's 1,464 tables (26.6%)** got a first column that was not the
+  table's, and five chose an entirely empty year column as the category axis, emitting
+  `labels = [None, None, None, None, None]` under `plt.xlabel("2016")`. `ChartIROptions.columns`
+  carries the order for callers who know it, and `shapeOf` filters `distinct === 0` for callers who
+  do not. The reading moved 529 → **530 (36.05%)**; the drawings moved for 389 rows.
 - **`ImageDialect`: how an image is spelled is now a declaration, not a constant.** OpenAI documents a
   `data:image/png;base64,…` URL that carries its own media type; Zhipu's own sample for GLM-4V sends
   the payload alone. Both reach a model that can see, and only one is accepted by any given endpoint —

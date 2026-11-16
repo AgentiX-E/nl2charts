@@ -582,14 +582,19 @@ function countMeasure(
 }
 
 function shapeOf(profiles: readonly FieldProfile[], options: Resolved): Shape {
-  const dims = profiles.filter((profile) => profile.type !== 'quantitative');
+  // A column every cell of which is null holds no values, so it is neither a dimension nor a
+  // measure: choosing it as the category axis draws bars against `[None, None, None]`, which is a
+  // chart whose shape says nothing and whose mark is still the right one. Five of the corpus's 1,464
+  // tables did exactly that, and no label-based score could see it.
+  const real = profiles.filter((profile) => profile.distinct > 0);
+  const dims = real.filter((profile) => profile.type !== 'quantitative');
   const ordered = dims.filter((profile) => profile.type === 'temporal' || profile.type === 'ordinal');
-  const measures = profiles.filter((profile) => profile.type === 'quantitative');
+  const measures = real.filter((profile) => profile.type === 'quantitative');
   const sliceable = dims
     .filter((profile) => profile.distinct <= options.maxSlices && profile.distinct >= 2)
     .sort((left, right) => right.distinct - left.distinct || left.name.localeCompare(right.name))[0];
   if (measures.length > 0) return { dims, ordered, measures, sliceable, counted: false };
-  const count = countMeasure(dims, profiles, options.rows);
+  const count = countMeasure(dims, real, options.rows);
   if (count === undefined) return { dims, ordered, measures, sliceable, counted: false };
   return { dims, ordered, measures: [count], sliceable, counted: true };
 }
@@ -688,6 +693,15 @@ export interface ChartIROptions extends RecommendOptions {
   readonly theme?: Theme;
   /** Rows to carry. The contract refuses more than fifty thousand. */
   readonly limit?: number;
+  /**
+   * The columns in the order the result set has them.
+   *
+   * A record cannot carry this: `Object.keys` puts integer-like keys first, so a table with a year
+   * column named `2016` enumerates with that column ahead of the ones the query selected. A caller
+   * that read the columns from a table passes them here, and the chart is drawn from the table's
+   * order rather than from a JavaScript property-order accident.
+   */
+  readonly columns?: readonly string[];
 }
 
 const ref = (profile: FieldProfile): FieldRef => ({ field: profile.name, type: profile.type });
@@ -872,7 +886,7 @@ export function toChartIR(
   if (rows.length === 0) {
     throw new Nl2ChartsError('NL2C_E_NOT_SUPPORTED', 'the result set is empty, so there is nothing to chart');
   }
-  const profiles = profileRows(rows);
+  const profiles = profileRows(rows, options.columns);
   // The one fact a column profile cannot hold, and the one that decides the counted measure.
   const choice = recommendChart(question, profiles, { ...options, rows: rows.length });
   const best = choice.recommendations[0];

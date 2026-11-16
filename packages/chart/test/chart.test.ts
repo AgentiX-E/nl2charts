@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ChartIR } from '@agentix-e/nl2charts-spec';
-import { compileToECharts, enumerateCandidates, inferType, isRenderable, lint, profileRows } from '../src/index.js';
+import { compileToECharts, compileToMatplotlib, enumerateCandidates, inferType, isRenderable, lint, profileRows, toChartIR } from '../src/index.js';
 
 const rows = [
   { month: '2026-01-01', region: 'north', revenue: 120, orders: 12 },
@@ -96,6 +96,40 @@ describe('profiling', () => {
     ]);
     expect(profiles.find((profile) => profile.name === 'a')).toMatchObject({ distinct: 2, nulls: 0 });
     expect(profiles.find((profile) => profile.name === 'b')).toMatchObject({ distinct: 2, nulls: 1 });
+  });
+
+  it('takes the column order the table has, not the order a record enumerates in', () => {
+    // The bug this exists for: `2016` is an integer-like key, so the language enumerates it before
+    // `country` no matter what the query selected. 389 of the corpus's 1,464 tables were read this
+    // way, five of them chose an entirely empty year column as the category axis, and the figure
+    // that came out was a bar chart of `[None, None, None]`.
+    const rows = [
+      { country: 'Armenia', '2016': null },
+      { country: 'Belize', '2016': null },
+    ];
+    expect(Object.keys(rows[0] as object)).toEqual(['2016', 'country']);
+    expect(profileRows(rows).map((profile) => profile.name)).toEqual(['2016', 'country']);
+    expect(profileRows(rows, ['country', '2016']).map((profile) => profile.name)).toEqual(['country', '2016']);
+  });
+
+  it('drops a column the caller named but the rows do not have', () => {
+    // A name without a column would profile as a column of nulls, which is not a column.
+    expect(profileRows([{ a: 1 }], ['b', 'a']).map((profile) => profile.name)).toEqual(['a']);
+  });
+
+  it('never chooses a column whose every cell is null as the axis or the measure', () => {
+    // A column of nothing is neither: choosing it draws bars against `[None, None, None]`, and the
+    // mark is still right, so every label-based score is unmoved by the picture being empty.
+    // Four distinct values, so `value` profiles as a measure: two values are an ordinal scale.
+    const rows = [
+      { country: 'Armenia', '2016': null, value: 73 },
+      { country: 'Belize', '2016': null, value: 31 },
+      { country: 'Kenya', '2016': null, value: 12 },
+      { country: 'Mozambique', '2016': null, value: 28 },
+    ];
+    const ir = toChartIR('which country has the highest value', rows, { columns: ['2016', 'country', 'value'] });
+    expect(ir.encoding.x).toMatchObject({ field: 'country' });
+    expect(compileToMatplotlib(ir)).not.toContain('labels = [None');
   });
 
   it('returns nothing for an empty result set and falls back to nominal for all-null columns', () => {

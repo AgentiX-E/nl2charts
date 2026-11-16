@@ -389,6 +389,7 @@
     "LINT_RULES",
     "MARKS",
     "RECOMMENDABLE_MARKS",
+    "TITLE_WIDTH",
     "compileToECharts",
     "compileToMatplotlib",
     "describeMark",
@@ -421,7 +422,8 @@
     "type Refusal",
     "type Severity",
     "type ShapeCounts",
-    "type SupportVerdict"
+    "type SupportVerdict",
+    "wrappedTitle"
   ],
   "mcp": [
     "ASK_TOOL",

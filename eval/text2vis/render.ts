@@ -111,7 +111,9 @@ export function chartJobs(rows: readonly ProfileInput[]): ChartJobs {
     // answered with no columns, or a recommendation this function has just read — so a catch here
     // would be a branch no row reaches, and a coverage number would be the only thing that ever ran
     // it. An exception from it is a defect in the product and belongs in the reading as a failure.
-    const ir: ChartIR = toChartIR(row.prompt, typedRows(set));
+    // `set.columns` because the table's order is what the query selected, and a record's key order
+    // is not: a year column named `2016` enumerates first and became the category axis of 389 rows.
+    const ir: ChartIR = toChartIR(row.prompt, typedRows(set), { columns: set.columns });
     try {
       jobs.push({ id, mark: top.mark, code: compileToMatplotlib(ir) });
     } catch (error) {

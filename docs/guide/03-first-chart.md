@@ -214,6 +214,19 @@ const ir = toChartIR('Daily open and close prices', rows);
 lint(ir); // no errors
 ```
 
+A record cannot tell `toChartIR` what order its columns were in. `Object.keys` enumerates
+integer-like keys first, so a result set with a year column (`{ country: 'Armenia', '2016': null }`)
+enumerates as `['2016', 'country']` and the chart is drawn against the year column — which, in a
+table where that column is empty, is a bar chart of nothing. Read the columns from your table and
+pass them:
+
+```ts
+const ir = toChartIR(question, rows, { columns: resultSet.columns });
+```
+
+A column every cell of which is null is never chosen as an axis or a measure, whether or not you
+pass the order.
+
 It throws `NL2C_E_NOT_SUPPORTED` for an empty result set, or for one no mark can
 encode, and names the columns it saw.
 
@@ -231,7 +244,7 @@ encode, and names the columns it saw.
 > The other half is `pnpm bench:text2vis:profile`, which scores the shipped entry
 > point with the corpus's own result set in front of it — no model, no database,
 > no renderer, because the corpus ships the table. That reading is
-> **526 of 1,470 (35.78%)** and it is held by a floor: `pnpm gate:text2vis` fails a
+> **530 of 1,470 (36.05%)** and it is held by a floor: `pnpm gate:text2vis` fails a
 > run that comes back lower, and fails one that comes back over a different number
 > of rows, because the scorer is deterministic and a fall is therefore never noise.
 >
