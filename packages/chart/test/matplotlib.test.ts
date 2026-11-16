@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ChartIR, ChartType, FieldRef } from '@agentix-e/nl2charts-spec';
-import { compileToMatplotlib, TITLE_WIDTH, wrappedTitle } from '../src/index.js';
+import { compileToMatplotlib, TICK_CROWD, TICK_LENGTH, TICK_ROTATION, TITLE_WIDTH, tickTilt, wrappedTitle } from '../src/index.js';
 
 const rows = [
   { region: 'north', total: 10.5, count: 3 },
@@ -391,5 +391,52 @@ describe('the title a figure can hold', () => {
     // taller and the axes wide instead of a ribbon.
     expect(code).toContain('\\n');
     expect(code).toMatch(/plt\.title\("/);
+  });
+});
+
+describe('the category axis that has to tilt', () => {
+  const bars = (labels: string[]) =>
+    ({
+      version: '3.0',
+      mark: 'bar',
+      encoding: { x: { field: 'name', type: 'nominal' }, y: [{ field: 'value', type: 'quantitative' }] } as ChartIR['encoding'],
+      data: labels.map((name) => ({ name, value: 1 })),
+      title: 't',
+      alt: 'bar',
+    }) as ChartIR;
+
+  it('tilts when a name is long enough to reach its neighbour, and there are enough neighbours', () => {
+    // Twelve characters in a five-category figure overlap: `Marshall Islands`, `Micronesia (country)`
+    // and `North Macedonia` in one axis were a smear in the chart judge's first reading.
+    expect(tickTilt(['Marshall Islands', 'Micronesia (country)', 'North Macedonia', 'Spain'])).toEqual({
+      rotation: TICK_ROTATION,
+      ha: 'right',
+    });
+    expect(tickTilt(['a'.repeat(TICK_LENGTH + 1), 'b', 'c', 'd'])).not.toBeUndefined();
+  });
+
+  it('leaves short names, and long names with nothing to collide with, alone', () => {
+    // One long name among three has room: the rule fires on the shape it was written for and no other,
+    // which is what keeps every short-label chart's emitted source byte-identical.
+    expect(tickTilt(['a', 'b', 'c', 'd'])).toBeUndefined();
+    expect(tickTilt(['Marshall Islands', 'Spain', 'Belize'])).toBeUndefined();
+    expect(tickTilt(['Marshall Islands'])).toBeUndefined();
+    // An empty cell is not a name: five rows, three of them unlabelled, is three things to collide.
+    expect(tickTilt(['Marshall Islands', '', '', ''])).toBeUndefined();
+  });
+
+  it('emits the tilt, and emits nothing at all when it does not tilt', () => {
+    const tilted = compileToMatplotlib(bars(['Marshall Islands', 'Micronesia (country)', 'North Macedonia', 'Spain']));
+    expect(tilted).toContain(`plt.xticks(positions, labels, rotation=${String(TICK_ROTATION)}, ha='right')`);
+    const flat = compileToMatplotlib(bars(['a', 'b', 'c', 'd']));
+    expect(flat).toContain('plt.xticks(positions, labels)');
+    expect(flat).not.toContain('rotation');
+  });
+
+  it('measures the name, not the Python literal around it', () => {
+    // A label of exactly the limit is measured as itself; if the emitter measured the quoted literal
+    // it would read two characters longer and tilt a chart that fits.
+    const names = Array.from({ length: TICK_CROWD }, () => 'x'.repeat(TICK_LENGTH));
+    expect(compileToMatplotlib(bars(names))).toContain('plt.xticks(positions, labels)');
   });
 });

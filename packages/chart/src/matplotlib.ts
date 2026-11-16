@@ -76,6 +76,53 @@ export function wrappedTitle(title: string, width: number = TITLE_WIDTH): string
 }
 
 /**
+ * When a category axis has to tilt its labels, and by how much.
+ *
+ * A figure is 6.4 inches wide at 110 dpi, so a bar in a five-category chart is about 140 pixels and
+ * a label of twelve characters is about 84 — which fits, until the labels are not even. The reading
+ * that found this was the chart judge's: `Marshall Islands`, `Micronesia (country)` and
+ * `North Macedonia` in one axis overlapped into a smear, and 514 of the corpus's 1,286 figures have a
+ * category label longer than ten characters. Tilting is free and loses nothing, so the rule tilts as
+ * soon as a label is long enough to collide with its neighbour: **more than ten characters, and at
+ * least four categories to collide with**.
+ *
+ * Thirty degrees rather than forty-five: at forty-five two rotated rows of text need the height of a
+ * third, and the taller the tick block the shorter the bars get — which is the same trade the title
+ * wrap made.
+ */
+export const TICK_ROTATION = 30;
+/** The length at which a category label starts to reach its neighbour. */
+export const TICK_LENGTH = 10;
+/** How few categories never collide, however long their names are. */
+export const TICK_CROWD = 4;
+
+/**
+ * The tilt a category axis needs, or nothing when the labels fit side by side.
+ *
+ * `undefined` is what keeps every chart whose labels are short byte-identical to what it emitted
+ * before this rule existed: a rule that only fires on the shape it was written for cannot move a
+ * reading it was not measured on.
+ */
+export function tickTilt(labels: readonly string[]): { readonly rotation: number; readonly ha: 'right' } | undefined {
+  const named = labels.filter((label) => label !== '');
+  const longest = named.reduce((most, label) => Math.max(most, label.length), 0);
+  if (longest <= TICK_LENGTH || named.length < TICK_CROWD) return undefined;
+  return { rotation: TICK_ROTATION, ha: 'right' };
+}
+
+/**
+ * The keyword arguments `plt.xticks` needs, as source.
+ *
+ * A string rather than an object because it is concatenated into one line of Python, and an empty
+ * string when the labels fit — which is what keeps the emitted source of a short-label chart
+ * identical to what it was before the tilt existed.
+ */
+function tickArguments(labels: readonly string[]): string {
+  const tilt = tickTilt(labels);
+  return tilt === undefined ? '' : `, rotation=${String(tilt.rotation)}, ha=${JSON.stringify(tilt.ha).replace(/"/g, "'")}`;
+}
+
+/**
  * A JavaScript value as a Python literal.
  *
  * JSON string literals and Python string literals agree on every escape that matters (`\"`, `\\`,
@@ -210,6 +257,9 @@ export function compileToMatplotlib(ir: ChartIR): string {
     body.push(`${CALL[ir.mark] as string}(xs, ys)`, `plt.xlabel(${JSON.stringify(labelRef.field)})`, `plt.ylabel(${JSON.stringify(measure.field)})`);
   } else {
     const labels: string[] = [];
+    // The labels as the data spells them, beside the Python literals: the tilt rule measures a name,
+    // and a literal's quotes and escapes are the emitter's business rather than the label's.
+    const names: string[] = [];
     const values: string[] = [];
     let dropped = 0;
     for (const row of ir.data) {
@@ -219,6 +269,7 @@ export function compileToMatplotlib(ir: ChartIR): string {
         continue;
       }
       labels.push(pyLiteral(row[labelRef.field]));
+      names.push(String(row[labelRef.field] ?? ''));
       values.push(String(value));
     }
     body.push(`labels = [${labels.join(', ')}]`, `values = [${values.join(', ')}]`);
@@ -249,7 +300,7 @@ export function compileToMatplotlib(ir: ChartIR): string {
       body.push(
         `positions = list(range(len(labels)))`,
         `${CALL[ir.mark] as string}(positions, values)`,
-        `plt.xticks(positions, labels)`,
+        `plt.xticks(positions, labels${tickArguments(names)})`,
         `plt.xlabel(${JSON.stringify(labelRef.field)})`,
         `plt.ylabel(${JSON.stringify(measure.field)})`,
       );
