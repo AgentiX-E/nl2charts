@@ -15230,6 +15230,36 @@ The report gained `grader: {endpoint, model}`, asserted non-empty at write time 
 two models. A report that did not name its grader would be quotable as a property of the charts. The
 self-test grew two cases for it, 24 to 26.
 
+### The first production run of the probe answered, in eleven seconds, `llm returned 429`
+
+The step paid for itself on its first dispatch, and not in the way it was written for. The log:
+
+```
+text2vis: grading with glm-4.5v (zhipu) at https://open.bigmodel.cn/api/paas/v4, images bare-base64, temperature unset
+text2vis: the probe answered "llm returned 429", which does not name the red in the image; nothing was graded
+```
+
+Two findings, one of them a defect in this repository.
+
+The first is what the step was for: the chain from a variable name to a request is intact — the url
+answered, the model name was not refused, the secret resolved (it was read through `LLM_API_KEY`,
+the second variable the row lists), and the run stopped after **one call and no render** instead of
+after 1,286 figures and a graded batch that would have been thrown away.
+
+The second is that the sentence is wrong. A 429 is a quota, a concurrency limit, or a model this key
+may not use; a colour it cannot name is a verdict on eyes. **The instrument printed the second when it
+meant the first**, which points the reader at the model when the repair is waiting or a plan. So the
+probe now carries `asked` beside `seen`, and the two refusals read differently:
+
+```
+text2vis: the endpoint never answered (llm returned 429): that is a quota, a key scope or a url,
+          not a verdict on what it can see; nothing was graded
+```
+
+and the provider stopped discarding the body of a status it retried: `llm returned 429: {"error":"quota"}`
+rather than `llm returned 429`. A status code is not a reason, and the vendor's own body is the only
+place the reason is written.
+
 What none of this establishes is a score. The rehearsal — `limit: 8` — is what says whether the
 endpoint answers, how long a call takes and what a run of 1,286 of them would cost in time, and its
 artifact is the first `text2vis-judge.json` this repository can read a mean out of.

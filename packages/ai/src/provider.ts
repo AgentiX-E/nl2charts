@@ -709,7 +709,11 @@ export function createHttpProvider(options: HttpProviderOptions): LlmProvider {
         // both mean the same request may work later.
         const refused =
           status !== undefined && status >= 400 && status < 500 && status !== 408 && !RETRYABLE.has(status);
-        const detail = refused && response !== undefined ? await refusalDetail(response) : undefined;
+        // Read for every failed status, not only for a refusal. "llm returned 429" is not a sentence
+        // anyone can act on: a quota, a concurrency limit and a model that is not enabled for this key
+        // all arrive as 429, and the vendor's own body is the only thing that tells them apart. The
+        // first production run of the chart judge printed exactly that line for a rate limit.
+        const detail = response === undefined ? undefined : await refusalDetail(response);
         if (refused) {
           throw toNl2ChartsError(
             'NL2C_E_LLM_REJECTED',
@@ -718,10 +722,12 @@ export function createHttpProvider(options: HttpProviderOptions): LlmProvider {
             { status, endpoint, attempts, ...(detail === undefined ? {} : { detail }) },
           );
         }
-        throw toNl2ChartsError('NL2C_E_LLM_UNAVAILABLE', `llm returned ${status ?? 'nothing'}`, transport, {
-          ...(status === undefined ? {} : { status }),
-          attempts,
-        });
+        throw toNl2ChartsError(
+          'NL2C_E_LLM_UNAVAILABLE',
+          `llm returned ${status ?? 'nothing'}${detail === undefined ? '' : `: ${detail}`}`,
+          transport,
+          { ...(status === undefined ? {} : { status }), attempts, ...(detail === undefined ? {} : { detail }) },
+        );
       }
       if (payload === undefined) {
         throw toNl2ChartsError('NL2C_E_LLM_INVALID_RESPONSE', 'llm response is not JSON', transport, { attempts });

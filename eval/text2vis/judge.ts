@@ -186,6 +186,25 @@ export function sawRed(reply: string): boolean {
 }
 
 /**
+ * What the probe learned, and the difference between the two ways of learning nothing.
+ *
+ * `asked` is the field a real dispatch added. The first production run of this instrument answered
+ * `llm returned 429` — a rate limit — and the report printed it as *"the probe answered \"llm returned
+ * 429\", which does not name the red in the image"*, which reads as a verdict on the endpoint's eyes.
+ * A quota is not a blindness: one of the two is a waiting problem and the other is a wrong endpoint,
+ * and an instrument that says the second when it means the first sends its reader to change a model
+ * that was fine. So a call that never got an answer is counted apart, and only a call that *answered*
+ * and failed to name the colour is evidence that the endpoint cannot see.
+ */
+export interface ProbeReading {
+  readonly answer: string;
+  /** Whether an answer came back at all. False for a transport failure or a refusal like 429. */
+  readonly asked: boolean;
+  /** Whether the answer could only have been written by a reader that saw red. */
+  readonly seen: boolean;
+}
+
+/**
  * Ask the endpoint to name a colour, and keep what it said.
  *
  * Never throws: a probe that could not be sent is a probe that did not see, and `seen` is the field
@@ -196,10 +215,7 @@ export function sawRed(reply: string): boolean {
  * name zero, and on an endpoint whose documented range may exclude zero the check would have been
  * the first thing refused — the instrument failing on the one call it exists to spend.
  */
-export async function probeVision(
-  provider: LlmProvider,
-  temperature: number | null = 0,
-): Promise<{ readonly answer: string; readonly seen: boolean }> {
+export async function probeVision(provider: LlmProvider, temperature: number | null = 0): Promise<ProbeReading> {
   try {
     const response = await provider.complete({
       messages: [
@@ -210,9 +226,9 @@ export async function probeVision(
       purpose: 'probe',
     });
     const answer = response.text.trim().replace(/\s+/g, ' ').slice(0, 80);
-    return { answer, seen: sawRed(answer) };
+    return { answer, asked: true, seen: sawRed(answer) };
   } catch (error) {
-    return { answer: error instanceof Error ? error.message : String(error), seen: false };
+    return { answer: error instanceof Error ? error.message : String(error), asked: false, seen: false };
   }
 }
 
@@ -782,6 +798,24 @@ function gradeWith(options: JudgeEntryOptions, args: JudgeArgs): JudgeResolved {
   return resolveJudge(options.env ?? process.env, args.endpoint);
 }
 
+/**
+ * Why a probe stopped the run, in the words that send the reader to the right place.
+ *
+ * Two refusals, deliberately not one. A call that never got an answer is a quota, a key scope or a
+ * url, and the repair is to wait or to fix the deployment; a call that answered and did not name the
+ * colour is an endpoint that cannot see, and the repair is another model. Reporting the first as the
+ * second is how a 429 becomes "your vision model is blind".
+ */
+function probeRefusal(probe: ProbeReading): string | undefined {
+  if (!probe.asked) {
+    return `the endpoint never answered (${probe.answer}): that is a quota, a key scope or a url, not a verdict on what it can see`;
+  }
+  if (!probe.seen) {
+    return `the endpoint did not see the probe image (it answered "${probe.answer}"), so it cannot grade a chart`;
+  }
+  return undefined;
+}
+
 /** The one line a dispatch reads before it pays for a render: who grades, and how it is sampled. */
 function describeGrader(resolved: JudgeResolved): string {
   const where = resolved.baseUrl === '' ? '' : ` at ${resolved.baseUrl}`;
@@ -808,16 +842,17 @@ export async function entryJudge(
     // which is the difference between learning in a minute that a base url or an image spelling is
     // wrong and learning it after 1,286 figures have been drawn.
     const probe = await probeVision(resolved.provider, resolved.temperature);
+    const refusal = probeRefusal(probe);
     if (args.probeOnly) {
       log(
-        probe.seen
+        refusal === undefined
           ? `text2vis: the probe answered "${probe.answer}", so this endpoint can see; nothing was graded`
-          : `text2vis: the probe answered "${probe.answer}", which does not name the red in the image; nothing was graded`,
+          : `text2vis: ${refusal}; nothing was graded`,
       );
-      return probe.seen ? 0 : 1;
+      return refusal === undefined ? 0 : 1;
     }
-    if (!probe.seen) {
-      log(`text2vis: the endpoint did not see the probe image (it answered "${probe.answer}"), so it cannot grade a chart`);
+    if (refusal !== undefined) {
+      log(`text2vis: ${refusal}`);
       return 1;
     }
     // The denominator comes from a render report, so a run without one has nothing to divide by —

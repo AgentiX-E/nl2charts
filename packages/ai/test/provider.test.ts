@@ -176,6 +176,16 @@ describe('http provider', () => {
     );
   });
 
+  it('quotes what a failing endpoint said about itself, on a status it also retried', async () => {
+    // A 429 is a quota, a concurrency limit or a model this key may not use, and the status alone
+    // cannot tell them apart. The first production run of the chart judge printed "llm returned 429"
+    // and nothing else, which sent its reader to look at the wrong half of the deployment.
+    const limited = createHttpProvider({ baseUrl: `${baseUrl}/error`, model: 'm' });
+    await expect(limited.complete({ messages: [] })).rejects.toThrow(/429: quota/);
+    const boom = createHttpProvider({ baseUrl: `${baseUrl}/boom`, model: 'm' });
+    await expect(boom.complete({ messages: [] })).rejects.toThrow(/500: upstream exploded/);
+  });
+
   it('rejects a non-json body', async () => {
     const provider = createHttpProvider({ baseUrl: `${baseUrl}/garbage`, model: 'm' });
     await expect(provider.complete({ messages: [] })).rejects.toSatisfy(

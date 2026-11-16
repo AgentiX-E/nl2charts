@@ -64,6 +64,13 @@ cannot be argued with.
   every request in this repository has been written in, so **a text-only request is byte-identical
   under either**, which a test asserts by comparing the two bodies. Four tests, two of them over a
   socket.
+- **A failing endpoint's own words survive to the error message, including on a status that was
+  retried.** `llm returned 429` is not a sentence anyone can act on: a quota, a concurrency limit and a
+  model that is not enabled for this key all arrive as 429, and the vendor's body is the only thing
+  that tells them apart. `LLM_UNAVAILABLE` now carries the body's reason (`llm returned 429:
+  {"error":"quota"}`) and puts it in `details.detail` — the body was read only for a 4xx that was not
+  retryable, so the one failure a batch job actually meets was the one it could not diagnose. Found by
+  the chart judge's first production run, which printed the old message and nothing else.
 - **`pnpm bench:text2vis:judge --probe-only` asks one endpoint one question and stops.** It needs no
   corpus and no render artifact, which is the point: a wrong base url, a retired model name, a key in
   the wrong secret and an image spelled the wrong way are properties of the *endpoint*, and they used

@@ -464,7 +464,7 @@ describe('the probe that proves the endpoint could see', () => {
       },
     };
     const probe = await probeVision(provider);
-    expect(probe).toEqual({ answer: 'Red.', seen: true });
+    expect(probe).toEqual({ answer: 'Red.', asked: true, seen: true });
     const messages = body.messages as { readonly role: string; readonly content: string; readonly images?: readonly unknown[] }[];
     expect(messages[1]?.content).toBe(VISION_PROBE);
     expect(messages[1]?.images).toHaveLength(1);
@@ -472,7 +472,8 @@ describe('the probe that proves the endpoint could see', () => {
 
   it('turns a refusal into an answer nobody saw, rather than into a stack trace', async () => {
     const refused = { id: 'p', model: 'p', complete: async () => ({ text: 'I cannot see images.', model: 'p' }) };
-    expect(await probeVision(refused)).toEqual({ answer: 'I cannot see images.', seen: false });
+    // Answered, and could not name the colour: the one shape that is evidence about eyes.
+    expect(await probeVision(refused)).toEqual({ answer: 'I cannot see images.', asked: true, seen: false });
     const broken = {
       id: 'p',
       model: 'p',
@@ -480,7 +481,8 @@ describe('the probe that proves the endpoint could see', () => {
         throw new Error('declares no vision capability');
       },
     };
-    expect(await probeVision(broken)).toEqual({ answer: 'declares no vision capability', seen: false });
+    // Never answered: a quota or a url, which is not the same finding and must not be reported as one.
+    expect(await probeVision(broken)).toEqual({ answer: 'declares no vision capability', asked: false, seen: false });
     const stringly = {
       id: 'p',
       model: 'p',
@@ -488,7 +490,7 @@ describe('the probe that proves the endpoint could see', () => {
         throw 'no route to host';
       },
     };
-    expect(await probeVision(stringly)).toEqual({ answer: 'no route to host', seen: false });
+    expect(await probeVision(stringly)).toEqual({ answer: 'no route to host', asked: false, seen: false });
   });
 });
 
@@ -934,7 +936,28 @@ describe('the judge command, over a real socket and a real PNG', () => {
     const lines: string[] = [];
     expect(await entryJudge(ENTRY, MODULE_URL, (line) => lines.push(line), { argv: ['--probe-only'], provider: blind })).toBe(1);
     expect(calls).toBe(1);
-    expect(lines.join('\n')).toMatch(/does not name the red in the image; nothing was graded/);
+    expect(lines.join('\n')).toMatch(/did not see the probe image .*nothing was graded/);
+  });
+
+  it('does not call a quota a blind model, which is what the first production run printed', async () => {
+    let calls = 0;
+    const limited = {
+      id: 'limited',
+      model: 'glm-4.5v',
+      complete: async () => {
+        calls += 1;
+        throw new Error('llm returned 429');
+      },
+    };
+    const lines: string[] = [];
+    expect(await entryJudge(ENTRY, MODULE_URL, (line) => lines.push(line), { argv: ['--probe-only'], provider: limited })).toBe(1);
+    expect(calls).toBe(1);
+    expect(lines.join('\n')).toMatch(/never answered \(llm returned 429\).*not a verdict on what it can see/);
+    // The batch path reads the same two facts the same way, and stops before the artifact is opened.
+    const batch: string[] = [];
+    expect(await entryJudge(ENTRY, MODULE_URL, (line) => batch.push(line), { argv: ['--render', '/nowhere/render.json'], provider: limited })).toBe(1);
+    expect(batch.join('\n')).toMatch(/never answered \(llm returned 429\)/);
+    expect(batch.join('\n')).not.toMatch(/did not see the probe image/);
   });
 
   it('refuses the whole run when the endpoint cannot name a colour, before grading a row', async () => {
