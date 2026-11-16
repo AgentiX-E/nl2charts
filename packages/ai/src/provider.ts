@@ -4,9 +4,43 @@ import type { ModelCapabilities } from './capability.js';
 
 export type Role = 'system' | 'user' | 'assistant';
 
+/**
+ * One image a message carries, as bytes rather than as a reference to them.
+ *
+ * Base64 and not a path or a URL, because a request is a value: a provider that read a file at
+ * send time would produce two different requests from one `LlmRequest`, and the meter, the
+ * replay fixture and the cache key would each be measuring a different thing.
+ *
+ * No `data:` prefix either. The prefix is the *wire* spelling of one dialect, and a contract that
+ * carried it would have decided which dialect it is talking to — the one thing this interface
+ * exists to keep open. `imageUrl` in `provider.ts` writes it, once, for the dialect this
+ * repository speaks.
+ */
+export interface LlmImage {
+  /** IANA media type. Typed as a union so a typo is a compile error rather than a spurious 400. */
+  readonly mediaType: 'image/png' | 'image/jpeg' | 'image/webp';
+  /** The bytes, base64-encoded, unpadded-or-padded as the encoder produced them. */
+  readonly data: string;
+}
+
 export interface LlmMessage {
   readonly role: Role;
   readonly content: string;
+  /**
+   * Images this message carries, in the order they were attached.
+   *
+   * A field beside `content` rather than a replacement for it, and that is a design decision with
+   * a measurable consequence: every request this repository has ever sent is a `{role, content}`
+   * pair, and the readings in `docs/benchmarks.md` are only reproducible if a text-only message
+   * still serialises to exactly those two fields. A union (`string | readonly Part[]`) puts every
+   * reader through a discriminant to prove what it already knows, and — worse — makes the wire
+   * shape the contract: a dialect that attaches images in a separate turn, or in a tool result,
+   * has nowhere to put them.
+   *
+   * Absent means "text only" and is spelled by not writing the field, so `JSON.stringify` of a
+   * text request is byte-identical to what it was before this field existed.
+   */
+  readonly images?: readonly LlmImage[];
 }
 
 /**
@@ -54,6 +88,19 @@ export interface PurposeUsage {
   readonly promptTokens: number;
   readonly completionTokens: number;
   readonly chars: number;
+  /**
+   * Images the request carried, which `chars` does not contain.
+   *
+   * The two are one statement: an endpoint bills a figure in prompt tokens and a character count
+   * cannot see it, so a bucket that reported only `chars` would invite a ratio over text against a
+   * token count that includes pictures.
+   *
+   * Optional because a bucket is also something a caller can *hand back* — a replayed artifact, a
+   * ledger reconstructed in a test — and every one of those recorded before this field existed is a
+   * record with no pictures in it. The meter always writes it; a reader that needs it has to say what
+   * it does with an artifact that predates the column, which is the honest place for that decision.
+   */
+  readonly images?: number;
   readonly unbilled: number;
   /**
    * Prompt tokens the endpoint billed at its cache rate, when it said so.
@@ -264,6 +311,64 @@ export interface HttpProviderOptions {
 /** Statuses that mean "try again", as opposed to "the request is wrong". */
 const RETRYABLE = new Set([429, 500, 502, 503, 504]);
 
+/**
+ * A base64 payload, checked as base64 rather than trusted.
+ *
+ * The mistake this catches is not malice, it is the one a caller makes while wiring a figure into
+ * a message: passing a path, a `file://` URL, or a `data:` URL that already carries its own
+ * prefix. All three are strings, all three travel to the endpoint as bytes nobody can decode, and
+ * the endpoint's answer is either a 400 that reads as a bad key or — the worse of the two — a
+ * reply written from the text alone, which is a judge grading a picture it never saw.
+ *
+ * Cheap, and deliberately not a decode: `Buffer.from` accepts garbage and truncates it, so a
+ * round-trip test would pass on payloads no decoder produces.
+ */
+function assertBase64(data: string, field: string): void {
+  if (data === '') {
+    throw toNl2ChartsError('NL2C_E_INVALID_INPUT', `${field} carries no bytes`);
+  }
+  if (data.startsWith('data:')) {
+    throw toNl2ChartsError('NL2C_E_INVALID_INPUT', `${field} is a data URL: pass the base64 payload, not the prefix`);
+  }
+  if (!/^[A-Za-z0-9+/\r\n]+={0,2}$/.test(data)) {
+    throw toNl2ChartsError('NL2C_E_INVALID_INPUT', `${field} is not base64: a path or a URL reached the message`);
+  }
+}
+
+/** One image as this dialect states it: a media type inside a `data:` URL. */
+function imageUrl(image: LlmImage): { readonly type: 'image_url'; readonly image_url: { readonly url: string } } {
+  assertBase64(image.data, `image (${image.mediaType})`);
+  return { type: 'image_url', image_url: { url: `data:${image.mediaType};base64,${image.data}` } };
+}
+
+/**
+ * The `messages` array an OpenAI-compatible endpoint reads.
+ *
+ * Two shapes, and which one a message takes is decided by whether it carries an image: a message
+ * without one is written as the `{role, content}` pair it always was, so every reading taken
+ * before this function existed is reproducible byte for byte. A message with images is written as
+ * the parts array the dialect requires, text first — the text states the question and the images
+ * are the evidence for it, and an endpoint that truncates a long turn keeps the reason it was asked.
+ *
+ * A message with images and empty text is legal and writes no text part at all: "here is a figure,
+ * describe it" is a complete request, and an empty `{type: 'text', text: ''}` part is a part some
+ * endpoints reject.
+ *
+ * Exported because the ablation that prices this channel needs to assert the bytes, and asserting
+ * them through a socket is a weaker test than asserting them here.
+ */
+export function wireMessages(messages: readonly LlmMessage[]): readonly Record<string, unknown>[] {
+  return messages.map((message) => {
+    const images = message.images;
+    if (images === undefined || images.length === 0) return { role: message.role, content: message.content };
+    const parts: ({ readonly type: 'text'; readonly text: string } | ReturnType<typeof imageUrl>)[] = [];
+    if (message.content !== '') parts.push({ type: 'text', text: message.content });
+    for (const image of images) parts.push(imageUrl(image));
+    return { role: message.role, content: parts };
+  });
+}
+
+
 function retryAfterMs(response: Response, fallback: number): number {
   const header = response.headers?.get?.('retry-after');
   if (header === null || header === undefined) return fallback;
@@ -417,7 +522,7 @@ export function createHttpProvider(options: HttpProviderOptions): LlmProvider {
       const adapted = adaptRequest(request, capabilities);
       const body: Record<string, unknown> = {
         model: options.model,
-        messages: adapted.request.messages,
+        messages: wireMessages(adapted.request.messages),
       };
       // Omitted rather than defaulted, so that `null` can mean what it says. The field is
       // written only when the deployment has an opinion about it and the endpoint honours it.
@@ -685,6 +790,8 @@ export function withCallCounter(provider: LlmProvider): {
     readonly promptTokens: number;
     readonly completionTokens: number;
     readonly chars: number;
+    /** Images the calls carried. Counted apart from `chars`, which is text only. */
+    readonly images: number;
     readonly unbilled: number;
     readonly cachedTokens: number;
     readonly cachedReported: number;
@@ -727,6 +834,7 @@ export function withCallCounter(provider: LlmProvider): {
     promptTokens: number;
     completionTokens: number;
     chars: number;
+    images: number;
     unbilled: number;
     cachedTokens: number;
     cachedReported: number;
@@ -738,6 +846,7 @@ export function withCallCounter(provider: LlmProvider): {
     promptTokens: 0,
     completionTokens: 0,
     chars: 0,
+    images: 0,
     unbilled: 0,
     cachedTokens: 0,
     cachedReported: 0,
@@ -770,9 +879,19 @@ export function withCallCounter(provider: LlmProvider): {
         // against the text of the *same* request: pairing it with a character count taken from a
         // different prompt (say, the system message alone) produces a ratio that has no tokenizer
         // behind it and still looks like one.
+        //
+        // Images are counted apart, and this is the whole reason they are counted at all: an
+        // endpoint bills a figure in prompt tokens, and base64 is 5.3 characters per three bytes,
+        // so folding a 44 KiB PNG into `chars` would publish a characters-per-token ratio of about
+        // 88,000 for a prompt whose text is 300 characters. The ratio would not be wrong by a
+        // little; it would be a measurement of the encoder. `images` lets a cost column say that
+        // the token count includes figures this count does not, which is the honest version.
         for (const message of request.messages) {
           meter.chars += message.content.length;
           totals.chars += message.content.length;
+          const images = message.images?.length ?? 0;
+          meter.images += images;
+          totals.images += images;
         }
         const response = await provider.complete(request, options);
         for (const parameter of response.ignored ?? []) dropped.set(parameter, (dropped.get(parameter) ?? 0) + 1);
@@ -819,6 +938,7 @@ export function withCallCounter(provider: LlmProvider): {
       promptTokens: totals.promptTokens,
       completionTokens: totals.completionTokens,
       chars: totals.chars,
+      images: totals.images,
       unbilled: totals.unbilled,
       cachedTokens: totals.cachedTokens,
       cachedReported: totals.cachedReported,

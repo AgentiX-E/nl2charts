@@ -7,6 +7,41 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **A message can carry an image, and the request it produces for text is byte for byte the request it
+  produced before.** `LlmMessage` gained `images?: readonly LlmImage[]`, a typed channel beside a
+  `content` that stays a `string` — not the union an OpenAI-shaped wire format suggests, because a
+  union makes the wire shape the contract, gives a dialect that attaches images in a separate turn
+  nowhere to put them, and turns "a text request is unchanged" into something tests have to
+  re-establish instead of something the type cannot express. `wireMessages` writes `{role, content}`
+  and nothing else when no images are present; a test pins the exact body an endpoint receives
+  (`…"messages":[{"role":"user","content":"hi"}]…`). Three refusals, at three layers: `assertBase64`
+  refuses a path, a URL, or a `data:` URL before the request is built (all three are strings that
+  arrive as bytes nobody can decode); `adaptRequest` refuses an image to an endpoint that never
+  declared `vision` with `NL2C_E_NOT_SUPPORTED`, because the alternative is a silent answer written
+  from the text alone; and the judge's probe catches a declaration that lies. The meter counts images
+  **apart from** characters — a 44 KiB PNG is about 60,000 base64 characters, and folding it into
+  `chars` would publish a characters-per-token ratio of ~88,000 for a prompt whose text is 300
+  characters. `transcriptOf` puts an image digest in the replay key, so a fixture recorded for one
+  figure cannot answer for another. 26 new tests over a real socket.
+- **`pnpm bench:text2vis:judge` grades the figures, one call per row, and refuses a blind endpoint.**
+  Both dimensions — `chart_correctness` and `readability` — are asked in one prompt, so
+  `calls === judged + failed` is an equality the report asserts rather than a budget it hopes for. The
+  report carries two means and the counts behind them, and **no pass rate**: a grader's 7 has no
+  calibrated threshold, so "7 or better" would be a cut invented after the fact and published to two
+  decimals. Every row lands in exactly one of `judged` / `failed` / `notSelected` / `skipped`, and
+  `judged + failed + notSelected === charts` and `charts + skipped === scored` are checked before any
+  mean is read. Before the batch the instrument spends one call on a two-by-two red PNG: a grader that
+  cannot name the colour stops the run, because a text-only model answering about a chart it never saw
+  is the one failure the request path cannot detect once a dispatch has declared `vision: true`.
+  `parseJudge` takes JSON, then the labelled form, and **never a bare pair** — an unlabelled `8 7` is
+  two numbers in an order only the prompt knows — and refuses a score outside 0–10 rather than
+  clamping it.
+- **`eval/text2vis/baseline.json` gained a `judge` block with no threshold on either mean**, which is
+  the honest part: nothing has been graded yet, so `compareJudge` holds the shape a reading must have
+  (one call per attempted row, every row accounted for, both means on the 0–10 scale, a probe that
+  named red) and prints the means without comparing them. The self-test count moved from 15 to 24.
+  `.github/workflows/text2vis-judge.yml` is dispatch-only and re-takes the render in the same run,
+  because a judge report is only comparable with a render artifact from the same corpus.
 - **`pnpm bench:text2vis:render` draws every chart, and the first run found ten percent of the emitted
   Python could not run.** `compileToMatplotlib` had 24 tests and **no line of its output had ever been
   executed**: the tests asserted which function is called with which column, and every assertion was

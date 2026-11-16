@@ -38,6 +38,7 @@ const ROOT = resolve(new URL('..', import.meta.url).pathname);
 const BASELINE = 'eval/text2vis/baseline.json';
 const REPORT = 'eval/out/text2vis-profile.json';
 const RENDER_REPORT = 'eval/out/text2vis-render.json';
+const JUDGE_REPORT = 'eval/out/text2vis-judge.json';
 
 /**
  * Compare one reading against the floor.
@@ -152,6 +153,127 @@ export function compareRender(report, floor, options = {}) {
   return { issues, notes };
 }
 
+
+/**
+ * Compare the judged reading against the floor.
+ *
+ * This one holds a different kind of statement from the two above, and the difference is worth
+ * spelling out: `compare` and `compareRender` compare *counts* against a recorded count, while the
+ * grader produces two means on an ordinal scale a model invented. So the floor here is not a number
+ * to stay above — it is the shape a reading must have before its means mean anything:
+ *
+ * 1. **One call per attempted row.** Two dimensions come back from one prompt, so `calls` must equal
+ *    `judged + failed` exactly. A run that spent more asked twice, and its means are over a different
+ *    instrument from the one `eval/text2vis/judge.ts` documents.
+ * 2. **Every row accounted for.** `judged + failed + notSelected === charts` and
+ *    `charts + skipped === scored`. A mean whose denominator cannot be checked is a number with no
+ *    population behind it.
+ * 3. **Both means on the scale the prompt asked for.** 0..10, not a probability and not a percentage.
+ *
+ * The means themselves are printed as notes and not compared, and that is the honest state of a first
+ * reading: there is nothing recorded to regress against yet. The round that takes it registers it.
+ *
+ * @returns {{issues: string[], notes: string[]}}
+ */
+export function compareJudge(report, floor, options = {}) {
+  const issues = [];
+  const notes = [];
+  if (report === undefined) {
+    const message = `TEXT2VIS JUDGE: no judge report at ${JUDGE_REPORT} — \`pnpm bench:text2vis:judge --artifact ${JUDGE_REPORT}\` writes it`;
+    if (options.require === true) issues.push(message);
+    else notes.push(`${message} (not required here)`);
+    return { issues, notes };
+  }
+  for (const key of ['scored', 'charts', 'judged', 'failed', 'notSelected', 'skipped', 'calls']) {
+    if (typeof report[key] !== 'number') {
+      issues.push(`TEXT2VIS JUDGE: the report has no numeric \`${key}\`, so the grading reading cannot be compared`);
+      return { issues, notes };
+    }
+  }
+  if (report.calls !== report.judged + report.failed) {
+    issues.push(
+      `TEXT2VIS JUDGE: ${String(report.calls)} calls for ${String(report.judged)} judged and ${String(report.failed)} failed — ` +
+        `this instrument asks both dimensions in one call, so anything but one call per attempted row is a different instrument`,
+    );
+  }
+  if (report.judged + report.failed + report.notSelected !== report.charts) {
+    issues.push(
+      `TEXT2VIS JUDGE: ${String(report.judged)} judged + ${String(report.failed)} failed + ` +
+        `${String(report.notSelected)} unselected is not ${String(report.charts)} charts`,
+    );
+  }
+  if (report.charts + report.skipped !== report.scored) {
+    issues.push(
+      `TEXT2VIS JUDGE: ${String(report.charts)} charts + ${String(report.skipped)} skipped is not ${String(report.scored)} scored`,
+    );
+  }
+  const means = report.means ?? {};
+  for (const dimension of floor.dimensions ?? ['chart_correctness', 'readability']) {
+    const value = means[dimension];
+    if (typeof value !== 'number') {
+      issues.push(`TEXT2VIS JUDGE: no mean for \`${dimension}\`, which is one of the two things this instrument asks`);
+      continue;
+    }
+    if (value < 0 || value > 10) {
+      issues.push(`TEXT2VIS JUDGE: \`${dimension}\` reads ${String(value)}, outside the 0-10 scale the prompt asked for`);
+    }
+  }
+  notes.push(
+    `TEXT2VIS JUDGE: chart_correctness ${Number(means.chart_correctness ?? 0).toFixed(2)}/10, ` +
+      `readability ${Number(means.readability ?? 0).toFixed(2)}/10 over ${String(report.judged)} of ` +
+      `${String(report.charts)} charts (${String(report.failed)} failed, ${String(report.skipped)} skipped), ` +
+      `${Number(report.callsPerRow ?? 0).toFixed(3)} calls per row`,
+  );
+  return { issues, notes };
+}
+
+/**
+ * Cases for the grading reading: the price, the partition, and the scale.
+ *
+ * `want` is a count of issues, so a case that fails two rules has to name two — the checks are
+ * deliberately independent, and a self-test that accepted "some issue" would let a rule that never
+ * fires hide behind one that always does.
+ */
+const JUDGE_SELF_TEST = [
+  {
+    name: 'a reading that spends one call per row and accounts for every row passes',
+    report: { scored: 1470, charts: 1286, judged: 1286, failed: 0, notSelected: 0, skipped: 184, calls: 1286, callsPerRow: 1, means: { chart_correctness: 6.4, readability: 7.8 } },
+    want: 0,
+  },
+  {
+    name: 'a run that asked both dimensions twice fails, even with perfect means',
+    report: { scored: 1470, charts: 1286, judged: 1286, failed: 0, notSelected: 0, skipped: 184, calls: 2572, callsPerRow: 2, means: { chart_correctness: 10, readability: 10 } },
+    want: 1,
+  },
+  {
+    name: 'a chart that is neither graded nor declared unselected fails',
+    report: { scored: 1470, charts: 1286, judged: 1200, failed: 0, notSelected: 0, skipped: 184, calls: 1200, callsPerRow: 1, means: { chart_correctness: 6, readability: 7 } },
+    want: 1,
+  },
+  {
+    name: 'a row that fell out of both partitions fails',
+    report: { scored: 1470, charts: 1286, judged: 1286, failed: 0, notSelected: 0, skipped: 100, calls: 1286, callsPerRow: 1, means: { chart_correctness: 6, readability: 7 } },
+    want: 1,
+  },
+  {
+    name: 'a mean outside the scale fails',
+    report: { scored: 1470, charts: 1286, judged: 1286, failed: 0, notSelected: 0, skipped: 184, calls: 1286, callsPerRow: 1, means: { chart_correctness: 64, readability: 7 } },
+    want: 1,
+  },
+  {
+    name: 'a missing dimension fails, because half a reading is not a reading',
+    report: { scored: 1470, charts: 1286, judged: 1286, failed: 0, notSelected: 0, skipped: 184, calls: 1286, callsPerRow: 1, means: { chart_correctness: 6 } },
+    want: 1,
+  },
+  {
+    name: 'a report with a missing counter fails',
+    report: { scored: 1470, judged: 1286 },
+    want: 1,
+  },
+  { name: 'no judge report is a failure when it is required', report: undefined, want: 1, require: true },
+  { name: 'no judge report is a note when it is not', report: undefined, want: 0 },
+];
+
 /** Cases that pin the three failures the gate exists for, plus the one it must not invent. */
 const SELF_TEST = [
   { name: 'a reading at the floor passes', report: { profile: { scored: 1470, top1: 526, shortlist: 618, declined: 167 } }, want: 0 },
@@ -199,11 +321,17 @@ function selfTest() {
     if (!ok) failed += 1;
     console.log(`${ok ? 'ok  ' : 'FAIL'} ${test.name}${ok ? '' : ` — ${String(issues.length)} issues, wanted ${String(test.want)}`}`);
   }
+  for (const test of JUDGE_SELF_TEST) {
+    const { issues } = compareJudge(test.report, { dimensions: ['chart_correctness', 'readability'] }, test.require === true ? { require: true } : {});
+    const ok = issues.length === test.want;
+    if (!ok) failed += 1;
+    console.log(`${ok ? 'ok  ' : 'FAIL'} ${test.name}${ok ? '' : ` — ${String(issues.length)} issues, wanted ${String(test.want)}`}`);
+  }
   if (failed > 0) {
     console.error(`${String(failed)} self-test case(s) failed`);
     return 1;
   }
-  console.log(`${String(SELF_TEST.length + RENDER_SELF_TEST.length)} self-test cases passed`);
+  console.log(`${String(SELF_TEST.length + RENDER_SELF_TEST.length + JUDGE_SELF_TEST.length)} self-test cases passed`);
   return 0;
 }
 
@@ -241,9 +369,18 @@ function main(argv) {
     const renderReport = existsSync(renderPath) ? JSON.parse(readFileSync(renderPath, 'utf8')) : undefined;
     ({ issues: renderIssues, notes: renderNotes } = compareRender(renderReport, baseline.render, { require }));
   }
-  for (const note of [...notes, ...renderNotes]) console.log(note);
-  for (const issue of [...issues, ...renderIssues]) console.error(issue);
-  return issues.length + renderIssues.length === 0 ? 0 : 1;
+  // The grading reading, on the same rule: a floor that records one is compared when the artifact
+  // exists, and a run of the cheaper halves is not asked for a file it never produced.
+  let judgeIssues = [];
+  let judgeNotes = [];
+  if (baseline.judge !== undefined) {
+    const judgePath = resolve(ROOT, JUDGE_REPORT);
+    const judgeReport = existsSync(judgePath) ? JSON.parse(readFileSync(judgePath, 'utf8')) : undefined;
+    ({ issues: judgeIssues, notes: judgeNotes } = compareJudge(judgeReport, baseline.judge, { require }));
+  }
+  for (const note of [...notes, ...renderNotes, ...judgeNotes]) console.log(note);
+  for (const issue of [...issues, ...renderIssues, ...judgeIssues]) console.error(issue);
+  return issues.length + renderIssues.length + judgeIssues.length === 0 ? 0 : 1;
 }
 
 process.exit(main(process.argv.slice(2)));

@@ -81,6 +81,21 @@ export interface ModelCapabilities {
    * says so — the same rule as every other field in this contract.
    */
   readonly thinkingSwitch: boolean;
+  /**
+   * Whether the endpoint reads an image a message carries.
+   *
+   * Absent is **not** a capability and not a maybe: a request that carries an image to an endpoint
+   * that did not declare this is refused before it is sent, because the two ways to be wrong are
+   * both silent. An endpoint that ignores the field answers from the text alone, and its answer
+   * reads as an opinion about a picture it never saw; an endpoint that rejects the field answers
+   * 400, which this library reports as "the request is wrong" for a deployment whose only mistake
+   * was believing the model could see.
+   *
+   * Declared and not derived from the name, for the reason `thinkingSwitch` gives: a name like
+   * `-vision` is a marketing string an alias can be re-pointed away from, and a private endpoint
+   * called `prod-v3` has no name to derive from at all.
+   */
+  readonly vision?: boolean;
 }
 
 /** A chat endpoint: sampling applies, JSON mode is served, the answer cap is the vendor's usual 4K. */
@@ -181,6 +196,18 @@ export interface AdaptedRequest {
  *    in the request builder.
  */
 export function adaptRequest(request: LlmRequest, capabilities: ModelCapabilities): AdaptedRequest {
+  // Before anything else, because this is the one refusal that cannot be worked around by the
+  // caller: dropping the images and sending the text would answer a question nobody asked, and the
+  // meter would record one call that produced a judge's opinion of a figure that never travelled.
+  const images = request.messages.reduce((total, message) => total + (message.images?.length ?? 0), 0);
+  if (images > 0 && capabilities.vision !== true) {
+    throw toNl2ChartsError(
+      'NL2C_E_NOT_SUPPORTED',
+      `this request carries ${String(images)} image(s) and the endpoint declares no vision capability`,
+      undefined,
+      { images, family: capabilities.family },
+    );
+  }
   if (request.json === true && !capabilities.jsonMode) {
     throw toNl2ChartsError(
       'NL2C_E_NOT_SUPPORTED',

@@ -168,6 +168,7 @@
     "EMPTY_BLIND_MESSAGE",
     "HttpProviderOptions",
     "LinkedColumn",
+    "LlmImage",
     "LlmMessage",
     "LlmProvider",
     "LlmRequest",
@@ -256,6 +257,7 @@
     "stripUnfoundedCap",
     "toCandidate",
     "tokenizeQuestion",
+    "transcriptOf",
     "turnTemperature",
     "type Answer",
     "type AskMessagesInput",
@@ -312,6 +314,7 @@
     "type UnfoundedCap",
     "type ValueGap",
     "wilson",
+    "wireMessages",
     "withCallCounter"
   ],
   "ai/linking": [
@@ -329,6 +332,7 @@
     "CallPurpose",
     "FinishReason",
     "HttpProviderOptions",
+    "LlmImage",
     "LlmMessage",
     "LlmProvider",
     "LlmRequest",
@@ -342,6 +346,7 @@
     "finishReasonOf",
     "reasoningTokensOf",
     "turnTemperature",
+    "wireMessages",
     "withCallCounter"
   ],
   "node": [

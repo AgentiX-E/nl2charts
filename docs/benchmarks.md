@@ -15037,8 +15037,122 @@ are true by construction rather than thresholds somebody chose:
 round that teaches the recommender to decline more tables (a good round) lowers it. The gate says what
 it can defend and prints the rest.
 
-**What this does not yet buy.** The PNG exists, and the judge that reads it does not: the paper's two
-dimensions need a provider that accepts an image, and `ChatMessage` in `@agentix-e/nl2charts-ai`
-carries a `string` content and nothing else. That is a contract change rather than a call-site change
-— every provider adapter, every prompt builder, every recorded transcript — so it is registered as its
-own round (`text2vis-judge`), with the renderer as the half that is now done and paid for.
+**What this did not yet buy, at the time.** The PNG existed and the judge that reads it did not: the
+paper's two dimensions need a provider that accepts an image, and `LlmMessage` in
+`@agentix-e/nl2charts-ai` carried a `string` content and nothing else. That is a contract change rather
+than a call-site change — every prompt builder writes it and every recorded transcript is matched
+against it — so it was registered as its own round. The section below is that round: the channel, the
+instrument and the floor are in place, and the reading itself is the next priced dispatch.
+
+---
+
+## An image the contract could not carry, and the probe that decides whether a reading is one
+
+The paragraph above ends where this one starts: the figures exist and nothing could read them, because
+the message contract in `@agentix-e/nl2charts-ai` states `{role, content}` and `content` is a string.
+That is the whole obstacle, and it is worth naming what kind of change it is — not a call site, not a
+flag, but the shape every request in this repository has had since the first one was sent. Three
+readers depend on `content` being the whole message — the wire builder, the meter that counts its
+characters, and the replay transcript that a fixture is matched against — every prompt builder writes
+it, and a change that made any of them guess would be a change to every reading already published.
+
+### The channel is a field beside the text, not a union around it
+
+Two designs were available and only one of them survives contact with what this repository measures.
+
+```ts
+// rejected: content becomes a discriminated union
+interface LlmMessage { readonly role: Role; readonly content: string | readonly LlmContentPart[] }
+
+// shipped: a typed channel beside a string that stays a string
+interface LlmMessage {
+  readonly role: Role;
+  readonly content: string;
+  readonly images?: readonly LlmImage[];   // { mediaType: 'image/png' | …, data: base64 }
+}
+```
+
+The union is what an OpenAI-shaped wire format suggests, and it fails on three counts. It puts every
+reader through a discriminant to prove something it already knows; it makes the wire shape the
+*contract*, so a dialect that attaches images in a separate turn or in a tool result has nowhere to
+put them; and the one property this round actually needs — that a text-only request is **byte for
+byte** the request it was before — becomes something to be re-established by tests rather than
+something the type cannot express. With a field beside the text, the old body is preserved by
+construction: `wireMessages` writes `{role, content}` and nothing else when no images are present, and
+`packages/ai/test/vision.test.ts` pins the exact bytes the endpoint receives:
+
+```
+{"model":"vision-test","messages":[{"role":"user","content":"hi"}],"temperature":0,"max_tokens":64}
+```
+
+Provider-agnosticism is the second reason, and the cheaper one to state: base64 goes in, and the
+`data:` URL that one dialect wants is written in exactly one place — `imageUrl` — rather than being
+baked into the value every dialect receives.
+
+### Three refusals, at three layers, because each one catches a different mistake
+
+| what was passed | who refuses it | why there and not later |
+|---|---|---|
+| a path, a URL, or a `data:` URL | `assertBase64`, before the request is built | all three are strings that travel as bytes nobody can decode; the endpoint's 400 reads as a bad key |
+| an image to an endpoint that never declared vision | `adaptRequest`, with `NL2C_E_NOT_SUPPORTED` | the alternative is a silent answer written from the text alone, which reads as an opinion of a picture nobody sent |
+| an image to an endpoint that *declared* it can see and cannot | the vision probe, one call, before the batch | the request builder cannot tell a lying declaration, and 1,286 graded rows is the price of finding out |
+
+The third one is the interesting layer, and it is the one this repository has been bitten by before in
+another form: a parameter the vendor accepts and ignores. `capabilities.vision` is optional and
+**absent means no**, so an undeclared endpoint is refused rather than assumed blind-and-therefore-
+harmless. But a dispatch names its own model, so `defaultJudgeProvider` declares `vision: true` for
+whatever it was told — which is exactly the state nothing can check from the request path.
+
+So the instrument spends one figure on the question only eyes can answer: a two-by-two PNG that is
+entirely red, and "what is the dominant colour of the image attached?". A grader that says red saw it.
+A grader that says *I cannot see images* — or that answers a chart question from the caption — does
+not, and the run stops before it grades a single chart:
+
+```
+text2vis: the endpoint did not see the probe image (it answered "I am a text-only model…"), so it cannot grade a chart
+```
+
+One call, outside the meter, reported as `probe` in the artifact. It is the difference between a
+reading and a table of numbers a model wrote about a question it was shown twice.
+
+### Two means, and no pass rate — by construction
+
+The grading call asks for two integers in one JSON object, so `calls === judged + failed` is an
+equality the report asserts rather than a budget it hopes for. Both dimensions travel in one prompt
+because two calls would double the price of learning the same thing about the same pixels.
+
+What the report deliberately does **not** contain is a pass rate. A grader's 7 has no calibrated
+threshold: "7 or better" is a cut invented after the fact and then published to two decimals. The
+report carries the two means, the counts behind them (`judged`, `failed`, `notSelected`, `skipped`),
+and the partitions add up — `judged + failed + notSelected === charts` and
+`charts + skipped === scored` — so a mean whose denominator nobody can name is refused rather than
+printed.
+
+`parseJudge` is strict in the way this repository has learned to be strict: JSON first, the labelled
+form second (`chart_correctness: 8, readability: 9` is unambiguous, and a retry to learn it would cost
+a call), and never a bare pair. An unlabelled `8 7` is two numbers in an order only the prompt knows,
+and a reader that trusted it would swap the dimensions on some rows and say nothing. A score outside
+0–10 is refused rather than clamped: a grader that answered 87 meant something the prompt did not ask
+for, and clamping it publishes that as the best possible chart.
+
+### What the floor is, before there is a reading
+
+`eval/text2vis/baseline.json` gained a `judge` block with **no threshold on either mean**, and that
+absence is the honest part. Nothing has been graded yet — this sandbox has no vision endpoint, and a
+number invented before the instrument runs is a number with nothing behind it. What *is* registered is
+the shape a reading must have before its means mean anything:
+
+- one call per attempted row (both dimensions come back from one prompt);
+- every row in exactly one of `judged` / `failed` / `notSelected` / `skipped`;
+- both means on the 0–10 scale the prompt asks for;
+- a probe that named red.
+
+`tools/check-text2vis-baseline.mjs` grew `compareJudge` and nine self-test cases — the count moved
+from 15 to 24 — and `.github/workflows/text2vis-judge.yml` is a dispatch-only workflow that re-takes
+the render in the same run, because a judge report is only comparable with a render artifact from the
+same corpus. It is dispatch-only for two reasons that are both about money: 1,286 calls per figure is
+not something a push can authorise, and the BIRD jobs' backbone cannot see.
+
+**So this round ships the channel, the instrument, and the floor — and not a score.** The next priced
+dispatch produces `chart_correctness` and `readability` over the 1,286 figures the compiler actually
+draws, and the round that takes it registers the means it earns.

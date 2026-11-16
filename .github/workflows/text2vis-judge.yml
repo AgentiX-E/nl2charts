@@ -1,0 +1,153 @@
+name: text2vis-judge
+
+# The half of the chart reading that needs eyes.
+#
+# `profile.ts` counts whether the recommender named the corpus's label and `render.ts` counts whether
+# the emitted source produced a PNG. Neither answers the question a chart system is for: whether the
+# picture says what the question asked. Reading the pixels is the one step in this evaluation that a
+# counter cannot take, so it is bought — one call per row, two dimensions in that call — and priced.
+#
+# Dispatch-only, and not on `push`, for two reasons that are both about money:
+#
+# 1. It spends a model call per figure. 1,286 calls on a provider that charges per image is a bill a
+#    push cannot authorise, and a workflow that spends it on every commit to `eval/text2vis/**` would
+#    be a bill nobody chose.
+# 2. It needs an endpoint that can *see*. The BIRD jobs run on a text-only backbone, so the default
+#    here is deliberately not the key those jobs use: a blind endpoint is refused at the request
+#    builder (`capabilities.vision`), which is the correct failure and an unhelpful one after the run
+#    has been priced. `secret_name` names which secret holds a vision endpoint's key; `model` and
+#    `base_url` say which endpoint.
+#
+# The two readings above it are re-taken here rather than reused, because a judge report is only
+# comparable with a render report taken on the same corpus in the same run: the denominator is the
+# number of figures that exist, and a file from last week is a different population.
+
+on:
+  workflow_dispatch:
+    inputs:
+      secret_name:
+        description: 'The secret holding a vision endpoint key (DEEPSEEK_API_KEY is text-only)'
+        required: true
+        default: 'LLM_API_KEY'
+        type: string
+      model:
+        description: 'The vision model to grade with'
+        required: true
+        default: 'glm-4v-plus'
+        type: string
+      base_url:
+        description: 'The chat-completions base url'
+        required: true
+        default: 'https://open.bigmodel.cn/api/paas/v4'
+        type: string
+      limit:
+        description: 'Grade only the first N figures (0 grades every one)'
+        required: true
+        default: '0'
+        type: string
+
+permissions:
+  contents: read
+
+# One at a time, keyed on the secret rather than the ref: the point of the lock is the rate limit the
+# endpoint enforces on one key, and two concurrent graders on that key would measure the limit.
+concurrency:
+  group: text2vis-judge-${{ inputs.secret_name }}
+  cancel-in-progress: false
+
+jobs:
+  judge:
+    name: what the figures are worth, one call each
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      LLM_API_KEY: ${{ secrets[inputs.secret_name] }}
+      LLM_MODEL: ${{ inputs.model }}
+      LLM_BASE_URL: ${{ inputs.base_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Cache the corpus
+        uses: actions/cache@v4
+        with:
+          path: eval/.cache/text2vis
+          key: text2vis-corpus-v1
+
+      # The denominator, from the same run: the judge grades the figures that exist, and it refuses a
+      # render artifact whose counts do not match the corpus it was handed.
+      - name: Score the recommender
+        run: pnpm bench:text2vis:profile --artifact eval/out/text2vis-profile.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install the renderer's one dependency
+        run: python3 -m pip install --quiet 'matplotlib==3.10.8'
+      - name: Draw every chart, and keep the pictures
+        run: pnpm bench:text2vis:render --artifact eval/out/text2vis-render.json --keep
+
+      # No separate preflight step: the judge spends its first call asking the endpoint to name the
+      # colour of a red image, and refuses the run when the answer did not see one. That check lives in
+      # the instrument rather than in this file because it is not a property of the workflow — a run
+      # started by hand from a laptop needs it exactly as much, and one that only `ci.yml` enforced
+      # would be a guard on the door nobody uses.
+      - name: Say which endpoint is about to grade
+        run: echo "grading with $LLM_MODEL at $LLM_BASE_URL, key from ${{ inputs.secret_name }}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Grade the figures
+        run: |
+          if [ "${{ inputs.limit }}" = "0" ]; then
+            pnpm bench:text2vis:judge --render eval/out/text2vis-render.json --png eval/.cache/text2vis/png --artifact eval/out/text2vis-judge.json
+          else
+            pnpm bench:text2vis:judge --render eval/out/text2vis-render.json --png eval/.cache/text2vis/png --artifact eval/out/text2vis-judge.json --limit "${{ inputs.limit }}"
+          fi
+
+      # The floor this reading was registered under: one call per attempted row, every row in exactly
+      # one partition, both means on the 0-10 scale. The means themselves are printed and not compared
+      # — nothing is recorded to regress against yet, and this step is what will make the next round
+      # able to register them.
+      - name: Hold the grading to its shape
+        run: node tools/check-text2vis-baseline.mjs --require
+
+      - name: Upload the reading
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: text2vis-judge
+          path: |
+            eval/out/text2vis-judge.json
+            eval/out/text2vis-render.json
+            eval/out/text2vis-profile.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Publish the summary
+        if: always()
+        run: |
+          if [ -f eval/out/text2vis-judge.json ]; then
+            node -e "
+              const report = require('./eval/out/text2vis-judge.json');
+              const lines = [
+                '### Text2Vis: the figures, graded by ' + process.env.LLM_MODEL,
+                '',
+                '| reading | value |',
+                '| --- | --- |',
+                '| chart_correctness | ' + report.means.chart_correctness.toFixed(2) + '/10 |',
+                '| readability | ' + report.means.readability.toFixed(2) + '/10 |',
+                '| judged | ' + report.judged + ' of ' + report.charts + ' charts |',
+                '| failed / unselected / skipped | ' + report.failed + ' / ' + report.notSelected + ' / ' + report.skipped + ' |',
+                '| calls | ' + report.calls + ' (' + report.callsPerRow.toFixed(3) + ' per judged row) |',
+                '',
+                'Two means, not a pass rate: a grader score is ordinal and has no calibrated threshold.'
+              ];
+              require('fs').appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join('\n') + '\n');
+            "
+          else
+            echo 'no judge report was written, so there is nothing to summarise' >> "$GITHUB_STEP_SUMMARY"
+          fi

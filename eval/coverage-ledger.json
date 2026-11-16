@@ -574,17 +574,23 @@
       "functions": 100,
       "branches": 100
     },
+    "eval/text2vis/judge.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 99.41
+    },
     "eval/text2vis/profile.ts": {
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 98.83
+      "branches": 98.84
     },
     "eval/text2vis/render.ts": {
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 95.86
+      "branches": 95.93
     },
     "eval/text2vis/rule.ts": {
       "lines": 100,

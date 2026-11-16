@@ -11,5 +11,10 @@
     "rendered": 1286,
     "failed": 0
   },
+  "judge": {
+    "dimensions": ["chart_correctness", "readability"],
+    "callsPerRow": 1,
+    "note": "Registered before the reading is taken, and deliberately without a floor on either mean: no grader has run, and a threshold invented before the instrument is a number with nothing behind it. What is registered is the shape the reading must have - one call per attempted row (both dimensions are asked in one prompt), every row in exactly one of judged/failed/unselected/skipped, and both means on the 0-10 scale the prompt asks for. The round that takes the reading registers the means it earns."
+  },
   "renderNote": "The pixel half, recorded in the round the renderer was built: 1,286 of the 1,470 scored rows reach a PNG (87.48%), 17 are refused because a gauge states a value against a scale this contract does not carry, and 167 are the rows the recommender declines. The floor is the pair (rendered >= 1,286, failed == 0) rather than an accuracy reading: a chart that raised in Python came from this repository own emitter."
 }

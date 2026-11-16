@@ -451,12 +451,12 @@ describe('withCallCounter', () => {
           : { text: 'x', model: 'm', usage: { promptTokens: 100, completionTokens: 10 } };
       },
     });
-    expect(priced.usage()).toEqual({ promptTokens: 0, completionTokens: 0, chars: 0, unbilled: 0, cachedTokens: 0, cachedReported: 0, reasoningTokens: 0, reasoningReported: 0 });
+    expect(priced.usage()).toEqual({ promptTokens: 0, completionTokens: 0, chars: 0, images: 0, unbilled: 0, cachedTokens: 0, cachedReported: 0, reasoningTokens: 0, reasoningReported: 0 });
     for (let index = 0; index < 3; index += 1) await priced.provider.complete({ messages: [{ role: 'user', content: 'q' }] });
     expect(priced.calls()).toBe(3);
     // `chars` is the text of the same three requests: one character per call in this stub, which
     // is how the ratio stays a fact about one request rather than two.
-    expect(priced.usage()).toEqual({ promptTokens: 200, completionTokens: 20, chars: 3, unbilled: 1, cachedTokens: 0, cachedReported: 0, reasoningTokens: 0, reasoningReported: 0 });
+    expect(priced.usage()).toEqual({ promptTokens: 200, completionTokens: 20, chars: 3, images: 0, unbilled: 1, cachedTokens: 0, cachedReported: 0, reasoningTokens: 0, reasoningReported: 0 });
   });
 
   it('reads the cached-prompt count from every spelling an endpoint uses', async () => {
@@ -564,6 +564,7 @@ describe('withCallCounter', () => {
       promptTokens: 300,
       completionTokens: 72,
       chars: 3,
+      images: 0,
       unbilled: 0,
       cachedTokens: 0,
       cachedReported: 0,
@@ -600,11 +601,11 @@ describe('withCallCounter', () => {
     await counted.provider.complete({ messages: [{ role: 'user', content: 'aa' }], purpose: 'generate' });
     await counted.provider.complete({ messages: [{ role: 'user', content: 'b' }], purpose: 'select' });
     const byPurpose = counted.byPurpose();
-    expect(byPurpose.get('generate')).toEqual({ calls: 1, promptTokens: 100, completionTokens: 10, chars: 2, unbilled: 0, cachedTokens: 0, cachedReported: 0, reasoningTokens: 0, reasoningReported: 0 });
-    expect(byPurpose.get('select')).toEqual({ calls: 1, promptTokens: 200, completionTokens: 10, chars: 1, unbilled: 0, cachedTokens: 0, cachedReported: 0, reasoningTokens: 0, reasoningReported: 0 });
+    expect(byPurpose.get('generate')).toEqual({ calls: 1, promptTokens: 100, completionTokens: 10, chars: 2, images: 0, unbilled: 0, cachedTokens: 0, cachedReported: 0, reasoningTokens: 0, reasoningReported: 0 });
+    expect(byPurpose.get('select')).toEqual({ calls: 1, promptTokens: 200, completionTokens: 10, chars: 1, images: 0, unbilled: 0, cachedTokens: 0, cachedReported: 0, reasoningTokens: 0, reasoningReported: 0 });
     // The case total is the sum of the parts rather than a second measurement of them, so the
     // share taken over it cannot disagree with the table it is taken from.
-    expect(counted.usage()).toEqual({ promptTokens: 300, completionTokens: 20, chars: 3, unbilled: 0, cachedTokens: 0, cachedReported: 0, reasoningTokens: 0, reasoningReported: 0 });
+    expect(counted.usage()).toEqual({ promptTokens: 300, completionTokens: 20, chars: 3, images: 0, unbilled: 0, cachedTokens: 0, cachedReported: 0, reasoningTokens: 0, reasoningReported: 0 });
     expect(counted.unlabelled()).toBe(0);
   });
 
@@ -618,7 +619,7 @@ describe('withCallCounter', () => {
       complete: async () => ({ text: 'x', model: 'm', usage: { promptTokens: 5, completionTokens: 1 } }),
     });
     await counted.provider.complete({ messages: [{ role: 'user', content: 'q' }] });
-    expect(counted.byPurpose().get('unlabelled')).toEqual({ calls: 1, promptTokens: 5, completionTokens: 1, chars: 1, unbilled: 0, cachedTokens: 0, cachedReported: 0, reasoningTokens: 0, reasoningReported: 0 });
+    expect(counted.byPurpose().get('unlabelled')).toEqual({ calls: 1, promptTokens: 5, completionTokens: 1, chars: 1, images: 0, unbilled: 0, cachedTokens: 0, cachedReported: 0, reasoningTokens: 0, reasoningReported: 0 });
     expect(counted.byPurpose().has('generate')).toBe(false);
     expect(counted.unlabelled()).toBe(1);
   });
@@ -631,7 +632,7 @@ describe('withCallCounter', () => {
     await counted.provider.complete({ messages: [{ role: 'user', content: 'q' }], purpose: 'select' });
     // An answer with no usage block reported no cache field either, so the two cache counters stay
     // at zero and say so: nothing was measured, which is not the same as a prompt that missed.
-    expect(counted.byPurpose().get('select')).toEqual({ calls: 1, promptTokens: 0, completionTokens: 0, chars: 1, unbilled: 1, cachedTokens: 0, cachedReported: 0, reasoningTokens: 0, reasoningReported: 0 });
+    expect(counted.byPurpose().get('select')).toEqual({ calls: 1, promptTokens: 0, completionTokens: 0, chars: 1, images: 0, unbilled: 1, cachedTokens: 0, cachedReported: 0, reasoningTokens: 0, reasoningReported: 0 });
   });
 
   it('records the model the endpoint served, not the alias it was asked for', async () => {

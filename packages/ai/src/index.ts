@@ -1,12 +1,12 @@
-export { createHttpProvider, reasoningTokensOf, turnTemperature, withCallCounter } from './provider.js';
+export { createHttpProvider, reasoningTokensOf, turnTemperature, withCallCounter, wireMessages } from './provider.js';
 export { CHAT_CAPABILITIES, REASONING_CAPABILITIES, adaptRequest, capabilitiesOf } from './capability.js';
 export type { AdaptedRequest, ModelCapabilities, ModelFamily, SamplingSupport } from './capability.js';
 export { renderEvidence } from './evidence.js';
-export type { CallPurpose, HttpProviderOptions, LlmMessage, LlmProvider, LlmRequest, LlmResponse, LlmUsage, PurposeUsage, Role } from './provider.js';
+export type { CallPurpose, HttpProviderOptions, LlmImage, LlmMessage, LlmProvider, LlmRequest, LlmResponse, LlmUsage, PurposeUsage, Role } from './provider.js';
 export type { ColumnProfile, DatabaseProfile, EvidenceOptions, ProfileKind } from './evidence.js';
 export { attachDefinitions, buildDefinitionPrompt, classifyColumn, parseDefinitions, renderDefinitions, singularize } from './definitions.js';
 export type { AttachResult, ColumnRole, DefinitionOptions, DefinitionRequest, DefinitionSample } from './definitions.js';
-export { createReplayProvider, recordProvider } from './replay.js';
+export { createReplayProvider, recordProvider, transcriptOf } from './replay.js';
 export type { RecordedCall, ReplayFixture } from './replay.js';
 export { linkSchema, renderName, renderSchemaCard, tokenizeQuestion } from './linking.js';
 export type { LinkedColumn, Recaller, SchemaCardOptions, SchemaColumn, SchemaTable } from './linking.js';

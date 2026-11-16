@@ -568,3 +568,39 @@ want for a warehouse contract test.
 - [ ] `budgets.json` diff reviewed
 - [ ] Benchmark artifacts attached to the release
 - [ ] No new `NL2C_E_*` code without a test that produces it
+
+## Asking a model to look at a figure
+
+`LlmMessage` carries an optional `images` field beside its `content`, so a request can send a picture
+to an endpoint that can see one:
+
+```ts
+await provider.complete({
+  messages: [
+    { role: 'system', content: 'You answer questions about images in one word.' },
+    {
+      role: 'user',
+      content: 'What is the dominant colour of the image attached?',
+      images: [{ mediaType: 'image/png', data: pngBase64 }],
+    },
+  ],
+});
+```
+
+Three things about that channel are decisions rather than plumbing.
+
+**Text requests are unchanged.** `wireMessages` writes `{role, content}` and nothing else when no
+image is present, so a message that has always been a string is still sent as a string, byte for byte.
+
+**An endpoint that never declared `vision` refuses the request.** The declaration is yours to make —
+`createHttpProvider({ …, capabilities: { vision: true } })` — and it is not derived from the model
+name, because an alias can be re-pointed at weights that cannot see, and a private endpoint called
+`prod-v3` has no name to derive from. The refusal is `NL2C_E_NOT_SUPPORTED` and it happens before
+anything is sent, because the alternative is a 400 that reads as a bad key or, worse, an answer
+written from the text alone.
+
+**A declaration is not a guarantee, so check it once.** `createHttpProvider` cannot tell whether an
+endpoint that says it can see actually can. If you are about to spend a call per figure, spend one
+first on a picture only a reader can describe — `eval/text2vis/judge.ts` does exactly that with a
+two-by-two red PNG and "what is the dominant colour?", and refuses the run when the answer did not see
+one.
