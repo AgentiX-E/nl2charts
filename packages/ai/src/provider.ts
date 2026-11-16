@@ -306,6 +306,16 @@ export interface HttpProviderOptions {
    * name has no other way to say "this one thinks before it answers".
    */
   readonly capabilities?: Partial<ModelCapabilities>;
+  /**
+   * How this endpoint spells an image, when a message carries one.
+   *
+   * Defaults to the `data:`-URL spelling, which is what every request in this repository has been
+   * written in. Declared by the caller that knows which vendor answers, for the same reason
+   * `capabilities` is: the provider is the only layer that knows, and the wrong spelling's failure
+   * mode — a 400 from one vendor, a body of undecodable characters from another — says nothing
+   * about which spelling was wrong.
+   */
+  readonly imageDialect?: ImageDialect;
 }
 
 /** Statuses that mean "try again", as opposed to "the request is wrong". */
@@ -335,10 +345,27 @@ function assertBase64(data: string, field: string): void {
   }
 }
 
-/** One image as this dialect states it: a media type inside a `data:` URL. */
-function imageUrl(image: LlmImage): { readonly type: 'image_url'; readonly image_url: { readonly url: string } } {
+/**
+ * How a dialect spells an image on the wire.
+ *
+ * Two spellings, and the difference is one string: OpenAI documents a `data:` URL that carries its
+ * own media type, and Zhipu's own sample for GLM-4V sends the bare base64 payload with the type
+ * left to the encoder that produced it. Both are "an image in a JSON body" and only one of them is
+ * accepted by any given endpoint — the other is a 400 that reads as a bad key.
+ *
+ * A named dialect rather than a boolean, because the third spelling is a formality away (`file_id`,
+ * a signed URL) and a boolean cannot grow a third value without every caller being revisited.
+ */
+export type ImageDialect = 'data-url' | 'bare-base64';
+
+/** One image as a dialect states it: a media type inside a `data:` URL, or the bytes alone. */
+function imageUrl(
+  image: LlmImage,
+  dialect: ImageDialect,
+): { readonly type: 'image_url'; readonly image_url: { readonly url: string } } {
   assertBase64(image.data, `image (${image.mediaType})`);
-  return { type: 'image_url', image_url: { url: `data:${image.mediaType};base64,${image.data}` } };
+  const url = dialect === 'bare-base64' ? image.data : `data:${image.mediaType};base64,${image.data}`;
+  return { type: 'image_url', image_url: { url } };
 }
 
 /**
@@ -356,14 +383,21 @@ function imageUrl(image: LlmImage): { readonly type: 'image_url'; readonly image
  *
  * Exported because the ablation that prices this channel needs to assert the bytes, and asserting
  * them through a socket is a weaker test than asserting them here.
+ *
+ * `dialect` defaults to the spelling every reading in this repository was taken at, so a text-only
+ * message is byte-identical either way and an image message changes only when a deployment says
+ * which endpoint it is talking to.
  */
-export function wireMessages(messages: readonly LlmMessage[]): readonly Record<string, unknown>[] {
+export function wireMessages(
+  messages: readonly LlmMessage[],
+  dialect: ImageDialect = 'data-url',
+): readonly Record<string, unknown>[] {
   return messages.map((message) => {
     const images = message.images;
     if (images === undefined || images.length === 0) return { role: message.role, content: message.content };
     const parts: ({ readonly type: 'text'; readonly text: string } | ReturnType<typeof imageUrl>)[] = [];
     if (message.content !== '') parts.push({ type: 'text', text: message.content });
-    for (const image of images) parts.push(imageUrl(image));
+    for (const image of images) parts.push(imageUrl(image, dialect));
     return { role: message.role, content: parts };
   });
 }
@@ -522,7 +556,7 @@ export function createHttpProvider(options: HttpProviderOptions): LlmProvider {
       const adapted = adaptRequest(request, capabilities);
       const body: Record<string, unknown> = {
         model: options.model,
-        messages: wireMessages(adapted.request.messages),
+        messages: wireMessages(adapted.request.messages, options.imageDialect),
       };
       // Omitted rather than defaulted, so that `null` can mean what it says. The field is
       // written only when the deployment has an opinion about it and the endpoint honours it.

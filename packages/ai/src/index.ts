@@ -2,7 +2,7 @@ export { createHttpProvider, reasoningTokensOf, turnTemperature, withCallCounter
 export { CHAT_CAPABILITIES, REASONING_CAPABILITIES, adaptRequest, capabilitiesOf } from './capability.js';
 export type { AdaptedRequest, ModelCapabilities, ModelFamily, SamplingSupport } from './capability.js';
 export { renderEvidence } from './evidence.js';
-export type { CallPurpose, HttpProviderOptions, LlmImage, LlmMessage, LlmProvider, LlmRequest, LlmResponse, LlmUsage, PurposeUsage, Role } from './provider.js';
+export type { CallPurpose, HttpProviderOptions, ImageDialect, LlmImage, LlmMessage, LlmProvider, LlmRequest, LlmResponse, LlmUsage, PurposeUsage, Role } from './provider.js';
 export type { ColumnProfile, DatabaseProfile, EvidenceOptions, ProfileKind } from './evidence.js';
 export { attachDefinitions, buildDefinitionPrompt, classifyColumn, parseDefinitions, renderDefinitions, singularize } from './definitions.js';
 export type { AttachResult, ColumnRole, DefinitionOptions, DefinitionRequest, DefinitionSample } from './definitions.js';

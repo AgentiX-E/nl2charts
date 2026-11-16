@@ -155,6 +155,39 @@ describe('a message that carries an image', () => {
   });
 });
 
+describe('the spelling of an image, which is a fact about the vendor rather than about the bytes', () => {
+  it('writes the payload alone when the endpoint documents bare base64', () => {
+    const bare = wireMessages([{ role: 'user', content: '', images: [{ mediaType: 'image/png', data: PIXEL_PNG }] }], 'bare-base64');
+    expect(bare[0]?.content).toEqual([{ type: 'image_url', image_url: { url: PIXEL_PNG } }]);
+  });
+
+  it('sends that spelling to the socket, and leaves the text part where it was', async () => {
+    const bare = createHttpProvider({ baseUrl, model: 'vision-test', capabilities: { vision: true }, imageDialect: 'bare-base64' });
+    await bare.complete({ messages: [{ role: 'user', content: 'what colour', images: [{ mediaType: 'image/png', data: PIXEL_PNG }] }] });
+    const messages = lastBody.messages as { readonly role: string; readonly content: readonly Record<string, unknown>[] }[];
+    expect(messages[0]?.content[0]).toEqual({ type: 'text', text: 'what colour' });
+    expect(messages[0]?.content[1]).toEqual({ type: 'image_url', image_url: { url: PIXEL_PNG } });
+    // Not a data URL by accident either: the prefix is the other dialect's spelling, and a body that
+    // carried both would be a request two endpoints read differently.
+    expect(lastRaw).not.toContain('data:image/png');
+  });
+
+  it('leaves a text-only request byte-identical, whichever spelling the endpoint uses', async () => {
+    await vision().complete({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 64, temperature: 0 });
+    const documented = lastRaw;
+    const bare = createHttpProvider({ baseUrl, model: 'vision-test', capabilities: { vision: true }, imageDialect: 'bare-base64' });
+    await bare.complete({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 64, temperature: 0 });
+    expect(lastRaw).toBe(documented);
+  });
+
+  it('refuses a payload that already carries a prefix, because the spelling is the writer\'s job', () => {
+    const prefixed = `data:image/png;base64,${PIXEL_PNG}`;
+    expect(() => wireMessages([{ role: 'user', content: '', images: [{ mediaType: 'image/png', data: prefixed }] }], 'bare-base64')).toThrow(
+      /is a data URL/,
+    );
+  });
+});
+
 describe('a payload that is not bytes is refused here, not at the endpoint', () => {
   const cases: readonly { readonly name: string; readonly data: string; readonly says: RegExp }[] = [
     { name: 'a data URL', data: 'data:image/png;base64,iVBORw0KGgo=', says: /is a data URL/ },
