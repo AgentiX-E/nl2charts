@@ -604,3 +604,30 @@ endpoint that says it can see actually can. If you are about to spend a call per
 first on a picture only a reader can describe — `eval/text2vis/judge.ts` does exactly that with a
 two-by-two red PNG and "what is the dominant colour?", and refuses the run when the answer did not see
 one.
+
+**How an image is spelled is a property of the endpoint, not of the bytes.** OpenAI documents a
+`data:image/png;base64,…` URL carrying its own media type; Zhipu's own sample for GLM-4V sends the
+payload alone. Both reach a model that can see, and only one is accepted by any given endpoint — and
+neither refusal says which spelling was wrong. Say which one yours takes:
+
+```ts
+createHttpProvider({ baseUrl, model, imageDialect: 'bare-base64', capabilities: { vision: true } });
+```
+
+The default is `'data-url'`, so a deployment that says nothing keeps the spelling every request in
+this repository has been written in, and a text-only request is byte-identical under either.
+
+If you grade with a vendor whose documented sampling range may exclude `0`, send no temperature at
+all rather than zero — `temperature: null` means "name no value", while an out-of-range number is a
+400 on every call:
+
+```ts
+await provider.complete({ messages, temperature: null });   // the field is omitted
+```
+
+`eval/text2vis/judge.ts` keeps those per-vendor facts in one table (`JUDGE_ENDPOINTS`), one row per
+endpoint, and `--probe-only` spends a single call to check the row before a run draws anything:
+
+```bash
+ZHIPU_API_KEY=… pnpm bench:text2vis:judge --probe-only
+```

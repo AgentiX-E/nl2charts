@@ -15100,8 +15100,9 @@ baked into the value every dialect receives.
 The third one is the interesting layer, and it is the one this repository has been bitten by before in
 another form: a parameter the vendor accepts and ignores. `capabilities.vision` is optional and
 **absent means no**, so an undeclared endpoint is refused rather than assumed blind-and-therefore-
-harmless. But a dispatch names its own model, so `defaultJudgeProvider` declares `vision: true` for
-whatever it was told — which is exactly the state nothing can check from the request path.
+harmless. But a dispatch names its own model, so the provider it was handed declared `vision: true` for whatever
+it was told — which is exactly the state nothing can check from the request path. (That builder is
+gone; *Which endpoint grades, and why that stopped being a default* below says what replaced it.)
 
 So the instrument spends one figure on the question only eyes can answer: a two-by-two PNG that is
 entirely red, and "what is the dominant colour of the image attached?". A grader that says red saw it.
@@ -15156,3 +15157,79 @@ not something a push can authorise, and the BIRD jobs' backbone cannot see.
 **So this round ships the channel, the instrument, and the floor — and not a score.** The next priced
 dispatch produces `chart_correctness` and `readability` over the 1,286 figures the compiler actually
 draws, and the round that takes it registers the means it earns.
+
+## Which endpoint grades, and why that stopped being a default
+
+The instrument above was written with a `defaultJudgeProvider` that named DeepSeek's base url,
+DeepSeek's model, and `vision: true`. Two of those three were false in the same way — DeepSeek's chat
+models are text-only — and the only thing between that claim and 1,286 means about captions was the
+probe. A default is the wrong shape for this decision, because every field in it is a fact about a
+vendor: which url answers, which model can see, how an image is spelled, what a temperature may be.
+Facts about vendors belong in a table a reader can check, not in a fallback nobody reads.
+
+```ts
+export interface JudgeEndpoint {
+  readonly name: string;              // what --endpoint selects
+  readonly baseUrl: string;
+  readonly model: string;
+  readonly apiKeyEnv: readonly string[];  // ZHIPU_API_KEY, then LLM_API_KEY
+  readonly imageDialect: ImageDialect;    // 'data-url' | 'bare-base64'
+  readonly temperature: number | null;    // null = name none
+  readonly maxOutputTokens: number;
+  readonly answerBudgetCeiling: number;
+}
+```
+
+One row today — `zhipu` — because one row is what has evidence behind it, and a second row that
+guessed would be the same defect one line down. Adding a vendor is one row.
+
+### Three of those fields are places where this repository's dialect and the vendor's differ
+
+**The image spelling.** OpenAI documents an image as a `data:` URL that carries its own media type,
+and that is what `imageUrl` wrote. Zhipu's own sample for GLM-4V sends the payload alone —
+`{"url": img_base}` — with the type left to the encoder. One of the two is refused by any given
+endpoint, and neither failure says which spelling was wrong: a 400 from one vendor reads as a bad key,
+a body of undecodable characters from another reads as a broken image. So the spelling became a named
+dialect (`ImageDialect`) rather than staying a constant, the provider takes it as a declaration, and
+the default is unchanged — a text-only request is byte-identical under either spelling, which is why
+this did not make a single published reading incomparable.
+
+**The temperature.** `adaptRequest` samples at zero when a caller expresses no opinion, and zero is
+what every reading in this document was taken at. Zhipu documents a default of 0.8 for its vision
+models and a range this repository has not verified includes 0. A value outside the range is a 400 on
+every row; the honest setting is therefore `null` — name no value and let the endpoint decide — and
+the row says so in one place. The probe carries the same temperature, because the probe is a request
+like any other: it used to name zero, so on this endpoint the check itself would have been the first
+thing refused.
+
+**The budget.** `max_tokens` is a limit rather than a reservation, so a 16,384-token ceiling for a
+reply that is one JSON object with two integers is not a decision anyone made. The row names 1,024 and
+declares 16,384 as the ceiling an escalation may reach — the number the model documents.
+
+### One call before a figure is drawn
+
+The workflow's first step after install is now:
+
+```
+pnpm bench:text2vis:judge --probe-only
+```
+
+`--probe-only` asks the endpoint the colour question and stops. It needs no corpus and no render
+artifact, which is the point: the failures it catches — a wrong base url, a retired model name, a key
+in the wrong secret, an image spelled the way this repository spells it rather than the way the vendor
+does — are properties of the *endpoint*, and they used to surface after 1,286 charts had been rendered
+and the first graded call had been paid for. One call, in the first minute, is the cheapest question
+this command can be asked, and the ordering inside `entryJudge` changed to make it the first one it
+answers.
+
+### A mean names the model that produced it
+
+The report gained `grader: {endpoint, model}`, asserted non-empty at write time and refused by
+`compareJudge` at gate time. The reason is the next round rather than this one: "chart_correctness
+6.4" is a fact about a model's reading, and the round that registers a floor is a comparison between
+two models. A report that did not name its grader would be quotable as a property of the charts. The
+self-test grew two cases for it, 24 to 26.
+
+What none of this establishes is a score. The rehearsal — `limit: 8` — is what says whether the
+endpoint answers, how long a call takes and what a run of 1,286 of them would cost in time, and its
+artifact is the first `text2vis-judge.json` this repository can read a mean out of.

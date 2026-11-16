@@ -41,7 +41,35 @@ cannot be argued with.
   (one call per attempted row, every row accounted for, both means on the 0–10 scale, a probe that
   named red) and prints the means without comparing them. The self-test count moved from 15 to 24.
   `.github/workflows/text2vis-judge.yml` is dispatch-only and re-takes the render in the same run,
-  because a judge report is only comparable with a render artifact from the same corpus.
+  because a judge report is only comparable with a render artifact from the same corpus. The gate grew
+  a twelfth check — a report that names no endpoint or model fails, because two means from two models
+  are two facts — and the self-test moved from 24 to 26.
+- **The judge's default provider became a declared table** (`JUDGE_ENDPOINTS`), with one row because
+  one row is what has evidence behind it. It replaces a builder that named DeepSeek's base url,
+  DeepSeek's model and `vision: true`: two of those three were false in the same way, and the only
+  thing standing between them and 1,286 means about captions was the probe. A row carries the url, the
+  model, the key's variable names, the image dialect, the temperature and the budget — every fact that
+  differs between vendors in one place, so a second vendor is a line rather than a refactor. The
+  `zhipu` row names `glm-4.5v`, sends bare base64, names **no temperature** (its documented range is
+  not this repository's to assume, and an out-of-range value is a 400 on every row) and caps the
+  answer at 1,024 tokens with 16,384 declared as the escalation ceiling. The probe now carries that
+  temperature too — it used to name zero, so on this endpoint the check itself would have been the
+  first thing refused.
+- **`ImageDialect`: how an image is spelled is now a declaration, not a constant.** OpenAI documents a
+  `data:image/png;base64,…` URL that carries its own media type; Zhipu's own sample for GLM-4V sends
+  the payload alone. Both reach a model that can see, and only one is accepted by any given endpoint —
+  and neither failure says which spelling was wrong, because a 400 reads as a bad key and a body of
+  undecodable characters reads as a broken image. `HttpProviderOptions.imageDialect` and
+  `wireMessages(messages, dialect)` take `'data-url' | 'bare-base64'`; the default is the spelling
+  every request in this repository has been written in, so **a text-only request is byte-identical
+  under either**, which a test asserts by comparing the two bodies. Four tests, two of them over a
+  socket.
+- **`pnpm bench:text2vis:judge --probe-only` asks one endpoint one question and stops.** It needs no
+  corpus and no render artifact, which is the point: a wrong base url, a retired model name, a key in
+  the wrong secret and an image spelled the wrong way are properties of the *endpoint*, and they used
+  to surface after 1,286 charts had been rendered. The judge workflow now runs it as its first step
+  after install, and the report carries `grader: {endpoint, model}` so a mean is never quotable as a
+  property of the charts.
 - **`pnpm bench:text2vis:render` draws every chart, and the first run found ten percent of the emitted
   Python could not run.** `compileToMatplotlib` had 24 tests and **no line of its output had ever been
   executed**: the tests asserted which function is called with which column, and every assertion was
