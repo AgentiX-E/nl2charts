@@ -165,6 +165,81 @@ describe('a result set, as the corpus spells it', () => {
   });
 });
 
+/**
+ * The `Table Data` cell is not always a CSV.
+ *
+ * 196 of the corpus's 1,985 rows write their table as a JSON object of columns — `{"Year": [2018,
+ * 2019], "Coal": [1000, 950]}` — and the CSV reader read the whole object as a one-line header with
+ * no rows. Every one of those rows was declined, not because its table could not be charted but
+ * because this instrument could not read the representation: 164 of the 352 declined rows the
+ * published reading carries. The cases below pin the two halves of the repair — an object that names
+ * its columns is read, and an object that cannot be read as a rectangle is refused rather than
+ * padded into one.
+ */
+describe('a table the corpus writes as an object instead of a csv', () => {
+  it('reads a column-shaped object as the rows it names', () => {
+    const set = parseResultSet('{"Year": [2018, 2019, 2020], "Coal": [1000, 950, 900]}');
+    expect(set.columns).toEqual(['Year', 'Coal']);
+    expect(set.rows).toEqual([
+      ['2018', '1000'],
+      ['2019', '950'],
+      ['2020', '900'],
+    ]);
+  });
+
+  it('keeps the key order, because the object states the column order', () => {
+    // A transposition that sorted its keys would put `Coal` before `Year` and hand the recommender an
+    // axis where the measure was — the failure mode a `Map` preserves order to avoid, not to tidy up.
+    const set = parseResultSet('{"Zeta": [1], "Alpha": [2], "Mid": [3]}');
+    expect(set.columns).toEqual(['Zeta', 'Alpha', 'Mid']);
+    expect(set.rows).toEqual([['1', '2', '3']]);
+  });
+
+  it('profiles an object table exactly as it profiles the same table as a csv', () => {
+    const object = parseResultSet('{"Region": ["North", "South", "East"], "Revenue": [100, 90, 80]}');
+    const csv = parseResultSet('Region, Revenue\nNorth, 100\nSouth, 90\nEast, 80');
+    expect(profilesOf(object)).toEqual(profilesOf(csv));
+  });
+
+  it('prints an absent value as an absent cell, not as the word null', () => {
+    // `String(null)` is `'null'`, which `numericCell` reads as a number of nothing and the column
+    // would keep a measure it does not have. The empty cell is what the CSV path writes for one.
+    const set = parseResultSet('{"Region": ["North", "South"], "Revenue": [100, null]}');
+    expect(typedRows(set)).toEqual([
+      { Region: 'North', Revenue: 100 },
+      { Region: 'South', Revenue: null },
+    ]);
+  });
+
+  it('refuses columns of different lengths rather than padding the short one', () => {
+    // A short column is a corrupt table, and padding it would invent a row: the same rule the CSV
+    // path states for a row that has fewer cells than the header.
+    expect(parseResultSet('{"A": [1, 2, 3], "B": [1, 2]}').columns).toEqual([]);
+  });
+
+  it('refuses an object whose values are not lists, an empty object, and a nested list', () => {
+    expect(parseResultSet('{"A": 1, "B": 2}').columns).toEqual([]);
+    expect(parseResultSet('{}').columns).toEqual([]);
+    expect(parseResultSet('{"A": [[1, 2]], "B": [[3, 4]]}').columns).toEqual([]);
+    expect(parseResultSet('{"A": [], "B": []}').columns).toEqual([]);
+  });
+
+  it('refuses a json array, which is rows without a header', () => {
+    // `[[1, 2], [3, 4]]` cannot say what to call its columns, and a name invented here would be a
+    // column the result set never had.
+    expect(parseResultSet('[[1, 2], [3, 4]]').columns).toEqual([]);
+  });
+
+  it('reads a brace that is not json as the csv it is', () => {
+    // A CSV whose first header cell starts with a brace is not a table that could not be read; it is
+    // a table whose first cell happens to start with `{`. Falling back is what keeps the object
+    // reader from swallowing the CSV path.
+    const set = parseResultSet('{count}, value\n{a}, 1');
+    expect(set.columns).toEqual(['{count}', 'value']);
+    expect(set.rows).toEqual([['{a}', '1']]);
+  });
+});
+
 describe('the recommender, with a table in front of it', () => {
   it('refuses a pie over twenty categories and answers bar', () => {
     // The row the cue-only reading gets wrong most often: `what percentage` names a share, the cue

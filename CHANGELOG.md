@@ -7,6 +7,26 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **The Text2Vis instrument reads the one table in nine it could not.** 196 of the corpus's 1,985
+  `Table Data` cells are not CSV: they are a JSON object of columns — `{"Year": [2018, 2019], "Coal":
+  [1000, 950]}` — because the prompts around them ask for Python and the table was written the way
+  Python prints one. `parseCsv` read the whole object as a one-line header with no rows, so the
+  profiler had no columns, `profileAnswer` returned `profile:none`, and **164 of the 352 declined rows
+  the published reading carried were this** — a parser defect filed as a product refusal, in the
+  direction that flatters nobody but is invisible to any rerun. `parseResultSet` now answers three
+  ways rather than two: a brace that is not JSON falls back to the CSV reader (a table whose first
+  header cell starts with `{` is still a CSV), a JSON object of equal-length scalar lists is
+  transposed with key order as column order and an absent cell kept absent, and a JSON object that is
+  not a rectangle — unequal lengths, a non-list value, an empty column, a list of lists, or an array
+  of rows without a header — is **refused rather than padded**, because padding invents a row and
+  naming an array's columns invents a field. Measured on `pnpm bench:text2vis:profile`, **the same
+  1,470 scored rows**: top-1 **444 → 495 (30.20% → 33.67%)**, shortlist **34.56% → 38.10%**, declined
+  **352 → 167**, `census`'s `header-only` tables **197 → 6**. The denominator did not move, and the
+  claim that this is a repair rather than a re-tune is a per-row A/B: over all 1,985 rows, **1,777
+  answer identically, 208 changed, 0 of the changed rows had a non-object cell, all 208 went
+  `declined → answered`, and none went the other way.** The 189 rows that now score are hits at
+  **26.98%**, *below* the reading they joined, which is the number that says the repair admitted the
+  hard ninth and not the easy one. 8 new tests pin the three answers and the five refusals.
 - **A result set with no measure is charted by counting its rows.** The largest bucket on the Text2Vis
   side was not a ranking problem: of 1,470 scored rows, **414 were refused by every mark** and 268 of
   those tables carried no measure at all — a grouped query whose answer *is* the count ships one

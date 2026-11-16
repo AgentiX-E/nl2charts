@@ -14202,12 +14202,19 @@ which is the same product with the result set taken away. The paragraph is right
 the population, and it is now right about which number the population belongs to.
 
 **Amended again by the counted measure** (`### A table with no measure is charted by counting its
-rows`). Both readings above are the round's own and are kept as such; today the entry point reads
+rows`). Both readings above are the round's own and are kept as such; the entry point then read
 **444 (30.20%) over the 1,470** and **36.01% (444/1,233) over the labels the contract can draw**, with
 the shortlist at **508 (34.56%)**. The `renderable` denominator did not change — the count measure
 converted refusals into answers, not unreachable labels into reachable ones — so the 237 rows this
 section is about remain out of reach for the same reason: the contract has no `area`, `histogram` or
 `violin` series.
+
+**Amended a third time by the object reader** (`## The instrument could not read one table in nine`).
+Today the entry point reads **495 (33.67%) over the 1,470** and **40.15% (495/1,233) over the labels
+the contract can draw**, with the shortlist at **560 (38.10%)** and 167 rows declined. The
+`renderable` denominator is the one thing that did not move across all three amendments, because it
+is a fact about the corpus's labels rather than about the reading: 237 rows name a series this
+contract does not have, and no parser and no admission rule can put them back in reach.
 
 ### The SQL side: a dispatch that could not resolve its own effect, and what replaced it
 
@@ -14535,16 +14542,25 @@ pnpm bench:text2vis:census    # the same rows, split by why a row missed
 | reading | instrument | top-1 | rest |
 | --- | --- | ---: | --- |
 | cue table alone | `rule.ts` (`CHART_CUES`) | **627 (42.65%)** | shortlist 971 (66.05%), declined 210 |
-| the shipped entry point | `profile.ts` (`recommendChart(question, profiles, { rows })`) | **444 (30.20%)** | shortlist 508 (34.56%), declined 352, missed 610 |
-| the census | `census.ts` | **444 (30.20%)** | same hit test, reproduced independently |
+| the shipped entry point | `profile.ts` (`recommendChart(question, profiles, { rows })`) | **495 (33.67%)** | shortlist 560 (38.10%), declined 167, missed 743 |
+| the census | `census.ts` | **495 (33.67%)** | same hit test, reproduced independently |
 
 So **`census` is not a third quantity; it is a second measurement of the entry point, and the two
-agree exactly.** The pair that disagrees is the cue table against the entry point, by **12.45pp**.
+agree exactly.** The pair that disagrees is the cue table against the entry point, by **8.98pp**.
 
-Both of the entry point's numbers moved in the round that taught it to count (`### A table with no
+The entry point read 444 (30.20%) when this table was first written and reads 495 (33.67%) now,
+because the instrument learned to read the 196 tables the corpus writes as JSON objects
+(`## The instrument could not read one table in nine` below). The cue table's 627 is unchanged by
+that repair for the same reason it was unchanged by the count measure: the cue table never sees the
+result set, so it can neither be refused by an admission rule nor rescued by a parser.
+
+Both of the entry point's numbers moved in the round that taught it to count (`## A table with no
 measure is charted by counting its rows` below): 414 → **444** on top-1 and 432 → **352** declined.
-The cue table's 627 did not, because the cue table never sees the result set and the admission rule it
-never consults is exactly what the count measure relaxed.
+They moved again in the round that taught the instrument to read an object-shaped `Table Data`
+(`## The instrument could not read one table in nine` below): 444 → **495** and 352 → **167**. The
+cue table's 627 did not move either time, because the cue table never sees the result set: the
+admission rule it never consults is exactly what the count measure relaxed, and the parser it never
+runs is exactly what the object reader repaired.
 
 The numbers this table replaces were `549` and `231`, read on the dispatch whose table this document
 still carries one screen up. Between that run and this one the cue table changed, and **neither
@@ -14556,24 +14572,27 @@ finding and disagree on its size:
 | --- | ---: | ---: | ---: |
 | as published | 549 | 231 | −21.64pp |
 | as measured, before the count measure | 627 | 414 | −13.30pp |
-| **as measured, this round** | **627** | **444** | **−12.45pp** |
+| as measured, after the count measure | 627 | 444 | −12.45pp |
+| **as measured, after the object reader** | **627** | **495** | **−8.98pp** |
 
 The finding survives: **the shipped recommender is worse than its own cue table when it is given the
 result set.** It is the single largest defect on this side of the product, and it is invisible in any
 single number because each instrument looks right on its own. What the count measure bought is the
 part of that gap which was an admission rule refusing a table it could have drawn, and it bought
-**+2.04pp** of it; the rest is ranking, which the cue table does not have to do.
+**+2.04pp** of it; the object reader bought **+3.47pp** more, because 164 of the rows being refused
+were refused by a parser rather than by a rule. The rest is ranking, which the cue table does not
+have to do.
 
 **A correction this round owes.** An earlier version of this section said the 28.16% was "worse than
 'always answer bar' (28.57%) by a hair". That comparison does not reproduce: `profile.ts` prints its
 two constants on every run and they read **26.60% for always-line and 24.29% for always-bar**, so the
-product was above both at 28.16% and is further above them at 30.20%. The 28.57% was never a number
+product was above both at 28.16% and is further above them at 33.67%. The 28.57% was never a number
 this instrument produced, and the file published a comparison against it for several rounds — which is
 the same defect the section above is about, one layer down: a reading whose denominator was never
 recorded is a reading nobody can reproduce, and it survived because it happened to support the
 narrative.
 
-What to publish is therefore **30.20%**, the entry point's own reading — not 42.65%, which measures a
+What to publish is therefore **33.67%**, the entry point's own reading — not 42.65%, which measures a
 component with the data removed, and not 15.71%, which measured a cue table that has since changed.
 **A reading without the date it was taken is a reading about a build that no longer exists**, which is
 the defect this section exists to name.
@@ -14625,6 +14644,79 @@ The cue table's own 627 (42.65%) does not move, and this is the clearest stateme
 instruments measure: **the cue table never sees the result set, so it can never be refused.** Its
 score is a ceiling that no product honouring `supportOf` can reach — the gap narrowed from 13.30pp to
 12.45pp, and the remaining 12.45pp is not a defect to be closed but a different question being asked.
+
+## The instrument could not read one table in nine
+
+The round above left a residual it could not explain: **352 of 1,470 scored rows were declined**, and
+its own note said the refusal was `a bar needs a category axis and a measure`. That sentence was true
+of the profile it was handed. It was not true of the corpus.
+
+196 of Text2Vis's 1,985 `Table Data` cells are not CSV. They are a JSON object of columns —
+`{"Year": [2018, 2019], "Coal": [1000, 950]}` — because the prompts around them ask for Python and
+the table was written the way Python prints one. `parseCsv` read the whole object as a one-line
+header with no rows, `profilesOf` answered `[]`, and `profileAnswer` returned `profile:none`. **164 of
+the 352 declined rows were this**, which is the largest single defect any reading of this corpus has
+found, and its direction is the one that flatters: the product looked worse than it is, and no
+rerun could have said so because the instrument was the thing being reproduced.
+
+`parseResultSet` now reads three representations, and the three are the point rather than an
+implementation detail:
+
+1. **A brace that is not JSON falls back to the CSV reader.** A table whose first header cell starts
+   with `{` is a CSV that happens to start with a brace, and swallowing it would trade one
+   unreadable class for another.
+2. **A JSON object whose values are equal-length lists of scalars is transposed.** Key order is
+   column order, because the object states it — a transposition that sorted its keys would put the
+   measure where the axis was. An absent cell stays absent rather than becoming the word `null`.
+3. **A JSON object that is not a rectangle is refused, not padded.** Two columns of different
+   lengths, a value that is not a list, an empty column, a list of lists, or a JSON array (rows
+   without a header) all answer `{columns: [], rows: []}`. Padding would invent a row; naming the
+   columns of an array would invent a field.
+
+| quantity | before | after | delta |
+| --- | ---: | ---: | ---: |
+| entry point, top-1 | 444 (30.20%) | **495 (33.67%)** | **+3.47pp** |
+| entry point, shortlist | 508 (34.56%) | 560 (38.10%) | +3.54pp |
+| refused by every mark | 352 | **167** | **−185** |
+| admitted and outranked | 610 | 743 | +133 |
+| rows whose table produced no profile at all | 197 | **6** | −191 |
+| denominator (scored rows) | 1,470 | 1,470 | **—** |
+
+**The denominator did not move**, and that is what makes the delta a delta: those 196 rows were
+already scored — the corpus states their label, so they were counted, and counted as misses. Reading
+their tables moved them from `declined` to an answer without adding a row to the corpus. `census`
+prints the residual as `tables that would not profile: header-only 6`, which is the same six rows the
+last paragraph of this section names.
+
+**The claim that this is a repair and not a re-tune is a per-row A/B, not the aggregate.** Running
+the previous reader and the current one over all 1,985 rows:
+
+| | rows |
+| --- | ---: |
+| identical answer (mark and families) | 1,777 |
+| changed | 208 |
+| changed **whose cell was not an object** | **0** |
+| `declined → answered` | 208 |
+| `answered → declined` | **0** |
+
+So the CSV path is bit-for-bit unchanged, every change is on a row this instrument could not read, and
+no row lost an answer. A repair that moved one row in the other direction would be a different story,
+and it is the number that would have been checked first if the delta had been larger than the
+mechanism could explain.
+
+**What the repair exposes rather than fixes.** The 208 rows now answer, and 51 of the 189 that carry a
+mapped label are hits — 26.98%, *below* the 30.20% the reading carried before. That the new rows are
+harder is the honest reason the total moved up rather than the new rows being easy; a repair that
+had admitted only the easy ninth of the corpus would have been a leak, and this one is measurable as
+its own share. `declined → gauge` on 17 histogram rows and `declined → bar` on 42 line rows are now
+visible as ranking losses instead of invisible as refusals, which is the second half of the round
+after this one.
+
+**The six rows still unread are named rather than chased.** They are Python assignments —
+`date_strings = [...]`, `Closing prices = [...]` — written on one line, and a cell that begins
+`name = [` is indistinguishable from a CSV whose header contains `=` and ends in `[`. Six rows
+(0.30%) is not worth a rule that can misread a CSV, so `census` prints them as `header-only` and this
+section records why they stay there.
 
 ## Three questions about the leader, and the arithmetic behind each answer
 

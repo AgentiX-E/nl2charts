@@ -151,12 +151,13 @@ the `maxSlices` option of `recommendChart` override it.
 
 The twelve is a reading rather than a round number. Seven was the limit this
 library shipped until it was measured against
-[Text2Vis](https://huggingface.co/datasets/mizanurr/Text2Vis), a corpus of 1,470
-questions with the chart its authors judged correct. A cap of eight or nine
-scores *worse* than seven — it admits the tables the corpus drew as bars at eight
-and nine categories while still refusing the ones it drew as pies at ten and
-twelve — and twelve is the first value where the pie a question asks for is no
-longer overruled by a constant. `docs/benchmarks.md` carries the whole curve.
+[Text2Vis](https://huggingface.co/datasets/mizanurr/Text2Vis), a corpus of 1,985
+questions — 1,470 of which carry a chart label this build can score — each with
+the chart its authors judged correct. A cap of eight or nine scores *worse* than
+seven — it admits the tables the corpus drew as bars at eight and nine categories
+while still refusing the ones it drew as pies at ten and twelve — and twelve is
+the first value where the pie a question asks for is no longer overruled by a
+constant. `docs/benchmarks.md` carries the whole curve.
 
 ## 2b. Or let the question choose
 

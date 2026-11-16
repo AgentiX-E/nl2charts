@@ -42,6 +42,57 @@ export interface ResultSet {
 }
 
 /**
+ * A table the corpus writes as an object of columns rather than as a CSV.
+ *
+ * 196 of the corpus's 1,985 `Table Data` cells are a JSON object whose values are equal-length lists —
+ * `{"Year": [2018, 2019], "Coal": [1000, 950]}` — because the questions around them ask for Python
+ * and the table was written the way Python prints one. The CSV reader read the whole object as a
+ * one-line header, so the table had no rows, the profiler had no columns, and every mark was
+ * refused: those rows were then counted as the recommender declining a chartable table. They are
+ * 164 of the 352 declined rows the published reading carried, which is the largest single defect any
+ * reading of this corpus has found — and it is a defect of this instrument, not of the product.
+ *
+ * Three answers rather than two, because the two failures have two repairs. A brace that is not JSON
+ * at all is a CSV whose first cell starts with `{` and falls back to the CSV reader; a JSON object
+ * that cannot be read as a rectangle — a column that is not a list, two columns of different
+ * lengths, an empty column — is refused, since the representation *is* an object and padding it
+ * would invent rows. A JSON array is refused for the reason it cannot be read: it is rows without a
+ * header, and a column name invented here would be a field the result set never had.
+ */
+type ObjectTable = { readonly kind: 'table'; readonly set: ResultSet } | { readonly kind: 'refused' } | { readonly kind: 'csv' };
+
+/** One cell of a column list, as the string the CSV reader would have produced for the same value. */
+function cellOf(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value;
+  return String(value as number | boolean);
+}
+
+function readObjectTable(text: string): ObjectTable {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return { kind: 'csv' };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return { kind: 'csv' };
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return { kind: 'refused' };
+  const entries = Object.entries(parsed as Record<string, unknown>);
+  if (entries.length === 0) return { kind: 'refused' };
+  if (!entries.every(([, value]) => Array.isArray(value))) return { kind: 'refused' };
+  const lists = entries.map(([, value]) => value as unknown[]);
+  // A list of lists is a column of cells that are not cells. Reading one as `'1,2'` would be this
+  // parser writing a value the table does not hold, so it is refused instead.
+  if (!lists.every((list) => list.every((cell) => cell === null || typeof cell !== 'object'))) return { kind: 'refused' };
+  const height = (lists[0] as unknown[]).length;
+  if (height === 0) return { kind: 'refused' };
+  if (!lists.every((list) => list.length === height)) return { kind: 'refused' };
+  const rows = Array.from({ length: height }, (_, index) => lists.map((list) => cellOf(list[index])));
+  return { kind: 'table', set: { columns: entries.map(([name]) => name), rows } };
+}
+
+/**
  * Parse one `Table Data` cell.
  *
  * The corpus writes these as CSV and uses the same quoting rules as the file that carries them, so
@@ -49,8 +100,15 @@ export interface ResultSet {
  * both places or the profile of one of them is wrong. Blank lines are dropped — the field is
  * line-oriented and a trailing newline is not a row — and a row is kept only when it has as many
  * cells as the header, because a short row is a corrupt table rather than a row with a null.
+ *
+ * A cell that holds a JSON object of columns is read by `readObjectTable` first, for the reason that
+ * type states. The two paths produce the same `ResultSet`, which is what lets the profile of a table
+ * be independent of how the corpus happened to spell it.
  */
 export function parseResultSet(text: string): ResultSet {
+  const object = readObjectTable(text);
+  if (object.kind === 'refused') return { columns: [], rows: [] };
+  if (object.kind === 'table') return object.set;
   const parsed = parseCsv(text);
   const columns = parsed.columns.map((name) => name.trim());
   // A blank line is not a row. `parseCsv` pads a short row to the header's width rather than
