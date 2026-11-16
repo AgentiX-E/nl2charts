@@ -113,7 +113,7 @@ jobs:
       # — nothing is recorded to regress against yet, and this step is what will make the next round
       # able to register them.
       - name: Hold the grading to its shape
-        run: node tools/check-text2vis-baseline.mjs --require
+        run: node tools/check-text2vis-baseline.mjs --require --require-judge
 
       - name: Upload the reading
         if: always()

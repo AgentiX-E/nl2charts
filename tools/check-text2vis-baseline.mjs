@@ -338,9 +338,18 @@ function selfTest() {
 function main(argv) {
   if (argv.includes('--self-test')) return selfTest();
   const require = argv.includes('--require');
-  const unknown = argv.filter((flag) => flag !== '--require' && flag !== '--self-test');
+  // A separate switch, because the two readings are produced by different runs: `--require` is the
+  // chart job, which renders and scores and never grades, and demanding a judge artifact from it
+  // turned that job red on the push that registered the judge floor. `--require-judge` is the
+  // dispatch-only grading workflow, where a missing artifact is a broken chain rather than a run
+  // that never had a vision endpoint to call.
+  const requireJudge = argv.includes('--require-judge');
+  const known = new Set(['--require', '--require-judge', '--self-test']);
+  const unknown = argv.filter((flag) => !known.has(flag));
   if (unknown.length > 0) {
-    console.error(`unknown argument ${unknown.join(' ')}: this gate reads ${REPORT} against ${BASELINE}, takes --require and --self-test`);
+    console.error(
+      `unknown argument ${unknown.join(' ')}: this gate reads ${REPORT} against ${BASELINE}, takes --require, --require-judge and --self-test`,
+    );
     return 2;
   }
   const reportPath = resolve(ROOT, REPORT);
@@ -376,7 +385,7 @@ function main(argv) {
   if (baseline.judge !== undefined) {
     const judgePath = resolve(ROOT, JUDGE_REPORT);
     const judgeReport = existsSync(judgePath) ? JSON.parse(readFileSync(judgePath, 'utf8')) : undefined;
-    ({ issues: judgeIssues, notes: judgeNotes } = compareJudge(judgeReport, baseline.judge, { require }));
+    ({ issues: judgeIssues, notes: judgeNotes } = compareJudge(judgeReport, baseline.judge, { require: requireJudge }));
   }
   for (const note of [...notes, ...renderNotes, ...judgeNotes]) console.log(note);
   for (const issue of [...issues, ...renderIssues, ...judgeIssues]) console.error(issue);
