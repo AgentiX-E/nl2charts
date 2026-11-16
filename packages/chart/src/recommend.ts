@@ -769,8 +769,15 @@ function encodingFor(mark: RecommendableMark, shape: Shape, profiles: readonly F
       // Both axes carry a measure: a scatter over a category axis is a bar chart
       // that lost its aggregation, and the linter refuses it outright.
       return clean({ x: ref(shape.measures[0] as FieldProfile), y: [ref(shape.measures[1] as FieldProfile)] });
-    case 'line':
-      return clean({ x: ref(shape.ordered[0] as FieldProfile), y: [measure(value)] });
+    case 'line': {
+      // A line runs along an axis, and an axis that does not carry its own order takes the order the
+      // measure gives it — the admission rule above admits exactly that shape, on the corpus's own
+      // words ("plot these percentages in order of increasing Value ... on a line chart"). Reading
+      // `ordered[0]` alone was this branch disagreeing with the rule that admitted the mark: 106 of
+      // the corpus's 1,470 scored rows reached here with no ordered column and threw.
+      const axis = shape.ordered[0] ?? first;
+      return clean({ x: ref(axis), y: [measure(value)] });
+    }
     case 'bar':
       return clean({ x: ref(first), y: [measure(value)] });
   }
@@ -786,6 +793,35 @@ function groupFieldsOf(encoding: Encoding): FieldRef[] {
     }
   }
   return [...out.values()];
+}
+
+/**
+ * Rows in the order a measure gives them, ascending, with the cells that are not finite numbers last.
+ *
+ * The column was profiled as a measure, so every cell is a number — but a number is not always a
+ * value: `NaN` and `Infinity` arrive from a result set that prints them, and `NaN - NaN` is not a
+ * comparison. Those rows keep the order the query returned, after the measured ones, rather than
+ * being dropped: the line still passes through them, and dropping a row would change how long the
+ * line is, which is a fact about the picture rather than about the row.
+ *
+ * The index is the second key so that tied measures keep the query's order. A sort that reordered
+ * equal values would make the reading depend on the engine's sort being stable.
+ */
+function orderedAlong(
+  rows: readonly Readonly<Record<string, unknown>>[],
+  field: string,
+): readonly Readonly<Record<string, unknown>>[] {
+  const keyed = rows.map((row, index) => ({ row, index, value: row[field] as number }));
+  return keyed
+    .sort((left, right) => {
+      const leftRead = Number.isFinite(left.value);
+      const rightRead = Number.isFinite(right.value);
+      if (leftRead && rightRead) return left.value - right.value || left.index - right.index;
+      if (leftRead) return -1;
+      if (rightRead) return 1;
+      return left.index - right.index;
+    })
+    .map((entry) => entry.row);
 }
 
 /**
@@ -851,6 +887,8 @@ export function toChartIR(
   const encoding = encodingFor(best.mark, shape, profiles);
   // Folding before the limit is what makes the limit a limit on the picture, not on the evidence.
   const groupFields = groupFieldsOf(encoding);
+  const axis = Array.isArray(encoding.x) ? encoding.x[0] : encoding.x;
+  const measureName = shape.counted ? undefined : (widest(shape.measures) as FieldProfile).name;
   const data = shape.counted
     ? countsOf(
         rows,
@@ -858,7 +896,15 @@ export function toChartIR(
         (widest(shape.measures) as FieldProfile).name,
         groupFields.some((field) => field.type === 'temporal' || field.type === 'ordinal'),
       ).slice(0, limit)
-    : [...rows].slice(0, limit).map((row) => ({ ...row }));
+    : (best.mark === 'line' && axis?.type === 'nominal'
+        ? // A line over categories the data does not order runs along the measure; see `encodingFor`,
+          // which chose the axis this order belongs to. Sorting before the limit keeps the limit a
+          // limit on the picture: the rows that survive are the ones the line actually visits.
+          orderedAlong(rows, measureName as string)
+        : [...rows]
+      )
+        .slice(0, limit)
+        .map((row) => ({ ...row }));
   const mark: ChartType = best.mark;
   const ir: ChartIR = {
     version: CONTRACT_VERSION,

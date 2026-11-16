@@ -272,9 +272,24 @@ describe('ECharts compilation', () => {
     expect(option.aria).toMatchObject({ enabled: true });
   });
 
-  it('adds a visual map to a heatmap', () => {
-    const option = compileToECharts(ir({ mark: 'heatmap' }));
+  it('adds a visual map to a heatmap, and draws none when the IR names no measure for the colour', () => {
+    const option = compileToECharts(
+      ir({
+        mark: 'heatmap',
+        encoding: {
+          x: { field: 'month', type: 'temporal' },
+          y: [{ field: 'region', type: 'nominal' }],
+          color: { field: 'revenue', type: 'quantitative' },
+        },
+      }),
+    );
     expect(option.visualMap).toBeDefined();
+    // Both axes of a heatmap are categories and the colour is the measure. The compiler used to fall
+    // back to `y` for the value, so an IR with no colour drew a heatmap whose colour was the region
+    // name — a picture of its own axis, which `supportOf` now refuses before any channel is read.
+    const colourless = compileToECharts(ir({ mark: 'heatmap', encoding: { x: { field: 'month', type: 'temporal' } } }));
+    expect(colourless.series).toEqual([]);
+    expect(colourless.visualMap).toBeUndefined();
   });
 
   it('compiles a pie from the theta encoding', () => {

@@ -92,12 +92,106 @@ describe('a chart IR compiled to matplotlib', () => {
   });
 
   it('refuses a mark it cannot draw instead of emitting a plausible wrong chart', () => {
-    // The contract lists 22 series types and matplotlib covers four of them. A map
-    // compiled to a bar chart is a picture that answers a different question, and
-    // the score would call it a wrong answer without saying why.
-    for (const mark of ['map', 'graph', 'sankey', 'treemap', 'sunburst', 'tree', 'heatmap', 'boxplot', 'candlestick'] as ChartType[]) {
+    // The contract lists 22 series types and this compiler covers nine of them. A map compiled to a
+    // bar chart is a picture that answers a different question, and the score would call it a wrong
+    // answer without saying why.
+    for (const mark of ['map', 'graph', 'sankey', 'treemap', 'sunburst', 'tree', 'radar', 'parallel', 'pictorialBar', 'themeRiver', 'lines', 'custom'] as ChartType[]) {
       expect(codeOf(() => compileToMatplotlib(ir(mark, { x: n('region'), y: q('total') })))).toBe('NL2C_E_NOT_SUPPORTED');
     }
+  });
+
+  it('refuses a gauge with a reason that names what the IR lacks, not what matplotlib lacks', () => {
+    // A gauge states a value *against a scale*, and this contract carries the value without the
+    // scale. Refusing it is not a limit of the plotting library — an arc is a wedge — it is the
+    // compiler declining to invent a ceiling and report it as the data's.
+    const gauge = ir('gauge', { y: q('total') });
+    expect(codeOf(() => compileToMatplotlib(gauge))).toBe('NL2C_E_NOT_SUPPORTED');
+    expect(() => compileToMatplotlib(gauge)).toThrow(/no matplotlib counterpart|scale/);
+  });
+
+  it('draws a heatmap as a matrix looked up by the pair, leaving a missing combination blank', () => {
+    // A heatmap reads two categories and a measure. The cell is addressed by its pair rather than by
+    // its position, so two rows that share a pair cannot silently become one column: the second is
+    // dropped, and a pair the table never carried stays blank rather than being painted as zero.
+    const code = compileToMatplotlib(
+      ir('heatmap', { x: n('region'), y: n('quarter'), color: q('total') }, {
+        data: [
+          { region: 'north', quarter: 'q1', total: 1 },
+          { region: 'south', quarter: 'q2', total: 2 },
+          { region: 'north', quarter: 'q1', total: 9 },
+        ],
+      }),
+    );
+    expect(code).toContain('xs = ["north", "south"]');
+    expect(code).toContain('ys = ["q1", "q2"]');
+    expect(code).toContain('("north", "q1"): 1');
+    expect(code).not.toContain('9');
+    expect(code).toContain('float("nan")');
+    expect(code).toContain('plt.imshow(');
+    expect(code).toContain('plt.colorbar()');
+  });
+
+  it('draws a funnel with its first stage at the top, because the narrowing is the claim', () => {
+    const code = compileToMatplotlib(ir('funnel', { theta: n('region'), y: q('total') }));
+    expect(code).toContain('plt.barh(positions, values)');
+    expect(code).toContain('invert_yaxis()');
+  });
+
+  it('draws a boxplot from the five tuple columns, in the order the contract fixes', () => {
+    // The columns are read in `min, q1, median, q3, max` order whatever order the table spells them
+    // in, because that ordering is what makes the box a box: a whisker read as a median is a picture
+    // that says the distribution has a different centre.
+    const code = compileToMatplotlib(
+      ir('boxplot', { x: n('region'), y: [q('med'), q('low'), q('high'), q('p25'), q('p75')] }, {
+        data: [{ region: 'north', med: 3, low: 1, high: 5, p25: 2, p75: 4 }],
+      }),
+    );
+    expect(code).toContain('"whislo": row[0]');
+    expect(code).toContain('"fliers": []');
+    expect(code).toContain('"q1": row[1]');
+    expect(code).toContain('"med": row[2]');
+    expect(code).toContain('"q3": row[3]');
+    expect(code).toContain('"whishi": row[4]');
+    expect(code).toContain('plt.gca().bxp(');
+  });
+
+  it('draws a candlestick as a wick and a body, coloured the way this project reads a move', () => {
+    const code = compileToMatplotlib(
+      ir('candlestick', { x: n('day'), y: [q('open'), q('close'), q('low'), q('high')] }, {
+        data: [
+          { day: 'd1', open: 10, close: 12, low: 9, high: 13 },
+          { day: 'd2', open: 12, close: 11, low: 10, high: 12.5 },
+        ],
+      }),
+    );
+    expect(code).toContain('plt.vlines(positions, lows, highs');
+    expect(code).toContain('colors = ["#d62728" if c >= o else "#2ca02c"');
+    expect(code).toContain('plt.xticks(positions, labels)');
+  });
+
+  it('drops a tuple row that is missing one of its numbers, and says how many', () => {
+    // Half a box is not a box: a row without all five numbers is one the mark cannot draw, and a
+    // silently shorter series is the failure mode the comment in the source exists to prevent.
+    const code = compileToMatplotlib(
+      ir('boxplot', { x: n('region'), y: [q('a'), q('b'), q('c'), q('d'), q('e')] }, {
+        data: [
+          { region: 'north', a: 1, b: 2, c: 3, d: 4, e: 5 },
+          { region: 'south', a: 1, b: 2, c: 3, d: 4 },
+        ],
+      }),
+    );
+    expect(code).toContain('1 row dropped');
+    expect(code).toContain('labels = ["north"]');
+  });
+
+  it('refuses a heatmap that names no measure for its colour', () => {
+    // The colour is the measure. Falling back to `y` would paint the category name, which is a
+    // picture of the axis rather than of the data — and the ECharts compiler used to fall back
+    // exactly that way, which is why this refusal has to be asked of `supportOf` and not of one
+    // compiler.
+    const colourless = ir('heatmap', { x: n('region'), y: n('quarter') });
+    expect(codeOf(() => compileToMatplotlib(colourless))).toBe('NL2C_E_NOT_SUPPORTED');
+    expect(() => compileToMatplotlib(colourless)).toThrow(/colour|color/);
   });
 
   it('refuses an IR whose channels the mark reads are missing', () => {
@@ -229,6 +323,15 @@ describe('a chart IR compiled to matplotlib', () => {
       data: [{ region: 42, total: 1 }, { region: false, total: 2 }],
     }));
     expect(code).toContain('labels = [42, False]');
+  });
+
+  it('turns the mathtext parser off, because a title quoting a price is not a formula', () => {
+    // `Revenue in $100k` is a title, and matplotlib reads `$…$` as mathematics: the corpus's row 746
+    // raised a `ParseSyntaxException` on a closing `$` that never came. Escaping each `$` would have
+    // to be repeated in every label, title and axis name; one switch says it once.
+    const titled = compileToMatplotlib(ir('bar', { x: n('region'), y: q('total') }, { title: 'Revenue in $100k' }));
+    expect(titled).toContain('plt.rcParams["text.parse_math"] = False');
+    expect(titled).toContain('"Revenue in $100k"');
   });
 
   it('emits a figure that calls show(), which is what the reference harness patches to save the png', () => {

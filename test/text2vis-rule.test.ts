@@ -452,6 +452,7 @@ describe('reading the corpus into rows', () => {
       rows: [
         {
           prompt: 'Which city has the most orders?',
+          modelPrompt: 'You are a data science assistant. ...',
           answer: 'Portland',
           code: '',
           chartType: 'Bar Chart',

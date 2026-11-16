@@ -49,7 +49,7 @@ const ENTRY = resolve('eval/text2vis/dataset.ts');
 const MODULE_URL = pathToFileURL(ENTRY).href;
 
 /** A CSV with a header and one row, which is the smallest thing the loader accepts. */
-const MINIMAL = `${TEXT2VIS_FIELDS.prompt},${TEXT2VIS_FIELDS.answer},${TEXT2VIS_FIELDS.code},${TEXT2VIS_FIELDS.chartType}\nWhich item sold most?,Widget,"plt.bar([1], [2])",Bar Chart\n`;
+const MINIMAL = `${TEXT2VIS_FIELDS.prompt},${TEXT2VIS_FIELDS.modelPrompt},${TEXT2VIS_FIELDS.answer},${TEXT2VIS_FIELDS.code},${TEXT2VIS_FIELDS.chartType}\nWhich item sold most?,You are a data science assistant. Which item sold most?,Widget,"plt.bar([1], [2])",Bar Chart\n`;
 
 /**
  * One HTTP server per test, serving whatever the test wants to give it.
@@ -123,10 +123,14 @@ describe('the CSV parser', () => {
 describe('the corpus reader', () => {
   it('pulls the four fields a reading uses out of the row and keeps the rest', () => {
     const corpus = readText2Vis(MINIMAL);
-    expect(corpus.columns).toEqual(['Prompt', 'Answer', 'Visualization Code', 'Chart Type']);
+    expect(corpus.columns).toEqual(['Question', 'Prompt', 'Answer', 'Visualization Code', 'Chart Type']);
     expect(corpus.rows).toHaveLength(1);
     const row = corpus.rows[0];
+    // The question comes from `Question`, and the pre-built turn is kept beside it: a rule reading
+    // taken on the whole prompt sees the table's own words as cues, which the corpus prices at 3.53pp
+    // of margin on the cue table.
     expect(row?.prompt).toBe('Which item sold most?');
+    expect(row?.modelPrompt).toBe('You are a data science assistant. Which item sold most?');
     expect(row?.answer).toBe('Widget');
     expect(row?.code).toBe('plt.bar([1], [2])');
     expect(row?.chartType).toBe('Bar Chart');
@@ -134,24 +138,27 @@ describe('the corpus reader', () => {
     // repository reads yet, and a loader that discarded them would make the next mechanism a
     // re-download rather than a new reading of the same bytes.
     expect(row?.raw).toEqual({
-      Prompt: 'Which item sold most?',
+      Question: 'Which item sold most?',
+      Prompt: 'You are a data science assistant. Which item sold most?',
       Answer: 'Widget',
       'Visualization Code': 'plt.bar([1], [2])',
       'Chart Type': 'Bar Chart',
     });
   });
 
-  it('names the missing Prompt column instead of answering every question with an empty string', () => {
+  it('names the missing Question column instead of answering every question with an empty string', () => {
     // The failure this check exists for: a file whose header changed reads as 1,985 questions with
-    // no text, and every accuracy computed from it is a number about nothing.
-    expect(() => readText2Vis('Question,Answer\nq,a\n')).toThrow(/no Prompt column \(it has Question, Answer\)/);
+    // no text, and every accuracy computed from it is a number about nothing. A file that carries
+    // only the pre-built `Prompt` is that case — the turn is not the question, and reading it as one
+    // is what this loader used to do.
+    expect(() => readText2Vis('Prompt,Answer\nq,a\n')).toThrow(/no Question column \(it has Prompt, Answer\)/);
     expect(() => readText2Vis('')).toThrow(/is empty: no header/);
   });
 
   it('leaves the optional fields empty when the file does not carry them', () => {
     // A reading of "can the engine pick the mark" needs no reference code, and a corpus stripped to
     // its question still has to load: the three optional fields are read when present, not required.
-    const corpus = readText2Vis('Prompt\nWhich item sold most?\n');
+    const corpus = readText2Vis('Question\nWhich item sold most?\n');
     expect(corpus.rows[0]?.answer).toBe('');
     expect(corpus.rows[0]?.code).toBe('');
     expect(corpus.rows[0]?.chartType).toBe('');
@@ -164,7 +171,7 @@ describe('what the corpus holds', () => {
     // model. Two runs over the same file have to print the same table, so the tie is broken by
     // name rather than by the order the rows happened to arrive in.
     const corpus = readText2Vis(
-      'Prompt,Chart Type\nq1,Bar Chart\nq2,Line Chart\nq3,Bar Chart\nq4,\n',
+      'Question,Chart Type\nq1,Bar Chart\nq2,Line Chart\nq3,Bar Chart\nq4,\n',
     );
     expect(chartTypeCounts(corpus)).toEqual([
       ['Bar Chart', 2],
@@ -178,12 +185,12 @@ describe('what the corpus holds', () => {
     // spends a single call.
     expect(describeCorpus(readText2Vis(MINIMAL))).toEqual([
       'rows 1',
-      'columns 4',
-      `column names Prompt | Answer | Visualization Code | Chart Type`,
+      'columns 5',
+      `column names Question | Prompt | Answer | Visualization Code | Chart Type`,
       'with reference code 1',
       'with an answer 1',
       'table data sample ""',
-      'question sample ""',
+      'question sample "Which item sold most?"',
       'Bar Chart 1',
     ]);
   });
@@ -209,11 +216,13 @@ describe('loading the file', () => {
 
   it('refuses a download that failed, and one whose header the reader would refuse', async () => {
     const down = await serve('', 404);
-    const wrongShape = await serve('Question,Answer\nq,a\n');
+    // A file whose header carries the pre-built turn and no question: the shape this reader used to
+    // accept, and the one that made every rule reading in the repository a reading about the table.
+    const wrongShape = await serve('Prompt,Answer\nq,a\n');
     const cacheDir = mkdtempSync(join(root, 'cold-'));
     try {
       await expect(loadText2Vis({ url: down.url, cacheDir })).rejects.toThrow(/could not be downloaded: 404/);
-      await expect(loadText2Vis({ url: wrongShape.url, cacheDir })).rejects.toThrow(/no Prompt column/);
+      await expect(loadText2Vis({ url: wrongShape.url, cacheDir })).rejects.toThrow(/no Question column/);
       // Neither failure leaves a file a later run would trust, and neither leaves the staged file
       // behind: a half-written CSV parses into a smaller corpus, which reads as a lower score.
       expect(readdirSync(cacheDir)).toEqual([]);
@@ -290,7 +299,7 @@ describe('the command line', () => {
     // Two states the corpus can be in that a reading must not proceed from: a file whose header
     // parsed and whose body is empty, and a transport that threw something that is not an Error
     // (a string, which is what a hand-written `throw 'timeout'` produces).
-    const headerOnly = await serve('Prompt\n');
+    const headerOnly = await serve('Question\n');
     const lines: string[] = [];
     const cacheDir = mkdtempSync(join(root, 'cli-empty-'));
     try {

@@ -7,6 +7,34 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **`pnpm bench:text2vis:render` draws every chart, and the first run found ten percent of the emitted
+  Python could not run.** `compileToMatplotlib` had 24 tests and **no line of its output had ever been
+  executed**: the tests asserted which function is called with which column, and every assertion was
+  true. The bridge to a judge is what forced the question — two of the public benchmark's four
+  criteria are stated about the figure — so `eval/text2vis/render.ts` now sends the compiler's source
+  to `eval/text2vis/render_worker.py`, which does what the reference harness does (`Agg`,
+  `plt.show` replaced by a saver, `exec`) and saves a PNG. On all 1,470 scored rows the first run
+  raised on **152 (10.34%)**: 135 bar charts whose categories arrived as a mixed object array and met
+  the default float bar width; 16 boxplots calling `plt.bxp`, which is not a function, and then
+  `Axes.bxp` without the `fliers` key it reads; 1 title quoting a price (`$100k`) that opened mathtext
+  and never closed it. After the repair **1,286 reach a PNG (87.48%), failed 0, refused 17, declined
+  167**, at **82.2 ms p50 / 137.0 ms p95 per figure**. The floor is recorded in
+  `eval/text2vis/baseline.json` as the pair *(failed == 0, rendered >= 1,286)* and checked beside the
+  top-1 floor by `pnpm gate:text2vis`, with 7 new self-test cases; the workflow installs a pinned
+  `matplotlib==3.10.8` because the default style decides the bytes.
+- **Four marks reach matplotlib, so nine of the eleven recommendable marks reach a figure.** `heatmap`
+  (a matrix looked up by the cell pair, blank where a pair is missing), `funnel` (a `barh` with the
+  first stage at the top), plus `boxplot` and `candlestick`, which the contract already had and the
+  compiler did not. `boxplot` reads its five columns in `min, q1, median, q3, max` order and draws
+  through `Axes.bxp`; `candlestick` draws a wick and a body, rising red by this project's convention.
+  `gauge` stays out with a reason that names the contract rather than the plotting library: a gauge
+  states a value *against a scale*, and this IR carries the value without the scale.
+- **A heatmap with no measure for its colour is refused instead of painted.** Both axes of a heatmap
+  are categories, and `compileToECharts` fell back to `y` for the value — so an IR with no `color`
+  drew a heatmap whose colour was the region name: a picture of its own axis, which the linter called
+  renderable because `supportOf` said nothing was missing. The verdict now names the missing channel,
+  and the ECharts compiler no longer invents one.
+
 - **`pnpm gate:text2vis` holds the chart reading to a floor.** The recommender's Text2Vis score moved
   five times in six rounds — 231, 414, 444, 495, 526 — and every move was checked by a human reading a
   log; nothing refused a run that came back lower. `tools/check-text2vis-baseline.mjs` reads the
@@ -20,6 +48,28 @@ cannot be argued with.
   invent; it runs as a self-test in `gate:all` and with `--require` in the `text2vis-rule` workflow.
 
 ### Changed
+- **The corpus reading is taken on the question, not on the conversational turn it arrived in.**
+  `eval/text2vis/dataset.ts` read the `Prompt` column — the reference harness's whole turn, with the
+  table inlined — and called it `prompt`, so every rule reading in this repository was a reading about
+  "the question and the data". The corpus prices the mistake: a table headed `Projected share of the
+  population` contains **share**, the cue that names a pie. On the same 1,470 scored rows the cue table
+  reads **627 (42.65%) on `Prompt` and 575 (39.12%) on `Question`**, while the shipped entry point reads
+  **526 (35.78%) → 529 (35.99%)**: the arm that never sees the result set was the arm the table's words
+  were fooling. The gap this project has tracked between the product and its own cue table therefore
+  survives at **3.13pp instead of 6.87pp** — the finding is unchanged and half its size was the
+  instrument. `prompt` is now the `Question` column, the loader refuses a file with no `Question`
+  column exactly as it already refused one with no `Prompt`, and `modelPrompt` keeps the pre-built turn
+  because an LLM arm reproducing the reference harness has to send it verbatim.
+- **A line over a category axis runs along the measure, and no longer throws.** The line admission was
+  widened to admit a category axis on the corpus's own words ("plot these percentages in order of
+  increasing Value ... on a line chart"), and `encodingFor` kept reading `shape.ordered[0]`, which is
+  empty for a nominal axis: **106 of the 1,470 scored rows reached a `TypeError` instead of a chart**,
+  and no reading could see it because `recommendChart` — the only function the readings call — never
+  reaches the branch. `toChartIR` now orders those rows by the measure, ascending, with tied values and
+  non-finite cells keeping the order the query returned; a measure with a `NaN` still keeps its row,
+  because dropping it would change how long the line is.
+- **The third ranking key was deciding accuracy → the time-axis bonus.** *(unchanged from the previous
+  entry, kept for the lineage of the number)* top-1 495 → 526 on `Prompt`.
 - **A time axis is a fact about the result set, not a tie to break.** Bar and line both need an axis
   and a measure, both scored two, and `bar` is first in `RECOMMENDABLE_MARKS` — so **every** question
   that named neither mark and had a time axis was answered with a bar, because the third ranking key

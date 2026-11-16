@@ -37,6 +37,7 @@ import { resolve } from 'node:path';
 const ROOT = resolve(new URL('..', import.meta.url).pathname);
 const BASELINE = 'eval/text2vis/baseline.json';
 const REPORT = 'eval/out/text2vis-profile.json';
+const RENDER_REPORT = 'eval/out/text2vis-render.json';
 
 /**
  * Compare one reading against the floor.
@@ -79,10 +80,74 @@ export function compare(report, baseline, options = {}) {
         `(${share(baseline.top1)}): ${String(gap)} rows, ${(((gap / baseline.scored) * 100)).toFixed(2)}pp`,
     );
   }
+  // The three buckets are disjoint and complete (`profile.ts` asserts it), so the misses are the
+  // remainder after the shortlist and the refusals — not after the *hits*. Subtracting the hits left
+  // the shortlisted rows that came second inside the number, and printed 774 misses for a report that
+  // counts 682: a right reading of the wrong quantity, in the one line a reader checks the floor with.
   notes.push(
     `TEXT2VIS: top-1 ${String(profile.top1)} (${share(profile.top1)}) against a floor of ${String(baseline.top1)}; ` +
       `shortlist ${String(profile.shortlist)} (${share(profile.shortlist)}), declined ${String(profile.declined)}, ` +
-      `missed ${String(baseline.scored - profile.top1 - profile.declined)}`,
+      `missed ${String(baseline.scored - profile.shortlist - profile.declined)}`,
+  );
+  return { issues, notes };
+}
+
+/**
+ * Compare the pixel reading against its floor.
+ *
+ * A different instrument from `compare`, and it needs a different rule. `rendered` is not an accuracy
+ * score that should only go up — it is the count of charts that reached a PNG, so it rises when the
+ * compiler learns a mark and falls when the product refuses more tables, and the same round can move
+ * both. What the gate can hold without contesting either is the pair of statements that are true by
+ * construction: **no chart may fail** (the source came from this repository's own emitter, so a Python
+ * exception is a defect here) and **the counters must add up** to the scored rows, which `render.ts`
+ * asserts on its own path and which this gate re-checks because a report is a file.
+ *
+ * `rendered` is compared as a floor for one reason: a compiler that suddenly paints fewer marks is a
+ * capability that was removed, and 1,286 is the number of charts this emitter actually produced.
+ *
+ * @returns {{issues: string[], notes: string[]}}
+ */
+export function compareRender(report, floor, options = {}) {
+  const issues = [];
+  const notes = [];
+  if (report === undefined) {
+    const message = `TEXT2VIS RENDER: no render report at ${RENDER_REPORT} — \`pnpm bench:text2vis:render --artifact ${RENDER_REPORT}\` writes it`;
+    if (options.require === true) issues.push(message);
+    else notes.push(`${message} (not required here)`);
+    return { issues, notes };
+  }
+  for (const key of ['scored', 'rendered', 'failed', 'refused', 'declined']) {
+    if (typeof report[key] !== 'number') {
+      issues.push(`TEXT2VIS RENDER: the report has no numeric \`${key}\`, so the pixel reading cannot be compared`);
+      return { issues, notes };
+    }
+  }
+  const total = report.rendered + report.failed + report.refused + report.declined;
+  if (total !== report.scored) {
+    issues.push(
+      `TEXT2VIS RENDER: ${String(report.rendered)} rendered + ${String(report.failed)} failed + ` +
+        `${String(report.refused)} refused + ${String(report.declined)} declined is not ${String(report.scored)} scored`,
+    );
+  }
+  if (report.failed !== floor.failed) {
+    issues.push(
+      `TEXT2VIS RENDER: ${String(report.failed)} charts raised in Python (the floor is ${String(floor.failed)}); ` +
+        `the source came from this repository's emitter, so this is a defect here rather than an instrument limit — ` +
+        `the report lists the first ones under \`failures\``,
+    );
+  }
+  if (report.rendered < floor.rendered) {
+    issues.push(
+      `TEXT2VIS RENDER: ${String(report.rendered)} charts reached a png (${((report.rendered / report.scored) * 100).toFixed(2)}%), ` +
+        `below the floor of ${String(floor.rendered)}: a mark this compiler used to paint stopped painting`,
+    );
+  }
+  notes.push(
+    `TEXT2VIS RENDER: rendered ${String(report.rendered)}/${String(report.scored)} ` +
+      `(${((report.rendered / report.scored) * 100).toFixed(2)}%), refused ${String(report.refused)}, ` +
+      `declined ${String(report.declined)}, failed ${String(report.failed)}; ` +
+      `p50 ${String(report.latency?.p50 ?? '?')} ms per figure`,
   );
   return { issues, notes };
 }
@@ -99,11 +164,37 @@ const SELF_TEST = [
   { name: 'the reading the floor replaced fails against the new floor', report: { profile: { scored: 1470, top1: 495, shortlist: 560, declined: 167 } }, want: 1 },
 ];
 
+/** Cases for the pixel reading: every way its four counters can lie. */
+const RENDER_SELF_TEST = [
+  { name: 'a run with no failure and at the floor passes', report: { scored: 1470, rendered: 1286, failed: 0, refused: 17, declined: 167 }, want: 0 },
+  { name: 'a mark painter that stopped painting fails', report: { scored: 1470, rendered: 1200, failed: 0, refused: 103, declined: 167 }, want: 1 },
+  {
+    name: 'a chart that raised in Python fails even when nothing else moved',
+    report: { scored: 1470, rendered: 1286, failed: 1, refused: 16, declined: 167 },
+    want: 1,
+  },
+  {
+    name: 'counters that do not add up fail',
+    report: { scored: 1470, rendered: 1286, failed: 0, refused: 17, declined: 100 },
+    want: 1,
+  },
+  { name: 'a report with a missing counter fails', report: { scored: 1470, rendered: 1286 }, want: 1 },
+  { name: 'no render report is a failure when it is required', report: undefined, want: 1, require: true },
+  { name: 'no render report is a note when it is not', report: undefined, want: 0 },
+];
+
 function selfTest() {
   const baseline = { scored: 1470, top1: 526 };
+  const floor = { rendered: 1286, failed: 0 };
   let failed = 0;
   for (const test of SELF_TEST) {
     const { issues } = compare(test.report, baseline, test.require === true ? { require: true } : {});
+    const ok = issues.length === test.want;
+    if (!ok) failed += 1;
+    console.log(`${ok ? 'ok  ' : 'FAIL'} ${test.name}${ok ? '' : ` — ${String(issues.length)} issues, wanted ${String(test.want)}`}`);
+  }
+  for (const test of RENDER_SELF_TEST) {
+    const { issues } = compareRender(test.report, floor, test.require === true ? { require: true } : {});
     const ok = issues.length === test.want;
     if (!ok) failed += 1;
     console.log(`${ok ? 'ok  ' : 'FAIL'} ${test.name}${ok ? '' : ` — ${String(issues.length)} issues, wanted ${String(test.want)}`}`);
@@ -112,7 +203,7 @@ function selfTest() {
     console.error(`${String(failed)} self-test case(s) failed`);
     return 1;
   }
-  console.log(`${String(SELF_TEST.length)} self-test cases passed`);
+  console.log(`${String(SELF_TEST.length + RENDER_SELF_TEST.length)} self-test cases passed`);
   return 0;
 }
 
@@ -141,9 +232,18 @@ function main(argv) {
     return 0;
   }
   const { issues, notes } = compare(JSON.parse(readFileSync(reportPath, 'utf8')), baseline, { require });
-  for (const note of notes) console.log(note);
-  for (const issue of issues) console.error(issue);
-  return issues.length === 0 ? 0 : 1;
+  // The pixel reading, when the floor records one: a run of the profile step alone has not rendered
+  // anything, and a gate that demanded a render report from it would fail the cheaper half.
+  let renderIssues = [];
+  let renderNotes = [];
+  if (baseline.render !== undefined) {
+    const renderPath = resolve(ROOT, RENDER_REPORT);
+    const renderReport = existsSync(renderPath) ? JSON.parse(readFileSync(renderPath, 'utf8')) : undefined;
+    ({ issues: renderIssues, notes: renderNotes } = compareRender(renderReport, baseline.render, { require }));
+  }
+  for (const note of [...notes, ...renderNotes]) console.log(note);
+  for (const issue of [...issues, ...renderIssues]) console.error(issue);
+  return issues.length + renderIssues.length === 0 ? 0 : 1;
 }
 
 process.exit(main(process.argv.slice(2)));

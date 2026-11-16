@@ -14532,6 +14532,12 @@ like a contradiction — 549, 231 and 414 on the same 1,470 rows — and the fir
 here was that they were three different quantities. **That explanation was wrong, and re-running the
 three instruments is what showed it.** They are the same pair of quantities at two moments.
 
+**Amended below by `## The question, not the turn it arrived in`.** Every reading in this section was
+taken on the corpus's `Prompt` column, which is the whole conversational turn with the table inlined,
+so a cue could match a column header. On the `Question` column the same instruments read **575
+(39.12%)** and **529 (35.99%)**, and the gap between them is **3.13pp** rather than 6.87pp. The table
+and the history under it are kept as they were taken; the corrected pair is in that section.
+
 Measured this round, no model call, one CSV:
 
 ```
@@ -14895,3 +14901,137 @@ So the correct statement is not that the copy failed. It is that **a budget was 
 four component prices were summed, the sum was compared against a gap that measures a composition,
 and the composition was never run as one arm. The queue entry that follows from this is not another
 component — it is `values` + `repairs` together, once, with the cost stated in advance.
+
+## The question, not the turn it arrived in
+
+Every rule reading this repository has ever taken on Text2Vis was taken on the wrong field, and the
+corpus says so in its own header. The file carries both `Question` — one natural-language question —
+and `Prompt` — that question inside the reference harness's whole conversational turn, with the table
+inlined above it. `eval/text2vis/dataset.ts` read `Prompt` and called it `prompt`, so:
+
+- the cue table was matched against a document that contains the **table**;
+- the recommender's admission rules were shown a question plus a data dump;
+- and every number in this document was a reading about "the question and the data", which is not the
+  quantity the product is asked to do.
+
+The mechanism is not subtle once the header is read. A column headed `Projected share of the
+population in extreme poverty` contains the word **share**, and `share` is the cue that names a pie.
+A table with a `Distribution` column fires `distribution`, which names a boxplot. The cue table was
+reading the answer's own column names as though the person had said them.
+
+Measured on the same 1,470 scored rows, no model call, one CSV:
+
+| reading | instrument | on `Prompt` (the turn) | on `Question` | delta |
+| --- | --- | ---: | ---: | ---: |
+| cue table alone | `rule.ts` | 627 (42.65%) | **575 (39.12%)** | −52 rows, −3.53pp |
+| shortlist | `rule.ts` | 971 (66.05%) | **885 (60.20%)** | −86 rows |
+| the shipped entry point | `profile.ts` | 526 (35.78%) | **529 (35.99%)** | +3 rows |
+| shortlist | `profile.ts` | 618 (42.04%) | **621 (42.24%)** | +3 rows |
+| declined | `profile.ts` | 167 | **167** | 0 |
+
+**The product went up and its competitor went down.** That is the shape a measurement error takes
+when one side of a comparison is contaminated and the other is not: the cue table is the arm that
+never sees the result set, so the table's words were pure noise for it, while the recommender reads
+the table anyway and lost nothing but the noise. The gap this document has been tracking for several
+rounds — "the shipped recommender is worse than its own cue table when it is given the result set" —
+**survives, at 3.13pp rather than 6.87pp.** The finding is unchanged. Half of its size was the
+instrument.
+
+Two decisions came out of it, and one of them is a rule for the next time:
+
+1. **`TEXT2VIS_FIELDS.prompt` is `Question`.** The loader now refuses a file with no `Question`
+   column, which is the same guard it already had for `Prompt` — a corpus whose header changed would
+   otherwise read as 1,985 blank questions. `modelPrompt` keeps the pre-built turn, because an LLM arm
+   reproducing the reference harness has to send it verbatim: our template and their template must not
+   become two variables in one comparison.
+2. **A reading has to name the field it read.** The old header of `rule.ts` said "a question in, a mark
+   out" and it was true of the code and false of the data. Nothing in the type system could catch
+   this — `prompt: string` accepts both — so the repair is a sentence in the loader that says which
+   column the string comes from and why.
+
+Per family, on the question (`profile.ts`, 1,470 rows), the two rows that move most are the two whose
+labels name a form the table's own headers also name:
+
+| label | n | top-1 on `Question` | top-1 on `Prompt` |
+| --- | ---: | ---: | ---: |
+| Line | 391 | **178 (45.52%)** | 164 (41.94%) |
+| Bar | 357 | **206 (57.70%)** | 220 (61.62%) |
+
+Bar lost fourteen rows and line gained fourteen. A table of monthly values whose header says `Amount`
+does not fire `ranking`; the same table inside a turn that also prints a column called `Rank` does.
+
+## The compiler emitted source nobody had ever run
+
+`compileToMatplotlib` has been in this repository for several rounds with 24 tests behind it, and
+until this round **not one line of its output had ever been executed.** The tests asserted the shape of
+the source — which function is called with which column, that `plt.show()` is emitted, that a hostile
+cell stays a quoted literal — and every one of those assertions was true. What they could not see is
+whether Python runs the code.
+
+The bridge to the judge is what forced the question. Two of the paper's four criteria are stated about
+the figure, so a reading needs a PNG, and a PNG needs the source to run. `eval/text2vis/render.ts`
+renders all 1,470 scored rows through one worker process (`render_worker.py`), which does what the
+reference harness does: `matplotlib.use("Agg")`, `plt.show` replaced by a saver, `exec` on the
+compiler's output.
+
+**The first run: 152 of 1,470 rows raised — 10.34%.** Three defects, none of which a string assertion
+could reach:
+
+| what raised | rows | why |
+| --- | ---: | --- |
+| `TypeError: the dtypes of parameters x (object) and width (float64) are incompatible` | 135 | the categories were handed to `plt.bar` as labels; a column that mixes numbers with text (`[65, "nan", 29, 42.84]`) arrives as an object array, and the default bar width is a float |
+| `AttributeError: module 'matplotlib.pyplot' has no attribute 'bxp'` | 16 | `bxp` lives on an axes, not on `pyplot`; and once on the axes, it raised `KeyError: 'fliers'` |
+| `ParseSyntaxException: … found end of text` | 1 | a title quoting a price (`Revenue in $100k`) opened mathtext that never closed |
+
+The repair is three lines of policy rather than three patches:
+
+- **Positions, not labels.** Every categorical mark now emits `positions = list(range(len(labels)))`,
+  draws against the positions and labels the axis with `plt.xticks(positions, labels)`. A category is
+  then whatever Python can stringify, including the empty string a null cell produces, and the dtype
+  of a column stops being able to decide whether the figure exists. Funnel does the same with `barh`
+  and `plt.yticks`.
+- **`plt.gca().bxp(stats, showfliers=False)` with `"fliers": []` in every statistics dict.** The key is
+  read, not consulted: an empty list is the honest statement, because every number the box is drawn
+  from is one of the five columns.
+- **`plt.rcParams["text.parse_math"] = False`.** A label on a chart is data, not mathematics. Escaping
+  each `$` would say the same thing in every title, axis name and category the emitter writes.
+
+Two marks joined the compiler in the same round, so that a `ChartIR` the product can produce is an IR
+the judge can see: **heatmap** (a matrix looked up by the cell pair, blank where a pair is missing)
+and **funnel** (a `barh` whose first stage is at the top). With `boxplot` and `candlestick`, which
+were already in the contract and are now in the compiler, **nine of the eleven recommendable marks
+reach a figure.** `gauge` does not, and the refusal is the honest one: a gauge states a value
+*against a scale*, and this IR carries the value without the scale. Drawing one anyway would be the
+compiler choosing a ceiling and reporting it as the data's.
+
+The reading after the repair, on all 1,470 scored rows:
+
+| outcome | rows | share |
+| --- | ---: | ---: |
+| rendered | **1,286** | 87.48% |
+| refused (`NL2C_E_NOT_SUPPORTED`, all `gauge`) | 17 | 1.16% |
+| the recommender answered nothing | 167 | 11.36% |
+| **raised in Python** | **0** | **0.00%** |
+
+Per figure: **82.2 ms p50, 137.0 ms p95**, 44.6 KiB p50 of PNG. The clock covers `exec` plus
+`savefig` in a warm process, which is the number a caller asking "can this run per request" needs; it
+is not "time to first chart" and this document does not call it that.
+
+**The floor is now two statements, not one number.** `eval/text2vis/baseline.json` gained a `render`
+block, and `tools/check-text2vis-baseline.mjs` checks it beside the top-1 floor with two rules that
+are true by construction rather than thresholds somebody chose:
+
+- `failed === 0` — the source came from this repository's own emitter, so a Python exception is a
+  defect here and not an instrument limit;
+- `rendered ≥ 1,286` — a compiler that stops painting a mark it used to paint is a capability that was
+  removed.
+
+`rendered` is not held to "only go up", because it will not: the product's own refusals move it, and a
+round that teaches the recommender to decline more tables (a good round) lowers it. The gate says what
+it can defend and prints the rest.
+
+**What this does not yet buy.** The PNG exists, and the judge that reads it does not: the paper's two
+dimensions need a provider that accepts an image, and `ChatMessage` in `@agentix-e/nl2charts-ai`
+carries a `string` content and nothing else. That is a contract change rather than a call-site change
+— every provider adapter, every prompt builder, every recorded transcript — so it is registered as its
+own round (`text2vis-judge`), with the renderer as the half that is now done and paid for.

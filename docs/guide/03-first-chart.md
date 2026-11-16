@@ -309,6 +309,44 @@ ssr.dispose();
 The option object is plain data. You can log it, diff it in a snapshot test, or
 send it over the wire — that is what makes visual regressions reviewable.
 
+## Exporting the chart as Python
+
+If your report pipeline is Python, or you want a PNG without a browser anywhere in the path, the
+same IR compiles to matplotlib source:
+
+```ts
+import { compileToMatplotlib } from '@agentix-e/nl2charts-chart';
+
+const source = compileToMatplotlib(ir); // a string; it draws nothing by itself
+```
+
+The source is a pure function of the IR — no interpreter, no IO — so it can be stored, reviewed and
+diffed. To get a picture, run it where matplotlib lives:
+
+```python
+import matplotlib
+matplotlib.use("Agg")          # no display in a server process
+import matplotlib.pyplot as plt
+
+plt.show = lambda *a, **k: plt.savefig("chart.png", dpi=110, bbox_inches="tight")
+exec(compile(source, "<chart>", "exec"), {"__name__": "__chart__"})
+```
+
+Two things to know before you rely on it:
+
+- **Nine of the eleven recommendable marks have a matplotlib counterpart** — bar, line, scatter,
+  pie, heatmap, funnel, boxplot, candlestick and their variants. `gauge` is refused on purpose: a
+  gauge states a value *against a scale*, and this contract carries the value without the scale, so
+  drawing one would be the library choosing a ceiling and reporting it as your data's. The refusal
+  is `NL2C_E_NOT_SUPPORTED` and its message says which of the two it is.
+- **The categories are drawn at integer positions and labelled with `xticks`.** That is what lets a
+  column that mixes numbers with text (`[65, "nan", 29]`) or holds a null reach a figure instead of
+  an exception — a detail that costs nothing in the output and prevents a whole class of runtime
+  failures.
+
+If you need a browser-quality PNG or an interactive chart, use `compileToECharts` above; the
+matplotlib path exists for reproducibility and for pipelines that already run Python.
+
 ## Themes and print
 
 ```ts

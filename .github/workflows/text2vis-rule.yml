@@ -70,11 +70,26 @@ jobs:
       - name: Score the recommender with the result set in front of it
         run: pnpm bench:text2vis:profile --artifact eval/out/text2vis-profile.json
 
+      # The pixel half. Two of the four criteria in the benchmark are stated about the figure, and
+      # this repository had no way to produce one: `compileToMatplotlib` turns an IR into source, and
+      # nothing ever ran that source. Running it on all 1,470 scored rows found what reading the
+      # source could not — 152 rows of emitted Python that raised, on a bar chart whose categories
+      # were handed to matplotlib as labels, and one title quoting a price that matplotlib read as a
+      # formula. The dependency is pinned because the default style decides the bytes, and a reading
+      # that moves when a library moves is not a reading about this compiler.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install the renderer's one dependency
+        run: python3 -m pip install --quiet 'matplotlib==3.10.8'
+      - name: Draw every chart, and refuse a run where one of them raised
+        run: pnpm bench:text2vis:render --artifact eval/out/text2vis-render.json
+
       # The floor. Every move this reading has made so far was checked by a human reading a log, and
       # nothing refused a run that came back lower: the scorer is deterministic over a fixed corpus,
       # so a fall is never noise. `--require` because the step above writes this file: a missing report
       # here is a broken chain rather than a machine without the corpus.
-      - name: Hold the recommender to its floor
+      - name: Hold the recommender and the renderer to their floors
         run: node tools/check-text2vis-baseline.mjs --require
 
       # The next question after "15.71%" is "which rule said no", and the answer is a count per
@@ -93,6 +108,7 @@ jobs:
           path: |
             eval/out/text2vis-rule.json
             eval/out/text2vis-profile.json
+            eval/out/text2vis-render.json
             eval/out/text2vis-census.json
           if-no-files-found: warn
           retention-days: 30

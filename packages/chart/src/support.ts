@@ -67,6 +67,13 @@ export function supportOf(ir: ChartIR): SupportVerdict {
   } else if (ir.mark === 'heatmap') {
     if (x === undefined) missing.push('a heatmap needs a column for x and was given none');
     if (y[0] === undefined) missing.push('a heatmap needs a column for y and was given none');
+    // The colour is the measure, and it is not optional: both axes of a heatmap are categories, so
+    // falling back to `y` would paint the category name. `compileToECharts` used to fall back exactly
+    // that way, which made a colourless heatmap a picture of its own axis — a wrong picture that the
+    // linter called renderable, because this verdict said nothing was missing.
+    if ((color ?? ir.encoding.size) === undefined) {
+      missing.push('a heatmap colours a measure from color and was given none');
+    }
   } else if (ir.mark === 'themeRiver') {
     if (x === undefined) missing.push('a theme river needs a time column from x and was given none');
     if (y[0] === undefined) missing.push('a theme river needs a measure from y and was given none');

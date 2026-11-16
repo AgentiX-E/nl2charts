@@ -93,7 +93,8 @@
     "gate:dispatch": "node tools/bird-dispatch.mjs --self-test",
     "bench:text2vis:rule": "tsx eval/text2vis/rule.ts",
     "bench:text2vis:profile": "tsx eval/text2vis/profile.ts",
-    "bench:text2vis:census": "tsx eval/text2vis/census.ts"
+    "bench:text2vis:census": "tsx eval/text2vis/census.ts",
+    "bench:text2vis:render": "tsx eval/text2vis/render.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

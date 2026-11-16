@@ -392,6 +392,38 @@ describe('turning a recommendation into a chart the compiler accepts', () => {
     expect(ir.data.length).toBe(monthly.length);
   });
 
+  it('runs a line over a category axis along the measure, because that is the only order there is', () => {
+    // The admission rule for a line was widened to admit a category axis, on the ground that the
+    // corpus labels 350 rows a line or an area over categories ("plot these percentages in order of
+    // increasing Value ... on a line chart"). `encodingFor` kept reading `shape.ordered[0]`, which is
+    // empty for a nominal axis, so the widened rule produced a TypeError on 106 of the corpus's 1,470
+    // scored rows: a crash, not a refusal, and one that no reading of `recommendChart` could see
+    // because the product's own chart builder is the only caller of `toChartIR`.
+    const ranked = rows({ product: ['beta', 'alpha', 'gamma'], revenue: [30, 10, 20] });
+    const ir = toChartIR('Plot the revenue by product on a line chart', ranked);
+    expect(ir.mark).toBe('line');
+    expect(ir.encoding.x).toMatchObject({ field: 'product', type: 'nominal' });
+    expect(ir.data.map((row) => row.revenue)).toEqual([10, 20, 30]);
+  });
+
+  it('leaves an ordered axis in the order the query produced', () => {
+    // The same line, with an axis that carries its own order: sorting by the measure here would be
+    // the chart stating an order the result set already stated differently.
+    const ir = toChartIR('How did revenue trend over time?', monthly);
+    expect(ir.encoding.x).toMatchObject({ field: 'month', type: 'temporal' });
+    expect(ir.data.map((row) => row.month)).toEqual(monthly.map((row) => row.month));
+  });
+
+  it('keeps ties and unreadable cells where the query put them when it orders a line by its measure', () => {
+    // Two rows at 5 and two cells that are numbers but not values. The tied pair must keep the order
+    // the query returned — a reading that depended on the engine's sort being stable would be a
+    // reading about the engine — and the unreadable rows must stay on the line, in their own order,
+    // because dropping them would shorten the picture.
+    const tied = rows({ product: ['e', 'd', 'c', 'b', 'a'], revenue: [5, Number.NaN, 5, 1, Infinity] });
+    const ir = toChartIR('Plot the revenue by product on a line chart', tied);
+    expect(ir.data.map((row) => row.product)).toEqual(['b', 'e', 'c', 'd', 'a']);
+  });
+
   it('lints clean and compiles to a series for every recommendation it will make', () => {
     const fixtures: readonly (readonly [string, readonly Record<string, unknown>[]])[] = [
       ['How did revenue trend over time?', monthly],

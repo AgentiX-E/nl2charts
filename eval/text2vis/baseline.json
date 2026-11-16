@@ -3,8 +3,13 @@
   "corpus": "Text2Vis.csv (mizanurr/Text2Vis, 1,985 rows, 1,470 scored after unmapped labels)",
   "recordedAt": "2026-11-16",
   "scored": 1470,
-  "top1": 526,
-  "shortlist": 618,
+  "top1": 529,
+  "shortlist": 621,
   "declined": 167,
-  "note": "Raised by hand, in the commit that earns it. 526 is the round that taught the ranking that a time axis is a fact about the result set rather than a tie to break: 495 -> 526 (+2.11pp), per-row A/B over all 1,470 scored rows, 1,212 unchanged, 91 changed, 0 changed outside the single-time-axis domain the rule names. The denominator is compared for identity, not for a floor: a reading over a different row set is a different question."
+  "note": "Raised by hand, in the commit that earns it. 529 is the reading after the corpus's Question column replaced its Prompt column: every rule reading in this repository had been taken on the whole conversational turn, table inlined, so a cue matched the table's own headers (a column called `Projected share of the population` fired `share`, which names a pie). The product reads 529 (35.99%) on the question and 526 (35.78%) on the turn; the cue table reads 575 (39.12%) on the question and 627 (42.65%) on the turn, so 52 rows of that instrument's margin were the table's words rather than the ask's. The denominator is compared for identity, not for a floor: a reading over a different row set is a different question.",
+  "render": {
+    "rendered": 1286,
+    "failed": 0
+  },
+  "renderNote": "The pixel half, recorded in the round the renderer was built: 1,286 of the 1,470 scored rows reach a PNG (87.48%), 17 are refused because a gauge states a value against a scale this contract does not carry, and 167 are the rows the recommender declines. The floor is the pair (rendered >= 1,286, failed == 0) rather than an accuracy reading: a chart that raised in Python came from this repository own emitter."
 }

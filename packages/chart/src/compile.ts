@@ -111,7 +111,7 @@ export function compileToECharts(ir: ChartIR): EChartsOption {
   if (ir.mark === 'heatmap') {
     const xRef = x as Ref;
     const yRef = yRefs[0] as Ref;
-    const valueRef = (color ?? ir.encoding.size ?? yRef) as Ref;
+    const valueRef = (color ?? ir.encoding.size) as Ref;
     const values = ir.data.map((row) => Number(row[valueRef.field])).filter((value) => Number.isFinite(value));
     option.xAxis = { type: 'category', name: xRef.field, data: [...new Set(ir.data.map((row) => row[xRef.field]))] };
     option.yAxis = { type: 'category', name: yRef.field, data: [...new Set(ir.data.map((row) => row[yRef.field]))] };

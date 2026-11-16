@@ -533,8 +533,8 @@ describe('the corpus rows this command reads', () => {
   it('takes the table the corpus ships, and leaves a row without one empty', () => {
     const inputs = profileInputs({
       rows: [
-        { prompt: 'q', answer: '', code: '', chartType: 'Bar Chart', raw: { 'Table Data': 'A, B\n1, 2' } },
-        { prompt: 'q', answer: '', code: '', chartType: 'Bar Chart', raw: {} },
+        { prompt: 'q', modelPrompt: '', answer: '', code: '', chartType: 'Bar Chart', raw: { 'Table Data': 'A, B\n1, 2' } },
+        { prompt: 'q', modelPrompt: '', answer: '', code: '', chartType: 'Bar Chart', raw: {} },
       ],
     });
     expect(inputs[0]?.tableData).toBe('A, B\n1, 2');

@@ -25,9 +25,24 @@ import { pathToFileURL } from 'node:url';
  * checked before any row is read, which is the only place the mistake can be named.
  */
 
-/** The columns a reading depends on, by the names the file uses. */
+/**
+ * The columns a reading depends on, by the names the file uses.
+ *
+ * `prompt` is the `Question` column, not the `Prompt` column, and that is a correction rather than a
+ * rename. `Prompt` is the whole conversational turn — the table inlined, a role sentence, then the
+ * question — and every rule reading in this repository used to be taken on it. A cue table matched
+ * against that text sees the *columns* as words: a table headed `Projected share of the population`
+ * fires the `share` cue, which names a pie, for a question that never asked for one. The corpus
+ * prices the mistake: on the same 1,470 scored rows the cue table reads **42.65% on `Prompt` and
+ * 39.12% on `Question`** — 52 rows of margin that came from the table rather than from the ask.
+ *
+ * `modelPrompt` keeps the pre-built prompt, because an LLM arm has to send it verbatim: the whole
+ * point of reproducing the reference harness is that our template and their template are not two
+ * variables in one comparison.
+ */
 export const TEXT2VIS_FIELDS = {
-  prompt: 'Prompt',
+  prompt: 'Question',
+  modelPrompt: 'Prompt',
   answer: 'Answer',
   code: 'Visualization Code',
   chartType: 'Chart Type',
@@ -35,8 +50,10 @@ export const TEXT2VIS_FIELDS = {
 
 /** One question, as the corpus states it. */
 export interface Text2VisRow {
-  /** The natural-language question. The one field a reading cannot proceed without. */
+  /** The question on its own, from the `Question` column: the one field a reading cannot proceed without. */
   readonly prompt: string;
+  /** The same question inside the reference prompt, from `Prompt`: what an LLM arm must send verbatim. */
+  readonly modelPrompt: string;
   /** The answer the authors computed, as the file spells it. */
   readonly answer: string;
   /** The reference matplotlib source. Empty when the file has none for this row. */
@@ -160,6 +177,7 @@ export function readText2Vis(text: string): Text2VisCorpus {
     columns,
     rows: rows.map((cells) => ({
       prompt: at(cells, TEXT2VIS_FIELDS.prompt),
+      modelPrompt: at(cells, TEXT2VIS_FIELDS.modelPrompt),
       answer: at(cells, TEXT2VIS_FIELDS.answer),
       code: at(cells, TEXT2VIS_FIELDS.code),
       chartType: at(cells, TEXT2VIS_FIELDS.chartType),
