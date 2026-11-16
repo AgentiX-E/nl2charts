@@ -13110,6 +13110,11 @@ reading printed beside it as the control.
 | reading | cue only | with the result set | delta |
 |---|---:|---:|---:|
 | top-1 | **549 (37.35%)** | **231 (15.71%)** | **−21.64pp** |
+
+*(Overwritten — see *which Text2Vis number is ours*. Both figures belong to the dispatch above; the cue
+table changed afterwards and neither was re-read. Measured today they are 627 and 414, a delta of
+−13.30pp. The table is kept because the round it records is the one that found the defect, and a
+reading that is quietly edited is a reading nobody can audit.)*
 | shortlist | 1,000 (68.03%) | 231 (15.71%) | −52.32pp |
 | declined | — | 555 (37.76%) | — |
 | missed (a mark that cannot cover the label) | — | 684 (46.53%) | — |
@@ -14167,6 +14172,11 @@ all: a reader comparing 28.16% against a competitor's published number is compar
 corpus the competitor was also scored on, and needs to know how much of it is out of reach for a
 reason that has nothing to do with ranking.
 
+**Amended by *which Text2Vis number is ours*.** 28.16% **is** the number the product scores, and this
+census reproduces it exactly; the figure it must not be confused with is the cue table's 42.65%,
+which is the same product with the result set taken away. The paragraph is right that a reader needs
+the population, and it is now right about which number the population belongs to.
+
 ### The SQL side: a dispatch that could not resolve its own effect, and what replaced it
 
 G2 was registered as "combine MAC-SQL's four components into one arm", against a bar of
@@ -14474,3 +14484,124 @@ is not.
 
 The instrument that measures the instrument was the one that was wrong, and it was wrong in the
 direction that reads as success.
+
+## Which Text2Vis number is ours
+
+Three top-1 readings for the chart half appear in this document. Putting them in one table looked
+like a contradiction — 549, 231 and 414 on the same 1,470 rows — and the first explanation written
+here was that they were three different quantities. **That explanation was wrong, and re-running the
+three instruments is what showed it.** They are the same pair of quantities at two moments.
+
+Measured this round, no model call, one CSV:
+
+```
+pnpm bench:text2vis:rule      # cue table alone
+pnpm bench:text2vis:profile   # the shipped entry point
+pnpm bench:text2vis:census    # the same rows, split by why a row missed
+```
+
+| reading | instrument | top-1 | rest |
+| --- | --- | ---: | --- |
+| cue table alone | `rule.ts` (`CHART_CUES`) | **627 (42.65%)** | shortlist 971 (66.05%), declined 210 |
+| the shipped entry point | `profile.ts` (`recommendChart(question, profiles)`) | **414 (28.16%)** | shortlist 477 (32.45%), declined 432, missed 561 |
+| the census | `census.ts` | **414 (28.16%)** | same hit test, reproduced independently |
+
+So **`census` is not a third quantity; it is a second measurement of the entry point, and the two
+agree exactly.** The pair that disagrees is the cue table against the entry point, by **13.30pp**.
+
+The numbers this table replaces were `549` and `231`, read on the dispatch whose table this document
+still carries one screen up. Between that run and this one the cue table changed, and **neither
+figure was overwritten when it did** — so for several rounds this file has published a comparison
+(−21.64pp) between two readings that no longer exist. The old pair and the new one agree on the
+finding and disagree on its size:
+
+| | cue only | entry point | delta |
+| --- | ---: | ---: | ---: |
+| as published | 549 | 231 | −21.64pp |
+| **as measured** | **627** | **414** | **−13.30pp** |
+
+The finding survives: **the shipped recommender is worse than its own cue table when it is given the
+result set**, and it is worse than "always answer bar" (28.57%) by a hair, on the same rows. It is
+the single largest defect on this side of the product, and it is invisible in any single number
+because each instrument looks right on its own.
+
+What to publish is therefore **28.16%**, the entry point's own reading — not 37.35% or 42.65%, which
+measure a component with the data removed, and not 15.71%, which measured a cue table that has since
+changed. **A reading without the date it was taken is a reading about a build that no longer exists**,
+which is the defect this section exists to name.
+
+## Three questions about the leader, and the arithmetic behind each answer
+
+### The corpus is already ours; the judge is not, and it costs two dollars
+
+Text2Vis (EMNLP 2025) ships one CSV of 1,985 rows: the question, the table, the reference matplotlib
+source, and the chart type its authors judged correct. `bench:text2vis:dataset` has downloaded that
+file for several rounds. What this repository does not have is the paper's own metric, which is a
+conjunction over four judgements:
+
+```
+pass = code_executes ∧ answer_matches ∧ readability ≥ 3.5 ∧ chart_correctness ≥ 3.5
+```
+
+The numbers the paper publishes for it: **26%** (GPT-4o, direct), 17% (Gemini 1.5-Flash), 13%
+(Qwen2.5-7B), 10% (DeepSeek-Coder-V2-Lite), rising to **42%** for the paper's actor-critic
+framework. The judge is GPT-4o, at reported agreement with human raters of Pearson > 0.85 and
+Cohen's κ = 0.78, for **about two dollars and five minutes over the whole set**.
+
+So the answer to "why is this product not scored on it" is not that the two are incomparable. It is
+that the bridge was never built, and the bridge is cheap. Its shape is fixed by what this product
+emits: a `ChartIR`, not Python. Two of the four judgements therefore do not apply — `code_executes`
+is vacuously true because no code is emitted, and `answer_matches` belongs to the SQL half — and the
+two that do apply are `chart_correctness` and `readability`. A pass rate assembled from vacuously
+true terms would be a score about a feature this product does not have.
+
+The missing function is one: render a `ChartIR` to a PNG without a browser, then hand the PNG and the
+row to the paper's judge. That reading is registered here as **`text2vis-judge`**: render the shipped
+recommender's choice for every row whose label the contract can draw, judge it on the paper's two
+applicable dimensions, and report the two means with the pass rate *withheld* — because the two
+vacuous terms would inflate it. Its bar is the paper's own pair for the closest system it evaluates,
+and its cost is capped at one judge call a row.
+
+### The register did not contain the system this document cites most
+
+`bench:competitors:intake` exists to answer one question before a round is spent: of the systems
+ahead of us, which can be learned from by *running* it, and which only by *reading* it? Its second
+output is the one the plan consumes — `intakeGaps` compares claims against `pins.json`, so a system
+that is `released` and not pinned is a **task** rather than a conclusion.
+
+OpenSearch-SQL was not in that file. It is cited twenty times in this document — the SQL-Like
+intermediate language, the result-set equality vote (`vote.py`'s `set(tuple(row))`, which
+`resultFingerprint` implements and `vote-cross` runs) and the self-taught CoT triples are all ported
+here — and it is MIT-licensed, 168 stars, first place on BIRD in August 2024, and by its own readme
+training-free. But because it had no row, `released and unpinned` could not name it, and "copy it in
+pieces instead of dispatching it" was a paragraph no machine had read. A reader could not tell that
+paragraph apart from a decision.
+
+It has a row now, at `eaed67e84d8cdeb4187812a9c85528bb03914f7d`, and the two obstacles that the
+paragraph carried are written into it so a dispatch can be argued against them rather than around
+them: value retrieval is an HNSW index over cells and column names, which needs an embedding backend
+this repository currently cannot reach; and its 69.3% was measured on GPT-4o, so a same-endpoint
+comparison has to be re-run on `deepseek-chat` and will not be that number.
+
+### The copy is behind because the parts were bought, not the pipeline
+
+The third question is the one whose answer was already in this document, written one section above
+the decision that ignored it: *a pipeline is not the sum of its levers*. The arithmetic:
+
+| MAC-SQL component | its own reading | decision | why |
+| --- | ---: | --- | --- |
+| value block (`samples-wide`) | +2.02pp for **+74.9% prompt tokens** | refused | unit cost |
+| dense schema (`dense.ts`) | **−5.65pp** | refused | measured negative |
+| decomposer | **−1.1pp** | refused | measured negative |
+| refiner (`inline+repair`) | +0.41pp | **adopted** | the only cheap positive |
+| **sum of the four** | **≈ +0.4pp** | | **the gap was 4.84pp** |
+
+The shipped arm reads 994 = 64.88%; with the two adopted rules (`null-order`, `ground-case-any`) it
+reads 999 = 65.21%; the fourth-candidate arm `select-mixed-rule-intent` reads 998 = 65.14%. MAC-SQL,
+same harness, same endpoint, same model, reads 67.89%. **The gap is 2.68pp**, and every point above
+the pool's 67.30% ceiling has to come from a statement the pool does not contain.
+
+So the correct statement is not that the copy failed. It is that **a budget was read as a finding**:
+four component prices were summed, the sum was compared against a gap that measures a composition,
+and the composition was never run as one arm. The queue entry that follows from this is not another
+component — it is `values` + `repairs` together, once, with the cost stated in advance.

@@ -305,8 +305,13 @@ describe('the file this repository ships', () => {
   );
   const byName = new Map(claims.map((claim) => [claim.system, claim]));
 
-  it('passes its own gate', () => {
-    expect(() => assertIntake(claims, TODAY)).not.toThrow();
+  it('passes its own gate, on the day the gate runs', () => {
+    // Not the fixture's `TODAY`. CI checks this file on the day CI runs, so a frozen date here would
+    // have to be edited every time a claim is refreshed — and that edit is the moment a reader stops
+    // trusting the assertion, because the test would then pass by moving its own reference point.
+    // The constant below still dates the claims the cases construct; this assertion is about the
+    // file this repository ships.
+    expect(() => assertIntake(claims, todayOf(new Date()))).not.toThrow();
   });
 
   it('files AskData as a paper with five mechanisms and no release', () => {
@@ -328,6 +333,49 @@ describe('the file this repository ships', () => {
     expect(copyPlan(byName.get('MAC-SQL') as IntakeClaim)).toBe('run');
     expect(copyPlan(byName.get('CHESS') as IntakeClaim)).toBe('run');
   });
+  // The register is checked against the systems this repository cites, because the defect it was
+  // added for was a disagreement between the file and the prose: `benchmarks.md` named
+  // OpenSearch-SQL twenty times — the SQL-Like intermediate language, the result-set equality vote
+  // and the self-taught CoT triples are all ported here — and the register did not list it.
+  //
+  // That is not a missing row. `intakeGaps` can only report claims the file holds, so "copy it in
+  // pieces rather than dispatch it" was a paragraph no machine had read, and a reader could not
+  // tell that paragraph apart from a decision.
+  const pins = JSON.parse(readFileSync(join(process.cwd(), 'eval/competitors/pins.json'), 'utf8')) as Record<
+    string,
+    { repo: string; commit: string }
+  >;
+  const opens = byName.get('OpenSearch-SQL') as IntakeClaim;
+
+  it('lists the strongest training-free leader as one whose code can be run', () => {
+    expect(opens.status).toBe('released');
+    expect(opens.license).toBe('MIT');
+    // `released` is the only status whose copy plan is `run`, and `run` is the only plan whose
+    // number may be plotted beside a run of this repository.
+    expect(copyPlan(opens)).toBe('run');
+  });
+
+  it('pins a commit and dates the claim, because a branch moves under a number', () => {
+    expect(opens.repo).toBe('OpenSearch-AI/OpenSearch-SQL');
+    expect(opens.commit).toMatch(/^[0-9a-f]{40}$/);
+    expect(opens.checkedAt).toBe('2026-11-16');
+  });
+
+  it('reports it as a task rather than a conclusion until a pin exists', () => {
+    // `released` + `run` + no pin is the one list that turns a claim into work. While the system was
+    // absent from the file, this list could not name it, and its absence read as a settled question.
+    expect(intakeGaps(claims, pins).unpinned).toContain('OpenSearch-SQL');
+  });
+
+  it('records which of its mechanisms are already here, so a dispatch is about the rest', () => {
+    // A `released` row with no mechanism list reads as "nothing was learned from it", which is the
+    // opposite of the case: three of its five are ported. The note carries the two obstacles as
+    // well, because an obstacle that lives only in prose is an obstacle nobody can argue with.
+    expect(opens.mechanisms?.length).toBeGreaterThanOrEqual(4);
+    expect(opens.note).toContain('HNSW');
+    expect(opens.note).toContain('deepseek-chat');
+  });
+
 });
 
 describe('todayOf and the command', () => {
@@ -381,3 +429,4 @@ describe('todayOf and the command', () => {
     expect(intakeGaps([{ ...released, repo: undefined }], {}).unpinned).toEqual(['released-one']);
   });
 });
+

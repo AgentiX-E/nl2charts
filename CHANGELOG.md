@@ -7,6 +7,16 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **OpenSearch-SQL joins the competitor register, which is what makes it a task.** The strongest
+  training-free system on BIRD (69.3% dev, 72.28% test) was cited twenty times in `benchmarks.md` —
+  the SQL-Like intermediate language, the result-set equality vote behind `resultFingerprint` and
+  `vote-cross`, the self-taught CoT triples are all ported here — and it had no row in
+  `eval/competitors/intake.json`. That is not a missing line: `intakeGaps` can only report claims the
+  file holds, so `released and unpinned` never named it, and "copy it in pieces rather than dispatch
+  it" was a paragraph no machine had read. It is registered at `eaed67e8`, MIT, with the two
+  obstacles written into the row so a dispatch can be argued against them: value retrieval is an HNSW
+  index over cells and column names, which needs an embedding backend this repository cannot reach
+  today, and its 69.3% was GPT-4o's, so a same-endpoint number has to be re-run on `deepseek-chat`.
 - **`layoutForSplit`: an artifact is read as the benchmark it says it scored.** The coverage ladder
   was loaded against Mini-Dev's questions file while reading a dev artifact, because `resolveLayout`
   defaults `BIRD_SPLIT` to `minidev` and the reading never consulted the field the artifact has
@@ -437,6 +447,31 @@ cannot be argued with.
   package refuses and why; no chart-quality score moved, and none was measured.
 
 ### Changed
+- **The chart half publishes the entry point's number, and the two it displaced are dated.** Three
+  top-1 readings for Text2Vis appeared in the documentation — 549, 231 and 414 on the same 1,470
+  rows — and the first explanation written for them was that they were three different quantities.
+  Re-running the three instruments showed they are the same pair at two moments: `rule.ts` (cue table
+  alone) reads **627 (42.65%)**, `profile.ts` (the shipped entry point) reads **414 (28.16%)**, and
+  `census.ts` reproduces 414 exactly — so the census is a second measurement of the entry point and
+  not a third quantity, which is the outcome a single hit test is supposed to produce. The pair that
+  disagrees is the cue table against the entry point, by **13.30pp** rather than the 21.64pp this
+  document has been quoting from a dispatch whose two figures were both superseded and neither was
+  overwritten. What the product should publish is **28.16%**; a reading without the date it was taken
+  is a reading about a build that no longer exists.
+- **The competitor register is a gate's configuration, not a reading.** `eval/competitors/intake.json`
+  is read by `bench:competitors:intake`, which spends one file read and no model call; the classifier
+  nevertheless filed it under `eval/` as a harness input, so the push that added the row above would
+  have bought thirteen BIRD arms over 496 questions and three live passes over 210 cases to re-measure
+  a pipeline whose bytes did not change. Fourth entry in that class, and the test pins the boundary
+  from the other side as well: `pins.json` sits beside it and still measures, because a pin is a
+  promise that a run will start.
+ `eval/competitors/intake.json`
+  is read by `bench:competitors:intake`, which spends one file read and no model call; the classifier
+  nevertheless filed it under `eval/` as a harness input, so the push that added the row above would
+  have bought thirteen BIRD arms over 496 questions and three live passes over 210 cases to re-measure
+  a pipeline whose bytes did not change. Fourth entry in that class, and the test pins the boundary
+  from the other side as well: `pins.json` sits beside it and still measures, because a pin is a
+  promise that a run will start.
 - **A case the loaded split cannot find is a problem, not a footnote.** `valuesProblems` reported
   its acceptance as a ratio over the rows that reached a named cause, so an artifact read against the
   wrong benchmark could not fail it. A dropped question now fails the gate and is named before the
@@ -695,6 +730,11 @@ cannot be argued with.
   stays in the catalogue as the ablation reference that closed it.
 
 ### Fixed
+- **A gate test that dated itself.** `the file this repository ships > passes its own gate` called
+  `assertIntake(claims, TODAY)` with a constant frozen at `2026-11-08`, so refreshing a claim failed a
+  test about the shipped file and the fix was to edit the constant — which is the moment a reader
+  stops trusting the assertion, because the reference point moves with the failure. It now runs on
+  `todayOf(new Date())`, the way CI does. Found by the first claim dated after the constant.
 - **A case that never produced a result set no longer claims a verdict.** The five no-answer
   branches (model timeout, guard refusal, empty pool, engine error, unusable reply) each wrote
   `reason: 'values'`, and the arm counter worked around it with `&& run.error === undefined`. Every
