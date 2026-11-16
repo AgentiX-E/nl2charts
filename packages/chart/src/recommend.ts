@@ -285,7 +285,7 @@ export type RecommendableMark =
 export interface Recommendation {
   readonly mark: RecommendableMark;
   /**
-   * Counted points: a structural prior plus three or two per cue that names the mark.
+   * Counted points: a structural prior, a shape bonus, and three or two per cue that names the mark.
    *
    * The second key of the order, not the first: it breaks a tie between marks that an equal number
    * of cues name *first*. Reading it as the whole ranking is a misreading the contract does not
@@ -402,6 +402,35 @@ interface Admission {
   readonly reason: string;
   /** Null when the data fits; otherwise the sentence explaining what is missing. */
   readonly admit: (shape: Shape, options: Resolved) => string | null;
+  /**
+   * A fact about the shape that makes this mark the better fit, paid at a cue's rate.
+   *
+   * `prior` says a mark *can* encode the shape, and two marks that can both encode it score the same
+   * and fall to the preference order — which is a statement about the order of `RECOMMENDABLE_MARKS`,
+   * not about the result set. Bar and line are exactly that pair: both need an axis and a measure,
+   * both score two, and `bar` is first in the list, so **every** question that named neither mark and
+   * had a time axis was answered with a bar. On Text2Vis that is 164 rows labelled `Line` where the
+   * product answered `bar`, and the 47 of them that fired no cue at all are the pure form of it: a
+   * coin flip dressed as a decision.
+   *
+   * What separates the pair is one property of the data, and it is not a weight: a bar over months and
+   * a line over months carry the same numbers, and the line states the interval between them. When the
+   * axis is a time axis the interval is in the result set, so the line is the mark that does not
+   * discard it.
+   *
+   * **Paid in the score, never in the primary key**, because the two keys answer different questions.
+   * The primary key asks what the question *asked for*, and only a phrase asks; the axis does not ask
+   * for a line, it merely fits one best. So the bonus is worth what a phrase that names the mark is
+   * worth — three — and loses to any mark a phrase names outright: a table of daily open and close
+   * prices has a time axis and is still a candlestick, because `volatility` asks for one.
+   *
+   * Narrow by dimension rather than by measure: the bonus is paid when the time axis is *the* axis. A
+   * table of region, month and revenue has an interval in it and has a grouping too, so the marks that
+   * read two categories are admissible there and the product's own evidence — `matrix` names the
+   * heatmap first — is about that table. It is not paid on an ordinal axis either: an ordered list of
+   * stages is a ranking, and a ranking over stages is the funnel or the bar, not a trend.
+   */
+  readonly bonus?: { readonly reason: string; readonly when: (shape: Shape) => boolean };
 }
 
 const ADMISSIONS: readonly Admission[] = [
@@ -414,6 +443,7 @@ const ADMISSIONS: readonly Admission[] = [
   {
     mark: 'line',
     prior: 2,
+    bonus: { reason: 'profile:time-axis', when: (shape) => shape.dims.length === 1 && shape.dims.some((dim) => dim.type === 'temporal') },
     // A line needs an axis to run along and a measure to draw; whether that axis carries its own
     // order is a property of how the line is *drawn*, not of whether it can be. Text2Vis labels 350
     // rows a line or an area over a category axis — `plot these percentages in order of increasing
@@ -589,13 +619,14 @@ function firstClaims(cues: readonly Cue[], mark: RecommendableMark): number {
  * Three keys, in order: **how many cues name the mark first**, then the counted score, then the fixed
  * preference order. The first key is what keeps a mark the question asked for from losing to a mark
  * that only ever arrives second; the second keeps "named once and named by three points' worth of
- * cue" apart from "named once as a fallback"; the third makes two marks that fit equally well rank
- * the same way on every run.
+ * cue" apart from "named once as a fallback", and it is where a fact about the shape is priced; the
+ * third makes two marks that fit equally well rank the same way on every run — and it is the third
+ * key, which is a statement about the order of a list, that used to decide between bar and line.
  *
  * The score is counted in points a reader can reproduce from the reasons: three for the first mark a
- * cue names, two for the rest, plus the structural prior. Nothing is normalised, so `score: 5` means
- * "this result set fits the mark and one cue named it", and a caller can recompute it from the two
- * facts reported alongside.
+ * cue names, two for the rest, plus the structural prior, plus `Admission.bonus`. Nothing is normalised,
+ * so `score: 5` means "this result set fits the mark and one cue named it", and a caller can
+ * recompute it from the facts reported alongside.
  */
 export function recommendChart(
   question: string,
@@ -617,6 +648,12 @@ export function recommendChart(
     const named = cues.filter((cue) => cue.marks.includes(admission.mark));
     const reasons = [admission.reason];
     let score = admission.prior;
+    // The shape's own contribution, paid before the cues so a reader can see the two apart: a fact
+    // about the result set is not a phrase from the question, and only the second can ask for a mark.
+    if (admission.bonus?.when(shape) === true) {
+      score += 3;
+      reasons.push(admission.bonus.reason);
+    }
     for (const cue of named) {
       score += cue.marks.indexOf(admission.mark) === 0 ? 3 : 2;
       reasons.push(`cue:${cue.kind} "${cue.phrase}"`);

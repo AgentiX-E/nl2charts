@@ -237,8 +237,8 @@ describe('recommending a chart from the question and the result set', () => {
   it('scores with counted facts, not a hidden weight', () => {
     const choice = recommendChart('How did revenue trend over time?', profiles(monthly));
     const line = choice.recommendations.find((item) => item.mark === 'line');
-    expect(line?.score).toBe(5);
-    expect(line?.reasons).toEqual(['profile:axis-and-measure', 'cue:trend "trend"']);
+    expect(line?.score).toBe(8);
+    expect(line?.reasons).toEqual(['profile:axis-and-measure', 'profile:time-axis', 'cue:trend "trend"']);
   });
 
   it('is deterministic, including the order of equal scores', () => {
@@ -329,6 +329,55 @@ describe('recommending a chart from the question and the result set', () => {
     // Two cues name the funnel now: the explicit `funnel` in the phrase and the stage vocabulary.
     expect(funnel?.cues).toEqual(['explicit', 'stages']);
     expect(pie?.cues).toEqual([]);
+  });
+});
+
+describe('a tie between bar and line is a fact about the data, not about the list order', () => {
+  it('prefers the line when the axis is a time axis and the question names neither mark', () => {
+    // 'for each month' fires no cue: `trend` needs `by month`, `monthly` or `trend` itself. Both marks
+    // are admissible at the same prior, so this used to fall to the preference order — the answer was
+    // a bar because `bar` is first in `RECOMMENDABLE_MARKS`, which is a fact about the list rather
+    // than about the result set.
+    const choice = recommendChart('Revenue for each month', profiles(monthly));
+    expect(choice.recommendations[0]?.mark).toBe('line');
+    expect(choice.recommendations[0]?.cues).toEqual([]);
+  });
+
+  it('states the time axis as a counted fact, so the score can be recomputed from the reasons', () => {
+    const choice = recommendChart('Revenue for each month', profiles(monthly));
+    const line = choice.recommendations.find((item) => item.mark === 'line');
+    const bar = choice.recommendations.find((item) => item.mark === 'bar');
+    // Two points for fitting the shape, three for the axis being time — what a cue that names the mark
+    // is worth — and none for cues, because the question names neither mark.
+    expect(line?.score).toBe(5);
+    expect(line?.reasons).toEqual(['profile:axis-and-measure', 'profile:time-axis']);
+    // The bar is not refused and it is not penalised: it is simply not the mark the data points at.
+    expect(bar?.score).toBe(2);
+    expect(bar?.reasons).toEqual(['profile:category-axis-and-measure']);
+  });
+
+  it('leaves a nominal axis on the tie-break it had, because nothing there says time', () => {
+    // The bonus is about the axis, not about the line: the same question over a category axis is still
+    // the bar the corpus draws for it, and that case is the one the bonus must not move.
+    const choice = recommendChart('Revenue for each region', profiles(regions));
+    expect(choice.recommendations[0]?.mark).toBe('bar');
+    expect(choice.recommendations[0]?.cues).toEqual([]);
+  });
+
+  it('still gives the bar to a question that names it first, time axis or not', () => {
+    // Naming is the primary key and stays the primary key: `highest` is a ranking question, and a
+    // ranking question over months is a bar whatever the axis is. The bonus is the third key's
+    // currency, so it cannot outrank the first.
+    const choice = recommendChart('Which month has the highest revenue?', profiles(monthly));
+    expect(choice.recommendations[0]?.mark).toBe('bar');
+    expect(choice.recommendations[0]?.cues).toEqual(['ranking']);
+  });
+
+  it('does not pay the bonus to a mark that needs two axes', () => {
+    // A heatmap over a time axis is not a trend: the bonus is stated for the mark whose whole
+    // encoding is the interval, and a mark that reads two categories has no interval to state.
+    const choice = recommendChart('Revenue for each month and region', profiles(matrix));
+    expect(choice.recommendations.find((item) => item.mark === 'heatmap')?.reasons).not.toContain('profile:time-axis');
   });
 });
 

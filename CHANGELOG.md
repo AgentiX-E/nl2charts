@@ -7,6 +7,38 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **`pnpm gate:text2vis` holds the chart reading to a floor.** The recommender's Text2Vis score moved
+  five times in six rounds — 231, 414, 444, 495, 526 — and every move was checked by a human reading a
+  log; nothing refused a run that came back lower. `tools/check-text2vis-baseline.mjs` reads the
+  artifact `pnpm bench:text2vis:profile --artifact` already writes and compares it with
+  `eval/text2vis/baseline.json`: **no tolerance** (the scorer is deterministic over a fixed corpus, so
+  a fall is never noise), the **denominator compared for identity** (a truncated corpus scores a lovely
+  percentage over 300 rows, and that is a different question rather than a worse reading), and **one
+  floor rather than four** — `shortlist` can fall while `top1` rises, and `declined` can rise while
+  `top1` rises when a rule learns to refuse a table it was drawing wrong, so those are printed rather
+  than floored. 8 self-test cases pin the three failures it exists for plus the one it must not
+  invent; it runs as a self-test in `gate:all` and with `--require` in the `text2vis-rule` workflow.
+
+### Changed
+- **A time axis is a fact about the result set, not a tie to break.** Bar and line both need an axis
+  and a measure, both scored two, and `bar` is first in `RECOMMENDABLE_MARKS` — so **every** question
+  that named neither mark and had a time axis was answered with a bar, because the third ranking key
+  (the preference order, which exists for determinism) was deciding accuracy. On Text2Vis `line → bar`
+  was 164 rows, and the 47 of them that fired no cue at all are the pure form: the corpus labels those
+  47 exactly in half, 47 bar and 47 line. A line states the interval between points and a bar does not,
+  so when the axis is a time axis the line's admission now carries a **bonus of three points** — a
+  cue's rate — reported as `profile:time-axis` in `reasons`, so `score` can still be recomputed by
+  hand. Measured on the same 1,470 scored rows: top-1 **495 → 526 (33.67% → 35.78%)**, shortlist
+  560 → **618**, declined unchanged at 167, `Line` 126 → **164** of 391. Two decisions were measured
+  rather than argued: **paid in the score, never in the primary key**, because an ask has to outrank a
+  fit — the first version put the axis in the key and a table of daily open and close prices stopped
+  being a candlestick, since `volatility` *asks* for one; and **three points rather than two**, because
+  two tied with a cue that names the bar second (513 rows, +1.22pp) and three wins those back. The
+  per-row A/B over all 1,470 rows is the evidence that this is a repair: 1,212 answers identical, 91
+  changed, **0 changed outside the single-time-axis domain the rule names**, 38 became hits and 7
+  stopped being hits.
+
+### Added
 - **The Text2Vis instrument reads the one table in nine it could not.** 196 of the corpus's 1,985
   `Table Data` cells are not CSV: they are a JSON object of columns — `{"Year": [2018, 2019], "Coal":
   [1000, 950]}` — because the prompts around them ask for Python and the table was written the way

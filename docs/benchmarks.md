@@ -14209,12 +14209,13 @@ converted refusals into answers, not unreachable labels into reachable ones — 
 section is about remain out of reach for the same reason: the contract has no `area`, `histogram` or
 `violin` series.
 
-**Amended a third time by the object reader** (`## The instrument could not read one table in nine`).
-Today the entry point reads **495 (33.67%) over the 1,470** and **40.15% (495/1,233) over the labels
-the contract can draw**, with the shortlist at **560 (38.10%)** and 167 rows declined. The
-`renderable` denominator is the one thing that did not move across all three amendments, because it
-is a fact about the corpus's labels rather than about the reading: 237 rows name a series this
-contract does not have, and no parser and no admission rule can put them back in reach.
+**Amended a third time by the object reader** (`## The instrument could not read one table in nine`),
+and a fourth by the time-axis claim (`## Bar and line tied, and the list order decided`). Today the
+entry point reads **526 (35.78%) over the 1,470** and **42.66% (526/1,233) over the labels the contract
+can draw**, with the shortlist at **618 (42.04%)** and 167 rows declined. The `renderable` denominator
+is the one thing that did not move across all four amendments, because it is a fact about the
+corpus's labels rather than about the reading: 237 rows name a series this contract does not have, and
+no parser, no admission rule and no ranking key can put them back in reach.
 
 ### The SQL side: a dispatch that could not resolve its own effect, and what replaced it
 
@@ -14542,25 +14543,28 @@ pnpm bench:text2vis:census    # the same rows, split by why a row missed
 | reading | instrument | top-1 | rest |
 | --- | --- | ---: | --- |
 | cue table alone | `rule.ts` (`CHART_CUES`) | **627 (42.65%)** | shortlist 971 (66.05%), declined 210 |
-| the shipped entry point | `profile.ts` (`recommendChart(question, profiles, { rows })`) | **495 (33.67%)** | shortlist 560 (38.10%), declined 167, missed 743 |
-| the census | `census.ts` | **495 (33.67%)** | same hit test, reproduced independently |
+| the shipped entry point | `profile.ts` (`recommendChart(question, profiles, { rows })`) | **526 (35.78%)** | shortlist 618 (42.04%), declined 167, missed 685 |
+| the census | `census.ts` | **526 (35.78%)** | same hit test, reproduced independently |
 
 So **`census` is not a third quantity; it is a second measurement of the entry point, and the two
-agree exactly.** The pair that disagrees is the cue table against the entry point, by **8.98pp**.
+agree exactly.** The pair that disagrees is the cue table against the entry point, by **6.87pp**.
 
-The entry point read 444 (30.20%) when this table was first written and reads 495 (33.67%) now,
-because the instrument learned to read the 196 tables the corpus writes as JSON objects
-(`## The instrument could not read one table in nine` below). The cue table's 627 is unchanged by
-that repair for the same reason it was unchanged by the count measure: the cue table never sees the
-result set, so it can neither be refused by an admission rule nor rescued by a parser.
+The entry point read 444 (30.20%) when this table was first written and reads 526 (35.78%) now, for
+two reasons with two repairs behind them: the instrument learned to read the 196 tables the corpus
+writes as JSON objects (`## The instrument could not read one table in nine` below), and the ranking
+learned that a time axis is a fact about the result set rather than a tie to break
+(`## Bar and line tied, and the list order decided` below). The cue table's 627 is unchanged by both
+for the same reason it was unchanged by the count measure: the cue table never sees the result set, so
+it can neither be refused by an admission rule, nor rescued by a parser, nor re-ranked by a shape.
 
-Both of the entry point's numbers moved in the round that taught it to count (`## A table with no
-measure is charted by counting its rows` below): 414 → **444** on top-1 and 432 → **352** declined.
-They moved again in the round that taught the instrument to read an object-shaped `Table Data`
-(`## The instrument could not read one table in nine` below): 444 → **495** and 352 → **167**. The
-cue table's 627 did not move either time, because the cue table never sees the result set: the
-admission rule it never consults is exactly what the count measure relaxed, and the parser it never
-runs is exactly what the object reader repaired.
+All three of the entry point's moves so far, in one place, because each of them was measured against
+the number before it and none of them was measured against the first:
+
+| round | why it moved | top-1 | declined |
+| --- | --- | ---: | ---: |
+| the count measure | a table with no measure is charted by counting its rows | 414 → **444** | 432 → **352** |
+| the object reader | `Table Data` is a JSON object in 196 rows, not a CSV | 444 → **495** | 352 → **167** |
+| the time-axis claim | a tie between bar and line was being broken by list order | 495 → **526** | 167 (unchanged) |
 
 The numbers this table replaces were `549` and `231`, read on the dispatch whose table this document
 still carries one screen up. Between that run and this one the cue table changed, and **neither
@@ -14573,7 +14577,8 @@ finding and disagree on its size:
 | as published | 549 | 231 | −21.64pp |
 | as measured, before the count measure | 627 | 414 | −13.30pp |
 | as measured, after the count measure | 627 | 444 | −12.45pp |
-| **as measured, after the object reader** | **627** | **495** | **−8.98pp** |
+| as measured, after the object reader | 627 | 495 | −8.98pp |
+| **as measured, after the time-axis claim** | **627** | **526** | **−6.87pp** |
 
 The finding survives: **the shipped recommender is worse than its own cue table when it is given the
 result set.** It is the single largest defect on this side of the product, and it is invisible in any
@@ -14717,6 +14722,103 @@ after this one.
 `name = [` is indistinguishable from a CSV whose header contains `=` and ends in `[`. Six rows
 (0.30%) is not worth a rule that can misread a CSV, so `census` prints them as `header-only` and this
 section records why they stay there.
+
+## Bar and line tied, and the list order decided
+
+The round above ended with two buckets it had made *visible* without making them *right*:
+`declined → gauge` on 17 histogram rows and `declined → bar` on 42 line rows. The registered P0 was
+those 59 rows. Opening them found something larger, and the larger thing was a defect rather than a
+missing rule.
+
+**What the confusion matrix actually said.** `line → bar` was not 42 rows; it was **164** — the 42 were
+the ones the object reader had just moved out of `declined`, and the rest had been there all along,
+counted as ordinary ranking losses in a table that no round had read down far enough. Of those 164,
+**47 fired no cue at all**: no `trend`, no `ranking`, no `share`, nothing. Their answer came from the
+structural prior alone, and there bar and line are both worth **two** — so the answer was decided by
+the third key, the fixed preference order, where `bar` is first because `RECOMMENDABLE_MARKS` begins
+with it. **A tie-break that exists for determinism was deciding accuracy.** The corpus splits those 47
+rows almost exactly in half — 47 labelled `bar`, 47 labelled `line` — which is what a coin flip looks
+like when it is written down.
+
+**The fact that separates the two marks is one property of the shape.** A bar over months and a line
+over months carry the same numbers; the line states the interval between them. When the axis is a time
+axis the interval is in the result set, so the line is the mark that does not discard it. That is a
+statement about the data, and it is now a **bonus of three points** on the line's admission — a cue's
+rate for naming a mark — reported in `reasons` as `profile:time-axis` so the score can still be
+recomputed by hand.
+
+**Paid in the score, never in the primary key**, and that distinction was measured rather than
+assumed. The first version put the time axis into the key — "the data names the line" — and a unit test
+caught what it cost: a table of daily open and close prices has a time axis and is still a candlestick,
+because `volatility` *asks* for one, and an ask has to outrank a fit. The two keys answer different
+questions: the first asks what the question asked for, and only a phrase asks.
+
+**Eight candidate conditions were measured before any code changed**, on the shipped reading, as a
+blind flip (which is the most a condition can win):
+
+| candidate (flip a bar answer to a line) | triggers | wins | losses | net rows | net pp |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `temporal > 0` | 176 | 59 | 27 | **+32** | +2.18 |
+| `temporal > 0 & dims = 1` | 155 | 55 | 22 | **+33** | +2.24 |
+| `temporal > 0 & dims = 1 & measures = 1` | 93 | 42 | 17 | +25 | +1.70 |
+| `ordered > 0 & dims = 1 & measures = 1` | 94 | 42 | 18 | +24 | +1.63 |
+| `temporal > 0 & no cue` | 54 | 22 | 4 | +18 | +1.22 |
+| `no cue & dims = 1 & measures = 1` | 94 | 32 | 14 | +18 | +1.22 |
+| `temporal > 0 & dims = 1 & measures = 1 & no bar-first cue` | 78 | 32 | 15 | +17 | +1.16 |
+
+The condition that shipped is the second one narrowed to *the* axis (`dims = 1`): a table of region,
+month and revenue has an interval in it and a grouping too, so a mark that reads two categories is
+admissible there and the product's own evidence — `matrix` names the heatmap first — is about that
+table. The gain over `temporal > 0` is one row, and the narrowing is worth stating anyway: it is the
+difference between a rule about a shape and a rule about a column.
+
+**The bonus is worth three and not two, and the difference was measured.** Two points tied with a cue
+that names the bar *second*, so a `share` question over a month axis kept its bar: **513 rows
+(+1.22pp)**. Three points — a cue's rate — wins those back: **526 rows (+2.11pp)**. Both numbers are
+recorded because the choice looks like tuning and is not: an ask and a fit are different evidence, and
+the currency of the ledger is what a naming is worth.
+
+**The per-row A/B, which is what makes this a fix rather than a re-tune.** Old and new ranking over all
+1,470 scored rows:
+
+| | rows |
+| --- | ---: |
+| answer identical | 1,212 |
+| answer changed | 91 |
+| changed **outside** the single-time-axis domain the rule names | **0** |
+| became a hit | 38 |
+| stopped being a hit | 7 |
+| Δ | **+31** |
+
+`bar → line` accounts for 88 of the 91 changes, `candlestick → line` for 2 and `boxplot → line` for 1.
+The 7 losses are the price: a bar over a time axis that the corpus calls a bar, and two candlestick
+tables whose five measures made the candlestick win on the score alone. Every one of them is inside the
+domain, which is the honest form of the claim — the rule was not silently changing anything it does not
+mention.
+
+**Read column by column, the reading moved where the defect was.** `Line` went 126 → **164** of 391
+(32.23% → 41.94%) and `Bar` went 223 → **220** of 357. Shortlist 560 → 618, because an area chart
+answered with a line is a shortlist hit and was already one, and a bar answered with a line is not.
+
+### The reading now has a floor
+
+Five readings in six rounds — 231, 414, 444, 495, 526 — and every one of them was checked by a human
+reading a log. Nothing refused a run that came back lower. The scorer is deterministic over a fixed
+corpus, so **a fall is never noise**, and `tools/check-text2vis-baseline.mjs` now compares the artifact
+`pnpm bench:text2vis:profile --artifact` writes against `eval/text2vis/baseline.json`:
+
+- **No tolerance.** Same corpus, same code, same count; a tolerance would be a licence to lose its own
+  amount every round.
+- **The denominator is compared for identity, not for a floor.** A corpus that came back truncated
+  scores a lovely percentage over 300 rows, and the identity check is the only place that difference
+  can be named — a reading over a different row set is not a worse reading, it is a different question.
+- **One floor, not four.** `shortlist` can fall while `top1` rises and `declined` can rise while `top1`
+  rises (a rule that learns to refuse a table it was drawing wrong). Floors on those would forbid the
+  improvements they exist to protect, so they are printed instead.
+- **Raised by hand, in the commit that earns it**, and `--self-test` pins the three failures it exists
+  for plus the one it must not invent (8 cases). It runs in `gate:all` as a self-test and in the
+  `text2vis-rule` workflow with `--require`, where a missing report is a broken chain rather than a
+  machine without the corpus.
 
 ## Three questions about the leader, and the arithmetic behind each answer
 

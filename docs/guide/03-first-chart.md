@@ -186,6 +186,15 @@ Two properties make the answer auditable rather than persuasive:
   what the result set lacks — `a boxplot reads five numbers per row and this
   result has 1` — so a caller that prefers another mark knows what would have to
   change, and a wrong choice has a trace instead of a mystery.
+- **The data can outrank the list order, not the question.** A bar over months and
+  a line over months carry the same numbers, and only the line states the interval
+  between them, so when the axis is a time axis the line is paid a bonus of three —
+  a cue's rate — reported as `profile:time-axis`. It is paid in the score, never in
+  the primary key, so a question that *names* a mark still gets it: `Daily open and
+  close prices` has a time axis and is still a candlestick, because `volatility`
+  asks for one. Before this, bar and line scored the same and the tie fell to the
+  order of the mark list, which meant the answer to `Revenue for each month` was a
+  bar because `bar` happens to be listed first.
 
 Seven marks can be chosen this way on top of the original five: funnel, boxplot,
 candlestick, radar, parallel, gauge, and pie over a twelve-slice limit. The set
@@ -219,12 +228,19 @@ encode, and names the columns it saw.
 > for is excluded from the score and **named in the log** rather than folded into
 > `bar`.
 >
-> What that leaves unmeasured is stated in the module rather than implied here:
-> whether the right mark is drawn with the right fields and aggregate (that needs
-> the corpus's tables), the recommender's data-shape half (with no result set only
-> the cue half can run), and whether any single label is more than one annotator's
-> judgement. The tests pin the rule table against a named fixture, and that
-> fixture is a regression corpus, not a benchmark.
+> The other half is `pnpm bench:text2vis:profile`, which scores the shipped entry
+> point with the corpus's own result set in front of it — no model, no database,
+> no renderer, because the corpus ships the table. That reading is
+> **526 of 1,470 (35.78%)** and it is held by a floor: `pnpm gate:text2vis` fails a
+> run that comes back lower, and fails one that comes back over a different number
+> of rows, because the scorer is deterministic and a fall is therefore never noise.
+>
+> What that still leaves unmeasured is stated in the module rather than implied
+> here: whether the right mark is drawn with the right fields and aggregate (that
+> needs a rendered comparison, which needs a renderer), and whether any single
+> label is more than one annotator's judgement. The tests pin the rule table
+> against a named fixture, and that fixture is a regression corpus, not a
+> benchmark.
 
 ## 3. Build the IR
 

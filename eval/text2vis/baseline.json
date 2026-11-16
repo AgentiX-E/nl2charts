@@ -1,0 +1,10 @@
+{
+  "instrument": "eval/text2vis/profile.ts",
+  "corpus": "Text2Vis.csv (mizanurr/Text2Vis, 1,985 rows, 1,470 scored after unmapped labels)",
+  "recordedAt": "2026-11-16",
+  "scored": 1470,
+  "top1": 526,
+  "shortlist": 618,
+  "declined": 167,
+  "note": "Raised by hand, in the commit that earns it. 526 is the round that taught the ranking that a time axis is a fact about the result set rather than a tie to break: 495 -> 526 (+2.11pp), per-row A/B over all 1,470 scored rows, 1,212 unchanged, 91 changed, 0 changed outside the single-time-axis domain the rule names. The denominator is compared for identity, not for a floor: a reading over a different row set is a different question."
+}

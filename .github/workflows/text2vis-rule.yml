@@ -70,6 +70,13 @@ jobs:
       - name: Score the recommender with the result set in front of it
         run: pnpm bench:text2vis:profile --artifact eval/out/text2vis-profile.json
 
+      # The floor. Every move this reading has made so far was checked by a human reading a log, and
+      # nothing refused a run that came back lower: the scorer is deterministic over a fixed corpus,
+      # so a fall is never noise. `--require` because the step above writes this file: a missing report
+      # here is a broken chain rather than a machine without the corpus.
+      - name: Hold the recommender to its floor
+        run: node tools/check-text2vis-baseline.mjs --require
+
       # The next question after "15.71%" is "which rule said no", and the answer is a count per
       # outcome: a mark refused by an admission rule, a mark admitted and outranked, a family no mark
       # covers, and a table that would not profile. Zero model calls — the corpus ships its tables.
