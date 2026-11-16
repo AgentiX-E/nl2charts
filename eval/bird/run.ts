@@ -5284,13 +5284,14 @@ export interface BirdLayout {
  */
 const HARNESS = resolve(new URL('.', import.meta.url).pathname);
 
+/** The directory a split ships in, which is what tells a pinned dataset from a defaulted one. */
+function canonicalData(split: BirdSplit, root: string): string {
+  return split === 'dev' ? join(root, 'eval/.cache/bird/dev/dev_20240627') : join(root, 'eval/.cache/bird/minidev/MINIDEV');
+}
+
 export function resolveLayout(env: Readonly<Record<string, string | undefined>>, root: string): BirdLayout {
   const split = (env.BIRD_SPLIT ?? 'minidev') as BirdSplit;
-  const data =
-    env.BIRD_DATA ??
-    (split === 'dev'
-      ? join(root, 'eval/.cache/bird/dev/dev_20240627')
-      : join(root, 'eval/.cache/bird/minidev/MINIDEV'));
+  const data = env.BIRD_DATA ?? canonicalData(split, root);
   return {
     root,
     split,
@@ -5323,6 +5324,52 @@ export function resolveLayout(env: Readonly<Record<string, string | undefined>>,
     definitionsFile: join(root, 'eval/baseline/definitions.minidev.json'),
     oracleScript: join(HARNESS, 'oracle.py'),
     out: env.BIRD_OUT ?? join(root, 'eval/out/bird-eval.json'),
+  };
+}
+
+/**
+ * The layout an artifact's own split names.
+ *
+ * An instrument that reads a written artifact is handed two statements about the same
+ * measurement: the artifact says which benchmark it scored, and the caller's environment says
+ * which benchmark the caller meant. `resolveLayout` defaults to Mini-Dev, so re-running a dev
+ * reading without `BIRD_SPLIT=dev` reads Mini-Dev's questions file — and the failure is silent,
+ * because both splits number their questions from zero. The ids that exist in both are looked up
+ * successfully and classified against another benchmark's gold statement; the ids that do not
+ * exist are dropped. On this repository's dev artifact that was 313 dropped and 170 misread out
+ * of 483, printed as `98.8% classified`, since the coverage denominator counted only the rows
+ * that had already survived the mistake.
+ *
+ * The artifact wins, because it is the record of what was measured. Pinning `BIRD_DATA` is a
+ * statement about *these files* rather than about a split — a harness may sit outside the
+ * repository — so a pinned directory stays pinned and the split only chooses the file name
+ * inside it. Everything else is left alone: a name that is not a split is a field this reader
+ * does not understand, and inventing a layout from it would be worse than ignoring it.
+ */
+export function layoutForSplit(split: string | undefined, layout: BirdLayout, root: string): BirdLayout {
+  const named = split === 'dev' || split === 'minidev' ? split : undefined;
+  // Identity, not a copy: a layout rebuilt on every call would re-derive paths the caller pinned,
+  // and no reading would show that it had.
+  if (named === undefined || named === layout.split) return layout;
+  // A dataset directory that is not the one this split ships in was named by the caller, and a
+  // caller names a directory to say *these files*. The split then only chooses the file name
+  // inside it. Re-resolving from the environment instead takes the directory from whatever
+  // `BIRD_DATA` holds at that moment — which is not necessarily what the caller passed, since a
+  // harness is handed its environment rather than reading the process's — and the reading that
+  // comes back is of the repository's corpus while the caller believes its own is under test.
+  const target = resolveLayout({ BIRD_SPLIT: named }, root);
+  // Where an artifact is written is the caller's, not a property of the split.
+  if (layout.data === canonicalData(layout.split as BirdSplit, root)) return { ...target, out: layout.out };
+  // The files follow the caller's directory; everything else about the layout (the harness script,
+  // the train file) is the same for both splits and comes from the resolved one.
+  return {
+    ...target,
+    data: layout.data,
+    questionsFile: join(layout.data, named === 'dev' ? 'dev.json' : 'mini_dev_sqlite.json'),
+    tablesFile: join(layout.data, 'dev_tables.json'),
+    databaseRoot: layout.databaseRoot,
+    descriptionsRoot: layout.descriptionsRoot,
+    out: layout.out,
   };
 }
 

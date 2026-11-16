@@ -32,7 +32,7 @@ import { pathToFileURL } from 'node:url';
 import { loadQuestions } from './data.js';
 import type { GapReportShape } from './gap.js';
 import { SHIPPED_ARM, requireArm } from './presence.js';
-import { resolveLayout } from './run.js';
+import { layoutForSplit, resolveLayout } from './run.js';
 import type { BirdLayout } from './run.js';
 import { statementShape } from './sql-shape.js';
 
@@ -450,7 +450,10 @@ export function ladderBuckets(body: unknown): Map<string, string> {
 
 export function runConditions(settings: ConditionSettings): ConditionOutcome {
   const report = JSON.parse(readFileSync(settings.report, 'utf8')) as GapReportShape;
-  const questions = loadQuestions(settings.layout.questionsFile);
+  // The artifact names the split it scored; the layout names the one the environment defaults
+  // to. Reading the first against the second's questions file is silent — see `layoutForSplit`.
+  const layout = layoutForSplit(report.split, settings.layout, settings.layout.root);
+  const questions = loadQuestions(layout.questionsFile);
   const byId = new Map(questions.map((question) => [String(question.question_id), question]));
   const cases = requireArm(report.cases, settings.arm, settings.report).filter((row) => row.arm === settings.arm);
   const statements = new Map((report.failures?.[settings.arm] ?? []).map((entry) => [String(entry.id), entry]));
@@ -492,7 +495,7 @@ export function runConditions(settings: ConditionSettings): ConditionOutcome {
   }
   const tally = tallyConditions(rows);
   return {
-    split: settings.layout.split,
+    split: layout.split,
     arm: settings.arm,
     scored: cases.length,
     rows,

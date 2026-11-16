@@ -7,6 +7,24 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **`layoutForSplit`: an artifact is read as the benchmark it says it scored.** The coverage ladder
+  was loaded against Mini-Dev's questions file while reading a dev artifact, because `resolveLayout`
+  defaults `BIRD_SPLIT` to `minidev` and the reading never consulted the field the artifact has
+  carried since it was added. Both splits number their questions from zero, so 313 of 483 no-answer
+  cases were dropped as unknown and the other 170 were looked up **successfully** and classified
+  against a different benchmark's gold statements, on Mini-Dev's copy of a database of the same name.
+  Nothing errored: a wrong id is a drop, a shared id is a reading. The gate could not see it either —
+  `valuesProblems` stated its criterion as a share of the rows that survived, so losing 313 cases
+  *raised* the number it printed, 98.8% over 170 rows against the true 99.6% over 483. Four
+  instruments carried a hand-written copy of "the artifact wins", and three of them re-resolved with
+  the caller's directory pinned as `BIRD_DATA`, which asks for `dev.json` inside the Mini-Dev
+  directory; ten more loaded questions without consulting the artifact at all. One function, fourteen
+  callers, and the artifact wins. No published score moved — `bird-dev.yml` sets `BIRD_SPLIT: dev`
+  job-wide — but the previous round's work queue was derived from the wrong reading and is replaced.
+- **`artifactSplit`, so the oracle's databases follow the split too.** `bench:bird:agents` and
+  `bench:bird:differential` build the oracle before they parse the artifact, which is when the
+  split's database directory is chosen; reading the field on its own is one predicate in one place
+  rather than a second parse per tool.
 - **`bench:bird:rules`: the free-rule space, priced in one reading.** The fourth candidate left a
   question sharper than the one it answered — 2.02pp of ceiling sits in the intent pool and
   `shortest` converts 92.92% of it — and the obvious way to answer it was an arm, 1,532 questions
@@ -419,6 +437,17 @@ cannot be argued with.
   package refuses and why; no chart-quality score moved, and none was measured.
 
 ### Changed
+- **A case the loaded split cannot find is a problem, not a footnote.** `valuesProblems` reported
+  its acceptance as a ratio over the rows that reached a named cause, so an artifact read against the
+  wrong benchmark could not fail it. A dropped question now fails the gate and is named before the
+  ratio, because it is the reason the ratio is the one it is: `--strict` on a dev artifact under the
+  default split exits non-zero instead of publishing a confident number about a fifth of the set.
+- **The coverage ledger is a gate's configuration.** `eval/coverage-ledger.json` is the per-file
+  record `check-eval-coverage` compares against; it lives under `eval/`, so a classifier written as a
+  list of root files read it as a reading and a push that only moves a number in it bought thirteen
+  BIRD arms over 496 questions and three live passes over 210 cases. Third entry in that class, and
+  the test that pins the boundary asserts the class stops there — an instrument under the same tree
+  still measures.
 - **`consensus.eligibleIndices` is exported, because it is the predicate every rule shares.** The
   rule harness refuses to restate which candidates a rule may choose among: "the ones that returned
   something" decides every score in both files, and a second copy of it is a second answer to the

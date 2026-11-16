@@ -36,12 +36,13 @@ import type { SchemaTable } from '@agentix-e/nl2charts-ai';
 import { buildSchema, loadQuestions, loadTables } from './data.js';
 import type { BirdTable } from './data.js';
 import type { CaseRecord } from './gap.js';
+import { artifactSplit } from './artifact.js';
 import { INFO_CLASSES, classifyInformation, promptForCase } from './information.js';
 import type { InfoClass } from './information.js';
 import { createOracle } from './oracle.js';
 import type { Oracle } from './oracle.js';
 import { BIRD_CARD, BIRD_SCHEMA_LINES } from './prompt-shape.js';
-import { resolveArm, resolveLayout } from './run.js';
+import { layoutForSplit, resolveArm, resolveLayout } from './run.js';
 import type { Arm, BirdLayout } from './run.js';
 import { literalSites } from './statement.js';
 import { exampleMapOf, exampleSetFor } from './value-examples.js';
@@ -183,7 +184,10 @@ export async function runDifferential(settings: DifferentialSettings, oracle: Or
     cases?: readonly CaseRecord[];
     controls?: { readonly synthesizedDefinitions?: Readonly<Record<string, string>> };
   };
-  const questions = loadQuestions(settings.layout.questionsFile);
+  // The artifact names the split it scored; the layout names the one the environment defaults
+  // to. Reading the first against the second's questions file is silent — see `layoutForSplit`.
+  const layout = layoutForSplit(report.split, settings.layout, settings.layout.root);
+  const questions = loadQuestions(layout.questionsFile);
   const tables = loadTables(settings.layout.tablesFile);
   const byId = new Map(questions.map((question) => [String(question.question_id), question]));
   const definitions = report.controls?.synthesizedDefinitions ?? {};
@@ -289,7 +293,7 @@ export async function runDifferential(settings: DifferentialSettings, oracle: Or
     })(),
   };
   const problems = differentialProblems({ tally, drops, arm: settings.arm });
-  return { split: settings.layout.split, arm: settings.arm, rows, tally, cost: priced, drops, problems };
+  return { split: layout.split, arm: settings.arm, rows, tally, cost: priced, drops, problems };
 }
 
 export function tallyDifferential(rows: readonly DifferentialRow[]): DifferentialTally {
@@ -433,7 +437,10 @@ export async function main(
   env: Record<string, string | undefined> = process.env,
 ): Promise<number> {
   const settings = resolveDifferentialSettings(env, argv, root);
-  const oracle = createOracle(resolvePath(root, 'eval/bird/oracle.py'), settings.layout.databaseRoot);
+  // The oracle's databases belong to the split the artifact scored, which `main` has to know
+  // before handing the oracle over; see `artifactSplit`.
+  const layout = layoutForSplit(artifactSplit(settings.report), settings.layout, settings.layout.root);
+  const oracle = createOracle(resolvePath(root, 'eval/bird/oracle.py'), layout.databaseRoot);
   try {
     const outcome = await runDifferential(settings, oracle);
     for (const line of differentialLines(outcome)) console.log(line);

@@ -178,7 +178,20 @@ describe('a change set that only edits a gate\'s own configuration', () => {
     expect(result.reason).toContain('never skips');
   });
 
-  it('names two files rather than a suffix, so a new root file has to be argued for', () => {
+  it('counts the coverage ledger as one of them, because only the gate opens it', () => {
+    // The fourth round in a row that changed nothing a prompt reads and bought the whole chain did
+    // it here: `eval/coverage-ledger.json` is the per-file record `tools/check-eval-coverage.mjs`
+    // compares against, and it lives under `eval/` — so the classifier read it as a reading. It is
+    // a number the gate holds, in the same sense `budgets.json` is a ceiling the gate holds.
+    expect(isToolConfig('eval/coverage-ledger.json')).toBe(true);
+    expect(needsModel(['eval/coverage-ledger.json']).measure).toBe(false);
+    // The class stops at the ledger: an instrument under the same tree is not configuration, and a
+    // rule written as "anything under `eval/`" would exempt the harness itself.
+    expect(isToolConfig('eval/bird/rules.ts')).toBe(false);
+    expect(needsModel(['eval/bird/rules.ts']).measure).toBe(true);
+  });
+
+  it('names three files rather than a suffix, so a new root file has to be argued for', () => {
     expect(isToolConfig('budgets.json')).toBe(true);
     expect(isToolConfig('api-surface.json')).toBe(true);
     // `package.json` changes what runs and what is installed, not what a ceiling is, and a change

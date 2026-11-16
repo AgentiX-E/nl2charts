@@ -48,7 +48,7 @@ import { loadDescriptions, loadQuestions, loadTables } from './data.js';
 import type { BirdQuestion, BirdTable, ColumnNote } from './data.js';
 import type { CaseRecord } from './gap.js';
 import { SHIPPED_ARM, requireArm } from './presence.js';
-import { promptFor, renderableArm, resolveArm, resolveLayout } from './run.js';
+import { layoutForSplit, promptFor, renderableArm, resolveArm, resolveLayout } from './run.js';
 import { definesOwnName, tableRefs } from './statement.js';
 import type { Arm, BirdLayout } from './run.js';
 
@@ -407,12 +407,15 @@ export function graphsOf(tables: ReadonlyMap<string, BirdTable>): Record<EdgeSou
 
 export async function runJoin(settings: JoinSettings): Promise<JoinOutcome> {
   const report = JSON.parse(readFileSync(settings.report, 'utf8')) as JoinReportShape;
+  // The artifact names the split it scored; the layout names the one the environment defaults
+  // to. Reading the first against the second's questions file is silent — see `layoutForSplit`.
+  const layout = layoutForSplit(report.split, settings.layout, settings.layout.root);
 
   const arm = resolveArm(settings.arm);
   // An arm that carries stored values on its card is rendered with them here too, or this
   // instrument would price the parent's card under the arm's name.
   const valuesFor = arm === undefined ? () => undefined : blockReader(arm, settings.layout);
-  const questions = loadQuestions(settings.layout.questionsFile);
+  const questions = loadQuestions(layout.questionsFile);
   const tables = loadTables(settings.layout.tablesFile);
   const byId = new Map(questions.map((question) => [String(question.question_id), question]));
   const definitions = report.controls?.synthesizedDefinitions ?? {};
@@ -494,7 +497,7 @@ export async function runJoin(settings: JoinSettings): Promise<JoinOutcome> {
     unrenderable: drops.unrenderable + drops.unknownArm + drops.definitionGap,
     graphDefects,
   });
-  return { split: settings.layout.split, arm: settings.arm, cases, tally, drops, problems };
+  return { split: layout.split, arm: settings.arm, cases, tally, drops, problems };
 }
 
 export function joinPath(settings: JoinSettings): string {

@@ -19,6 +19,8 @@
  *   is the second line of defence rather than the only one.
  */
 
+import { readFileSync } from 'node:fs';
+
 /** The one field an arm row carries when, and only when, it sampled more than one candidate. */
 export interface CandidateClaimingArm {
   readonly candidateRecall?: unknown;
@@ -52,4 +54,24 @@ export function scoredQuestions(cases: readonly { readonly id?: unknown }[] | un
   const ids = new Set<string>();
   for (const row of cases ?? []) if (row.id !== undefined) ids.add(String(row.id));
   return ids.size;
+}
+
+/**
+ * The split an artifact declares, read without parsing the whole file into a type.
+ *
+ * `main` needs one field — which benchmark the run scored — before it can build the oracle, which
+ * needs the split's database directory. The instruments read it from the object they already
+ * parsed; the two that build an oracle first read it here. One predicate, so the rule "the artifact
+ * names the split" has one statement in the repository rather than one per tool.
+ *
+ * An unreadable file answers `undefined`, which is the same answer a file without the field gives:
+ * the caller's layout is used unchanged, and the run fails later on the artifact it cannot read.
+ */
+export function artifactSplit(file: string): string | undefined {
+  try {
+    const body = JSON.parse(readFileSync(file, 'utf8')) as { split?: unknown };
+    return typeof body.split === 'string' ? body.split : undefined;
+  } catch {
+    return undefined;
+  }
 }

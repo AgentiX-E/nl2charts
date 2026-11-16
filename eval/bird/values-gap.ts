@@ -49,7 +49,7 @@ import { caseMismatchedLiterals, classifyFailureShape, missingValueLiterals } fr
 import type { FailureShape } from './failure-shape.js';
 import { createOracle } from './oracle.js';
 import { SHIPPED_ARM, requireArm } from './presence.js';
-import { resolveLayout } from './run.js';
+import { layoutForSplit, resolveLayout } from './run.js';
 import type { BirdLayout } from './run.js';
 import type { GapReportShape } from './gap.js';
 import { predicateKeys, statementShape, withoutWindow } from './sql-shape.js';
@@ -192,6 +192,16 @@ export function tallyValues(rows: readonly ValuesBucket[]): ValuesTally {
  */
 export function valuesProblems(tally: ValuesTally, minimumCoverage = 0.8, drops: ValuesDrops = NO_VALUE_DROPS): string[] {
   const problems: string[] = [];
+  // First, because it is the reason for everything after it. A case whose question the loaded
+  // split does not hold was read against the wrong benchmark, or not read at all — and the
+  // coverage criterion below cannot see it, because `tally` counts the rows that survived. On
+  // this repository's dev artifact 313 of 483 cases were dropped this way while the tool printed
+  // 98.8%: a denominator that shrinks when the instrument fails is not a denominator.
+  if (drops.unknownQuestion > 0) {
+    problems.push(
+      `VGAP: ${String(drops.unknownQuestion)} no-answer cases name a question the loaded split does not hold, so the artifact and the questions file are different benchmarks — check BIRD_SPLIT against the split the artifact declares`,
+    );
+  }
   if (tally.total === 0) {
     // Two states that read the same in a ratio and mean opposite things: nothing was retained,
     // or everything retained was outside the scope the caller asked for. Naming the second one
@@ -343,7 +353,10 @@ export interface ValuesOutcome {
 export async function runValuesGap(settings: ValuesGapSettings): Promise<ValuesOutcome> {
   const report = JSON.parse(readFileSync(settings.report, 'utf8')) as GapReportShape;
 
-  const questions = loadQuestions(settings.layout.questionsFile);
+  // The artifact says which benchmark it scored; the environment says which one the caller meant.
+  // Reading the first against the second's questions file is silent — see `layoutForSplit`.
+  const layout = layoutForSplit(report.split, settings.layout, settings.layout.root);
+  const questions = loadQuestions(layout.questionsFile);
   const byId = new Map(questions.map((question) => [String(question.question_id), question]));
   const statements = new Map((report.failures?.[settings.arm] ?? []).map((entry) => [String(entry.id), entry]));
   const scoped = requireArm(report.cases, settings.arm, settings.report).filter((row) => row.arm === settings.arm);
@@ -358,7 +371,8 @@ export async function runValuesGap(settings: ValuesGapSettings): Promise<ValuesO
     engineRefused: 0,
     goldFailed: 0,
   };
-  const oracle = createOracle(settings.layout.oracleScript, settings.layout.databaseRoot);
+  // The databases follow the split the artifact named, not the one the environment defaulted to.
+  const oracle = createOracle(layout.oracleScript, layout.databaseRoot);
   const gold = new Map<string, Awaited<ReturnType<typeof oracle.run>>>();
   try {
     for (const row of scored) {
@@ -408,7 +422,7 @@ export async function runValuesGap(settings: ValuesGapSettings): Promise<ValuesO
   // reporting something the split cannot see — and that is worth failing a gate over.
   const problems = noAnswer.length === 0 ? [] : valuesProblems(tally, 0.8, drops);
   const outcome: ValuesOutcome = {
-    split: settings.layout.split,
+    split: layout.split,
     arm: settings.arm,
     scope: settings.scope,
     population,

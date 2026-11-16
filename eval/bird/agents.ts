@@ -44,13 +44,14 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { artifactSplit } from './artifact.js';
 import { loadQuestions, loadTables } from './data.js';
 import type { BirdTable } from './data.js';
 import type { CaseRecord } from './gap.js';
 import { promptForCase } from './information.js';
 import { createOracle } from './oracle.js';
 import type { Oracle, OracleResult } from './oracle.js';
-import { resolveArm, resolveLayout } from './run.js';
+import { layoutForSplit, resolveArm, resolveLayout } from './run.js';
 import type { Arm, BirdLayout } from './run.js';
 
 /** Which pin the predicates below were read from. */
@@ -227,7 +228,10 @@ export async function runAgents(settings: AgentsSettings, oracle: Oracle): Promi
     failureSample?: { readonly truncated?: readonly string[] };
     controls?: { readonly synthesizedDefinitions?: Readonly<Record<string, string>> };
   };
-  const questions = loadQuestions(settings.layout.questionsFile);
+  // The artifact names the split it scored; the layout names the one the environment defaults
+  // to. Reading the first against the second's questions file is silent — see `layoutForSplit`.
+  const layout = layoutForSplit(report.split, settings.layout, settings.layout.root);
+  const questions = loadQuestions(layout.questionsFile);
   const tables = loadTables(settings.layout.tablesFile);
   const byId = new Map<string, (typeof questions)[number]>();
   for (const question of questions) byId.set(String(question.question_id), question);
@@ -445,7 +449,10 @@ export async function main(
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): Promise<number> {
   const settings = resolveAgentsSettings(env, argv, root);
-  const oracle = createOracle(join(root, 'eval/bird/oracle.py'), settings.layout.databaseRoot);
+  // The oracle's databases belong to the split the artifact scored, which `main` has to know
+  // before handing the oracle over; see `artifactSplit`.
+  const layout = layoutForSplit(artifactSplit(settings.report), settings.layout, settings.layout.root);
+  const oracle = createOracle(join(root, 'eval/bird/oracle.py'), layout.databaseRoot);
   try {
     const outcome = await runAgents(settings, oracle);
     for (const line of agentsLines(outcome)) console.log(line);

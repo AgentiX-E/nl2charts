@@ -40,7 +40,7 @@ import type { GapReportShape } from './gap.js';
 import { createOracle } from './oracle.js';
 import type { OracleResult } from './oracle.js';
 import { SHIPPED_ARM, requireArm } from './presence.js';
-import { resolveLayout } from './run.js';
+import { layoutForSplit, resolveLayout } from './run.js';
 import type { BirdLayout } from './run.js';
 
 /** Where the select list starts and ends inside a statement, as offsets into its text. */
@@ -350,7 +350,10 @@ export function missingItems(gold: SelectList | undefined, predicted: string): s
  */
 export async function runWidth(settings: WidthSettings): Promise<WidthOutcome> {
   const report = JSON.parse(readFileSync(settings.report, 'utf8')) as GapReportShape;
-  const questions = loadQuestions(settings.layout.questionsFile);
+  // The artifact names the split it scored; the layout names the one the environment defaults
+  // to. Reading the first against the second's questions file is silent — see `layoutForSplit`.
+  const layout = layoutForSplit(report.split, settings.layout, settings.layout.root);
+  const questions = loadQuestions(layout.questionsFile);
   const byId = new Map(questions.map((question) => [String(question.question_id), question]));
   const cases = requireArm(report.cases, settings.arm, settings.report).filter((row) => row.arm === settings.arm);
   const statements = new Map((report.failures?.[settings.arm] ?? []).map((entry) => [String(entry.id), entry]));
@@ -358,7 +361,7 @@ export async function runWidth(settings: WidthSettings): Promise<WidthOutcome> {
   const filed = cases.filter((row) => row.reason === 'column-count');
   const rows: WidthRow[] = [];
   const drops = { unknownQuestion: 0, unretained: 0, engineRefused: 0, goldFailed: 0 };
-  const oracle = createOracle(settings.layout.oracleScript, settings.layout.databaseRoot);
+  const oracle = createOracle(settings.layout.oracleScript, layout.databaseRoot);
   const gold = new Map<string, OracleResult>();
   try {
     for (const row of filed) {
@@ -416,7 +419,7 @@ export async function runWidth(settings: WidthSettings): Promise<WidthOutcome> {
     await oracle.close();
   }
   const tally = tallyWidth(rows, scored);
-  return { split: settings.layout.split, arm: settings.arm, scored, rows, tally, drops, problems: widthProblems(rows, drops) };
+  return { split: layout.split, arm: settings.arm, scored, rows, tally, drops, problems: widthProblems(rows, drops) };
 }
 
 /**

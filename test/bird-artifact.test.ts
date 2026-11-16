@@ -1,5 +1,8 @@
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { declaresCandidateSet, scoredQuestions } from '../eval/bird/artifact.js';
+import { artifactSplit, declaresCandidateSet, scoredQuestions } from '../eval/bird/artifact.js';
 
 /**
  * The one predicate three instruments share, and the sentence it licenses.
@@ -32,5 +35,41 @@ describe('what an artifact claims, read without inventing a number', () => {
     // A row with no `id` is not a question: an artifact written by an older harness carried rows
     // without one, and counting them would inflate the denominator of a sentence.
     expect(scoredQuestions([{}, { id: 3 }])).toBe(1);
+  });
+});
+
+/**
+ * The split an artifact declares, read on its own.
+ *
+ * The pair this function exists to break up is a run that scored one benchmark and a questions file
+ * that describes another. `main` in `agents` and `differential` has to build the oracle — and so
+ * choose the split's database directory — before the instrument parses the artifact, so the one
+ * field it needs is read here rather than by a second parse written per tool.
+ */
+describe('the split an artifact names, read on its own', () => {
+  const written = (body: unknown): string => {
+    const path = join(mkdtempSync(join(tmpdir(), 'artifact-split-')), 'bird-eval.json');
+    writeFileSync(path, typeof body === 'string' ? body : JSON.stringify(body));
+    return path;
+  };
+
+  it('reads the field a run wrote', () => {
+    expect(artifactSplit(written({ split: 'dev', cases: [] }))).toBe('dev');
+    expect(artifactSplit(written({ split: 'minidev' }))).toBe('minidev');
+  });
+
+  it('answers nothing for an artifact that never recorded one', () => {
+    // An artifact written before the field existed is read as the caller's split, which is what such
+    // a file can be read as without inventing a number.
+    expect(artifactSplit(written({ cases: [] }))).toBeUndefined();
+    // A field of the wrong type is not a split either: `split: 3` must not become `"3"`.
+    expect(artifactSplit(written({ split: 3 }))).toBeUndefined();
+  });
+
+  it('answers nothing rather than throwing when the file cannot be read', () => {
+    // The oracle is built before anything else, so a throw here would report a missing file as a
+    // layout error. The run fails later, on the artifact it actually could not read.
+    expect(artifactSplit('/does/not/exist.json')).toBeUndefined();
+    expect(artifactSplit(written('not json'))).toBeUndefined();
   });
 });

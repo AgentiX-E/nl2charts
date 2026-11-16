@@ -54,6 +54,7 @@ import {
   offeredCandidates,
   pairedComparisons,
   decideByRule,
+  layoutForSplit,
   resolveLayout,
   resolveArm,
   resolveSettings,
@@ -98,8 +99,61 @@ describe('where a run points', () => {
   });
 });
 
-describe('which databases a run covers', () => {
-  it('reports no databases rather than throwing when there is no manifest at all', () => {
+/**
+ * The layout an artifact's own split names.
+ *
+ * Every instrument that reads a written artifact is handed two things that can disagree: the
+ * artifact says which benchmark it scored, and the environment says which benchmark the caller
+ * meant. `resolveLayout` defaults to Mini-Dev, so re-running a dev reading without
+ * `BIRD_SPLIT=dev` silently reads Mini-Dev's questions file.
+ *
+ * Silent is the operative word. Both splits number their questions from zero, so the ids that
+ * exist in both are looked up successfully and classified against a different gold statement,
+ * and the ids that do not exist are dropped. On this repository's dev artifact that was 313
+ * dropped and 170 misread, out of 483 — with the tool printing a 98.8% coverage, because its
+ * denominator had already lost the cases that would have moved it.
+ */
+describe('which split an artifact is read as', () => {
+  it('keeps the caller\'s layout when the artifact agrees, or names no split at all', () => {
+    const layout = resolveLayout({}, '/repo');
+    // Identity, not equality: a layout that re-resolved on every call would rebuild paths the
+    // caller may have pinned, and no reading would show that it had.
+    expect(layoutForSplit('minidev', layout, '/repo')).toBe(layout);
+    expect(layoutForSplit(undefined, layout, '/repo')).toBe(layout);
+    // A name that is not a split is a field this reader does not understand, and inventing one
+    // would be worse than ignoring it.
+    expect(layoutForSplit('train', layout, '/repo')).toBe(layout);
+  });
+
+  it('reads the split the artifact names from that split\'s own directory', () => {
+    const layout = resolveLayout({}, '/repo');
+    const dev = layoutForSplit('dev', layout, '/repo');
+    expect(dev.split).toBe('dev');
+    expect(dev.questionsFile).toBe('/repo/eval/.cache/bird/dev/dev_20240627/dev.json');
+    expect(dev.databaseRoot).toBe('/repo/eval/.cache/bird/dev/dev_20240627/dev_databases');
+  });
+
+  it('does not look for the named split inside the directory that was not named', () => {
+    // The regression this function exists for: the tools re-resolved with `BIRD_DATA` pinned to
+    // the *caller's* data directory, so asking for `dev` while the environment defaulted to
+    // Mini-Dev looked for `dev.json` inside `minidev/MINIDEV`. Nothing pinned is the common case
+    // and it has to land in the dev directory.
+    const layout = resolveLayout({}, '/repo');
+    expect(layoutForSplit('dev', layout, '/repo').questionsFile).not.toContain('minidev');
+  });
+
+  it('keeps a dataset directory the caller pinned, because a harness may sit outside the repository', () => {
+    // Pinning `BIRD_DATA` is a statement about *these files*; the split then only chooses the
+    // file name inside it. Dropping the pin would read `eval/.cache` instead of the dataset the
+    // caller handed over — a reading of a corpus that was not the one under test.
+    const layout = resolveLayout({ BIRD_DATA: '/data' }, '/repo');
+    const dev = layoutForSplit('dev', layout, '/repo');
+    expect(dev.data).toBe('/data');
+    expect(dev.questionsFile).toBe('/data/dev.json');
+  });
+});
+
+describe('which databases a run covers', () => {  it('reports no databases rather than throwing when there is no manifest at all', () => {
     // The runner falls back to the questions file, so a missing manifest is a state and
     // not an error: the splits that ship one are the derived ones.
     expect(databasesFromManifest('/does/not/exist')).toEqual([]);

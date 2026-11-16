@@ -52,7 +52,7 @@ import type { CaseRecord } from './gap.js';
 import { graphOf } from './join-graph.js';
 import { pruneSchema } from './prune.js';
 import { SHIPPED_ARM, requireArm } from './presence.js';
-import { promptFor, renderableArm, resolveArm, resolveLayout } from './run.js';
+import { layoutForSplit, promptFor, renderableArm, resolveArm, resolveLayout } from './run.js';
 // Re-exported: this instrument's gate is a property of the arm, and its callers import it here.
 export { renderableArm };
 import type { Arm, BirdLayout } from './run.js';
@@ -362,11 +362,14 @@ export function noAnswerCases(cases: readonly CaseRecord[], arm: string): CaseRe
 
 export async function runInformation(settings: InfoSettings): Promise<InfoOutcome> {
   const report = JSON.parse(readFileSync(settings.report, 'utf8')) as InfoReportShape;
+  // The artifact names the split it scored; the layout names the one the environment defaults
+  // to. Reading the first against the second's questions file is silent — see `layoutForSplit`.
+  const layout = layoutForSplit(report.split, settings.layout, settings.layout.root);
 
   const arm = resolveArm(settings.arm);
   // An arm that carries a block is rendered with it, or this instrument prices its parent.
   const valuesFor = arm === undefined ? () => undefined : blockReader(arm, settings.layout);
-  const questions = loadQuestions(settings.layout.questionsFile);
+  const questions = loadQuestions(layout.questionsFile);
   const tables = loadTables(settings.layout.tablesFile);
   const byId = new Map(questions.map((question) => [String(question.question_id), question]));
   const definitions = report.controls?.synthesizedDefinitions ?? {};
@@ -404,7 +407,7 @@ export async function runInformation(settings: InfoSettings): Promise<InfoOutcom
     definitionGap: drops.definitionGap,
     unrenderable: drops.unrenderable + drops.unknownArm,
   });
-  return { split: settings.layout.split, arm: settings.arm, rows, tally, drops, problems };
+  return { split: layout.split, arm: settings.arm, rows, tally, drops, problems };
 }
 
 export function informationPath(settings: InfoSettings): string {

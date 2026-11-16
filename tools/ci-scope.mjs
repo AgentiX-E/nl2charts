@@ -100,10 +100,13 @@ export function isChartReading(file) {
 }
 
 /**
- * A gate's own configuration: the two files at the repository root that `tools/check-*.mjs` read.
+ * A gate's own configuration: the files `tools/check-*.mjs` read.
  *
- * `budgets.json` is a bundle ceiling and `api-surface.json` is a snapshot of what each package
- * exports. The readers are `tools/check-budgets.mjs` and `tools/check-exports.mjs`, both run by the
+ * `budgets.json` is a bundle ceiling, `api-surface.json` is a snapshot of what each package
+ * exports, and `eval/coverage-ledger.json` is the per-file coverage record `check-eval-coverage`
+ * compares against. The third was added after four consecutive pushes that changed nothing a
+ * prompt reads and bought the whole chain: the ledger lives under `eval/`, so a classifier written
+ * as a list of root files read it as a reading rather than as a number the gate holds. The readers are `tools/check-budgets.mjs` and `tools/check-exports.mjs`, both run by the
  * `quality` job, which is never skipped — and neither file is opened by a prompt builder. A round
  * that moved a budget therefore bought thirteen arms over 496 questions and three live passes over
  * 210 cases to re-measure a SQL pipeline that had not changed a byte, and the round before that
@@ -115,7 +118,7 @@ export function isChartReading(file) {
  * would swallow it. A new root-level configuration has to be argued for here instead of inherited.
  */
 export function isToolConfig(file) {
-  return file === 'budgets.json' || file === 'api-surface.json';
+  return file === 'budgets.json' || file === 'api-surface.json' || file === 'eval/coverage-ledger.json';
 }
 
 /**

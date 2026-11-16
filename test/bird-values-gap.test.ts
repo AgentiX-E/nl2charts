@@ -23,6 +23,7 @@ import {
   groupingColumns,
   isEntry,
   main,
+  NO_VALUE_DROPS,
   resolveValuesGapSettings,
   runValuesGap,
   tallyValues,
@@ -388,7 +389,11 @@ describe('the entry, run the way a workflow runs it', () => {
     expect(outcome.drops.unknownQuestion).toBe(1);
     // `1` is a no-answer case with no retained statement: the artifact's loss, not the model's.
     expect(outcome.drops.unretained).toBe(1);
-    expect(outcome.problems).toEqual([]);
+    // The one question the fixture does not hold is now a problem rather than a footnote. This
+    // assertion used to read `toEqual([])`: the coverage it protected was computed over the rows
+    // that survived, so losing a case *raised* the number the gate read.
+    expect(outcome.problems).toHaveLength(1);
+    expect(outcome.problems[0]).toContain('different benchmarks');
   });
 
   it('leaves the column-count bucket out of the default scope, and counts it', async () => {
@@ -615,5 +620,93 @@ describe('the entry, run the way a workflow runs it', () => {
     expect(isEntry(new URL('../eval/bird/values-gap.ts', import.meta.url).pathname, own)).toBe(true);
     expect(isEntry(new URL('../eval/bird/gap.ts', import.meta.url).pathname, own)).toBe(false);
     expect(isEntry(undefined, own)).toBe(false);
+  });
+});
+
+/**
+ * Which benchmark the ladder read.
+ *
+ * The tool is handed an artifact that declares its split, and a layout built from the caller's
+ * environment. Those two disagree the moment a reader re-runs a dev reading without
+ * `BIRD_SPLIT=dev`: `resolveLayout` defaults to Mini-Dev, and the two splits number their
+ * questions from zero, so Mini-Dev's question 7 is a real question with the same id, a
+ * different database id, and a different gold statement.
+ *
+ * That is worse than an error. A wrong id is dropped and counted; a shared id is classified
+ * against another benchmark's gold and reported as a cause. On the dev artifact this repository
+ * ships, 313 of 483 no-answer cases were dropped as unknown and the other 170 were split
+ * against Mini-Dev's SQL — and the tool printed `98.8% classified`, because its coverage
+ * denominator only counted the rows that had already survived the mistake.
+ */
+describe('the split an artifact declares, against the split the caller asked for', () => {
+  /** A dataset holding the mini questions, and one question that exists only in `dev.json`. */
+  function twoSplits(): string {
+    const data = writeMiniBirdDataset(mkdtempSync(join(tmpdir(), 'vgap-splits-')));
+    writeFileSync(
+      join(data, 'dev.json'),
+      JSON.stringify([
+        { question_id: 500, db_id: MINI_DB, question: 'How many items are there?', evidence: '', SQL: 'select count(*) from items', difficulty: 'simple' },
+      ]),
+    );
+    return data;
+  }
+
+  const devReport = {
+    split: 'dev',
+    model: 'deepseek-chat',
+    arms: [{ arm: 'select-cross', candidateRecall: 0 }],
+    cases: [{ arm: 'select-cross', id: '500', passed: false, reason: 'values', candidateRecall: false }],
+    failures: { 'select-cross': [{ id: '500', predicted: 'select count(*) from items where id = 1', reason: 'values' }] },
+  };
+
+  function settingsFor(data: string, body: unknown): ReturnType<typeof resolveValuesGapSettings> {
+    const dir = mkdtempSync(join(tmpdir(), 'vgap-split-out-'));
+    const report = join(dir, 'bird-eval.json');
+    writeFileSync(report, JSON.stringify(body));
+    return resolveValuesGapSettings(
+      { BIRD_SPLIT: 'minidev', BIRD_DATA: data, BIRD_OUT: join(dir, 'out.json') },
+      [report, '--arm', 'select-cross', '--scope', 'all'],
+      ROOT,
+    );
+  }
+
+  it('reads the questions the artifact names rather than the ones the environment defaults to', async () => {
+    const data = twoSplits();
+    const settings = settingsFor(data, devReport);
+    // The caller asked for Mini-Dev; the artifact says dev. The artifact is the one that knows
+    // what it scored.
+    expect(settings.layout.split).toBe('minidev');
+    const outcome = await runValuesGap(settings);
+    expect(outcome.split).toBe('dev');
+    expect(outcome.drops.unknownQuestion).toBe(0);
+    expect(outcome.tally.total).toBe(1);
+    // Same aggregate, one extra predicate: the ladder names the condition, not the count.
+    expect(outcome.tally.buckets.predicate).toBe(1);
+  });
+
+  it('still reads the caller\'s dataset directory, because a harness may point outside the repository', async () => {
+    const data = twoSplits();
+    const settings = settingsFor(data, devReport);
+    const outcome = await runValuesGap(settings);
+    // The reading came from the caller's directory and not from `eval/.cache`: the fixture's
+    // database is the only one either split could have queried.
+    expect(outcome.drops.goldFailed).toBe(0);
+    expect(outcome.drops.engineRefused).toBe(0);
+  });
+
+  it('counts a question the split cannot resolve instead of publishing a coverage over the survivors', () => {
+    // The instrument's own criterion was stated as a share of the classified rows, so dropping
+    // 313 of 483 cases *raised* the number it printed. A drop of that kind is a wrong benchmark,
+    // not a leftover, and it has to be a problem before it is a percentage.
+    const tally = tallyValues(['predicate', 'predicate']);
+    expect(valuesProblems(tally, 0.8, { ...NO_VALUE_DROPS, unknownQuestion: 313 })[0]).toContain('313');
+    // And it is stated before the empty-split reading, because it is the reason for it.
+    const empty = valuesProblems(tallyValues([]), 0.8, { ...NO_VALUE_DROPS, unknownQuestion: 313 });
+    expect(empty[0]).toContain('313');
+    expect(empty.length).toBeGreaterThan(1);
+  });
+
+  it('says nothing when every question resolved', () => {
+    expect(valuesProblems(tallyValues(['predicate']), 0.8, NO_VALUE_DROPS)).toEqual([]);
   });
 });
