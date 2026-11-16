@@ -10,9 +10,10 @@ import type { ProfileInput } from '../eval/text2vis/profile.js';
 import {
   assertJudgeReport,
   buildJudgePrompt,
-  defaultJudgeProvider,
+  JUDGE_ENDPOINTS,
   describeJudge,
   probeVision,
+  resolveJudge,
   sawRed,
   entryJudge,
   JUDGE_DIMENSIONS,
@@ -42,6 +43,9 @@ const row = (prompt: string, label: string): ProfileInput => ({
 
 /** The probe answer a run that could see would have produced. */
 const SEEN = { answer: 'red', seen: true };
+
+/** Who graded, for the reports a test builds by hand: a mean without an author is not publishable. */
+const GRADER = { endpoint: 'zhipu', model: 'glm-4.5v' };
 
 const job = (id: string, mark: string): JudgeJob => ({ id, mark, label: 'Bar Chart', question: 'top products by revenue', png: `/tmp/${id}.png` });
 
@@ -162,14 +166,14 @@ describe('the report is two means and their denominators', () => {
   ];
 
   it('averages each dimension over the rows that were graded, to two places', () => {
-    const report = summarizeJudge(6, 3, jobs, [{ id: '3', reason: 'profile:none' }, { id: '4', reason: 'render:failed' }, { id: '5', reason: 'NL2C_E_NOT_SUPPORTED' }], verdicts, 3, SEEN);
+    const report = summarizeJudge(6, 3, jobs, [{ id: '3', reason: 'profile:none' }, { id: '4', reason: 'render:failed' }, { id: '5', reason: 'NL2C_E_NOT_SUPPORTED' }], verdicts, 3, SEEN, GRADER);
     expect(report.means).toEqual({ chart_correctness: 6, readability: 7.33 });
     expect(report).toMatchObject({ scored: 6, charts: 3, judged: 3, failed: 0, notSelected: 0, skipped: 3, calls: 3, callsPerRow: 1 });
     expect(assertJudgeReport(report)).toBeUndefined();
   });
 
   it('keeps a failure out of the mean and counts it beside them', () => {
-    const report = summarizeJudge(2, 2, jobs.slice(0, 2), [], [{ id: '0', chart_correctness: 10, readability: 10, }, { id: '1', error: 'socket hang up' }], 2, SEEN);
+    const report = summarizeJudge(2, 2, jobs.slice(0, 2), [], [{ id: '0', chart_correctness: 10, readability: 10, }, { id: '1', error: 'socket hang up' }], 2, SEEN, GRADER);
     expect(report.means).toEqual({ chart_correctness: 10, readability: 10 });
     expect(report.failed).toBe(1);
     expect(report.failures).toEqual([{ id: '1', error: 'socket hang up' }]);
@@ -177,14 +181,14 @@ describe('the report is two means and their denominators', () => {
   });
 
   it('publishes no pass rate, because a grader score has no calibrated threshold', () => {
-    const report = summarizeJudge(1, 1, [job('0', 'bar')], [], verdicts.slice(0, 1), 1, SEEN);
+    const report = summarizeJudge(1, 1, [job('0', 'bar')], [], verdicts.slice(0, 1), 1, SEEN, GRADER);
     const keys = Object.keys(report).join(' ');
     expect(keys).not.toMatch(/pass|accuracy|correct(?!ness)/i);
     expect(Object.keys(report.means)).toEqual(['chart_correctness', 'readability']);
   });
 
   it('splits by mark, biggest bucket first, so a family that scores badly is visible', () => {
-    const report = summarizeJudge(3, 3, jobs, [], verdicts, 3, SEEN);
+    const report = summarizeJudge(3, 3, jobs, [], verdicts, 3, SEEN, GRADER);
     expect(report.byMark.map((one) => [one.mark, one.rows])).toEqual([
       ['bar', 2],
       ['pie', 1],
@@ -197,12 +201,12 @@ describe('the report is two means and their denominators', () => {
     const report = summarizeJudge(2, 2, tied, [], [
       { id: '0', chart_correctness: 1, readability: 1 },
       { id: '1', chart_correctness: 2, readability: 2 },
-    ], 2, SEEN);
+    ], 2, SEEN, GRADER);
     expect(report.byMark.map((one) => one.mark)).toEqual(['bar', 'pie']);
   });
 
   it('reports zero-and-zero on an empty set rather than NaN', () => {
-    const report = summarizeJudge(2, 2, [job('0', 'bar'), job('1', 'bar')], [], [], 0, SEEN);
+    const report = summarizeJudge(2, 2, [job('0', 'bar'), job('1', 'bar')], [], [], 0, SEEN, GRADER);
     expect(report.means).toEqual({ chart_correctness: 0, readability: 0 });
     expect(report.callsPerRow).toBe(0);
     expect(assertJudgeReport(report)).toBeUndefined();
@@ -210,13 +214,13 @@ describe('the report is two means and their denominators', () => {
   });
 
   it('refuses a verdict for a row that was never offered', () => {
-    expect(() => summarizeJudge(1, 1, [job('0', 'bar')], [], [{ id: '9', chart_correctness: 1, readability: 1 }], 1, SEEN)).toThrow(
+    expect(() => summarizeJudge(1, 1, [job('0', 'bar')], [], [{ id: '9', chart_correctness: 1, readability: 1 }], 1, SEEN, GRADER)).toThrow(
       /has no job/,
     );
   });
 
   it('prints the two means, the denominators and the failures, and nothing else', () => {
-    const report = summarizeJudge(3, 3, jobs, [], verdicts, 3, SEEN);
+    const report = summarizeJudge(3, 3, jobs, [], verdicts, 3, SEEN, GRADER);
     const lines = describeJudge(report).join('\n');
     expect(lines).toContain('judged 3/3 charts');
     expect(lines).toContain('chart_correctness 6.00/10, readability 7.33/10');
@@ -228,6 +232,7 @@ describe('the report is two means and their denominators', () => {
 describe('what a report has to be before a mean can be read out of it', () => {
   const base: JudgeReport = {
     dimensions: [...JUDGE_DIMENSIONS],
+    grader: GRADER,
     scored: 3,
     charts: 2,
     judged: 2,
@@ -268,6 +273,11 @@ describe('what a report has to be before a mean can be read out of it', () => {
 
   it('refuses a reading whose grader could not name the colour of a red image', () => {
     reject({ probe: { answer: 'I cannot see images', seen: false } }, /the endpoint did not say red to a red image/);
+  });
+
+  it('refuses a report that names no grader, because a mean without an author gets quoted as a fact about the charts', () => {
+    reject({ grader: { endpoint: '', model: 'glm-4.5v' } }, /names no endpoint or model/);
+    reject({ grader: { endpoint: 'zhipu', model: '  ' } }, /names no endpoint or model/);
   });
 
   it('refuses a mean outside the scale the prompt asked for', () => {
@@ -324,6 +334,21 @@ describe('grading a batch', () => {
       expect(parts[1]?.image_url?.url).toBe(`data:image/png;base64,${PIXEL_PNG.toString('base64')}`);
       // One call per row, which is the criterion this instrument was registered under.
       expect(bodies).toHaveLength(1);
+    } finally {
+      await close();
+    }
+  });
+
+  it('samples a row the way the endpoint is sampled, and can name no temperature at all', async () => {
+    const { provider, bodies, close } = responder('{"chart_correctness": 9, "readability": 5}');
+    try {
+      // The default is this repository's zero, which every published reading was taken at.
+      await judgeJobsWith([{ ...job('0', 'bar'), png }], { provider });
+      expect(bodies[0]?.temperature).toBe(0);
+      // `null` is "name none", and it has to survive the trip: an endpoint whose documented range
+      // may exclude zero refuses the field rather than ignoring it, so it must not be sent.
+      await judgeJobsWith([{ ...job('0', 'bar'), png }], { provider, temperature: null });
+      expect(Object.keys(bodies[1] ?? {})).not.toContain('temperature');
     } finally {
       await close();
     }
@@ -421,6 +446,11 @@ describe('the probe that proves the endpoint could see', () => {
     expect(sawRed('')).toBe(false);
     // "reduce" and "credit" contain letters of "red" and are not a colour: the probe matches a word.
     expect(sawRed('reduced credit')).toBe(false);
+    // A grader asked in English answers in English, but a Chinese vision model asked about a
+    // colour sometimes answers in Chinese, and a probe that refused 红色 would call it blind.
+    expect(sawRed('红色')).toBe(true);
+    expect(sawRed('主色调是红色。')).toBe(true);
+    expect(sawRed('蓝色')).toBe(false);
   });
 
   it('asks one question about one image, and keeps the answer', async () => {
@@ -462,6 +492,91 @@ describe('the probe that proves the endpoint could see', () => {
   });
 });
 
+describe('the endpoint a run grades with', () => {
+  it('declares one endpoint, and it is one whose vision model this repository can name', () => {
+    expect(JUDGE_ENDPOINTS.map((endpoint) => endpoint.name)).toEqual(['zhipu']);
+    const row = JUDGE_ENDPOINTS[0]!;
+    expect(row.model).toBe('glm-4.5v');
+    expect(row.baseUrl).toBe('https://open.bigmodel.cn/api/paas/v4');
+    // The vendor's own sample sends the payload with no prefix, and this repository's default
+    // spelling carries one: the row is where that difference is written down.
+    expect(row.imageDialect).toBe('bare-base64');
+    // No temperature, because the range this endpoint documents is not this repository's to assume.
+    expect(row.temperature).toBe(null);
+    // A first budget under the ceiling it may escalate to, and a budget that is a decision.
+    expect(row.maxOutputTokens).toBe(1024);
+    expect(row.answerBudgetCeiling).toBeGreaterThanOrEqual(row.maxOutputTokens);
+  });
+
+  it('takes the org secret by its vendor name, and the conventional name after it', () => {
+    expect(resolveJudge({ ZHIPU_API_KEY: 'z' }).grader).toEqual({ endpoint: 'zhipu', model: 'glm-4.5v' });
+    expect(resolveJudge({ LLM_API_KEY: 'l' }).grader.endpoint).toBe('zhipu');
+    // A variable that holds whitespace holds no key, and an empty header is a 401 that reads as a
+    // bad key rather than as a missing export.
+    expect(() => resolveJudge({ ZHIPU_API_KEY: '   ' })).toThrow(/no key for the zhipu endpoint/);
+    expect(() => resolveJudge({})).toThrow(/set ZHIPU_API_KEY or LLM_API_KEY/);
+  });
+
+  it('refuses a name it does not declare, and lists the ones it does', () => {
+    expect(() => resolveJudge({ ZHIPU_API_KEY: 'z' }, 'openai')).toThrow(/no endpoint named "openai": this repository declares zhipu/);
+    expect(resolveJudge({ ZHIPU_API_KEY: 'z', JUDGE_ENDPOINT: 'zhipu' }).grader.endpoint).toBe('zhipu');
+    expect(() => resolveJudge({ ZHIPU_API_KEY: 'z', JUDGE_ENDPOINT: 'anthropic' })).toThrow(/no endpoint named "anthropic"/);
+  });
+
+  it('lets a dispatch point the same row at a mirror and an alias without losing the row', () => {
+    const moved = resolveJudge({ ZHIPU_API_KEY: 'z', LLM_BASE_URL: 'http://127.0.0.1:9/v1', LLM_MODEL: 'glm-4v-plus' });
+    expect(moved.grader).toEqual({ endpoint: 'zhipu', model: 'glm-4v-plus' });
+    expect(moved.baseUrl).toBe('http://127.0.0.1:9/v1');
+    // The facts that are about the vendor rather than about this deployment still apply.
+    expect(moved.imageDialect).toBe('bare-base64');
+    expect(moved.temperature).toBe(null);
+  });
+
+  it('declares vision on the row, which is a declaration the probe then checks', () => {
+    const resolved = resolveJudge({ ZHIPU_API_KEY: 'z' });
+    expect(resolved.provider.capabilities?.vision).toBe(true);
+    expect(resolved.provider.capabilities?.maxOutputTokens).toBe(1024);
+    expect(resolved.provider.model).toBe('glm-4.5v');
+    expect(resolved.provider.id).toBe('http');
+  });
+
+  it('sends the image the way the vendor documents, and names no temperature at all', async () => {
+    const sent: Record<string, unknown>[] = [];
+    const server = createServer((request, response) => {
+      let body = '';
+      request.on('data', (chunk) => {
+        body += String(chunk);
+      });
+      request.on('end', () => {
+        sent.push(JSON.parse(body) as Record<string, unknown>);
+        response.writeHead(200, { 'content-type': 'application/json' });
+        response.end(
+          JSON.stringify({ model: 'glm-4.5v', choices: [{ message: { content: 'red' } }], usage: { prompt_tokens: 900, completion_tokens: 2 } }),
+        );
+      });
+    });
+    await new Promise<void>((ready) => server.listen(0, '127.0.0.1', ready));
+    const { port } = server.address() as AddressInfo;
+    try {
+      const resolved = resolveJudge({ ZHIPU_API_KEY: 'z', LLM_BASE_URL: `http://127.0.0.1:${String(port)}/api/paas/v4` });
+      // The probe is a request like any other, so it is sampled the way the row says.
+      expect((await probeVision(resolved.provider, resolved.temperature)).seen).toBe(true);
+      expect(sent).toHaveLength(1);
+      const body = sent[0] as Record<string, unknown>;
+      // Absent, not zero and not the vendor's default: the field is one this endpoint may refuse.
+      expect(Object.keys(body)).not.toContain('temperature');
+      expect(body.max_tokens).toBe(1024);
+      const messages = body.messages as { readonly content: readonly { readonly type: string; readonly image_url?: { readonly url: string } }[] }[];
+      const image = messages[1]?.content.find((part) => part.type === 'image_url');
+      // Bare base64: no `data:image/png;base64,` prefix, which is the spelling OpenAI documents.
+      expect(image?.image_url?.url.startsWith('data:')).toBe(false);
+      expect(image?.image_url?.url).toMatch(/^[A-Za-z0-9+/]+={0,2}$/);
+    } finally {
+      await new Promise<void>((done) => server.close(() => done()));
+    }
+  });
+});
+
 describe('the render artifact the denominator comes from', () => {
   const dir = mkdtempSync(join(tmpdir(), 'nl2charts-render-read-'));
   const write = (name: string, text: string): string => {
@@ -492,7 +607,7 @@ describe('the render artifact the denominator comes from', () => {
 
 describe('the command line', () => {
   it('defaults to the corpus png directory and no artifact', () => {
-    expect(parseJudgeArgs([])).toEqual({ png: 'eval/.cache/text2vis/png', json: false });
+    expect(parseJudgeArgs([])).toEqual({ png: 'eval/.cache/text2vis/png', json: false, probeOnly: false });
   });
 
   it('takes the five flags it documents', () => {
@@ -502,7 +617,18 @@ describe('the command line', () => {
       artifact: '/j.json',
       limit: 40,
       json: true,
+      probeOnly: false,
     });
+  });
+
+  it('takes the two flags that choose a grader rather than a row set', () => {
+    expect(parseJudgeArgs(['--probe-only', '--endpoint', 'zhipu'])).toEqual({
+      png: 'eval/.cache/text2vis/png',
+      json: false,
+      probeOnly: true,
+      endpoint: 'zhipu',
+    });
+    expect(() => parseJudgeArgs(['--endpoint'])).toThrow(/--endpoint needs a value/);
   });
 
   it('refuses a flag it does not use, and a flag without a value', () => {
@@ -581,6 +707,9 @@ describe('the judge command, over a real socket and a real PNG', () => {
       expect(code).toBe(0);
       const report = JSON.parse(readFileSync(join(root, 'judge.json'), 'utf8')) as JudgeReport;
       expect(report).toMatchObject({
+        // An injected provider is named by its own id and model: the artifact says who graded even
+        // when the table was not consulted at all.
+        grader: { endpoint: 'http', model: 'grade' },
         scored: 1,
         charts: 1,
         judged: 1,
@@ -650,24 +779,23 @@ describe('the judge command, over a real socket and a real PNG', () => {
 
   it('says why it cannot run without a render artifact, and without being the entry', async () => {
     const lines: string[] = [];
-    expect(await entryJudge(ENTRY, MODULE_URL, (line) => lines.push(line), { argv: [] })).toBe(1);
+    // A provider, so that the endpoint is not what stops the run: the missing artifact is.
+    expect(await entryJudge(ENTRY, MODULE_URL, (line) => lines.push(line), { argv: [], provider: grader('{}').provider })).toBe(1);
     expect(lines.join('\n')).toMatch(/--render <path> is required/);
     expect(await entryJudge(undefined, MODULE_URL, () => undefined)).toBeUndefined();
   });
 
-  it('takes the default provider from the environment when a caller names none', () => {
-    const declared = defaultJudgeProvider({ LLM_BASE_URL: 'http://127.0.0.1:1/v1', LLM_API_KEY: 'k', LLM_MODEL: 'glm-4v' });
-    expect(declared.model).toBe('glm-4v');
-    // The declaration this instrument cannot default: a blind endpoint would be refused, and the
-    // refusal would arrive after the run had been priced.
-    expect(declared.capabilities?.vision).toBe(true);
-    const bare = defaultJudgeProvider({});
-    expect(bare.model).toBe('deepseek-chat');
-    expect(bare.capabilities?.vision).toBe(true);
-    // The key is not readable from the provider by design, so the two spellings are held to what is
-    // observable: either name produces a provider rather than a crash on a missing variable.
-    expect(defaultJudgeProvider({ DEEPSEEK_API_KEY: 'one' }).id).toBe('http');
-    expect(defaultJudgeProvider({ LLM_API_KEY: 'two' }).id).toBe('http');
+  it('takes the endpoint from the environment, and refuses one it cannot name', async () => {
+    const lines: string[] = [];
+    // No key anywhere: the cheapest thing this command can be asked to do is still a call, so the
+    // key is checked before the probe rather than discovered as a 401 that reads as a bad key.
+    expect(await entryJudge(ENTRY, MODULE_URL, (line) => lines.push(line), { argv: ['--probe-only'], env: {} })).toBe(1);
+    expect(lines.join('\n')).toMatch(/set ZHIPU_API_KEY or LLM_API_KEY/);
+    const named: string[] = [];
+    expect(
+      await entryJudge(ENTRY, MODULE_URL, (line) => named.push(line), { argv: ['--probe-only', '--endpoint', 'nope'], env: { ZHIPU_API_KEY: 'z' } }),
+    ).toBe(1);
+    expect(named.join('\n')).toMatch(/no endpoint named "nope"/);
   });
 
   it('writes the report as json when it is asked to, and reads the image through a caller seam', async () => {
@@ -727,6 +855,86 @@ describe('the judge command, over a real socket and a real PNG', () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it('grades with the endpoint the environment names, over the wire, for one call', async () => {
+    const sent: Record<string, unknown>[] = [];
+    const server = createServer((request, response) => {
+      let body = '';
+      request.on('data', (chunk) => {
+        body += String(chunk);
+      });
+      request.on('end', () => {
+        sent.push(JSON.parse(body) as Record<string, unknown>);
+        response.writeHead(200, { 'content-type': 'application/json' });
+        response.end(JSON.stringify({ model: 'glm-4.5v', choices: [{ message: { content: 'red' } }], usage: { prompt_tokens: 900, completion_tokens: 2 } }));
+      });
+    });
+    await new Promise<void>((ready) => server.listen(0, '127.0.0.1', ready));
+    const { port } = server.address() as AddressInfo;
+    try {
+      const lines: string[] = [];
+      const code = await entryJudge(ENTRY, MODULE_URL, (line) => lines.push(line), {
+        argv: ['--probe-only'],
+        env: { ZHIPU_API_KEY: 'k', LLM_BASE_URL: `http://127.0.0.1:${String(port)}/api/paas/v4`, LLM_MODEL: 'glm-4.5v' },
+      });
+      expect(code).toBe(0);
+      // The whole chain, from a variable name to the bytes on the socket: who grades, where, and the
+      // three facts about this vendor that a default would have got wrong.
+      expect(lines.join('\n')).toMatch(
+        new RegExp(`grading with glm-4\\.5v \\(zhipu\\) at http://127\\.0\\.0\\.1:${String(port)}/api/paas/v4, images bare-base64, temperature unset`),
+      );
+      expect(sent).toHaveLength(1);
+      expect(Object.keys(sent[0] ?? {})).not.toContain('temperature');
+      expect(sent[0]?.max_tokens).toBe(1024);
+      const messages = sent[0]?.messages as { readonly content: readonly { readonly type: string; readonly image_url?: { readonly url: string } }[] }[];
+      const image = messages[1]?.content.find((part) => part.type === 'image_url');
+      expect(image?.image_url?.url.startsWith('data:')).toBe(false);
+    } finally {
+      await new Promise<void>((done) => server.close(() => done()));
+    }
+  });
+
+  it('says so when the temperature it will not name is none', async () => {
+    const { provider } = grader('red');
+    const lines: string[] = [];
+    expect(await entryJudge(ENTRY, MODULE_URL, (line) => lines.push(line), { argv: ['--probe-only'], provider, temperature: null })).toBe(0);
+    expect(lines.join('\n')).toMatch(/temperature unset/);
+  });
+
+  it('checks an endpoint for one call, and grades nothing', async () => {
+    const { provider, calls } = grader('{"chart_correctness": 6, "readability": 9}');
+    const root = mkdtempSync(join(tmpdir(), 'nl2charts-judge-probe-only-'));
+    try {
+      const lines: string[] = [];
+      const code = await entryJudge(ENTRY, MODULE_URL, (line) => lines.push(line), { argv: ['--probe-only'], provider });
+      expect(code).toBe(0);
+      // One call, no corpus, no render artifact, no report: this is the cheapest question this
+      // command can be asked, and it is the one a dispatch should ask first.
+      expect(calls()).toBe(1);
+      expect(existsSync(join(root, 'judge.json'))).toBe(false);
+      const printed = lines.join('\n');
+      expect(printed).toMatch(/grading with grade \(http\), images data-url, temperature 0/);
+      expect(printed).toMatch(/the probe answered "red", so this endpoint can see; nothing was graded/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('reports a probe-only run on a blind endpoint as a failure of that one call', async () => {
+    let calls = 0;
+    const blind = {
+      id: 'blind',
+      model: 'text-only',
+      complete: async () => {
+        calls += 1;
+        return { text: 'I cannot see images.', model: 'text-only' };
+      },
+    };
+    const lines: string[] = [];
+    expect(await entryJudge(ENTRY, MODULE_URL, (line) => lines.push(line), { argv: ['--probe-only'], provider: blind })).toBe(1);
+    expect(calls).toBe(1);
+    expect(lines.join('\n')).toMatch(/does not name the red in the image; nothing was graded/);
   });
 
   it('refuses the whole run when the endpoint cannot name a colour, before grading a row', async () => {

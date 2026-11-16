@@ -218,11 +218,27 @@ export function compareJudge(report, floor, options = {}) {
       issues.push(`TEXT2VIS JUDGE: \`${dimension}\` reads ${String(value)}, outside the 0-10 scale the prompt asked for`);
     }
   }
+  // Who graded, refused rather than assumed: two means from two models are two facts, and a report
+  // that dropped the name is quotable as a property of the charts. The instrument checks the same
+  // thing at write time; this is the copy that runs on a file somebody else wrote.
+  const grader = report.grader;
+  if (
+    typeof grader?.model !== 'string' ||
+    grader.model.trim() === '' ||
+    typeof grader?.endpoint !== 'string' ||
+    grader.endpoint.trim() === ''
+  ) {
+    issues.push(
+      'TEXT2VIS JUDGE: the report names no endpoint or model, so its means are a reading of nothing ' +
+        "that can be compared with another grader's",
+    );
+  }
   notes.push(
     `TEXT2VIS JUDGE: chart_correctness ${Number(means.chart_correctness ?? 0).toFixed(2)}/10, ` +
       `readability ${Number(means.readability ?? 0).toFixed(2)}/10 over ${String(report.judged)} of ` +
       `${String(report.charts)} charts (${String(report.failed)} failed, ${String(report.skipped)} skipped), ` +
-      `${Number(report.callsPerRow ?? 0).toFixed(3)} calls per row`,
+      `${Number(report.callsPerRow ?? 0).toFixed(3)} calls per row, graded by ` +
+      `${typeof grader?.model === 'string' ? grader.model : '(unnamed)'}`,
   );
   return { issues, notes };
 }
@@ -234,40 +250,53 @@ export function compareJudge(report, floor, options = {}) {
  * deliberately independent, and a self-test that accepted "some issue" would let a rule that never
  * fires hide behind one that always does.
  */
+/** The grader every self-test report names, so that each case fails only for the reason it is for. */
+const GRADER = { endpoint: 'zhipu', model: 'glm-4.5v' };
+
 const JUDGE_SELF_TEST = [
   {
     name: 'a reading that spends one call per row and accounts for every row passes',
-    report: { scored: 1470, charts: 1286, judged: 1286, failed: 0, notSelected: 0, skipped: 184, calls: 1286, callsPerRow: 1, means: { chart_correctness: 6.4, readability: 7.8 } },
+    report: { grader: GRADER, scored: 1470, charts: 1286, judged: 1286, failed: 0, notSelected: 0, skipped: 184, calls: 1286, callsPerRow: 1, means: { chart_correctness: 6.4, readability: 7.8 } },
     want: 0,
   },
   {
     name: 'a run that asked both dimensions twice fails, even with perfect means',
-    report: { scored: 1470, charts: 1286, judged: 1286, failed: 0, notSelected: 0, skipped: 184, calls: 2572, callsPerRow: 2, means: { chart_correctness: 10, readability: 10 } },
+    report: { grader: GRADER, scored: 1470, charts: 1286, judged: 1286, failed: 0, notSelected: 0, skipped: 184, calls: 2572, callsPerRow: 2, means: { chart_correctness: 10, readability: 10 } },
     want: 1,
   },
   {
     name: 'a chart that is neither graded nor declared unselected fails',
-    report: { scored: 1470, charts: 1286, judged: 1200, failed: 0, notSelected: 0, skipped: 184, calls: 1200, callsPerRow: 1, means: { chart_correctness: 6, readability: 7 } },
+    report: { grader: GRADER, scored: 1470, charts: 1286, judged: 1200, failed: 0, notSelected: 0, skipped: 184, calls: 1200, callsPerRow: 1, means: { chart_correctness: 6, readability: 7 } },
     want: 1,
   },
   {
     name: 'a row that fell out of both partitions fails',
-    report: { scored: 1470, charts: 1286, judged: 1286, failed: 0, notSelected: 0, skipped: 100, calls: 1286, callsPerRow: 1, means: { chart_correctness: 6, readability: 7 } },
+    report: { grader: GRADER, scored: 1470, charts: 1286, judged: 1286, failed: 0, notSelected: 0, skipped: 100, calls: 1286, callsPerRow: 1, means: { chart_correctness: 6, readability: 7 } },
     want: 1,
   },
   {
     name: 'a mean outside the scale fails',
-    report: { scored: 1470, charts: 1286, judged: 1286, failed: 0, notSelected: 0, skipped: 184, calls: 1286, callsPerRow: 1, means: { chart_correctness: 64, readability: 7 } },
+    report: { grader: GRADER, scored: 1470, charts: 1286, judged: 1286, failed: 0, notSelected: 0, skipped: 184, calls: 1286, callsPerRow: 1, means: { chart_correctness: 64, readability: 7 } },
     want: 1,
   },
   {
     name: 'a missing dimension fails, because half a reading is not a reading',
-    report: { scored: 1470, charts: 1286, judged: 1286, failed: 0, notSelected: 0, skipped: 184, calls: 1286, callsPerRow: 1, means: { chart_correctness: 6 } },
+    report: { grader: GRADER, scored: 1470, charts: 1286, judged: 1286, failed: 0, notSelected: 0, skipped: 184, calls: 1286, callsPerRow: 1, means: { chart_correctness: 6 } },
     want: 1,
   },
   {
     name: 'a report with a missing counter fails',
-    report: { scored: 1470, judged: 1286 },
+    report: { grader: GRADER, scored: 1470, judged: 1286 },
+    want: 1,
+  },
+  {
+    name: 'means with no model named fail, because the grader is part of the reading',
+    report: { scored: 1470, charts: 1286, judged: 1286, failed: 0, notSelected: 0, skipped: 184, calls: 1286, callsPerRow: 1, means: { chart_correctness: 6, readability: 7 } },
+    want: 1,
+  },
+  {
+    name: 'a grader named only by whitespace fails',
+    report: { grader: { endpoint: 'zhipu', model: '  ' }, scored: 1470, charts: 1286, judged: 1286, failed: 0, notSelected: 0, skipped: 184, calls: 1286, callsPerRow: 1, means: { chart_correctness: 6, readability: 7 } },
     want: 1,
   },
   { name: 'no judge report is a failure when it is required', report: undefined, want: 1, require: true },
@@ -288,19 +317,19 @@ const SELF_TEST = [
 
 /** Cases for the pixel reading: every way its four counters can lie. */
 const RENDER_SELF_TEST = [
-  { name: 'a run with no failure and at the floor passes', report: { scored: 1470, rendered: 1286, failed: 0, refused: 17, declined: 167 }, want: 0 },
-  { name: 'a mark painter that stopped painting fails', report: { scored: 1470, rendered: 1200, failed: 0, refused: 103, declined: 167 }, want: 1 },
+  { name: 'a run with no failure and at the floor passes', report: { grader: GRADER, scored: 1470, rendered: 1286, failed: 0, refused: 17, declined: 167 }, want: 0 },
+  { name: 'a mark painter that stopped painting fails', report: { grader: GRADER, scored: 1470, rendered: 1200, failed: 0, refused: 103, declined: 167 }, want: 1 },
   {
     name: 'a chart that raised in Python fails even when nothing else moved',
-    report: { scored: 1470, rendered: 1286, failed: 1, refused: 16, declined: 167 },
+    report: { grader: GRADER, scored: 1470, rendered: 1286, failed: 1, refused: 16, declined: 167 },
     want: 1,
   },
   {
     name: 'counters that do not add up fail',
-    report: { scored: 1470, rendered: 1286, failed: 0, refused: 17, declined: 100 },
+    report: { grader: GRADER, scored: 1470, rendered: 1286, failed: 0, refused: 17, declined: 100 },
     want: 1,
   },
-  { name: 'a report with a missing counter fails', report: { scored: 1470, rendered: 1286 }, want: 1 },
+  { name: 'a report with a missing counter fails', report: { grader: GRADER, scored: 1470, rendered: 1286 }, want: 1 },
   { name: 'no render report is a failure when it is required', report: undefined, want: 1, require: true },
   { name: 'no render report is a note when it is not', report: undefined, want: 0 },
 ];

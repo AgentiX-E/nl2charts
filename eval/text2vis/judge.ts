@@ -22,7 +22,7 @@
  *    model. So `judged`, `failed` and `skipped` are published beside the means, and the identity
  *    `judged + failed + skipped === scored` is asserted rather than assumed.
  */
-import { createHttpProvider, withCallCounter, type LlmImage, type LlmProvider } from '@agentix-e/nl2charts-ai';
+import { createHttpProvider, withCallCounter, type ImageDialect, type LlmImage, type LlmProvider } from '@agentix-e/nl2charts-ai';
 import { applyExitCode, isEntry, loadText2Vis, type LoadOptions } from './dataset.js';
 import { profileInputs, type ProfileInput } from './profile.js';
 import { familyOfLabel } from './rule.js';
@@ -70,8 +70,24 @@ export interface MarkJudgement {
   readonly readability: number;
 }
 
+/** Who graded, because a mean without an author cannot be compared with another model's mean. */
+export interface JudgeGrader {
+  /** The declared endpoint the run selected, or the injected provider's own id. */
+  readonly endpoint: string;
+  /** The model that answered. Read from the declaration, not from the reply, which may rename it. */
+  readonly model: string;
+}
+
 export interface JudgeReport {
   readonly dimensions: readonly JudgeDimension[];
+  /**
+   * The instrument that produced these means.
+   *
+   * First in the report because everything after it is relative to it: "chart_correctness 6.4" is
+   * a fact about a model's reading, and the next round's floor is a comparison between two models.
+   * A report that did not name its grader would be quotable as a property of the charts.
+   */
+  readonly grader: JudgeGrader;
   /** The rows the reading is over: the corpora rows the contract can lead with. */
   readonly scored: number;
   /** The charts the render artifact says exist, which is the population this instrument grades. */
@@ -162,7 +178,11 @@ export const VISION_PROBE = 'What is the dominant colour of the image attached? 
 
 /** Whether a reply could only have been written by a reader that saw red. */
 export function sawRed(reply: string): boolean {
-  return /\b(red|crimson|scarlet|vermilion)\b|ff0000|#f00\b/i.test(reply);
+  // `红` is here because the grader is not necessarily asked in its first language: Zhipu's vision
+  // models answer an English question in English, and answer it in Chinese when the prompt's own
+  // wording tips them that way. A probe that refused `红色` would report a working endpoint as blind,
+  // and the run would stop before grading a single figure — the expensive direction of this check.
+  return /\b(red|crimson|scarlet|vermilion)\b|ff0000|#f00\b|红/i.test(reply);
 }
 
 /**
@@ -171,15 +191,22 @@ export function sawRed(reply: string): boolean {
  * Never throws: a probe that could not be sent is a probe that did not see, and `seen` is the field
  * the report refuses on — an exception here would be a stack trace where a one-line reason belongs.
  * `undefined` as an answer is spelled as an empty string so the report has one shape.
+ *
+ * `temperature` travels with the probe because the probe is a request like any other: it used to
+ * name zero, and on an endpoint whose documented range may exclude zero the check would have been
+ * the first thing refused — the instrument failing on the one call it exists to spend.
  */
-export async function probeVision(provider: LlmProvider): Promise<{ readonly answer: string; readonly seen: boolean }> {
+export async function probeVision(
+  provider: LlmProvider,
+  temperature: number | null = 0,
+): Promise<{ readonly answer: string; readonly seen: boolean }> {
   try {
     const response = await provider.complete({
       messages: [
         { role: 'system', content: 'You answer questions about images in one word.' },
         { role: 'user', content: VISION_PROBE, images: [{ mediaType: 'image/png', data: PROBE_PNG }] },
       ],
-      temperature: 0,
+      temperature,
       purpose: 'probe',
     });
     const answer = response.text.trim().replace(/\s+/g, ' ').slice(0, 80);
@@ -322,6 +349,7 @@ export function summarizeJudge(
   verdicts: readonly JudgeVerdict[],
   calls: number,
   probe: { readonly answer: string; readonly seen: boolean },
+  grader: JudgeGrader,
 ): JudgeReport {
   const byId = new Map(jobs.map((job) => [job.id, job]));
   const byMark = new Map<string, { rows: number; correctness: number[]; readability: number[] }>();
@@ -348,6 +376,7 @@ export function summarizeJudge(
   const judged = correctness.length;
   const report: JudgeReport = {
     dimensions: [...JUDGE_DIMENSIONS],
+    grader,
     scored,
     charts,
     judged,
@@ -414,6 +443,13 @@ export function assertJudgeReport(report: JudgeReport): void {
       `judge report: the endpoint did not say red to a red image (it said "${report.probe.answer}"), so these means are an opinion of the text rather than a reading of the figures`,
     );
   }
+  // Two means and no author is the shape of a number that gets quoted as a property of the corpus.
+  // Refused here rather than left to the reader, because the reader has no way to recover the name.
+  if (report.grader.endpoint.trim() === '' || report.grader.model.trim() === '') {
+    throw new Error(
+      'judge report: the report names no endpoint or model, so its means cannot be compared with another grader\'s',
+    );
+  }
   for (const mean of [report.means.chart_correctness, report.means.readability]) {
     if (mean < 0 || mean > 10) throw new Error(`judge report: a mean of ${String(mean)} is outside the scale`);
   }
@@ -422,8 +458,8 @@ export function assertJudgeReport(report: JudgeReport): void {
 /** The lines the log prints, and the shape of the answer: two means and their denominators. */
 export function describeJudge(report: JudgeReport): readonly string[] {
   const lines = [
-    `text2vis: judged ${String(report.judged)}/${String(report.charts)} charts` +
-      ` (${String(report.failed)} failed, ${String(report.notSelected)} unselected, ${String(report.skipped)} skipped of ${String(report.scored)} scored)`,
+    `text2vis: judged ${String(report.judged)}/${String(report.charts)} charts with ${report.grader.model} (${report.grader.endpoint})` +
+      ` — ${String(report.failed)} failed, ${String(report.notSelected)} unselected, ${String(report.skipped)} skipped of ${String(report.scored)} scored`,
     `  chart_correctness ${report.means.chart_correctness.toFixed(2)}/10, readability ${report.means.readability.toFixed(2)}/10`,
     `  calls ${String(report.calls)}, ${report.callsPerRow.toFixed(3)} per judged row; the vision probe answered "${report.probe.answer}"`,
   ];
@@ -442,6 +478,15 @@ const PNG_MEDIA = 'image/png' as const;
 
 export interface JudgeOptions {
   readonly provider: LlmProvider;
+  /**
+   * The sampling temperature, in the two absences the contract distinguishes.
+   *
+   * `undefined` is this repository's default of zero, which is what every reading in
+   * `docs/benchmarks.md` was taken at. `null` is "do not name a value", and it is the only honest
+   * setting for an endpoint whose documented range may exclude zero: a grader sent a value it
+   * refuses answers 400, and one sent a value it ignores reports a sampling nobody applied.
+   */
+  readonly temperature?: number | null;
   /** Reads one PNG as base64. Injected so the grading loop can be tested without a filesystem. */
   readonly readImage?: (path: string) => Promise<LlmImage>;
   readonly now?: () => number;
@@ -459,6 +504,7 @@ export async function judgeJobsWith(jobs: readonly JudgeJob[], options: JudgeOpt
   const { readFile } = await import('node:fs/promises');
   const read = options.readImage ?? (async (path: string) => ({ mediaType: PNG_MEDIA, data: (await readFile(path)).toString('base64') }));
   const now = options.now ?? (() => Date.now());
+  const temperature = options.temperature === undefined ? 0 : options.temperature;
   const verdicts: JudgeVerdict[] = [];
   for (const job of jobs) {
     const started = now();
@@ -469,7 +515,7 @@ export async function judgeJobsWith(jobs: readonly JudgeJob[], options: JudgeOpt
           { role: 'system', content: JUDGE_SYSTEM },
           { role: 'user', content: buildJudgePrompt(job), images: [image] },
         ],
-        temperature: 0,
+        temperature,
         purpose: 'compare',
       });
       const scores = parseJudge(response.text);
@@ -487,6 +533,10 @@ export interface JudgeArgs {
   readonly png: string;
   readonly limit?: number;
   readonly json: boolean;
+  /** The endpoint row to grade with, when the caller wants one other than the default. */
+  readonly endpoint?: string;
+  /** Ask the endpoint one question about one image and stop: the whole run, priced at one call. */
+  readonly probeOnly: boolean;
 }
 
 export function parseJudgeArgs(argv: readonly string[]): JudgeArgs {
@@ -495,13 +545,19 @@ export function parseJudgeArgs(argv: readonly string[]): JudgeArgs {
   let png = 'eval/.cache/text2vis/png';
   let limit: number | undefined;
   let json = false;
+  let endpoint: string | undefined;
+  let probeOnly = false;
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index] as string;
     if (flag === '--json') {
       json = true;
       continue;
     }
-    if (flag === '--artifact' || flag === '--render' || flag === '--png' || flag === '--limit') {
+    if (flag === '--probe-only') {
+      probeOnly = true;
+      continue;
+    }
+    if (flag === '--artifact' || flag === '--render' || flag === '--png' || flag === '--limit' || flag === '--endpoint') {
       const value = argv[index + 1];
       if (value === undefined || value.startsWith('--')) throw new Error(`${flag} needs a value`);
       if (flag === '--limit') {
@@ -509,15 +565,25 @@ export function parseJudgeArgs(argv: readonly string[]): JudgeArgs {
         limit = Number(value);
       } else if (flag === '--artifact') artifact = value;
       else if (flag === '--render') render = value;
+      else if (flag === '--endpoint') endpoint = value;
       else png = value;
       index += 1;
       continue;
     }
     throw new Error(
-      `unknown argument ${flag}: this command grades the charts the renderer drew, and takes --json, --png <dir>, --render <path>, --artifact <path> and --limit <n>`,
+      `unknown argument ${flag}: this command grades the charts the renderer drew, and takes --json, --png <dir>, ` +
+        `--render <path>, --artifact <path>, --limit <n>, --endpoint <name> and --probe-only`,
     );
   }
-  return { png, json, ...(artifact === undefined ? {} : { artifact }), ...(render === undefined ? {} : { render }), ...(limit === undefined ? {} : { limit }) };
+  return {
+    png,
+    json,
+    probeOnly,
+    ...(artifact === undefined ? {} : { artifact }),
+    ...(render === undefined ? {} : { render }),
+    ...(limit === undefined ? {} : { limit }),
+    ...(endpoint === undefined ? {} : { endpoint }),
+  };
 }
 
 /**
@@ -546,48 +612,220 @@ export async function readRender(path: string): Promise<{ readonly failed: reado
 }
 
 /**
- * The provider a dispatch gets when the caller names none.
+ * An endpoint that can see, as a declaration a person made and one call will check.
  *
- * Owned by this file rather than reached for at the call site so that the three environment
- * variables are a value a test can hand over. The `vision: true` is the one declaration this
- * instrument cannot default: an endpoint that cannot see is refused at the request builder, which
- * is the correct failure and an unhelpful one — it arrives after the run has been priced, so the
- * dispatch names a vision endpoint in its inputs and this function states that it did.
+ * The previous draft of this file had a `defaultJudgeProvider` that named DeepSeek's base url,
+ * DeepSeek's model and `vision: true`. Two of those three were wrong in the same way: DeepSeek's
+ * chat models are text-only, so the declaration was a claim about an endpoint that could not keep
+ * it, and the only thing standing between that claim and 1,286 means about captions was the probe.
+ * A default is the wrong shape for this decision. What an endpoint *is* — its url, its model, how it
+ * spells an image, what it does with a temperature — is a fact about a vendor, and facts belong in a
+ * table a reader can check rather than in a fallback nobody reads.
+ *
+ * So each row is one endpoint, every field is one fact that differs between vendors, and adding a
+ * vendor is one row. `zhipu` is the only row with evidence behind it, which is why it is the only
+ * row: a second row that guessed would be the same defect one line down.
  */
-export function defaultJudgeProvider(env: Record<string, string | undefined>): LlmProvider {
-  return createHttpProvider({
-    baseUrl: env.LLM_BASE_URL ?? 'https://api.deepseek.com/v1',
-    apiKey: env.DEEPSEEK_API_KEY ?? env.LLM_API_KEY ?? '',
-    model: env.LLM_MODEL ?? 'deepseek-chat',
-    capabilities: { vision: true },
+export interface JudgeEndpoint {
+  /** The name `--endpoint` selects. */
+  readonly name: string;
+  /** The chat-completions base url, without `/chat/completions`. */
+  readonly baseUrl: string;
+  readonly model: string;
+  /**
+   * The environment variables that may hold this endpoint's key, tried in order.
+   *
+   * More than one because the same endpoint is reached two ways in this repository: the workflow
+   * passes the org secret by its vendor name, and a developer's shell exports the conventional
+   * `LLM_API_KEY` that every other job reads. Both are the same key, and requiring the caller to
+   * spell it one way is the kind of rule that gets worked around by pasting the key into a file.
+   */
+  readonly apiKeyEnv: readonly string[];
+  /** How this vendor spells an image in a request body. */
+  readonly imageDialect: ImageDialect;
+  /** The temperature to name, or `null` for "name none and let the endpoint decide". */
+  readonly temperature: number | null;
+  /** The answer budget the first request carries. */
+  readonly maxOutputTokens: number;
+  /** The largest budget an escalation may name. */
+  readonly answerBudgetCeiling: number;
+}
+
+/**
+ * The endpoints this instrument knows how to talk to.
+ *
+ * `zhipu` and its reasons, field by field — the model is `glm-4.5v`, the current vision model on
+ * `open.bigmodel.cn` with a documented 16,384-token answer cap, not `glm-4v-plus`, whose name points
+ * at a 2024 release. The image is sent as bare base64 because that is what the vendor's own sample
+ * sends: `{"url": img_base}` with no `data:` prefix, while this repository's default spelling is
+ * OpenAI's `data:image/png;base64,…`. One of the two is refused by any given endpoint and neither
+ * failure says which spelling was wrong, so the spelling is declared rather than assumed.
+ *
+ * `temperature: null` is a statement about evidence, not about taste. The endpoint documents a
+ * default of 0.8 and a range this repository has not verified includes 0, and a value outside the
+ * range is a 400 on every row. `null` is the one answer that cannot be refused; if a probe run
+ * shows the endpoint accepts 0, the row changes in one place and the readings say so.
+ *
+ * The budget is 1,024 rather than the model's 16,384 because the reply is one JSON object with two
+ * integers: a ceiling that large is not a decision anyone made, and `max_tokens` is a limit the
+ * escalation can still raise to 16,384 if a reply is ever cut.
+ */
+export const JUDGE_ENDPOINTS: readonly JudgeEndpoint[] = [
+  {
+    name: 'zhipu',
+    baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+    model: 'glm-4.5v',
+    apiKeyEnv: ['ZHIPU_API_KEY', 'LLM_API_KEY'],
+    imageDialect: 'bare-base64',
+    temperature: null,
+    maxOutputTokens: 1024,
+    answerBudgetCeiling: 16384,
+  },
+];
+
+/** What a run needs to know about its grader: the provider, who it is, and how it is sampled. */
+export interface JudgeResolved {
+  readonly provider: LlmProvider;
+  readonly grader: JudgeGrader;
+  readonly temperature: number | null;
+  /** Where the calls go, for the log line a dispatch reads before it pays for anything. */
+  readonly baseUrl: string;
+  readonly imageDialect: ImageDialect;
+}
+
+/**
+ * The endpoint a run grades with.
+ *
+ * Resolution order is fixed and short: the name the caller asked for, then `JUDGE_ENDPOINT`, then
+ * `zhipu`. `LLM_BASE_URL` and `LLM_MODEL` override the row rather than replacing it, because a
+ * dispatch that points at a mirror or a differently named alias is asking about the same vendor,
+ * and every other fact in the row — the image spelling, the temperature, the budget — still applies.
+ *
+ * A missing key is an error naming both variables rather than an empty `Authorization` header: the
+ * header's failure is a 401 whose message is about the key, and the caller who forgot to export one
+ * reads it as "the key is wrong". A local endpoint with no key is not a case this table serves, and
+ * saying so is better than a row that pretends.
+ */
+export function resolveJudge(env: Record<string, string | undefined>, name?: string): JudgeResolved {
+  const chosen = name ?? env.JUDGE_ENDPOINT ?? 'zhipu';
+  const row = JUDGE_ENDPOINTS.find((endpoint) => endpoint.name === chosen);
+  if (row === undefined) {
+    throw new Error(
+      `judge: no endpoint named "${chosen}": this repository declares ${JUDGE_ENDPOINTS.map((endpoint) => endpoint.name).join(', ')}`,
+    );
+  }
+  const value = (variable: string): string | undefined => {
+    const raw = env[variable];
+    return raw === undefined || raw.trim() === '' ? undefined : raw.trim();
+  };
+  const apiKey = row.apiKeyEnv.map(value).find((candidate) => candidate !== undefined);
+  if (apiKey === undefined) {
+    throw new Error(`judge: no key for the ${row.name} endpoint: set ${row.apiKeyEnv.join(' or ')}`);
+  }
+  const baseUrl = value('LLM_BASE_URL') ?? row.baseUrl;
+  const model = value('LLM_MODEL') ?? row.model;
+  const provider = createHttpProvider({
+    baseUrl,
+    model,
+    apiKey,
+    imageDialect: row.imageDialect,
+    // The declaration the probe is about to check. Declared per row rather than asserted by the
+    // dispatch, so that a row added without a vision model is a row nobody can add quietly.
+    capabilities: {
+      vision: true,
+      maxOutputTokens: row.maxOutputTokens,
+      answerBudgetCeiling: row.answerBudgetCeiling,
+    },
+    // A 429 on row 700 of 1,286 is a row that lost its grade, not an arm that lost its reading —
+    // and this endpoint's key is the one whose quota this repository has already exhausted once.
+    // A retry inside the provider is still one call to the meter, so `callsPerRow` stays one.
+    retries: 3,
+    retryDelayMs: 1000,
   });
+  return {
+    provider,
+    grader: { endpoint: row.name, model },
+    temperature: row.temperature,
+    baseUrl,
+    imageDialect: row.imageDialect,
+  };
+}
+
+export interface JudgeEntryOptions {
+  readonly argv?: readonly string[];
+  readonly env?: Record<string, string | undefined>;
+  readonly load?: LoadOptions;
+  readonly provider?: LlmProvider;
+  readonly temperature?: number | null;
+  readonly readImage?: (path: string) => Promise<LlmImage>;
+}
+
+/**
+ * The grader a run uses: the endpoint it declared, or the provider a caller handed over.
+ *
+ * An injected provider is named by its own `id` and `model` rather than by an endpoint row, because
+ * that is what it is — the artifact then says `http`/`grade` and a reader can tell a run driven by a
+ * caller from one driven by the table. It samples at zero, the value every fixture in this suite was
+ * written at, unless the caller says otherwise.
+ */
+function gradeWith(options: JudgeEntryOptions, args: JudgeArgs): JudgeResolved {
+  const injected = options.provider;
+  if (injected !== undefined) {
+    return {
+      provider: injected,
+      grader: { endpoint: injected.id, model: injected.model },
+      temperature: options.temperature === undefined ? 0 : options.temperature,
+      baseUrl: '',
+      imageDialect: 'data-url',
+    };
+  }
+  return resolveJudge(options.env ?? process.env, args.endpoint);
+}
+
+/** The one line a dispatch reads before it pays for a render: who grades, and how it is sampled. */
+function describeGrader(resolved: JudgeResolved): string {
+  const where = resolved.baseUrl === '' ? '' : ` at ${resolved.baseUrl}`;
+  const temperature = resolved.temperature === null ? 'unset' : String(resolved.temperature);
+  return (
+    `text2vis: grading with ${resolved.grader.model} (${resolved.grader.endpoint})${where}, ` +
+    `images ${resolved.imageDialect}, temperature ${temperature}`
+  );
 }
 
 export async function entryJudge(
   argv1: string | undefined,
   moduleUrl: string,
   log: (line: string) => void,
-  options: {
-    readonly argv?: readonly string[];
-    readonly load?: LoadOptions;
-    readonly provider?: LlmProvider;
-    readonly readImage?: (path: string) => Promise<LlmImage>;
-  } = {},
+  options: JudgeEntryOptions = {},
 ): Promise<number | undefined> {
   if (!isEntry(argv1, moduleUrl)) return undefined;
   try {
     const args = parseJudgeArgs(options.argv ?? []);
-    if (args.render === undefined) throw new Error('judge: --render <path> is required: the denominator comes from the render artifact');
-    const render = await readRender(args.render);
-    const provider = options.provider ?? defaultJudgeProvider(process.env);
-    // Before the meter, and before the corpus: one call that proves the endpoint can see, because the
-    // only alternative is 1,286 rows of a grader writing about a caption it never looked at.
-    const probe = await probeVision(provider);
+    const resolved = gradeWith(options, args);
+    log(describeGrader(resolved));
+    // Before the render artifact is even read, and before the meter: one call that proves the
+    // endpoint can see. `--probe-only` exists so that a dispatch can spend that one call on its own,
+    // which is the difference between learning in a minute that a base url or an image spelling is
+    // wrong and learning it after 1,286 figures have been drawn.
+    const probe = await probeVision(resolved.provider, resolved.temperature);
+    if (args.probeOnly) {
+      log(
+        probe.seen
+          ? `text2vis: the probe answered "${probe.answer}", so this endpoint can see; nothing was graded`
+          : `text2vis: the probe answered "${probe.answer}", which does not name the red in the image; nothing was graded`,
+      );
+      return probe.seen ? 0 : 1;
+    }
     if (!probe.seen) {
       log(`text2vis: the endpoint did not see the probe image (it answered "${probe.answer}"), so it cannot grade a chart`);
       return 1;
     }
-    const metered = withCallCounter(provider);
+    // The denominator comes from a render report, so a run without one has nothing to divide by —
+    // but only after the probe, so that a misconfigured endpoint is reported as one on the cheapest
+    // possible call rather than as a missing file.
+    if (args.render === undefined) throw new Error('judge: --render <path> is required: the denominator comes from the render artifact');
+    const render = await readRender(args.render);
+    const metered = withCallCounter(resolved.provider);
     const { corpus, source, path } = await loadText2Vis(options.load);
     log(`text2vis: ${source} ${path}`);
     const inputs = profileInputs(corpus).filter((input) => familyOfLabel(input.label) !== undefined);
@@ -605,9 +843,10 @@ export async function entryJudge(
     log(`text2vis: ${String(selected.length)} of ${String(jobs.length)} charts selected for grading (${String(render.rendered)} rendered)`);
     const verdicts = await judgeJobsWith(selected, {
       provider: metered.provider,
+      temperature: resolved.temperature,
       ...(options.readImage === undefined ? {} : { readImage: options.readImage }),
     });
-    const report = summarizeJudge(inputs.length, jobs.length, jobs, skipped, verdicts, metered.calls(), probe);
+    const report = summarizeJudge(inputs.length, jobs.length, jobs, skipped, verdicts, metered.calls(), probe, resolved.grader);
     assertJudgeReport(report);
     if (args.json) log(JSON.stringify(report, null, 2));
     else for (const line of describeJudge(report)) log(line);
