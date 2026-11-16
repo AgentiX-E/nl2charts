@@ -15256,9 +15256,19 @@ text2vis: the endpoint never answered (llm returned 429): that is a quota, a key
           not a verdict on what it can see; nothing was graded
 ```
 
-and the provider stopped discarding the body of a status it retried: `llm returned 429: {"error":"quota"}`
-rather than `llm returned 429`. A status code is not a reason, and the vendor's own body is the only
-place the reason is written.
+and the provider stopped discarding the body of a status it retried. The second dispatch, eleven seconds
+after a push, is what the new message reads like:
+
+```
+text2vis: the endpoint never answered (llm returned 429: 余额不足或无可用资源包,请充值。):
+          that is a quota, a key scope or a url, not a verdict on what it can see; nothing was graded
+```
+
+**A status code is not a reason, and the vendor's own body is the only place the reason is written.**
+That sentence — "insufficient balance or no available resource package, please top up" — is the whole
+state of this reading: the channel, the endpoint declaration, the image spelling, the key and the
+probe are all in place, and what stands between them and two means is credit on the account. No code
+change can produce the number; the next dispatch after a top-up will.
 
 What none of this establishes is a score. The rehearsal — `limit: 8` — is what says whether the
 endpoint answers, how long a call takes and what a run of 1,286 of them would cost in time, and its
