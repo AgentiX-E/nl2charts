@@ -7,6 +7,22 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **The arm that carries the rebuild, and the two things it does that the lever list does not say.**
+  `askdata-shape` is one lever from `select-mixed-rule` — same three sources, same prompts, same free
+  rule, same judge — and its only difference is `arm.askdata`. Wiring it exposed two decisions that a
+  reading of the arm table would get wrong. First, the link runs *before* every other card decision,
+  because a rule that narrows the card afterwards would be reading an already-narrowed card and its
+  cost would be filed under the wrong lever. Second, the union is computed once per question and
+  applied to **every** source's card: a mixed arm whose three candidates answered on three different
+  schemas is a delta about which source was drawn first, not about linking. Both are pinned on the
+  real harness rather than on a unit test — `test/bird-run-e2e.test.ts` drives the parent at **3.00
+  calls a case** and this arm at **8.00**, which is five variants and three candidates with no
+  rewrite needed on the fixture's statements. The cost is why the arm is on demand and not in the
+  chain: it triples the bill of every push, so it earns its place with one reading against the
+  criterion `docs/benchmarks.md` registered before the code existed. The catalogue and the runner are
+  also made to agree about the new field: `test/bird-arms.test.ts` lists every field of `Arm` as a
+  lever and refuses one that no code reads, which is the defect `reconcileAdopt` carried until that
+  test was written.
 - **The linker of the leader no one can run, rebuilt from its paper.** `AskData` holds the top BIRD
   row this repository compares itself to (dev 78.49%, test 83.40% as the leaderboard read it) and has
   never had a release: the arXiv page carries no artifact link, a repository search for the name

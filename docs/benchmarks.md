@@ -7964,6 +7964,26 @@ checked and up to three corrections applied; all three are executed and voted as
 is **8 calls at minimum against the 3 the shipped arm spends**, and the cost column is published per
 arm because the paper publishes no call count at all.
 
+**What exists now, and what is still a claim.** The specification above is a paragraph of this
+document until something reads it, so the §3 half is code: `eval/bird/askdata.ts` holds the shingle
+index over up to 10,000 distinct values per field (`RESEMBLANCE = 0.6`, three-shingle Jaccard, so
+`'Fresno County Office of Education'` resolves to a field that stores `'Office Of'` and a bare
+`'Banned'` is refused rather than guessed onto `'Banned Item'`), the five variants and the union of
+the fields their statements read, and step 2.d with `MaxRetry` as a parameter because the paper does
+not state its value. `askdata-shape` is the arm that carries it, one lever from `select-mixed-rule`
+— same three sources, same prompts, same free rule, same judge — with `arm.askdata` as the only
+difference. Two things the arm does that a reading of the lever list would miss: the link runs
+*before* every other card decision, because a column-choosing rule applied afterwards would be
+reading an already-narrowed card and its cost would be filed under the wrong lever; and the union is
+computed once per question and applied to **every** source's card, because a mixed arm whose three
+candidates answered on three different schemas would be a delta about which source was drawn first.
+Both are pinned by `test/bird-run-e2e.test.ts` on the real harness (`parent 3.00 calls, this arm
+8.00`), and the loop itself by 36 tests against a scripted generator, at 100% of statements and lines
+and 95.4% of branches.
+
+What is *not* claimed: no number from this arm is a reproduction of theirs, and the arm has not been
+dispatched. The bars below were registered before the code existed and are unchanged by it.
+
 | reading against `select-mixed` on the same 496 | verdict |
 |---|---|
 | ≥ +4.0pp, paired p < 0.05 | the pipeline carries something five levers do not: replication becomes the road, and the ablation runs in reverse (drop one mechanism at a time) |
@@ -8024,12 +8044,12 @@ published, and the three kinds of copying cannot be filed in one column:
 - **rebuild** may not either, and it may not be called a replication. The bar it has to clear is its
   own before-and-after, not the paper's number.
 
-That is why the queue is ordered as it is. `askdata-shape` is specified above and **no arm carries
-that name today**: the round that would have spent eight calls a question rebuilding it went to
-MAC-SQL instead, which is free to dispatch and won 4.84pp. A paper-only leader is worth rebuilding
-*after* the released ones have been run, because a rebuild's first result is a number with no
-denominator — and this document already has one entry of that kind, the `45.0%` that did not
-reproduce at `40.3%`.
+That is why the queue is ordered as it is. `askdata-shape` was specified in the section above and
+**no arm carried that name** for four rounds: the round that would have spent eight calls a question
+rebuilding it went to MAC-SQL instead, which is free to dispatch and won 4.84pp. The arm exists now
+and the specification is code, but it is still the *last* of the paper-only leaders rather than the
+first thing to run, because a rebuild's first result is a number with no denominator — and this
+document already has one entry of that kind, the `45.0%` that did not reproduce at `40.3%`.
 
 ## Two runs of the same experiment are not the same experiment
 

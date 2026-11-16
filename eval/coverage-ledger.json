@@ -2,7 +2,7 @@
   "note": "Per-file eval coverage. Enforced by tools/check-eval-coverage.mjs: a number may rise freely and may only fall with an explicit, reviewed edit. `target` is the standard every file must reach before eval/ joins the main gate.",
   "target": 95,
   "tolerancePp": 0.2,
-  "measuredAt": "2026-11-15",
+  "measuredAt": "2026-11-16",
   "totals": {
     "lines": 99.56,
     "statements": 99.56,
@@ -41,8 +41,8 @@
       "branches": 96.2
     },
     "eval/bird/agents.ts": {
-      "lines": 99.19,
-      "statements": 99.19,
+      "lines": 99.2,
+      "statements": 99.2,
       "functions": 100,
       "branches": 97.45
     },
@@ -51,6 +51,12 @@
       "statements": 100,
       "functions": 100,
       "branches": 100
+    },
+    "eval/bird/askdata.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 96.36
     },
     "eval/bird/block-columns.ts": {
       "lines": 100,
@@ -137,8 +143,8 @@
       "branches": 98.86
     },
     "eval/bird/differential.ts": {
-      "lines": 99.28,
-      "statements": 99.28,
+      "lines": 99.29,
+      "statements": 99.29,
       "functions": 100,
       "branches": 99.21
     },
@@ -212,7 +218,7 @@
       "lines": 99,
       "statements": 99,
       "functions": 100,
-      "branches": 95.52
+      "branches": 96.87
     },
     "eval/bird/literal-repair.ts": {
       "lines": 100,
@@ -410,7 +416,7 @@
       "lines": 99.35,
       "statements": 99.35,
       "functions": 100,
-      "branches": 97.01
+      "branches": 97.7
     },
     "eval/bird/synthesize.ts": {
       "lines": 100,
@@ -431,10 +437,10 @@
       "branches": 95.83
     },
     "eval/bird/values-gap.ts": {
-      "lines": 99.23,
-      "statements": 99.23,
+      "lines": 99.25,
+      "statements": 99.25,
       "functions": 100,
-      "branches": 99.14
+      "branches": 99.15
     },
     "eval/bird/values.ts": {
       "lines": 100,

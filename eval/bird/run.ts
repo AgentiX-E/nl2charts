@@ -33,6 +33,7 @@ import { inspectSql } from '@agentix-e/nl2charts-core';
 import { casesForEffect, compareArms, judgeOfficial, judgeStrict, majorityResult, mcnemarExact, pairedResolution, resultKey, summarise, wilsonInterval } from '@agentix-e/nl2charts-devkit';
 import type { PairedComparison } from '@agentix-e/nl2charts-devkit';
 import { graphForDatabase } from './join-graph.js';
+import { buildValueShards, keepFields, linkByAlignment } from './askdata.js';
 import { INTENT_RULE, intentFunnel, readIntentReply } from './intent.js';
 import type { IntentRecord } from './intent.js';
 import { ppPerExtraCall, repairFunnel } from './metrics.js';
@@ -87,6 +88,29 @@ export interface Arm {
    * together, and the delta would belong to neither.
    */
   readonly linkEvidence?: boolean;
+  /**
+   * Link the schema by *asking the generator*, the way `arXiv:2505.19988` §3 does it.
+   *
+   * Not a synonym for `linking`. `linking: true` runs one recaller pass over the card and renders
+   * the result as a `Likely columns` hint in front of a card that still holds every table — the
+   * model may ignore the hint, and 56.1% of the card in characters belongs to tables no gold
+   * statement reads. This lever narrows the card itself: five variants (focused/full × minimal/
+   * full profile, plus focused-and-full) each write one statement, and the **union of the fields
+   * those statements read** is the schema the arm then answers on. A table none of the five
+   * statements named is not in the prompt at all, so the lever cannot be read past.
+   *
+   * It is also the only lever here that spends generation calls to decide what to show: five, plus
+   * one rewrite per variant whose statement left a literal in a field that cannot hold it. That is
+   * why it is a lever and not a default — the arm that carries it is priced at eight calls per case
+   * against the shipped three, and `askdata-shape` exists to decide whether the narrowing is worth
+   * five of them.
+   *
+   * The value index it needs is the paper's, not `values`: `values` resolves the question's own
+   * literals by exact equality against the profile, which cannot see `'Office Of'` in a column that
+   * stores `'Office of'`. `askdata.ts` builds a shingle index over up to 10,000 distinct values per
+   * field, so step 2.d can tell "this literal lives in another field" from "this literal is wrong".
+   */
+  readonly askdata?: boolean;
   /** 'adaptive' lets the question shape choose the schema card and notes. */
   readonly profile?: 'adaptive';
   /**
@@ -1333,6 +1357,32 @@ export const ARMS: readonly Arm[] = [
   // one run — the score, the recorded candidates, and `bench:bird:consensus` over those
   // candidates — and the identity between the last two is exact or something is wrong.
   { name: 'select-mixed-rule', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, selectRule: 'shortest', mixed: MIXED_SOURCES },
+  // The leader's linker, on this repository's shipped candidate set and free rule.
+  //
+  // `AskData` is the top BIRD row this repository compares itself to (78.49% dev, 83.40% test) and
+  // has no release; `eval/bird/askdata.ts` rebuilds §3 from the paper, and this arm is the only
+  // instrument that can say whether the mechanism transfers to this endpoint. It is one lever
+  // against `select-mixed-rule` — same sources, same three prompts, same chooser, same judge — and
+  // the cost is the one thing that is not one lever: five generation calls to link, plus one rewrite
+  // per variant whose statement leaves a literal in a field that cannot hold it, so the arm's own
+  // row is where `calls.mean` has to be read rather than assumed.
+  //
+  // Why it is worth five calls: the paper's ablation prices *their* linking at +2.0pp without hints
+  // (61.2 → 63.2) and +1.8pp with them (71.2 → 73.0) on Mini-Dev, and +6.2pp if the link were
+  // perfect. Aligned on the same rows, this repository's hint-carrying full-schema reading is 63.0%
+  // and their number for the same cell is 71.2%, so 8.2pp is loose somewhere and the four candidates
+  // are the model, the eight demonstrations, the candidate-repair-vote machinery, and this linker.
+  // Three of the four have been read here and none of them explains it — metadata +3.6pp, three
+  // demonstrations +0.91pp at p = 0.2684, result-set voting −2.74pp — which leaves the linker and the
+  // model, and only a run can separate them.
+  //
+  // Pre-registered against `select-mixed-rule`, same 496 questions, one dispatch: **≥ +4.0pp** at
+  // p < 0.05 means the pipeline is the explanation and every later arm should carry the linker;
+  // **+1.5 to +4.0pp** means the linker is worth copying and the rest of the gap is the model;
+  // **< +1.5pp** means the 8.2pp belongs to the author and the next lever is a stronger model rather
+  // than a longer pipeline. Any reading is a verdict on the *endpoint*, never a reproduction of
+  // their number, and no figure from this arm may be filed under their name.
+  { name: 'askdata-shape', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, selectRule: 'shortest', mixed: MIXED_SOURCES, askdata: true },
   // The shipping arm with the narrowed value block on every candidate's card.
   //
   // The block has only ever been priced as a single-prompt lever, and it cleared its own bar there:
@@ -1870,6 +1920,7 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'select-mixed-rule': "the parent's own candidates chosen by `shortest` instead of by the model: three calls instead of four, and the offline device already priced the rule at 63.64% against the selector's 62.79% on 1,532 dev questions (63.71% against 61.42% on the strong pool, +2.29pp, p = 0.0030) — this arm is the derivation becoming a measurement, and its artifact is what `bench:bird:consensus` must reproduce exactly",
   'select-mixed-rule-rows': "the shipped arm plus a fourth candidate drawn from three stored rows per table: the pool read apart offline says the missing statements are `values` failures (71.3% of the 168 questions whose pool held no correct candidate) and that seven filter sites in ten aim at a column that has never held the value, which is a fact about rows rather than about columns — the arm that asks whether a fourth candidate differing in knowledge converts under a rule instead of under a selector",
   'select-mixed-rule-narrow': "the shipping arm with the narrowed value block on all three candidate cards: the block cleared its single-prompt bar at +1.50pp for +9.17% tokens (`43591209696`), and this arm is the one that says whether it survives being paid once per candidate on a pool that already holds three chances to be right — one field (`sourceSamples`), same sources, same chooser, three calls",
+  'askdata-shape': "the leader's five-variant alignment linker on this repository's own pool: it is the only arm that can price the 8.2pp between this split's hint-carrying full-schema 63.0% and the 71.2% the paper reports for the same cell, and it costs eight calls a case — five to decide what to show, one rewrite per variant whose statement leaves a literal in a field that cannot hold it, and three candidates. Dispatched once, against `select-mixed-rule` on the same 496 questions, against a criterion registered in `docs/benchmarks.md` before the run: at or above +4.0pp the pipeline explains the gap, +1.5 to +4.0pp the linker is worth copying and the rest is the model, below +1.5pp the gap belongs to the author's model and demonstrations and the next lever is a stronger model rather than a longer pipeline. The five-call cost is why it is not in the chain: a lever that triples the bill of every push has to earn its place with one reading, not with a weekly one",
   'select-mixed-rule-intent': 'the same fourth call spent on a candidate rendered from a query intent: same pool size, same free rule, same price as `select-mixed-rule-rows`, so the two arms together say which kind of difference a fourth candidate has to be — and the delta against `select-mixed-rule` is the conversion test `select-intent` could not give, because that arm read four candidates with the paid selector and lost 3.50pp doing it',
   'select-samples': "the trio's third slot given to the sampled card rather than the value index: the same four calls, and the block it replaces is empty on 60.9% of the split",
   intent: 'the same card one rule longer, answering with a query object the renderer turns into SQL: the only arm whose output grammar is enforced, and the only one that cannot be dispatched alone — its statement is rendered on the candidate-source path, so `assertIntentRule` refuses a run that names it as an arm of its own',
@@ -6607,7 +6658,27 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
    * `assertMixedFeasible` refused the run. The guard was reading the right thing and the run the
    * wrong one, so the run now reads what the guard reads: one card per candidate, from its source.
    */
-  const schemaForSource = (source: Arm, question: BirdQuestion): readonly SchemaTable[] => schemaFor(source, question);
+  /**
+   * Every column a linking arm's five statements read, per question.
+   *
+   * Held here rather than inside `cardFor` because a mixed arm builds one card per *source* and the
+   * link is a property of the question: five calls decide which fields this case can need, and each
+   * source is then narrowed to that set. Recomputing per source would spend fifteen calls to answer
+   * one question, and — worse — let the three candidates disagree about which tables exist.
+   */
+  const alignmentFields = new Map<number, readonly string[]>();
+
+  const narrowToAlignment = (schema: readonly SchemaTable[], question: BirdQuestion): readonly SchemaTable[] => {
+    const fields = alignmentFields.get(question.question_id);
+    if (fields === undefined) return schema;
+    const kept = keepFields(schema, fields);
+    // An empty result is not a cheaper card, it is a card with no tables: the caller's card is
+    // returned unchanged, and `alignCard` explains why that is the only honest fallback.
+    return kept.length === 0 ? schema : kept;
+  };
+
+  const schemaForSource = (source: Arm, question: BirdQuestion): readonly SchemaTable[] =>
+    narrowToAlignment(schemaFor(source, question), question);
 
   /**
    * What each column-choosing arm actually sent, keyed by arm and question.
@@ -6630,12 +6701,67 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
   const samplesOn = (schema: readonly SchemaTable[]): number =>
     schema.reduce((total, table) => total + table.columns.filter((column) => (column.samples?.length ?? 0) > 0).length, 0);
 
+  /**
+   * The five-variant alignment link, or `undefined` when the case cannot support it.
+   *
+   * Returns `undefined` in exactly one situation: the database has no profile. A shingle index is
+   * built from what the columns store, and a case whose profile the run never built has no values to
+   * resolve a literal against — so step 2.d would silently become "no literal lives anywhere", which
+   * is the *opposite* of its finding. Falling back to the full card is the only answer that does not
+   * invent a reading, and the run's `controls` already says how many databases were profiled.
+   *
+   * A union that names no field of the card falls back the same way. `keepFields` returns the card
+   * minus everything when the five statements read only columns the card does not hold — possible
+   * when the model writes against a table the focused variant showed and the full variant did not.
+   * An empty schema is not a cheaper prompt, it is a prompt with no tables in it, and the arm would
+   * report that as a hallucination rather than as a linker that found nothing.
+   */
+  const alignCard = async (
+    arm: Arm,
+    question: BirdQuestion,
+    base: readonly SchemaTable[],
+    provider: LlmProvider,
+  ): Promise<{ readonly schema: readonly SchemaTable[] } | undefined> => {
+    const profile = profiles.get(question.db_id);
+    if (profile === undefined) return undefined;
+    const alignment = await linkByAlignment({
+      question: question.question,
+      schema: base,
+      // The card, the evidence and the notes the arm would send are the prompt the variants write
+      // against: the paper's whole claim is that linking by *generating* beats linking by matching,
+      // and a variant given a different prompt would be measuring a different task.
+      prompt: { ...promptFor(arm, question, blocksFor(arm, question)) } as Record<string, unknown>,
+      shards: buildValueShards(profile),
+      // The same temperature the sampled arms draw at, and the same purpose label: a call spent
+      // deciding what to show is a generation call, and counting it under another purpose would make
+      // the arm's cost table disagree with the one this repository publishes.
+      generate: async (messages) => (await provider.complete({ messages, temperature: 0.7, purpose: 'generate' })).text,
+    });
+    alignmentFields.set(question.question_id, alignment.fields);
+    return { schema: narrowToAlignment(base, question) };
+  };
+
   const cardFor = async (arm: Arm, question: BirdQuestion, provider: LlmProvider): Promise<CardOutcome> => {
     const plan = cardPlan(arm, question);
     const base = plan.schema;
     const samples = arm.samples === undefined ? {} : { samples: { columns: samplesOn(base) } };
     const fields = plan.fields === undefined ? {} : { fields: plan.fields };
     const mode = arm.columnSelect;
+    // The alignment linker runs before every other card decision, because it is the one that can
+    // remove a table: a column-choosing rule applied afterwards would be reading a card the linker
+    // already narrowed, and its cost would be attributed to the wrong lever.
+    if (arm.askdata === true) {
+      const aligned = await alignCard(arm, question, base, provider);
+      if (aligned !== undefined) {
+        const outcome: CardOutcome = {
+          schema: aligned.schema,
+          ...(arm.samples === undefined ? {} : { samples: { columns: samplesOn(aligned.schema) } }),
+          ...fields,
+        };
+        sentCards.set(cardKey(arm, question), outcome);
+        return outcome;
+      }
+    }
     if (mode === undefined) return { schema: base, ...samples, ...fields };
     const reply = await provider.complete({
       messages: [

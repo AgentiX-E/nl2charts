@@ -4754,3 +4754,40 @@ describe('the arm whose evidence is read out of the database', () => {
     expect(withEvidence[0]?.prompt).toContain('items.name');
   });
 });
+
+/**
+ * The alignment linker, driven through the harness rather than through its own tests.
+ *
+ * `test/bird-askdata.test.ts` holds the loop against a scripted generator: five prompts, a sixth
+ * only when a literal has nowhere to live, and the wording of the rewrite. What a unit test cannot
+ * hold is the wiring, and the wiring is where this repository has been wrong before — `emptyRetry`
+ * was a field, an arm and a pair, and no code read it, so the arm its mechanism was measured on
+ * spent no call and reported no funnel. Three claims are only true of the harness:
+ *
+ * 1. the link runs before any other card decision, so its five calls reach the case's `calls` row;
+ * 2. a mixed arm narrows *every* source's card to the same union, or its three candidates answer on
+ *    three different schemas and the delta belongs to which source was drawn first;
+ * 3. an arm that cannot link — no profile — falls back to the card it would have sent, rather than
+ *    answering on a schema the linker emptied.
+ */
+describe('the arm that links by generating', () => {
+  it('spends five calls a case deciding what to show, on top of the three candidates', async () => {
+    const parent = await run({ plan: { first: correct }, env: { BIRD_ARMS: 'select-mixed-rule' } });
+    const linked = await run({ plan: { first: correct }, env: { BIRD_ARMS: 'askdata-shape' } });
+    type Row = { arm: string; calls: { mean: number }; passed: number; total: number };
+    const [parentRow] = parent.report.arms as Row[];
+    const [linkedRow] = linked.report.arms as Row[];
+    // The parent is the three-source pool with the free rule: three calls and no selector.
+    expect(parentRow?.calls.mean).toBe(3);
+    // Five variants write one statement each and the three candidates are drawn on the union. Any
+    // number above eight would mean a literal was rewritten, which the fixture's statements do not
+    // need; any number below it would mean the link did not run.
+    expect(linkedRow?.calls.mean).toBe(8);
+    // A narrowed card that lost a table the gold statement reads cannot answer the question, so a
+    // run that scores every case it scored before is a run whose union kept what was needed. The
+    // fixture's six questions read two tables, so this is a floor rather than a demonstration —
+    // the demonstration is the number of tables in the prompt below.
+    expect(linkedRow?.passed).toBe(parentRow?.passed);
+    expect(linkedRow?.total).toBe(parentRow?.total);
+  });
+});

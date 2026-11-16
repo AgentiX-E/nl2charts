@@ -65,7 +65,7 @@
   "status": "paper-only",
   "paper": "arXiv:2505.19988",
   "evidence": "https://arxiv.org/abs/2505.19988",
-  "checkedAt": "2026-11-08",
+  "checkedAt": "2026-11-16",
   "mechanisms": [
    "database-profiling-per-column-with-minhash-sketch",
    "llm-summary-of-the-profile-two-lengths",
@@ -73,6 +73,6 @@
    "three-candidates-by-sampling-seed-and-schema-order",
    "result-set-majority-vote-with-three-hand-written-corrections"
   ],
-  "note": "No release exists: the leaderboard row carries no repository and a GitHub search returns only community rebuilds. Four of the five mechanisms are already priced here (profile summary +3.6pp, three candidates, vote which lost 2.74pp to `shortest`, corrections bounded at 0.4pp); the open one is the linker, whose own ablation puts it at +1.8pp against +6.2pp for perfect linking. One community rebuild of the four-stage pipeline reports 95.6% mean column recall and 90.5% F1 in linking but 61.8% BIRD accuracy against the paper's 76.14-78.49 dev, which is what a rebuild of the published part buys when the unpublished part is the prompt text and the eight retrieved examples."
+  "note": "No release exists, re-checked on 2026-11-16 three ways: the arXiv page carries no artifact or code link in its abstract, body or appendix and names sqlglot, datasketch, kshingle and FAISS only as dependencies; a repository search for the name returns 161 items that are unrelated commercial products; and the single repository whose description names the method is a stub with one directory and no README. What the paper does carry is enough to write code, and that is now the case: `eval/bird/askdata.ts` rebuilds section 3 -- the shingle index over up to 10,000 distinct values per field, the five schema variants with the union of the fields their statements read, and step 2.d with `MaxRetry` as a parameter because the paper does not state its value -- and `askdata-shape` is the arm that carries it, one lever from `select-mixed-rule` at eight calls a case against three. Four of the five mechanisms were already priced here (profile summary +3.6pp, three candidates, vote which lost 2.74pp to `shortest`, corrections bounded at 0.4pp); the open one was the linker, whose own ablation puts it at +1.8pp against +6.2pp for perfect linking. One community rebuild of the four-stage pipeline reports 95.6% mean column recall and 90.5% F1 in linking but 61.8% BIRD accuracy against the paper's 76.14-78.49 dev, which is what a rebuild of the published part buys when the unpublished part is the prompt text and the eight retrieved examples. No number from the arm may be filed under this row: a rebuild's first reading is a number with no denominator."
  }
 ]
