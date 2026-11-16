@@ -7978,8 +7978,9 @@ reading an already-narrowed card and its cost would be filed under the wrong lev
 computed once per question and applied to **every** source's card, because a mixed arm whose three
 candidates answered on three different schemas would be a delta about which source was drawn first.
 Both are pinned by `test/bird-run-e2e.test.ts` on the real harness (`parent 3.00 calls, this arm
-8.00`), and the loop itself by 36 tests against a scripted generator, at 100% of statements and lines
-and 95.4% of branches.
+8.00`), and the loop itself by 36 tests against a scripted generator: 100% of statements and lines,
+and 96.4% of branches when the whole suite drives the file (95.4% when it was measured alone, before
+anything called it — the harness adds the two branches the arm is the only caller of).
 
 What is *not* claimed: no number from this arm is a reproduction of theirs, and the arm has not been
 dispatched. The bars below were registered before the code existed and are unchanged by it.
