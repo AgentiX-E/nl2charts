@@ -190,7 +190,11 @@ export function profileAnswer(prompt: string, tableData: string): ProfileAnswer 
   // same rows, so a cue change is decided by both readings rather than by the one that ignores
   // admission. This function stays single-table because it is the *published* reading of the product
   // that ships, and a reading that could be run against a candidate would stop being that.
-  const choice = recommendChart(prompt, profiles);
+  // The row count is what lets a table with no measure be charted by counting its rows, and it is
+  // the one fact the profiles cannot carry. It is passed here because this is the *published* reading
+  // of the product: a path that withheld it would publish a number about a recommender the caller of
+  // `toChartIR` never gets.
+  const choice = recommendChart(prompt, profiles, { rows: set.rows.length });
   const top = choice.recommendations[0];
   if (top === undefined) return { mark: 'declined', families: [], reasons: ['profile:refused'] };
   const cue = top.cues[0];

@@ -709,7 +709,7 @@ export function classify(row: ProfileInput): CensusRow {
   // through the cue that named it and no mark can be that family at all — a bar is a histogram only
   // when the question says so. Testing coverage first would file that row as `uncovered` and lose the
   // one fact that explains it.
-  const choice = recommendChart(row.prompt, profiles);
+  const choice = recommendChart(row.prompt, profiles, { rows: set.rows.length });
   const top = choice.recommendations[0];
   const lead = top === undefined ? undefined : familiesOfMark(top.mark, top.cues[0]);
   const covering = coveringMarks(expected);
@@ -983,6 +983,7 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
       const cell = tally.byFamily.get(classified.expected) ?? { n: 0, hit: 0 };
       cell.n += 1;
       const choice = recommendChart(row.prompt, profiles, {
+        rows: set.rows.length,
         cues: candidate.cues,
         // Only when the entry is about the cap: passing the default explicitly would make every cue
         // table a second test of a number none of them changes.
@@ -1010,7 +1011,10 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
     // population and the same hit test, so `hit` and `counterfactual.hit` are the same measurement
     // of two orderings rather than two measurements of one ordering.
     if (profiles.length > 0) {
-      const under = firstAdmissibleWinner(recommendChart(row.prompt, profiles), readCues(row.prompt));
+      const under = firstAdmissibleWinner(
+        recommendChart(row.prompt, profiles, { rows: set.rows.length }),
+        readCues(row.prompt),
+      );
       const answers = under !== undefined && familiesOfMark(under.mark, under.cues[0])[0] === classified.expected;
       const answered = classified.outcome === 'hit';
       if (answers) underFirstClaims += 1;
@@ -1041,7 +1045,7 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
         const untyped = profiles.map((profile) =>
           runs.includes(profile.name) ? { ...profile, type: 'quantitative' as const } : profile,
         );
-        const top = recommendChart(row.prompt, untyped).recommendations[0];
+        const top = recommendChart(row.prompt, untyped, { rows: set.rows.length }).recommendations[0];
         under = top !== undefined && familiesOfMark(top.mark, top.cues[0])[0] === classified.expected;
       }
       const answered = classified.outcome === 'hit';

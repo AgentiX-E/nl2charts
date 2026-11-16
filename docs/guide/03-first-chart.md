@@ -63,6 +63,43 @@ chart cares about relative height, not the unit) and the accounting negative
 `1.234,56` are deliberately not: both require guessing which separator is the
 decimal one, and a guess here turns a category into a measure.
 
+### A result set with no measure is charted by counting
+
+A grouped query often answers with the count already in it: one categorical
+column and no number. `toChartIR` draws that table rather than refusing it, by
+counting how many rows each category accounts for — the measure such a table
+always has.
+
+```ts
+const ir = toChartIR('Which genre has the most plays?', [
+  { genre: 'History', play: 'Henry V' },
+  { genre: 'Tragedy', play: 'Hamlet' },
+  { genre: 'Tragedy', play: 'Macbeth' },
+]);
+// ir.mark      === 'bar'
+// ir.encoding.x === { field: 'genre', type: 'nominal' }
+// ir.encoding.y === [{ field: 'count', type: 'quantitative', aggregate: 'count' }]
+// ir.data      === [{ genre: 'Tragedy', count: 2 }, { genre: 'History', count: 1 }]
+```
+
+Two conditions decide whether this is a chart or a refusal, and both are facts
+about the data rather than settings:
+
+- **A category has to repeat.** A count over a column of unique values is a row
+  of equal bars, so a table of twelve countries with nothing else is still
+  refused — correctly, because there is nothing to compare.
+- **A mark still has to fit.** The counted measure is one measure, so a scatter
+  (two measures), a boxplot (five numbers a row) and a radar (three) are still
+  out of reach, and a pie still needs one category of at most twelve slices.
+
+The count is *materialised*, not declared: the IR carries one row per group and
+the ref names the column it produced with `aggregate: 'count'`. A result set that
+already has a column called `count` keeps it, and the folded one is added as
+`count_2`. If you build the IR yourself, `recommendChart` will offer the counted
+measures only when you pass `rows` — the number of rows the profiles were taken
+from — because a recommend function handed profiles alone cannot tell twelve
+countries from twelve thousand sales.
+
 ```ts
 const CURRENCY = /^[$€£¥₹]\s?/;
 const GROUPED = /^\d{1,3}(?:,\d{3})+(?:\.\d+)?$/;

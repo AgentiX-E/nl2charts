@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { ChartIR } from '@agentix-e/nl2charts-spec';
 import { SERIES_TYPES, isNl2ChartsError, parseChartIR } from '@agentix-e/nl2charts-spec';
 import type { FieldProfile } from '../src/profile.js';
 import { profileRows } from '../src/profile.js';
@@ -255,14 +256,21 @@ describe('recommending a chart from the question and the result set', () => {
       dims: 1,
       ordered: 1,
       measures: 1,
+      counted: false,
     });
     // A category axis and no time: the same dims, one fewer ordered dimension.
-    expect(recommendChart('Revenue by region', profiles(regions)).shape).toEqual({ dims: 1, ordered: 0, measures: 1 });
+    expect(recommendChart('Revenue by region', profiles(regions)).shape).toEqual({
+      dims: 1,
+      ordered: 0,
+      measures: 1,
+      counted: false,
+    });
     // Two measures and nothing to group them by.
     expect(recommendChart('Is price correlated with rating?', profiles(twoMeasures)).shape).toEqual({
       dims: 0,
       ordered: 0,
       measures: 2,
+      counted: false,
     });
   });
 
@@ -471,7 +479,23 @@ describe('the properties every recommendation has to hold, over generated result
         expect(item.reasons.length).toBeGreaterThan(0);
       }
       if (choice.recommendations.length === 0) {
-        expect(() => toChartIR(question, data)).toThrow();
+        // The recommender was handed profiles and no row count, so it could not offer the counted
+        // measure; `toChartIR` is handed the rows and can. What must hold either way is that a chart
+        // is not drawn from a table the recommender could not measure: it counts, or it refuses, and
+        // a counted chart accounts for every row exactly once — that is what makes the fold a fold
+        // rather than a filter.
+        let counted: ChartIR | undefined;
+        try {
+          counted = toChartIR(question, data);
+        } catch {
+          counted = undefined;
+        }
+        if (counted !== undefined) {
+          const measure = Array.isArray(counted.encoding.y) ? counted.encoding.y[0] : counted.encoding.y;
+          expect(measure?.aggregate).toBe('count');
+          expect(counted.data.reduce((total, row) => total + Number(row['count']), 0)).toBe(data.length);
+          expect(lint(counted)).toEqual([]);
+        }
         continue;
       }
       const ir = toChartIR(question, data);
@@ -526,5 +550,166 @@ describe('the cue table a caller hands in', () => {
     const narrow = recommendChart(question, profileRows(matrix), { maxSlices: 1, cues: CHART_CUES });
     expect(narrow.refused.map((entry) => entry.mark)).toContain('pie');
     expect(narrow.refused.some((entry) => entry.reason.includes('at most 1 slices'))).toBe(true);
+  });
+});
+
+/**
+ * A table of names and nothing else is not unmeasurable.
+ *
+ * The result of a grouped query often carries one categorical column and no number at all — the
+ * question asked for a count and the copy in front of the reader *is* the count.
+ * `eval/text2vis` labels 106 such rows `bar` and this product refused every one of them with "a bar
+ * needs a category axis and a measure", which was 28% of the corpus's refusals and the single largest
+ * bucket on that side of the product.
+ *
+ * The measure is the row count, and these tests hold the three things that make it a measurement
+ * rather than a licence to draw: it exists only when the caller says how many rows there were, only
+ * when a category actually repeats, and it is materialised into the IR rather than declared and left
+ * for a renderer to guess.
+ */
+describe('counting a result set that carries no measure', () => {
+  const dramas = rows({
+    genre: ['History', 'History', 'Tragedy', 'Tragedy', 'Tragedy', 'Comedy'],
+    play: ['Henry V', 'Richard III', 'Hamlet', 'Macbeth', 'Othello', 'Twelfth Night'],
+  });
+  const question = 'Among the genres, which one has the most plays?';
+
+  it('refuses the table until the caller says how many rows it holds', () => {
+    const profiles = profileRows(dramas);
+    // Two categorical columns and no number: no mark can carry it, and the refusal names the measure.
+    const blind = recommendChart(question, profiles);
+    expect(blind.recommendations).toEqual([]);
+    expect(blind.refused.some((entry) => entry.reason.includes('measure'))).toBe(true);
+    expect(blind.shape).toEqual({ dims: 2, ordered: 0, measures: 0, counted: false });
+    // The same profiles, with the one fact a profile cannot carry. Nothing else changed.
+    const told = recommendChart(question, profiles, { rows: dramas.length });
+    expect(told.recommendations[0]?.mark).toBe('bar');
+    expect(told.shape).toEqual({ dims: 2, ordered: 0, measures: 1, counted: true });
+  });
+
+  it('refuses a column of unique values, because a count of one each is a row of equal bars', () => {
+    // Every play is named once, so counting the plays would draw six bars of height one and say
+    // nothing about the data. `distinct < rows` is the whole reason the measure is not synthesised
+    // from the profiles alone.
+    const unique = rows({ play: ['Hamlet', 'Macbeth', 'Othello'], genre: ['Tragedy', 'Tragedy', 'Tragedy'] });
+    const choice = recommendChart('Which play is it?', profileRows(unique), { rows: unique.length });
+    // `play` is distinct in every row and `genre` holds one value, so no dim repeats: the only count
+    // available is one bar of height three beside three bars of height one, and the product refuses.
+    expect(choice.shape.counted).toBe(false);
+    expect(choice.recommendations).toEqual([]);
+    // The boundary is a *repeating* category, not a table with more than one row: the same table with
+    // one genre repeated by two of its three plays is a distribution and is charted.
+    const spread = rows({ play: ['Hamlet', 'Macbeth', 'Othello'], genre: ['Tragedy', 'Tragedy', 'Comedy'] });
+    expect(recommendChart('Which genre is it?', profileRows(spread), { rows: spread.length }).shape.counted).toBe(true);
+  });
+
+  it('materialises the count into the rows and names the column in the encoding', () => {
+    const ir = toChartIR(question, dramas);
+    expect(ir.mark).toBe('bar');
+    const y = Array.isArray(ir.encoding.y) ? ir.encoding.y[0] : ir.encoding.y;
+    // `aggregate: 'count'` is what tells a reader of the IR that this column was folded, and what
+    // keeps the linter's `measure-without-aggregate` from firing on a chart whose aggregation was
+    // performed rather than forgotten.
+    expect(y).toEqual({ field: 'count', type: 'quantitative', aggregate: 'count' });
+    // One row per genre, ranked, and the counts add up to the rows that went in: a fold that lost or
+    // invented a row would still draw a picture.
+    expect(ir.data).toEqual([
+      { genre: 'Tragedy', count: 3 },
+      { genre: 'History', count: 2 },
+      { genre: 'Comedy', count: 1 },
+    ]);
+    expect(ir.data.reduce((total, row) => total + Number(row['count']), 0)).toBe(dramas.length);
+    // The picture survives the contract, the linter and the compiler — the three readers of an IR.
+    expect(parseChartIR(ir).mark).toBe('bar');
+    expect(isRenderable(lint(ir))).toBe(true);
+    const series = compileToECharts(ir).series as { encode: { x: string; y: string[] } }[];
+    expect(series[0]?.encode).toEqual({ x: 'genre', y: ['count'] });
+  });
+
+  it('keeps the query order when the group axis is ordered, and ranks otherwise', () => {
+    // Two rows in 2019 and three in 2020: ranking by count would put 2020 first, and a trend along
+    // years read backwards is a chart through a shuffle.
+    const years = rows({
+      year: ['2019', '2020', '2020', '2020'],
+      city: ['Oslo', 'Oslo', 'Rome', 'Rome'],
+      district: ['a', 'b', 'c', 'd'],
+    });
+    const trend = toChartIR('How did the number of districts trend over time?', years);
+    expect(trend.mark).toBe('line');
+    expect(trend.data.map((row) => row['year'])).toEqual(['2019', '2020']);
+    expect(trend.data.map((row) => row['count'])).toEqual([1, 3]);
+    // The same shape without an ordered axis is a ranking, and a ranking is sorted by count: the
+    // question a count chart answers is "which one has the most", and a reader should not have to
+    // find the answer by scanning.
+    const cities = rows({ city: ['Oslo', 'Oslo', 'Rome', 'Rome', 'Rome'], district: ['a', 'b', 'c', 'd', 'e'] });
+    const ranked = toChartIR('Which city has the most districts?', cities);
+    expect(ranked.mark).toBe('bar');
+    expect(ranked.data.map((row) => row['city'])).toEqual(['Rome', 'Oslo']);
+    expect(ranked.data.map((row) => row['count'])).toEqual([3, 2]);
+  });
+
+  it('never overwrites a column that is already called count', () => {
+    // A query that counted something returns a column called `count`, and folding onto that name
+    // would replace the numbers the chart is about with the numbers of rows that carry them.
+    const counted = rows({
+      genre: ['History', 'Tragedy', 'Tragedy'],
+      count: ['one', 'two', 'three'],
+    });
+    const ir = toChartIR('Which genre has the most of them?', counted);
+    const y = Array.isArray(ir.encoding.y) ? ir.encoding.y[0] : ir.encoding.y;
+    expect(y?.field).toBe('count_2');
+    // The result set's own column is still there, unchanged, in the folded rows.
+    expect(ir.data).toEqual([
+      { genre: 'Tragedy', count_2: 2 },
+      { genre: 'History', count_2: 1 },
+    ]);
+    // And the search keeps going: a table that already holds `count` and `count_2` gets `count_3`,
+    // because the name is chosen to be absent rather than to be conventionally first.
+    const twice = rows({
+      genre: ['History', 'Tragedy', 'Tragedy'],
+      count: ['one', 'two', 'three'],
+      count_2: ['i', 'ii', 'iii'],
+    });
+    const third = toChartIR('Which genre has the most of them?', twice);
+    const measure = Array.isArray(third.encoding.y) ? third.encoding.y[0] : third.encoding.y;
+    expect(measure?.field).toBe('count_3');
+  });
+
+  it('groups by both axes when the mark reads two categories', () => {
+    // A heatmap counts cells, not rows: grouping by x alone would draw one bar per region and lose
+    // the quarter it belongs to.
+    const cells = rows({
+      region: ['north', 'north', 'south', 'south', 'south'],
+      product: ['a', 'b', 'a', 'a', 'b'],
+    });
+    const ir = toChartIR('Counts by region and product', cells);
+    expect(ir.mark).toBe('heatmap');
+    expect(ir.encoding.color?.aggregate).toBe('count');
+    // One row per (region, product) cell, with the cells that hold two rows first.
+    expect(ir.data).toEqual([
+      { region: 'south', product: 'a', count: 2 },
+      { region: 'north', product: 'a', count: 1 },
+      { region: 'north', product: 'b', count: 1 },
+      { region: 'south', product: 'b', count: 1 },
+    ]);
+  });
+
+  it('applies the limit to the picture and not to the evidence', () => {
+    // Folding after the limit would count the first N rows and call the total a count.
+    const wide = rows({ kind: ['a', 'a', 'b', 'b', 'c', 'c', 'c'] });
+    const ir = toChartIR('Which kind is the most common?', wide, { limit: 2 });
+    expect(ir.data).toEqual([
+      { kind: 'c', count: 3 },
+      { kind: 'a', count: 2 },
+    ]);
+  });
+
+  it('leaves a table that has a measure of its own exactly as it was', () => {
+    const measured = rows({ region: ['north', 'south', 'west'], revenue: [120, 90, 60] });
+    const ir = toChartIR('Which region earned the most?', measured);
+    expect(ir.data).toEqual(measured);
+    const y = Array.isArray(ir.encoding.y) ? ir.encoding.y[0] : ir.encoding.y;
+    expect(y?.aggregate).toBeUndefined();
+    expect(recommendChart('Which region earned the most?', profileRows(measured), { rows: 3 }).shape.counted).toBe(false);
   });
 });

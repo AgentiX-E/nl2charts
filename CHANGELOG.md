@@ -7,6 +7,25 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **A result set with no measure is charted by counting its rows.** The largest bucket on the Text2Vis
+  side was not a ranking problem: of 1,470 scored rows, **414 were refused by every mark** and 268 of
+  those tables carried no measure at all — a grouped query whose answer *is* the count ships one
+  categorical column and no number, and the admission sentence `a bar needs a category axis and a
+  measure` was true and useless. `shapeOf` now synthesises the measure every such table has, under two
+  conditions that keep it a measurement rather than a licence to draw: the caller states the row count
+  (`RecommendOptions.rows`, because "does this category repeat" compares a distinct count with a row
+  count and a `FieldProfile` holds only the first), and at least one dim repeats (a count over unique
+  values is a row of equal bars). `toChartIR` materialises the fold — the contract has no transform
+  channel, so the counts arrive as data and the ref carries `aggregate: 'count'`, which is how a reader
+  tells a folded column from one called `count`; a result set that already holds that name gets
+  `count_2`. Measured on `pnpm bench:text2vis:profile`, same 1,470 rows: top-1 **414 → 444 (28.16% →
+  30.20%)**, shortlist **32.45% → 34.56%**, declined **432 → 352**. The refusal-to-hit split is the
+  finding and it is recorded rather than summarised: of the 68 rows that stopped being refused, **30
+  became hits and 37 were admitted and outranked**, so the admission rule was half the gap and the
+  ranking — invisible while the table was refused — is the other half. 8 new tests pin the boundary
+  (no row count, no repeating dim, a collision on `count`, ordering, limit-after-fold, two-axis
+  grouping, and the untouched path for tables that do carry a measure), and `packages/chart`'s
+  `recommend.ts` is at 100% of statements, branches, functions and lines.
 - **The arm that carries the rebuild, and the two things it does that the lever list does not say.**
   `askdata-shape` is one lever from `select-mixed-rule` — same three sources, same prompts, same free
   rule, same judge — and its only difference is `arm.askdata`. Wiring it exposed two decisions that a

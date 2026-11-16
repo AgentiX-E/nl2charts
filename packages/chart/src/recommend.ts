@@ -316,7 +316,10 @@ export interface ShapeCounts {
   readonly dims: number;
   /** The dims a line can order along: temporal and ordinal, never nominal. */
   readonly ordered: number;
+  /** Measures the result set carries, including the counted one. */
   readonly measures: number;
+  /** True when the only measure is the row count, materialised by `toChartIR` rather than read. */
+  readonly counted: boolean;
 }
 
 export interface ChartChoice {
@@ -367,10 +370,20 @@ export interface RecommendOptions {
    * would be a second answer to which cues exist, and this is the same table under a different order.
    */
   readonly cues?: readonly CueRule[];
+  /**
+   * How many rows the profiles were taken from, when the caller knows.
+   *
+   * It decides whether a table with no measure column has the counted one, which is a comparison
+   * between a distinct count and a row count — and a `FieldProfile` holds only the first. Omitted
+   * means "do not count": a recommender given profiles alone cannot tell twelve countries from twelve
+   * thousand sales. `toChartIR` always passes it, because it is the function that folds the rows.
+   */
+  readonly rows?: number;
 }
 
 interface Resolved {
   readonly maxSlices: number;
+  readonly rows: number | undefined;
 }
 
 interface Shape {
@@ -379,6 +392,8 @@ interface Shape {
   readonly measures: readonly FieldProfile[];
   /** The widest category still small enough to be named in a pie. */
   readonly sliceable: FieldProfile | undefined;
+  /** True when `measures` holds the synthesised row count instead of a column of the result set. */
+  readonly counted: boolean;
 }
 
 interface Admission {
@@ -504,6 +519,38 @@ export const RECOMMENDABLE_MARKS: readonly RecommendableMark[] = [
 /** Order that decides ties, so two marks that fit equally well always rank the same way. */
 const PREFERENCE: readonly RecommendableMark[] = RECOMMENDABLE_MARKS;
 
+/** The column `toChartIR` materialises a count into. */
+const COUNT_FIELD = 'count';
+
+/**
+ * A name no column of the result set holds: a query that counted something returns a column called
+ * `count`, and folding onto that name would replace the numbers the chart is about.
+ */
+function countName(profiles: readonly FieldProfile[]): string {
+  const taken = new Set(profiles.map((profile) => profile.name));
+  if (!taken.has(COUNT_FIELD)) return COUNT_FIELD;
+  let suffix = 2;
+  while (taken.has(`${COUNT_FIELD}_${String(suffix)}`)) suffix += 1;
+  return `${COUNT_FIELD}_${String(suffix)}`;
+}
+
+/**
+ * The measure a result set without one always has: its own rows. Two conditions keep it honest — a
+ * row count from the caller, and one dim that repeats, since a count over unique values is a row of
+ * equal bars. `toChartIR` folds the rows; no compiler learns an aggregate.
+ */
+function countMeasure(
+  dims: readonly FieldProfile[],
+  profiles: readonly FieldProfile[],
+  rows: number | undefined,
+): FieldProfile | undefined {
+  if (rows === undefined) return undefined;
+  if (!dims.some((profile) => profile.distinct >= 2 && profile.distinct < rows)) return undefined;
+  // A count's range is unknown until the rows are folded, and the only reader of a measure's range is
+  // `widest`, which has one candidate here. The bounds are the widest a count could be.
+  return { name: countName(profiles), type: 'quantitative', distinct: 1, nulls: 0, min: 1, max: rows, negative: false };
+}
+
 function shapeOf(profiles: readonly FieldProfile[], options: Resolved): Shape {
   const dims = profiles.filter((profile) => profile.type !== 'quantitative');
   const ordered = dims.filter((profile) => profile.type === 'temporal' || profile.type === 'ordinal');
@@ -511,7 +558,10 @@ function shapeOf(profiles: readonly FieldProfile[], options: Resolved): Shape {
   const sliceable = dims
     .filter((profile) => profile.distinct <= options.maxSlices && profile.distinct >= 2)
     .sort((left, right) => right.distinct - left.distinct || left.name.localeCompare(right.name))[0];
-  return { dims, ordered, measures, sliceable };
+  if (measures.length > 0) return { dims, ordered, measures, sliceable, counted: false };
+  const count = countMeasure(dims, profiles, options.rows);
+  if (count === undefined) return { dims, ordered, measures, sliceable, counted: false };
+  return { dims, ordered, measures: [count], sliceable, counted: true };
 }
 
 /**
@@ -552,7 +602,7 @@ export function recommendChart(
   profiles: readonly FieldProfile[],
   options: RecommendOptions = {},
 ): ChartChoice {
-  const resolved: Resolved = { maxSlices: options.maxSlices ?? DEFAULT_MAX_SLICES };
+  const resolved: Resolved = { maxSlices: options.maxSlices ?? DEFAULT_MAX_SLICES, rows: options.rows };
   const shape = shapeOf(profiles, resolved);
   const cues = readCues(question, options.cues);
   const recommendations: Recommendation[] = [];
@@ -585,7 +635,12 @@ export function recommendChart(
     question,
     recommendations,
     refused,
-    shape: { dims: shape.dims.length, ordered: shape.ordered.length, measures: shape.measures.length },
+    shape: {
+      dims: shape.dims.length,
+      ordered: shape.ordered.length,
+      measures: shape.measures.length,
+      counted: shape.counted,
+    },
   };
 }
 
@@ -649,14 +704,18 @@ function clean(channels: Record<string, unknown>): Encoding {
 function encodingFor(mark: RecommendableMark, shape: Shape, profiles: readonly FieldProfile[]): Encoding {
   const first = shape.dims[0] as FieldProfile;
   const value = widest(shape.measures) as FieldProfile;
+  // `aggregate: 'count'` says the column was folded rather than read, and it keeps the linter's
+  // `measure-without-aggregate` — a rule about an aggregation forgotten, not one performed — quiet.
+  const measure = (profile: FieldProfile): FieldRef =>
+    shape.counted ? { ...ref(profile), aggregate: 'count' } : ref(profile);
   switch (mark) {
     case 'pie':
     case 'funnel':
-      return clean({ theta: ref(shape.sliceable as FieldProfile), y: ref(value) });
+      return clean({ theta: ref(shape.sliceable as FieldProfile), y: measure(value) });
     case 'gauge':
-      return clean({ y: ref(value) });
+      return clean({ y: measure(value) });
     case 'heatmap':
-      return clean({ x: ref(first), y: [ref(shape.dims[1] as FieldProfile)], color: ref(value) });
+      return clean({ x: ref(first), y: [ref(shape.dims[1] as FieldProfile)], color: measure(value) });
     case 'boxplot':
     case 'candlestick': {
       const axis = shape.ordered[0];
@@ -666,18 +725,57 @@ function encodingFor(mark: RecommendableMark, shape: Shape, profiles: readonly F
       });
     }
     case 'radar':
-      return clean({ theta: ref(first), y: [ref(value)] });
+      return clean({ theta: ref(first), y: [measure(value)] });
     case 'parallel':
-      return clean({ x: ref(first), y: shape.measures.map(ref) });
+      return clean({ x: ref(first), y: shape.measures.map(measure) });
     case 'scatter':
       // Both axes carry a measure: a scatter over a category axis is a bar chart
       // that lost its aggregation, and the linter refuses it outright.
       return clean({ x: ref(shape.measures[0] as FieldProfile), y: [ref(shape.measures[1] as FieldProfile)] });
     case 'line':
-      return clean({ x: ref(shape.ordered[0] as FieldProfile), y: [ref(value)] });
+      return clean({ x: ref(shape.ordered[0] as FieldProfile), y: [measure(value)] });
     case 'bar':
-      return clean({ x: ref(first), y: [ref(value)] });
+      return clean({ x: ref(first), y: [measure(value)] });
   }
+}
+
+/** Every field an encoding groups by: the axes, and any non-measure on colour. */
+function groupFieldsOf(encoding: Encoding): FieldRef[] {
+  const out = new Map<string, FieldRef>();
+  for (const channel of [encoding.x, encoding.theta, encoding.y, encoding.color]) {
+    if (channel === undefined) continue;
+    for (const field of Array.isArray(channel) ? channel : [channel]) {
+      if (field.type !== 'quantitative') out.set(field.field, field);
+    }
+  }
+  return [...out.values()];
+}
+
+/**
+ * Fold rows into one row per group, with a count.
+ *
+ * A chart along an ordered axis keeps the order the query produced — a line over years ranked by its
+ * counts is a line through a shuffle — and any other chart is ranked, because "which one has the
+ * most" is the question a count chart answers.
+ */
+function countsOf(
+  rows: readonly Readonly<Record<string, unknown>>[],
+  fields: readonly string[],
+  name: string,
+  keepOrder: boolean,
+): Record<string, unknown>[] {
+  const groups = new Map<string, { values: Record<string, unknown>; count: number }>();
+  for (const row of rows) {
+    const key = fields.map((field) => String(row[field])).join('\u0000');
+    const group = groups.get(key);
+    if (group === undefined) {
+      groups.set(key, { values: Object.fromEntries(fields.map((field) => [field, row[field] ?? null])), count: 1 });
+    } else group.count += 1;
+  }
+  const counted = [...groups.values()];
+  // `Array#sort` is stable, so equal counts keep the order the query returned them in.
+  if (!keepOrder) counted.sort((left, right) => right.count - left.count);
+  return counted.map((group) => ({ ...group.values, [name]: group.count }));
 }
 
 /**
@@ -702,7 +800,8 @@ export function toChartIR(
     throw new Nl2ChartsError('NL2C_E_NOT_SUPPORTED', 'the result set is empty, so there is nothing to chart');
   }
   const profiles = profileRows(rows);
-  const choice = recommendChart(question, profiles, options);
+  // The one fact a column profile cannot hold, and the one that decides the counted measure.
+  const choice = recommendChart(question, profiles, { ...options, rows: rows.length });
   const best = choice.recommendations[0];
   if (best === undefined) {
     const columns = profiles.map((profile) => `${profile.name}:${profile.type}`).join(', ');
@@ -711,13 +810,23 @@ export function toChartIR(
       `no chart fits a result set of (${columns}); a chart needs a measure, and a shape needs the columns that witness it`,
     );
   }
-  const shape = shapeOf(profiles, { maxSlices: options.maxSlices ?? DEFAULT_MAX_SLICES });
-  const data = [...rows].slice(0, limit).map((row) => ({ ...row }));
+  const shape = shapeOf(profiles, { maxSlices: options.maxSlices ?? DEFAULT_MAX_SLICES, rows: rows.length });
+  const encoding = encodingFor(best.mark, shape, profiles);
+  // Folding before the limit is what makes the limit a limit on the picture, not on the evidence.
+  const groupFields = groupFieldsOf(encoding);
+  const data = shape.counted
+    ? countsOf(
+        rows,
+        groupFields.map((field) => field.field),
+        (widest(shape.measures) as FieldProfile).name,
+        groupFields.some((field) => field.type === 'temporal' || field.type === 'ordinal'),
+      ).slice(0, limit)
+    : [...rows].slice(0, limit).map((row) => ({ ...row }));
   const mark: ChartType = best.mark;
   const ir: ChartIR = {
     version: CONTRACT_VERSION,
     mark,
-    encoding: encodingFor(best.mark, shape, profiles),
+    encoding,
     data,
     title: options.title ?? question,
     alt: options.alt ?? `${mark} chart of ${String(data.length)} row(s): ${question}`,

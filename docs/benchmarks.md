@@ -13131,15 +13131,18 @@ reading printed beside it as the control.
 | reading | cue only | with the result set | delta |
 |---|---:|---:|---:|
 | top-1 | **549 (37.35%)** | **231 (15.71%)** | **−21.64pp** |
-
-*(Overwritten — see *which Text2Vis number is ours*. Both figures belong to the dispatch above; the cue
-table changed afterwards and neither was re-read. Measured today they are 627 and 414, a delta of
-−13.30pp. The table is kept because the round it records is the one that found the defect, and a
-reading that is quietly edited is a reading nobody can audit.)*
 | shortlist | 1,000 (68.03%) | 231 (15.71%) | −52.32pp |
 | declined | — | 555 (37.76%) | — |
 | missed (a mark that cannot cover the label) | — | 684 (46.53%) | — |
 | scored rows | 1,470 of 1,985 (515 unmapped labels) | same | — |
+
+*(Overwritten — see *which Text2Vis number is ours*. Both figures belong to the dispatch above; the cue
+table changed afterwards and neither was re-read. Re-read in the round that found the defect they were
+627 and **414**, a delta of −13.30pp, and the round that taught the product to count moved the second
+to **444** (−12.45pp). The table is kept because the round it records is the one that found the defect,
+and a reading that is quietly edited is a reading nobody can audit. It also used to sit between two
+rows, which broke the table in two for every renderer: an annotation that destroys the thing it
+annotates is the same defect one layer down.)* |
 | baseline: always the most frequent family | line 26.60% | — | — |
 | baseline: always bar | 24.29% | — | — |
 
@@ -14198,6 +14201,14 @@ census reproduces it exactly; the figure it must not be confused with is the cue
 which is the same product with the result set taken away. The paragraph is right that a reader needs
 the population, and it is now right about which number the population belongs to.
 
+**Amended again by the counted measure** (`### A table with no measure is charted by counting its
+rows`). Both readings above are the round's own and are kept as such; today the entry point reads
+**444 (30.20%) over the 1,470** and **36.01% (444/1,233) over the labels the contract can draw**, with
+the shortlist at **508 (34.56%)**. The `renderable` denominator did not change — the count measure
+converted refusals into answers, not unreachable labels into reachable ones — so the 237 rows this
+section is about remain out of reach for the same reason: the contract has no `area`, `histogram` or
+`violin` series.
+
 ### The SQL side: a dispatch that could not resolve its own effect, and what replaced it
 
 G2 was registered as "combine MAC-SQL's four components into one arm", against a bar of
@@ -14524,11 +14535,16 @@ pnpm bench:text2vis:census    # the same rows, split by why a row missed
 | reading | instrument | top-1 | rest |
 | --- | --- | ---: | --- |
 | cue table alone | `rule.ts` (`CHART_CUES`) | **627 (42.65%)** | shortlist 971 (66.05%), declined 210 |
-| the shipped entry point | `profile.ts` (`recommendChart(question, profiles)`) | **414 (28.16%)** | shortlist 477 (32.45%), declined 432, missed 561 |
-| the census | `census.ts` | **414 (28.16%)** | same hit test, reproduced independently |
+| the shipped entry point | `profile.ts` (`recommendChart(question, profiles, { rows })`) | **444 (30.20%)** | shortlist 508 (34.56%), declined 352, missed 610 |
+| the census | `census.ts` | **444 (30.20%)** | same hit test, reproduced independently |
 
 So **`census` is not a third quantity; it is a second measurement of the entry point, and the two
-agree exactly.** The pair that disagrees is the cue table against the entry point, by **13.30pp**.
+agree exactly.** The pair that disagrees is the cue table against the entry point, by **12.45pp**.
+
+Both of the entry point's numbers moved in the round that taught it to count (`### A table with no
+measure is charted by counting its rows` below): 414 → **444** on top-1 and 432 → **352** declined.
+The cue table's 627 did not, because the cue table never sees the result set and the admission rule it
+never consults is exactly what the count measure relaxed.
 
 The numbers this table replaces were `549` and `231`, read on the dispatch whose table this document
 still carries one screen up. Between that run and this one the cue table changed, and **neither
@@ -14539,17 +14555,76 @@ finding and disagree on its size:
 | | cue only | entry point | delta |
 | --- | ---: | ---: | ---: |
 | as published | 549 | 231 | −21.64pp |
-| **as measured** | **627** | **414** | **−13.30pp** |
+| as measured, before the count measure | 627 | 414 | −13.30pp |
+| **as measured, this round** | **627** | **444** | **−12.45pp** |
 
 The finding survives: **the shipped recommender is worse than its own cue table when it is given the
-result set**, and it is worse than "always answer bar" (28.57%) by a hair, on the same rows. It is
-the single largest defect on this side of the product, and it is invisible in any single number
-because each instrument looks right on its own.
+result set.** It is the single largest defect on this side of the product, and it is invisible in any
+single number because each instrument looks right on its own. What the count measure bought is the
+part of that gap which was an admission rule refusing a table it could have drawn, and it bought
+**+2.04pp** of it; the rest is ranking, which the cue table does not have to do.
 
-What to publish is therefore **28.16%**, the entry point's own reading — not 37.35% or 42.65%, which
-measure a component with the data removed, and not 15.71%, which measured a cue table that has since
-changed. **A reading without the date it was taken is a reading about a build that no longer exists**,
-which is the defect this section exists to name.
+**A correction this round owes.** An earlier version of this section said the 28.16% was "worse than
+'always answer bar' (28.57%) by a hair". That comparison does not reproduce: `profile.ts` prints its
+two constants on every run and they read **26.60% for always-line and 24.29% for always-bar**, so the
+product was above both at 28.16% and is further above them at 30.20%. The 28.57% was never a number
+this instrument produced, and the file published a comparison against it for several rounds — which is
+the same defect the section above is about, one layer down: a reading whose denominator was never
+recorded is a reading nobody can reproduce, and it survived because it happened to support the
+narrative.
+
+What to publish is therefore **30.20%**, the entry point's own reading — not 42.65%, which measures a
+component with the data removed, and not 15.71%, which measured a cue table that has since changed.
+**A reading without the date it was taken is a reading about a build that no longer exists**, which is
+the defect this section exists to name.
+
+## A table with no measure is charted by counting its rows
+
+The largest bucket of refusals on the Text2Vis side was not a ranking problem. Of 1,470 scored rows,
+**414 were refused by every mark** — 28.16%, one row in three — and 268 of those tables carried no
+measure at all. The admission sentence was `a bar needs a category axis and a measure`, and it was
+true and useless: a grouped query whose answer *is* the count ships one categorical column and no
+number, so the copy in front of the reader is a table of names that a bar can draw perfectly well.
+
+The measure is the row count, and it is the same measure every spreadsheet reaches for first. It is
+now synthesised in `shapeOf` under three conditions, each of which is a decision rather than a
+convenience:
+
+1. **The caller says how many rows it has** (`RecommendOptions.rows`). "Does this category repeat" is
+   a comparison between a column's distinct count and the number of rows, and `FieldProfile` holds
+   only the first. `toChartIR` always passes it, because it is the function that then folds; a
+   recommender handed profiles alone does not count, because twelve countries and twelve thousand
+   sales produce the same profiles.
+2. **At least one dim repeats** (`distinct >= 2 && distinct < rows`). A count over a column of unique
+   values is a row of equal bars: a picture about nothing, and the shape most likely to be labelled
+   with a mark it cannot support.
+3. **The aggregation is materialised, not declared.** The contract has no transform channel, so
+   `toChartIR` folds the rows and the IR carries the counts as data — with `aggregate: 'count'` on the
+   ref, which is how a reader of the IR tells a column that was folded from a column called `count`.
+
+The name is chosen to be absent: a result set that already holds `count` gets `count_2`, because
+folding onto that name would replace the numbers the chart is about.
+
+| quantity | before | after | delta |
+| --- | ---: | ---: | ---: |
+| entry point, top-1 | 414 (28.16%) | **444 (30.20%)** | **+2.04pp** |
+| entry point, shortlist | 477 (32.45%) | 508 (34.56%) | +2.11pp |
+| refused by every mark | 414 | 346 | **−68** |
+| admitted and outranked | 363 | 400 | +37 |
+| `always line` / `always bar`, the two constants on the same rows | 26.60% / 24.29% | 26.60% / 24.29% | — |
+
+**The 68 rows that stopped being refused did not all become hits, and the split is the finding:** 30
+became hits, 37 were admitted and lost the ranking to another mark, and 1 was substituted. So the
+admission rule was half of the problem and the ranking was the other half — and the ranking was
+invisible while the table was being refused. That is the next lever, and it is registered with its
+own reading rather than assumed: of the 37, sixteen are counted bars winning over a `line` label and
+eleven are `lost area to bar`, which is what a pool of cues that names neither does when the fixed
+preference order breaks the tie.
+
+The cue table's own 627 (42.65%) does not move, and this is the clearest statement of what the two
+instruments measure: **the cue table never sees the result set, so it can never be refused.** Its
+score is a ceiling that no product honouring `supportOf` can reach — the gap narrowed from 13.30pp to
+12.45pp, and the remaining 12.45pp is not a defect to be closed but a different question being asked.
 
 ## Three questions about the leader, and the arithmetic behind each answer
 
