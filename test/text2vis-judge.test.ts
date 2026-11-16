@@ -23,6 +23,8 @@ import {
   parseJudge,
   parseJudgeArgs,
   readRender,
+  REPLY_LIMIT,
+  score,
   summarizeJudge,
   VISION_PROBE,
 } from '../eval/text2vis/judge.js';
@@ -159,10 +161,13 @@ describe('which figures get graded, and what happens to the rest', () => {
 
 describe('the report is two means and their denominators', () => {
   const jobs = [job('0', 'bar'), job('1', 'bar'), job('2', 'pie')];
+  // Every verdict carries the reply it was parsed from, because the assertion added this round
+  // refuses a row whose score cannot be re-read: a mean is a product of a parse, and a parse over a
+  // reply nobody kept is a number no reader can audit.
   const verdicts: readonly JudgeVerdict[] = [
-    { id: '0', chart_correctness: 10, readability: 8 },
-    { id: '1', chart_correctness: 0, readability: 6 },
-    { id: '2', chart_correctness: 8, readability: 8 },
+    { id: '0', chart_correctness: 10, readability: 8, reply: '{"chart_correctness": 10, "readability": 8}' },
+    { id: '1', chart_correctness: 0, readability: 6, reply: '{"chart_correctness": 0, "readability": 6}' },
+    { id: '2', chart_correctness: 8, readability: 8, reply: '{"chart_correctness": 8, "readability": 8}' },
   ];
 
   it('averages each dimension over the rows that were graded, to two places', () => {
@@ -173,7 +178,7 @@ describe('the report is two means and their denominators', () => {
   });
 
   it('keeps a failure out of the mean and counts it beside them', () => {
-    const report = summarizeJudge(2, 2, jobs.slice(0, 2), [], [{ id: '0', chart_correctness: 10, readability: 10, }, { id: '1', error: 'socket hang up' }], 2, SEEN, GRADER);
+    const report = summarizeJudge(2, 2, jobs.slice(0, 2), [], [{ id: '0', chart_correctness: 10, readability: 10, reply: '{"chart_correctness": 10, "readability": 10}' }, { id: '1', error: 'socket hang up' }], 2, SEEN, GRADER);
     expect(report.means).toEqual({ chart_correctness: 10, readability: 10 });
     expect(report.failed).toBe(1);
     expect(report.failures).toEqual([{ id: '1', error: 'socket hang up' }]);
@@ -205,12 +210,30 @@ describe('the report is two means and their denominators', () => {
     expect(report.byMark.map((one) => one.mark)).toEqual(['bar', 'pie']);
   });
 
-  it('reports zero-and-zero on an empty set rather than NaN', () => {
+  it('reports no reading at all on an empty set, because zero is a claim about the charts', () => {
     const report = summarizeJudge(2, 2, [job('0', 'bar'), job('1', 'bar')], [], [], 0, SEEN, GRADER);
-    expect(report.means).toEqual({ chart_correctness: 0, readability: 0 });
+    // `null` and not NaN, and not zero either: a run where every call failed would otherwise publish
+    // "chart_correctness 0.00", a mean over no readings presented as a verdict.
+    expect(report.means).toEqual({ chart_correctness: null, readability: null });
     expect(report.callsPerRow).toBe(0);
     expect(assertJudgeReport(report)).toBeUndefined();
-    expect(describeJudge(report).join('\n')).toContain('chart_correctness 0.00/10');
+    expect(describeJudge(report).join('\n')).toContain('chart_correctness no reading, readability no reading');
+  });
+
+  it('says no reading for a mark whose every row failed, instead of zero', () => {
+    // The first production reading printed `boxplot 0/1 judged, correctness 0.00` — a mean over zero
+    // rows, which reads as "the one boxplot scored zero" when the truth was that its call timed out.
+    const report = summarizeJudge(1, 1, [job('0', 'boxplot')], [], [{ id: '0', error: 'llm call timed out' }], 1, SEEN, GRADER);
+    expect(report.byMark).toEqual([{ mark: 'boxplot', rows: 1, judged: 0, chart_correctness: null, readability: null }]);
+    expect(describeJudge(report).join('\n')).toContain('boxplot: 0/1 judged, correctness no reading, readability no reading');
+  });
+
+  it('spells a mean with no readings behind it as one, on the 0-10 scale for everything else', () => {
+    // The two spellings live in one function because a reader who sees one of them will see the
+    // other, and "0.00/10" for a bucket nothing was graded on is the defect this replaced.
+    expect(score(null)).toBe('no reading');
+    expect(score(0)).toBe('0.00/10');
+    expect(score(10)).toBe('10.00/10');
   });
 
   it('refuses a verdict for a row that was never offered', () => {
@@ -219,13 +242,25 @@ describe('the report is two means and their denominators', () => {
     );
   });
 
+  it('prints every graded row of a sample, with what the grader wrote, because that is what a rehearsal is for', () => {
+    // Two of five charts unselected is the shape of a `--limit` run: the sample is printed, and the
+    // rows it did not reach are counted rather than silently missing.
+    const report = summarizeJudge(5, 5, jobs, [], verdicts, 3, SEEN, GRADER);
+    const lines = describeJudge(report).join('\n');
+    expect(lines).toContain('the 3 rows that were graded, with what the grader wrote:');
+    expect(lines).toMatch(/row 0: correctness 10, readability 8(, \d+ ms)? — \{"chart_correctness": 10, "readability": 8\}/);
+    // A full run keeps the artifact instead: 1,286 lines of log is not a summary.
+    const full = summarizeJudge(3, 3, jobs, [], verdicts, 3, SEEN, GRADER);
+    expect(describeJudge(full).join('\n')).not.toContain('rows that were graded');
+  });
+
   it('prints the two means, the denominators and the failures, and nothing else', () => {
     const report = summarizeJudge(3, 3, jobs, [], verdicts, 3, SEEN, GRADER);
     const lines = describeJudge(report).join('\n');
     expect(lines).toContain('judged 3/3 charts');
     expect(lines).toContain('chart_correctness 6.00/10, readability 7.33/10');
     expect(lines).toContain('calls 3, 1.000 per judged row');
-    expect(lines).toContain('bar: 2/2 judged, correctness 5.00, readability 7.00');
+    expect(lines).toContain('bar: 2/2 judged, correctness 5.00/10, readability 7.00/10');
   });
 });
 
@@ -244,6 +279,10 @@ describe('what a report has to be before a mean can be read out of it', () => {
     calls: 2,
     callsPerRow: 1,
     failures: [],
+    verdicts: [
+      { id: '0', chart_correctness: 8, readability: 8, reply: '{"chart_correctness": 8, "readability": 8}' },
+      { id: '1', chart_correctness: 8, readability: 8, reply: '{"chart_correctness": 8, "readability": 8}' },
+    ],
     probe: SEEN,
   };
   const reject = (patch: Partial<JudgeReport>, says: RegExp): void => {
@@ -289,6 +328,145 @@ describe('what a report has to be before a mean can be read out of it', () => {
   });
 });
 
+describe('a batch is priced in calls and in wall clock', () => {
+  const rows = ['0', '1', '2', '3'].map((id) => job(id, 'bar'));
+
+  /** A provider whose answer arrives later the *sooner* the row is, so completion order is reversed. */
+  function reversed(calls: { inFlight: number; peak: number }) {
+    return {
+      id: 'staggered',
+      model: 'glm-4.5v',
+      complete: async (request: { readonly messages: readonly { readonly content: string }[] }) => {
+        calls.inFlight += 1;
+        calls.peak = Math.max(calls.peak, calls.inFlight);
+        const prompt = request.messages[1]?.content ?? '';
+        const id = /row (\d+)/.exec(prompt)?.[1] ?? '0';
+        await new Promise((done) => setTimeout(done, (4 - Number(id)) * 12));
+        calls.inFlight -= 1;
+        return { text: '{"chart_correctness": 5, "readability": 5}', model: 'glm-4.5v' };
+      },
+    };
+  }
+
+  it('keeps the artifact in row order even though the replies came back backwards', async () => {
+    const calls = { inFlight: 0, peak: 0 };
+    const verdicts = await judgeJobsWith(rows, {
+      provider: reversed(calls),
+      concurrency: 4,
+      readImage: async () => ({ mediaType: 'image/png', data: PIXEL_PNG.toString('base64') }),
+    });
+    // Four rows, finished 3-2-1-0, reported 0-1-2-3: the report is a statement about the corpus and
+    // a scheduling accident must not be able to reorder it.
+    expect(verdicts.map((verdict) => verdict.id)).toEqual(['0', '1', '2', '3']);
+  });
+
+  it('overlaps the calls it is told to overlap, and no more', async () => {
+    const calls = { inFlight: 0, peak: 0 };
+    await judgeJobsWith(rows, { provider: reversed(calls), concurrency: 2, readImage: async () => ({ mediaType: 'image/png', data: PIXEL_PNG.toString('base64') }) });
+    expect(calls.peak).toBe(2);
+    const serial = { inFlight: 0, peak: 0 };
+    await judgeJobsWith(rows, { provider: reversed(serial), readImage: async () => ({ mediaType: 'image/png', data: PIXEL_PNG.toString('base64') }) });
+    expect(serial.peak).toBe(1);
+  });
+
+  it('still spends one call per row, whatever the concurrency', async () => {
+    let spent = 0;
+    const counting = {
+      id: 'counting',
+      model: 'm',
+      complete: async () => {
+        spent += 1;
+        return { text: '{"chart_correctness": 5, "readability": 5}', model: 'm' };
+      },
+    };
+    await judgeJobsWith(rows, { provider: counting, concurrency: 3, readImage: async () => ({ mediaType: 'image/png', data: PIXEL_PNG.toString('base64') }) });
+    expect(spent).toBe(4);
+  });
+
+  it('grades an empty list at any concurrency, and spends nothing', async () => {
+    // A sample of zero rows is a run the caller asked for and a shape the loop has to survive: the
+    // clamping to one worker exists because `Array.from({length: 0})` would otherwise await nothing
+    // and still have to return an empty report.
+    const verdicts = await judgeJobsWith([], { provider: reversed({ inFlight: 0, peak: 0 }), concurrency: 4 });
+    expect(verdicts).toEqual([]);
+  });
+
+  it('refuses a concurrency that is not a whole number of at least one', async () => {
+    const provider = reversed({ inFlight: 0, peak: 0 });
+    await expect(judgeJobsWith(rows, { provider, concurrency: 0, readImage: async () => ({ mediaType: 'image/png', data: PIXEL_PNG.toString('base64') }) })).rejects.toThrow(
+      /whole number of at least 1/,
+    );
+    await expect(judgeJobsWith(rows, { provider, concurrency: 1.5, readImage: async () => ({ mediaType: 'image/png', data: PIXEL_PNG.toString('base64') }) })).rejects.toThrow(
+      /whole number of at least 1/,
+    );
+  });
+});
+
+describe('a reply that is kept, and bounded', () => {
+  it('keeps the grader\'s own words beside the two scores', async () => {
+    const verdicts = await judgeJobsWith([job('0', 'bar')], {
+      provider: { id: 'p', model: 'm', complete: async () => ({ text: '  {"chart_correctness": 7, "readability": 6}  ', model: 'm' }) },
+      readImage: async () => ({ mediaType: 'image/png', data: PIXEL_PNG.toString('base64') }),
+    });
+    // Trimmed but otherwise verbatim: the point is that a reader can tell a misread from a bad chart.
+    expect(verdicts[0]?.reply).toBe('{"chart_correctness": 7, "readability": 6}');
+  });
+
+  it('truncates a reply that ran long, and says how long the report may be', async () => {
+    const long = `{"chart_correctness": 7, "readability": 6}${' '.repeat(REPLY_LIMIT)}and then some commentary`;
+    const verdicts = await judgeJobsWith([job('0', 'bar')], {
+      provider: { id: 'p', model: 'm', complete: async () => ({ text: long, model: 'm' }) },
+      readImage: async () => ({ mediaType: 'image/png', data: PIXEL_PNG.toString('base64') }),
+    });
+    expect(verdicts[0]?.reply).toHaveLength(REPLY_LIMIT);
+    expect(assertJudgeReport(summarizeJudge(1, 1, [job('0', 'bar')], [], verdicts, 1, SEEN, GRADER))).toBeUndefined();
+  });
+
+  it('keeps no reply for a row that never got one, because a fabricated empty one reads as an answer', async () => {
+    const verdicts = await judgeJobsWith([job('0', 'bar')], {
+      provider: { id: 'p', model: 'm', complete: async () => { throw new Error('llm call timed out'); } },
+      readImage: async () => ({ mediaType: 'image/png', data: PIXEL_PNG.toString('base64') }),
+    });
+    expect(verdicts[0]).toEqual({ id: '0', error: 'llm call timed out', ms: expect.any(Number) as number });
+  });
+
+  it('refuses a reply longer than the report documents', () => {
+    const report = summarizeJudge(1, 1, [job('0', 'bar')], [], [{ id: '0', chart_correctness: 5, readability: 5, reply: 'x'.repeat(REPLY_LIMIT + 1) }], 1, SEEN, GRADER);
+    // The bound is what keeps 1,286 replies inside an artifact a person can open, and a run that
+    // ignored it would be a run whose artifact nobody can load.
+    expect(() => assertJudgeReport(report)).toThrow(new RegExp(`over the ${String(REPLY_LIMIT)} it documents`));
+  });
+
+  it('refuses a report whose row kept neither a reply nor an error', () => {
+    const report = summarizeJudge(1, 1, [job('0', 'bar')], [], [{ id: '0', chart_correctness: 5, readability: 5 }], 1, SEEN, GRADER);
+    expect(() => assertJudgeReport(report)).toThrow(/kept no reply, so its score cannot be re-read/);
+  });
+
+  it('refuses a report whose kept rows do not add up to the rows the means were over', () => {
+    const report = summarizeJudge(1, 1, [job('0', 'bar')], [], [{ id: '0', chart_correctness: 5, readability: 5, reply: 'r' }], 1, SEEN, GRADER);
+    // One row judged and one row kept is the only shape that adds up; a report where the array and
+    // the counts disagree is one where a row was dropped between the summary and the artifact.
+    expect(() => assertJudgeReport({ ...report, verdicts: [] })).toThrow(/0 rows kept for 1 judged and 0 failed/);
+  });
+
+  it('prints a failed row of a sample as a failure, with its own reason', () => {
+    const report = summarizeJudge(3, 3, [job('0', 'bar'), job('1', 'pie'), job('2', 'line')], [], [
+      { id: '0', chart_correctness: 5, readability: 5, reply: 'r', ms: 12 },
+      { id: '1', error: 'llm call timed out', ms: 180_000 },
+      { id: '2', chart_correctness: 1, readability: 1, reply: 'r' },
+    ], 3, SEEN, GRADER);
+    const lines = describeJudge({ ...report, notSelected: 1, charts: 4, scored: 5, skipped: 1 }).join('\n');
+    expect(lines).toContain('row 1: FAILED llm call timed out, 180000 ms');
+  });
+
+  it('refuses a row that is scored and an error at the same time, or neither', () => {
+    const both = summarizeJudge(1, 1, [job('0', 'bar')], [], [{ id: '0', chart_correctness: 5, readability: 5, error: 'x', reply: 'r' }], 1, SEEN, GRADER);
+    expect(() => assertJudgeReport(both)).toThrow(/scored and also an error/);
+    const neither = summarizeJudge(1, 1, [job('0', 'bar')], [], [{ id: '0', reply: 'nothing here' }], 1, SEEN, GRADER);
+    expect(() => assertJudgeReport(neither)).toThrow(/neither scored nor an error/);
+  });
+});
+
 describe('grading a batch', () => {
   const dir = mkdtempSync(join(tmpdir(), 'nl2charts-judge-'));
   const png = join(dir, '0.png');
@@ -326,7 +504,17 @@ describe('grading a batch', () => {
     const { provider, bodies, close } = responder('{"chart_correctness": 9, "readability": 5}');
     try {
       const verdicts = await judgeJobsWith([{ ...job('0', 'bar'), png }], { provider });
-      expect(verdicts).toEqual([{ id: '0', chart_correctness: 9, readability: 5, ms: expect.any(Number) as number }]);
+      // The reply is kept verbatim, so a later reader can tell a parse that misread a well-formed
+      // reply from a grader that really wrote that number.
+      expect(verdicts).toEqual([
+        {
+          id: '0',
+          chart_correctness: 9,
+          readability: 5,
+          reply: '{"chart_correctness": 9, "readability": 5}',
+          ms: expect.any(Number) as number,
+        },
+      ]);
       const messages = bodies[0]?.messages as { readonly role: string; readonly content: unknown }[];
       expect(messages).toHaveLength(2);
       const parts = messages[1]?.content as { readonly type: string; readonly image_url?: { readonly url: string } }[];
@@ -633,6 +821,16 @@ describe('the command line', () => {
     expect(() => parseJudgeArgs(['--endpoint'])).toThrow(/--endpoint needs a value/);
   });
 
+  it('takes the concurrency the runner has room for, and refuses one it cannot honour', () => {
+    // The first reading measured 49 seconds per call over 1,286 rows, which is longer than any
+    // runner will hold a job: the flag exists because the calls are independent, and the price
+    // (`one call per row`) is asserted elsewhere and does not move with it.
+    expect(parseJudgeArgs(['--concurrency', '8'])).toMatchObject({ concurrency: 8 });
+    expect(() => parseJudgeArgs(['--concurrency', '0'])).toThrow(/positive whole number/);
+    expect(() => parseJudgeArgs(['--concurrency', 'half'])).toThrow(/positive whole number/);
+    expect(() => parseJudgeArgs(['--concurrency'])).toThrow(/--concurrency needs a value/);
+  });
+
   it('refuses a flag it does not use, and a flag without a value', () => {
     expect(() => parseJudgeArgs(['--nope'])).toThrow(/unknown argument --nope/);
     expect(() => parseJudgeArgs(['--png'])).toThrow(/--png needs a value/);
@@ -743,9 +941,25 @@ describe('the judge command, over a real socket and a real PNG', () => {
       writeFileSync(join(root, 'render.json'), JSON.stringify({ rendered: 2, failed: 0, failures: [] }));
       const lines: string[] = [];
       const code = await entryJudge(ENTRY, MODULE_URL, (line) => lines.push(line), {
-        argv: ['--render', join(root, 'render.json'), '--png', root, '--limit', '1', '--artifact', join(root, 'judge.json')],
+        // `--concurrency` is passed here rather than only parsed elsewhere: the flag has to reach the
+        // loop, and the one place that proves it is a run.
+        argv: [
+          '--render',
+          join(root, 'render.json'),
+          '--png',
+          root,
+          '--limit',
+          '1',
+          '--concurrency',
+          '2',
+          '--artifact',
+          join(root, 'judge.json'),
+        ],
         load: { url: server.url, cacheDir: join(root, 'cache') },
         provider,
+        // A provider that samples at a number rather than at zero: the injected path defaults to
+        // zero, and the branch that lets a caller override it has to be taken once.
+        temperature: 0.2,
       });
       expect(code).toBe(0);
       const report = JSON.parse(readFileSync(join(root, 'judge.json'), 'utf8')) as JudgeReport;
@@ -902,6 +1116,35 @@ describe('the judge command, over a real socket and a real PNG', () => {
     const lines: string[] = [];
     expect(await entryJudge(ENTRY, MODULE_URL, (line) => lines.push(line), { argv: ['--probe-only'], provider, temperature: null })).toBe(0);
     expect(lines.join('\n')).toMatch(/temperature unset/);
+    // An injected provider has no timeout of its own, and printing a number the run is not using
+    // would be worse than printing that the provider's default applies.
+    expect(lines.join('\n')).toMatch(/timeout provider default/);
+  });
+
+  it('carries the row\'s timeout, because a timeout is a fact about the model', async () => {
+    // Measured, not assumed: the first reading lost 2 of 8 rows to the provider's 60-second default
+    // while the six that answered averaged 49 seconds each.
+    const row = JUDGE_ENDPOINTS.find((endpoint) => endpoint.name === 'zhipu');
+    expect(row?.timeoutMs).toBe(180_000);
+    const resolved = resolveJudge({ ZHIPU_API_KEY: 'k' });
+    expect(resolved.timeoutMs).toBe(180_000);
+  });
+
+  it('falls back to the process environment when a caller hands it none, which is the CLI path', async () => {
+    // The one arm no injected fixture reaches: a run started by hand reads `process.env`. It is not
+    // covered by passing `env: {}` — that is the *other* arm — so the variables are removed and put
+    // back, and the assertion is the message that names them.
+    const kept = { z: process.env.ZHIPU_API_KEY, l: process.env.LLM_API_KEY };
+    delete process.env.ZHIPU_API_KEY;
+    delete process.env.LLM_API_KEY;
+    try {
+      const lines: string[] = [];
+      expect(await entryJudge(ENTRY, MODULE_URL, (line) => lines.push(line), { argv: ['--probe-only'] })).toBe(1);
+      expect(lines.join('\n')).toMatch(/no key for the zhipu endpoint: set ZHIPU_API_KEY or LLM_API_KEY/);
+    } finally {
+      if (kept.z !== undefined) process.env.ZHIPU_API_KEY = kept.z;
+      if (kept.l !== undefined) process.env.LLM_API_KEY = kept.l;
+    }
   });
 
   it('checks an endpoint for one call, and grades nothing', async () => {

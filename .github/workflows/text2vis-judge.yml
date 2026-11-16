@@ -50,6 +50,11 @@ on:
         required: true
         default: '0'
         type: string
+      concurrency:
+        description: 'Calls in flight at once (measured: 49 s per call, so 1 would take 17 h)'
+        required: true
+        default: '8'
+        type: string
 
 permissions:
   contents: read
@@ -64,9 +69,11 @@ jobs:
   judge:
     name: what the figures are worth, one call each
     runs-on: ubuntu-latest
-    # 1,286 graded figures, one call each, in order. The number is a budget and not a measurement:
-    # the reading reports each call's `ms`, and a rehearsal with `limit: 8` is what says whether this
-    # much time is enough. Raised from 90 when the grader became a vision model that thinks first.
+    # 1,286 graded figures, one call each, eight in flight. The number is a budget and not a
+    # measurement, but it is now arithmetic rather than a guess: the rehearsal measured **49 seconds
+    # per call** (6 rows, 8 attempted) on this endpoint, so a serial run is 17½ hours — longer than
+    # this runner will hold a job — and eight in flight is 2¼. The margin is for the tail and for
+    # retries inside the provider.
     timeout-minutes: 240
     env:
       LLM_API_KEY: ${{ secrets[inputs.secret_name] }}
@@ -117,9 +124,9 @@ jobs:
       - name: Grade the figures
         run: |
           if [ "${{ inputs.limit }}" = "0" ]; then
-            pnpm bench:text2vis:judge --render eval/out/text2vis-render.json --png eval/.cache/text2vis/png --artifact eval/out/text2vis-judge.json
+            pnpm bench:text2vis:judge --render eval/out/text2vis-render.json --png eval/.cache/text2vis/png --artifact eval/out/text2vis-judge.json --concurrency "${{ inputs.concurrency }}"
           else
-            pnpm bench:text2vis:judge --render eval/out/text2vis-render.json --png eval/.cache/text2vis/png --artifact eval/out/text2vis-judge.json --limit "${{ inputs.limit }}"
+            pnpm bench:text2vis:judge --render eval/out/text2vis-render.json --png eval/.cache/text2vis/png --artifact eval/out/text2vis-judge.json --limit "${{ inputs.limit }}" --concurrency "${{ inputs.concurrency }}"
           fi
 
       # The floor this reading was registered under: one call per attempted row, every row in exactly
@@ -154,14 +161,26 @@ jobs:
                 '| --- | --- |',
                 '| graded by | ' + report.grader.model + ' (' + report.grader.endpoint + ') |',
                 '| the vision probe answered | ' + report.probe.answer + ' |',
-                '| chart_correctness | ' + report.means.chart_correctness.toFixed(2) + '/10 |',
-                '| readability | ' + report.means.readability.toFixed(2) + '/10 |',
+                '| chart_correctness | ' + (report.means.chart_correctness === null ? 'no reading' : report.means.chart_correctness.toFixed(2) + '/10') + ' |',
+                '| readability | ' + (report.means.readability === null ? 'no reading' : report.means.readability.toFixed(2) + '/10') + ' |',
                 '| judged | ' + report.judged + ' of ' + report.charts + ' charts |',
                 '| failed / unselected / skipped | ' + report.failed + ' / ' + report.notSelected + ' / ' + report.skipped + ' |',
                 '| calls | ' + report.calls + ' (' + report.callsPerRow.toFixed(3) + ' per judged row) |',
                 '',
                 'Two means, not a pass rate: a grader score is ordinal and has no calibrated threshold.'
               ];
+              // A sample is audited here, because the whole question a rehearsal answers is whether
+              // this grader is reading these figures. A full run leaves the rows in the artifact.
+              if (report.notSelected > 0 && Array.isArray(report.verdicts)) {
+                lines.push('', '| row | correctness | readability | ms | what the grader wrote |', '| --- | --- | --- | --- | --- |');
+                for (const v of report.verdicts) {
+                  const wrote = String(v.reply || v.error || '').replace(/\|/g, '\\|').slice(0, 120);
+                  const one = v.chart_correctness === undefined ? '—' : v.chart_correctness;
+                  const two = v.readability === undefined ? '—' : v.readability;
+                  const ms = v.ms === undefined ? '—' : v.ms;
+                  lines.push('| ' + v.id + ' | ' + one + ' | ' + two + ' | ' + ms + ' | ' + wrote + ' |');
+                }
+              }
               require('fs').appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join('\n') + '\n');
             "
           else

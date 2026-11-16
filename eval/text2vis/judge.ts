@@ -59,15 +59,42 @@ export interface JudgeVerdict {
   /** Present when the call failed or the reply could not be read as two scores. */
   readonly error?: string;
   readonly ms?: number;
+  /**
+   * What the grader actually wrote, bounded.
+   *
+   * Added after the first reading produced `chart_correctness 1.17` and nobody could say whether the
+   * parse had misread a well-formed reply or the model had really written a 1. A mean is a product of
+   * a parse, and a parse over a reply nobody kept is a number no reader can audit — the same defect
+   * as a percentage in prose, one layer down. `REPLY_LIMIT` characters because the whole reply is one
+   * JSON object; a grader that wrote prose has already failed the instruction, and the first 240
+   * characters are enough to see that it did.
+   */
+  readonly reply?: string;
 }
+
+/**
+ * How much of a reply the report keeps.
+ *
+ * Long enough for the instructed object plus the commentary a model sometimes adds around it, short
+ * enough that 1,286 of them fit in an artifact a person can open.
+ */
+export const REPLY_LIMIT = 240;
 
 /** One mark's line: the same two means over the rows that mark answered. */
 export interface MarkJudgement {
   readonly mark: string;
   readonly rows: number;
   readonly judged: number;
-  readonly chart_correctness: number;
-  readonly readability: number;
+  /**
+   * The two means, or `null` when nothing under this mark was judged.
+   *
+   * `null` rather than `0` because the first reading of this instrument printed `boxplot 0/1 judged,
+   * correctness 0.00` — a mean over zero rows, which reads as "the one boxplot scored zero" when the
+   * truth is that its single call timed out. A zero that means "no observation" is the same defect as
+   * a mean with no denominator.
+   */
+  readonly chart_correctness: number | null;
+  readonly readability: number | null;
 }
 
 /** Who graded, because a mean without an author cannot be compared with another model's mean. */
@@ -104,12 +131,26 @@ export interface JudgeReport {
   readonly notSelected: number;
   /** Rows with no figure at all: declined, refused, or failed at draw time. */
   readonly skipped: number;
-  readonly means: { readonly chart_correctness: number; readonly readability: number };
+  /**
+   * The two means, or `null` when nothing was judged.
+   *
+   * `null` and not `0`: a run whose every call failed would otherwise publish "chart_correctness
+   * 0.00", which is a claim about the charts made out of no readings at all.
+   */
+  readonly means: { readonly chart_correctness: number | null; readonly readability: number | null };
   readonly byMark: readonly MarkJudgement[];
   /** Calls actually spent. One per attempted row, and the assertion below holds it to that. */
   readonly calls: number;
   readonly callsPerRow: number;
   readonly failures: readonly { readonly id: string; readonly error: string }[];
+  /**
+   * Every row that was attempted, with its own two scores, its price in milliseconds and what the
+   * grader wrote.
+   *
+   * The means above are a summary of this array and nothing else: publishing them without it would
+   * make a reading that cannot be re-read, which is how a parse defect survives a round.
+   */
+  readonly verdicts: readonly JudgeVerdict[];
   /**
    * The one call spent proving the endpoint could see, and what it answered.
    *
@@ -344,8 +385,14 @@ export function judgeJobs(
 }
 
 /** Mean to two places, and `0` for an empty set — reported beside a count that says it was empty. */
-function mean(values: readonly number[]): number {
-  if (values.length === 0) return 0;
+/**
+ * The mean of at least one reading, to two places.
+ *
+ * The caller proves the array is not empty and keeps `null` for the empty case: a function that
+ * answered zero would be a mean pretending to be a verdict, which is the defect this round removed
+ * from two report fields. There is no guard here because there is no zero to return.
+ */
+function mean(values: readonly [number, ...number[]]): number {
   return Number((values.reduce((total, value) => total + value, 0) / values.length).toFixed(2));
 }
 
@@ -399,14 +446,17 @@ export function summarizeJudge(
     failed: failures.length,
     notSelected: charts - verdicts.length,
     skipped: skipped.length,
-    means: { chart_correctness: mean(correctness), readability: mean(readability) },
+    means: {
+      chart_correctness: correctness.length === 0 ? null : mean(correctness as [number, ...number[]]),
+      readability: readability.length === 0 ? null : mean(readability as [number, ...number[]]),
+    },
     byMark: [...byMark.entries()]
       .map(([mark, cell]) => ({
         mark,
         rows: cell.rows,
         judged: cell.correctness.length,
-        chart_correctness: mean(cell.correctness),
-        readability: mean(cell.readability),
+        chart_correctness: cell.correctness.length === 0 ? null : mean(cell.correctness as [number, ...number[]]),
+        readability: cell.readability.length === 0 ? null : mean(cell.readability as [number, ...number[]]),
       }))
       .sort((left, right) => right.rows - left.rows || left.mark.localeCompare(right.mark)),
     calls,
@@ -415,6 +465,10 @@ export function summarizeJudge(
     // rows and lost one reply to a parse, which is a ratio about the parser rather than about price.
     callsPerRow: verdicts.length === 0 ? 0 : Number((calls / verdicts.length).toFixed(3)),
     failures,
+    // By row index, which is a number because `chartJobs` makes every id one (`String(index)`), and
+    // unique because it *is* the index. A tie-break here would be code no input can reach: two
+    // verdicts with the same id are the same row counted twice, which the partition check refuses.
+    verdicts: [...verdicts].sort((left, right) => Number(left.id) - Number(right.id)),
     probe,
   };
   return report;
@@ -467,8 +521,33 @@ export function assertJudgeReport(report: JudgeReport): void {
     );
   }
   for (const mean of [report.means.chart_correctness, report.means.readability]) {
+    if (mean === null) continue;
     if (mean < 0 || mean > 10) throw new Error(`judge report: a mean of ${String(mean)} is outside the scale`);
   }
+  // A row is a reading or a failure, never both and never neither: two scores without a place in the
+  // mean, or an id the means were computed without, would be a row the summary silently dropped.
+  if (report.verdicts.length !== report.judged + report.failed) {
+    throw new Error(
+      `judge report: ${String(report.verdicts.length)} rows kept for ${String(report.judged)} judged and ${String(report.failed)} failed`,
+    );
+  }
+  for (const verdict of report.verdicts) {
+    const scored = verdict.chart_correctness !== undefined && verdict.readability !== undefined;
+    if (scored === (verdict.error !== undefined)) {
+      throw new Error(`judge report: row ${verdict.id} is ${scored ? 'scored and also an error' : 'neither scored nor an error'}`);
+    }
+    if (verdict.reply === undefined && verdict.error === undefined) {
+      throw new Error(`judge report: row ${verdict.id} kept no reply, so its score cannot be re-read`);
+    }
+    if (verdict.reply !== undefined && verdict.reply.length > REPLY_LIMIT) {
+      throw new Error(`judge report: row ${verdict.id} kept ${String(verdict.reply.length)} characters of reply, over the ${String(REPLY_LIMIT)} it documents`);
+    }
+  }
+}
+
+/** A mean as the log prints it, with "no reading" for the bucket that has no rows behind it. */
+export function score(mean: number | null): string {
+  return mean === null ? 'no reading' : `${mean.toFixed(2)}/10`;
 }
 
 /** The lines the log prints, and the shape of the answer: two means and their denominators. */
@@ -476,16 +555,30 @@ export function describeJudge(report: JudgeReport): readonly string[] {
   const lines = [
     `text2vis: judged ${String(report.judged)}/${String(report.charts)} charts with ${report.grader.model} (${report.grader.endpoint})` +
       ` — ${String(report.failed)} failed, ${String(report.notSelected)} unselected, ${String(report.skipped)} skipped of ${String(report.scored)} scored`,
-    `  chart_correctness ${report.means.chart_correctness.toFixed(2)}/10, readability ${report.means.readability.toFixed(2)}/10`,
+    `  chart_correctness ${score(report.means.chart_correctness)}, readability ${score(report.means.readability)}`,
     `  calls ${String(report.calls)}, ${report.callsPerRow.toFixed(3)} per judged row; the vision probe answered "${report.probe.answer}"`,
   ];
   for (const mark of report.byMark) {
     lines.push(
       `  ${mark.mark}: ${String(mark.judged)}/${String(mark.rows)} judged, ` +
-        `correctness ${mark.chart_correctness.toFixed(2)}, readability ${mark.readability.toFixed(2)}`,
+        `correctness ${score(mark.chart_correctness)}, readability ${score(mark.readability)}`,
     );
   }
   for (const failure of report.failures) lines.push(`  FAILED row ${failure.id}: ${failure.error}`);
+  // A sample is audited in the log it was taken in. On a full run the per-row lines would be 1,286
+  // of them and the artifact holds every one; on a rehearsal they are the whole point, because the
+  // only question a rehearsal answers is "is this grader reading these figures, and what did it say".
+  if (report.notSelected > 0) {
+    lines.push(`  the ${String(report.verdicts.length)} rows that were graded, with what the grader wrote:`);
+    for (const verdict of report.verdicts) {
+      const scores =
+        verdict.error === undefined
+          ? `correctness ${String(verdict.chart_correctness)}, readability ${String(verdict.readability)}`
+          : `FAILED ${verdict.error}`;
+      const ms = verdict.ms === undefined ? '' : `, ${String(verdict.ms)} ms`;
+      lines.push(`  row ${verdict.id}: ${scores}${ms}${verdict.reply === undefined ? '' : ` — ${verdict.reply}`}`);
+    }
+  }
   return lines;
 }
 
@@ -506,6 +599,16 @@ export interface JudgeOptions {
   /** Reads one PNG as base64. Injected so the grading loop can be tested without a filesystem. */
   readonly readImage?: (path: string) => Promise<LlmImage>;
   readonly now?: () => number;
+  /**
+   * How many calls may be in flight at once. One by default.
+   *
+   * The first reading of this instrument measured **49 seconds per call** on a 1,286-chart corpus,
+   * which is seventeen and a half hours in sequence — longer than any runner will hold a job. The
+   * calls are independent, so the only decision is how many to overlap; what must not change is the
+   * price (`one call per row`, still asserted) or the order of the artifact (rebuilt by index, so a
+   * faster row does not move the report).
+   */
+  readonly concurrency?: number;
 }
 
 /**
@@ -521,8 +624,12 @@ export async function judgeJobsWith(jobs: readonly JudgeJob[], options: JudgeOpt
   const read = options.readImage ?? (async (path: string) => ({ mediaType: PNG_MEDIA, data: (await readFile(path)).toString('base64') }));
   const now = options.now ?? (() => Date.now());
   const temperature = options.temperature === undefined ? 0 : options.temperature;
-  const verdicts: JudgeVerdict[] = [];
-  for (const job of jobs) {
+  const concurrency = options.concurrency ?? 1;
+  if (!Number.isInteger(concurrency) || concurrency < 1) {
+    throw new Error(`judge: --concurrency must be a whole number of at least 1, not ${String(concurrency)}`);
+  }
+  const verdicts: JudgeVerdict[] = new Array<JudgeVerdict>(jobs.length);
+  const one = async (job: JudgeJob, index: number): Promise<void> => {
     const started = now();
     try {
       const image = await read(job.png);
@@ -535,11 +642,24 @@ export async function judgeJobsWith(jobs: readonly JudgeJob[], options: JudgeOpt
         purpose: 'compare',
       });
       const scores = parseJudge(response.text);
-      verdicts.push({ id: job.id, ...scores, ms: now() - started });
+      verdicts[index] = { id: job.id, ...scores, reply: response.text.trim().slice(0, REPLY_LIMIT), ms: now() - started };
     } catch (error) {
-      verdicts.push({ id: job.id, error: error instanceof Error ? error.message : String(error), ms: now() - started });
+      // A row that never got an answer has no reply to keep: the error *is* what was learned, and a
+      // fabricated empty reply would read as a grader that answered with nothing.
+      verdicts[index] = { id: job.id, error: error instanceof Error ? error.message : String(error), ms: now() - started };
     }
-  }
+  };
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const index = next;
+      next += 1;
+      const job = jobs[index];
+      if (job === undefined) return;
+      await one(job, index);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, jobs.length === 0 ? 1 : jobs.length) }, worker));
   return verdicts;
 }
 
@@ -553,6 +673,8 @@ export interface JudgeArgs {
   readonly endpoint?: string;
   /** Ask the endpoint one question about one image and stop: the whole run, priced at one call. */
   readonly probeOnly: boolean;
+  /** How many calls the run keeps in flight. Absent means one. */
+  readonly concurrency?: number;
 }
 
 export function parseJudgeArgs(argv: readonly string[]): JudgeArgs {
@@ -563,6 +685,7 @@ export function parseJudgeArgs(argv: readonly string[]): JudgeArgs {
   let json = false;
   let endpoint: string | undefined;
   let probeOnly = false;
+  let concurrency: number | undefined;
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index] as string;
     if (flag === '--json') {
@@ -573,12 +696,22 @@ export function parseJudgeArgs(argv: readonly string[]): JudgeArgs {
       probeOnly = true;
       continue;
     }
-    if (flag === '--artifact' || flag === '--render' || flag === '--png' || flag === '--limit' || flag === '--endpoint') {
+    if (
+      flag === '--artifact' ||
+      flag === '--render' ||
+      flag === '--png' ||
+      flag === '--limit' ||
+      flag === '--endpoint' ||
+      flag === '--concurrency'
+    ) {
       const value = argv[index + 1];
       if (value === undefined || value.startsWith('--')) throw new Error(`${flag} needs a value`);
       if (flag === '--limit') {
         if (!/^\d+$/.test(value) || Number(value) === 0) throw new Error(`--limit needs a positive whole number, not ${value}`);
         limit = Number(value);
+      } else if (flag === '--concurrency') {
+        if (!/^\d+$/.test(value) || Number(value) === 0) throw new Error(`--concurrency needs a positive whole number, not ${value}`);
+        concurrency = Number(value);
       } else if (flag === '--artifact') artifact = value;
       else if (flag === '--render') render = value;
       else if (flag === '--endpoint') endpoint = value;
@@ -588,7 +721,7 @@ export function parseJudgeArgs(argv: readonly string[]): JudgeArgs {
     }
     throw new Error(
       `unknown argument ${flag}: this command grades the charts the renderer drew, and takes --json, --png <dir>, ` +
-        `--render <path>, --artifact <path>, --limit <n>, --endpoint <name> and --probe-only`,
+        `--render <path>, --artifact <path>, --limit <n>, --endpoint <name>, --concurrency <n> and --probe-only`,
     );
   }
   return {
@@ -599,6 +732,7 @@ export function parseJudgeArgs(argv: readonly string[]): JudgeArgs {
     ...(render === undefined ? {} : { render }),
     ...(limit === undefined ? {} : { limit }),
     ...(endpoint === undefined ? {} : { endpoint }),
+    ...(concurrency === undefined ? {} : { concurrency }),
   };
 }
 
@@ -665,6 +799,16 @@ export interface JudgeEndpoint {
   readonly maxOutputTokens: number;
   /** The largest budget an escalation may name. */
   readonly answerBudgetCeiling: number;
+  /**
+   * How long one grading call may take before it is a failed row.
+   *
+   * A fact about the model, like the temperature. The first reading of this instrument ran on the
+   * provider's 60-second default and lost **2 of 8 rows to `llm call timed out`** while the six that
+   * answered averaged 49 seconds each: a default chosen for a chat turn is shorter than a vision
+   * model that reasons about a figure before writing two integers. Named here rather than raised
+   * everywhere, because the text jobs' 60 seconds is correct for them.
+   */
+  readonly timeoutMs: number;
 }
 
 /**
@@ -696,6 +840,9 @@ export const JUDGE_ENDPOINTS: readonly JudgeEndpoint[] = [
     temperature: null,
     maxOutputTokens: 1024,
     answerBudgetCeiling: 16384,
+    // Measured, not guessed: the six rows that answered took 49 s on average and two crossed 60 s.
+    // Three minutes leaves room for the tail without making a stuck row cost a quarter of an hour.
+    timeoutMs: 180_000,
   },
 ];
 
@@ -707,6 +854,13 @@ export interface JudgeResolved {
   /** Where the calls go, for the log line a dispatch reads before it pays for anything. */
   readonly baseUrl: string;
   readonly imageDialect: ImageDialect;
+  /**
+   * How long one call may take, when the row said.
+   *
+   * Absent for an injected provider: a fixture has no timeout of its own, and printing a number the
+   * run is not using would be worse than printing that the provider's own default applies.
+   */
+  readonly timeoutMs?: number;
 }
 
 /**
@@ -757,6 +911,7 @@ export function resolveJudge(env: Record<string, string | undefined>, name?: str
     // A retry inside the provider is still one call to the meter, so `callsPerRow` stays one.
     retries: 3,
     retryDelayMs: 1000,
+    timeoutMs: row.timeoutMs,
   });
   return {
     provider,
@@ -764,6 +919,7 @@ export function resolveJudge(env: Record<string, string | undefined>, name?: str
     temperature: row.temperature,
     baseUrl,
     imageDialect: row.imageDialect,
+    timeoutMs: row.timeoutMs,
   };
 }
 
@@ -820,9 +976,13 @@ function probeRefusal(probe: ProbeReading): string | undefined {
 function describeGrader(resolved: JudgeResolved): string {
   const where = resolved.baseUrl === '' ? '' : ` at ${resolved.baseUrl}`;
   const temperature = resolved.temperature === null ? 'unset' : String(resolved.temperature);
+  // The timeout is on this line because it is the number the run is budgeted against: the first
+  // reading lost two rows of eight to a 60-second default, and "how long may one call take" is the
+  // first thing a reader of a timed-out row needs to know.
+  const timeout = resolved.timeoutMs === undefined ? 'provider default' : `${String(resolved.timeoutMs / 1000)}s`;
   return (
     `text2vis: grading with ${resolved.grader.model} (${resolved.grader.endpoint})${where}, ` +
-    `images ${resolved.imageDialect}, temperature ${temperature}`
+    `images ${resolved.imageDialect}, temperature ${temperature}, timeout ${timeout}`
   );
 }
 
@@ -879,6 +1039,7 @@ export async function entryJudge(
     const verdicts = await judgeJobsWith(selected, {
       provider: metered.provider,
       temperature: resolved.temperature,
+      ...(args.concurrency === undefined ? {} : { concurrency: args.concurrency }),
       ...(options.readImage === undefined ? {} : { readImage: options.readImage }),
     });
     const report = summarizeJudge(inputs.length, jobs.length, jobs, skipped, verdicts, metered.calls(), probe, resolved.grader);

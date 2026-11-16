@@ -233,9 +233,13 @@ export function compareJudge(report, floor, options = {}) {
         "that can be compared with another grader's",
     );
   }
+  // A null mean is spelled as one here too: `Number(null)` is 0, and printing "0.00/10" for a
+  // dimension nothing was graded on is the same defect as the `boxplot 0/1 judged, correctness 0.00`
+  // line the first production reading printed.
+  const shown = (value) => (typeof value === 'number' ? `${value.toFixed(2)}/10` : 'no reading');
   notes.push(
-    `TEXT2VIS JUDGE: chart_correctness ${Number(means.chart_correctness ?? 0).toFixed(2)}/10, ` +
-      `readability ${Number(means.readability ?? 0).toFixed(2)}/10 over ${String(report.judged)} of ` +
+    `TEXT2VIS JUDGE: chart_correctness ${shown(means.chart_correctness)}, ` +
+      `readability ${shown(means.readability)} over ${String(report.judged)} of ` +
       `${String(report.charts)} charts (${String(report.failed)} failed, ${String(report.skipped)} skipped), ` +
       `${Number(report.callsPerRow ?? 0).toFixed(3)} calls per row, graded by ` +
       `${typeof grader?.model === 'string' ? grader.model : '(unnamed)'}`,
@@ -298,6 +302,11 @@ const JUDGE_SELF_TEST = [
     name: 'a grader named only by whitespace fails',
     report: { grader: { endpoint: 'zhipu', model: '  ' }, scored: 1470, charts: 1286, judged: 1286, failed: 0, notSelected: 0, skipped: 184, calls: 1286, callsPerRow: 1, means: { chart_correctness: 6, readability: 7 } },
     want: 1,
+  },
+  {
+    name: 'a null mean fails, because a run that graded nothing has no reading to report',
+    report: { grader: GRADER, scored: 1470, charts: 1286, judged: 0, failed: 8, notSelected: 1278, skipped: 184, calls: 8, callsPerRow: 1, means: { chart_correctness: null, readability: null } },
+    want: 2,
   },
   { name: 'no judge report is a failure when it is required', report: undefined, want: 1, require: true },
   { name: 'no judge report is a note when it is not', report: undefined, want: 0 },
