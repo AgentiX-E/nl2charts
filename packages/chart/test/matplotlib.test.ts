@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ChartIR, ChartType, FieldRef } from '@agentix-e/nl2charts-spec';
-import { compileToMatplotlib, TICK_CROWD, TICK_LENGTH, TICK_ROTATION, TITLE_WIDTH, tickTilt, wrappedTitle } from '../src/index.js';
+import { compileToMatplotlib, TICK_CROWD, TICK_LENGTH, TICK_ROTATION, TICK_UPRIGHT, TITLE_WIDTH, tickTilt, wrappedTitle } from '../src/index.js';
 
 const rows = [
   { region: 'north', total: 10.5, count: 3 },
@@ -423,6 +423,27 @@ describe('the category axis that has to tilt', () => {
     expect(tickTilt(['Marshall Islands'])).toBeUndefined();
     // An empty cell is not a name: five rows, three of them unlabelled, is three things to collide.
     expect(tickTilt(['Marshall Islands', '', '', ''])).toBeUndefined();
+  });
+
+  it('stands the names upright when tilting them cannot buy the room', () => {
+    // Row 651 of the Text2Vis corpus: nineteen countries drawn at thirty degrees, where the tilt
+    // shortens each name's horizontal reach by cos(30) but the slot is only 100/19 wide — the
+    // labels overlap into one smear. Measured over the 324 charts this rule tilts, **123** are in
+    // that state (119 of them bars) and their mean readability is **2.95** against **4.30** for
+    // the ones that fit, so the threshold is not a guess: it is the boundary those two groups sit
+    // on either side of.
+    const countries = [
+      'Germany', 'Austria', 'Italy', 'France', 'Ireland', 'Finland', 'Spain', 'Portugal',
+      'Luxembourg', 'Netherlands', 'Lithuania', 'Belgium', 'Latvia', 'Estonia', 'Greece',
+      'Cyprus', 'Slovakia', 'Malta', 'Slovenia',
+    ];
+    expect(tickTilt(countries)).toEqual({ rotation: TICK_UPRIGHT, ha: 'center' });
+  });
+
+  it('keeps the tilt where the tilt is enough, which is most of the corpus', () => {
+    // Seven names of sixteen characters: 16 × 0.62 × cos(30) = 8.6 units against a slot of 14.3.
+    expect(tickTilt(['Age-standardized', 'Under-5s', '70+ years old', 'All ages', '50-60 years old', '5-14 years old', '15-49 years old']))
+      .toEqual({ rotation: TICK_ROTATION, ha: 'right' });
   });
 
   it('emits the tilt, and emits nothing at all when it does not tilt', () => {

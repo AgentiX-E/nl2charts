@@ -392,6 +392,7 @@
     "TICK_CROWD",
     "TICK_LENGTH",
     "TICK_ROTATION",
+    "TICK_UPRIGHT",
     "TITLE_WIDTH",
     "compileToECharts",
     "compileToMatplotlib",
