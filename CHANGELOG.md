@@ -146,6 +146,25 @@ cannot be argued with.
   invent; it runs as a self-test in `gate:all` and with `--require` in the `text2vis-rule` workflow.
 
 ### Changed
+- **A reply cut at the token cap is not a reply that named nothing.** The first full grading run
+  (`43979969822`) judged 1,259 of 1,286 figures — `chart_correctness 2.90/10`, `readability 4.67/10`,
+  one call per attempted row — and failed 27. Reading the replies, which is what the `reply` field
+  exists for, shows 24 of them named `chart_correctness` and stopped at `max_tokens: 1024`
+  (`{"chart_correctness": 1, "readability":`), on a model whose deliberation is billed inside
+  `max_tokens`; the other 3 were provider content-policy refusals. All 27 were reported as `the reply
+  named neither score`, which is false twice and sends the reader after a parser bug that does not
+  exist. Four repairs: `parseJudge` counts the labels the reply did name; it takes the provider's
+  `finishReason`, which `judgeJobsWith` was already receiving and dropping, so a `length` stop is
+  named as a cap rather than inferred from a missing brace; `classifyFailure` maps the error's `code`
+  to `truncated` / `unreadable` / `refused` / `unavailable` / `invalid-response` / `call-failed` and
+  the report carries `failedByKind`, so `27 failed` prints as `24 truncated, 3 refused`; and
+  `maxOutputTokens` goes 1,024 → 4,096, which costs nothing on the 1,262 rows that never needed the
+  headroom because a cap is a limit and not a reservation. Two assertions in the suite expected
+  "neither" for a one-label object — they had recorded the defect as correct — and the budget
+  assertion no longer restates `1024` but reads `JUDGE_ENDPOINTS[0]?.maxOutputTokens`, so the number
+  appears in one place. `baseline.json` registers the means with **no floor**: a floor needs a noise
+  estimate and there is one reading. 4 new tests over the truncated shape, the cap sentence, the
+  classification and the count.
 - **The corpus reading is taken on the question, not on the conversational turn it arrived in.**
   `eval/text2vis/dataset.ts` read the `Prompt` column — the reference harness's whole turn, with the
   table inlined — and called it `prompt`, so every rule reading in this repository was a reading about

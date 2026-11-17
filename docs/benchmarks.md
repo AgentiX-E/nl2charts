@@ -15362,3 +15362,89 @@ provider's 60-second default. So the timeout became a field of the endpoint row 
 68 seconds, which makes 1,286 rows about **2½ hours** rather than seventeen and a half. One call per
 row is still an equality, and the artifact is rebuilt by index, so a faster row cannot reorder the
 report.
+
+## The failure was a budget, and the message was a guess
+
+The full run — 1,286 figures, ten calls in flight, `glm-4.5v` — took 82 minutes and **failed**:
+
+```
+text2vis: judged 1259/1286 charts with glm-4.5v (zhipu) — 27 failed, 0 unselected, 184 skipped of 1470 scored
+  chart_correctness 2.90/10, readability 4.67/10
+  calls 1286, 1.000 per judged row; the vision probe answered "Red"
+  bar: 623/638 judged, correctness 2.92/10, readability 5.09/10
+  line: 323/325 judged, correctness 3.60/10, readability 4.45/10
+  pie: 202/207 judged, correctness 1.96/10, readability 3.55/10
+  scatter: 61/63 judged, correctness 2.80/10, readability 6.61/10
+  boxplot: 32/35 judged, correctness 1.50/10, readability 2.31/10
+  heatmap: 11/11 judged, correctness 0.91/10, readability 2.18/10
+  funnel: 6/6 judged, correctness 6.50/10, readability 7.83/10
+  candlestick: 1/1 judged, correctness 10.00/10, readability 6.00/10
+```
+
+Two means over five figures in six of eight marks is a reading. Twenty-seven failures out of 1,286
+is also a reading — of the instrument, and it is the reason every row keeps the grader's own words:
+
+```
+FAILED row 42:  the reply named neither score: {"chart_correctness": 2
+FAILED row 298: the reply named neither score: {"chart_correctness": 1, "read
+FAILED row 1355: the reply named neither score: {"chart_correctness": 8, "readability":
+```
+
+### The sentence was false twice
+
+Those three replies **name `chart_correctness`**, and one of them names `readability` too. What they
+do not do is finish: the endpoint stopped them at `max_tokens: 1024`, and on this model the
+deliberation that precedes the two integers is **billed inside `max_tokens`** — a fact
+`packages/ai/src/capability.ts` has carried since the pipeline learned to send a budget at all. The
+cap was sized for the answer and spent on the thinking.
+
+Of the 27, **24 were that** and **3 were refusals** by the provider's content policy:
+
+```
+FAILED row 1006: llm refused the request with 400: 系统检测到输入或生成内容可能包含不安全或敏感内容…
+```
+
+One is a budget this repository chooses; the other is a policy it cannot change. Both were reported
+as the same sentence, which is the defect: **a diagnosis is the only repair instruction a failed row
+carries, and this one pointed at the parser.**
+
+### Four changes, and a test that had recorded the bug as correct
+
+- `parseJudge` counts the dimensions the reply *did* name. One label reads `the reply named
+  chart_correctness and stopped before readability`; only a reply with no label keeps `named neither
+  score`. Two existing assertions expected "neither" for a one-label object — they were the bug,
+  written down as a check.
+- `parseJudge(reply, finishReason)` takes the field the provider was already returning and
+  `judgeJobsWith` was dropping. A `length` stop is now named as one instead of inferred from a missing
+  brace; a `stop` that ends mid-object is **not** blamed on a cap.
+- `classifyFailure` maps the error's `code` — not its sentence — to `truncated`, `unreadable`,
+  `refused`, `unavailable`, `invalid-response` or `call-failed`, and the report carries
+  `failedByKind`. The log now prints `why they failed: 24 truncated, 3 refused`.
+- `maxOutputTokens` **1,024 → 4,096**. A cap is a limit, not a reservation: the endpoint bills what it
+  writes, so the 1,262 rows that never needed the headroom cost the same, and the 1.9% that did have a
+  reading instead of a failure.
+
+The test that pinned the old budget said `expect(body.max_tokens).toBe(1024)` — it restated the number
+without restating the reason, which is how a wrong number survives a green suite. It now reads
+`toBe(JUDGE_ENDPOINTS[0]?.maxOutputTokens)`: the request's budget *is* the row's declaration, and the
+number appears once.
+
+### What the reading is registered as
+
+`eval/text2vis/baseline.json` gained the means but **no floor on either one**:
+
+```json
+"means": { "chart_correctness": 2.9, "readability": 4.67 }, "judged": 1259, "of": 1286
+```
+
+A floor needs a noise estimate, and there is one reading. What the note does record is the shape of
+the 27: 24 truncated, 3 refused — because a regression against `2.90` taken on a different failure set
+would be a comparison between two denominators that both call themselves the same run.
+
+### One more thing the same round fixed
+
+Thirty-three integration tests are `skipIf(url === undefined)`, and a machine with no database
+therefore reported `5,340 passed | 33 skipped` beside a claim that every package met 95% on four
+dimensions. The claim was false for that run: `packages/node` measured 83.74% of statements, against
+99.62% with the servers up. `pnpm db:probe` names the missing server and the files its absence
+removes; `pnpm db:up` starts it and waits for the port. Both are in `gate:all` and in CI.
