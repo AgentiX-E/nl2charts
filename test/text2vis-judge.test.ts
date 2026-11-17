@@ -501,7 +501,7 @@ describe('a reply that is kept, and bounded', () => {
       provider: {
         id: 'p',
         model: 'm',
-        complete: async () => ({ text: '{"chart_correctness": 2, "readability":', finishReason: 'length' }),
+        complete: async () => ({ text: '{"chart_correctness": 2, "readability":', model: 'm', finishReason: 'length' }),
       },
       readImage: async () => ({ mediaType: 'image/png', data: PIXEL_PNG.toString('base64') }),
     });
