@@ -144,12 +144,17 @@ Node 20.19+ (Node 22 is what CI uses). The packages are not published to npm yet
 lists equal (`tools/check-gate-parity.mjs`) — an aggregate that silently covers less than CI
 is worse than no aggregate, because it replaces the habit of checking.
 
-Two suites need real database servers; without them they skip and the `node` package's
-coverage falls below the gate, which is a *failed* run rather than a passing one:
+Thirty-three tests need real database servers — 29 in the two connector integration suites, and
+four more in `test/leak-audit.test.ts` and `test/runbooks.test.ts`. Without `PG_TEST_URL` and
+`MYSQL_TEST_URL` they skip, which is not a failure but is not a reading either: on the same tree
+`packages/node` measures 83.74% of statements against 99.62% with the servers up, and the coverage
+gate goes red on the difference. `pnpm db:probe` says which server answers and exits 1 when one
+does not; `pnpm db:up` starts it and prints the two exports:
 
 ```bash
-PG_TEST_URL="postgres://postgres:postgres@127.0.0.1:5432/nl2charts_test" \
-MYSQL_TEST_URL="mysql://analyst:s3cret@127.0.0.1:3306/nl2charts_test" \
+pnpm db:up
+export PG_TEST_URL='postgres://postgres:postgres@127.0.0.1:5432/nl2charts_test'
+export MYSQL_TEST_URL='mysql://analyst:s3cret@127.0.0.1:3306/nl2charts_test'
 pnpm gate:all
 ```
 

@@ -133,6 +133,10 @@ jobs:
       # were not running". The self-test plants that tree.
       - name: Coverage gate self-test (names the short file and the unset variable)
         run: node tools/coverage-gate.mjs --self-test
+      # The probe that answers "which server is missing" is a claim about two ports; this proves
+      # it against a real socket rather than a stubbed `net` module.
+      - name: Database probe self-test
+        run: node tools/local-db.mjs --self-test
       # The packages are measured and the harness that produces every published number was
       # not, so its coverage could only go down. This is not a threshold — `eval/` is at 64%
       # and a 95% red would be red for months — it is a ratchet against a committed ledger:

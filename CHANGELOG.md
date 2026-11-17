@@ -7,6 +7,18 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **`pnpm db:probe` and `pnpm db:up` answer "which server is missing" with a command instead of a
+  paragraph.** Thirty-three tests — 29 across the PostgreSQL and MySQL connector integration suites,
+  and four in `test/leak-audit.test.ts` / `test/runbooks.test.ts` that point a URL at a real server —
+  are `skipIf(url === undefined)`, so a machine without a database reports `5,340 passed | 33 skipped`
+  and a coverage gate that is red on `packages/node` (83.74 / 88.21 / 94.55 / 83.74). Those two
+  readings describe the same tree and cannot both be true; the gate is the one that says so.
+  `tools/local-db.mjs` probes the two ports over TCP, `--start` runs `service <name> start` and then
+  **waits for the port** — an init script returns before MariaDB accepts connections, and a tool that
+  reports "down" about a server it just started is worse than no tool — and prints the two exports.
+  Exit 1 when a server stays down, naming the files its absence removes. 14 self-tests over a real
+  socket: a temporary listener proves the probe reads "up", the same port after `close` proves it
+  reads "down", and the start/flag decisions are pinned through an injected `spawnSync`.
 - **A message can carry an image, and the request it produces for text is byte for byte the request it
   produced before.** `LlmMessage` gained `images?: readonly LlmImage[]`, a typed channel beside a
   `content` that stays a `string` — not the union an OpenAI-shaped wire format suggests, because a

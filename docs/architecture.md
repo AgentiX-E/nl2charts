@@ -503,10 +503,22 @@ test/              cross-package public-surface snapshot
 ### Running the gates on a machine that has no service containers
 
 `ci.yml` starts PostgreSQL 16 and MySQL 8.4 as services and exports `PG_TEST_URL` and
-`MYSQL_TEST_URL`. Without them the two connector suites are **skipped**, not failed — and
-`packages/node` then reports 85.83% on lines, which is a measurement of the environment rather
-than of the code. The four dimensions of all eight packages reach 95% only when the servers are
-there: 99.59% lines and 98.23% branches for `packages/node`, 2,751 tests passing and none skipped.
+`MYSQL_TEST_URL`. Without them **33 tests are skipped, not failed** — 29 in the two connector
+integration suites and four more in `test/leak-audit.test.ts` and `test/runbooks.test.ts`, which
+point a URL at a real server to prove a password never reaches an error message. The skip is
+deliberate: a laptop with no database still covers every contract, and nothing is mocked. What it
+is *not* is a passing reading. On the same tree, same vitest run, same coverage directory:
+
+| | tests | `packages/node` st / br / fu / li | all eight packages |
+| --- | --- | --- | --- |
+| no servers | 5,340 passed, 33 skipped | **83.74 / 88.21 / 94.55 / 83.74** — gate red | 98.62 / 96.95 / 99.17 / 98.62 |
+| servers up | 5,373 passed, none skipped | **99.62 / 98.02 / 100.00 / 99.62** — gate green | 99.72 / 97.54 / 99.79 / 99.72 |
+
+`packages/node` drops because the two suites it lost are the ones that execute `mysql.ts` and
+`postgres.ts`: 68.94% and 68.09% of statements, with the gate's own hint naming the unset variable.
+So "5,340 passed, 33 skipped" and "every dimension ≥95%" cannot both be true, and the gate is what
+says so. `pnpm db:probe` reports which server answers (exit 1 when one does not); `pnpm db:up`
+starts it, waits for the port, and prints the two exports.
 
 On Debian/Ubuntu the whole setup is six commands:
 
