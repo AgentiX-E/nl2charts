@@ -336,6 +336,7 @@ describe('what a report has to be before a mean can be read out of it', () => {
     callsPerRow: 1,
     failures: [],
     failedByKind: { truncated: 0, unreadable: 0, refused: 0, unavailable: 0, 'invalid-response': 0, 'call-failed': 0 },
+    tokens: { prompt: 0, completion: 0, reasoning: 0, reported: 0 },
     verdicts: [
       { id: '0', chart_correctness: 8, readability: 8, reply: '{"chart_correctness": 8, "readability": 8}' },
       { id: '1', chart_correctness: 8, readability: 8, reply: '{"chart_correctness": 8, "readability": 8}' },
@@ -348,6 +349,16 @@ describe('what a report has to be before a mean can be read out of it', () => {
 
   it('accepts a report that adds up', () => {
     expect(() => assertJudgeReport(base)).not.toThrow();
+  });
+
+  it('refuses kinds that do not add up to the failures they explain', () => {
+    // A count by kind that disagrees with `failed` is a report whose arithmetic nobody checked.
+    reject({ failedByKind: { ...base.failedByKind, unavailable: 1 } }, /1 failures counted by kind and 0 reported/);
+  });
+
+  it('refuses more rows reporting usage than there are judged rows', () => {
+    // A failed call may have been billed, but this instrument does not know what it cost.
+    reject({ tokens: { prompt: 10, completion: 2, reasoning: 0, reported: 3 } }, /3 rows reported usage for 2 judged/);
   });
 
   it('refuses a run that spent more than one call per attempted row', () => {
@@ -382,6 +393,45 @@ describe('what a report has to be before a mean can be read out of it', () => {
 
   it('refuses a call count lower than the rows it claims to have attempted', () => {
     reject({ calls: 1 }, /spends one call per attempted row/);
+  });
+});
+
+describe('what a call cost, in the unit the endpoint bills', () => {
+  const text = '{"chart_correctness": 5, "readability": 5}';
+
+  it('keeps the usage the endpoint reported, and sums it with the count that reported any', async () => {
+    // Two of three rows report usage: the third is an endpoint that says nothing, and a sum over an
+    // unknown number of rows is a number nobody can divide. `reported` is what makes the total
+    // readable, the same way `judged` makes a mean readable.
+    let calls = 0;
+    const verdicts = await judgeJobsWith([job('0', 'bar'), job('1', 'bar'), job('2', 'bar')], {
+      provider: {
+        id: 'p',
+        model: 'm',
+        complete: async () => {
+          calls += 1;
+          return calls === 3
+            ? { text, model: 'm' }
+            : { text, model: 'm', usage: { promptTokens: 900, completionTokens: 300, reasoningTokens: 220 } };
+        },
+      },
+      readImage: async () => ({ mediaType: 'image/png', data: PIXEL_PNG.toString('base64') }),
+    });
+    const report = summarizeJudge(3, 3, [job('0', 'bar'), job('1', 'bar'), job('2', 'bar')], [], verdicts, 3, SEEN, GRADER);
+    expect(report.tokens.reported).toBe(2);
+    expect(report.tokens.prompt).toBe(1_800);
+    expect(report.tokens.completion).toBe(600);
+    expect(report.tokens.reasoning).toBe(440);
+    const line = describeJudge(report).find((row) => row.includes('tokens '));
+    expect(line).toContain('2 rows reported');
+    expect(line).toContain('reasoning 440, 73.3% of it');
+  });
+
+  it('says nothing about tokens when the endpoint reports none', () => {
+    const report = summarizeJudge(1, 1, [job('0', 'bar')], [], [{ id: '0', chart_correctness: 5, readability: 5, reply: text }], 1, SEEN, GRADER);
+    expect(report.tokens).toEqual({ prompt: 0, completion: 0, reasoning: 0, reported: 0 });
+    // A zero is not a reading: an endpoint that said nothing has not said it charged nothing.
+    expect(describeJudge(report).some((row) => row.includes('tokens '))).toBe(false);
   });
 });
 
@@ -592,6 +642,9 @@ describe('grading a batch', () => {
           chart_correctness: 9,
           readability: 5,
           reply: '{"chart_correctness": 9, "readability": 5}',
+          // The usage reaches the row, not just the provider: a price in calls says nothing about
+          // the bill, and this endpoint reports one on a real socket.
+          usage: { promptTokens: 900, completionTokens: 14 },
           ms: expect.any(Number) as number,
         },
       ]);

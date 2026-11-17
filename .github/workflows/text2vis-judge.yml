@@ -167,6 +167,7 @@ jobs:
                 '| failed / unselected / skipped | ' + report.failed + ' / ' + report.notSelected + ' / ' + report.skipped + ' |',
                 '| why they failed | ' + (report.failed === 0 ? '—' : Object.entries(report.failedByKind).filter(([, rows]) => rows > 0).map(([kind, rows]) => rows + ' ' + kind).join(', ')) + ' |',
                 '| calls | ' + report.calls + ' (' + report.callsPerRow.toFixed(3) + ' per judged row) |',
+                '| tokens | ' + (report.tokens.reported === 0 ? 'the endpoint reported none' : report.tokens.prompt + ' prompt, ' + report.tokens.completion + ' completion (' + report.tokens.reasoning + ' reasoning), over ' + report.tokens.reported + ' rows |'),
                 '',
                 'Two means, not a pass rate: a grader score is ordinal and has no calibrated threshold.'
               ];

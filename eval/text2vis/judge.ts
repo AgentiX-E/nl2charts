@@ -22,7 +22,14 @@
  *    model. So `judged`, `failed` and `skipped` are published beside the means, and the identity
  *    `judged + failed + skipped === scored` is asserted rather than assumed.
  */
-import { createHttpProvider, withCallCounter, type ImageDialect, type LlmImage, type LlmProvider } from '@agentix-e/nl2charts-ai';
+import {
+  createHttpProvider,
+  withCallCounter,
+  type ImageDialect,
+  type LlmImage,
+  type LlmProvider,
+  type LlmUsage,
+} from '@agentix-e/nl2charts-ai';
 import { applyExitCode, isEntry, loadText2Vis, type LoadOptions } from './dataset.js';
 import { profileInputs, type ProfileInput } from './profile.js';
 import { familyOfLabel } from './rule.js';
@@ -66,6 +73,15 @@ export interface JudgeVerdict {
    * the reader to count bullet points.
    */
   readonly failure?: JudgeFailureKind;
+  /**
+   * What the endpoint said this call cost, when it said anything.
+   *
+   * A price in calls is a price in the only unit this instrument chooses; a price in tokens is the
+   * one the endpoint bills. Both belong on the row, because `1,286 calls` at two very different
+   * completion lengths is two very different bills — and because the deliberation a thinking model
+   * spends before writing two integers is invisible in every other column.
+   */
+  readonly usage?: LlmUsage;
   readonly ms?: number;
   /**
    * What the grader actually wrote, bounded.
@@ -150,6 +166,19 @@ export interface JudgeReport {
   /** Calls actually spent. One per attempted row, and the assertion below holds it to that. */
   readonly calls: number;
   readonly callsPerRow: number;
+  /**
+   * The tokens the endpoint reported, summed over the rows that reported any.
+   *
+   * `reported` travels with the sums for the same reason `judged` travels with the means: an
+   * endpoint that says nothing about usage is not an endpoint that charged nothing, and a total
+   * over an unknown number of rows is a number nobody can divide.
+   */
+  readonly tokens: {
+    readonly prompt: number;
+    readonly completion: number;
+    readonly reasoning: number;
+    readonly reported: number;
+  };
   readonly failures: readonly { readonly id: string; readonly error: string; readonly kind: JudgeFailureKind }[];
   /**
    * The failures counted by kind, so "27 failed" can be read without counting bullet points.
@@ -501,6 +530,7 @@ export function summarizeJudge(
   };
   const correctness: number[] = [];
   const readability: number[] = [];
+  const tokens = { prompt: 0, completion: 0, reasoning: 0, reported: 0 };
   for (const verdict of verdicts) {
     const job = byId.get(verdict.id);
     if (job === undefined) throw new Error(`judge: verdict for row ${verdict.id} has no job`);
@@ -515,6 +545,12 @@ export function summarizeJudge(
       failures.push({ id: verdict.id, error: verdict.error, kind });
       failedByKind[kind] += 1;
       continue;
+    }
+    if (verdict.usage !== undefined) {
+      tokens.prompt += verdict.usage.promptTokens;
+      tokens.completion += verdict.usage.completionTokens;
+      tokens.reasoning += verdict.usage.reasoningTokens ?? 0;
+      tokens.reported += 1;
     }
     const one = verdict.chart_correctness as number;
     const two = verdict.readability as number;
@@ -553,6 +589,7 @@ export function summarizeJudge(
     callsPerRow: verdicts.length === 0 ? 0 : Number((calls / verdicts.length).toFixed(3)),
     failures,
     failedByKind,
+    tokens,
     // By row index, which is a number because `chartJobs` makes every id one (`String(index)`), and
     // unique because it *is* the index. A tie-break here would be code no input can reach: two
     // verdicts with the same id are the same row counted twice, which the partition check refuses.
@@ -595,6 +632,22 @@ export function assertJudgeReport(report: JudgeReport): void {
   }
   if (report.callsPerRow > 1) {
     throw new Error(`judge report: ${report.callsPerRow.toFixed(3)} calls per row, and this instrument spends one`);
+  }
+  // The kinds must add up to the count they explain: 27 failures described as 24 truncated and 3
+  // refused is a reading, and 24 and 3 beside a failed of 30 is a report whose arithmetic nobody has
+  // checked. Cheap here, invisible to a reader.
+  const byKind = Object.values(report.failedByKind).reduce((total, rows) => total + rows, 0);
+  if (byKind !== report.failed) {
+    throw new Error(
+      `judge report: ${String(byKind)} failures counted by kind and ${String(report.failed)} reported as failed`,
+    );
+  }
+  // Only a judged row can carry usage: a failed call may have been billed, but this instrument does
+  // not know what it cost, and a total that silently included one would be a number with a guess in it.
+  if (report.tokens.reported > report.judged) {
+    throw new Error(
+      `judge report: ${String(report.tokens.reported)} rows reported usage for ${String(report.judged)} judged`,
+    );
   }
   if (!report.probe.seen) {
     throw new Error(
@@ -651,6 +704,13 @@ export function describeJudge(report: JudgeReport): readonly string[] {
       .filter(([, rows]) => rows > 0)
       .map(([kind, rows]) => `${String(rows)} ${kind}`);
     lines.push(`  why they failed: ${counted.join(', ')}`);
+  }
+  if (report.tokens.reported > 0) {
+    const share = report.tokens.completion === 0 ? '—' : `${((report.tokens.reasoning / report.tokens.completion) * 100).toFixed(1)}%`;
+    lines.push(
+      `  tokens ${String(report.tokens.reported)} rows reported: prompt ${String(report.tokens.prompt)}, ` +
+        `completion ${String(report.tokens.completion)} (reasoning ${String(report.tokens.reasoning)}, ${share} of it)`,
+    );
   }
   for (const mark of report.byMark) {
     lines.push(
@@ -736,7 +796,13 @@ export async function judgeJobsWith(jobs: readonly JudgeJob[], options: JudgeOpt
         purpose: 'compare',
       });
       const scores = parseJudge(response.text, response.finishReason);
-      verdicts[index] = { id: job.id, ...scores, reply: response.text.trim().slice(0, REPLY_LIMIT), ms: now() - started };
+      verdicts[index] = {
+        id: job.id,
+        ...scores,
+        ...(response.usage === undefined ? {} : { usage: response.usage }),
+        reply: response.text.trim().slice(0, REPLY_LIMIT),
+        ms: now() - started,
+      };
     } catch (error) {
       // A row that never got an answer has no reply to keep: the error *is* what was learned, and a
       // fabricated empty reply would read as a grader that answered with nothing.
