@@ -179,6 +179,26 @@ export interface JudgeReport {
     readonly reasoning: number;
     readonly reported: number;
   };
+  /**
+   * The shape of the two readings, because a mean of a two-peaked distribution is a number about
+   * neither peak.
+   *
+   * The first full reading averages 2.90 while **72.8% of its rows score 0-2 and 18.8% score 8-10**,
+   * with the valley at 5-7 holding 2.3% — the grader is not marking a continuum, it is answering
+   * "does this figure answer the question" with a nearly binary judgement and shading the edges.
+   * Publishing the mean alone would report the midpoint of two populations as if it were a typical
+   * figure. Publishing a pass rate would invent a threshold the prompt never asked for; publishing
+   * the eleven counts invents nothing and lets a reader see the two peaks.
+   *
+   * `decimals` is the number of rows whose score was not a whole number (a grader that answered
+   * 7.5). They are counted and kept out of the buckets rather than rounded into one: `Math.round`
+   * here would be this file choosing a score the grader did not write.
+   */
+  readonly histogram: {
+    readonly chart_correctness: readonly number[];
+    readonly readability: readonly number[];
+    readonly decimals: number;
+  };
   readonly failures: readonly { readonly id: string; readonly error: string; readonly kind: JudgeFailureKind }[];
   /**
    * The failures counted by kind, so "27 failed" can be read without counting bullet points.
@@ -531,6 +551,9 @@ export function summarizeJudge(
   const correctness: number[] = [];
   const readability: number[] = [];
   const tokens = { prompt: 0, completion: 0, reasoning: 0, reported: 0 };
+  const correctnessCounts = Array.from({ length: 11 }, () => 0);
+  const readabilityCounts = Array.from({ length: 11 }, () => 0);
+  let decimals = 0;
   for (const verdict of verdicts) {
     const job = byId.get(verdict.id);
     if (job === undefined) throw new Error(`judge: verdict for row ${verdict.id} has no job`);
@@ -556,6 +579,9 @@ export function summarizeJudge(
     const two = verdict.readability as number;
     correctness.push(one);
     readability.push(two);
+    if (Number.isInteger(one) && one >= 0 && one <= 10) correctnessCounts[one] = (correctnessCounts[one] ?? 0) + 1;
+    else decimals += 1;
+    if (Number.isInteger(two) && two >= 0 && two <= 10) readabilityCounts[two] = (readabilityCounts[two] ?? 0) + 1;
     cell.correctness.push(one);
     cell.readability.push(two);
   }
@@ -590,6 +616,7 @@ export function summarizeJudge(
     failures,
     failedByKind,
     tokens,
+    histogram: { chart_correctness: correctnessCounts, readability: readabilityCounts, decimals },
     // By row index, which is a number because `chartJobs` makes every id one (`String(index)`), and
     // unique because it *is* the index. A tie-break here would be code no input can reach: two
     // verdicts with the same id are the same row counted twice, which the partition check refuses.
@@ -644,6 +671,15 @@ export function assertJudgeReport(report: JudgeReport): void {
   }
   // Only a judged row can carry usage: a failed call may have been billed, but this instrument does
   // not know what it cost, and a total that silently included one would be a number with a guess in it.
+  // The buckets and the off-integer rows must account for every graded row, or a row left the
+  // mean without leaving a trace in the shape.
+  const histogrammed =
+    report.histogram.chart_correctness.reduce((total, n) => total + n, 0) + report.histogram.decimals;
+  if (histogrammed !== report.judged) {
+    throw new Error(
+      `judge report: ${String(histogrammed)} rows in the correctness histogram for ${String(report.judged)} judged`,
+    );
+  }
   if (report.tokens.reported > report.judged) {
     throw new Error(
       `judge report: ${String(report.tokens.reported)} rows reported usage for ${String(report.judged)} judged`,
@@ -711,6 +747,18 @@ export function describeJudge(report: JudgeReport): readonly string[] {
       `  tokens ${String(report.tokens.reported)} rows reported: prompt ${String(report.tokens.prompt)}, ` +
         `completion ${String(report.tokens.completion)} (reasoning ${String(report.tokens.reasoning)}, ${share} of it)`,
     );
+  }
+  if (report.judged > 0) {
+    // The eleven counts, not a share: a mean of a two-peaked distribution is a number about neither
+    // peak, and a "share above 8" would be a threshold the prompt never asked for. A reader who sees
+    // `269 326 321 42 35 12 7 10 25 69 143` has seen the shape; nothing here chose it for them.
+    const row = (name: string, counts: readonly number[]): string =>
+      `  ${name} 0-10: ${counts.map((n) => String(n)).join(' ')}`;
+    lines.push(row('correctness', report.histogram.chart_correctness));
+    lines.push(row('readability', report.histogram.readability));
+    if (report.histogram.decimals > 0) {
+      lines.push(`  (${String(report.histogram.decimals)} row(s) scored off the whole numbers, kept out of both rows)`);
+    }
   }
   for (const mark of report.byMark) {
     lines.push(

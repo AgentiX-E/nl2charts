@@ -51,9 +51,12 @@ on:
         default: '0'
         type: string
       concurrency:
+        # 10 was measured at 82 minutes for 1,286 figures and cost 8 rows to `429 您的账户已达到速率限制`
+        # in a burst; 6 keeps the wall clock near two hours and the pressure below the ceiling. The
+        # vendor's limit is not published, so this is the number two readings agree is safe.
         description: 'Calls in flight at once (measured: 49 s per call, so 1 would take 17 h)'
         required: true
-        default: '8'
+        default: '6'
         type: string
 
 permissions:

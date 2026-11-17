@@ -337,6 +337,7 @@ describe('what a report has to be before a mean can be read out of it', () => {
     failures: [],
     failedByKind: { truncated: 0, unreadable: 0, refused: 0, unavailable: 0, 'invalid-response': 0, 'call-failed': 0 },
     tokens: { prompt: 0, completion: 0, reasoning: 0, reported: 0 },
+    histogram: { chart_correctness: [0,0,0,0,0,0,0,0,2,0,0], readability: [0,0,0,0,0,0,0,0,2,0,0], decimals: 0 },
     verdicts: [
       { id: '0', chart_correctness: 8, readability: 8, reply: '{"chart_correctness": 8, "readability": 8}' },
       { id: '1', chart_correctness: 8, readability: 8, reply: '{"chart_correctness": 8, "readability": 8}' },
@@ -425,6 +426,43 @@ describe('what a call cost, in the unit the endpoint bills', () => {
     const line = describeJudge(report).find((row) => row.includes('tokens '));
     expect(line).toContain('2 rows reported');
     expect(line).toContain('reasoning 440, 73.3% of it');
+  });
+
+  it('publishes the shape of the reading, because a mean of two peaks is a number about neither', () => {
+    // The first full reading: 72.8% of rows at 0-2 and 18.8% at 8-10, with the valley at 5-7 holding
+    // 2.3%. `chart_correctness 2.90` is the midpoint of those two populations.
+    const verdicts = [
+      { id: '0', chart_correctness: 0, readability: 2, reply: text },
+      { id: '1', chart_correctness: 1, readability: 3, reply: text },
+      { id: '2', chart_correctness: 10, readability: 9, reply: text },
+    ];
+    const jobs = [job('0', 'bar'), job('1', 'bar'), job('2', 'bar')];
+    const report = summarizeJudge(3, 3, jobs, [], verdicts, 3, SEEN, GRADER);
+    expect(report.histogram.chart_correctness).toEqual([1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
+    expect(report.histogram.readability).toEqual([0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0]);
+    expect(report.histogram.decimals).toBe(0);
+    expect(describeJudge(report)).toContain('  correctness 0-10: 1 1 0 0 0 0 0 0 0 0 1');
+    expect(assertJudgeReport(report)).toBeUndefined();
+  });
+
+  it('keeps an off-integer score out of the buckets rather than rounding it into one', () => {
+    const report = summarizeJudge(
+      2,
+      2,
+      [job('0', 'bar'), job('1', 'bar')],
+      [],
+      [
+        { id: '0', chart_correctness: 7.5, readability: 8, reply: text },
+        { id: '1', chart_correctness: 7, readability: 8, reply: text },
+      ],
+      2,
+      SEEN,
+      GRADER,
+    );
+    expect(report.histogram.decimals).toBe(1);
+    expect(report.histogram.chart_correctness[7]).toBe(1);
+    expect(report.histogram.chart_correctness[8]).toBe(0);
+    expect(describeJudge(report).some((row) => row.includes('1 row(s) scored off the whole numbers'))).toBe(true);
   });
 
   it('says nothing about tokens when the endpoint reports none', () => {
