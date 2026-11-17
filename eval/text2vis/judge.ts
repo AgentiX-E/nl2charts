@@ -58,6 +58,14 @@ export interface JudgeVerdict {
   readonly readability?: number;
   /** Present when the call failed or the reply could not be read as two scores. */
   readonly error?: string;
+  /**
+   * Why the call or the reply failed, as a kind a report can count.
+   *
+   * `error` is the sentence for a reader; this is the same fact for arithmetic. A run that lost
+   * 27 rows to two different causes and printed only the sentences published "27 failed" and left
+   * the reader to count bullet points.
+   */
+  readonly failure?: JudgeFailureKind;
   readonly ms?: number;
   /**
    * What the grader actually wrote, bounded.
@@ -142,7 +150,14 @@ export interface JudgeReport {
   /** Calls actually spent. One per attempted row, and the assertion below holds it to that. */
   readonly calls: number;
   readonly callsPerRow: number;
-  readonly failures: readonly { readonly id: string; readonly error: string }[];
+  readonly failures: readonly { readonly id: string; readonly error: string; readonly kind: JudgeFailureKind }[];
+  /**
+   * The failures counted by kind, so "27 failed" can be read without counting bullet points.
+   *
+   * The first full run published 27 failures whose causes were 24 truncated replies and 3 provider
+   * refusals — one is a budget this file chooses, the other is a policy this file cannot change.
+   */
+  readonly failedByKind: Readonly<Record<JudgeFailureKind, number>>;
   /**
    * Every row that was attempted, with its own two scores, its price in milliseconds and what the
    * grader wrote.
@@ -273,10 +288,53 @@ export async function probeVision(provider: LlmProvider, temperature: number | n
   }
 }
 
+/**
+ * Why a reply could not be read as two scores.
+ *
+ * Kept as a field rather than inferred from the sentence, because the sentence is what a reader
+ * sees and the kind is what a report counts. The first full run of this instrument lost 27 of
+ * 1,286 rows and published all of them as `the reply named neither score` — 24 of those replies
+ * named the first score and were cut at the endpoint's token cap, so the message sent a reader
+ * looking for a parser bug where there was a budget one. `truncated` and `unreadable` are two
+ * different repairs.
+ */
+export type JudgeFailureKind = 'truncated' | 'unreadable' | 'refused' | 'unavailable' | 'invalid-response' | 'call-failed';
+
+/** A reply that arrived but could not be read, carrying the reason as data. */
+export class JudgeReplyError extends Error {
+  constructor(
+    readonly kind: 'partial' | 'unreadable' | 'out-of-range',
+    message: string,
+  ) {
+    super(message);
+    this.name = 'JudgeReplyError';
+  }
+}
+
+/**
+ * The kind of a failed row, from the structure the failure already carries.
+ *
+ * The provider's refusals and outages arrive as `Nl2ChartsError` with a code, and a reply that
+ * could not be read arrives as `JudgeReplyError` with a kind, so this is a mapping rather than a
+ * match on prose. That matters for the same reason `finish_reason` is carried instead of inferred:
+ * a message is written for a reader and changed for a reader, and anything that counts must not
+ * move when the wording does.
+ */
+export function classifyFailure(error: unknown): JudgeFailureKind {
+  if (error instanceof JudgeReplyError) {
+    return error.kind === 'partial' ? 'truncated' : 'unreadable';
+  }
+  const code = typeof error === 'object' && error !== null && 'code' in error ? (error as { code: unknown }).code : undefined;
+  if (code === 'NL2C_E_LLM_REJECTED') return 'refused';
+  if (code === 'NL2C_E_LLM_UNAVAILABLE') return 'unavailable';
+  if (code === 'NL2C_E_LLM_INVALID_RESPONSE') return 'invalid-response';
+  return 'call-failed';
+}
+
 /** A refusal that names the reply, because the reply is the only thing that explains it. */
-function unreadable(reply: string, why: string): Error {
+function unreadable(reply: string, why: string, kind: 'partial' | 'unreadable' | 'out-of-range'): Error {
   const seen = reply.trim().replace(/\s+/g, ' ');
-  return new Error(`${why}: ${seen.length === 0 ? '(empty reply)' : seen.slice(0, 160)}`);
+  return new JudgeReplyError(kind, `${why}: ${seen.length === 0 ? '(empty reply)' : seen.slice(0, 160)}`);
 }
 
 /**
@@ -292,7 +350,10 @@ function unreadable(reply: string, why: string): Error {
  * A number outside 0..10 is refused rather than clamped. A grader that answered 87 meant something
  * the prompt did not ask for, and clamping it to 10 would publish that as the best possible chart.
  */
-export function parseJudge(reply: string): { readonly chart_correctness: number; readonly readability: number } {
+export function parseJudge(
+  reply: string,
+  finishReason?: string,
+): { readonly chart_correctness: number; readonly readability: number } {
   const text = reply.trim();
   const fenced = /```(?:json)?\s*([\s\S]*?)```/.exec(text);
   const body = (fenced?.[1] ?? text).trim();
@@ -320,7 +381,20 @@ export function parseJudge(reply: string): { readonly chart_correctness: number;
   if (labelled.every((value) => value !== undefined)) {
     return scoresOf(Number(labelled[0]), Number(labelled[1]), body);
   }
-  throw unreadable(body, 'the reply named neither score');
+  // Which of the two the grader did name, and whether the endpoint said why it stopped. A reply
+  // that names one score is not a reply that named neither, and at 1,286 figures the difference
+  // is 24 rows a reader would otherwise chase through the parser instead of the budget.
+  const named = JUDGE_DIMENSIONS.filter((_, index) => labelled[index] !== undefined);
+  const cap = finishReason === 'length' ? ' (finish=length: the endpoint hit its token cap)' : '';
+  if (named.length === 1) {
+    const missing = JUDGE_DIMENSIONS.find((dimension) => dimension !== named[0]) as string;
+    throw unreadable(body, `the reply named ${named[0]} and stopped before ${missing}${cap}`, 'partial');
+  }
+  throw unreadable(
+    body,
+    finishReason === 'length' ? `the reply stopped at the token cap before it named either score${cap}` : 'the reply named neither score',
+    'unreadable',
+  );
 }
 
 function scoresOf(correctness: number, readability: number, reply: string): {
@@ -329,7 +403,7 @@ function scoresOf(correctness: number, readability: number, reply: string): {
 } {
   for (const value of [correctness, readability]) {
     if (!Number.isFinite(value) || value < 0 || value > 10) {
-      throw unreadable(reply, `a score of ${String(value)} is outside the 0-10 scale the prompt asked for`);
+      throw unreadable(reply, `a score of ${String(value)} is outside the 0-10 scale the prompt asked for`, 'out-of-range');
     }
   }
   return { chart_correctness: correctness, readability };
@@ -416,7 +490,15 @@ export function summarizeJudge(
 ): JudgeReport {
   const byId = new Map(jobs.map((job) => [job.id, job]));
   const byMark = new Map<string, { rows: number; correctness: number[]; readability: number[] }>();
-  const failures: { id: string; error: string }[] = [];
+  const failures: { id: string; error: string; kind: JudgeFailureKind }[] = [];
+  const failedByKind: Record<JudgeFailureKind, number> = {
+    truncated: 0,
+    unreadable: 0,
+    refused: 0,
+    unavailable: 0,
+    'invalid-response': 0,
+    'call-failed': 0,
+  };
   const correctness: number[] = [];
   const readability: number[] = [];
   for (const verdict of verdicts) {
@@ -426,7 +508,12 @@ export function summarizeJudge(
     byMark.set(job.mark, cell);
     cell.rows += 1;
     if (verdict.error !== undefined) {
-      failures.push({ id: verdict.id, error: verdict.error });
+      // Only one path produces an error verdict and it always sets `failure`; the fallback is for a
+      // report read back from an artifact written before the field existed, and it says so rather
+      // than guessing a cause.
+      const kind = verdict.failure ?? 'call-failed';
+      failures.push({ id: verdict.id, error: verdict.error, kind });
+      failedByKind[kind] += 1;
       continue;
     }
     const one = verdict.chart_correctness as number;
@@ -465,6 +552,7 @@ export function summarizeJudge(
     // rows and lost one reply to a parse, which is a ratio about the parser rather than about price.
     callsPerRow: verdicts.length === 0 ? 0 : Number((calls / verdicts.length).toFixed(3)),
     failures,
+    failedByKind,
     // By row index, which is a number because `chartJobs` makes every id one (`String(index)`), and
     // unique because it *is* the index. A tie-break here would be code no input can reach: two
     // verdicts with the same id are the same row counted twice, which the partition check refuses.
@@ -558,6 +646,12 @@ export function describeJudge(report: JudgeReport): readonly string[] {
     `  chart_correctness ${score(report.means.chart_correctness)}, readability ${score(report.means.readability)}`,
     `  calls ${String(report.calls)}, ${report.callsPerRow.toFixed(3)} per judged row; the vision probe answered "${report.probe.answer}"`,
   ];
+  if (report.failed > 0) {
+    const counted = Object.entries(report.failedByKind)
+      .filter(([, rows]) => rows > 0)
+      .map(([kind, rows]) => `${String(rows)} ${kind}`);
+    lines.push(`  why they failed: ${counted.join(', ')}`);
+  }
   for (const mark of report.byMark) {
     lines.push(
       `  ${mark.mark}: ${String(mark.judged)}/${String(mark.rows)} judged, ` +
@@ -641,12 +735,17 @@ export async function judgeJobsWith(jobs: readonly JudgeJob[], options: JudgeOpt
         temperature,
         purpose: 'compare',
       });
-      const scores = parseJudge(response.text);
+      const scores = parseJudge(response.text, response.finishReason);
       verdicts[index] = { id: job.id, ...scores, reply: response.text.trim().slice(0, REPLY_LIMIT), ms: now() - started };
     } catch (error) {
       // A row that never got an answer has no reply to keep: the error *is* what was learned, and a
       // fabricated empty reply would read as a grader that answered with nothing.
-      verdicts[index] = { id: job.id, error: error instanceof Error ? error.message : String(error), ms: now() - started };
+      verdicts[index] = {
+        id: job.id,
+        error: error instanceof Error ? error.message : String(error),
+        failure: classifyFailure(error),
+        ms: now() - started,
+      };
     }
   };
   let next = 0;
@@ -838,7 +937,13 @@ export const JUDGE_ENDPOINTS: readonly JudgeEndpoint[] = [
     apiKeyEnv: ['ZHIPU_API_KEY', 'LLM_API_KEY'],
     imageDialect: 'bare-base64',
     temperature: null,
-    maxOutputTokens: 1024,
+    // 4,096 and not 1,024, which is what the first full run was given. On this model the chain of
+    // thought is billed inside `max_tokens`, so a cap sized for two integers is a cap on the
+    // deliberation that precedes them: run 43979969822 lost 24 of 1,286 rows to replies that ended
+    // mid-object at `{"chart_correctness": 2, "readability":`. A cap is a limit and not a
+    // reservation — the endpoint bills what it writes, not what it may write — so raising it costs
+    // nothing on the rows that never needed it and buys back the 1.9% that did.
+    maxOutputTokens: 4096,
     answerBudgetCeiling: 16384,
     // Measured, not guessed: the six rows that answered took 49 s on average and two crossed 60 s.
     // Three minutes leaves room for the tail without making a stuck row cost a quarter of an hour.

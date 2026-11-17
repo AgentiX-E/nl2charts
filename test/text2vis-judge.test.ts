@@ -10,8 +10,10 @@ import type { ProfileInput } from '../eval/text2vis/profile.js';
 import {
   assertJudgeReport,
   buildJudgePrompt,
+  classifyFailure,
   JUDGE_ENDPOINTS,
   describeJudge,
+  JudgeReplyError,
   probeVision,
   resolveJudge,
   sawRed,
@@ -36,6 +38,16 @@ const PIXEL_PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==',
   'base64',
 );
+
+/** The kind a refusal carries, for the assertions that are about the reason rather than the words. */
+const kindOf = (reply: string, finishReason?: string): string => {
+  try {
+    parseJudge(reply, finishReason);
+    return 'parsed';
+  } catch (error) {
+    return error instanceof JudgeReplyError ? error.kind : 'other';
+  }
+};
 
 const row = (prompt: string, label: string): ProfileInput => ({
   prompt,
@@ -92,7 +104,9 @@ describe('two scores out of a reply, and the replies it refuses', () => {
   it('refuses prose, an empty reply, and a JSON object with only one of the two', () => {
     expect(() => parseJudge('the chart is quite good')).toThrow(/named neither score/);
     expect(() => parseJudge('')).toThrow(/\(empty reply\)/);
-    expect(() => parseJudge('{"chart_correctness": 8}')).toThrow(/named neither score/);
+    // One label is not "neither": a run that reads this as "neither" sends its reader after the
+    // parser when the reply stopped for a reason the reply itself shows.
+    expect(() => parseJudge('{"chart_correctness": 8}')).toThrow(/named chart_correctness and stopped before readability/);
   });
 
   it('quotes what it was given, because that is the only thing that explains the refusal', () => {
@@ -109,8 +123,33 @@ describe('two scores out of a reply, and the replies it refuses', () => {
   it('refuses a JSON array and a null, which are objects to a loose reader', () => {
     expect(() => parseJudge('[8, 7]')).toThrow(/named neither score/);
     expect(() => parseJudge('null')).toThrow(/named neither score/);
-    // A truncated object is the shape a token cap leaves behind.
-    expect(() => parseJudge('{"chart_correctness": 8, "readability"')).toThrow(/named neither score/);
+    // A truncated object is the shape a token cap leaves behind, and it names the score it got to.
+    expect(() => parseJudge('{"chart_correctness": 8, "readability"')).toThrow(
+      /named chart_correctness and stopped before readability/,
+    );
+  });
+
+  it('names the one score it read when the reply was cut, which "neither" would deny', () => {
+    // Run 43979969822 lost 24 of 1,286 rows to replies that ended at `"readability":` and reported
+    // all of them as "the reply named neither score". The message is the only repair instruction a
+    // failed row carries, and this one pointed at the parser instead of at the budget.
+    expect(() => parseJudge('{"chart_correctness": 2, "readability":')).toThrow(
+      /named chart_correctness and stopped before readability/,
+    );
+    expect(() => parseJudge('{"chart_correctness": 2')).toThrow(/named chart_correctness and stopped before readability/);
+  });
+
+  it('says the token cap was the reason when the endpoint reported a length stop', () => {
+    expect(() => parseJudge('{"chart_correctness": 2, "readability":', 'length')).toThrow(/finish=length/);
+    expect(() => parseJudge('', 'length')).toThrow(/token cap/);
+    // A stop that is not a cap is not blamed on one.
+    expect(() => parseJudge('{"chart_correctness": 2', 'stop')).not.toThrow(/finish=length/);
+  });
+
+  it('carries the reason as a kind, so a report can count it without reading the sentence', () => {
+    expect(kindOf('{"chart_correctness": 2')).toBe('partial');
+    expect(kindOf('nothing here')).toBe('unreadable');
+    expect(kindOf('{"chart_correctness": 87, "readability": 7}')).toBe('out-of-range');
   });
 });
 
@@ -178,10 +217,27 @@ describe('the report is two means and their denominators', () => {
   });
 
   it('keeps a failure out of the mean and counts it beside them', () => {
-    const report = summarizeJudge(2, 2, jobs.slice(0, 2), [], [{ id: '0', chart_correctness: 10, readability: 10, reply: '{"chart_correctness": 10, "readability": 10}' }, { id: '1', error: 'socket hang up' }], 2, SEEN, GRADER);
+    const hangUp = Object.assign(new Error('socket hang up'), { code: 'NL2C_E_LLM_UNAVAILABLE' });
+    const report = summarizeJudge(
+      2,
+      2,
+      jobs.slice(0, 2),
+      [],
+      [
+        { id: '0', chart_correctness: 10, readability: 10, reply: '{"chart_correctness": 10, "readability": 10}' },
+        { id: '1', error: hangUp.message, failure: classifyFailure(hangUp) },
+      ],
+      2,
+      SEEN,
+      GRADER,
+    );
     expect(report.means).toEqual({ chart_correctness: 10, readability: 10 });
     expect(report.failed).toBe(1);
-    expect(report.failures).toEqual([{ id: '1', error: 'socket hang up' }]);
+    expect(report.failures).toEqual([{ id: '1', error: 'socket hang up', kind: 'unavailable' }]);
+    // The count is the fact a reader wants from "1 failed": an outage and a truncated reply are
+    // the same number and two different repairs.
+    expect(report.failedByKind.unavailable).toBe(1);
+    expect(report.failedByKind.truncated).toBe(0);
     expect(assertJudgeReport(report)).toBeUndefined();
   });
 
@@ -279,6 +335,7 @@ describe('what a report has to be before a mean can be read out of it', () => {
     calls: 2,
     callsPerRow: 1,
     failures: [],
+    failedByKind: { truncated: 0, unreadable: 0, refused: 0, unavailable: 0, 'invalid-response': 0, 'call-failed': 0 },
     verdicts: [
       { id: '0', chart_correctness: 8, readability: 8, reply: '{"chart_correctness": 8, "readability": 8}' },
       { id: '1', chart_correctness: 8, readability: 8, reply: '{"chart_correctness": 8, "readability": 8}' },
@@ -424,10 +481,33 @@ describe('a reply that is kept, and bounded', () => {
 
   it('keeps no reply for a row that never got one, because a fabricated empty one reads as an answer', async () => {
     const verdicts = await judgeJobsWith([job('0', 'bar')], {
-      provider: { id: 'p', model: 'm', complete: async () => { throw new Error('llm call timed out'); } },
+      provider: {
+        id: 'p',
+        model: 'm',
+        complete: async () => {
+          throw Object.assign(new Error('llm call timed out'), { code: 'NL2C_E_LLM_UNAVAILABLE' });
+        },
+      },
       readImage: async () => ({ mediaType: 'image/png', data: PIXEL_PNG.toString('base64') }),
     });
-    expect(verdicts[0]).toEqual({ id: '0', error: 'llm call timed out', ms: expect.any(Number) as number });
+    expect(verdicts[0]).toEqual({ id: '0', error: 'llm call timed out', failure: 'unavailable', ms: expect.any(Number) });
+  });
+
+  it('calls a reply cut at the token cap what it is, and says the cap was the reason', async () => {
+    // The shape run 43979969822 produced 24 times: the provider stopped for `length` and the text
+    // ends mid-object. Reading it as "the reply named neither score" pointed the reader at the
+    // parser; the row was a budget the next commit raised.
+    const verdicts = await judgeJobsWith([job('0', 'bar')], {
+      provider: {
+        id: 'p',
+        model: 'm',
+        complete: async () => ({ text: '{"chart_correctness": 2, "readability":', finishReason: 'length' }),
+      },
+      readImage: async () => ({ mediaType: 'image/png', data: PIXEL_PNG.toString('base64') }),
+    });
+    expect(verdicts[0]?.failure).toBe('truncated');
+    expect(verdicts[0]?.error).toMatch(/named chart_correctness and stopped before readability/);
+    expect(verdicts[0]?.error).toMatch(/finish=length/);
   });
 
   it('refuses a reply longer than the report documents', () => {
@@ -694,7 +774,10 @@ describe('the endpoint a run grades with', () => {
     // No temperature, because the range this endpoint documents is not this repository's to assume.
     expect(row.temperature).toBe(null);
     // A first budget under the ceiling it may escalate to, and a budget that is a decision.
-    expect(row.maxOutputTokens).toBe(1024);
+    // 1,024 was the first decision and it was wrong: on a thinking model the deliberation is
+    // billed inside `max_tokens`, and run 43979969822 lost 24 of 1,286 rows to replies cut at
+    // `{"chart_correctness": 2, "readability":`.
+    expect(row.maxOutputTokens).toBe(4096);
     expect(row.answerBudgetCeiling).toBeGreaterThanOrEqual(row.maxOutputTokens);
   });
 
@@ -725,7 +808,7 @@ describe('the endpoint a run grades with', () => {
   it('declares vision on the row, which is a declaration the probe then checks', () => {
     const resolved = resolveJudge({ ZHIPU_API_KEY: 'z' });
     expect(resolved.provider.capabilities?.vision).toBe(true);
-    expect(resolved.provider.capabilities?.maxOutputTokens).toBe(1024);
+    expect(resolved.provider.capabilities?.maxOutputTokens).toBe(JUDGE_ENDPOINTS[0]?.maxOutputTokens);
     expect(resolved.provider.model).toBe('glm-4.5v');
     expect(resolved.provider.id).toBe('http');
   });
@@ -755,7 +838,7 @@ describe('the endpoint a run grades with', () => {
       const body = sent[0] as Record<string, unknown>;
       // Absent, not zero and not the vendor's default: the field is one this endpoint may refuse.
       expect(Object.keys(body)).not.toContain('temperature');
-      expect(body.max_tokens).toBe(1024);
+      expect(body.max_tokens).toBe(JUDGE_ENDPOINTS[0]?.maxOutputTokens);
       const messages = body.messages as { readonly content: readonly { readonly type: string; readonly image_url?: { readonly url: string } }[] }[];
       const image = messages[1]?.content.find((part) => part.type === 'image_url');
       // Bare base64: no `data:image/png;base64,` prefix, which is the spelling OpenAI documents.
@@ -1102,7 +1185,7 @@ describe('the judge command, over a real socket and a real PNG', () => {
       );
       expect(sent).toHaveLength(1);
       expect(Object.keys(sent[0] ?? {})).not.toContain('temperature');
-      expect(sent[0]?.max_tokens).toBe(1024);
+      expect(sent[0]?.max_tokens).toBe(JUDGE_ENDPOINTS[0]?.maxOutputTokens);
       const messages = sent[0]?.messages as { readonly content: readonly { readonly type: string; readonly image_url?: { readonly url: string } }[] }[];
       const image = messages[1]?.content.find((part) => part.type === 'image_url');
       expect(image?.image_url?.url.startsWith('data:')).toBe(false);

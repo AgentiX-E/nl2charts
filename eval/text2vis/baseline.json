@@ -17,7 +17,13 @@
       "readability"
     ],
     "callsPerRow": 1,
-    "note": "Registered before the reading is taken, and deliberately without a floor on either mean: no grader has run, and a threshold invented before the instrument is a number with nothing behind it. What is registered is the shape the reading must have - one call per attempted row (both dimensions are asked in one prompt), every row in exactly one of judged/failed/unselected/skipped, and both means on the 0-10 scale the prompt asks for. The round that takes the reading registers the means it earns."
+    "means": {
+      "chart_correctness": 2.9,
+      "readability": 4.67
+    },
+    "judged": 1259,
+    "of": 1286,
+    "note": "The first full reading, run 43979969822 on 60beec22 with glm-4.5v: chart_correctness 2.90/10 and readability 4.67/10 over 1,259 of 1,286 figures, one call per attempted row. No floor is set on either mean yet, because a floor needs a noise estimate and there is one reading. The 27 failures are published with their causes rather than folded into the denominator: 24 replies were cut at the endpoint's 1,024-token cap (the deliberation is billed inside max_tokens on this model) and 3 were refused by the provider's content policy. The cap is now 4,096, which costs nothing on rows that never needed it, and the next reading of the same corpus on the same grader is what turns these two means into a floor."
   },
   "renderNote": "The pixel half, recorded in the round the renderer was built: 1,286 of the 1,470 scored rows reach a PNG (87.48%), 17 are refused because a gauge states a value against a scale this contract does not carry, and 167 are the rows the recommender declines. The floor is the pair (rendered >= 1,286, failed == 0) rather than an accuracy reading: a chart that raised in Python came from this repository own emitter. Still (rendered == 1,286, failed == 0) after the column-order fix, which changed which column each figure is drawn against without changing how many figures exist: 389 of 1,464 tables were being read in JavaScript property order, five of them against an entirely empty year column."
 }

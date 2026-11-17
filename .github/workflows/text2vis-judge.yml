@@ -165,6 +165,7 @@ jobs:
                 '| readability | ' + (report.means.readability === null ? 'no reading' : report.means.readability.toFixed(2) + '/10') + ' |',
                 '| judged | ' + report.judged + ' of ' + report.charts + ' charts |',
                 '| failed / unselected / skipped | ' + report.failed + ' / ' + report.notSelected + ' / ' + report.skipped + ' |',
+                '| why they failed | ' + (report.failed === 0 ? '—' : Object.entries(report.failedByKind).filter(([, rows]) => rows > 0).map(([kind, rows]) => rows + ' ' + kind).join(', ')) + ' |',
                 '| calls | ' + report.calls + ' (' + report.callsPerRow.toFixed(3) + ' per judged row) |',
                 '',
                 'Two means, not a pass rate: a grader score is ordinal and has no calibrated threshold.'
