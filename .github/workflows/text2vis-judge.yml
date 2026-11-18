@@ -200,10 +200,17 @@ jobs:
         uses: actions/cache@v4
         with:
           path: eval/.cache/judge
-          key: text2vis-judge-${{ steps.figures.outputs.digest }}-${{ hashFiles('packages/chart/src/**', 'eval/text2vis/render.ts', 'eval/text2vis/profile.ts', 'eval/text2vis/rule.ts', 'eval/text2vis/dataset.ts', 'eval/text2vis/judge-cache.ts', '.github/workflows/text2vis-judge.yml') }}
+          # The instrument is in the key, and the round that wrote this line has the receipt: run
+          # `44249999301` restored the store written by `glm-4.6v` *with the endpoint deciding the
+          # mode*, asked 178 questions in a different mode, and hit **0** of them — 177 answers it had
+          # already paid for, restored into a directory the judge could not use. A store named by a
+          # digest alone restores the most recent archive of *some* instrument, and one hit is worth
+          # less than the download of 1,286 misses. The model and the mode are what make an answer an
+          # answer; the digest only says which figures.
+          key: text2vis-judge-${{ inputs.model }}-${{ inputs.think }}-${{ steps.figures.outputs.digest }}-${{ hashFiles('packages/chart/src/**', 'eval/text2vis/render.ts', 'eval/text2vis/profile.ts', 'eval/text2vis/rule.ts', 'eval/text2vis/dataset.ts', 'eval/text2vis/judge-cache.ts', '.github/workflows/text2vis-judge.yml') }}
           restore-keys: |
-            text2vis-judge-${{ steps.figures.outputs.digest }}-
-            text2vis-judge-
+            text2vis-judge-${{ inputs.model }}-${{ inputs.think }}-${{ steps.figures.outputs.digest }}-
+            text2vis-judge-${{ inputs.model }}-${{ inputs.think }}-
 
       # No separate preflight step: the judge spends its first call asking the endpoint to name the
       # colour of a red image, and refuses the run when the answer did not see one. That check lives in

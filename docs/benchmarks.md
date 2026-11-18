@@ -16044,3 +16044,57 @@ sentence names both what it answered and what the quadrants are, so the operator
 about the endpoint rather than about the check. Either reading of the four — reading order or
 clockwise — passes, because both place every colour in its own corner; three of four, or four in the
 wrong corners, does not.
+
+## The null interval: what a grading reading can claim, measured against itself
+
+Two arms were dispatched for a different question — is `glm-4.6v-flashx` a cheaper copy of
+`glm-4.6v` — and the answer to that question turned out to be less interesting than a by-product of
+asking it. Both arms graded the same 177 rows of the stride sample, and so did the round before:
+
+| pair | rows | same score | mean difference | per-row sd | max \|Δ\| |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `glm-4.6v@off` against **itself** (two runs) | 177 | **144 (81.4%)** | +0.040 ± 0.180 | 1.222 | 10 |
+| `glm-4.5v@off` against `glm-4.5v` default | 177 | 124 (70.1%) | +0.006 ± 0.16 | — | — |
+| `glm-4.5v` against `glm-4.6v` | 177 | **50 (28.2%)** | +0.949 | — | — |
+| `glm-4.6v` against `glm-4.6v-flashx` | 177 | 65 (36.7%) | **+2.147** | 3.153 | 10 |
+
+Three facts, three consequences.
+
+**1. The instrument disagrees with itself on one row in five, by up to ten points.** On a 0-10 scale,
+a per-row standard deviation of 1.22 means a single row's score is worth ±2.4 at 95%. Nothing in this
+repository may be read off one row: `heatmap 0.67` is nine rows and a mean, not nine opinions.
+
+**2. What it is precise about is a mean.** Over 177 rows the standard error of a difference of means
+is `1.222 / √177 = 0.092`, and the measured null interval is ±0.180 — which is exactly what the
+ablation prints when the same instrument reads the same rows twice:
+
+```console
+$ pnpm bench:text2vis:ablate --before <run 44240226991> --after <run 44249999301> --group all
+text2vis: 177 rows graded in both readings, 1 only in the first, 0 only in the second
+  all: 177 rows, correctness 2.30 → 2.34 (+0.040 ± 0.180), readability 5.59 → 5.64 (+0.045 ± 0.132)
+```
+
+**That ± is the noise floor**, and it scales as `1/√n`: ±0.06 at 1,411 rows, ±0.18 at 177, ±0.4 at
+36. A round that claims +0.05 on a 177-row sample has measured its own instrument. The published
+moves — the melt's `+4.13 ± 0.93` on 140 rows, the sixth reading's `+0.39` — are ten to forty times
+the floor, which is why they were readable.
+
+**3. Two graders are not one ruler read twice.** `glm-4.5v` and `glm-4.6v` agree on 28% of rows and
+differ by 0.95 in the mean. `glm-4.6v` and `flashx` agree on 37% and differ by 2.15. That is not a
+constant offset that could be subtracted; it is two readers whose per-row answers are nearly
+independent, whose *distributions* happen to sit at different heights. The consequence is now
+enforced rather than documented: `bench:text2vis:ablate` **refuses a pair whose two artifacts name
+different graders**, because a paired interval presupposes one ruler read twice.
+
+**The cheapest arm is the most generous one.** `glm-4.6v-flashx` scores `4.51/6.83` where
+`glm-4.6v` scores `2.34/5.64` and `glm-4.5v` scores `3.24/6.42` — monotonically higher as the model
+gets cheaper, at ¥0.20 a reading against ¥1.17 and ¥10.52. With no gold standard there is no way to
+say which reader is right; there is only the statement that a grader which scores a corpus two points
+above two other graders is a *different scale*, not a better eye. So `flashx` is not adopted for
+iteration: the iteration instrument has to be one whose numbers can be compared with the floor's at
+all, and 37% row agreement is not that.
+
+What would settle it is a **null control** — the probe image, which is not a chart, sent with a real
+question and graded by the same prompt. An instrument that gives a four-colour test card 7/10 is
+measuring its own willingness, not the figure. That is the next round's first call, and it costs one
+call per instrument.

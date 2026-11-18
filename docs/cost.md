@@ -247,3 +247,49 @@ which is where most of the week's ¥63 was spent, and a measured reason to keep 
 numbers that get published. Nothing about the remaining work is expensive: what was expensive was
 taking a reading that could not answer the question it was dispatched for, at full price, and calling
 the result a null.
+
+## The store, measured — and the one way it was restoring the wrong answers
+
+The round that added the store claimed a re-reading would cost the rows that changed. It was not
+measured until now, and the first two measurements disagree, which is why both are here:
+
+| run | what it restored | graded | answered from the store | calls | bill |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `44249999301` | `glm-4.6v` **default-mode** answers | 178 | **0** | 178 | ¥0.1468 |
+| `44254362649` | `glm-4.6v@off` answers | 178 | **177** | 1 | **¥0.0008** |
+
+The second run is the feature working: 177 of 178 answers restored for free, one call for the row the
+first run had lost to a parse failure, and `savedYuan: 0.146809` on the artifact — the tokens the
+store prevented, priced at the same table as the tokens it did not.
+
+The first run is the defect. `actions/cache` restores the **most recently created** archive matching a
+`restore-keys` prefix, and the prefix was `text2vis-judge-<corpus digest>-`: the digest says which
+figures, and nothing said *which instrument*. So a `glm-4.6v@off` run restored the archive of a
+`glm-4.6v` default-mode run, downloaded 178 answers that its key computation could not match (a
+request that names `thinking: false` and one that names nothing are two requests), and paid for all
+178 again. **A cache that restores into a directory of unusable entries is worse than a cold one**:
+it costs the download, the same calls, and one misleading line in the log.
+
+The key now carries the instrument:
+
+```yaml
+key: text2vis-judge-${{ inputs.model }}-${{ inputs.think }}-${{ steps.figures.outputs.digest }}-...
+restore-keys: |
+  text2vis-judge-${{ inputs.model }}-${{ inputs.think }}-${{ steps.figures.outputs.digest }}-
+  text2vis-judge-${{ inputs.model }}-${{ inputs.think }}-
+```
+
+The last fallback is the useful one — same instrument, different corpus — and the branch-wide
+`text2vis-judge-` fallback is gone, because the only thing it ever matched was somebody else's ruler.
+
+Two numbers follow from the hit rate, and both change the ledger:
+
+| | before | after |
+| --- | ---: | ---: |
+| a re-reading of unchanged figures | ¥1.17 (4.6v) to ¥10.52 (4.5v) | **¥0.001** |
+| a round that changes 40 of 1,418 figures | ¥1.17 | **≈¥0.03 + the 40** |
+
+`glm-4.6v-flashx` was measured for the first time on the same 178 rows: **¥0.0251**, which is ¥0.20 a
+full reading — a sixth of the iteration instrument. It is not adopted, and the reason is in
+[benchmarks.md](./benchmarks.md#the-null-interval-what-a-grading-reading-can-claim-measured-against-itself):
+it scores the corpus two points *above* both graders whose numbers the floor is defined against.

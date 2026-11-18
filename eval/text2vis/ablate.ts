@@ -41,6 +41,32 @@ export interface PairedVerdict {
   readonly group: string;
 }
 
+/** The two facts a judge artifact carries that decide whether two of them can be paired. */
+interface JudgeArtifact {
+  readonly verdicts: readonly JudgeVerdict[];
+  readonly grader?: Grader;
+}
+
+interface Grader {
+  readonly endpoint?: string;
+  readonly model?: string;
+  readonly thinking?: boolean;
+}
+
+/**
+ * Two graders that are not one instrument, named, or nothing when they are the same one.
+ *
+ * Silent when either side does not name a model: an artifact without one cannot be told apart from
+ * another, and inventing a divergence would refuse a pair this file has no evidence about.
+ */
+function graderDivergence(before: Grader | undefined, after: Grader | undefined): string | undefined {
+  if (typeof before?.model !== 'string' || typeof after?.model !== 'string') return undefined;
+  const mode = (one: Grader | undefined): string => (typeof one?.thinking === 'boolean' ? ` thinking ${one.thinking ? 'on' : 'off'}` : '');
+  const same = before.model === after.model && mode(before) === mode(after);
+  if (same) return undefined;
+  return `the two readings were graded by ${before.model}${mode(before)} and ${after.model}${mode(after)}`;
+}
+
 /** What one group of paired rows says. */
 export interface GroupReading {
   readonly group: string;
@@ -295,14 +321,27 @@ export async function entryAblate(
   try {
     const args = parseAblateArgs(options.argv);
     if (args.before === undefined || args.after === undefined) throw new Error('ablate: --before and --after are both required');
-    const read = async (path: string): Promise<{ readonly verdicts: readonly JudgeVerdict[] }> => {
+    const read = async (path: string): Promise<JudgeArtifact> => {
       const text = await readFile(path, 'utf8');
-      const parsed = JSON.parse(text) as { readonly verdicts?: readonly JudgeVerdict[] };
+      const parsed = JSON.parse(text) as { readonly verdicts?: readonly JudgeVerdict[]; readonly grader?: Grader };
       if (!Array.isArray(parsed.verdicts)) throw new Error(`ablate: ${path} has no verdicts, so it is not a judge reading`);
-      return { verdicts: parsed.verdicts };
+      return { verdicts: parsed.verdicts, ...(parsed.grader === undefined ? {} : { grader: parsed.grader }) };
     };
     const before = await read(args.before);
     const after = await read(args.after);
+    // A paired difference is a claim about rows, and its premise is that one instrument graded each
+    // row twice. Measured on 177 rows: `glm-4.5v` and `glm-4.6v` gave the same score on **28%** of
+    // them while their means differ by 0.95, and `glm-4.6v` against itself agreed on 81% — so two
+    // graders are not one ruler read twice, they are two readers whose per-row answers are nearly
+    // independent. The table below would pair them anyway, and the ± on it would be the width of a
+    // distribution that no row belongs to.
+    const divergence = graderDivergence(before.grader, after.grader);
+    if (divergence !== undefined) {
+      throw new Error(
+        `ablate: ${divergence} — a paired difference is a claim about rows, and two graders are two ` +
+          'readers: compare the two means directly, or re-grade the same rows on one instrument',
+      );
+    }
     // The corpus is what `auto` needs and what `all` deliberately does not: a population reading is
     // about every row that was graded twice, and reading 6 MB of tables to answer "how many" would
     // make the cheap question as expensive as the expensive one.

@@ -108,6 +108,12 @@ cannot be argued with.
   shortlist 676 -> 686, declined 39 -> 35, figures 1,414 -> **1,418**, `failed 0`.
 
 ### Fixed
+- **`bench:text2vis:ablate` paired two readings that two graders wrote.** A paired interval
+  presupposes one ruler read twice, and the measurement above says two graders agree on 28% of rows:
+  the ± would have been the width of a distribution no row belongs to. The tool now compares both
+  artifacts' `grader` — model and decode mode — and refuses the pair with a message naming both, so a
+  cross-instrument comparison has to be stated as a comparison of means rather than produced as a
+  table of row differences.
 - **The probe that decides whether an endpoint can see was itself a guessable, degenerate input.**
   `PROBE_PNG` was a 2×2 red square — 73 bytes, two pixels a side — and the question was "what is the
   dominant colour", answered with one word from a set of five. That is the hardest possible input for
@@ -207,6 +213,25 @@ cannot be argued with.
   published reading is arithmetically wrong is the day the step above it exited non-zero.
 
 ### Measured
+- **The instrument's noise floor, from two runs of the same instrument on the same rows.** Two arms
+  were dispatched to price `glm-4.6v-flashx` and left a more useful number behind: `glm-4.6v@off`
+  against *itself* on 177 rows agrees on **81.4%**, with a per-row standard deviation of **1.222** and
+  a maximum disagreement of **10**, and a mean difference of `+0.040 ± 0.180`. That ± is the ablation's
+  null interval, and it scales as 1/√n — ±0.06 at 1,411 rows. Anything a round claims below that is
+  its own instrument. The same pair of runs also priced the cross-grader question: `glm-4.5v` and
+  `glm-4.6v` agree on **28.2%** of rows while their means differ by 0.95, and `glm-4.6v` and
+  `flashx` on 36.7% while differing by 2.15 — two readers, not one ruler read twice.
+- **`glm-4.6v-flashx` passes the rebuilt probe and scores *above* both graders**: `4.51/6.83` against
+  `2.34/5.64` (`glm-4.6v`) and `3.24/6.42` (`glm-4.5v`) on the same 177 rows, for **¥0.0251** — ¥0.20
+  a full reading. It is not adopted: a grader two points above the two whose numbers the floor is
+  defined against is a different scale, and with no gold standard nothing here can say which reader
+  is right. The next round's first call is a null control — the probe card, which is not a chart,
+  graded by the same prompt.
+- **The answer store pays, and it had one way of restoring the wrong answers.** `44254362649` graded
+  178 rows with **177 answered from the store, one call, ¥0.0008, ¥0.1468 saved**. The run before it
+  restored the archive of a *default-mode* run into an off-mode reading: 178 answers downloaded, 0
+  matched, 178 calls paid. The cache key now carries the model and the decode mode, and the
+  branch-wide fallback that matched somebody else's ruler is gone.
 - **A reading can cost ¥1.17 instead of ¥10.52, and the deliberation it drops is worth nothing on the
   model that serves the switch.** Four arms on one 200-row stride sample, paired within row. `glm-4.6v`
   with `thinking: disabled` returned **16.9 completion tokens per row, none of them reasoning**, for

@@ -328,6 +328,55 @@ describe('the ablate command', () => {
     }
   });
 
+  it('refuses to pair two readings that two graders wrote', async () => {
+    // The measurement behind this rule, on 177 rows: `glm-4.5v` and `glm-4.6v` gave the same score
+    // on 28% of them while their means differ by 0.95, and `glm-4.6v` against itself agreed on 81%.
+    // A paired interval presupposes one ruler read twice; across two graders it would be the width of
+    // a distribution no row belongs to.
+    const directory = mkdtempSync(join(tmpdir(), 'ablate-graders-'));
+    try {
+      const write = (name: string, grader: Record<string, unknown>): string => {
+        const path = join(directory, name);
+        writeFileSync(path, JSON.stringify({ grader, verdicts: [verdict('0', 3, 6), verdict('1', 5, 7)] }));
+        return path;
+      };
+      const entry = join(process.cwd(), 'eval/text2vis/ablate.ts');
+      const lines: string[] = [];
+      const run = (before: string, after: string) =>
+        entryAblate(entry, pathToFileURL(entry).href, (line) => lines.push(line), { argv: ['--before', before, '--after', after, '--group', 'all'] });
+      // Two models.
+      expect(await run(write('a.json', { endpoint: 'zhipu', model: 'glm-4.5v' }), write('b.json', { endpoint: 'zhipu', model: 'glm-4.6v' }))).toBe(1);
+      expect(lines.join('\n')).toContain('the two readings were graded by glm-4.5v and glm-4.6v');
+      // One model, two decode modes: the mode is half of the instrument for the same reason the
+      // floor records it, and it is the half a reader is most likely to have changed by accident.
+      const modes: string[] = [];
+      expect(
+        await entryAblate(entry, pathToFileURL(entry).href, (line) => modes.push(line), {
+          argv: [
+            '--before',
+            write('c.json', { endpoint: 'zhipu', model: 'glm-4.6v', thinking: false }),
+            '--after',
+            write('d.json', { endpoint: 'zhipu', model: 'glm-4.6v', thinking: true }),
+            '--group',
+            'all',
+          ],
+        }),
+      ).toBe(1);
+      expect(modes.join('\n')).toContain('glm-4.6v thinking off and glm-4.6v thinking on');
+      // And the same instrument on both sides still reads, with the grader now in the file: the rule
+      // is about a difference, not about artifacts that say who wrote them.
+      const same: string[] = [];
+      expect(
+        await entryAblate(entry, pathToFileURL(entry).href, (line) => same.push(line), {
+          argv: ['--before', write('e.json', { endpoint: 'zhipu', model: 'glm-4.6v', thinking: false }), '--after', write('f.json', { endpoint: 'zhipu', model: 'glm-4.6v', thinking: false }), '--group', 'all'],
+        }),
+      ).toBe(0);
+      expect(same.join('\n')).toMatch(/2 rows graded in both readings/);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('reports a reading that is not a pair of judge artifacts as one', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'ablate-shape-'));
     try {
