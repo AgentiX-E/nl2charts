@@ -573,6 +573,56 @@ expensive one: a real change classified as prose, and a number that then gets qu
 without ever being produced. Between paying for a comment and quoting a measurement that
 does not exist, the guard pays.
 
+### What a push has to reproduce
+
+A commit is a tree, its parents, an author line and a message, and its name is the hash of
+exactly those bytes. So a push is correct only if the commit that arrives on the remote hashes
+to the commit that left. The channel used until now did not: it rebuilt a commit from the
+working tree and sent `parents: [<remote head>]`, when the local commit's parent is the
+previous *local* commit. A commit's hash covers its parents, so every push produced a **twin** —
+same content, different name — and because it pushed `HEAD` alone, every commit behind it was
+dropped. The branch on the remote then held content and not history.
+
+Measured, on 2026-11-18, before the repair:
+
+| reading | value |
+| --- | --- |
+| commits on `master` this clone does not have | **48** (all twins, above the shared `1220221`) |
+| commits in this clone the remote did not have | **27** (16–18 November) |
+| twins carrying a tree no local commit has | **21 of 48** — pushed from an uncommitted working tree |
+| blob revisions that existed only in those twins | **70** |
+| documentation citations that resolved locally and 404'd on the remote | **2** (`9ccf30d`, `f9c8e6e`) |
+
+The 21 are the part worth keeping in mind: a working tree is not a commit, so a state pushed
+from one is a state no `git checkout` can return to. CI measured those states, which makes the
+numbers real and their provenance weak at the same time — real, because a run happened and its
+log is on the server; weak, because "this number comes from commit X" is a claim the
+repository could not support.
+
+What the measurements kept was content. Comparing the two heads file by file: 469 blobs on the
+remote, **467 byte-identical** to the local head, two that are documents the local head has
+since extended, and one the local head added (`tools/flint-probe.ts`). Every file the shipped
+baseline was measured on — `eval/text2vis/profile.ts`, `packages/chart/src/profile.ts`,
+`eval/text2vis/baseline.json` — is the same object on both sides, which is why `606 / 710 / 35`
+survives the repair without being re-measured.
+
+The replacement channel asserts instead of hoping, in `.git/push_history_via_api.py`:
+
+1. `createTree(base_tree = the previous tree, entries = this commit's own diff)` must equal
+   `git rev-parse <commit>^{tree}`.
+2. `createCommit(parents = this commit's own parents, message = its exact bytes)` must equal the
+   commit's own SHA.
+3. The ref moves only after the whole span asserts, and a final read must return `HEAD`.
+4. Blobs are read from the object store, never the working tree — the defect that made 21
+   states unpushable as history.
+5. A ref this clone has never seen is replaced only when every blob the remote carries exists
+   here, or is contained line for line in the file at `HEAD`. Content that would vanish stops
+   the push instead of being overwritten.
+
+`git cat-file -e <remote sha>` is the whole detector: it fails exactly when the two histories
+have diverged. It is the first thing the channel runs, and the reason a twin cannot be created
+twice.
+
 ### Adaptation without a benchmark
 
 A deployment that swaps the backbone loses the calibration and keeps the code. The layer that

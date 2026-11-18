@@ -6,6 +6,25 @@ cannot be argued with.
 
 ## Unreleased
 
+### Fixed
+- **The push channel built twin commits, and the branch on the remote held content without
+  history.** A commit's name is the hash of its tree, its parents, its author line and its exact
+  message, and the channel sent `parents: [<remote head>]` when a local commit's parent is the
+  previous local commit -- so no rebuilt commit could ever hash to the one it was rebuilding, and
+  the remote received a twin each time. It also pushed `HEAD` alone, so the commits behind it were
+  dropped. **Measured before the repair: 48 commits on `master` this clone did not have, 27 in this
+  clone the remote did not have, 21 of the 48 twins carrying a tree no local commit has** -- states
+  pushed from an uncommitted working tree, which CI measured and which no checkout could return to.
+  Two documentation citations (`9ccf30d`, `f9c8e6e`) resolved here and 404'd there. **The numbers
+  survived on content**: of 469 blobs on the remote head, 467 are byte-identical to the local head,
+  two are documents since extended, and one is new, and every file the shipped baseline was
+  measured on is the same object on both sides -- so `606 / 710 / 35` stands without re-measuring.
+  The replacement replays the span commit by commit and asserts each hash (`createTree` against
+  `<commit>^{tree}`, `createCommit` against the commit's own name), reads blobs from the object
+  store rather than the working tree, and refuses to replace a ref unless every blob the remote
+  carries exists locally or is contained line for line at `HEAD`. `git cat-file -e <remote sha>` is
+  the detector, and it runs first.
+
 ### Added
 - **The chart half's first external competitor reading, and the subtraction it makes possible.**
   Every number this repository publishes about the chart half has been a score against a corpus
