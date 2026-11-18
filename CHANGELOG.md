@@ -180,6 +180,21 @@ cannot be argued with.
   published reading is arithmetically wrong is the day the step above it exited non-zero.
 
 ### Measured
+- **A reading can cost ¥1.17 instead of ¥10.52, and the deliberation it drops is worth nothing on the
+  model that serves the switch.** Four arms on one 200-row stride sample, paired within row. `glm-4.6v`
+  with `thinking: disabled` returned **16.9 completion tokens per row, none of them reasoning**, for
+  ¥0.1476 where `glm-4.5v` spent ¥1.3541 — `2.29` against `3.24` correctness, `−0.949 ± 0.358`. Its
+  default decoder spent ¥0.5430 for `2.19`, which paired against `disabled` is `−0.101 ± 0.323`
+  correctness and `+0.157 ± 0.264` readability: **both intervals contain zero**, so on that model
+  thinking costs 3.7× and buys nothing measurable. And the half-price grader is a *different
+  instrument*, not a cheaper one — a full point below `glm-4.5v` on correctness with or without
+  thinking (`−1.045 ± 0.319`) — so published floors stay on 4.5V and iteration moves to the ninth-price
+  instrument, where only a delta is claimed.
+- **The cheapest arm was refused by the probe.** `glm-4.6v-flashx` (≈¥0.55 a reading) answered `orange`
+  to a red probe image: one call, three seconds, no figures drawn. Recorded as a refusal rather than a
+  result, with the one thing that would settle it — `PROBE_PNG` is a 1×1 image, which is the hardest
+  input for an encoder that resizes.
+
 - **The layout batch was worth +0.84 readability, and pies moved 3.40 -> 6.51.** Run 44096943698
   (`5c8942be`, `glm-4.5v`, 1,286 figures, one call per row): `chart_correctness 2.89 -> 3.04`,
   `readability 5.21 -> 6.05`, 1,284 judged, 2 refusals on the same two rows, no truncation and no 429.

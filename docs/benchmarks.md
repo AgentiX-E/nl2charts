@@ -15836,6 +15836,17 @@ Three things make that experiment honest:
 `--think on` exists for the same reason `off` does: an A/B whose cheap arm is the only reachable one
 is not an A/B.
 
+**It was run, and the question it asked does not exist on this model.** Two arms on the same 200-row
+stride sample — `44234111191` with `--think off`, `44234138243` with the endpoint's default — graded
+the same 177 rows and disagreed by nothing: correctness `3.25` against `3.24` (`−0.006 ± 0.162`),
+readability `6.44` against `6.42` (`−0.017 ± 0.233`), ¥1.3148 against ¥1.3541, and **98.2% of both
+replies' completion was still deliberation**. The vendor documents `glm-4.5v` as *forced thinking*:
+the request is accepted and does not change the decoder. The lever moved to `glm-4.6v`, where it is
+real — `44240226991` on the same rows returned 16.9 completion tokens per row, **zero** of them
+reasoning, for **¥0.1476** against ¥1.3541, and lost `0.944 ± 0.369` correctness and `0.825 ± 0.316`
+readability for it. `docs/cost.md` carries the table and the guards that now refuse a run which
+claims a mode it did not obtain.
+
 ## The sixth reading: 3.44 and 6.49, and the paired table that says why
 
 The melt was priced in the commit that earned it, and the sixth full reading is the price. Run

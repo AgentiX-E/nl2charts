@@ -88,9 +88,10 @@ file choosing a number the grader did not write, and caching it would make the c
 
 | lever | expected saving | what it costs to find out | state |
 | --- | --- | --- | --- |
-| ~~Decode mode off~~ | was: ~¥8 of every ¥10.68 reading | one paired arm on a 200-row stride sample: 178 calls, **¥2.67 for both arms** | **spent, and the answer is no: `glm-4.5v` is forced thinking** — see below |
-| **Grader `glm-4.6v`** | half of every reading before any mode change (¥1/¥3 against ¥2/¥6) | the same paired sample, against the same figures: ≈¥1.3 an arm | ready; the price row is already in the table |
-| **Decode mode off, on `glm-4.6v`** | whatever the deliberation turns out to be worth: the same page lists 4.6V as deciding for itself | the arm above, taken twice | ready, and it is the second half of the same dispatch |
+| ~~Decode mode off, `glm-4.5v`~~ | was: ~¥8 of every ¥10.68 reading | 178 calls, **¥2.67 for both arms** | **spent; the answer is no — `glm-4.5v` is forced thinking** |
+| ~~Grader `glm-4.6v`~~ | was: half of every reading (¥1/¥3 against ¥2/¥6) | the same sample, twice: **¥0.69 for both arms** | **spent; 4.6V is ¥4.32 a reading and 1.0 point lower — a different instrument, not a cheaper one** |
+| **Decode mode off, `glm-4.6v`** | was: the deliberation | the second half of the same dispatch | **spent; it works, it saves 3.7×, and it costs nothing measurable** — see below |
+| **A cheap instrument for iteration** | ¥10.52 → **¥1.17** a reading, 9× | already measured | **available now**: deltas only, floors stay on 4.5V |
 | **Batch API** | half of whatever is left | nothing to measure — the provider states 5折 — but it is asynchronous, so the workflow changes shape | not started |
 | **`deepseek-v4-pro` vs `flash`** | negative: pro is ¥4.5/¥13.5 against ¥2/¥8 | one dispatched arm | not worth it for the gate; relevant only if BIRD accuracy needs it |
 | **Sample on push instead of dispatch** | removes the dispatch step from the round's loop | a recorded sample floor, which needs one full reading to establish | not started |
@@ -140,11 +141,62 @@ Three things changed in the code, and the third is the one that would have caugh
    is a fifth because the two populations this instrument has measured are 98% and near zero, and a
    guard at zero would refuse a correct reading on its arithmetic.
 
-The lever is not gone; it moved to the model that serves it. `glm-4.6v` is in the *模型自动判断* group,
-priced at ¥1/¥3 against 4.5V's ¥2/¥6 — so the next dispatch takes the same 200 rows twice on 4.6V, once
-with `disabled` and once with the default, and answers both questions with one pair of arms: is the
-halved grader as good, and does the mode it serves save the other half. Expected: ¥1.3 an arm again,
-and a reading that costs ≈¥5 with thinking and ≈¥1.3 without.
+The lever moved to the model that serves it. `glm-4.6v` is in the *模型自动判断* group, priced at ¥1/¥3
+against 4.5V's ¥2/¥6, so the same 200 rows were taken twice on it — 44240226991 with `disabled`,
+44240239563 with the default. Both arms are green, which already says the switch is served; the token
+column says it plainly:
+
+| instrument (same 178 rows, 200-row stride sample) | prompt/row | completion/row | reasoning share | ¥/row | **¥/reading** | correctness | readability |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `glm-4.5v`, any mode (forced thinking) | 830.7 | 961.1 | 98.2% | 0.00743 | **10.52–10.83** | 3.24–3.25 | 6.42–6.44 |
+| `glm-4.6v`, default | 774.8 | 758.5 | 97.3% | 0.00305 | **4.32** | 2.19 | 5.75 |
+| `glm-4.6v`, `disabled` | 778.8 | **16.9** | **0.0%** | 0.00083 | **1.17** | 2.29 | 5.60 |
+
+Two results, and the second is the one that matters:
+
+1. **`glm-4.6v` serves the switch.** 178 rows, 3,006 completion tokens between them, **zero** of them
+   reasoning. A reading on it costs ¥1.17 instead of ¥10.52 — **9× cheaper**, measured, not projected.
+2. **On `glm-4.6v` the deliberation is worthless.** Paired within row, `disabled` against default:
+   correctness `2.29 → 2.19` (**−0.101 ± 0.323**), readability `5.60 → 5.75` (**+0.157 ± 0.264**). Both
+   intervals contain zero, so thinking on that model buys nothing measurable and costs **3.7×** — the
+   same 178 rows for ¥0.1476 instead of ¥0.5430.
+
+And the half-price grader is **not a cheaper copy of the same instrument**:
+
+| comparison | correctness | readability |
+| --- | ---: | ---: |
+| `glm-4.6v` `disabled` against `glm-4.5v` default | **−0.949 ± 0.358** | −0.842 ± 0.339 |
+| `glm-4.6v` default against `glm-4.5v` default | **−1.045 ± 0.319** | −0.667 ± 0.317 |
+
+Both arms of 4.6V sit a full point below 4.5V on correctness, with or without thinking, and the
+intervals exclude zero by three standard errors. That is not "the newer model is worse" — nothing here
+has a gold standard to say which grader is right. It is the repo's own rule standing where it says it
+does: **a grader swap is an instrument swap, and a floor is relative to the instrument.** Two
+consequences, both of them about money:
+
+- **Published floors stay on `glm-4.5v`.** The 3.44/6.49 in `docs/benchmarks.md` is a fact about that
+  instrument, and re-basing it on a grader that scores a point lower would make the project look worse
+  for having cheaper eyes. A re-baseline is a decision, not a side effect of saving money.
+- **Iteration moves to the ¥1.17 instrument.** A round that only needs a *delta* — did this change move
+  the figure, did that reshape break a mark — can take its before and after on `glm-4.6v` `disabled`,
+  paired within row, for a ninth of the price. Twelve such rounds cost ¥14 instead of the ¥63 the judge
+  chain spent in five days.
+
+A fifth arm — `glm-4.6v-flashx`, ¥0.15/¥1.5, which would be ≈¥0.55 a reading — was dispatched as
+44240917967 on the same sample and **was refused by the probe**: asked for the dominant colour of a red
+image it answered `orange`. One call, three seconds, ¥0.0002, and no figures drawn — which is the probe
+doing the job it exists for, and the cheapest rejection this instrument can produce.
+
+Two readings of that refusal, and the cheap one is not the honest one:
+
+- **The instrument's rule stands.** The probe is strict on purpose: an endpoint that answers a colour
+  question without seeing a colour is the failure mode a whole reading's means depend on, and relaxing
+  the test so that a cheaper model passes is adjusting the ruler to the result.
+- **The probe is one pixel.** `PROBE_PNG` is a 1×1 red square, and a 1×1 image is the hardest possible
+  input for a visual encoder that resizes. `glm-4.5v` and `glm-4.6v` both say `red`; `flashx` says
+  `orange`, which may be a weaker encoder or may be the size. Distinguishing the two costs one more
+  call and a larger probe image, and it is worth taking before the cheap instrument is written off — a
+  probe that rejects a usable model is as wrong as one that admits a blind one.
 
 
 ## The rules this round adds
@@ -173,8 +225,10 @@ and a reading that costs ≈¥5 with thinking and ≈¥1.3 without.
 environment, so the pipeline runs on the recorded fixtures — and it is the only per-push check of the
 evaluation code's own behaviour. It stays.
 
-The `--think` question is now **answered and closed for `glm-4.5v`**: the mode is not served there, the
-two arms above say so twice over, and the guard refuses the claim instead of publishing it. The grader
-question is dispatched on the model that serves the mode, at ¥1.3 an arm. Nothing about the remaining
-work is expensive: what was expensive was taking a reading that could not answer the question it was
-dispatched for, at full price, and calling the result a null.
+The `--think` question is **answered, and it is two answers**: the mode does not exist on `glm-4.5v`
+(forced thinking) and it is worthless on `glm-4.6v` (both intervals contain zero). What the same
+dispatches bought is better than the ¥8 lever they were sent for: a **¥1.17 instrument** for iteration,
+which is where most of the week's ¥63 was spent, and a measured reason to keep the ¥10.52 one for the
+numbers that get published. Nothing about the remaining work is expensive: what was expensive was
+taking a reading that could not answer the question it was dispatched for, at full price, and calling
+the result a null.
