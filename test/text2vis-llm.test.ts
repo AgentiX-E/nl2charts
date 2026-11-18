@@ -235,6 +235,21 @@ describe('one call, and what it leaves behind', () => {
     expect(answer.truncated).toBe(true);
     expect(answer.choice).toBeUndefined();
   });
+
+  it('does not score the prefix of a cut reply, even when the cut lands after a name', async () => {
+    // At `max_tokens: 32` five replies were cut and three of them began with the name — "Pie Chart."
+    // and then a sentence nobody read. `parseChoice` strips a trailing full stop, so those three were
+    // scored as answers and the first full run published 860 top-1 instead of 857. A prefix is not an
+    // answer: the cut has to make the row unreadable, not readable-with-less-text.
+    const provider = scripted(() => 'pie. The question asks for a share of a whole, so the', { finishReason: 'length' });
+    const answer = await askOnce(provider, { question: 'What share does each region hold?', options: markOptions() }, { maxTokens: 32 });
+    expect(answer.truncated).toBe(true);
+    expect(answer.choice).toBeUndefined();
+    // The same text without the cut is still unreadable, because it is a sentence rather than a name;
+    // what the cut changes is only whether this file could have been tempted to read a prefix.
+    const whole = scripted(() => 'pie.', {});
+    expect((await askOnce(whole, { question: 'Q', options: markOptions() }, { maxTokens: 96 })).choice).toBe('pie');
+  });
 });
 
 describe('scoring one arm', () => {

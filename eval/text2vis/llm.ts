@@ -278,12 +278,18 @@ export async function askOnce(
     ...(options.maxTokens === undefined ? {} : { maxTokens: options.maxTokens }),
     purpose: 'select',
   });
+  // `length` is the only finish reason that says the *answer* was cut. Everything else either
+  // finished or was stopped by something a reader can see in `reply`.
+  const truncated = response.finishReason === 'length';
   const row: ModelRow = {
-    choice: parseChoice(response.text, request.options),
+    // A cut reply names nothing, whatever its first words happened to be. This is not pedantry: at
+    // `max_tokens: 32` five replies were cut, and the three whose cut landed just after the name
+    // ("Pie Chart." and then a sentence that was never read) were scored as answers, which is how the
+    // first full run published 860 top-1 instead of 857. A prefix of an answer is not an answer —
+    // the same rule the judge learned at 1,024 tokens, applied where the cut can still be seen.
+    choice: truncated ? undefined : parseChoice(response.text, request.options),
     reply: response.text,
-    // `length` is the only finish reason that says the *answer* was cut. Everything else either
-    // finished or was stopped by something a reader can see in `reply`.
-    truncated: response.finishReason === 'length',
+    truncated,
   };
   // The model travels with the row: the key already separates models, and this is the lock a store
   // copied between two cache directories has to pass before its answer is read.

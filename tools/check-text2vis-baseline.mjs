@@ -605,6 +605,13 @@ function selfTest() {
   const recorded = JSON.parse(readFileSync(resolve(ROOT, BASELINE), 'utf8'))?.judge?.grader;
   const named = typeof recorded?.model === 'string' && typeof recorded?.endpoint === 'string';
   caseOf(`the floor records the instrument that took it (${String(recorded?.endpoint)}/${String(recorded?.model)})`, named ? [] : ['no judge.grader'], 0);
+  // The same rule for the model arm: a floor with no arms turns every check above into a note, and a
+  // note is what a gate looks like while it is doing nothing. Asserted by *scale* rather than by model
+  // name, because the model is the thing a new reading changes and the scales are the instrument.
+  const recordedArms = JSON.parse(readFileSync(resolve(ROOT, BASELINE), 'utf8'))?.llm?.arms;
+  const scales = Object.keys(recordedArms ?? {});
+  const bothScales = scales.some((key) => key.endsWith('|mark')) && scales.some((key) => key.endsWith('|label'));
+  caseOf(`the model floor records an arm per scale (${scales.join(', ') || 'none'})`, bothScales ? [] : ['no llm.arms'], 0);
   if (failed > 0) {
     console.error(`${String(failed)} self-test case(s) failed`);
     return 1;
