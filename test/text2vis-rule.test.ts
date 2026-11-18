@@ -19,6 +19,7 @@ import { TEXT2VIS_FIELDS } from '../eval/text2vis/dataset.js';
 import {
   assertRuleReport,
   CUE_VARIANTS,
+  withDistributionWide,
   cueAnswer,
   cueCrossings,
   cueMarks,
@@ -552,6 +553,24 @@ describe('the table a variant constructs', () => {
     expect(CUE_VARIANTS[0]?.cues).toBe(CHART_CUES);
     expect(new Set(CUE_VARIANTS.map((variant) => variant.name)).size).toBe(CUE_VARIANTS.length);
     for (const variant of CUE_VARIANTS) expect(variant.note.length).toBeGreaterThan(20);
+  });
+
+  it('widens one pattern and leaves every other cue untouched', () => {
+    // `boxplot` reads 6.74% and 44 of its misses answer `bar`, and every one of those questions says
+    // "IQR" or "outlier" or "z-score" and never "box plot". The lever is therefore one pattern's
+    // width, and a variant that also reordered the table could not attribute what the width bought.
+    const wide = withDistributionWide(CUE_VARIANTS[0]!.cues);
+    expect(wide).toHaveLength(CUE_VARIANTS[0]!.cues.length);
+    const shipped = CUE_VARIANTS[0]!.cues;
+    const changed = wide.filter((rule, index) => rule.pattern !== shipped[index]?.pattern);
+    expect(changed.map((rule) => rule.kind)).toEqual(['distribution']);
+    expect(changed[0]?.marks).toEqual(shipped.find((rule) => rule.kind === 'distribution')?.marks);
+    // The words are the ones the questions are written in, and they still fire the shipped cue on a
+    // question that already fired it — a widening that lost the old matches would be a swap.
+    for (const question of ['interquartile range of each country', 'identify any outlier', 'z-score above the mean', 'standard deviation of the class']) {
+      expect(cueMarks(question, wide)[0]).toBe('boxplot');
+    }
+    expect(cueMarks('distribution of revenue', wide)[0]).toBe('boxplot');
   });
 });
 

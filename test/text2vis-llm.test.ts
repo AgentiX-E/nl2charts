@@ -160,8 +160,11 @@ describe('the instruction, and reading the answer back', () => {
     expect(parseChoice('barchart', options)).toBeUndefined();
   });
 
-  it('leaves a thinking model unbudgeted, and budgets a chat model at one word', () => {
-    expect(replyBudget({ id: 'a', model: 'a', complete: async () => ({ text: '', model: 'a' }) })).toBe(32);
+  it('leaves a thinking model unbudgeted, and gives a chat model room to finish a sentence', () => {
+    // 32 was "one word plus punctuation", and 5 of 2,940 replies were cut at it — every one a model
+    // that opened with a sentence. The fence is sized so that hitting it is an anomaly; a reply that
+    // finishes and names nothing is `unparsed`, which is a fact about the model rather than the cap.
+    expect(replyBudget({ id: 'a', model: 'a', complete: async () => ({ text: '', model: 'a' }) })).toBe(96);
     expect(
       replyBudget({
         id: 'b',
@@ -185,7 +188,7 @@ describe('one call, and what it leaves behind', () => {
     // the money bought.
     expect(provider.seen[0]?.purpose).toBe('select');
     expect(provider.seen[0]?.temperature).toBe(0);
-    expect(provider.seen[0]?.maxTokens).toBe(32);
+    expect(provider.seen[0]?.maxTokens).toBe(96);
   });
 
   it('sends no budget and keeps nothing when the caller asks for neither', async () => {
@@ -820,9 +823,9 @@ describe('the endpoint the arm actually talks to', () => {
       expect(cost?.cachedPromptTokens).toBe(400);
       expect(cost?.yuan).toBeGreaterThan(0);
       // The wire, not just the report: the purpose a meter files the call under has to be on the
-      // request, and the budget a chat model gets is one word's worth.
+      // request, and the budget a chat model gets has to be the one `replyBudget` names.
       const body = JSON.parse(api.bodies[0] as string) as { max_tokens: number; temperature: number; model: string };
-      expect(body.max_tokens).toBe(32);
+      expect(body.max_tokens).toBe(96);
       expect(body.temperature).toBe(0);
       expect(body.model).toBe('deepseek-chat');
     } finally {

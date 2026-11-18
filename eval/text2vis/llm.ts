@@ -294,14 +294,24 @@ export async function askOnce(
 /**
  * How much room a reply gets.
  *
- * A chat model answering with one word needs a handful of tokens, and a cap of 32 is enough for the
- * word plus the punctuation an endpoint appends. A model that declares it thinks aloud is not given a
- * cap at all: its deliberation is billed as completion, so a cap sized for the answer truncates the
- * thinking and reports the cut as an unreadable reply — the failure mode the judge met at 1,024
- * tokens, where 24 of 1,286 figures came back cut and the whole run had to be re-taken.
+ * A model that declares it thinks aloud is not given a cap at all: its deliberation is billed as
+ * completion, so a cap sized for the answer truncates the thinking and reports the cut as an
+ * unreadable reply — the failure mode the judge met at 1,024 tokens, where 24 of 1,286 figures came
+ * back cut and the whole run had to be re-taken.
+ *
+ * The cap for a chat model is a fence around a runaway reply, not a size for one word. It was 32,
+ * on the reasoning that a chart name is one word plus the punctuation an endpoint appends, and the
+ * first full run showed what that reasoning costs: **5 of 2,940 replies were cut**, every one of them
+ * a model that began its answer with a sentence, and a single cut reply makes the whole reading
+ * unpublishable — so five ordinary chat behaviours cost 1,470 × 2 calls their meaning. 96 leaves room
+ * for that sentence to *finish*, which turns a model that will not answer in one word into a row that
+ * is `unparsed` (a fact about the model) rather than a row that is `truncated` (a fact about the cap).
+ *
+ * The cap is part of the cache key, so changing it re-buys the store: this line cost ¥1.25 and the
+ * 5 rows, which is the price of measuring the budget instead of assuming it.
  */
 export function replyBudget(provider: LlmProvider): number | undefined {
-  return provider.capabilities?.thinksAloud === true ? undefined : 32;
+  return provider.capabilities?.thinksAloud === true ? undefined : 96;
 }
 
 export type Scale = 'mark' | 'label';

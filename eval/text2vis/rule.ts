@@ -786,6 +786,28 @@ export function withShareRankedCue(table: readonly CueRule[]): readonly CueRule[
 }
 
 /**
+ * The words outlier analysis is written in, added to the `distribution` cue.
+ *
+ * `boxplot` reads 6.74% of its 89 rows and 44 of the misses are answered `bar`, and the questions
+ * behind those 44 name the *statistic* rather than the picture: "calculate the interquartile range",
+ * "identify any country more than two standard deviations above the mean", "perform an outlier
+ * analysis using the IQR method". Not one of them says "box plot", which is the only phrase the cue
+ * table knew. The cue that would decide them already exists and already leads with a boxplot, so the
+ * lever is the width of one pattern and nothing else.
+ *
+ * A hypothesis, priced in the sweep before it is shipped: the same words also appear in questions the
+ * corpus drew as bars and histograms, and a widening that trades 20 boxplot rows for 28 rows in other
+ * families is not a fix. `distribution-wide` in `CUE_VARIANTS` is where that arithmetic is read.
+ */
+export const DISTRIBUTION_WIDE =
+  /\b(?:distribution|spread|dispersion|quartiles?|median|variability|histogram|box ?plot|iqr|interquartile|outliers?|z-scores?|standard deviations?|skew(?:ed|ness)?)\b|分布|四分位|离群/;
+
+/** The same table with the `distribution` cue widened to the statistics it is asked about. */
+export function withDistributionWide(table: readonly CueRule[]): readonly CueRule[] {
+  return table.map((rule) => (rule.kind === 'distribution' ? { ...rule, pattern: DISTRIBUTION_WIDE } : rule));
+}
+
+/**
  * The tables this build prices, and what each one changes.
  *
  * The discipline is that a variant changes one thing and says what it is in one line: the order of
@@ -843,6 +865,11 @@ export const CUE_VARIANTS: readonly TableVariant[] = [
       name: 'share-ranked',
       note: 'a ranked share read as one phrase: a share word and a ranking word inside one clause, answered with a bar',
       cues: withShareRankedCue(CHART_CUES),
+    },
+    {
+      name: 'distribution-wide',
+      note: 'the `distribution` cue widened to IQR, outlier, z-score and standard deviation: the words boxplot questions are written in',
+      cues: withDistributionWide(CHART_CUES),
     },
     ...FALLBACK_FLIPS,
     ...ABLATIONS,
