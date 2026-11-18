@@ -6,6 +6,21 @@ cannot be argued with.
 
 ## Unreleased
 
+### Changed
+- **The grading workflow defaults to the cheap instrument, and a floor reading can no longer be
+  taken on it.** The round that priced the grader measured a full point of correctness between
+  `glm-4.5v` and `glm-4.6v` on the same 178 figures (`−0.949 ± 0.358`), so the two are two rulers and
+  not one ruler at two prices. `text2vis-judge.yml` therefore takes a `purpose` — `iteration` by
+  default, `floor` on request — and its `model`/`think` defaults moved to `glm-4.6v` and `off`, which
+  is ¥1.17 a full reading against ¥10.52. The floor is protected in three places rather than by
+  discipline: `eval/text2vis/baseline.json` now records `judge.grader = { endpoint, model, thinking }`;
+  a `purpose: floor` dispatch runs `tools/check-text2vis-baseline.mjs --expect-instrument
+  "$LLM_MODEL@<mode>"` above the probe, so a mismatched dispatch dies at a name instead of after
+  1,416 figures; and the post-run shape gate refuses a report whose grader differs from the floor's in
+  model, endpoint **or decode mode**, unless the run is declared `--iteration` — which turns the
+  difference into a note saying the means are a delta. The decode mode is in that comparison because
+  the same model with the switch off costs a third of the same model deliberating.
+
 ### Added
 - **A store for answers already paid for, which turns a reading into a reading of the rows that
   changed.** Twelve full readings were taken in two days and every one of them re-graded all 1,286 or
@@ -93,6 +108,18 @@ cannot be argued with.
   shortlist 676 -> 686, declined 39 -> 35, figures 1,414 -> **1,418**, `failed 0`.
 
 ### Fixed
+- **The probe that decides whether an endpoint can see was itself a guessable, degenerate input.**
+  `PROBE_PNG` was a 2×2 red square — 73 bytes, two pixels a side — and the question was "what is the
+  dominant colour", answered with one word from a set of five. That is the hardest possible input for
+  an encoder that resamples, and it is an answer a blinded model lands on often enough to matter: the
+  cheapest arm dispatched, `glm-4.6v-flashx` at ¥0.55 a reading, was refused for saying `orange`, and
+  the refusal had three possible causes with only one of them about the endpoint. The probe is now
+  64×64 with four quadrants — red, blue, yellow, green in reading order — and a pass has to place all
+  four, in reading order or clockwise; `red, blue, yellow` does not pass, and neither does a single
+  colour. The refusal now names what the endpoint answered and what the quadrants are, because
+  `orange` and `red, blue, yellow` send a reader to two different repairs. `sawRed` is replaced by
+  `sawFourQuadrants`, and the eight probe tests were replaced by eleven.
+
 - **A reading that asked for a decode mode and did not get one published the mode anyway.** `--think
   off` on `glm-4.5v` spent 178 calls and ¥1.31 grading 177 figures at 98.2% deliberation, exactly like
   the arm that asked for nothing: the vendor documents that model as **forced thinking**, so the

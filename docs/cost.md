@@ -91,7 +91,8 @@ file choosing a number the grader did not write, and caching it would make the c
 | ~~Decode mode off, `glm-4.5v`~~ | was: ~¥8 of every ¥10.68 reading | 178 calls, **¥2.67 for both arms** | **spent; the answer is no — `glm-4.5v` is forced thinking** |
 | ~~Grader `glm-4.6v`~~ | was: half of every reading (¥1/¥3 against ¥2/¥6) | the same sample, twice: **¥0.69 for both arms** | **spent; 4.6V is ¥4.32 a reading and 1.0 point lower — a different instrument, not a cheaper one** |
 | **Decode mode off, `glm-4.6v`** | was: the deliberation | the second half of the same dispatch | **spent; it works, it saves 3.7×, and it costs nothing measurable** — see below |
-| **A cheap instrument for iteration** | ¥10.52 → **¥1.17** a reading, 9× | already measured | **available now**: deltas only, floors stay on 4.5V |
+| **A cheap instrument for iteration** | ¥10.52 → **¥1.17** a reading, 9× | already measured | **adopted, and it is the default**: `purpose: iteration` dispatches `glm-4.6v@off`; a floor run names `glm-4.5v@default` and is refused before its first call if it does not |
+| **`glm-4.6v-flashx`** | ¥1.17 → ≈¥0.55 a reading | one probe call, now that the probe is a 64×64 four-quadrant image | the refusal had three causes and two of them were the probe's; re-running |
 | **Batch API** | half of whatever is left | nothing to measure — the provider states 5折 — but it is asynchronous, so the workflow changes shape | not started |
 | **`deepseek-v4-pro` vs `flash`** | negative: pro is ¥4.5/¥13.5 against ¥2/¥8 | one dispatched arm | not worth it for the gate; relevant only if BIRD accuracy needs it |
 | **Sample on push instead of dispatch** | removes the dispatch step from the round's loop | a recorded sample floor, which needs one full reading to establish | not started |
@@ -187,17 +188,26 @@ A fifth arm — `glm-4.6v-flashx`, ¥0.15/¥1.5, which would be ≈¥0.55 a read
 image it answered `orange`. One call, three seconds, ¥0.0002, and no figures drawn — which is the probe
 doing the job it exists for, and the cheapest rejection this instrument can produce.
 
-Two readings of that refusal, and the cheap one is not the honest one:
+That refusal had three possible causes, and only one of them is about the endpoint: a blind endpoint
+answering from the prompt, a weak colour encoder, or an input the encoder could not use. The probe's
+image was a **2×2 red square, 73 bytes**, and a two-pixel image is the hardest possible input for an
+encoder that resamples. Writing off an instrument that would cut the reading to ¥0.55 on the strength
+of a check with a guessable answer and a degenerate input would be the expensive mistake in the other
+direction — a probe that rejects a working model costs as much as one that admits a blind one.
 
-- **The instrument's rule stands.** The probe is strict on purpose: an endpoint that answers a colour
-  question without seeing a colour is the failure mode a whole reading's means depend on, and relaxing
-  the test so that a cheaper model passes is adjusting the ruler to the result.
-- **The probe is one pixel.** `PROBE_PNG` is a 1×1 red square, and a 1×1 image is the hardest possible
-  input for a visual encoder that resizes. `glm-4.5v` and `glm-4.6v` both say `red`; `flashx` says
-  `orange`, which may be a weaker encoder or may be the size. Distinguishing the two costs one more
-  call and a larger probe image, and it is worth taking before the cheap instrument is written off — a
-  probe that rejects a usable model is as wrong as one that admits a blind one.
+So the probe was rebuilt before anything was concluded:
 
+| | was | is |
+| --- | --- | --- |
+| image | 2×2, one colour, 73 B | 64×64, four quadrants, 150 B |
+| question | "what is the dominant colour" | "name the colour of each quadrant, top-left first" |
+| a pass | one word from a set of five | four colours, in the order the quadrants are in |
+| a blind guess | plausible often enough to matter | asks for a compound fact from an image it never saw |
+| the refusal | "it did not see the probe image" | what it answered, and what the quadrants are |
+
+Reading order and clockwise both pass, because both put every colour in its own corner. `flashx` is
+re-run against the new probe before its ¥0.55 reading is either used or refused; the price of finding
+out is one call.
 
 ## The rules this round adds
 
@@ -218,6 +228,11 @@ Two readings of that refusal, and the cheap one is not the honest one:
 5. **Money is a reason to change a workflow, and never a reason to skip a check.** The four checks
    that moved out of the paid jobs are the ones that need no model. Nothing that catches a defect was
    dropped to save a yuan.
+6. **The cheap ruler never takes the floor.** Defaults are the iteration instrument — ¥1.17, most
+   dispatches — and a floor reading names `glm-4.5v` and its decode mode, is refused before the first
+   call if it does not, and is refused again afterwards by the gate. A floor is registered against
+   the instrument that took it (`judge.grader`), including the mode, and `--iteration` is how a
+   reading says that its means are a delta rather than a candidate.
 
 ## What this does not fix
 

@@ -12,6 +12,11 @@
     "failed": 0
   },
   "judge": {
+    "grader": {
+      "endpoint": "zhipu",
+      "model": "glm-4.5v",
+      "thinking": null
+    },
     "dimensions": [
       "chart_correctness",
       "readability"

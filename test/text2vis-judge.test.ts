@@ -21,7 +21,7 @@ import {
   JudgeReplyError,
   probeVision,
   resolveJudge,
-  sawRed,
+  sawFourQuadrants,
   entryJudge,
   JUDGE_DIMENSIONS,
   JUDGE_SYSTEM,
@@ -61,7 +61,10 @@ const row = (prompt: string, label: string): ProfileInput => ({
 });
 
 /** The probe answer a run that could see would have produced. */
-const SEEN = { answer: 'red', seen: true };
+/** What a working vision endpoint answers to the probe: four colours in four quadrants. */
+const SAW = 'red, blue, yellow, green';
+
+const SEEN = { answer: SAW, seen: true };
 
 /** Who graded, for the reports a test builds by hand: a mean without an author is not publishable. */
 const GRADER = { endpoint: 'zhipu', model: 'glm-4.5v' };
@@ -593,8 +596,8 @@ describe('what a report has to be before a mean can be read out of it', () => {
     reject({ failed: 1, calls: 3, charts: 3, scored: 4, failures: [] }, /1 failures and 0 messages/);
   });
 
-  it('refuses a reading whose grader could not name the colour of a red image', () => {
-    reject({ probe: { answer: 'I cannot see images', seen: false } }, /the endpoint did not say red to a red image/);
+  it('refuses a reading whose grader could not read the probe\'s four quadrants', () => {
+    reject({ probe: { answer: 'orange', seen: false } }, /did not read the four quadrants of the probe image \(it said "orange"/);
   });
 
   it('refuses a report that names no grader, because a mean without an author gets quoted as a fact about the charts', () => {
@@ -1042,8 +1045,11 @@ describe('grading a batch', () => {
       });
       request.on('end', () => {
         bodies.push(JSON.parse(body) as Record<string, unknown>);
+        // Every request but the probe gets the reply under test. The probe is answered the way an
+        // endpoint that can see answers, because it is the precondition of a run and not a row.
+        const text = body.includes('Name the colour of each quadrant') ? SAW : reply;
         response.writeHead(200, { 'content-type': 'application/json' });
-        response.end(JSON.stringify({ model: 'judge-test', choices: [{ message: { content: reply } }], usage: { prompt_tokens: 900, completion_tokens: 14 } }));
+        response.end(JSON.stringify({ model: 'judge-test', choices: [{ message: { content: text } }], usage: { prompt_tokens: 900, completion_tokens: 14 } }));
       });
     });
     const listening = new Promise<number>((ready) => {
@@ -1189,20 +1195,38 @@ describe('grading a batch', () => {
 });
 
 describe('the probe that proves the endpoint could see', () => {
-  it('reads a colour as a reader that saw one, and refuses a reply that describes itself', () => {
-    expect(sawRed('Red')).toBe(true);
-    expect(sawRed('The dominant colour is crimson.')).toBe(true);
-    expect(sawRed('#FF0000')).toBe(true);
-    expect(sawRed('I cannot see images.')).toBe(false);
-    expect(sawRed('I am sorry, I am a text-only model.')).toBe(false);
-    expect(sawRed('')).toBe(false);
-    // "reduce" and "credit" contain letters of "red" and are not a colour: the probe matches a word.
-    expect(sawRed('reduced credit')).toBe(false);
-    // A grader asked in English answers in English, but a Chinese vision model asked about a
-    // colour sometimes answers in Chinese, and a probe that refused 红色 would call it blind.
-    expect(sawRed('红色')).toBe(true);
-    expect(sawRed('主色调是红色。')).toBe(true);
-    expect(sawRed('蓝色')).toBe(false);
+  it('needs four quadrants, in an order a guesser would not land on', () => {
+    // Reading order, which is what the question asks for.
+    expect(sawFourQuadrants('Red, blue, yellow, green')).toBe(true);
+    // Clockwise, which is the other way a reader describes four quadrants. Both are four colours in
+    // the four right places; refusing the second would be a probe that fails a working endpoint.
+    expect(sawFourQuadrants('red, blue, green, yellow')).toBe(true);
+    // Prose, because a vision model answers a question in a sentence when it feels like it.
+    expect(sawFourQuadrants('The top-left is red, the top-right is blue, and below are yellow and green.')).toBe(true);
+    // The same endpoint asked in Chinese answers in Chinese, and 红蓝黄绿 is a full answer.
+    expect(sawFourQuadrants('红、蓝、黄、绿')).toBe(true);
+    // Synonyms, because "crimson/azure/gold/emerald" is a correct reading of the same image.
+    expect(sawFourQuadrants('crimson, azure, gold, emerald')).toBe(true);
+  });
+
+  it('refuses an answer that could have been written without the image', () => {
+    // The blinded guess: a plausible colour for a one-colour question. This is what the 2x2 probe
+    // used to accept as a pass and what `glm-4.6v-flashx` answered.
+    expect(sawFourQuadrants('orange')).toBe(false);
+    expect(sawFourQuadrants('red')).toBe(false);
+    // Three of four, in the right order: a reader that missed a quadrant has not read the image.
+    expect(sawFourQuadrants('red, blue, yellow')).toBe(false);
+    // Four right colours in an order that is neither reading nor clockwise: the reply names colours
+    // but not the ones in those places, which is what a caption-only answer looks like.
+    expect(sawFourQuadrants('red, green, blue, yellow')).toBe(false);
+    expect(sawFourQuadrants('I cannot see images.')).toBe(false);
+    expect(sawFourQuadrants('I am sorry, I am a text-only model.')).toBe(false);
+    expect(sawFourQuadrants('')).toBe(false);
+    // "reduce", "credit" and "blueprint" contain the letters of a colour and are not one: the probe
+    // matches a word, and a substring match here would read a whole paragraph as a pass.
+    expect(sawFourQuadrants('reduced credit blueprint')).toBe(false);
+    // Named twice: the quadrants are still four in the right order, because a repeat is not a move.
+    expect(sawFourQuadrants('red, red, blue, yellow, green')).toBe(true);
   });
 
   it('asks one question about one image, and keeps the answer', async () => {
@@ -1212,14 +1236,36 @@ describe('the probe that proves the endpoint could see', () => {
       model: 'p',
       complete: async (request: { readonly messages: readonly { readonly content: string; readonly images?: readonly unknown[] }[] }) => {
         body = { messages: request.messages };
-        return { text: '  Red.\n', model: 'p' };
+        return { text: '  Red, blue, yellow, green.\n', model: 'p' };
       },
     };
     const probe = await probeVision(provider);
-    expect(probe).toEqual({ answer: 'Red.', asked: true, seen: true });
+    expect(probe).toEqual({ answer: 'Red, blue, yellow, green.', asked: true, seen: true });
     const messages = body.messages as { readonly role: string; readonly content: string; readonly images?: readonly unknown[] }[];
     expect(messages[1]?.content).toBe(VISION_PROBE);
     expect(messages[1]?.images).toHaveLength(1);
+  });
+
+  it('sends an image big enough to be an image', async () => {
+    let sent: { readonly mediaType: string; readonly data: string } | undefined;
+    const provider = {
+      id: 'p',
+      model: 'p',
+      complete: async (request: { readonly messages: readonly { readonly images?: readonly { readonly mediaType: string; readonly data: string }[] }[] }) => {
+        sent = request.messages[1]?.images?.[0];
+        return { text: 'red, blue, yellow, green', model: 'p' };
+      },
+    };
+    await probeVision(provider);
+    // The probe used to be a 2x2 png — 73 bytes, two pixels a side — which is the hardest possible
+    // input for a visual encoder that resamples, and a plausible reason for a working endpoint to
+    // answer "orange". 64x64 is not a large image either; it is merely not a degenerate one.
+    expect(sent?.mediaType).toBe('image/png');
+    const png = Buffer.from(sent?.data ?? '', 'base64');
+    // IHDR is the first chunk: width and height are two 32-bit big-endian integers after its name.
+    expect(png.subarray(1, 4).toString('ascii')).toBe('PNG');
+    expect(png.readUInt32BE(16)).toBe(64);
+    expect(png.readUInt32BE(20)).toBe(64);
   });
 
   it('turns a refusal into an answer nobody saw, rather than into a stack trace', async () => {
@@ -1308,7 +1354,7 @@ describe('the endpoint a run grades with', () => {
         sent.push(JSON.parse(body) as Record<string, unknown>);
         response.writeHead(200, { 'content-type': 'application/json' });
         response.end(
-          JSON.stringify({ model: 'glm-4.5v', choices: [{ message: { content: 'red' } }], usage: { prompt_tokens: 900, completion_tokens: 2 } }),
+          JSON.stringify({ model: 'glm-4.5v', choices: [{ message: { content: SAW } }], usage: { prompt_tokens: 900, completion_tokens: 2 } }),
         );
       });
     });
@@ -1432,7 +1478,7 @@ describe('the judge command, over a real socket and a real PNG', () => {
         calls += 1;
         // The first call is the vision probe, and it is answered the way an endpoint that can see
         // answers. Everything after it is a row, and gets the reply under test.
-        const text = body.includes('dominant colour') ? 'red' : reply;
+        const text = body.includes('Name the colour of each quadrant') ? SAW : reply;
         response.writeHead(200, { 'content-type': 'application/json' });
         response.end(JSON.stringify({ model: 'grade', choices: [{ message: { content: text } }], usage: { prompt_tokens: 800, completion_tokens: 12 } }));
       });
@@ -1496,7 +1542,7 @@ describe('the judge command, over a real socket and a real PNG', () => {
       model: 'glm-4.5v',
       complete: async (): Promise<{ text: string; model: string; ignored: readonly string[] }> => {
         calls += 1;
-        return { text: 'red', model: 'glm-4.5v', ignored: ['thinking'] };
+        return { text: SAW, model: 'glm-4.5v', ignored: ['thinking'] };
       },
     };
     try {
@@ -1730,7 +1776,7 @@ describe('the judge command, over a real socket and a real PNG', () => {
       request.on('end', () => {
         sent.push(JSON.parse(body) as Record<string, unknown>);
         response.writeHead(200, { 'content-type': 'application/json' });
-        response.end(JSON.stringify({ model: 'glm-4.5v', choices: [{ message: { content: 'red' } }], usage: { prompt_tokens: 900, completion_tokens: 2 } }));
+        response.end(JSON.stringify({ model: 'glm-4.5v', choices: [{ message: { content: SAW } }], usage: { prompt_tokens: 900, completion_tokens: 2 } }));
       });
     });
     await new Promise<void>((ready) => server.listen(0, '127.0.0.1', ready));
@@ -1759,7 +1805,7 @@ describe('the judge command, over a real socket and a real PNG', () => {
   });
 
   it('says so when the temperature it will not name is none', async () => {
-    const { provider } = grader('red');
+    const { provider } = grader(SAW);
     const lines: string[] = [];
     expect(await entryJudge(ENTRY, MODULE_URL, (line) => lines.push(line), { argv: [ '--no-cache','--probe-only'], provider, temperature: null })).toBe(0);
     expect(lines.join('\n')).toMatch(/temperature unset/);
@@ -1807,7 +1853,7 @@ describe('the judge command, over a real socket and a real PNG', () => {
       expect(existsSync(join(root, 'judge.json'))).toBe(false);
       const printed = lines.join('\n');
       expect(printed).toMatch(/grading with grade \(http\), images data-url, temperature 0/);
-      expect(printed).toMatch(/the probe answered "red", so this endpoint can see; nothing was graded/);
+      expect(printed).toMatch(/the probe answered "red, blue, yellow, green", so this endpoint can see; nothing was graded/);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -1826,7 +1872,7 @@ describe('the judge command, over a real socket and a real PNG', () => {
     const lines: string[] = [];
     expect(await entryJudge(ENTRY, MODULE_URL, (line) => lines.push(line), { argv: [ '--no-cache','--probe-only'], provider: blind })).toBe(1);
     expect(calls).toBe(1);
-    expect(lines.join('\n')).toMatch(/did not see the probe image .*nothing was graded/);
+    expect(lines.join('\n')).toMatch(/did not read the four quadrants of the probe image .*nothing was graded/);
   });
 
   it('does not call a quota a blind model, which is what the first production run printed', async () => {
@@ -1847,10 +1893,10 @@ describe('the judge command, over a real socket and a real PNG', () => {
     const batch: string[] = [];
     expect(await entryJudge(ENTRY, MODULE_URL, (line) => batch.push(line), { argv: [ '--no-cache','--render', '/nowhere/render.json'], provider: limited })).toBe(1);
     expect(batch.join('\n')).toMatch(/never answered \(llm returned 429\)/);
-    expect(batch.join('\n')).not.toMatch(/did not see the probe image/);
+    expect(batch.join('\n')).not.toMatch(/did not read the four quadrants of the probe image/);
   });
 
-  it('refuses the whole run when the endpoint cannot name a colour, before grading a row', async () => {
+  it('refuses the whole run when the endpoint cannot read the probe, before grading a row', async () => {
     const server = await serve(corpus);
     const root = mkdtempSync(join(tmpdir(), 'nl2charts-judge-blind-'));
     let calls = 0;
@@ -1874,7 +1920,7 @@ describe('the judge command, over a real socket and a real PNG', () => {
       // One call: the probe. The 1,286 that followed in a run without this check were the bill this
       // instrument exists to avoid paying.
       expect(calls).toBe(1);
-      expect(lines.join('\n')).toMatch(/did not see the probe image/);
+      expect(lines.join('\n')).toMatch(/did not read the four quadrants of the probe image/);
       expect(existsSync(join(root, 'judge.json'))).toBe(false);
     } finally {
       await server.close();

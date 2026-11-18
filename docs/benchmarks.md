@@ -16002,3 +16002,45 @@ round that followed put a content-addressed store in front of the judge (`eval/t
 so a reading costs the rows that changed rather than the corpus, moved the paid half of the BIRD
 chain to dispatch, and put `bill`, `cached` and `saved` on the artifact so that the next reading
 cannot be published without saying what it cost.
+
+## Two instruments, one floor, and the probe rebuilt to tell them apart
+
+The round above priced the grader and found it was not one grader. `glm-4.6v` scores about a point
+below `glm-4.5v` on the same 178 figures — `−0.949 ± 0.358` correctness with the switch off,
+`−1.045 ± 0.319` with the endpoint deciding — and both intervals sit three standard errors from
+zero. So the repository now keeps **two** instruments, and says which one a reading came from:
+
+| | model | decode mode | ¥ per 1,416-row reading | what it may claim |
+| --- | --- | --- | ---: | --- |
+| **floor** | `glm-4.5v` | endpoint decides | 10.52 | the published number, compared to `baseline.json` |
+| **iteration** | `glm-4.6v` | `off` | 1.17 | a paired delta within row, never a floor |
+
+The defaults moved to the iteration instrument, because eleven of twelve dispatches are for a delta
+and the twelfth is a decision. That is only safe if a floor reading cannot be taken on the cheap
+ruler, so the rule became machine-checkable in three places:
+
+1. **`eval/text2vis/baseline.json` names the instrument** — `judge.grader = { endpoint, model,
+   thinking: null }`, where `null` is "the endpoint decided the mode". A floor that does not say
+   what took it cannot hold anyone to it.
+2. **Before the money**, a `purpose: floor` dispatch runs
+   `tools/check-text2vis-baseline.mjs --expect-instrument "$LLM_MODEL@<mode>"`. It costs nothing and
+   it runs above the probe, so a floor dispatch on the wrong instrument dies at the name rather than
+   after 1,416 figures.
+3. **After the money**, the shape gate refuses a report whose `grader` differs from the floor's —
+   model, endpoint or decode mode — unless the run is declared `--iteration`, which turns the
+   difference into a note that says what the means are worth instead of an error.
+
+The decode mode is in that comparison because this round measured it: the same model with the switch
+off costs a third of the same model deliberating, so `glm-4.6v` in two modes is two rulers wearing
+one name.
+
+**The probe was rebuilt for the same reason.** It used to be a 2×2 red square and the question "what
+is the dominant colour": 73 bytes, two pixels a side, and an answer a blinded model can guess. That
+is also the shape that refused `glm-4.6v-flashx` for answering `orange`, and a refusal with three
+possible causes — a blind endpoint, a weak encoder, a degenerate input — is not a finding. The probe
+is now 64×64 in four quadrants, red, blue, yellow, green in reading order, and the answer must place
+all four. A guesser cannot land on that, a resampling encoder sees a real image, and the refusal
+sentence names both what it answered and what the quadrants are, so the operator's next decision is
+about the endpoint rather than about the check. Either reading of the four — reading order or
+clockwise — passes, because both place every colour in its own corner; three of four, or four in the
+wrong corners, does not.

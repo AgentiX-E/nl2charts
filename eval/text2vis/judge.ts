@@ -367,7 +367,8 @@ export function buildJudgePrompt(job: JudgeJob): string {
 }
 
 /**
- * A two-by-two figure that is entirely red, and the question only a pair of eyes can answer.
+ * A 64x64 figure in four quadrants — red, blue, yellow, green in reading order — and the question
+ * only a pair of eyes can answer.
  *
  * This exists because of the one failure the contract cannot see: an endpoint *declared* able to
  * read images answers anyway when it cannot, and its answer is written from the question alone. The
@@ -375,21 +376,66 @@ export function buildJudgePrompt(job: JudgeJob): string {
  * names a text-only model has *declared* it, so nothing in the request path can tell. On 1,286
  * graded figures that failure would publish two means about a model's opinion of a caption.
  *
- * So one figure is spent before the batch, its answer is checked against the only fact it can carry,
- * and a run whose grader cannot name a colour does not grade anything. Two pixels rather than one:
- * a one-pixel PNG is a file some image pipelines treat as degenerate.
+ * So one figure is spent before the batch, its answer is checked against the only facts it can
+ * carry, and a run whose grader cannot place four colours in four quadrants does not grade anything.
+ *
+ * **Why four and not one.** The first version of this probe was a 2x2 red square and the word
+ * `red`. Both of its weaknesses point at the expensive direction of the test: a probe that refuses a
+ * working endpoint costs a reading, and a probe a blinded endpoint can pass costs the whole corpus.
+ * `red` is a guess a model writing from the question alone makes often enough to matter, and a 2x2
+ * png is 73 bytes, two pixels a side — the hardest possible input for a visual encoder that
+ * resamples, and a plausible reason for a working endpoint to answer `orange`. Four colours in four
+ * named positions is a compound fact: read off the image, or nearly impossible to invent. 64x64
+ * removes the degenerate input from the list of explanations, which is what makes a refusal a
+ * statement about eyes rather than about a file.
  */
-const PROBE_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR42mP4z8AARAwQCgAf7gP9Y167WwAAAABJRU5ErkJggg==';
+const PROBE_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAXUlEQVR42u3RgQkAIRADwdxj/31ZgeW8VZwozDYQhtSf3iq9C18eDwAAAAAAAAAAAAAAAAAAAAAAAAAAAOB8I6t5YZYHAAAAAAAAAAAAAAAAAAAAAAAAAAAAAO5qA2H9BCLh30/uAAAAAElFTkSuQmCC';
 
-export const VISION_PROBE = 'What is the dominant colour of the image attached? Answer with one word.';
+/**
+ * The probe's four quadrants in reading order, each with the words a reader may legitimately use.
+ *
+ * Synonyms are here for the same reason the Chinese names are: a model asked about colours answers
+ * in the vocabulary of its own language and its own colour space, and a probe that accepted only the
+ * four English primary names would call a correct reading wrong.
+ */
+const QUADRANTS = [
+  ['red', 'crimson', 'scarlet', 'vermilion', 'ruby', '红'],
+  ['blue', 'azure', 'cobalt', 'navy', 'indigo', '蓝'],
+  ['yellow', 'gold', 'golden', 'amber', '黄'],
+  ['green', 'emerald', 'jade', '绿'],
+] as const;
 
-/** Whether a reply could only have been written by a reader that saw red. */
-export function sawRed(reply: string): boolean {
-  // `红` is here because the grader is not necessarily asked in its first language: Zhipu's vision
-  // models answer an English question in English, and answer it in Chinese when the prompt's own
-  // wording tips them that way. A probe that refused `红色` would report a working endpoint as blind,
-  // and the run would stop before grading a single figure — the expensive direction of this check.
-  return /\b(red|crimson|scarlet|vermilion)\b|ff0000|#f00\b|红/i.test(reply);
+export const VISION_PROBE =
+  'The image attached is divided into four quadrants of equal size. Name the colour of each quadrant ' +
+  'in this order: top-left, top-right, bottom-left, bottom-right. Answer with four colour words and nothing else.';
+
+/** Whether a reply could only have been written by a reader that saw four colours in four places. */
+export function sawFourQuadrants(reply: string): boolean {
+  const text = reply.toLowerCase();
+  const seen: { readonly at: number; readonly family: number }[] = [];
+  QUADRANTS.forEach((words, family) => {
+    for (const word of words) {
+      // A word boundary on both sides for the latin names: `blueprint` and `reduced` contain a
+      // colour and are not one, and a substring match would read a paragraph as a pass. Chinese has
+      // no word boundaries, so those names are matched as they are.
+      const pattern = /^[\x20-\x7e]+$/.test(word) ? new RegExp(`\\b${word}\\b`) : new RegExp(word);
+      const found = pattern.exec(text);
+      if (found !== null) seen.push({ at: found.index, family });
+    }
+  });
+  // The families in the order the reply used them, because the reply is what was asked for: the
+  // position of the *word* is the order the model chose to speak in. A quadrant named twice has still
+  // been read, so a repeat is dropped rather than counted as a move.
+  const order: number[] = [];
+  for (const one of seen.sort((left, right) => left.at - right.at)) {
+    if (!order.includes(one.family)) order.push(one.family);
+  }
+  // Reading order is what the question asks for; clockwise is the other way a reader describes four
+  // quadrants, and both place all four colours in their own corners. Anything else — three of four,
+  // or four in the wrong corners — is a reply that named colours without reading the image.
+  const says = (wanted: readonly number[]): boolean =>
+    order.length === wanted.length && order.every((family, index) => family === wanted[index]);
+  return says([0, 1, 2, 3]) || says([0, 1, 3, 2]);
 }
 
 /**
@@ -421,7 +467,7 @@ export interface ProbeReading {
 }
 
 /**
- * Ask the endpoint to name a colour, and keep what it said.
+ * Ask the endpoint to place four colours, and keep what it said.
  *
  * Never throws: a probe that could not be sent is a probe that did not see, and `seen` is the field
  * the report refuses on — an exception here would be a stack trace where a one-line reason belongs.
@@ -447,7 +493,7 @@ export async function probeVision(provider: LlmProvider, temperature: number | n
       purpose: 'probe',
     });
     const answer = response.text.trim().replace(/\s+/g, ' ').slice(0, 80);
-    return { answer, asked: true, seen: sawRed(answer), ...(response.ignored === undefined ? {} : { omitted: response.ignored }) };
+    return { answer, asked: true, seen: sawFourQuadrants(answer), ...(response.ignored === undefined ? {} : { omitted: response.ignored }) };
   } catch (error) {
     return { answer: error instanceof Error ? error.message : String(error), asked: false, seen: false };
   }
@@ -849,7 +895,7 @@ export function assertJudgeReport(report: JudgeReport): void {
   }
   if (!report.probe.seen) {
     throw new Error(
-      `judge report: the endpoint did not say red to a red image (it said "${report.probe.answer}"), so these means are an opinion of the text rather than a reading of the figures`,
+      `judge report: the endpoint did not read the four quadrants of the probe image (it said "${report.probe.answer}"), so these means are an opinion of the text rather than a reading of the figures`,
     );
   }
   // A mode that was asked for and not obtained is not a mode. `glm-4.5v` is documented as *forced*
@@ -1673,7 +1719,14 @@ function probeRefusal(probe: ProbeReading, think?: boolean): string | undefined 
     return `the endpoint never answered (${probe.answer}): that is a quota, a key scope or a url, not a verdict on what it can see`;
   }
   if (!probe.seen) {
-    return `the endpoint did not see the probe image (it answered "${probe.answer}"), so it cannot grade a chart`;
+    // The expected answer is spelled out, because the operator's next decision depends on it: a
+    // reply of `orange` to a four-quadrant image is a finding about the endpoint, and a reply of
+    // `red, blue, yellow` is a finding about the model's attention. Neither is actionable while the
+    // sentence only says "it did not see the image".
+    return (
+      `the endpoint did not read the four quadrants of the probe image (it answered "${probe.answer}"; ` +
+      `they are red, blue, yellow and green, left to right and top to bottom), so it cannot grade a chart`
+    );
   }
   // Asked after the two above, because a blind endpoint is blind in every mode and its blindness is
   // the fact that explains the run. A mode the adapter dropped is the opposite: the endpoint is fine,

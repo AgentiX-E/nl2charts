@@ -14,14 +14,26 @@ name: text2vis-judge
 #    be a bill nobody chose.
 # 2. It needs an endpoint that can *see*. The BIRD jobs run on a text-only backbone, so the default
 #    here is deliberately not the key those jobs use: `ZHIPU_API_KEY` is the org secret that holds a
-#    vision endpoint's key, and `glm-4.5v` is the current vision model on `open.bigmodel.cn`.
-#    `secret_name`, `model` and `base_url` name the endpoint; `eval/text2vis/judge.ts` declares the
-#    rest of what differs between vendors (how an image is spelled, what temperature to name).
+#    vision endpoint's key. `secret_name`, `model` and `base_url` name the endpoint; `eval/text2vis/judge.ts`
+#    declares the rest of what differs between vendors (how an image is spelled, what temperature to name).
 #
-# The first step after install is one call that asks the endpoint to name the colour of a red image.
-# It costs a call and answers the only question that cannot be answered locally — whether this url,
-# this model name, this key and this image spelling reach a model that can see — before anything is
-# drawn. A run that failed there used to fail after 1,286 figures had been rendered.
+# **Two instruments, and this file defaults to the cheap one.** The round that priced the grader
+# measured a full point of correctness between `glm-4.5v` and `glm-4.6v` on the same 178 figures
+# (−0.949 ± 0.358), so the two are not a cheap copy of one ruler: they are two rulers. What that
+# buys is a split by *purpose*, not by budget:
+#
+# - `iteration` (the default) grades on `glm-4.6v` with the decode switch off: ¥1.17 a full reading
+#   against ¥10.52, and a claim that is a paired delta within row — never a floor.
+# - `floor` grades on `glm-4.5v`, the instrument every published number was taken with. Its model
+#   has to be typed, and the first step refuses the run if it is not the one `baseline.json` names.
+#
+# The defaults are the iteration instrument because that is what eleven of twelve dispatches are for.
+# A floor run is rare, deliberate, and now says so on its command line.
+#
+# The first step after install is one call that asks the endpoint to place four colours in four
+# quadrants. It costs a call and answers the only question that cannot be answered locally — whether
+# this url, this model name, this key and this image spelling reach a model that can see — before
+# anything is drawn. A run that failed there used to fail after 1,286 figures had been rendered.
 #
 # The two readings above it are re-taken here rather than reused, because a judge report is only
 # comparable with a render report taken on the same corpus in the same run: the denominator is the
@@ -30,15 +42,28 @@ name: text2vis-judge
 on:
   workflow_dispatch:
     inputs:
+      purpose:
+        # The one input that decides how the rest of them are read. `iteration` is a delta on the
+        # cheap instrument; `floor` is a candidate for the published number and may only be taken on
+        # the instrument `eval/text2vis/baseline.json` records.
+        description: 'What this reading is for: a delta (iteration) or the published floor'
+        required: true
+        default: 'iteration'
+        type: choice
+        options:
+          - iteration
+          - floor
       secret_name:
         description: 'The secret holding a vision endpoint key (DEEPSEEK_API_KEY is text-only)'
         required: true
         default: 'ZHIPU_API_KEY'
         type: string
       model:
-        description: 'The vision model to grade with'
+        # The iteration instrument, because that is what most dispatches are for. `glm-4.5v` is the
+        # one the floor was registered with, and a `floor` dispatch has to name it.
+        description: 'The vision model to grade with (glm-4.6v for iterating, glm-4.5v for a floor)'
         required: true
-        default: 'glm-4.5v'
+        default: 'glm-4.6v'
         type: string
       base_url:
         description: 'The chat-completions base url'
@@ -46,16 +71,18 @@ on:
         default: 'https://open.bigmodel.cn/api/paas/v4'
         type: string
       think:
-        # The one cost lever left in this instrument: 98.3% of the fifth reading's completion tokens
-        # were deliberation before two integers. `default` sends nothing and is what every published
-        # number was taken with; `off` is the cheap arm of a paired A/B on the same figures.
+        # Measured, not assumed: `glm-4.5v` is forced thinking (the switch is dropped by the
+        # adapter), and on `glm-4.6v` thinking buys nothing — correctness −0.101 ± 0.323 and
+        # readability +0.157 ± 0.264 over the same 178 rows — for 3.7x the price (¥4.32 against
+        # ¥1.17 a full reading). So the default is off: a default that spends ¥3.15 to measure
+        # nothing is the kind of silence this file's comments exist to break.
         description: 'Decode mode: default leaves it to the endpoint, on/off asks'
         required: true
-        default: 'default'
+        default: 'off'
         type: choice
         options:
-          - default
           - 'off'
+          - default
           - 'on'
       limit:
         description: 'Grade only the first N figures (0 grades every one)'
@@ -120,10 +147,20 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
+      # Zero calls, and it runs above the probe: a `floor` dispatch that named the cheap grader would
+      # otherwise spend a full reading and only then be told its number is not a floor. Both halves of
+      # the instrument are named — the model and the decode mode — because the same model in another
+      # mode is another ruler too. The gate reads the file the post-run check reads, so the two
+      # cannot disagree about what the floor is.
+      - name: Refuse a floor reading on another instrument
+        if: inputs.purpose == 'floor'
+        run: node tools/check-text2vis-baseline.mjs --expect-instrument "$LLM_MODEL@${{ inputs.think }}"
+
       # One call, before the corpus is fetched and before a figure is drawn. Everything this run
       # depends on that cannot be checked from here — the base url, the model name, the key, the way
-      # the image is spelled — is a 400 on this call or a wrong colour, and both are cheaper now.
-      - name: Ask the endpoint to name a colour
+      # the image is spelled, whether the decode mode is served — is a 400 on this call or four
+      # colours in the wrong places, and both are cheaper now.
+      - name: Ask the endpoint to place four colours
         run: pnpm bench:text2vis:judge --probe-only
 
       - name: Cache the corpus
@@ -202,7 +239,16 @@ jobs:
       # two refusals above it, so the artifact was published and never held to its arithmetic.
       - name: Hold the grading to its shape
         if: always()
-        run: node tools/check-text2vis-baseline.mjs --require --require-judge
+        env:
+          PURPOSE: ${{ inputs.purpose }}
+        run: |
+          # The shape rules are the same for both instruments — one call per row, every row in one
+          # partition, both means on the 0-10 scale — and they run whatever happened above. What the
+          # purpose changes is the one rule about *which* ruler took the means: an iteration reading
+          # is declared a delta and is not compared to the floor's instrument.
+          MODE=""
+          if [ "$PURPOSE" = "iteration" ]; then MODE="--iteration"; fi
+          node tools/check-text2vis-baseline.mjs --require --require-judge $MODE
 
       - name: Upload the reading
         if: always()
@@ -218,6 +264,9 @@ jobs:
 
       - name: Publish the summary
         if: always()
+        env:
+          PURPOSE: ${{ inputs.purpose }}
+          MODE: ${{ inputs.think }}
         run: |
           if [ -f eval/out/text2vis-judge.json ]; then
             node -e "
@@ -227,7 +276,11 @@ jobs:
                 '',
                 '| reading | value |',
                 '| --- | --- |',
-                '| graded by | ' + report.grader.model + ' (' + report.grader.endpoint + ') |',
+                '| graded by | ' + report.grader.model + ' (' + report.grader.endpoint + '), decode mode ' + process.env.MODE + ' |',
+                // The instrument is half of what a number means, and the purpose is the other half:
+                // two means from the cheap ruler are a delta, and a reader who does not see that
+                // line will quote them against a floor taken on another one.
+                '| this reading is | ' + (process.env.PURPOSE === 'floor' ? 'a **floor candidate**, on the instrument the floor was registered with' : 'an **iteration delta** on the cheap instrument — paired within row, not comparable to the floor') + ' |',
                 '| the vision probe answered | ' + report.probe.answer + ' |',
                 '| chart_correctness | ' + (report.means.chart_correctness === null ? 'no reading' : report.means.chart_correctness.toFixed(2) + '/10') + ' |',
                 '| readability | ' + (report.means.readability === null ? 'no reading' : report.means.readability.toFixed(2) + '/10') + ' |',

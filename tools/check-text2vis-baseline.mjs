@@ -155,6 +155,41 @@ export function compareRender(report, floor, options = {}) {
 
 
 /**
+ * Whether two graders are two instruments, said as one sentence or as nothing.
+ *
+ * The round that priced the grader found that `glm-4.6v` grades about a point lower than
+ * `glm-4.5v` on the same 178 figures, with both intervals three standard errors from zero. That is
+ * not a cheaper copy of the same ruler — it is a different ruler, and two means from two rulers are
+ * two facts. So the floor records which instrument took it, and this function is the one place that
+ * compares a reading's instrument with the floor's.
+ *
+ * A field missing on either side is *not* a divergence: a reading that names no model at all is
+ * already an issue of its own ("a mean with no author"), and saying it twice would make the issue
+ * count depend on which check ran first. The comparison is only between two named instruments.
+ *
+ * @returns {string | undefined} one sentence naming both instruments, or undefined when they match.
+ */
+export function differentInstrument(floorGrader, grader) {
+  if (typeof floorGrader?.model !== 'string' || typeof grader?.model !== 'string') return undefined;
+  // The endpoint is compared only when both sides name one: a model served from two places is not
+  // the same instrument, but a floor recorded before the field existed must not read as a swap.
+  const sameEndpoint =
+    typeof floorGrader.endpoint !== 'string' ||
+    typeof grader.endpoint !== 'string' ||
+    floorGrader.endpoint === grader.endpoint;
+  // The decode mode is part of the instrument too, and this round has the receipt: `glm-4.6v` with
+  // the switch off costs a third of what the same model costs deliberating, so the same name with a
+  // different mode is two instruments on the same scale. Absent means the endpoint decided.
+  const modeOf = (one) => (typeof one.thinking === 'boolean' ? one.thinking : null);
+  const sameMode = modeOf(floorGrader) === modeOf(grader);
+  if (floorGrader.model === grader.model && sameEndpoint && sameMode) return undefined;
+  const name = (one) =>
+    `${typeof one.endpoint === 'string' ? `${one.endpoint}/` : ''}${one.model}` +
+    (typeof one.thinking === 'boolean' ? ` thinking ${one.thinking ? 'on' : 'off'}` : ' with the endpoint deciding the mode');
+  return `graded by ${name(grader)}, while the floor was registered with ${name(floorGrader)}`;
+}
+
+/**
  * Compare the judged reading against the floor.
  *
  * This one holds a different kind of statement from the two above, and the difference is worth
@@ -255,6 +290,23 @@ export function compareJudge(report, floor, options = {}) {
       'TEXT2VIS JUDGE: the report names no endpoint or model, so its means are a reading of nothing ' +
         "that can be compared with another grader's",
     );
+  } else {
+    // A reading taken on a different grader is a reading, not a floor: the round that priced the
+    // instrument measured a full point between `glm-4.5v` and `glm-4.6v` on the same figures, so
+    // registering the cheaper one would move the floor by a fact about the ruler. `--iteration`
+    // declares a delta, and a delta is allowed to have been taken on the cheaper instrument.
+    const divergence = differentInstrument(floor.grader, grader);
+    if (divergence !== undefined) {
+      const sentence = `TEXT2VIS JUDGE: ${divergence}`;
+      if (options.iteration === true) {
+        notes.push(`${sentence} (an iteration reading: its deltas are paired, and its means are not this floor)`);
+      } else {
+        issues.push(
+          `${sentence} — a grader swap is an instrument swap, so a floor reading has to be taken on the ` +
+            'instrument the floor was registered with, or the floor moves by a fact about the ruler',
+        );
+      }
+    }
   }
   // A null mean is spelled as one here too: `Number(null)` is 0, and printing "0.00/10" for a
   // dimension nothing was graded on is the same defect as the `boxplot 0/1 judged, correctness 0.00`
@@ -367,6 +419,35 @@ const JUDGE_SELF_TEST = [
     },
     want: 1,
   },
+  {
+    // `glm-4.6v` grades about a point below `glm-4.5v` on the same figures, so a report that names
+    // the cheaper model is a reading of a different ruler. Registering it as the floor would move
+    // the floor by a fact about the instrument, which is the one thing a floor may not do.
+    name: 'a reading taken on another grader fails, because the floor is relative to its instrument',
+    report: { grader: { endpoint: 'zhipu', model: 'glm-4.6v' }, scored: 1470, charts: 1286, judged: 1286, failed: 0, notSelected: 0, skipped: 184, calls: 1286, callsPerRow: 1, means: { chart_correctness: 6, readability: 7 } },
+    want: 1,
+  },
+  {
+    // The same report, declared as what it is: an iteration reading, whose claim is a paired delta
+    // within row and never a floor.
+    name: 'the same reading declared as an iteration passes, and says what it is',
+    report: { grader: { endpoint: 'zhipu', model: 'glm-4.6v' }, scored: 1470, charts: 1286, judged: 1286, failed: 0, notSelected: 0, skipped: 184, calls: 1286, callsPerRow: 1, means: { chart_correctness: 6, readability: 7 } },
+    iteration: true,
+    want: 0,
+  },
+  {
+    // The decode mode is part of the instrument: the same model doing a third of the work is not the
+    // same ruler, and the round that closed the `--think` question measured exactly that.
+    name: 'a reading taken in another decode mode fails, because the mode is part of the instrument',
+    report: { grader: { endpoint: 'zhipu', model: 'glm-4.5v', thinking: false }, scored: 1470, charts: 1286, judged: 1286, failed: 0, notSelected: 0, skipped: 184, calls: 1286, callsPerRow: 1, means: { chart_correctness: 6, readability: 7 } },
+    want: 1,
+  },
+  {
+    // Same model name, different endpoint: two vendors serve the same name from different weights.
+    name: 'a reading from another endpoint fails even with the same model name',
+    report: { grader: { endpoint: 'openrouter', model: 'glm-4.5v' }, scored: 1470, charts: 1286, judged: 1286, failed: 0, notSelected: 0, skipped: 184, calls: 1286, callsPerRow: 1, means: { chart_correctness: 6, readability: 7 } },
+    want: 1,
+  },
   { name: 'no judge report is a failure when it is required', report: undefined, want: 1, require: true },
   { name: 'no judge report is a note when it is not', report: undefined, want: 0 },
 ];
@@ -404,31 +485,98 @@ const RENDER_SELF_TEST = [
 
 function selfTest() {
   const baseline = { scored: 1470, top1: 526 };
-  const floor = { rendered: 1286, failed: 0 };
+  const renderFloor = { rendered: 1286, failed: 0 };
   let failed = 0;
+  let reported = 0;
+  /** One case: the name, the issues it produced, and how many it was supposed to. */
+  const caseOf = (name, issues, want) => {
+    const ok = issues.length === want;
+    if (!ok) failed += 1;
+    reported += 1;
+    console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}${ok ? '' : ` — ${String(issues.length)} issues, wanted ${String(want)}`}`);
+  };
   for (const test of SELF_TEST) {
     const { issues } = compare(test.report, baseline, test.require === true ? { require: true } : {});
-    const ok = issues.length === test.want;
-    if (!ok) failed += 1;
-    console.log(`${ok ? 'ok  ' : 'FAIL'} ${test.name}${ok ? '' : ` — ${String(issues.length)} issues, wanted ${String(test.want)}`}`);
+    caseOf(test.name, issues, test.want);
   }
   for (const test of RENDER_SELF_TEST) {
-    const { issues } = compareRender(test.report, floor, test.require === true ? { require: true } : {});
-    const ok = issues.length === test.want;
-    if (!ok) failed += 1;
-    console.log(`${ok ? 'ok  ' : 'FAIL'} ${test.name}${ok ? '' : ` — ${String(issues.length)} issues, wanted ${String(test.want)}`}`);
+    const { issues } = compareRender(test.report, renderFloor, test.require === true ? { require: true } : {});
+    caseOf(test.name, issues, test.want);
   }
+  const judgeFloor = { dimensions: ['chart_correctness', 'readability'], grader: { endpoint: 'zhipu', model: 'glm-4.5v' } };
   for (const test of JUDGE_SELF_TEST) {
-    const { issues } = compareJudge(test.report, { dimensions: ['chart_correctness', 'readability'] }, test.require === true ? { require: true } : {});
-    const ok = issues.length === test.want;
-    if (!ok) failed += 1;
-    console.log(`${ok ? 'ok  ' : 'FAIL'} ${test.name}${ok ? '' : ` — ${String(issues.length)} issues, wanted ${String(test.want)}`}`);
+    const options = { ...(test.require === true ? { require: true } : {}), ...(test.iteration === true ? { iteration: true } : {}) };
+    const { issues } = compareJudge(test.report, judgeFloor, options);
+    caseOf(test.name, issues, test.want);
   }
+  // The sentence both callers share: the report check and `--expect-instrument` decide the same question,
+  // and a test of one of them would leave the other free to disagree.
+  const swaps = [
+    ['the same instrument is not a swap', { endpoint: 'zhipu', model: 'glm-4.5v' }, { endpoint: 'zhipu', model: 'glm-4.5v' }, false],
+    ['another model is a swap', { endpoint: 'zhipu', model: 'glm-4.5v' }, { endpoint: 'zhipu', model: 'glm-4.6v' }, true],
+    ['another endpoint is a swap, even with the same model name', { endpoint: 'zhipu', model: 'glm-4.5v' }, { endpoint: 'openrouter', model: 'glm-4.5v' }, true],
+    ['a floor recorded before the endpoint field is compared on the model alone', { model: 'glm-4.5v' }, { endpoint: 'zhipu', model: 'glm-4.5v' }, false],
+    ['a reading that names no model is not a swap, because it is already an issue of its own', { endpoint: 'zhipu', model: 'glm-4.5v' }, { endpoint: 'zhipu' }, false],
+    ['another decode mode is a swap, because the mode is part of the instrument', { endpoint: 'zhipu', model: 'glm-4.5v', thinking: null }, { endpoint: 'zhipu', model: 'glm-4.5v', thinking: false }, true],
+  ];
+  for (const [name, was, now, differs] of swaps) {
+    const sentence = differentInstrument(was, now);
+    const ok = (sentence !== undefined) === differs;
+    if (!ok) failed += 1;
+    reported += 1;
+    console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}${ok ? '' : ` — got ${String(sentence)}`}`);
+  }
+  // The floor has to name what took it, or every check above silently does nothing: this is the
+  // assertion that a future edit cannot delete the field and leave the gate looking healthy.
+  const recorded = JSON.parse(readFileSync(resolve(ROOT, BASELINE), 'utf8'))?.judge?.grader;
+  const named = typeof recorded?.model === 'string' && typeof recorded?.endpoint === 'string';
+  caseOf(`the floor records the instrument that took it (${String(recorded?.endpoint)}/${String(recorded?.model)})`, named ? [] : ['no judge.grader'], 0);
   if (failed > 0) {
     console.error(`${String(failed)} self-test case(s) failed`);
     return 1;
   }
-  console.log(`${String(SELF_TEST.length + RENDER_SELF_TEST.length + JUDGE_SELF_TEST.length)} self-test cases passed`);
+  console.log(`${String(reported)} self-test cases passed`);
+  return 0;
+}
+
+/**
+ * The cheap half of the instrument rule, asked of a dispatch before it spends anything.
+ *
+ * `--expect-instrument` exists because the report check runs *after* the money: a floor dispatch
+ * that named the cheap grader would grade 1,416 figures on it and only then be told the reading is
+ * not a floor. Checking the instrument the dispatch typed is the only part of that decision
+ * available in advance, and it is the part a human gets wrong — the workflow defaults to the
+ * iteration instrument now, so a floor run has to say both its model and its decode mode out loud.
+ *
+ * The spec is `model[@mode]`, where mode is `on`, `off` or `default` — the same three words the
+ * workflow's `think` input takes. A spec with no mode is a spec that says the mode does not matter,
+ * and that is not what the floor records, so it is refused rather than assumed.
+ */
+function checkExpectedInstrument(baseline, spec) {
+  const floor = baseline?.judge?.grader;
+  if (typeof floor?.model !== 'string') {
+    console.error(
+      `TEXT2VIS: ${BASELINE} records no \`judge.grader.model\`, so no dispatch can be held to the instrument that took the floor`,
+    );
+    return 2;
+  }
+  const [model, mode, ...rest] = spec.split('@');
+  const known = mode === undefined || mode === 'default' || mode === 'on' || mode === 'off';
+  if (model === undefined || model === '' || !known || rest.length > 0) {
+    console.error(`--expect-instrument takes model[@mode] with mode default, on or off, e.g. --expect-instrument glm-4.5v@default`);
+    return 2;
+  }
+  const asked = { model, ...(mode === undefined || mode === 'default' ? {} : { thinking: mode === 'on' }) };
+  const divergence = differentInstrument(floor, asked);
+  if (divergence !== undefined) {
+    console.error(
+      `TEXT2VIS: this dispatch would grade ${divergence} — a floor reading has to be taken on the ` +
+        'instrument the floor was registered with; a reading that only claims a delta is declared with --iteration',
+    );
+    return 1;
+  }
+  const named = `${typeof floor.endpoint === 'string' ? `${floor.endpoint}/` : ''}${floor.model}`;
+  console.log(`TEXT2VIS: the floor's instrument, ${named}: this dispatch may register a floor`);
   return 0;
 }
 
@@ -441,11 +589,26 @@ function main(argv) {
   // dispatch-only grading workflow, where a missing artifact is a broken chain rather than a run
   // that never had a vision endpoint to call.
   const requireJudge = argv.includes('--require-judge');
-  const known = new Set(['--require', '--require-judge', '--self-test']);
-  const unknown = argv.filter((flag) => !known.has(flag));
+  // An iteration reading is a delta on the cheap instrument: paired within row, and never a floor.
+  // Declared rather than inferred, because the inference would be "anything that does not match the
+  // floor is allowed", which is the rule this gate exists to refuse.
+  const iteration = argv.includes('--iteration');
+  const known = new Set(['--require', '--require-judge', '--iteration', '--self-test', '--expect-instrument']);
+  // The value after `--expect-instrument` is a model name and not a flag, so it is skipped rather than
+  // reported as an unknown argument.
+  const flags = [];
+  for (let index = 0; index < argv.length; index += 1) {
+    if (argv[index] === '--expect-instrument') {
+      index += 1;
+      continue;
+    }
+    flags.push(argv[index]);
+  }
+  const unknown = flags.filter((flag) => !known.has(flag));
   if (unknown.length > 0) {
     console.error(
-      `unknown argument ${unknown.join(' ')}: this gate reads ${REPORT} against ${BASELINE}, takes --require, --require-judge and --self-test`,
+      `unknown argument ${unknown.join(' ')}: this gate reads ${REPORT} against ${BASELINE}, takes --require, ` +
+        '--require-judge, --iteration, --expect-instrument <model> and --self-test',
     );
     return 2;
   }
@@ -456,6 +619,18 @@ function main(argv) {
     return 2;
   }
   const baseline = JSON.parse(readFileSync(baselinePath, 'utf8'));
+  // Before the report, before the corpus, before a call: the one question about a dispatch that can
+  // be answered from a file. A floor reading on another instrument costs a full reading and then
+  // fails, so it is refused first — the workflow runs this step above the probe.
+  const expected = argv.indexOf('--expect-instrument');
+  if (expected !== -1) {
+    const asked = argv[expected + 1];
+    if (asked === undefined || asked.startsWith('--')) {
+      console.error('--expect-instrument needs a model name, e.g. --expect-instrument glm-4.5v');
+      return 2;
+    }
+    return checkExpectedInstrument(baseline, asked);
+  }
   if (!existsSync(reportPath)) {
     const message = `TEXT2VIS: no reading at ${REPORT} — \`pnpm bench:text2vis:profile --artifact ${REPORT}\` writes it`;
     if (require) {
@@ -482,7 +657,7 @@ function main(argv) {
   if (baseline.judge !== undefined) {
     const judgePath = resolve(ROOT, JUDGE_REPORT);
     const judgeReport = existsSync(judgePath) ? JSON.parse(readFileSync(judgePath, 'utf8')) : undefined;
-    ({ issues: judgeIssues, notes: judgeNotes } = compareJudge(judgeReport, baseline.judge, { require: requireJudge }));
+    ({ issues: judgeIssues, notes: judgeNotes } = compareJudge(judgeReport, baseline.judge, { require: requireJudge, iteration }));
   }
   for (const note of [...notes, ...renderNotes, ...judgeNotes]) console.log(note);
   for (const issue of [...issues, ...renderIssues, ...judgeIssues]) console.error(issue);
