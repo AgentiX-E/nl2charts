@@ -403,6 +403,7 @@
     "isCalendarRun",
     "isRenderable",
     "lint",
+    "meltWide",
     "profileRows",
     "readCues",
     "recommendChart",
@@ -428,6 +429,7 @@
     "type Severity",
     "type ShapeCounts",
     "type SupportVerdict",
+    "type WideTable",
     "wrappedTitle"
   ],
   "mcp": [

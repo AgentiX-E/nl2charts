@@ -25,7 +25,7 @@
  * hole). Families are compared, never labels, and an unmapped label is excluded and published with
  * its count — the same rule `rule.ts` states and for the same reason.
  */
-import { profileRows, recommendChart, type FieldProfile, type RecommendableMark } from '@agentix-e/nl2charts-chart';
+import { meltWide, profileRows, recommendChart, type FieldProfile, type RecommendableMark } from '@agentix-e/nl2charts-chart';
 import { applyExitCode, isEntry, loadText2Vis, parseCsv, type LoadOptions, type Text2VisRow } from './dataset.js';
 import { familiesOfMark, familyOfLabel, scoreRule, type ChartFamily, type RuleInput, type RuleReport } from './rule.js';
 
@@ -241,6 +241,15 @@ export interface ProfileAnswer {
  */
 export function profileAnswer(prompt: string, tableData: string): ProfileAnswer {
   const set = parseResultSet(tableData);
+  // The reshape comes first, because the product's answer does. A table that is wide in time is
+  // drawn as one line per entity by `toChartIR` without asking an admission rule, so a reading that
+  // let every rule refuse it would report the product declining a table it charts — and the render
+  // report, reading the same rows, would publish a different `declined` count for the same corpus.
+  // Two instruments disagreeing about "the product answered nothing" is the defect both of them
+  // exist to catch, so the one that runs offline asks the same predicate the pipeline asks.
+  if (meltWide(typedRows(set), set.columns) !== undefined) {
+    return { mark: 'line', families: familiesOfMark('line'), reasons: ['melt:wide'] };
+  }
   const profiles = profilesOf(set);
   if (profiles.length === 0) return { mark: 'declined', families: [], reasons: ['profile:none'] };
   // The shipped cue table, and only it. `recommendChart` now takes a table as an option, and the

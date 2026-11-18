@@ -88,6 +88,22 @@ describe('profiling', () => {
     expect(inferType([1, 2, 3, 4, 5, 6, 7, 8, 9])).toBe('quantitative');
   });
 
+  it('reads a pair of measurements as a measure, because two rows have no cardinality', () => {
+    // The cardinality rule asks whether a number column repeats inside a small range, and with two
+    // rows and two different values it answered yes for every column: `unique <= max(2, ceil(n/2))`
+    // is `2 <= 2`. 145 of the corpus's tables are exactly two rows wide — `Oman` and `Samoa` against
+    // seven year columns — and every one of their measures was typed `ordinal`, so the table had no
+    // measure at all and every mark refused it. These are the two readings from that table.
+    expect(inferType([183.8809395, 40.72624401])).toBe('quantitative');
+    expect(inferType([47.92, 29.01])).toBe('quantitative');
+    // A pair that could be a scale or a pair of years stays a category: `1999, 2000` is the pair the
+    // calendar guard already refuses to call a timeline, and `1, 2` is an encoding before it is a
+    // measurement. The rule is the shape of the numbers, not the size of the table.
+    expect(inferType([1999, 2000])).toBe('ordinal');
+    expect(inferType([1, 2])).toBe('ordinal');
+    expect(inferType([2019.5, 2020.5])).toBe('quantitative');
+  });
+
   it('counts distinct values and nulls', () => {
     const profiles = profileRows([
       { a: 'x', b: 1 },

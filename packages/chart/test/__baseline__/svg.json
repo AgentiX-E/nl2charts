@@ -3,19 +3,19 @@
   "note": "Regenerate with UPDATE_VISUAL=1; review the diff before committing.",
   "marks": {
     "bar": {
-      "shape": "158e9bc6",
-      "geometry": 17,
-      "bytes": 4518
+      "shape": "1f80eec5",
+      "geometry": 22,
+      "bytes": 6160
     },
     "line": {
-      "shape": "3ddba36a",
-      "geometry": 29,
-      "bytes": 7946
+      "shape": "668c7f50",
+      "geometry": 38,
+      "bytes": 9988
     },
     "pie": {
       "shape": "0b4b9de9",
       "geometry": 10,
-      "bytes": 3035
+      "bytes": 3043
     },
     "scatter": {
       "shape": "53bb78f2",
@@ -75,7 +75,7 @@
     "lines": {
       "shape": "9ea5c971",
       "geometry": 7,
-      "bytes": 1972
+      "bytes": 1973
     },
     "graph": {
       "shape": "63d57038",

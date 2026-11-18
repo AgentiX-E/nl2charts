@@ -39,6 +39,20 @@ const ir = (mark: ChartType, encoding: ChartIR['encoding'], extra: Partial<Chart
 });
 
 /**
+ * A bar chart of one value per name, which is the shape two rules are about: how a category axis
+ * announces its labels, and how much room the figure has for them.
+ */
+const bars = (labels: string[]): ChartIR =>
+  ({
+    version: '3.0',
+    mark: 'bar',
+    encoding: { x: { field: 'name', type: 'nominal' }, y: [{ field: 'value', type: 'quantitative' }] } as ChartIR['encoding'],
+    data: labels.map((name) => ({ name, value: 1 })),
+    title: 't',
+    alt: 'bar',
+  }) as ChartIR;
+
+/**
  * The compiler's job is to emit Python a reader can run, not a string that merely
  * mentions a plotting call: `execution_result` is one of the four criteria the
  * score depends on, so a figure that fails to draw is a zero regardless of how the
@@ -153,6 +167,29 @@ describe('a chart IR compiled to matplotlib', () => {
     expect(code).toContain('"q3": row[3]');
     expect(code).toContain('"whishi": row[4]');
     expect(code).toContain('plt.gca().bxp(');
+  });
+
+  it('names the tuple axis while the five names fit, and leaves it unnamed when they do not', () => {
+    // `p25 / low / high / med / p75` is a title; five region names joined by slashes is 88 characters
+    // that matplotlib cannot wrap, so it clips against the figure edge and takes the axes with it.
+    const short = compileToMatplotlib(
+      ir('boxplot', { x: n('region'), y: [q('med'), q('low'), q('high'), q('p25'), q('p75')] }, {
+        data: [{ region: 'north', med: 3, low: 1, high: 5, p25: 2, p75: 4 }],
+      }),
+    );
+    expect(short).toContain('plt.ylabel("med / low / high / p25 / p75")');
+    const long = compileToMatplotlib(
+      ir('boxplot', {
+        x: n('region'),
+        y: [q('America (north)'), q('America (south)'), q('America (central)'), q('Europe (west)'), q('Europe (east)')],
+      }, {
+        data: [{
+          region: 'north',
+          'America (north)': 1, 'America (south)': 2, 'America (central)': 3, 'Europe (west)': 4, 'Europe (east)': 5,
+        }],
+      }),
+    );
+    expect(long).not.toContain('plt.ylabel');
   });
 
   it('draws a candlestick as a wick and a body, coloured the way this project reads a move', () => {
@@ -395,15 +432,6 @@ describe('the title a figure can hold', () => {
 });
 
 describe('the category axis that has to tilt', () => {
-  const bars = (labels: string[]) =>
-    ({
-      version: '3.0',
-      mark: 'bar',
-      encoding: { x: { field: 'name', type: 'nominal' }, y: [{ field: 'value', type: 'quantitative' }] } as ChartIR['encoding'],
-      data: labels.map((name) => ({ name, value: 1 })),
-      title: 't',
-      alt: 'bar',
-    }) as ChartIR;
 
   it('tilts when a name is long enough to reach its neighbour, and there are enough neighbours', () => {
     // Twelve characters in a five-category figure overlap: `Marshall Islands`, `Micronesia (country)`
@@ -459,5 +487,189 @@ describe('the category axis that has to tilt', () => {
     // it would read two characters longer and tilt a chart that fits.
     const names = Array.from({ length: TICK_CROWD }, () => 'x'.repeat(TICK_LENGTH));
     expect(compileToMatplotlib(bars(names))).toContain('plt.xticks(positions, labels)');
+  });
+});
+
+/**
+ * The chart judge reads the figure, not the code, and its two lowest-scoring populations were
+ * legibility rather than mark choice: 67 of the 1,275 graded rows were "right chart, unreadable
+ * figure", and the samples name the same things — a bar whose height has to be measured against an
+ * axis, a `1e6` offset badge floating above a title, forty year labels in one smear, and a title
+ * with no room to breathe. Each rule below is one of those complaints, emitted as one line.
+ */
+describe('a figure is read, not merely drawn', () => {
+  it('prints the value on every bar, so a height does not have to be measured against an axis', () => {
+    const code = compileToMatplotlib(ir('bar', { x: n('region'), y: q('total') }));
+    // `%g` would write 140000 as 1.4e+05 and hand back the reading the label exists to remove.
+    expect(code).toContain('bars = plt.bar(positions, values)');
+    expect(code).toContain('plt.bar_label(bars, fmt="%.6g")');
+  });
+
+  it('writes the numbers the table holds instead of an offset badge above the axes', () => {
+    // A y axis reading 2.15 … 2.55 with `1e6` floating at the top is two readings the reader has to
+    // multiply, and the badge itself collides with the title on a four-line question.
+    expect(compileToMatplotlib(ir('line', { x: n('region'), y: q('total') }))).toContain(
+      'plt.ticklabel_format(axis="y", style="plain")',
+    );
+    expect(compileToMatplotlib(ir('scatter', { x: q('total'), y: q('total') }))).toContain(
+      'plt.ticklabel_format(axis="y", style="plain")',
+    );
+    // A funnel is that chart on its side: the numbers are on x.
+    expect(compileToMatplotlib(ir('funnel', { theta: n('region'), y: q('total') }))).toContain(
+      'plt.ticklabel_format(axis="x", style="plain")',
+    );
+  });
+
+  it('stops labelling a category axis once the labels cannot sit side by side', () => {
+    // Forty years in a 6.4-inch figure is 13 pixels per slot: `2021 2022 2023 …` overlaps into one
+    // unreadable string whether it is tilted or not, so every other label is drawn and every bar
+    // stays. The bars are still forty; only the announcements are halved.
+    const years = Array.from({ length: 40 }, (_, index) => String(2010 + index));
+    const code = compileToMatplotlib(bars(years));
+    expect(code).toContain(`plt.xticks(positions[::2], labels[::2], rotation=${String(TICK_UPRIGHT)}, ha='center')`);
+    expect(code).toContain('plt.bar(positions, values)');
+  });
+
+  it('prints a value only while the values have room, because forty of them are a band of digits', () => {
+    // The first version printed one on every bar. Row 195 came back with forty six-digit populations
+    // in an unbroken line above the plot — the tick smear moved from the axis onto the data, which is
+    // a defect the rule that fixed the axis had just created.
+    expect(compileToMatplotlib(bars(Array.from({ length: 40 }, (_, index) => String(index))))).not.toContain('bar_label');
+    expect(compileToMatplotlib(bars(Array.from({ length: 13 }, (_, index) => String(index))))).not.toContain('bar_label');
+    expect(compileToMatplotlib(bars(Array.from({ length: 12 }, (_, index) => String(index))))).toContain('bar_label');
+  });
+
+  it('leaves an axis whose labels fit alone, down to the byte', () => {
+    // The chart that fits is most of the corpus: 1,286 figures and only the crowded ones may change.
+    expect(compileToMatplotlib(bars(['a', 'b', 'c', 'd']))).toContain('plt.xticks(positions, labels)');
+    expect(compileToMatplotlib(bars(['a', 'b', 'c', 'd']))).not.toContain('[::');
+  });
+
+  it('gives the figure room for its own title and labels, instead of clipping them', () => {
+    // A five-line question plus forty rotated labels does not fit the default subplot rectangle, and
+    // matplotlib clips rather than complains.
+    expect(compileToMatplotlib(bars(['a', 'b', 'c', 'd']))).toContain('plt.tight_layout()');
+    expect(compileToMatplotlib(ir('pie', { theta: n('region'), y: q('total') }))).toContain('plt.tight_layout()');
+  });
+
+  it('names the share on a pie, because comparing arcs is not reading a number', () => {
+    expect(compileToMatplotlib(ir('pie', { theta: n('region'), y: q('total') }))).toContain(
+      'plt.pie(values, labels=labels, autopct="%1.1f%%")',
+    );
+  });
+});
+
+/**
+ * A table that is wide in time: one row per country, one column per year. Melted into long form, the
+ * country is a series and the year is the axis — which is the shape the `series` channel exists for,
+ * and the shape the ECharts emitter has drawn since the contract gained the field while this emitter
+ * drew one sequence through every row. The difference is invisible in a unit test that only checks
+ * that a `plot` call exists, so these assertions are about how many series the source draws.
+ */
+const wideRows = [
+  { country: 'Oman', year: '2019', value: 1 },
+  { country: 'Oman', year: '2020', value: 2 },
+  { country: 'Oman', year: '2021', value: 3 },
+  { country: 'Samoa', year: '2019', value: 4 },
+  { country: 'Samoa', year: '2021', value: 6 },
+];
+
+const grouped = (mark: 'bar' | 'line', data: readonly Record<string, unknown>[] = wideRows): ChartIR =>
+  ({
+    version: '3.0',
+    mark,
+    encoding: {
+      x: { field: 'year', type: 'temporal' },
+      y: [{ field: 'value', type: 'quantitative' }],
+      series: { field: 'country', type: 'nominal' },
+    },
+    data,
+    title: 'population',
+    alt: 'population by year and country',
+  }) as ChartIR;
+
+describe('a chart IR whose series channel names more than one series', () => {
+  it('draws one line per series, with a legend, and a gap where the pair is missing', () => {
+    const code = compileToMatplotlib(grouped('line'));
+    expect(code).toContain('labels = ["2019", "2020", "2021"]');
+    expect(code).toContain('s0 = [1, 2, 3]');
+    // A pair the result set does not hold is a gap in that line, not a zero: `None` breaks the
+    // stroke, and matplotlib draws no segment through it.
+    expect(code).toContain('s1 = [4, None, 6]');
+    expect(code).toContain('plt.plot(positions, s0, marker="o", label="Oman")');
+    expect(code).toContain('plt.plot(positions, s1, marker="o", label="Samoa")');
+    expect(code).toContain('plt.legend(fontsize="small", ncol=1)');
+    // The axis is still the category axis the table's columns name.
+    expect(code).toContain('plt.xticks(positions, labels)');
+    expect(code).toContain('plt.xlabel("year")');
+    expect(code).toContain('plt.ylabel("value")');
+  });
+
+  it('draws bars side by side inside each category, and keeps the categories centred on their ticks', () => {
+    const code = compileToMatplotlib(grouped('bar'));
+    // 0.8 of a category is the group; each bar takes half of it, and the two halves sit either side
+    // of the tick so that the tick still names the pair.
+    expect(code).toContain('width = 0.4');
+    expect(code).toContain('plt.bar([-0.2, 0.8, 1.8], s0, width=0.4, label="Oman")');
+    // The second series has no cell for 2020, and a bar at a position the query never returned would
+    // be a value the table does not hold.
+    expect(code).toContain('plt.bar([0.2, 2.2], s1, width=0.4, label="Samoa")');
+    expect(code).toContain('plt.xticks(positions, labels)');
+  });
+
+  it('leaves a chart without the channel byte-identical, and draws no legend for one series', () => {
+    // 1,414 of the corpus's charts carry no `series`, and every reading taken before this rule was
+    // taken on their source.
+    const code = compileToMatplotlib(ir('line', { x: n('region'), y: q('total') }));
+    expect(code).not.toContain('plt.legend');
+    expect(code).toContain('labels = ["north", "south"]');
+    expect(code).toContain('plt.plot(positions, values)');
+  });
+
+  it('ignores a series channel on a mark that does not read one', () => {
+    // A pie states its categories in `theta`; a series on the same IR is a second encoding of the
+    // same column, and drawing a legend for it would name the slices twice.
+    const code = compileToMatplotlib(
+      ir('pie', { theta: n('region'), y: q('total'), series: n('region') }),
+    );
+    expect(code).toContain('plt.pie(');
+    expect(code).not.toContain('plt.legend');
+  });
+
+  it('takes the categories and the series in the order the table states them', () => {
+    // A matrix read alphabetically would draw the same numbers in a different order, and the order of
+    // a period axis is the only thing a line asserts.
+    const code = compileToMatplotlib(
+      grouped('line', [
+        { country: 'Tonga', year: '2021', value: 9 },
+        { country: 'Oman', year: '2020', value: 1 },
+        { country: 'Tonga', year: '2020', value: 8 },
+      ]),
+    );
+    expect(code).toContain('labels = ["2021", "2020"]');
+    expect(code.slice(code.indexOf('plt.plot(positions, s0'))).toContain('label="Tonga"');
+  });
+
+  it('keeps the first value for a pair the result set repeats, rather than the last', () => {
+    // Last-wins would make the picture depend on the query's row order, which is not a fact the IR
+    // states.
+    const code = compileToMatplotlib(
+      grouped('line', [
+        { country: 'Oman', year: '2019', value: 1 },
+        { country: 'Oman', year: '2019', value: 99 },
+      ]),
+    );
+    expect(code).toContain('s0 = [1]');
+  });
+
+  it('drops a cell that is not a finite number, and counts it', () => {
+    const code = compileToMatplotlib(
+      grouped('line', [
+        { country: 'Oman', year: '2019', value: 'n/a' },
+        { country: 'Samoa', year: '2019', value: 4 },
+      ]),
+    );
+    expect(code).toContain('s0 = [None]');
+    expect(code).toContain('s1 = [4]');
   });
 });

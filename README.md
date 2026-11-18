@@ -173,6 +173,7 @@ Every push runs the same gates locally and in CI:
 | Benchmark | Oracle must score 100%, empty predictor 0%, or the run fails |
 | Documented commands | Every `pnpm <script>` in this README or under `docs/` is a script in `package.json` |
 | Published tables | The paired-reading tables in [benchmarks.md](docs/benchmarks.md) are derived from `eval/baseline/readings.json`, never typed |
+| What a reading costs | Every judge artifact carries `bill: {yuan, savedYuan}` and `cached`, priced from a table that names its source and the day it was read; `pnpm bench:bill <artifact>` prints it |
 
 ## Documentation
 
@@ -193,6 +194,7 @@ Every push runs the same gates locally and in CI:
 - [Architecture](docs/architecture.md)
 - [Glossary](docs/glossary.md)
 - [Benchmarks and ablations](docs/benchmarks.md)
+- [What a reading costs](docs/cost.md) — the ledger, the store that makes a second reading nearly free, and the rules that keep a bill from arriving as a surprise
 
 ## License
 

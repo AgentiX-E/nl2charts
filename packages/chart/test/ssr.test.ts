@@ -7,7 +7,7 @@ import { CORE, FIXTURE_GEO, fixture } from './mark-fixtures.js';
 const n = (field: string) => ({ field, type: 'nominal' as const });
 const q = (field: string) => ({ field, type: 'quantitative' as const });
 
-function render(mark: ChartType): string {
+function renderIR(ir: ChartIR): string {
   const chart = echarts.init(null as unknown as HTMLElement, null, {
     renderer: 'svg',
     ssr: true,
@@ -15,11 +15,15 @@ function render(mark: ChartType): string {
     height: 320,
   });
   try {
-    chart.setOption(compileToECharts(fixture(mark)));
+    chart.setOption(compileToECharts(ir));
     return chart.renderToSVGString();
   } finally {
     chart.dispose();
   }
+}
+
+function render(mark: ChartType): string {
+  return renderIR(fixture(mark));
 }
 
 beforeAll(() => {
@@ -75,5 +79,68 @@ describe('server-side rendering', () => {
       encoding: { x: n('region'), y: q('revenue') },
     };
     expect(compileToECharts(ir).series).toEqual([]);
+  });
+
+  it('draws one series per group the encoding names, and names each in the legend', () => {
+    // The flat alternative — one series over every row, named after the column — draws a single line
+    // that walks back and forth through the periods, and a legend that names `country` rather than
+    // Oman and Samoa. The assertion is on the rendered picture because that is what a reader sees;
+    // the option object only says what was asked for.
+    const ir: ChartIR = {
+      version: '3.0',
+      mark: 'line',
+      title: 'population by year',
+      alt: 'population by year and country',
+      encoding: { x: { field: 'year', type: 'temporal' }, y: [q('value')], series: n('country') },
+      data: [
+        { country: 'Oman', year: '2019', value: 1 },
+        { country: 'Oman', year: '2020', value: 2 },
+        { country: 'Samoa', year: '2019', value: 4 },
+        { country: 'Samoa', year: '2020', value: 6 },
+      ],
+    };
+    const svg = renderIR(ir);
+    expect(svg).toContain('Oman');
+    expect(svg).toContain('Samoa');
+    expect(svg).not.toContain('country');
+    expect((svg.match(/<path/g) ?? []).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('groups bars as well as lines, and keeps a group whose rows are not contiguous', () => {
+    const ir: ChartIR = {
+      version: '3.0',
+      mark: 'bar',
+      title: 'population',
+      alt: 'population by year and country',
+      encoding: { x: { field: 'year', type: 'nominal' }, y: [q('value')], series: n('country') },
+      // The rows of one series are interleaved with the other's, which is the order a melted table
+      // arrives in when the query groups by period first.
+      data: [
+        { country: 'Oman', year: '2019', value: 1 },
+        { country: 'Samoa', year: '2019', value: 4 },
+        { country: 'Oman', year: '2020', value: 2 },
+        { country: 'Samoa', year: '2020', value: 6 },
+      ],
+    };
+    const svg = renderIR(ir);
+    expect(svg).toContain('Oman');
+    expect(svg).toContain('Samoa');
+    expect((svg.match(/<path/g) ?? []).length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('leaves a chart without a series channel exactly as one series, as it always was', () => {
+    const ir: ChartIR = {
+      version: '3.0',
+      mark: 'bar',
+      title: 'by region',
+      alt: 'by region',
+      encoding: { x: n('region'), y: [q('total')] },
+      data: [
+        { region: 'north', total: 1 },
+        { region: 'south', total: 2 },
+      ],
+    };
+    expect(compileToECharts(ir).series).toHaveLength(1);
+    expect(renderIR(ir)).not.toContain('legend');
   });
 });

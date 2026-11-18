@@ -1,5 +1,7 @@
 import { CONTRACT_VERSION, Nl2ChartsError } from '@agentix-e/nl2charts-spec';
 import type { ChartIR, ChartType, Encoding, FieldRef, Theme } from '@agentix-e/nl2charts-spec';
+import type { WideTable } from './melt.js';
+import { meltWide } from './melt.js';
 import type { FieldProfile } from './profile.js';
 import { profileRows } from './profile.js';
 
@@ -707,6 +709,33 @@ export interface ChartIROptions extends RecommendOptions {
 const ref = (profile: FieldProfile): FieldRef => ({ field: profile.name, type: profile.type });
 
 /**
+ * A wide table as the chart it is: one line per entity along the periods the table is wide in.
+ *
+ * The mark is not a recommendation, it is the shape: the columns *are* a timeline, one line per
+ * entity is the only reading that keeps the entities apart, and a bar chart of seven periods by two
+ * entities would ask the reader to compare across a gap the table went to the trouble of closing.
+ * No admission rule has to be asked, because there is no choice left to admit — which is also why
+ * this path cannot decline a table it has already proved is chartable.
+ */
+function wideIR(question: string, melt: WideTable, limit: number, options: ChartIROptions): ChartIR {
+  const data = melt.rows.slice(0, limit).map((row) => ({ ...row }));
+  return {
+    version: CONTRACT_VERSION,
+    mark: 'line',
+    encoding: {
+      x: { field: melt.period, type: 'temporal' },
+      y: [{ field: melt.value, type: 'quantitative' }],
+      series: { field: melt.entity, type: 'nominal' },
+    },
+    data,
+    title: options.title ?? question,
+    alt: options.alt ?? `line chart of ${String(data.length)} row(s): ${question}`,
+    ...(options.subtitle === undefined ? {} : { subtitle: options.subtitle }),
+    ...(options.theme === undefined ? {} : { theme: options.theme }),
+  };
+}
+
+/**
  * The observed range of a measure. A quantitative column always carries both
  * bounds — `profileRows` sets them whenever a column holds numbers — so this is a
  * subtraction rather than a defaulted one.
@@ -824,19 +853,64 @@ function groupFieldsOf(encoding: Encoding): FieldRef[] {
 function orderedAlong(
   rows: readonly Readonly<Record<string, unknown>>[],
   field: string,
+  direction: 'ascending' | 'descending' = 'ascending',
 ): readonly Readonly<Record<string, unknown>>[] {
   const keyed = rows.map((row, index) => ({ row, index, value: row[field] as number }));
+  const sign = direction === 'ascending' ? 1 : -1;
   return keyed
     .sort((left, right) => {
       const leftRead = Number.isFinite(left.value);
       const rightRead = Number.isFinite(right.value);
-      if (leftRead && rightRead) return left.value - right.value || left.index - right.index;
+      if (leftRead && rightRead) return sign * (left.value - right.value) || left.index - right.index;
       if (leftRead) return -1;
       if (rightRead) return 1;
       return left.index - right.index;
     })
     .map((entry) => entry.row);
 }
+
+/** The words that name each end of a ranking, in the spelling a question uses. */
+const RANK_WORDS: readonly (readonly [RegExp, 'ascending' | 'descending'])[] = [
+  [/\b(?:lowest|least|smallest|fewest|bottom|worst|cheapest)\b|最低|最少|最小|最差/, 'ascending'],
+  // `rank` without an end names the usual one: a ranking written with no direction is a list from
+  // the largest down, which is what every table of ranks in this corpus does.
+  [/\b(?:top|highest|largest|greatest|most|best|rank\w*)\b|最高|最多|最大|最好|排名/, 'descending'],
+];
+
+/**
+ * The direction a question's ranking asks for, or nothing when it asks for no ranking at all.
+ *
+ * Two tables answer two different questions here, and the difference is load-bearing. `readCues`
+ * says whether a sentence ranks something *strongly enough to ask for a bar*, and that table is
+ * deliberately narrow because every word in it pays three points to a mark. This one says which
+ * end the sentence named, and it can be wider than the cue: a sort loses nothing, while a cue
+ * changes which chart is drawn. `fewest` is the reading that separated them — it is a ranking word
+ * the cue table does not carry, so the first version of this function answered `undefined` for
+ * "Which products have the fewest orders?" and the counted path stayed largest-first.
+ *
+ * The earliest ranking word wins, so a question naming both ends is ordered by the one it asked
+ * about first. `min` and `max` are left out of both lists on purpose: they are as often a column
+ * name as an instruction.
+ *
+ * `undefined` is what leaves every chart whose question ranks nothing byte-identical: the rule fires
+ * only on the sentences it was written for.
+ */
+export function rankingDirection(question: string): 'ascending' | 'descending' | undefined {
+  const text = question.toLowerCase();
+  let first: { readonly at: number; readonly direction: 'ascending' | 'descending' } | undefined;
+  for (const [pattern, direction] of RANK_WORDS) {
+    // Not global: `exec` on a global pattern advances `lastIndex` and would skip every other call.
+    const found = pattern.exec(text);
+    if (found === null) continue;
+    if (first === undefined || found.index < first.at) first = { at: found.index, direction };
+  }
+  // No word at all is not "descending by default": it is a question that named no end, and the
+  // caller leaves the rows where the query put them.
+  return first?.direction;
+}
+
+/** The marks whose slices or bars are read as a comparison of their sizes, so an order is owed. */
+const RANKED_MARKS = new Set(['bar', 'pie', 'funnel']);
 
 /**
  * Fold rows into one row per group, with a count.
@@ -850,6 +924,7 @@ function countsOf(
   fields: readonly string[],
   name: string,
   keepOrder: boolean,
+  direction: 'ascending' | 'descending' = 'descending',
 ): Record<string, unknown>[] {
   const groups = new Map<string, { values: Record<string, unknown>; count: number }>();
   for (const row of rows) {
@@ -860,8 +935,12 @@ function countsOf(
     } else group.count += 1;
   }
   const counted = [...groups.values()];
-  // `Array#sort` is stable, so equal counts keep the order the query returned them in.
-  if (!keepOrder) counted.sort((left, right) => right.count - left.count);
+  // `Array#sort` is stable, so equal counts keep the order the query returned them in. The
+  // direction is the ranking the question asked for, because a count is the only ranking a table
+  // without a measure can express and `fewest` is the other end of it.
+  if (!keepOrder) {
+    counted.sort((left, right) => (direction === 'descending' ? right.count - left.count : left.count - right.count));
+  }
   return counted.map((group) => ({ ...group.values, [name]: group.count }));
 }
 
@@ -886,6 +965,11 @@ export function toChartIR(
   if (rows.length === 0) {
     throw new Nl2ChartsError('NL2C_E_NOT_SUPPORTED', 'the result set is empty, so there is nothing to chart');
   }
+  // A table that is wide in time is read as the shape it states, before any column is profiled: its
+  // rows are not observations, they are entities written sideways, and every rule below would read
+  // the period columns as competing measures. See `meltWide` for why the predicate is that narrow.
+  const melt = meltWide(rows, options.columns);
+  if (melt !== undefined) return wideIR(question, melt, limit, options);
   const profiles = profileRows(rows, options.columns);
   // The one fact a column profile cannot hold, and the one that decides the counted measure.
   const choice = recommendChart(question, profiles, { ...options, rows: rows.length });
@@ -901,21 +985,33 @@ export function toChartIR(
   const encoding = encodingFor(best.mark, shape, profiles);
   // Folding before the limit is what makes the limit a limit on the picture, not on the evidence.
   const groupFields = groupFieldsOf(encoding);
-  const axis = Array.isArray(encoding.x) ? encoding.x[0] : encoding.x;
+  // The axis a slice or bar runs along, whichever channel carries it: a pie states its categories
+  // in `theta`, and reading only `x` here left every pie in the table's order.
+  const axisChannel = encoding.x ?? encoding.theta;
+  const axis = Array.isArray(axisChannel) ? axisChannel[0] : axisChannel;
   const measureName = shape.counted ? undefined : (widest(shape.measures) as FieldProfile).name;
+  /** The order a ranking question owes its mark, or nothing when the question asked for none. */
+  const ranking =
+    axis?.type === 'nominal' && RANKED_MARKS.has(best.mark) ? rankingDirection(question) : undefined;
   const data = shape.counted
     ? countsOf(
         rows,
         groupFields.map((field) => field.field),
         (widest(shape.measures) as FieldProfile).name,
         groupFields.some((field) => field.type === 'temporal' || field.type === 'ordinal'),
+        // The counted path ranks its groups already; only the direction is the question's to say.
+        ranking ?? 'descending',
       ).slice(0, limit)
     : (best.mark === 'line' && axis?.type === 'nominal'
         ? // A line over categories the data does not order runs along the measure; see `encodingFor`,
           // which chose the axis this order belongs to. Sorting before the limit keeps the limit a
           // limit on the picture: the rows that survive are the ones the line actually visits.
           orderedAlong(rows, measureName as string)
-        : [...rows]
+        : ranking === undefined
+          ? [...rows]
+          : // A bar, pie or funnel answering a ranked question: the tallest bar first is the whole
+            // answer, and the order the query returned is not an order the question asked about.
+            orderedAlong(rows, measureName as string, ranking)
       )
         .slice(0, limit)
         .map((row) => ({ ...row }));

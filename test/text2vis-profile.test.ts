@@ -262,6 +262,20 @@ describe('the recommender, with a table in front of it', () => {
     expect(answer.reasons).toEqual(['profile:none']);
   });
 
+  it('answers the reshape for a table that is wide in time, and says which rule answered it', () => {
+    // The product draws this table as one line per entity without asking an admission rule, so a
+    // reading that let every rule refuse it would publish a `declined` count the render report — which
+    // reads the same rows — could not agree with. Two instruments disagreeing about "the product
+    // answered nothing" is the defect both of them exist to catch.
+    const answer = profileAnswer(
+      'How has the population changed?',
+      'country,2019,2020,2021\nOman,1,2,3\nSamoa,4,5,6',
+    );
+    expect(answer.mark).toBe('line');
+    expect(answer.reasons).toEqual(['melt:wide']);
+    expect(answer.families).toContain('line');
+  });
+
   it('declines a table every admission refuses', () => {
     // One nominal column and no measure: a bar needs a measure, a line needs an ordered axis, a pie
     // needs a measure, and the two marks that read several numbers need columns that are not there.

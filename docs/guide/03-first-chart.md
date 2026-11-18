@@ -41,6 +41,24 @@ gaps in it stays one too. The reason the rule exists at all is that a `YEAR`
 column arrives as a number from most drivers and as text from most CSVs, and
 those two transports used to produce two different charts for the same data.
 
+### A column of two values is decided by the values
+
+Low cardinality usually means a scale: `1, 2, 1, 2` is an ordinal column, and a
+bar over it is a bar over two categories rather than a measure. With exactly two
+values the rule has nothing to count, so the values themselves decide:
+
+| a column of | is read as | why |
+| --- | --- | --- |
+| `1999, 2000` | ordinal | two years are the pair the calendar rule refuses to call a timeline |
+| `1, 2` | ordinal | a small whole number (≤ 20) is a scale or an encoding before it is a measurement |
+| `47.92, 29.01` | quantitative | neither a scale nor a year |
+| `2019.5, 2020.5` | quantitative | not whole numbers, so not years |
+
+This matters most for wide tables: `Oman` and `Samoa` against seven year columns
+is a two-row table, and before this rule every one of its seven measures was read
+as an ordinal, which left the table with **no measure at all** — and a table with
+no measure is one every mark refuses.
+
 ### If you parse a result set yourself
 
 `profileRows` reads JavaScript types, so a column of strings is a label column —
@@ -230,6 +248,30 @@ pass the order.
 It throws `NL2C_E_NOT_SUPPORTED` for an empty result set, or for one no mark can
 encode, and names the columns it saw.
 
+### A ranking question is ordered by its measure
+
+`Top products by revenue` is a question about an order, and the order of a result
+set is the order the query returned its rows. The two are not the same, so
+`toChartIR` sorts a bar, pie or funnel by its measure when the question names a
+ranking — largest first for `top`/`highest`/`most`, smallest first for
+`lowest`/`fewest`, decided by whichever ranking word appears first in the
+sentence. A table with no measure is drawn from its row counts and those counts are
+ranked the same way.
+
+Three boundaries, all of them deliberate:
+
+- **A nominal axis only.** `2021, 2022, 2023` is an axis that carries its own
+  order; sorting a time axis by its measure would draw a line through a shuffle.
+  `2027-Q1` and `March 2014` are read as time for the same reason.
+- **Sorting, never truncating.** `top 5` reorders the rows it was given and drops
+  none; the chart shows the evidence the query returned.
+- **Nothing at all when the question ranks nothing.** `Revenue by product` keeps
+  the order the query produced, byte for byte.
+
+If you want the order under your own control, build the `ChartIR` and pass `data`
+already sorted — this layer reads the question, not your intent, and an IR you
+construct is not touched.
+
 > **What this is not.** There is **no encoding score** behind this layer. What
 > exists is `pnpm bench:text2vis:rule`: it scores the *cue half* — the mark the
 > question names — against Text2Vis (EMNLP 2025), the one public corpus that
@@ -244,7 +286,7 @@ encode, and names the columns it saw.
 > The other half is `pnpm bench:text2vis:profile`, which scores the shipped entry
 > point with the corpus's own result set in front of it — no model, no database,
 > no renderer, because the corpus ships the table. That reading is
-> **530 of 1,470 (36.05%)** and it is held by a floor: `pnpm gate:text2vis` fails a
+> **579 of 1,470 (39.39%)** and it is held by a floor: `pnpm gate:text2vis` fails a
 > run that comes back lower, and fails one that comes back over a different number
 > of rows, because the scorer is deterministic and a fall is therefore never noise.
 >

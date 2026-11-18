@@ -5,6 +5,7 @@ import type { FieldProfile } from '../src/profile.js';
 import { profileRows } from '../src/profile.js';
 import { CHART_CUES, DEFAULT_MAX_SLICES, readCues, recommendChart, toChartIR } from '../src/recommend.js';
 import { compileToECharts } from '../src/compile.js';
+import { compileToMatplotlib } from '../src/matplotlib.js';
 import { isRenderable, lint } from '../src/lint.js';
 
 const rows = (spec: Record<string, readonly unknown[]>): Record<string, unknown>[] => {
@@ -424,6 +425,58 @@ describe('turning a recommendation into a chart the compiler accepts', () => {
     expect(ir.data.map((row) => row.product)).toEqual(['b', 'e', 'c', 'd', 'a']);
   });
 
+  it('orders a bar by its measure when the question asked for a ranking', () => {
+    // A ranking question is a question about an order, and the order of a result set is the order of
+    // its rows — which is the order the query returned them in, not the order the question asked
+    // about. Drawn as returned, `Top products by revenue` is a bar chart whose bars are shuffled:
+    // the reader has to find the tallest bar themselves, which is the one thing the mark exists to
+    // save them. 287 of the corpus's 503 ranking questions drawn as a bar, pie or funnel came back
+    // in an order the measure does not have.
+    const ir = toChartIR('Top products by revenue', products);
+    expect(ir.mark).toBe('bar');
+    expect(ir.data.map((row) => row.revenue)).toEqual([30, 21, 12, 7]);
+  });
+
+  it('orders it the other way when the question asked for the bottom', () => {
+    // `lowest` names the same order reversed, and a chart that answered it with the largest bar
+    // first would be answering the other question. The direction is read from the question for the
+    // reason the mark is: it is a fact about the sentence, not about the table.
+    const ir = toChartIR('Which products have the lowest revenue?', products);
+    expect(ir.mark).toBe('bar');
+    expect(ir.data.map((row) => row.revenue)).toEqual([7, 12, 21, 30]);
+  });
+
+  it('leaves the rows alone when the question asked for no order', () => {
+    // The rule fires on the sentence that asks for it. A bar of `Revenue by product` is the table
+    // in the table's order, and sorting it would be the chart inventing a ranking nobody asked for
+    // — the same defect as the aggregate this file refuses to invent.
+    const ir = toChartIR('Revenue by product', products);
+    expect(ir.mark).toBe('bar');
+    expect(ir.data.map((row) => row.revenue)).toEqual([12, 30, 7, 21]);
+  });
+
+  it('does not rank a bar on a time axis, because a year is not a contest', () => {
+    // `Top months by revenue` still runs along the calendar: the axis carries its own order, and
+    // sorting a time axis by the measure would draw a line through a shuffle. The rule therefore
+    // reads the axis type, not only the question.
+    const ir = toChartIR('Top months by revenue', monthly);
+    expect(ir.encoding.x).toMatchObject({ field: 'month', type: 'temporal' });
+    expect(ir.data.map((row) => row.month)).toEqual(monthly.map((row) => row.month));
+  });
+
+  it('counts upward when the question asked for the fewest, because a count axis is a ranking too', () => {
+    // The counted path already ranked its groups — it is the only ranking the table can express when
+    // there is no measure — but it ranked them one way only. 35 of the corpus's 113 counted tables
+    // are asked a ranking question and one of them asks for the smallest ("What is the smallest
+    // number of countries ..."), which came back largest first: the same rule, two paths, and one of
+    // them ignoring the direction.
+    const log = rows({ product: ['a', 'a', 'b', 'c', 'c', 'c', 'c'] });
+    const fewest = toChartIR('Which products have the fewest orders?', log);
+    expect(fewest.data.map((row) => row.count)).toEqual([1, 2, 4]);
+    const most = toChartIR('Which products have the most orders?', log);
+    expect(most.data.map((row) => row.count)).toEqual([4, 2, 1]);
+  });
+
   it('lints clean and compiles to a series for every recommendation it will make', () => {
     const fixtures: readonly (readonly [string, readonly Record<string, unknown>[]])[] = [
       ['How did revenue trend over time?', monthly],
@@ -792,5 +845,50 @@ describe('counting a result set that carries no measure', () => {
     const y = Array.isArray(ir.encoding.y) ? ir.encoding.y[0] : ir.encoding.y;
     expect(y?.aggregate).toBeUndefined();
     expect(recommendChart('Which region earned the most?', profileRows(measured), { rows: 3 }).shape.counted).toBe(false);
+  });
+});
+
+/**
+ * A table that is wide in time, through the whole pipeline.
+ *
+ * The melt is the one place in this package that *invents* rows, so the assertions are about the
+ * three things that can go wrong: the table is not read at all (the refusal this replaced), the IR it
+ * produces is not one the contract accepts, or the two renderers disagree about the series it names.
+ */
+describe('a table that is wide in time, through the chart pipeline', () => {
+  const wide = [
+    { country: 'Oman', '2019': 1, '2020': 2, '2021': 3 },
+    { country: 'Samoa', '2019': 4, '2020': 5, '2021': 6 },
+  ];
+
+  it('produces the series the emitters read instead of declining the table', () => {
+    const ir = toChartIR('How has the population changed?', wide);
+    expect(ir.mark).toBe('line');
+    expect(ir.encoding.x).toEqual({ field: 'Year', type: 'temporal' });
+    expect(ir.encoding.y).toEqual([{ field: 'Value', type: 'quantitative' }]);
+    expect(ir.encoding.series).toEqual({ field: 'country', type: 'nominal' });
+    expect(ir.data).toHaveLength(6);
+    // The IR this branch invents has to be one the contract accepts: the schema is the only reader
+    // that would notice a field the emitters were taught and the contract was not.
+    expect(() => parseChartIR(ir)).not.toThrow();
+    expect(isRenderable(lint(ir))).toBe(true);
+  });
+
+  it('compiles to the same two series in both renderers', () => {
+    const ir = toChartIR('How has the population changed?', wide);
+    expect(compileToECharts(ir).series).toHaveLength(2);
+    const code = compileToMatplotlib(ir);
+    expect(code).toContain('label="Oman"');
+    expect(code).toContain('label="Samoa"');
+  });
+
+  it('keeps the caller’s limit on the rows it carries', () => {
+    expect(toChartIR('How has it changed?', wide, { limit: 3 }).data).toHaveLength(3);
+  });
+
+  it('leaves a table that is not wide alone, down to the absent channel', () => {
+    const ir = toChartIR('Revenue by product', rows({ product: ['a', 'b', 'c'], revenue: [1, 2, 3] }));
+    expect(ir.encoding.series).toBeUndefined();
+    expect(ir.data).toHaveLength(3);
   });
 });

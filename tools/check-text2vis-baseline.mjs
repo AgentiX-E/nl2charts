@@ -162,9 +162,11 @@ export function compareRender(report, floor, options = {}) {
  * grader produces two means on an ordinal scale a model invented. So the floor here is not a number
  * to stay above — it is the shape a reading must have before its means mean anything:
  *
- * 1. **One call per attempted row.** Two dimensions come back from one prompt, so `calls` must equal
- *    `judged + failed` exactly. A run that spent more asked twice, and its means are over a different
- *    instrument from the one `eval/text2vis/judge.ts` documents.
+ * 1. **One call per attempted row the store did not already answer.** Two dimensions come back from one
+ *    prompt, so `calls` must equal `judged + failed - cached` exactly. A run that spent more asked
+ *    twice, and its means are over a different instrument from the one `eval/text2vis/judge.ts`
+ *    documents; a run that spent less answered rows it did not look at, and a reading whose cache
+ *    count is wrong is a reading whose call count is wrong.
  * 2. **Every row accounted for.** `judged + failed + notSelected === charts` and
  *    `charts + skipped === scored`. A mean whose denominator cannot be checked is a number with no
  *    population behind it.
@@ -190,10 +192,19 @@ export function compareJudge(report, floor, options = {}) {
       return { issues, notes };
     }
   }
-  if (report.calls !== report.judged + report.failed) {
+  // Absent on the readings taken before the store existed, and absent means zero: those runs answered
+  // nothing from a cache because there was none. Coerced here rather than required, because a gate that
+  // refuses to read a six-month-old artifact is a gate somebody deletes.
+  const cached = typeof report.cached === 'number' ? report.cached : 0;
+  if (report.calls !== report.judged + report.failed - cached) {
     issues.push(
-      `TEXT2VIS JUDGE: ${String(report.calls)} calls for ${String(report.judged)} judged and ${String(report.failed)} failed — ` +
-        `this instrument asks both dimensions in one call, so anything but one call per attempted row is a different instrument`,
+      `TEXT2VIS JUDGE: ${String(report.calls)} calls for ${String(report.judged)} judged, ${String(report.failed)} failed and ${String(cached)} from the store — ` +
+        `this instrument asks both dimensions in one call, so anything but one call per attempted row it did not already have is a different instrument`,
+    );
+  }
+  if (cached > report.judged) {
+    issues.push(
+      `TEXT2VIS JUDGE: ${String(cached)} rows answered from the store for ${String(report.judged)} judged rows — a cached row is a graded row, so this count cannot exceed it`,
     );
   }
   if (report.judged + report.failed + report.notSelected !== report.charts) {
@@ -205,6 +216,18 @@ export function compareJudge(report, floor, options = {}) {
   if (report.charts + report.skipped !== report.scored) {
     issues.push(
       `TEXT2VIS JUDGE: ${String(report.charts)} charts + ${String(report.skipped)} skipped is not ${String(report.scored)} scored`,
+    );
+  }
+  // A stopped run passes every rule above by construction: the rows it never reached arrive as
+  // `notSelected`, which is a legitimate partition for a rehearsal. `44155803661` measured 244 of
+  // 1,418 charts and would have been published as a reading, so the stop is refused on its own terms.
+  if (report.aborted !== undefined) {
+    const aborted = report.aborted;
+    issues.push(
+      `TEXT2VIS JUDGE: the run stopped after ${String(aborted?.streak)} calls in a row without a reply; ` +
+        `${String(aborted?.attempted)} of ${String(report.charts)} charts were attempted and ` +
+        `${String(report.charts - aborted?.attempted)} were never asked about — a stopped run is not a reading ` +
+        `(${String(aborted?.reason)})`,
     );
   }
   const means = report.means ?? {};
@@ -269,6 +292,23 @@ const JUDGE_SELF_TEST = [
     want: 1,
   },
   {
+    name: 'a reading that answered most of its rows from the store passes, because it spent what it looked at',
+    report: { grader: GRADER, scored: 1470, charts: 1286, judged: 1286, failed: 0, notSelected: 0, skipped: 184, cached: 1240, calls: 46, callsPerRow: 0.036, means: { chart_correctness: 6, readability: 7 } },
+    want: 0,
+  },
+  {
+    // The count that a cache makes possible to fake: a run that claims 1,240 hits and 1,286 calls either
+    // asked twice for the rows it already had or is reporting a bill it did not pay.
+    name: 'a run that claims cached rows and still charges for them fails',
+    report: { grader: GRADER, scored: 1470, charts: 1286, judged: 1286, failed: 0, notSelected: 0, skipped: 184, cached: 1240, calls: 1286, callsPerRow: 1, means: { chart_correctness: 6, readability: 7 } },
+    want: 1,
+  },
+  {
+    name: 'more cached rows than judged rows fails, because a cached row is a graded one',
+    report: { grader: GRADER, scored: 1470, charts: 1286, judged: 100, failed: 0, notSelected: 1186, skipped: 184, cached: 120, calls: -20, callsPerRow: -0.2, means: { chart_correctness: 6, readability: 7 } },
+    want: 1,
+  },
+  {
     name: 'a chart that is neither graded nor declared unselected fails',
     report: { grader: GRADER, scored: 1470, charts: 1286, judged: 1200, failed: 0, notSelected: 0, skipped: 184, calls: 1200, callsPerRow: 1, means: { chart_correctness: 6, readability: 7 } },
     want: 1,
@@ -307,6 +347,25 @@ const JUDGE_SELF_TEST = [
     name: 'a null mean fails, because a run that graded nothing has no reading to report',
     report: { grader: GRADER, scored: 1470, charts: 1286, judged: 0, failed: 8, notSelected: 1278, skipped: 184, calls: 8, callsPerRow: 1, means: { chart_correctness: null, readability: null } },
     want: 2,
+  },
+  {
+    // The arithmetic of this run is perfect — 8 failed plus 1,278 unselected is every chart — and it
+    // measured 0.6% of the corpus. `44155803661` would have passed every rule above.
+    name: 'a run that stopped before the end fails, however tidy its arithmetic',
+    report: {
+      grader: GRADER,
+      scored: 1470,
+      charts: 1286,
+      judged: 240,
+      failed: 8,
+      notSelected: 1038,
+      skipped: 184,
+      calls: 248,
+      callsPerRow: 1,
+      means: { chart_correctness: 3, readability: 6 },
+      aborted: { streak: 8, attempted: 248, reason: 'llm returned 429: 余额不足或无可用资源包,请充值。' },
+    },
+    want: 1,
   },
   { name: 'no judge report is a failure when it is required', report: undefined, want: 1, require: true },
   { name: 'no judge report is a note when it is not', report: undefined, want: 0 },

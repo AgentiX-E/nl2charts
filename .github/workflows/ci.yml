@@ -249,12 +249,74 @@ jobs:
           path: eval/out/
           retention-days: 30
 
+  # Dispatch-only, and the reason is a bill rather than a preference.
+  #
+  # These two jobs ran on every push that touched anything a prompt reads — 40 executions of each in
+  # five days, beside 35 dispatched runs of the same chains. `live-eval` spends `LIVE_REPEATS` passes
+  # over its questions and `bird-eval` spends the whole Mini-Dev split on every arm, so a push that
+  # changed one wording cost about twenty yuan and the day cost several hundred. Nothing about the
+  # measurement improved by taking it more often: the floor is a number to publish against, and a
+  # published number is taken once, at the end of a round, on purpose.
+  #
+  # A push still measures everything that is free — the unit and integration suites, the replay
+  # benchmark, and (in `bird-prompt`) every check of the prompt that needs no model at all. What moved
+  # is the paid half.
+  bird-prompt:
+    name: what a prompt shows, without a model
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # The half of the BIRD chain that costs nothing, kept on push when the paid half moved to
+    # dispatch. These three checks are the ones that catch a prompt defect before money is spent on
+    # it: a gold identifier the prompt never shows, a statement the product cannot run in the
+    # dialect it translates into, and a corpus whose columns do not survive the port. They need the
+    # datasets and no key, which is exactly the shape a gate on a push should have.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Cache the external dataset
+        uses: actions/cache@v4
+        with:
+          path: eval/.cache/bird/minidev
+          key: bird-minidev-v3-${{ runner.os }}
+      - name: Cache the training corpus
+        uses: actions/cache@v4
+        with:
+          path: eval/.cache/bird/train
+          key: bird-train-v1-${{ runner.os }}
+      - name: Cache synthesized definitions
+        uses: actions/cache@v4
+        with:
+          path: eval/.cache/bird/definitions
+          key: bird-definitions-${{ runner.os }}-${{ hashFiles('eval/bird/synthesize.ts', 'packages/ai/src/definitions.ts') }}
+          restore-keys: bird-definitions-${{ runner.os }}-
+      - name: Fetch Mini-Dev (no-op when the cache is warm)
+        run: node eval/bird/fetch.mjs
+      - name: Fetch the training corpus (no-op when the cache is warm)
+        run: pnpm bench:bird:fetch:train
+      - name: Gold queries, prompts and controls without a model
+        run: pnpm bench:bird:dry
+      # The one that catches a prompt that hides what it asks for: every identifier the gold
+      # statement names must be visible in the rendered prompt. It costs nothing and it is the
+      # cheapest possible audit of the thing every paid call depends on.
+      - name: Every gold identifier is in the prompt
+        run: pnpm bench:bird:recall
+      - name: DuckDB portability census
+        run: pnpm bench:bird:port
+
   live-eval:
     name: live NL to SQL evaluation
     if: >-
       needs.quality.result == 'success' &&
       needs.changes.outputs.models == 'true' &&
-      (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/master'))
+      github.event_name == 'workflow_dispatch'
     needs: [quality, changes]
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -298,7 +360,7 @@ jobs:
     if: >-
       needs.quality.result == 'success' &&
       needs.changes.outputs.models == 'true' &&
-      (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/master'))
+      github.event_name == 'workflow_dispatch'
     needs: [quality, changes]
     runs-on: ubuntu-latest
     timeout-minutes: 120

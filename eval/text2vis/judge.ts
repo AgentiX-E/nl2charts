@@ -27,6 +27,7 @@ import {
   withCallCounter,
   type ImageDialect,
   type LlmImage,
+  type LlmMessage,
   type LlmProvider,
   type LlmUsage,
 } from '@agentix-e/nl2charts-ai';
@@ -34,6 +35,31 @@ import { applyExitCode, isEntry, loadText2Vis, type LoadOptions } from './datase
 import { profileInputs, type ProfileInput } from './profile.js';
 import { familyOfLabel } from './rule.js';
 import { chartJobs, type ChartJobs } from './render.js';
+import { cacheKey, openCache, type CacheIdentity, type JudgeCache } from './judge-cache.js';
+import { billOf, describeBill } from '../price.js';
+
+/**
+ * Where answers already paid for are kept, unless a run says otherwise.
+ *
+ * Deliberately **not** under `eval/.cache/text2vis`: the workflow caches that directory under a fixed
+ * key for the corpus, and a directory restored from a key that never changes is a directory the judge
+ * could never write to. Its own path, its own key.
+ */
+export const DEFAULT_CACHE = 'eval/.cache/judge';
+
+/**
+ * Where a run keeps the answers it paid for, from what the command line said.
+ *
+ * Three inputs and three outcomes, in one place so that the default is testable without writing into
+ * the repository: `false` is `--no-cache` and means every row costs a call, a string is a directory
+ * somebody named, and `undefined` is "the flag was not given" — which means the default, because the
+ * expensive mistake is not a stale store, it is a fresh reading that pays for 1,280 figures nobody
+ * changed.
+ */
+export function cacheDirectoryOf(cache: string | false | undefined): string | undefined {
+  if (cache === false) return undefined;
+  return cache ?? DEFAULT_CACHE;
+}
 
 /** The two things a grader is asked, in the order the prompt names them. */
 export const JUDGE_DIMENSIONS = ['chart_correctness', 'readability'] as const;
@@ -94,6 +120,15 @@ export interface JudgeVerdict {
    * characters are enough to see that it did.
    */
   readonly reply?: string;
+  /**
+   * True when the two scores came from the store rather than from a call.
+   *
+   * On the row rather than only in a total, because the two facts a reader needs are different: the
+   * total says what the run cost, the flag says which figures nobody looked at this time. A reading
+   * that re-published yesterday's opinion of 1,378 figures and graded 40 is a reading of 40 figures,
+   * and the artifact has to be able to say so per row.
+   */
+  readonly cached?: boolean;
 }
 
 /**
@@ -127,6 +162,15 @@ export interface JudgeGrader {
   readonly endpoint: string;
   /** The model that answered. Read from the declaration, not from the reply, which may rename it. */
   readonly model: string;
+  /**
+   * The decode mode the run asked for, or absent when it left the choice to the endpoint.
+   *
+   * Recorded for the reason the model is: `1,411 judged at 3.05` is a fact about one instrument, and
+   * a thinking model and the same model with its deliberation switched off are two instruments even
+   * when the name on the reply is identical. Absent rather than `true` because "the endpoint decided"
+   * and "we asked for thinking" are different claims about how a number was obtained.
+   */
+  readonly thinking?: boolean;
 }
 
 export interface JudgeReport {
@@ -163,8 +207,37 @@ export interface JudgeReport {
    */
   readonly means: { readonly chart_correctness: number | null; readonly readability: number | null };
   readonly byMark: readonly MarkJudgement[];
-  /** Calls actually spent. One per attempted row, and the assertion below holds it to that. */
+  /** Calls actually spent. One per attempted row that was not answered from the store. */
   readonly calls: number;
+  /**
+   * Rows answered from the store rather than from a call.
+   *
+   * The column this round exists for. Without it a reading is a number of calls, and a number of
+   * calls cannot say whether 1,418 figures were looked at or forty were and the rest remembered.
+   * `calls === judged + failed - cached` is asserted below, so the two cannot drift apart.
+   */
+  readonly cached: number;
+  /**
+   * The bill the store prevented, summed from the usage each cached row recorded when it was paid for.
+   *
+   * A measured counterfactual and not an estimate: these are the tokens the endpoint reported for
+   * these exact rows on the reading that bought them. `reported` travels with the sums for the same
+   * reason it does in `tokens` — a total over an unknown number of rows is a number nobody can divide.
+   */
+  readonly saved: {
+    readonly prompt: number;
+    readonly completion: number;
+    readonly reasoning: number;
+    readonly reported: number;
+  };
+  /**
+   * What this reading cost, and what the store prevented, in yuan.
+   *
+   * On the artifact rather than only in the log, because a cost that lives in a runner's scrollback is
+   * a cost nobody adds up: twelve readings were taken in two days and no document could say what they
+   * came to. `null` is "this model has no price on file" — never zero, which would read as free.
+   */
+  readonly bill: { readonly yuan: number | null; readonly savedYuan: number | null };
   readonly callsPerRow: number;
   /**
    * The tokens the endpoint reported, summed over the rows that reported any.
@@ -190,14 +263,20 @@ export interface JudgeReport {
    * figure. Publishing a pass rate would invent a threshold the prompt never asked for; publishing
    * the eleven counts invents nothing and lets a reader see the two peaks.
    *
-   * `decimals` is the number of rows whose score was not a whole number (a grader that answered
-   * 7.5). They are counted and kept out of the buckets rather than rounded into one: `Math.round`
-   * here would be this file choosing a score the grader did not write.
+   * `off` is the number of rows per dimension whose score was not one of the eleven whole numbers
+   * (a grader that answered 7.5). They are counted and kept out of the buckets rather than rounded
+   * into one: `Math.round` here would be this file choosing a score the grader did not write.
+   *
+   * **One remainder per dimension, because one number cannot say which row it is about.** A row
+   * scored `correctness 8, readability 7.5` is inside the correctness row and outside the
+   * readability row, so a single count of "rows off the whole numbers" either overstates the first
+   * row or understates the second. With the remainder carried alongside each row, every row of the
+   * histogram can be checked against `judged` on its own, which is what the assertion below does.
    */
   readonly histogram: {
     readonly chart_correctness: readonly number[];
     readonly readability: readonly number[];
-    readonly decimals: number;
+    readonly off: { readonly chart_correctness: number; readonly readability: number };
   };
   readonly failures: readonly { readonly id: string; readonly error: string; readonly kind: JudgeFailureKind }[];
   /**
@@ -222,6 +301,29 @@ export interface JudgeReport {
    * that folded it into the per-row price would make a 1,286-row run read 1.001 calls per row.
    */
   readonly probe: { readonly answer: string; readonly seen: boolean };
+  /**
+   * Why the run stopped before it reached the end of its row set, when it did.
+   *
+   * Absent is the normal case and means every selected row was attempted. Present means the loop gave
+   * up because the endpoint had stopped answering — and a run in that state is not a reading, however
+   * tidy its arithmetic: the identity `judged + failed + notSelected === charts` still holds, and the
+   * `notSelected` rows are the ones nobody asked about.
+   */
+  readonly aborted?: JudgeAbort;
+}
+
+/**
+ * A run that gave up, in the three numbers a reader needs to price it.
+ *
+ * `streak` is the patience that ran out, `attempted` is how many rows it got to, and `reason` is the
+ * first message of the run of failures — kept verbatim, because on 2026-11-17 that message was
+ * `llm returned 429: 余额不足或无可用资源包,请充值。` and the difference between an empty account and a
+ * rate limit is in those words, not in the status code both of them share.
+ */
+export interface JudgeAbort {
+  readonly streak: number;
+  readonly attempted: number;
+  readonly reason: string;
 }
 
 /**
@@ -307,6 +409,15 @@ export interface ProbeReading {
   readonly asked: boolean;
   /** Whether the answer could only have been written by a reader that saw red. */
   readonly seen: boolean;
+  /**
+   * The request fields the endpoint's adapter removed before sending, when it reported any.
+   *
+   * Carried here because the probe is the cheap place to learn that a mode cannot be asked for: the
+   * adapter drops `thinking` on a deployment that did not declare a switch, and a run that went on to
+   * grade 178 figures would then report a decode mode it never obtained. One call is a better price
+   * for that fact than a whole reading.
+   */
+  readonly omitted?: readonly string[];
 }
 
 /**
@@ -320,7 +431,7 @@ export interface ProbeReading {
  * name zero, and on an endpoint whose documented range may exclude zero the check would have been
  * the first thing refused — the instrument failing on the one call it exists to spend.
  */
-export async function probeVision(provider: LlmProvider, temperature: number | null = 0): Promise<ProbeReading> {
+export async function probeVision(provider: LlmProvider, temperature: number | null = 0, think?: boolean): Promise<ProbeReading> {
   try {
     const response = await provider.complete({
       messages: [
@@ -328,10 +439,15 @@ export async function probeVision(provider: LlmProvider, temperature: number | n
         { role: 'user', content: VISION_PROBE, images: [{ mediaType: 'image/png', data: PROBE_PNG }] },
       ],
       temperature,
+      // The probe asks in the mode the run will grade in. A probe taken in the default decoder would
+      // answer "red" for a run that is about to spend 178 calls in another mode, and the one fact it
+      // exists to establish — that this deployment serves what the dispatch asked for — would be
+      // established about a different request.
+      ...(think === undefined ? {} : { thinking: think }),
       purpose: 'probe',
     });
     const answer = response.text.trim().replace(/\s+/g, ' ').slice(0, 80);
-    return { answer, asked: true, seen: sawRed(answer) };
+    return { answer, asked: true, seen: sawRed(answer), ...(response.ignored === undefined ? {} : { omitted: response.ignored }) };
   } catch (error) {
     return { answer: error instanceof Error ? error.message : String(error), asked: false, seen: false };
   }
@@ -520,6 +636,16 @@ function mean(values: readonly [number, ...number[]]): number {
 }
 
 /**
+ * A sparse tally as the eleven counts the report publishes.
+ *
+ * The buckets are dense on the page and sparse in the counting, because a bucket nobody scored in
+ * is a zero (a fact about the reading) rather than a missing key (a fact about the loop).
+ */
+function elevenCounts(tally: ReadonlyMap<number, number>): number[] {
+  return Array.from({ length: 11 }, (_, score) => tally.get(score) ?? 0);
+}
+
+/**
  * Fold the verdicts into one report.
  *
  * `scored` is passed rather than derived so the identity at the end is a statement about the corpus
@@ -536,6 +662,7 @@ export function summarizeJudge(
   calls: number,
   probe: { readonly answer: string; readonly seen: boolean },
   grader: JudgeGrader,
+  aborted?: JudgeAbort,
 ): JudgeReport {
   const byId = new Map(jobs.map((job) => [job.id, job]));
   const byMark = new Map<string, { rows: number; correctness: number[]; readability: number[] }>();
@@ -551,9 +678,27 @@ export function summarizeJudge(
   const correctness: number[] = [];
   const readability: number[] = [];
   const tokens = { prompt: 0, completion: 0, reasoning: 0, reported: 0 };
-  const correctnessCounts = Array.from({ length: 11 }, () => 0);
-  const readabilityCounts = Array.from({ length: 11 }, () => 0);
-  let decimals = 0;
+  // Kept apart from `tokens` because they are two different claims about money: `tokens` is what this
+  // run was billed, `saved` is what the same rows cost the reading that bought them. Folding them into
+  // one total would publish a bill for calls nobody made.
+  const saved = { prompt: 0, completion: 0, reasoning: 0, reported: 0 };
+  let cached = 0;
+  // Tallied sparsely and materialised below, because a dense eleven-slot array needs a fallback for
+  // the index it just checked — a branch no score can reach, which is a line that can only be
+  // covered by lying to the test.
+  const correctnessCounts = new Map<number, number>();
+  const readabilityCounts = new Map<number, number>();
+  const off = { chart_correctness: 0, readability: 0 };
+  /**
+   * One score into its own dimension's eleven buckets, or into that dimension's remainder.
+   *
+   * Per dimension and not per row: a row can be a whole number on one axis and 7.5 on the other,
+   * and a single remainder would then describe a row that is inside one row of the histogram.
+   */
+  const bucket = (counts: Map<number, number>, remainder: 'chart_correctness' | 'readability', value: number): void => {
+    if (Number.isInteger(value) && value >= 0 && value <= 10) counts.set(value, (counts.get(value) ?? 0) + 1);
+    else off[remainder] += 1;
+  };
   for (const verdict of verdicts) {
     const job = byId.get(verdict.id);
     if (job === undefined) throw new Error(`judge: verdict for row ${verdict.id} has no job`);
@@ -569,19 +714,20 @@ export function summarizeJudge(
       failedByKind[kind] += 1;
       continue;
     }
+    if (verdict.cached === true) cached += 1;
     if (verdict.usage !== undefined) {
-      tokens.prompt += verdict.usage.promptTokens;
-      tokens.completion += verdict.usage.completionTokens;
-      tokens.reasoning += verdict.usage.reasoningTokens ?? 0;
-      tokens.reported += 1;
+      const into = verdict.cached === true ? saved : tokens;
+      into.prompt += verdict.usage.promptTokens;
+      into.completion += verdict.usage.completionTokens;
+      into.reasoning += verdict.usage.reasoningTokens ?? 0;
+      into.reported += 1;
     }
     const one = verdict.chart_correctness as number;
     const two = verdict.readability as number;
     correctness.push(one);
     readability.push(two);
-    if (Number.isInteger(one) && one >= 0 && one <= 10) correctnessCounts[one] = (correctnessCounts[one] ?? 0) + 1;
-    else decimals += 1;
-    if (Number.isInteger(two) && two >= 0 && two <= 10) readabilityCounts[two] = (readabilityCounts[two] ?? 0) + 1;
+    bucket(correctnessCounts, 'chart_correctness', one);
+    bucket(readabilityCounts, 'readability', two);
     cell.correctness.push(one);
     cell.readability.push(two);
   }
@@ -609,6 +755,12 @@ export function summarizeJudge(
       }))
       .sort((left, right) => right.rows - left.rows || left.mark.localeCompare(right.mark)),
     calls,
+    cached,
+    saved,
+    bill: {
+      yuan: billOf(grader.model, { promptTokens: tokens.prompt, completionTokens: tokens.completion }) ?? null,
+      savedYuan: billOf(grader.model, { promptTokens: saved.prompt, completionTokens: saved.completion }) ?? null,
+    },
     // Per *attempted* row — judged plus failed — because that is what the instrument costs. Dividing
     // by `judged` alone would report two calls per row on a run that spent one call on each of two
     // rows and lost one reply to a parse, which is a ratio about the parser rather than about price.
@@ -616,12 +768,17 @@ export function summarizeJudge(
     failures,
     failedByKind,
     tokens,
-    histogram: { chart_correctness: correctnessCounts, readability: readabilityCounts, decimals },
+    histogram: {
+      chart_correctness: elevenCounts(correctnessCounts),
+      readability: elevenCounts(readabilityCounts),
+      off,
+    },
     // By row index, which is a number because `chartJobs` makes every id one (`String(index)`), and
     // unique because it *is* the index. A tie-break here would be code no input can reach: two
     // verdicts with the same id are the same row counted twice, which the partition check refuses.
     verdicts: [...verdicts].sort((left, right) => Number(left.id) - Number(right.id)),
     probe,
+    ...(aborted === undefined ? {} : { aborted }),
   };
   return report;
 }
@@ -639,10 +796,13 @@ export function assertJudgeReport(report: JudgeReport): void {
   // The price, as an equality rather than a bound: one call per attempted row, so a run that spent
   // more asked twice and a run that spent fewer counted wrong. Both are instruments other than the
   // one this file documents, and a `<=` here would report either of them as this one.
-  if (report.calls !== report.judged + report.failed) {
+  if (report.calls !== report.judged + report.failed - report.cached) {
     throw new Error(
-      `judge report: ${String(report.calls)} calls for ${String(report.judged)} judged and ${String(report.failed)} failed, and this instrument spends one call per attempted row`,
+      `judge report: ${String(report.calls)} calls for ${String(report.judged)} judged, ${String(report.failed)} failed and ${String(report.cached)} from the store, and this instrument spends one call per attempted row it does not already have`,
     );
+  }
+  if (report.cached > report.judged) {
+    throw new Error(`judge report: ${String(report.cached)} cached rows for ${String(report.judged)} judged`);
   }
   if (report.judged + report.failed + report.notSelected !== report.charts) {
     throw new Error(
@@ -671,14 +831,16 @@ export function assertJudgeReport(report: JudgeReport): void {
   }
   // Only a judged row can carry usage: a failed call may have been billed, but this instrument does
   // not know what it cost, and a total that silently included one would be a number with a guess in it.
-  // The buckets and the off-integer rows must account for every graded row, or a row left the
-  // mean without leaving a trace in the shape.
-  const histogrammed =
-    report.histogram.chart_correctness.reduce((total, n) => total + n, 0) + report.histogram.decimals;
-  if (histogrammed !== report.judged) {
-    throw new Error(
-      `judge report: ${String(histogrammed)} rows in the correctness histogram for ${String(report.judged)} judged`,
-    );
+  // The buckets and the off-grid rows must account for every graded row, per dimension: a row that
+  // left the mean without leaving a trace in the shape is a reading whose denominator moved, and one
+  // dimension's row can lose a row the other one kept.
+  for (const dimension of JUDGE_DIMENSIONS) {
+    const histogrammed = report.histogram[dimension].reduce((total, n) => total + n, 0) + report.histogram.off[dimension];
+    if (histogrammed !== report.judged) {
+      throw new Error(
+        `judge report: ${String(histogrammed)} rows in the ${dimension} histogram for ${String(report.judged)} judged`,
+      );
+    }
   }
   if (report.tokens.reported > report.judged) {
     throw new Error(
@@ -689,6 +851,20 @@ export function assertJudgeReport(report: JudgeReport): void {
     throw new Error(
       `judge report: the endpoint did not say red to a red image (it said "${report.probe.answer}"), so these means are an opinion of the text rather than a reading of the figures`,
     );
+  }
+  // A mode that was asked for and not obtained is not a mode. `glm-4.5v` is documented as *forced*
+  // thinking, so a request that disables it is accepted and answered by the same decoder — and the 200
+  // cannot be told apart from obedience. The token counts can: a run that asked for a direct decode
+  // and spent most of its completion on deliberation graded with the other instrument, and its means
+  // are not comparable with a reading that did not. Measured on run 44234111191 (`--think off`, 178
+  // calls, ¥1.31): 167,108 of 170,117 completion tokens were deliberation, 97.9%.
+  if (report.grader.thinking === false && report.tokens.reported > 0) {
+    const share = report.tokens.reasoning / Math.max(1, report.tokens.completion);
+    if (share > DIRECT_DECODE_CEILING) {
+      throw new Error(
+        `judge report: the run asked for a direct decode and ${String(Math.round(share * 100))}% of what it wrote was deliberation — the endpoint answered and did not serve the mode, so these means belong to the other instrument`,
+      );
+    }
   }
   // Two means and no author is the shape of a number that gets quoted as a property of the corpus.
   // Refused here rather than left to the reader, because the reader has no way to recover the name.
@@ -727,6 +903,69 @@ export function score(mean: number | null): string {
   return mean === null ? 'no reading' : `${mean.toFixed(2)}/10`;
 }
 
+/**
+ * How much of a reading may go unmeasured before the run is red.
+ *
+ * One row in twenty. A grader that answers for 1,411 of 1,414 charts has measured the corpus; a
+ * grader that answered for 900 of them has measured a sample nobody declared. The number is a
+ * declaration rather than a discovery, which is why it is here and not computed from the last run.
+ */
+export const UNJUDGED_TOLERANCE = 0.05;
+
+/**
+ * How many calls in a row may go unanswered before the run stops asking.
+ *
+ * Eight, and the number is picked from the shape of the fault rather than from a rate: a single 429
+ * is a row, and a burst of them is what a shared tenant looks like under load — those are runs that
+ * are still measuring. Eight in a row with no answer at all is an account, a key or a url, and the
+ * ninth call cannot say anything the eighth did not.
+ */
+export const PATIENCE = 8;
+
+/**
+ * How much of a "direct" reply may be deliberation before the mode is judged not served.
+ *
+ * Not zero, because a token or two of framing is not a chain of thought and a guard at zero would
+ * refuse a correct reading on its arithmetic. Not half, because the question is whether the endpoint
+ * deliberated *instead of* answering, and the two populations this instrument has measured are 98%
+ * (the default decoder) and, on a model that serves `disabled`, near zero. A fifth of the completion
+ * is far above the one and far below the other.
+ */
+export const DIRECT_DECODE_CEILING = 0.2;
+
+/**
+ * The exit code a reading earns.
+ *
+ * Two things make a run red, and neither of them is "the grader did not grade everything":
+ *
+ * - **a failure this repository controls.** `truncated` is a token cap set in this file, `unreadable`
+ *   and `invalid-response` are a prompt and a parser — one row lost to any of them is a defect that
+ *   the next round has to fix, and a green run would be the only thing hiding it.
+ * - **more than {@link UNJUDGED_TOLERANCE} of the charts unmeasured**, whatever the cause. A run that
+ *   lost a twentieth of its rows is a reading about a sample, and the denominator in the artifact
+ *   would then be the only witness.
+ *
+ * Everything else is a fact about a run nobody here can repair: a content policy that will not look
+ * at a question, an endpoint that dropped one call in 1,414. Five consecutive readings exited 1 while
+ * publishing usable means — `44116541584` judged 1,411 of 1,414, losing two rows to a content policy
+ * and one to a 180-second deadline — and an exit code that is red on every reading teaches an operator
+ * to ignore it. The workflow's shape check already had to be told `if: always()` because this one was
+ * red; with the rule below it runs on a green job and still catches a reading whose arithmetic broke.
+ *
+ * A run that **stopped** is the one case outside that tolerance, and it is not a share of the corpus:
+ * `44155803661` measured 244 of 1,418 rows and would have passed every rule here, because 1,174
+ * failures of 1,418 is over a twentieth and the seven rows it did not lose were all fine. What made
+ * it unreadable was the stop, so the stop is what the exit code reads — not a percentage that happens
+ * to catch it on this corpus and would miss a stop at row 1,400 of 1,418.
+ */
+export function gradingExitCode(
+  report: Pick<JudgeReport, 'failedByKind' | 'charts' | 'failed'> & { readonly aborted?: JudgeAbort },
+): 0 | 1 {
+  const ours = report.failedByKind.truncated + report.failedByKind.unreadable + report.failedByKind['invalid-response'];
+  if (report.aborted !== undefined) return 1;
+  return ours > 0 || report.failed > report.charts * UNJUDGED_TOLERANCE ? 1 : 0;
+}
+
 /** The lines the log prints, and the shape of the answer: two means and their denominators. */
 export function describeJudge(report: JudgeReport): readonly string[] {
   const lines = [
@@ -734,12 +973,49 @@ export function describeJudge(report: JudgeReport): readonly string[] {
       ` — ${String(report.failed)} failed, ${String(report.notSelected)} unselected, ${String(report.skipped)} skipped of ${String(report.scored)} scored`,
     `  chart_correctness ${score(report.means.chart_correctness)}, readability ${score(report.means.readability)}`,
     `  calls ${String(report.calls)}, ${report.callsPerRow.toFixed(3)} per judged row; the vision probe answered "${report.probe.answer}"`,
+    `  bill ${describeBill(report.grader.model, {
+      promptTokens: report.tokens.prompt,
+      completionTokens: report.tokens.completion,
+      ...(report.tokens.reasoning === 0 ? {} : { reasoningTokens: report.tokens.reasoning }),
+    })}`,
   ];
+  if (report.cached > 0) {
+    // The lever this round added, stated as money rather than as a count: "1,378 hits" is a fact about
+    // a directory, and the sentence a reader needs is what those 1,378 rows would have cost.
+    const unmetered = report.cached - report.saved.reported;
+    lines.push(
+      `  cache ${String(report.cached)} of ${String(report.judged + report.failed)} rows answered from the store, ` +
+        `which did not spend ${describeBill(report.grader.model, {
+          promptTokens: report.saved.prompt,
+          completionTokens: report.saved.completion,
+          ...(report.saved.reasoning === 0 ? {} : { reasoningTokens: report.saved.reasoning }),
+        })}` +
+        (unmetered > 0 ? `; ${String(unmetered)} of them recorded no usage when they were paid for, so that bill is a floor` : ''),
+    );
+  }
   if (report.failed > 0) {
     const counted = Object.entries(report.failedByKind)
       .filter(([, rows]) => rows > 0)
       .map(([kind, rows]) => `${String(rows)} ${kind}`);
     lines.push(`  why they failed: ${counted.join(', ')}`);
+    // The one kind that is a fact about the corpus rather than about the run, said in those words:
+    // a reader who sees `2 refused` beside `2 failed` cannot tell whether the two rows are a policy
+    // or a defect, and the exit code no longer answers that question for them.
+    if (report.failedByKind.refused > 0) {
+      lines.push(
+        `  not looked at: ${String(report.failedByKind.refused)} of ${String(report.charts)} charts, because the endpoint declined the request; they are counted, not scored`,
+      );
+    }
+  }
+  if (report.aborted !== undefined) {
+    // One sentence where the run spent 1,174 messages saying the same thing. The numbers are the
+    // point: the reader has to know which row it died on and how much of the corpus that leaves.
+    lines.push(
+      `  stopped: ${String(report.aborted.streak)} calls in a row without a reply; ` +
+        `${String(report.aborted.attempted)} of ${String(report.charts)} charts were attempted and ` +
+        `${String(report.charts - report.aborted.attempted)} were never asked about`,
+    );
+    lines.push(`  the first of them said: ${report.aborted.reason}`);
   }
   if (report.tokens.reported > 0) {
     const share = report.tokens.completion === 0 ? '—' : `${((report.tokens.reasoning / report.tokens.completion) * 100).toFixed(1)}%`;
@@ -752,13 +1028,14 @@ export function describeJudge(report: JudgeReport): readonly string[] {
     // The eleven counts, not a share: a mean of a two-peaked distribution is a number about neither
     // peak, and a "share above 8" would be a threshold the prompt never asked for. A reader who sees
     // `269 326 321 42 35 12 7 10 25 69 143` has seen the shape; nothing here chose it for them.
-    const row = (name: string, counts: readonly number[]): string =>
-      `  ${name} 0-10: ${counts.map((n) => String(n)).join(' ')}`;
-    lines.push(row('correctness', report.histogram.chart_correctness));
-    lines.push(row('readability', report.histogram.readability));
-    if (report.histogram.decimals > 0) {
-      lines.push(`  (${String(report.histogram.decimals)} row(s) scored off the whole numbers, kept out of both rows)`);
-    }
+    // The remainder rides on its own row rather than hanging below both, because a row can be off
+    // the whole numbers on one axis and inside the buckets on the other: "kept out of both rows"
+    // would then be false about the axis that kept it.
+    const row = (name: string, counts: readonly number[], off: number): string =>
+      `  ${name} 0-10: ${counts.map((n) => String(n)).join(' ')}` +
+      (off > 0 ? ` (+${String(off)} off the whole numbers)` : '');
+    lines.push(row('correctness', report.histogram.chart_correctness, report.histogram.off.chart_correctness));
+    lines.push(row('readability', report.histogram.readability, report.histogram.off.readability));
   }
   for (const mark of report.byMark) {
     lines.push(
@@ -798,6 +1075,16 @@ export interface JudgeOptions {
    * refuses answers 400, and one sent a value it ignores reports a sampling nobody applied.
    */
   readonly temperature?: number | null;
+  /**
+   * The decode mode, in the two absences this contract knows.
+   *
+   * `undefined` sends nothing and lets the endpoint do what it does by default, which is what every
+   * published reading was taken with. `false` asks for no deliberation before the two integers — the
+   * grader spends 98.3% of its completion tokens thinking, and whether that thinking buys a better
+   * reading is a question an A/B on the same figures can answer. `true` is accepted because the
+   * endpoint takes it, not because anything here needs it.
+   */
+  readonly think?: boolean;
   /** Reads one PNG as base64. Injected so the grading loop can be tested without a filesystem. */
   readonly readImage?: (path: string) => Promise<LlmImage>;
   readonly now?: () => number;
@@ -811,6 +1098,44 @@ export interface JudgeOptions {
    * faster row does not move the report).
    */
   readonly concurrency?: number;
+  /**
+   * How many calls in a row may go unanswered before the run stops asking.
+   *
+   * A floor on patience rather than a budget: the loop spends at most this many calls to learn that
+   * the endpoint has stopped answering, and every call after it would buy nothing. {@link PATIENCE}
+   * by default, and a caller that wants every row attempted whatever happens says so.
+   */
+  readonly abortAfter?: number;
+  /**
+   * Where answers already paid for are kept, when the caller keeps them.
+   *
+   * Absent means every row costs a call, which is what every reading before this round did — twelve
+   * full readings in two days, each re-grading 1,418 figures of which ~1,280 had not changed. With a
+   * store, a reading costs the rows that changed.
+   */
+  readonly cache?: JudgeCache;
+  /**
+   * A ceiling on calls, as a belt beside `abortAfter`'s braces.
+   *
+   * `abortAfter` learns that the endpoint has stopped answering; this one is a budget chosen before
+   * the run, for a dispatch that would rather stop than discover a misconfiguration on row 1,400.
+   * Reaching it is a stopped run, not a sample: `--limit` is how a sample is declared.
+   */
+  readonly maxCalls?: number;
+}
+
+/**
+ * What one pass over the rows produced: the verdicts, and whether the run reached the end.
+ *
+ * Two fields rather than an array with a property stapled to it, because the stop is a fact about
+ * the run and every reader of the verdicts has to decide what to do with it: a caller that ignored
+ * it would publish a mean over the rows that arrived before the endpoint died, which is the defect
+ * `44155803661` put in a log.
+ */
+export interface JudgeOutcome {
+  /** Every row that was attempted, in row order. On a stopped run this is not the whole selection. */
+  readonly verdicts: readonly JudgeVerdict[];
+  readonly aborted?: JudgeAbort;
 }
 
 /**
@@ -820,29 +1145,97 @@ export interface JudgeOptions {
  * forty should cost that row's grade and nothing else, and a batch that aborts on the first 429
  * reports an accuracy over the rows that happened to arrive before the limit. The error is kept
  * with the row's id so the report can print which figure nobody graded.
+ *
+ * **A run of failures is the other case.** `44155803661` graded 244 rows and then asked an account
+ * with no balance left 1,174 more times: thirty-five minutes of a runner, 1,174 calls, and no
+ * reading at the end of it. One failure is a row; eight in a row is an endpoint that is not
+ * answering, and every call after the eighth is a call whose answer is already known. The loop stops
+ * and says where (`streak`, `attempted`, `reason`), and the report refuses to be published.
  */
-export async function judgeJobsWith(jobs: readonly JudgeJob[], options: JudgeOptions): Promise<readonly JudgeVerdict[]> {
+export async function judgeJobsWith(jobs: readonly JudgeJob[], options: JudgeOptions): Promise<JudgeOutcome> {
   const { readFile } = await import('node:fs/promises');
   const read = options.readImage ?? (async (path: string) => ({ mediaType: PNG_MEDIA, data: (await readFile(path)).toString('base64') }));
   const now = options.now ?? (() => Date.now());
   const temperature = options.temperature === undefined ? 0 : options.temperature;
   const concurrency = options.concurrency ?? 1;
+  const abortAfter = options.abortAfter ?? PATIENCE;
   if (!Number.isInteger(concurrency) || concurrency < 1) {
     throw new Error(`judge: --concurrency must be a whole number of at least 1, not ${String(concurrency)}`);
   }
+  if (!Number.isInteger(abortAfter) || abortAfter < 1) {
+    throw new Error(`judge: --abort-after must be a whole number of at least 1, not ${String(abortAfter)}`);
+  }
+  const maxCalls = options.maxCalls;
+  if (maxCalls !== undefined && (!Number.isInteger(maxCalls) || maxCalls < 1)) {
+    throw new Error(`judge: --max-calls must be a whole number of at least 1, not ${String(maxCalls)}`);
+  }
+  // Read from the provider's own declaration rather than from a second argument: the cap the endpoint
+  // applies and the cap the cache key claims have to be one fact, and two arguments that can disagree
+  // is how a cache starts answering for a budget nobody used.
+  const maxTokens = options.provider.capabilities?.maxOutputTokens;
+  const identityOf = (messages: readonly LlmMessage[]): CacheIdentity => ({
+    messages,
+    model: options.provider.model,
+    thinking: options.think,
+    maxTokens,
+    temperature,
+  });
   const verdicts: JudgeVerdict[] = new Array<JudgeVerdict>(jobs.length);
+  /** How many calls have failed since the last one that answered. Shared by the workers, by design. */
+  let streak = 0;
+  /** Calls actually spent, which the cap counts and the cache does not. */
+  let spent = 0;
+  let stopped: { readonly reason: string; readonly streak: number } | undefined;
+  /** A defect that makes the whole run meaningless, as opposed to a row that failed. */
+  let fatal: Error | undefined;
   const one = async (job: JudgeJob, index: number): Promise<void> => {
     const started = now();
     try {
       const image = await read(job.png);
+      const messages: LlmMessage[] = [
+        { role: 'system', content: JUDGE_SYSTEM },
+        { role: 'user', content: buildJudgePrompt(job), images: [image] },
+      ];
+      const key = options.cache === undefined ? undefined : cacheKey(identityOf(messages));
+      const hit = key === undefined ? undefined : options.cache?.get(key, { model: options.provider.model });
+      if (hit !== undefined) {
+        // A hit is not a call, so it does not touch the streak: the endpoint has said nothing, and
+        // silence from an endpoint nobody asked is not evidence that it stopped answering.
+        verdicts[index] = {
+          id: job.id,
+          chart_correctness: hit.chart_correctness,
+          readability: hit.readability,
+          reply: hit.reply,
+          ...(hit.usage === undefined ? {} : { usage: hit.usage }),
+          ms: now() - started,
+          cached: true,
+        };
+        return;
+      }
+      // The budget is checked here rather than at the top of the worker, because a cached row costs
+      // nothing and a run whose remaining rows are all cached has not reached its cap at all.
+      if (maxCalls !== undefined && spent >= maxCalls) {
+        stopped ??= { reason: `--max-calls ${String(maxCalls)} reached`, streak };
+        return;
+      }
+      spent += 1;
       const response = await options.provider.complete({
-        messages: [
-          { role: 'system', content: JUDGE_SYSTEM },
-          { role: 'user', content: buildJudgePrompt(job), images: [image] },
-        ],
+        messages,
         temperature,
+        ...(options.think === undefined ? {} : { thinking: options.think }),
         purpose: 'compare',
       });
+      // A mode the adapter removed is a configuration error and not a row that failed: the endpoint
+      // answered, the answer is a score, and every one of the remaining rows would be just as far
+      // from the instrument the run claims to be. Stopping here costs the calls already in flight;
+      // continuing costs the reading, and the reading is the expensive half.
+      if (options.think !== undefined && response.ignored?.includes('thinking') === true) {
+        fatal ??= new Error(
+          `judge: the ${options.provider.model} deployment dropped the requested decode mode, so this run would grade with the model's default and report a mode it never obtained`,
+        );
+        stopped ??= { reason: 'the endpoint dropped the requested decode mode', streak };
+        return;
+      }
       const scores = parseJudge(response.text, response.finishReason);
       verdicts[index] = {
         id: job.id,
@@ -851,20 +1244,39 @@ export async function judgeJobsWith(jobs: readonly JudgeJob[], options: JudgeOpt
         reply: response.text.trim().slice(0, REPLY_LIMIT),
         ms: now() - started,
       };
+      if (key !== undefined && options.cache !== undefined) {
+        options.cache.put(key, {
+          chart_correctness: scores.chart_correctness,
+          readability: scores.readability,
+          reply: response.text.trim().slice(0, REPLY_LIMIT),
+          ...(response.usage === undefined ? {} : { usage: response.usage }),
+          model: options.provider.model,
+        });
+      }
+      // An answer, whatever it scored: the endpoint is talking, so the run continues.
+      streak = 0;
     } catch (error) {
       // A row that never got an answer has no reply to keep: the error *is* what was learned, and a
       // fabricated empty reply would read as a grader that answered with nothing.
+      const message = error instanceof Error ? error.message : String(error);
       verdicts[index] = {
         id: job.id,
-        error: error instanceof Error ? error.message : String(error),
+        error: message,
         failure: classifyFailure(error),
         ms: now() - started,
       };
+      streak += 1;
+      // The first reason wins, because it is the one closest to the cause: the calls after it are
+      // answers to the same question, and the endpoint's wording does not improve with repetition.
+      if (stopped === undefined && streak >= abortAfter) stopped = { reason: message, streak };
     }
   };
   let next = 0;
   const worker = async (): Promise<void> => {
     for (;;) {
+      // Checked before the claim, so the workers in flight when the stop lands finish their call and
+      // no new one is spent. They are counted, because they were paid for.
+      if (stopped !== undefined) return;
       const index = next;
       next += 1;
       const job = jobs[index];
@@ -873,7 +1285,13 @@ export async function judgeJobsWith(jobs: readonly JudgeJob[], options: JudgeOpt
     }
   };
   await Promise.all(Array.from({ length: Math.min(concurrency, jobs.length === 0 ? 1 : jobs.length) }, worker));
-  return verdicts;
+  // Thrown rather than returned as an aborted outcome: an abort is a reading that stopped, and this
+  // is not a reading at all — the caller must not write an artifact that a later reader would price.
+  if (fatal !== undefined) throw fatal;
+  // Compacted rather than sliced: a worker can be holding the index it claimed when the stop landed,
+  // so the rows that have a verdict are not necessarily a prefix of the selection.
+  const attempted = verdicts.filter((verdict): verdict is JudgeVerdict => verdict !== undefined);
+  return stopped === undefined ? { verdicts: attempted } : { verdicts: attempted, aborted: { ...stopped, attempted: attempted.length } };
 }
 
 export interface JudgeArgs {
@@ -888,6 +1306,29 @@ export interface JudgeArgs {
   readonly probeOnly: boolean;
   /** How many calls the run keeps in flight. Absent means one. */
   readonly concurrency?: number;
+  /** `--think on|off`: ask the endpoint for the mode, or leave the choice to the endpoint. */
+  readonly think?: boolean;
+  /** `--abort-after <n>`: how many calls in a row may go unanswered. Absent means {@link PATIENCE}. */
+  readonly abortAfter?: number;
+  /**
+   * `--cache <dir>`, or `--no-cache`.
+   *
+   * A string means "keep answers here", `false` means "spend a call on every row", and absent means
+   * {@link DEFAULT_CACHE} — because the expensive mistake is not a stale cache, it is a fresh reading
+   * that pays for 1,378 figures nobody changed. A run that wants to re-grade everything says so out
+   * loud, and the artifact records which of the three it was.
+   */
+  readonly cache?: string | false;
+  /** `--max-calls <n>`: a ceiling on calls, for a dispatch that would rather stop than overspend. */
+  readonly maxCalls?: number;
+  /**
+   * `--sample <n>`: grade every k-th row instead of all of them.
+   *
+   * A stride and not a random draw, so that the same `n` is the same rows on every machine and two
+   * arms of an experiment are paired by construction. `--limit` takes a *prefix*, which is a different
+   * thing: the corpus is ordered by row index, and a prefix of it is a prefix of one population.
+   */
+  readonly sample?: number;
 }
 
 export function parseJudgeArgs(argv: readonly string[]): JudgeArgs {
@@ -899,6 +1340,11 @@ export function parseJudgeArgs(argv: readonly string[]): JudgeArgs {
   let endpoint: string | undefined;
   let probeOnly = false;
   let concurrency: number | undefined;
+  let think: boolean | undefined;
+  let abortAfter: number | undefined;
+  let cache: string | false | undefined;
+  let maxCalls: number | undefined;
+  let sample: number | undefined;
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index] as string;
     if (flag === '--json') {
@@ -909,13 +1355,22 @@ export function parseJudgeArgs(argv: readonly string[]): JudgeArgs {
       probeOnly = true;
       continue;
     }
+    if (flag === '--no-cache') {
+      cache = false;
+      continue;
+    }
     if (
       flag === '--artifact' ||
       flag === '--render' ||
       flag === '--png' ||
       flag === '--limit' ||
       flag === '--endpoint' ||
-      flag === '--concurrency'
+      flag === '--concurrency' ||
+      flag === '--think' ||
+      flag === '--abort-after' ||
+      flag === '--cache' ||
+      flag === '--max-calls' ||
+      flag === '--sample'
     ) {
       const value = argv[index + 1];
       if (value === undefined || value.startsWith('--')) throw new Error(`${flag} needs a value`);
@@ -925,7 +1380,20 @@ export function parseJudgeArgs(argv: readonly string[]): JudgeArgs {
       } else if (flag === '--concurrency') {
         if (!/^\d+$/.test(value) || Number(value) === 0) throw new Error(`--concurrency needs a positive whole number, not ${value}`);
         concurrency = Number(value);
-      } else if (flag === '--artifact') artifact = value;
+      } else if (flag === '--abort-after') {
+        if (!/^\d+$/.test(value) || Number(value) === 0) throw new Error(`--abort-after needs a positive whole number, not ${value}`);
+        abortAfter = Number(value);
+      } else if (flag === '--max-calls') {
+        if (!/^\d+$/.test(value) || Number(value) === 0) throw new Error(`--max-calls needs a positive whole number, not ${value}`);
+        maxCalls = Number(value);
+      } else if (flag === '--sample') {
+        if (!/^\d+$/.test(value) || Number(value) === 0) throw new Error(`--sample needs a positive whole number, not ${value}`);
+        sample = Number(value);
+      } else if (flag === '--think') {
+        if (value !== 'on' && value !== 'off') throw new Error(`--think takes on or off, not ${value}`);
+        think = value === 'on';
+      } else if (flag === '--cache') cache = value;
+      else if (flag === '--artifact') artifact = value;
       else if (flag === '--render') render = value;
       else if (flag === '--endpoint') endpoint = value;
       else png = value;
@@ -934,7 +1402,8 @@ export function parseJudgeArgs(argv: readonly string[]): JudgeArgs {
     }
     throw new Error(
       `unknown argument ${flag}: this command grades the charts the renderer drew, and takes --json, --png <dir>, ` +
-        `--render <path>, --artifact <path>, --limit <n>, --endpoint <name>, --concurrency <n> and --probe-only`,
+        `--render <path>, --artifact <path>, --limit <n>, --sample <n>, --endpoint <name>, --concurrency <n>, ` +
+        `--think on|off, --cache <dir>, --no-cache, --max-calls <n> and --probe-only`,
     );
   }
   return {
@@ -946,6 +1415,11 @@ export function parseJudgeArgs(argv: readonly string[]): JudgeArgs {
     ...(limit === undefined ? {} : { limit }),
     ...(endpoint === undefined ? {} : { endpoint }),
     ...(concurrency === undefined ? {} : { concurrency }),
+    ...(think === undefined ? {} : { think }),
+    ...(abortAfter === undefined ? {} : { abortAfter }),
+    ...(cache === undefined ? {} : { cache }),
+    ...(maxCalls === undefined ? {} : { maxCalls }),
+    ...(sample === undefined ? {} : { sample }),
   };
 }
 
@@ -1095,7 +1569,7 @@ export interface JudgeResolved {
  * reads it as "the key is wrong". A local endpoint with no key is not a case this table serves, and
  * saying so is better than a row that pretends.
  */
-export function resolveJudge(env: Record<string, string | undefined>, name?: string): JudgeResolved {
+export function resolveJudge(env: Record<string, string | undefined>, name?: string, thinking?: boolean): JudgeResolved {
   const chosen = name ?? env.JUDGE_ENDPOINT ?? 'zhipu';
   const row = JUDGE_ENDPOINTS.find((endpoint) => endpoint.name === chosen);
   if (row === undefined) {
@@ -1124,6 +1598,15 @@ export function resolveJudge(env: Record<string, string | undefined>, name?: str
       vision: true,
       maxOutputTokens: row.maxOutputTokens,
       answerBudgetCeiling: row.answerBudgetCeiling,
+      // The vendor documents `thinking: {type: 'enabled' | 'disabled'}` for the GLM-4.5 family and
+      // above, so the transport can carry the field — which is all this declaration means. Whether a
+      // model *serves* it is a different fact and a measured one: the same page lists `glm-4.5v` as
+      // **forced thinking**, so a run that asks that model for `disabled` gets an answer from the same
+      // decoder. Declaring the switch here without that distinction is how run 44234111191 spent
+      // ¥1.31 on 178 figures and produced a report claiming a mode it never obtained; the guard for
+      // it is the reasoning share in `assertJudgeReport`, and the model that does serve the choice is
+      // `glm-4.6v` (listed as deciding for itself, and priced at half of 4.5V).
+      thinkingSwitch: true,
     },
     // A 429 on row 700 of 1,286 is a row that lost its grade, not an arm that lost its reading —
     // and this endpoint's key is the one whose quota this repository has already exhausted once.
@@ -1134,7 +1617,7 @@ export function resolveJudge(env: Record<string, string | undefined>, name?: str
   });
   return {
     provider,
-    grader: { endpoint: row.name, model },
+    grader: { endpoint: row.name, model, ...(thinking === undefined ? {} : { thinking }) },
     temperature: row.temperature,
     baseUrl,
     imageDialect: row.imageDialect,
@@ -1164,13 +1647,17 @@ function gradeWith(options: JudgeEntryOptions, args: JudgeArgs): JudgeResolved {
   if (injected !== undefined) {
     return {
       provider: injected,
-      grader: { endpoint: injected.id, model: injected.model },
+      grader: {
+        endpoint: injected.id,
+        model: injected.model,
+        ...(args.think === undefined ? {} : { thinking: args.think }),
+      },
       temperature: options.temperature === undefined ? 0 : options.temperature,
       baseUrl: '',
       imageDialect: 'data-url',
     };
   }
-  return resolveJudge(options.env ?? process.env, args.endpoint);
+  return resolveJudge(options.env ?? process.env, args.endpoint, args.think);
 }
 
 /**
@@ -1181,12 +1668,18 @@ function gradeWith(options: JudgeEntryOptions, args: JudgeArgs): JudgeResolved {
  * colour is an endpoint that cannot see, and the repair is another model. Reporting the first as the
  * second is how a 429 becomes "your vision model is blind".
  */
-function probeRefusal(probe: ProbeReading): string | undefined {
+function probeRefusal(probe: ProbeReading, think?: boolean): string | undefined {
   if (!probe.asked) {
     return `the endpoint never answered (${probe.answer}): that is a quota, a key scope or a url, not a verdict on what it can see`;
   }
   if (!probe.seen) {
     return `the endpoint did not see the probe image (it answered "${probe.answer}"), so it cannot grade a chart`;
+  }
+  // Asked after the two above, because a blind endpoint is blind in every mode and its blindness is
+  // the fact that explains the run. A mode the adapter dropped is the opposite: the endpoint is fine,
+  // the deployment cannot be asked the question, and the repair is a line in the capability table.
+  if (think !== undefined && probe.omitted?.includes('thinking') === true) {
+    return `the ${think ? 'on' : 'off'} decode mode was dropped before the request was sent: this deployment does not declare a thinking switch, so the run would grade with the model's default and report a mode it never obtained`;
   }
   return undefined;
 }
@@ -1199,9 +1692,13 @@ function describeGrader(resolved: JudgeResolved): string {
   // reading lost two rows of eight to a 60-second default, and "how long may one call take" is the
   // first thing a reader of a timed-out row needs to know.
   const timeout = resolved.timeoutMs === undefined ? 'provider default' : `${String(resolved.timeoutMs / 1000)}s`;
+  // The mode rides on this line for the same reason the temperature does: two readings of the same
+  // figures taken in two decode modes are two instruments, and a log that did not say which one was
+  // used would let a cheaper reading be compared with an expensive one.
+  const thinking = resolved.grader.thinking === undefined ? '' : `, thinking ${resolved.grader.thinking ? 'on' : 'off'}`;
   return (
     `text2vis: grading with ${resolved.grader.model} (${resolved.grader.endpoint})${where}, ` +
-    `images ${resolved.imageDialect}, temperature ${temperature}, timeout ${timeout}`
+    `images ${resolved.imageDialect}, temperature ${temperature}, timeout ${timeout}${thinking}`
   );
 }
 
@@ -1220,8 +1717,8 @@ export async function entryJudge(
     // endpoint can see. `--probe-only` exists so that a dispatch can spend that one call on its own,
     // which is the difference between learning in a minute that a base url or an image spelling is
     // wrong and learning it after 1,286 figures have been drawn.
-    const probe = await probeVision(resolved.provider, resolved.temperature);
-    const refusal = probeRefusal(probe);
+    const probe = await probeVision(resolved.provider, resolved.temperature, resolved.grader.thinking);
+    const refusal = probeRefusal(probe, resolved.grader.thinking);
     if (args.probeOnly) {
       log(
         refusal === undefined
@@ -1253,15 +1750,39 @@ export async function entryJudge(
         `judge: the render artifact counted ${String(render.rendered)} charts and this corpus produces ${String(jobs.length)}: they are not the same row set`,
       );
     }
-    const selected = args.limit === undefined ? jobs : jobs.slice(0, args.limit);
-    log(`text2vis: ${String(selected.length)} of ${String(jobs.length)} charts selected for grading (${String(render.rendered)} rendered)`);
-    const verdicts = await judgeJobsWith(selected, {
+    const capped = args.limit === undefined ? jobs : jobs.slice(0, args.limit);
+    // The stride is computed once and applied to the *capped* list, so `--sample 200` and
+    // `--limit 400 --sample 200` mean the same first two hundred rows and not two different ones.
+    const stride = args.sample === undefined ? 1 : Math.max(1, Math.ceil(capped.length / args.sample));
+    const selected = stride === 1 ? capped : capped.filter((_, index) => index % stride === 0);
+    log(
+      `text2vis: ${String(selected.length)} of ${String(jobs.length)} charts selected for grading (${String(render.rendered)} rendered)` +
+        (stride === 1 ? '' : `, every ${String(stride)}th row`),
+    );
+    const directory = cacheDirectoryOf(args.cache);
+    const cache = directory === undefined ? undefined : openCache(directory);
+    if (cache !== undefined) log(`text2vis: keeping answers in ${directory} (${String(cache.size())} on file; --no-cache to spend a call on every row)`);
+    const run = await judgeJobsWith(selected, {
       provider: metered.provider,
       temperature: resolved.temperature,
       ...(args.concurrency === undefined ? {} : { concurrency: args.concurrency }),
+      ...(args.think === undefined ? {} : { think: args.think }),
+      ...(args.abortAfter === undefined ? {} : { abortAfter: args.abortAfter }),
+      ...(args.maxCalls === undefined ? {} : { maxCalls: args.maxCalls }),
+      ...(cache === undefined ? {} : { cache }),
       ...(options.readImage === undefined ? {} : { readImage: options.readImage }),
     });
-    const report = summarizeJudge(inputs.length, jobs.length, jobs, skipped, verdicts, metered.calls(), probe, resolved.grader);
+    const report = summarizeJudge(
+      inputs.length,
+      jobs.length,
+      jobs,
+      skipped,
+      run.verdicts,
+      metered.calls(),
+      probe,
+      resolved.grader,
+      run.aborted,
+    );
     assertJudgeReport(report);
     if (args.json) log(JSON.stringify(report, null, 2));
     else for (const line of describeJudge(report)) log(line);
@@ -1273,7 +1794,7 @@ export async function entryJudge(
       await rename(`${args.artifact}.part`, args.artifact);
       log(`text2vis: wrote ${args.artifact}`);
     }
-    return report.failed === 0 ? 0 : 1;
+    return gradingExitCode(report);
   } catch (error) {
     log(`text2vis: ${error instanceof Error ? error.message : String(error)}`);
     return 1;

@@ -97,7 +97,9 @@
     "bench:text2vis:profile": "tsx eval/text2vis/profile.ts",
     "bench:text2vis:census": "tsx eval/text2vis/census.ts",
     "bench:text2vis:render": "tsx eval/text2vis/render.ts",
-    "bench:text2vis:judge": "tsx eval/text2vis/judge.ts"
+    "bench:text2vis:judge": "tsx eval/text2vis/judge.ts",
+    "bench:text2vis:ablate": "tsx eval/text2vis/ablate.ts",
+    "bench:bill": "tsx eval/bill.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

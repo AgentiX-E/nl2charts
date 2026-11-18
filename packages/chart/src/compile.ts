@@ -267,6 +267,30 @@ export function compileToECharts(ir: ChartIR): EChartsOption {
   if (CARTESIAN.has(ir.mark)) {
     option.xAxis = axis(x);
     option.yAxis = axis(yRefs[0] ?? theta);
+    const seriesField = series?.field;
+    if (seriesField !== undefined && (ir.mark === 'bar' || ir.mark === 'line')) {
+      // One series per group the channel names, each with its own rows. The flat alternative — one
+      // series over every row, named after the *column* — was what this branch did, and on a melted
+      // wide table it draws one line that walks back and forth through the periods and a legend that
+      // names the column instead of the entity. `dataset` stays for the readers that use it; a series
+      // that states its own `data` ignores it, and `encode` then indexes that data (0 = label, 1 =
+      // measure) rather than the dataset's column names.
+      const labelField = (x as Ref).field;
+      const measureField = (yRefs[0] as Ref).field;
+      option.series = distinctValues(ir, seriesField).map((group) => ({
+        type: ir.mark,
+        name: group,
+        encode: { x: 0, y: 1 },
+        data: ir.data
+          .filter((row) => String(row[seriesField]) === group)
+          .map((row) => [row[labelField], toNumber(row[measureField])]),
+      }));
+      // Without a legend the series are drawn in colours nothing names, which is the picture this
+      // branch exists to stop being ambiguous. `scroll` because twelve entities in one row do not fit
+      // a 480-pixel canvas, and the alternative is a legend that names the first five.
+      option.legend = { type: 'scroll', bottom: 0 };
+      return option;
+    }
     const base: Record<string, unknown> = {
       type: ir.mark,
       encode: { x: x?.field, y: yRefs.map((ref) => ref.field) },

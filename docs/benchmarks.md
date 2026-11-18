@@ -15448,3 +15448,546 @@ therefore reported `5,340 passed | 33 skipped` beside a claim that every package
 dimensions. The claim was false for that run: `packages/node` measured 83.74% of statements, against
 99.62% with the servers up. `pnpm db:probe` names the missing server and the files its absence
 removes; `pnpm db:up` starts it and waits for the port. Both are in `gate:all` and in CI.
+
+## The guard that had never been called, and the row it was counting wrong
+
+`2.90` is the midpoint of two populations, so the report publishes the eleven counts behind it rather
+than the mean alone: `correctness 0-10:` followed by eleven integers, and the same for `readability`.
+A reader who sees eleven numbers has seen the shape, and nothing in this file chose a threshold for
+them.
+
+The row has to account for every graded figure, so the first version carried a remainder —
+`histogram.decimals`, "rows scored off the whole numbers, kept out of both rows" — and the assertion
+that the buckets plus that remainder equal `judged` was written against the correctness row alone.
+Neither had a caller. CI's eval-coverage ratchet said so on the next push:
+
+```
+FAILED: eval/text2vis/judge.ts lines fell from 100.00% to 99.39%
+FAILED: eval/text2vis/judge.ts branches fell from 99.41% to 98.19%
+```
+
+Four guards shipped with no test: the histogram check, two of the six branches of `classifyFailure`,
+and the `completion === 0` division. Writing the test found the defect the guard was written for:
+
+> A row scored **`correctness 8, readability 7.5`** is inside the correctness row and outside the
+> readability row. One remainder for both is false about the row that kept it, and silent about the
+> row that lost one.
+
+So the remainder is now per dimension and rides on its own row:
+
+```
+  correctness 0-10: 0 0 0 0 0 0 0 0 1 0 0
+  readability 0-10: 0 0 0 0 0 0 0 0 0 0 0 (+1 off the whole numbers)
+```
+
+and `assertJudgeReport` loops both dimensions instead of the one it happened to name. Two further
+things fell out of the exercise. An out-of-range integer (`11`, which `parseJudge` refuses and only a
+hand-built report can carry) is counted as off-grid rather than written into a twelfth slot — the row
+documents eleven, and the mean still keeps the score while the report refuses it on the scale. And the
+buckets are now tallied in a `Map` and materialised into eleven counts, because the dense array needed
+`counts[value] ?? 0` for an index the guard had just bounded: a branch no score can reach, coverable
+only by lying to the test.
+
+The measurement is back to **100.00 / 100.00 / 100.00 / 100.00** over 108 tests, and the lesson is the
+one this repository keeps relearning in different clothes: **a guard with no caller is a sentence, not
+a check — the coverage ratchet is what turns it back into one.**
+
+
+## The figures the grader could see and could not read
+
+`chart_correctness 2.90` and `readability 5.12` are two different questions, and the rows where they
+disagree are the only population that isolates layout from modelling: **67 of the 1,275 graded rows
+were scored 7 or better on the mark and 4 or worse on the figure**. Four of them, read as images:
+
+| row | verdict | what the figure does |
+| --- | --- | --- |
+| 195 | 9 / 2 | forty year labels at `2021 2022 2023 …` overlapping into one string; the question is which year began a run of declines |
+| 161 | 9 / 4 | a `1e6` offset badge floating above the axes, colliding with a four-line title, while the y axis reads `2.15 … 2.55` |
+| 99 | 9 / 2 | the y axis titled `America / Latin America / Western America / …`, taller than the axes and clipped; six boxes with ticks `0..5` |
+| 34 | 7 / 2 | four unlabelled arcs whose labels are the values, and one slice labelled `nan` |
+
+Six rules came out of four images, and one of them is a rule the first version of the batch got
+wrong:
+
+- **A bar prints its value**, because a height measured against an axis is an estimate — and **only
+  while the values have room**, because forty of them are not a label but a band. The first build
+  printed every one, re-rendered, and row 195 came back with `143465 143654 143541 …` in an unbroken
+  line above the plot: the tick smear, moved from the axis onto the data by the rule that fixed the
+  axis. Twelve is where six digits still fit in 704 pixels.
+- **The y axis is written in the table's numbers** (`ticklabel_format(style="plain")`). `2.55` plus a
+  `1e6` badge is two readings, and the badge sits where the title is.
+- **A category axis announces at most twenty labels**, every `step`-th one upright beyond that. Every
+  bar stays: the shape of the distribution survives, only the announcements are thinned.
+- **`tight_layout()`**, because a five-line question plus rotated labels does not fit matplotlib's
+  default rectangle, and matplotlib clips rather than complains.
+- **A pie prints the share**, because comparing two arcs is not reading a number.
+- **A tuple axis is titled with its column names only while the title fits on one line** (30
+  characters). `min / q1 / median / q3 / max` is a title; five region names joined by slashes is a
+  schema dump that matplotlib cannot wrap, so it grew taller than the box it belonged to.
+
+Re-rendered over the whole corpus: **1,286 figures, 0 failures**, PNG total 62.5 -> 65.5 MiB, p50
+latency 116.5 -> 141.5 ms per figure. The six rules cost **902 B gzip** and each returns its source
+byte-identical for a figure it does not apply to, which is what keeps the previous reading a
+comparable reading rather than a sentence about a renderer that no longer exists.
+
+### What was deliberately left broken
+
+A `nan` slice label (row 34) is *the data* — the corpus's label column holds the string `nan` — and
+naming it something else would be this compiler inventing a category. Boxplot ticks `0..5` are the
+honest statement that the IR has no category channel for those rows: the five columns are region
+names, so there is nothing to put on x. Both are recorded here rather than silently fixed by a rule
+that would then apply to rows where the assumption is false.
+
+## Two rules, taken from a confusion matrix rather than from a picture
+
+The chart judge prices a figure it can see. The corpus also carries what the authors called each
+chart, and that label needs no model to read — so the first thing to measure after the layout batch
+was not a score but a table: **1,470 rows carry a family**. Before the two rules below, **530** of
+them were answered with that family (**36.05%**); after them, **579 (39.39%)**, and `declined` fell
+**167 -> 39**. A refused table cannot hit a family, so a fix to a refusal is also a fix to the
+counter — +49 rows, +3.34pp, from a rule that never looks at a label.
+
+| family | rows | answered as that family | the rest |
+| --- | --- | --- | --- |
+| bar | 420 | 246 | pie 66, line 23, boxplot 6, scatter 6, heatmap 2, funnel 1, **declined 70** |
+| line | 394 | 180 | bar 97, pie 36, boxplot 21, scatter 17, **declined 40** |
+| pie | 182 | 71 | bar 86, scatter 4, **declined 19** |
+| area | 138 | — | line 69 (the widening that says an area is a line filled), bar 44, pie 14 |
+| scatter | 104 | 21 | bar 38, line 22, **declined 12** |
+| boxplot | 90 | 5 | bar 47, line 22, **declined 9** |
+| histogram | 90 | — | bar 52 (the cue-conditional widening), **declined 11** |
+| heatmap | 20 | 2 | bar 8, scatter 5, line 4 |
+
+Two things in that table are not modelling errors, they are defects:
+
+1. **205 tables produced no chart at all** (14% of the corpus). Every mark refused every one of them,
+   and the refusal reasons were identical across all ten rules — which is the signature of a table
+   with no measure rather than of a table no mark fits.
+2. **287 of the 503 questions that rank something** were drawn in the order the result set carried
+   them.
+
+### The two-row table with no measure
+
+`inferType` asks whether a number column repeats inside a small range, because a low-cardinality
+number column is a scale (`1..5` is a Likert row) and not a measurement. The predicate is
+`unique <= max(2, ceil(n / 2))`, and with **two rows it is `2 <= 2`** — true for every pair of
+different values. A table two rows wide therefore had no measure, and a table with no measure is a
+table all ten admission rules refuse.
+
+145 of the 1,985 tables are exactly that shape. `Oman` and `Samoa` against seven year columns;
+`Finland` and `Spain` against one indicator whose name is a paragraph. The pair is now read by what
+its numbers look like rather than by the size of the table: `[1999, 2000]` stays a category (it is
+the pair the calendar guard already refuses to call a timeline) and `[1, 2]` stays an encoding, while
+`[183.8809395, 40.72624401]` is a measurement. The rule is one predicate, it changes nothing for any
+table with three or more rows, and it changed **145 rows from `declined` to a chart**: bar 64, pie
+49, line 17, boxplot 9, scatter 4. Two heatmaps became bars, because a measure took the place of one
+of their two category axes — the only two rows this rule costs.
+
+### The order a ranking question owed
+
+A bar chart answering `Top products by revenue` is a question about an order, and the order of a
+result set is the order the query returned its rows. **287 of 503** ranked questions came back with
+their bars shuffled: the reader has to find the tallest bar themselves, which is the one thing the
+mark exists to save them.
+
+`rankingDirection(question)` reads which end the sentence asked about, by the **earliest** ranking
+word in it, so a question naming both ends is ordered by the one it asked first; `orderedAlong`
+learned a direction to match. The rule fires only on a `nominal` axis: a year is not a contest, and
+sorting a time axis by its measure is the shuffle the line rule already refuses. After the change
+**0 of 503** are out of order on a nominal axis, and 84 stay in query order on an ordered axis **by
+design** — they are the rows where the axis carries its own order.
+
+### What this costs the earlier readings
+
+These two rules change which figures exist and what order their rows are in, so the three judge
+readings taken before them are **not comparable** to the ones after: the denominator moved from
+1,286 to 1,414 figures. They are kept as history, and the next reading is the first one taken on the
+corpus as it now stands. That is the price of fixing a defect rather than of tuning one, and the
+alternative — leaving fourteen percent of tables unanswered to keep a number comparable — would be a
+reading about the instrument instead of about the product.
+
+### Still refused, with the reason recorded
+
+- **44 wide tables** (`Entity` × seven year columns) now have measures but no long form: the correct
+  chart is a line over 2008–2014 with one series per entity, and the IR has no `series` channel a
+  wide table can fill without a fold this compiler refuses to invent. Recorded, not guessed.
+- **16 rows whose `tableData` is a Python literal** (`date_strings = [ ... ] Closing prices = [ ... ]`)
+  parse to zero rows. The corpus ships them, `parseResultSet` cannot read them, and a parser for a
+  transport that appears in 0.8% of the rows is a change to the dataset reader rather than to the
+  chart compiler. Priced at 16 rows and left for the reader's own decision.
+
+### Two more readings of the same rule, from the paths it did not reach
+
+The ranking rule above was written for the path that draws a table with a measure. Two other paths
+were measured afterwards, and both were wrong in the same direction.
+
+**The counted path.** A table with no measure is drawn from its row counts, and `countsOf` ranked
+those counts largest-first because that path predates the rule. **35 of the corpus's 113 counted
+tables** are asked a ranking question, and one asks for the smallest — `What is the smallest number
+of countries that together contain …` came back largest first. `countsOf` takes the direction now.
+
+**The word list.** The direction was first read through `readCues`, on the argument that the cue
+table is the one place that already knows a sentence ranks something. It is not the same question:
+the cue table decides **which chart is drawn** and is deliberately narrow, because every word in it
+pays three points to a mark, while a sort loses nothing and can be wider. `fewest` is the reading
+that separated them — it is a ranking word the cue table does not carry, so `Which products have the
+fewest orders?` answered `undefined` and the counted path stayed largest-first. The direction now has
+its own two word lists; **702 charts are ordered by a ranking word, 140 of them on words the cue
+table does not name**.
+
+Both tables stay, and the reason is the same one this file has used throughout: a rule that changes
+what is drawn has to be narrower than a rule that changes only an order, because the first is a claim
+about the data and the second is a claim about reading it.
+
+### A refusal is also a miss, and the counter said so first
+
+The corpus half of this reading counts a row as a hit only when the leading mark carries the labelled
+family. A row the recommender **refuses** cannot hit anything, so the 145 tables that had no measure
+were not a separate defect sitting beside the score — they were 145 rows of it. Measured after the
+rule: **top-1 530 -> 579 (+3.34pp), shortlist 623 -> 676, declined 167 -> 39**, against floors of
+`always line 26.60%` and `always bar 24.29%`. Forty-nine of the recovered rows hit their family
+exactly; the other ninety-six reached the shortlist or were counted against a family no shipped mark
+covers (area, violin, radar).
+
+That is the cheapest reading this repository has ever bought: no model, no database, no renderer —
+one CSV, one predicate.
+
+## What the six rules were worth: 5.21 -> 6.05, and 3.40 -> 6.51 on pies
+
+Run `44096943698` (`5c8942be`, `glm-4.5v`, concurrency 6) is the first reading taken after the layout
+batch, on the same 1,286 figures and the same prompt:
+
+| | third reading | fourth reading | |
+| --- | --- | --- | --- |
+| `chart_correctness` | 2.89 | **3.04** | +0.15 |
+| `readability` | 5.21 | **6.05** | **+0.84** |
+| judged | 1,284 / 1,286 | 1,284 / 1,286 | 2 refusals, same two rows |
+| truncated / 429 | 0 / 0 | 0 / 0 | the cap and the concurrency held |
+
+Per mark, readability: **pie 3.40 -> 6.51**, funnel 6.50 -> 7.17, scatter 6.46 -> 6.94, bar 6.24 ->
+6.65, line 4.45 -> 4.90, heatmap 2.27 -> 2.73, boxplot 2.17 -> 2.29, candlestick 9.00 -> 9.00. The
+pie move is the single largest this instrument has recorded, and it belongs to one rule with a label
+on it: `autopct="%1.1f%%"`. A reader comparing four arcs is estimating; a reader comparing `37.5%` to
+`22.1%` is reading.
+
+### The finding inside the correctness number
+
+`chart_correctness` moved as well — **2.01 -> 2.69 on pies, 2.63 -> 2.97 on scatter, no mark changed
+on either**. That is not noise, and it is not the layout batch improving the choosing: the grader's
+judgement of *whether this figure answers the question* is not independent of whether the figure
+states its numbers. A bar with its values printed and a bar without them are the same mark, and the
+same question, and the grader reads them differently.
+
+Two consequences, both of which change how this instrument has to be used:
+
+1. **A layout change has to be read on both means.** The one it was aimed at moves for the reason
+   expected; the other moves too, and calling that movement a modelling gain would be attributing to
+   the recommender what the labels did.
+2. **The ablation that isolates a mark from its labels has to vary one of them.** The next reading
+   (denominator 1,414) changes the corpus *and* the colour of the ordering rule, so it cannot answer
+   this; the clean experiment is the same figures with the six rules reverted, which is a dispatch
+   this repository will take only when a decision depends on it, because it costs the same 1,286
+   vision calls as any other reading.
+
+### The shape behind the two means
+
+`chart_correctness` 0-10: `249 308 349 53 37 17 16 12 23 61 159` — **70.6% of rows at 0-2, 12.4% at
+10**. `readability` 0-10: `4 20 119 130 143 133 115 125 195 242 58`, median bucket 5-6, and the low
+population that made the earlier mean a midpoint of two groups is gone.
+
+Tokens, all 1,284 rows reporting usage: prompt 1,063,617, completion 1,294,167, of which **reasoning
+1,272,338 = 98.3%**. The prompt side fell by 5,168 tokens against the previous run and the completion
+side rose by 25,085 — the figures got busier, and the deliberation inside the same 4,096 cap grew
+with them. Neither is a cost this repository can now cut without changing what is being measured:
+the only remaining lever is the pixel size of the image, and that lever moves the reading itself, so
+it needs an A/B rather than a default change.
+
+## The fifth reading: 3.05 and 6.05 over 1,414, and a floor that did not move
+
+Run `44116541584` on `11968f73`, `glm-4.5v`, one call per row: **1,414 figures rendered, 1,411
+judged**, three rows ungraded — two questions the provider's content policy would not look at, one
+call dead at its 180-second deadline. `chart_correctness 3.05`, `readability 6.05`.
+
+Per mark, judged / correctness / readability: bar 697/698, 3.13, 6.66 · line 341/341, 3.38, 4.80 ·
+pie 248/250, 2.66, 6.68 · scatter 66/66, 2.74, 6.47 · boxplot 43/43, 1.65, 2.40 · heatmap 9/9, 1.11,
+2.56 · funnel 6/6, 5.17, 7.67 · candlestick 1/1, 10.00, 9.00.
+
+**This is not a delta against the fourth reading.** That one was over 1,286 figures; this one is over
+1,414, because the pair rule admitted 128 tables that had no figure before it. The difference between
+3.04 and 3.05 is two numbers about two populations, and the only thing it licenses is the sentence it
+supports: *the 128 new figures score at the corpus average rather than above it*, which is what a rule
+that stops refusing tables should do, and is not evidence of a better picture. The floor therefore
+stays where the fourth reading put it — 3.04 and 6.05. A reading that ties the last one has not
+earned a new floor, and a floor raised on a tie is a floor that records arithmetic rather than a
+result.
+
+`declined` held at 39 and `refused` at 17 (all seventeen a gauge, which states a value against a
+scale this contract does not carry), so the pair rule's own effect is inside the denominator rather
+than beside it. The ordering rule cannot be read out of either mean at all: it changed what the
+figures look like without changing how many exist.
+
+### An exit code that was red on every reading
+
+Five consecutive runs of this workflow concluded `failure` while publishing usable means. The cause
+was one line — `return report.failed === 0 ? 0 : 1` — and what it counted included the two failures
+this repository cannot repair: a provider that answers 400 with a content policy has declined to look
+at a picture, and no retry, cap or parser changes that.
+
+The cost of that line was not the red badge. It was that the workflow's *shape* assertion — the step
+that re-reads the artifact and refuses a reading whose arithmetic stopped adding up — had to be given
+`if: always()` to run at all, which is a check that has been quietly detached from the job it checks.
+
+`gradingExitCode` now separates the two facts:
+
+| kind | whose | exit |
+| --- | --- | --- |
+| `truncated`, `unreadable`, `invalid-response` | this repository's cap, prompt, parser | **1**, however few rows |
+| `refused`, `unavailable`, `call-failed` | the provider's policy, its network, its deadline | 0 while at most one chart in twenty goes unmeasured |
+
+The one-in-twenty budget is a declaration, not a discovery (`UNJUDGED_TOLERANCE`), and it is the half
+that keeps "the endpoint was down" from being a free pass: a run that loses a hundred calls is an
+outage whatever its cause, and the artifact's denominator would be its only witness. Nothing about the
+subset is hidden — the log prints `not looked at: 2 of 1,414 charts, because the endpoint declined the
+request`, and every mean continues to travel with the `judged` count it was taken over.
+
+## The series channel, the melt, and 44 tables that had no picture
+
+The contract has carried `encoding.series` since v3.0. Three of the four places that read an encoding
+treated it differently:
+
+| reader | before |
+| --- | --- |
+| `Encoding` (`packages/spec`) | the field exists |
+| `compileToECharts` | grouped the **radar** and **lines** families only; a bar or line with a series was one series named after the *column* |
+| `compileToMatplotlib` | no occurrence of the field at all |
+| `toChartIR` | never produced it |
+
+So a table that is wide in time — one row per entity, one column per period, which is how the corpus
+writes a seven-year series — had no shape the pipeline could hold. The census priced that at **44
+tables** the admission rules could only refuse, because to a profiler seven year columns are seven
+competing measures.
+
+**That count was wrong, and the first reading after the melt says by how much.** The rule job of run
+`44149995497` (commit `27defec5`, zero model calls) reports **111 tables melted**, not 44:
+
+| mark | before | after | |
+| --- | ---: | ---: | --- |
+| bar | 698 | 645 | −53 |
+| line | 341 | 452 | **+111** |
+| pie | 250 | 227 | −23 |
+| scatter | 66 | 64 | −2 |
+| boxplot | 43 | 14 | **−29** |
+| declined | 39 | 35 | −4 |
+| figures | 1,414 | **1,418** | +4 |
+
+The census counted tables that *no admission rule could chart*. The melt's predicate is about the
+**column names being periods**, and 107 of the tables it catches were not refused at all — they were
+being charted as the wrong mark. The sharpest case is the −29 on boxplot: a wide table with five or
+more columns fits a boxplot's tuple shape exactly, so five years were read as `min, q1, median, q3,
+max` — a distribution the table never stated, drawn with the axis of a period it did have.
+
+**On the only labeled metric this is a gain**: top-1 `579 -> 588` (+0.61pp), shortlist `676 -> 686`,
+`declined 39 -> 35`. Both floors moved in the commit that took the reading.
+
+Three changes, and the order matters:
+
+1. **`seriesSource`** in the matplotlib emitter: one `plot` per group with a legend, `None` where a
+   pair is absent (a gap, never a zero), and side-by-side bars on a category axis at `0.8 / groups`
+   width. The flat path is untouched: every figure without the channel compiles byte-identically,
+   which is asserted rather than assumed.
+2. **`compileToECharts`** now groups `bar` and `line` too, one series per group with its own rows and
+   its name, plus a `scroll` legend at the bottom — without it the series are drawn in colours nothing
+   names, which is the ambiguity the branch exists to remove.
+3. **`meltWide`** reads the wide table as the long form it is: at least three period columns, exactly
+   one column that is not a period (the entity), every period name reads as a period, every cell a
+   finite number or absent, every entity once. It emits `Year`/`Period` and `Value` — and a table whose
+   entity column is already called one of those is declined rather than renamed.
+
+The predicate is the part that is not negotiable. A melt that fires on the wrong table rewrites a
+result set into one the query never returned, and nothing downstream can see it: the figure draws,
+the numbers are plausible, and the only witness is a query nobody re-runs. That is why the test suite
+prices eleven near-misses — a text cell under a year header, a nested cell, a repeated entity, a
+period column with no number in it, a first column that is itself a year — as refusals.
+
+**What it costs**: `chart` 31,428 -> 33,851 B gzip (+2,423), ceiling 34,500. **What it does not cost
+yet**: any reading. The 1,414 figures in the fifth reading were drawn without the channel, so no
+published number moved; the sixth reading is the one that prices it, and its evidence is a count
+rather than a mean — `declined` should fall by however many of the 39 were wide tables, and the
+`line` row of `byMark` should grow by the same number.
+
+### The one cost lever left in the judge, and the A/B that will decide it
+
+The fifth reading's bill is mostly deliberation: **1,272,338 of 1,294,167 completion tokens (98.3%)
+were reasoning**, spent before the model wrote `{"chart_correctness": n, "readability": n}`. Nothing
+in the prompt asks for it, and nothing in the two scores is a chain of thought — so the question is
+whether it buys anything at all, and it is answerable by a **paired** run: the same figures, the same
+prompt, the same model, `--think off`.
+
+Three things make that experiment honest:
+
+1. **the mode is in the artifact** (`grader.thinking`), so two readings cannot be compared without
+   the difference being stated;
+2. **the sample is the same sample** — a `--limit` run compares rows to rows, not means to means, and
+   the report already publishes `notSelected` so a sample cannot be quoted as the corpus;
+3. **the decision rule is written first**: if `--think off` holds both means within the paired
+   interval on the same rows, it becomes the default and every later reading costs a tenth; if it
+   loses, the reasoning is a measured cost rather than an assumed one.
+
+`--think on` exists for the same reason `off` does: an A/B whose cheap arm is the only reachable one
+is not an A/B.
+
+## The sixth reading: 3.44 and 6.49, and the paired table that says why
+
+The melt was priced in the commit that earned it, and the sixth full reading is the price. Run
+`44150185171` on `27defec5`, `glm-4.5v`, one call per row:
+
+| reading | fifth (`11968f73`) | sixth (`27defec5`) | |
+| --- | ---: | ---: | --- |
+| figures graded | 1,411 of 1,414 | 1,416 of 1,418 | +2 |
+| `chart_correctness` | 3.05 | **3.44** | +0.39 |
+| `readability` | 6.05 | **6.49** | +0.44 |
+| calls | 1,414 | 1,418 | 1.000 per row |
+| refusals | 2 | 2 (rows 1006, 1007) | content policy, counted not scored |
+
+Two rows were refused at the prompt: `400 系统检测到输入或生成内容可能包含不安全或敏感内容`. That is a fact
+about the question, not about the figure, so they are counted and not scored, and
+`gradingExitCode` reads them as not-this-repository's to repair.
+
+**Two means are not a delta.** The directories differ by four figures and 140 rows changed mark, so the
+reading is taken as a **paired difference on the 1,411 rows both readings graded** — same corpus row,
+graded twice, one difference per row — by a tool that is now part of the repository rather than a
+transcript of one afternoon:
+
+```console
+$ pnpm bench:text2vis:ablate --before fifth/text2vis-judge.json --after sixth/text2vis-judge.json
+text2vis: 1411 rows graded in both readings, 0 only in the first, 5 only in the second
+  kept:bar: 644 rows, correctness 3.13 → 3.06 (-0.078 ± 0.085), readability 6.71 → 6.69 (-0.025 ± 0.124)
+  kept:line: 308 rows, correctness 3.67 → 3.69 (+0.019 ± 0.148), readability 5.00 → 5.01 (+0.006 ± 0.168)
+  kept:pie: 225 rows, correctness 2.80 → 2.91 (+0.111 ± 0.165), readability 6.68 → 6.61 (-0.067 ± 0.219)
+  melted: 140 rows, correctness 1.78 → 5.91 (+4.129 ± 0.934), readability 4.61 → 9.19 (+4.586 ± 0.512)
+  kept:scatter: 64 rows, correctness 2.80 → 2.72 (-0.078 ± 0.206), readability 6.61 → 6.53 (-0.078 ± 0.366)
+  kept:boxplot: 14 rows, correctness 3.00 → 3.07 (+0.071 ± 0.382), readability 2.14 → 2.50 (+0.357 ± 0.487)
+  kept:heatmap: 9 rows, correctness 1.11 → 0.67 (-0.444 ± 0.662), readability 2.56 → 2.22 (-0.333 ± 0.327)
+  kept:funnel: 6 rows, correctness 5.17 → 6.00 (+0.833 ± 1.854), readability 7.67 → 7.50 (-0.167 ± 1.178)
+  kept:candlestick: 1 rows, correctness 10.00 → 10.00 (+0.000), readability 9.00 → 9.00 (+0.000)
+  7 control group(s) that did not change kept their means: the instrument did not drift, so the groups that changed are the change
+  no interval: kept:candlestick (1 row), because a single row has no variance to estimate
+```
+
+**Read the control groups first.** Every group whose figure did not change held its mean: 644 bar rows
+at −0.08, 308 line rows at +0.02, 225 pie rows at +0.11, and four smaller groups inside intervals that
+include zero. That is the sentence that licenses the rest — the judge did not drift, the renderer did
+not drift, so the group that moved is the change and not the instrument. A control group that moved
+would have been printed *before* the table, and the round would have stopped there.
+
+The moved group is exactly the rows the melt re-drew — 140 of them, at **+4.13 correctness and +4.59
+readability**, and the arithmetic closes: `140 × 4.13 / 1,411 = 0.41` of the 0.39 the two means moved.
+
+### What the paired design bought
+
+A mean-over-means comparison would have needed the two denominators to be equal, and they are not: the
+melt turned 4 declined tables into figures. It would also have needed the two *populations* to be the
+same, and they are not: 140 rows are drawn differently. The pairing is what survives both — it compares
+a row to itself, so a row that only exists in one reading is counted (`5 only in the second`) instead
+of being averaged into a population nobody can name.
+
+The interval is the paired one, `1.96 · SE` of the per-row differences and not of the two means,
+because the rows are the unit and they are the same rows.
+
+### The arm that measured nothing, and the two defects that cost it
+
+The `--think off` arm was dispatched as `44155803661` over the same figures. It graded 244 rows and
+then the account ran out:
+
+```
+  FAILED row 248: llm returned 429: 余额不足或无可用资源包,请充值。
+  ... 1,174 more, identical, over 35 minutes
+  chart_correctness 2.58/10, readability 5.91/10
+```
+
+**1,174 calls, thirty-five minutes, and a mean in the log that no reader could tell from a reading.**
+The run is void: no number about thinking is registered, in this file or in `baseline.json`. Two
+defects came out of it, and both are fixed in the commit after it:
+
+1. **A run of failures is an endpoint, not a row.** `judgeJobsWith` now stops after `PATIENCE = 8`
+   consecutive calls without a reply, reports `{streak, attempted, reason}` in the artifact, and the
+   log prints one line — `stopped: 8 calls in a row without a reply; 8 of 1418 charts were attempted
+   and 1410 were never asked about` — instead of 1,174. `--abort-after <n>` overrides the patience for
+   a rehearsal that would rather be cheap than complete.
+2. **A stopped run is not a reading, whatever it measured.** `gradingExitCode` is red on `aborted`,
+   and so is the workflow's shape check. A percentage could not do this job: 1,174 of 1,418 was over
+   the one-in-twenty tolerance by accident, and a stop at row 1,400 would have been inside it.
+
+The fifth reading's bill is why the arm exists at all: **1,272,338 of 1,294,167 completion tokens
+(98.3%) were reasoning**. That number stands; whether the reasoning buys anything does not, and the
+A/B that would answer it needs an account with a balance. The two arms are otherwise ready — the mode
+is in the artifact (`grader.thinking`), the sample is the same sample, and the decision rule is
+written in this file.
+
+### Where the reading leaves the marks
+
+| mark | rows | correctness | readability | |
+| --- | ---: | ---: | ---: | --- |
+| bar | 645 | 3.06 | 6.69 | the biggest bucket, unchanged by the melt |
+| line | 452 | **4.36** | 6.34 | the melt's destination: 312 kept, 111 arrived (107 re-marked, 4 that had been declined), 29 already lines |
+| pie | 225 | 2.91 | 6.61 | |
+| scatter | 64 | 2.72 | 6.53 | |
+| boxplot | 14 | 3.07 | **2.50** | 43 → 14: the melt took the tables that were never distributions |
+| heatmap | 9 | **0.67** | **2.22** | the worst bucket on both axes, and the next target |
+| funnel | 6 | 6.00 | 7.50 | |
+| candlestick | 1 | 10.00 | 9.00 | |
+
+The 29 are worth naming: they are wide tables that *were* drawn as `line` before the melt — one line
+that walked back and forth through the periods — so their mark never changed and only their shape
+did. A mark that is right for the wrong shape is not a hit, and they are in the `melted` group
+because the reshape is the change they are evidence about; the group's 1.78 before-mean is what those
+29 and the 111 arrived lines average together.
+
+### The ninth figure of the heatmap bucket: a shape that passes and a table that cannot mean it
+
+The sixth reading's worst bucket is heatmap, 9 rows at `0.67 / 2.22`. Reading their IRs offline (no
+model calls) splits them in two:
+
+- **rows 355, 358** are 3-column tables with a quantitative measure — a **legitimate** heatmap shape —
+  whose corpus row has four fields under three headers, so the columns are shifted and the `y` axis
+  holds prose (`"cafes and restaurants"`). The figure is a correct heatmap of a broken table.
+- **rows 329, 574** are 2-column tables whose only numeric column typed `ordinal` on cardinality
+  (`5 <= max(2, ceil(11/2))`), so `shapeOf` found no measure, `countMeasure` supplied one, and
+  `dims = [category, that numeric column]` + one measure satisfied the heatmap rule exactly. The
+  generated source is a cross-tab of a value against its own row, every cell `1`:
+
+  ```
+  ys = [54, 51, 4, 2, 1]                    # five title counts became the y axis
+  cells = {("Rangers FC", 54): 1, ...}      # every cell counts one row
+  ```
+
+  0.67 is not a harsh judge; the figure has no information.
+
+Not fixed in this round, and the reason is arithmetic: the direct fix (a heatmap may not take its
+colour from a synthesized `count`) refuses rows 329 and 574, whose labels are **Donut** and
+**Scatter** — top-1 unchanged, figures 1,418 → 1,416, `declined` +2, and the render floor would have
+to move **down**. The upstream question is worth more than the patch: should a counted table be
+allowed a heatmap at all, and should a numeric column with few distinct values be read as a dimension
+rather than as a measure? Both candidates get priced on the offline `profile` instrument before a
+reading is spent on them.
+
+## What a reading costs, which is now on the reading
+
+Every number above was published in *calls*, and a call is not money. The sixth reading is 1,418
+calls and **¥10.68**: 1,171,852 prompt tokens at ¥2 per million and 1,390,180 completion tokens at
+¥6, of which 1,366,108 were deliberation. Read off the artifact rather than off a dashboard:
+
+```console
+$ pnpm bench:bill eval/out/text2vis-judge.json
+bill: 1 line(s), 1416 rows
+  spent: 1416 rows, 1,171,852 prompt + 1,390,180 completion (1,366,108 reasoning) = ¥10.68 at glm-4.5v list price (2026-11-18)
+  total: ¥10.68
+```
+
+The week's ledger, and the reason it looked the way it did, is in **[cost.md](./cost.md)**: twelve
+judge readings, forty automatic BIRD runs on push, twenty-one dispatched ones and forty live-arm
+runs came to about ¥570, of which the judge — the chain that got all of the attention — was ¥63. The
+round that followed put a content-addressed store in front of the judge (`eval/text2vis/judge-cache.ts`)
+so a reading costs the rows that changed rather than the corpus, moved the paid half of the BIRD
+chain to dispatch, and put `bill`, `cached` and `saved` on the artifact so that the next reading
+cannot be published without saying what it cost.

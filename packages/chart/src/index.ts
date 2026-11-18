@@ -7,6 +7,8 @@ export type { LintIssue, LintRule, Severity } from './lint.js';
 export { compileToECharts } from './compile.js';
 export type { EChartsOption } from './compile.js';
 export { compileToMatplotlib, TICK_CROWD, TICK_LENGTH, TICK_ROTATION, TICK_UPRIGHT, TITLE_WIDTH, tickTilt, wrappedTitle } from './matplotlib.js';
+export { meltWide } from './melt.js';
+export type { WideTable } from './melt.js';
 export { supportOf } from './support.js';
 export type { SupportVerdict } from './support.js';
 export { MARKS, describeMark } from './marks.js';

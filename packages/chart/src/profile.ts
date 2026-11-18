@@ -78,6 +78,44 @@ export function isCalendarRun(values: readonly unknown[]): boolean {
   return years.every((year, index) => index === 0 || Math.abs(year - (years[index - 1] as number)) === 1);
 }
 
+/**
+ * Whether a column of numbers is exactly one pair of different values.
+ *
+ * Two values, not two rows: a three-row column holding `1, null, 2` reaches the rule with a present
+ * count of two, and the rule it breaks is about how many values there are, not how many rows.
+ *
+ * The cardinality rule below asks "does this number column repeat inside a small range", and with two
+ * values `unique <= max(2, ceil(n / 2))` is `2 <= 2` — true for every pair of different values. That
+ * made the question unanswerable rather than answered: such a table had no measure at all.
+ * 145 of the Text2Vis corpus's tables are exactly that shape, `Oman` and `Samoa` against seven year
+ * columns, and every measure in them typed `ordinal`, so all ten admission rules refused the table
+ * and the product drew nothing. A pair is therefore decided by what its numbers look like, below.
+ */
+function isPair(present: readonly unknown[]): boolean {
+  return present.length === 2 && new Set(present).size === 2;
+}
+
+/** The largest whole number still read as a scale — a Likert row, a 1-10 rating, a decile. */
+const SCALE_CEILING = 20;
+
+/**
+ * Whether a pair's numbers look like a two-point scale or two years, rather than two measurements.
+ *
+ * `[1999, 2000]` is the pair the calendar guard already refuses to call a timeline, and calling it a
+ * measure would put a measurement on the axis of a two-bar chart of years. `[1, 2]` is an encoding
+ * before it is a measurement. `[183.88, 40.72]` is neither: it is a measurement, and it is the
+ * reading that says so — 145 tables of the corpus stopped being refused when this predicate was
+ * written.
+ */
+function looksLikeScale(present: readonly unknown[]): boolean {
+  return present.every(
+    (value) =>
+      typeof value === 'number' &&
+      Number.isInteger(value) &&
+      (Math.abs(value) <= SCALE_CEILING || (value >= 1900 && value <= 2100)),
+  );
+}
+
 export function inferType(values: readonly unknown[]): FieldType {
   const present = values.filter((value) => value !== null && value !== undefined);
   if (present.length === 0) return 'nominal';
@@ -86,9 +124,8 @@ export function inferType(values: readonly unknown[]): FieldType {
     // as three categories of a measure otherwise, and the axis the table carries is thrown away.
     if (isCalendarRun(values)) return 'temporal';
     const unique = new Set(present).size;
-    return present.length > 1 && unique <= Math.max(2, Math.ceil(present.length * 0.5)) && unique <= 20
-      ? 'ordinal'
-      : 'quantitative';
+    const low = present.length > 1 && unique <= Math.max(2, Math.ceil(present.length * 0.5)) && unique <= 20;
+    return low && (!isPair(present) || looksLikeScale(present)) ? 'ordinal' : 'quantitative';
   }
   if (present.every((value) => typeof value === 'string' && (ISO_DATE.test(value) || PERIOD.test(value)))) {
     return 'temporal';

@@ -45,6 +45,18 @@ on:
         required: true
         default: 'https://open.bigmodel.cn/api/paas/v4'
         type: string
+      think:
+        # The one cost lever left in this instrument: 98.3% of the fifth reading's completion tokens
+        # were deliberation before two integers. `default` sends nothing and is what every published
+        # number was taken with; `off` is the cheap arm of a paired A/B on the same figures.
+        description: 'Decode mode: default leaves it to the endpoint, on/off asks'
+        required: true
+        default: 'default'
+        type: choice
+        options:
+          - default
+          - 'off'
+          - 'on'
       limit:
         description: 'Grade only the first N figures (0 grades every one)'
         required: true
@@ -57,6 +69,23 @@ on:
         description: 'Calls in flight at once (measured: 49 s per call, so 1 would take 17 h)'
         required: true
         default: '6'
+        type: string
+      sample:
+        # A stride, not a prefix: `limit` takes the first N rows of a corpus ordered by index, and two
+        # arms of an experiment drawn from a prefix are paired within one population. `sample` takes
+        # every k-th row, so the same number is the same rows on every machine and in every arm.
+        description: 'Grade every k-th row so that at most N are graded (0 grades them all)'
+        required: true
+        default: '0'
+        type: string
+      max_calls:
+        # The belt beside `abortAfter`. `abortAfter` learns that the endpoint has stopped answering;
+        # this one is a budget chosen before the run, for a dispatch that would rather stop than
+        # discover a misconfiguration on row 1,400. Reaching it is a red run: `limit` is how a sample
+        # is declared, and a sample publishes its unselected rows in advance.
+        description: 'Stop after N calls (0 means no ceiling)'
+        required: true
+        default: '0'
         type: string
 
 permissions:
@@ -116,6 +145,29 @@ jobs:
       - name: Draw every chart, and keep the pictures
         run: pnpm bench:text2vis:render --artifact eval/out/text2vis-render.json --keep
 
+      # The eleven readings before this round each re-graded every figure, including the ~1,280 whose
+      # bytes and question had not changed since the reading before — twelve full readings in two days.
+      # The store below turns a reading into a reading of the rows that changed.
+      #
+      # The key names *the figures*, not the run. A PNG is a function of the code that draws it, the
+      # corpus it is drawn from, and the renderer's version, and all three are in the key; the artifact
+      # is deliberately not, because it carries latency and byte counts that differ between two runs
+      # over identical pictures. `restore-keys` then restores the most recent store — safe, because an
+      # entry is only ever returned for a byte-identical picture with an identical prompt, mode and
+      # model, so an over-broad restore can produce hits and never a wrong one.
+      - name: Name the figures this run will grade
+        id: figures
+        run: echo "digest=$(sha256sum eval/.cache/text2vis/*.csv 2>/dev/null | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      - name: Keep the answers already paid for
+        uses: actions/cache@v4
+        with:
+          path: eval/.cache/judge
+          key: text2vis-judge-${{ steps.figures.outputs.digest }}-${{ hashFiles('packages/chart/src/**', 'eval/text2vis/render.ts', 'eval/text2vis/profile.ts', 'eval/text2vis/rule.ts', 'eval/text2vis/dataset.ts', 'eval/text2vis/judge-cache.ts', '.github/workflows/text2vis-judge.yml') }}
+          restore-keys: |
+            text2vis-judge-${{ steps.figures.outputs.digest }}-
+            text2vis-judge-
+
       # No separate preflight step: the judge spends its first call asking the endpoint to name the
       # colour of a red image, and refuses the run when the answer did not see one. That check lives in
       # the instrument rather than in this file because it is not a property of the workflow — a run
@@ -126,17 +178,30 @@ jobs:
 
       - name: Grade the figures
         run: |
+          # The mode is appended rather than always passed: `--think default` is not a mode, and a
+          # flag that has to be spelled differently from every other one is a flag a dispatch gets
+          # wrong. Empty means the endpoint decides, which is what every earlier reading did.
+          THINK=""
+          if [ "${{ inputs.think }}" != "default" ]; then THINK="--think ${{ inputs.think }}"; fi
+          SAMPLE=""
+          if [ "${{ inputs.sample }}" != "0" ]; then SAMPLE="--sample ${{ inputs.sample }}"; fi
+          CAP=""
+          if [ "${{ inputs.max_calls }}" != "0" ]; then CAP="--max-calls ${{ inputs.max_calls }}"; fi
           if [ "${{ inputs.limit }}" = "0" ]; then
-            pnpm bench:text2vis:judge --render eval/out/text2vis-render.json --png eval/.cache/text2vis/png --artifact eval/out/text2vis-judge.json --concurrency "${{ inputs.concurrency }}"
+            pnpm bench:text2vis:judge --render eval/out/text2vis-render.json --png eval/.cache/text2vis/png --artifact eval/out/text2vis-judge.json --concurrency "${{ inputs.concurrency }}" $SAMPLE $CAP $THINK
           else
-            pnpm bench:text2vis:judge --render eval/out/text2vis-render.json --png eval/.cache/text2vis/png --artifact eval/out/text2vis-judge.json --limit "${{ inputs.limit }}" --concurrency "${{ inputs.concurrency }}"
+            pnpm bench:text2vis:judge --render eval/out/text2vis-render.json --png eval/.cache/text2vis/png --artifact eval/out/text2vis-judge.json --limit "${{ inputs.limit }}" --concurrency "${{ inputs.concurrency }}" $SAMPLE $CAP $THINK
           fi
 
       # The floor this reading was registered under: one call per attempted row, every row in exactly
       # one partition, both means on the 0-10 scale. The means themselves are printed and not compared
       # — nothing is recorded to regress against yet, and this step is what will make the next round
       # able to register them.
+      # `always()`, because the day this assertion matters is the day the grading step exited non-zero:
+      # run 44027154427 wrote a complete report and lost the two columns of its own shape check to the
+      # two refusals above it, so the artifact was published and never held to its arithmetic.
       - name: Hold the grading to its shape
+        if: always()
         run: node tools/check-text2vis-baseline.mjs --require --require-judge
 
       - name: Upload the reading
@@ -170,7 +235,17 @@ jobs:
                 '| failed / unselected / skipped | ' + report.failed + ' / ' + report.notSelected + ' / ' + report.skipped + ' |',
                 '| why they failed | ' + (report.failed === 0 ? '—' : Object.entries(report.failedByKind).filter(([, rows]) => rows > 0).map(([kind, rows]) => rows + ' ' + kind).join(', ')) + ' |',
                 '| calls | ' + report.calls + ' (' + report.callsPerRow.toFixed(3) + ' per judged row) |',
+                // The two rows this round exists for. A reading that re-published yesterday's opinion
+                // of most of the corpus and a reading that looked at every figure are the same two
+                // means, and the difference between them is this line.
+                '| answered from the store | ' + (report.cached === undefined ? 0 : report.cached) + ' of ' + report.judged + ' judged rows |',
+                '| bill | ' + (report.bill === undefined || report.bill.yuan === null
+                  ? 'no price on file for ' + report.grader.model + ', so the tokens above are the only figure'
+                  : '¥' + report.bill.yuan.toFixed(3) + (report.bill.savedYuan === null || report.bill.savedYuan === 0 ? '' : ', and ¥' + report.bill.savedYuan.toFixed(3) + ' not spent because the answers were already paid for')) + ' |',
                 '| tokens | ' + (report.tokens.reported === 0 ? 'the endpoint reported none' : report.tokens.prompt + ' prompt, ' + report.tokens.completion + ' completion (' + report.tokens.reasoning + ' reasoning), over ' + report.tokens.reported + ' rows |'),
+                // A run that stopped is not a reading, said in the summary where the two means are:
+                // `44155803661` printed 2.58 over 244 of 1,418 rows and nothing on the page said so.
+                ...(report.aborted === undefined ? [] : ['| **stopped** | ' + report.aborted.streak + ' calls in a row without a reply; ' + report.aborted.attempted + ' of ' + report.charts + ' charts attempted, ' + (report.charts - report.aborted.attempted) + ' never asked about — **this is not a reading** |']),
                 '',
                 'Two means, not a pass rate: a grader score is ordinal and has no calibrated threshold.'
               ];

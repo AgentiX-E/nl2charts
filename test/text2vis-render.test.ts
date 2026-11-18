@@ -34,6 +34,14 @@ const matrix = input(
   'region,quarter,revenue\nnorth,q1,1\nnorth,q2,2\nsouth,q1,3\nsouth,q2,4\neast,q1,5\neast,q2,6',
 );
 const single = input('How are we tracking against target?', 'Gauge', 'revenue\n42');
+// One row per country, one column per year: the shape the admission rules can only refuse, and the
+// shape the melt answers. It has to reach a figure now, or this reading reports the product declining
+// a table the product draws.
+const wide = input(
+  'How has the population changed?',
+  'Line Chart',
+  'country,2019,2020,2021\nOman,1203,1180,1164\nSamoa,200,210,219',
+);
 const nameless = input('Which products are there?', 'Bar Chart', 'product,region\nalpha,north');
 const unreadable = input('Top products by revenue', 'Bar Chart', '');
 
@@ -55,6 +63,14 @@ describe('turning corpus rows into the charts a worker can draw', () => {
     const { jobs } = chartJobs([matrix]);
     expect(jobs[0]?.mark).toBe('heatmap');
     expect(jobs[0]?.code).toContain('plt.imshow(');
+  });
+
+  it('draws a table that is wide in time as one line per entity, instead of declining it', () => {
+    const { jobs, refusals } = chartJobs([wide]);
+    expect(refusals).toEqual([]);
+    expect(jobs[0]?.mark).toBe('line');
+    expect(jobs[0]?.code).toContain('plt.plot(positions, s0, marker="o", label="Oman")');
+    expect(jobs[0]?.code).toContain('label="Samoa"');
   });
 
   it('keeps "the product answered no chart" apart from "the compiler refused the answer"', () => {

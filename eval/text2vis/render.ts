@@ -32,6 +32,7 @@ import { compileToMatplotlib, recommendChart, toChartIR, type RecommendableMark 
 import type { ChartIR } from '@agentix-e/nl2charts-spec';
 import { Nl2ChartsError } from '@agentix-e/nl2charts-spec';
 import { applyExitCode, isEntry, loadText2Vis, type LoadOptions } from './dataset.js';
+import { meltWide } from '@agentix-e/nl2charts-chart';
 import { parseResultSet, profileInputs, profilesOf, typedRows, type ProfileInput } from './profile.js';
 import { familyOfLabel, percentiles } from './rule.js';
 
@@ -77,7 +78,14 @@ function codeOf(error: unknown): string {
   return error instanceof Nl2ChartsError ? error.code : 'internal';
 }
 
-function messageOf(error: unknown): string {
+/**
+ * The sentence an error carries, or the value's own spelling.
+ *
+ * Exported because three instruments in this directory print the reason a row failed, and the one
+ * defect worth not repeating is a log line that reads `Error: Error: ...` because each caller wrote
+ * its own extractor.
+ */
+export function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
@@ -96,16 +104,24 @@ export function chartJobs(rows: readonly ProfileInput[]): ChartJobs {
   rows.forEach((row, index) => {
     const id = String(index);
     const set = parseResultSet(row.tableData);
-    const profiles = profilesOf(set);
-    if (profiles.length === 0) {
-      refusals.push({ id, mark: 'declined', code: 'profile:none', reason: 'the table would not profile' });
-      return;
-    }
-    const choice = recommendChart(row.prompt, profiles, { rows: set.rows.length });
-    const top = choice.recommendations[0];
-    if (top === undefined) {
-      refusals.push({ id, mark: 'declined', code: 'profile:refused', reason: 'every admission rule refused the table' });
-      return;
+    // Read once, because both the melt and `toChartIR` need the typed cells and a second call is a
+    // second answer to the same question.
+    const typed = typedRows(set);
+    // A table that is wide in time is answered by the reshape before any column is profiled. Without
+    // this check the recommender would refuse it — its period columns are competing measures to every
+    // admission rule — and the reading would report the product declining a table it now draws, which
+    // is a number about this harness rather than about the product.
+    if (meltWide(typed, set.columns) === undefined) {
+      const profiles = profilesOf(set);
+      if (profiles.length === 0) {
+        refusals.push({ id, mark: 'declined', code: 'profile:none', reason: 'the table would not profile' });
+        return;
+      }
+      const choice = recommendChart(row.prompt, profiles, { rows: set.rows.length });
+      if (choice.recommendations[0] === undefined) {
+        refusals.push({ id, mark: 'declined', code: 'profile:refused', reason: 'every admission rule refused the table' });
+        return;
+      }
     }
     // `toChartIR` is not wrapped: every way it throws needs a result set `profilesOf` would have
     // answered with no columns, or a recommendation this function has just read — so a catch here
@@ -113,11 +129,15 @@ export function chartJobs(rows: readonly ProfileInput[]): ChartJobs {
     // it. An exception from it is a defect in the product and belongs in the reading as a failure.
     // `set.columns` because the table's order is what the query selected, and a record's key order
     // is not: a year column named `2016` enumerates first and became the category axis of 389 rows.
-    const ir: ChartIR = toChartIR(row.prompt, typedRows(set), { columns: set.columns });
+    const ir: ChartIR = toChartIR(row.prompt, typed, { columns: set.columns });
     try {
-      jobs.push({ id, mark: top.mark, code: compileToMatplotlib(ir) });
+      // The mark the figure was drawn as, not the one the recommender ranked first: for a melted
+      // table they are two different facts, and the report is a table about figures.
+      // `ir.mark` is one of the marks `toChartIR` can answer with, all of which are recommendable;
+      // the contract's type is wider than the pipeline's because a hand-written IR may name any mark.
+      jobs.push({ id, mark: ir.mark as RecommendableMark, code: compileToMatplotlib(ir) });
     } catch (error) {
-      refusals.push({ id, mark: top.mark, code: codeOf(error), reason: messageOf(error) });
+      refusals.push({ id, mark: ir.mark as RecommendableMark, code: codeOf(error), reason: messageOf(error) });
     }
   });
   return { jobs, refusals };
