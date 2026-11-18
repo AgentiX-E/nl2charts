@@ -555,7 +555,18 @@ export function describeArm(report: ArmReport): readonly string[] {
 export interface ArmSettings {
   readonly provider: LlmProvider;
   readonly scale: Scale;
+  /** The rows this arm asks about and scores. */
   readonly rows: readonly ProfileInput[];
+  /**
+   * Every label the corpus carries, when that is more than `rows` does.
+   *
+   * The option list is the *question*, and a question that shrank with the sample would make `--limit`
+   * a second variable: the smoke run's first twenty rows name two families, so an option list built
+   * from them offered two charts, and twelve of the twenty answers named a chart that was not on the
+   * list and were counted as unreadable. A sample may decide how many rows are asked; it may not
+   * decide what the model is allowed to say.
+   */
+  readonly vocabulary?: readonly { readonly label: string }[];
   readonly cache?: ContentStore<StoredRow>;
   readonly concurrency: number;
   readonly log?: (line: string) => void;
@@ -585,7 +596,9 @@ async function pool<T, R>(items: readonly T[], limit: number, worker: (item: T) 
  */
 export async function runArm(settings: ArmSettings): Promise<{ readonly report: ArmReport; readonly outcomes: readonly ModelOutcome[] }> {
   const options =
-    settings.scale === 'mark' ? markOptions() : labelOptions(settings.rows.map((row) => ({ label: row.label })));
+    settings.scale === 'mark'
+      ? markOptions()
+      : labelOptions(settings.vocabulary ?? settings.rows.map((row) => ({ label: row.label })));
   const metered = withCallCounter(settings.provider);
   const cache = settings.cache;
   const before = { hits: cache?.hits ?? 0, misses: cache?.misses ?? 0, corrupt: cache?.corrupt ?? 0 };
@@ -795,6 +808,8 @@ export async function entryLlm(
           provider,
           scale,
           rows,
+          // The whole corpus, not the sample: the option list is the question.
+          vocabulary: all.map((row) => ({ label: row.label })),
           concurrency,
           ...(cache === undefined ? {} : { cache }),
           log,

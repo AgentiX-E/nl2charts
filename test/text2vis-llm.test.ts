@@ -530,6 +530,72 @@ describe('the arm, end to end', () => {
   });
 });
 
+describe('a sample may decide how many rows are asked, not what may be answered', () => {
+  it('builds the label vocabulary from the whole corpus while asking only the sampled rows', async () => {
+    // The smoke run's first twenty rows name two families, and an option list built from them offered
+    // two charts: twelve of twenty answers named a chart that was not on the list and were counted as
+    // unreadable. The list is the question, and a question that shrinks with the sample makes `--limit`
+    // a second variable in a comparison.
+    const asked: string[] = [];
+    const provider: LlmProvider = {
+      id: 'p',
+      model: 'deepseek-chat',
+      complete: async (request) => {
+        asked.push(request.messages[0]?.content ?? '');
+        const question = request.messages[1]?.content ?? '';
+        // The sampled line row is answered with a family the *sample* does not name, which is the
+        // answer the shrunken list used to reject; the bar row is answered correctly.
+        const text = question.includes('changed over time') ? 'Pie Chart' : 'Bar Chart';
+        return { text, model: 'deepseek-chat', finishReason: 'stop' };
+      },
+    };
+    const corpus = [
+      row('How has revenue changed over time?', 'Line Chart', QUARTERLY),
+      row('Compare revenue by region', 'Bar Chart', REGIONS),
+      row('What share does each region hold?', 'Pie Chart', REGIONS),
+    ];
+    const { report } = await runArm({
+      provider,
+      scale: 'label',
+      rows: corpus.slice(0, 2),
+      vocabulary: corpus,
+      concurrency: 2,
+    });
+    // Three families offered, two rows asked: the pie answer on the line row is a readable miss, not
+    // an unreadable reply, and the bar answer is the one exact match.
+    expect(asked[0]).toContain('Pie Chart');
+    expect(asked[0]).toContain('Line Chart');
+    expect(asked[0]).toContain('Bar Chart');
+    if (report.scale !== 'label') throw new Error('unreachable');
+    expect(report.requested).toBe(2);
+    expect(report.unparsed).toBe(0);
+    expect(report.answered).toBe(2);
+    expect(report.exact).toBe(1);
+  });
+
+  it('offers only the rows it was given when the caller names no vocabulary', async () => {
+    // The fallback, and the reason it is a fallback rather than the default: a caller that holds one
+    // row can only describe that row's family. `entryLlm` is what supplies the corpus, so this path is
+    // reached by a programmatic arm and must still be a list rather than an empty prompt.
+    const asked: string[] = [];
+    const provider: LlmProvider = {
+      id: 'p',
+      model: 'deepseek-chat',
+      complete: async (request) => {
+        asked.push(request.messages[0]?.content ?? '');
+        return { text: 'Bar Chart', model: 'deepseek-chat', finishReason: 'stop' };
+      },
+    };
+    const rows = [row('Compare revenue by region', 'Bar Chart', REGIONS)];
+    const { report } = await runArm({ provider, scale: 'label', rows, concurrency: 1 });
+    // One option, because one family is all this caller knows about; the gloss separator counts them.
+    expect(asked[0]?.split('\n').filter((line) => line.includes(' — '))).toHaveLength(1);
+    expect(asked[0]).toContain('Bar Chart');
+    if (report.scale !== 'label') throw new Error('unreachable');
+    expect(report.exact).toBe(1);
+  });
+});
+
 describe('an arm on a model that thinks aloud', () => {
   it('sends no output cap at all, because a cap sized for one word truncates the deliberation', async () => {
     const seen: LlmRequest[] = [];
