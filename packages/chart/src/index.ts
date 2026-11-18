@@ -1,4 +1,4 @@
-export { distinctValues, inferType, isCalendarRun, profileRows, refFor } from './profile.js';
+export { distinctValues, inferType, isCalendarColumn, profileRows, refFor } from './profile.js';
 export type { FieldProfile } from './profile.js';
 export { enumerateCandidates } from './candidates.js';
 export type { Candidate } from './candidates.js';

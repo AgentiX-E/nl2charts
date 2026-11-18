@@ -384,6 +384,25 @@ describe('the reading', () => {
     expect(line.match(/pie /g)?.length).toBe(1);
   });
 
+  it('compares the two readings on the covering test they share, not on one each', () => {
+    // An area question over a year column. The cue table names the line, and a line covers `area`
+    // because an area chart is that line filled — so the cue reading counts this row a hit. This
+    // report's `top1` is stricter and counts it a miss, which is correct for a published top-1 and
+    // wrong for a delta: subtracting the two reads `area -58` on the real corpus, a difference
+    // between two predicates printed as a difference between two instruments, and it made the area
+    // family look like the worst result of the profile half for two rounds. The delta is taken on
+    // the covering test the two share, so this row is a difference of zero and the line is silent.
+    const years = 'Year, Revenue\n2019, 10\n2020, 14\n2021, 18\n2022, 26\n2023, 31';
+    const inputs = [row('How has revenue changed over time?', 'Area Chart', years)];
+    const report = scoreProfile(inputs);
+    const cue = scoreRule(inputs);
+    // The two readings disagree about the row and agree about the family.
+    expect(cue.top1).toBe(1);
+    expect(report.top1).toBe(0);
+    expect(report.shortlist).toBe(1);
+    expect(describeProfile(report, cue).join('\n')).not.toContain('delta by family');
+  });
+
   it('prints a family the result set made worse with a minus', () => {
     // The delta line signs both directions, because the reading is not a sales document: a cue that
     // names the trend and a profile that then names a bar is a family this half *lost*, and a line

@@ -46,13 +46,14 @@ on:
         # The one input that decides how the rest of them are read. `iteration` is a delta on the
         # cheap instrument; `floor` is a candidate for the published number and may only be taken on
         # the instrument `eval/text2vis/baseline.json` records.
-        description: 'What this reading is for: a delta (iteration) or the published floor'
+        description: 'What this reading is for: a delta (iteration), the published floor, or the instrument floor (control)'
         required: true
         default: 'iteration'
         type: choice
         options:
           - iteration
           - floor
+          - control
       secret_name:
         description: 'The secret holding a vision endpoint key (DEEPSEEK_API_KEY is text-only)'
         required: true
@@ -125,8 +126,53 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # One call, no corpus, no renderer: what this instrument charges for a figure that is not a chart.
+  #
+  # It is a job of its own rather than a mode of the reading because it shares nothing with a reading
+  # but the endpoint: no denominator, no figures, no cache worth restoring. A `control` dispatch is
+  # the cheapest question this evaluation can ask — and it is the one that decides whether two
+  # instruments' means may be compared at all, since a grader that scores a card of four squares at
+  # 3/6 has added three and six to every figure it ever looked at.
+  control:
+    name: what this instrument scores a figure that is not a chart
+    if: inputs.purpose == 'control'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      LLM_API_KEY: ${{ secrets[inputs.secret_name] }}
+      LLM_MODEL: ${{ inputs.model }}
+      LLM_BASE_URL: ${{ inputs.base_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Price the floor
+        run: |
+          THINK=""
+          if [ "${{ inputs.think }}" != "default" ]; then THINK="--think ${{ inputs.think }}"; fi
+          pnpm bench:text2vis:control $THINK | tee control.txt
+      - name: Publish the floor
+        if: always()
+        run: |
+          {
+            echo "### The control card, graded by $LLM_MODEL"
+            echo ''
+            echo '```'
+            cat control.txt 2>/dev/null || echo 'no reading'
+            echo '```'
+            echo ''
+            echo 'A card of four coloured squares has no title, no axis, no tick, no measure and no mark,'
+            echo 'so correctness 0 and readability 0 are the only correct answers. Every point above zero is'
+            echo 'a point this instrument also adds to a chart, and a mean it reports has to be reduced by it.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
   judge:
     name: what the figures are worth, one call each
+    if: inputs.purpose != 'control'
     runs-on: ubuntu-latest
     # 1,286 graded figures, one call each, eight in flight. The number is a budget and not a
     # measurement, but it is now arithmetic rather than a guess: the rehearsal measured **49 seconds

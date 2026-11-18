@@ -98,6 +98,7 @@
     "bench:text2vis:census": "tsx eval/text2vis/census.ts",
     "bench:text2vis:render": "tsx eval/text2vis/render.ts",
     "bench:text2vis:judge": "tsx eval/text2vis/judge.ts",
+    "bench:text2vis:control": "tsx eval/text2vis/judge.ts --control-only",
     "bench:text2vis:ablate": "tsx eval/text2vis/ablate.ts",
     "bench:bill": "tsx eval/bill.ts"
   },

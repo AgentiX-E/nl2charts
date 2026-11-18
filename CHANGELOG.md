@@ -6,7 +6,42 @@ cannot be argued with.
 
 ## Unreleased
 
+### Added
+- **The chart half's first external competitor reading, and the subtraction it makes possible.**
+  Every number this repository publishes about the chart half has been a score against a corpus
+  label, which means no reader could tell whether 41.22% was strong or merely alone. `flint-chart`
+  1.1.1 (MIT, `microsoft/flint-chart`) is the deterministic recommendation layer inside
+  Data Formulator, and `tools/flint-probe.ts` reads it on the same rows. **Measured: 309 top-1
+  (21.11%) for Flint against 606 (41.39%) for this repository, on the 1,464 rows both can read.**
+  The signature is the finding: `recommendChartTypes(data, semanticTypes, options)` has no parameter
+  a question could be passed in, so the pair differs by exactly one input — the question — and the
+  20.28pp between them is that input's price. That reframes the next round: a model reading the
+  question has ~20pp to win, not ~60pp. Not added as a dependency, on three readings in order of
+  weight: it would replace a 41.39% component with a 21.11% one, it pulls 91 packages and 163 MB
+  into a package that depends on `spec` alone, and it answers a different question than the
+  component it would replace. The probe lives outside `eval/` because it cannot be covered without
+  the package installed, and a competitor's number is a fact to record rather than a test to pay
+  for on every push.
+
 ### Changed
+- **A year column with holes in it is a year column, and a scale is a column that steps by one.**
+  Two typing rules, shipped together because each one alone is a wash. The calendar rule required a
+  *contiguous* block of years and each row one year from the one above it, on the argument that a gap
+  makes a year column indistinguishable from a price column that happens to be large — an argument
+  that was never priced. A survey fielded every two years (`2002, 2004, 2006, 2008, 2010`) is a time
+  axis with holes in it, and refusing it dropped the axis, refused every line and bar drawn over the
+  table, and answered `scatter` from the measures that survived. Dropping that clause alone reads
+  **+10 rows against −3** on the 1,470 scored rows, and none of the three it loses is a price column.
+  The ordinal rule asked only whether a number column *repeated* inside a small range, and a
+  cardinality is not a scale: with eight rows and four values `unique <= ceil(n / 2)` holds for any
+  four-value column, so a survey's percentages per wave (`10, 12, 9, 14`) were read as an axis while
+  the measure they carried disappeared — which is how a two-measure scatter was answered `heatmap`
+  and a heatmap answered `scatter`. A scale steps by one, and the pair case that used to need its own
+  predicate (`isPair` + `looksLikeScale`, deleted) falls out of it: `[1999, 2000]` is a scale,
+  `[183.88, 40.72]` is a measurement. `isCalendarRun` is renamed `isCalendarColumn`, because the run
+  is exactly what it no longer requires. **Measured: 606 top-1 (41.22%) against 588, shortlist 710
+  against 686, on 27 rows gained and 9 lost — a paired comparison on the same rows, sign test
+  p = 0.004.** Line 58.82% → 63.17%, scatter 23.66% → 27.96%, bar 57.42% → 55.46%.
 - **The grading workflow defaults to the cheap instrument, and a floor reading can no longer be
   taken on it.** The round that priced the grader measured a full point of correctness between
   `glm-4.5v` and `glm-4.6v` on the same 178 figures (`−0.949 ± 0.358`), so the two are two rulers and
@@ -22,6 +57,24 @@ cannot be argued with.
   the same model with the switch off costs a third of the same model deliberating.
 
 ### Added
+- **A control card: what an instrument scores a figure that is not a chart, for one call.**
+  Three vision graders were priced on the same 177 rows and the *cheapest* read highest —
+  `glm-4.5v` 2.34/5.64, `glm-4.6v@off` 2.34/5.64, `glm-4.6v-flashx@off` 4.51/6.83, monotonically —
+  and a mean over charts cannot say whether that is a lenient reader or a different one, because
+  neither reader has a zero. `--control-only` supplies the zero: it sends the four-quadrant card
+  through the run's own rubric (`JUDGE_SYSTEM`) and a corpus-shaped question, so a card with no
+  title, no axis, no tick, no measure and no mark must be scored `0/0`, and every point above zero is
+  an offset the instrument adds to every figure it ever grades. `eval/text2vis/judge.ts` reports the
+  pair and the sentence that follows from it — *"so 4.50 of every mean it reports is leniency rather
+  than signal"* — or the other sentence, when the card is charged nothing and the means are
+  comparable as they stand. It is the cheapest question this evaluation can ask (one call, no corpus,
+  no renderer) and the one that decides whether two instruments may be compared at all;
+  `text2vis-judge.yml` therefore takes `purpose: control`, which runs a one-minute job of its own
+  rather than a reading with a flag. `CallPurpose` gains `control` so the meter prices it as an
+  instrument call instead of folding it into a case. **Measured, two calls, ¥0.002: `glm-4.6v@off`
+  and `glm-4.6v-flashx@off` both score the card `0/0`.** The cheap instrument's two extra points are
+  therefore not leniency — it does not reward emptiness either — and the gap between the two readers
+  cannot be normalised away by subtracting a floor.
 - **A store for answers already paid for, which turns a reading into a reading of the rows that
   changed.** Twelve full readings were taken in two days and every one of them re-graded all 1,286 or
   1,418 figures, including the ~1,280 whose PNG bytes and question had not moved since the reading
@@ -108,6 +161,15 @@ cannot be argued with.
   shortlist 676 -> 686, declined 39 -> 35, figures 1,414 -> **1,418**, `failed 0`.
 
 ### Fixed
+- **The `delta by family` line compared two different predicates and published the difference as a
+  result.** The cue report counts a hit when the first mark of its leading cue *covers* the family;
+  the profile report counts one only when the mark's **first** family is the label's. Subtracting one
+  from the other printed `area -58` on the corpus — a claim that the result set made the area family
+  worse — and it had been printed for two rounds. It did not: a line covers `area`, the cue table says
+  so, and the strict count will not. The delta is now taken on the covering test the two readings
+  share (`shortlist` here, `top1` there), which reads `area +21`, and `top1` stays strict and
+  published on its own line where a reader can see it move. This changes no score; it stops one line
+  from reporting the shape of a predicate as the shape of a corpus.
 - **`bench:text2vis:ablate` paired two readings that two graders wrote.** A paired interval
   presupposes one ruler read twice, and the measurement above says two graders agree on 28% of rows:
   the ± would have been the width of a distribution no row belongs to. The tool now compares both
@@ -213,6 +275,33 @@ cannot be argued with.
   published reading is arithmetically wrong is the day the step above it exited non-zero.
 
 ### Measured
+- **The two readings of the same corpus disagree on 73 of 1,470 rows, and the census is the one that
+  is wrong.** `profileAnswer` asks the reshape first — a table that is wide in time is drawn as one
+  line per entity by `toChartIR` without consulting an admission rule — and `classify` in the census
+  ranks every table, so on the rows the product melts the census reports a mark the product never
+  chooses (mostly `bar` for a wide table the product draws as a line). A row-by-row comparison puts
+  the gap at **73 rows, 5.0% of the scored population**, and it is the direction that matters: the
+  published `hit` is 606 and the census's is 599, so the diagnostic has been under-reporting the
+  product for as long as the melt has existed. It is recorded rather than repaired here because the
+  repair needs a decision this classifier does not have — which of `hit`, `substituted`, `outranked`
+  and `refused` a reshape belongs to — and a refusal tally that counts a row no admission rule was
+  asked about would be a second wrong number. The doc comment on `classify` states the size.
+- **The heatmap's second axis had to be a label, and three ways of saying so were priced and
+  rejected.** The rule was `dims >= 2`, and `dims` counts a time axis, so `month, region, revenue`
+  was admitted and the product drew a heatmap wherever a period crossed a label. Reading the eleven
+  figures it drew as heatmaps against their own labels found four matrices, and the rest mostly a
+  numeric column that repeated and was typed `ordinal` — a measure standing where a label should be.
+  Three repairs were measured on the 1,470 scored rows before one was written down: a heatmap whose
+  two axes must be labels (top-1 **588 → 588**: a row-by-row dump of the variant against the tree
+  showed not one answer moved, and no heatmap winner in the corpus carries a period — one run of the
+  same variant printed 590, and every reproduction since reads 588, so that run is recorded as
+  unreproducible rather than as a gain),
+  a tighter `ordinal` — a scale is consecutive integers, not merely few distinct values — (588 →
+  **587**: the scatter family, the weakest at 23.66%, gains eight correct rows and the bar family
+  loses eight, and a net loss is a rejection however good the story), and the two together (587).
+  None shipped. What shipped is the diagnostic: the rejected variants are recorded here, with their
+  numbers, so the next round starts from the measurement instead of from the argument. The tighter
+  `ordinal` is the promising one and it needs the bar half solved in the same change.
 - **The instrument's noise floor, from two runs of the same instrument on the same rows.** Two arms
   were dispatched to price `glm-4.6v-flashx` and left a more useful number behind: `glm-4.6v@off`
   against *itself* on 177 rows agrees on **81.4%**, with a per-row standard deviation of **1.222** and

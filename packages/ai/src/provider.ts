@@ -71,7 +71,16 @@ export type CallPurpose =
    * leaving it unlabelled would make the meter's own "every call names a purpose" check fail
    * on a call that knows exactly what it is for.
    */
-  | 'probe';
+  | 'probe'
+  /**
+   * A fixed figure graded with the run's own rubric, to price the floor of the instrument.
+   *
+   * Distinct from `probe` because the two answer different questions with the same money: `probe`
+   * asks whether the endpoint can see at all, and this asks what it charges for something that is
+   * not a chart. A reading that folded the second into the first would report a floor as a
+   * capability check, and the subtraction a floor is for needs its own row in the meter.
+   */
+  | 'control';
 
 /**
  * The bucket a call lands in when it names no purpose.

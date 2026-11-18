@@ -61,12 +61,19 @@ describe('profiling', () => {
   });
 
   it('reads the run, not the magnitude, so a measure that lives in the same numbers stays a measure', () => {
-    // The guard that makes the widening safe, stated as five ways to fail it. Every one of them is a
-    // column whose values sit in the calendar window and none of them is a timeline: gaps, a fraction,
-    // a repeat, a pair, and a run that starts before the window. A price column of `2019` dollars is
-    // only indistinguishable from a year by its magnitude, and magnitude is exactly what this reads
-    // last.
-    expect(inferType([2018, 2020, 2022])).toBe('quantitative');
+    // The guard that makes the widening safe, stated as four ways to fail it: a fraction, a repeat, a
+    // pair, and a value outside the window. A gap used to be a fifth, on the argument that "a price
+    // column of `2019` dollars is indistinguishable by its magnitude" — and the argument was never
+    // priced, because nothing had run over a gapped year column yet. The corpus does: a survey
+    // conducts its waves every two or three years, so `2002, 2004, 2006, 2010` is a *time axis* with
+    // holes in it, and refusing it dropped the axis, refused every line and bar drawn over it, and
+    // answered `scatter` from two surviving measures. On the 1,470 scored rows the gap clause is worth
+    // **ten rows gained against three lost** on its own, and the three it loses are not price columns
+    // either — they are years the corpus labels a scatter or a boxplot.
+    expect(inferType([2018, 2020, 2022])).toBe('temporal');
+    expect(inferType([2002, 2004, 2006, 2008, 2010])).toBe('temporal');
+    // Descending, and gapped, because a result set orders its years whichever way the query did.
+    expect(inferType([2020, 2017, 2012, 2008])).toBe('temporal');
     expect(inferType([2019, 2019.5, 2020])).toBe('quantitative');
     expect(inferType([2019, 2019, 2020, 2020])).toBe('ordinal');
     expect(inferType([1999, 2000])).toBe('ordinal');
@@ -83,9 +90,31 @@ describe('profiling', () => {
     expect(inferType(['Dec', 'North'])).toBe('nominal');
   });
 
-  it('treats low-cardinality numbers as ordinal', () => {
+  it('treats a run of small integers as a scale, and a set of small integers as a measure', () => {
+    // What "ordinal" is for: a column that repeats a handful of whole numbers is an *axis* the marks
+    // can group by — a Likert row, a rating, a decile. The first rule asked only "does it repeat
+    // inside a small range", which is a question about cardinality, and a cardinality is not a scale:
+    // with eight rows and four values `unique <= ceil(n / 2)` is `4 <= 4`, so `10, 12, 9, 11` counted
+    // as a scale twice over. The corpus is full of that shape — a survey column of percentages per
+    // wave — and every one of them became an axis while the measure it held disappeared, which is how
+    // a two-measure scatter was answered `heatmap` and a bar was answered `scatter`.
+    //
+    // A scale steps by one. That is the property, and it is the only one that separates `1..5` from
+    // `9, 10, 11, 12`, which differ by nothing else.
     expect(inferType([1, 2, 1, 2])).toBe('ordinal');
+    expect(inferType([1, 2, 3, 1, 2, 3, 1, 2])).toBe('ordinal');
+    expect(inferType([0, 2, 1, 2, 0, 1, 2, 0])).toBe('ordinal');
+    expect(inferType([10, 12, 9, 14, 10, 12, 9, 14])).toBe('quantitative');
+    expect(inferType([0, 50, 100, 0, 50, 100])).toBe('quantitative');
+    // The cardinality gate survives the rewrite, and a dense run is why: `1, 2, 3, 4, 5` one per row
+    // is a row index, not a scale — it is what a `SELECT` over an auto-increment key returns. Removing
+    // the gate reads **604** on the corpus against this rule's **606**, so the gate stays and this is
+    // the row that holds it.
+    expect(inferType([1, 2, 3, 4, 5])).toBe('quantitative');
+    expect(inferType([1, 2, 3, 4, 5, 1, 2, 3])).toBe('quantitative');
+    // A scale is capped at a readable number of steps: twenty values is a scale, thirty is a range.
     expect(inferType([1, 2, 3, 4, 5, 6, 7, 8, 9])).toBe('quantitative');
+    expect(inferType([...Array(21).keys()])).toBe('quantitative');
   });
 
   it('reads a pair of measurements as a measure, because two rows have no cardinality', () => {
@@ -102,6 +131,13 @@ describe('profiling', () => {
     expect(inferType([1999, 2000])).toBe('ordinal');
     expect(inferType([1, 2])).toBe('ordinal');
     expect(inferType([2019.5, 2020.5])).toBe('quantitative');
+    // And a pair of adjacent integers that begins at neither zero nor one is two measurements, which
+    // is the one thing "steps by one" cannot decide on its own: every pair of adjacent integers steps
+    // by one. `22, 23` is two sales figures; `1, 2` is a two-point scale. The corpus states both, and
+    // the row that separates them is a two-row table whose only measure was `22, 23` — read as a
+    // scale it left the table with no measure at all and every mark refused it.
+    expect(inferType([22, 23])).toBe('quantitative');
+    expect(inferType([0, 1])).toBe('ordinal');
   });
 
   it('counts distinct values and nulls', () => {

@@ -13982,7 +13982,7 @@ had one.
 
 ### The rule, and the five ways to fail it
 
-`isCalendarRun` reads the shape a timeline has rather than the size of its numbers: every value an
+`isCalendarColumn` (then `isCalendarRun`) reads the shape a timeline has rather than the size of its numbers: every value an
 integer, no value repeated, the distinct values a contiguous block inside 1900–2100, and the rows one year
 apart, ascending or descending. Each condition is a way for a measure to fail it, and the last is what
 makes it a timeline rather than a set — a column of three consecutive years printed out of order is a
@@ -14001,6 +14001,9 @@ The frontier was swept before it shipped, on the same 1,470 rows:
 
 Two things in that table decided the rule. The step-2 case (`2019, 2021, 2023`) buys six rows and costs
 four for a rule three times wider — refused, and recorded here so the next round does not rediscover it.
+*That refusal was re-priced three rounds later and reversed:* on the tree of this round the same widening
+reads ten rows gained against three lost, and the later section below states the measurement. A price is
+a reading of one tree, and a decision taken at +2 is a decision to re-take when the tree moves.
 And the row-order condition, which is the justification the sentence needs, costs **nothing at all** on
 this corpus: no qualifying column is out of order. A guard that is free is still worth keeping when it is
 the difference between reading a timeline and guessing from magnitude.
@@ -16094,7 +16097,160 @@ above two other graders is a *different scale*, not a better eye. So `flashx` is
 iteration: the iteration instrument has to be one whose numbers can be compared with the floor's at
 all, and 37% row agreement is not that.
 
-What would settle it is a **null control** — the probe image, which is not a chart, sent with a real
+What settles it is a **null control** — the probe image, which is not a chart, sent with a real
 question and graded by the same prompt. An instrument that gives a four-colour test card 7/10 is
-measuring its own willingness, not the figure. That is the next round's first call, and it costs one
-call per instrument.
+measuring its own willingness, not the figure.
+
+The control is now a command rather than a plan:
+
+```console
+$ pnpm bench:text2vis:control --think off
+text2vis: <model> answered "<the reply>" and the control card — four coloured squares, no title,
+          no axis, no measure — scored correctness <c>, readability <r>, so <mean> of every mean it
+          reports is leniency rather than signal
+```
+
+One call, no corpus, no renderer, and a workflow job of its own (`purpose: control` in
+`text2vis-judge.yml`). The two sentences it can print are the two decisions it can lead to: a card
+charged nothing means two instruments' means may be compared as they stand, and a card charged
+anything means the comparison is a subtraction, with the amount printed. What it deliberately does
+not claim is that a cheap grader is a good one — a card at `0/0` says a grader does not reward
+emptiness and says nothing about whether it can tell a good chart from a mediocre one. That still
+needs a paired arm, and a paired arm still costs a reading.
+
+**Measured, 2026-11-18, two calls.** Both instruments were asked to grade the card, in the decode
+mode they grade in, with the prompt they grade with:
+
+| instrument | the card | `chart_correctness` | `readability` | what follows |
+| --- | --- | ---: | ---: | --- |
+| `glm-4.6v@off` | four coloured squares | **0** | **0** | charges nothing for a figure that is not a chart |
+| `glm-4.6v-flashx@off` | four coloured squares | **0** | **0** | the same |
+
+So the cheap instrument's two extra points are **not leniency**. It does not reward emptiness any
+more than the expensive one does; it rates *charts* two points higher, which is a disagreement about
+charts and not a constant offset a subtraction could remove. That closes the question the null
+interval opened, and it closes it in the direction that matters: the gap cannot be normalised away,
+so `flashx` stays out of the comparison for a reason that is now measured rather than suspected —
+28% row agreement with `glm-4.5v` and 37% with `glm-4.6v` is two readers, and two readers whose
+floors agree are still two readers.
+
+What the pair also buys is a statement about the instrument itself. A grader that answers `0/0` to
+four squares is discriminating on content rather than answering the question it was asked: the
+prompt said "grade the chart", and a model writing from the prompt alone would have invented a
+bar chart and scored it. Two graders passing that test is the evidence that the 3.44 and the 6.49
+above are readings of pictures.
+
+The cost of knowing it: **¥0.002**, two calls, no corpus, no renderer, ninety seconds of runner
+time. It is the cheapest number in this document and the only one that licenses the others.
+
+## The axis that was not there: a year column with holes, and a scale that stepped by two
+
+The chart reading is 1,470 of the corpus's 1,985 rows — the labels `area`, `histogram` and `violin`
+name a series type this contract does not carry, so they are outside the denominator rather than
+inside the score. Every other row has a result set in front of the recommender, and the recommender
+reads three things off a column: is it a label, an ordered axis, or a measure. Two typing rules
+decided that badly, and both were argued rather than measured.
+
+**A year column with holes in it.** The calendar rule wanted a *contiguous* block of years, each row
+one year from the one above it. The defence was that a gap makes a year column indistinguishable
+from a price column that happens to be large. A survey fielded every two years is not a hypothetical:
+`2002, 2004, 2006, 2008, 2010` is a time axis, and refusing it dropped the axis entirely — every line
+and bar over the table was refused, and the marks that survived were the two-measure ones, so the
+product answered `scatter` about a trend. Dropping the clause is worth **+10 rows gained against −3
+lost**, taken alone on the 1,470 scored rows, and none of the three it loses is a price column.
+
+**A scale that stepped by two.** The ordinal rule asked one question: does this number column repeat
+inside a small range? With eight rows and four distinct values, `unique <= ceil(n / 2)` holds for
+*any* four-value column, so a survey's percentages per wave — `10, 12, 9, 14` — were read as an axis,
+the measure they carried stopped being a measure, and a table that should have been a scatter or a
+bar became a matrix of two "labels". The rule now asks whether the column **steps by one**, which is
+what a scale is: a Likert row, a rating, a decile. `1, 2, 3` is a scale; `9, 10, 12, 14` is a
+measurement.
+
+Taken alone, the second rule is a wash — 588 either way, because the tables it repairs are the tables
+where the first rule had promoted a *year* to an axis, and demoting the year loses what the repair
+gains. Taken together they read:
+
+| reading | top-1 | shortlist | declined |
+| --- | ---: | ---: | ---: |
+| before | 588 (40.00%) | 686 (46.67%) | 35 |
+| after | **606 (41.22%)** | **710 (48.30%)** | 35 |
+
+27 rows gained against 9 lost, paired on the same rows: a sign test gives **p = 0.004**, so this is a
+change and not a shuffle. By family: line 58.82% → **63.17%**, scatter 23.66% → **27.96%**, bar
+57.42% → **55.46%**.
+
+The bar loss is the honest part. Seven rows of "a year crossed with several measures" are now read as
+a line, and the corpus labels them a bar. Six of those tables are the same shape as six the corpus
+labels a line — `Year, Obama, Merkel` at four waves — so the label is a coin flip inside the corpus
+itself, and a rule cannot be tuned against a coin flip. That is the next round's job: find the
+property that separates them, or record that there is none.
+
+### One line that was reporting a predicate as a result
+
+The reading prints a `delta by family` line: what the result set adds over the question alone. It
+subtracted the cue report's per-family hits from this report's per-family hits, and the two reports
+define a hit differently — the cue report counts a row when the first mark of its leading cue
+*covers* the family, this report counts one only when the mark's **first** family is the label's. A
+line covers `area` because an area chart is that line filled, so the cue report scores those rows and
+the strict count does not, and the line printed `area -58` for two rounds: a claim that the result set
+made the area family *worse*. It did not. The delta is now taken on the covering test the two share,
+which reads `area +21`, and the strict top-1 is still published on its own line. No score moved; one
+sentence stopped lying.
+
+### The competitor's deterministic recommender, read on the same rows
+
+The chart half has only ever been scored against a corpus label. It has never been scored against
+another system, so "41.22%" has had no context: a reader cannot tell whether it is good, bad, or
+merely the only number in the room. Microsoft publishes one, and it is open source.
+
+**`flint-chart@1.1.1`** (MIT, `microsoft/flint-chart`, 91 packages, 163 MB, five render backends) is
+the deterministic half of Data Formulator: a semantic-type layer with a curated ranking heuristic in
+front of a compiler. Its `recommendChartTypes(data, semanticTypes, options)` returns chart-type names
+ranked by a design heuristic — no model call, no training. It is the closest published sibling of
+`recommendChart`, and the comparison is one command away.
+
+The signature is the finding. `recommendChartTypes` takes **the table and nothing else** — there is
+no parameter a question could be passed in. Flint answers "what chart suits this table", which is the
+EDA question; Text2Vis asks "what chart answers this question", which is the NL2Vis question. So the
+reading below is not a contest. It is a **subtraction**, and what it isolates is the price of the
+question.
+
+`pnpm exec tsx tools/flint-probe.ts`, over the 1,464 rows both instruments can read (of
+1,470 scored after unmapped labels; 6 carry no table):
+
+| instrument | what it reads | top-1 | shortlist |
+| --- | --- | ---: | ---: |
+| `flint-chart` 1.1.1 | the table's shape | **309 (21.11%)** | — |
+| `profile.ts` (shipped) | the table's shape **and** the question | **606 (41.39%)** | 710 (48.50%) |
+
+**The question is worth 20.28pp on the same rows, the same labels and the same family map.** That
+number did not exist before this reading, and it changes what the next round is for: the gap a model
+has to close is not the 58.61pp between 41.39% and a perfect score, it is the 20.28pp between a
+recommender that never sees the question and one that does. A model that reads the question and
+matches Flint's shape reading buys ~20pp, not ~60pp.
+
+Where Flint loses, and what it says about our own rules. Its largest bucket is `line → scatter`
+(302 rows): a table of a period crossed with one measure is ranked a scatter because nothing in the
+table says the period is a timeline to be traced rather than two numbers to be correlated. Second is
+`bar → scatter` (190) and third `pie → bar` (146). Every one of those is a question-shaped fact — a
+question that says "over time" or "share of" or "compare" — which is exactly the information
+`profileAnswer` gets and Flint does not.
+
+The reverse reading matters too. Flint is not a weaker implementation of `recommendChart`; it is a
+different instrument, and on its own task (given a table, suggest something to look at) the absence
+of a question is a feature. It is also newer than this repository's rules and from a larger team, so
+the 21.11% is a ceiling on shape-only heuristics rather than a verdict on the team that wrote them.
+
+**It is therefore not a dependency.** Three readings decided that, in order of weight: it would
+replace a 41.39% component with a 21.11% one; it pulls 91 packages and 163 MB into a package that
+currently depends on `spec` alone; and it does not do the job the component it would replace does.
+The reading is kept, the package is not. `tools/flint-probe.ts` reproduces the number on
+demand and its header carries the install commands; CI does not run it, because a competitor's
+number is a fact to record, not a test to pay for on every push.
+
+What is worth taking from it is not the ranker but the **shape of the seam**: Flint's semantic layer
+takes a table and emits a compact spec, and a compiler does every geometric decision below it. This
+repository already has the compiler and the geometry (`matplotlib.ts` draws without inventing a
+scale it was not given). The part that would be new is a semantic layer that reads the question —
+which is what `CHART_CUES` is doing with regular expressions, and where a model would go.

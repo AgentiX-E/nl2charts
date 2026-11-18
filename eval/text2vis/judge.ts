@@ -358,7 +358,7 @@ export const JUDGE_SYSTEM = [
  * answer: a grader told "the right answer is a bar chart" scores the form it was told to expect,
  * which is the reading `profile.ts` already takes with a counter and would be measuring twice.
  */
-export function buildJudgePrompt(job: JudgeJob): string {
+export function buildJudgePrompt(job: Pick<JudgeJob, 'question' | 'label'>): string {
   return [
     `Question: ${job.question}`,
     `The question is labelled "${job.label}" in the corpus that collected it.`,
@@ -389,7 +389,7 @@ export function buildJudgePrompt(job: JudgeJob): string {
  * removes the degenerate input from the list of explanations, which is what makes a refusal a
  * statement about eyes rather than about a file.
  */
-const PROBE_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAXUlEQVR42u3RgQkAIRADwdxj/31ZgeW8VZwozDYQhtSf3iq9C18eDwAAAAAAAAAAAAAAAAAAAAAAAAAAAOB8I6t5YZYHAAAAAAAAAAAAAAAAAAAAAAAAAAAAAO5qA2H9BCLh30/uAAAAAElFTkSuQmCC';
+export const VISION_PROBE_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAXUlEQVR42u3RgQkAIRADwdxj/31ZgeW8VZwozDYQhtSf3iq9C18eDwAAAAAAAAAAAAAAAAAAAAAAAAAAAOB8I6t5YZYHAAAAAAAAAAAAAAAAAAAAAAAAAAAAAO5qA2H9BCLh30/uAAAAAElFTkSuQmCC';
 
 /**
  * The probe's four quadrants in reading order, each with the words a reader may legitimately use.
@@ -482,7 +482,7 @@ export async function probeVision(provider: LlmProvider, temperature: number | n
     const response = await provider.complete({
       messages: [
         { role: 'system', content: 'You answer questions about images in one word.' },
-        { role: 'user', content: VISION_PROBE, images: [{ mediaType: 'image/png', data: PROBE_PNG }] },
+        { role: 'user', content: VISION_PROBE, images: [{ mediaType: 'image/png', data: VISION_PROBE_PNG }] },
       ],
       temperature,
       // The probe asks in the mode the run will grade in. A probe taken in the default decoder would
@@ -497,6 +497,90 @@ export async function probeVision(provider: LlmProvider, temperature: number | n
   } catch (error) {
     return { answer: error instanceof Error ? error.message : String(error), asked: false, seen: false };
   }
+}
+
+/**
+ * The question the control card is graded against, and the reason it is a corpus's own question.
+ *
+ * A card scored against "rate this chart" invites the grader to answer about the *question* instead
+ * of the picture, which is the failure the colour probe exists to catch. So the card arrives exactly
+ * as a row does: a question a person would ask of a result set, the label the corpus gave that
+ * question, and an image. The image happens to be four squares.
+ */
+export const CONTROL_QUESTION = 'Show the total revenue by region as a bar chart.';
+export const CONTROL_LABEL = 'Bar Chart';
+
+/**
+ * What an instrument scores a figure that is not a chart.
+ *
+ * The reading this file is missing, and the one that decides whether a cheap instrument can be
+ * compared with an expensive one. Three vision graders were priced on the same 177 rows: the floor
+ * `glm-4.5v` read 2.34/5.64, the iteration instrument `glm-4.6v@off` read 2.34/5.64, and
+ * `glm-4.6v-flashx@off` read 4.51/6.83 — the cheapest instrument reading *highest*, monotonically.
+ * A mean cannot say whether that is a lenient grader or a different one, because a mean over charts
+ * has no zero to compare against: both graders are being asked about figures they can see, and both
+ * answer in a range the prompt defines loosely.
+ *
+ * The card supplies the zero. It has no title, no axis, no tick, no measure and no mark, so
+ * `chart_correctness` 0 and `readability` 0 are the only correct answers, and every point above zero
+ * is a point the instrument would also add to a chart. That is an **offset**, not a mistake: an
+ * instrument that scores the card at 3/6 and a corpus at 4.51/6.83 is reading (1.51/0.83) of signal
+ * on top of its own floor, and a reading of two instruments is comparable only after the floor is
+ * subtracted. One call per instrument, and the arithmetic that follows is subtraction.
+ */
+export interface CardReading {
+  readonly answer: string;
+  readonly scores: { readonly chart_correctness: number; readonly readability: number };
+}
+
+/**
+ * Ask the grader to grade the card, and keep what it said.
+ *
+ * Throws when the reply cannot be read as two scores: a card that was answered with prose is not a
+ * reading, and printing a default would be a number nobody measured. The caller reports the message
+ * and stops, because the next thing it would do with a fabricated pair is subtract it.
+ */
+export async function gradeControlCard(
+  provider: LlmProvider,
+  temperature: number | null = 0,
+  think?: boolean,
+): Promise<CardReading> {
+  const response = await provider.complete({
+    messages: [
+      { role: 'system', content: JUDGE_SYSTEM },
+      {
+        role: 'user',
+        content: buildJudgePrompt({ question: CONTROL_QUESTION, label: CONTROL_LABEL }),
+        images: [{ mediaType: 'image/png', data: VISION_PROBE_PNG }],
+      },
+    ],
+    temperature,
+    // Asked in the mode the run grades in, for the reason the colour probe gives: a card read by a
+    // different decoder is a floor for a different instrument.
+    ...(think === undefined ? {} : { thinking: think }),
+    purpose: 'control',
+  });
+  const text = response.text.trim();
+  return { answer: text.replace(/\s+/g, ' ').slice(0, REPLY_LIMIT), scores: parseJudge(text, response.finishReason) };
+}
+
+/** The points a card collected that a chart with no content could not have earned. */
+export function leniencyOf(scores: { readonly chart_correctness: number; readonly readability: number }): number {
+  return (scores.chart_correctness + scores.readability) / 2;
+}
+
+/**
+ * One sentence a dispatch log can carry, saying which way the reading went.
+ *
+ * Two decimals rather than one, because the offset is subtracted from means reported to two.
+ */
+export function describeControl(reading: CardReading): string {
+  const mean = leniencyOf(reading.scores);
+  const pair = `correctness ${String(reading.scores.chart_correctness)}, readability ${String(reading.scores.readability)}`;
+  if (mean === 0) {
+    return `the control card — four coloured squares, no title, no axis, no measure — scored ${pair}: this instrument charges nothing for a figure that is not a chart, so its means are comparable as they stand`;
+  }
+  return `the control card — four coloured squares, no title, no axis, no measure — scored ${pair}, so ${mean.toFixed(2)} of every mean it reports is leniency rather than signal`;
 }
 
 /**
@@ -1350,6 +1434,15 @@ export interface JudgeArgs {
   readonly endpoint?: string;
   /** Ask the endpoint one question about one image and stop: the whole run, priced at one call. */
   readonly probeOnly: boolean;
+  /**
+   * Grade the control card and stop: what this instrument charges for a figure that is not a chart.
+   *
+   * Its own flag rather than a mode of `--probe-only`, because the two spend their call on different
+   * questions and a dispatch reads the answer to one of them: the probe answers "can this endpoint
+   * see", and the card answers "what does it score when there is nothing to see". A run that folded
+   * them would pay twice and report once.
+   */
+  readonly controlOnly: boolean;
   /** How many calls the run keeps in flight. Absent means one. */
   readonly concurrency?: number;
   /** `--think on|off`: ask the endpoint for the mode, or leave the choice to the endpoint. */
@@ -1385,6 +1478,7 @@ export function parseJudgeArgs(argv: readonly string[]): JudgeArgs {
   let json = false;
   let endpoint: string | undefined;
   let probeOnly = false;
+  let controlOnly = false;
   let concurrency: number | undefined;
   let think: boolean | undefined;
   let abortAfter: number | undefined;
@@ -1395,6 +1489,10 @@ export function parseJudgeArgs(argv: readonly string[]): JudgeArgs {
     const flag = argv[index] as string;
     if (flag === '--json') {
       json = true;
+      continue;
+    }
+    if (flag === '--control-only') {
+      controlOnly = true;
       continue;
     }
     if (flag === '--probe-only') {
@@ -1456,6 +1554,7 @@ export function parseJudgeArgs(argv: readonly string[]): JudgeArgs {
     png,
     json,
     probeOnly,
+    controlOnly,
     ...(artifact === undefined ? {} : { artifact }),
     ...(render === undefined ? {} : { render }),
     ...(limit === undefined ? {} : { limit }),
@@ -1766,6 +1865,14 @@ export async function entryJudge(
     const args = parseJudgeArgs(options.argv ?? []);
     const resolved = gradeWith(options, args);
     log(describeGrader(resolved));
+    // One call, before anything else is read: what this instrument scores a figure that is not a
+    // chart. Nothing here needs the render artifact or the corpus, and a dispatch that only wanted
+    // the floor should not be charged for a probe it did not ask for.
+    if (args.controlOnly) {
+      const reading = await gradeControlCard(resolved.provider, resolved.temperature, resolved.grader.thinking);
+      log(`text2vis: ${resolved.grader.model} answered "${reading.answer}" and ${describeControl(reading)}`);
+      return 0;
+    }
     // Before the render artifact is even read, and before the meter: one call that proves the
     // endpoint can see. `--probe-only` exists so that a dispatch can spend that one call on its own,
     // which is the difference between learning in a minute that a base url or an image spelling is

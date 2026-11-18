@@ -449,10 +449,20 @@ export function describeProfile(report: ProfileReport, cue: RuleReport): readonl
   // Summed by family, not listed by label: `perLabel` is keyed by label and this line is titled by
   // family, so the first published version printed `bar +142, scatter -26, bar -27, …` on the real
   // corpus — eight bars, one number each, and no column a reader could add up.
+  //
+  // **Covered, not first**, because that is the test the other side is taken on. The cue report counts
+  // a hit when the first mark of the leading cue *covers* the family, and this report's `top1` counts
+  // one only when the mark's **first** family is the label's. Two readings of the same corpus, two
+  // different predicates, and a line that subtracts them publishes the difference between the
+  // predicates as a difference between the instruments: it read `area -58` on this corpus for two
+  // rounds, which says the result set made the area family worse. It does not. The cue table calls a
+  // line an area and this report's strict count will not, so the pair is compared on the covering
+  // test they share — `shortlist` here and `top1` there — and `top1` stays strict and published on
+  // its own line where a reader can see it move.
   const byFamily = new Map<ChartFamily, number>();
-  for (const entry of report.perLabel) byFamily.set(entry.family, (byFamily.get(entry.family) ?? 0) + entry.top1);
+  for (const entry of report.perLabel) byFamily.set(entry.family, (byFamily.get(entry.family) ?? 0) + entry.shortlist);
   const moved = [...byFamily.entries()]
-    .map(([family, top1]) => ({ family, delta: top1 - cueOf(family) }))
+    .map(([family, covered]) => ({ family, delta: covered - cueOf(family) }))
     .filter((entry) => entry.delta !== 0)
     .sort((left, right) => right.delta - left.delta || left.family.localeCompare(right.family));
   const lines = [

@@ -35,32 +35,35 @@ const PERIOD = new RegExp(
 );
 
 /**
- * Whether a column of numbers walks the calendar, one year per row.
+ * Whether a column of numbers is a column of years.
  *
  * This exists because a year arrives in two transports and used to get two types. `PERIOD` reads
  * `'2019'` as time, and the same column handed over as a *number* — which is what a driver with a
  * `YEAR` column sends, and what the Text2Vis corpus stores — typed `quantitative`, so the table lost
  * its axis and every bar, line, pie and area drawn over it was refused. The census prices the defect
  * at 182 rows of the corpus and 53 hits; the fix is not to guess from magnitude, which would turn a
- * price column of `2019` dollars into an axis, but to read the shape a timeline actually has:
+ * price column of `2019` dollars into an axis, but to read the shape a year column actually has:
  *
  * - every value is an integer (a year is; `2019.5` is a rating);
  * - no value repeats (a year appears once per row — a column that repeats is a group, not a period);
- * - the distinct values are a contiguous block, `max − min + 1` of them (a gap says the column is a
- *   sample of numbers that happen to be large, not a run of years);
- * - that block lies inside the calendar window;
- * - the rows read in order — each value one year from the one above it, ascending or descending.
+ * - every value lies inside the calendar window;
+ * - there are at least three of them (two years are a pair, not a timeline).
  *
- * Five conditions, each one a way for a measure to fail it, and the last is what makes the read a
- * *timeline* rather than a block: an unsorted column of three consecutive years is a set, and a
- * result set that prints its years out of order is one that will be re-read by a person.
+ * A fifth condition used to be here and it was wrong: the values had to be a contiguous block and
+ * the rows had to read one year apart. A survey fielded every two or three years — `2002, 2004,
+ * 2006, 2008, 2010` — is a time axis with holes in it, and the rule refused it, so the table lost its
+ * axis: every line and bar over it was refused and a scatter was recommended from the measures that
+ * survived. The defence was that a gap makes a year column indistinguishable from a price column that
+ * happens to be large, and it was an argument rather than a reading. The reading: on the 1,470 scored
+ * rows the gap clause is worth **ten rows gained against three lost**, and none of the three is a
+ * price column — they are years the corpus labels a scatter, a boxplot or a bar.
  *
  * Exported because the census has to price this rule against the alternative on every run rather
  * than restate it: `eval/text2vis/census.ts` un-types the columns this accepts and measures what the
  * product loses, which is the same predicate asked the inverse question.
  */
-export function isCalendarRun(values: readonly unknown[]): boolean {
-  // A missing cell breaks the run: the string path applies the same rule, where `PERIOD` has to
+export function isCalendarColumn(values: readonly unknown[]): boolean {
+  // A missing cell breaks the column: the string path applies the same rule, where `PERIOD` has to
   // match every value or the column is not a period.
   if (values.length < 3) return false;
   if (!values.every((value) => typeof value === 'number' && Number.isInteger(value))) return false;
@@ -73,47 +76,59 @@ export function isCalendarRun(values: readonly unknown[]): boolean {
     if (year < low) low = year;
     if (year > high) high = year;
   }
-  if (low < 1900 || high > 2100) return false;
-  if (high - low + 1 !== distinct.size) return false;
-  return years.every((year, index) => index === 0 || Math.abs(year - (years[index - 1] as number)) === 1);
+  return low >= CALENDAR_LOW && high <= CALENDAR_HIGH;
 }
 
-/**
- * Whether a column of numbers is exactly one pair of different values.
- *
- * Two values, not two rows: a three-row column holding `1, null, 2` reaches the rule with a present
- * count of two, and the rule it breaks is about how many values there are, not how many rows.
- *
- * The cardinality rule below asks "does this number column repeat inside a small range", and with two
- * values `unique <= max(2, ceil(n / 2))` is `2 <= 2` — true for every pair of different values. That
- * made the question unanswerable rather than answered: such a table had no measure at all.
- * 145 of the Text2Vis corpus's tables are exactly that shape, `Oman` and `Samoa` against seven year
- * columns, and every measure in them typed `ordinal`, so all ten admission rules refused the table
- * and the product drew nothing. A pair is therefore decided by what its numbers look like, below.
- */
-function isPair(present: readonly unknown[]): boolean {
-  return present.length === 2 && new Set(present).size === 2;
-}
-
-/** The largest whole number still read as a scale — a Likert row, a 1-10 rating, a decile. */
+/** The most distinct values a scale may carry — a Likert row, a 1-10 rating, a decile. */
 const SCALE_CEILING = 20;
 
+/** The window a year column lives in, and the one `PERIOD` accepts as a bare year. */
+const CALENDAR_LOW = 1900;
+const CALENDAR_HIGH = 2100;
+
 /**
- * Whether a pair's numbers look like a two-point scale or two years, rather than two measurements.
+ * Whether a column of numbers is a scale rather than a measurement.
  *
- * `[1999, 2000]` is the pair the calendar guard already refuses to call a timeline, and calling it a
- * measure would put a measurement on the axis of a two-bar chart of years. `[1, 2]` is an encoding
- * before it is a measurement. `[183.88, 40.72]` is neither: it is a measurement, and it is the
- * reading that says so — 145 tables of the corpus stopped being refused when this predicate was
- * written.
+ * Three readings, and the rule needs all three.
+ *
+ * **It steps by one.** `1, 2, 3, 4, 5` is a rating and `9, 10, 12, 14` is four measurements. The rule
+ * used to be cardinality alone — "does this number column repeat inside a small range" — and a
+ * cardinality is not a scale: with eight rows and four values `unique <= ceil(n / 2)` holds for any
+ * four-value column, so a survey's percentages per wave were read as an axis and the measure it
+ * carried disappeared. The corpus shows what that cost: two-measure scatters answered `heatmap`, and
+ * heatmaps answered `scatter`, because a measure had been promoted to a dimension.
+ *
+ * **It repeats.** `1, 2, 3, 4, 5` one value per row is a row index — what a `SELECT` over an
+ * auto-increment key returns — and an axis of row numbers groups nothing, so the cardinality gate
+ * stays: no more than half the rows may be distinct, and at most twenty values in all. The gate is
+ * not a matter of taste: removing it reads **604** on the corpus against this rule's **606**.
+ *
+ * **It starts where a scale starts.** A *two-value* column is the case the first reading cannot
+ * decide, because every pair of adjacent integers steps by one — `22, 23` as much as `1, 2`. The
+ * corpus has both, and the difference is what they are: a two-point scale begins at zero or one, and
+ * a pair of numbers that begins at 22 is two measurements. So a pair must begin at 0 or 1, or be a
+ * pair of years — `1999, 2000` is a two-point time axis, and calling it a measurement would put a
+ * measurement on the axis of a two-bar chart of years. Dropping the year half of that reads the same
+ * top-1 (606) and one row fewer in `declined`; it is kept because a year is not a quantity, and one
+ * row is not evidence enough to overrule that.
+ *
+ * The predicate that used to guard exactly this pair (`looksLikeScale`, with `isPair` beside it) is
+ * gone: it asked whether every value was small or a year, which is the same question as "does the
+ * run start at zero or one" asked about the whole column instead of about the pair, and it read
+ * `[10, 12, 9, 14]` as a scale because all four values were small.
  */
-function looksLikeScale(present: readonly unknown[]): boolean {
-  return present.every(
-    (value) =>
-      typeof value === 'number' &&
-      Number.isInteger(value) &&
-      (Math.abs(value) <= SCALE_CEILING || (value >= 1900 && value <= 2100)),
-  );
+function isScale(present: readonly unknown[]): boolean {
+  if (present.length <= 1) return false;
+  if (!present.every((value) => typeof value === 'number' && Number.isInteger(value))) return false;
+  const sorted = [...new Set(present as readonly number[])].sort((left, right) => left - right);
+  if (sorted.length > SCALE_CEILING) return false;
+  if (sorted.length > Math.max(2, Math.ceil(present.length * 0.5))) return false;
+  if (sorted.length === 2) {
+    const low = sorted[0] as number;
+    const years = low >= CALENDAR_LOW && (sorted[1] as number) <= CALENDAR_HIGH;
+    if (low > 1 && !years) return false;
+  }
+  return sorted.every((value, at) => at === 0 || value === (sorted[at - 1] as number) + 1);
 }
 
 export function inferType(values: readonly unknown[]): FieldType {
@@ -122,10 +137,8 @@ export function inferType(values: readonly unknown[]): FieldType {
   if (present.every((value) => typeof value === 'number')) {
     // Before the cardinality rule, because a year is not an ordinal scale: `[2019, 2020, 2021]` reads
     // as three categories of a measure otherwise, and the axis the table carries is thrown away.
-    if (isCalendarRun(values)) return 'temporal';
-    const unique = new Set(present).size;
-    const low = present.length > 1 && unique <= Math.max(2, Math.ceil(present.length * 0.5)) && unique <= 20;
-    return low && (!isPair(present) || looksLikeScale(present)) ? 'ordinal' : 'quantitative';
+    if (isCalendarColumn(values)) return 'temporal';
+    return isScale(present) ? 'ordinal' : 'quantitative';
   }
   if (present.every((value) => typeof value === 'string' && (ISO_DATE.test(value) || PERIOD.test(value)))) {
     return 'temporal';

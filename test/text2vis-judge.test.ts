@@ -34,6 +34,12 @@ import {
   score,
   summarizeJudge,
   VISION_PROBE,
+  VISION_PROBE_PNG,
+  CONTROL_QUESTION,
+  CONTROL_LABEL,
+  describeControl,
+  gradeControlCard,
+  leniencyOf,
 } from '../eval/text2vis/judge.js';
 import type { JudgeJob, JudgeReport, JudgeVerdict } from '../eval/text2vis/judge.js';
 import type { ChartJobs } from '../eval/text2vis/render.js';
@@ -1410,7 +1416,7 @@ describe('the render artifact the denominator comes from', () => {
 
 describe('the command line', () => {
   it('defaults to the corpus png directory and no artifact', () => {
-    expect(parseJudgeArgs([])).toEqual({ png: 'eval/.cache/text2vis/png', json: false, probeOnly: false });
+    expect(parseJudgeArgs([])).toEqual({ png: 'eval/.cache/text2vis/png', json: false, probeOnly: false, controlOnly: false });
   });
 
   it('takes the five flags it documents', () => {
@@ -1421,6 +1427,7 @@ describe('the command line', () => {
       limit: 40,
       json: true,
       probeOnly: false,
+      controlOnly: false,
     });
   });
 
@@ -1429,9 +1436,16 @@ describe('the command line', () => {
       png: 'eval/.cache/text2vis/png',
       json: false,
       probeOnly: true,
+      controlOnly: false,
       endpoint: 'zhipu',
     });
     expect(() => parseJudgeArgs(['--endpoint'])).toThrow(/--endpoint needs a value/);
+  });
+
+  it('takes the flag that spends its one call on the control card', () => {
+    expect(parseJudgeArgs(['--control-only'])).toMatchObject({ controlOnly: true, probeOnly: false });
+    // Two instrument calls in one run would be two numbers and one log line; each flag is its own.
+    expect(parseJudgeArgs(['--control-only', '--probe-only'])).toMatchObject({ controlOnly: true, probeOnly: true });
   });
 
   it('takes the concurrency the runner has room for, and refuses one it cannot honour', () => {
@@ -2226,5 +2240,74 @@ describe('the store at the seam where a row is answered without a call', () => {
     expect(() => parseJudgeArgs(['--sample', 'many'])).toThrow(/--sample needs a positive whole number, not many/);
     expect(parseJudgeArgs(['--max-calls', '8']).maxCalls).toBe(8);
     expect(parseJudgeArgs(['--sample', '200']).sample).toBe(200);
+  });
+});
+
+describe('the control card prices the floor of a grader', () => {
+  const answering = (text: string, captured: unknown[] = []) => ({
+    id: 'fixture',
+    model: 'fixture',
+    complete: async (request: unknown) => {
+      captured.push(request);
+      return { text, model: 'fixture' };
+    },
+  });
+
+  it('sends the run\'s own rubric, a corpus question and the four-colour card', async () => {
+    // The card is graded as a row is graded. A card asked "rate this chart" invites an answer about
+    // the question rather than about the picture, which is the failure the colour probe exists to
+    // catch — so the request is identical to a row's in everything but the image.
+    const captured: { messages: readonly { role: string; content: string; images?: readonly { data: string }[] }[]; purpose?: string; thinking?: boolean }[] = [];
+    const reading = await gradeControlCard(answering('{"chart_correctness": 3, "readability": 6}', captured), null, false);
+    expect(reading.scores).toEqual({ chart_correctness: 3, readability: 6 });
+    const request = captured[0];
+    expect(request?.purpose).toBe('control');
+    expect(request?.thinking).toBe(false);
+    expect(request?.messages[0]?.content).toBe(JUDGE_SYSTEM);
+    const turn = request?.messages[1];
+    expect(turn?.content).toContain(CONTROL_QUESTION);
+    expect(turn?.content).toContain(CONTROL_LABEL);
+    expect(turn?.images?.[0]?.data).toBe(VISION_PROBE_PNG);
+  });
+
+  it('refuses a reply that is not two scores, because a floor nobody measured is not a floor', async () => {
+    await expect(gradeControlCard(answering('Looks like a colourful chart to me.'), null)).rejects.toThrow(
+      /named neither score/,
+    );
+  });
+
+  it('turns the pair into the offset a mean has to be reduced by', () => {
+    expect(leniencyOf({ chart_correctness: 3, readability: 6 })).toBe(4.5);
+    expect(leniencyOf({ chart_correctness: 0, readability: 0 })).toBe(0);
+    // Two sentences, because the two readings call for different arithmetic: nothing to subtract, or
+    // a number to subtract.
+    expect(describeControl({ answer: '', scores: { chart_correctness: 0, readability: 0 } })).toMatch(
+      /charges nothing for a figure that is not a chart/,
+    );
+    expect(describeControl({ answer: '', scores: { chart_correctness: 3, readability: 6 } })).toMatch(
+      /4\.50 of every mean it reports is leniency rather than signal/,
+    );
+  });
+
+  it('spends exactly one call and needs no render artifact', async () => {
+    let calls = 0;
+    const provider = {
+      id: 'fixture',
+      model: 'fixture',
+      complete: async () => {
+        calls += 1;
+        return { text: '{"chart_correctness": 4, "readability": 7}', model: 'fixture' };
+      },
+    };
+    const lines: string[] = [];
+    const code = await entryJudge(join(process.cwd(), 'eval/text2vis/judge.ts'), pathToFileURL(join(process.cwd(), 'eval/text2vis/judge.ts')).href, (line) => lines.push(line), {
+      argv: ['--control-only', '--no-cache'],
+      provider,
+      temperature: null,
+    });
+    expect(code).toBe(0);
+    expect(calls).toBe(1);
+    expect(lines.join('\n')).toMatch(/the control card/);
+    expect(lines.join('\n')).toMatch(/5\.50 of every mean/);
   });
 });

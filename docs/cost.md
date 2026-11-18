@@ -293,3 +293,50 @@ Two numbers follow from the hit rate, and both change the ledger:
 full reading — a sixth of the iteration instrument. It is not adopted, and the reason is in
 [benchmarks.md](./benchmarks.md#the-null-interval-what-a-grading-reading-can-claim-measured-against-itself):
 it scores the corpus two points *above* both graders whose numbers the floor is defined against.
+
+## The zero a mean needs, and the one call that buys it
+
+The store above answers "how much does a reading cost". It cannot answer the question the same
+ledger raises next: **how much of a mean is the instrument's own floor.** Three vision graders were
+priced on the same 177 figures and the reading is monotone in price, in the wrong direction:
+
+| instrument | ¥ / full reading | chart_correctness | readability |
+| --- | ---: | ---: | ---: |
+| `glm-4.5v` (the floor) | 10.52 | 3.24 | 6.42 |
+| `glm-4.6v@off` (iteration) | 1.17 | 2.34 | 5.64 |
+| `glm-4.6v-flashx@off` | **0.20** | **4.51** | **6.83** |
+
+Cheapest reads highest. A mean over charts cannot say whether that is a lenient reader or a
+different one — both are being asked about figures they can see, in a range the prompt defines
+loosely. What is missing is a figure they cannot see as a chart at all.
+
+`pnpm bench:text2vis:control` sends exactly that: four coloured squares, graded through the run's own
+rubric and a corpus-shaped question. No title, no axis, no tick, no measure, no mark — so `0/0` is
+the only correct answer, and every point above it is an offset added to every figure the instrument
+ever grades. One call.
+
+```
+pnpm bench:text2vis:control --think off
+text2vis: glm-4.6v answered "{"chart_correctness": 0, "readability": 0}" and the control card —
+          four coloured squares, no title, no axis, no measure — scored correctness 0,
+          readability 0: this instrument charges nothing for a figure that is not a chart, so its
+          means are comparable as they stand
+```
+
+Two things follow, and both are decisions rather than prose:
+
+1. **A cheap instrument is admissible if its card is charged nothing — and it is not.** Measured on
+   2026-11-18, one call each: `glm-4.6v@off` scored the card `0/0` and `glm-4.6v-flashx@off` scored it
+   `0/0` as well. So the cheap instrument's two extra points are not leniency; it does not reward
+   emptiness either, and it rates charts higher. That is a disagreement about charts, and no
+   subtraction removes it — which is the measured form of the decision already taken, that `flashx`
+   stays out of the iteration comparison at 28% and 37% row agreement with the two graders the floor
+   is defined against. The control's value is that the decision no longer rests on suspicion: ¥0.002
+   bought the statement that the gap cannot be normalised away.
+2. **The card is priced as an instrument call, not a case.** `CallPurpose` gained `control` for it,
+   so the meter cannot fold an instrument check into an arm — the same reason `probe` has its own
+   bucket.
+
+What it does not do is make a cheap grader *good*. A card at `0/0` says a grader does not reward
+emptiness; it says nothing about whether the grader can tell a good chart from a mediocre one. The
+paired arm is still the only instrument for that, and it still costs a reading.

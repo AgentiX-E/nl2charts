@@ -41,7 +41,7 @@ import type {
   RecommendableMark,
   ShapeCounts,
 } from '@agentix-e/nl2charts-chart';
-import { CHART_CUES, RECOMMENDABLE_MARKS, isCalendarRun, readCues, recommendChart } from '@agentix-e/nl2charts-chart';
+import { CHART_CUES, RECOMMENDABLE_MARKS, isCalendarColumn, readCues, recommendChart } from '@agentix-e/nl2charts-chart';
 import { applyExitCode, isEntry, loadText2Vis, type LoadOptions } from './dataset.js';
 import { CUE_VARIANTS, familiesOfMark, familyOfLabel, type ChartFamily, type TableVariant } from './rule.js';
 import { isMissingCell, numericCell, parseResultSet, profilesOf, typedRows, type ProfileInput, type ResultSet } from './profile.js';
@@ -696,6 +696,15 @@ function firstClaims(cues: readonly Cue[], mark: RecommendableMark): number {
  * line as a hit while the published reading called it a shortlist-only row, and the census would then
  * be explaining a count nobody published — `text2vis-census.test.ts` asserts the two agree row for
  * row, and `substituted` is the outcome that makes them agree.
+ *
+ * **One place they do not agree, measured and not yet repaired.** `profileAnswer` asks the reshape
+ * first — a table that is wide in time is drawn as one line per entity by `toChartIR` without
+ * consulting an admission rule — and this classifier ranks every table. On the 1,470 scored rows that
+ * splits **73** of them: the census answers a ranked mark for a table the product melts to a line.
+ * The gap is a defect in this file rather than in the product, and it is written down here instead of
+ * being repaired in the round that found it because the repair needs a decision this classifier does
+ * not currently have to make — which of `hit`, `substituted`, `outranked` and `refused` a reshape
+ * belongs to, and what a refusal tally can say about a row no admission rule was asked about.
  */
 export function classify(row: ProfileInput): CensusRow {
   const expected = familyOfLabel(row.label);
@@ -1030,7 +1039,7 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
         ? []
         : (() => {
             const typed = typedRows(set);
-            return set.columns.filter((name) => isCalendarRun(typed.map((cells) => cells[name])));
+            return set.columns.filter((name) => isCalendarColumn(typed.map((cells) => cells[name])));
           })();
     if (profiles.length > 0) {
       // `rows` is the population the price is taken *over*; `hit` is a count over the whole scored
