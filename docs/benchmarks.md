@@ -16303,3 +16303,62 @@ of it beyond the counters:
 The model arm beside this reading — `bench:text2vis:llm`, dispatched by `text2vis-llm.yml` — is what
 the repair makes comparable: it answers the same question the census explains, so its top-1 is one
 subtraction away from 41.22% and its misses can be read against the same seven outcomes.
+
+## The chart half, answered by a model: 58.30% on the same 1,470 rows
+
+Everything the product's chart half has ever reported is a score against this corpus's labels. That
+number says how the product does; it does not say how hard the question is, and it cannot say whether
+41.22% is a shortfall in the rules or a ceiling in the task. This reading closes that gap by asking a
+model the same question on the same rows, with the same scorer.
+
+**The question is deliberately the narrowest one that is still a measurement.** The model is given the
+question only — no table, no result set, no chart — and must name one chart. Two scales, because they
+answer two different things:
+
+| Scale | Option list | Scored by | What it answers |
+|---|---|---|---|
+| `mark` | the 11 marks this product can draw | `scoreAnswers`, the function `scoreProfile` calls | is the model better than the product? `857 − 606` is a difference between two answers |
+| `label` | the corpus's own chart names, grouped by family | exact family match | how hard is the task? the number a Text2Vis paper reports |
+
+Same 1,470 rows, `deepseek-chat`, temperature 0, one call per row per scale:
+
+| Instrument | top-1 | shortlist |
+|---|---:|---:|
+| the cue table alone (`rule.ts`) | 575 (39.12%) | 885 (60.20%) |
+| **the product** (cues + table shape, `profile.ts`) | **606 (41.22%)** | 710 (48.30%) |
+| **a model, mark scale** | **857 (58.30%)** | 982 (66.80%) |
+| **a model, label scale** | **886 (60.27%)** exact | — |
+
+The `label` arm's 886 includes **59 rows** whose family no mark can lead with (`area`, `histogram`,
+`violin`), which is exactly why the two scales differ by 29 rows and why neither one alone is the
+reading.
+
+**Paired, row for row** — the same rows, the same day, both sides answering:
+
+| | rows |
+|---|---:|
+| both right | 472 |
+| product only | 134 |
+| model only | 385 |
+| neither | 479 |
+| McNemar exact p | 3.9e-29 |
+
+Three facts follow. The model's advantage is not a higher average, it is that it wins on the rows the
+product loses, 385 to 134. The **union of the two arms is 991 rows (67.41%)**, which is the ceiling a
+hybrid could reach and the number the next round is priced against. And the product's 134 exclusive
+wins are the reason to build a hybrid rather than to replace the rules outright.
+
+**Cost: ¥1.25 for 2,940 calls** — ¥0.0004 per row per scale. The workflow that produces this reading
+is dispatch-only, because 2,940 calls cannot be authorised by a push, and its answer store is
+content-addressed, so a second dispatch pays only for the rows that changed.
+
+Two defects this reading found in itself, both worth stating because they are the kind a share hides:
+
+1. The first run asked **all 1,985 corpus rows to score 1,470** — the 515 labels no family names
+   (`Waterfall`, `Treemap`, …) were sent to the model and then dropped by the scorer. That is 1,030
+   calls of 3,970 bought for nothing. The rows are now filtered before the slice, and `requested ==
+   scored` is asserted.
+2. At `max_tokens: 32`, **5 of 2,940 replies were cut**, and the three whose cut landed just after the
+   name were scored — a *prefix* of an answer counted as an answer. Raising the fence to 96 tokens
+   removed the truncation and **lowered** the reading (860 → 857): the old cap was manufacturing
+   correct answers. A cut reply now carries no choice at all.
