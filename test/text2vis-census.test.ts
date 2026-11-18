@@ -336,6 +336,55 @@ describe('what became of one question', () => {
     expect(report.outcomes.hit + report.outcomes.substituted).toBe(profile.shortlist);
   });
 
+  it('classifies a table the product melts without asking any admission rule', () => {
+    // The product answers a wide table before `recommendChart` is consulted — `profileAnswer` says so
+    // and `toChartIR` does it — so three labels over the same table have three different outcomes and
+    // not one ranking. The census used to rank this table, which is the defect this round repaired: it
+    // filed the row as `outranked` and explained a decision no rule and no ranking had made.
+    const WIDE = table('Country, 2019, 2020, 2021', ['France, 10, 12, 14', 'Spain, 9, 11, 13']);
+    expect(classify(input(TREND, 'Line Chart', WIDE))).toEqual({ expected: 'line', outcome: 'hit' });
+    // An area chart is that line filled, so the melt's line covers it as its second claim — the same
+    // split `profile.ts` makes between its top-1 and its shortlist.
+    expect(classify(input(TREND, 'Area Chart', WIDE))).toEqual({
+      expected: 'area',
+      outcome: 'substituted',
+      answered: 'line',
+      ownFamily: 'line',
+    });
+    // And a label the melt never considered is neither a refusal nor a loss: no rule refused this
+    // table and nothing outranked anything. It gets the name of what happened, and the axis names
+    // travel with it so a wrong reshape can be read without a rerun.
+    expect(classify(input('Compare revenue by country', 'Bar Chart', WIDE))).toEqual({
+      expected: 'bar',
+      outcome: 'reshaped',
+      answered: 'line',
+      entity: 'Country',
+      period: 'Year',
+    });
+  });
+
+  it('keeps the profile reconciliation exact on a population that contains a reshape', () => {
+    // The three outcomes above are the reason the identity is asserted on a mixed population and not
+    // on a ranking-only one: a reshape is invisible to `scoreProfile`'s buckets except through the
+    // answer it produces, so a classifier that invented a fourth bucket without agreeing on the mark
+    // would still pass a hand-built test and fail this subtraction.
+    const WIDE = table('Country, 2019, 2020, 2021', ['France, 10, 12, 14', 'Spain, 9, 11, 13']);
+    const rows = [
+      input(TREND, 'Line Chart', QUARTERLY),
+      input(TREND, 'Area Chart', QUARTERLY),
+      input(TREND, 'Line Chart', WIDE),
+      input(TREND, 'Area Chart', WIDE),
+      input('Compare revenue by country', 'Bar Chart', WIDE),
+      input(TREND, 'Line Chart', AXISLESS),
+    ];
+    const report = censusOf(rows);
+    const profile = scoreProfile(rows);
+    expect(report.outcomes).toEqual({ hit: 2, substituted: 2, reshaped: 1, refused: 1, outranked: 0, uncovered: 0, noProfile: 0 });
+    expect(report.outcomes.hit).toBe(profile.top1);
+    expect(report.outcomes.hit + report.outcomes.substituted).toBe(profile.shortlist);
+    expect(() => assertCensusReport(report)).not.toThrow();
+  });
+
   it('names the admission rule that refused a line over a table with no axis', () => {
     // The reading this instrument exists for. Two measures and no column to group them by: the
     // sentence below is the product's own refusal — not a paraphrase of it, so a document can quote
@@ -612,7 +661,7 @@ describe('the census over a population', () => {
     expect(report.rows).toBe(9);
     expect(report.unmapped).toBe(1);
     expect(report.scored).toBe(8);
-    expect(report.outcomes).toEqual({ hit: 2, substituted: 0, refused: 2, outranked: 2, uncovered: 1, noProfile: 1 });
+    expect(report.outcomes).toEqual({ hit: 2, substituted: 0, reshaped: 0, refused: 2, outranked: 2, uncovered: 1, noProfile: 1 });
     expect(() => assertCensusReport(report)).not.toThrow();
   });
 
@@ -671,7 +720,7 @@ describe('the census over a population', () => {
 
   it('refuses a report whose counters do not add up', () => {
     const report = censusOf(population);
-    expect(() => assertCensusReport({ ...report, outcomes: { ...report.outcomes, hit: 0 } })).toThrow(/six outcomes/);
+    expect(() => assertCensusReport({ ...report, outcomes: { ...report.outcomes, hit: 0 } })).toThrow(/seven outcomes/);
     expect(() => assertCensusReport({ ...report, byFamily: [] })).toThrow(/per-family rows/);
     expect(() => assertCensusReport({ ...report, unmapped: 0 })).toThrow(/unmapped/);
     // The counterfactual is an ordering, not a second corpus: it can move a row and it cannot create

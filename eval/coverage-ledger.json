@@ -4,8 +4,8 @@
   "tolerancePp": 0.2,
   "measuredAt": "2026-11-18",
   "totals": {
-    "lines": 99.59,
-    "statements": 99.59,
+    "lines": 99.6,
+    "statements": 99.6,
     "functions": 100,
     "branches": 98.34
   },
@@ -584,7 +584,13 @@
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 98.95
+      "branches": 98.98
+    },
+    "eval/text2vis/content-store.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 100
     },
     "eval/text2vis/dataset.ts": {
       "lines": 100,
@@ -596,19 +602,25 @@
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 98.14
+      "branches": 100
     },
     "eval/text2vis/judge.ts": {
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 99.78
+      "branches": 100
+    },
+    "eval/text2vis/llm.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 95.96
     },
     "eval/text2vis/profile.ts": {
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 98.85
+      "branches": 98.88
     },
     "eval/text2vis/render.ts": {
       "lines": 100,

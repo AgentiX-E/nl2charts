@@ -310,7 +310,34 @@ export interface ProfileReport {
  * and every scored row is exactly one of the three. The middle bucket was missing from the first
  * version of this function and the assertion is what caught it.
  */
-export function scoreProfile(rows: readonly ProfileInput[], options: { readonly variant?: string } = {}): ProfileReport {
+/**
+ * One answer for one question, in the only three shapes the scorer knows.
+ *
+ * `families` travels with the mark for the reason `rule.ts` gives: a bar answers for a histogram only
+ * when a cue named it, and a line answers for an area unconditionally. The scorer reads the *first*
+ * family as the top-1 claim and the whole list as the shortlist, so an answer function that returned
+ * only a mark would have made one of the two readings impossible.
+ */
+export interface ChartAnswer {
+  readonly mark: RecommendableMark | 'declined';
+  readonly families: readonly ChartFamily[];
+}
+
+/**
+ * Price any answer function against the corpus.
+ *
+ * Extracted from `scoreProfile` in the round that added a second thing that answers the same question
+ * — a language model given only the question, with no result set at all. Two scorers written side by
+ * side would be two definitions of "hit", and the comparison between the two arms is a subtraction of
+ * their totals: a subtraction of two numbers built by different arithmetic is a difference between the
+ * arithmetic and not between the arms. Everything about the corpus, the denominators, the identity and
+ * the baselines is therefore shared, and the only thing an arm brings is where its answer came from.
+ */
+export function scoreAnswers(
+  rows: readonly ProfileInput[],
+  answerOf: (row: ProfileInput) => ChartAnswer,
+  options: { readonly variant?: string } = {},
+): ProfileReport {
   const perLabel = new Map<
     string,
     { family: ChartFamily; n: number; top1: number; shortlist: number; answered: Map<RecommendableMark | 'declined', number> }
@@ -329,7 +356,7 @@ export function scoreProfile(rows: readonly ProfileInput[], options: { readonly 
       unmappedLabels.set(row.label, (unmappedLabels.get(row.label) ?? 0) + 1);
       continue;
     }
-    const answer = profileAnswer(row.prompt, row.tableData);
+    const answer = answerOf(row);
     scored += 1;
     const bucket = perLabel.get(row.label) ?? { family, n: 0, top1: 0, shortlist: 0, answered: new Map() };
     bucket.n += 1;
@@ -397,6 +424,11 @@ export function scoreProfile(rows: readonly ProfileInput[], options: { readonly 
     confusion: [...confusion.values()].sort((left, right) => right.n - left.n || left.expected.localeCompare(right.expected)),
     variant: options.variant ?? 'profile',
   };
+}
+
+/** The product's answer, priced on its own tables. The arm the published reading is about. */
+export function scoreProfile(rows: readonly ProfileInput[], options: { readonly variant?: string } = {}): ProfileReport {
+  return scoreAnswers(rows, (row) => profileAnswer(row.prompt, row.tableData), options);
 }
 
 /** The corpus, as the rows this reading scores. */

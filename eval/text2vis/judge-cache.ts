@@ -9,79 +9,28 @@
  * With a store keyed on the *content* of the request, a reading costs the rows that changed and
  * nothing else, and the same corpus re-read after a prompt edit costs what the prompt edit costs.
  *
- * ## Why the key is what it is
- *
- * A cache is only as honest as its key. Six inputs can change the two integers a grader writes,
- * and every one of them is in the key:
- *
- * | input | what goes wrong without it |
- * | --- | --- |
- * | the picture's bytes | a re-rendered figure is answered with the old figure's opinion |
- * | the question and the label | one figure answers two questions differently |
- * | the model | a grader swap is an instrument swap, and the floor is relative to the instrument |
- * | the decode mode | the `--think` A/B reads the same figures twice, and would read one answer twice |
- * | the output cap | a reply cut at 1,024 tokens is a different answer from one that finished |
- * | the temperature | a sample is not a reading, and a cached sample is a fabricated one |
- *
- * `CACHE_VERSION` travels with them so a change to the *prompt* — which is an input this file does
- * not otherwise see — can be made a miss by bumping it. Both the version and the hashed text are in
- * the key rather than one or the other: the version is the author's promise that the prompt changed,
- * and the text is the proof.
- *
- * ## Why the digest is SHA-256 and not the fixture hash
- *
- * `replay.ts` identifies a request by an FNV-1a hash of the payload, and says in its own comment
- * that it must never be used for a cache key on disk. This is that disk: 1,418 pictures in one
- * store is a birthday-problem population, and the cost of a collision is not a cache miss but one
- * figure silently graded with another's opinion.
+ * The key and the store live in `content-store.ts`, because the chart arm needs the same two things
+ * for the same reason and two copies of a cache key are two definitions of "the same request". What
+ * is left here is the *record*: the two integers a grader writes, and the reader that refuses a
+ * record it cannot stand behind.
  */
 
-import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import type { LlmMessage, LlmUsage } from '@agentix-e/nl2charts-ai';
+import type { LlmUsage } from '@agentix-e/nl2charts-ai';
+import { cacheKey as keyOf, openStore, type CacheIdentity, type ContentStore } from './content-store.js';
+
+// Re-exported rather than moved out of this module's surface: every caller of the judge asks for the
+// identity in the same breath as the key, and a reader looking for "what identifies a reading" should
+// not have to know that the answer lives one file away.
+export type { CacheIdentity } from './content-store.js';
 
 /**
  * Bumped when the judge prompt changes.
  *
- * The prompt is not an argument to {@link cacheKey}, so an edit to `JUDGE_SYSTEM` would otherwise
- * keep serving the old prompt's answers — the one way a cache can turn a new reading into a
- * re-publication of the previous one. The text is hashed as well, so a forgotten bump is a miss
- * rather than a silent reuse; the version is kept because it also covers a change to this file's
- * own key scheme, which no text hash can see.
+ * The prompt is not visible to the key, whose material is only the rendered request, so an edit to
+ * `JUDGE_SYSTEM` that leaves the *question* untouched would otherwise keep serving the old prompt's
+ * answers — the one way a cache can turn a new reading into a re-publication of the previous one.
  */
 export const CACHE_VERSION = 1;
-
-export interface CacheIdentity {
-  readonly messages: readonly LlmMessage[];
-  readonly model: string;
-  readonly thinking: boolean | undefined;
-  readonly maxTokens: number | undefined;
-  readonly temperature: number | null;
-}
-
-/**
- * Everything that can change the answer, as one hex string.
- *
- * The three absences are spelled out (`unstated`, `null`) rather than passed through `??`: a request
- * that did not name a mode and a request that named `false` are two different requests to this
- * endpoint, and a key that folded them together would make the A/B unreadable.
- */
-export function cacheKey(identity: CacheIdentity): string {
-  const sections = identity.messages.map((message) => {
-    const pictures = (message.images ?? []).map((image) => createHash('sha256').update(image.data).digest('hex'));
-    return [message.content, ...pictures].join('\u0000');
-  });
-  const material = JSON.stringify([
-    CACHE_VERSION,
-    sections,
-    identity.model,
-    identity.thinking === undefined ? 'unstated' : identity.thinking,
-    identity.maxTokens ?? null,
-    identity.temperature === null ? 'unstated' : identity.temperature,
-  ]);
-  return createHash('sha256').update(material).digest('hex');
-}
 
 /** One graded figure, as the store keeps it. */
 export interface CachedReading {
@@ -94,26 +43,7 @@ export interface CachedReading {
   readonly model?: string;
 }
 
-export interface JudgeCache {
-  /** The entry for this key, or `undefined` when there is none or it cannot be trusted. */
-  get(key: string, expect?: { readonly model: string }): CachedReading | undefined;
-  /** Keeps a reading. An entry that already exists is left alone. */
-  put(key: string, reading: CachedReading): void;
-  /** Rows answered from the store. */
-  readonly hits: number;
-  /**
-   * Rows that cost a call, which is every row that is not a hit.
-   *
-   * `hits + misses` is the number of rows asked about, so a report can be checked against its own
-   * denominator without a third counter. A corrupt entry is counted here as well as in `corrupt`,
-   * because it is a row the endpoint will be charged for.
-   */
-  readonly misses: number;
-  /** Entries that were present and unusable: a subset of `misses`, and always a defect. */
-  readonly corrupt: number;
-  /** How many entries the directory holds. */
-  size(): number;
-}
+export type JudgeCache = ContentStore<CachedReading>;
 
 const isScore = (value: unknown): value is number =>
   typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 10;
@@ -130,6 +60,8 @@ function readingOf(parsed: unknown, expect: { readonly model: string } | undefin
   if (typeof parsed !== 'object' || parsed === null) return undefined;
   const row = parsed as Record<string, unknown>;
   if (row['version'] !== CACHE_VERSION) return undefined;
+  // Both columns before either reader: a row the grader wrote with one score off the scale is a row
+  // this store will not serve at all, and each column is asserted by its own case below.
   if (!isScore(row['chart_correctness']) || !isScore(row['readability'])) return undefined;
   if (typeof row['reply'] !== 'string') return undefined;
   if (expect !== undefined && row['model'] !== expect.model) return undefined;
@@ -147,64 +79,11 @@ function readingOf(parsed: unknown, expect: { readonly model: string } | undefin
   };
 }
 
-/** The two directories a key can land in, so one directory holds a few hundred files and not a million. */
-const shardOf = (key: string): string => key.slice(0, 2);
+/** The key for one judge request, bound to this record's version. */
+export function cacheKey(identity: CacheIdentity): string {
+  return keyOf(identity, CACHE_VERSION);
+}
 
 export function openCache(directory: string): JudgeCache {
-  let hits = 0;
-  let misses = 0;
-  let corrupt = 0;
-  return {
-    get hits() {
-      return hits;
-    },
-    get misses() {
-      return misses;
-    },
-    get corrupt() {
-      return corrupt;
-    },
-    get(key, expect) {
-      const path = join(directory, shardOf(key), `${key}.json`);
-      if (!existsSync(path)) {
-        misses += 1;
-        return undefined;
-      }
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(readFileSync(path, 'utf8'));
-      } catch {
-        corrupt += 1;
-        misses += 1;
-        return undefined;
-      }
-      const reading = readingOf(parsed, expect);
-      if (reading === undefined) {
-        corrupt += 1;
-        misses += 1;
-        return undefined;
-      }
-      hits += 1;
-      return reading;
-    },
-    put(key, reading) {
-      const shard = join(directory, shardOf(key));
-      const path = join(shard, `${key}.json`);
-      // Append-only: two workers can hold the same key, and the first answer is as good as the second.
-      // Rewriting it would also make the store a place where a later run can change an earlier one's
-      // published reading, which is the property an artifact is supposed to have.
-      if (existsSync(path)) return;
-      mkdirSync(shard, { recursive: true });
-      writeFileSync(path, `${JSON.stringify({ version: CACHE_VERSION, ...reading })}\n`);
-    },
-    size() {
-      if (!existsSync(directory)) return 0;
-      let total = 0;
-      for (const shard of readdirSync(directory, { withFileTypes: true })) {
-        if (!shard.isDirectory()) continue;
-        total += readdirSync(join(directory, shard.name)).filter((name) => name.endsWith('.json')).length;
-      }
-      return total;
-    },
-  };
+  return openStore<CachedReading>(directory, CACHE_VERSION, readingOf);
 }

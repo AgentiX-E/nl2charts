@@ -29,6 +29,7 @@
  *
  *   node tools/check-text2vis-baseline.mjs                  # report from eval/out, note if absent
  *   node tools/check-text2vis-baseline.mjs --require        # CI: a missing report is a failure
+ *   node tools/check-text2vis-baseline.mjs --llm --require   # the model arm's dispatch
  *   node tools/check-text2vis-baseline.mjs --self-test
  */
 import { existsSync, readFileSync } from 'node:fs';
@@ -39,6 +40,7 @@ const BASELINE = 'eval/text2vis/baseline.json';
 const REPORT = 'eval/out/text2vis-profile.json';
 const RENDER_REPORT = 'eval/out/text2vis-render.json';
 const JUDGE_REPORT = 'eval/out/text2vis-judge.json';
+const LLM_REPORT = 'eval/out/text2vis-llm.json';
 
 /**
  * Compare one reading against the floor.
@@ -453,6 +455,53 @@ const JUDGE_SELF_TEST = [
 ];
 
 /** Cases that pin the three failures the gate exists for, plus the one it must not invent. */
+/**
+ * The model arm's own cases.
+ *
+ * One per way the reader refuses, because each of them is a report that would otherwise be published:
+ * a cut reply, a counter that does not add up, a denominator that moved, a reading under its floor,
+ * and a missing artifact on a dispatch that asked for one. The generated case at the end is the
+ * positive one — a hand-written pass would prove nothing about the arithmetic the run uses.
+ */
+const LLM_SELF_TEST = [
+  {
+    name: 'a model reading over the floor passes and is printed',
+    report: { arms: [{ model: 'deepseek-chat', scale: 'mark', requested: 1470, answered: 1470, unparsed: 0, truncated: 0, scored: 1470, top1: 700 }] },
+    want: 0,
+  },
+  {
+    name: 'a reply cut at the budget is refused, because a share over the survivors is not a share',
+    report: { arms: [{ model: 'deepseek-chat', scale: 'mark', requested: 1470, answered: 1469, unparsed: 1, truncated: 24, scored: 1470, top1: 700 }] },
+    want: 1,
+  },
+  {
+    name: 'counters that do not add up are refused before any share is read',
+    report: { arms: [{ model: 'deepseek-chat', scale: 'mark', requested: 1470, answered: 1400, unparsed: 0, truncated: 0, scored: 1470, top1: 700 }] },
+    want: 1,
+  },
+  {
+    name: 'a reading under its floor is refused',
+    report: { arms: [{ model: 'deepseek-chat', scale: 'mark', requested: 1470, answered: 1470, unparsed: 0, truncated: 0, scored: 1470, top1: 600 }] },
+    want: 1,
+  },
+  {
+    name: 'a reading over another row set is a different question',
+    report: { arms: [{ model: 'deepseek-chat', scale: 'mark', requested: 200, answered: 200, unparsed: 0, truncated: 0, scored: 200, top1: 100 }] },
+    want: 1,
+  },
+  {
+    name: 'a label arm is held to its exact count, not to a top-1 it never published',
+    report: { arms: [{ model: 'deepseek-chat', scale: 'label', requested: 1470, answered: 1470, unparsed: 0, truncated: 0, scored: 1470, exact: 800 }] },
+    want: 0,
+  },
+  {
+    name: 'a dispatch that asked for a reading and wrote none is refused',
+    report: undefined,
+    require: true,
+    want: 1,
+  },
+];
+
 const SELF_TEST = [
   { name: 'a reading at the floor passes', report: { profile: { scored: 1470, top1: 526, shortlist: 618, declined: 167 } }, want: 0 },
   { name: 'a reading above the floor passes', report: { profile: { scored: 1470, top1: 530, shortlist: 620, declined: 160 } }, want: 0 },
@@ -502,6 +551,31 @@ function selfTest() {
   for (const test of RENDER_SELF_TEST) {
     const { issues } = compareRender(test.report, renderFloor, test.require === true ? { require: true } : {});
     caseOf(test.name, issues, test.want);
+  }
+  // One floor for both scales: the reader picks the dimension from the arm's own scale, which is the
+  // decision these cases exist to pin.
+  const llmFloor = {
+    arms: {
+      'deepseek-chat|mark': { scored: 1470, top1: 640 },
+      'deepseek-chat|label': { scored: 1470, exact: 780 },
+    },
+  };
+  for (const test of LLM_SELF_TEST) {
+    const { issues } = compareLlm(test.report, llmFloor, test.require === true ? { require: true } : {});
+    caseOf(test.name, issues, test.want);
+  }
+  // An arm nobody has priced yet is a note rather than a failure: the first dispatch of a new model is
+  // the measurement that establishes its floor, and a gate that refused it would refuse that run.
+  const unpriced = compareLlm(
+    { arms: [{ model: 'glm-4.5', scale: 'mark', requested: 10, answered: 10, unparsed: 0, truncated: 0, scored: 10, top1: 5 }] },
+    llmFloor,
+    {},
+  );
+  {
+    const ok = unpriced.issues.length === 0 && unpriced.notes.length === 1;
+    if (!ok) failed += 1;
+    reported += 1;
+    console.log(`${ok ? 'ok  ' : 'FAIL'} an arm with no recorded floor is noted, not refused`);
   }
   const judgeFloor = { dimensions: ['chart_correctness', 'readability'], grader: { endpoint: 'zhipu', model: 'glm-4.5v' } };
   for (const test of JUDGE_SELF_TEST) {
@@ -580,6 +654,89 @@ function checkExpectedInstrument(baseline, spec) {
   return 0;
 }
 
+/**
+ * Compare the model arm's reading against its floor.
+ *
+ * A separate reader rather than a fourth branch of `compare`, because the artifact is a different
+ * shape and the scale decides what the number even is: a `mark` arm publishes a top-1 over the same
+ * eleven marks the product can draw, and a `label` arm publishes an exact family count over the
+ * corpus's own vocabulary. Comparing one against the other's floor would hold a model to a reading it
+ * never took.
+ *
+ * Three things are checked besides the reading itself, and each of them is a way a report can be a
+ * file rather than a measurement:
+ *
+ * - `truncated` must be zero. A reply cut at the token budget is not an answer, and a share computed
+ *   over the rows that survived is a share over a population chosen by the endpoint's cap.
+ * - `scored` must equal the floor's, for `compare`'s reason: a reading over a different row set is a
+ *   different question.
+ * - `answered + unparsed` must equal `requested`. The arm asserts this itself; this re-checks it
+ *   because a report is a file, and a counter that does not add up is a share on the wrong
+ *   denominator wherever it was written.
+ *
+ * An arm the floor has no entry for is a *note*, not a failure: the first dispatch of a new model (or
+ * a new scale) is the measurement that establishes the number, and a gate that refused it would
+ * refuse the only run that could ever satisfy it.
+ *
+ * @returns {{issues: string[], notes: string[]}}
+ */
+export function compareLlm(report, floor, options = {}) {
+  const issues = [];
+  const notes = [];
+  if (report === undefined) {
+    const message = `TEXT2VIS LLM: no reading at ${LLM_REPORT} — \`pnpm bench:text2vis:llm --artifact ${LLM_REPORT}\` writes it`;
+    if (options.require === true) issues.push(message);
+    else notes.push(`${message} (not required here)`);
+    return { issues, notes };
+  }
+  const arms = Array.isArray(report.arms) ? report.arms : [];
+  if (arms.length === 0) {
+    issues.push('TEXT2VIS LLM: the reading has no arms, so no model was priced');
+    return { issues, notes };
+  }
+  const recorded = floor?.arms ?? {};
+  for (const arm of arms) {
+    const name = `${String(arm.model)}|${String(arm.scale)}`;
+    if (arm.answered + arm.unparsed !== arm.requested) {
+      issues.push(
+        `TEXT2VIS LLM: ${name} reports ${String(arm.answered)} answered + ${String(arm.unparsed)} unparsed against ${String(arm.requested)} rows asked`,
+      );
+      continue;
+    }
+    if (arm.truncated > 0) {
+      issues.push(
+        `TEXT2VIS LLM: ${name} had ${String(arm.truncated)} replies cut at the token budget, so its share is over the rows the cap survived`,
+      );
+      continue;
+    }
+    const entry = recorded[name];
+    if (entry === undefined) {
+      notes.push(`TEXT2VIS LLM: no floor recorded for ${name}; this reading establishes one (${String(arm.scored)} scored rows)`);
+      continue;
+    }
+    if (arm.scored !== entry.scored) {
+      issues.push(
+        `TEXT2VIS LLM: ${name} scored ${String(arm.scored)} rows and the floor was recorded over ${String(entry.scored)}; a reading over a different row set is a different question`,
+      );
+      continue;
+    }
+    const dimension = arm.scale === 'mark' ? 'top1' : 'exact';
+    const value = arm[dimension];
+    if (typeof value !== 'number') {
+      issues.push(`TEXT2VIS LLM: ${name} has no numeric \`${dimension}\`, so its reading cannot be compared`);
+      continue;
+    }
+    if (value < entry[dimension]) {
+      issues.push(
+        `TEXT2VIS LLM: ${name} fell to ${String(value)} ${dimension} (${((value / entry.scored) * 100).toFixed(2)}%) from the floor of ${String(entry[dimension])} (${((entry[dimension] / entry.scored) * 100).toFixed(2)}%)`,
+      );
+      continue;
+    }
+    notes.push(`TEXT2VIS LLM: ${name} reads ${String(value)} ${dimension} (${((value / entry.scored) * 100).toFixed(2)}%) against a floor of ${String(entry[dimension])}`);
+  }
+  return { issues, notes };
+}
+
 function main(argv) {
   if (argv.includes('--self-test')) return selfTest();
   const require = argv.includes('--require');
@@ -593,7 +750,11 @@ function main(argv) {
   // Declared rather than inferred, because the inference would be "anything that does not match the
   // floor is allowed", which is the rule this gate exists to refuse.
   const iteration = argv.includes('--iteration');
-  const known = new Set(['--require', '--require-judge', '--iteration', '--self-test', '--expect-instrument']);
+  // The model arm's dispatch, which produces no profile report at all: it asks a model, writes one
+  // artifact and compares it with its own floor. A flag rather than a guess from which file exists,
+  // because a run that has both artifacts should be read by the reader that knows what it produced.
+  const llm = argv.includes('--llm');
+  const known = new Set(['--require', '--require-judge', '--iteration', '--self-test', '--expect-instrument', '--llm']);
   // The value after `--expect-instrument` is a model name and not a flag, so it is skipped rather than
   // reported as an unknown argument.
   const flags = [];
@@ -619,6 +780,14 @@ function main(argv) {
     return 2;
   }
   const baseline = JSON.parse(readFileSync(baselinePath, 'utf8'));
+  if (llm) {
+    const llmPath = resolve(ROOT, LLM_REPORT);
+    const llmReport = existsSync(llmPath) ? JSON.parse(readFileSync(llmPath, 'utf8')) : undefined;
+    const { issues: llmIssues, notes: llmNotes } = compareLlm(llmReport, baseline.llm, { require });
+    for (const note of llmNotes) console.log(note);
+    for (const issue of llmIssues) console.error(issue);
+    return llmIssues.length === 0 ? 0 : 1;
+  }
   // Before the report, before the corpus, before a call: the one question about a dispatch that can
   // be answered from a file. A floor reading on another instrument costs a full reading and then
   // fails, so it is refused first — the workflow runs this step above the probe.

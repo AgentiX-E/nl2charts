@@ -1,0 +1,188 @@
+name: text2vis-llm
+
+# The chart half, answered by a model.
+#
+# Two readings live beside this one and neither costs a model call: `text2vis-rule` scores the cue
+# table and the recommender against the corpus, on every push that touches the chart code. What
+# neither can answer is the question the next round's plan depends on — how far a *model* gets on the
+# same rows — because that answer costs one call per row.
+#
+# **Dispatch-only, and not on `push`.** 1,470 questions x 2 scales x 1 model is 2,940 calls, and a
+# trigger would spend that on every commit to `eval/text2vis/**` in exchange for a number that only
+# moves when the prompt, the option list or the model does. That is the discipline the competitor
+# readings already follow: a number is *recorded*, and a record is not a test.
+#
+# **Two scales, because they answer two questions.** `mark` offers the eleven marks this product can
+# draw and is scored by `profile.ts`'s own scorer, so its top-1 is comparable with the 41.22% the
+# product reads. `label` offers the corpus's own chart names and counts exact family matches, which is
+# the number a Text2Vis paper reports — and the only place the three families no mark can lead with
+# (`area`, `histogram`, `violin`) can be seen at all.
+#
+# **The reply store is why a second dispatch is cheap.** Answers are keyed on the exact request —
+# messages, model, temperature, budget, and a prompt version written by hand — so a dispatch after a
+# one-line change pays for the rows that changed. The cache is restored from the previous run of the
+# same prompt version, and a bump of `PROMPT_VERSION` in `eval/text2vis/llm.ts` starts a new key space
+# rather than serving answers to a prompt nobody sends any more.
+
+on:
+  workflow_dispatch:
+    inputs:
+      models:
+        # A comma-separated list, and the primary is always first. Two models in one dispatch is the
+        # strong-against-weak comparison on one corpus and one download, which a matrix job would pay
+        # for twice.
+        description: 'Primary model, optionally followed by a second (comma-separated)'
+        required: true
+        default: 'deepseek-chat'
+        type: string
+      scales:
+        # `mark` is the decision variable; `label` is the SOTA comparison. Both by default, because a
+        # dispatch that took only the first would leave the reachable ceiling unexplained.
+        description: 'Scales to price: mark, label, or mark,label'
+        required: true
+        default: 'mark,label'
+        type: choice
+        options:
+          - 'mark,label'
+          - 'mark'
+          - 'label'
+      limit:
+        # The smoke run. A prefix rather than a stride because this arm has no pairing between two
+        # samples of itself; what it pairs is the model against the product, and both are read from
+        # the same rows in the same run.
+        description: 'Ask only the first N rows (0 asks every scored row)'
+        required: true
+        default: '0'
+        type: string
+      concurrency:
+        # A one-word answer to a 200-token prompt: the calls are short and the endpoint is a chat tier.
+        # 6 keeps the wall clock near ten minutes for 2,940 calls without putting a burst on the key.
+        description: 'Calls in flight at once'
+        required: true
+        default: '6'
+        type: string
+      second_base_url:
+        description: 'Base url for the second model, when one is named'
+        required: false
+        default: 'https://open.bigmodel.cn/api/paas/v4'
+        type: string
+
+permissions:
+  contents: read
+
+# One at a time per prompt version: the store is the point, and two dispatches filling it in parallel
+# would answer the same keys twice.
+concurrency:
+  group: text2vis-llm-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  arms:
+    name: what a model answers on the same 1,470 rows
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      # The primary is the text backbone the BIRD jobs already use, so the org secret is the one that
+      # exists rather than a new one. The second model takes the vision endpoint's key because that is
+      # where the other vendor's credential lives.
+      LLM_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+      LLM_BASE_URL: 'https://api.deepseek.com/v1'
+      TEXT2VIS_LLM_MODELS: ${{ inputs.models }}
+      TEXT2VIS_SECOND_BASE_URL: ${{ inputs.second_base_url }}
+      TEXT2VIS_SECOND_API_KEY: ${{ secrets.ZHIPU_API_KEY }}
+      TEXT2VIS_LLM_CONCURRENCY: ${{ inputs.concurrency }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # The corpus, kept between runs: the file is immutable upstream, and a reading whose first step
+      # is a download reports a network as a score when the network is what failed.
+      - name: Cache the corpus
+        uses: actions/cache@v4
+        with:
+          path: eval/.cache/text2vis
+          key: text2vis-corpus-v1
+
+      # The answers, kept between runs and keyed on the prompt version. This is the whole reason a
+      # second dispatch of the same prompt costs nothing rather than ¥2.
+      - name: Cache the answers
+        uses: actions/cache@v4
+        with:
+          path: eval/.cache/text2vis/llm-choices
+          key: text2vis-llm-answers-v1-${{ inputs.models }}
+          restore-keys: |
+            text2vis-llm-answers-v1-
+
+      # The instrument, before the measurement: how many rows, which labels, how many are scored.
+      - name: Read the corpus
+        run: pnpm bench:text2vis:dataset
+
+      - name: Ask every model on every scale
+        run: |
+          LIMIT=""
+          if [ "${{ inputs.limit }}" != "0" ]; then LIMIT="--limit ${{ inputs.limit }}"; fi
+          pnpm bench:text2vis:llm --artifact eval/out/text2vis-llm.json \
+            --scales "${{ inputs.scales }}" $LIMIT
+
+      # The floor, when one has been registered. A first dispatch establishes the number; the commit
+      # that earns it writes it into `eval/text2vis/baseline.json`, and every dispatch after that is
+      # held to it — the same rule the recommender's reading follows, and for the same reason: a
+      # number nobody refuses can fall as quietly as it rose.
+      - name: Hold the model to its recorded reading
+        run: node tools/check-text2vis-baseline.mjs --llm --require
+
+      - name: Upload the reading
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: text2vis-llm
+          path: eval/out/text2vis-llm.json
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Publish the summary
+        if: always()
+        run: |
+          if [ -f eval/out/text2vis-llm.json ]; then
+            node -e "
+              const payload = require('./eval/out/text2vis-llm.json');
+              const pct = (value) => (value * 100).toFixed(2) + '%';
+              const rows = payload.arms.map((arm) => {
+                const reading = arm.scale === 'mark'
+                  ? 'top-1 ' + pct(arm.top1Share) + ' (' + arm.top1 + ' of ' + arm.scored + ')'
+                  : 'exact ' + pct(arm.exactShare) + ' (' + arm.exact + ' of ' + arm.scored + ')';
+                const cost = arm.cost.yuan === undefined ? 'unpriced' : '¥' + arm.cost.yuan.toFixed(3);
+                return '| ' + arm.model + ' | ' + arm.scale + ' | ' + reading + ' | ' + arm.unparsed + ' | ' + arm.truncated + ' | ' + cost + ' |';
+              });
+              const pairs = payload.paired.map((entry) =>
+                '| ' + entry.model + ' | ' + entry.pair.both + ' | ' + entry.pair.ruleOnly + ' | ' + entry.pair.modelOnly + ' | ' + entry.pair.p.toFixed(4) + ' |'
+              );
+              const lines = [
+                '### Text2Vis: a model on the same ' + payload.corpus.asked + ' rows',
+                '',
+                '| model | scale | reading | unparsed | truncated | cost |',
+                '| --- | --- | --- | --- | --- | --- |',
+                ...rows,
+                '',
+                '### Paired against the product, row for row',
+                '',
+                '| model | both | product only | model only | McNemar p |',
+                '| --- | --- | --- | --- | --- |',
+                ...pairs,
+                '',
+                'The product reads 41.22% (606 of 1,470) on the same rows; the cue table alone reads',
+                '39.12%. A `mark` arm offers the same eleven marks the product does, so its top-1 is one',
+                'subtraction away from that number. A `label` arm offers the corpus\'s own vocabulary and',
+                'counts exact family matches: that is the comparable reading for a Text2Vis paper, and',
+                'the only one on which `area`, `histogram` and `violin` can be hit at all.'
+              ];
+              require('fs').appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join('\n') + '\n');
+            "
+          else
+            echo 'no reading was written, so there is nothing to summarise' >> "$GITHUB_STEP_SUMMARY"
+          fi

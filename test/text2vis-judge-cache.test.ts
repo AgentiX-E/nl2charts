@@ -137,6 +137,46 @@ describe('the store on disk', () => {
     }
   });
 
+  it('refuses an entry another model wrote, which a copied store is the only way to produce', () => {
+    const directory = temporary();
+    try {
+      const key = cacheKey(identity());
+      const shard = join(directory, key.slice(0, 2));
+      mkdirSync(shard, { recursive: true });
+      // The key already separates models, so this entry is only reachable by copying a store from a
+      // directory keyed on another one — and serving it would score a figure with the other grader's
+      // opinion under this one's name.
+      writeFileSync(
+        join(shard, `${key}.json`),
+        JSON.stringify({ version: 1, chart_correctness: 5, readability: 5, reply: '{}', model: 'glm-4.6v' }),
+      );
+      const cache = openCache(directory);
+      expect(cache.get(key, { model: 'glm-4.5v' })).toBeUndefined();
+      expect(cache.corrupt).toBe(1);
+      // The same entry is served when the expectation names the model that wrote it.
+      expect(openCache(directory).get(key, { model: 'glm-4.6v' })?.chart_correctness).toBe(5);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('treats an entry whose reply is not text as a miss', () => {
+    const directory = temporary();
+    try {
+      const key = cacheKey(identity());
+      const shard = join(directory, key.slice(0, 2));
+      mkdirSync(shard, { recursive: true });
+      // The reply is the only part of an entry a document quotes; a number there is a record this
+      // reader will not serve, and serving it would put a non-string into a transcript.
+      writeFileSync(join(shard, `${key}.json`), JSON.stringify({ version: 1, chart_correctness: 5, readability: 5, reply: 7 }));
+      const cache = openCache(directory);
+      expect(cache.get(key)).toBeUndefined();
+      expect(cache.corrupt).toBe(1);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('treats a well-formed entry with impossible scores as a miss', () => {
     const directory = temporary();
     try {
@@ -145,10 +185,27 @@ describe('the store on disk', () => {
       mkdirSync(shard, { recursive: true });
       // 11 is off the 0-10 scale the prompt asks for. Rounding it into the histogram would be this
       // file choosing a score the grader did not write, and caching it would make the choice permanent.
-      writeFileSync(join(shard, `${key}.json`), JSON.stringify({ chart_correctness: 11, readability: 5, reply: '{}' }));
+      // `version` first: an entry without it is refused by the *version* check, so a fixture that
+      // omitted it would pass this test while never reaching the predicate it is about — a green test
+      // over an untested line, which is the exact defect a coverage floor exists to expose.
+      writeFileSync(
+        join(shard, `${key}.json`),
+        JSON.stringify({ version: 1, chart_correctness: 11, readability: 5, reply: '{}' }),
+      );
+      // And the same for the other column: a reader that only ever refused the first score is a reader
+      // whose second check was never exercised, which is a test passing over half a predicate.
       const cache = openCache(directory);
       expect(cache.get(key)).toBeUndefined();
       expect(cache.corrupt).toBe(1);
+      // The same entry with the *second* column off the scale, written over the first: a reader whose
+      // second check never ran is a reader that passes a test over half its predicate.
+      writeFileSync(
+        join(shard, `${key}.json`),
+        JSON.stringify({ version: 1, chart_correctness: 5, readability: 11, reply: '{}' }),
+      );
+      const second = openCache(directory);
+      expect(second.get(key)).toBeUndefined();
+      expect(second.corrupt).toBe(1);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

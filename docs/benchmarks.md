@@ -16254,3 +16254,52 @@ takes a table and emits a compact spec, and a compiler does every geometric deci
 repository already has the compiler and the geometry (`matplotlib.ts` draws without inventing a
 scale it was not given). The part that would be new is a semantic layer that reads the question —
 which is what `CHART_CUES` is doing with regular expressions, and where a model would go.
+
+## The census was ranking tables the product melts, and the fix is a seventh outcome
+
+`eval/text2vis/census.ts` explains a miss and `eval/text2vis/profile.ts` counts it, and the two are
+supposed to agree row for row: `hit` here is the `top1` there, and `hit + substituted` is the
+`shortlist` there. They did not. On the 1,470 scored rows the census read **599 hit and 702
+shortlist** against the profile's **606 and 710**, and the file said so in its own comment — the gap
+was measured, named and left unrepaired because the repair needed a decision the classifier did not
+have to make.
+
+**The disagreement was one thing: the reshape.** `profileAnswer` asks `meltWide` first — a table whose
+columns are periods is drawn as one line per entity by `toChartIR` without consulting any admission
+rule — and the census ranked every table. A melted table is not a ranking; it is an answer that
+happened before ranking. So on 78 of the 1,470 rows the census was explaining a decision nobody made:
+73 were filed as `outranked` ("a covering mark was admitted and lost"), 4 as `refused` ("every mark
+that could cover the family was ruled out"), and 1 as `uncovered`. None of those sentences was true.
+
+The repair is a **seventh outcome**, not a re-bucketing into the six that existed:
+
+| outcome | what happened | rows |
+| --- | --- | ---: |
+| `hit` | the melt draws the picture the label names | +7 |
+| `substituted` | the label's family is the melted line's *second* claim (`area`) | +1 |
+| `reshaped` | the melt drew a line and the label asked for something else | **70** |
+
+with `refused` −4, `outranked` −73 and `uncovered` −1 on the same rows. `reshaped` carries the axis
+names the melt gave the table, because the two ways a reshape can be wrong are visible in them: an
+entity called `Min` over columns called `Q1`…`Q4` is a five-number summary read as years.
+
+After the change the two instruments agree exactly — **606 hit, 710 shortlist, 35 declined** — and
+`assertCensusReport` still holds all seven outcomes to the scored population. Three things came out
+of it beyond the counters:
+
+1. **The identity was the detector.** A summary that reads "606 top-1" beside a census that reads
+   "599 hit" is a reader's problem; the two numbers being asserted against each other is what turned
+   it into a defect.
+2. **A counterfactual has nothing to say about a row that was never ranked.** The calendar ablation and
+   the first-admissible-winner counterfactual now skip reshaped rows rather than crediting them with a
+   conversion: their identity (`hit - converted + lost === counterfactual.hit`) is preserved by making
+   `under == answered` on those rows, which is the arithmetic way of saying "this row is silent about
+   that ordering".
+3. **A cheap arm was green for the wrong reason.** The branch the coverage gate refused to let pass
+   turned out to be a *test* defect: a cache fixture written without `version` was refused by the
+   version check before it ever reached the score check it was written to exercise. The gate found it
+   because the branch was uncoverable, which is the whole reason a branch floor is worth its noise.
+
+The model arm beside this reading — `bench:text2vis:llm`, dispatched by `text2vis-llm.yml` — is what
+the repair makes comparable: it answers the same question the census explains, so its top-1 is one
+subtraction away from 41.22% and its misses can be read against the same seven outcomes.
