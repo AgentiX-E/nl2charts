@@ -358,9 +358,12 @@ export function assertArmReport(report: ArmReport): void {
     );
   }
   if (report.scale === 'mark') {
-    if (report.unparsed > report.declined) {
+    // Equality, not `>=`: every asked row is now scored, and `markAnswer` turns exactly one reply
+    // into a refusal — the one that named no offered option. Anything else means a row was counted
+    // twice or an unreadable reply was scored as an answer.
+    if (report.unparsed !== report.declined) {
       throw new Error(
-        `text2vis llm: ${String(report.unparsed)} unparsed replies but only ${String(report.declined)} declined rows, so an unreadable reply was scored as an answer`,
+        `text2vis llm: ${String(report.unparsed)} unparsed replies but ${String(report.declined)} declined rows, so an unreadable reply was scored as an answer or a readable one was thrown away`,
       );
     }
     if (report.top1 > report.shortlist) {
@@ -374,6 +377,24 @@ export function assertArmReport(report: ArmReport): void {
   const perFamily = report.perFamily.reduce((sum, entry) => sum + entry.n, 0);
   if (perFamily !== report.scored) {
     throw new Error(`text2vis llm: the per-family rows sum to ${String(perFamily)} and ${String(report.scored)} were scored`);
+  }
+}
+
+/**
+ * The population a report was taken over, refused when it is not the population it asked.
+ *
+ * A row that is asked and cannot be scored is a call that was paid for and thrown away, and the
+ * counters above cannot see it: they are all consistent when 1,985 rows are asked and 1,470 scored,
+ * because both numbers are true of different populations. The first full run did exactly that — the
+ * 515 labels no family names were sent to the model and then dropped by the scorer — so the one
+ * sentence that catches it is a comparison of the two, kept separate from the arithmetic so it is
+ * reported as its own defect rather than as a rounding disagreement.
+ */
+export function assertArmPopulation(report: ArmReport): void {
+  if (report.requested !== report.scored) {
+    throw new Error(
+      `text2vis llm: ${String(report.requested)} rows asked and ${String(report.scored)} scored; every row asked must be scored, or the calls the rest cost bought nothing`,
+    );
   }
 }
 
@@ -774,7 +795,19 @@ export async function entryLlm(
     }));
     // The rows are cut *before* the ask, so `--limit` prices a smoke run and never silently scores a
     // corpus it did not send.
-    const rows = args.limit === undefined ? all : all.slice(0, args.limit);
+    //
+    // A label no family names cannot be scored by either scale, and asking it spends a call to learn
+    // nothing: 515 of the corpus's 1,985 rows carry one (`Waterfall`, `Treemap`, …). They are dropped
+    // here, before the slice, so `--limit 20` is twenty *scored* rows and `requested` is the
+    // denominator the reading is published over. The drop is logged because a corpus silently
+    // narrowed is a corpus whose score is over the rows that were easy to ask.
+    const scored = all.filter((row) => familyOfLabel(row.label) !== undefined);
+    if (scored.length !== all.length) {
+      log(
+        `text2vis llm: ${String(all.length - scored.length)} of ${String(all.length)} rows carry a label no family names, so they are not asked`,
+      );
+    }
+    const rows = args.limit === undefined ? scored : scored.slice(0, args.limit);
     const targets = resolveTargets(env);
     if (options.providers === undefined && targets.some((target) => target.apiKey === '')) {
       throw new Error(
@@ -815,6 +848,7 @@ export async function entryLlm(
           log,
         });
         assertArmReport(report);
+        assertArmPopulation(report);
         arms.push(report);
         if (scale === 'mark') {
           const byRow = new Map<ProfileInput, ModelRow>(outcomes.map((outcome) => [outcome.row, outcome.answer]));

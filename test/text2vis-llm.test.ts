@@ -22,6 +22,7 @@ import { TEXT2VIS_FIELDS } from '../eval/text2vis/dataset.js';
 import { openStore } from '../eval/text2vis/content-store.js';
 import {
   askOnce,
+  assertArmPopulation,
   assertArmReport,
   buildChoicePrompt,
   describeArm,
@@ -318,6 +319,11 @@ describe('scoring one arm', () => {
     if (mark.scale !== 'mark') throw new Error('unreachable');
     expect(() => assertArmReport({ ...mark, answered: 99 })).toThrow(/unparsed is not the/);
     expect(() => assertArmReport({ ...mark, requested: 3, answered: 2, unparsed: 1, declined: 0 })).toThrow(/unreadable reply was scored/);
+    // Asked and unscored is a paid call that bought nothing, and it is a defect the counters above
+    // cannot see: `1 answered + 0 unparsed` against `1 asked` is consistent while three rows were
+    // scored, which is exactly the shape the first full run published as 1,985 asked / 1,470 scored.
+    expect(() => assertArmPopulation(mark)).toThrow(/every row asked must be scored/);
+    expect(() => assertArmPopulation({ ...mark, requested: 3, answered: 3, unparsed: 0, declined: 1 })).not.toThrow();
     const label = scoreArm(rows, outcomes, { model: 'm', options: labelOptions(rows), usage, cache }, 'label');
     if (label.scale !== 'label') throw new Error('unreachable');
     expect(() => assertArmReport({ ...label, exact: 9 })).toThrow(/exact matches out of/);
@@ -441,6 +447,42 @@ const TWO_ROWS = [
 ].join('\n');
 
 describe('the arm, end to end', () => {
+  it('does not spend a call on a row no scale can score, and says how many it dropped', async () => {
+    // The first full dispatch asked all 1,985 corpus rows for a 1,470-row reading: the 515 labels no
+    // family names went to the model, came back, and were dropped by the scorer. That is 515 wasted
+    // calls per scale, and the assertion that catches it is `requested === scored`.
+    const body = [
+      HEADER,
+      [cell('How has revenue changed over time?'), cell('10'), cell(''), cell('Line Chart'), cell(QUARTERLY)].join(','),
+      [cell('Draw the flows between stages'), cell('10'), cell(''), cell('Waterfall'), cell(QUARTERLY)].join(','),
+    ].join('\n');
+    const server = await serve(body);
+    const lines: string[] = [];
+    const provider = scripted(() => 'line');
+    try {
+      const target = join(root, 'unmapped.json');
+      const code = await entryLlm(ENTRY, MODULE_URL, (line) => lines.push(line), {
+        argv: ['--artifact', target, '--scales', 'mark'],
+        load: { cacheDir: join(root, 'unmapped-corpus'), url: server.url },
+        env: { TEXT2VIS_LLM_CACHE: 'none' },
+        providers: () => [provider],
+      });
+      expect(code).toBe(0);
+      // One scoreable row, one call: the waterfall row is never sent.
+      expect(provider.calls()).toBe(1);
+      expect(lines.join('\n')).toContain('1 of 2 rows carry a label no family names');
+      const written = JSON.parse(readFileSync(target, 'utf8')) as {
+        corpus: { rows: number; asked: number };
+        arms: { requested: number; scored: number }[];
+      };
+      expect(written.corpus).toEqual({ rows: 2, asked: 1 });
+      expect(written.arms[0]?.requested).toBe(1);
+      expect(written.arms[0]?.scored).toBe(1);
+    } finally {
+      await server.close();
+    }
+  });
+
   it('asks once per row per scale and writes the report', async () => {
     const server = await serve(TWO_ROWS);
     const lines: string[] = [];
