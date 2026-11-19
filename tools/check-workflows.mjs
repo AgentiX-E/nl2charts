@@ -132,6 +132,7 @@ export function cacheSteps(lines) {
     if (!block.some((line) => /^\s*uses:\s*actions\/cache(\/|@|\s|$)/.test(line))) continue;
     const paths = [];
     let key;
+    let id;
     for (let inner = index; inner < end; inner += 1) {
       const line = lines[inner] ?? '';
       const declared = /^\s*path:\s*(.*)$/.exec(line);
@@ -151,10 +152,26 @@ export function cacheSteps(lines) {
       }
       const named = /^\s*key:\s*(.+)$/.exec(line);
       if (named !== null && key === undefined) key = (named[1] ?? '').trim();
+      const identified = /^\s*id:\s*([A-Za-z][\w-]*)\s*$/.exec(line);
+      if (identified !== null && id === undefined) id = identified[1];
     }
-    steps.push({ line: index + 1, paths, key });
+    steps.push({ line: index + 1, paths, key, id });
   }
   return steps;
+}
+
+/**
+ * The key a step actually saves under, following a `cache-primary-key` indirection.
+ *
+ * A restore step and its save step share one key expression, and the save step names it as
+ * `${{ steps.<id>.outputs.cache-primary-key }}` rather than repeating it — which is exactly right, and
+ * exactly what a checker that reads key text literally gets wrong.
+ */
+export function effectiveKey(step, byId, depth = 0) {
+  const indirect = /^\$\{\{\s*steps\.([A-Za-z][\w-]*)\.outputs\.cache-primary-key\s*\}\}$/.exec(step.key ?? '');
+  if (indirect === null || depth > 3) return step.key;
+  const source = byId.get(indirect[1]);
+  return source === undefined ? step.key : effectiveKey(source, byId, depth + 1);
 }
 
 /** Whether a cached path is, contains, or sits inside a store this repository writes into. */
@@ -175,15 +192,17 @@ export function check(yaml, file) {
   for (const step of cacheSteps(lines)) {
     const held = step.paths.find(holdsStore);
     if (held === undefined) continue;
+    const byId = new Map(cacheSteps(lines).filter((entry) => entry.id !== undefined).map((entry) => [entry.id, entry]));
+    const key = effectiveKey(step, byId);
     // Rule 4: a key that cannot change is a cache that is saved once and then never again, because
     // GitHub refuses to overwrite an existing key. The store keeps growing on the runner while the
     // archive in CI stays frozen, and every dispatch after the first pays for the same answers.
-    if (!/hashFiles\(/.test(step.key ?? '')) {
+    if (!/hashFiles\(/.test(key ?? '')) {
       issues.push({
         file,
         line: step.line,
         rule: 'constant-key-for-mutable-store',
-        message: `the cache of ${held} holds answers this repository buys, and its key "${step.key ?? '(none)'}" cannot change when they do, so GitHub will save it once and refuse every later save`,
+        message: `the cache of ${held} holds answers this repository buys, and its key "${key ?? '(none)'}" cannot change when they do, so GitHub will save it once and refuse every later save`,
       });
     }
   }
@@ -293,8 +312,22 @@ function selfTest() {
   const download = withCache('eval/.cache/bird/train', 'bird-train-v1');
   if (check(download, 'h.yml').length !== 0) issues.push('a constant key on an immutable download was reported');
 
+  // And a save step names its key as the restore step's output rather than repeating the expression:
+  // one key, written once, and the checker has to follow it — in both directions.
+  const pair = (restoreKey) =>
+    ok.replace(
+      '      - name: consume',
+      `      - name: restore\n        id: kept\n        uses: actions/cache/restore@v4\n        with:\n          path: eval/.cache/judge\n          key: ${restoreKey}\n      - name: save\n        uses: actions/cache/save@v4\n        with:\n          path: eval/.cache/judge\n          key: \${{ steps.kept.outputs.cache-primary-key }}\n      - name: consume`,
+    );
+  if (check(pair("${{ hashFiles('eval/text2vis/judge.ts') }}"), 'i.yml').length !== 0) {
+    issues.push('a save step naming its restore step\u2019s key was reported');
+  }
+  if (!check(pair('judge-v1'), 'j.yml').some((issue) => issue.rule === 'constant-key-for-mutable-store')) {
+    issues.push('a save step inheriting a constant key was not reported');
+  }
+
   for (const issue of issues) console.error(`self-test: ${issue}`);
-  console.log(`check-workflows: ${String(9 - issues.length)}/9 self-checks passed`);
+  console.log(`check-workflows: ${String(11 - issues.length)}/11 self-checks passed`);
   return issues.length === 0 ? 0 : 1;
 }
 

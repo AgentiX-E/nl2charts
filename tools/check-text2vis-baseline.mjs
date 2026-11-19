@@ -577,6 +577,23 @@ function selfTest() {
     reported += 1;
     console.log(`${ok ? 'ok  ' : 'FAIL'} an arm with no recorded floor is noted, not refused`);
   }
+  // A floor with a band, in both directions. The band exists because the instrument re-samples to ±3
+  // rows at temperature 0, and run 44439035718 was rejected at 1 row under its floor — a gate that
+  // reds on noise teaches its readers to ignore it, which is worse than no gate at all.
+  const bandedFloor = { tolerance: 5, arms: { 'deepseek-chat|mark': { scored: 1470, top1: 640 } } };
+  const bandCase = (name, top1, want) => {
+    const { issues, notes } = compareLlm(
+      { arms: [{ model: 'deepseek-chat', scale: 'mark', requested: 1470, answered: 1470, unparsed: 0, truncated: 0, scored: 1470, top1 }] },
+      bandedFloor,
+      {},
+    );
+    const ok = issues.length === want && (want === 1 || notes.length === 1);
+    if (!ok) failed += 1;
+    reported += 1;
+    console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}${ok ? '' : ` — ${String(issues.length)} issues, wanted ${String(want)}`}`);
+  };
+  bandCase('a reading 3 rows under its floor is inside the band, and is said to be', 637, 0);
+  bandCase('a reading 6 rows under its floor is outside the band', 634, 1);
   const judgeFloor = { dimensions: ['chart_correctness', 'readability'], grader: { endpoint: 'zhipu', model: 'glm-4.5v' } };
   for (const test of JUDGE_SELF_TEST) {
     const options = { ...(test.require === true ? { require: true } : {}), ...(test.iteration === true ? { iteration: true } : {}) };
@@ -702,6 +719,12 @@ export function compareLlm(report, floor, options = {}) {
     return { issues, notes };
   }
   const recorded = floor?.arms ?? {};
+  // A hosted model at temperature 0 is not deterministic: three dispatches of one arm with no change
+  // to its prompt, budget or rows read mark 857 / 859 / 856 and label 886 / 886 / 889. A floor with no
+  // band therefore fails a re-sample — run 44439035718 was rejected at 856 against a floor of 857,
+  // which is 0.07pp — and a gate that reds on noise is a gate that gets ignored, which is worse than
+  // no gate because the number it protects then moves unnoticed.
+  const tolerance = typeof floor?.tolerance === 'number' ? floor.tolerance : 0;
   for (const arm of arms) {
     const name = `${String(arm.model)}|${String(arm.scale)}`;
     if (arm.answered + arm.unparsed !== arm.requested) {
@@ -733,9 +756,15 @@ export function compareLlm(report, floor, options = {}) {
       issues.push(`TEXT2VIS LLM: ${name} has no numeric \`${dimension}\`, so its reading cannot be compared`);
       continue;
     }
-    if (value < entry[dimension]) {
+    if (value < entry[dimension] - tolerance) {
       issues.push(
-        `TEXT2VIS LLM: ${name} fell to ${String(value)} ${dimension} (${((value / entry.scored) * 100).toFixed(2)}%) from the floor of ${String(entry[dimension])} (${((entry[dimension] / entry.scored) * 100).toFixed(2)}%)`,
+        `TEXT2VIS LLM: ${name} fell to ${String(value)} ${dimension} (${((value / entry.scored) * 100).toFixed(2)}%) from the floor of ${String(entry[dimension])} (${((entry[dimension] / entry.scored) * 100).toFixed(2)}%), which is outside the ${String(tolerance)}-row band this instrument re-samples within`,
+      );
+      continue;
+    }
+    if (value < entry[dimension]) {
+      notes.push(
+        `TEXT2VIS LLM: ${name} reads ${String(value)} ${dimension} against a floor of ${String(entry[dimension])}, inside the ${String(tolerance)}-row band the same arm re-samples within — not a regression`,
       );
       continue;
     }

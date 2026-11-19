@@ -37,6 +37,8 @@
     "commit": "ebb58e4c",
     "instrument": "eval/text2vis/llm.ts, PROMPT_VERSION 1, deepseek-chat, temperature 0, max_tokens 96, thinking absent",
     "asked": 1470,
+    "tolerance": 5,
+    "resamples": "Three dispatches of one arm with no code change moved mark 857 / 859 / 856 and label 886 / 886 / 889 — a spread of 3 rows at temperature 0. A floor without a band therefore rejects a re-sample: run 44439035718 failed at 856 against a floor of 857, which is 0.07pp and inside the instrument's own noise. 5 rows is wider than the largest observed spread and still 0.34pp, below any decision this benchmark can make.",
     "note": "The first full reading of the chart half by a model, and the floor the next dispatch is held to. 1,470 rows asked at both scales; the 515 corpus rows whose label no family names are not sent, which is a correction this reading itself produced — the run before it asked all 1,985 and scored 1,470, so 1,030 calls of 3,970 bought nothing. Zero replies were cut at the cap; the run before it had 5 cut at max_tokens 32, and the three whose cut landed just after the name were counted as answers, which is why that run read 860 top-1 and this one reads 857. `mark` offers the eleven marks this product can draw and is scored by profile.ts's own scorer, so 857 - 606 is a difference between two answers on one population. `label` offers the corpus's vocabulary and counts exact family matches: 886, of which 59 name a family no mark leads with (area, histogram, violin), which is the only scale on which those families can be hit. Cost: ¥0.604 + ¥0.649 = ¥1.25 for 2,940 calls, ¥0.0004 per row per scale.",
     "arms": {
       "deepseek-chat|mark": {

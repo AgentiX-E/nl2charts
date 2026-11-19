@@ -140,13 +140,21 @@ jobs:
       # save; an unchanged request is an exact hit and needs no save. `restore-keys` widens to the
       # same corpus and then to any earlier store, which is why an edit to one prompt re-asks that
       # prompt's rows rather than the corpus.
+      #
+      # The store travels as a restore and a save, not as one `actions/cache` step, and that is the
+      # other half of the same receipt. `actions/cache` saves in a post step that does not run when
+      # the job fails, so run `44439035718` — which failed the fidelity gate one row under its floor —
+      # bought 2,940 answers, priced them, and threw them away without a save. A save whose
+      # `if: always()` is written down is a save that survives the gate that is supposed to protect it.
       - name: Keep the answers already paid for
-        uses: actions/cache@v4
+        id: answers
+        uses: actions/cache/restore@v4
         with:
           path: eval/.cache/text2vis/llm-choices
-          key: text2vis-llm-answers-v2-${{ inputs.models }}-${{ steps.corpus.outputs.digest }}-${{ hashFiles('eval/text2vis/llm.ts', 'eval/text2vis/content-store.ts') }}
+          key: text2vis-llm-answers-v2-${{ inputs.models }}-${{ inputs.scales }}-${{ inputs.limit }}-${{ steps.corpus.outputs.digest }}-${{ hashFiles('eval/text2vis/llm.ts', 'eval/text2vis/content-store.ts') }}
           restore-keys: |
-            text2vis-llm-answers-v2-${{ inputs.models }}-${{ steps.corpus.outputs.digest }}-
+            text2vis-llm-answers-v2-${{ inputs.models }}-${{ inputs.scales }}-${{ inputs.limit }}-${{ steps.corpus.outputs.digest }}-
+            text2vis-llm-answers-v2-${{ inputs.models }}-${{ inputs.scales }}-${{ inputs.limit }}-
             text2vis-llm-answers-v2-${{ inputs.models }}-
             text2vis-llm-answers-v2-
 
@@ -156,6 +164,16 @@ jobs:
           if [ "${{ inputs.limit }}" != "0" ]; then LIMIT="--limit ${{ inputs.limit }}"; fi
           pnpm bench:text2vis:llm --artifact eval/out/text2vis-llm.json \
             --scales "${{ inputs.scales }}" $LIMIT
+
+      # Before the gate, not after it. What this step saves was paid for by the step above, and the
+      # reading it produced is a separate question: a run that misses its floor has still bought its
+      # answers, and the next dispatch should not buy them again.
+      - name: Keep what this run paid for
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: eval/.cache/text2vis/llm-choices
+          key: ${{ steps.answers.outputs.cache-primary-key }}
 
       # The floor, when one has been registered. A first dispatch establishes the number; the commit
       # that earns it writes it into `eval/text2vis/baseline.json`, and every dispatch after that is
