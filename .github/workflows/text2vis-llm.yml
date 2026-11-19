@@ -211,6 +211,15 @@ jobs:
       - name: Price the arbitration between the two answers
         run: pnpm bench:text2vis:arbitrate --answers eval/out/text2vis-llm.json --artifact eval/out/text2vis-arbitrate.json
 
+
+      # The table is a gate, not a printout. Six readings that add up to a ceiling are the only reason
+      # anyone can compare policies at all, and a policy that quietly routes every row to one answer
+      # reads exactly like a policy that works — so the identities are re-checked on the file: the
+      # disagreement partitions the population, the ceiling is the union of the three cells, every
+      # policy's hits are its own three cells, and the headline is the maximum of the table.
+      - name: Hold the arbitration to its recorded reading
+        run: node tools/check-text2vis-baseline.mjs --arbitration --require
+
       - name: Upload the reading
         if: always()
         uses: actions/upload-artifact@v5

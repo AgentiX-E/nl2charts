@@ -30,6 +30,7 @@
  *   node tools/check-text2vis-baseline.mjs                  # report from eval/out, note if absent
  *   node tools/check-text2vis-baseline.mjs --require        # CI: a missing report is a failure
  *   node tools/check-text2vis-baseline.mjs --llm --require   # the model arm's dispatch
+ *   node tools/check-text2vis-baseline.mjs --arbitration --require  # the six policies, priced on those answers
  *   node tools/check-text2vis-baseline.mjs --self-test
  */
 import { existsSync, readFileSync } from 'node:fs';
@@ -41,6 +42,7 @@ const REPORT = 'eval/out/text2vis-profile.json';
 const RENDER_REPORT = 'eval/out/text2vis-render.json';
 const JUDGE_REPORT = 'eval/out/text2vis-judge.json';
 const LLM_REPORT = 'eval/out/text2vis-llm.json';
+const ARBITRATION_REPORT = 'eval/out/text2vis-arbitrate.json';
 
 /**
  * Compare one reading against the floor.
@@ -625,6 +627,50 @@ function selfTest() {
   // The same rule for the model arm: a floor with no arms turns every check above into a note, and a
   // note is what a gate looks like while it is doing nothing. Asserted by *scale* rather than by model
   // name, because the model is the thing a new reading changes and the scales are the instrument.
+  // The arbitration floor, and the assertions that keep its table honest. Each case breaks exactly one
+  // identity, because a table can be wrong in five ways that all look like a table.
+  const arbFloor = { scored: 8, product: 4, best: 6, ceiling: 7, tolerance: 0 };
+  const arbReport = () => ({
+    population: { scored: 8 },
+    agreement: { agree: 2, agreeHit: 2, disagree: 6, productRight: 2, modelRight: 3 },
+    oracle: { hit: 7 },
+    best: 'p',
+    policies: [
+      { name: 'product', hit: 4, keptRight: 2, givenRight: 0 },
+      { name: 'p', hit: 6, keptRight: 2, givenRight: 2 },
+    ],
+  });
+  {
+    const clean = compareArbitration(arbReport(), arbFloor, { require: true });
+    caseOf('a table whose cells add up is accepted', clean.issues, 0);
+    const broken = arbReport();
+    broken.policies[1].hit = 7;
+    caseOf('a policy whose hits are not its three cells is refused', compareArbitration(broken, arbFloor, {}).issues, 1);
+    // The floor is lowered in these two cases on purpose: each fixture should break *one* identity, and
+    // a fixture that also falls under its floor would be refused for the floor's reason instead.
+    const misquoted = arbReport();
+    misquoted.best = 'product';
+    caseOf('a headline that is not the maximum is refused', compareArbitration(misquoted, { ...arbFloor, best: 4 }, {}).issues, 1);
+    const collapsed = arbReport();
+    collapsed.oracle = { hit: 6 };
+    caseOf('a ceiling that is not the union is refused', compareArbitration(collapsed, { ...arbFloor, ceiling: 6 }, {}).issues, 1);
+    const dropped = arbReport();
+    dropped.policies = dropped.policies.filter((policy) => policy.name !== 'product');
+    caseOf('a table with no product baseline is refused', compareArbitration(dropped, arbFloor, {}).issues, 1);
+    const fewer = arbReport();
+    fewer.population = { scored: 7 };
+    caseOf('a table priced over another row set is refused', compareArbitration(fewer, arbFloor, {}).issues, 1);
+    const moved = arbReport();
+    moved.agreement.disagree = 7;
+    caseOf('a disagreement that is not a partition is refused', compareArbitration(moved, arbFloor, {}).issues, 1);
+    const under = arbReport();
+    under.policies[1].hit = 5;
+    under.policies[1].keptRight = 1;
+    under.policies[1].givenRight = 2;
+    caseOf('a best policy one row under its floor is refused', compareArbitration(under, arbFloor, {}).issues, 1);
+    const banded = compareArbitration(under, { ...arbFloor, tolerance: 5 }, {});
+    caseOf('the same row inside the band is a note', banded.issues, 0);
+  }
   const recordedArms = JSON.parse(readFileSync(resolve(ROOT, BASELINE), 'utf8'))?.llm?.arms;
   const scales = Object.keys(recordedArms ?? {});
   const bothScales = scales.some((key) => key.endsWith('|mark')) && scales.some((key) => key.endsWith('|label'));
@@ -773,6 +819,103 @@ export function compareLlm(report, floor, options = {}) {
   return { issues, notes };
 }
 
+/**
+ * The arbitration reading, against the floor it establishes.
+ *
+ * This is the only gate in the repository whose input is *derived*: no model is asked anything, the
+ * policies are pure functions of two answer columns that were already bought. That makes it the one
+ * gate that can be wrong in a way that still looks green — a policy that silently routes every row to
+ * one answer reads exactly like a working policy — so the identities are re-checked here, on the file:
+ *
+ * - `agree + disagree === scored`: the disagreement is a partition of the population.
+ * - `oracle.hit === agreeHit + productRight + modelRight`: the ceiling is the union, not a policy.
+ * - `hit === agreeHit + keptRight + givenRight` for every policy: a policy routes to one of the two
+ *   answers, so its hits are one from each of the three cells. A policy that invents a third answer
+ *   breaks this and is refused.
+ * - `best` names a policy that is actually the maximum; a table whose headline is not its own maximum
+ *   is a table someone will quote wrongly.
+ *
+ * The floor carries a band for the same reason the model floor does: the answers underneath move by a
+ * couple of rows per re-sample, and every number here is a function of them.
+ *
+ * @returns {{issues: string[], notes: string[]}}
+ */
+export function compareArbitration(report, floor, options = {}) {
+  const issues = [];
+  const notes = [];
+  if (report === undefined) {
+    const message = `TEXT2VIS ARBITRATION: no reading at ${ARBITRATION_REPORT} — \`pnpm bench:text2vis:arbitrate --answers ${LLM_REPORT} --artifact ${ARBITRATION_REPORT}\` writes it`;
+    if (options.require === true) issues.push(message);
+    else notes.push(`${message} (not required here)`);
+    return { issues, notes };
+  }
+  const scored = report.population?.scored;
+  if (scored !== floor.scored) {
+    issues.push(
+      `TEXT2VIS ARBITRATION: priced over ${String(scored)} rows and the floor was recorded over ${String(floor.scored)}; a policy read on a different row set is a different question`,
+    );
+    return { issues, notes };
+  }
+  const { agree, agreeHit, disagree, productRight, modelRight } = report.agreement ?? {};
+  if (agree + disagree !== scored) {
+    issues.push(`TEXT2VIS ARBITRATION: ${String(agree)} agreed + ${String(disagree)} disputed is not ${String(scored)} rows, so the partition is not one`);
+    return { issues, notes };
+  }
+  const oracle = report.oracle?.hit;
+  if (oracle !== agreeHit + productRight + modelRight) {
+    issues.push(
+      `TEXT2VIS ARBITRATION: the ceiling reads ${String(oracle)} and the three cells sum to ${String(agreeHit + productRight + modelRight)}; the union is every row either system got right`,
+    );
+  }
+  const policies = Array.isArray(report.policies) ? report.policies : [];
+  if (policies.length === 0) {
+    issues.push('TEXT2VIS ARBITRATION: no policy was priced, so the table has no reading');
+    return { issues, notes };
+  }
+  const tolerance = typeof floor.tolerance === 'number' ? floor.tolerance : 0;
+  for (const policy of policies) {
+    if (policy.hit !== agreeHit + policy.keptRight + policy.givenRight) {
+      issues.push(
+        `TEXT2VIS ARBITRATION: ${String(policy.name)} reads ${String(policy.hit)} but its cells sum to ${String(agreeHit + policy.keptRight + policy.givenRight)}; a policy routes a row to one of the two answers and to nothing else`,
+      );
+    }
+  }
+  const best = policies.find((policy) => policy.name === report.best);
+  if (best === undefined) {
+    issues.push(`TEXT2VIS ARBITRATION: \`best\` names ${String(report.best)}, which is not among the priced policies`);
+    return { issues, notes };
+  }
+  const highest = Math.max(...policies.map((policy) => policy.hit));
+  if (best.hit !== highest) {
+    issues.push(`TEXT2VIS ARBITRATION: ${String(best.name)} is quoted as best at ${String(best.hit)} while another policy reads ${String(highest)}`);
+  }
+  if (best.hit < floor.best - tolerance) {
+    issues.push(
+      `TEXT2VIS ARBITRATION: the best policy fell to ${String(best.hit)} (${((best.hit / scored) * 100).toFixed(2)}%) from the floor of ${String(floor.best)}, which is outside the ${String(tolerance)}-row band this instrument re-samples within`,
+    );
+  } else if (best.hit < floor.best) {
+    notes.push(`TEXT2VIS ARBITRATION: ${String(best.name)} reads ${String(best.hit)} against a floor of ${String(floor.best)}, inside the ${String(tolerance)}-row band — not a regression`);
+  } else {
+    notes.push(`TEXT2VIS ARBITRATION: ${String(best.name)} reads ${String(best.hit)} (${((best.hit / scored) * 100).toFixed(2)}%) against a floor of ${String(floor.best)}`);
+  }
+  if (oracle < floor.ceiling - tolerance) {
+    issues.push(
+      `TEXT2VIS ARBITRATION: the ceiling fell to ${String(oracle)} from the recorded ${String(floor.ceiling)}; the union is a property of the two answers, not of a policy`,
+    );
+  } else {
+    notes.push(`TEXT2VIS ARBITRATION: ${String(policies.length)} policies priced, ceiling ${String(oracle)}, best ${String(best.name)}`);
+  }
+  const product = policies.find((policy) => policy.name === 'product');
+  if (product === undefined) {
+    issues.push('TEXT2VIS ARBITRATION: the table has no `product` baseline, so no policy can be said to beat the pipeline it would replace');
+  } else if (product.hit !== floor.product) {
+    issues.push(
+      `TEXT2VIS ARBITRATION: the product baseline reads ${String(product.hit)} and the floor records ${String(floor.product)}; the rule path is deterministic, so this is a change to the product and not a re-sample`,
+    );
+  }
+  return { issues, notes };
+}
+
 function main(argv) {
   if (argv.includes('--self-test')) return selfTest();
   const require = argv.includes('--require');
@@ -790,7 +933,10 @@ function main(argv) {
   // artifact and compares it with its own floor. A flag rather than a guess from which file exists,
   // because a run that has both artifacts should be read by the reader that knows what it produced.
   const llm = argv.includes('--llm');
-  const known = new Set(['--require', '--require-judge', '--iteration', '--self-test', '--expect-instrument', '--llm']);
+  // The derived reading: priced from the answers the step above bought, so it is a separate switch
+  // from `--llm` — a run of the model arm alone has no arbitration artifact to check.
+  const arbitration = argv.includes('--arbitration');
+  const known = new Set(['--require', '--require-judge', '--iteration', '--self-test', '--expect-instrument', '--llm', '--arbitration']);
   // The value after `--expect-instrument` is a model name and not a flag, so it is skipped rather than
   // reported as an unknown argument.
   const flags = [];
@@ -823,6 +969,14 @@ function main(argv) {
     for (const note of llmNotes) console.log(note);
     for (const issue of llmIssues) console.error(issue);
     return llmIssues.length === 0 ? 0 : 1;
+  }
+  if (arbitration) {
+    const path = resolve(ROOT, ARBITRATION_REPORT);
+    const report = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : undefined;
+    const { issues: arbIssues, notes: arbNotes } = compareArbitration(report, baseline.llm?.arbitration ?? {}, { require });
+    for (const note of arbNotes) console.log(note);
+    for (const issue of arbIssues) console.error(issue);
+    return arbIssues.length === 0 ? 0 : 1;
   }
   // Before the report, before the corpus, before a call: the one question about a dispatch that can
   // be answered from a file. A floor reading on another instrument costs a full reading and then

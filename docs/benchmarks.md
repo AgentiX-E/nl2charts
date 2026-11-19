@@ -16451,3 +16451,63 @@ Neither was harmful yet; both would have been the moment a corpus change landed.
 bidirectional containment check against a written-down list, and it deliberately does not fire on a
 download: `bird-train-v1` is immutable upstream, and a checker that refuses that is a checker someone
 disables.
+
+## The +2 is the same +2: a second dispatch, and what it says about the size of the hybrid
+
+Two full runs now price the same six rules on the same 1,470 rows, and the second one is the receipt for
+every number in the table above being reproducible:
+
+| run | product | model | `cue-led` | `cue-any` | `product-holds` | `model-holds` | ceiling |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `44435717857` | 606 | 859 | 755 | 702 | 626 | **861** | 994 |
+| `44551395709` | 606 | 861 | 760 | 704 | 626 | **863** | 994 |
+
+Every policy moved by at most 5 rows, the product did not move at all, and the ceiling did not move
+because it is a property of the two answers rather than of a sample. **`model-holds` won by 2 rows in
+both runs** — the same 2, which is a better argument than either run alone: the *sign* of the gain is
+stable, and its *size* is 2 rows out of 1,470, i.e. 0.14pp. A reader who wants a hybrid with a
+measurable margin is asking for something this measurement says is not there.
+
+The second run is also the first one that was cheap for the right reason: it restored the frozen v1
+archive, missed all 1,470 answers because the request had changed since that archive was written, and
+paid ¥1.2521 to rebuild the store — then **saved it**, under a key that names the corpus, the
+instrument and the code. A third dispatch is an exact hit.
+
+## A comment inside a `restore-keys` block is a key
+
+The first attempt at the second run (`44549009308`) never asked a question:
+
+> `##[error]Key Validation Error: # The frozen v1 archive. It is not a target, it is a seed: the store is content-addressed, cannot contain commas.`
+
+The rationale for the last widening key had been written *among* the keys. `restore-keys: |` is a YAML
+block scalar, so a `#` line is not a comment there — it is the first key, and that sentence contains a
+comma, which the cache service rejects. The restore failed, and every step after it was skipped. The
+prose sits above the block now, and `check-workflows.mjs` grew rule 6: after its `${{ }}` expressions
+are removed, every entry of a `restore-keys` block must read as a key — no leading `#`, no space, no
+comma — while `answers-${{ steps.slug.outputs.value }}-${{ hashFiles('a.ts') }}` still passes.
+
+Three cache defects, three rules, one shape: **every value that leaves this repository as a key is
+validated by someone else, in a step that reports nothing to the reading.** Rule 4 (constant key) was
+green while it re-bought the corpus; rule 5 (raw input) was green while it asked nothing; rule 6 (prose
+in a block) was green while it restored nothing.
+
+## The table is now a gate, not a printout
+
+`check-text2vis-baseline.mjs --arbitration --require` runs in the dispatch after the pricing step and
+re-checks the identities on the artifact, because the failure mode of a derived reading is that it looks
+finished: a policy that silently routes every row to one answer produces a table, a percentage and a
+`best`, and all three are wrong in a way no reader can see.
+
+| identity | what it refuses |
+|---|---|
+| `agree + disagree === scored` | a disagreement that is not a partition of the population |
+| `oracle === agreeHit + productRight + modelRight` | a ceiling that is not the union of the three cells |
+| `hit === agreeHit + keptRight + givenRight` | a policy that answers a third mark, or counts a row twice |
+| `best` reads the table's maximum | a headline that is not its own maximum |
+| `product` reads its recorded 606 | a change to the rule path (which is deterministic, so this is not a re-sample) |
+| `best ≥ 863 − 5` | a regression in the routing, inside the band the answers themselves re-sample within |
+
+Nine self-test cases break exactly one identity each, and one breaks none; the band is tested in both
+directions. The floor records `863`, the better of the two runs, with the same five-row tolerance as the
+model floor and for the same reason — every cell in the table is a function of the two answer columns,
+and those move by a couple of rows per re-sample.

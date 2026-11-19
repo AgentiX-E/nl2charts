@@ -49,6 +49,21 @@
         "scored": 1470,
         "exact": 886
       }
+    },
+    "arbitration": {
+      "recordedAt": "2026-11-19",
+      "runs": [
+        "44435717857",
+        "44551395709"
+      ],
+      "scored": 1470,
+      "product": 606,
+      "best": 863,
+      "bestPolicy": "model-holds",
+      "ceiling": 994,
+      "tolerance": 5,
+      "note": "Two full dispatches priced the same six policies on the same 1,470 rows: best 861 and 863, model alone 859 and 861, product 606 both times, ceiling 994 both times. The hybrid therefore wins by 2 rows in both — the sign is stable and the size is 0.14pp — which is why the floor records the best policy's reading rather than a margin over the model. The tolerance is the model floor's, for the model floor's reason: every cell here is a function of the two answer columns, and those move by a couple of rows per re-sample.",
+      "why": "This is the only gate whose artifact is derived rather than bought: no model is asked anything. It is checked anyway, because a policy that routes every row to one answer reads exactly like a policy that works, and because the two identities it carries (the disagreement partitions the population; the ceiling is the union of the three cells) are the only things that make the six readings add up to something."
     }
   }
 }
