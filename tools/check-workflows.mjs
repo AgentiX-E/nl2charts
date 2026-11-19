@@ -168,6 +168,7 @@ export function cacheSteps(lines) {
     const block = lines.slice(index, end);
     if (!block.some((line) => /^\s*uses:\s*actions\/cache(\/|@|\s|$)/.test(line))) continue;
     const paths = [];
+    const restoreKeys = [];
     let key;
     let id;
     for (let inner = index; inner < end; inner += 1) {
@@ -191,8 +192,25 @@ export function cacheSteps(lines) {
       if (named !== null && key === undefined) key = (named[1] ?? '').trim();
       const identified = /^\s*id:\s*([A-Za-z][\w-]*)\s*$/.exec(line);
       if (identified !== null && id === undefined) id = identified[1];
+      const widening = /^\s*restore-keys:\s*(.*)$/.exec(line);
+      if (widening !== null) {
+        const value = (widening[1] ?? '').trim();
+        // `restore-keys: |` is a block scalar, and a block scalar is text: a `#` line inside it is
+        // not a comment, it is a key. Run `44549009308` restored nothing because of exactly that —
+        // the rationale for the last key was written among the keys, and GitHub rejected the first
+        // of those lines for containing a comma.
+        if (value === '' || value === '|' || value === '>') {
+          const depth = (/^(\s*)/.exec(line)?.[1] ?? '').length;
+          for (let sub = inner + 1; sub < end; sub += 1) {
+            const entry = lines[sub] ?? '';
+            if (entry.trim() === '') continue;
+            if ((/^(\s*)/.exec(entry)?.[1] ?? '').length <= depth) break;
+            restoreKeys.push(entry.trim());
+          }
+        } else restoreKeys.push(value);
+      }
     }
-    steps.push({ line: index + 1, paths, key, id });
+    steps.push({ line: index + 1, paths, key, id, restoreKeys });
   }
   return steps;
 }
@@ -257,6 +275,22 @@ export function check(yaml, file) {
         line: step.line,
         rule: 'raw-input-in-cache-key',
         message: `the cache key "${step.key ?? ''}" interpolates inputs.${name}, whose declared values can contain a comma, and a comma is an invalid cache key — flatten it through a step output first`,
+      });
+    }
+  }
+  // Rule 6, on the widening list rather than the primary key: a `restore-keys: |` block is text, so
+  // a rationale written between the keys *becomes* a key. This repository has already paid for that
+  // lesson once (run `44549009308`: the first comment line, which names a comma, was sent as a key
+  // and the restore failed before the run asked a single question).
+  for (const step of cacheSteps(lines)) {
+    for (const entry of step.restoreKeys) {
+      const bare = entry.replace(/\$\{\{[^}]*\}\}/g, '');
+      if (!/^\s*#/.test(bare) && !/[,\s]/.test(bare)) continue;
+      issues.push({
+        file,
+        line: step.line,
+        rule: 'comment-or-space-in-restore-keys',
+        message: `restore key "${entry}" reads as a key rather than as prose: inside a block scalar a '#' line is not a comment and a space or comma is an invalid key`,
       });
     }
   }
@@ -405,8 +439,24 @@ function selfTest() {
     issues.push('a cache key reading a step output was reported as a raw input');
   }
 
+  // Rule 6: prose among the widening keys, then the same list with an expression that legitimately
+  // contains spaces. The block is a scalar, so only what YAML would send as a key decides.
+  const withRestore = (body) =>
+    declaredScale.replace(
+      '      - name: consume',
+      `      - name: keep\n        uses: actions/cache@v4\n        with:\n          path: eval/.cache/text2vis/llm-choices\n          key: answers-$\{\{ hashFiles('a.ts') \}\}\n          restore-keys: |\n${body}      - name: consume`,
+    );
+  const proseAmongKeys = withRestore("            answers-${{ hashFiles('a.ts') }}\n            # the frozen archive, which names a comma, elsewhere\n            answers-old-\n");
+  if (!check(proseAmongKeys, 'n.yml').some((issue) => issue.rule === 'comment-or-space-in-restore-keys')) {
+    issues.push('a comment line inside a restore-keys block was not reported');
+  }
+  const keyWithExpression = withRestore("            answers-${{ steps.slug.outputs.value }}-${{ hashFiles('a.ts') }}\n            answers-old-\n");
+  if (check(keyWithExpression, 'o.yml').some((issue) => issue.rule === 'comment-or-space-in-restore-keys')) {
+    issues.push('a restore key containing an expression was reported as prose');
+  }
+
   for (const issue of issues) console.error(`self-test: ${issue}`);
-  console.log(`check-workflows: ${String(14 - issues.length)}/14 self-checks passed`);
+  console.log(`check-workflows: ${String(16 - issues.length)}/16 self-checks passed`);
   return issues.length === 0 ? 0 : 1;
 }
 

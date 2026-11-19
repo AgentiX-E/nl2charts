@@ -167,13 +167,16 @@ jobs:
         with:
           path: eval/.cache/text2vis/llm-choices
           key: text2vis-llm-answers-v2-${{ steps.instrument.outputs.slug }}-${{ steps.corpus.outputs.digest }}-${{ hashFiles('eval/text2vis/llm.ts', 'eval/text2vis/content-store.ts') }}
+          # The last line is the frozen v1 archive: not a target, a seed. The store is
+          # content-addressed, so an answer bought under the old request is a hit only where the
+          # request is unchanged and a miss everywhere else — restoring it costs a download, and not
+          # restoring it costs ¥1.25. The line above `restore-keys` rather than inside it, because a
+          # `|` block is text: run `44549009308` put these four comment lines into the key list, and
+          # GitHub answered `Key Validation Error: # The frozen v1 archive. … cannot contain commas`.
           restore-keys: |
             text2vis-llm-answers-v2-${{ steps.instrument.outputs.slug }}-${{ steps.corpus.outputs.digest }}-
             text2vis-llm-answers-v2-${{ steps.instrument.outputs.slug }}-
             text2vis-llm-answers-v2-
-            # The frozen v1 archive. It is not a target, it is a seed: the store is content-addressed,
-            # so an answer bought under the old request is a hit only where the request is the same
-            # and a miss everywhere else. Restoring it costs a download and can save a re-buy.
             text2vis-llm-answers-v1-
 
       - name: Ask every model on every scale
