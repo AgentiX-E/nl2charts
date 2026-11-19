@@ -16673,3 +16673,10 @@ request, and `budget: 32` against a floor of 96 is not a band, it is another pro
 nothing to re-measure: the answer store is content-addressed on the *request*, not on the file, so
 editing `llm.ts` re-keys the cache without re-buying a single answer — the next dispatch restores the
 store through `restore-keys` and hits 1,470 of 1,470 again.
+
+Run `44586399949` is that prediction, and it is worth stating separately because the whole design rests
+on it: the run restored the answer store under the **previous** key
+(`…-3ac6936b37043a5d-<old hash of llm.ts>`), hit 1,470 of 1,470 answers on each scale, made no call,
+cost **¥0.0000**, and read the same 861 / 886 / 863 / 754 as the run before it — while the artifact it
+wrote names a request (`promptVersion 1`, `budget 96`) that the artifact before it could not name. The
+cache key changed and the store did not, which is the difference between a file hash and a request.
