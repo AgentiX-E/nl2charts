@@ -35,6 +35,7 @@ import {
   parseLlmArgs,
   replyBudget,
   replyOf,
+  rosterOf,
   runArm,
   resolveTargets,
   scoreArm,
@@ -335,8 +336,8 @@ describe('scoring one arm', () => {
     const outcomes = [outcome(rows[0] as ProfileInput, 'line')];
     const mark = scoreArm(rows, outcomes, { model: 'm', options: markOptions(), usage, cache }, 'mark');
     if (mark.scale !== 'mark') throw new Error('unreachable');
-    expect(() => assertArmReport({ ...mark, answered: 99 })).toThrow(/unparsed is not the/);
-    expect(() => assertArmReport({ ...mark, requested: 3, answered: 2, unparsed: 1, declined: 0 })).toThrow(/unreadable reply was scored/);
+    expect(() => assertArmReport({ ...mark, unparsed: 5 })).toThrow(/unparsed is not the/);
+    expect(() => assertArmReport({ ...mark, choices: ['line', null, null], requested: 3, answered: 1, unparsed: 2, declined: 1 })).toThrow(/unreadable reply was scored/);
     // Asked and unscored is a paid call that bought nothing, and it is a defect the counters above
     // cannot see: `1 answered + 0 unparsed` against `1 asked` is consistent while three rows were
     // scored, which is exactly the shape the first full run published as 1,985 asked / 1,470 scored.
@@ -346,6 +347,20 @@ describe('scoring one arm', () => {
     if (label.scale !== 'label') throw new Error('unreachable');
     expect(() => assertArmReport({ ...label, exact: 9 })).toThrow(/exact matches out of/);
     expect(() => assertArmReport({ ...label, perFamily: [] })).toThrow(/per-family rows sum to 0/);
+    // The answer column is checked like any other column of the report: a short list would attach every
+    // answer to the row above it, and a list whose non-null count disagrees with `answered` is one of
+    // the two columns being wrong. Both are refused rather than published.
+    expect(() => assertArmReport({ ...mark, choices: [] })).toThrow(/not one per row/);
+    expect(() => assertArmReport({ ...mark, choices: [null] })).toThrow(/one of the two columns is wrong/);
+  });
+
+  it('names the rows it answered, so an artifact cannot be read against another corpus', () => {
+    const one = [{ prompt: 'Compare revenue by region', label: 'Bar Chart', tableData: 'Region, Revenue\nNorth, 40' }];
+    expect(rosterOf(one)).toMatch(/^[0-9a-f]{64}$/);
+    expect(rosterOf(one)).toBe(rosterOf([{ ...(one[0] as ProfileInput) }]));
+    // A field separator that cannot occur in a field: concatenating without one would let `ab` + `c`
+    // and `a` + `bc` hash to the same fingerprint, and two different populations would look identical.
+    expect(rosterOf([{ ...(one[0] as ProfileInput), prompt: 'Compare revenue by regio', label: 'nBar Chart' }])).not.toBe(rosterOf(one));
   });
 
   it('says what the run cost, per row as well as in total', () => {
@@ -490,10 +505,15 @@ describe('the arm, end to end', () => {
       expect(provider.calls()).toBe(1);
       expect(lines.join('\n')).toContain('1 of 2 rows carry a label no family names');
       const written = JSON.parse(readFileSync(target, 'utf8')) as {
-        corpus: { rows: number; asked: number };
+        corpus: { rows: number; scored: number; asked: number; roster: string };
         arms: { requested: number; scored: number }[];
       };
-      expect(written.corpus).toEqual({ rows: 2, asked: 1 });
+      expect(written.corpus.rows).toBe(2);
+      expect(written.corpus.scored).toBe(1);
+      expect(written.corpus.asked).toBe(1);
+      // The roster names the one row that was asked, so a second process can tell whether the answers
+      // in this artifact belong to the rows it is holding.
+      expect(written.corpus.roster).toMatch(/^[0-9a-f]{64}$/);
       expect(written.arms[0]?.requested).toBe(1);
       expect(written.arms[0]?.scored).toBe(1);
     } finally {
@@ -504,7 +524,14 @@ describe('the arm, end to end', () => {
   it('asks once per row per scale and writes the report', async () => {
     const server = await serve(TWO_ROWS);
     const lines: string[] = [];
-    const provider = scripted((request) => (request.messages[0]?.content ?? '').includes('Bar Chart') ? 'Bar Chart' : 'line');
+    // Two rows, two different answers, so an answer list that is not aligned with the rows is visible:
+    // a provider that answered `line` twice would make the alignment untestable.
+    const provider = scripted((request) => {
+      const line = (request.messages[1]?.content ?? '').includes('changed over time');
+      const labelScale = (request.messages[0]?.content ?? '').includes('Bar Chart');
+      if (labelScale) return line ? 'Line Chart' : 'Bar Chart';
+      return line ? 'line' : 'bar';
+    });
     try {
       const target = join(root, 'arm.json');
       const code = await entryLlm(ENTRY, MODULE_URL, (line) => lines.push(line), {
@@ -525,7 +552,32 @@ describe('the arm, end to end', () => {
       const mark = written.arms[0];
       expect(mark?.scale).toBe('mark');
       expect(mark?.scored).toBe(2);
+      // The answers travel with the report: one entry per asked row, in the order they were asked, and
+      // the label scale's list is aligned to the same rows so the two can be read side by side.
+      expect(mark?.choices).toEqual(['line', 'bar']);
+      expect(written.arms[1]?.choices).toEqual(['Line Chart', 'Bar Chart']);
       expect(lines.join('\n')).toContain('paired against the product');
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('publishes a null where the reply named nothing, so the column stays one per row', async () => {
+    const server = await serve(TWO_ROWS);
+    const provider = scripted(() => 'I would suggest a chart of some kind');
+    try {
+      const target = join(root, 'column.json');
+      const code = await entryLlm(ENTRY, MODULE_URL, () => undefined, {
+        argv: ['--artifact', target, '--scales', 'mark'],
+        load: { cacheDir: join(root, 'column'), url: server.url },
+        env: { TEXT2VIS_LLM_CACHE: 'none' },
+        providers: () => [provider],
+      });
+      expect(code).toBe(0);
+      const written = JSON.parse(readFileSync(target, 'utf8')) as { arms: { choices: (string | null)[] }[] };
+      // `null` and not a short array: an array that shifted would attach every answer to the row above
+      // it, and the arithmetic would still balance.
+      expect(written.arms[0]?.choices).toEqual([null, null]);
     } finally {
       await server.close();
     }

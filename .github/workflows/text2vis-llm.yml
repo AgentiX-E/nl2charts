@@ -136,12 +136,29 @@ jobs:
       - name: Hold the model to its recorded reading
         run: node tools/check-text2vis-baseline.mjs --llm --require
 
+      # The arbitration, and it is the cheapest step in this file: no model is asked anything, because
+      # the answers are in the artifact the step above wrote. What it prices is the only shippable
+      # question — given the question, the table's answer and the model's answer, how many of the rows
+      # the two disagree about can a rule route correctly? The 991-row union is the ceiling any such
+      # rule is aiming at, and no rule may look at the answer key to get there.
+      - name: Price the arbitration between the two answers
+        run: pnpm bench:text2vis:arbitrate --answers eval/out/text2vis-llm.json --artifact eval/out/text2vis-arbitrate.json
+
       - name: Upload the reading
         if: always()
         uses: actions/upload-artifact@v5
         with:
           name: text2vis-llm
           path: eval/out/text2vis-llm.json
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Upload the arbitration
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: text2vis-arbitrate
+          path: eval/out/text2vis-arbitrate.json
           if-no-files-found: warn
           retention-days: 90
 
@@ -183,6 +200,32 @@ jobs:
               ];
               require('fs').appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join('\n') + '\n');
             "
+            if [ -f eval/out/text2vis-arbitrate.json ]; then
+              node -e "
+                const report = require('./eval/out/text2vis-arbitrate.json');
+                const pct = (value) => (value * 100).toFixed(2) + '%';
+                const rows = report.policies.map((policy) =>
+                  '| ' + policy.name + ' | ' + policy.hit + ' (' + pct(policy.share) + ') | ' +
+                  policy.kept + ' / ' + policy.keptRight + ' | ' + policy.given + ' / ' + policy.givenRight + ' | ' +
+                  (policy.gained - policy.lost >= 0 ? '+' : '') + (policy.gained - policy.lost) + ' | ' + policy.p.toFixed(4) + ' |'
+                );
+                const lines = [
+                  '',
+                  '### Arbitration: routing the ' + report.agreement.disagree + ' rows the two answers disagree about',
+                  '',
+                  '| policy | top-1 | kept (right) | given to model (right) | vs product | McNemar p |',
+                  '| --- | --- | --- | --- | --- | --- |',
+                  ...rows,
+                  '| **ceiling** | ' + report.oracle.hit + ' (' + pct(report.oracle.share) + ') | — | — | — | — |',
+                  '',
+                  'The ceiling is the union of the two answers and is not a policy: reaching it needs the answer',
+                  'key. Every policy above is a rule over the question, the table and the model answer, priced at',
+                  '¥0 because no call was made. `best` = **' + report.best + '**; ties are broken by how many rows a',
+                  'policy changes, so a rule that reaches the same score by rewriting every answer does not win.'
+                ];
+                require('fs').appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join('\n') + '\n');
+              "
+            fi
           else
             echo 'no reading was written, so there is nothing to summarise' >> "$GITHUB_STEP_SUMMARY"
           fi

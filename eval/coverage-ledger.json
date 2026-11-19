@@ -2,10 +2,10 @@
   "note": "Per-file eval coverage. Enforced by tools/check-eval-coverage.mjs: a number may rise freely and may only fall with an explicit, reviewed edit. `target` is the standard every file must reach before eval/ joins the main gate.",
   "target": 95,
   "tolerancePp": 0.2,
-  "measuredAt": "2026-11-18",
+  "measuredAt": "2026-11-19",
   "totals": {
-    "lines": 99.6,
-    "statements": 99.6,
+    "lines": 99.61,
+    "statements": 99.61,
     "functions": 100,
     "branches": 98.34
   },
@@ -580,6 +580,12 @@
       "functions": 100,
       "branches": 100
     },
+    "eval/text2vis/arbitrate.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 100
+    },
     "eval/text2vis/census.ts": {
       "lines": 100,
       "statements": 100,
@@ -614,7 +620,7 @@
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 95.96
+      "branches": 96.29
     },
     "eval/text2vis/profile.ts": {
       "lines": 100,

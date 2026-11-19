@@ -48,9 +48,10 @@
  * the two have different repairs. The same discipline the judge learned about truncation applies here:
  * a truncated reply is not an answer, so `entryLlm` refuses to publish a run that had any.
  */
+import { createHash } from 'node:crypto';
 import { createHttpProvider, withCallCounter, type LlmProvider } from '@agentix-e/nl2charts-ai';
 import { RECOMMENDABLE_MARKS, type RecommendableMark } from '@agentix-e/nl2charts-chart';
-import { applyExitCode, isEntry, loadText2Vis, type LoadOptions } from './dataset.js';
+import { applyExitCode, isEntry, loadText2Vis, type LoadOptions, type Text2VisCorpus } from './dataset.js';
 import { billOf, formatYuan } from '../price.js';
 import { cacheKey, openStore, type CacheIdentity, type ContentStore } from './content-store.js';
 import { profileAnswer, scoreAnswers, type ChartAnswer, type ProfileInput, type ProfileReport } from './profile.js';
@@ -344,6 +345,16 @@ export interface ArmBase {
   readonly unparsed: number;
   /** Replies cut at the token budget. Any of these makes the run unpublishable. */
   readonly truncated: number;
+  /**
+   * One entry per asked row, in the order the rows were asked: what was answered, or `null`.
+   *
+   * A report carries the answers themselves because the alternative is to re-ask for them: an
+   * arbitration between this arm and the product needs to know, row by row, what the model said, and
+   * a table whose routing had to buy a second sample would be pricing a different reading. `null`
+   * rather than an absent entry, because an array that shifted would silently attach every answer to
+   * the row before it — which the two count checks in `assertArmReport` refuse.
+   */
+  readonly choices: readonly (string | null)[];
   readonly cost: ArmCost;
   readonly cache: { readonly hits: number; readonly misses: number; readonly corrupt: number };
 }
@@ -368,6 +379,20 @@ export type ArmReport = MarkArm | LabelArm;
 
 /** The arithmetic a report can be wrong about, refused rather than published. */
 export function assertArmReport(report: ArmReport): void {
+  // The answer list is a column of the report, so it is checked like one: one entry per asked row, and
+  // as many entries that name something as `answered` says. An array one short would attach every
+  // answer to the row above it, and every later count would still add up.
+  if (report.choices.length !== report.requested) {
+    throw new Error(
+      `text2vis llm: ${String(report.choices.length)} answers for ${String(report.requested)} rows asked, so the answers are not one per row`,
+    );
+  }
+  const named = report.choices.filter((choice) => choice !== null).length;
+  if (named !== report.answered) {
+    throw new Error(
+      `text2vis llm: ${String(named)} answers name an option and ${String(report.answered)} are counted as answered, so one of the two columns is wrong`,
+    );
+  }
   if (report.answered + report.unparsed !== report.requested) {
     throw new Error(
       `text2vis llm: ${String(report.answered)} answered + ${String(report.unparsed)} unparsed is not the ${String(report.requested)} rows asked`,
@@ -420,8 +445,15 @@ export interface ModelOutcome {
   readonly answer: ModelRow;
 }
 
-/** The marks a `mark`-scale answer covers, as the scorer wants them. */
-function markAnswer(choice: string | undefined): ChartAnswer {
+/**
+ * The marks a `mark`-scale answer covers, as the scorer wants them.
+ *
+ * Exported because the arbitration is a second reader of the same answer: `arbitrate.ts` routes a row
+ * to one of two answers, and it must turn a mark into families exactly the way the arm that produced
+ * the score did. A second copy of this line is a second definition of "what answering `bar` covers",
+ * and the two readings would then be able to disagree about a row neither of them changed.
+ */
+export function markAnswer(choice: string | undefined): ChartAnswer {
   if (choice === undefined) return { mark: 'declined', families: [] };
   return { mark: choice as RecommendableMark, families: familiesOfMark(choice as RecommendableMark) };
 }
@@ -459,6 +491,7 @@ export function scoreArm(rows: readonly ProfileInput[], outcomes: readonly Model
   const base: ArmBase = {
     model: options.model,
     options: options.options,
+    choices: outcomes.map((outcome) => outcome.answer.choice ?? null),
     requested: outcomes.length,
     answered,
     unparsed: outcomes.length - answered,
@@ -775,6 +808,39 @@ export function parseLlmArgs(argv: readonly string[]): LlmArgs {
   return { json, scales, ...(artifact === undefined ? {} : { artifact }), ...(limit === undefined ? {} : { limit }) };
 }
 
+/**
+ * The rows a scale can score, and how many labels it had to drop to get them.
+ *
+ * One definition, because two processes now need it: the arm asks these rows, and the arbitration
+ * attaches its answers to these rows. `515` of the corpus's `1,985` labels name no family (`Waterfall`,
+ * `Treemap`, …), so both scales are blind to them — a row asked and not scored is a call paid for and
+ * thrown away, which is a defect the first full run published as 1,985 asked / 1,470 scored.
+ */
+export function scoredRows(corpus: Text2VisCorpus): { readonly rows: ProfileInput[]; readonly dropped: number } {
+  const all: ProfileInput[] = corpus.rows.map((row) => ({
+    prompt: row.prompt,
+    label: row.chartType,
+    tableData: row.raw['Table Data'] ?? '',
+  }));
+  const rows = all.filter((row) => familyOfLabel(row.label) !== undefined);
+  return { rows, dropped: all.length - rows.length };
+}
+
+/**
+ * A fingerprint of the rows a reading was taken over.
+ *
+ * Three fields and two separators that cannot occur in the fields, so two different populations
+ * cannot hash to the same string by concatenation (`ab` + `c` against `a` + `bc`). The answer store is
+ * content-addressed per question, which makes a single row's answer reusable; the roster is the other
+ * half — it says *which* questions the answers were given to, so an artifact from an earlier corpus
+ * cannot be scored against this one.
+ */
+export function rosterOf(rows: readonly ProfileInput[]): string {
+  const hash = createHash('sha256');
+  for (const row of rows) hash.update(`${row.label}\u0000${row.prompt}\u0000${row.tableData}\u0001`);
+  return hash.digest('hex');
+}
+
 export interface LlmEntryOptions {
   readonly argv?: readonly string[];
   readonly load?: LoadOptions;
@@ -804,11 +870,6 @@ export async function entryLlm(
     const env = options.env ?? process.env;
     const { corpus, source, path } = await loadText2Vis(options.load ?? {});
     log(`text2vis: ${source} ${path}`);
-    const all: ProfileInput[] = corpus.rows.map((row) => ({
-      prompt: row.prompt,
-      label: row.chartType,
-      tableData: row.raw['Table Data'] ?? '',
-    }));
     // The rows are cut *before* the ask, so `--limit` prices a smoke run and never silently scores a
     // corpus it did not send.
     //
@@ -817,10 +878,10 @@ export async function entryLlm(
     // here, before the slice, so `--limit 20` is twenty *scored* rows and `requested` is the
     // denominator the reading is published over. The drop is logged because a corpus silently
     // narrowed is a corpus whose score is over the rows that were easy to ask.
-    const scored = all.filter((row) => familyOfLabel(row.label) !== undefined);
-    if (scored.length !== all.length) {
+    const { rows: scored, dropped } = scoredRows(corpus);
+    if (dropped > 0) {
       log(
-        `text2vis llm: ${String(all.length - scored.length)} of ${String(all.length)} rows carry a label no family names, so they are not asked`,
+        `text2vis llm: ${String(dropped)} of ${String(corpus.rows.length)} rows carry a label no family names, so they are not asked`,
       );
     }
     const rows = args.limit === undefined ? scored : scored.slice(0, args.limit);
@@ -858,7 +919,7 @@ export async function entryLlm(
           scale,
           rows,
           // The whole corpus, not the sample: the option list is the question.
-          vocabulary: all.map((row) => ({ label: row.label })),
+          vocabulary: scored.map((row) => ({ label: row.label })),
           concurrency,
           ...(cache === undefined ? {} : { cache }),
           log,
@@ -876,7 +937,14 @@ export async function entryLlm(
         }
       }
     }
-    const payload = { corpus: { rows: corpus.rows.length, asked: rows.length }, arms, paired };
+    // The roster names the rows the answers belong to. It is not a checksum of the artifact: it is the
+    // one thing a second process can recompute, and the reason a reading taken over one population
+    // cannot be quietly scored against another.
+    const payload = {
+      corpus: { rows: corpus.rows.length, scored: scored.length, asked: rows.length, roster: rosterOf(rows) },
+      arms,
+      paired,
+    };
     if (args.json) log(JSON.stringify(payload, null, 2));
     if (args.artifact !== undefined) {
       const { mkdir, writeFile, rename } = await import('node:fs/promises');
