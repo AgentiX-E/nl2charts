@@ -102,25 +102,53 @@ jobs:
 
       # The corpus, kept between runs: the file is immutable upstream, and a reading whose first step
       # is a download reports a network as a score when the network is what failed.
+      #
+      # The path is the CSV, not the directory. Caching `eval/.cache/text2vis` also cached the answer
+      # store that lives under it — a second store, frozen at whatever the first save contained, and
+      # restored *after* the answers step, which is how an archive of the corpus came to carry answers
+      # to questions this arm no longer asked.
       - name: Cache the corpus
         uses: actions/cache@v4
         with:
-          path: eval/.cache/text2vis
+          path: eval/.cache/text2vis/*.csv
           key: text2vis-corpus-v1
-
-      # The answers, kept between runs and keyed on the prompt version. This is the whole reason a
-      # second dispatch of the same prompt costs nothing rather than ¥2.
-      - name: Cache the answers
-        uses: actions/cache@v4
-        with:
-          path: eval/.cache/text2vis/llm-choices
-          key: text2vis-llm-answers-v1-${{ inputs.models }}
-          restore-keys: |
-            text2vis-llm-answers-v1-
 
       # The instrument, before the measurement: how many rows, which labels, how many are scored.
       - name: Read the corpus
         run: pnpm bench:text2vis:dataset
+
+      # What the answers belong to: the corpus, not the calendar. It goes in the answers key below for
+      # the reason the judge's figures digest does.
+      - name: Name the corpus this run asks about
+        id: corpus
+        run: echo "digest=$(sha256sum eval/.cache/text2vis/*.csv 2>/dev/null | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      # The answers, kept between runs. This is the whole reason a second dispatch of the same
+      # questions costs nothing rather than ¥1.25.
+      #
+      # The key was a constant — `text2vis-llm-answers-v1-<model>` — and a constant key is a cache
+      # that is written once and then never again: GitHub refuses to save over an existing key, so
+      # after the first successful save the store in CI is frozen while the store on the runner keeps
+      # growing. Run `44435717857` has the receipt. It restored the v1 archive, asked 2,940 questions,
+      # hit **0** of them — the cap had moved 32 → 96 and every key with it — paid ¥1.2522, and then
+      # printed `Cache hit occurred on the primary key … not saving cache`: the 2,940 answers it had
+      # just bought were discarded. A dispatch after any change to the request paid the full price
+      # forever, and no reading could show it, because the cost is in a step that succeeded.
+      #
+      # So the key follows the contents, the way the judge's does: the corpus digest, and the code
+      # that builds the request. A change to a prompt, a budget or a row is a new key and therefore a
+      # save; an unchanged request is an exact hit and needs no save. `restore-keys` widens to the
+      # same corpus and then to any earlier store, which is why an edit to one prompt re-asks that
+      # prompt's rows rather than the corpus.
+      - name: Keep the answers already paid for
+        uses: actions/cache@v4
+        with:
+          path: eval/.cache/text2vis/llm-choices
+          key: text2vis-llm-answers-v2-${{ inputs.models }}-${{ steps.corpus.outputs.digest }}-${{ hashFiles('eval/text2vis/llm.ts', 'eval/text2vis/content-store.ts') }}
+          restore-keys: |
+            text2vis-llm-answers-v2-${{ inputs.models }}-${{ steps.corpus.outputs.digest }}-
+            text2vis-llm-answers-v2-${{ inputs.models }}-
+            text2vis-llm-answers-v2-
 
       - name: Ask every model on every scale
         run: |

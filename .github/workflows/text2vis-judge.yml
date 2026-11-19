@@ -212,7 +212,7 @@ jobs:
       - name: Cache the corpus
         uses: actions/cache@v4
         with:
-          path: eval/.cache/text2vis
+          path: eval/.cache/text2vis/*.csv
           key: text2vis-corpus-v1
 
       # The denominator, from the same run: the judge grades the figures that exist, and it refuses a

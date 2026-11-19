@@ -56,7 +56,7 @@ jobs:
       - name: Cache the corpus
         uses: actions/cache@v4
         with:
-          path: eval/.cache/text2vis
+          path: eval/.cache/text2vis/*.csv
           key: text2vis-corpus-v1
 
       # The instrument, not the score: how many rows, which chart types, how many carry reference
