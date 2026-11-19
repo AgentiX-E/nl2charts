@@ -242,6 +242,18 @@ jobs:
         id: figures
         run: echo "digest=$(sha256sum eval/.cache/text2vis/*.csv 2>/dev/null | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
 
+      # The instrument as a slug, because `model` is free text and a cache key is not: run
+      # `44442360115` in `text2vis-llm.yml` failed at dispatch with `Key Validation Error: … cannot
+      # contain commas` after an input holding `mark,label` went straight into a key. The values
+      # arrive as environment variables rather than as `${{ }}` inside the shell, because an input is
+      # also a place where a quote could come from.
+      - name: Name the instrument this run grades with
+        id: instrument
+        env:
+          MODEL: ${{ inputs.model }}
+          THINK: ${{ inputs.think }}
+        run: echo "slug=$(printf '%s-%s' "$MODEL" "$THINK" | tr , _ | tr -c 'A-Za-z0-9._-' _)" >> "$GITHUB_OUTPUT"
+
       - name: Keep the answers already paid for
         uses: actions/cache@v4
         with:
@@ -253,10 +265,10 @@ jobs:
           # digest alone restores the most recent archive of *some* instrument, and one hit is worth
           # less than the download of 1,286 misses. The model and the mode are what make an answer an
           # answer; the digest only says which figures.
-          key: text2vis-judge-${{ inputs.model }}-${{ inputs.think }}-${{ steps.figures.outputs.digest }}-${{ hashFiles('packages/chart/src/**', 'eval/text2vis/render.ts', 'eval/text2vis/profile.ts', 'eval/text2vis/rule.ts', 'eval/text2vis/dataset.ts', 'eval/text2vis/judge-cache.ts', '.github/workflows/text2vis-judge.yml') }}
+          key: text2vis-judge-${{ steps.instrument.outputs.slug }}-${{ steps.figures.outputs.digest }}-${{ hashFiles('packages/chart/src/**', 'eval/text2vis/render.ts', 'eval/text2vis/profile.ts', 'eval/text2vis/rule.ts', 'eval/text2vis/dataset.ts', 'eval/text2vis/judge-cache.ts', '.github/workflows/text2vis-judge.yml') }}
           restore-keys: |
-            text2vis-judge-${{ inputs.model }}-${{ inputs.think }}-${{ steps.figures.outputs.digest }}-
-            text2vis-judge-${{ inputs.model }}-${{ inputs.think }}-
+            text2vis-judge-${{ steps.instrument.outputs.slug }}-${{ steps.figures.outputs.digest }}-
+            text2vis-judge-${{ steps.instrument.outputs.slug }}-
 
       # No separate preflight step: the judge spends its first call asking the endpoint to name the
       # colour of a red image, and refuses the run when the answer did not see one. That check lives in

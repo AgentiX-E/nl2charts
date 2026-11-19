@@ -16362,3 +16362,92 @@ Two defects this reading found in itself, both worth stating because they are th
    name were scored — a *prefix* of an answer counted as an answer. Raising the fence to 96 tokens
    removed the truncation and **lowered** the reading (860 → 857): the old cap was manufacturing
    correct answers. A cut reply now carries no choice at all.
+
+## Arbitrating the two answers: 861 of 1,470, and the 133 rows no rule can route
+
+The two systems answer the same 1,470 rows and disagree on **729** of them. That disagreement is the
+only place a product decision lives: where they agree, there is nothing to decide, and 471 of the 741
+agreed rows are right.
+
+| | rows |
+|---|---:|
+| same answer | 741 (471 right) |
+| in dispute | 729 |
+| product alone right | 135 |
+| model alone right | 388 |
+| **union — every row either one got right** | **994 (67.62%)** |
+
+The union is a **ceiling, not a policy**: reaching it needs the answer key, and a number computed from
+the key is not a number about a product. So the question worth pricing is the one a rule can answer
+without it — given the question, the table's answer and the model's answer, which of the two should
+the product show? Six rules, each a sentence about what the two systems are for, all priced at **¥0**
+because the answers are already on disk:
+
+| policy | what it believes | top-1 | kept (right) | given to model (right) | vs product | McNemar p |
+|---|---|---:|---:|---:|---:|---:|
+| `product` | the pipeline always answers | 606 (41.22%) | 729 (135) | 0 (0) | +0 | 1.0000 |
+| `model` | the model always answers | 859 (58.44%) | 0 (0) | 729 (388) | +253 | 2.3e-29 |
+| `cue-led` | trust the product only where the cue table *leads* with the mark it answered | 755 (51.36%) | 282 (51) | 447 (233) | +149 | 2.4e-17 |
+| `cue-any` | trust the product wherever a cue *named* that mark | 702 (47.76%) | 476 (95) | 253 (136) | +96 | 1.9e-13 |
+| `product-holds` | the product, except where it refused and the model did not | 626 (42.59%) | 695 (135) | 34 (20) | +20 | 1.9e-06 |
+| `model-holds` | the model, except where its reply named nothing | **861 (58.57%)** | 6 (2) | 723 (388) | +255 | 6.0e-30 |
+| *ceiling* | the union, which needs the key | *994 (67.62%)* | — | — | — | — |
+
+**The hybrid does not exist at this resolution.** The best rule over the two answers beats simply
+shipping the model by **2 rows** (861 against 859), which is inside the ±2 rows a re-sample of the
+same 1,470 questions moves at temperature 0 — the second dispatch of this very round moved the model
+arm 857 → 859 with no code change to the arm. And the rules that give the product a say are all
+*worse* than the model alone: `cue-led` loses 104 rows, `cue-any` loses 157. A cue table that names
+the mark is evidence, but it is weaker evidence than the sentence the model just read.
+
+The one rule with an unambiguous sign is `product-holds`: of the 34 rows where the product refused
+and the model answered, **20 are right and 0 are lost**. A refusal is the product saying it has
+nothing to show, so there is nothing to lose by asking someone else — that is +1.36pp for a rule a
+reader can state in one line, and it is what `model-holds` already contains.
+
+**What this leaves.** 133 rows separate the best shippable number from the ceiling, and no routing
+rule over these two answers can claim them: they are rows where the model is wrong and the product is
+wrong, or where the product is right and the rule has no way to know it. The lever is a better
+reader, not a better rule — which is why the next round spends on the model, not on the arbitration.
+
+Three properties make the table checkable rather than plausible, and all three are asserted:
+
+1. `Dispute` carries four fields — the product's answer, the mark the cue table leads with, the marks
+   the cues name, the model's answer. The expected family is **not among them by type**, and the
+   suite asserts the field list at run time, because a type is erased and a field named `expected`
+   would compile.
+2. Every policy is a **partition of the disagreement**, so `hit === agreeHit + keptRight + givenRight`
+   must hold against the score the *shared* scorer computes. A policy that answers a third mark — a
+   hybrid, an average, a seventh option — is refused rather than credited.
+3. Every reading is over the population it names: the artifact publishes `corpus.roster`, a SHA-256
+   over `label\0prompt\0tableData\1` for the 1,470 scored rows, and the arbitration recomputes it
+   from the corpus on disk. An artifact from an earlier corpus, or from a `--limit` that cut a
+   different set of rows, is refused instead of being scored against questions it was never asked.
+
+## A cache that was written once and never again: ¥1.25 a dispatch, in a green step
+
+The dispatch above was supposed to cost nothing — its answers were bought in an earlier run. It cost
+**¥1.2522**, hit **0** of 2,940 answers, and printed this at the end:
+
+> `Cache hit occurred on the primary key text2vis-llm-answers-v1-deepseek-chat, not saving cache.`
+
+Both halves are one defect. `actions/cache` refuses to save over a key that already exists, so a
+**constant** key is an archive frozen at its first save while the store on the runner keeps growing.
+The key was `text2vis-llm-answers-v1-<model>`; the reply cap had moved 32 → 96 since the archive was
+written, which changed every request and therefore no key. From then on every dispatch re-bought the
+whole corpus, and nothing failed: the restore succeeded, the misses were counted inside the arm, and
+the billing line sat in a step that went green.
+
+The key now follows the contents — the corpus digest and the code that builds the request — with
+`restore-keys` widening to the same corpus and then to any earlier store. A changed prompt, budget or
+row is a new key and therefore a save; an unchanged one is an exact hit and needs no save. The corpus
+cache is narrowed to `eval/.cache/text2vis/*.csv`, because caching the directory also archived the
+answer store and restored it *after* the answers step.
+
+`check-workflows.mjs` grew a fourth rule — a cache of a store this repository buys answers into may
+not have a constant key — and it found two more instances on its first run: `text2vis-judge.yml` and
+`text2vis-rule.yml` both cached the directory above the answer store under `text2vis-corpus-v1`.
+Neither was harmful yet; both would have been the moment a corpus change landed. The rule is a
+bidirectional containment check against a written-down list, and it deliberately does not fire on a
+download: `bird-train-v1` is immutable upstream, and a checker that refuses that is a checker someone
+disables.

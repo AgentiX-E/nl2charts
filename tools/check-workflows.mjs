@@ -14,7 +14,8 @@
  * 1. a job-level `env:` value may not reference `steps.` or `needs.` from outside its own job;
  * 2. `steps.<id>` must name a step id declared in the same job;
  * 3. `inputs.<name>` must name an input the `workflow_dispatch` trigger declares;
- * 4. a cache that holds a store this repository writes into must not have a constant key.
+ * 4. a cache that holds a store this repository writes into must not have a constant key;
+ * 5. a cache key may not interpolate a workflow input.
  *
  * Rule 3 is the quiet one: an input nobody declared resolves to an empty string rather than an
  * error, so the workflow runs with the feature silently off — a dispatch that resumes nothing
@@ -93,9 +94,16 @@ export function referenced(lines, job, prefix) {
   return found;
 }
 
-/** Inputs the `workflow_dispatch` trigger declares. */
+/**
+ * Inputs the `workflow_dispatch` trigger declares, with the values each one may take.
+ *
+ * The values matter to rule 5 and the names alone cannot answer it: `scales` is a `choice` whose
+ * options include `mark,label`, so a "choice inputs are safe" shortcut is wrong, and `models` is free
+ * text, so a comma is always possible there. What decides is whether *any declared value* can contain
+ * a comma.
+ */
 export function dispatchInputs(lines) {
-  const declared = new Set();
+  const declared = new Map();
   const trigger = lines.findIndex((line) => /^ {2}workflow_dispatch:\s*$/.test(line));
   if (trigger === -1) return declared;
   const inputs = lines.findIndex((line, index) => index > trigger && /^ {4}inputs:\s*$/.test(line));
@@ -104,9 +112,38 @@ export function dispatchInputs(lines) {
     const line = lines[index] ?? '';
     if (/^ {4}\S/.test(line)) break;
     const match = /^ {6}([A-Za-z][\w-]*):\s*$/.exec(line);
-    if (match !== null) declared.add(match[1]);
+    if (match === null) continue;
+    const entry = { type: 'string', options: [] };
+    for (let inner = index + 1; inner < lines.length; inner += 1) {
+      const field = lines[inner] ?? '';
+      if (field.trim() === '') continue;
+      if ((/^(\s*)/.exec(field)?.[1] ?? '').length <= 6) break;
+      const typed = /^\s+type:\s*(\S+)\s*$/.exec(field);
+      if (typed !== null) entry.type = typed[1];
+      const inline = /^\s+options:\s*\[(.*)\]\s*$/.exec(field);
+      if (inline !== null) entry.options.push(...(inline[1] ?? '').split(',').map((option) => option.trim().replace(/^['"]|['"]$/g, '')).filter((option) => option !== ''));
+      if (/^\s+options:\s*$/.test(field)) {
+        for (let sub = inner + 1; sub < lines.length; sub += 1) {
+          const option = lines[sub] ?? '';
+          if (option.trim() === '') continue;
+          if ((/^(\s*)/.exec(option)?.[1] ?? '').length <= 8) break;
+          const listed = /^\s*-\s*(.+)$/.exec(option);
+          if (listed !== null) entry.options.push((listed[1] ?? '').trim().replace(/^['"]|['"]$/g, ''));
+        }
+      }
+    }
+    declared.set(match[1], entry);
   }
   return declared;
+}
+
+/** Whether a declared input could carry a comma, which a cache key may not contain. */
+export function mayContainComma(entry) {
+  if (entry === undefined) return false;
+  if (entry.type === 'boolean') return false;
+  // No declared value list means free text, and free text is exactly where a comma comes from.
+  if (entry.options.length === 0) return true;
+  return entry.options.some((option) => option.includes(','));
 }
 
 /** Every caching step in the file: the paths it caches and the key it names. */
@@ -203,6 +240,23 @@ export function check(yaml, file) {
         line: step.line,
         rule: 'constant-key-for-mutable-store',
         message: `the cache of ${held} holds answers this repository buys, and its key "${key ?? '(none)'}" cannot change when they do, so GitHub will save it once and refuse every later save`,
+      });
+    }
+  }
+  // Rule 5, on every cache step rather than only the ones above: a cache key is validated by GitHub,
+  // and an input is free text. A dispatch whose `scales` read `mark,label` produced a key containing a
+  // comma, `actions/cache/restore` answered `Key Validation Error: … cannot contain commas`, and run
+  // `44442360115` skipped every step after it. The failure lands at dispatch time, in the one step
+  // that decides whether the run is cheap.
+  for (const step of cacheSteps(lines)) {
+    for (const match of (step.key ?? '').matchAll(/\$\{\{[^}]*\binputs\.([A-Za-z][\w-]*)/g)) {
+      const name = match[1];
+      if (!mayContainComma(inputs.get(name)) || !inputs.has(name)) continue;
+      issues.push({
+        file,
+        line: step.line,
+        rule: 'raw-input-in-cache-key',
+        message: `the cache key "${step.key ?? ''}" interpolates inputs.${name}, whose declared values can contain a comma, and a comma is an invalid cache key — flatten it through a step output first`,
       });
     }
   }
@@ -326,8 +380,33 @@ function selfTest() {
     issues.push('a save step inheriting a constant key was not reported');
   }
 
+  // Rule 5: the same key, twice, differing only in whether the input was flattened first — over a
+  // workflow that declares the input, because an undeclared one is rule 3's problem and would let this
+  // rule pass by never looking.
+  const declaredScale = ok.replace(
+    '      known:\n',
+    "      known:\n        description: a string input\n      scales:\n        description: a choice whose values hold a comma\n        type: choice\n        options:\n          - 'mark,label'\n          - 'mark'\n",
+  );
+  const withDeclaredCache = (key) =>
+    declaredScale.replace(
+      '      - name: consume',
+      `      - name: keep\n        uses: actions/cache@v4\n        with:\n          path: eval/.cache/text2vis/llm-choices\n          key: ${key}\n      - name: consume`,
+    );
+  const rawInput = withDeclaredCache("answers-${{ inputs.scales }}-${{ hashFiles('a.ts') }}");
+  if (!check(rawInput, 'k.yml').some((issue) => issue.rule === 'raw-input-in-cache-key')) {
+    issues.push('a cache key interpolating a raw input was not reported');
+  }
+  const freeText = withDeclaredCache("answers-${{ inputs.known }}-${{ hashFiles('a.ts') }}");
+  if (!check(freeText, 'm.yml').some((issue) => issue.rule === 'raw-input-in-cache-key')) {
+    issues.push('a cache key interpolating a free-text input was not reported');
+  }
+  const sluggedInput = withDeclaredCache("answers-${{ steps.slug.outputs.value }}-${{ hashFiles('a.ts') }}");
+  if (check(sluggedInput, 'l.yml').some((issue) => issue.rule === 'raw-input-in-cache-key')) {
+    issues.push('a cache key reading a step output was reported as a raw input');
+  }
+
   for (const issue of issues) console.error(`self-test: ${issue}`);
-  console.log(`check-workflows: ${String(11 - issues.length)}/11 self-checks passed`);
+  console.log(`check-workflows: ${String(14 - issues.length)}/14 self-checks passed`);
   return issues.length === 0 ? 0 : 1;
 }
 

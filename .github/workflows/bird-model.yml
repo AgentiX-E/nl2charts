@@ -38,9 +38,17 @@ on:
         required: false
         default: ''
       split:
+        # A choice rather than a string, because the value is in a cache key: `competitors.yml`
+        # declares the same two values the same way, and a free-text input is one comma away from
+        # `Key Validation Error: … cannot contain commas` — the failure `44442360115` hit on
+        # `scales: mark,label`, at dispatch time, in the step that decides whether a run is cheap.
         description: 'minidev or dev (dev is the split leaderboards report)'
         required: false
-        default: 'minidev'
+        type: choice
+        default: minidev
+        options:
+          - minidev
+          - dev
       concurrency:
         description: Parallel calls (a reasoning model needs fewer, and a slow endpoint more time)
         required: false
