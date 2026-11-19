@@ -41,6 +41,7 @@ import { applyExitCode, isEntry, loadText2Vis, type LoadOptions } from './datase
 import { mcnemarExact, markAnswer, rosterOf, scoredRows, type ArmReport } from './llm.js';
 import { profileAnswer, scoreAnswers, type ChartAnswer, type ProfileInput } from './profile.js';
 import { cueMarks, familyOfLabel, type ChartFamily } from './rule.js';
+import { RECOMMENDABLE_MARKS } from '@agentix-e/nl2charts-chart';
 import type { RecommendableMark } from '@agentix-e/nl2charts-chart';
 
 /**
@@ -118,8 +119,22 @@ export const POLICIES: readonly Policy[] = [
   },
 ];
 
-/** The product's answer, the cues and the model's answer, read off one row. */
+/**
+ * The product's answer, the cues and the model's answer, read off one row.
+ *
+ * A name outside `RECOMMENDABLE_MARKS` is refused rather than carried, because the artifact this reads
+ * is an external file. The arm's `parseChoice` only ever writes a name it was offered, so a foreign
+ * name means the file was edited or written by another version — and a policy handed `donut` would
+ * answer "donut", whose family list is empty, which the scorer reads as *declined*. A row silently
+ * reclassified as a refusal is a row the table would credit to whichever side happened to decline it,
+ * and nothing downstream could tell that from a model that had nothing to say.
+ */
 export function disputeOf(row: ProfileInput, choice: string | null): Dispute {
+  if (choice !== null && !(RECOMMENDABLE_MARKS as readonly string[]).includes(choice)) {
+    throw new Error(
+      `text2vis arbitrate: the artifact holds ${choice} for "${row.prompt}", which is not one of the ${String(RECOMMENDABLE_MARKS.length)} marks this arm offers; the answer belongs to a different option list`,
+    );
+  }
   const named = cueMarks(row.prompt);
   return {
     product: profileAnswer(row.prompt, row.tableData),

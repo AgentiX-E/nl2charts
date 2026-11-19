@@ -626,7 +626,7 @@
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 98.88
+      "branches": 99.44
     },
     "eval/text2vis/render.ts": {
       "lines": 100,
@@ -635,6 +635,12 @@
       "branches": 95.96
     },
     "eval/text2vis/rule.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 100
+    },
+    "eval/text2vis/ship.ts": {
       "lines": 100,
       "statements": 100,
       "functions": 100,

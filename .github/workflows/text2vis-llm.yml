@@ -220,6 +220,20 @@ jobs:
       - name: Hold the arbitration to its recorded reading
         run: node tools/check-text2vis-baseline.mjs --arbitration --require
 
+      # The shipped path, priced on the same answers. `arbitrate.ts` shows that a rule *could* reach
+      # 861 by routing between the two answers; this runs the code that would ship it — `assistedMark`
+      # for the decision and `assistedChartIR` for the chart — and asserts the two agree row for row.
+      # A policy that reads well in a table and a product that behaves differently are two claims, and
+      # only one of them is worth publishing. Costs nothing: the answers are already on disk.
+      - name: Ship the winning policy and prove it is the product
+        run: pnpm bench:text2vis:ship --answers eval/out/text2vis-llm.json --artifact eval/out/text2vis-ship.json
+
+      # The gate on that reading: the product's decision must be the arbitration's policy, every row
+      # must be decided by exactly one side, and a chart may only differ from the decision when a veto
+      # replaced it. No model is asked anything here either.
+      - name: Hold the shipped path to the arbiter
+        run: node tools/check-text2vis-baseline.mjs --ship --require
+
       - name: Upload the reading
         if: always()
         uses: actions/upload-artifact@v5
@@ -235,6 +249,15 @@ jobs:
         with:
           name: text2vis-arbitrate
           path: eval/out/text2vis-arbitrate.json
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Upload the shipped reading
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: text2vis-ship
+          path: eval/out/text2vis-ship.json
           if-no-files-found: warn
           retention-days: 90
 

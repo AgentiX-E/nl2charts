@@ -43,6 +43,7 @@ const RENDER_REPORT = 'eval/out/text2vis-render.json';
 const JUDGE_REPORT = 'eval/out/text2vis-judge.json';
 const LLM_REPORT = 'eval/out/text2vis-llm.json';
 const ARBITRATION_REPORT = 'eval/out/text2vis-arbitrate.json';
+const SHIP_REPORT = 'eval/out/text2vis-ship.json';
 
 /**
  * Compare one reading against the floor.
@@ -671,6 +672,47 @@ function selfTest() {
     const banded = compareArbitration(under, { ...arbFloor, tolerance: 5 }, {});
     caseOf('the same row inside the band is a note', banded.issues, 0);
   }
+  // The shipped path, and the seven ways a derived reading can look finished: a third answer, an
+  // unexplained row, a reason counted twice, more hits than rows, a changed row no veto accounts for,
+  // a reading under its floor, and — the one this gate exists for — a product that is not the policy.
+  const shipFloor = { scored: 8, decided: 6, shipped: 6, tolerance: 0 };
+  const shipReport = () => ({
+    population: { scored: 8 },
+    decided: { hit: 6, share: 0.75, fromModel: 6, fromProduct: 2, reasons: { 'no-advice': 2, unavailable: 0, unlisted: 0, wide: 0, 'not-admitted': 0, unchartable: 0 } },
+    shipped: { hit: 6, share: 0.75, fromModel: 4, fromProduct: 4, reasons: { 'no-advice': 1, unavailable: 0, unlisted: 0, wide: 2, 'not-admitted': 0, unchartable: 1 } },
+    changed: 3,
+    divergence: [],
+  });
+  {
+    caseOf('a shipped reading that adds up is accepted', compareShip(shipReport(), shipFloor, { require: true }).issues, 0);
+    const missing = compareShip(undefined, shipFloor, { require: true });
+    caseOf('a missing ship artifact is refused when it is required', missing.issues, 1);
+    caseOf('a missing ship artifact is a note when it is not', compareShip(undefined, shipFloor, {}).issues, 0);
+    const other = shipReport();
+    other.divergence = [{ row: 3, policy: 'bar', shipped: 'line' }];
+    caseOf('a product that disagrees with the policy on one row is refused', compareShip(other, shipFloor, {}).issues, 1);
+    const short = shipReport();
+    short.decided.fromModel = 5;
+    caseOf('a split that does not cover the population is refused', compareShip(short, shipFloor, {}).issues, 1);
+    const doubled = shipReport();
+    doubled.shipped.reasons['no-advice'] = 2;
+    caseOf('a reason counted twice is refused', compareShip(doubled, shipFloor, {}).issues, 1);
+    const over = shipReport();
+    over.shipped.hit = 9;
+    caseOf('more hits than rows is refused', compareShip(over, shipFloor, {}).issues, 1);
+    const stray = shipReport();
+    stray.changed = 4;
+    caseOf('a changed row that no veto explains is refused', compareShip(stray, shipFloor, {}).issues, 1);
+    const under = shipReport();
+    under.decided.hit = 5;
+    caseOf('a decision one row under its floor is refused', compareShip(under, shipFloor, {}).issues, 1);
+    caseOf('the same row inside the band is a note', compareShip(under, { ...shipFloor, tolerance: 5 }, {}).issues, 0);
+    const priced = shipReport();
+    priced.population = { scored: 9 };
+    caseOf('a reading over another row set is refused', compareShip(priced, shipFloor, {}).issues, 1);
+    const fresh = compareShip(shipReport(), { scored: 8, tolerance: 5 }, {});
+    caseOf('a first dispatch registers the floor instead of failing against it', fresh.issues, 0);
+  }
   const recordedArms = JSON.parse(readFileSync(resolve(ROOT, BASELINE), 'utf8'))?.llm?.arms;
   const scales = Object.keys(recordedArms ?? {});
   const bothScales = scales.some((key) => key.endsWith('|mark')) && scales.some((key) => key.endsWith('|label'));
@@ -916,9 +958,110 @@ export function compareArbitration(report, floor, options = {}) {
   return { issues, notes };
 }
 
+/**
+ * The shipped path, against the floor it establishes.
+ *
+ * The arbitration prices a *policy*; this prices the *product*. `eval/text2vis/ship.ts` runs
+ * `assistedMark` and `assistedChartIR` over the same answers and publishes two readings — the decision
+ * and the chart — and the only reason those numbers mean anything is that the first one is the same
+ * sentence as the arbitration's `model-holds`. Two implementations of one rule, in two packages: a
+ * single row they disagree about is a row where the published hybrid number does not describe what a
+ * caller receives.
+ *
+ * The identities re-checked here are the ones a derived reading can lose quietly:
+ *
+ * - `divergence` empty: the shipped decision is the policy, row for row. This is the hard one; there is
+ *   no band, because both sides are computed from one artifact in one process.
+ * - `fromModel + fromProduct === scored` and `sum(reasons) === fromProduct`: every row was decided by
+ *   exactly one side, and every table-decided row carries exactly one reason.
+ * - `changed <= wide + not-admitted + unchartable`: a chart may differ from the decision only because a
+ *   veto replaced it with the table's answer. `shipReport` checks that row by row; this checks the
+ *   arithmetic that would let a third answer hide.
+ *
+ * The floor itself is optional on the day it is created — the first dispatch that produces a ship
+ * artifact establishes it, and the commit that earns it writes `decided` and `shipped` into
+ * `baseline.json`. Until then the identities still run, which is most of the value: they are the part
+ * that cannot be eyeballed.
+ *
+ * @returns {{issues: string[], notes: string[]}}
+ */
+export function compareShip(report, floor, options = {}) {
+  const issues = [];
+  const notes = [];
+  if (report === undefined) {
+    const message = `TEXT2VIS SHIP: no reading at ${SHIP_REPORT} — \`pnpm bench:text2vis:ship --answers ${LLM_REPORT} --artifact ${SHIP_REPORT}\` writes it`;
+    if (options.require === true) issues.push(message);
+    else notes.push(`${message} (not required here)`);
+    return { issues, notes };
+  }
+  const scored = report.population?.scored;
+  if (scored !== floor.scored) {
+    issues.push(
+      `TEXT2VIS SHIP: priced over ${String(scored)} rows and the floor was recorded over ${String(floor.scored)}; the shipped path on another row set is a different question`,
+    );
+    return { issues, notes };
+  }
+  const divergence = Array.isArray(report.divergence) ? report.divergence : [];
+  if (divergence.length > 0) {
+    const first = divergence[0] ?? {};
+    issues.push(
+      `TEXT2VIS SHIP: ${String(divergence.length)} row(s) where the shipped decision and the arbitration policy disagree; row ${String(first.row)}: policy ${String(first.policy)}, shipped ${String(first.shipped)}. The product and the published hybrid reading are the same rule and must be the same answer`,
+    );
+    return { issues, notes };
+  }
+  for (const name of ['decided', 'shipped']) {
+    const counts = report[name] ?? {};
+    if (counts.fromModel + counts.fromProduct !== scored) {
+      issues.push(
+        `TEXT2VIS SHIP: ${name} splits ${String(counts.fromModel)} model and ${String(counts.fromProduct)} table over a population of ${String(scored)}`,
+      );
+      continue;
+    }
+    const reasons = Object.values(counts.reasons ?? {}).reduce((sum, value) => sum + value, 0);
+    if (reasons !== counts.fromProduct) {
+      issues.push(
+        `TEXT2VIS SHIP: ${name} counts ${String(reasons)} reasons over ${String(counts.fromProduct)} table-decided rows, so a row is unexplained or counted twice`,
+      );
+    }
+    if (counts.hit > scored) {
+      issues.push(`TEXT2VIS SHIP: ${name} reads ${String(counts.hit)} hits over ${String(scored)} rows`);
+    }
+  }
+  const vetoes =
+    (report.shipped?.reasons?.wide ?? 0) +
+    (report.shipped?.reasons?.['not-admitted'] ?? 0) +
+    (report.shipped?.reasons?.unchartable ?? 0);
+  if (report.changed > vetoes) {
+    issues.push(
+      `TEXT2VIS SHIP: ${String(report.changed)} rows differ from the decision and only ${String(vetoes)} were vetoed; a chart may only change to the table's answer, and only when a veto explains it`,
+    );
+  }
+  const tolerance = typeof floor.tolerance === 'number' ? floor.tolerance : 0;
+  for (const name of ['decided', 'shipped']) {
+    const recorded = floor[name];
+    const measured = report[name]?.hit;
+    if (typeof recorded !== 'number') {
+      notes.push(`TEXT2VIS SHIP: ${name} reads ${String(measured)} and no floor is registered yet — this dispatch establishes it`);
+      continue;
+    }
+    if (measured < recorded - tolerance) {
+      issues.push(
+        `TEXT2VIS SHIP: ${name} fell to ${String(measured)} (${((measured / scored) * 100).toFixed(2)}%) from the floor of ${String(recorded)}, which is outside the ${String(tolerance)}-row band this instrument re-samples within`,
+      );
+    } else if (measured < recorded) {
+      notes.push(`TEXT2VIS SHIP: ${name} reads ${String(measured)} against a floor of ${String(recorded)}, inside the ${String(tolerance)}-row band — not a regression`);
+    } else {
+      notes.push(`TEXT2VIS SHIP: ${name} reads ${String(measured)} (${((measured / scored) * 100).toFixed(2)}%) against a floor of ${String(recorded)}`);
+    }
+  }
+  notes.push(
+    `TEXT2VIS SHIP: ${String(report.changed)} row(s) drew the table's answer instead of the decision's, all of them vetoed`,
+  );
+  return { issues, notes };
+}
+
 function main(argv) {
-  if (argv.includes('--self-test')) return selfTest();
-  const require = argv.includes('--require');
+  if (argv.includes('--self-test')) return selfTest();  const require = argv.includes('--require');
   // A separate switch, because the two readings are produced by different runs: `--require` is the
   // chart job, which renders and scores and never grades, and demanding a judge artifact from it
   // turned that job red on the push that registered the judge floor. `--require-judge` is the
@@ -936,7 +1079,11 @@ function main(argv) {
   // The derived reading: priced from the answers the step above bought, so it is a separate switch
   // from `--llm` — a run of the model arm alone has no arbitration artifact to check.
   const arbitration = argv.includes('--arbitration');
-  const known = new Set(['--require', '--require-judge', '--iteration', '--self-test', '--expect-instrument', '--llm', '--arbitration']);
+  // The product's own reading of the same answers. A separate switch for the same reason the
+  // arbitration has one: it is produced by a step of its own, and a dispatch that skipped it must be
+  // told so rather than read the absence as agreement.
+  const ship = argv.includes('--ship');
+  const known = new Set(['--require', '--require-judge', '--iteration', '--self-test', '--expect-instrument', '--llm', '--arbitration', '--ship']);
   // The value after `--expect-instrument` is a model name and not a flag, so it is skipped rather than
   // reported as an unknown argument.
   const flags = [];
@@ -951,7 +1098,7 @@ function main(argv) {
   if (unknown.length > 0) {
     console.error(
       `unknown argument ${unknown.join(' ')}: this gate reads ${REPORT} against ${BASELINE}, takes --require, ` +
-        '--require-judge, --iteration, --expect-instrument <model> and --self-test',
+        '--require-judge, --iteration, --expect-instrument <model>, --llm, --arbitration, --ship and --self-test',
     );
     return 2;
   }
@@ -977,6 +1124,14 @@ function main(argv) {
     for (const note of arbNotes) console.log(note);
     for (const issue of arbIssues) console.error(issue);
     return arbIssues.length === 0 ? 0 : 1;
+  }
+  if (ship) {
+    const path = resolve(ROOT, SHIP_REPORT);
+    const report = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : undefined;
+    const { issues: shipIssues, notes: shipNotes } = compareShip(report, baseline.llm?.ship ?? {}, { require });
+    for (const note of shipNotes) console.log(note);
+    for (const issue of shipIssues) console.error(issue);
+    return shipIssues.length === 0 ? 0 : 1;
   }
   // Before the report, before the corpus, before a call: the one question about a dispatch that can
   // be answered from a file. A floor reading on another instrument costs a full reading and then

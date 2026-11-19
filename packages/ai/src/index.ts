@@ -12,6 +12,14 @@ export { linkSchema, renderName, renderSchemaCard, tokenizeQuestion } from './li
 export type { LinkedColumn, Recaller, SchemaCardOptions, SchemaColumn, SchemaTable } from './linking.js';
 export { buildAskMessages, buildSqlPrompt, choosePromptProfile, createPipeline, extractSql } from './pipeline.js';
 export { buildInterpretationPrompt, parseInterpretation } from './interpret.js';
+export {
+  buildChartChoicePrompt,
+  CHART_CHOICE_INSTRUCTION,
+  chartChoiceBudget,
+  createChartAdvisor,
+  parseChartChoice,
+} from './choice.js';
+export type { ChartAdviceUsage, ChartAdvisor, ChartAdvisorOptions, ChartChoiceOption } from './choice.js';
 export { buildPlanPrompt, parsePlan } from './plan.js';
 export { countSteps, DECOMPOSE_RULES, parseDecomposed } from './decompose.js';
 export { parseSqlLike, renderSqlLike, SQL_LIKE_RULES } from './sql-like.js';

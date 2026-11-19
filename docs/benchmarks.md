@@ -16530,3 +16530,54 @@ push has to be, or the gate is priced per commit and gets turned off. The first 
 restoring the frozen v1 archive found nothing it could reuse (the request had changed since that archive
 was written) and the store had to be rebuilt; the save that ran *before* the fidelity gate is what made
 the third one free.
+
+## The policy is now a product, and the product is allowed to disagree with it
+
+`assistedMark` in `packages/chart` is the arbitration's `model-holds` policy written as shipped code: the
+model everywhere it answered, the table where it did not. `assistedChartIR` is the same decision followed
+by the drawing, and drawing has one thing the policy does not — a veto. A table whose columns *are* a
+timeline is one line per entity and nothing else, so it is not offered to the advisor at all (144 tables
+on this corpus, and 144 calls not spent); a mark the admissions refuse cannot become an encoding, so it is
+refused rather than coerced into a neighbour. Both are counted.
+
+`eval/text2vis/ship.ts` runs both passes over the same artifact and publishes two readings:
+
+| reading | what runs | relation to the arbiter |
+|---|---|---|
+| `decided` | `assistedMark` on every scored row | **equal**, row for row — no band |
+| `shipped` | `assistedChartIR`, which skips the wide tables | free to differ, and every difference must be the table's answer |
+
+The first is the assertion this round exists for. `arbitrate.ts` prices a `choose(dispute)` function over
+cached answers; the product is a different package, a different caller and a different control flow, and
+the claim that the hybrid reads 861 is only true of both if they answer the same on all 1,470 rows. The
+gate is `check-text2vis-baseline.mjs --ship`, which refuses a single divergent row, and the run costs ¥0
+because the answers are already on disk.
+
+### Two readings, one pass, and a veto that wins
+
+The first draft of `assertShip` said `shipped <= decided`, on the reasoning that a veto can only take a
+row back. An arm that answered `bar` on every row made the chart read **433** against the decision's
+**420**, and the assertion failed on a run that was correct.
+
+The reasoning was wrong, not the code. A veto does not delete the model's answer; it replaces it with the
+table's, and on 144 tables whose columns are a timeline the table's `line` is more often right than a
+model that answered `bar`. The constraint that survives is the one checked row by row while both answers
+are in hand: a chart may only be one of the two answers, and it may only change to the table's. The
+`changed` count is published beside the two readings for exactly that reason — a fallback nobody counts
+reads as a model that agreed.
+
+| arm | `decided` | `shipped` | changed | vetoes |
+|---|---:|---:|---:|---|
+| product's own marks (degenerate) | 606 | 606 | 0 | 144 wide + 35 unchartable |
+| `bar` on every row | 420 | 433 | 209 | 144 wide + 30 not-admitted + 35 unchartable |
+| `bar`/`pie` alternating | 302 | 388 | 335 | 144 wide + 156 not-admitted + 35 unchartable |
+
+### The number the profile arm calls "always bar" is not the number a bar-always arm reads
+
+The `bar` row above also settled a naming question that had been passing for a fact. `scoreAnswers`
+publishes `baseline.bar`, which is `rows labelled exactly "Bar" / total` — 357 of 1,470, 24.29%. An arm
+that answers `bar` on every row reads **420**, because the bar family also holds `Stacked Bar` (56) and
+seven other labels. Both numbers are correct and they are not the same quantity; the first is a class
+frequency, the second is what a constant arm scores. `rule.ts` prints the former under `baseline:` and has
+since the first reading, so nothing here changed — what changed is that a second instrument now prints the
+latter, and the two must not be quoted as a contradiction.

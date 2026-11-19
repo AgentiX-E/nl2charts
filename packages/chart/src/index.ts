@@ -14,6 +14,8 @@ export type { SupportVerdict } from './support.js';
 export { MARKS, describeMark } from './marks.js';
 export type { MarkSpec } from './marks.js';
 export { CHART_CUES, RECOMMENDABLE_MARKS, readCues, recommendChart, toChartIR } from './recommend.js';
+export { assistedChartIR, assistedMark, MARK_GLOSS, MARK_OPTIONS } from './assist.js';
+export type { AssistedChart, AssistedDecision, AssistingChartIROptions, MarkAdvisor, MarkName, MarkOption } from './assist.js';
 export type {
   ChartChoice,
   ChartIROptions,

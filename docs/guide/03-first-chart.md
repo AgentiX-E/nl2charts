@@ -286,7 +286,7 @@ construct is not touched.
 > The other half is `pnpm bench:text2vis:profile`, which scores the shipped entry
 > point with the corpus's own result set in front of it — no model, no database,
 > no renderer, because the corpus ships the table. That reading is
-> **579 of 1,470 (39.39%)** and it is held by a floor: `pnpm gate:text2vis` fails a
+> **606 of 1,470 (41.22%)** and it is held by a floor: `pnpm gate:text2vis` fails a
 > run that comes back lower, and fails one that comes back over a different number
 > of rows, because the scorer is deterministic and a fall is therefore never noise.
 >
@@ -296,6 +296,70 @@ construct is not touched.
 > label is more than one annotator's judgement. The tests pin the rule table
 > against a named fixture, and that fixture is a regression corpus, not a
 > benchmark.
+
+### Letting a model choose the mark
+
+Everything above is free, offline and deterministic, and that is the default for a
+reason: a chart name is a one-word answer that a rule table gets right 41% of the
+time on Text2Vis, and a model asked the same question — with no table, no result
+rows and no image — gets it right **58%**. Neither is a decision you want to make
+for a user by accident, so the model path is opt-in and costs nothing until you
+opt in.
+
+```ts
+import { assistedChartIR } from '@agentix-e/nl2charts-chart';
+import { createChartAdvisor, createHttpProvider } from '@agentix-e/nl2charts-ai';
+
+const advisor = createChartAdvisor(
+  createHttpProvider({ baseUrl: 'https://api.deepseek.com/v1', apiKey: process.env.LLM_API_KEY!, model: 'deepseek-chat' }),
+);
+
+const { ir, decision } = await assistedChartIR('What share of revenue does each region hold?', rows, {
+  columns: resultSet.columns,
+  advisor,
+});
+// decision: { mark: 'pie', source: 'model', product: 'pie' }
+// If the endpoint fails: { mark: <the table's answer>, source: 'product', fallback: 'unavailable' }
+```
+
+Four properties, each of them a thing that goes wrong in a product that adds a
+model to a deterministic path:
+
+- **Without an advisor there is no path.** `advisor` absent returns before its
+  first `await`, and `assistedChartIR` returns exactly what `toChartIR` returns —
+  the same object, byte for byte. Adding the feature cannot change an application
+  that does not turn it on.
+- **A failure is the table's answer, not an error.** An endpoint that times out, a
+  reply that names nothing, a name that is not on the list — all three fall back
+  and all three are *counted separately*, because they have three repairs. A chart
+  that becomes unavailable because somebody else's endpoint did is a chart a user
+  cannot have.
+- **The model chooses the shape; the result set still decides the content.** The
+  override sets the mark and nothing else: the admission rules still apply, the
+  encoding is still derived from the columns, the rows are still folded, ordered
+  and limited by the same code. `decision.veto` is how a refusal is reported — a
+  wide table is one line per entity and nothing else, so it is not asked about, and
+  a mark the admissions refuse is not coerced into a neighbour.
+- **The prompt is a measured artifact, not a message.** It is the same two messages
+  the benchmark sends — four lines, ~180 tokens, one word out — because the reading
+  it produces is a number *about that text*. `test/text2vis-ship.test.ts` compares
+  the shipped builder against the arm's character for character, and the shipped
+  list of marks against the arm's gloss for gloss. A wording changed in one place
+  and not the other would change the task without changing the measurement.
+
+Cost is bounded by the shape of the call: one request per question, `max_tokens`
+96 (absent for an endpoint that thinks aloud), `temperature` 0, and the same
+prefix on every call so the provider's own cache bills it at the cached rate — at
+the prices this repository benchmarks with, **¥0.0004 per row**. `advisor.usage()`
+reports what was spent, because a feature whose cost cannot be read is a feature
+whose cost is discovered on the invoice.
+
+> **What the model path reads.** Same 1,470 rows, same scorer: 857 of 1,470 by the
+> model alone (58.30%), 606 by the rule table, and **861 by routing between the
+> two** — the model everywhere it answered, the table where it did not. That last
+> number is the one this API implements, and `pnpm bench:text2vis:ship` re-runs the
+> shipped code against the answers already on disk to prove the product and the
+> published policy are the same rule, row for row, at ¥0.
 
 ## 3. Build the IR
 

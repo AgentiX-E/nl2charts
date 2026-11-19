@@ -147,6 +147,19 @@ describe('the dispute a policy is allowed to see', () => {
     expect(disputeOf(row, 'bar').cueLead).toBeUndefined();
     expect(disputeOf(row, 'bar').cueNamed).toEqual([]);
   });
+
+  it('refuses a name the arm never offered, because the artifact is an external file', () => {
+    // The arm's reader only writes a name it was given, so a foreign name means the file was edited or
+    // written by another version. Carried instead of refused, `donut` would become a policy answer
+    // whose family list is empty — which the scorer reads as *declined*, reclassifying the row as a
+    // refusal and crediting it to whichever side happened to decline.
+    const row: ProfileInput = { prompt: 'Show revenue', label: 'Bar Chart', tableData: 'A, B\n1, 2' };
+    expect(() => disputeOf(row, 'donut')).toThrow(/not one of the 11 marks/);
+    expect(() => disputeOf(row, 'Bar')).toThrow(/not one of the 11 marks/);
+    // The two states the artifact can actually hold are still accepted.
+    expect(disputeOf(row, 'bar').model).toBe('bar');
+    expect(disputeOf(row, null).model).toBeUndefined();
+  });
 });
 
 describe('the policies', () => {

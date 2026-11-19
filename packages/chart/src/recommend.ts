@@ -704,6 +704,19 @@ export interface ChartIROptions extends RecommendOptions {
    * order rather than from a JavaScript property-order accident.
    */
   readonly columns?: readonly string[];
+  /**
+   * The mark to draw, when the choice was made outside this function.
+   *
+   * One use: `assist.ts` asks a model for a mark and hands the answer back here. The override decides
+   * the mark and nothing else — admissions still apply, the encoding is still derived from the result
+   * set, and the rows are still folded and ordered by the same code — so a model can change *what
+   * shape* is drawn but never *what the chart says*.
+   *
+   * A mark the result set cannot hold is refused with the recommender's own reason rather than
+   * coerced into a neighbour. Drawing a bar because a pie was not admitted is this function choosing
+   * for the caller, and the caller is the one holding the answer key.
+   */
+  readonly mark?: RecommendableMark;
 }
 
 const ref = (profile: FieldProfile): FieldRef => ({ field: profile.name, type: profile.type });
@@ -945,6 +958,24 @@ function countsOf(
 }
 
 /**
+ * The recommendation for one named mark, or a refusal carrying the recommender's own reason.
+ *
+ * Only reachable through `ChartIROptions.mark`, which exists so a caller that decided the mark
+ * elsewhere — `assist.ts`, on a model's advice — can hand the decision back without reimplementing
+ * the admissions. The two lists are exhaustive over `RECOMMENDABLE_MARKS`: `recommendChart` pushes
+ * every mark into exactly one of them, so a mark that is in neither is a mark added to the list
+ * without an admission, and returning `undefined` there would surface as "no chart fits" rather than
+ * as the defect it is.
+ */
+function admitted(choice: ChartChoice, mark: RecommendableMark): Recommendation | undefined {
+  const refusal = choice.refused.find((entry) => entry.mark === mark);
+  if (refusal !== undefined) {
+    throw new Nl2ChartsError('NL2C_E_NOT_SUPPORTED', `the mark ${mark} is refused on this result set: ${refusal.reason}`);
+  }
+  return choice.recommendations.find((entry) => entry.mark === mark);
+}
+
+/**
  * Turn the best recommendation into a chart contract, so the caller of a query
  * does not have to write one. The title is the question because a chart without
  * one cannot be cited, and the alt text names the mark because that is the part a
@@ -973,7 +1004,7 @@ export function toChartIR(
   const profiles = profileRows(rows, options.columns);
   // The one fact a column profile cannot hold, and the one that decides the counted measure.
   const choice = recommendChart(question, profiles, { ...options, rows: rows.length });
-  const best = choice.recommendations[0];
+  const best = options.mark === undefined ? choice.recommendations[0] : admitted(choice, options.mark);
   if (best === undefined) {
     const columns = profiles.map((profile) => `${profile.name}:${profile.type}`).join(', ');
     throw new Nl2ChartsError(
