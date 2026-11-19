@@ -16511,3 +16511,22 @@ Nine self-test cases break exactly one identity each, and one breaks none; the b
 directions. The floor records `863`, the better of the two runs, with the same five-row tolerance as the
 model floor and for the same reason — every cell in the table is a function of the two answer columns,
 and those move by a couple of rows per re-sample.
+
+## The third dispatch cost ¥0, and that is the whole point of the four cache rules
+
+Run `44557699795` asked the same 2,940 questions on the same 1,470 rows and read the same numbers:
+
+| | run `44551395709` | run `44557699795` |
+|---|---:|---:|
+| `mark` top-1 | 861 | 861 |
+| `label` exact | 886 | 886 |
+| truncated | 0 | 0 |
+| cache | 0 hit / 2,940 miss | **2,940 hit / 0 miss** |
+| cost | ¥1.2521 | **¥0** |
+| best policy | `model-holds` 863 | `model-holds` 863 |
+
+Two dispatches, identical readings, and the second one free — which is what a benchmark that gates every
+push has to be, or the gate is priced per commit and gets turned off. The first of the two paid because
+restoring the frozen v1 archive found nothing it could reuse (the request had changed since that archive
+was written) and the store had to be rebuilt; the save that ran *before* the fidelity gate is what made
+the third one free.
