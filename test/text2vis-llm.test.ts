@@ -38,6 +38,7 @@ import {
   rosterOf,
   runArm,
   resolveTargets,
+  PROMPT_VERSION,
   scoreArm,
   type ArmReport,
   type ModelOutcome,
@@ -52,6 +53,14 @@ afterAll(() => {
 
 const ENTRY = resolve('eval/text2vis/llm.ts');
 const MODULE_URL = pathToFileURL(ENTRY).href;
+/**
+ * The request every report in this file names, written once.
+ *
+ * It is a constant rather than a literal per call because the point of the field is that it is the
+ * same for every arm in a run: a test where nine reports describe nine requests would prove nothing
+ * about the one the product ships.
+ */
+const REQUEST = { promptVersion: PROMPT_VERSION, budget: 96 } as const;
 const HEADER = `${TEXT2VIS_FIELDS.prompt},${TEXT2VIS_FIELDS.answer},${TEXT2VIS_FIELDS.code},${TEXT2VIS_FIELDS.chartType},Table Data`;
 
 function cell(text: string): string {
@@ -268,7 +277,7 @@ describe('scoring one arm', () => {
 
   it('prices the mark scale with the product’s own scorer', () => {
     const outcomes = [outcome(rows[0] as ProfileInput, 'line'), outcome(rows[1] as ProfileInput, 'pie'), outcome(rows[2] as ProfileInput, undefined)];
-    const report = scoreArm(rows, outcomes, { model: 'deepseek-chat', options: markOptions(), usage, cache }, 'mark');
+    const report = scoreArm(rows, outcomes, { model: 'deepseek-chat', options: markOptions(), request: REQUEST, usage, cache }, 'mark');
     expect(report.scale).toBe('mark');
     if (report.scale !== 'mark') throw new Error('unreachable');
     expect(report.scored).toBe(3);
@@ -297,7 +306,7 @@ describe('scoring one arm', () => {
       outcome(labelled[2] as ProfileInput, 'Line Chart'),
       outcome(labelled[3] as ProfileInput, 'Pie Chart'),
     ];
-    const report = scoreArm(labelled, outcomes, { model: 'deepseek-chat', options: labelOptions(labelled), usage, cache }, 'label');
+    const report = scoreArm(labelled, outcomes, { model: 'deepseek-chat', options: labelOptions(labelled), request: REQUEST, usage, cache }, 'label');
     expect(report.scale).toBe('label');
     if (report.scale !== 'label') throw new Error('unreachable');
     expect(report.scored).toBe(4);
@@ -309,7 +318,7 @@ describe('scoring one arm', () => {
   });
 
   it('scores an empty population as nothing rather than as a perfect run', () => {
-    const report = scoreArm([], [], { model: 'deepseek-chat', options: markOptions(), usage, cache }, 'label');
+    const report = scoreArm([], [], { model: 'deepseek-chat', options: markOptions(), request: REQUEST, usage, cache }, 'label');
     if (report.scale !== 'label') throw new Error('unreachable');
     expect(report.scored).toBe(0);
     expect(report.exactShare).toBe(0);
@@ -325,7 +334,7 @@ describe('scoring one arm', () => {
       row('Compare revenue by region a third time', 'Column Chart', REGIONS),
     ];
     const outcomes = labelled.map((input) => outcome(input, 'Bar Chart'));
-    const report = scoreArm(labelled, outcomes, { model: 'deepseek-chat', options: labelOptions(labelled), usage, cache }, 'label');
+    const report = scoreArm(labelled, outcomes, { model: 'deepseek-chat', options: labelOptions(labelled), request: REQUEST, usage, cache }, 'label');
     if (report.scale !== 'label') throw new Error('unreachable');
     expect(report.exact).toBe(3);
     expect(report.perFamily).toEqual([{ family: 'bar', n: 3, exact: 3 }]);
@@ -334,7 +343,7 @@ describe('scoring one arm', () => {
 
   it('refuses a report whose counters do not add up', () => {
     const outcomes = [outcome(rows[0] as ProfileInput, 'line')];
-    const mark = scoreArm(rows, outcomes, { model: 'm', options: markOptions(), usage, cache }, 'mark');
+    const mark = scoreArm(rows, outcomes, { model: 'm', options: markOptions(), request: REQUEST, usage, cache }, 'mark');
     if (mark.scale !== 'mark') throw new Error('unreachable');
     expect(() => assertArmReport({ ...mark, unparsed: 5 })).toThrow(/unparsed is not the/);
     expect(() => assertArmReport({ ...mark, choices: ['line', null, null], requested: 3, answered: 1, unparsed: 2, declined: 1 })).toThrow(/unreadable reply was scored/);
@@ -343,7 +352,7 @@ describe('scoring one arm', () => {
     // scored, which is exactly the shape the first full run published as 1,985 asked / 1,470 scored.
     expect(() => assertArmPopulation(mark)).toThrow(/every row asked must be scored/);
     expect(() => assertArmPopulation({ ...mark, requested: 3, answered: 3, unparsed: 0, declined: 1 })).not.toThrow();
-    const label = scoreArm(rows, outcomes, { model: 'm', options: labelOptions(rows), usage, cache }, 'label');
+    const label = scoreArm(rows, outcomes, { model: 'm', options: labelOptions(rows), request: REQUEST, usage, cache }, 'label');
     if (label.scale !== 'label') throw new Error('unreachable');
     expect(() => assertArmReport({ ...label, exact: 9 })).toThrow(/exact matches out of/);
     expect(() => assertArmReport({ ...label, perFamily: [] })).toThrow(/per-family rows sum to 0/);
@@ -365,7 +374,7 @@ describe('scoring one arm', () => {
 
   it('says what the run cost, per row as well as in total', () => {
     const outcomes = rows.map((input) => outcome(input, 'line'));
-    const report = scoreArm(rows, outcomes, { model: 'deepseek-chat', options: markOptions(), usage, cache }, 'mark');
+    const report = scoreArm(rows, outcomes, { model: 'deepseek-chat', options: markOptions(), request: REQUEST, usage, cache }, 'mark');
     // 60 prompt tokens at the list rate and 300 at the cached rate, plus 6 completion: the number is a
     // function of both, which is what makes reporting `cachedPromptTokens` worth a column.
     expect(report.cost.perRowYuan).toBeCloseTo((report.cost.yuan as number) / 3, 9);
@@ -374,7 +383,7 @@ describe('scoring one arm', () => {
 
   it('prices a model the table has no rate for without inventing one', () => {
     const outcomes = [outcome(rows[0] as ProfileInput, 'line')];
-    const report = scoreArm(rows, outcomes, { model: 'unpriced-model', options: markOptions(), usage, cache }, 'mark');
+    const report = scoreArm(rows, outcomes, { model: 'unpriced-model', options: markOptions(), request: REQUEST, usage, cache }, 'mark');
     expect(report.cost.yuan).toBeUndefined();
     expect(describeArm(report).join('\n')).not.toContain('cost ¥');
   });
@@ -700,6 +709,9 @@ describe('a sample may decide how many rows are asked, not what may be answered'
     };
     const rows = [row('Compare revenue by region', 'Bar Chart', REGIONS)];
     const { report } = await runArm({ provider, scale: 'label', rows, concurrency: 1 });
+    // The request travels with the reading: a report is one request's answer, and the two facts a
+    // reader cannot recover from the score are the prompt version and the cap it was given.
+    expect(report.request).toEqual({ promptVersion: PROMPT_VERSION, budget: 96 });
     // One option, because one family is all this caller knows about; the gloss separator counts them.
     expect(asked[0]?.split('\n').filter((line) => line.includes(' — '))).toHaveLength(1);
     expect(asked[0]).toContain('Bar Chart');
@@ -728,7 +740,9 @@ describe('an arm on a model that thinks aloud', () => {
     expect(seen[0]?.temperature).toBe(0);
     if (report.scale !== 'mark') throw new Error('unreachable');
     expect(report.top1).toBe(1);
-    // The deliberation is billed *inside* completion tokens, so the meter does not add it again: a
+    // No cap was sent, so none is claimed: `budget` is absent rather than `0`, because a zero would
+    // read as a fence of zero tokens.
+    expect(report.request).toEqual({ promptVersion: PROMPT_VERSION });
     // second charge for the same tokens would inflate exactly the rows whose cost is under review.
     expect(report.cost.yuan).toBeGreaterThan(0);
   });
@@ -762,6 +776,32 @@ describe('the record a second run reads', () => {
 });
 
 describe('the counters a report can be wrong about', () => {
+  it('refuses a report that does not name the request it answered', () => {
+    // The field exists because of a file that passed a gate while measuring a prompt nobody sends: a
+    // local artifact read 857 under a 32-token cap, the floor was 861 on 96, and every count in the
+    // file added up. A reading of the wrong request is not a low reading, it is a different
+    // instrument, so it is refused before the arithmetic is looked at.
+    const rows = [row('How has revenue changed over time?', 'Line Chart', QUARTERLY)];
+    const outcomes: ModelOutcome[] = [
+      { row: rows[0] as ProfileInput, answer: { choice: 'line', reply: 'line', truncated: false } },
+    ];
+    const options = {
+      model: 'deepseek-chat',
+      options: markOptions(),
+      request: REQUEST,
+      usage: { calls: 1, promptTokens: 120, completionTokens: 2, cachedPromptTokens: 0 },
+      cache: { hits: 0, misses: 1, corrupt: 0 },
+    };
+    const report = scoreArm(rows, outcomes, options, 'mark');
+    expect(report.request).toEqual(REQUEST);
+    expect(() => assertArmReport(report)).not.toThrow();
+    expect(() => assertArmReport({ ...report, request: { promptVersion: 0 } })).toThrow(/prompt version 0/);
+    expect(() => assertArmReport({ ...report, request: { promptVersion: 1.5 } })).toThrow(/prompt version 1.5/);
+    expect(() => assertArmReport({ ...report, request: {} as never })).toThrow(/prompt that produced it/);
+    expect(() => assertArmReport({ ...report, request: { promptVersion: 1, budget: 0 } })).toThrow(/reply budget of 0/);
+    expect(() => assertArmReport({ ...report, request: { promptVersion: 1, budget: 12.5 } })).toThrow(/reply budget of 12.5/);
+  });
+
   it('refuses more top-1 hits than the shortlist that contains them', () => {
     const rows = [row('How has revenue changed over time?', 'Line Chart', QUARTERLY)];
     const outcomes: ModelOutcome[] = [
@@ -770,6 +810,7 @@ describe('the counters a report can be wrong about', () => {
     const report = scoreArm(rows, outcomes, {
       model: 'deepseek-chat',
       options: markOptions(),
+      request: REQUEST,
       usage: { calls: 1, promptTokens: 120, completionTokens: 2, cachedPromptTokens: 0 },
       cache: { hits: 0, misses: 1, corrupt: 0 },
     }, 'mark');

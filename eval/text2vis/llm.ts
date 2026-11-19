@@ -334,9 +334,30 @@ export interface ArmCost {
   readonly perRowYuan?: number;
 }
 
+/**
+ * The request an arm answered: the two facts that are not in the answers themselves.
+ *
+ * A report is read months later, and the reading it publishes is only the reading of *one* request.
+ * The two variables a reader cannot see in a score are the version of the prompt that was sent and
+ * the cap the reply had, and both of them move the number: the first dispatch of this arm read 857
+ * at a 32-token cap and the same rows read 861 at 96, so a file that does not name its request
+ * cannot be told apart from one taken on an instrument nobody sends any more. `assertArmReport`
+ * requires both, and the floor records them, which is what makes the gate able to refuse a stale
+ * artifact instead of calling it a re-sample.
+ *
+ * `budget` is absent rather than zero for a model that thinks aloud: no cap was sent at all, and a
+ * `0` would read as a cap of zero tokens.
+ */
+export interface ArmRequest {
+  readonly promptVersion: number;
+  readonly budget?: number;
+}
+
 export interface ArmBase {
   readonly model: string;
   readonly options: readonly ChoiceOption[];
+  /** What was asked of the endpoint, so a reading can be told apart from another request's. */
+  readonly request: ArmRequest;
   /** Rows asked about. Not `scored`: a row whose label has no family is asked and not scored. */
   readonly requested: number;
   /** Answers that named an option this arm offered. */
@@ -379,6 +400,19 @@ export type ArmReport = MarkArm | LabelArm;
 
 /** The arithmetic a report can be wrong about, refused rather than published. */
 export function assertArmReport(report: ArmReport): void {
+  // The request first, because it is the one field the counts cannot imply: a report whose numbers all
+  // add up is a valid reading of *some* request, and this is what says which.
+  const request = report.request;
+  if (typeof request?.promptVersion !== 'number' || !Number.isInteger(request.promptVersion) || request.promptVersion < 1) {
+    throw new Error(
+      `text2vis llm: ${String(report.model)} reports prompt version ${String(request?.promptVersion)}, so the reading does not name the prompt that produced it`,
+    );
+  }
+  if (request.budget !== undefined && (!Number.isInteger(request.budget) || request.budget < 1)) {
+    throw new Error(
+      `text2vis llm: ${String(report.model)} reports a reply budget of ${String(request.budget)}, which is not a positive whole number of tokens; an absent budget is how a model with no cap is written`,
+    );
+  }
   // The answer list is a column of the report, so it is checked like one: one entry per asked row, and
   // as many entries that name something as `answered` says. An array one short would attach every
   // answer to the row above it, and every later count would still add up.
@@ -466,6 +500,7 @@ function labelAnswer(choice: string | undefined): ChartFamily | undefined {
 export interface ScoreArmOptions {
   readonly model: string;
   readonly options: readonly ChoiceOption[];
+  readonly request: ArmRequest;
   readonly usage: { readonly calls: number; readonly promptTokens: number; readonly completionTokens: number; readonly cachedPromptTokens: number };
   readonly cache: { readonly hits: number; readonly misses: number; readonly corrupt: number };
 }
@@ -491,6 +526,7 @@ export function scoreArm(rows: readonly ProfileInput[], outcomes: readonly Model
   const base: ArmBase = {
     model: options.model,
     options: options.options,
+    request: options.request,
     choices: outcomes.map((outcome) => outcome.answer.choice ?? null),
     requested: outcomes.length,
     answered,
@@ -687,6 +723,7 @@ export async function runArm(settings: ArmSettings): Promise<{ readonly report: 
     {
       model: settings.provider.model,
       options,
+      request: { promptVersion: PROMPT_VERSION, ...(budget === undefined ? {} : { budget }) },
       usage: {
         calls: metered.calls(),
         promptTokens: usage.promptTokens,

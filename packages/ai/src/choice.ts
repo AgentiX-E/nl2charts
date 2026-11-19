@@ -12,7 +12,7 @@
  * ## Why the prompt is a constant here and a measurement there
  *
  * `eval/text2vis/llm.ts` sends a prompt of four lines and it has been paid for 1,470 times twice
- * over. The reading it produced — 857 top-1 on the mark scale, 861 once the table's refusals are
+ * over. The reading it produced — 861 top-1 on the mark scale, 863 once the table's refusals are
  * routed in — is a number *about that text*. Reproducing the reading from the product is therefore
  * only possible if the product sends the same bytes, which is why `test/text2vis-ship.test.ts`
  * compares this builder against the arm's, character for character, instead of trusting a comment.

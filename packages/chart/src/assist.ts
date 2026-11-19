@@ -35,7 +35,7 @@
  * ## The reading this exists to move
  *
  * `eval/text2vis/arbitrate.ts` priced six ways to route between the table's answer and the model's,
- * and the winner — the model everywhere it spoke, the table where it did not — reads **861** of 1,470
+ * and the winner — the model everywhere it spoke, the table where it did not — reads **863** of 1,470
  * against the table's 606. That number was computed by a policy over cached answers; this file is the
  * same policy as shipped code, and `eval/text2vis/ship.ts` asserts the two agree row for row. A
  * policy that reads well in a table and a product that behaves differently are two claims, and only
@@ -57,7 +57,7 @@ export interface MarkOption {
  * What each mark is, in one clause.
  *
  * These eleven strings are part of a *measured prompt*: `eval/text2vis/llm.ts` sends them and the
- * 861-row reading was taken with them. They are repeated here rather than imported because `ai`
+ * 861-top-1 reading was taken with them. They are repeated here rather than imported because `ai`
  * cannot be imported by `chart` and `eval` cannot be imported by either — and the duplication is
  * held together by a test that compares this table against the arm's, string for string
  * (`test/text2vis-ship.test.ts`). A wording changed in one place and not the other would change the

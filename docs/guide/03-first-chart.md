@@ -354,12 +354,15 @@ the prices this repository benchmarks with, **¥0.0004 per row**. `advisor.usage
 reports what was spent, because a feature whose cost cannot be read is a feature
 whose cost is discovered on the invoice.
 
-> **What the model path reads.** Same 1,470 rows, same scorer: 857 of 1,470 by the
-> model alone (58.30%), 606 by the rule table, and **861 by routing between the
+> **What the model path reads.** Same 1,470 rows, same scorer: 861 of 1,470 by the
+> model alone (58.57%), 606 by the rule table, and **863 by routing between the
 > two** — the model everywhere it answered, the table where it did not. That last
 > number is the one this API implements, and `pnpm bench:text2vis:ship` re-runs the
 > shipped code against the answers already on disk to prove the product and the
-> published policy are the same rule, row for row, at ¥0.
+> published policy are the same rule, row for row, at ¥0. What a caller *receives*
+> is the third reading, **754 of 1,470 (51.29%)**: a wide table is one line per
+> entity and a mark the admissions refuse is not drawn, so 402 rows are answered by
+> the table instead of the model, and 307 of them change the chart.
 
 ## 3. Build the IR
 

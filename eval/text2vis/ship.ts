@@ -310,7 +310,7 @@ export async function shipReport(
  * The arithmetic a reader could not reproduce, refused rather than published.
  *
  * Five checks. The first is the one the file exists for: the shipped decision and the arbitration
- * policy are the same sentence, so a single row they disagree about means the published 861 does not
+ * policy are the same sentence, so a single row they disagree about means the published 863 does not
  * describe this product.
  */
 export function assertShip(report: ShipReport): void {

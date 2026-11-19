@@ -16304,7 +16304,7 @@ The model arm beside this reading — `bench:text2vis:llm`, dispatched by `text2
 the repair makes comparable: it answers the same question the census explains, so its top-1 is one
 subtraction away from 41.22% and its misses can be read against the same seven outcomes.
 
-## The chart half, answered by a model: 58.30% on the same 1,470 rows
+## The chart half, answered by a model: 58.57% on the same 1,470 rows
 
 Everything the product's chart half has ever reported is a score against this corpus's labels. That
 number says how the product does; it does not say how hard the question is, and it cannot say whether
@@ -16317,7 +16317,7 @@ answer two different things:
 
 | Scale | Option list | Scored by | What it answers |
 |---|---|---|---|
-| `mark` | the 11 marks this product can draw | `scoreAnswers`, the function `scoreProfile` calls | is the model better than the product? `857 − 606` is a difference between two answers |
+| `mark` | the 11 marks this product can draw | `scoreAnswers`, the function `scoreProfile` calls | is the model better than the product? `861 − 606` is a difference between two answers |
 | `label` | the corpus's own chart names, grouped by family | exact family match | how hard is the task? the number a Text2Vis paper reports |
 
 Same 1,470 rows, `deepseek-chat`, temperature 0, one call per row per scale:
@@ -16326,26 +16326,32 @@ Same 1,470 rows, `deepseek-chat`, temperature 0, one call per row per scale:
 |---|---:|---:|
 | the cue table alone (`rule.ts`) | 575 (39.12%) | 885 (60.20%) |
 | **the product** (cues + table shape, `profile.ts`) | **606 (41.22%)** | 710 (48.30%) |
-| **a model, mark scale** | **857 (58.30%)** | 982 (66.80%) |
+| **a model, mark scale** | **861 (58.57%)** | 986 (66.80%) |
 | **a model, label scale** | **886 (60.27%)** exact | — |
 
-The `label` arm's 886 includes **59 rows** whose family no mark can lead with (`area`, `histogram`,
-`violin`), which is exactly why the two scales differ by 29 rows and why neither one alone is the
+The `label` arm's 886 includes **58 rows** whose family no mark can lead with (`area`, `histogram`,
+`violin`), which is exactly why the two scales differ by 25 rows and why neither one alone is the
 reading.
+
+**These numbers have a date and a request.** The table above is the 96-token dispatch — the request
+the product ships — and the first full reading of this arm, taken at a 32-token cap, read 857 with 982
+shortlist instead. Every count that follows moved with the cap by a few rows (472 → 473 both right,
+134 → 133 product only, 385 → 388 model only), which is why the floor registered in `baseline.json` is
+the later reading and the artifact now names the request that produced it.
 
 **Paired, row for row** — the same rows, the same day, both sides answering:
 
 | | rows |
 |---|---:|
-| both right | 472 |
-| product only | 134 |
-| model only | 385 |
-| neither | 479 |
-| McNemar exact p | 3.9e-29 |
+| both right | 473 |
+| product only | 133 |
+| model only | 388 |
+| neither | 476 |
+| McNemar exact p | 6.0e-30 |
 
 Three facts follow. The model's advantage is not a higher average, it is that it wins on the rows the
-product loses, 385 to 134. The **union of the two arms is 991 rows (67.41%)**, which is the ceiling a
-hybrid could reach and the number the next round is priced against. And the product's 134 exclusive
+product loses, 388 to 133. The **union of the two arms is 994 rows (67.62%)**, which is the ceiling a
+hybrid could reach and the number the next round is priced against. And the product's 133 exclusive
 wins are the reason to build a hybrid rather than to replace the rules outright.
 
 **Cost: ¥1.25 for 2,940 calls** — ¥0.0004 per row per scale. The workflow that produces this reading
@@ -16364,6 +16370,10 @@ Two defects this reading found in itself, both worth stating because they are th
    correct answers. A cut reply now carries no choice at all.
 
 ## Arbitrating the two answers: 861 of 1,470, and the 133 rows no rule can route
+
+**This section is the first run** (`44435717857`, best 861); the second dispatch read 863 and the section
+"The +2 is the same +2" below prices both. The floor registered in `baseline.json` is the later reading,
+because it is the one the current answers give.
 
 The two systems answer the same 1,470 rows and disagree on **729** of them. That disagreement is the
 only place a product decision lives: where they agree, there is nothing to decide, and 471 of the 741
@@ -16581,3 +16591,85 @@ seven other labels. Both numbers are correct and they are not the same quantity;
 frequency, the second is what a constant arm scores. `rule.ts` prints the former under `baseline:` and has
 since the first reading, so nothing here changed — what changed is that a second instrument now prints the
 latter, and the two must not be quoted as a contradiction.
+
+### The shipped path, priced on the answers already bought: 863 decided, 754 shipped
+
+Run `44580426870` ran the two new steps on the same 1,470 rows, restored **1,470 of 1,470** answers on
+each scale, made **no call** and cost **¥0.0000** — and read exactly what the two dispatches before it
+read, which is what makes the pair of numbers a floor rather than a sample:
+
+| reading | what it is | value |
+|---|---|---:|
+| `decided` | the arbitration's `model-holds` as shipped code | **863 (58.71%)** |
+| `shipped` | the chart a caller receives | **754 (51.29%)** |
+| changed | rows the chart drew as the table's answer instead | 307 |
+| route agrees with `model-holds` | row for row, no band | 1470 of 1470 |
+
+Three numbers explain the 109 rows between them, and all three are in the artifact:
+
+```
+decided   863   model 1464, table 6
+shipped   754   model 1063, table 407
+          vetoes took 220 model hits away (401 model-decided rows became table-decided)
+          and returned 111 table hits on the 402 rows the table answered
+          863 - 220 + 111 = 754
+```
+
+**Where the 402 vetoed rows are, and what they cost.** Each row was scored twice off the same pass —
+once with the chart it shipped, once with the mark the model named — which is a comparison of two
+*intentions*, not of two achievable drawings: a mark the admissions refuse cannot be encoded on that
+table, so the second column is an upper bound on agreement and never a candidate reading.
+
+| veto | rows | the product's answer hit | the model's own mark would have hit | what the model mostly named |
+|---|---:|---:|---:|---|
+| `wide` | 144 | 71 | 88 | `line` 94, `bar` 33 |
+| `not-admitted` | 223 | 40 | 112 | `boxplot` 159, `scatter` 36 |
+| `unchartable` | 35 | 0 | 20 | `bar` 15, `line` 8 |
+
+The `wide` row is the doctrine holding: 144 tables whose columns are a timeline are drawn as one line
+per entity and never offered to the advisor, and the model's intent agrees with the label's family on
+17 more rows than the melt does. That is not an argument for handing those tables to the model — the
+census measured the melt as a net gain (+7 rows on the product's own answers, and 73 rows the other
+readings would have mis-drawn as boxplots and pies) — it is the size of the disagreement, published
+because a veto nobody counts reads as a model that agreed.
+
+The `not-admitted` row is where the next lever lives, and it is not a routing rule: 223 rows, 159 of
+them `boxplot`, where the model named a mark no admission rule will draw. Its 112 "would have hit" is
+unreachable by definition — the table cannot hold that mark — so the only lever there is a mark that is
+*drawable* and close to what the model meant, which is a second question in the prompt and therefore a
+new measurement rather than a new rule. The ceiling of 994 did not move, and no rule over these two
+answers can claim these rows; that is the same conclusion the arbitration reached, arrived at from the
+product's side instead of the table's.
+
+### A gate that read a stale file and called it a re-sample
+
+The two readings above are held to a floor. Registering it exposed a hole in the gate for the *model*
+arm, and the receipt for it was sitting on the disk:
+
+```
+TEXT2VIS LLM: deepseek-chat|mark reads 857 top1 against a floor of 861, inside the 5-row band — not a regression
+```
+
+Every count in that file added up. It was the first dispatch's artifact — prompt version 1, a **32-token**
+reply cap, 1,470 answers bought for ¥0.60 — and the repository has sent 96 tokens since. The band could
+not tell the difference because the artifact never said what it was: `requested`, `answered`, `unparsed`,
+`truncated`, `cost` and `cache` describe *an* answer sheet, and none of them names the request that
+produced it.
+
+So the artifact now carries `request: { promptVersion, budget }`, `assertArmReport` refuses a report that
+does not name one (and a budget that is not a positive whole number — an absent budget is how a model
+with no cap is written), and `check-text2vis-baseline.mjs --llm` compares it against the floor's:
+
+| what the file says | what the gate says |
+|---|---|
+| the floor's request | compares the reading, as before |
+| another prompt version, or another reply cap | **refused**: a different instrument, not a low sample |
+| no request at all | **refused**: the reading does not name the prompt that produced it |
+| a request, and the floor has none | a note — this dispatch establishes it |
+
+Seven self-test cases hold the six branches (81 cases in the file now, up from 74), including the pair
+that makes the point: `{ promptVersion: 1 }` and `{ promptVersion: 1, budget: undefined }` are one
+request, and `budget: 32` against a floor of 96 is not a band, it is another prompt. The change costs
+nothing to re-measure: the answer store is content-addressed on the *request*, not on the file, so
+editing `llm.ts` re-keys the cache without re-buying a single answer — the next dispatch restores the
+store through `restore-keys` and hits 1,470 of 1,470 again.

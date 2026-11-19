@@ -32,18 +32,24 @@
   },
   "renderNote": "The pixel half, recorded in the round the renderer was built: 1,286 of the 1,470 scored rows reach a PNG (87.48%), 17 are refused because a gauge states a value against a scale this contract does not carry, and 167 are the rows the recommender declines. The floor is the pair (rendered >= 1,286, failed == 0) rather than an accuracy reading: a chart that raised in Python came from this repository own emitter. Still (rendered == 1,286, failed == 0) after the column-order fix, which changed which column each figure is drawn against without changing how many figures exist: 389 of 1,464 tables were being read in JavaScript property order, five of them against an entirely empty year column. 1,418 (v9.29): four tables that had no shape reach a PNG through the melt, and 111 are re-marked without changing the count of figures -- so the floor moves by the four that are new, not by the 111 that changed.",
   "llm": {
-    "recordedAt": "2026-11-18",
-    "run": "44363677094",
-    "commit": "ebb58e4c",
+    "recordedAt": "2026-11-19",
+    "run": "44551395709",
+    "commit": "37b7e3d9",
     "instrument": "eval/text2vis/llm.ts, PROMPT_VERSION 1, deepseek-chat, temperature 0, max_tokens 96, thinking absent",
+    "request": {
+      "promptVersion": 1,
+      "budget": 96
+    },
+    "requestNote": "The request, as the arm itself records it in every artifact: prompt version 1 with a 96-token reply budget. `instrument` above is the same fact written for a reader; this is the same fact written for a comparison, because a reader cannot be asked what a file means. A local artifact from the first dispatch — version 1, a 32-token cap, 857 top-1 — sat on disk and the gate called it \"inside the band, not a regression\": every count in it added up, and the only thing wrong with it was the request it answered. That is the class of file this field refuses.",
     "asked": 1470,
     "tolerance": 5,
-    "resamples": "Three dispatches of one arm with no code change moved mark 857 / 859 / 856 and label 886 / 886 / 889 — a spread of 3 rows at temperature 0. A floor without a band therefore rejects a re-sample: run 44439035718 failed at 856 against a floor of 857, which is 0.07pp and inside the instrument's own noise. 5 rows is wider than the largest observed spread and still 0.34pp, below any decision this benchmark can make.",
-    "note": "The first full reading of the chart half by a model, and the floor the next dispatch is held to. 1,470 rows asked at both scales; the 515 corpus rows whose label no family names are not sent, which is a correction this reading itself produced — the run before it asked all 1,985 and scored 1,470, so 1,030 calls of 3,970 bought nothing. Zero replies were cut at the cap; the run before it had 5 cut at max_tokens 32, and the three whose cut landed just after the name were counted as answers, which is why that run read 860 top-1 and this one reads 857. `mark` offers the eleven marks this product can draw and is scored by profile.ts's own scorer, so 857 - 606 is a difference between two answers on one population. `label` offers the corpus's vocabulary and counts exact family matches: 886, of which 59 name a family no mark leads with (area, histogram, violin), which is the only scale on which those families can be hit. Cost: ¥0.604 + ¥0.649 = ¥1.25 for 2,940 calls, ¥0.0004 per row per scale.",
+    "resamples": "Three dispatches of one arm with no code change moved mark 857 / 859 / 856 and label 886 / 886 / 889 — a spread of 3 rows at temperature 0. A floor without a band therefore rejects a re-sample: run 44439035718 failed at 856 against a floor of 857, which is 0.07pp and inside the instrument's own noise. 5 rows is wider than the largest observed spread and still 0.34pp, below any decision this benchmark can make. On the 96-token request that actually ships the same arm read 859, 861, 861 and 861 across four dispatches — a spread of 2 rows, because the last three restored one store instead of re-asking — so the five-row tolerance is wider than the instrument needs and is kept anyway: the wider number was measured on a prompt the repository no longer sends, and narrowing a band in the same commit that re-registers the floor would hide which of the two moved.",
+    "note": "The first full reading of the chart half by a model, and the floor the next dispatch is held to. 1,470 rows asked at both scales; the 515 corpus rows whose label no family names are not sent, which is a correction this reading itself produced — the run before it asked all 1,985 and scored 1,470, so 1,030 calls of 3,970 bought nothing. Zero replies were cut at the cap; the run before it had 5 cut at max_tokens 32, and the three whose cut landed just after the name were counted as answers, which is why that run read 860 top-1 and this one reads 857. `mark` offers the eleven marks this product can draw and is scored by profile.ts's own scorer, so 857 - 606 is a difference between two answers on one population. `label` offers the corpus's vocabulary and counts exact family matches: 886, of which 59 name a family no mark leads with (area, histogram, violin), which is the only scale on which those families can be hit. Cost: ¥0.604 + ¥0.649 = ¥1.25 for 2,940 calls, ¥0.0004 per row per scale. The `mark` arm's floor has since been re-registered at 861: the 857 it carried was taken on a 32-token reply budget, and the 96-token request that ships reads 859 and 861.",
     "arms": {
       "deepseek-chat|mark": {
         "scored": 1470,
-        "top1": 857
+        "top1": 861,
+        "note": "Re-registered from 857, which was a reading of a request this repository no longer sends. The floor was established by run 44363677094, when the reply budget was 32 tokens and five replies were cut; the budget is 96 (five numbers had been cut mid-answer and three of them were scored as prefixes), and the two dispatches on the 96-token request read 859 (44435717857) and 861 (44551395709). Two more dispatches reproduced 861 exactly (44557699795, 44580426870), both as cache hits, which makes 861 the reading of the answers that are on disk rather than one sample of them. Leaving the floor at 857 would have widened the gate: the band is five rows by design, and a floor four rows under the store adds four more that only look like noise."
       },
       "deepseek-chat|label": {
         "scored": 1470,
@@ -66,11 +72,18 @@
       "why": "This is the only gate whose artifact is derived rather than bought: no model is asked anything. It is checked anyway, because a policy that routes every row to one answer reads exactly like a policy that works, and because the two identities it carries (the disagreement partitions the population; the ceiling is the union of the three cells) are the only things that make the six readings add up to something."
     },
     "ship": {
-      "recordedAt": "2026-11-20",
+      "recordedAt": "2026-11-19",
+      "runs": [
+        "44551395709",
+        "44557699795",
+        "44580426870"
+      ],
       "scored": 1470,
+      "decided": 863,
+      "shipped": 754,
       "tolerance": 5,
-      "note": "The floor this section will hold is not registered yet, and the reason is stated rather than left as an empty number: `decided` and `shipped` are readings of the *product*, and no dispatch had ever run `packages/chart` against the answers before this commit. The first `text2vis-llm` dispatch that runs `pnpm bench:text2vis:ship` establishes them, and the commit that earns that run writes the two integers here. Until then the gate still runs the identities, which are the part that cannot be eyeballed: the shipped decision must equal the arbitration policy row for row, every row must be decided by exactly one side, every table-decided row must carry exactly one reason, and a row whose chart differs from the decision must be one a veto replaced. `scored` is registered now because it is not a floor but a fact about the population — a ship artifact priced over a different row set is a different question, not a smaller number.",
-      "why": "Two readings from one pass, because the policy and the product are not the same object. `arbitrate.ts` prices a `choose(dispute)` function over cached answers; the product has to draw the result, and drawing has a veto the policy does not — a wide table is one line per entity and nothing else, and a mark the admissions refuse cannot become an encoding. So `decided` is the policy number produced by shipped code (the identity above), and `shipped` is the chart a caller receives. They are not ordered: the first draft of `ship.ts` asserted `shipped <= decided` on the reasoning that a veto can only take a row back, and an alternating bar/pie arm made the chart read 433 against the decision's 420. The reasoning was wrong, not the run — a veto replaces the model's mark with the table's, and the table is more often right than a model that answered `bar` on 144 tables whose columns are a timeline. The constraint that survives is the one `shipReport` checks row by row: a chart may only be one of the two answers, and it may only change to the table's."
+      "note": "Two integers, established by run 44580426870 and reproducible for ¥0: that dispatch restored 2,940 of 2,940 answers from the store (1,470 hit, 0 miss on each scale), made no call, and read exactly what the two dispatches before it read. `decided` 863 is 861 model hits plus 2 hits on the 6 rows the model declined; `shipped` 754 is what a caller receives, and the 109 rows between the two are the vetoes, which is the whole reason both are registered instead of one. The arithmetic a reader can check: the vetoes took 220 model hits away (401 model-decided rows became table-decided, 220 of them hits) and returned 111 table hits on the 402 rows the table answered, so 863 - 220 + 111 = 754.",
+      "why": "The floor is registered on `shipped` because that is the number a caller experiences, and on `decided` because that is the identity against the arbitration policy: a drift in `decided` is a policy change nobody asked for, and a drift in `shipped` is the product disagreeing with its own description. They are not ordered and the first draft of `ship.ts` was wrong to assert they were: a veto replaces the model's mark with the table's, so `shipped` can read above or below `decided` and an alternating bar/pie arm made it read 433 against 420. What survives is the row-by-row constraint the artifact carries: a chart is one of the two answers, and it changes only to the table's."
     }
   }
 }

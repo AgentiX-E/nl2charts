@@ -597,6 +597,33 @@ function selfTest() {
   };
   bandCase('a reading 3 rows under its floor is inside the band, and is said to be', 637, 0);
   bandCase('a reading 6 rows under its floor is outside the band', 634, 1);
+  // The request, in both directions. A floor says which request it was taken on, and a file that
+  // answers a different one is a different instrument: the local artifact this rule was written for
+  // read 857 under a 32-token cap against a 861 floor and was reported as a re-sample.
+  const requestArm = (request, top1 = 640) => ({
+    arms: [{ model: 'deepseek-chat', scale: 'mark', requested: 1470, answered: 1470, unparsed: 0, truncated: 0, scored: 1470, top1, ...(request === undefined ? {} : { request }) }],
+  });
+  const requestFloor = { tolerance: 5, request: { promptVersion: 1, budget: 96 }, arms: { 'deepseek-chat|mark': { scored: 1470, top1: 640 } } };
+  const requestCase = (name, report, floor, want, notes = 1) => {
+    const { issues, notes: said } = compareLlm(report, floor, {});
+    const ok = issues.length === want && (want === 1 || said.length === notes);
+    if (!ok) failed += 1;
+    reported += 1;
+    console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}${ok ? '' : ` — ${String(issues.length)} issues and ${String(said.length)} notes, wanted ${String(want)}/${String(notes)}`}`);
+  };
+  requestCase('the same request is the same instrument', requestArm({ promptVersion: 1, budget: 96 }), requestFloor, 0);
+  requestCase('an absent budget and an unset budget are one request', requestArm({ promptVersion: 1 }), { ...requestFloor, request: { promptVersion: 1 } }, 0);
+  requestCase('the same rows under another reply cap are refused', requestArm({ promptVersion: 1, budget: 32 }), requestFloor, 1);
+  requestCase('another prompt version is refused', requestArm({ promptVersion: 2, budget: 96 }), requestFloor, 1);
+  requestCase('an artifact that names no request is refused', requestArm(undefined), requestFloor, 1);
+  // Two notes: one for the request it names, one for the reading itself.
+  requestCase('a floor with no request notes the one this reading names', requestArm({ promptVersion: 1, budget: 96 }), { ...requestFloor, request: undefined }, 0, 2);
+  requestCase(
+    'a cap the floor never sent is refused, not called a lower sample',
+    requestArm({ promptVersion: 1, budget: 96 }, 630),
+    { ...requestFloor, request: { promptVersion: 1 } },
+    1,
+  );
   const judgeFloor = { dimensions: ['chart_correctness', 'readability'], grader: { endpoint: 'zhipu', model: 'glm-4.5v' } };
   for (const test of JUDGE_SELF_TEST) {
     const options = { ...(test.require === true ? { require: true } : {}), ...(test.iteration === true ? { iteration: true } : {}) };
@@ -767,6 +794,21 @@ function checkExpectedInstrument(baseline, spec) {
 }
 
 /**
+ * A request as one sentence, so two reports are compared by what they asked rather than by shape.
+ *
+ * `{ budget: undefined }` and `{}` are the same request — no cap was sent — and rendering both to the
+ * same string is what keeps that comparison honest. A report that names nothing renders as its own
+ * sentence rather than as a mismatch, because "the floor has no request" and "this file has none" are
+ * two different repairs.
+ */
+export function describeRequest(request) {
+  if (request === undefined || request === null || typeof request !== 'object') return 'no request at all';
+  const version = typeof request.promptVersion === 'number' ? String(request.promptVersion) : 'an unstated version';
+  const budget = request.budget === undefined ? 'no reply budget' : `a ${String(request.budget)}-token reply budget`;
+  return `${version} with ${budget}`;
+}
+
+/**
  * Compare the model arm's reading against its floor.
  *
  * A separate reader rather than a fourth branch of `compare`, because the artifact is a different
@@ -778,6 +820,12 @@ function checkExpectedInstrument(baseline, spec) {
  * Three things are checked besides the reading itself, and each of them is a way a report can be a
  * file rather than a measurement:
  *
+ * - the arm must name the **request** it answered, and that request must be the floor's. This is the
+ *   one check the counters cannot imply: every number in a stale artifact adds up. A local file left
+ *   over from the first dispatch — prompt version 1, a 32-token reply cap, 857 top-1 — was scored
+ *   against a floor of 861 and reported as "inside the band, not a regression", which is the sentence
+ *   a gate says when it cannot see what it is reading. The same 1,470 rows read 861 under the 96-token
+ *   cap the repository now sends, so the difference is the instrument, not the sample.
  * - `truncated` must be zero. A reply cut at the token budget is not an answer, and a share computed
  *   over the rows that survived is a share over a population chosen by the endpoint's cap.
  * - `scored` must equal the floor's, for `compare`'s reason: a reading over a different row set is a
@@ -820,6 +868,17 @@ export function compareLlm(report, floor, options = {}) {
         `TEXT2VIS LLM: ${name} reports ${String(arm.answered)} answered + ${String(arm.unparsed)} unparsed against ${String(arm.requested)} rows asked`,
       );
       continue;
+    }
+    const wantedRequest = floor?.request;
+    if (wantedRequest !== undefined) {
+      if (describeRequest(arm.request) !== describeRequest(wantedRequest)) {
+        issues.push(
+          `TEXT2VIS LLM: ${name} was answered on prompt ${describeRequest(arm.request)}, and the floor was taken on prompt ${describeRequest(wantedRequest)}; a reading of a different request is a different instrument, and comparing the two would report the instrument as a sample`,
+        );
+        continue;
+      }
+    } else if (arm.request !== undefined) {
+      notes.push(`TEXT2VIS LLM: ${name} names prompt ${describeRequest(arm.request)} and the floor records none; this dispatch establishes it`);
     }
     if (arm.truncated > 0) {
       issues.push(
