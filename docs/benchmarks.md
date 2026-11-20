@@ -16737,3 +16737,135 @@ Two disciplines come out of this, and they are the reason the run was worth ¥0.
    deterministic — same answers, same code, one flag — the band is the wrong test, and the right test is
    the one this run used: compute the reading both ways on the same answers, and compare them.
 
+## The lever was a mark: 144 refusals become 87, and the shipped path reads 793
+
+The section above ended with a hypothesis and its price: a boxplot computed from raw rows would turn
+144 *refused* rows into answerable ones, the model had already said 144 times that it wanted one, and
+the evaluation would cost ¥0 because the answers on disk name the mark. This section is that
+hypothesis, built and measured.
+
+**What was missing was one admission.** A boxplot needed `min, q1, median, q3, max` as five columns of
+the result set — the shape of a pre-aggregated export. A result set that lists one observation per row
+(`SELECT year, revenue`) carries the same distribution in its *rows*, and no rule could see it. So the
+admission, the encoding and the fold now ask one function, `boxplotReading`, which answers with a
+layout — `tuple` for five columns, `derived` for observations — and the fold writes five numbers per
+measure, labelled by the column they came from.
+
+Three decisions inside it are worth the space, because each is a place where a plausible alternative
+reads a different distribution:
+
+| decision | what shipped | what the alternative reads |
+|---|---|---|
+| the estimator | interpolated order statistics at `(n - 1) * p` (R's type 7, numpy's `linear`) | nearest-rank reads the quartiles of `1..10` as **3 and 8**, not 3.25 and 7.75 |
+| the floor | **4 observations**, the smallest `n` at which every quarter is anchored by its own observation | the corpus prices the nearby floors on the 164 rows that named a refused boxplot: 2 moves 43, 3 moves 42, 4 moves 39, 5 moves 38 |
+| the boxes | **one per measure**, each labelled with its column | one box in all would silently summarise whichever column had the wider range — on `Characteristic, Male, Female` that is `Female` for a question about male percentages |
+
+### The rule arm: 606 → 610, and a family that moved 40 points
+
+Same 1,470 scored rows, no model call, `pnpm bench:text2vis:profile`:
+
+| reading | before | after |
+|---|---:|---:|
+| top-1 | 606 (41.22%) | **610 (41.50%)** |
+| shortlist | 710 (48.30%) | **713 (48.50%)** |
+| declined | 35 | 35 |
+
+The net is four rows. The reasons are not four rows:
+
+| family | n | before | after | what happened |
+|---|---:|---|---|---|
+| Boxplot | 89 | 6.74% (6) | **47.19% (42)** | the reading this feature is for: 36 rows of one-measure tables |
+| Bar | 357 | 55.46% (198) | 49.30% (176) | 22 rows the `distribution` cue now wins |
+| Line | 391 | 63.17% (247) | 62.15% (243) | 4 rows |
+| Stacked Bar | 56 | 64.29% (36) | 60.71% (34) | 2 rows |
+| Histogram | 90 | 0.00% (bar 57, gauge 17) | 0.00% (bar 52, boxplot 23) | 17 rows that answered `gauge` now answer the mark the question asked for |
+
+The 22 rows the bar loses are the cue table's own reading, not this change's: `distribution` names a
+boxplot, the admission refused every boxplot, and a cue was being overruled by a rule about columns.
+The ablation prices that cue at +25 rows (`no-distribution` reads 550 on the same corpus), so the 28
+rows it costs are the price of the 36 it wins. That is a trade this project can state and defend; the
+alternative, a cue that fires and is silently discarded, is not.
+
+**One defect the tests caught, and it is the reason the mark's score is in this commit at all.** The
+first draft gave `boxplot` a prior of 3 — the value the five-column reading needs — and
+`Revenue by product`, four products and one measure, came back a **boxplot**. The prior says a mark
+*can* encode the shape; it does not say folding four rows into one box is better than reading them,
+and a bar over that table discards nothing. So the mark is priced at 2, like a bar, and the layout
+decides the rest: a *derived* boxplot ties with the bar and loses to it on the preference order unless
+a question asks for a distribution, while a *tuple* table pays the bonus a cue is worth (`profile:five-number-columns`),
+because a bar there draws one of its five numbers and drops four. The test that found it is
+`leaves the rows alone when the question asked for no order`, which existed for another reason.
+
+### The hybrid: shipped 754 → 793, and `decided` does not move
+
+Run `44662904529`, same 1,470 rows, 2,940 answers restored from the store, ¥0:
+
+| reading | before | after |
+|---|---:|---:|
+| `decided` | 863 (58.71%) | **863 (58.71%)** |
+| `shipped` | 754 (51.29%) | **793 (53.95%)** |
+| changed | 307 | **171** |
+| vetoes: wide | 144 | 144 |
+| vetoes: `not-admitted` | 223 | **87** |
+| vetoes: unchartable | 35 | 35 |
+
+`decided` is unchanged because the policy did not change — the model still holds every row it
+answered. `shipped` moves by **39 rows (+2.65pp)** and that is the whole point: on the 136 rows where
+the boxplot veto was lifted, the model's own answer is right 39 times more often than the table's was.
+The arithmetic closes the way the artifact states it: 1,199 model answers + 271 table answers = 1,470,
+and 266 vetoes explain every row where the chart is not what the decision said.
+
+**The ceiling fell, and that is not a regression.** The union of the two arms went **994 → 974**:
+
+| arbitration cell | before | after |
+|---|---:|---:|
+| product right | 606 | 610 |
+| model right | 861 | 861 |
+| disagree | — | 663 |
+| both right on the rows they agree about | — | 497 |
+| **ceiling (union)** | **994** | **974** |
+| best policy (`model-holds`) | 863 | 863 |
+
+The product's answers moved *onto* the model's: 26 rows where it now agrees and is right were rows the
+model already had, and the 22 rows it gave up were mostly rows **only the product** had. A union is a
+property of two answers, not of a policy, and a change that makes the product agree with a better arm
+is allowed to lower it — what it may not do is lower `shipped`, and that rose by 39. `product` and
+`ceiling` are re-registered in `baseline.json` for that reason: `product` is compared for equality on
+purpose, because a deterministic rule path that changes its answer is a change to the product rather
+than a re-sample.
+
+### The second question, re-priced on the rows that are left
+
+`llm.repair` was rejected at 36 against 39 on the 223 refusals. The population is now 87, and the
+measurement was re-run rather than left as history for a population that no longer exists:
+
+| reading | on 223 refusals (run 44648039546) | on 87 refusals (run 44661951720) |
+|---|---:|---:|
+| refused | 223 | **87** |
+| asked | 200 | **86** |
+| right, second answer | 36 | **16** |
+| right, table | 39 | **15** |
+| cost | ¥0.0580 | **¥0.0137** |
+
+Sixteen against fifteen is a wash inside the noise of a fifteen-row comparison, and the verdict stays
+`rejected`. What the re-pricing does establish is *why* the first reading was negative: the model was
+not confused about the task, it was asking for a mark the product could not draw. Removing that
+impossibility removed 136 of the 223 refusals; the ones that remain are tables with one mark and
+questions about another, where a shorter list genuinely cannot help.
+
+### What this round cost, and what it changed about the instrument
+
+¥0 for the readings — the answers were already on disk and the cache key hashes `llm.ts`,
+`content-store.ts`, `repair.ts` and `assist.ts`, none of which changed — plus **¥0.0137** to re-price
+the second question, whose short list changed under it and therefore its keys.
+
+Two disciplines came out of the round, and the second is the expensive one to learn twice:
+
+1. **A capability is not a prompt.** Two rounds priced the cheaper hypothesis (`repair`) before this
+   one priced the expensive one, and the negative result from the first is what pointed at the second.
+   The order matters: a rejected option that is recorded with its cost is a decision, and one that is
+   merely dropped is an idea somebody proposes again.
+2. **A floor compared for equality on a deterministic path is a detector, not a formality.** The
+   arbitration gate failed this dispatch on three lines — product 610 against a floor of 606, ceiling
+   974 against 994 — and it was right to: the rule path cannot re-sample, so a moved number there is a
+   changed product. Without that gate the ceiling would have fallen by 20 rows in a green run.
