@@ -16826,9 +16826,18 @@ and 266 vetoes explain every row where the chart is not what the decision said.
 | **ceiling (union)** | **994** | **974** |
 | best policy (`model-holds`) | 863 | 863 |
 
-The product's answers moved *onto* the model's: 26 rows where it now agrees and is right were rows the
-model already had, and the 22 rows it gave up were mostly rows **only the product** had. A union is a
-property of two answers, not of a policy, and a change that makes the product agree with a better arm
+The product's answers moved *onto* the model's, and the decomposition is exact because all three cells
+are in the artifact:
+
+```
+product alone (the union's surplus over the model)   133 -> 113   (-20)
+both right (the intersection)                        473 -> 497   (+24)
+product's own hits                                   606 -> 610   (+4)
+```
+
+So of the 36 rows the derived boxplot wins, **24 are rows the model already had right** and 12 are new
+product-only rows; against 32 rows the product stops getting right, 20 of which only it had. A union is
+a property of two answers, not of a policy, and a change that makes the product agree with a better arm
 is allowed to lower it — what it may not do is lower `shipped`, and that rose by 39. `product` and
 `ceiling` are re-registered in `baseline.json` for that reason: `product` is compared for equality on
 purpose, because a deterministic rule path that changes its answer is a change to the product rather
