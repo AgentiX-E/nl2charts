@@ -42,7 +42,7 @@ import { assistedChartIR, assistedMark, MARK_OPTIONS, type MarkAdvisor, type Mar
 import { POLICIES, disputeOf, type Policy } from './arbitrate.js';
 import { markAnswer, rosterOf, scoredRows, type ArmReport } from './llm.js';
 import { parseResultSet, scoreAnswers, typedRows, type ProfileInput } from './profile.js';
-import type { ChartFamily } from './rule.js';
+import { familyOfLabel, type ChartFamily } from './rule.js';
 
 /** Why a row was answered by the table rather than by the model. */
 export type ShipReason = 'no-advice' | 'unavailable' | 'unlisted' | 'not-admitted' | 'unchartable';
@@ -112,6 +112,14 @@ export interface ShipReport {
    * argue with and a row is a bug report.
    */
   readonly divergence: readonly { readonly row: number; readonly policy: string; readonly shipped: MarkName }[];
+  /**
+   * The rows the table answered because the model named a mark it could not hold, one line per mark.
+   *
+   * Published beside `shipped` rather than in a separate command because it is the same pass: the
+   * model's first answer and the table's replacement are both in hand here, and a bill computed from
+   * the artifact alone would be a second opinion about which rows were refused.
+   */
+  readonly refusals: readonly RefusalBill[];
 }
 
 /** The reasons a row can fall back, in the order a reader wants them. */
@@ -165,6 +173,78 @@ export function countsOf(
     fromProduct: decisions.length - fromModel - repaired,
     reasons,
   };
+}
+
+/**
+ * One family of refusals: what the model asked for, and what the table answered instead.
+ *
+ * The rows the table answers because the model named a mark it cannot hold are not one fact. They are
+ * one fact per family, and the families need different repairs — a derivation of the mark, a parser
+ * that reads the column the mark needed, or nothing at all because the label was asking for a picture
+ * the result set cannot witness.
+ *
+ * **`owed` is the ceiling, and it is the whole of it.** A row the model asked for `scatter` on a table
+ * labelled `Bar` is not a scatter this product owes anybody; a row labelled `Scatter` is, and the
+ * table cannot have drawn it — the mark was refused, so no answer it gave can *lead* with that
+ * family. That is why there is no "saved" column: on the rows this bill is about, the table's score is
+ * zero by construction, and a column of zeros would read like a measurement.
+ *
+ * `instead` is what the reader needs in its place: the pictures those rows have today. A derivation
+ * has to be a better picture than the one on that list, and the list says which one it must beat.
+ */
+export interface RefusalBill {
+  /** The mark the model named, which the table refused. */
+  readonly mark: MarkName;
+  /** Rows where the model's first answer was this mark and the table could not hold it. */
+  readonly rows: number;
+  /** Of those, rows whose label names a family this mark covers — the ones a derivation would win. */
+  readonly owed: number;
+  /** What the table drew on the `owed` rows instead, largest substitution first. */
+  readonly instead: readonly { readonly mark: MarkName; readonly rows: number }[];
+}
+
+/**
+ * The bill, one line per mark the table refused.
+ *
+ * Reads the same function the published reading does — `markAnswer` for what a mark means — so a row
+ * cannot be counted here and not there. Sorted by rows, because the first line is the repair worth
+ * doing first.
+ */
+export function refusalBill(
+  rows: readonly ProfileInput[],
+  choices: readonly (string | null)[],
+  decisions: readonly ShipRow[],
+): readonly RefusalBill[] {
+  if (rows.length !== choices.length || rows.length !== decisions.length) {
+    throw new Error(
+      `text2vis ship: ${String(rows.length)} rows, ${String(choices.length)} answers and ${String(decisions.length)} decisions cannot be billed together`,
+    );
+  }
+  const bills = new Map<string, { rows: number; owed: number; instead: Map<MarkName, number> }>();
+  for (let index = 0; index < rows.length; index += 1) {
+    const decision = decisions[index] as ShipRow;
+    if (decision.reason !== 'not-admitted') continue;
+    const asked = choices[index] ?? undefined;
+    if (asked === undefined) throw new Error('text2vis ship: a row refused the model’s answer and no answer is on disk');
+    const bucket = bills.get(asked) ?? { rows: 0, owed: 0, instead: new Map<MarkName, number>() };
+    bucket.rows += 1;
+    const family = familyOfLabel((rows[index] as ProfileInput).label);
+    if (family !== undefined && markAnswer(asked).families.includes(family)) {
+      bucket.owed += 1;
+      bucket.instead.set(decision.product, (bucket.instead.get(decision.product) ?? 0) + 1);
+    }
+    bills.set(asked, bucket);
+  }
+  return [...bills.entries()]
+    .map(([mark, counts]) => ({
+      mark: mark as MarkName,
+      rows: counts.rows,
+      owed: counts.owed,
+      instead: [...counts.instead.entries()]
+        .map(([substitute, n]) => ({ mark: substitute, rows: n }))
+        .sort((left, right) => right.rows - left.rows || left.mark.localeCompare(right.mark)),
+    }))
+    .sort((left, right) => right.rows - left.rows || right.owed - left.owed || left.mark.localeCompare(right.mark));
 }
 
 /**
@@ -464,6 +544,7 @@ export async function shipReport(
     marks: drawn.marks,
     changed,
     divergence,
+    refusals: refusalBill(rows, choices, drawn.decisions),
   };
 }
 
@@ -513,6 +594,23 @@ export function assertShip(report: ShipReport): void {
     }
     if (counts.share > 1) throw new Error(`text2vis ship: ${name} has a share above one, which is not a rate`);
   }
+  // Every refused row is in exactly one line of the bill, and every line's `owed` is inside its rows:
+  // a bill that lost a row would report a family smaller than it is, and the row it lost is the one a
+  // derivation would have been judged against.
+  const billed = report.refusals.reduce((sum, bill) => sum + bill.rows, 0);
+  if (billed !== report.shipped.reasons['not-admitted']) {
+    throw new Error(
+      `text2vis ship: the refusal bill covers ${String(billed)} rows and the shipped reading counted ${String(report.shipped.reasons['not-admitted'])} refused, so a row the table answered is in neither`,
+    );
+  }
+  for (const bill of report.refusals) {
+    const drawn = bill.instead.reduce((sum, one) => sum + one.rows, 0);
+    if (bill.owed > bill.rows || drawn !== bill.owed) {
+      throw new Error(
+        `text2vis ship: ${bill.mark} bills ${String(bill.rows)} rows, ${String(bill.owed)} owed and ${String(drawn)} substitutions, so a row owes a picture nothing drew`,
+      );
+    }
+  }
   // A chart can only change a row it vetoed, and it can only change it to the table's answer or to the
   // model's second one — `shipReport` checks that row by row. What is left to check here is the
   // arithmetic: the number of changed rows cannot exceed the rows a veto or a repair explains.
@@ -536,6 +634,17 @@ export function describeShip(report: ShipReport, model = report.model): readonly
     `    reasons  ${reasons(report.shipped)}`,
     `    changed  ${String(report.changed)} row(s) drew an answer other than the decision s`,
     `    route agrees with model-holds on ${String(report.population.scored - report.divergence.length)} of ${String(report.population.scored)} rows`,
+    ...(report.refusals.length === 0
+      ? []
+      : [
+          '',
+          '    what the table answered instead: the model named a mark this table refuses',
+          '      mark        rows  label-owes  a derivation could win   what the table drew instead',
+          ...report.refusals.map(
+            (bill) =>
+              `      ${bill.mark.padEnd(10)} ${String(bill.rows).padStart(5)}  ${String(bill.owed).padStart(10)}  ${(bill.owed === 0 ? 'nothing: the label never asked for it' : `at most ${String(bill.owed)}`).padStart(24)}   ${bill.instead.map((one) => `${one.mark} ${String(one.rows)}`).join(', ') || '—'}`,
+          ),
+        ]),
   ];
 }
 

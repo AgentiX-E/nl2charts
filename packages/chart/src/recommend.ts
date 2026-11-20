@@ -1088,6 +1088,57 @@ export function rankingDirection(question: string): 'ascending' | 'descending' |
 const RANKED_MARKS = new Set(['bar', 'pie', 'funnel']);
 
 /**
+ * The field a chart is a **matrix** of, or nothing when it is not one.
+ *
+ * A matrix states a category on each axis and a measure in colour, so its rows are cells. Read off
+ * the encoding rather than the mark's name for the reason `groupFieldsOf` reads channels. The test is
+ * "neither axis is a measure", not "both are nominal": a heatmap's lanes are as often time as a
+ * category, and asking for `nominal` twice left every one of those being cut inside a column.
+ */
+function matrixFieldOf(encoding: Encoding): string | undefined {
+  const x = encoding.x;
+  const y = encoding.y;
+  if (x === undefined || Array.isArray(x) || x.type === 'quantitative') return undefined;
+  if (y === undefined || !Array.isArray(y) || y.length !== 1 || (y[0] as FieldRef).type === 'quantitative') return undefined;
+  return x.field;
+}
+
+/**
+ * The limit, applied to a matrix **by the column** instead of by the row.
+ *
+ * A row limit is a limit on a picture when the picture is a sequence: cut a line at row 500 and you
+ * get a shorter line. A matrix is not a sequence — cutting it inside a column leaves a lane that
+ * reads as *missing data*, which is the one reading a heatmap exists to give. So whole columns are
+ * kept in the order they first appear and the first that does not fit is dropped rather than started.
+ * A limit below one column keeps nothing, and that is a refusal: the message names both numbers.
+ */
+export function wholeColumns<T>(rows: readonly T[], field: (row: T) => unknown, limit: number): T[] {
+  // No rows is no matrix to cut, and it is not the refusal below: the refusal is about a limit that
+  // is too small for the columns that exist, and here no column exists to be too small for.
+  if (rows.length === 0) return [];
+  const sizes = new Map<string, number>();
+  for (const row of rows) {
+    const key = String(field(row));
+    sizes.set(key, (sizes.get(key) ?? 0) + 1);
+  }
+  const admitted = new Set<string>();
+  let taken = 0;
+  for (const [key, size] of sizes) {
+    if (taken + size > limit) break;
+    admitted.add(key);
+    taken += size;
+  }
+  if (admitted.size === 0) {
+    const [column, size] = [...sizes][0] as [string, number];
+    throw new Nl2ChartsError(
+      'NL2C_E_INVALID_INPUT',
+      `limit=${String(limit)} is smaller than one column of this matrix: "${column}" holds ${String(size)} cells, and a matrix cut inside a column reads as missing data rather than as a smaller picture`,
+    );
+  }
+  return rows.filter((row) => admitted.has(String(field(row))));
+}
+
+/**
  * Fold rows into one row per group, with a count.
  *
  * A chart along an ordered axis keeps the order the query produced — a line over years ranked by its
@@ -1217,7 +1268,7 @@ export function toChartIR(
         groupFields.some((field) => field.type === 'temporal' || field.type === 'ordinal'),
         // The counted path ranks its groups already; only the direction is the question's to say.
         ranking ?? 'descending',
-      ).slice(0, limit)
+      )
     : (best.mark === 'line' && axis?.type === 'nominal'
         ? // A line over categories the data does not order runs along the measure; see `encodingFor`,
           // which chose the axis this order belongs to. Sorting before the limit keeps the limit a
@@ -1228,10 +1279,17 @@ export function toChartIR(
           : // A bar, pie or funnel answering a ranked question: the tallest bar first is the whole
             // answer, and the order the query returned is not an order the question asked about.
             orderedAlong(rows, measureName as string, ranking)
-      )
-        .slice(0, limit)
-        .map((row) => ({ ...row }));
-  const data = boxes === undefined ? folded : boxes.slice(0, limit);
+      ).map((row) => ({ ...row }));
+  // The limit is one decision, taken in one place, in the unit the picture has: rows for a sequence,
+  // columns for a matrix. It used to be two `.slice` calls in the middle of the ordering expressions,
+  // which is how a heatmap came to be cut inside a column.
+  const columns = matrixFieldOf(encoding);
+  const data =
+    boxes !== undefined
+      ? boxes.slice(0, limit)
+      : columns === undefined
+        ? folded.slice(0, limit)
+        : wholeColumns(folded, (row) => row[columns], limit);
   const mark: ChartType = best.mark;
   const ir: ChartIR = {
     version: CONTRACT_VERSION,

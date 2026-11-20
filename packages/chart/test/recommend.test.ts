@@ -3,7 +3,7 @@ import type { ChartIR } from '@agentix-e/nl2charts-spec';
 import { SERIES_TYPES, isNl2ChartsError, parseChartIR } from '@agentix-e/nl2charts-spec';
 import type { FieldProfile } from '../src/profile.js';
 import { profileRows } from '../src/profile.js';
-import { CHART_CUES, DEFAULT_MAX_SLICES, readCues, recommendChart, toChartIR } from '../src/recommend.js';
+import { CHART_CUES, DEFAULT_MAX_SLICES, readCues, recommendChart, toChartIR, wholeColumns } from '../src/recommend.js';
 import { compileToECharts } from '../src/compile.js';
 import { compileToMatplotlib } from '../src/matplotlib.js';
 import { isRenderable, lint } from '../src/lint.js';
@@ -847,6 +847,66 @@ describe('counting a result set that carries no measure', () => {
       { kind: 'c', count: 3 },
       { kind: 'a', count: 2 },
     ]);
+  });
+
+  it('reads a matrix’s limit as columns, because half a column reads as missing data', () => {
+    // The defect this exists for: `limit` sliced rows, so a heatmap came out with its last column
+    // half drawn — and a cell that is absent because the limit cut it is indistinguishable from a
+    // cell that is absent because the query had no value for it, which is the one reading a heatmap
+    // exists to give. Three regions by three quarters, so a limit of four is one whole column and a
+    // limit of six is two.
+    const grid = rows({
+      region: ['north', 'north', 'north', 'south', 'south', 'south', 'east', 'east', 'east'],
+      quarter: ['Q1', 'Q2', 'Q3', 'Q1', 'Q2', 'Q3', 'Q1', 'Q2', 'Q3'],
+      revenue: [10, 12, 9, 11, 13, 8, 7, 6, 5],
+    });
+    const one = toChartIR('Revenue by region and quarter', grid, { limit: 4 });
+    expect(one.mark).toBe('heatmap');
+    expect(one.data).toHaveLength(3);
+    expect(new Set(one.data.map((cell) => cell['region']))).toEqual(new Set(['north']));
+    const two = toChartIR('Revenue by region and quarter', grid, { limit: 6 });
+    expect(two.data).toHaveLength(6);
+    expect(new Set(two.data.map((cell) => cell['region']))).toEqual(new Set(['north', 'south']));
+    // A sequence keeps the row limit it always had: the same caller, the same number, one bar.
+    const bars = toChartIR('Revenue by region', grid, { limit: 2 });
+    expect(bars.mark).not.toBe('heatmap');
+    expect(bars.data).toHaveLength(2);
+  });
+
+  it('refuses a matrix limit smaller than one of its own columns, rather than cutting it', () => {
+    // There is no picture at that size: a limit below one column keeps no column, and a chart of no
+    // cells is a picture of nothing rather than a smaller picture. The message names both numbers so
+    // the remedy is the caller's.
+    const grid = rows({
+      region: ['north', 'north', 'north', 'south', 'south', 'south'],
+      quarter: ['Q1', 'Q2', 'Q3', 'Q1', 'Q2', 'Q3'],
+      revenue: [10, 12, 9, 11, 13, 8],
+    });
+    expect(() => toChartIR('Revenue by region and quarter', grid, { limit: 2 })).toThrow(
+      /limit=2 is smaller than one column of this matrix: "north" holds 3 cells/,
+    );
+  });
+
+  it('keeps whole columns in the order they appear and the rows in the order they came', () => {
+    const cells = [
+      { x: 'a', y: 'p', v: 1 },
+      { x: 'b', y: 'p', v: 2 },
+      { x: 'a', y: 'q', v: 3 },
+      { x: 'b', y: 'q', v: 4 },
+      { x: 'c', y: 'p', v: 5 },
+    ];
+    // Columns `a` (2 cells) and `b` (2) fit in four; `c` would be the fifth and is dropped whole.
+    expect(wholeColumns(cells, (cell) => cell.x, 4).map((cell) => `${cell.x}${cell.y}`)).toEqual([
+      'ap',
+      'bp',
+      'aq',
+      'bq',
+    ]);
+    // A column that appears after others and is the only one too big stops the walk, exactly as the
+    // first one too big would: the limit is a budget spent in order, not a best fit.
+    expect(wholeColumns(cells, (cell) => cell.x, 3).map((cell) => cell.x)).toEqual(['a', 'a']);
+    // No rows is no matrix, and it is a different fact from a limit below one column.
+    expect(wholeColumns([], () => 'x', 1)).toEqual([]);
   });
 
   it('leaves a table that has a measure of its own exactly as it was', () => {

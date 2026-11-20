@@ -176,7 +176,15 @@ export function profileRows(rows: readonly Readonly<Record<string, unknown>>[], 
   if (first === undefined) return [];
   // `name in first` rather than a cast: a column named by the caller but absent from the rows would
   // profile as a column of nulls, and a column of nulls is not a column.
-  const names = columns === undefined ? Object.keys(first) : columns.filter((name) => name in first);
+  const names = (columns === undefined ? Object.keys(first) : columns.filter((name) => name in first)).filter(
+    // The same rule applied to the values rather than to the keys, and it is not a nicety: a column
+    // every cell of which is a printed absence is what a result set calls a *column of a table that
+    // had nothing to put there* — a header the query produced and never filled. Profiled as `nominal`
+    // it becomes a category axis with no categories, which is enough to satisfy "two category axes"
+    // and to draw a heatmap whose lanes are all `null`. Dropping it costs nothing and removes a shape
+    // the data never had; the cells stay in the rows, so a caller reading `data` still sees them.
+    (name) => rows.some((row) => row[name] !== null && row[name] !== undefined),
+  );
   return names.map((name) => {
     const values = rows.map((row) => row[name]);
     const type = inferType(values);

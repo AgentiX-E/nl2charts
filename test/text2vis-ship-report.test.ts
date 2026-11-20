@@ -32,9 +32,11 @@ import {
   repairAdvisor,
   repairAnswers,
   repairAsks,
+  refusalBill,
   routedBy,
   shipReport,
   type ShipCounts,
+  type RefusalBill,
   type ShipReport,
 } from '../eval/text2vis/ship.js';
 import { admittedOptions, MARK_OPTIONS, type MarkOption } from '@agentix-e/nl2charts-chart';
@@ -85,6 +87,7 @@ function report(over: Partial<ShipReport> = {}): ShipReport {
     changed: 0,
     marks: ['bar', 'line'],
     divergence: [],
+    refusals: [],
     ...over,
   };
 }
@@ -781,5 +784,99 @@ describe('the command, with a repair on disk', () => {
     } finally {
       await served.close();
     }
+  });
+});
+
+/**
+ * The bill is what a derivation has to beat, so its arithmetic is asserted rather than printed.
+ *
+ * The fixture is three rows where the model named a mark the table refuses: two labelled `Scatter` on
+ * a table with one measure (the shape 27 of the corpus's 33 owed scatter rows have), and one labelled
+ * `Bar` where the model said `gauge`. The first two are owed — a scatter label is a family `scatter`
+ * covers — and the third is not, which is the column that stops the bill from reading like an
+ * opportunity: 60 of the corpus's 109 refused rows are owed, and the bill has to say which is which.
+ */
+describe('the bill for the rows the table answered instead', () => {
+  const BILL_ROWS: readonly ProfileInput[] = [
+    row('Correlate the two temperatures', 'Scatter', 'country,value\nUS,5\nDE,9\nFR,2'),
+    row('Correlate the two rates', 'Scatter', 'country,value\nUS,1\nDE,2\nFR,3'),
+    row('Which country is highest', 'Bar', 'country,value\nUS,5\nDE,9\nFR,2'),
+  ];
+  const BILL_CHOICES: readonly (string | null)[] = ['scatter', 'scatter', 'gauge'];
+
+  it('counts one line per mark the table refused, and owes only the families the label names', async () => {
+    const shipped = await shipReport(BILL_ROWS, BILL_CHOICES, 'a-model', { roster: rosterOf(BILL_ROWS) });
+    const bill = shipped.refusals;
+    expect(bill.map((line) => [line.mark, line.rows, line.owed])).toEqual([
+      ['scatter', 2, 2],
+      ['gauge', 1, 0],
+    ]);
+    // What the table drew on the owed rows, which is the picture a derivation has to beat.
+    expect(bill[0]?.instead.reduce((sum, one) => sum + one.rows, 0)).toBe(2);
+    expect(bill[0]?.instead.every((one) => one.mark !== 'scatter')).toBe(true);
+    // Nothing was drawn for a row no label asked about.
+    expect(bill[1]?.instead).toEqual([]);
+  });
+
+  it('orders a tie by name, because a bill read twice must be the same bill', async () => {
+    // Two marks refused once each, and one of them drawn two different ways on two rows: the two sorts
+    // in `refusalBill` both tie, and a tie broken by insertion order would print a different table for
+    // the same artifact depending on which row was read first.
+    const tied: readonly ProfileInput[] = [
+      row('Correlate revenue', 'Scatter', 'country,value\nUS,5\nDE,9\nFR,2'),
+      row('Correlate revenue over time', 'Scatter', 'year,value\n2019,3\n2020,4\n2021,8'),
+      row('Spread of revenue', 'Boxplot', 'country,value\nUS,1\nDE,2\nFR,3'),
+      row('Spread of the rates', 'Boxplot', 'country,value\nUS,4\nDE,5\nFR,6'),
+    ];
+    const shipped = await shipReport(tied, ['scatter', 'scatter', 'boxplot', 'boxplot'], 'a-model', {
+      roster: rosterOf(tied),
+    });
+    expect(shipped.refusals.map((line) => [line.mark, line.rows, line.owed])).toEqual([
+      ['boxplot', 2, 2],
+      ['scatter', 2, 2],
+    ]);
+    expect(shipped.refusals[1]?.instead.map((one) => one.mark)).toEqual(['bar', 'line']);
+  });
+
+  it('refuses three lists that cannot be billed together', () => {
+    expect(() => refusalBill(BILL_ROWS, BILL_CHOICES.slice(0, 2), [])).toThrow(/cannot be billed together/);
+  });
+
+  it('refuses a refused row with no answer on disk, which is the model deciding by silence', () => {
+    const decisions = [{ mark: 'bar', source: 'product', product: 'bar', reason: 'not-admitted' }] as const;
+    expect(() => refusalBill([BILL_ROWS[0] as ProfileInput], [null], [...decisions])).toThrow(/no answer is on disk/);
+  });
+
+  it('refuses a bill that lost a row, and one whose substitutions do not add up', () => {
+    // The bill is the audit trail of the vetoes, so a row that is refused and not billed is a row
+    // nobody can price — and `not-admitted` is the number that says how many there should be.
+    const short: RefusalBill = { mark: 'scatter', rows: 1, owed: 1, instead: [{ mark: 'bar', rows: 1 }] };
+    expect(() =>
+      assertShip(
+        report({
+          shipped: counts({ fromModel: 0, fromProduct: 2, reasons: { 'no-advice': 0, unavailable: 0, unlisted: 0, 'not-admitted': 2, unchartable: 0 } }),
+          refusals: [short],
+        }),
+      ),
+    ).toThrow(/the refusal bill covers 1 rows and the shipped reading counted 2 refused/);
+    expect(() =>
+      assertShip(
+        report({
+          shipped: counts({ fromModel: 1, fromProduct: 1, reasons: { 'no-advice': 0, unavailable: 0, unlisted: 0, 'not-admitted': 1, unchartable: 0 } }),
+          refusals: [{ mark: 'scatter', rows: 1, owed: 1, instead: [] }],
+        }),
+      ),
+    ).toThrow(/1 owed and 0 substitutions/);
+  });
+
+  it('prints the bill only when there is one', async () => {
+    // A report with no refusals must not grow an empty table: five lines that say "nothing" read like
+    // a measurement of nothing.
+    expect(describeShip(report()).some((line) => line.includes('what the table answered instead'))).toBe(false);
+    const shipped = await shipReport(BILL_ROWS, BILL_CHOICES, 'a-model', { roster: rosterOf(BILL_ROWS) });
+    const printed = describeShip(shipped).join('\n');
+    expect(printed).toContain('what the table answered instead');
+    expect(printed).toMatch(/scatter\s+2\s+2/);
+    expect(printed).toContain('nothing: the label never asked for it');
   });
 });

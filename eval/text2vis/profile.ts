@@ -143,8 +143,18 @@ const GROUPED = /^\d{1,3}(?:,\d{3})+(?:\.\d+)?$/;
  * The spellings are the ones a result set actually prints, and the list stops where reading would
  * start guessing: `No data` is two words, and a rule that read phrases would read `None of the above`
  * as a missing region. `5-10` is a band and not a NULL, which is why the match is on the whole cell.
+ *
+ * **`nan` is on the list for a different reason than the others, and it is the strongest reason of
+ * all.** `-` and `null` are *words a database prints*; `nan` is a word *no person writes into a
+ * category* — it is what the arithmetic that produced the table answered. This corpus carries **595
+ * cells** spelled exactly `nan`, in 320 columns of 120 rows, and every one of them was read as the
+ * string `"nan"`, which demoted its column from a measure to a category. The instrument that was
+ * built to find this class (`census.ts`'s `unreadNumerals`) could not see it: it looks for a decimal
+ * shape, and `nan` has none. The cost is a measure that disappears and a category axis that appears
+ * in its place — the heatmap of a numeric column against its own values, which is a picture of
+ * nothing.
  */
-const MISSING = /^(?:-+|—|–|n\/?a|null|none|\.)$/i;
+const MISSING = /^(?:-+|—|–|n\/?a|null|none|nan|\.)$/i;
 
 /**
  * Whether a cell is a printed absence rather than a value.
@@ -333,6 +343,19 @@ export interface ChartAnswer {
  * arithmetic and not between the arms. Everything about the corpus, the denominators, the identity and
  * the baselines is therefore shared, and the only thing an arm brings is where its answer came from.
  */
+/**
+ * Whether an answer leads with the family the label names — the hit test every reading publishes.
+ *
+ * A hit is the *first* family a mark covers: a bar named by a histogram cue covers `histogram` as its
+ * second family, and counting that as a hit would make one answer two answers. It lives here, as one
+ * function, because `ship.ts`'s refusal bill has to agree with this file about which rows the table
+ * got right, and a restated comparison is the defect this repository keeps finding — it agrees with
+ * the original until the day one of them changes.
+ */
+export function leadsWith(answer: ChartAnswer, family: ChartFamily): boolean {
+  return answer.families[0] === family;
+}
+
 export function scoreAnswers(
   rows: readonly ProfileInput[],
   answerOf: (row: ProfileInput) => ChartAnswer,
@@ -381,7 +404,7 @@ export function scoreAnswers(
       // A hit is the *first* family the answer covers: a bar named by a histogram cue covers
       // `histogram` as its second family, and counting that as a hit would make one answer two
       // answers — the reading would then be about how many families a mark can impersonate.
-      if (answer.families[0] === family) {
+      if (leadsWith(answer, family)) {
         top1 += 1;
         bucket.top1 += 1;
       }

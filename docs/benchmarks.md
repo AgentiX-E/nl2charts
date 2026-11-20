@@ -17292,3 +17292,157 @@ test. The properties held are the four the file exists on: a prior reads only fr
 is an absence rather than a mark, every count is the sum of the rows it routed, and the price is a
 parameter with a stated break-even. Two commands' worth of arithmetic meet in the same file: the floor
 refuses a price list whose `both` row disagrees with `route.ts` about either number.
+
+## The table was lying about two things: `nan`, and a column of nothing
+
+Every reading in this repository is a reading of a table, and a table arrives as text that a profiler
+turns into columns. Three defects lived in that turn, and this round prices them: **a printed absence
+spelled `nan`**, **a column whose every cell is an absence**, and **a row limit applied to a picture
+that has columns**. The first two cost rows in the product's own reading; the third costs cells in a
+heatmap and cannot be seen in any label.
+
+### What `nan` was doing
+
+`nan` is what the arithmetic that produced a table answers, and 595 cells of this corpus are spelled
+exactly that — in **320 columns of 120 rows**. Read as the string it is, each one demoted its column
+from a measure to a category, because the type rule asks whether *every* present cell is a number. The
+consequence is not "one column typed oddly". It is a table with no measure, or a table with two
+categories where it had one, and a shape rule that counts categories:
+
+```ts
+// Before: three numbers and one `nan` is a category of four values.
+inferType([1999, 'nan', 2001, 2002]);   // 'nominal'
+// After: `nan` is the absence it prints, so the column is the numbers it has.
+inferType([1999, null, 2001, 2002]);    // 'quantitative' (or 'temporal', if the years are contiguous)
+```
+
+The instrument built to find this class — `census.ts`'s `unreadNumerals` — could not see it: it looks
+for a *decimal shape* (`\d[.,]\d`), and `nan` has none. A defect that the instrument designed for it
+cannot see is the reason the instrument is not the only reader.
+
+### What a column of nothing was doing
+
+A header the query produced and never filled profiles as `nominal` with zero distinct values. It is
+enough to satisfy "two category axes", so a one-category table could be read as a matrix and drawn as
+a heatmap whose lanes are all `null`. The file already said the axiom — *a column of nulls is not a
+column* — and applied it to a name the rows did not carry, not to a column they did. Now it applies to
+both: **401 (table, column) pairs** of this corpus are dropped from the profiles, and their cells stay
+in `data`, because a caller reading a chart asked for the table and not for a filtered copy of it.
+
+### The reading, and the thirteen rows that moved
+
+Same 1,470 rows, same answers on disk, `pnpm bench:text2vis:profile` and `pnpm bench:text2vis:ship`, ¥0:
+
+| reading | before | after |
+|---|---:|---:|
+| `+profile` top-1 | 610 (41.50%) | **614 (41.77%)** |
+| `+profile` shortlist | 713 | **718** |
+| declined | 35 | **28** |
+| shipped (`deepseek-chat`) | 807 (54.90%) | 807 (54.90%) |
+| `not-admitted` | 104 | 109 |
+| `unchartable` | 35 | 28 |
+
+Thirteen rows drew a different chart, and every one of them is accounted for:
+
+| row | label | before → after | why |
+|---|---|---|---|
+| 445, 452, 468 | Line | `declined` → `line` | a column of numbers with `nan` holes had no measure, so nothing could be drawn |
+| 523, 536, 584, 643 | Pie, Scatter | `declined` → `bar` | same, and the table's answer is wrong — but a wrong chart is not the same as no chart |
+| 478, 480, 996, 1385 | Line, Bar | `line`/`bar` → `scatter` | two measures where there was one: the axis column is `9, 93, 9…`, a two-digit year, so it is a measure and the table now reads as two of them |
+| 1317 | Bar | `heatmap` → `scatter` | the spurious second category axis is gone |
+| 983 | Bar | `bar` → `line` | the measure that appeared outranked the bar |
+
+**3 gained, 3 lost, 7 uncorked** — and the shipped reading is unmoved at 807. That is the honest
+ledger, and the losses are the reason it is reported as a ledger rather than as a gain: the two
+`Line` rows that became `scatter` are labelled `Line` and are now wrong, because their year column is
+`9, 93` and `isCalendarColumn` needs four digits. The fix exposed a different defect rather than
+creating one, and the different defect is measured: teaching `isCalendarColumn` to skip missing cells
+changes **no row at all** on this corpus, so it was reverted rather than kept as an unearned axiom.
+
+### The refusal bill, and two ideas it retires
+
+`pnpm bench:text2vis:ship` now prints what the table answered on the rows where the model named a mark
+it cannot hold — one line per mark, with the ceiling a derivation of that mark could reach:
+
+```
+      mark        rows  label-owes  a derivation could win   what the table drew instead
+      scatter       43          32                at most 32   bar 20, line 6, pie 4, heatmap 2
+      boxplot       32           9                 at most 9   line 4, bar 3, pie 2
+      heatmap        9           4                 at most 4   line 2, bar 1, scatter 1
+      pie            8           8                 at most 8   bar 5, line 2, scatter 1
+      line           7           4                 at most 4   scatter 4
+      gauge          4           0  nothing: the label never asked for it   —
+      candlestick    3           3                 at most 3   line 2, bar 1
+      bar            3           0  nothing: the label never asked for it   —
+```
+
+109 rows, 60 of them owed to a family the model named. The largest line looks like a 32-row
+opportunity, and the shapes say it is not:
+
+| shape of the table | owed `scatter` rows |
+|---|---:|
+| one measure, one category | **27** |
+| one measure, two categories | 2 |
+| two categories, no measure | 2 |
+| several measures (a wide table's long form) | 2 |
+
+**27 of 33 have one measure** — 33 rows whose label asks for a scatter and whose table refuses it, 32
+of which the bill counts (the 33rd is a table nothing can chart, so it is in `unchartable` instead).
+A scatter of one measure against its categories is a bar chart with round ends — a picture the table can already draw, renamed. `familiesOfMark('scatter')` would count it
+as a hit, and the reading would go up by 32 rows while the product drew nothing it had not drawn
+before. That is scoreboard, not capability, so **the derivation of `scatter` is retired**, and this
+table is the reason.
+
+The second retirement is the pie cap. Five Donut rows and one Pie row are refused for carrying 16 to
+20 slices against a limit of 12, and folding them to *top 11 plus Other* is a standard picture. The
+corpus prices the alternative: lifting the cap changes **23 rows**, because every question that says
+"percentage" then prefers a pie — 21 of them labelled Line, Area or Stacked Bar. Product top-1 falls
+689 → 678 on the shortlist test, shipped rises 934 → 938 on the same. Four rows on the shipped column
+for eleven on the product's own is not a trade this project takes, so the cap stays an admission rule.
+
+What is left of the whole 109-row bill, measured rather than imagined: **candlestick 3 rows**, where a
+table holds four numbers per row and no date, and the row's own order is the axis. Nothing else in the
+table is a derivation; everything else is a table that does not hold the picture the question named.
+
+### `limit` is a limit on the picture, and a matrix has columns
+
+The third defect is in the library, and no label can see it. `toChartIR`'s `limit` sliced **rows**:
+
+```ts
+toChartIR('Revenue by region and quarter', grid, { limit: 4 });
+// before: 4 cells, so the second column is half drawn
+// after:  one whole column (3 cells), because a cell missing to the limit is
+//         indistinguishable from a cell missing from the query
+```
+
+A row limit is a limit on a picture when the picture is a sequence: cut a line at row 500 and you get
+a shorter line. A matrix is not a sequence. Cutting it inside a column leaves a lane that reads as
+missing data, and "this cell has no value" is the one reading a heatmap exists to give. The unit is
+therefore the column — whole ones kept in the order they first appear, the first that does not fit
+dropped rather than started — and the rows keep the order they arrived in, because the limit is about
+how much of the matrix is drawn and not about how it is read.
+
+`matrixFieldOf` decides what a matrix is from the **encoding**, not from the mark's name: neither axis
+may be a measure. The first version asked for `nominal` twice, and the corpus's heatmaps put `quarter`
+and `year` on the second axis, so every one of them would have kept being cut inside a column — the
+defect was found by the test written to prevent it, on its first run. A limit below one column keeps
+no column, and that is a refusal (`NL2C_E_INVALID_INPUT`) naming the column and both numbers, not an
+empty chart.
+
+The default path is untouched: `limit` defaults to 5,000 and no table in this corpus is that tall, so
+the shipped reading does not move. The fix is verified where it lives — `wholeColumns` on a five-cell
+grid, and three `toChartIR` cases: a heatmap at a limit of four, at six, and a bar at two, which keeps
+the row limit it always had.
+
+### Gates
+
+| item | result |
+|---|---|
+| `tsc --noEmit` | clean |
+| `vitest` (real PostgreSQL and MariaDB) | 5,887 passed / 0 skipped (193 files) |
+| `packages/chart` | 348 cases, 5 new: the matrix limit at two sizes, its refusal, `wholeColumns`, an empty column |
+| `eval/text2vis/profile.test` | 49 cases, 2 new: `nan` as an absence, a column of absences |
+| `eval/text2vis/ship-report.test` | 62 cases, 5 new: the bill, its ordering, its two identities, and the table it prints |
+| eval coverage | 99.63 / 99.63 / 100.00 / 98.33; 108 of 109 files at 95% on all four |
+| `pnpm gate:all` | EXIT 0 |
+| cost | **¥0** — no model was called; every number is a re-reading of answers on disk |

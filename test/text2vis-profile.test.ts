@@ -26,6 +26,7 @@ import {
   parseResultSet,
   profileAnswer,
   profileInputs,
+  isMissingCell,
   numericCell,
   profilesOf,
   scoreProfile,
@@ -122,6 +123,31 @@ describe('the number a cell holds', () => {
     const set = parseResultSet('Region, Revenue\nNorth, "1,234"\nSouth, "2,345"\nEast, "3,456"\nWest, "4,567"');
     expect(profilesOf(set).find((profile) => profile.name === 'Revenue')?.type).toBe('quantitative');
     expect(typedRows(set)[0]?.Revenue).toBe(1234);
+  });
+
+  it('reads `nan` as a printed absence, because no person writes it into a category', () => {
+    // 595 cells of the corpus are spelled exactly `nan`, in 320 columns of 120 rows. Read as the
+    // string it is, each one demoted its column from a measure to a category — and a category axis is
+    // enough to satisfy a shape rule, so the table drew a heatmap of a numeric column against itself.
+    expect(isMissingCell('nan')).toBe(true);
+    expect(isMissingCell('NaN')).toBe(true);
+    expect(isMissingCell(' nan ')).toBe(true);
+    // Not a substring match, and not a word that could name a region.
+    expect(isMissingCell('nanogram')).toBe(false);
+    expect(isMissingCell('Nassau')).toBe(false);
+    const set = parseResultSet('Year, Value\n2019, 12\n2020, nan\n2021, 14');
+    expect(typedRows(set)[1]?.Value).toBeNull();
+    // Two numbers, so `inferType` reads a scale rather than a measure — the point is that the column
+    // is numeric at all: a `nan` used to make it text.
+    expect(profilesOf(set).find((profile) => profile.name === 'Value')?.numbers).toBe(2);
+  });
+
+  it('does not profile a column whose every cell is a printed absence', () => {
+    // A header the query produced and never filled. Profiled, it is a category axis with no
+    // categories — which satisfies "two category axes" and draws a heatmap whose lanes are all null.
+    const set = parseResultSet('Country, 2016, Value\nArmenia, nan, 73\nBelize, nan, 31\nKenya, nan, 12');
+    expect(profilesOf(set).map((profile) => profile.name)).toEqual(['Country', 'Value']);
+    expect(profilesOf(set).find((profile) => profile.name === 'Country')?.type).toBe('nominal');
   });
 });
 

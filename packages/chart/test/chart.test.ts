@@ -155,13 +155,34 @@ describe('profiling', () => {
     // `country` no matter what the query selected. 389 of the corpus's 1,464 tables were read this
     // way, five of them chose an entirely empty year column as the category axis, and the figure
     // that came out was a bar chart of `[None, None, None]`.
-    const rows = [
+    const empty = [
       { country: 'Armenia', '2016': null },
       { country: 'Belize', '2016': null },
     ];
-    expect(Object.keys(rows[0] as object)).toEqual(['2016', 'country']);
-    expect(profileRows(rows).map((profile) => profile.name)).toEqual(['2016', 'country']);
-    expect(profileRows(rows, ['country', '2016']).map((profile) => profile.name)).toEqual(['country', '2016']);
+    expect(Object.keys(empty[0] as object)).toEqual(['2016', 'country']);
+    // Two facts now, and the second is what makes the first harmless: the order the caller names is
+    // the order the profiles keep, and a column every cell of which is a printed absence is not a
+    // column at all — so the year cannot be chosen as an axis by any rule, in any order.
+    expect(profileRows(empty).map((profile) => profile.name)).toEqual(['country']);
+    expect(profileRows(empty, ['country', '2016']).map((profile) => profile.name)).toEqual(['country']);
+    const filled = [
+      { country: 'Armenia', '2016': null },
+      { country: 'Belize', '2016': 12 },
+    ];
+    expect(profileRows(filled, ['country', '2016']).map((profile) => profile.name)).toEqual(['country', '2016']);
+  });
+
+  it('keeps an empty column’s cells in the data while refusing to profile it', () => {
+    // The column is dropped from the *profiles*, which is what the shape and every admission read;
+    // it stays in the rows, because a caller reading `data` asked for the table and not for a
+    // filtered copy of it. Two rows so the table is chartable at all.
+    const rows = [
+      { country: 'Armenia', '2016': null, value: 73 },
+      { country: 'Belize', '2016': null, value: 31 },
+    ];
+    const ir = toChartIR('which country has the highest value', rows, { columns: ['2016', 'country', 'value'] });
+    expect(ir.data[0]).toMatchObject({ '2016': null, country: 'Armenia' });
+    expect(profileRows(rows, ['2016', 'country', 'value']).map((profile) => profile.name)).toEqual(['country', 'value']);
   });
 
   it('drops a column the caller named but the rows do not have', () => {
