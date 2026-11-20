@@ -610,6 +610,26 @@ export interface ProductVariant {
   readonly shortlist: number;
   /** Of those, the rows covered as the *second* claim: the family the product shows instead. */
   readonly substituted: number;
+  /**
+   * The two halves of `hit`, as a delta against the control rather than as a count.
+   *
+   * The absolute counts are in `split` and they are half of a denominator, which reads as nothing: a
+   * candidate's job is to change rows, and 603 of 735 says only how large the corpus is. The delta is
+   * what a reader compares, and the difference between the two halves is the whole of the guard — the
+   * control's own are zero by construction, not by measurement.
+   */
+  readonly halves: { readonly a: number; readonly b: number };
+  /**
+   * The two halves disagree in sign: one gains what the other loses.
+   *
+   * Pre-registered, and the reason the halves are printed at all. A sweep of seventeen tables reports
+   * its own winner by arithmetic, so a candidate that gains on the corpus's even rows and loses on its
+   * odd ones reaches the top of the table having measured nothing — the split is arbitrary with respect
+   * to content, so a sign that flips between the halves is a sign that depends on which rows were
+   * drawn. This is not a significance test and does not replace one (`assertCensusReport` refuses a
+   * report that disagrees with its own arithmetic, not one whose arithmetic is unimpressive).
+   */
+  readonly fitted: boolean;
 }
 
 /**
@@ -1418,12 +1438,20 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
     ),
     product: PRODUCT_CANDIDATES.map((candidate) => {
       const tally = product.get(candidate.name) as ProductTally;
+      // The origin the deltas are taken from: the control is first by construction, and a table of
+      // deltas against a missing control would be deltas against nothing. The cast is the whole of
+      // the claim — the list is a non-empty constant, and the seed above is what makes the lookup
+      // total — so there is no fallback branch here for a reader to mistake for a measured case.
+      const control = product.get((PRODUCT_CANDIDATES[0] as ProductCandidate).name) as ProductTally;
+      const halves = halvesAgainst(tally.split, control.split);
       return {
         variant: candidate.name,
         note: candidate.note,
         hit: tally.hit,
         hitShare: scored === 0 ? 0 : tally.hit / scored,
         split: { a: tally.split.a, b: tally.split.b },
+        halves,
+        fitted: isFitted(halves),
         moved: tally.moved,
         shortlist: tally.shortlist,
         substituted: tally.substituted,
@@ -1605,6 +1633,14 @@ export function assertCensusReport(report: CensusReport): void {
         `census report: variant ${variant.variant} reads ${String(variant.split.a)} + ${String(variant.split.b)} hits in its two halves, which is not the ${String(variant.hit)} it reports, so one of the halves is not a half`,
       );
     }
+    // `fitted` is derived from the halves, so a report that carries a flag its own arithmetic
+    // contradicts is either a hand-written report or a half computed after the flag was set. Both are
+    // the same defect: the line a reader trusts was not read off the numbers beside it.
+    if (variant.fitted !== isFitted(variant.halves)) {
+      throw new Error(
+        `census report: variant ${variant.variant} is ${variant.fitted ? '' : 'not '}fitted while its halves read ${signed(variant.halves.a)} and ${signed(variant.halves.b)}, which is not what those halves say`,
+      );
+    }
   }
 }
 
@@ -1739,16 +1775,50 @@ export function describeProduct(report: CensusReport): readonly string[] {
     // user sees a picture of the distribution instead of a boxplot of a different question.
     const shelf = variant === control ? 0 : variant.shortlist - control.shortlist;
     const shelfNote = shelf === 0 ? '' : `  |  shortlist ${shelf > 0 ? '+' : ''}${String(shelf)}`;
+    // The halves, and only against the control: the control's own are zero by construction, and a
+    // line of two zeros would read as a measurement that came out flat rather than as the origin the
+    // other lines are measured from. `fitted` is printed as a word because a reader who has to compare
+    // two signed numbers to notice a flipped sign is a reader who will not notice it.
+    const halves =
+      variant === control
+        ? ''
+        : `  |  halves ${signed(variant.halves.a)} / ${signed(variant.halves.b)}${variant.fitted ? ' (fitted)' : ''}`;
     lines.push(
-      `    ${variant.variant.padEnd(24)} hit ${String(variant.hit).padStart(4)} (${(variant.hitShare * 100).toFixed(2)}%)${moved.length === 0 ? '' : `  |  ${moved.join(', ')}`}${shelfNote}`,
+      `    ${variant.variant.padEnd(24)} hit ${String(variant.hit).padStart(4)} (${(variant.hitShare * 100).toFixed(2)}%)${moved.length === 0 ? '' : `  |  ${moved.join(', ')}`}${shelfNote}${halves}`,
+    );
+  }
+  // Said once under the table rather than repeated on every line: the count is the claim, and a
+  // fitted candidate is not automatically a rejected one — it is one nothing can be concluded from.
+  const fitted = report.product.filter((variant) => variant.fitted).length;
+  if (fitted > 0) {
+    lines.push(
+      `  ${String(fitted)} of ${String(report.product.length)} tables gain on one half and lose on the other: fitted, so the split says nothing about them`,
     );
   }
   return lines;
 }
 
+/** A delta as the table prints it: the sign is the reading, so a zero keeps none. */
+function signed(delta: number): string {
+  return delta > 0 ? `+${String(delta)}` : String(delta);
+}
+
 /** A family's hit count in one product reading, or zero when that reading has no row for it. */
 function hitOf(variant: ProductVariant, family: ChartFamily): number {
   return variant.byFamily.find((cell) => cell.family === family)?.hit ?? 0;
+}
+
+/** A candidate's two halves as a delta against the control's, which is what a reader compares. */
+function halvesAgainst(
+  split: { readonly a: number; readonly b: number },
+  control: { readonly a: number; readonly b: number },
+): { readonly a: number; readonly b: number } {
+  return { a: split.a - control.a, b: split.b - control.b };
+}
+
+/** One half gains and the other loses. The criterion is fixed here, not chosen per candidate. */
+function isFitted(halves: { readonly a: number; readonly b: number }): boolean {
+  return (halves.a > 0 && halves.b < 0) || (halves.a < 0 && halves.b > 0);
 }
 
 /** The flags this command takes, and nothing else. */

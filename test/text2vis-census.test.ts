@@ -1498,4 +1498,79 @@ describe('the admission cap, priced beside the cue tables', () => {
     expect(knob).toContain('pie -1');
     expect(lines.find((line) => line.trimStart().startsWith('shipped '))).not.toContain('|');
   });
+
+  /**
+   * The halves were computed, asserted, and never printed.
+   *
+   * `ProductVariant.split` exists so that a candidate chosen for winning cannot also be chosen for
+   * fitting, and `assertCensusReport` refuses a split that does not add up — but the only reader of
+   * either was the assertion. The calendar ablation next door prints its halves; the seventeen-table
+   * sweep did not, so a +7 that came from one half of the corpus and cost the other was printed as a
+   * +7. A guard nobody reads is a guard the next round re-derives from a probe.
+   */
+  it('prints the two halves as deltas, so a gain that only holds on one half is visible', () => {
+    const SEVEN = table('Region, Revenue', regions(7).split('\n').slice(1));
+    const report = censusOf([input(PART, 'Pie Chart', SEVEN), input(TREND, 'Line Chart', QUARTERLY)]);
+    const control = report.product[0]!;
+    for (const variant of report.product) {
+      // A delta, not an absolute: half the corpus scoring 600 rows says nothing about a candidate,
+      // and the control's own halves are zero by construction rather than by measurement.
+      expect(variant.halves.a).toBe(variant.split.a - control.split.a);
+      expect(variant.halves.b).toBe(variant.split.b - control.split.b);
+    }
+    expect(control.halves).toEqual({ a: 0, b: 0 });
+    expect(control.fitted).toBe(false);
+    const lines = describeProduct(report);
+    expect(lines.find((line) => line.trimStart().startsWith('shipped '))).not.toContain('halves');
+  });
+
+  it('names a table fitted when one half gains what the other loses', () => {
+    // Two rows, one per half, and they pull in opposite directions: the widened `distribution` cue
+    // answers a box plot question the shipped table misses, and takes a bar question it was getting
+    // right. One row is a gain on `a` and one is a loss on `b`, so the net is zero and the halves are
+    // the only thing that says why. Rows are assigned to halves by position in the scored population.
+    const WIDE = table('Region, Revenue', ['North, 10', 'South, 12', 'East, 11', 'West, 14']);
+    const report = censusOf([
+      input('What is the standard deviation of revenue across the regions?', 'Box Plot', WIDE),
+      input('What is the standard deviation of revenue by region?', 'Bar Chart', WIDE),
+    ]);
+    const wide = report.product.find((variant) => variant.variant === 'distribution-wide');
+    expect(wide?.halves).toEqual({ a: 1, b: -1 });
+    expect(wide?.fitted).toBe(true);
+    const lines = describeProduct(report);
+    const line = lines.find((entry) => entry.trimStart().startsWith('distribution-wide '));
+    expect(line).toContain('halves +1 / -1');
+    // The word is the point: a reader who sees only `hit 1` has to guess which half it came from.
+    expect(line).toContain('fitted');
+  });
+
+  it('refuses a report whose fitted flag disagrees with its own halves', () => {
+    const report = censusOf([input(PART, 'Pie Chart', NINE)]);
+    const shipped = report.product[0]!;
+    expect(() => assertCensusReport({ ...report, product: [{ ...shipped, fitted: true }] })).toThrow(/fitted/);
+    // The message names which way the report is wrong, so both readings of the flag are exercised:
+    // a table whose halves are fitted but whose flag denies it reads as "not fitted", and a reader
+    // told only "fitted" would look for the wrong half.
+    expect(() =>
+      assertCensusReport({ ...report, product: [{ ...shipped, halves: { a: 1, b: -1 }, fitted: false }] }),
+    ).toThrow(/not fitted/);
+  });
+
+  it('accepts the other sign, and the report with no fitted table at all', () => {
+    // The criterion is symmetric — a loss on `a` against a gain on `b` is the same shape of fitting as
+    // its mirror — so the guard has to accept it. Both halves are written out rather than derived from
+    // a corpus, because the point is the arithmetic and not the rows that would produce it.
+    const report = censusOf([input(PART, 'Pie Chart', NINE)]);
+    const shipped = report.product[0]!;
+    expect(() =>
+      assertCensusReport({ ...report, product: [{ ...shipped, halves: { a: -2, b: 1 }, fitted: true }] }),
+    ).not.toThrow();
+    // And a table that moved on one half only is not fitted in either direction: `0` is not a sign.
+    expect(() =>
+      assertCensusReport({ ...report, product: [{ ...shipped, halves: { a: 0, b: 3 }, fitted: false }] }),
+    ).not.toThrow();
+    // No footer when nothing is fitted: the line is a count of tables, and zero tables is no claim.
+    const clean = { ...report, product: report.product.map((variant) => ({ ...variant, halves: { a: 1, b: 0 }, fitted: false })) };
+    expect(describeProduct(clean).join('\n')).not.toContain('fitted, so the split');
+  });
 });

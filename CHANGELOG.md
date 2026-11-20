@@ -6,7 +6,27 @@ cannot be argued with.
 
 ## Unreleased
 
+### Added
+- **The census prints the two halves of every candidate, and names the ones that are fitted.** The
+  split has been in the report since the sweep learned to price cue tables — two disjoint halves of
+  the scored population, fixed before the reading, so a candidate chosen for winning cannot also be
+  chosen for fitting — and `assertCensusReport` refused a split that does not add up. Nothing printed
+  it: the calendar ablation next door showed its halves and the thirty-four-table sweep showed only
+  the total, so every `+7` arrived as a `+7`. Each line now carries the halves as a delta against the
+  control and the word `fitted` when they disagree in sign, and the report refuses a `fitted` flag its
+  own arithmetic contradicts. First readback on the 1,470 scored rows: `no-share` is `+8 / −8`, and
+  `no-ranking` — the highest number on the board at 677, six above the shipped table — is `+10 / −4`.
+
 ### Fixed
+- **A cue change is priced on the ceiling and the shipped path, not on the rule arm.** Widening the
+  `distribution` cue to the statistics box plot questions are written in ("IQR", "outlier", "z-score",
+  "standard deviation", "skew") reads **671** on the rule arm against 664 — 17 box plots won against
+  6 bars, 2 lines and 2 scatters, and both halves of the corpus agreeing (+3 and +4), so the gain was
+  not a property of which rows were drawn. Shipped, the same artifact reads `ceiling` **1,020 → 1,014**
+  and `shipped` **843 → 841**. The rule arm gained seven rows while the union of the two arms lost
+  six, which can only mean the rows a rule wins are rows the model already had and the rows it loses
+  are rows only the rule held. Reverted; `distribution-wide` stays in the sweep with all three numbers
+  in its note.
 - **A histogram question over a table that is also wide in time was priced as a line by the census
   sweep, and the identity that compares the two counts said so.** Three of the 1,470 scored rows are
   both a histogram question and a wide table: `toChartIR` bins them before the melt, the sweep asked

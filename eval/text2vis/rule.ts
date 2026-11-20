@@ -820,16 +820,19 @@ export function withShareRankedCue(table: readonly CueRule[]): readonly CueRule[
 /**
  * The words outlier analysis is written in, added to the `distribution` cue.
  *
- * `boxplot` reads 6.74% of its 89 rows and 44 of the misses are answered `bar`, and the questions
- * behind those 44 name the *statistic* rather than the picture: "calculate the interquartile range",
+ * `boxplot` reads 6.74% of its 89 rows and 44 of the misses answered `bar`, and the questions behind
+ * those 44 name the *statistic* rather than the picture: "calculate the interquartile range",
  * "identify any country more than two standard deviations above the mean", "perform an outlier
  * analysis using the IQR method". Not one of them says "box plot", which is the only phrase the cue
- * table knew. The cue that would decide them already exists and already leads with a boxplot, so the
- * lever is the width of one pattern and nothing else.
+ * table knew.
  *
- * A hypothesis, priced in the sweep before it is shipped: the same words also appear in questions the
- * corpus drew as bars and histograms, and a widening that trades 20 boxplot rows for 28 rows in other
- * families is not a fix. `distribution-wide` in `CUE_VARIANTS` is where that arithmetic is read.
+ * **Priced on the product path and held back.** Widened, the rule arm reads **671** against 664, and
+ * the two halves of the corpus agree on the sign (+3 and +4) — the first candidate this table has had
+ * that is not fitted. It is still not shipped, because 671 is the *rule* arm and the product ships
+ * through an arbitration that scores the model's recorded answers under the same cue table: renaming
+ * the family a bar claims on a statistics question moves the model's score too, and the ensemble's
+ * price has to be taken before the width is adopted. The number that decides is `ceiling` and
+ * `shipped`, not `top-1`.
  */
 export const DISTRIBUTION_WIDE =
   /\b(?:distribution|spread|dispersion|quartiles?|median|variability|histogram|box ?plot|iqr|interquartile|outliers?|z-scores?|standard deviations?|skew(?:ed|ness)?)\b|分布|四分位|离群/;
@@ -900,7 +903,7 @@ export const CUE_VARIANTS: readonly TableVariant[] = [
     },
     {
       name: 'distribution-wide',
-      note: 'the `distribution` cue widened to IQR, outlier, z-score and standard deviation: the words boxplot questions are written in',
+      note: 'the `distribution` cue widened to IQR, outlier, z-score and standard deviation: +7 on the rule arm, held back until the ensemble prices it',
       cues: withDistributionWide(CHART_CUES),
     },
     ...FALLBACK_FLIPS,

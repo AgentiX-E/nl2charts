@@ -581,8 +581,10 @@ describe('the table a variant constructs', () => {
     expect(changed.map((rule) => rule.kind)).toEqual(['distribution']);
     expect(changed[0]?.marks).toEqual(shipped.find((rule) => rule.kind === 'distribution')?.marks);
     // The words are the ones the questions are written in, and they still fire the shipped cue on a
-    // question that already fired it — a widening that lost the old matches would be a swap.
+    // question that already fired it — a widening that lost the old matches would be a swap. The
+    // shipped table answers none of them, which is the whole of the 17 box plots the width buys.
     for (const question of ['interquartile range of each country', 'identify any outlier', 'z-score above the mean', 'standard deviation of the class']) {
+      expect(cueMarks(question, shipped)).toEqual([]);
       expect(cueMarks(question, wide)[0]).toBe('boxplot');
     }
     expect(cueMarks('distribution of revenue', wide)[0]).toBe('boxplot');

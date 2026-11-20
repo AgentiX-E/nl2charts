@@ -17744,3 +17744,83 @@ it is the same lockstep one level down.
 | census identity | 664 = 664, after three rounds of 661 against 664 |
 | `packages/chart` coverage | 100 / 100 / 100 / 100 |
 | cost | **¥0** |
+
+## A guard that was computed, asserted, and never printed — and the change it caught on its first run
+
+`ProductVariant.split` has been in the census since the sweep learned to price cue tables: two disjoint
+halves of the scored population, fixed before the reading, so that a candidate chosen for winning cannot
+also be chosen for fitting. `assertCensusReport` refuses a split that does not add up. The calendar
+ablation next door prints its halves — `halves 53/4 and 59/3` — and the thirty-four-table sweep printed
+only the total, so the guard existed and no reader ever saw it.
+
+That is the shape of an instrument that does not work: the number was computed, asserted, and withheld,
+and every `+7` in the table arrived as a `+7`.
+
+The table now prints the two halves as deltas against the control, and says the word `fitted` when they
+disagree in sign:
+
+| table | `hit` | families | halves | |
+|---|---:|---|---|---|
+| `distribution-wide` | 671 | boxplot +17, bar −6, line −2, scatter −2 | **+3 / +4** | consistent |
+| `progress-bar-first` | 665 | bar +1 | 0 / +1 | consistent |
+| `no-share` | 671 | bar +59, line +14, boxplot +5, pie −79 | **+8 / −8** | fitted |
+| `no-ranking` | 677 | pie +39, line +25, boxplot +8, bar −68 | **+10 / −4** | fitted |
+
+`no-ranking` is the reason to print it. Removing the ranking stage reads **677**, six rows *above* the
+shipped table and the highest number on the board — and it is `+10 / −4`: ten rows won on one half of
+the corpus and four lost on the other. A reader shown the total has to be told that; a reader shown the
+halves has been told it.
+
+### The +7 that survived the guard and died on the ensemble
+
+`distribution-wide` is the other half of the story. It was the first candidate in this table to clear
+both checks: **671** against 664 on the rule arm, and `+3 / +4` — the halves agree, so the gain is not a
+property of which rows were drawn.
+
+It was shipped, on that evidence, and then measured again:
+
+| reading | before | widened | Δ |
+|---|---:|---:|---:|
+| rule arm `top-1` | 664 | **671** | **+7** |
+| `ceiling` (union of the two arms) | 1,020 | **1,014** | **−6** |
+| `shipped` (the path the product takes) | 843 | **841** | **−2** |
+
+Same artifact, same rows, one pattern's width. The rule arm gained seven rows and the union of the two
+arms *lost* six, which can only happen one way: **the rows a rule wins are mostly rows the model already
+had, and the rows a rule loses are rows only the rule held.** A cue change is therefore not priced on the
+rule arm, and the widening is reverted — kept as a candidate whose note now carries all three numbers.
+
+The criterion this round pre-registers, and the reason the revert is not a judgement call:
+
+1. **The rule arm is not the product.** The product ships through an arbitration that scores the model's
+   recorded answers under the same cue table, so a cue that renames the family a mark claims moves both
+   arms at once.
+2. **`ceiling` is the honest upper bound and it is a free check.** A change that lowers the union of the
+   two answers cannot be a change that helps the ensemble, whatever it does to one arm.
+3. **`shipped` is the only number that is about the product**, and it is the last gate, not the first.
+
+### Two other things that were measured and closed
+
+**The 147 rows no mark can lead with are not a capability gap.** 138 of them are labelled `Area Chart`
+and 9 `Violin Plot`, and an area chart is a line with the region filled. Two facts settle it: **2 of the
+138 area rows name "area" in the question**, so no width of any cue would reach them, and 80 of the 138
+is already `substituted` — drawn as a line, which is the covering mark. The corpus is stating an
+aesthetic preference, not a picture this grammar cannot draw. A new mark would have to be *inferred*
+from the same table and the same question, which is the inference this repository measured and refused
+in the previous round.
+
+**`binned 0` is not a counting bug.** The outcome exists for the rows whose label the bins reading
+rewrites away, and it reads zero because every row the reading takes is labelled `histogram`: 50 binned,
+50 hits. The counter would be a bug if it were reporting a branch nobody reaches, so the branch is
+asserted by a unit test that classifies a histogram question over a pie-labelled row instead.
+
+### Gates
+
+| item | result |
+|---|---|
+| `tsc --noEmit` | clean |
+| census | 671 → **664** after the revert; identity 664 = 664 |
+| `ceiling` / `decided` / `shipped` | 1,020 / 891 / **843**, reproduced from the same artifact |
+| halved sweep | 34 tables, 2 fitted (`no-share`, `no-ranking`) |
+| `packages/chart` coverage | 100 / 100 / 100 / 100 |
+| cost | **¥0** |
