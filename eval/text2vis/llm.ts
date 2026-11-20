@@ -52,7 +52,7 @@ import { createHash } from 'node:crypto';
 import { capabilitiesOf, createHttpProvider, withCallCounter, type LlmProvider } from '@agentix-e/nl2charts-ai';
 import { RECOMMENDABLE_MARKS, type RecommendableMark } from '@agentix-e/nl2charts-chart';
 import { applyExitCode, isEntry, loadText2Vis, type LoadOptions, type Text2VisCorpus } from './dataset.js';
-import { billOf, formatYuan } from '../price.js';
+import { billOf, formatYuan, type TokenCounts } from '../price.js';
 import { cacheKey, openStore, type CacheIdentity, type ContentStore } from './content-store.js';
 import { profileAnswer, scoreAnswers, type ChartAnswer, type ProfileInput, type ProfileReport } from './profile.js';
 import { familiesOfMark, familyOfLabel, type ChartFamily } from './rule.js';
@@ -198,6 +198,23 @@ export interface ModelRow {
   readonly choice: string | undefined;
   readonly reply: string;
   readonly truncated: boolean;
+  /**
+   * The tokens the call that produced this answer was billed for, present only when the answer came
+   * from the store.
+   *
+   * A live call's tokens are already in the provider meter that produced them, and counting them here
+   * as well would inflate exactly the rows whose cost is under examination. A replayed answer's tokens
+   * are in nobody's meter — the run that bought them ended — so this is the only place they survive.
+   */
+  readonly replayed?: TokenCounts;
+  /**
+   * Present when the answer came from a store written before it kept meters.
+   *
+   * Not the same fact as `replayed: {0, 0}`: that would say the call was free, and this says nobody
+   * wrote down what it cost. The two are reported apart because a bill assembled from the first is
+   * wrong in the direction that makes the next dispatch look cheap.
+   */
+  readonly unmetered?: true;
 }
 
 /**
@@ -209,6 +226,8 @@ export interface ModelRow {
  */
 export interface StoredRow extends ModelRow {
   readonly model: string;
+  /** What the call cost, kept with the answer so that a resumed run can say what the reading cost. */
+  readonly usage?: TokenCounts;
 }
 
 /**
@@ -228,11 +247,42 @@ export function replyOf(parsed: unknown, expect: { readonly model: string } | un
   if (expect !== undefined && row['model'] !== expect.model) return undefined;
   const choice = row['choice'];
   if (choice !== undefined && choice !== null && typeof choice !== 'string') return undefined;
+  const usage = usageOf(row['usage']);
+  if (usage === false) return undefined;
   return {
     model: row['model'],
     choice: typeof choice === 'string' ? choice : undefined,
     reply: row['reply'],
     truncated: row['truncated'],
+    ...(usage === undefined ? {} : { usage }),
+  };
+}
+
+/**
+ * The meters in a stored record, `undefined` when the entry predates them, `false` when they are not
+ * counts.
+ *
+ * The two counts a call is billed on are required together: a record with a prompt count and no
+ * completion count is a half-written file, and billing half a call is worse than billing none of it
+ * because the number would look like a measurement. The cache-hit count is optional *in the record*
+ * because a provider is allowed not to report one, and its absence is read as **no hits** — the
+ * assumption that costs more, which is the direction a bill should err in: an overstatement makes a
+ * lever look expensive, and an understatement makes it look free.
+ */
+function usageOf(value: unknown): TokenCounts | undefined | false {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'object' || value === null) return false;
+  const counts = value as Record<string, unknown>;
+  for (const field of ['promptTokens', 'completionTokens'] as const) {
+    const count = counts[field];
+    if (typeof count !== 'number' || !Number.isInteger(count) || count < 0) return false;
+  }
+  const cached = counts['cachedPromptTokens'];
+  if (cached !== undefined && (typeof cached !== 'number' || !Number.isInteger(cached) || cached < 0)) return false;
+  return {
+    promptTokens: counts['promptTokens'] as number,
+    completionTokens: counts['completionTokens'] as number,
+    cachedPromptTokens: typeof cached === 'number' ? cached : 0,
   };
 }
 
@@ -272,7 +322,12 @@ export async function askOnce(
   };
   const key = cacheKey(identity, PROMPT_VERSION);
   const cached = options.cache?.get(key, { model: provider.model });
-  if (cached !== undefined) return cached;
+  if (cached !== undefined) {
+    // The meters travel with the row, under the name that says where it came from: `replayed` is the
+    // cost of a call this run did not make, and `unmetered` is the admission that the store cannot say.
+    if (cached.usage === undefined) return { ...cached, unmetered: true };
+    return { ...cached, replayed: cached.usage };
+  }
   const response = await provider.complete({
     messages: identity.messages,
     temperature,
@@ -294,7 +349,7 @@ export async function askOnce(
   };
   // The model travels with the row: the key already separates models, and this is the lock a store
   // copied between two cache directories has to pass before its answer is read.
-  options.cache?.put(key, { ...row, model: provider.model });
+  options.cache?.put(key, { ...row, model: provider.model, ...(response.usage === undefined ? {} : { usage: response.usage }) });
   return row;
 }
 
@@ -370,6 +425,27 @@ export function describeDeadline(provider: LlmProvider, env: Record<string, stri
 
 export type Scale = 'mark' | 'label';
 
+/**
+ * What a run spent on the answers it replayed instead of buying.
+ *
+ * Separate from `ArmCost` rather than added to it, because the two answer different questions and a
+ * sum of them answers neither: `ArmCost` is this run's invoice, and this is what the reading would have
+ * cost if every answer in it had to be bought again. The first dispatch of the reasoning arm spent a
+ * real amount and died before printing a bill; the second printed Y0.0033. Neither number is the
+ * reading's cost, and only the pair is.
+ */
+export interface ReplayedCost {
+  /** Answers that came from the store. */
+  readonly rows: number;
+  readonly promptTokens: number;
+  readonly completionTokens: number;
+  readonly cachedPromptTokens: number;
+  /** 元 at the same table `yuan` uses; absent when the model is unpriced. */
+  readonly yuan?: number;
+  /** Rows replayed from an entry that recorded no meters: their cost is unknown, not zero. */
+  readonly unpriced: number;
+}
+
 /** What both scales' reports carry: where the answers came from and what they cost. */
 export interface ArmCost {
   readonly calls: number;
@@ -379,6 +455,8 @@ export interface ArmCost {
   /** 元, from `price.ts`; absent when that table has no price for this model. */
   readonly yuan?: number;
   readonly perRowYuan?: number;
+  /** The answers this run did not buy, and what they cost when somebody else did; absent on a live run. */
+  readonly replayed?: ReplayedCost;
 }
 
 /**
@@ -553,6 +631,42 @@ export interface ScoreArmOptions {
 }
 
 /**
+ * What the answers this run replayed cost when they were bought.
+ *
+ * `undefined` when nothing was replayed: a column of zeros would read as "the store answered nothing",
+ * and the honest statement about a live run is that there is no replay to report. Rows whose store
+ * entry has no meters are counted in `unpriced` rather than priced at zero — the second is a claim, the
+ * first is a fact, and the difference is the whole reason this function exists.
+ */
+export function replayedCost(model: string, outcomes: readonly ModelOutcome[]): ReplayedCost | undefined {
+  const replayed = outcomes.filter((outcome) => outcome.answer.replayed !== undefined || outcome.answer.unmetered === true);
+  if (replayed.length === 0) return undefined;
+  let promptTokens = 0;
+  let completionTokens = 0;
+  let cachedPromptTokens = 0;
+  let unpriced = 0;
+  for (const outcome of replayed) {
+    const usage = outcome.answer.replayed;
+    if (usage === undefined) {
+      unpriced += 1;
+      continue;
+    }
+    promptTokens += usage.promptTokens;
+    completionTokens += usage.completionTokens;
+    cachedPromptTokens += usage.cachedPromptTokens ?? 0;
+  }
+  const yuan = billOf(model, { promptTokens, completionTokens, cachedPromptTokens });
+  return {
+    rows: replayed.length,
+    promptTokens,
+    completionTokens,
+    cachedPromptTokens,
+    ...(yuan === undefined ? {} : { yuan }),
+    unpriced,
+  };
+}
+
+/**
  * Price one model's answers on one scale.
  *
  * The mark scale is `scoreAnswers`, which is the function `scoreProfile` calls: `model.top1 -
@@ -570,6 +684,7 @@ export function scoreArm(rows: readonly ProfileInput[], outcomes: readonly Model
     completionTokens: options.usage.completionTokens,
     cachedPromptTokens: options.usage.cachedPromptTokens,
   });
+  const replayed = replayedCost(options.model, outcomes);
   const base: ArmBase = {
     model: options.model,
     options: options.options,
@@ -582,6 +697,7 @@ export function scoreArm(rows: readonly ProfileInput[], outcomes: readonly Model
     cost: {
       ...options.usage,
       ...(yuan === undefined ? {} : { yuan, perRowYuan: outcomes.length === 0 ? 0 : yuan / outcomes.length }),
+      ...(replayed === undefined ? {} : { replayed }),
     },
     cache: options.cache,
   };
@@ -689,6 +805,14 @@ export function describeArm(report: ArmReport): readonly string[] {
   ];
   if (report.cost.yuan !== undefined) {
     cost.push(`    cost ${formatYuan(report.cost.yuan)}, ${formatYuan(report.cost.perRowYuan ?? 0)} per row`);
+  }
+  if (report.cost.replayed !== undefined) {
+    const replayed = report.cost.replayed;
+    // Said as two facts, because it is two: how many answers this run did not buy, and what they cost
+    // when they were bought. A resumed run's own bill is nearly nothing and says nothing about the price.
+    const price = replayed.yuan === undefined ? 'unpriced model' : formatYuan(replayed.yuan);
+    const unknown = replayed.unpriced === 0 ? '' : `, ${String(replayed.unpriced)} of them unmetered`;
+    cost.push(`    replayed ${String(replayed.rows)} answers bought for ${price}${unknown}`);
   }
   if (report.scale === 'mark') {
     return [

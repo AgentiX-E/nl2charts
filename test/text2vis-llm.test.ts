@@ -412,6 +412,57 @@ describe('scoring one arm', () => {
     expect(describeArm(report).join('\n')).toContain('per row');
   });
 
+  it('reports what a replayed answer cost when it was bought, beside what this run spent', () => {
+    // A resumed run spends almost nothing and reports almost nothing, which is true of the run and false
+    // of the reading: the first dispatch bought 1,469 reasoning answers and died on a deadline before
+    // printing a bill, and the second one printed Y0.0033 for a reading that cost far more. So the row
+    // that came from the store carries the meters it was bought with, and the arm publishes the two
+    // sums apart — `cost` is this run, `cost.replayed` is the answers this run did not have to buy.
+    const answered = [
+      { ...outcome(rows[0] as ProfileInput, 'line'), answer: { choice: 'line', reply: 'line', truncated: false, replayed: { promptTokens: 500, completionTokens: 5, cachedPromptTokens: 0 } } },
+      { ...outcome(rows[1] as ProfileInput, 'bar'), answer: { choice: 'bar', reply: 'bar', truncated: false, replayed: { promptTokens: 500, completionTokens: 5, cachedPromptTokens: 0 } } },
+      { ...outcome(rows[2] as ProfileInput, 'pie'), answer: { choice: 'pie', reply: 'pie', truncated: false, unmetered: true as const } },
+    ];
+    const report = scoreArm(rows, answered, { model: 'deepseek-chat', options: markOptions(), request: REQUEST, usage, cache }, 'mark');
+    // One call's usage, which is what this run spent — not three answers' worth.
+    expect(report.cost.calls).toBe(usage.calls);
+    expect(report.cost.replayed).toEqual({
+      rows: 3,
+      promptTokens: 1000,
+      completionTokens: 10,
+      cachedPromptTokens: 0,
+      yuan: expect.closeTo(0.00208, 8),
+      unpriced: 1,
+    });
+    expect(describeArm(report).join('\n')).toContain('replayed');
+    // A row bought by an earlier run is not a row this run paid for, and the two are printed apart for
+    // exactly that reason; folding them together would report a reading nobody can afford as free.
+    expect(report.cost.promptTokens).not.toBe(report.cost.replayed?.promptTokens);
+  });
+
+  it('says a replayed answer is unpriced rather than free when the rate table has no rate', () => {
+    // The two unknowns are separate: an unpriced *model* means nobody wrote down the rate, and an
+    // `unmetered` row means nobody wrote down the tokens. Printing either as Y0 is a claim the reading
+    // cannot support, and the one it would support is that the reading cost nothing.
+    const answered = [
+      { ...outcome(rows[0] as ProfileInput, 'line'), answer: { choice: 'line', reply: 'line', truncated: false, unmetered: true as const } },
+      { ...outcome(rows[1] as ProfileInput, 'bar'), answer: { choice: 'bar', reply: 'bar', truncated: false, replayed: { promptTokens: 10, completionTokens: 1 } } },
+    ];
+    const report = scoreArm(rows, answered, { model: 'unpriced-model', options: markOptions(), request: REQUEST, usage, cache }, 'mark');
+    expect(report.cost.replayed).toEqual({ rows: 2, promptTokens: 10, completionTokens: 1, cachedPromptTokens: 0, unpriced: 1 });
+    const log = describeArm(report).join('\n');
+    expect(log).toContain('replayed 2 answers bought for unpriced model, 1 of them unmetered');
+    expect(log).not.toContain('cost Y0');
+  });
+
+  it('leaves the replay column off a run that bought every answer itself', () => {
+    const report = scoreArm(rows, rows.map((input) => outcome(input, 'line')), { model: 'deepseek-chat', options: markOptions(), request: REQUEST, usage, cache }, 'mark');
+    // Absent rather than zero: a column of zeros reads as "the store answered nothing", and the honest
+    // statement about a live run is that there is no replay to report.
+    expect(report.cost.replayed).toBeUndefined();
+    expect(describeArm(report).join('\n')).not.toContain('replayed');
+  });
+
   it('prices a model the table has no rate for without inventing one', () => {
     const outcomes = [outcome(rows[0] as ProfileInput, 'line')];
     const report = scoreArm(rows, outcomes, { model: 'unpriced-model', options: markOptions(), request: REQUEST, usage, cache }, 'mark');
@@ -784,6 +835,47 @@ describe('an arm on a model that thinks aloud', () => {
 });
 
 describe('the record a second run reads', () => {
+  it('keeps the meters beside the answer, and gives them back with the row it replays', async () => {
+    const cache = openStore<ModelRow & { model: string }>(join(root, 'meters'), 1, replyOf);
+    const provider = scripted(() => 'line');
+    const request = { question: 'How has revenue changed over time?', options: markOptions() };
+    const fresh = await askOnce(provider, request, { cache, maxTokens: 32 });
+    // A live answer carries no replay: its tokens are already in the caller's meter, and a second
+    // charge for the same tokens would inflate exactly the rows whose cost is under review.
+    expect(fresh.replayed).toBeUndefined();
+    const replayed = await askOnce(provider, request, { cache, maxTokens: 32 });
+    expect(provider.calls()).toBe(1);
+    expect(replayed.replayed).toEqual({ promptTokens: 120, completionTokens: 2, cachedPromptTokens: 0 });
+    expect(replayed.choice).toBe('line');
+  });
+
+  it('replays an entry written before the store kept meters without inventing a number', async () => {
+    // The store this round read was written before the field existed, so every answer in it is
+    // unmetered: the run can say how many answers it replayed and cannot say what they cost, and those
+    // are two different statements that must not be collapsed into "free".
+    const cache = openStore<ModelRow & { model: string }>(join(root, 'unmetered'), 1, replyOf);
+    const { mkdir, readdir, readFile, writeFile } = await import('node:fs/promises');
+    await mkdir(join(root, 'unmetered'), { recursive: true });
+    const provider = scripted(() => 'line');
+    const request = { question: 'How has revenue changed over time?', options: markOptions() };
+    await askOnce(provider, request, { cache, maxTokens: 32 });
+    // Rewrite the entry the way the previous version wrote it: every field but `usage`. The store
+    // shards by key, so the walk is recursive — a flat `readdir` gets a directory and reads it.
+    const files = (await readdir(join(root, 'unmetered'), { recursive: true })).filter((name) => name.endsWith('.json'));
+    expect(files).toHaveLength(1);
+    for (const name of files) {
+      const path = join(root, 'unmetered', name);
+      const stored = JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>;
+      delete stored['usage'];
+      await writeFile(path, JSON.stringify(stored));
+    }
+    const second = openStore<ModelRow & { model: string }>(join(root, 'unmetered'), 1, replyOf);
+    const replayed = await askOnce(scripted(() => 'bar'), request, { cache: second, maxTokens: 32 });
+    expect(replayed.choice).toBe('line');
+    expect(replayed.replayed).toBeUndefined();
+    expect(replayed.unmetered).toBe(true);
+  });
+
   it('accepts the row it wrote and refuses one it cannot stand behind', () => {
     const good = { version: 1, model: 'deepseek-chat', choice: 'bar', reply: 'bar', truncated: false };
     expect(replyOf(good, { model: 'deepseek-chat' })).toEqual({
@@ -807,6 +899,27 @@ describe('the record a second run reads', () => {
     expect(replyOf({ ...good, model: undefined }, undefined)).toBeUndefined();
     expect(replyOf({ ...good, choice: 42 }, undefined)).toBeUndefined();
     expect(replyOf(good, { model: 'another-chat' })).toBeUndefined();
+    // The meters are numbers or nothing: a string, a half-written object or a negative count is a record
+    // this reader will not serve, because a bill computed from it would be a bill about nothing.
+    expect(replyOf({ ...good, usage: { promptTokens: 120, completionTokens: 2, cachedPromptTokens: 0 } }, undefined)?.usage).toEqual({
+      promptTokens: 120,
+      completionTokens: 2,
+      cachedPromptTokens: 0,
+    });
+    expect(replyOf({ ...good, usage: { promptTokens: '120' } }, undefined)).toBeUndefined();
+    // A provider that reports no cache-hit count is read as no hits, which overstates the bill rather
+    // than understating it — the direction a bill should err in. Half a record is still refused: a
+    // prompt count with no completion count is a file that was cut while it was written.
+    expect(replyOf({ ...good, usage: { promptTokens: 120, completionTokens: 2 } }, undefined)?.usage).toEqual({
+      promptTokens: 120,
+      completionTokens: 2,
+      cachedPromptTokens: 0,
+    });
+    expect(replyOf({ ...good, usage: { promptTokens: 120 } }, undefined)).toBeUndefined();
+    expect(replyOf({ ...good, usage: { promptTokens: -1, completionTokens: 2, cachedPromptTokens: 0 } }, undefined)).toBeUndefined();
+    expect(replyOf({ ...good, usage: { promptTokens: 120, completionTokens: 2, cachedPromptTokens: -1 } }, undefined)).toBeUndefined();
+    expect(replyOf({ ...good, usage: null }, undefined)).toBeUndefined();
+    expect(replyOf({ ...good, usage: 'metres' }, undefined)).toBeUndefined();
   });
 });
 
