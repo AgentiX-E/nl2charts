@@ -166,7 +166,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: eval/.cache/text2vis/llm-choices
-          key: text2vis-llm-answers-v2-${{ steps.instrument.outputs.slug }}-${{ steps.corpus.outputs.digest }}-${{ hashFiles('eval/text2vis/llm.ts', 'eval/text2vis/content-store.ts') }}
+          key: text2vis-llm-answers-v2-${{ steps.instrument.outputs.slug }}-${{ steps.corpus.outputs.digest }}-${{ hashFiles('eval/text2vis/llm.ts', 'eval/text2vis/content-store.ts', 'eval/text2vis/repair.ts', 'packages/chart/src/assist.ts') }}
           # The last line is the frozen v1 archive: not a target, a seed. The store is
           # content-addressed, so an answer bought under the old request is a hit only where the
           # request is unchanged and a miss everywhere else — restoring it costs a download, and not
@@ -186,7 +186,13 @@ jobs:
           pnpm bench:text2vis:llm --artifact eval/out/text2vis-llm.json \
             --scales "${{ inputs.scales }}" $LIMIT
 
-      # Before the gate, not after it. What this step saves was paid for by the step above, and the
+      # The second question, on the rows the table refused. One call per refused row — 223 of 1,470 on
+      # this corpus, about ¥0.06 — and it runs *before* the save below, because its answers go into the
+      # same content-addressed store and a dispatch that restored them should not pay for them again.
+      - name: Ask the refused rows the narrower question
+        run: pnpm bench:text2vis:repair --answers eval/out/text2vis-llm.json --artifact eval/out/text2vis-repair.json
+
+      # Before the gate, not after it. What this step saves was paid for by the steps above, and the
       # reading it produced is a separate question: a run that misses its floor has still bought its
       # answers, and the next dispatch should not buy them again.
       - name: Keep what this run paid for
@@ -226,7 +232,7 @@ jobs:
       # A policy that reads well in a table and a product that behaves differently are two claims, and
       # only one of them is worth publishing. Costs nothing: the answers are already on disk.
       - name: Ship the winning policy and prove it is the product
-        run: pnpm bench:text2vis:ship --answers eval/out/text2vis-llm.json --artifact eval/out/text2vis-ship.json
+        run: pnpm bench:text2vis:ship --answers eval/out/text2vis-llm.json --repair eval/out/text2vis-repair.json --artifact eval/out/text2vis-ship.json
 
       # The gate on that reading: the product's decision must be the arbitration's policy, every row
       # must be decided by exactly one side, and a chart may only differ from the decision when a veto
@@ -258,6 +264,15 @@ jobs:
         with:
           name: text2vis-ship
           path: eval/out/text2vis-ship.json
+
+      - name: Upload the second question
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: text2vis-repair
+          path: eval/out/text2vis-repair.json
+          if-no-files-found: warn
+          retention-days: 90
           if-no-files-found: warn
           retention-days: 90
 

@@ -207,7 +207,7 @@ export interface ModelRow {
  * copied between two cache directories answers a key with an entry another model wrote, and scoring
  * that answer would be this file reading a model it did not ask.
  */
-interface StoredRow extends ModelRow {
+export interface StoredRow extends ModelRow {
   readonly model: string;
 }
 
@@ -678,8 +678,13 @@ export interface ArmSettings {
   readonly log?: (line: string) => void;
 }
 
-/** How many calls are in flight at once. The same shape `eval/live/run.ts` uses. */
-async function pool<T, R>(items: readonly T[], limit: number, worker: (item: T) => Promise<R>): Promise<R[]> {
+/**
+ * How many calls are in flight at once. The same shape `eval/live/run.ts` uses.
+ *
+ * Exported because `repair.ts` asks a second question over a subset of these rows and must spread it
+ * the same way: a concurrency chosen twice is two different wall clocks behind one reading.
+ */
+export async function pool<T, R>(items: readonly T[], limit: number, worker: (item: T) => Promise<R>): Promise<R[]> {
   const results = new Array<R>(items.length);
   let cursor = 0;
   const runners = Array.from({ length: Math.min(Math.max(1, limit), items.length) }, async () => {

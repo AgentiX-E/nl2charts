@@ -38,7 +38,7 @@
  *    every reason the table answered is counted and published beside the score.
  */
 import { applyExitCode, isEntry, loadText2Vis, type LoadOptions } from './dataset.js';
-import { assistedChartIR, assistedMark, type MarkName } from '@agentix-e/nl2charts-chart';
+import { assistedChartIR, assistedMark, MARK_OPTIONS, type MarkAdvisor, type MarkName, type MarkOption } from '@agentix-e/nl2charts-chart';
 import { POLICIES, disputeOf, type Policy } from './arbitrate.js';
 import { markAnswer, rosterOf, scoredRows, type ArmReport } from './llm.js';
 import { parseResultSet, scoreAnswers, typedRows, type ProfileInput } from './profile.js';
@@ -53,14 +53,24 @@ export interface ShipRow {
   readonly source: 'model' | 'product';
   readonly product: MarkName;
   readonly reason?: ShipReason;
+  /** The model's first answer was refused by this table and its second one was drawn. */
+  readonly repaired?: true;
 }
 
 /** The counts behind one rate. */
 export interface ShipCounts {
   readonly hit: number;
   readonly share: number;
-  /** Rows the model decided. */
+  /** Rows the model decided on its first answer. */
   readonly fromModel: number;
+  /**
+   * Rows the model decided on its *second* answer, after the table refused the first.
+   *
+   * Separate from `fromModel` rather than folded into it for the reason every other counter here is
+   * separate: a repair is a call that only happened because the first answer was impossible, and a
+   * reading that adds the two reports a gain the caller paid for as if it were free.
+   */
+  readonly repaired: number;
   /** Rows the table decided, for any of the reasons below. */
   readonly fromProduct: number;
   readonly reasons: Readonly<Record<ShipReason, number>>;
@@ -124,9 +134,11 @@ export function countsOf(
   });
   const reasons = emptyReasons();
   let fromModel = 0;
+  let repaired = 0;
   for (const decision of decisions) {
     if (decision.source === 'model') {
-      fromModel += 1;
+      if (decision.repaired === true) repaired += 1;
+      else fromModel += 1;
       continue;
     }
     // A table-decided row has exactly one reason, and the type says so: `reason` is required whenever
@@ -136,7 +148,14 @@ export function countsOf(
     if (reason === undefined) throw new Error('text2vis ship: a table-decided row carries no reason');
     reasons[reason] += 1;
   }
-  return { hit: scored.top1, share: scored.top1Share, fromModel, fromProduct: decisions.length - fromModel, reasons };
+  return {
+    hit: scored.top1,
+    share: scored.top1Share,
+    fromModel,
+    repaired,
+    fromProduct: decisions.length - fromModel - repaired,
+    reasons,
+  };
 }
 
 /**
@@ -166,17 +185,28 @@ export function artifactAdvisor(
 }
 
 /**
- * Which of the two answers a chart took, and a refusal when it took a third.
+ * Which of the answers a chart took, and a refusal when it took something else.
  *
- * There are exactly two answers in this system — the model's and the table's — so a chart that is
- * neither is a defect no reading should absorb. `arbitrate.ts` guards the same property for the
- * policy (`side !== modelLead` throws); this is the same guard on the shipped path, which is the one a
- * caller can actually receive. A pure function rather than a closure because the third-answer branch
- * cannot occur in a run — the types say so — and a branch nobody can reach is a branch nobody can
- * test, which is how a guard rots.
+ * There are three answers a chart can be, and the third one is not a loophole: the model's first
+ * answer, the model's second answer after the table refused the first, and the table's. A chart that
+ * is none of them is a defect no reading should absorb — `arbitrate.ts` guards the same property for
+ * the policy (`side !== modelLead` throws), and this is the guard on the shipped path, which is the
+ * one a caller can actually receive. A pure function rather than a closure because the third-answer
+ * branch cannot occur in a run — the types say so — and a branch nobody can reach is a branch nobody
+ * can test, which is how a guard rots.
  */
-export function routedBy(index: number, decided: MarkName, product: MarkName, shipped: MarkName): 'same' | 'table' {
+export function routedBy(
+  index: number,
+  decided: MarkName,
+  product: MarkName,
+  shipped: MarkName,
+  repaired = false,
+): 'same' | 'repair' | 'table' {
   if (shipped === decided) return 'same';
+  // Tested before the table's answer: a repair that happened to land on the table's mark is still a
+  // second question that was asked and paid for, and counting it as the table's answer would make the
+  // table look smarter than it was on exactly the rows the repair rescued.
+  if (repaired) return 'repair';
   if (shipped === product) return 'table';
   throw new Error(
     `text2vis ship: row ${String(index)} decided ${decided}, shipped ${shipped}, and the table answers ${product}; a chart may only be one of the two`,
@@ -207,6 +237,138 @@ export function chartAdvisor(
 }
 
 /**
+ * Which question an answer belongs to: the sentence, plus the list it was asked over.
+ *
+ * The second question is not identified by its row — a row can carry two answers — but by its
+ * *option list*, which is the only thing that differs between them. Two rows with the same question
+ * and the same table are therefore one question and one answer, which is also how the store keys
+ * them: the key is a hash of exactly this material.
+ */
+export function answerKey(question: string, options: readonly { readonly name: string }[]): string {
+  return `${question}\u0000${options.map((option) => option.name).join(',')}`;
+}
+
+/** One second question the chart pass needs an answer to. */
+export interface RepairAsk {
+  /** Index in the population, so a caller can score the answer against the row it was asked about. */
+  readonly row: number;
+  readonly question: string;
+  readonly options: readonly MarkOption[];
+}
+
+/**
+ * Draw every row, twice if a row is refused, and report what was drawn.
+ *
+ * The two passes in `shipReport` differ only in whether a repair is on the table. Factoring the
+ * drawing out is what lets `repairAsks` compute the *set* of second questions by running the same
+ * code that will ask them, rather than by restating the rule that decides which rows need one. A
+ * restated rule is the defect this repository keeps finding: it agrees with the code until the day
+ * one of them changes.
+ *
+ * `onRow` exists for the same reason: an advisor is called about a question, not about a row, and a
+ * caller that needs to know which row is being drawn cannot recover it afterwards — a wide table is
+ * skipped, so the advisor's own call count is not the row index.
+ */
+async function drawAll(
+  rows: readonly ProfileInput[],
+  options: {
+    readonly advisor: MarkAdvisor;
+    readonly repair: boolean;
+    readonly onRow?: (index: number) => void;
+  },
+): Promise<{ readonly marks: MarkName[]; readonly decisions: ShipRow[] }> {
+  const marks: MarkName[] = [];
+  const decisions: ShipRow[] = [];
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index] as ProfileInput;
+    const set = parseResultSet(row.tableData);
+    options.onRow?.(index);
+    try {
+      const chart = await assistedChartIR(row.prompt, typedRows(set), {
+        columns: set.columns,
+        advisor: options.advisor,
+        repair: options.repair,
+      });
+      marks.push(chart.decision.mark);
+      decisions.push({
+        mark: chart.decision.mark,
+        source: chart.decision.source,
+        product: chart.decision.product,
+        ...(chart.decision.fallback === undefined ? {} : { reason: chart.decision.fallback }),
+        ...(chart.decision.veto === undefined ? {} : { reason: chart.decision.veto }),
+        ...(chart.decision.repaired === undefined ? {} : { repaired: true as const }),
+      });
+    } catch {
+      // A result set no mark can hold. The table's published reading counts these as `declined`, and so
+      // does this pass: a row with no chart is not a row with a wrong chart.
+      marks.push('declined');
+      decisions.push({ mark: 'declined', source: 'product', product: 'declined', reason: 'unchartable' });
+    }
+  }
+  return { marks, decisions };
+}
+
+/**
+ * The advisor a replayed repair reads: question one from the arm, question two from the repair file.
+ *
+ * The two are told apart by the list, and the difference is structural rather than conventional:
+ * question two is always a strict subset of the roster, because the mark that was just refused is
+ * not on it. `missing` is the reason this returns `undefined` instead of throwing — a throw would be
+ * caught by `assistedChartIR` and become a quiet fallback, and a repair that is not on disk must be a
+ * refusal to publish, not a row answered by the table. `shipReport` turns the list into that refusal.
+ */
+export function repairAdvisor(
+  first: (question: string) => Promise<string | undefined>,
+  answers: ReadonlyMap<string, string | undefined>,
+  missing: string[],
+): MarkAdvisor {
+  return async (question, options) => {
+    if (options.length === MARK_OPTIONS.length) return first(question);
+    const key = answerKey(question, options);
+    if (!answers.has(key)) {
+      missing.push(key);
+      return undefined;
+    }
+    return answers.get(key);
+  };
+}
+
+/**
+ * The second questions the chart pass will ask, computed by asking it.
+ *
+ * The advisor answers question one and declines question two, so `assistedChartIR` falls back exactly
+ * where it would without a repair and *records* each question two on the way. Running the pass is the
+ * point: a repair set computed from the artifact alone would be a second opinion about which rows are
+ * refused, and a row added to one side and not the other is a row whose second answer is never asked
+ * for and never checked.
+ *
+ * One entry per *row*, not per question: two rows that share a question and a table are one question
+ * and one call — the store folds them — but they are two rows of the reading, and a caller that
+ * deduplicated here could not say how many rows the second question rescued.
+ */
+export async function repairAsks(
+  rows: readonly ProfileInput[],
+  choices: readonly (string | null)[],
+): Promise<{ readonly refused: number; readonly asks: readonly RepairAsk[] }> {
+  const first = chartAdvisor(rows, choices);
+  const asks: RepairAsk[] = [];
+  let at = 0;
+  const advisor: MarkAdvisor = async (question, options) => {
+    if (options.length === MARK_OPTIONS.length) return first(question);
+    asks.push({ row: at, question, options });
+    return undefined;
+  };
+  const drawn = await drawAll(rows, { advisor, repair: true, onRow: (index) => { at = index; } });
+  // Two numbers, not one. `refused` is every row whose first answer its table refused; `asks` is the
+  // subset a second question can help — a table that holds one mark is not asked. Reporting only the
+  // second would hide the first, and the difference between them is a fact about the corpus: on
+  // Text2Vis it is 23 rows out of 223, and a reader comparing this file with `ship.json` would find
+  // them by subtraction and have no name for them.
+  const refused = drawn.decisions.filter((decision) => decision.reason === 'not-admitted').length;
+  return { refused, asks };
+}
+
+/**
  * Price the shipped path on the rows the artifact answered.
  *
  * Both passes run over the same population, in the same order, and the divergence list is built during
@@ -218,7 +380,7 @@ export async function shipReport(
   choices: readonly (string | null)[],
   model: string,
   population: { readonly roster: string },
-  options: { readonly policies?: readonly Policy[] } = {},
+  options: { readonly policies?: readonly Policy[]; readonly repair?: ReadonlyMap<string, string | undefined> } = {},
 ): Promise<ShipReport> {
   if (rows.length !== choices.length) {
     throw new Error(
@@ -259,48 +421,38 @@ export async function shipReport(
     if (expected !== decision.mark) divergence.push({ row: index, policy: expected, shipped: decision.mark });
   }
 
-  // The second pass is the chart a caller receives. Its advisor is the same answers, read the same way;
-  // a wide table never reaches it, which is the 144 calls this pass does not spend.
+  // The second pass is the chart a caller receives. Its advisor is the same answers, read the same
+  // way; a wide table never reaches it, which is the 144 calls this pass does not spend. When a repair
+  // file is given, the same pass also asks the refused rows' second question — and refuses to publish
+  // if one of those questions has no answer on disk.
   const chartAnswers = chartAdvisor(rows, choices);
-  const shippedMarks: MarkName[] = [];
-  const shippedRows: ShipRow[] = [];
-  /** Every row whose chart is not the decision, and every one of them must be the table's answer. */
+  const missing: string[] = [];
+  const advisor = options.repair === undefined ? chartAnswers : repairAdvisor(chartAnswers, options.repair, missing);
+  const drawn = await drawAll(rows, { advisor, repair: options.repair !== undefined });
+  if (missing.length > 0) {
+    const first = (missing[0] as string).split('\u0000')[0] as string;
+    throw new Error(
+      `text2vis ship: ${String(missing.length)} second question(s) have no answer in the repair artifact, the first asked about "${first}"; a repair that is not on disk is a row silently answered by the table`,
+    );
+  }
+  /** Every row whose chart is not the decision, and every one of them must be a repair or the table's answer. */
   let changed = 0;
   for (let index = 0; index < rows.length; index += 1) {
-    const row = rows[index] as ProfileInput;
-    const set = parseResultSet(row.tableData);
-    try {
-      const chart = await assistedChartIR(row.prompt, typedRows(set), {
-        columns: set.columns,
-        advisor: chartAnswers,
-      });
-      if (routedBy(index, decidedMarks[index] as MarkName, (decisionRows[index] as ShipRow).product, chart.decision.mark) === 'table') {
-        changed += 1;
-      }
-      shippedMarks.push(chart.decision.mark);
-      shippedRows.push({
-        mark: chart.decision.mark,
-        source: chart.decision.source,
-        product: chart.decision.product,
-        ...(chart.decision.fallback === undefined ? {} : { reason: chart.decision.fallback }),
-        ...(chart.decision.veto === undefined ? {} : { reason: chart.decision.veto }),
-      });
-    } catch {
-      // A result set no mark can hold. The table's published reading counts these as `declined`, and so
-      // does this pass: a row with no chart is not a row with a wrong chart.
-      if (routedBy(index, decidedMarks[index] as MarkName, (decisionRows[index] as ShipRow).product, 'declined') === 'table') {
-        changed += 1;
-      }
-      shippedMarks.push('declined');
-      shippedRows.push({ mark: 'declined', source: 'product', product: 'declined', reason: 'unchartable' });
-    }
+    const routed = routedBy(
+      index,
+      decidedMarks[index] as MarkName,
+      (decisionRows[index] as ShipRow).product,
+      drawn.marks[index] as MarkName,
+      (drawn.decisions[index] as ShipRow).repaired === true,
+    );
+    if (routed !== 'same') changed += 1;
   }
 
   return {
     model,
     population: { scored: rows.length, roster },
     decided: countsOf(rows, decidedMarks, decisionRows),
-    shipped: countsOf(rows, shippedMarks, shippedRows),
+    shipped: countsOf(rows, drawn.marks, drawn.decisions),
     changed,
     divergence,
   };
@@ -325,9 +477,11 @@ export function assertShip(report: ShipReport): void {
     ['decided', report.decided],
     ['shipped', report.shipped],
   ] as const) {
-    if (counts.fromModel + counts.fromProduct !== scored) {
+    // Three sources and no fourth: a row is the model's first answer, the model's second one, or the
+    // table's. A total that is not the population is a row counted twice or a source invented.
+    if (counts.fromModel + counts.repaired + counts.fromProduct !== scored) {
       throw new Error(
-        `text2vis ship: ${name} split ${String(counts.fromModel)} model and ${String(counts.fromProduct)} table over a population of ${String(scored)}`,
+        `text2vis ship: ${name} splits ${String(counts.fromModel)} first answers, ${String(counts.repaired)} repairs and ${String(counts.fromProduct)} table answers over a population of ${String(scored)}`,
       );
     }
     const reasons = REASONS.reduce((sum, reason) => sum + counts.reasons[reason], 0);
@@ -343,13 +497,13 @@ export function assertShip(report: ShipReport): void {
     }
     if (counts.share > 1) throw new Error(`text2vis ship: ${name} has a share above one, which is not a rate`);
   }
-  // A charter can only change a row it vetoed, and it can only change it to the table's answer —
-  // `shipReport` checks that row by row. What is left to check here is the arithmetic: the number of
-  // changed rows cannot exceed the number of rows a veto explains.
+  // A chart can only change a row it vetoed, and it can only change it to the table's answer or to the
+  // model's second one — `shipReport` checks that row by row. What is left to check here is the
+  // arithmetic: the number of changed rows cannot exceed the rows a veto or a repair explains.
   const vetoes = report.shipped.reasons.wide + report.shipped.reasons['not-admitted'] + report.shipped.reasons.unchartable;
-  if (report.changed > vetoes) {
+  if (report.changed > vetoes + report.shipped.repaired) {
     throw new Error(
-      `text2vis ship: ${String(report.changed)} rows differ from the decision and only ${String(vetoes)} were vetoed`,
+      `text2vis ship: ${String(report.changed)} rows differ from the decision and only ${String(vetoes)} were vetoed and ${String(report.shipped.repaired)} repaired`,
     );
   }
 }
@@ -362,9 +516,9 @@ export function describeShip(report: ShipReport, model = report.model): readonly
   return [
     `\n  shipped path on ${String(report.population.scored)} rows against ${model}`,
     `    decided  ${String(report.decided.hit)} (${share(report.decided.share)})  model ${String(report.decided.fromModel)}, table ${String(report.decided.fromProduct)}`,
-    `    shipped  ${String(report.shipped.hit)} (${share(report.shipped.share)})  model ${String(report.shipped.fromModel)}, table ${String(report.shipped.fromProduct)}`,
+    `    shipped  ${String(report.shipped.hit)} (${share(report.shipped.share)})  model ${String(report.shipped.fromModel)} first, ${String(report.shipped.repaired)} repaired, table ${String(report.shipped.fromProduct)}`,
     `    reasons  ${reasons(report.shipped)}`,
-    `    changed  ${String(report.changed)} row(s) drew the table s answer instead of the decision s`,
+    `    changed  ${String(report.changed)} row(s) drew an answer other than the decision s`,
     `    route agrees with model-holds on ${String(report.population.scored - report.divergence.length)} of ${String(report.population.scored)} rows`,
   ];
 }
@@ -380,11 +534,53 @@ export function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * The repair artifact, read and checked: one answer per (question, list).
+ *
+ * Checked rather than trusted, for the reason every reader in this file is: the file is written by a
+ * different process on a different machine, and a half-finished copy arrives as valid JSON. A row
+ * whose answer is a number, a list that is not a list of names, and two different answers to one
+ * question are three files this would otherwise place into a reading.
+ */
+export function repairAnswers(parsed: unknown): ReadonlyMap<string, string | undefined> {
+  const refuse = (why: string): never => {
+    throw new Error(`the repair artifact ${why}, so the second answers it holds cannot be placed`);
+  };
+  if (typeof parsed !== 'object' || parsed === null) refuse('is not an object');
+  const rows = (parsed as Record<string, unknown>)['rows'];
+  if (!Array.isArray(rows)) refuse('carries no rows array');
+  const answers = new Map<string, string | undefined>();
+  for (const entry of rows as readonly unknown[]) {
+    if (typeof entry !== 'object' || entry === null) refuse('carries a row that is not an object');
+    const row = entry as Record<string, unknown>;
+    const question = row['question'];
+    const options = row['options'];
+    const choice = row['choice'];
+    if (typeof question !== 'string') refuse('carries a row without a question');
+    if (!Array.isArray(options) || !(options as readonly unknown[]).every((name) => typeof name === 'string')) {
+      refuse(`carries a row for "${String(question)}" without an option list`);
+    }
+    if (choice !== null && choice !== undefined && typeof choice !== 'string') {
+      refuse(`carries an answer for "${String(question)}" that is not a name`);
+    }
+    const key = answerKey(question as string, (options as readonly string[]).map((name) => ({ name })));
+    const answer = typeof choice === 'string' ? choice : undefined;
+    // Two answers to one question is a file that was appended to by two runs, and picking either one
+    // would be this reader choosing which of them is the measurement.
+    if (answers.has(key) && answers.get(key) !== answer) {
+      refuse(`answers "${String(question as string)}" twice, and the two answers differ`);
+    }
+    answers.set(key, answer);
+  }
+  return answers;
+}
+
 export interface ShipArgs {
   readonly json: boolean;
   readonly answers: string;
   readonly artifact?: string;
   readonly model?: string;
+  readonly repair?: string;
 }
 
 /** Parse the command line, refusing anything it does not use — the reason `parseLlmArgs` gives. */
@@ -393,29 +589,37 @@ export function parseShipArgs(argv: readonly string[]): ShipArgs {
   let answers: string | undefined;
   let artifact: string | undefined;
   let model: string | undefined;
+  let repair: string | undefined;
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index] as string;
     if (flag === '--json') {
       json = true;
       continue;
     }
-    if (flag === '--answers' || flag === '--artifact' || flag === '--model') {
+    if (flag === '--answers' || flag === '--artifact' || flag === '--model' || flag === '--repair') {
       const value = argv[index + 1];
       if (value === undefined || value.startsWith('--')) throw new Error(`${flag} needs a path or a name`);
       if (flag === '--answers') answers = value;
       else if (flag === '--artifact') artifact = value;
+      else if (flag === '--repair') repair = value;
       else model = value;
       index += 1;
       continue;
     }
     throw new Error(
-      `unknown argument ${flag}: this command asks nothing to a model and prices the shipped path against answers already on disk, so it takes --json, --answers <path>, --artifact <path> and --model <name>`,
+      `unknown argument ${flag}: this command asks nothing to a model and prices the shipped path against answers already on disk, so it takes --json, --answers <path>, --artifact <path>, --model <name> and --repair <path>`,
     );
   }
   if (answers === undefined) {
     throw new Error('--answers is required: this command prices the answers an arm already wrote, and takes the path to them');
   }
-  return { json, answers, ...(artifact === undefined ? {} : { artifact }), ...(model === undefined ? {} : { model }) };
+  return {
+    json,
+    answers,
+    ...(artifact === undefined ? {} : { artifact }),
+    ...(model === undefined ? {} : { model }),
+    ...(repair === undefined ? {} : { repair }),
+  };
 }
 
 /** The shape this command reads out of `llm.ts`'s artifact, checked rather than trusted. */
@@ -427,6 +631,27 @@ interface Reading {
 export interface ShipEntryOptions {
   readonly argv?: readonly string[];
   readonly load?: LoadOptions;
+}
+
+/** The repair file on disk, with the one check that makes it about *this* population. */
+async function readRepair(path: string, roster: string): Promise<ReadonlyMap<string, string | undefined>> {
+  const { readFile } = await import('node:fs/promises');
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await readFile(path, 'utf8'));
+  } catch (error) {
+    throw new Error(`${path} is not readable JSON: ${messageOf(error)}`);
+  }
+  const said = (parsed as { readonly population?: { readonly roster?: unknown } }).population?.roster;
+  if (typeof said !== 'string') {
+    throw new Error(`${path} carries no population.roster, so the rows its second answers were given to cannot be identified`);
+  }
+  if (said !== roster) {
+    throw new Error(
+      `${path} answered a different population (${said.slice(0, 12)}…) than the artifact on disk (${roster.slice(0, 12)}…)`,
+    );
+  }
+  return repairAnswers(parsed);
 }
 
 /**
@@ -469,7 +694,9 @@ export async function entryShip(
     if (!Array.isArray(choices) || !choices.every((choice) => choice === null || typeof choice === 'string')) {
       throw new Error(`${answersPath} carries no per-row choices for ${String(arm.model)}, so the rows it answered cannot be shipped; re-run the arm that wrote it`);
     }
-    const report = await shipReport(rows, choices as readonly (string | null)[], String(arm.model), { roster });
+    const report = await shipReport(rows, choices as readonly (string | null)[], String(arm.model), { roster }, {
+      ...(args.repair === undefined ? {} : { repair: await readRepair(args.repair, roster) }),
+    });
     assertShip(report);
     for (const line of describeShip(report)) log(line);
     if (args.json) log(JSON.stringify(report, null, 2));

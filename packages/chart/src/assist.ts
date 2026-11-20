@@ -32,6 +32,25 @@
  * availability is a function of somebody else's endpoint, and the rule table already answers every
  * question this corpus can ask.
  *
+ * ## The second question, and why the first one is not enough
+ *
+ * The first answer is given to a list of eleven marks, and the table can hold fewer than eleven of
+ * them. On this corpus that is not a corner: **223 rows** name a mark their own result set refuses,
+ * 159 of them `boxplot` on a table with no distribution in it. The model was answering a question
+ * whose option list contained marks this table could never draw, and the product then quietly
+ * replaced its answer with the rule table's — which is a fallback being reported as a decision.
+ *
+ * So `assistedChartIR` can ask again, over `admittedOptions`: the same question, the same
+ * instructions, a shorter list. It is opt-in (`repair: true`) because it is one extra call per
+ * *refused* row and a caller who has not measured the trade-off should not be paying for it. It
+ * never changes the first answer's role: `decided` in `eval/text2vis/ship.ts` is still one question
+ * per row, so the identity against the arbitration policy stays exact.
+ *
+ * The repair cannot rescue a wrong intent — a model that meant a boxplot and is offered `bar` may
+ * simply name `bar` — and it is not supposed to. It answers a narrower question: *of the pictures
+ * this table can actually make, which one did you mean?* Whether that is worth 223 calls is a
+ * measurement, and it is taken on the same 1,470 rows as every other reading here.
+ *
  * ## The reading this exists to move
  *
  * `eval/text2vis/arbitrate.ts` priced six ways to route between the table's answer and the model's,
@@ -87,6 +106,55 @@ export const MARK_GLOSS: Readonly<Record<RecommendableMark, string>> = {
 export const MARK_OPTIONS: readonly MarkOption[] = RECOMMENDABLE_MARKS.map((mark) => ({ name: mark, gloss: MARK_GLOSS[mark] }));
 
 /**
+ * The marks *this table* can hold, in the roster's order.
+ *
+ * The list a second question is asked over. It is computed by trying every mark through the same
+ * `toChartIR` that will draw the answer, which is the only definition of "drawable" that cannot drift
+ * from the drawing: a separate predicate over column types would be a second opinion about admissions,
+ * and the recommender already has one.
+ *
+ * Two properties are load-bearing downstream:
+ *
+ * - **It is shorter than `MARK_OPTIONS` whenever it is used**, because it is only built after a mark
+ *   was refused and that mark is not on it. Callers rely on the difference to tell the two questions
+ *   apart without being told which one they are answering.
+ * - **The order is `RECOMMENDABLE_MARKS`'s**, not the order the marks survived in. A prompt hashed
+ *   byte for byte is the cache key of the answer, so two implementations that agree on the set and
+ *   disagree on the order would buy the same answer twice and read it as two.
+ */
+export function admittedOptions(
+  question: string,
+  rows: readonly Readonly<Record<string, unknown>>[],
+  options: ChartIROptions = {},
+): readonly MarkOption[] {
+  const admitted: MarkOption[] = [];
+  for (const option of MARK_OPTIONS) {
+    try {
+      toChartIR(question, rows, { ...options, mark: option.name });
+      admitted.push(option);
+    } catch {
+      // The admission refused this mark for this table. Not an error: eleven refusals in a row is
+      // what an unchartable table looks like, and it is the caller's job to have asked `toChartIR`
+      // first — which `assistedChartIR` does, before it consults anybody.
+    }
+  }
+  return admitted;
+}
+
+/** The second question, or nothing — an advisor is somebody else's endpoint and may throw. */
+async function secondAnswer(
+  advisor: MarkAdvisor,
+  question: string,
+  options: readonly MarkOption[],
+): Promise<string | undefined> {
+  try {
+    return await advisor(question, options);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * A function that names a mark for a question, or declines to.
  *
  * `undefined` is a first-class answer and not an error: a model that says "none of these" is a model
@@ -117,9 +185,18 @@ export interface AssistedDecision {
    *
    * `wide` is the reshape: the table's columns are a timeline and one line per entity is the only
    * picture it produces, so the advisor was never asked. `not-admitted` is the recommender refusing
-   * the mark the advisor named — the same admission that would have refused it had the table named it.
+   * the mark the advisor named — the same admission that would have refused it had the table named it
+   * — *after* the second question was asked and did not answer it either.
    */
   readonly veto?: 'wide' | 'not-admitted';
+  /**
+   * The model's first answer was refused by this table, and its *second* answer was drawn.
+   *
+   * Present only on a row that reached the repair, which is why it is a flag rather than a field on
+   * every decision: a reading that cannot tell a first answer from a second reads as one model that
+   * agreed with itself, and the whole point of the second question is that it does not.
+   */
+  readonly repaired?: true;
 }
 
 /**
@@ -152,6 +229,15 @@ export async function assistedMark(
 /** The options `assistedChartIR` takes: everything `toChartIR` takes, plus the advisor. */
 export interface AssistingChartIROptions extends ChartIROptions {
   readonly advisor?: MarkAdvisor;
+  /**
+   * Ask a second question when the first answer names a mark this table cannot hold.
+   *
+   * Off by default, and the default is the acceptance criterion: with no advisor — or with an advisor
+   * and this flag absent — `assistedChartIR` returns what it returned before the flag existed, so a
+   * caller who does not opt in cannot pay for a call they did not ask for. What it costs when it is
+   * on: one call per *refused* row, not per row. On this corpus that is 223 of 1,470.
+   */
+  readonly repair?: boolean;
 }
 
 /** A chart and the decision that produced it, so a caller can log which one it got and why. */
@@ -208,9 +294,48 @@ export async function assistedChartIR(
       decision,
     };
   } catch {
-    // A name on the list that this result set still cannot hold: the recommender's admissions are the
-    // authority on what is drawable, and `toChartIR` refuses rather than emitting an encoding whose
-    // channel is undefined. The refusal is the veto — recorded, never silent.
+    // The name was on the roster and this result set still cannot hold it. That is a fact about the
+    // table, not about the model's intent — and it is the one case where a second question has
+    // something to add, because the model was answering a question whose option list contained marks
+    // this table could never draw.
+    const repaired = options.repair === true ? await repairMark(question, rows, chartOptions, advisor) : undefined;
+    if (repaired !== undefined) {
+      return {
+        ir: toChartIR(question, rows, { ...chartOptions, mark: repaired }),
+        decision: { mark: repaired, source: 'model', product, repaired: true },
+      };
+    }
+    // A name the table cannot hold, and no second answer that it can. The refusal is the veto —
+    // recorded, never silent, because a fallback nobody counts reads as a model that agreed.
     return { ir: productIr, decision: { ...decision, mark: product, source: 'product', veto: 'not-admitted' } };
   }
+}
+
+/**
+ * The second question, asked over the marks this table can hold.
+ *
+ * Three refusals to ask, and each of them is a call that would have been wasted or a reading that
+ * would have meant something else:
+ *
+ * 1. **Fewer than two drawable marks.** A question with one possible answer is not a question; the
+ *    model would be asked to name the only name and the answer would be the table's by construction.
+ * 2. **An answer outside the shorter list.** A model that writes a name the list does not carry is
+ *    not being asked a second time; it is declining, and the table already has an answer.
+ * 3. **An advisor that threw.** The endpoint is somebody else's, and a chart that fails because a
+ *    model timed out is a chart the user cannot have.
+ *
+ * The returned mark is always one of `admitted`, so the caller can encode it without a second
+ * admission check — and if that encode still throws, the caller's own `catch` is the honest answer.
+ */
+async function repairMark(
+  question: string,
+  rows: readonly Readonly<Record<string, unknown>>[],
+  options: ChartIROptions,
+  advisor: MarkAdvisor,
+): Promise<RecommendableMark | undefined> {
+  const admitted = admittedOptions(question, rows, options);
+  if (admitted.length < 2) return undefined;
+  const named = await secondAnswer(advisor, question, admitted);
+  if (named === undefined) return undefined;
+  return admitted.find((option) => option.name === named)?.name;
 }

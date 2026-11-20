@@ -101,6 +101,7 @@
     "bench:text2vis:control": "tsx eval/text2vis/judge.ts --control-only",
     "bench:text2vis:ablate": "tsx eval/text2vis/ablate.ts",
     "bench:text2vis:llm": "tsx eval/text2vis/llm.ts",
+    "bench:text2vis:repair": "tsx eval/text2vis/repair.ts",
     "bench:text2vis:arbitrate": "tsx eval/text2vis/arbitrate.ts",
     "bench:text2vis:ship": "tsx eval/text2vis/ship.ts",
     "bench:bill": "tsx eval/bill.ts"

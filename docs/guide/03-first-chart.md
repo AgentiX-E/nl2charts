@@ -347,6 +347,46 @@ model to a deterministic path:
   list of marks against the arm's gloss for gloss. A wording changed in one place
   and not the other would change the task without changing the measurement.
 
+#### Asking again, over the pictures this table can actually make
+
+The eleven-mark list is the same for every question, and a result set holds fewer
+than eleven of them. So a model can name a mark its own table refuses — `boxplot`
+for a table with no distribution in it — and the product then draws the rule
+table's answer instead. That is a real case, not a corner: **223 of the 1,470
+benchmark rows** name a mark their table cannot hold.
+
+`repair: true` asks a second question instead, over `admittedOptions` — the same
+instructions, a shorter list, computed by trying each mark through the same
+`toChartIR` that will draw the answer:
+
+```ts
+const { ir, decision } = await assistedChartIR(question, rows, {
+  columns: resultSet.columns,
+  advisor,
+  repair: true,
+});
+// decision: { mark: 'bar', source: 'model', product: 'gauge', repaired: true }
+// The first answer was `boxplot`; the table holds { bar, line, pie, funnel }; the
+// model was asked again and chose `bar`.
+```
+
+Three things it will not do:
+
+- **It is not asked when there is nothing to choose.** A table that holds one mark
+  is not asked a question with one answer, and a table whose rows cannot be drawn at
+  all is refused before anybody is consulted.
+- **It cannot rescue a wrong intent, and does not try.** A model that meant a
+  boxplot and is offered `bar` may simply choose `bar`. The question it answers is
+  narrower — *of the pictures this table can make, which one did you mean?* — and
+  whether that is worth the calls is a measurement, published in
+  [the benchmarks](../benchmarks.md), not an assumption here.
+- **It does not change the first answer's role.** `decision.mark` is the first
+  answer unless `repaired` is set, so a caller reading decisions sees one question
+  per row; the second one is reported separately, never folded in.
+
+The cost is bounded by refusals rather than by rows: one extra call only where the
+first answer was impossible, and none anywhere else.
+
 Cost is bounded by the shape of the call: one request per question, `max_tokens`
 96 (absent for an endpoint that thinks aloud), `temperature` 0, and the same
 prefix on every call so the provider's own cache bills it at the cached rate — at

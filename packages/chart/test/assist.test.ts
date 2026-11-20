@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { assistedChartIR, assistedMark, MARK_GLOSS, MARK_OPTIONS } from '../src/assist.js';
+import { admittedOptions, assistedChartIR, assistedMark, MARK_GLOSS, MARK_OPTIONS } from '../src/assist.js';
 import { RECOMMENDABLE_MARKS, toChartIR } from '../src/recommend.js';
 
 /**
@@ -164,5 +164,119 @@ describe('assistedChartIR', () => {
     });
     expect(JSON.stringify(assisted.ir)).toBe(JSON.stringify(plain));
     expect(assisted.decision.fallback).toBe('unavailable');
+  });
+});
+
+describe('admittedOptions', () => {
+  it('offers the marks this table can hold, in the roster s order', () => {
+    // The second question is only worth asking if its list is the drawing's list, so the test asks the
+    // drawer: every mark it offers must encode, and every mark it withholds must refuse.
+    const offered = admittedOptions('revenue by country', TABLE).map((option) => option.name);
+    expect(offered).toEqual(['bar', 'line', 'pie', 'funnel']);
+    const order = RECOMMENDABLE_MARKS.filter((mark) => offered.includes(mark));
+    expect(offered).toEqual([...order]);
+    for (const mark of RECOMMENDABLE_MARKS) {
+      const draws = (() => {
+        try {
+          toChartIR('revenue by country', TABLE, { mark });
+          return true;
+        } catch {
+          return false;
+        }
+      })();
+      expect(draws).toBe(offered.includes(mark));
+    }
+  });
+
+  it('offers one mark when the table holds one, which is why the second question is skipped', () => {
+    expect(admittedOptions('total revenue', SINGLE).map((option) => option.name)).toEqual(['gauge']);
+  });
+
+  it('offers nothing when nothing can be drawn, rather than inventing a list', () => {
+    expect(admittedOptions('nothing here', [])).toEqual([]);
+  });
+
+  it('carries the gloss with the name, because the gloss is half of the question', () => {
+    for (const option of admittedOptions('revenue by country', TABLE)) {
+      expect(option.gloss).toBe(MARK_GLOSS[option.name]);
+    }
+  });
+
+  it('is always shorter than the roster it was drawn from when a mark has just been refused', async () => {
+    // The property the replay reader depends on: question two is identified by its list being a strict
+    // subset, so a repair ask can never be mistaken for a first ask.
+    const asked: number[] = [];
+    await assistedChartIR('revenue by country', TABLE, {
+      advisor: async (_question, options) => {
+        asked.push(options.length);
+        return options.length === MARK_OPTIONS.length ? 'boxplot' : undefined;
+      },
+      repair: true,
+    });
+    expect(asked).toEqual([MARK_OPTIONS.length, 4]);
+  });
+});
+
+describe('the second question', () => {
+  it('is not asked when the caller did not opt in', async () => {
+    const spy = vi.fn(async () => 'boxplot');
+    const chart = await assistedChartIR('revenue by country', TABLE, { advisor: spy });
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(chart.decision).toMatchObject({ mark: 'bar', source: 'product', veto: 'not-admitted' });
+  });
+
+  it('draws the model s second answer when the first was impossible on this table', async () => {
+    const asked: readonly string[][] = [];
+    const chart = await assistedChartIR('revenue by country', TABLE, {
+      advisor: async (_question, options) => {
+        (asked as string[][]).push(options.map((option) => option.name));
+        return options.length === MARK_OPTIONS.length ? 'boxplot' : 'pie';
+      },
+      repair: true,
+    });
+    expect(asked).toHaveLength(2);
+    expect(chart.ir.mark).toBe('pie');
+    expect(chart.decision).toEqual({ mark: 'pie', source: 'model', product: 'bar', repaired: true });
+  });
+
+  it('is not asked when the table holds a single mark, because a one-answer question is not one', async () => {
+    const spy = vi.fn(async () => 'bar');
+    const chart = await assistedChartIR('total revenue', SINGLE, { advisor: spy, repair: true });
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(chart.decision).toMatchObject({ mark: 'gauge', source: 'product', veto: 'not-admitted' });
+  });
+
+  it('keeps the table chart when the second answer names nothing on the shorter list', async () => {
+    const chart = await assistedChartIR('revenue by country', TABLE, {
+      advisor: async (_question, options) => (options.length === MARK_OPTIONS.length ? 'boxplot' : 'donut'),
+      repair: true,
+    });
+    expect(chart.decision).toEqual({ mark: 'bar', source: 'product', product: 'bar', veto: 'not-admitted' });
+  });
+
+  it('keeps the table chart when the second call fails, so availability is still not the endpoint s', async () => {
+    const chart = await assistedChartIR('revenue by country', TABLE, {
+      advisor: async (_question, options) => {
+        if (options.length === MARK_OPTIONS.length) return 'boxplot';
+        throw new Error('ETIMEDOUT');
+      },
+      repair: true,
+    });
+    expect(chart.decision).toEqual({ mark: 'bar', source: 'product', product: 'bar', veto: 'not-admitted' });
+  });
+
+  it('is not asked when the first answer was drawable, because there is nothing to repair', async () => {
+    // The saving that makes the option affordable: the flag is on, the row is fine, and the second
+    // question does not happen. On this corpus that is 1,247 of 1,470 rows.
+    const spy = vi.fn(async () => 'pie');
+    const chart = await assistedChartIR('revenue by country', TABLE, { advisor: spy, repair: true });
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(chart.decision).toEqual({ mark: 'pie', source: 'model', product: 'bar' });
+  });
+
+  it('still refuses a table nothing can chart, and does not ask about one', async () => {
+    const spy = vi.fn(async () => 'bar');
+    await expect(assistedChartIR('nothing here', [], { advisor: spy, repair: true })).rejects.toThrow(/nothing to chart/);
+    expect(spy).not.toHaveBeenCalled();
   });
 });

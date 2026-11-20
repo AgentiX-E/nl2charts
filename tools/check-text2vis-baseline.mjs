@@ -739,6 +739,19 @@ function selfTest() {
     caseOf('a reading over another row set is refused', compareShip(priced, shipFloor, {}).issues, 1);
     const fresh = compareShip(shipReport(), { scored: 8, tolerance: 5 }, {});
     caseOf('a first dispatch registers the floor instead of failing against it', fresh.issues, 0);
+    // The second question is a third source, and it is the one a two-source split cannot see.
+    const repaired = shipReport();
+    repaired.shipped.fromModel = 2;
+    repaired.shipped.repaired = 2;
+    repaired.changed = 5;
+    caseOf('a repair is a third source and can explain a changed row', compareShip(repaired, shipFloor, {}).issues, 0);
+    const outside = shipReport();
+    outside.shipped.repaired = 1;
+    caseOf('a repair counted outside the split is refused', compareShip(outside, shipFloor, {}).issues, 1);
+    const lapsed = compareShip(shipReport(), { ...shipFloor, repaired: 3 }, {});
+    caseOf('a repair that stopped being asked is refused', lapsed.issues, 1);
+    const inside = compareShip(shipReport(), { ...shipFloor, repaired: 2, tolerance: 5 }, {});
+    caseOf('a repair count inside the band is a note', inside.issues, 0);
   }
   const recordedArms = JSON.parse(readFileSync(resolve(ROOT, BASELINE), 'utf8'))?.llm?.arms;
   const scales = Object.keys(recordedArms ?? {});
@@ -1070,9 +1083,13 @@ export function compareShip(report, floor, options = {}) {
   }
   for (const name of ['decided', 'shipped']) {
     const counts = report[name] ?? {};
-    if (counts.fromModel + counts.fromProduct !== scored) {
+    // Three sources, and the third is a *second question*: a row can be answered by the model's first
+    // answer, by its second one after the table refused the first, or by the table. A split that adds
+    // up with only two of them is a repair counted as an ordinary decision.
+    const repaired = counts.repaired ?? 0;
+    if (counts.fromModel + repaired + counts.fromProduct !== scored) {
       issues.push(
-        `TEXT2VIS SHIP: ${name} splits ${String(counts.fromModel)} model and ${String(counts.fromProduct)} table over a population of ${String(scored)}`,
+        `TEXT2VIS SHIP: ${name} splits ${String(counts.fromModel)} first answers, ${String(repaired)} repairs and ${String(counts.fromProduct)} table answers over a population of ${String(scored)}`,
       );
       continue;
     }
@@ -1090,9 +1107,10 @@ export function compareShip(report, floor, options = {}) {
     (report.shipped?.reasons?.wide ?? 0) +
     (report.shipped?.reasons?.['not-admitted'] ?? 0) +
     (report.shipped?.reasons?.unchartable ?? 0);
-  if (report.changed > vetoes) {
+  const repairs = report.shipped?.repaired ?? 0;
+  if (report.changed > vetoes + repairs) {
     issues.push(
-      `TEXT2VIS SHIP: ${String(report.changed)} rows differ from the decision and only ${String(vetoes)} were vetoed; a chart may only change to the table's answer, and only when a veto explains it`,
+      `TEXT2VIS SHIP: ${String(report.changed)} rows differ from the decision and only ${String(vetoes)} were vetoed and ${String(repairs)} repaired; a chart may only change to the table's answer or to the model's second one, and only when one of them explains it`,
     );
   }
   const tolerance = typeof floor.tolerance === 'number' ? floor.tolerance : 0;
@@ -1113,8 +1131,20 @@ export function compareShip(report, floor, options = {}) {
       notes.push(`TEXT2VIS SHIP: ${name} reads ${String(measured)} (${((measured / scored) * 100).toFixed(2)}%) against a floor of ${String(recorded)}`);
     }
   }
+  // The repair has a floor of its own, and it is a *count* rather than a score. A dispatch where no
+  // row was refused would read as a clean run and would in fact be a run that stopped asking the second
+  // question — which is the gate measuring nothing while printing green.
+  if (typeof floor.repaired === 'number') {
+    if (repairs < floor.repaired - tolerance) {
+      issues.push(
+        `TEXT2VIS SHIP: ${String(repairs)} rows were answered by a second question and the floor records ${String(floor.repaired)}; a repair that stopped being asked is a gate that stopped measuring it`,
+      );
+    } else if (repairs < floor.repaired) {
+      notes.push(`TEXT2VIS SHIP: ${String(repairs)} repairs against a floor of ${String(floor.repaired)}, inside the ${String(tolerance)}-row band — not a regression`);
+    }
+  }
   notes.push(
-    `TEXT2VIS SHIP: ${String(report.changed)} row(s) drew the table's answer instead of the decision's, all of them vetoed`,
+    `TEXT2VIS SHIP: ${String(report.changed)} row(s) drew an answer other than the decision's: ${String(vetoes)} vetoed and ${String(repairs)} repaired`,
   );
   return { issues, notes };
 }

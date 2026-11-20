@@ -405,6 +405,7 @@
     "TICK_ROTATION",
     "TICK_UPRIGHT",
     "TITLE_WIDTH",
+    "admittedOptions",
     "assistedChartIR",
     "assistedMark",
     "compileToECharts",

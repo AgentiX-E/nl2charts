@@ -17,9 +17,10 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { POLICIES, type Policy } from '../eval/text2vis/arbitrate.js';
 import { rosterOf } from '../eval/text2vis/llm.js';
 import { familyOfLabel } from '../eval/text2vis/rule.js';
-import { profileAnswer, type ProfileInput } from '../eval/text2vis/profile.js';
+import { parseResultSet, profileAnswer, typedRows, type ProfileInput } from '../eval/text2vis/profile.js';
 import { TEXT2VIS_FIELDS } from '../eval/text2vis/dataset.js';
 import {
+  answerKey,
   artifactAdvisor,
   chartAdvisor,
   assertShip,
@@ -28,11 +29,15 @@ import {
   entryShip,
   messageOf,
   parseShipArgs,
+  repairAdvisor,
+  repairAnswers,
+  repairAsks,
   routedBy,
   shipReport,
   type ShipCounts,
   type ShipReport,
 } from '../eval/text2vis/ship.js';
+import { admittedOptions, MARK_OPTIONS, type MarkOption } from '@agentix-e/nl2charts-chart';
 
 const root = mkdtempSync(join(tmpdir(), 'nl2charts-ship-'));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -64,6 +69,7 @@ function counts(over: Partial<ShipCounts> = {}): ShipCounts {
     hit: 1,
     share: 0.5,
     fromModel: 1,
+    repaired: 0,
     fromProduct: 1,
     reasons: { 'no-advice': 1, unavailable: 0, unlisted: 0, wide: 0, 'not-admitted': 0, unchartable: 0 },
     ...over,
@@ -549,5 +555,220 @@ describe('the reading against the product s own answer', () => {
     expect(shipped.divergence).toEqual([]);
     expect(shipped.decided.hit).toBe(3);
     expect(shipped.shipped.hit).toBe(3);
+  });
+});
+
+/**
+ * The list `ship.ts` will offer for a row: the marks its own result set can hold.
+ *
+ * Computed through `parseResultSet` and `typedRows`, exactly as the chart pass does, because an
+ * admitted set derived from hand-written rows is a different table — and the first version of these
+ * tests did that, produced four keys that matched nothing, and was refused by the very check it was
+ * trying to exercise.
+ */
+function listFor(prompt: string, table: string): readonly MarkOption[] {
+  const set = parseResultSet(table);
+  return admittedOptions(prompt, typedRows(set), { columns: set.columns });
+}
+
+describe('the second answers, replayed', () => {
+  /** The choices that make the repair fire: `boxplot` is on the roster and refused by these tables. */
+  const REFUSED: readonly (string | null)[] = ['boxplot', 'boxplot', 'pie', null, 'bar', 'bar'];
+
+  it('keys an answer by its question and its list, because that is what the two questions differ in', () => {
+    const short = listFor('Revenue by country', 'country,value\nUS,5\nDE,9\nFR,2');
+    expect(answerKey('q', short)).toBe(`q\u0000${short.map((option) => option.name).join(',')}`);
+    expect(answerKey('q', short)).not.toBe(answerKey('q', [{ name: 'bar' }]));
+    expect(answerKey('q', short)).not.toBe(answerKey('r', short));
+  });
+
+  it('reads question one from the arm and question two from the file', async () => {
+    const short = listFor('Revenue by country', 'country,value\nUS,5\nDE,9\nFR,2');
+    const answers = new Map([[answerKey('Revenue by country', short), 'pie']]);
+    const missing: string[] = [];
+    const advisor = repairAdvisor(async () => 'bar', answers, missing);
+    expect(await advisor('Revenue by country', MARK_OPTIONS)).toBe('bar');
+    expect(await advisor('Revenue by country', short)).toBe('pie');
+    expect(missing).toEqual([]);
+    // A question two nobody answered is recorded rather than thrown: `assistedChartIR` catches what an
+    // advisor throws, and a repair that is not on disk must be a refusal to publish, not a fallback.
+    expect(await advisor('another question', short)).toBeUndefined();
+    expect(missing).toEqual([answerKey('another question', short)]);
+  });
+
+  it('records exactly the questions the chart pass will ask, by asking it', async () => {
+    const { refused, asks } = await repairAsks(ROWS, REFUSED);
+    // Three rows are refused: two name `boxplot` on a table that holds four marks, and one names `bar`
+    // on a gauge table that holds only `gauge`. The first two are asked; the third is not, because a
+    // question with one possible answer is not a question. The wide table is never offered at all.
+    expect(refused).toBe(3);
+    expect(asks.map((ask) => ask.row)).toEqual([0, 1]);
+    for (const ask of asks) expect(ask.options).toHaveLength(4);
+  });
+
+  it('reads a repair file, and refuses the three files that cannot be placed', () => {
+    const short = listFor('Revenue by country', 'country,value\nUS,5\nDE,9\nFR,2').map((option) => option.name);
+    const good = { rows: [{ question: 'Revenue by country', options: short, choice: 'pie' }] };
+    expect(repairAnswers(good).get(answerKey('Revenue by country', short.map((name) => ({ name }))))).toBe('pie');
+    expect(() => repairAnswers(null)).toThrow(/is not an object/);
+    expect(() => repairAnswers({})).toThrow(/carries no rows array/);
+    expect(() => repairAnswers({ rows: [null] })).toThrow(/row that is not an object/);
+    expect(() => repairAnswers({ rows: [{ options: short, choice: 'pie' }] })).toThrow(/without a question/);
+    expect(() => repairAnswers({ rows: [{ question: 'q', choice: 'pie' }] })).toThrow(/without an option list/);
+    expect(() => repairAnswers({ rows: [{ question: 'q', options: ['bar'], choice: 7 }] })).toThrow(/not a name/);
+    expect(() =>
+      repairAnswers({
+        rows: [
+          { question: 'q', options: ['bar'], choice: 'bar' },
+          { question: 'q', options: ['bar'], choice: 'pie' },
+        ],
+      }),
+    ).toThrow(/twice, and the two answers differ/);
+    // The same answer twice is a file two runs appended to, and it is still one answer.
+    expect(repairAnswers({ rows: [{ question: 'q', options: ['bar'] }, { question: 'q', options: ['bar'] }] }).size).toBe(1);
+  });
+
+  it('draws the model s second answer, and counts the row as a repair rather than as a first answer', async () => {
+    const roster = rosterOf(ROWS);
+    const plain = await shipReport(ROWS, REFUSED, 'a-model', { roster });
+    const short = listFor('Revenue by country', 'country,value\nUS,5\nDE,9\nFR,2');
+    const answers = new Map([
+      [answerKey((ROWS[0] as ProfileInput).prompt, short), 'pie'],
+      [answerKey((ROWS[1] as ProfileInput).prompt, listFor((ROWS[1] as ProfileInput).prompt, (ROWS[1] as ProfileInput).tableData)), 'line'],
+    ]);
+    const repaired = await shipReport(ROWS, REFUSED, 'a-model', { roster }, { repair: answers });
+    assertShip(repaired);
+    expect(repaired.decided).toEqual(plain.decided);
+    expect(repaired.shipped.repaired).toBe(2);
+    expect(repaired.shipped.fromProduct).toBe(plain.shipped.fromProduct - 2);
+    // The gauge table holds one mark, so its refused row is not repairable and stays a veto: the
+    // second question is not asked where it has only one possible answer.
+    expect(repaired.shipped.reasons['not-admitted']).toBe(1);
+    // A repair is a chart that is not the decision, so it is a changed row — and the count is checked
+    // against the vetoes plus the repairs rather than against the vetoes alone.
+    expect(repaired.changed).toBe(plain.changed);
+    expect(describeShip(repaired).join('\n')).toContain('2 repaired');
+  });
+
+  it('refuses to publish when a second question has no answer on disk', async () => {
+    await expect(
+      shipReport(ROWS, REFUSED, 'a-model', { roster: rosterOf(ROWS) }, { repair: new Map() }),
+    ).rejects.toThrow(/second question\(s\) have no answer in the repair artifact/);
+  });
+
+  it('counts a repair apart from a first answer, and refuses a total that hides it', () => {
+    const decisions = [
+      { mark: 'pie' as const, source: 'model' as const, product: 'bar' as const, repaired: true as const },
+      { mark: 'line' as const, source: 'model' as const, product: 'line' as const },
+      { mark: 'pie' as const, source: 'product' as const, product: 'pie' as const, reason: 'no-advice' as const },
+      { mark: 'declined' as const, source: 'product' as const, product: 'declined' as const, reason: 'unchartable' as const },
+      { mark: 'bar' as const, source: 'model' as const, product: 'bar' as const },
+      { mark: 'bar' as const, source: 'model' as const, product: 'bar' as const },
+    ];
+    const counted = countsOf(ROWS, ['pie', 'line', 'pie', 'declined', 'bar', 'bar'], decisions);
+    expect(counted.repaired).toBe(1);
+    expect(counted.fromModel).toBe(3);
+    expect(counted.fromProduct).toBe(2);
+  });
+
+  it('lets a repair explain a changed row, and only within its own count', () => {
+    expect(() => assertShip(report({ changed: 0 }))).not.toThrow();
+    expect(() =>
+      assertShip(report({ shipped: counts({ repaired: 0, fromModel: 1, fromProduct: 1 }), changed: 1 })),
+    ).toThrow(/only 0 were vetoed and 0 repaired/);
+  });
+
+  it('refuses a fifth answer even when a repair was attempted', () => {
+    expect(() => routedBy(3, 'bar', 'line', 'pie', false)).toThrow(/a chart may only be one of the two/);
+    expect(routedBy(3, 'bar', 'line', 'pie', true)).toBe('repair');
+    // A repair that landed on the table s own answer is still a repair: it was asked, and it was paid for.
+    expect(routedBy(3, 'bar', 'line', 'line', true)).toBe('repair');
+  });
+
+  it('takes --repair on the command line, and refuses a value that is another flag', () => {
+    expect(parseShipArgs(['--answers', 'a.json', '--repair', 'r.json'])).toEqual({
+      json: false,
+      answers: 'a.json',
+      repair: 'r.json',
+    });
+    expect(() => parseShipArgs(['--answers', 'a.json', '--repair', '--json'])).toThrow(/--repair needs a path or a name/);
+  });
+});
+
+describe('the command, with a repair on disk', () => {
+  const CHOICES_WITH_REFUSAL = ['boxplot', 'line', 'gauge', 'bar'];
+
+  function repairFile(over: Record<string, unknown> = {}): string {
+    const short = listFor('Revenue by country', 'country,value\nUS,5\nDE,9\nFR,2').map((option) => option.name);
+    const path = join(root, `repair-${String(Date.now())}-${String(Math.random()).slice(2)}.json`);
+    writeFileSync(
+      path,
+      JSON.stringify({
+        population: { roster: rosterOf(SCORED_ROWS.map(([prompt, label, table]) => row(prompt, label, table))) },
+        rows: [{ question: 'Revenue by country', options: short, choice: 'pie' }],
+        ...over,
+      }),
+    );
+    return path;
+  }
+
+  it('draws the repaired chart and says how many rows it repaired', async () => {
+    const served = await serve(CSV);
+    try {
+      const lines: string[] = [];
+      const code = await entryShip(ENTRY, MODULE_URL, (line) => lines.push(line), {
+        argv: ['--answers', artifact({ arms: [{ model: 'a-model', scale: 'mark', choices: CHOICES_WITH_REFUSAL }] }), '--repair', repairFile()],
+        load: { url: served.url, cacheDir: join(root, 'corpus') },
+      } as never);
+      expect(code).toBe(0);
+      expect(lines.join('\n')).toContain('1 repaired');
+    } finally {
+      await served.close();
+    }
+  });
+
+  it('exits 1 when the repair file answers a different population', async () => {
+    const served = await serve(CSV);
+    try {
+      const lines: string[] = [];
+      const code = await entryShip(ENTRY, MODULE_URL, (line) => lines.push(line), {
+        argv: ['--answers', artifact({ arms: [{ model: 'a-model', scale: 'mark', choices: CHOICES_WITH_REFUSAL }] }), '--repair', repairFile({ population: { roster: 'somebody-else' } })],
+        load: { url: served.url, cacheDir: join(root, 'corpus') },
+      } as never);
+      expect(code).toBe(1);
+      expect(lines.join('\n')).toContain('answered a different population');
+    } finally {
+      await served.close();
+    }
+  });
+
+  it('exits 1 when the repair file does not say which rows it answered', async () => {
+    const served = await serve(CSV);
+    try {
+      const lines: string[] = [];
+      const code = await entryShip(ENTRY, MODULE_URL, (line) => lines.push(line), {
+        argv: ['--answers', artifact({ arms: [{ model: 'a-model', scale: 'mark', choices: CHOICES_WITH_REFUSAL }] }), '--repair', repairFile({ population: {} })],
+        load: { url: served.url, cacheDir: join(root, 'corpus') },
+      } as never);
+      expect(code).toBe(1);
+      expect(lines.join('\n')).toContain('carries no population.roster');
+    } finally {
+      await served.close();
+    }
+  });
+
+  it('exits 1 when the repair file cannot be read at all', async () => {
+    const served = await serve(CSV);
+    try {
+      const lines: string[] = [];
+      const code = await entryShip(ENTRY, MODULE_URL, (line) => lines.push(line), {
+        argv: ['--answers', artifact({ arms: [{ model: 'a-model', scale: 'mark', choices: CHOICES_WITH_REFUSAL }] }), '--repair', join(root, 'no-such-file.json')],
+        load: { url: served.url, cacheDir: join(root, 'corpus') },
+      } as never);
+      expect(code).toBe(1);
+      expect(lines.join('\n')).toContain('is not readable JSON');
+    } finally {
+      await served.close();
+    }
   });
 });
