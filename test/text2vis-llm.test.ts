@@ -29,6 +29,7 @@ import {
   entryLlm,
   labelOptions,
   markOptions,
+  markAnswer,
   mcnemarExact,
   pairArms,
   parseChoice,
@@ -468,6 +469,23 @@ describe('scoring one arm', () => {
     const report = scoreArm(rows, outcomes, { model: 'unpriced-model', options: markOptions(), request: REQUEST, usage, cache }, 'mark');
     expect(report.cost.yuan).toBeUndefined();
     expect(describeArm(report).join('\n')).not.toContain('cost ¥');
+  });
+});
+
+describe('what an answer covers, given what it was asked', () => {
+  it('widens a bar to a histogram only when the question named a histogram', () => {
+    // The chart that ships decides the family: `toChartIR` pools and bins the cells when the cue fires,
+    // so the picture is a histogram whoever named the bar, and the scorer has to read the same chart.
+    expect(markAnswer('bar', 'Plot a histogram of the order totals').families[0]).toBe('histogram');
+    expect(markAnswer('bar', 'Compare revenue by region').families[0]).toBe('bar');
+    // A mark the reading does not rewrite keeps its own families, whatever else the question said.
+    expect(markAnswer('line', 'Plot a histogram of the order totals').families).toEqual(['line', 'area']);
+  });
+
+  it('answers a refusal and an unasked answer separately', () => {
+    expect(markAnswer(undefined, 'Plot a histogram of the order totals')).toEqual({ mark: 'declined', families: [] });
+    // An answer scored without the question is scored conservatively: no cue, no widening.
+    expect(markAnswer('bar')).toEqual({ mark: 'bar', families: ['bar'] });
   });
 });
 

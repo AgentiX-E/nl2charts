@@ -144,7 +144,7 @@ export function countsOf(
   const byRow = new Map<ProfileInput, { mark: MarkName; families: readonly ChartFamily[] }>();
   for (let index = 0; index < rows.length; index += 1) {
     const mark = marks[index] as MarkName;
-    byRow.set(rows[index] as ProfileInput, markAnswer(mark === 'declined' ? undefined : mark));
+    byRow.set(rows[index] as ProfileInput, markAnswer(mark === 'declined' ? undefined : mark, (rows[index] as ProfileInput).prompt));
   }
   const scored = scoreAnswers(rows, (row) => byRow.get(row) as { mark: MarkName; families: readonly ChartFamily[] }, {
     variant: 'ship',
@@ -229,7 +229,7 @@ export function refusalBill(
     const bucket = bills.get(asked) ?? { rows: 0, owed: 0, instead: new Map<MarkName, number>() };
     bucket.rows += 1;
     const family = familyOfLabel((rows[index] as ProfileInput).label);
-    if (family !== undefined && markAnswer(asked).families.includes(family)) {
+    if (family !== undefined && markAnswer(asked, (rows[index] as ProfileInput).prompt).families.includes(family)) {
       bucket.owed += 1;
       bucket.instead.set(decision.product, (bucket.instead.get(decision.product) ?? 0) + 1);
     }

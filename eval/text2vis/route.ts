@@ -63,10 +63,11 @@ export function duelOf(row: ProfileInput, left: string | null, right: string | n
   assertOfferedMark(row, right);
   const named = cueMarks(row.prompt);
   return {
-    product:
-      left === null
-        ? { mark: 'declined', families: [] }
-        : { mark: left as RecommendableMark, families: [left as RecommendableMark] },
+    // The left arm's answer as the scorer wants it. `markAnswer` rather than the bare mark, because
+    // one family claim depends on the question: a `bar` answer to a histogram question ships bins, and
+    // wrapping the mark in a one-element list scored that chart as a bar.
+    product: markAnswer(left ?? undefined, row.prompt),
+    asked: row.prompt,
     cueLead: named[0],
     cueNamed: named,
     model: right === null ? undefined : (right as RecommendableMark),
@@ -200,8 +201,8 @@ export function shippedPair(
   let neither = 0;
   for (const [index, row] of rows.entries()) {
     const family = familyOfLabel(row.label);
-    const leftHit = markAnswer(left[index] === 'declined' ? undefined : left[index]).families[0] === family;
-    const rightHit = markAnswer(right[index] === 'declined' ? undefined : right[index]).families[0] === family;
+    const leftHit = markAnswer(left[index] === 'declined' ? undefined : left[index], row.prompt).families[0] === family;
+    const rightHit = markAnswer(right[index] === 'declined' ? undefined : right[index], row.prompt).families[0] === family;
     if (leftHit && rightHit) both += 1;
     else if (leftHit) leftOnly += 1;
     else if (rightHit) rightOnly += 1;

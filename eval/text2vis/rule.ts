@@ -93,8 +93,15 @@ export function familyOfLabel(label: string): ChartFamily | undefined {
  * the whole reason it is honest. The first reading of this corpus reported "a bar does not answer
  * for a histogram" as a fact about the table — 90 histogram rows, 0.00%, answered `boxplot` — and
  * the fix is a cue that *names* the intent, not a blanket claim that every bar is a histogram. So
- * the widening lives in `familiesOfMark` below and only fires when the leading cue is `histogram`:
- * a bar recommended for a ranking question still answers for `bar` and nothing else.
+ * the widening lives in `familiesOfMark` below and only fires when the cue is `histogram`: a bar
+ * recommended for a ranking question still answers for `bar` and nothing else.
+ *
+ * **The widening leads, and that is a claim about the picture rather than about the list.** Until
+ * `histogramReading` existed, a bar on a histogram question was a grouped bar of the table's columns
+ * — not a histogram at all — so listing `bar` first was the honest order: the mark answered for the
+ * family in the shortlist and not in the chart. Now the reading rewrites the rows: the numbers are
+ * pooled and counted into bins and the bars are drawn over the bins. The picture *is* the histogram,
+ * so the family that leads has to be the one the chart is.
  */
 const MARK_FAMILIES: Readonly<Record<RecommendableMark, readonly ChartFamily[]>> = {
   bar: ['bar'],
@@ -119,7 +126,21 @@ const MARK_FAMILIES: Readonly<Record<RecommendableMark, readonly ChartFamily[]>>
  */
 export function familiesOfMark(mark: RecommendableMark, cue?: CueKind): readonly ChartFamily[] {
   const base = MARK_FAMILIES[mark];
-  return mark === 'bar' && cue === 'histogram' ? [...base, 'histogram'] : base;
+  return mark === 'bar' && cue === 'histogram' ? ['histogram', ...base] : base;
+}
+
+/**
+ * The cue a family claim is made under, given every cue that named the mark.
+ *
+ * Almost always the first one — the cue table is ordered strongest first, and the mark that leads it
+ * is the mark the question asked for. The exception is `histogram`, and it is not a preference: a bar
+ * on a histogram question is *rewritten* (`histogramReading` pools and bins the cells), so the chart
+ * that ships is a histogram whatever else the question also said. A caller that kept `cues[0]` would
+ * report an answer of `bar` for a picture of bins, which is the one disagreement between the offline
+ * reading and the shipped path that this corpus punishes hardest.
+ */
+export function familyCue(cues: readonly CueKind[]): CueKind | undefined {
+  return cues.includes('histogram') ? 'histogram' : cues[0];
 }
 
 /** One question and the chart the corpus says is right. */
@@ -156,6 +177,17 @@ export function cueAnswer(
 /** The marks alone, in the same order. */
 export function cueMarks(question: string, table?: readonly CueRule[]): readonly RecommendableMark[] {
   return cueAnswer(question, table).map((answer) => answer.mark);
+}
+
+/**
+ * The cue kinds a question fires, in the table's order.
+ *
+ * The marks are not enough for a family claim: `histogram` widens the bar to answer for a family, and
+ * a caller holding only the marks cannot tell the bar a histogram question asked for from the bar a
+ * ranking question asked for.
+ */
+export function cueKinds(question: string, table?: readonly CueRule[]): readonly CueKind[] {
+  return readCues(question, table).map((cue) => cue.kind);
 }
 
 /**

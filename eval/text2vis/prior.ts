@@ -205,9 +205,9 @@ export interface PriorReading {
 }
 
 /** Whether one answer is the row's family, scored the way the shipped path scores it. */
-function hitOf(choice: string | null, label: string): boolean {
+function hitOf(choice: string | null, label: string, asked: string): boolean {
   if (choice === null) return false;
-  return markAnswer(choice).families[0] === familyOfLabel(label);
+  return markAnswer(choice, asked).families[0] === familyOfLabel(label);
 }
 
 /**
@@ -240,7 +240,7 @@ export async function priorReport(
   const choices = answersUnder(signals, left, right, prior);
   let decided = 0;
   for (const [index, row] of rows.entries()) {
-    if (hitOf(choices[index] as string | null, row.label)) decided += 1;
+    if (hitOf(choices[index] as string | null, row.label, row.prompt)) decided += 1;
   }
   const calls = callsUnder(signals, prior);
   const shipped = (await shipReport(rows, choices, prior.name, { roster })).shipped.hit;
@@ -268,7 +268,7 @@ export async function dualReading(
   const choices = routeChoices(disputes, policy);
   let decided = 0;
   for (const [index, row] of rows.entries()) {
-    if (hitOf(choices[index] as string | null, row.label)) decided += 1;
+    if (hitOf(choices[index] as string | null, row.label, row.prompt)) decided += 1;
   }
   const shipped = (await shipReport(rows, choices, 'both', { roster })).shipped.hit;
   return {

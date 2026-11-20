@@ -1,5 +1,7 @@
 import { CONTRACT_VERSION, Nl2ChartsError } from '@agentix-e/nl2charts-spec';
 import type { ChartIR, ChartType, Encoding, FieldRef, Theme } from '@agentix-e/nl2charts-spec';
+import type { Distribution } from './histogram.js';
+import { pooledDistribution } from './histogram.js';
 import type { WideTable } from './melt.js';
 import { meltWide } from './melt.js';
 import type { FieldProfile } from './profile.js';
@@ -639,10 +641,15 @@ const LABEL_FIELD = 'measure';
  * keeps it, and the summary names its boxes `measure_2`.
  */
 function freeName(profiles: readonly FieldProfile[], wanted: string): string {
-  const taken = new Set(profiles.map((profile) => profile.name));
-  if (!taken.has(wanted)) return wanted;
+  return freeOf(profiles.map((profile) => profile.name), wanted);
+}
+
+/** The same rule for a caller that has the column names rather than their profiles. */
+function freeOf(taken: Iterable<string>, wanted: string): string {
+  const used = new Set(taken);
+  if (!used.has(wanted)) return wanted;
   let suffix = 2;
-  while (taken.has(`${wanted}_${String(suffix)}`)) suffix += 1;
+  while (used.has(`${wanted}_${String(suffix)}`)) suffix += 1;
   return `${wanted}_${String(suffix)}`;
 }
 
@@ -870,6 +877,119 @@ function wideIR(question: string, melt: WideTable, limit: number, options: Chart
     data,
     title: options.title ?? question,
     alt: options.alt ?? `${mark} chart of ${String(data.length)} row(s): ${question}`,
+    ...(options.subtitle === undefined ? {} : { subtitle: options.subtitle }),
+    ...(options.theme === undefined ? {} : { theme: options.theme }),
+  };
+}
+
+/** The column a histogram states its intervals in. */
+const BIN_FIELD = 'bin';
+
+/**
+ * A table read as a histogram: every number in it, pooled and counted into bins.
+ *
+ * The reading is gated on the question, not on the shape, and that is the whole of its honesty: a
+ * table of five numbers has as many readings as it has marks, and the pooled distribution is only
+ * the one a question asked for in words. `cues` is the shipped table, so the gate is the same one
+ * that offers the bar — the difference is that this reading also *rewrites the rows*, which is what
+ * a bar of a histogram is and what a grouped bar of the period columns was not.
+ *
+ * Two tables are pooled by the same rule. A narrow one contributes every measure column; a table wide
+ * in time contributes the single `value` column its melt produces, because the periods are the same
+ * numbers written sideways. `meltWide` is asked first for exactly that reason, and it decides nothing
+ * here: a wide table that is not asked for a histogram still goes down the line-per-entity path.
+ */
+export interface HistogramReading {
+  /** One row per bin: the interval, and the number of pooled values that fell in it. */
+  readonly rows: readonly Readonly<Record<string, string | number>>[];
+  readonly bin: string;
+  readonly count: string;
+  /** The bins themselves, which is what the caller can label an axis with. */
+  readonly distribution: Distribution;
+}
+
+/**
+ * The histogram reading of `rows`, or nothing when the question did not ask for one.
+ *
+ * Exported because the readings in `eval/text2vis` price the product from profiles alone, and this
+ * one predicate is the only thing that can keep the offline instrument and the shipped path from
+ * disagreeing about what the product draws: `toChartIR` calls it before anything else, and
+ * `profileAnswer` calls it through the same function rather than restating the gate.
+ */
+/**
+ * The columns whose numbers a histogram pools.
+ *
+ * A quantitative column is a measure, and those are pooled first. The fallback catches the tables
+ * the profiler cannot call a measure: a column that holds one number repeated is typed `ordinal`
+ * (one distinct value is a category, by the rule that types every column), so a histogram of three
+ * sevens had no measure to pool at all. A `temporal` column is never pooled whatever it holds — the
+ * years are the axis the table runs along, and counting them is not a distribution of anything.
+ */
+function pooledColumns(profiles: readonly FieldProfile[]): readonly string[] {
+  const measures = profiles.filter((profile) => profile.type === 'quantitative').map((profile) => profile.name);
+  if (measures.length > 0) return measures;
+  return profiles
+    .filter((profile) => profile.type !== 'temporal' && profile.numbers > 0)
+    .map((profile) => profile.name);
+}
+
+export function histogramReading(
+  question: string,
+  rows: readonly Readonly<Record<string, unknown>>[],
+  columns?: readonly string[],
+  cues?: readonly CueRule[],
+): HistogramReading | undefined {
+  if (!readCues(question, cues).some((cue) => cue.kind === 'histogram')) return undefined;
+  const melt = meltWide(rows, columns);
+  const pooled = melt === undefined ? rows : melt.rows;
+  const measures = melt === undefined ? pooledColumns(profileRows(rows, columns)) : [melt.value];
+  const values: unknown[] = [];
+  for (const row of pooled) for (const name of measures) values.push(row[name]);
+  const distribution = pooledDistribution(values);
+  if (distribution === undefined) return undefined;
+  // Non-empty by construction at this point: a distribution needs at least one number, so the rows it
+  // was pooled from exist. Indexing the source rather than the pool is what keeps the order the caller
+  // stated — a melted table's names are the three the melt invented, and those are the ones it owns.
+  const names =
+    columns !== undefined && melt === undefined
+      ? columns
+      : Object.keys((melt?.rows[0] ?? rows[0]) as Readonly<Record<string, unknown>>);
+  const bin = freeOf(names, BIN_FIELD);
+  const count = freeOf([...names, bin], COUNT_FIELD);
+  return {
+    rows: distribution.bins.map((entry) => ({ [bin]: entry.label, [count]: entry.count })),
+    bin,
+    count,
+    distribution,
+  };
+}
+
+/**
+ * A histogram, drawn: bars over the bins.
+ *
+ * No admission rule is asked and none could refuse, which is why this is a branch of its own rather
+ * than a recommendation: the rows are the picture's, not the table's, so every rule that asked about
+ * the table's columns would be answering a question about a table this chart no longer draws. The
+ * limit applies to the bins because a bin is the unit this picture has — and there are never more
+ * than twelve of them, so it truncates only when a caller asks for fewer.
+ */
+function binnedIR(question: string, reading: HistogramReading, limit: number, options: ChartIROptions): ChartIR {
+  const data = reading.rows.slice(0, limit).map((row) => ({ ...row }));
+  const encoding: Encoding = {
+    // Ordered, because the bins are: a category axis sorts them lexically, and `[10, 20)` sorts
+    // after `[100, 110)` as text. `ordinal` is the type that says the order is the data's.
+    x: { field: reading.bin, type: 'ordinal' },
+    y: [{ field: reading.count, type: 'quantitative' }],
+  };
+  return {
+    version: CONTRACT_VERSION,
+    mark: 'bar',
+    encoding,
+    data,
+    title: options.title ?? question,
+    alt:
+      options.alt ??
+      `bar chart of ${String(data.length)} bin(s) pooled from the table's numbers: ${question}`,
     ...(options.subtitle === undefined ? {} : { subtitle: options.subtitle }),
     ...(options.theme === undefined ? {} : { theme: options.theme }),
   };
@@ -1227,6 +1347,12 @@ export function toChartIR(
   if (rows.length === 0) {
     throw new Nl2ChartsError('NL2C_E_NOT_SUPPORTED', 'the result set is empty, so there is nothing to chart');
   }
+  // A question that asked for a histogram is answered with one, before any other reading: the rows
+  // are pooled and binned, so every rule below would be reading a table this chart no longer draws.
+  // A caller that named a different mark is not answered this way — an explicit mark is an
+  // instruction, and a rewrite of the caller's data is not a decoration of it.
+  const histogram = options.mark === undefined || options.mark === 'bar' ? histogramReading(question, rows, options.columns) : undefined;
+  if (histogram !== undefined) return binnedIR(question, histogram, limit, options);
   // A table that is wide in time is read as the shape it states, before any column is profiled: its
   // rows are not observations, they are entities written sideways, and every rule below would read
   // the period columns as competing measures. See `meltWide` for why the predicate is that narrow.

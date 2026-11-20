@@ -152,13 +152,13 @@ describe('which marks could have answered a family', () => {
   });
 
   it('leaves the cue-conditional widening to the row, because a bar is a histogram only when told', () => {
-    // `familiesOfMark('bar', 'histogram')` is `['bar', 'histogram']`: the widening exists, it is just
+    // `familiesOfMark('bar', 'histogram')` is `['histogram', 'bar']`: the widening exists, it is just
     // conditional on a cue naming the mark. Asking it of the table made every histogram row's covering
     // mark the bar that answered it — 43 rows reported as "lost histogram to bar" with bar on both
     // sides, a loss to itself. The table answers what a mark *is*; the row answers what this question
     // said.
     expect(coveringMarks('histogram')).toEqual([]);
-    expect(familiesOfMark('bar', 'histogram')).toEqual(['bar', 'histogram']);
+    expect(familiesOfMark('bar', 'histogram')).toEqual(['histogram', 'bar']);
   });
 
   it('reads an uncovered family as uncovered when the answer never claimed it', () => {
@@ -379,7 +379,7 @@ describe('what became of one question', () => {
     ];
     const report = censusOf(rows);
     const profile = scoreProfile(rows);
-    expect(report.outcomes).toEqual({ hit: 2, substituted: 2, reshaped: 1, refused: 1, outranked: 0, uncovered: 0, noProfile: 0 });
+    expect(report.outcomes).toEqual({ hit: 2, substituted: 2, reshaped: 1, binned: 0, refused: 1, outranked: 0, uncovered: 0, noProfile: 0 });
     expect(report.outcomes.hit).toBe(profile.top1);
     expect(report.outcomes.hit + report.outcomes.substituted).toBe(profile.shortlist);
     expect(() => assertCensusReport(report)).not.toThrow();
@@ -661,7 +661,7 @@ describe('the census over a population', () => {
     expect(report.rows).toBe(9);
     expect(report.unmapped).toBe(1);
     expect(report.scored).toBe(8);
-    expect(report.outcomes).toEqual({ hit: 2, substituted: 0, reshaped: 0, refused: 2, outranked: 2, uncovered: 1, noProfile: 1 });
+    expect(report.outcomes).toEqual({ hit: 2, substituted: 0, reshaped: 0, binned: 0, refused: 2, outranked: 2, uncovered: 1, noProfile: 1 });
     expect(() => assertCensusReport(report)).not.toThrow();
   });
 
@@ -1091,13 +1091,13 @@ describe('the families no mark can lead with', () => {
       input('Draw a histogram of revenue.', 'Histogram', table('Revenue', ['10', '14', '18', '26', '31'])),
       input(TREND, 'Line Chart', QUARTERLY),
     ]);
-    expect(report.unreachable.byFamily.map((entry) => entry.family)).toEqual(['area', 'histogram']);
-    expect(report.unreachable.rows).toBe(2);
+    expect(report.unreachable.byFamily.map((entry) => entry.family)).toEqual(['area']);
+    expect(report.unreachable.rows).toBe(1);
     // A healthy report has to pass the same check that refuses a broken one, or the check is only
     // ever exercised by the fixtures that break it.
     expect(() => assertCensusReport(report)).not.toThrow();
     const rows = report.unreachable.byFamily.map((entry) => entry.outcome.hit);
-    expect(rows).toEqual([0, 0]);
+    expect(rows).toEqual([0]);
   });
 
   it('says which outcome those rows took, and which mark stands in for them', () => {
@@ -1111,16 +1111,37 @@ describe('the families no mark can lead with', () => {
     expect(area?.coveredBy).toBe('line');
   });
 
-  it('counts a histogram row as uncovered until a cue names the intent', () => {
-    // Without a cue that says `histogram`, the distribution cue answers a boxplot, and a boxplot
-    // covers neither family. This is the row `histogram` in the cue sweep is priced against.
+  it('stops counting a histogram row as unreachable once the reading rewrites its rows', () => {
+    // The four rounds this test spent asserting `uncovered` were four rounds in which the product
+    // offered a bar and drew a grouped bar of the columns. `histogramReading` pools and bins, the cue
+    // leads, and the family is reachable — so the row is a hit and the family leaves the list without
+    // any of it being declared: `unreachableFamilies` derives the list from the widening.
     const report = censusOf([
       input('Draw a histogram of revenue.', 'Histogram', table('Revenue', ['10', '14', '18', '26', '31'])),
     ]);
-    const histogram = report.unreachable.byFamily[0];
-    expect(histogram?.family).toBe('histogram');
-    expect(histogram?.outcome.uncovered).toBe(1);
-    expect(histogram?.coveredBy).toBeUndefined();
+    expect(report.unreachable.rows).toBe(0);
+    expect(report.outcomes.hit).toBe(1);
+  });
+
+  it('reads a histogram question labelled bar as the bar it is, with the bins named', () => {
+    // The other side of the same claim: `['histogram', 'bar']` covers `bar` as its second family, so the
+    // row is a substitution — the label asked for bars and got bins, which is a nearby picture and not
+    // the one it named. There is no such row in the corpus, and the branch still has to be right: a
+    // family list that covers a label must not be scored as a refusal.
+    const row = classify(
+      input('Draw a histogram of the revenue values.', 'Bar Chart', table('Revenue', ['10', '14', '18', '26', '31'])),
+    );
+    expect(row).toMatchObject({ expected: 'bar', outcome: 'substituted', answered: 'bar', ownFamily: 'histogram' });
+  });
+
+  it('files a histogram question whose label asked for another picture as a rewrite, not a loss', () => {
+    // The reading answers these rows with bins whatever the label wanted, and nothing refused the
+    // mark the label asked for, so calling it `refused` or `outranked` would be a diagnosis of a
+    // decision nobody made. `binned` is that third answer.
+    const row = classify(
+      input('Draw a histogram of the revenue values.', 'Box Plot', table('Revenue', ['10', '14', '18', '26', '31'])),
+    );
+    expect(row).toMatchObject({ expected: 'boxplot', outcome: 'binned', answered: 'bar' });
   });
 
   it('publishes the denominator the reachable rows are a share of', () => {
@@ -1129,11 +1150,13 @@ describe('the families no mark can lead with', () => {
       input(TREND, 'Area Chart', QUARTERLY),
       input('Draw a histogram of revenue.', 'Histogram', table('Revenue', ['10', '14', '18', '26', '31'])),
     ]);
-    expect(report.outcomes.hit).toBe(1);
-    expect(report.unreachable.rows).toBe(2);
-    expect(report.renderable).toBe(1);
+    // Two hits now: the bar row and the histogram row, which the reading answers with bins. One row is
+    // still unreachable — the area chart, which no mark leads with — so the denominator is 2 of 3.
+    expect(report.outcomes.hit).toBe(2);
+    expect(report.unreachable.rows).toBe(1);
+    expect(report.renderable).toBe(2);
     expect(report.hitShareRenderable).toBe(1);
-    expect(describeCensus(report).join('\n')).toContain('1 hit of 1 renderable rows (100.00%), against 1 of 3 (33.33%)');
+    expect(describeCensus(report).join('\n')).toContain('2 hit of 2 renderable rows (100.00%), against 2 of 3 (66.67%)');
   });
 
   it('reads zero when every label is one the contract can lead with', () => {
@@ -1316,17 +1339,17 @@ describe('every cue table, priced on the product', () => {
     ).toThrow(/two corpora/);
   });
 
-  it('counts the shortlist a candidate puts in front of a user, which a hit count cannot see', () => {
-    // A candidate can move a row from `uncovered` to `substituted` without moving a single hit: the
-    // histogram cue answers a histogram question with a bar, and a bar covers the family as its
-    // *second* claim. The user is shown a picture of the distribution instead of a boxplot of a
-    // different question, and `hit` does not move by one — which is why the sweep publishes both.
+  it('records the ablation of the cue that now produces a hit, row for row', () => {
+    // This test used to be the argument for the cue: a `substituted` that no hit count could see,
+    // and an ablation priced at ±0. The reading changed what the cue buys — the row is a hit, not a
+    // substitution — so the same two cells are asserted the other way round. What has not changed is
+    // why the sweep publishes both counts: `hit` and `shortlist` are one population read twice, and a
+    // report where they disagree is a report about a different corpus.
     const report = censusOf([input('Draw a histogram of revenue.', 'Histogram', REGIONS)]);
     const shipped = report.product[0]!;
-    expect(shipped).toMatchObject({ hit: 0, substituted: 1, shortlist: 1 });
-    // The ablation of the cue that produces it: the same row, one hit either way, and the shortlist
-    // falls by exactly the row the cue named. This is the reading that shipped the cue — for two
-    // rounds it was priced as "±0, therefore nothing", and the number that decided it was this one.
+    expect(shipped).toMatchObject({ hit: 1, substituted: 0, shortlist: 1 });
+    // The ablation of the cue that produces it: without `histogram` the distribution cue answers a
+    // boxplot, which covers neither the label nor the bins, so the row falls out of both counts.
     const ablated = report.product.find((variant) => variant.variant === 'no-histogram');
     expect(ablated).toMatchObject({ hit: 0, substituted: 0, shortlist: 0 });
     // The two counts are the same population read twice, so a report where they disagree is a

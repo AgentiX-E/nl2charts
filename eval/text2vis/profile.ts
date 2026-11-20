@@ -25,9 +25,9 @@
  * hole). Families are compared, never labels, and an unmapped label is excluded and published with
  * its count — the same rule `rule.ts` states and for the same reason.
  */
-import { meltWide, profileRows, recommendChart, type FieldProfile, type RecommendableMark } from '@agentix-e/nl2charts-chart';
+import { histogramReading, meltWide, profileRows, recommendChart, type FieldProfile, type RecommendableMark } from '@agentix-e/nl2charts-chart';
 import { applyExitCode, isEntry, loadText2Vis, parseCsv, type LoadOptions, type Text2VisRow } from './dataset.js';
-import { familiesOfMark, familyOfLabel, scoreRule, type ChartFamily, type RuleInput, type RuleReport } from './rule.js';
+import { familiesOfMark, familyCue, familyOfLabel, scoreRule, type ChartFamily, type RuleInput, type RuleReport } from './rule.js';
 
 /** One question, the chart the corpus says is right, and the result set it drew. */
 export interface ProfileInput extends RuleInput {
@@ -251,7 +251,14 @@ export interface ProfileAnswer {
  */
 export function profileAnswer(prompt: string, tableData: string): ProfileAnswer {
   const set = parseResultSet(tableData);
-  // The reshape comes first, because the product's answer does. A table that is wide in time is
+  // The histogram reading comes first, because in the product it does: `toChartIR` asks the cue
+  // before anything else, and a question that named a histogram is answered with the cells pooled
+  // and binned. Asking it through the same exported function is the only way the two instruments
+  // can be sure they are pricing the same picture — restating the gate here is how they drift.
+  if (histogramReading(prompt, typedRows(set), set.columns) !== undefined) {
+    return { mark: 'bar', families: familiesOfMark('bar', 'histogram'), reasons: ['histogram:pooled'] };
+  }
+  // The reshape comes next, because the product's answer does. A table that is wide in time is
   // drawn as one line per entity by `toChartIR` without asking an admission rule, so a reading that
   // let every rule refuse it would report the product declining a table it charts — and the render
   // report, reading the same rows, would publish a different `declined` count for the same corpus.
@@ -274,8 +281,7 @@ export function profileAnswer(prompt: string, tableData: string): ProfileAnswer 
   const choice = recommendChart(prompt, profiles, { rows: set.rows.length });
   const top = choice.recommendations[0];
   if (top === undefined) return { mark: 'declined', families: [], reasons: ['profile:refused'] };
-  const cue = top.cues[0];
-  return { mark: top.mark, families: familiesOfMark(top.mark, cue), reasons: top.reasons };
+  return { mark: top.mark, families: familiesOfMark(top.mark, familyCue(top.cues)), reasons: top.reasons };
 }
 
 /**

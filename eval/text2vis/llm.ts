@@ -55,7 +55,7 @@ import { applyExitCode, isEntry, loadText2Vis, type LoadOptions, type Text2VisCo
 import { billOf, formatYuan, type TokenCounts } from '../price.js';
 import { cacheKey, openStore, type CacheIdentity, type ContentStore } from './content-store.js';
 import { profileAnswer, scoreAnswers, type ChartAnswer, type ProfileInput, type ProfileReport } from './profile.js';
-import { familiesOfMark, familyOfLabel, type ChartFamily } from './rule.js';
+import { cueKinds, familiesOfMark, familyCue, familyOfLabel, type ChartFamily } from './rule.js';
 
 /**
  * Bumped when the prompt or the option list changes meaning.
@@ -612,9 +612,16 @@ export interface ModelOutcome {
  * the score did. A second copy of this line is a second definition of "what answering `bar` covers",
  * and the two readings would then be able to disagree about a row neither of them changed.
  */
-export function markAnswer(choice: string | undefined): ChartAnswer {
+export function markAnswer(choice: string | undefined, asked?: string): ChartAnswer {
   if (choice === undefined) return { mark: 'declined', families: [] };
-  return { mark: choice as RecommendableMark, families: familiesOfMark(choice as RecommendableMark) };
+  const mark = choice as RecommendableMark;
+  // `asked` is the question the answer was given to, and it is read for one thing: a `bar` answer to
+  // a question that named a histogram. That answer ships a histogram — `toChartIR` pools and bins the
+  // cells whatever arm named the bar — so scoring it as a bar is a reading of a chart nobody received.
+  // Measured before it shipped: 50 corpus rows, 0 of them labelled `Bar`, so the widening cannot cost
+  // a bar row anything on this corpus.
+  const cues = asked === undefined ? [] : cueKinds(asked);
+  return { mark, families: familiesOfMark(mark, familyCue(cues)) };
 }
 
 /** The family a `label`-scale answer names, or nothing. */
@@ -702,7 +709,7 @@ export function scoreArm(rows: readonly ProfileInput[], outcomes: readonly Model
     cache: options.cache,
   };
   if (scale === 'mark') {
-    const baseReport = scoreAnswers(rows, (row) => markAnswer(byRow.get(row)?.choice), {
+    const baseReport = scoreAnswers(rows, (row) => markAnswer(byRow.get(row)?.choice, row.prompt), {
       variant: `${options.model}:mark`,
     });
     return { ...baseReport, ...base, scale: 'mark' };
@@ -783,7 +790,7 @@ export function pairArms(rows: readonly ProfileInput[], modelChoice: (row: Profi
     const expected = familyOfLabel(row.label);
     if (expected === undefined) continue;
     const rule = profileAnswer(row.prompt, row.tableData).families[0] === expected;
-    const model = markAnswer(modelChoice(row)).families[0] === expected;
+    const model = markAnswer(modelChoice(row), row.prompt).families[0] === expected;
     if (rule && model) both += 1;
     else if (rule) ruleOnly += 1;
     else if (model) modelOnly += 1;

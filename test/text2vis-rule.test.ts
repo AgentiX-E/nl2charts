@@ -30,6 +30,7 @@ import {
   describeSweep,
   entryRule,
   familiesOfMark,
+  familyCue,
   familyOfLabel,
   familyRows,
   parseRuleArgs,
@@ -517,17 +518,22 @@ describe('a bar that answers for a histogram, when the table said so', () => {
     // One claim, stated once: a histogram is a bar with the measure binned. It is conditional
     // because a bar recommended for a ranking question is a ranking bar, and crediting it for a
     // histogram label would be the table grading itself.
-    expect(familiesOfMark('bar', 'histogram')).toEqual(['bar', 'histogram']);
+    //
+    // **The widening leads**, and since `histogramReading` that is a claim about the picture: the
+    // rows are pooled and binned before the bars are drawn, so the chart a caller receives is a
+    // histogram and the family that leads has to be the one the chart is. Before the rewrite this
+    // list was `['bar', 'histogram']`, which priced the bar as a shortlist hit and never as an
+    // answer — the 90 histogram rows read 0.00% for four rounds with the widening present.
+    expect(familiesOfMark('bar', 'histogram')).toEqual(['histogram', 'bar']);
     expect(familiesOfMark('bar')).toEqual(['bar']);
     expect(familiesOfMark('bar', 'ranking')).toEqual(['bar']);
     expect(familiesOfMark('boxplot', 'histogram')).toEqual(['boxplot']);
   });
 
-  it('scores a histogram question as a shortlist hit once the table names the intent', () => {
-    // The cue shipped, so this is now the control. The row is a shortlist hit and not a top-1 hit,
-    // and that difference is the whole honesty of a scoped claim: a bar is only a histogram because
-    // a cue said so, and the bar still leads with `bar`, so the corpus's label is answered as a
-    // picture of the distribution rather than as *the* picture it named.
+  it('scores a histogram question as a top-1 hit once the reading rewrites the rows', () => {
+    // The cue shipped first and bought a shortlist hit; the reading came later and it is what makes
+    // the answer the label's family. Both are asserted, because the difference between them is the
+    // difference between "the table offered a bar" and "a caller received a histogram".
     const rows = [{ prompt: 'draw a histogram of order totals', label: 'Histogram' }];
     const shipped = scoreRule(rows);
     expect(shipped.shortlist).toBe(1);
@@ -539,6 +545,15 @@ describe('a bar that answers for a histogram, when the table said so', () => {
     // own alternative for the word.
     const other = scoreRule([{ prompt: 'draw a box plot of order totals', label: 'Box Plot' }]);
     expect(other.top1).toBe(1);
+  });
+
+  it('states the cue a claim is made under, which is the histogram whenever it fired', () => {
+    // The exception is not a preference: a bar answer to a histogram question ships bins, so the
+    // claim is made under `histogram` whatever else the question said.
+    expect(familyCue(['histogram'])).toBe('histogram');
+    expect(familyCue(['trend', 'histogram'])).toBe('histogram');
+    expect(familyCue(['trend'])).toBe('trend');
+    expect(familyCue([])).toBeUndefined();
   });
 });
 

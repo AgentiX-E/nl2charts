@@ -17501,3 +17501,108 @@ gains are the three the question asked for, and wrong when it is a renaming.
 | `check-text2vis-baseline --arbitration` | `product` 614, ceiling 970, `model-holds` 863 — unmoved |
 | `pnpm gate:all` | EXIT 0 |
 | cost | **¥0** |
+
+## Ninety rows with no picture: what a histogram is, when the grammar has no word for it
+
+The refusal bill closed the last round with one family it could not price: `histogram`, 90 rows,
+"nothing: the label never asked for it" for eight of the sixteen other families and a *gap in the
+contract* for this one. The census had been saying the same thing in a different column for four
+rounds — `histogram` was on its "labels no mark can lead with" list, beside `area` and `violin`.
+
+That list was wrong in one word. A histogram is not a mark this grammar lacks; it is **a bar with the
+measure binned**, which is what the corpus's own reference code does:
+
+```python
+plt.hist(all_values, bins=20)     # the label says "create a histogram with bins of width 20%"
+```
+
+ECharts has no histogram series either — you bin the data and draw bars. So the capability was never a
+new mark. It is a **data rewrite**, the same class of transformation as the melt in `melt.ts`: the
+numbers are pooled, counted into equal-width bins, and the counts become the rows. Nothing downstream
+learns an aggregate, and the contract does not change.
+
+The 90 rows say why it matters. None of them could be reached: `familiesOfMark('bar', 'histogram')`
+widened the bar to answer for the family, but the hit test reads the *first* family, so a bar answer
+scored as a bar — 0.00% for four rounds with the widening in place. And the pictures were not
+histograms either: `Characteristic | 2016 | 2017` was drawn as a grouped bar of the period columns when
+the question asked for the distribution of all the cells together.
+
+### What gets pooled, and how many bins
+
+| decision | rule | why |
+|---|---|---|
+| which columns | every `quantitative` column | a measure is a measure; a label column contributes nothing |
+| when none is typed that way | columns that hold numbers and are not `temporal` | a column of one repeated number is typed `ordinal`, and three sevens still have a distribution |
+| never pooled | `temporal` columns | the years are the axis the table runs along, not a distribution of anything |
+| how many bins | Sturges — `ceil(log2 n) + 1` — clamped to `[5, 12]` and to the distinct values | four bins hide the shape; twelve is where this product's own tick-crowding logic starts; two values are not five bins with three empty ones |
+| the last bin | closed at both ends | the maximum has to land in a bin, and `floor` of the top edge is one past the last one |
+| a table wide in time | the melt's single `value` column | five entities over three years is fifteen numbers written sideways |
+
+The reading is gated on the **question**: a table of five numbers has as many readings as it has marks,
+and the pooled distribution is only the one that was asked for in words.
+
+### The family claim had to move with the picture
+
+`familiesOfMark('bar', 'histogram')` was `['bar', 'histogram']`. That was the honest order while a bar
+on a histogram question was a grouped bar of the columns — the mark answered for the family in the
+shortlist and not in the chart. Now the bars are over the bins, so the list is `['histogram', 'bar']`,
+and the two changes had to ship together: the ordering alone would have been a claim about a picture
+that did not exist, and the reading alone would have changed the picture without changing the score.
+
+The same fact reached one more reader, and finding it was the round's second defect. `markAnswer` —
+the function every scorer uses to say what a model's answer covers — did not read the question:
+
+```ts
+// before: a bar answer to a histogram question scored as a bar
+familiesOfMark(choice)
+// after: the same chart the caller receives, scored as the chart it is
+familiesOfMark(choice, familyCue(cueKinds(asked)))
+```
+
+The 11-mark roster has no `histogram` in it, so `bar` is the only answer a model can give to a
+histogram question. Scoring it as wrong was a defect of the instrument, not a reading of the product.
+`route.ts` had the same defect in its own construction (`families: [left]`), which is why the router's
+disagreement count fell from 248 to 236 without a single answer changing.
+
+### The readings
+
+| reading | before | after |
+|---|---:|---:|
+| `profile` top-1 / shortlist / declined | 614 / 718 / 28 | **664 / 744 / 27** |
+| `deepseek-chat\|mark` / `deepseek-reasoner\|mark` | 861 / 875 | **889 / 892** |
+| arbitration `product` / `model-holds` / ceiling | 614 / 863 / 970 | **664 / 891 / 1,020** |
+| ship `decided` / `shipped` | 863 / 810 | **891 / 843** |
+| duel `chat` / `reasoner` / `cue-led` (shipped) | 810 / 821 / 831 | **843 / 849 / 865** |
+| prior `chat` / `cue-gate` / `table-agrees` | 810 / 818 / 816 | **843 / 851 / 847** |
+| cost | — | **¥0** (answers already on disk) |
+
+Two numbers in that table are worth reading twice.
+
+**The ceiling rose by 50, and by all 50 at once.** The union of the two answers is what could be
+recovered with the key in hand, and it rose by the full size of the capability — because the rows it
+wins are rows *neither* system answered before. The rule path had no histogram mark and the model had
+no histogram word in its roster. These were rows where agreeing could only ever mean agreeing on a
+wrong answer.
+
+**The strong-against-weak gap on the mark scale collapsed from 14 rows to 3**, while the label scale
+kept its 61. The chat arm gained 28 histogram rows and the reasoning arm 17: on these questions the
+thinking arm talks itself into `boxplot` or `line`, both of which are refused or drawn as something
+else, while the plain answer `bar` is exactly what the reading needs. That is not noise and it is not a
+regression — it is the first measurement in this repository where deliberation *costs* rows, and it
+sharpens the claim the two scales exist to make: deliberation buys vocabulary, and this family is
+answered with a word the vocabulary already had.
+
+### Gates
+
+| item | result |
+|---|---|
+| `tsc --noEmit` | clean |
+| `vitest` (real PostgreSQL and MariaDB) | 5,900 passed / 0 skipped (194 files) |
+| `packages/chart` | 21 new cases: the pooling rule, the bin rule, the field names, the family gate |
+| `packages/chart` coverage | 100 / 100 / 100 / 100 |
+| bundle budget | `chart` 40,905 B / 41,000 B — the prose was trimmed first and the figure did not move by a byte, so the growth is code |
+| eval coverage | 99.62 / 99.62 / 100.00 / 98.31, every file at or above its ledger |
+| `check-text2vis-baseline --arbitration` | `product` 664, ceiling 1,020, `model-holds` 891 |
+| `check-text2vis-baseline --ship` | `decided` 891, `shipped` 843, 130 changed against 136 table answers |
+| `pnpm gate:all` | EXIT 0 |
+| cost | **¥0** |

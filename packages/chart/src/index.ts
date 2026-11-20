@@ -7,13 +7,15 @@ export type { LintIssue, LintRule, Severity } from './lint.js';
 export { compileToECharts } from './compile.js';
 export type { EChartsOption } from './compile.js';
 export { compileToMatplotlib, TICK_CROWD, TICK_LENGTH, TICK_ROTATION, TICK_UPRIGHT, TITLE_WIDTH, tickTilt, wrappedTitle } from './matplotlib.js';
+export { pooledDistribution } from './histogram.js';
+export type { Bin, Distribution } from './histogram.js';
 export { meltWide } from './melt.js';
 export type { WideTable } from './melt.js';
 export { supportOf } from './support.js';
 export type { SupportVerdict } from './support.js';
 export { MARKS, describeMark } from './marks.js';
 export type { MarkSpec } from './marks.js';
-export { CHART_CUES, RECOMMENDABLE_MARKS, readCues, recommendChart, toChartIR } from './recommend.js';
+export { CHART_CUES, RECOMMENDABLE_MARKS, histogramReading, readCues, recommendChart, toChartIR } from './recommend.js';
 export { admittedOptions, assistedChartIR, assistedMark, MARK_GLOSS, MARK_OPTIONS } from './assist.js';
 export type { AssistedChart, AssistedDecision, AssistingChartIROptions, MarkAdvisor, MarkName, MarkOption } from './assist.js';
 export type {
@@ -22,6 +24,7 @@ export type {
   Cue,
   CueKind,
   CueRule,
+  HistogramReading,
   RecommendableMark,
   Recommendation,
   RecommendOptions,

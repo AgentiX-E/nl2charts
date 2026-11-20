@@ -122,7 +122,9 @@ describe('the seat the first arm sits in', () => {
   it('refuses a dispute that hides the label, which is the property the type cannot enforce', () => {
     // Erased types do not stop a field from being *carried*: a `Dispute` with an `expected` would
     // compile, and every policy that read it would be reading the answer key.
-    for (const dispute of DISPUTES) expect(Object.keys(dispute).sort()).toEqual(['cueLead', 'cueNamed', 'model', 'product']);
+    // `asked` is the question and not the answer key: it is what `markAnswer` reads to know that a
+    // `bar` answer to a histogram question ships bins, and it is a field the row always had.
+    for (const dispute of DISPUTES) expect(Object.keys(dispute).sort()).toEqual(['asked', 'cueLead', 'cueNamed', 'model', 'product']);
   });
 });
 

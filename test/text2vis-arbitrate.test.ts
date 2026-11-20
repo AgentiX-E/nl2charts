@@ -80,8 +80,9 @@ function dispute(
   modelMark: RecommendableMark | undefined,
   cueLead: RecommendableMark | undefined,
   cueNamed: readonly RecommendableMark[],
+  asked = 'compare the values by region',
 ): Dispute {
-  return { product: answer(productMark), model: modelMark, cueLead, cueNamed };
+  return { product: answer(productMark), model: modelMark, cueLead, cueNamed, asked };
 }
 
 const DISPUTES: readonly Dispute[] = [
@@ -119,8 +120,12 @@ function policyOf(readings: readonly PolicyReading[], name: string): PolicyReadi
 describe('the dispute a policy is allowed to see', () => {
   it('carries the answers and the question, and no way to look up the truth', () => {
     // The guarantee is a type, but a type is erased at run time and a field named `expected` would
-    // compile. This is the assertion that a fourth field cannot be added quietly.
-    expect(Object.keys(DISPUTES[0] as Dispute).sort()).toEqual(['cueLead', 'cueNamed', 'model', 'product']);
+    // compile. This is the assertion that a field cannot be added quietly — and `asked` was added
+    // deliberately: it is the question, not the answer key, and the one thing that reads it is
+    // `markAnswer`, which needs the wording to know a `bar` answer to a histogram question ships bins.
+    // A policy that reached for it would be reading the question the product read, which is not the
+    // label and was never hidden.
+    expect(Object.keys(DISPUTES[0] as Dispute).sort()).toEqual(['asked', 'cueLead', 'cueNamed', 'model', 'product']);
   });
 
   it('reads the product, the cues and the model off one row', () => {

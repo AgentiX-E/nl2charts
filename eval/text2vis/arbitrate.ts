@@ -54,6 +54,8 @@ import type { RecommendableMark } from '@agentix-e/nl2charts-chart';
  */
 export interface Dispute {
   readonly product: ChartAnswer;
+  /** The question, kept for the one family claim that depends on what was asked: see `markAnswer`. */
+  readonly asked: string;
   readonly cueLead: RecommendableMark | undefined;
   readonly cueNamed: readonly RecommendableMark[];
   readonly model: RecommendableMark | undefined;
@@ -69,7 +71,7 @@ export interface Policy {
 
 /** The model's answer as the scorer wants it, or a refusal when it said nothing. */
 function modelAnswer(dispute: Dispute): ChartAnswer {
-  return dispute.model === undefined ? { mark: 'declined', families: [] } : markAnswer(dispute.model);
+  return dispute.model === undefined ? { mark: 'declined', families: [] } : markAnswer(dispute.model, dispute.asked);
 }
 
 /** The family an answer claims first: the one top-1 is scored on. */
@@ -149,6 +151,7 @@ export function disputeOf(row: ProfileInput, choice: string | null): Dispute {
   const named = cueMarks(row.prompt);
   return {
     product: profileAnswer(row.prompt, row.tableData),
+    asked: row.prompt,
     cueLead: named[0],
     cueNamed: named,
     model: choice === null ? undefined : (choice as RecommendableMark),

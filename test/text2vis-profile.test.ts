@@ -302,6 +302,19 @@ describe('the recommender, with a table in front of it', () => {
     expect(answer.families).toContain('line');
   });
 
+  it('answers a histogram question with the bins, before the reshape or any admission rule', () => {
+    // The reading the product takes first, and the reason this instrument had to learn it: `tallyChart`
+    // pools and bins before it looks at a column, so an offline reading that ranked the table would be
+    // pricing a chart nobody receives. The label here is `Histogram` and the answer leads with it.
+    const answer = profileAnswer(
+      'Draw a histogram of all the values and say whether it is skewed.',
+      'Characteristic,2016,2017\nCoal,10,15\nGas,20,25\nOil,30,35',
+    );
+    expect(answer.mark).toBe('bar');
+    expect(answer.families[0]).toBe('histogram');
+    expect(answer.reasons).toEqual(['histogram:pooled']);
+  });
+
   it('declines a table every admission refuses', () => {
     // One nominal column and no measure: a bar needs a measure, a line needs an ordered axis, a pie
     // needs a measure, and the two marks that read several numbers need columns that are not there.

@@ -42,9 +42,17 @@ import type {
   RecommendableMark,
   ShapeCounts,
 } from '@agentix-e/nl2charts-chart';
-import { CHART_CUES, RECOMMENDABLE_MARKS, isCalendarColumn, meltWide, readCues, recommendChart } from '@agentix-e/nl2charts-chart';
+import {
+  CHART_CUES,
+  RECOMMENDABLE_MARKS,
+  histogramReading,
+  isCalendarColumn,
+  meltWide,
+  readCues,
+  recommendChart,
+} from '@agentix-e/nl2charts-chart';
 import { applyExitCode, isEntry, loadText2Vis, type LoadOptions } from './dataset.js';
-import { CUE_VARIANTS, familiesOfMark, familyOfLabel, type ChartFamily, type TableVariant } from './rule.js';
+import { CUE_VARIANTS, familiesOfMark, familyCue, familyOfLabel, type ChartFamily, type TableVariant } from './rule.js';
 import { isMissingCell, numericCell, parseResultSet, profilesOf, typedRows, type ProfileInput, type ResultSet } from './profile.js';
 
 /**
@@ -137,7 +145,7 @@ export function noProfileReason(text: string, set: ResultSet): TableDefect {
 }
 
 /** What became of one scored question. */
-export type CensusOutcome = 'hit' | 'substituted' | 'reshaped' | 'refused' | 'outranked' | 'uncovered' | 'noProfile';
+export type CensusOutcome = 'hit' | 'substituted' | 'reshaped' | 'binned' | 'refused' | 'outranked' | 'uncovered' | 'noProfile';
 
 /**
  * One scored question, classified, with the facts the classification was made from.
@@ -161,6 +169,20 @@ export type CensusRow =
       readonly answered: RecommendableMark;
       /** The family the mark answered as, which is the one the label did not ask for. */
       readonly ownFamily: ChartFamily;
+    }
+  | {
+      readonly expected: ChartFamily;
+      readonly outcome: 'binned';
+      /**
+       * The mark the product drew: a bar, because a histogram in this contract is a bar over the
+       * bins. Typed as the literal for the same reason `reshaped` is — the reading has one output.
+       */
+      readonly answered: 'bar';
+      /** How many bins the pooled numbers were counted into. */
+      readonly bins: number;
+      /** The two column names the reading invented, which is what a reader checks the axis against. */
+      readonly bin: string;
+      readonly count: string;
     }
   | {
       readonly expected: ChartFamily;
@@ -533,7 +555,7 @@ interface UnreachableTally {
 
 /** Seven zeroes, one per outcome: a fresh object, because the tally mutates what it is given. */
 function emptyOutcome(): Record<CensusOutcome, number> {
-  return { hit: 0, substituted: 0, reshaped: 0, refused: 0, outranked: 0, uncovered: 0, noProfile: 0 };
+  return { hit: 0, substituted: 0, reshaped: 0, binned: 0, refused: 0, outranked: 0, uncovered: 0, noProfile: 0 };
 }
 
 export interface CeilingCensus {
@@ -614,7 +636,13 @@ export interface UnreachableCensus {
  * `familiesOfMark` answers "what may this mark stand for", in order, and the hit test reads the
  * *first* entry. So the reachable set is the first entries over every mark and every cue, and its
  * complement is the set of labels this contract cannot answer whatever the question says. On
- * Text2Vis that is `area`, `histogram` and `violin` — three of sixteen labels, 237 of 1,470 rows.
+ * Text2Vis that is `area` and `violin` — two of sixteen labels, 147 of 1,470 rows.
+ *
+ * **`histogram` was the third until the reading existed.** `familiesOfMark('bar', 'histogram')` listed
+ * the bar first, so the reachable set did not contain it, and 90 rows were published as a gap in the
+ * contract rather than as a gap in the marks. Now that the cue leads, the family is reachable and the
+ * list is shorter by a label — which is what a derived list is for: it shrinks by itself when the
+ * capability arrives, and this paragraph is the only thing that had to be edited by hand.
  *
  * This is a reading and not a defect list. A product that draws a line where the corpus drew an area
  * has answered a nearby question, and calling that a top-1 hit would make the score say the product
@@ -738,9 +766,20 @@ export function classify(row: ProfileInput): CensusRow {
     throw new Error(`census: ${row.label} has no family, and an unmapped label is excluded before it is classified`);
   }
   const set = parseResultSet(row.tableData);
-  // The reshape before the profiles, in that order and for `profileAnswer`'s reason: the product
-  // answers these tables without asking an admission rule, so a classifier that ranked them would be
+  // The two readings the product takes before any admission rule, in the order `toChartIR` takes
+  // them: a histogram question is answered by pooling and binning the cells, and a table wide in time
+  // is answered by melting it. Neither asks a rule, so a classifier that ranked these rows would be
   // explaining a decision the product never made.
+  const bins = histogramReading(row.prompt, typedRows(set), set.columns);
+  if (bins !== undefined) {
+    const lead = familiesOfMark('bar', 'histogram');
+    if (lead[0] === expected) return { expected, outcome: 'hit' };
+    if (lead.includes(expected)) return { expected, outcome: 'substituted', answered: 'bar', ownFamily: 'histogram' };
+    // The rows were rewritten, so the family the label asked for is not a picture of the numbers that
+    // are left: nothing refused the mark and nothing outranked it, and calling it either would be a
+    // diagnosis of a decision nobody made.
+    return { expected, outcome: 'binned', answered: 'bar', bins: bins.distribution.bins.length, bin: bins.bin, count: bins.count };
+  }
   const wide = meltWide(typedRows(set), set.columns);
   if (wide !== undefined) {
     const lead = familiesOfMark('line');
@@ -757,7 +796,7 @@ export function classify(row: ProfileInput): CensusRow {
   // one fact that explains it.
   const choice = recommendChart(row.prompt, profiles, { rows: set.rows.length });
   const top = choice.recommendations[0];
-  const lead = top === undefined ? undefined : familiesOfMark(top.mark, top.cues[0]);
+  const lead = top === undefined ? undefined : familiesOfMark(top.mark, familyCue(top.cues));
   const covering = coveringMarks(expected);
   if (covering.length === 0 && (lead === undefined || !lead.includes(expected))) {
     return { expected, outcome: 'uncovered' };
@@ -828,6 +867,7 @@ interface FamilyTally {
   hit: number;
   substituted: number;
   reshaped: number;
+  binned: number;
   refused: number;
   outranked: number;
   uncovered: number;
@@ -1001,6 +1041,7 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
       hit: 0,
       substituted: 0,
       reshaped: 0,
+      binned: 0,
       refused: 0,
       outranked: 0,
       uncovered: 0,
@@ -1017,8 +1058,18 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
     // sweep that ranked them would publish a candidate's hit count over rows where no candidate was
     // consulted, and the assertion that the shipped candidate reproduces `outcomes.hit` would fail on
     // precisely the rows this round repaired.
-    const wide = meltWide(typedRows(set), set.columns);
-    const reshapedLead = wide === undefined ? undefined : familiesOfMark('line');
+    const typed = typedRows(set);
+    const wide = meltWide(typed, set.columns);
+    // The two readings the product takes without ranking: a melt, and the pooled bins a histogram
+    // question is answered with. The row's own `fixedLead` is read off the *shipped* table, because
+    // the counterfactual and the calendar ablation below are about the product: on a row the product
+    // answered without ranking, there is no ordering for another ordering to beat.
+    const fixedLead =
+      wide !== undefined || histogramReading(row.prompt, typed, set.columns) !== undefined
+        ? wide !== undefined
+          ? familiesOfMark('line')
+          : familiesOfMark('bar', 'histogram')
+        : undefined;
     // Every candidate table, on the product path, against the same rows. The profiles are computed
     // once per row and handed to each variant, so what differs between the numbers is the cue table
     // and nothing else — a second `profilesOf` per variant would make the readings differ by the
@@ -1045,8 +1096,17 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
         ...(candidate.maxSlices === undefined ? {} : { maxSlices: candidate.maxSlices }),
       });
       const top = choice.recommendations[0];
+      // A candidate's answer is priced with the candidate's own cue table — including the reading,
+      // which is gated on a cue: the `no-histogram` ablation has to lose this row, or the sweep would
+      // credit every table with a widening only one of them carries.
       const lead =
-        reshapedLead ?? (top === undefined ? undefined : familiesOfMark(top.mark, top.cues[0]));
+        wide !== undefined
+          ? fixedLead
+          : histogramReading(row.prompt, typed, set.columns, candidate.cues) !== undefined
+            ? familiesOfMark('bar', 'histogram')
+            : top === undefined
+              ? undefined
+              : familiesOfMark(top.mark, familyCue(top.cues));
       if (candidate === PRODUCT_CANDIDATES[0]) {
         control = top?.mark;
         controlDims = choice.shape.dims;
@@ -1067,20 +1127,20 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
     // population and the same hit test, so `hit` and `counterfactual.hit` are the same measurement
     // of two orderings rather than two measurements of one ordering.
     //
-    // A reshaped row is excluded from the comparison rather than from the population: the product
-    // answered it by melting, so there is no ranking here for another ranking to beat, and crediting
+    // A fixed row is excluded from the comparison rather than from the population: the product
+    // answered it by melting or by binning, so there is no ranking here for another ranking to beat, and crediting
     // the counterfactual with a conversion it did not make would inflate one lever with the work of
     // another. `under` is set equal to `answered` on those rows, which is the arithmetic way of saying
     // "this row says nothing about that ordering" while keeping the identity the report asserts.
     const answered = classified.outcome === 'hit';
     if (profiles.length > 0) {
       const under =
-        reshapedLead === undefined
+        fixedLead === undefined
           ? firstAdmissibleWinner(recommendChart(row.prompt, profiles, { rows: set.rows.length }), readCues(row.prompt))
           : undefined;
       const answers =
-        reshapedLead === undefined
-          ? under !== undefined && familiesOfMark(under.mark, under.cues[0])[0] === classified.expected
+        fixedLead === undefined
+          ? under !== undefined && familiesOfMark(under.mark, familyCue(under.cues))[0] === classified.expected
           : answered;
       if (answers) underFirstClaims += 1;
       if (answers && !answered) converted += 1;
@@ -1091,11 +1151,11 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
     // predicate rather than restating the rule is the whole point — a copy of the rule here would be
     // a second answer to "is this a year", and the reading would then be about the copy.
     //
-    // A reshaped row takes no part in this, for the reason it takes none in the counterfactual: the
+    // A fixed row takes no part in this, for the reason it takes none in the counterfactual: the
     // product did not read its columns as types at all. It still contributes its own answer to
     // `calendar.hit` when it is a hit, because the identity below is over the whole population.
     const runs =
-      profiles.length === 0 || reshapedLead !== undefined
+      profiles.length === 0 || fixedLead !== undefined
         ? []
         : (() => {
             const typed = typedRows(set);
@@ -1556,7 +1616,7 @@ export function describeCensus(report: CensusReport): readonly string[] {
   const outcome = report.outcomes;
   const lines = [
     `text2vis census: ${String(report.scored)} scored of ${String(report.rows)} rows (${String(report.unmapped)} unmapped labels)`,
-    `  hit ${String(outcome.hit)} (${share(outcome.hit)}), substituted ${String(outcome.substituted)}, reshaped ${String(outcome.reshaped)}, refused ${String(outcome.refused)} (${share(outcome.refused)}), outranked ${String(outcome.outranked)} (${share(outcome.outranked)}), uncovered ${String(outcome.uncovered)}, no profile ${String(outcome.noProfile)}`,
+    `  hit ${String(outcome.hit)} (${share(outcome.hit)}), substituted ${String(outcome.substituted)}, reshaped ${String(outcome.reshaped)}, binned ${String(outcome.binned)}, refused ${String(outcome.refused)} (${share(outcome.refused)}), outranked ${String(outcome.outranked)} (${share(outcome.outranked)}), uncovered ${String(outcome.uncovered)}, no profile ${String(outcome.noProfile)}`,
     `  hit + substituted is the shortlist the profile file publishes: ${String(outcome.hit + outcome.substituted)} of ${String(report.scored)}`,
     `  time-formatted columns the profiler did not call temporal: ${String(report.timeLikeRows)} rows`,
     `  columns that are numbers only after their formatting is read: ${String(report.coercedRows)} rows`,
@@ -1565,7 +1625,7 @@ export function describeCensus(report: CensusReport): readonly string[] {
   if (report.unreachable.rows > 0) {
     const renderable = report.renderable;
     lines.push(
-      `  labels no mark can lead with (area, histogram, violin): ${String(report.unreachable.rows)} rows, so ${String(report.outcomes.hit)} hit of ${String(renderable)} renderable rows (${(report.hitShareRenderable * 100).toFixed(2)}%), against ${String(report.outcomes.hit)} of ${String(report.scored)} (${(report.outcomes.hit / Math.max(1, report.scored) * 100).toFixed(2)}%)`,
+      `  labels no mark can lead with (${report.unreachable.byFamily.map((entry) => entry.family).join(', ')}): ${String(report.unreachable.rows)} rows, so ${String(report.outcomes.hit)} hit of ${String(renderable)} renderable rows (${(report.hitShareRenderable * 100).toFixed(2)}%), against ${String(report.outcomes.hit)} of ${String(report.scored)} (${(report.outcomes.hit / Math.max(1, report.scored) * 100).toFixed(2)}%)`,
     );
     for (const entry of report.unreachable.byFamily) {
       const took = Object.entries(entry.outcome)

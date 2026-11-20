@@ -169,11 +169,11 @@ export async function runRepair(settings: RepairSettings): Promise<RepairReport>
     else answered += 1;
     const row = settings.rows[ask.row] as ProfileInput;
     const expected = familyOfLabel(row.label);
-    if (expected !== undefined && answer.choice !== undefined && markAnswer(answer.choice).families[0] === expected) {
+    if (expected !== undefined && answer.choice !== undefined && markAnswer(answer.choice, row.prompt).families[0] === expected) {
       hits += 1;
     }
     // The verdict `ship.ts` would have drawn on this row without the repair: the table's mark.
-    if (expected !== undefined && markAnswer(settings.products[ask.row]).families[0] === expected) {
+    if (expected !== undefined && markAnswer(settings.products[ask.row], row.prompt).families[0] === expected) {
       tableHits += 1;
     }
   }
