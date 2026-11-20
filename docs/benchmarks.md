@@ -17105,3 +17105,95 @@ deliberation is empty, and the next question is not "which arm is better" but wh
 routes between the two *chats* — one that thinks, one that does not — beats `model-holds` on the 160 rows
 they disagree about. A router over 160 rows is a smaller and cheaper question than another full arm, and
 it is the only one where this reading changes an answer.
+
+## Two answers worth the same, and a rule that reads them together: 807 → 828
+
+The round before this one bought the same vendor's thinking mode and priced it on the same 1,470 rows:
+**875** against the chat arm's **861**, 73 rows against 87, McNemar p = 0.30, and a union with the rule
+table that went *down* by one. The honest reading of that is not "the arms are equal" — it is that the
+question was malformed. Two answers of equal value are worth exactly what a rule can make of their
+disagreement, and that is a different measurement.
+
+`eval/text2vis/route.ts` makes it. It prices **the same six rules** `arbitrate.ts` already prices —
+reused by function reference, renamed only where a name would lie — with the chat arm in the seat the
+product occupied. Nothing calls a model: the answers were bought once and the store replayed them for
+¥0.
+
+### The table
+
+| rule | what it believes | decided | vs chat | vs reasoner | changed |
+|---|---|---:|---:|---:|---:|
+| `chat` | the arm that does not think, always | 861 (58.57%) | — | −14 | 0 |
+| `reasoner` | the arm that thinks, always | 875 (59.52%) | +14 (p=0.30) | — | 236 |
+| **`cue-led`** | **keep the chat answer only where the cue table *leads* with the mark it answered** | **891 (60.61%)** | **+30 (p=0.0073)** | **+16 (p=0.0195)** | 170 |
+| `cue-any` | keep it wherever *any* cue named it | 880 (59.86%) | +19 (p=0.023) | +5 | 92 |
+| `chat-holds` | chat, except where it refused | 863 (58.71%) | +2 | −12 | 6 |
+| `reasoner-holds` | reasoner, except where *it* refused | 876 (59.59%) | +15 | +1 | 235 |
+| *ceiling* | the union of the two answers | *948 (64.49%)* | | | |
+
+The two arms agree on 1,234 rows (788 of them right) and disagree on 236. `cue-led` reads 103 of those
+236 correctly — 29 it kept for the chat arm, 74 it gave to the reasoning one — against the 87 the
+reasoning arm reads alone. It rewrites 170 of the 1,470 answers.
+
+The rule is a sentence a reader can argue with: *a question that names a shape first is a question the
+answer should follow, and if the plain arm agrees with the cue, deliberation has nothing to add*. It is
+not a threshold and not a weight, which is why it can be checked by hand on any row.
+
+### The number that decides is not the decided one
+
+`decided` is what the model would choose. `shipped` is what a caller receives, after `assistedChartIR`
+vetoes a mark the result set cannot hold. Both are computed by the product's own code, and the chat
+arm's row reproduces the published 807 exactly — which is what makes the other two comparable:
+
+| answer set | decided | shipped | changed by a veto |
+|---|---:|---:|---:|
+| `deepseek-chat` | 863 | 807 (54.90%) | 138 |
+| `deepseek-reasoner` | 875 | 818 (55.65%) | 149 |
+| **`cue-led`** | **891** | **828 (56.33%)** | 144 |
+
+The pairing on the *charts*, not on the decisions: **61 rows gained, 40 lost**, p = 0.046. At the
+decision level the same rule is +30/−3. The difference is the vetoes: a chart that cannot be drawn is
+replaced by the table's answer, and the table is wrong often enough that it both rescues rows the rule
+lost and ruins rows it won. A decided gain of 30 rows is a shipped gain of 21.
+
+### What this is not
+
+1. **Not an established effect.** Six rules were priced and the best one is reported; a Bonferroni
+   correction puts `cue-led`'s margin over the *reasoning arm* at p = 0.117, and its shipped gain at
+   0.276. Against the chat arm it survives (0.0073 → 0.044), which is the comparison nobody needs: the
+   chat arm is not the incumbent.
+2. **Not free.** The router needs both answers, so it costs two calls per row where the product costs
+   one. 21 shipped rows for double the inference is a trade a caller should be allowed to decline, so
+   the default path is unchanged and the routing table is registered as a *priced option* — floor
+   `llm.duel`, `cue-led` at 891 decided / 828 shipped, reproduced on every dispatch for ¥0.
+3. **Not the last word on the cheaper alternative.** A one-call router exists — keep the product's
+   answer where the cue leads, ask the reasoning arm otherwise — and it was priced on the same artifact
+   rather than argued about: **766** (`cue-led` between the product and the reasoning arm), against the
+   875 the reasoning arm reads alone. The cue rules only pay when the two answers are of comparable
+   quality; against a 610-row answerer they throw away too much.
+
+### Replicated on both halves
+
+The rule was written before this dispatch (it is a row of the arbitration table the product-versus-model
+reading already prices), so the split is a check rather than a fit. Rows split by a hash of the question:
+
+| half | rows | chat shipped | reasoner shipped | routed shipped | delta |
+|---|---:|---:|---:|---:|---:|
+| 0 | 732 | 396 (54.10%) | 396 | 402 (54.92%) | **+6** |
+| 1 | 738 | 411 (55.69%) | 422 | 426 (57.72%) | **+15** |
+
+Both halves gain, and neither is doing the other's work.
+
+### Two defects found by building the instrument
+
+1. **The store kept answers, not meters.** The first reasoning dispatch bought 1,469 answers and died
+   on a deadline before printing a bill; the resumed run printed ¥0.0033, which is true of the run and
+   false of the reading. `StoredRow` now carries `usage`, a replayed row carries it back as `replayed`,
+   and `ArmCost.replayed` publishes *what this run did not have to buy* beside what it spent. A store
+   entry written before the field existed is reported as `unmetered` rather than as `¥0`: the second is
+   a claim and the first is a fact.
+2. **The command's default seat priced one arm against itself.** `--left` and `--right` both defaulted
+   to the first mark arm, so the first invocation printed six rules that all read the same number — and
+   the guard that caught it ("a route between one arm and itself prices the same answer twice") exists
+   because the wrong table was the first thing the command produced. The default is now the first two
+   *distinct* arms.
