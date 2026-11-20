@@ -17010,3 +17010,98 @@ saved with `if: always()` — so a run that hits the cap resumes from the store 
 A second model is a *cheap* question that the harness made expensive: ¥0 of answers already on disk,
 two gates and one deadline between them and a reading. Both were found by dispatching, neither by
 reading the code, which is the same lesson the store's own history carries.
+
+## The strong model clears the floor and is not better: 875 against 861, p = 0.30
+
+The previous round registered one number for the next dispatch to beat — a reasoning model's `mark` arm
+had to read **at least 861**, the chat arm's reading on the same 1,470 rows. It reads **875 (59.52%)**,
+and the honest sentence about that is two sentences, because the two halves point in opposite
+directions.
+
+### The reading
+
+| arm | answer | unparsed | truncated | top-1 | shortlist |
+|---|---:|---:|---:|---:|---:|
+| `deepseek-chat` | 1,464 | 6 | 0 | 861 (58.57%) | 986 |
+| `deepseek-reasoner` | 1,469 | 1 | 0 | **875 (59.52%)** | **998** |
+
+One dispatch, one corpus download, both arms on the same roster
+(`a5371fb5753fc8a6…`, 1,470 rows). The chat arm cost **¥0**: 1,470 of 1,470 answers restored from the
+content-addressed store, four commits after the code that fills the store changed — the key is the
+request, and the request did not change. The reasoning arm answered one row it had not already bought
+in the earlier, timed-out dispatch; the bill for the other 1,469 is the one number this reading cannot
+publish, and *that* is a defect — see below.
+
+### The pairing, which is the part that decides
+
+| | count |
+|---|---:|
+| both arms right | 788 |
+| `deepseek-chat` right, `deepseek-reasoner` wrong | 73 |
+| `deepseek-reasoner` right, `deepseek-chat` wrong | 87 |
+| neither right | 522 |
+
+McNemar on the 160 discordant pairs: **p = 0.30**. The direction is the reasoning model; the size is
+not a signal. A 73/87 split is what one coin produces often enough that +14 rows on 1,470 cannot be
+called an improvement — which is exactly why the floor was registered as a number to beat rather than a
+number to interpret.
+
+### Where the 14 rows come from, and where they go
+
+| family | rows | `deepseek-chat` | `deepseek-reasoner` | delta |
+|---|---:|---:|---:|---:|
+| pie | 182 | 39.56% | **46.70%** | +13 |
+| line | 394 | 87.31% | **89.34%** | +8 |
+| heatmap | 20 | 30.00% | **40.00%** | +2 |
+| bar | 420 | 62.38% | 62.62% | +1 |
+| radar | 6 | 100.00% | 83.33% | −1 |
+| funnel | 11 | 72.73% | 63.64% | −1 |
+| boxplot | 90 | 94.44% | 91.11% | −3 |
+| scatter | 104 | 70.19% | 65.38% | −5 |
+| area / histogram / violin | 237 | 0.00% | 0.00% | 0 |
+
+The deliberation buys **vocabulary**: a question that names a shape out loud (`share`, `proportion`,
+`trend`) is read better, and `pie` is the family with the most to gain (+13 of its 182 rows). It does
+not buy **structure**: the two families this product *derives* rather than reads — `scatter` from two
+measures, `boxplot` from repeated observations — get worse, and those are the families where the answer
+depends on what the table's numbers look like rather than on what the sentence asks. Five rows of
+`scatter` and three of `boxplot` is a small sample, but it points the same way as the cost: the model
+that thinks is not being asked to think about the table.
+
+`area`, `histogram` and `violin` are zero on both arms and stay zero: no mark this product draws leads
+with those families, so no list of eleven marks can reach them. That is a ceiling of the instrument, not
+of the model, and it is why the `label` scale exists.
+
+### Two defects this reading found, neither of them about the model
+
+1. **The store keeps answers, not meters.** The first dispatch bought 1,469 reasoning answers and died
+   on a deadline before printing a bill. The answers were saved (`if: always()`) and the second dispatch
+   paid ¥0.003 for one row — but the money spent on the 1,469 is unrecoverable, because `StoredRow`
+   carries `{choice, reply, truncated, model}` and no token counts. A resumed run therefore reports a
+   bill that is *smaller than the truth*, in the direction that makes the next dispatch look free.
+2. **A floor with one request cannot register two arms.** `llm.request` recorded `{promptVersion: 1,
+   budget: 96}` for every arm, and a reasoning endpoint is sent no cap at all — so registering the new
+   arm immediately re-armed the check that had already refused it once. The floor now records a
+   `request` per arm (`llm.arms['deepseek-reasoner|mark'].request`), and the global one stays as the
+   default for the arms registered before the field existed. Two arms in one dispatch are legitimately
+   two instruments; a floor that can only say one request can only ever exempt the second arm or refuse
+   it.
+
+### What this means for the next round
+
+The floor is now 875 for `deepseek-reasoner|mark`, and the ceiling that decides whether deliberation is
+worth buying is not either arm's reading — it is the union of one arm with the rule table, which is what
+`arbitrate.ts` prices six policies against. Computed on the same artifact, ¥0:
+
+| | product | model | union with the product | rows only the product gets |
+|---|---:|---:|---:|---:|
+| `deepseek-chat` | 610 | 861 | **974** | 113 |
+| `deepseek-reasoner` | 610 | **875** | 973 | 98 |
+
+**+14 rows alone is −1 row in union.** The 14 the reasoning model wins are largely rows the rule table
+already had, so they buy nothing a router could use; the rows only the product gets fall 113 → 98 for the
+same reason, which is the same fact seen from the other side. So the queue of reasons to spend ¥12 on
+deliberation is empty, and the next question is not "which arm is better" but whether a policy that
+routes between the two *chats* — one that thinks, one that does not — beats `model-holds` on the 160 rows
+they disagree about. A router over 160 rows is a smaller and cheaper question than another full arm, and
+it is the only one where this reading changes an answer.

@@ -1,104 +1,138 @@
 {
-  "instrument": "eval/text2vis/profile.ts",
-  "corpus": "Text2Vis.csv (mizanurr/Text2Vis, 1,985 rows, 1,470 scored after unmapped labels)",
-  "recordedAt": "2026-11-18",
-  "scored": 1470,
-  "top1": 610,
-  "shortlist": 713,
-  "declined": 35,
-  "note": "Raised by hand, in the commit that earns it. 529 was the reading after the corpus's Question column replaced its Prompt column: every rule reading in this repository had been taken on the whole conversational turn, table inlined, so a cue matched the table's own headers (a column called `Projected share of the population` fired `share`, which names a pie). The product reads 530 (36.05%) on the question; the cue table reads 575 (39.12%), so the gap is 3.07pp. The +1 is the round that taught `profileRows` to take the table's column order: a column every cell of which is null is no longer admitted as an axis or a measure, which moved one row. The denominator is compared for identity, not for a floor: a reading over a different row set is a different question. This reading is the round that stopped reading a pair of values as a scale: 145 tables of the corpus were two rows wide and had no measure at all, so every mark refused them. Reading a pair by what its numbers look like moved declined 167 -> 39 and, with it, top-1 530 -> 579 (+3.34pp) and shortlist 623 -> 676: a table that is refused cannot hit a family, so a fix to a refusal is also a fix to the counter. The render reading moves 1,286 -> 1,414 figures for the same reason, and the judge readings taken at 1,286 are kept as history rather than compared with the ones after it. 588/686/35 (v9.29): the melt's own reading, taken by the text2vis-rule job of run 44149995497 on 27defec5 and raised here because the number did not exist until that job ran. The melt re-marked 111 tables, not the 44 the census had counted: bar 698 -> 645, line 341 -> 452, pie 250 -> 227, scatter 66 -> 64, boxplot 43 -> 14, declined 39 -> 35. The census was counting tables that no admission rule could chart; the melt predicate is about the *column names* being periods, and 107 of those tables were being charted as the wrong mark rather than refused — a wide table with five or more columns fits a boxplot's tuple shape, which reads five years as min/q1/median/q3/max, and 29 rows were drawn that way. The reading is a net gain on the only labeled metric (top-1 579 -> 588, +0.61pp; shortlist 676 -> 686) and the four new figures are the ones that were declined. Floors raised here rather than in 27defec5 because a floor is a number taken from a reading, and this reading is the first one that exists. **v9.31: 588 -> 606, shortlist 686 -> 710, declined 35 -> 35.** Two typing rules in one change, because each one alone is a wash and together they are not. A column of years with *holes* in it — a survey fielded every two years, `2002, 2004, 2006, 2008, 2010` — is a timeline, and the rule demanded a contiguous block: ten rows gained against three lost when the gap clause is dropped. A *scale* steps by one, and the rule asked only whether the column repeated inside a small range, so a survey's percentages per wave (`10, 12, 9, 14` over eight rows, four distinct) were read as an axis and the measure they carried disappeared: that is what answered a two-measure scatter `heatmap` and a heatmap a `scatter`. Alone that reads 588 again (the losses are the gapped years the first rule recovers), together they read **606** on 27 gains against 9 losses — a paired comparison on the same rows, sign test p = 0.004. Family by family: line 58.82% -> 63.17%, scatter 23.66% -> 27.96%, bar 57.42% -> 55.46% (seven rows of year-by-several-measures now read a line where the corpus says a bar, which is label noise in both directions and the next round's job). Also fixed in this reading: the `delta by family` line compared the cue report's *covering* hit with this report's *strict* one and published the difference between the predicates as a difference between the instruments — it read `area -58`, which says the result set made the area family worse, and it did not. **v9.46: 606 -> 610, shortlist 710 -> 713, declined 35 -> 35.** The derived boxplot, and the row counts are the smallest part of it: the *Boxplot* family reads 6.74% -> 47.19% (+36 of its 89 rows) because a table that states its distribution by repeating a measure is now read as one, while the marks the old admission overruled pay for it — bar 198 -> 176, line 247 -> 243, stacked bar 36 -> 34, and 17 histogram rows that used to answer `gauge` now answer `boxplot`. Net +4 on top-1, and the swap is the cue table's own reading, not this change's: `distribution` names a boxplot, the admission refused every boxplot, and the cue was being overruled by a rule about columns. The ablation prices that cue at +25 rows (`no-distribution` reads 550), so the 28 rows it costs are the price of the 36 it wins. Shipped, the same change removes 144 of the 223 `not-admitted` vetoes, which is the half of this reading a rule arm cannot show.",
-  "render": {
-    "rendered": 1418,
-    "failed": 0
+ "instrument": "eval/text2vis/profile.ts",
+ "corpus": "Text2Vis.csv (mizanurr/Text2Vis, 1,985 rows, 1,470 scored after unmapped labels)",
+ "recordedAt": "2026-11-18",
+ "scored": 1470,
+ "top1": 610,
+ "shortlist": 713,
+ "declined": 35,
+ "note": "Raised by hand, in the commit that earns it. 529 was the reading after the corpus's Question column replaced its Prompt column: every rule reading in this repository had been taken on the whole conversational turn, table inlined, so a cue matched the table's own headers (a column called `Projected share of the population` fired `share`, which names a pie). The product reads 530 (36.05%) on the question; the cue table reads 575 (39.12%), so the gap is 3.07pp. The +1 is the round that taught `profileRows` to take the table's column order: a column every cell of which is null is no longer admitted as an axis or a measure, which moved one row. The denominator is compared for identity, not for a floor: a reading over a different row set is a different question. This reading is the round that stopped reading a pair of values as a scale: 145 tables of the corpus were two rows wide and had no measure at all, so every mark refused them. Reading a pair by what its numbers look like moved declined 167 -> 39 and, with it, top-1 530 -> 579 (+3.34pp) and shortlist 623 -> 676: a table that is refused cannot hit a family, so a fix to a refusal is also a fix to the counter. The render reading moves 1,286 -> 1,414 figures for the same reason, and the judge readings taken at 1,286 are kept as history rather than compared with the ones after it. 588/686/35 (v9.29): the melt's own reading, taken by the text2vis-rule job of run 44149995497 on 27defec5 and raised here because the number did not exist until that job ran. The melt re-marked 111 tables, not the 44 the census had counted: bar 698 -> 645, line 341 -> 452, pie 250 -> 227, scatter 66 -> 64, boxplot 43 -> 14, declined 39 -> 35. The census was counting tables that no admission rule could chart; the melt predicate is about the *column names* being periods, and 107 of those tables were being charted as the wrong mark rather than refused — a wide table with five or more columns fits a boxplot's tuple shape, which reads five years as min/q1/median/q3/max, and 29 rows were drawn that way. The reading is a net gain on the only labeled metric (top-1 579 -> 588, +0.61pp; shortlist 676 -> 686) and the four new figures are the ones that were declined. Floors raised here rather than in 27defec5 because a floor is a number taken from a reading, and this reading is the first one that exists. **v9.31: 588 -> 606, shortlist 686 -> 710, declined 35 -> 35.** Two typing rules in one change, because each one alone is a wash and together they are not. A column of years with *holes* in it — a survey fielded every two years, `2002, 2004, 2006, 2008, 2010` — is a timeline, and the rule demanded a contiguous block: ten rows gained against three lost when the gap clause is dropped. A *scale* steps by one, and the rule asked only whether the column repeated inside a small range, so a survey's percentages per wave (`10, 12, 9, 14` over eight rows, four distinct) were read as an axis and the measure they carried disappeared: that is what answered a two-measure scatter `heatmap` and a heatmap a `scatter`. Alone that reads 588 again (the losses are the gapped years the first rule recovers), together they read **606** on 27 gains against 9 losses — a paired comparison on the same rows, sign test p = 0.004. Family by family: line 58.82% -> 63.17%, scatter 23.66% -> 27.96%, bar 57.42% -> 55.46% (seven rows of year-by-several-measures now read a line where the corpus says a bar, which is label noise in both directions and the next round's job). Also fixed in this reading: the `delta by family` line compared the cue report's *covering* hit with this report's *strict* one and published the difference between the predicates as a difference between the instruments — it read `area -58`, which says the result set made the area family worse, and it did not. **v9.46: 606 -> 610, shortlist 710 -> 713, declined 35 -> 35.** The derived boxplot, and the row counts are the smallest part of it: the *Boxplot* family reads 6.74% -> 47.19% (+36 of its 89 rows) because a table that states its distribution by repeating a measure is now read as one, while the marks the old admission overruled pay for it — bar 198 -> 176, line 247 -> 243, stacked bar 36 -> 34, and 17 histogram rows that used to answer `gauge` now answer `boxplot`. Net +4 on top-1, and the swap is the cue table's own reading, not this change's: `distribution` names a boxplot, the admission refused every boxplot, and the cue was being overruled by a rule about columns. The ablation prices that cue at +25 rows (`no-distribution` reads 550), so the 28 rows it costs are the price of the 36 it wins. Shipped, the same change removes 144 of the 223 `not-admitted` vetoes, which is the half of this reading a rule arm cannot show.",
+ "render": {
+  "rendered": 1418,
+  "failed": 0
+ },
+ "judge": {
+  "grader": {
+   "endpoint": "zhipu",
+   "model": "glm-4.5v",
+   "thinking": null
   },
-  "judge": {
-    "grader": {
-      "endpoint": "zhipu",
-      "model": "glm-4.5v",
-      "thinking": null
-    },
-    "dimensions": [
-      "chart_correctness",
-      "readability"
-    ],
-    "callsPerRow": 1,
-    "means": {
-      "chart_correctness": 3.44,
-      "readability": 6.49
-    },
-    "judged": 1416,
-    "of": 1418,
-    "note": "The sixth full reading, run 44150185171 on 27defec5 with glm-4.5v, and the first taken after the melt: 1,418 figures rendered, 1,416 judged, 1,418 calls, two rows the provider's content policy would not look at (rows 1006 and 1007, refused at the prompt with `400 系统检测到输入或生成内容可能包含不安全或敏感内容` — a fact about the question, not about the figure, and counted rather than scored). chart_correctness 3.05 -> 3.44 and readability 6.05 -> 6.49, so the floor moves to 3.44/6.49: both dimensions rose on a population that is the same 1,418 rows the render floor names. **The +0.39 is not read off two means.** The two denominators differ by four figures and 140 rows changed mark, so the reading was taken as a paired difference over the 1,411 rows both readings graded (`pnpm bench:text2vis:ablate --before <fifth> --after <sixth>`): the 140 rows the melt re-drew moved correctness 1.78 -> 5.91 (+4.13 ± 0.93) and readability 4.61 -> 9.19 (+4.59 ± 0.51), while every control group held its mean — bar 644 rows -0.08 ± 0.09, line 308 rows +0.02 ± 0.15, pie 225 rows +0.11 ± 0.17, scatter 64 rows -0.08 ± 0.21, boxplot 14 rows +0.07 ± 0.38, heatmap 9 rows -0.44 ± 0.66, funnel 6 rows +0.83 ± 1.85. Seven control intervals include zero, which is the claim that matters: the instrument did not drift, so the group that moved is the change. 140 x 4.13 / 1,411 = 0.41 of the 0.39 observed. Per mark: bar 645/645 at 3.06/6.69, line 452/452 at 4.36/6.34, pie 225/227 at 2.91/6.61, scatter 64/64 at 2.72/6.53, boxplot 14/14 at 3.07/2.50, heatmap 9/9 at 0.67/2.22, funnel 6/6 at 6.00/7.50, candlestick 1/1 at 10.00/9.00. Heatmap is now the worst bucket on both axes and is the next round's target. **The think A/B arm is void, not negative.** Run 44155803661 asked for `think=off` over the same 1,418 figures and graded 244 of them before the account ran out: rows 248 onwards returned `429 余额不足或无可用资源包,请充值。` 1,174 times, in 35 minutes, and the log printed `chart_correctness 2.58` over those 244 rows as though it were a reading. That run cost one lesson and two fixes: `judgeJobsWith` stops after eight calls in a row without a reply and reports where it stopped (`aborted`), and `gradingExitCode` is red on a stopped run whatever share of the corpus it lost. No number about thinking is registered, because none was measured."
+  "dimensions": [
+   "chart_correctness",
+   "readability"
+  ],
+  "callsPerRow": 1,
+  "means": {
+   "chart_correctness": 3.44,
+   "readability": 6.49
   },
-  "renderNote": "The pixel half, recorded in the round the renderer was built: 1,286 of the 1,470 scored rows reach a PNG (87.48%), 17 are refused because a gauge states a value against a scale this contract does not carry, and 167 are the rows the recommender declines. The floor is the pair (rendered >= 1,286, failed == 0) rather than an accuracy reading: a chart that raised in Python came from this repository own emitter. Still (rendered == 1,286, failed == 0) after the column-order fix, which changed which column each figure is drawn against without changing how many figures exist: 389 of 1,464 tables were being read in JavaScript property order, five of them against an entirely empty year column. 1,418 (v9.29): four tables that had no shape reach a PNG through the melt, and 111 are re-marked without changing the count of figures -- so the floor moves by the four that are new, not by the 111 that changed.",
-  "llm": {
-    "recordedAt": "2026-11-19",
-    "run": "44551395709",
-    "commit": "37b7e3d9",
-    "instrument": "eval/text2vis/llm.ts, PROMPT_VERSION 1, deepseek-chat, temperature 0, max_tokens 96, thinking absent",
+  "judged": 1416,
+  "of": 1418,
+  "note": "The sixth full reading, run 44150185171 on 27defec5 with glm-4.5v, and the first taken after the melt: 1,418 figures rendered, 1,416 judged, 1,418 calls, two rows the provider's content policy would not look at (rows 1006 and 1007, refused at the prompt with `400 系统检测到输入或生成内容可能包含不安全或敏感内容` — a fact about the question, not about the figure, and counted rather than scored). chart_correctness 3.05 -> 3.44 and readability 6.05 -> 6.49, so the floor moves to 3.44/6.49: both dimensions rose on a population that is the same 1,418 rows the render floor names. **The +0.39 is not read off two means.** The two denominators differ by four figures and 140 rows changed mark, so the reading was taken as a paired difference over the 1,411 rows both readings graded (`pnpm bench:text2vis:ablate --before <fifth> --after <sixth>`): the 140 rows the melt re-drew moved correctness 1.78 -> 5.91 (+4.13 ± 0.93) and readability 4.61 -> 9.19 (+4.59 ± 0.51), while every control group held its mean — bar 644 rows -0.08 ± 0.09, line 308 rows +0.02 ± 0.15, pie 225 rows +0.11 ± 0.17, scatter 64 rows -0.08 ± 0.21, boxplot 14 rows +0.07 ± 0.38, heatmap 9 rows -0.44 ± 0.66, funnel 6 rows +0.83 ± 1.85. Seven control intervals include zero, which is the claim that matters: the instrument did not drift, so the group that moved is the change. 140 x 4.13 / 1,411 = 0.41 of the 0.39 observed. Per mark: bar 645/645 at 3.06/6.69, line 452/452 at 4.36/6.34, pie 225/227 at 2.91/6.61, scatter 64/64 at 2.72/6.53, boxplot 14/14 at 3.07/2.50, heatmap 9/9 at 0.67/2.22, funnel 6/6 at 6.00/7.50, candlestick 1/1 at 10.00/9.00. Heatmap is now the worst bucket on both axes and is the next round's target. **The think A/B arm is void, not negative.** Run 44155803661 asked for `think=off` over the same 1,418 figures and graded 244 of them before the account ran out: rows 248 onwards returned `429 余额不足或无可用资源包,请充值。` 1,174 times, in 35 minutes, and the log printed `chart_correctness 2.58` over those 244 rows as though it were a reading. That run cost one lesson and two fixes: `judgeJobsWith` stops after eight calls in a row without a reply and reports where it stopped (`aborted`), and `gradingExitCode` is red on a stopped run whatever share of the corpus it lost. No number about thinking is registered, because none was measured."
+ },
+ "renderNote": "The pixel half, recorded in the round the renderer was built: 1,286 of the 1,470 scored rows reach a PNG (87.48%), 17 are refused because a gauge states a value against a scale this contract does not carry, and 167 are the rows the recommender declines. The floor is the pair (rendered >= 1,286, failed == 0) rather than an accuracy reading: a chart that raised in Python came from this repository own emitter. Still (rendered == 1,286, failed == 0) after the column-order fix, which changed which column each figure is drawn against without changing how many figures exist: 389 of 1,464 tables were being read in JavaScript property order, five of them against an entirely empty year column. 1,418 (v9.29): four tables that had no shape reach a PNG through the melt, and 111 are re-marked without changing the count of figures -- so the floor moves by the four that are new, not by the 111 that changed.",
+ "llm": {
+  "recordedAt": "2026-11-20",
+  "run": "44684484285",
+  "commit": "37b7e3d9",
+  "instrument": "eval/text2vis/llm.ts, PROMPT_VERSION 1, deepseek-chat, temperature 0, max_tokens 96, thinking absent",
+  "request": {
+   "promptVersion": 1,
+   "budget": 96
+  },
+  "requestNote": "The request, as the arm itself records it in every artifact: prompt version 1 with a 96-token reply budget. `instrument` above is the same fact written for a reader; this is the same fact written for a comparison, because a reader cannot be asked what a file means. A local artifact from the first dispatch — version 1, a 32-token cap, 857 top-1 — sat on disk and the gate called it \"inside the band, not a regression\": every count in it added up, and the only thing wrong with it was the request it answered. That is the class of file this field refuses.",
+  "asked": 1470,
+  "tolerance": 5,
+  "resamples": "Three dispatches of one arm with no code change moved mark 857 / 859 / 856 and label 886 / 886 / 889 — a spread of 3 rows at temperature 0. A floor without a band therefore rejects a re-sample: run 44439035718 failed at 856 against a floor of 857, which is 0.07pp and inside the instrument's own noise. 5 rows is wider than the largest observed spread and still 0.34pp, below any decision this benchmark can make. On the 96-token request that actually ships the same arm read 859, 861, 861 and 861 across four dispatches — a spread of 2 rows, because the last three restored one store instead of re-asking — so the five-row tolerance is wider than the instrument needs and is kept anyway: the wider number was measured on a prompt the repository no longer sends, and narrowing a band in the same commit that re-registers the floor would hide which of the two moved.",
+  "note": "The first full reading of the chart half by a model, and the floor the next dispatch is held to. 1,470 rows asked at both scales; the 515 corpus rows whose label no family names are not sent, which is a correction this reading itself produced — the run before it asked all 1,985 and scored 1,470, so 1,030 calls of 3,970 bought nothing. Zero replies were cut at the cap; the run before it had 5 cut at max_tokens 32, and the three whose cut landed just after the name were counted as answers, which is why that run read 860 top-1 and this one reads 857. `mark` offers the eleven marks this product can draw and is scored by profile.ts's own scorer, so 857 - 606 is a difference between two answers on one population. `label` offers the corpus's vocabulary and counts exact family matches: 886, of which 59 name a family no mark leads with (area, histogram, violin), which is the only scale on which those families can be hit. Cost: ¥0.604 + ¥0.649 = ¥1.25 for 2,940 calls, ¥0.0004 per row per scale. The `mark` arm's floor has since been re-registered at 861: the 857 it carried was taken on a 32-token reply budget, and the 96-token request that ships reads 859 and 861. **v9.48: 861 and 886 reproduced for Y0, and the second model priced at 875.** Run `44684484285` asked the same 1,470 rows with `deepseek-chat` and `deepseek-reasoner` in one dispatch. The chat halves were restored from the content-addressed store (2,940 of 2,940 hits, 0 calls, Y0) and read exactly the numbers above, which is the store's own receipt: the key is the request, and four commits of code changed nothing about the request. The reasoning half is the new arm — 1,469 answered, 1 unparsed, 0 truncated, **875 top-1 (59.52%)** against 861, so it clears the floor the previous round registered for it (>=861) by 14 rows. The head-to-head is in `llm.comparison`: 788 rows both arms get, 73 only the chat arm, 87 only the reasoning arm, McNemar p = 0.30. A registered arm now records its own `request`: the floor's 96-token budget is a fact about a chat endpoint, and a reasoning endpoint is sent no cap at all, so one global request could only ever exempt the second arm or refuse it. Cost is the one number this reading cannot publish — the first dispatch (run `44681062395`) bought 1,469 answers and died on a 60-second deadline before printing a bill, and the store keeps answers, not meters.",
+  "arms": {
+   "deepseek-chat|mark": {
+    "scored": 1470,
+    "top1": 861,
+    "note": "Re-registered from 857, which was a reading of a request this repository no longer sends. The floor was established by run 44363677094, when the reply budget was 32 tokens and five replies were cut; the budget is 96 (five numbers had been cut mid-answer and three of them were scored as prefixes), and the two dispatches on the 96-token request read 859 (44435717857) and 861 (44551395709). Two more dispatches reproduced 861 exactly (44557699795, 44580426870), both as cache hits, which makes 861 the reading of the answers that are on disk rather than one sample of them. Leaving the floor at 857 would have widened the gate: the band is five rows by design, and a floor four rows under the store adds four more that only look like noise."
+   },
+   "deepseek-chat|label": {
+    "scored": 1470,
+    "exact": 886
+   },
+   "deepseek-reasoner|mark": {
+    "scored": 1470,
+    "top1": 875,
     "request": {
-      "promptVersion": 1,
-      "budget": 96
-    },
-    "requestNote": "The request, as the arm itself records it in every artifact: prompt version 1 with a 96-token reply budget. `instrument` above is the same fact written for a reader; this is the same fact written for a comparison, because a reader cannot be asked what a file means. A local artifact from the first dispatch — version 1, a 32-token cap, 857 top-1 — sat on disk and the gate called it \"inside the band, not a regression\": every count in it added up, and the only thing wrong with it was the request it answered. That is the class of file this field refuses.",
-    "asked": 1470,
-    "tolerance": 5,
-    "resamples": "Three dispatches of one arm with no code change moved mark 857 / 859 / 856 and label 886 / 886 / 889 — a spread of 3 rows at temperature 0. A floor without a band therefore rejects a re-sample: run 44439035718 failed at 856 against a floor of 857, which is 0.07pp and inside the instrument's own noise. 5 rows is wider than the largest observed spread and still 0.34pp, below any decision this benchmark can make. On the 96-token request that actually ships the same arm read 859, 861, 861 and 861 across four dispatches — a spread of 2 rows, because the last three restored one store instead of re-asking — so the five-row tolerance is wider than the instrument needs and is kept anyway: the wider number was measured on a prompt the repository no longer sends, and narrowing a band in the same commit that re-registers the floor would hide which of the two moved.",
-    "note": "The first full reading of the chart half by a model, and the floor the next dispatch is held to. 1,470 rows asked at both scales; the 515 corpus rows whose label no family names are not sent, which is a correction this reading itself produced — the run before it asked all 1,985 and scored 1,470, so 1,030 calls of 3,970 bought nothing. Zero replies were cut at the cap; the run before it had 5 cut at max_tokens 32, and the three whose cut landed just after the name were counted as answers, which is why that run read 860 top-1 and this one reads 857. `mark` offers the eleven marks this product can draw and is scored by profile.ts's own scorer, so 857 - 606 is a difference between two answers on one population. `label` offers the corpus's vocabulary and counts exact family matches: 886, of which 59 name a family no mark leads with (area, histogram, violin), which is the only scale on which those families can be hit. Cost: ¥0.604 + ¥0.649 = ¥1.25 for 2,940 calls, ¥0.0004 per row per scale. The `mark` arm's floor has since been re-registered at 861: the 857 it carried was taken on a 32-token reply budget, and the 96-token request that ships reads 859 and 861.",
-    "arms": {
-      "deepseek-chat|mark": {
-        "scored": 1470,
-        "top1": 861,
-        "note": "Re-registered from 857, which was a reading of a request this repository no longer sends. The floor was established by run 44363677094, when the reply budget was 32 tokens and five replies were cut; the budget is 96 (five numbers had been cut mid-answer and three of them were scored as prefixes), and the two dispatches on the 96-token request read 859 (44435717857) and 861 (44551395709). Two more dispatches reproduced 861 exactly (44557699795, 44580426870), both as cache hits, which makes 861 the reading of the answers that are on disk rather than one sample of them. Leaving the floor at 857 would have widened the gate: the band is five rows by design, and a floor four rows under the store adds four more that only look like noise."
-      },
-      "deepseek-chat|label": {
-        "scored": 1470,
-        "exact": 886
-      }
-    },
-    "arbitration": {
-      "recordedAt": "2026-11-19",
-      "runs": [
-        "44435717857",
-        "44551395709",
-        "44661951720"
-      ],
-      "scored": 1470,
-      "product": 610,
-      "best": 863,
-      "bestPolicy": "model-holds",
-      "ceiling": 974,
-      "tolerance": 5,
-      "note": "Two full dispatches priced the same six policies on the same 1,470 rows: best 861 and 863, model alone 859 and 861, product 606 both times, ceiling 994 both times. The hybrid therefore wins by 2 rows in both — the sign is stable and the size is 0.14pp — which is why the floor records the best policy's reading rather than a margin over the model. The tolerance is the model floor's, for the model floor's reason: every cell here is a function of the two answer columns, and those move by a couple of rows per re-sample. **v9.46: product 606 -> 610, ceiling 994 -> 974.** The product's answers moved onto the model's, and the union is where that shows: the derived boxplot wins 26 rows the model also gets right, and gives back 22 rows the corpus drew as a bar - twenty of which leave the union, because neither answer is right on them any more. `best` and `bestPolicy` are unchanged: model-holds still reads 863, so the routing table's maximum did not move with the product under it. Both numbers are re-registered rather than accepted as drift, because `product` is compared for equality on purpose: a deterministic rule path that changes its answer is a change to the product, not a re-sample.",
-      "why": "This is the only gate whose artifact is derived rather than bought: no model is asked anything. It is checked anyway, because a policy that routes every row to one answer reads exactly like a policy that works, and because the two identities it carries (the disagreement partitions the population; the ceiling is the union of the three cells) are the only things that make the six readings add up to something."
-    },
-    "ship": {
-      "recordedAt": "2026-11-19",
-      "runs": [
-        "44551395709",
-        "44557699795",
-        "44580426870",
-        "44662904529",
-        "44673494103"
-      ],
-      "scored": 1470,
-      "decided": 863,
-      "shipped": 807,
-      "tolerance": 5,
-      "note": "Two integers, established by run 44580426870 and reproducible for ¥0: that dispatch restored 2,940 of 2,940 answers from the store (1,470 hit, 0 miss on each scale), made no call, and read exactly what the two dispatches before it read. `decided` 863 is 861 model hits plus 2 hits on the 6 rows the model declined; `shipped` 754 is what a caller receives, and the 109 rows between the two are the vetoes, which is the whole reason both are registered instead of one. The arithmetic a reader can check: the vetoes took 220 model hits away (401 model-decided rows became table-decided, 220 of them hits) and returned 111 table hits on the 402 rows the table answered, so 863 - 220 + 111 = 754. The reading is the product *without* the second question: 754. With it, the same answers read 751 on run 44648039546 — the repair is measurably worse on exactly the rows it can reach, and `llm.repair` records that verdict. **v9.46: shipped 754 -> 793, decided 863 unchanged, changed 307 -> 171.** The derived boxplot stops the veto that was costing the most: `not-admitted` falls 223 -> 87 and the chart draws the model's own answer on those rows, which is right 39 times more often than the table's was. `decided` does not move because the policy did not: the model still holds every row it answered, so 863 is the same number for a different reason. The arithmetic a reader can check: 1199 model answers, 271 table answers, 793 hits, and 266 vetoes (144 wide + 87 not-admitted + 35 unchartable) accounting for the rows where the chart is not what the decision said. **v9.47: shipped 793 -> 807, decided 863 unchanged, changed 171 -> 138.** The reshape stopped being a preference. `wideIR` used to hard-code one mark and `assistedChartIR` used to return before asking the advisor on this shape, on the stated ground that one line per entity is the only reading a table written sideways produces — a claim about the first implementation, not about the reshape. The corpus prices it: of the 144 wide tables, 71 are labelled Line and 53 Bar, the model names `bar` on 33 of them and is right on 20 against 6 the line was winning. `wide` is therefore no longer a reason at all, `not-admitted` rises 87 -> 104 because a wide table whose model answer is a pie or a scatter is now refused with a sentence instead of skipped, and the rows the table answers fall 186 -> 144. The arithmetic a reader can check: 1,326 model answers + 144 table answers = 1,470; 5 no-advice + 104 not-admitted + 35 unchartable = 144; 138 rows drew an answer other than the decision's against 139 vetoes, the difference being one vetoed row whose table answer happened to be the decision's mark. The model arm cost nothing again (1,470 of 1,470 answers restored, 0 calls).",
-      "why": "The floor is registered on `shipped` because that is the number a caller experiences, and on `decided` because that is the identity against the arbitration policy: a drift in `decided` is a policy change nobody asked for, and a drift in `shipped` is the product disagreeing with its own description. They are not ordered and the first draft of `ship.ts` was wrong to assert they were: a veto replaces the model's mark with the table's, so `shipped` can read above or below `decided` and an alternating bar/pie arm made it read 433 against 420. What survives is the row-by-row constraint the artifact carries: a chart is one of the two answers, and it changes only to the table's."
-    },
-    "repair": {
-      "recordedAt": "2026-11-20",
-      "run": "44673494103",
-      "refused": 104,
-      "repairable": 103,
-      "hits": 22,
-      "tableHits": 20,
-      "costYuan": 0.0181,
-      "verdict": "rejected",
-      "note": "The second question, priced twice: once on the 223 rows the admissions refused (run 44648039546) and again on the 87 that are left after the derived boxplot was admitted (run 44661951720). The first reading is the one that made the admission the target rather than the prompt: 144 of the 223 refusals were `boxplot`, the model was naming the one mark that would have said what the question asked, and a shorter list cannot invent a picture. On the residual 87 the short list is a wash and slightly ahead - 16 right against the table's 15 on the same rows, 86 asked, 43 calls, Y0.0136 - which is inside the noise of a 15-row comparison and does not overturn the verdict.",
-      "why": "The verdict is `rejected`, and the reason it is recorded here rather than deleted with the code is that the code still works: a shorter list is a real question and a model answers it. What the measurement says is that the answer is not better than the rule table on the rows where the model's first answer was impossible. The distribution of the 223 refusals explains it: 144 `boxplot` (\"a boxplot reads five numbers per row\" — the mark is drawable only when the table already carries a five-number summary), 36 `scatter` (\"needs two measures\"), 8 `heatmap`, and the rest one or two each. The model was not naming a mark at random; it was naming the one mark that would have said what the question asked, and no list without that mark can hold the answer. So the lever is a *drawable* mark — a boxplot computed from raw rows — not a better prompt, and this file is the receipt that the cheaper hypothesis was tried first. **v9.47: re-priced on the 104 refusals the new admissions leave, run 44673494103: 103 asked, 101 answered, 22 right against the table's 20 on the same rows, 60 calls, Y0.0181 (43 answers restored). The verdict stays `rejected` for the third time and for the same reason — two rows on a hundred is not a signal — but the population moved in a way worth recording: the 144 `boxplot` refusals that made the admission the target are gone, the `wide` rows that could not be asked are gone, and what is left is 104 rows where the model named a mark the table genuinely cannot hold."
+     "promptVersion": 1
     }
+   }
+  },
+  "arbitration": {
+   "recordedAt": "2026-11-19",
+   "runs": [
+    "44435717857",
+    "44551395709",
+    "44661951720",
+    "44684484285"
+   ],
+   "scored": 1470,
+   "product": 610,
+   "best": 863,
+   "bestPolicy": "model-holds",
+   "ceiling": 974,
+   "tolerance": 5,
+   "note": "Two full dispatches priced the same six policies on the same 1,470 rows: best 861 and 863, model alone 859 and 861, product 606 both times, ceiling 994 both times. The hybrid therefore wins by 2 rows in both — the sign is stable and the size is 0.14pp — which is why the floor records the best policy's reading rather than a margin over the model. The tolerance is the model floor's, for the model floor's reason: every cell here is a function of the two answer columns, and those move by a couple of rows per re-sample. **v9.46: product 606 -> 610, ceiling 994 -> 974.** The product's answers moved onto the model's, and the union is where that shows: the derived boxplot wins 26 rows the model also gets right, and gives back 22 rows the corpus drew as a bar - twenty of which leave the union, because neither answer is right on them any more. `best` and `bestPolicy` are unchanged: model-holds still reads 863, so the routing table's maximum did not move with the product under it. Both numbers are re-registered rather than accepted as drift, because `product` is compared for equality on purpose: a deterministic rule path that changes its answer is a change to the product, not a re-sample.",
+   "why": "This is the only gate whose artifact is derived rather than bought: no model is asked anything. It is checked anyway, because a policy that routes every row to one answer reads exactly like a policy that works, and because the two identities it carries (the disagreement partitions the population; the ceiling is the union of the three cells) are the only things that make the six readings add up to something."
+  },
+  "ship": {
+   "recordedAt": "2026-11-19",
+   "runs": [
+    "44551395709",
+    "44557699795",
+    "44580426870",
+    "44662904529",
+    "44673494103",
+    "44684484285"
+   ],
+   "scored": 1470,
+   "decided": 863,
+   "shipped": 807,
+   "tolerance": 5,
+   "note": "Two integers, established by run 44580426870 and reproducible for ¥0: that dispatch restored 2,940 of 2,940 answers from the store (1,470 hit, 0 miss on each scale), made no call, and read exactly what the two dispatches before it read. `decided` 863 is 861 model hits plus 2 hits on the 6 rows the model declined; `shipped` 754 is what a caller receives, and the 109 rows between the two are the vetoes, which is the whole reason both are registered instead of one. The arithmetic a reader can check: the vetoes took 220 model hits away (401 model-decided rows became table-decided, 220 of them hits) and returned 111 table hits on the 402 rows the table answered, so 863 - 220 + 111 = 754. The reading is the product *without* the second question: 754. With it, the same answers read 751 on run 44648039546 — the repair is measurably worse on exactly the rows it can reach, and `llm.repair` records that verdict. **v9.46: shipped 754 -> 793, decided 863 unchanged, changed 307 -> 171.** The derived boxplot stops the veto that was costing the most: `not-admitted` falls 223 -> 87 and the chart draws the model's own answer on those rows, which is right 39 times more often than the table's was. `decided` does not move because the policy did not: the model still holds every row it answered, so 863 is the same number for a different reason. The arithmetic a reader can check: 1199 model answers, 271 table answers, 793 hits, and 266 vetoes (144 wide + 87 not-admitted + 35 unchartable) accounting for the rows where the chart is not what the decision said. **v9.47: shipped 793 -> 807, decided 863 unchanged, changed 171 -> 138.** The reshape stopped being a preference. `wideIR` used to hard-code one mark and `assistedChartIR` used to return before asking the advisor on this shape, on the stated ground that one line per entity is the only reading a table written sideways produces — a claim about the first implementation, not about the reshape. The corpus prices it: of the 144 wide tables, 71 are labelled Line and 53 Bar, the model names `bar` on 33 of them and is right on 20 against 6 the line was winning. `wide` is therefore no longer a reason at all, `not-admitted` rises 87 -> 104 because a wide table whose model answer is a pie or a scatter is now refused with a sentence instead of skipped, and the rows the table answers fall 186 -> 144. The arithmetic a reader can check: 1,326 model answers + 144 table answers = 1,470; 5 no-advice + 104 not-admitted + 35 unchartable = 144; 138 rows drew an answer other than the decision's against 139 vetoes, the difference being one vetoed row whose table answer happened to be the decision's mark. The model arm cost nothing again (1,470 of 1,470 answers restored, 0 calls).",
+   "why": "The floor is registered on `shipped` because that is the number a caller experiences, and on `decided` because that is the identity against the arbitration policy: a drift in `decided` is a policy change nobody asked for, and a drift in `shipped` is the product disagreeing with its own description. They are not ordered and the first draft of `ship.ts` was wrong to assert they were: a veto replaces the model's mark with the table's, so `shipped` can read above or below `decided` and an alternating bar/pie arm made it read 433 against 420. What survives is the row-by-row constraint the artifact carries: a chart is one of the two answers, and it changes only to the table's."
+  },
+  "repair": {
+   "recordedAt": "2026-11-20",
+   "run": "44673494103",
+   "refused": 104,
+   "repairable": 103,
+   "hits": 22,
+   "tableHits": 20,
+   "costYuan": 0.0181,
+   "verdict": "rejected",
+   "note": "The second question, priced twice: once on the 223 rows the admissions refused (run 44648039546) and again on the 87 that are left after the derived boxplot was admitted (run 44661951720). The first reading is the one that made the admission the target rather than the prompt: 144 of the 223 refusals were `boxplot`, the model was naming the one mark that would have said what the question asked, and a shorter list cannot invent a picture. On the residual 87 the short list is a wash and slightly ahead - 16 right against the table's 15 on the same rows, 86 asked, 43 calls, Y0.0136 - which is inside the noise of a 15-row comparison and does not overturn the verdict.",
+   "why": "The verdict is `rejected`, and the reason it is recorded here rather than deleted with the code is that the code still works: a shorter list is a real question and a model answers it. What the measurement says is that the answer is not better than the rule table on the rows where the model's first answer was impossible. The distribution of the 223 refusals explains it: 144 `boxplot` (\"a boxplot reads five numbers per row\" — the mark is drawable only when the table already carries a five-number summary), 36 `scatter` (\"needs two measures\"), 8 `heatmap`, and the rest one or two each. The model was not naming a mark at random; it was naming the one mark that would have said what the question asked, and no list without that mark can hold the answer. So the lever is a *drawable* mark — a boxplot computed from raw rows — not a better prompt, and this file is the receipt that the cheaper hypothesis was tried first. **v9.47: re-priced on the 104 refusals the new admissions leave, run 44673494103: 103 asked, 101 answered, 22 right against the table's 20 on the same rows, 60 calls, Y0.0181 (43 answers restored). The verdict stays `rejected` for the third time and for the same reason — two rows on a hundred is not a signal — but the population moved in a way worth recording: the 144 `boxplot` refusals that made the admission the target are gone, the `wide` rows that could not be asked are gone, and what is left is 104 rows where the model named a mark the table genuinely cannot hold."
+  },
+  "comparison": {
+   "recordedAt": "2026-11-20",
+   "run": "44684484285",
+   "rows": 1470,
+   "a": "deepseek-chat|mark",
+   "b": "deepseek-reasoner|mark",
+   "both": 788,
+   "aOnly": 73,
+   "bOnly": 87,
+   "neither": 522,
+   "mcnemarP": 0.3041,
+   "note": "Two arms, one dispatch, one corpus download: the chat arm was restored from the store for Y0 and the reasoning arm was bought once. The discordant pairs are 73 against 87, so the direction is the reasoning model and the size is not a signal: +14 rows at p = 0.30. Where it wins is where the answer is a shape the question names rather than a shape the table suggests (pie +13 of 182, line +8 of 394); where it loses is the two families this product derives rather than reads (scatter -5 of 104, boxplot -3 of 90). That is the reading worth keeping: deliberation buys vocabulary, not structure. And the number that decides it is not either reading: the union with the rule table is 974 for the chat arm and **973** for the reasoning one, so +14 rows alone is -1 row in union — the rows deliberation wins are largely rows the product already had. The floor is registered at 875 anyway, because a floor records what an arm reads, not whether it is worth buying.",
+   "unionA": {
+    "product": 610,
+    "model": 861,
+    "union": 974,
+    "productOnly": 113
+   },
+   "unionB": {
+    "product": 610,
+    "model": 875,
+    "union": 973,
+    "productOnly": 98
+   }
   }
+ }
 }

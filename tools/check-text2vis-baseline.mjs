@@ -642,6 +642,38 @@ function selfTest() {
     0,
     1,
   );
+  // And once that arm *is* registered, the request it is held to is its own rather than the other
+  // endpoint's. Two arms in one dispatch are two instruments, so a floor that can only say one request
+  // would either exempt the second arm for ever or refuse it for answering the question it was sent.
+  const splitFloor = {
+    ...requestFloor,
+    arms: {
+      'deepseek-chat|mark': { scored: 1470, top1: 640 },
+      'deepseek-reasoner|mark': { scored: 1470, top1: 900, request: { promptVersion: 1 } },
+    },
+  };
+  requestCase(
+    'a registered arm is held to the request its own floor records',
+    {
+      arms: [
+        { model: 'deepseek-reasoner', scale: 'mark', requested: 1470, answered: 1470, unparsed: 0, truncated: 0, scored: 1470, top1: 900, request: { promptVersion: 1 } },
+      ],
+    },
+    splitFloor,
+    0,
+    // One note: the reading itself, printed because it met its own floor.
+    1,
+  );
+  requestCase(
+    'the same arm answering the other endpoint request is refused',
+    {
+      arms: [
+        { model: 'deepseek-reasoner', scale: 'mark', requested: 1470, answered: 1470, unparsed: 0, truncated: 0, scored: 1470, top1: 900, request: { promptVersion: 1, budget: 96 } },
+      ],
+    },
+    splitFloor,
+    1,
+  );
   const judgeFloor = { dimensions: ['chart_correctness', 'readability'], grader: { endpoint: 'zhipu', model: 'glm-4.5v' } };
   for (const test of JUDGE_SELF_TEST) {
     const options = { ...(test.require === true ? { require: true } : {}), ...(test.iteration === true ? { iteration: true } : {}) };
@@ -922,7 +954,12 @@ export function compareLlm(report, floor, options = {}) {
       );
       continue;
     }
-    const wantedRequest = floor?.request;
+    // The floor may record a request *per arm*, and once it does that is the one this arm is held to.
+    // It has to be able to, because two arms in one dispatch are legitimately two instruments: a chat
+    // endpoint is sent a 96-token reply cap and a reasoning endpoint is sent none (`replyBudget`), and
+    // one global request would call the second arm's correct request a difference in instrument. The
+    // global `request` stays as the default for the arms registered before this field existed.
+    const wantedRequest = entry.request ?? floor?.request;
     if (wantedRequest !== undefined) {
       if (describeRequest(arm.request) !== describeRequest(wantedRequest)) {
         issues.push(
