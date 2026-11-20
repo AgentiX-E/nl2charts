@@ -319,13 +319,13 @@ export function parseRouteArgs(argv: readonly string[]): RouteArgs {
 }
 
 /** The shape this command reads out of `llm.ts`'s artifact, checked rather than trusted. */
-interface Reading {
+export interface ArtifactReading {
   readonly corpus?: { readonly roster?: unknown; readonly asked?: unknown };
   readonly arms?: readonly (Partial<ArmReport> & { readonly choices?: unknown })[];
 }
 
 /** One arm's answers, or the refusal that says which arm was missing. */
-function choicesOf(reading: Reading, path: string, model: string): { model: string; choices: readonly (string | null)[] } {
+export function choicesOf(reading: ArtifactReading, path: string, model: string): { model: string; choices: readonly (string | null)[] } {
   const arm = (reading.arms ?? []).filter((candidate) => candidate.scale === 'mark').find((candidate) => candidate.model === model);
   if (arm === undefined) {
     throw new Error(`${path} has no ${model} mark arm, and a route between one arm and nothing is not a reading`);
@@ -344,7 +344,7 @@ function choicesOf(reading: Reading, path: string, model: string): { model: stri
  * against itself and reports a table of six rules that all read the same number. So the default is the
  * first two *distinct* mark arms, and a file with one arm is refused rather than doubled.
  */
-function seatsOf(reading: Reading, path: string, left: string | undefined, right: string | undefined): { left: string; right: string } {
+export function seatsOf(reading: ArtifactReading, path: string, left: string | undefined, right: string | undefined): { left: string; right: string } {
   const models = (reading.arms ?? []).filter((arm) => arm.scale === 'mark').map((arm) => String(arm.model));
   const distinct = [...new Set(models)];
   const leftName = left ?? distinct[0];
@@ -395,7 +395,7 @@ export async function entryRoute(
     const { rows: scored, dropped } = scoredRows(corpus);
     if (dropped > 0) log(`text2vis route: ${String(dropped)} rows carry a label no family names and are not part of any population`);
     const { readFile } = await import('node:fs/promises');
-    const reading = JSON.parse(await readFile(args.answers, 'utf8')) as Reading;
+    const reading = JSON.parse(await readFile(args.answers, 'utf8')) as ArtifactReading;
     const roster = reading.corpus?.roster;
     if (typeof roster !== 'string') {
       throw new Error(`${args.answers} carries no corpus.roster, so the rows its answers were given to cannot be identified; re-run the arm that wrote it`);

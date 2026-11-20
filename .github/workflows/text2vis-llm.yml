@@ -299,12 +299,29 @@ jobs:
           name: text2vis-ship
           path: eval/out/text2vis-ship.json
 
+      # The same two arms, priced in the unit a caller can act on. The routing table above is a table of
+      # quality: it needs *both* answers, so it costs two calls per row and a price per row cannot be
+      # computed for it. `prior.ts` prices five routers that decide before the call — only the cue table,
+      # the recommender, and whether either had anything to say are read — and reports calls per row and
+      # 元 per shipped chart beside the two-call router's, whose 891/828 it rebuilds out of the same rules.
+      - name: Price the same two arms per shipped chart
+        run: pnpm bench:text2vis:prior --answers eval/out/text2vis-llm.json --require --artifact eval/out/text2vis-prior.json
+
       - name: Upload the route
         if: always()
         uses: actions/upload-artifact@v5
         with:
           name: text2vis-route
           path: eval/out/text2vis-route.json
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Upload the price list
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: text2vis-prior
+          path: eval/out/text2vis-prior.json
           if-no-files-found: warn
           retention-days: 90
 

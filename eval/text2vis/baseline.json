@@ -160,6 +160,28 @@
     "44684484285",
     "44696562624"
    ]
+  },
+  "prior": {
+   "recordedAt": "2026-11-20",
+   "run": "44696562624",
+   "instrument": "eval/text2vis/prior.ts",
+   "scored": 1470,
+   "rate": {
+    "chatYuan": 0.000426,
+    "ratio": 7.72
+   },
+   "readings": {
+    "chat": 807,
+    "reasoner": 818,
+    "cue-gate": 815,
+    "table-agrees": 816,
+    "table-refused": 807
+   },
+   "dual": {
+    "decided": 891,
+    "shipped": 828
+   },
+   "note": "Five priors and the two-call router, priced in the same unit on the same 1,470 rows, at Y0: the answers of run `44696562624` are on disk and this is a re-analysis of them. A prior decides which arm to call from what is free before the call -- the cue table's first mark, whether it fired at all, and the recommender's own mark -- so unlike `llm.duel` it prices a router a caller can actually deploy at one call per row. `cue-gate` is the one that reads best: spend the thinking call only on the 305 questions no cue reads, which ships **815** for 1,165 plain calls and 305 thinking ones -- 8 of the 21 charts the two-call router buys, for 27% of its bill. `table-agrees` ships 816 at 4.27x the plain price, `reasoner` ships 818 at 7.72x, and `table-refused` buys its 35 thinking calls and ships **nothing**: the recommender's refusal is not a signal that deliberation helps, and that prior is dominated. The number that decides is the marginal one -- yuan per *additional* chart over the default: cue-gate **Y0.109**, table-agrees Y0.228, the two-call router **Y0.230**, reasoner Y0.383 -- so the router that reads both answers buys its 21 charts at more than twice the unit price of the one-call prior's 8, and that ordering is r-free: cue-gate's marginal is 305(r-1) yuan / 8 against the router's 1470r yuan / 21, which is lower for every r >= 0. The ratio r itself is a parameter rather than a measurement, because the 2,940 answers on disk were written before the store kept meters; the default 7.72 is the one live reasoning call this project metered (Y0.00329 against a plain call's measured Y0.000426, the receipt being Y1.2521 for 2,940 calls). Every conclusion is stated as the ratio at which it would stop holding: cue-gate is the cheaper chart than the default only below x1.048, table-agrees below x1.023, reasoner below x1.014, and the two-call router below **x0.026** -- so at any price a provider has ever charged, buying both answers is the most expensive way to obtain a chart this corpus can measure. A thinking call is one prompt of the same length with a longer completion, so r is bounded below by 1: no reading here is sensitive to a ratio smaller than the one that would make deliberation free."
   }
  }
 }

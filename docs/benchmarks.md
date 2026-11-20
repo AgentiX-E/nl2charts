@@ -17197,3 +17197,98 @@ Both halves gain, and neither is doing the other's work.
    the guard that caught it ("a route between one arm and itself prices the same answer twice") exists
    because the wrong table was the first thing the command produced. The default is now the first two
    *distinct* arms.
+
+## What a chart costs: five routers priced per shipped chart, 807 → 815 → 828
+
+The routing table above is a table of **quality**, and its own footnote says what is missing from it:
+the router needs both answers, so it costs two calls per row where the product costs one. 21 charts
+for double the inference is a trade, and a trade cannot be read off one column. This round prices the
+other column.
+
+### The object that can be priced
+
+A router that reads both answers cannot be charged per row before it runs. So the object priced here
+is a **prior**: a function from what is free *before* the call to one of the two seats. Three signals
+qualify, and all three are computed by code the product already runs on every row:
+
+| signal | where it comes from | why a router may read it |
+|---|---|---|
+| `cueLead` | `cueMarks(question)[0]` | the cue table is the product; no model wrote it |
+| `cueFired` | whether that list is empty | same pass over the same question |
+| `product` | `toChartIR(question, resultSet).mark` | the recommender's answer — and its *refusal* is a fact about the table, not a missing value |
+
+Nothing else. In particular no prior reads the label, which is the answer key: `signalsOf` is given
+two rows that differ only in their label and returns the same signals, and that identity is a test.
+
+### The price list
+
+`pnpm bench:text2vis:prior --answers eval/out/text2vis-llm.json`, on the same 1,470 rows, **¥0** — the
+answers of run `44696562624` are on disk and this is a re-reading of them:
+
+| router | decides by | calls/row | price/row | decided | shipped | ¥/chart | ¥ per extra chart |
+|---|---|---:|---:|---:|---:|---:|---:|
+| `chat` | nothing: the default path | 1.000 | 1.000 | 861 | 807 (54.90%) | 0.000776 | — |
+| `reasoner` | nothing: buy the arm that scores higher | 1.000 | 7.720 | 875 | 818 (55.65%) | 0.005910 | 0.3826 |
+| **`cue-gate`** | **no cue fires → thinking call** | 1.000 | 2.394 | 875 | 815 (55.44%) | **0.001840** | **0.1091** |
+| `table-agrees` | cue lead ≠ recommender → thinking call | 1.000 | 4.273 | 877 | 816 (55.51%) | 0.003279 | 0.2277 |
+| `table-refused` | the recommender refused → thinking call | 1.000 | 1.160 | 863 | 807 (54.90%) | 0.000900 | — |
+| `both` | `cue-led` over two answers (`route.ts`) | 2.000 | 8.720 | 891 | **828 (56.33%)** | 0.006595 | 0.2302 |
+
+`price/row` is the bill in plain calls; `calls/row` is how many calls the router makes. They are two
+columns because they are two different numbers, and the first version of this table printed only one
+of them and was wrong about `both` by a factor of four — 8.72 is what two calls per row *cost*, not
+how many calls it makes. That defect was found by the first print, in the same way the routing table's
+default seat was.
+
+### The measurement the table needs, and does not have
+
+`price/row` needs one number the artifact cannot supply: **what a thinking call costs in plain calls**.
+The store that holds these 2,940 answers was written before it kept meters, so the reading knows its
+calls and not its bill. The default is therefore a *measured sample* and not a constant — **7.72**,
+from the one reasoning call this project ever metered (¥0.00329 against a plain call's ¥0.000426, that
+figure being the receipt ¥1.2521 for 2,940 calls).
+
+So every conclusion below is stated as the ratio at which it would stop holding, which is a stronger
+claim than a verdict on one number:
+
+| comparison | the ratio that decides it | at the measured 7.72 |
+|---|---|---|
+| `cue-gate` vs the default | `cue-gate` is the cheaper chart below **x1.048** | the default is |
+| `table-agrees` vs the default | below **x1.023** | the default is |
+| `reasoner` vs the default | below **x1.014** | the default is |
+| `both` vs the default | below **x0.026** | the default is |
+| `cue-gate` vs `both`, per *extra* chart | never: 305(r−1)/8 against 1,470r/21 is lower for every r ≥ 0 | `cue-gate`, at less than half the price |
+
+The last row is the answer to the question the round asked. **The router that reads both answers buys
+its 21 charts at ¥0.230 each; the prior that only reads whether a cue fired buys 8 of them at
+¥0.109.** That ordering has no ratio in it — it is true at every price a provider has ever charged,
+because a thinking call cannot be cheaper than the plain prompt it contains.
+
+### What this says about the product, and what it does not
+
+1. **Cheapest per chart is doing nothing.** 807 charts at ¥0.000776 each. Every router here is a
+   quality purchase, and the honest framing is a price list rather than a winner: a caller who wants
+   eight more charts pays ¥0.109 each, and a caller who wants twenty-one pays ¥0.230 each.
+2. **`table-refused` is dominated.** It spends 35 thinking calls on the rows where the recommender
+   refused the result set and ships **nothing** for them: a refusal is not a signal that deliberation
+   helps, and the prior that assumed it was is the one row of the table with no marginal price to
+   report. It is kept in `PRIORS` rather than deleted, because the next round's temptation is exactly
+   this rule.
+3. **The two-call router is now an option with a price, not a recommendation.** Its 891 decided and 828
+   shipped are reproduced by this command out of `route.ts`'s own exports — the floor asserts both —
+   which is what makes the comparison one instrument rather than two.
+4. **Not a new dispatch.** No model was called, no row was re-asked, and the shipped column is the same
+   answers read through the same shipped path: `chat`'s 807 and `both`'s 828 are the numbers the
+   previous round published, re-derived here as an identity check.
+5. **`r` is still a sample of one.** What the table cannot say is how a thinking call's *completion*
+   length varies across rows; what it can say is that no conclusion above depends on the answer.
+
+### The instrument, tested
+
+`test/text2vis-prior.test.ts` — 34 cases, all hand-checkable, on a three-row fixture whose ordering is
+**not** the corpus's: there the thinking arm ships more charts than the plain one, here it ships fewer
+(1 against 2), so a fixture that reproduced the corpus result would be a coincidence rather than a
+test. The properties held are the four the file exists on: a prior reads only free signals, a refusal
+is an absence rather than a mark, every count is the sum of the rows it routed, and the price is a
+parameter with a stated break-even. Two commands' worth of arithmetic meet in the same file: the floor
+refuses a price list whose `both` row disagrees with `route.ts` about either number.

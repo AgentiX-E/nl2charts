@@ -105,6 +105,7 @@
     "bench:text2vis:arbitrate": "tsx eval/text2vis/arbitrate.ts",
     "bench:text2vis:ship": "tsx eval/text2vis/ship.ts",
     "bench:text2vis:route": "tsx eval/text2vis/route.ts",
+    "bench:text2vis:prior": "tsx eval/text2vis/prior.ts",
     "bench:bill": "tsx eval/bill.ts"
   },
   "devDependencies": {
