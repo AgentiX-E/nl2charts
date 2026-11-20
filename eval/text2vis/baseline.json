@@ -82,8 +82,20 @@
       "decided": 863,
       "shipped": 754,
       "tolerance": 5,
-      "note": "Two integers, established by run 44580426870 and reproducible for ¥0: that dispatch restored 2,940 of 2,940 answers from the store (1,470 hit, 0 miss on each scale), made no call, and read exactly what the two dispatches before it read. `decided` 863 is 861 model hits plus 2 hits on the 6 rows the model declined; `shipped` 754 is what a caller receives, and the 109 rows between the two are the vetoes, which is the whole reason both are registered instead of one. The arithmetic a reader can check: the vetoes took 220 model hits away (401 model-decided rows became table-decided, 220 of them hits) and returned 111 table hits on the 402 rows the table answered, so 863 - 220 + 111 = 754.",
+      "note": "Two integers, established by run 44580426870 and reproducible for ¥0: that dispatch restored 2,940 of 2,940 answers from the store (1,470 hit, 0 miss on each scale), made no call, and read exactly what the two dispatches before it read. `decided` 863 is 861 model hits plus 2 hits on the 6 rows the model declined; `shipped` 754 is what a caller receives, and the 109 rows between the two are the vetoes, which is the whole reason both are registered instead of one. The arithmetic a reader can check: the vetoes took 220 model hits away (401 model-decided rows became table-decided, 220 of them hits) and returned 111 table hits on the 402 rows the table answered, so 863 - 220 + 111 = 754. The reading is the product *without* the second question: 754. With it, the same answers read 751 on run 44648039546 — the repair is measurably worse on exactly the rows it can reach, and `llm.repair` records that verdict.",
       "why": "The floor is registered on `shipped` because that is the number a caller experiences, and on `decided` because that is the identity against the arbitration policy: a drift in `decided` is a policy change nobody asked for, and a drift in `shipped` is the product disagreeing with its own description. They are not ordered and the first draft of `ship.ts` was wrong to assert they were: a veto replaces the model's mark with the table's, so `shipped` can read above or below `decided` and an alternating bar/pie arm made it read 433 against 420. What survives is the row-by-row constraint the artifact carries: a chart is one of the two answers, and it changes only to the table's."
+    },
+    "repair": {
+      "recordedAt": "2026-11-20",
+      "run": "44648039546",
+      "refused": 223,
+      "repairable": 200,
+      "hits": 36,
+      "tableHits": 39,
+      "costYuan": 0.058,
+      "verdict": "rejected",
+      "note": "The second question, priced once. 223 rows name a mark their own table refuses; 200 of them have a table that holds more than one mark and were asked again over that shorter list; the second answer is right on 36 of the 200 and the table was right on 39 of the same rows, so shipping it reads 751 instead of 754. 200 calls, ¥0.058, no truncated reply, nothing unread.",
+      "why": "The verdict is `rejected`, and the reason it is recorded here rather than deleted with the code is that the code still works: a shorter list is a real question and a model answers it. What the measurement says is that the answer is not better than the rule table on the rows where the model's first answer was impossible. The distribution of the 223 refusals explains it: 144 `boxplot` (\"a boxplot reads five numbers per row\" — the mark is drawable only when the table already carries a five-number summary), 36 `scatter` (\"needs two measures\"), 8 `heatmap`, and the rest one or two each. The model was not naming a mark at random; it was naming the one mark that would have said what the question asked, and no list without that mark can hold the answer. So the lever is a *drawable* mark — a boxplot computed from raw rows — not a better prompt, and this file is the receipt that the cheaper hypothesis was tried first."
     }
   }
 }

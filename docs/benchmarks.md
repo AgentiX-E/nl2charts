@@ -16680,3 +16680,60 @@ on it: the run restored the answer store under the **previous** key
 cost **¥0.0000**, and read the same 861 / 886 / 863 / 754 as the run before it — while the artifact it
 wrote names a request (`promptVersion 1`, `budget 96`) that the artifact before it could not name. The
 cache key changed and the store did not, which is the difference between a file hash and a request.
+
+### The second question: 200 calls, ¥0.058, and three rows worse
+
+The 223 `not-admitted` rows are the only position the product has looked like it could take, so the
+next step was priced before it was believed: ask those rows again, over the marks their own table can
+hold. `assist.ts` does it behind `repair: true`, `repair.ts` asks and scores it, and run `44648039546`
+is the first dispatch that paid for an answer:
+
+| reading | value |
+|---|---:|
+| rows whose first answer their table refuses | **223** |
+| of those, rows whose table holds more than one mark (asked again) | **200** |
+| right, on the model's second answer | **36 (18.00%)** |
+| right, on the table's answer — the same 200 rows | **39 (19.50%)** |
+| calls, cost | 200, **¥0.058** |
+| shipped reading with the repair, against 754 without it | **751** |
+
+**It loses.** Three rows, deterministically, on the only rows it can reach — and the gate cannot see it:
+751 is inside the five-row band this instrument re-samples within, so the run is green and the sentence
+printed is *"inside the 5-row band — not a regression"*. That sentence is true of the instrument and
+false of the change, and the difference is what `baseline.json`'s `llm.repair` is for: the verdict
+`rejected` is recorded beside the numbers, so the next person who proposes it starts from a measurement
+rather than from the same argument.
+
+**Why it loses is more interesting than that it does.** The 223 refusals are not a model naming marks at
+random; they are one mark, 144 times:
+
+| first answer | rows | the refusal |
+|---|---:|---|
+| `boxplot` | 144 | *a boxplot reads five numbers per row* — drawable only when the table already carries a five-number summary |
+| `scatter` | 36 | *a scatter needs two measures* |
+| `heatmap` | 8 | *a heatmap needs two category axes and a measure* |
+| `pie` / `gauge` / `candlestick` / others | 23 | one or two each; the tables that hold a single mark |
+
+Every one of those sentences is the product saying *this table cannot be that picture*, and on 144 of
+them the model was asking for the picture the question wanted. A shorter list does not contain that
+picture, so the model picks the nearest thing it can name, which is a coin-flip against a rule table
+that has been reading cues for four rounds. The 112-row "intent would have hit" upper bound published
+last round was measured against the *label's family* — that is, against a world where `boxplot` were
+drawable. This run is the receipt that it is not, and that re-asking cannot make it so.
+
+So the next lever is a mark, not a prompt: a boxplot computed from raw rows (one measure, quartiles
+derived) would turn 144 rows from *refused* into *answerable*, and the model has already said, 144
+times, that it wants one. That is a chart-package capability with a measured payoff of up to 144 rows,
+and it is priced at ¥0 to evaluate because the answers on disk already name the mark.
+
+Two disciplines come out of this, and they are the reason the run was worth ¥0.058:
+
+1. **A rejected option gets a floor too — a floor of zero.** `llm.repair.verdict` is not decoration: a
+   step that stops producing the negative result would let the option drift back into the plan as an
+   unexamined idea, and the whole point of having paid for the measurement is that the next round does
+   not pay for the argument.
+2. **A five-row band can hide a three-row regression.** The band exists because the instrument
+   re-samples; it does not exist to excuse a change whose direction is known. When a change is
+   deterministic — same answers, same code, one flag — the band is the wrong test, and the right test is
+   the one this run used: compute the reading both ways on the same answers, and compare them.
+

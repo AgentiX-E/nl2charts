@@ -387,6 +387,17 @@ Three things it will not do:
 The cost is bounded by refusals rather than by rows: one extra call only where the
 first answer was impossible, and none anywhere else.
 
+> **What the second question measured, and why it is off.** On the 1,470-row benchmark it
+> reaches 200 of the 223 refused rows, costs ¥0.058, and reads **36 right against the
+> table's 39** on exactly those rows — so the shipped reading falls from 754 to 751. The
+> option stays in the API and the code stays tested, because it answers a real question
+> correctly; it is simply not better than the rule table, and a feature that loses three
+> rows is not shipped on the grounds that it is elegant. The distribution of the 223
+> refusals is what closes the argument: 144 of them are `boxplot`, a mark this product can
+> only draw when the table already carries a five-number summary. The model was asking for
+> the right picture on rows where the product has no picture to offer, and a shorter list
+> cannot invent one.
+
 Cost is bounded by the shape of the call: one request per question, `max_tokens`
 96 (absent for an endpoint that thinks aloud), `temperature` 0, and the same
 prefix on every call so the provider's own cache bills it at the cached rate — at
