@@ -60,26 +60,48 @@ describe('a benchmark workflow publishes what a failed run produced', () => {
  * Two inputs with independent defaults can disagree, so only one of them keeps a default. These
  * two assertions are what stops that from being undone: the endpoint is derived from the provider,
  * and the input that could override it starts empty.
+ *
+ * The chart half has the same two inputs and had the same defect, which is why this reads both files
+ * rather than the one the failure came from: `text2vis-llm.yml` pair a second model with
+ * `ZHIPU_API_KEY` and a default endpoint of Zhipu's host, so a dispatch that named two DeepSeek
+ * models — `deepseek-chat,deepseek-reasoner`, the strong-against-weak reading on one corpus — would
+ * have sent DeepSeek's model name to Zhipu's host with Zhipu's key. Same failure, same silence, and
+ * the reading it was meant to produce is the one that decides whether a reasoning model is worth
+ * the deliberation it bills for.
  */
 describe('the second endpoint follows the second provider', () => {
-  const text = (): string => readFileSync(resolve(process.cwd(), '.github/workflows/bird-dev.yml'), 'utf8');
+  const workflows = [
+    { file: '.github/workflows/bird-dev.yml', url: 'BIRD_SECOND_BASE_URL', key: 'BIRD_SECOND_API_KEY' },
+    { file: '.github/workflows/text2vis-llm.yml', url: 'TEXT2VIS_SECOND_BASE_URL', key: 'TEXT2VIS_SECOND_API_KEY' },
+  ] as const;
 
-  it('derives the endpoint from the provider rather than defaulting to one vendor', () => {
-    const line = text()
-      .split('\n')
-      .find((candidate) => candidate.trim().startsWith('BIRD_SECOND_BASE_URL:'));
-    expect(line).toBeDefined();
-    expect(line).toContain('inputs.second_provider');
-    expect(line).toContain('https://api.deepseek.com/v1');
-    expect(line).toContain('https://open.bigmodel.cn/api/paas/v4');
+  it.each(workflows)('derives the endpoint and the key from the provider ($file)', ({ file, url, key }) => {
+    const lines = readFileSync(resolve(process.cwd(), file), 'utf8').split('\n');
+    const urlLine = lines.find((candidate) => candidate.trim().startsWith(`${url}:`));
+    expect(urlLine, `${file} declares no ${url}`).toBeDefined();
+    expect(urlLine).toContain('inputs.second_provider');
+    expect(urlLine).toContain('https://api.deepseek.com/v1');
+    expect(urlLine).toContain('https://open.bigmodel.cn/api/paas/v4');
+    // A key chosen by anything but the provider is the other half of the same 401: a DeepSeek model
+    // with a Zhipu key on DeepSeek's host reads as an expired token, which is the one thing that is
+    // not wrong.
+    const keyLine = lines.find((candidate) => candidate.trim().startsWith(`${key}:`));
+    expect(keyLine, `${file} declares no ${key}`).toBeDefined();
+    expect(keyLine).toContain('inputs.second_provider');
+    expect(keyLine).toContain('secrets.DEEPSEEK_API_KEY');
+    expect(keyLine).toContain('secrets.ZHIPU_API_KEY');
   });
 
-  it('leaves the endpoint input empty so that the derivation is the default', () => {
-    const block = text()
-      .split('\n')
-      .slice(text().split('\n').findIndex((candidate) => candidate.trim() === 'second_base_url:'))
-      .slice(0, 4)
-      .join('\n');
+  it.each(workflows)('leaves the endpoint input empty so that the derivation is the default ($file)', ({ file }) => {
+    const lines = readFileSync(resolve(process.cwd(), file), 'utf8').split('\n');
+    const start = lines.findIndex((candidate) => candidate.trim() === 'second_base_url:');
+    expect(start, `${file} declares no second_base_url input`).toBeGreaterThan(-1);
+    // The input's own block, delimited by the next key at the same indent rather than by a line
+    // count: the property is the default, and a fixed window makes the test a length limit on the
+    // comment that explains the default.
+    const rest = lines.slice(start + 1);
+    const end = rest.findIndex((line) => line.trim() !== '' && /^ {6}[a-z_]+:/u.test(line));
+    const block = rest.slice(0, end === -1 ? rest.length : end).join('\n');
     expect(block).toContain("default: ''");
   });
 });
@@ -112,7 +134,7 @@ describe('every workflow input is declared, and every declaration is read', () =
     return names;
   }
 
-  const files = ['.github/workflows/bird-model.yml'];
+  const files = ['.github/workflows/bird-model.yml', '.github/workflows/text2vis-llm.yml'];
 
   it('reads only names it declares', () => {
     for (const file of files) {

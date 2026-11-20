@@ -62,10 +62,25 @@ on:
         default: '6'
         type: string
       second_base_url:
-        description: 'Base url for the second model, when one is named'
+        # Empty, so that the endpoint is a *consequence* of the provider rather than a second default
+        # that can disagree with it. `bird-dev.yml` learned this from run `41791956315`: a valid key,
+        # a right model name, and the other vendor's host, answered as `401 令牌已过期或验证不正确`.
+        description: 'Base url for the second model, when one is named (empty takes it from second_provider)'
         required: false
-        default: 'https://open.bigmodel.cn/api/paas/v4'
+        default: ''
         type: string
+      second_provider:
+        # Which vendor the second model belongs to, and therefore which endpoint and which key. The
+        # reading this dispatch exists for is `deepseek-chat,deepseek-reasoner`: one provider's chat
+        # mode against its own thinking mode, on one corpus, in one run — the strong-against-weak
+        # comparison the model floor has been waiting for since it was registered.
+        description: 'Vendor of the second model, when one is named'
+        required: true
+        default: 'zhipu'
+        type: choice
+        options:
+          - 'zhipu'
+          - 'deepseek'
 
 permissions:
   contents: read
@@ -88,8 +103,11 @@ jobs:
       LLM_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
       LLM_BASE_URL: 'https://api.deepseek.com/v1'
       TEXT2VIS_LLM_MODELS: ${{ inputs.models }}
-      TEXT2VIS_SECOND_BASE_URL: ${{ inputs.second_base_url }}
-      TEXT2VIS_SECOND_API_KEY: ${{ secrets.ZHIPU_API_KEY }}
+      # Derived, never defaulted: the provider names the host and the key together, because the two
+      # ways to get it wrong — DeepSeek's model on Zhipu's host, or Zhipu's key on DeepSeek's — both
+      # answer 401 and both read as an expired token.
+      TEXT2VIS_SECOND_BASE_URL: ${{ inputs.second_base_url != '' && inputs.second_base_url || (inputs.second_provider == 'deepseek' && 'https://api.deepseek.com/v1' || 'https://open.bigmodel.cn/api/paas/v4') }}
+      TEXT2VIS_SECOND_API_KEY: ${{ inputs.second_provider == 'deepseek' && secrets.DEEPSEEK_API_KEY || secrets.ZHIPU_API_KEY }}
       TEXT2VIS_LLM_CONCURRENCY: ${{ inputs.concurrency }}
     steps:
       - uses: actions/checkout@v4
