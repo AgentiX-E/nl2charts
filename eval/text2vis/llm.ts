@@ -49,7 +49,7 @@
  * a truncated reply is not an answer, so `entryLlm` refuses to publish a run that had any.
  */
 import { createHash } from 'node:crypto';
-import { createHttpProvider, withCallCounter, type LlmProvider } from '@agentix-e/nl2charts-ai';
+import { capabilitiesOf, createHttpProvider, withCallCounter, type LlmProvider } from '@agentix-e/nl2charts-ai';
 import { RECOMMENDABLE_MARKS, type RecommendableMark } from '@agentix-e/nl2charts-chart';
 import { applyExitCode, isEntry, loadText2Vis, type LoadOptions, type Text2VisCorpus } from './dataset.js';
 import { billOf, formatYuan } from '../price.js';
@@ -319,6 +319,53 @@ export async function askOnce(
  */
 export function replyBudget(provider: LlmProvider): number | undefined {
   return provider.capabilities?.thinksAloud === true ? undefined : 96;
+}
+
+/** The deadline a chat endpoint has always been given: one word out of eleven, a second or two. */
+const CHAT_DEADLINE_MS = 60_000;
+
+/**
+ * The deadline a model that thinks aloud is given.
+ *
+ * Five minutes, and the number is a consequence rather than a taste: the budget it may spend is
+ * 8,192 tokens of deliberation (`adaptRequest` sends `maxOutputTokens` for every family) and the
+ * endpoint's own stream is the slow part, so a deadline sized for a one-word answer aborts a call
+ * that is working. That is not a theory: run `44681062395` dispatched `deepseek-chat` beside
+ * `deepseek-reasoner` on the same 1,470 rows, the chat arms restored 2,940 answers from the store in
+ * zero calls, and the reasoning arm died on `text2vis: llm call timed out` after ten minutes of
+ * asking — a whole dispatch, and the ¥0 it cost is the only reason the receipt is cheap.
+ */
+const REASONING_DEADLINE_MS = 300_000;
+
+/**
+ * How long a call is waited for, before it is a timeout rather than a slow answer.
+ *
+ * Derived from what the endpoint declares, the way `replyBudget` is, and overridable by the
+ * environment the way `BIRD_LLM_TIMEOUT_MS` already is — a deployment that knows its endpoint is
+ * slower than this should not need a commit to say so. The parameter is a provider *or* a model name,
+ * because the caller that builds the provider needs the deadline before the provider exists.
+ */
+export function replyDeadline(
+  endpoint: LlmProvider | string,
+  env: Record<string, string | undefined> = process.env,
+): number {
+  const declared = Number(env.TEXT2VIS_LLM_TIMEOUT_MS);
+  if (Number.isFinite(declared) && declared > 0) return declared;
+  const thinksAloud =
+    typeof endpoint === 'string' ? capabilitiesOf(endpoint).thinksAloud : endpoint.capabilities?.thinksAloud === true;
+  return thinksAloud ? REASONING_DEADLINE_MS : CHAT_DEADLINE_MS;
+}
+
+/**
+ * One line of log: how long this endpoint is waited for, and why.
+ *
+ * Said out loud because it is the one number in a run that the artifact cannot carry: a run stopped by
+ * a deadline and a run stopped by a wrong answer leave the same file, and only the log says which.
+ */
+export function describeDeadline(provider: LlmProvider, env: Record<string, string | undefined>): string {
+  const seconds = Math.round(replyDeadline(provider, env) / 1000);
+  const thinks = provider.capabilities?.thinksAloud === true ? ', which thinks before it answers' : '';
+  return `text2vis llm: waiting ${String(seconds)} s per call for ${provider.model}${thinks}`;
 }
 
 export type Scale = 'mark' | 'label';
@@ -941,12 +988,20 @@ export async function entryLlm(
               apiKey: target.apiKey,
               model: target.model,
               retries: 2,
-              timeoutMs: 60_000,
+              // Not a constant: a model that thinks aloud is waited for longer, because the deadline
+              // is a deadline on the *reply* and its reply includes the deliberation. Run
+              // `44681062395` is the receipt — the chat arms read 861 and 886 out of the store for ¥0
+              // and the reasoning arm was aborted at the one-word-answer deadline.
+              timeoutMs: replyDeadline(target.model, env),
             }),
           )
         : options.providers(targets);
     const declared = Number(env.TEXT2VIS_LLM_CONCURRENCY ?? 6);
     const concurrency = Number.isFinite(declared) && declared > 0 ? declared : 6;
+    // Said out loud, because it is the one number in the request that a reader cannot recover from
+    // the artifact: a run that stopped on a deadline and a run that stopped on a wrong answer leave
+    // the same file, and only the log says which one happened.
+    for (const provider of providers) log(describeDeadline(provider, env));
     const cache =
       options.cache ??
       (env.TEXT2VIS_LLM_CACHE === 'none'

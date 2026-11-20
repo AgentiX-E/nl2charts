@@ -95,7 +95,12 @@ jobs:
   arms:
     name: what a model answers on the same 1,470 rows
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # 60 minutes was sized for a chat model: 2,940 calls of one word each at concurrency 6. A reasoning
+    # model writes a chain of thought per row and the wall clock is the deliberation, not this job. The
+    # cap is a backstop against a hung run, not an estimate — run `44681062395` spent ten minutes on the
+    # reasoning arm before its first timeout, and every answer it bought is in the store, so a run that
+    # does hit the cap resumes rather than re-pays.
+    timeout-minutes: 100
     env:
       # The primary is the text backbone the BIRD jobs already use, so the org secret is the one that
       # exists rather than a new one. The second model takes the vision endpoint's key because that is

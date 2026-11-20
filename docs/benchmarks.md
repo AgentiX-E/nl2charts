@@ -16958,3 +16958,55 @@ loses 20 rows is a veto this project does not keep.
 answer is `bar`. Before, the chart drew the line and the row was a hit. Now it draws the bar and the
 row is a miss — five of six labels hit instead of six. That is the 6-in-144 half of the measurement
 above, kept as an assertion so the trade cannot be told as a pure gain.
+
+## The second model was refused twice before it was asked anything: run 44681062395
+
+The next question is the one the model floor has been waiting for since it was registered: does a
+model that thinks before it answers read this corpus better than the one that does not? `deepseek-chat`
+reads **861 (58.57%)** on the mark scale; the same vendor serves a thinking mode of the same base
+model at the same price, so the comparison costs one dispatch rather than a second vendor contract.
+
+It cost three. Both refusals were in the harness, not in the model, and neither is visible in a number.
+
+### First: the arm was held to another arm's request
+
+`compareLlm` compared every arm in the artifact against the floor's `request` before it checked
+whether that arm had a floor at all. The floor records `{promptVersion: 1, budget: 96}`, which is a
+fact about `deepseek-chat`; `replyBudget` sends a model that thinks aloud **no** cap at all, so its
+artifact records `{promptVersion: 1}` and the gate answered
+
+> `deepseek-reasoner|mark was answered on prompt 1 with no reply budget, and the floor was taken on
+> prompt 1 with a 96-token reply budget`
+
+— a regression in an arm that had no reading to regress from. The self-test case that should have
+caught it could not: the floor it used carried no `request`. It does now, and the gate's order is
+counters → a cut reply → the floor lookup → the comparison.
+
+### Second: the deadline was sized for one word out of eleven
+
+```
+  deepseek-chat on the mark scale (11 options)
+    top-1 861 (58.57%) of 1470 scored, shortlist 986, declined 6
+    calls 0, tokens 0+0 (cached 0), cache 1470 hit / 0 miss
+    cost ¥0.0000, ¥0.0000 per row
+  deepseek-chat on the label scale (12 options)
+    exact 886 (60.27%) of 1470 scored
+text2vis: llm call timed out
+```
+
+The chat arms are the measurement above, reproduced for **¥0** — 2,940 of 2,940 answers restored from
+the content-addressed store, four commits after the code that fills it changed, because the key is the
+request and the request did not change. The reasoning arm then died on the 60-second deadline that was
+hard-coded for a one-word answer, having spent ten minutes of deliberation on it.
+
+`replyDeadline` is the fix, and it is a function of what the endpoint declares for the reason
+`replyBudget` is: 60 s for a chat endpoint (unchanged, so no reading moves), 300 s for a model that
+thinks aloud, and `TEXT2VIS_LLM_TIMEOUT_MS` for a deployment that knows its endpoint is slower than
+either. The job's own cap moves 60 → 100 minutes for the same reason, and the answers a run buys are
+saved with `if: always()` — so a run that hits the cap resumes from the store rather than re-paying.
+
+### What the two refusals establish
+
+A second model is a *cheap* question that the harness made expensive: ¥0 of answers already on disk,
+two gates and one deadline between them and a reading. Both were found by dispatching, neither by
+reading the code, which is the same lesson the store's own history carries.

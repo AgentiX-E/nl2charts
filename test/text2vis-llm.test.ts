@@ -34,6 +34,8 @@ import {
   parseChoice,
   parseLlmArgs,
   replyBudget,
+  replyDeadline,
+  describeDeadline,
   replyOf,
   rosterOf,
   runArm,
@@ -185,6 +187,33 @@ describe('the instruction, and reading the answer back', () => {
         complete: async () => ({ text: '', model: 'b' }),
       }),
     ).toBeUndefined();
+  });
+
+  it('waits longer for a model that thinks aloud, and decides it from the name when it must', () => {
+    // Run `44681062395`: `deepseek-chat` restored 2,940 answers from the store in zero calls beside
+    // `deepseek-reasoner`, and the reasoning arm reported `text2vis: llm call timed out` after ten
+    // minutes of asking — at a deadline sized for one word out of eleven.
+    const chat = (): LlmProvider => ({ id: 'a', model: 'a', complete: async () => ({ text: '', model: 'a' }) });
+    expect(replyDeadline(chat(), {})).toBe(60_000);
+    expect(replyDeadline({ ...chat(), capabilities: REASONING_CAPABILITIES }, {})).toBe(300_000);
+    // The caller that builds the provider has the model name before it has a provider, so the name
+    // alone has to answer the same question the capabilities do.
+    expect(replyDeadline('deepseek-chat', {})).toBe(60_000);
+    expect(replyDeadline('deepseek-reasoner', {})).toBe(300_000);
+    // A deployment that knows its endpoint is slower than this says so in the environment, which is
+    // the one place a dispatch can carry a decision the code cannot see.
+    expect(replyDeadline('deepseek-reasoner', { TEXT2VIS_LLM_TIMEOUT_MS: '900000' })).toBe(900_000);
+    // A declared deadline that is not a positive number of milliseconds is not a deadline: falling
+    // back to the family's own number beats a 0 s timeout, which would abort every call at once.
+    expect(replyDeadline('deepseek-reasoner', { TEXT2VIS_LLM_TIMEOUT_MS: 'soon' })).toBe(300_000);
+    expect(replyDeadline('deepseek-reasoner', { TEXT2VIS_LLM_TIMEOUT_MS: '0' })).toBe(300_000);
+    expect(replyDeadline('deepseek-reasoner', { TEXT2VIS_LLM_TIMEOUT_MS: '-1' })).toBe(300_000);
+    // The line the log carries, in both shapes: a dispatch that stopped on a deadline and one that
+    // stopped on a wrong answer leave the same artifact, and only this sentence separates them.
+    expect(describeDeadline(chat(), {})).toBe('text2vis llm: waiting 60 s per call for a');
+    expect(describeDeadline({ ...chat(), model: 'deepseek-reasoner', capabilities: REASONING_CAPABILITIES }, {})).toBe(
+      'text2vis llm: waiting 300 s per call for deepseek-reasoner, which thinks before it answers',
+    );
   });
 });
 
