@@ -120,6 +120,21 @@ export const POLICIES: readonly Policy[] = [
 ];
 
 /**
+ * Refuse a name this product cannot draw, before it is carried anywhere.
+ *
+ * Exported because `route.ts` reads a *second* answer out of the same file, and two readers with two
+ * copies of this rule is how one of them ends up accepting a mark the other refuses. The message names
+ * the row, because a table with a foreign mark in it is a bug report about one line of one file.
+ */
+export function assertOfferedMark(row: ProfileInput, choice: string | null): void {
+  if (choice !== null && !(RECOMMENDABLE_MARKS as readonly string[]).includes(choice)) {
+    throw new Error(
+      `text2vis arbitrate: the artifact holds ${choice} for "${row.prompt}", which is not one of the ${String(RECOMMENDABLE_MARKS.length)} marks this arm offers; the answer belongs to a different option list`,
+    );
+  }
+}
+
+/**
  * The product's answer, the cues and the model's answer, read off one row.
  *
  * A name outside `RECOMMENDABLE_MARKS` is refused rather than carried, because the artifact this reads
@@ -130,11 +145,7 @@ export const POLICIES: readonly Policy[] = [
  * and nothing downstream could tell that from a model that had nothing to say.
  */
 export function disputeOf(row: ProfileInput, choice: string | null): Dispute {
-  if (choice !== null && !(RECOMMENDABLE_MARKS as readonly string[]).includes(choice)) {
-    throw new Error(
-      `text2vis arbitrate: the artifact holds ${choice} for "${row.prompt}", which is not one of the ${String(RECOMMENDABLE_MARKS.length)} marks this arm offers; the answer belongs to a different option list`,
-    );
-  }
+  assertOfferedMark(row, choice);
   const named = cueMarks(row.prompt);
   return {
     product: profileAnswer(row.prompt, row.tableData),
@@ -331,7 +342,7 @@ export function arbitrateDisputes(
  * population, an oracle that is not the union, a `best` that is not the best, or per-family cells
  * that do not sum to their own total.
  */
-export function assertArbitration(report: ArbitrationReport): void {
+export function assertArbitration(report: ArbitrationReport, baseline = 'product'): void {
   const { agree, disagree } = report.agreement;
   if (agree + disagree !== report.population.scored) {
     throw new Error(
@@ -343,8 +354,12 @@ export function assertArbitration(report: ArbitrationReport): void {
       `text2vis arbitrate: the ceiling of ${String(report.oracle.hit)} is not the agreed hits plus the rows each system won alone`,
     );
   }
-  const product = report.policies.find((reading) => reading.name === 'product');
-  if (product === undefined) throw new Error('text2vis arbitrate: the table has no product baseline');
+  // The baseline is a parameter because a table has one *row* that everything else is stated against,
+  // and which answer sits in that row depends on the question: `route.ts` prices two models and holds
+  // the reading to the one that does not think, so asking it for a `product` row would be asking the
+  // wrong table for its own identity.
+  const product = report.policies.find((reading) => reading.name === baseline);
+  if (product === undefined) throw new Error(`text2vis arbitrate: the table has no ${baseline} baseline`);
   for (const reading of report.policies) {
     if (reading.kept + reading.given !== disagree) {
       throw new Error(

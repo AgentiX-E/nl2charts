@@ -266,6 +266,14 @@ jobs:
       - name: Hold the shipped path to the arbiter
         run: node tools/check-text2vis-baseline.mjs --ship --require
 
+      # The same six rules, priced on the disagreement between two *models* rather than between the
+      # table and one. The round that bought the second arm read 875 against 861 with p = 0.30, which
+      # says the two answers are worth the same and says nothing about whether a rule can read them
+      # together; `route.ts` prices that, and `--ship` prices what a caller would receive for the
+      # routed answers, because a decided number the table can veto is not a shipped one.
+      - name: Price the route between the two arms
+        run: pnpm bench:text2vis:route --answers eval/out/text2vis-llm.json --require --ship --artifact eval/out/text2vis-route.json
+
       - name: Upload the reading
         if: always()
         uses: actions/upload-artifact@v5
@@ -290,6 +298,15 @@ jobs:
         with:
           name: text2vis-ship
           path: eval/out/text2vis-ship.json
+
+      - name: Upload the route
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: text2vis-route
+          path: eval/out/text2vis-route.json
+          if-no-files-found: warn
+          retention-days: 90
 
       - name: Upload the second question
         if: always()

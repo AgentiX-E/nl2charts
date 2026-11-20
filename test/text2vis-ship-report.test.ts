@@ -83,6 +83,7 @@ function report(over: Partial<ShipReport> = {}): ShipReport {
     decided: counts(),
     shipped: counts(),
     changed: 0,
+    marks: ['bar', 'line'],
     divergence: [],
     ...over,
   };
@@ -190,6 +191,13 @@ describe('the shipped report', () => {
 describe('the arithmetic a reader could not reproduce', () => {
   it('passes a report that is internally consistent', () => {
     expect(() => assertShip(report())).not.toThrow();
+  });
+
+  it('refuses a reading whose per-row marks are not one per row', () => {
+    // The marks are what pairs this reading with another one row by row, so a short list is not a
+    // cosmetic gap: it is a comparison that would silently skip the rows it never reached.
+    expect(() => assertShip(report({ marks: ['bar'] }))).toThrow(/per-row marks and a population of 2/);
+    expect(() => assertShip(report({ marks: ['bar', 'line', 'pie'] }))).toThrow(/per-row marks and a population of 2/);
   });
 
   it('refuses a split that does not cover the population', () => {

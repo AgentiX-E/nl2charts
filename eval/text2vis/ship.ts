@@ -95,6 +95,15 @@ export interface ShipReport {
    */
   readonly changed: number;
   /**
+   * The chart each row received, in row order.
+   *
+   * Published because a shipped reading is the one number two answer sets are compared on, and a
+   * comparison of two shares is not a comparison of two sets of rows: `route.ts` pairs them row by row
+   * so a gain of 21 rows can be stated with the rows it gained rather than as a difference of two
+   * percentages. It costs one mark per row in the artifact and nothing at run time.
+   */
+  readonly marks: readonly MarkName[];
+  /**
    * Rows where the shipped decision and the arbitration policy name different marks.
    *
    * Computed rather than asserted in a comment, and it must be zero: the two are one sentence written
@@ -452,6 +461,7 @@ export async function shipReport(
     population: { scored: rows.length, roster },
     decided: countsOf(rows, decidedMarks, decisionRows),
     shipped: countsOf(rows, drawn.marks, drawn.decisions),
+    marks: drawn.marks,
     changed,
     divergence,
   };
@@ -470,6 +480,13 @@ export function assertShip(report: ShipReport): void {
     const first = report.divergence[0] as { row: number; policy: string; shipped: MarkName };
     throw new Error(
       `text2vis ship: ${String(report.divergence.length)} row(s) where the shipped decision and model-holds disagree; row ${String(first.row)}: policy ${first.policy}, shipped ${first.shipped}`,
+    );
+  }
+  // One mark per row, because the list is what pairs this reading with another one row by row; a list
+  // that is short is a comparison that would silently skip the rows it never reached.
+  if (report.marks.length !== scored) {
+    throw new Error(
+      `text2vis ship: ${String(report.marks.length)} per-row marks and a population of ${String(scored)}, so the rows this reading published cannot be paired with another one`,
     );
   }
   for (const [name, counts] of [
