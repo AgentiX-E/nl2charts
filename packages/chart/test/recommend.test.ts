@@ -529,6 +529,44 @@ describe('turning a recommendation into a chart the compiler accepts', () => {
     expect(y.map((ref) => ref?.field)).toEqual(['open', 'close', 'low', 'high']);
   });
 
+  it('reads the row order as the axis when every row is its own period', () => {
+    // The corpus asks for a candlestick over `Day 1 … Day 7`, and the profiler types that column
+    // `nominal`: `Day 7` is not a date and guessing that it means one would be a fiction. The picture
+    // does not need the date — four numbers per row, one row per period, and the rows arrive in the
+    // order the question describes. Refusing it was this layer insisting on a date axis for a table
+    // that states its axis in words.
+    const labelled = rows({
+      period: ['Day 1', 'Day 2', 'Day 3', 'Day 4', 'Day 5', 'Day 6'],
+      open: [10, 11, 12, 13, 14.5, 15],
+      high: [12, 13, 13, 14.5, 16, 16.5],
+      low: [9, 10.5, 10, 12.5, 14, 14.5],
+      close: [11, 12.5, 11, 14, 15.5, 16],
+    });
+    const ir = toChartIR('Using the provided OHLC data for the cryptocurrency, plot a candlestick chart', labelled);
+    expect(ir.mark).toBe('candlestick');
+    expect(ir.encoding.x).toMatchObject({ field: 'period' });
+    const y = Array.isArray(ir.encoding.y) ? ir.encoding.y : [ir.encoding.y];
+    expect(y.map((ref) => ref?.field)).toEqual(['open', 'close', 'low', 'high']);
+  });
+
+  it('refuses that reading when the rows are not one per period', () => {
+    // Two series over six days, flattened: the axis repeats, so row order is not a sequence and a
+    // candle per row would splice two timelines into one. The chart still exists — a line reads the
+    // repeated axis — so the assertion is about the mark that was refused, not about a throw.
+    const stacked = rows({
+      period: ['Day 1', 'Day 2', 'Day 3', 'Day 1', 'Day 2', 'Day 3'],
+      open: [10, 11, 12, 20, 21, 22],
+      high: [12, 13, 13, 22, 23, 23],
+      low: [9, 10.5, 10, 19, 20.5, 20],
+      close: [11, 12.5, 11, 21, 22.5, 21],
+    });
+    const choice = recommendChart('Plot a candlestick chart of the OHLC data', profiles(stacked), {
+      rows: stacked.length,
+    });
+    expect(choice.refused.find((item) => item.mark === 'candlestick')?.reason).toContain('one value per row');
+    expect(choice.recommendations.map((item) => item.mark)).not.toContain('candlestick');
+  });
+
   it('caps the rows it will carry, because the contract refuses more than fifty thousand', () => {
     const big = rows({ region: Array.from({ length: 5 }, (_, index) => `r${String(index)}`), revenue: [1, 2, 3, 4, 5] });
     const ir = toChartIR('Top regions by revenue', big, { limit: 2 });

@@ -17446,3 +17446,58 @@ the row limit it always had.
 | eval coverage | 99.63 / 99.63 / 100.00 / 98.33; 108 of 109 files at 95% on all four |
 | `pnpm gate:all` | EXIT 0 |
 | cost | **¥0** — no model was called; every number is a re-reading of answers on disk |
+
+## The candlestick's axis was never a calendar
+
+The refusal bill that closed the last round priced every remaining debt at its ceiling, and exactly
+one family came out honest: `candlestick`, 3 rows, "a derivation could win: at most 3". Those three
+rows are a week written `Day 1 … Day 7`, four numbers per row, one row per period. The profiler types
+that column `nominal` — `Day 7` is not a date, and reading it as one would be a fiction — so the mark
+was refused for a missing date axis, and the table drew a line or a bar instead.
+
+A candlestick does not read a calendar. It reads **a sequence**: one row per period, four numbers, and
+the order the rows arrive in. A date column is one spelling of that claim; a label column with as many
+distinct values as there are rows is the other. `Shape.sequence` is that second spelling, and it is
+deliberately narrow: one axis column only (two dimensions state a grid, not a sequence) and every
+value distinct (a repeated label describes two series interleaved in one column of candles). It also
+requires the caller to state the row count, because twelve periods and twelve thousand sales profile
+the same, and "one value per row" is a claim about the rows.
+
+```ts
+// before: a candlestick on `Day 1 … Day 7` was refused before the question was read
+shape.measures.length >= 4 && shape.ordered.length >= 1
+// after: an axis that orders the rows, which a date is one spelling of and a label per row another
+shape.measures.length >= 4 && (shape.ordered.length >= 1 || shape.sequence !== undefined)
+```
+
+The shipped reading pays for it in full: **807 → 810**, exactly the bill's three rows, all three drawn
+as the model named them. `not-admitted` falls 109 → 106, the rows the table answers 142 → 139, and
+`decided` does not move at all.
+
+The rule arm cannot see the change, and that is worth stating rather than hiding: `profileAnswer`
+prices the product from profiles alone — no row count — so its top-1 stays 614 with the same shortlist
+and the same 28 declines. An instrument that reads shape without rows cannot see a rule about rows.
+The floor is therefore registered on `shipped`, the number a caller receives, and the obligation this
+creates is written down: whoever teaches `profileAnswer` to carry the row count will move eight rows
+(two gained, two lost, four drawn differently) and will need to re-register this floor on the answers,
+not on the count.
+
+Eight rows in all answered differently, and the four that gained or lost cancel: two `Bar` tables now
+draw candles because their question named the OHLC cue, and the scoreboard reads them as a wash. That
+is the trade the bill predicted, and the reason the bill is what decides which derivations are worth
+building — a capability that gains three and costs three is still right to build when the three it
+gains are the three the question asked for, and wrong when it is a renaming.
+
+### Gates
+
+| item | result |
+|---|---|
+| `tsc --noEmit` | clean |
+| `vitest` (real PostgreSQL and MariaDB) | 5,889 passed / 0 skipped (193 files) |
+| `packages/chart` | 350 cases, 2 new: the label axis read as a sequence, and its refusal when the label repeats |
+| `packages/chart` coverage | 100 / 100 / 100 / 100 |
+| bundle budget | `chart` 39,180 B / 39,200 B — the prose was trimmed first, and it was enough |
+| `check-text2vis-baseline --ship` | `shipped` 810 against a floor of 810; 133 changed against 134 vetoes |
+| `check-text2vis-baseline --arbitration` | `product` 614, ceiling 970, `model-holds` 863 — unmoved |
+| `pnpm gate:all` | EXIT 0 |
+| cost | **¥0** |

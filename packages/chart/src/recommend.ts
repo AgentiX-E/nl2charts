@@ -401,6 +401,12 @@ interface Resolved {
 interface Shape {
   readonly dims: readonly FieldProfile[];
   readonly ordered: readonly FieldProfile[];
+  /**
+   * The one axis column whose values are all different, when the caller stated the row count: a table
+   * that spells its order `Day 1 … Day 7` states a sequence without stating a date, which is what a
+   * candlestick reads. A repeated label describes two interleaved series, so it is not one.
+   */
+  readonly sequence: FieldProfile | undefined;
   readonly measures: readonly FieldProfile[];
   /** The widest category still small enough to be named in a pie. */
   readonly sliceable: FieldProfile | undefined;
@@ -561,10 +567,14 @@ const ADMISSIONS: readonly Admission[] = [
     mark: 'candlestick',
     prior: 3,
     reason: 'profile:four-numbers-per-row-on-an-ordered-axis',
+    // An axis that orders the rows: a date is one spelling of it, a label per row is another. The
+    // corpus's three refusals here were all a week written `Day 1 … Day 7`.
     admit: (shape) =>
-      shape.measures.length >= 4 && shape.ordered.length >= 1
+      shape.measures.length >= 4 && (shape.ordered.length >= 1 || shape.sequence !== undefined)
         ? null
-        : `a candlestick reads four numbers per row on a date axis and this result has ${String(shape.measures.length)} and ${String(shape.ordered.length)}`,
+        : shape.measures.length < 4
+          ? `a candlestick reads four numbers per row and this result has ${String(shape.measures.length)}`
+          : `a candlestick reads four numbers per row on an axis that orders them, and this result has neither a date column nor a label column with one value per row`,
   },
   {
     mark: 'radar',
@@ -668,13 +678,19 @@ function shapeOf(profiles: readonly FieldProfile[], options: Resolved): Shape {
   const dims = real.filter((profile) => profile.type !== 'quantitative');
   const ordered = dims.filter((profile) => profile.type === 'temporal' || profile.type === 'ordinal');
   const measures = real.filter((profile) => profile.type === 'quantitative');
+  // One label per row, and only one axis: a table with two dimensions states a grid, not a sequence,
+  // and reading its row order as a timeline would splice several series into one line of candles.
+  const sequence =
+    dims.length === 1 && options.rows !== undefined && dims[0]?.nulls === 0 && dims[0].distinct === options.rows
+      ? dims[0]
+      : undefined;
   const sliceable = dims
     .filter((profile) => profile.distinct <= options.maxSlices && profile.distinct >= 2)
     .sort((left, right) => right.distinct - left.distinct || left.name.localeCompare(right.name))[0];
-  if (measures.length > 0) return { dims, ordered, measures, sliceable, counted: false, observations: options.rows };
+  if (measures.length > 0) return { dims, ordered, sequence, measures, sliceable, counted: false, observations: options.rows };
   const count = countMeasure(dims, real, options.rows);
-  if (count === undefined) return { dims, ordered, measures, sliceable, counted: false, observations: options.rows };
-  return { dims, ordered, measures: [count], sliceable, counted: true, observations: options.rows };
+  if (count === undefined) return { dims, ordered, sequence, measures, sliceable, counted: false, observations: options.rows };
+  return { dims, ordered, sequence, measures: [count], sliceable, counted: true, observations: options.rows };
 }
 
 /**
@@ -897,13 +913,15 @@ function clean(channels: Record<string, unknown>): Encoding {
   return Object.fromEntries(Object.entries(channels).filter(([, value]) => value !== undefined)) as unknown as Encoding;
 }
 
-/** The tuple a pre-aggregated table states: five (or four) columns of `y`, along its ordered axis. */
+/** The tuple a pre-aggregated table states: five (or four) columns of `y`, along the axis that orders them. */
 function tupleEncoding(
   mark: 'boxplot' | 'candlestick',
   shape: Shape,
   profiles: readonly FieldProfile[],
 ): Encoding {
-  const axis = shape.ordered[0];
+  // A date column when there is one; else, for the candlestick only, the label column with one value per
+  // row. The boxplot keeps its own reading, so widening its axis would be a change nobody measured.
+  const axis = shape.ordered[0] ?? (mark === 'candlestick' ? shape.sequence : undefined);
   return clean({
     ...(axis === undefined ? {} : { x: ref(axis) }),
     y: tupleColumns(profiles, mark).map(ref),
