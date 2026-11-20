@@ -273,8 +273,6 @@ jobs:
           path: eval/out/text2vis-repair.json
           if-no-files-found: warn
           retention-days: 90
-          if-no-files-found: warn
-          retention-days: 90
 
       - name: Publish the summary
         if: always()

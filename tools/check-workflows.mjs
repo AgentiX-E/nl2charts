@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Four rules about workflow files that GitHub only tells you after a push.
+ * Seven rules about workflow files that GitHub only tells you after a push.
  *
  * A workflow is code, and the only part of it that can be wrong without looking wrong is the
  * expression context. `BIRD_RESUME_FROM: ${{ steps.resume.outputs.path }}` reads as ordinary YAML,
@@ -15,7 +15,11 @@
  * 2. `steps.<id>` must name a step id declared in the same job;
  * 3. `inputs.<name>` must name an input the `workflow_dispatch` trigger declares;
  * 4. a cache that holds a store this repository writes into must not have a constant key;
- * 5. a cache key may not interpolate a workflow input.
+ * 5. a cache key may not interpolate a workflow input;
+ * 6. a `restore-keys: |` block may not contain a comment or a space, because a block scalar is text
+ *    and prose written between the keys is sent as a key;
+ * 7. no key may appear twice in one mapping block, because YAML keeps the last one and GitHub refuses
+ *    the whole file — the same "no job, no log" failure as rule 1, arriving from the parser.
  *
  * Rule 3 is the quiet one: an input nobody declared resolves to an empty string rather than an
  * error, so the workflow runs with the feature silently off — a dispatch that resumes nothing
@@ -239,6 +243,59 @@ export function holdsStore(path) {
 }
 
 /** Every problem this checker can see in one workflow file. */
+/**
+ * Every key of one mapping block, once — rule 7, and the one that has no soft failure in it.
+ *
+ * A duplicate key is not a subtle mistake: YAML keeps the last one, and GitHub rejects the file with
+ * `failed to parse workflow` before any job exists. That is the same *shape* of failure as rule 1 —
+ * a run with no job and no log — and the file that produced it passed every other check here,
+ * because the other checks read lines and a repeated key is a fact about the *shape*.
+ *
+ * The walk keeps a stack of mapping blocks, keyed by indentation, and opens a new block on every list
+ * item: two `- name:` lines under one `steps:` are two mappings that happen to share an indent, not one
+ * mapping with a repeated key. Block scalars (`run: |`) are skipped by indentation, because their
+ * contents are text and a `key: value` inside one is a line of a shell script.
+ */
+export function duplicateKeys(lines) {
+  const found = [];
+  const stack = [];
+  let scalarAt;
+  for (let index = 0; index < lines.length; index += 1) {
+    const text = lines[index];
+    if (scalarAt !== undefined) {
+      const inside = /^\s*$/.test(text) || leadingSpaces(text) > scalarAt;
+      if (inside) continue;
+      scalarAt = undefined;
+    }
+    if (/^\s*(#|$|---)/.test(text)) continue;
+    const match = /^(\s*)(-\s+)?(?:([A-Za-z_$][\w.$-]*)|"([^"]*)"|'([^']*)')\s*:(?:\s|$)/.exec(text);
+    const indent = leadingSpaces(text);
+    if (match === null) {
+      // A list item that is a scalar, or a line that opens nothing: it neither joins nor opens a block.
+      while (stack.length > 0 && stack[stack.length - 1].indent > indent) stack.pop();
+      continue;
+    }
+    const structural = match[2] === undefined ? indent : indent + match[2].length;
+    while (stack.length > 0 && stack[stack.length - 1].indent > structural) stack.pop();
+    const key = match[3] ?? match[4] ?? match[5];
+    let frame = stack[stack.length - 1];
+    if (match[2] !== undefined || frame === undefined || frame.indent < structural) {
+      frame = { indent: structural, keys: new Set() };
+      stack.push(frame);
+    }
+    if (frame.keys.has(key)) found.push({ line: index + 1, key });
+    frame.keys.add(key);
+    const value = text.slice(match[0].length);
+    if (/^[|>][+-]?\d*\s*(#.*)?$/.test(value)) scalarAt = indent;
+  }
+  return found;
+}
+
+/** How far a line is indented, in spaces. A tab is invalid YAML here and is read as one column. */
+function leadingSpaces(text) {
+  return /^\s*/.exec(text)[0].length;
+}
+
 export function check(yaml, file) {
   const lines = yaml.split('\n');
   const issues = [];
@@ -293,6 +350,14 @@ export function check(yaml, file) {
         message: `restore key "${entry}" reads as a key rather than as prose: inside a block scalar a '#' line is not a comment and a space or comma is an invalid key`,
       });
     }
+  }
+  for (const repeat of duplicateKeys(lines)) {
+    issues.push({
+      file,
+      line: repeat.line,
+      rule: 'duplicate-key',
+      message: `"${repeat.key}" is declared twice in one block; YAML keeps the last one and GitHub refuses the file with "failed to parse workflow", so the run it would create has no job and no log`,
+    });
   }
   for (const job of jobsOf(lines)) {
     // Rule 1: a job env block cannot see `steps` — the context exists only once a step runs.
@@ -455,8 +520,41 @@ function selfTest() {
     issues.push('a restore key containing an expression was reported as prose');
   }
 
+  // Rule 7: the block that was actually shipped. `if-no-files-found` appears twice under one `with:`,
+  // and GitHub answered the dispatch with `failed to parse workflow: (Line: 276, Col: 11):
+  // 'if-no-files-found' is already defined` — after the push, and after this file had reported the
+  // workflow clean, because every rule above reads lines and a repeated key is a fact about shape.
+  const doubled = ok.replace(
+    '      - name: consume',
+    '      - name: keep\n        uses: actions/upload-artifact@v5\n        with:\n          name: a\n          path: a.json\n          retention-days: 90\n          retention-days: 90\n      - name: consume',
+  );
+  const repeated = check(doubled, 'p.yml').filter((issue) => issue.rule === 'duplicate-key');
+  if (repeated.length !== 1 || !/retention-days/.test(repeated[0].message)) {
+    issues.push('a key declared twice in one block was not reported once, by name');
+  }
+  // A list of mappings is a list of blocks: two `- name:` lines share an indent and repeat nothing.
+  if (check(ok, 'q.yml').some((issue) => issue.rule === 'duplicate-key')) {
+    issues.push('two list items sharing a key were reported as a duplicate');
+  }
+  // A block scalar is text. A `key: value` line inside a shell script is not a key, and the second
+  // `run:` below is the only one that matters.
+  const scalar = ok.replace(
+    '        run: echo hi',
+    '        run: |\n          echo "name: hi"\n          echo "run: there"\n        shell: bash',
+  );
+  if (check(scalar, 'r.yml').some((issue) => issue.rule === 'duplicate-key')) {
+    issues.push('a line inside a block scalar was read as a key');
+  }
+  // The same key in two different blocks, at two indents, is one declaration each.
+  const nested = ok
+    .replace('    runs-on: ubuntu-latest', '    runs-on: ubuntu-latest\n    env:\n      name: job-level')
+    .replace('        id: produce', '        id: produce\n        env:\n          name: step-level');
+  if (check(nested, 's.yml').some((issue) => issue.rule === 'duplicate-key')) {
+    issues.push('the same key in two nested blocks was reported as a duplicate');
+  }
+
   for (const issue of issues) console.error(`self-test: ${issue}`);
-  console.log(`check-workflows: ${String(16 - issues.length)}/16 self-checks passed`);
+  console.log(`check-workflows: ${String(20 - issues.length)}/20 self-checks passed`);
   return issues.length === 0 ? 0 : 1;
 }
 
