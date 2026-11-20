@@ -624,6 +624,24 @@ function selfTest() {
     { ...requestFloor, request: { promptVersion: 1 } },
     1,
   );
+  // The request check is scoped to the arms the floor records, and this is the case that says so.
+  // A reasoning endpoint is sent **no** reply cap — `replyBudget` returns `undefined` where the model
+  // thinks aloud, because a cap sized for one word truncates the deliberation — so its artifact
+  // records `{promptVersion: 1}` and no budget, and the floor's `96` is a fact about a different
+  // endpoint. Applying it anyway refused the first dispatch of every second model at the one check
+  // that arm had no floor to be measured against, which reads exactly like a regression and is not
+  // one. The note is the right shape: there is nothing yet to hold this reading to.
+  requestCase(
+    'an arm nobody has priced is not held to the floor request',
+    {
+      arms: [
+        { model: 'deepseek-reasoner', scale: 'mark', requested: 1470, answered: 1470, unparsed: 0, truncated: 0, scored: 1470, top1: 900, request: { promptVersion: 1 } },
+      ],
+    },
+    requestFloor,
+    0,
+    1,
+  );
   const judgeFloor = { dimensions: ['chart_correctness', 'readability'], grader: { endpoint: 'zhipu', model: 'glm-4.5v' } };
   for (const test of JUDGE_SELF_TEST) {
     const options = { ...(test.require === true ? { require: true } : {}), ...(test.iteration === true ? { iteration: true } : {}) };
@@ -882,6 +900,28 @@ export function compareLlm(report, floor, options = {}) {
       );
       continue;
     }
+    // A cut reply invalidates the share whatever the request was, so it is refused before the floor
+    // is consulted at all — the arm's own artifact says its rows are over the survivors of a cap.
+    if (arm.truncated > 0) {
+      issues.push(
+        `TEXT2VIS LLM: ${name} had ${String(arm.truncated)} replies cut at the token budget, so its share is over the rows the cap survived`,
+      );
+      continue;
+    }
+    // The floor's request is a fact about the arms the floor *records*, which is why this lookup comes
+    // before the comparison rather than after it. An arm nobody has priced has no request to be held
+    // to, and holding it to another endpoint's cap refused the first dispatch of every second model:
+    // a reasoning endpoint is sent **no** reply cap (`replyBudget` returns `undefined` where the model
+    // thinks aloud, because a cap sized for one word truncates the deliberation), so its artifact
+    // records `{promptVersion: 1}` and the floor records `96` — a fact about a different endpoint,
+    // reported as a regression in an arm that had no reading to regress from.
+    const entry = recorded[name];
+    if (entry === undefined) {
+      notes.push(
+        `TEXT2VIS LLM: no floor recorded for ${name}; this reading establishes one (${String(arm.scored)} scored rows, and it answered ${describeRequest(arm.request)})`,
+      );
+      continue;
+    }
     const wantedRequest = floor?.request;
     if (wantedRequest !== undefined) {
       if (describeRequest(arm.request) !== describeRequest(wantedRequest)) {
@@ -892,17 +932,6 @@ export function compareLlm(report, floor, options = {}) {
       }
     } else if (arm.request !== undefined) {
       notes.push(`TEXT2VIS LLM: ${name} names prompt ${describeRequest(arm.request)} and the floor records none; this dispatch establishes it`);
-    }
-    if (arm.truncated > 0) {
-      issues.push(
-        `TEXT2VIS LLM: ${name} had ${String(arm.truncated)} replies cut at the token budget, so its share is over the rows the cap survived`,
-      );
-      continue;
-    }
-    const entry = recorded[name];
-    if (entry === undefined) {
-      notes.push(`TEXT2VIS LLM: no floor recorded for ${name}; this reading establishes one (${String(arm.scored)} scored rows)`);
-      continue;
     }
     if (arm.scored !== entry.scored) {
       issues.push(
