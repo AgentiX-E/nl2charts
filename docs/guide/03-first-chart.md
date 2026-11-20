@@ -330,7 +330,7 @@ construct is not touched.
 > The other half is `pnpm bench:text2vis:profile`, which scores the shipped entry
 > point with the corpus's own result set in front of it — no model, no database,
 > no renderer, because the corpus ships the table. That reading is
-> **606 of 1,470 (41.22%)** and it is held by a floor: `pnpm gate:text2vis` fails a
+> **610 of 1,470 (41.50%)** and it is held by a floor: `pnpm gate:text2vis` fails a
 > run that comes back lower, and fails one that comes back over a different number
 > of rows, because the scorer is deterministic and a fall is therefore never noise.
 >
@@ -340,6 +340,43 @@ construct is not touched.
 > label is more than one annotator's judgement. The tests pin the rule table
 > against a named fixture, and that fixture is a regression corpus, not a
 > benchmark.
+
+### A table written sideways has three readings
+
+Some result sets state their shape backwards: one row per entity, one *column* per
+period.
+
+| country | 2019 | 2020 | 2021 |
+|---|---:|---:|---:|
+| Oman | 1203 | 1180 | 1164 |
+| Samoa | 200 | 210 | 219 |
+
+Nothing in that table is a chart yet — it is two rows and four columns, and a bar
+over it would draw one of the three years and drop the other two. `toChartIR`
+recognises the shape and *melts* it: one row per entity and period, with the period
+columns turned into a column and their numbers turned into a measure. That long
+form is two categories and one measure, and it has exactly three pictures:
+
+| `mark` | what you get | axes |
+|---|---|---|
+| `line` (the default) | one line per entity | period × value, coloured by entity |
+| `bar` | side-by-side bars, one group per period | period × value, grouped by entity |
+| `heatmap` | a matrix of the two categories | period × entity, coloured by value |
+
+```ts
+toChartIR('Population by year', rows).mark;                      // 'line'
+toChartIR('Population by year', rows, { mark: 'bar' }).mark;     // 'bar'
+toChartIR('Population by year', rows, { mark: 'heatmap' }).mark; // 'heatmap'
+toChartIR('Population by year', rows, { mark: 'pie' });          // throws: not a picture of two categories and one measure
+```
+
+The default is the line because the columns *are* a timeline and a line states the
+interval between periods. The other two are not preferences: on the benchmark's
+144 wide tables, **71 are labelled `Line` and 53 `Bar`**, so "one line per entity is
+the only reading" was a claim about the first implementation rather than about the
+reshape. A mark the long form cannot hold is refused with its own sentence instead
+of being drawn as the nearest neighbour — a pie of *entity × period* would slice
+one against the other, which is a total the table never stated.
 
 ### Letting a model choose the mark
 
@@ -382,8 +419,8 @@ model to a deterministic path:
   override sets the mark and nothing else: the admission rules still apply, the
   encoding is still derived from the columns, the rows are still folded, ordered
   and limited by the same code. `decision.veto` is how a refusal is reported — a
-  wide table is one line per entity and nothing else, so it is not asked about, and
-  a mark the admissions refuse is not coerced into a neighbour.
+  mark the long form of a wide table cannot hold is refused with its own sentence,
+  and never coerced into a neighbour.
 - **The prompt is a measured artifact, not a message.** It is the same two messages
   the benchmark sends — four lines, ~180 tokens, one word out — because the reading
   it produces is a number *about that text*. `test/text2vis-ship.test.ts` compares
@@ -452,14 +489,14 @@ reports what was spent, because a feature whose cost cannot be read is a feature
 whose cost is discovered on the invoice.
 
 > **What the model path reads.** Same 1,470 rows, same scorer: 861 of 1,470 by the
-> model alone (58.57%), 606 by the rule table, and **863 by routing between the
+> model alone (58.57%), 610 by the rule table, and **863 by routing between the
 > two** — the model everywhere it answered, the table where it did not. That last
 > number is the one this API implements, and `pnpm bench:text2vis:ship` re-runs the
 > shipped code against the answers already on disk to prove the product and the
 > published policy are the same rule, row for row, at ¥0. What a caller *receives*
-> is the third reading, **754 of 1,470 (51.29%)**: a wide table is one line per
-> entity and a mark the admissions refuse is not drawn, so 402 rows are answered by
-> the table instead of the model, and 307 of them change the chart.
+> is the third reading, **807 of 1,470 (54.90%)**: a mark the admissions refuse is
+> not drawn and the table answers instead, so 144 rows are answered by the table
+> rather than by the model, and 138 of them change the chart.
 
 ## 3. Build the IR
 

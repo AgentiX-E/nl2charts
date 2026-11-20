@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { meltWide } from '../src/index.js';
+import { meltWide, toChartIR } from '../src/index.js';
 
 /**
  * The table the corpus is full of and the contract could not hold: one row per entity, one column per
@@ -80,4 +80,51 @@ describe('a table that is wide in time', () => {
   ])('declines %s', (_name, rows) => {
     expect(meltWide(rows as never)).toBeUndefined();
   });
+});
+
+/**
+ * The long form is one shape with three pictures in it, and the corpus prices all three.
+ *
+ * `line` is the default and the shape's own reading — a timeline, one series per entity. `bar` and
+ * `heatmap` are the other two, and they are not preferences: 53 of the 144 wide tables in
+ * `eval/text2vis` are labelled `Bar` and 71 `Line`, so "one line per entity is the only reading the
+ * reshape produces" was a claim about the first implementation rather than about the reshape.
+ */
+describe('the marks a melted table can be drawn as', () => {
+  it('defaults to a line per entity, which is the shape s own reading', () => {
+    const ir = toChartIR('population by year', wide);
+    expect(ir.mark).toBe('line');
+    expect(ir.encoding.x).toEqual({ field: 'Year', type: 'temporal' });
+    expect(ir.encoding.series).toEqual({ field: 'country', type: 'nominal' });
+    expect(ir.data).toHaveLength(6);
+  });
+
+  it('draws a grouped bar when the caller asked for one, over the same long form', () => {
+    const ir = toChartIR('population by year', wide, { mark: 'bar' });
+    expect(ir.mark).toBe('bar');
+    expect(ir.encoding.series).toEqual({ field: 'country', type: 'nominal' });
+    expect(ir.encoding.y).toEqual([{ field: 'Value', type: 'quantitative' }]);
+    // The data is the melt, not the table: a reader of the chart sees one row per entity and period.
+    expect(ir.data[0]).toEqual({ country: 'Oman', Year: '2019', Value: 1203 });
+  });
+
+  it('draws a matrix of the two categories when the caller asked for a heatmap', () => {
+    const ir = toChartIR('population by year', wide, { mark: 'heatmap' });
+    expect(ir.mark).toBe('heatmap');
+    expect(ir.encoding.x).toEqual({ field: 'Year', type: 'temporal' });
+    expect(ir.encoding.y).toEqual([{ field: 'country', type: 'nominal' }]);
+    expect(ir.encoding.color).toEqual({ field: 'Value', type: 'quantitative' });
+    // A matrix carries no series: the entity *is* the second axis, so a series channel here would be
+    // the same column drawn twice.
+    expect(ir.encoding.series).toBeUndefined();
+  });
+
+  it.each(['pie', 'scatter', 'boxplot', 'candlestick', 'radar', 'parallel', 'gauge', 'funnel'] as const)(
+    'refuses %s, which is not a picture of two categories and one measure',
+    (mark) => {
+      expect(() => toChartIR('population by year', wide, { mark })).toThrow(
+        /written sideways across Year columns/,
+      );
+    },
+  );
 });

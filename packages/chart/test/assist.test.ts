@@ -140,13 +140,28 @@ describe('assistedChartIR', () => {
     expect(assisted.decision).toMatchObject({ mark: plain.mark, source: 'product', veto: 'not-admitted' });
   });
 
-  it('does not ask about a wide table, whose reshape leaves one reading', async () => {
+  it('draws the mark a wide table can hold, instead of not asking', async () => {
+    // The reshape has three readings and the advisor is asked about all three: a line per entity, a
+    // grouped bar per period, a matrix of the two. The corpus says 53 of its 144 wide tables were
+    // drawn as bars, and skipping the question cost those rows.
+    const advisor = vi.fn(async () => 'bar');
+    const assisted = await assistedChartIR('population by year', WIDE, { advisor });
+    expect(advisor).toHaveBeenCalledTimes(1);
+    expect(assisted.ir.mark).toBe('bar');
+    // Same long form, same series: a model may change the picture's shape, never what it says.
+    expect(assisted.ir.encoding.series?.field).toBe('entity');
+    expect(assisted.ir.data).toHaveLength(6);
+    expect(assisted.decision).toEqual({ mark: 'bar', source: 'model', product: 'line' });
+  });
+
+  it('vetoes a mark the long form cannot hold, and keeps the line', async () => {
+    // A pie of `entity × period` slices entities against periods, which is a total the table never
+    // stated — refused with the reshape's own reason rather than drawn as the nearest neighbour.
     const advisor = vi.fn(async () => 'pie');
     const assisted = await assistedChartIR('population by year', WIDE, { advisor });
-    expect(advisor).not.toHaveBeenCalled();
     expect(assisted.ir.mark).toBe('line');
     expect(assisted.ir.encoding.series?.field).toBe('entity');
-    expect(assisted.decision).toMatchObject({ mark: 'line', source: 'product', veto: 'wide' });
+    expect(assisted.decision).toMatchObject({ mark: 'line', source: 'product', veto: 'not-admitted' });
   });
 
   it('does not ask about a table nothing can chart', async () => {
@@ -190,6 +205,13 @@ describe('admittedOptions', () => {
 
   it('offers one mark when the table holds one, which is why the second question is skipped', () => {
     expect(admittedOptions('total revenue', SINGLE).map((option) => option.name)).toEqual(['gauge']);
+  });
+
+  it('offers the three readings of a table read sideways, and no fourth', () => {
+    // Two categories and one measure: a line per entity, side-by-side bars, or the matrix. Every mark
+    // outside those three names a picture the reshape does not produce — a pie of `entity × period`
+    // would slice one against the other.
+    expect(admittedOptions('population by year', WIDE).map((option) => option.name)).toEqual(['bar', 'line', 'heatmap']);
   });
 
   it('offers nothing when nothing can be drawn, rather than inventing a list', () => {

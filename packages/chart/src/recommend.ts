@@ -798,27 +798,62 @@ export interface ChartIROptions extends RecommendOptions {
 const ref = (profile: FieldProfile): FieldRef => ({ field: profile.name, type: profile.type });
 
 /**
+ * The marks a table read sideways can be drawn as.
+ *
+ * Three, and each one is a reading of the same long form (`entity × period × value`): a line per
+ * entity, side-by-side bars per period, or a matrix of the two categories coloured by the value.
+ *
+ * This list used to be a single mark, and the comment that justified it said one line per entity is
+ * "the only reading the reshape produces". The corpus says otherwise, and it says it 53 times: of the
+ * 144 wide tables in `eval/text2vis`, **53 are labelled `Bar`** and 71 `Line`. The prediction was not
+ * a reading of the data, it was a reading of the reshape's *first* implementation, and a shape with
+ * two categories in it is what a grouped bar is for.
+ */
+const WIDE_MARKS: readonly RecommendableMark[] = ['line', 'bar', 'heatmap'];
+
+/**
  * A wide table as the chart it is: one line per entity along the periods the table is wide in.
  *
- * The mark is not a recommendation, it is the shape: the columns *are* a timeline, one line per
- * entity is the only reading that keeps the entities apart, and a bar chart of seven periods by two
- * entities would ask the reader to compare across a gap the table went to the trouble of closing.
- * No admission rule has to be asked, because there is no choice left to admit — which is also why
- * this path cannot decline a table it has already proved is chartable.
+ * The mark is not a recommendation, it is the shape — which is why it defaults to the line rather
+ * than being ranked: the columns *are* a timeline, and a line keeps the entities apart while stating
+ * the interval between periods. No admission rule has to be asked for that default, because there is
+ * no choice left to admit — which is also why this path cannot decline a table it has already proved
+ * is chartable.
+ *
+ * A caller that names a mark gets the mark, if the long form can hold it: the reshape produces two
+ * categories and one measure, so a grouped bar and a heatmap are both pictures of it. A mark it
+ * cannot hold is refused here rather than drawn as the nearest neighbour, for the reason
+ * `ChartIROptions.mark` gives — a pie of the long form would slice entities against periods, which is
+ * a total the table never stated.
  */
 function wideIR(question: string, melt: WideTable, limit: number, options: ChartIROptions): ChartIR {
+  const mark = options.mark ?? 'line';
+  if (!WIDE_MARKS.includes(mark)) {
+    throw new Nl2ChartsError(
+      'NL2C_E_NOT_SUPPORTED',
+      `this table is one row per ${melt.entity} written sideways across ${melt.period} columns, so its long form is ${melt.entity} × ${melt.period} × ${melt.value}; a ${mark} is not a picture of two categories and one measure`,
+    );
+  }
   const data = melt.rows.slice(0, limit).map((row) => ({ ...row }));
+  const encoding: Encoding =
+    mark === 'heatmap'
+      ? {
+          x: { field: melt.period, type: 'temporal' },
+          y: [{ field: melt.entity, type: 'nominal' }],
+          color: { field: melt.value, type: 'quantitative' },
+        }
+      : {
+          x: { field: melt.period, type: 'temporal' },
+          y: [{ field: melt.value, type: 'quantitative' }],
+          series: { field: melt.entity, type: 'nominal' },
+        };
   return {
     version: CONTRACT_VERSION,
-    mark: 'line',
-    encoding: {
-      x: { field: melt.period, type: 'temporal' },
-      y: [{ field: melt.value, type: 'quantitative' }],
-      series: { field: melt.entity, type: 'nominal' },
-    },
+    mark,
+    encoding,
     data,
     title: options.title ?? question,
-    alt: options.alt ?? `line chart of ${String(data.length)} row(s): ${question}`,
+    alt: options.alt ?? `${mark} chart of ${String(data.length)} row(s): ${question}`,
     ...(options.subtitle === undefined ? {} : { subtitle: options.subtitle }),
     ...(options.theme === undefined ? {} : { theme: options.theme }),
   };

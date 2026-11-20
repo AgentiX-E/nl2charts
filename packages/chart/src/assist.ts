@@ -24,9 +24,10 @@
  *    membership, because a name outside `RECOMMENDABLE_MARKS` is a chart this product cannot draw,
  *    and drawing a bar instead of a name nobody has is choosing for the model rather than reading it.
  * 2. **The advice was an answer the result set cannot hold.** Handled one layer up, in
- *    `assistedChartIR`: a wide table has exactly one reading, and a model asking for a pie of it is
- *    asking for a picture the reshape does not produce. That veto is recorded, not silent, because a
- *    fallback nobody counts reads as a model that agreed.
+ *    `assistedChartIR`: a wide table has three readings (a line per entity, side-by-side bars, or a
+ *    matrix of its two categories), and a model asking for a pie of it is asking for a total the
+ *    reshape never stated. That veto is recorded, not silent, because a fallback nobody counts reads
+ *    as a model that agreed.
  *
  * Neither refusal throws. A product that fails because an optional advisor failed is a product whose
  * availability is a function of somebody else's endpoint, and the rule table already answers every
@@ -183,12 +184,13 @@ export interface AssistedDecision {
   /**
    * Why the model's answer was not drawn, when it named a mark this result set cannot hold.
    *
-   * `wide` is the reshape: the table's columns are a timeline and one line per entity is the only
-   * picture it produces, so the advisor was never asked. `not-admitted` is the recommender refusing
-   * the mark the advisor named — the same admission that would have refused it had the table named it
-   * — *after* the second question was asked and did not answer it either.
+   * `not-admitted` is the recommender refusing the mark the advisor named — the same admission that
+   * would have refused it had the table named it — *after* the second question was asked and did not
+   * answer it either. It used to be a two-member union: `wide` said the reshape had one reading and
+   * the advisor was therefore never asked. The corpus priced that claim and it lost: see
+   * `WIDE_MARKS` in `recommend.ts`.
    */
-  readonly veto?: 'wide' | 'not-admitted';
+  readonly veto?: 'not-admitted';
   /**
    * The model's first answer was refused by this table, and its *second* answer was drawn.
    *
@@ -258,11 +260,14 @@ export interface AssistedChart {
  *    against, both computed by the same code that would have drawn the chart. Asking the recommender
  *    twice would let the two answers differ about a row neither of them changed.
  *
- * A wide table is not offered to the advisor at all: its columns *are* a timeline, one line per
- * entity is the only reading the reshape produces, and a bar of the long form would stack entities
- * the table went to the trouble of separating. Declining to ask is also 144 calls not spent — the
- * count `meltWide` reports on this corpus — which is the cost discipline the whole repository runs
- * on. The veto is recorded so a run that saved those calls cannot read as a model that agreed.
+ * **A wide table is asked about, and used to not be.** The reshape has three readings — a line per
+ * entity, side-by-side bars per period, a matrix of the two — and this function used to return before
+ * consulting anybody, on the stated ground that the line was the only one. The corpus refuted it:
+ * 53 of the 144 wide tables are labelled `Bar`, the model names `bar` on 33 of them and is right on
+ * 20, and drawing the line instead cost those 20 rows against the 6 it saved. So the advisor is asked
+ * on a wide table like on any other, `toChartIR` draws the mark it named when the reshape can hold it,
+ * and the 144 calls this used to save are now the price of the answer — one call per wide *table*,
+ * which is the cheapest call in the pipeline because it is the narrowest question.
  */
 export async function assistedChartIR(
   question: string,
@@ -281,11 +286,6 @@ export async function assistedChartIR(
   const product = productIr.mark as MarkName;
   const advisor = options.advisor;
   if (advisor === undefined) return { ir: productIr, decision: { mark: product, source: 'product', product } };
-  // The reshape has already happened inside `toChartIR`; a chart whose mark is `line` and whose data
-  // carries a `series` channel is that path's output, and no other mark is available on it.
-  if (productIr.encoding.series !== undefined) {
-    return { ir: productIr, decision: { mark: product, source: 'product', product, veto: 'wide' } };
-  }
   const decision = await assistedMark(question, product, advisor);
   if (decision.source === 'product') return { ir: productIr, decision };
   try {

@@ -16878,3 +16878,83 @@ Two disciplines came out of the round, and the second is the expensive one to le
    arbitration gate failed this dispatch on three lines — product 610 against a floor of 606, ceiling
    974 against 994 — and it was right to: the rule path cannot re-sample, so a moved number there is a
    changed product. Without that gate the ceiling would have fallen by 20 rows in a green run.
+
+## The reshape was a preference, not a property: shipped 793 → 807
+
+The previous section ended on a sentence that was wrong, and it was wrong in the way that costs the
+most — a claim about the data written as a fact about the code:
+
+> A wide table is not offered to the advisor at all: its columns *are* a timeline, one line per entity
+> is the only reading the reshape produces.
+
+"Only" was never measured. The reshape (`meltWide`) produces `entity × period × value` — two
+categories and one measure — and a shape with two categories in it is what a grouped bar is for. The
+corpus says so 53 times.
+
+### The evidence, taken before any code moved
+
+The 144 wide tables in Text2Vis, read row by row against their labels:
+
+| label | rows | what the product drew |
+|---|---:|---|
+| Line | 71 | a line — right |
+| Bar | 53 | a line — wrong |
+| Boxplot | 4 | a line — wrong |
+| Scatter | 3 | a line — wrong |
+| Heatmap | 1 | a line — wrong |
+| Pie, Area, Histogram | 12 | a line — wrong |
+
+The model, asked the same questions with the same eleven-mark list, answered `line` on 94 of them and
+`bar` on 33, and where it said `bar` it was right **20** times and wrong 6. So honouring it inside the
+reshape is worth 20 rows and costs 6 — which is the whole of this round's gain, and the reason the
+claim above is now a table rather than a sentence.
+
+### What shipped
+
+`wideIR` decides a mark instead of assuming one. The long form has exactly three readings — a line per
+entity, side-by-side bars per period, a matrix of the two categories — and anything else is refused
+with the shape's own reason rather than coerced into the nearest neighbour:
+
+```ts
+toChartIR('Population by year', wide).mark;                      // 'line'  — the shape's own reading
+toChartIR('Population by year', wide, { mark: 'bar' }).mark;     // 'bar'
+toChartIR('Population by year', wide, { mark: 'heatmap' }).mark; // 'heatmap'
+toChartIR('Population by year', wide, { mark: 'pie' });          // NL2C_E_NOT_SUPPORTED
+```
+
+`assistedChartIR` no longer returns before asking on this shape. The veto it used to record (`wide`)
+is gone from the type, because a reason no row can carry is a branch held open by a coverage number.
+The default path is untouched: with no advisor, a wide table is drawn exactly as before, byte for
+byte, and `pnpm bench:text2vis:profile` still reads 610.
+
+### The reading
+
+Same answers on disk, same 1,470 rows, `pnpm bench:text2vis:ship`, ¥0:
+
+| reading | before | after |
+|---|---:|---:|
+| `decided` | 863 (58.71%) | 863 (58.71%) |
+| `shipped` | 793 (53.95%) | **807 (54.90%)** |
+| rows the table answered | 186 | **144** |
+| `not-admitted` | 87 | 104 |
+| `wide` | 144 | **0** |
+| `changed` | 171 | **138** |
+| `unchartable` | 35 | 35 |
+
+The arithmetic a reader can check: 1,326 model answers + 144 table answers = 1,470, and the 17 rows
+that moved from `wide` to `not-admitted` are the wide tables whose model answer was a pie, a scatter or
+a boxplot — marks the long form cannot hold, now refused with a sentence instead of skipped.
+
+### The cost, stated where it is paid
+
+144 calls that used to be skipped are now asked — one per wide *table*, on the narrowest question in
+the pipeline (one word out of eleven). The alternative is not free either: it is drawing a picture the
+question did not ask for and reporting the model's answer as `wide`. A veto that saves a call and
+loses 20 rows is a veto this project does not keep.
+
+### The test that got worse on purpose
+
+`test/text2vis-ship-report.test.ts` has a fixture whose wide row is labelled `Line` and whose model
+answer is `bar`. Before, the chart drew the line and the row was a hit. Now it draws the bar and the
+row is a miss — five of six labels hit instead of six. That is the 6-in-144 half of the measurement
+above, kept as an assertion so the trade cannot be told as a pure gain.

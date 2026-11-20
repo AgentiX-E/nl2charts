@@ -16,7 +16,7 @@
  * | reading | what it is | what it should equal |
  * | --- | --- | --- |
  * | `decided` | `assistedMark` on every scored row | the policy's 861, row for row |
- * | `shipped` | `assistedChartIR`, which does not ask about a wide table | at most `decided` |
+ * | `shipped` | `assistedChartIR`, which draws only what the table can hold | at most `decided` |
  *
  * `decided === policy` is a hard identity: two implementations of one sentence, in two packages,
  * compared here on 1,470 rows. `shipped` is the honest product number and is allowed to sit below it,
@@ -45,7 +45,7 @@ import { parseResultSet, scoreAnswers, typedRows, type ProfileInput } from './pr
 import type { ChartFamily } from './rule.js';
 
 /** Why a row was answered by the table rather than by the model. */
-export type ShipReason = 'no-advice' | 'unavailable' | 'unlisted' | 'wide' | 'not-admitted' | 'unchartable';
+export type ShipReason = 'no-advice' | 'unavailable' | 'unlisted' | 'not-admitted' | 'unchartable';
 
 /** One row's decision, kept so the report can be audited rather than believed. */
 export interface ShipRow {
@@ -87,10 +87,10 @@ export interface ShipReport {
    * Rows whose chart differs from the decision.
    *
    * A veto is not a no-op: it replaces the model's mark with the table's, and the table's answer can be
-   * *more* often right than the model's was — the 144 wide tables are line charts, and a model that
-   * answered `bar` on them was wrong. So `shipped` may sit **above** `decided`, and the first version
-   * of this file asserted it could not. That assertion was wrong, not the run: the constraint is that
-   * every changed row was changed *to the table's answer*, which is what `shipReport` checks row by row
+   * *more* often right than the model's was — a table that states a distribution in rows is the case
+   * that made this visible. So `shipped` may sit **above** `decided`, and the first version of this
+   * file asserted it could not. That assertion was wrong, not the run: the constraint is that every
+   * changed row was changed *to the table's answer*, which is what `shipReport` checks row by row
    * while both answers are in hand.
    */
   readonly changed: number;
@@ -106,11 +106,11 @@ export interface ShipReport {
 }
 
 /** The reasons a row can fall back, in the order a reader wants them. */
-const REASONS: readonly ShipReason[] = ['no-advice', 'unavailable', 'unlisted', 'wide', 'not-admitted', 'unchartable'];
+const REASONS: readonly ShipReason[] = ['no-advice', 'unavailable', 'unlisted', 'not-admitted', 'unchartable'];
 
-/** All six at zero, so a missing reason reads as a zero rather than as a field nobody set. */
+/** All five at zero, so a missing reason reads as a zero rather than as a field nobody set. */
 function emptyReasons(): Record<ShipReason, number> {
-  return { 'no-advice': 0, unavailable: 0, unlisted: 0, wide: 0, 'not-admitted': 0, unchartable: 0 };
+  return { 'no-advice': 0, unavailable: 0, unlisted: 0, 'not-admitted': 0, unchartable: 0 };
 }
 
 /** The rows one pass answered, scored by the same scorer every other reading uses. */
@@ -218,10 +218,10 @@ export function routedBy(
  *
  * Separate from `artifactAdvisor` because the two passes consume the answers differently. The deciding
  * pass asks once per row in order, so a cursor is enough and a drift is visible immediately. The chart
- * pass does not ask about a wide table at all — 144 of them on this corpus — so a cursor would be
- * wrong by exactly the number of skips. Looking the row up by its question is the only reading that
- * survives a skip, and the miss branch is a refusal rather than a silent `undefined`: an answer that
- * cannot be placed is a population that changed under the run.
+ * pass asks again on the rows its *first* answer could not draw — a second question, asked over a
+ * shorter list — so its call sequence is not the row sequence. Looking the row up by its question is
+ * the only reading that survives a skip, and the miss branch is a refusal rather than a silent
+ * `undefined`: an answer that cannot be placed is a population that changed under the run.
  */
 export function chartAdvisor(
   rows: readonly ProfileInput[],
@@ -266,8 +266,8 @@ export interface RepairAsk {
  * one of them changes.
  *
  * `onRow` exists for the same reason: an advisor is called about a question, not about a row, and a
- * caller that needs to know which row is being drawn cannot recover it afterwards — a wide table is
- * skipped, so the advisor's own call count is not the row index.
+ * caller that needs to know which row is being drawn cannot recover it afterwards — a repair is a
+ * second call on a row that already had one, so the advisor's own call count is not the row index.
  */
 async function drawAll(
   rows: readonly ProfileInput[],
@@ -422,9 +422,8 @@ export async function shipReport(
   }
 
   // The second pass is the chart a caller receives. Its advisor is the same answers, read the same
-  // way; a wide table never reaches it, which is the 144 calls this pass does not spend. When a repair
-  // file is given, the same pass also asks the refused rows' second question — and refuses to publish
-  // if one of those questions has no answer on disk.
+  // way. When a repair file is given, the same pass also asks the refused rows' second question — and
+  // refuses to publish if one of those questions has no answer on disk.
   const chartAnswers = chartAdvisor(rows, choices);
   const missing: string[] = [];
   const advisor = options.repair === undefined ? chartAnswers : repairAdvisor(chartAnswers, options.repair, missing);
@@ -500,7 +499,7 @@ export function assertShip(report: ShipReport): void {
   // A chart can only change a row it vetoed, and it can only change it to the table's answer or to the
   // model's second one — `shipReport` checks that row by row. What is left to check here is the
   // arithmetic: the number of changed rows cannot exceed the rows a veto or a repair explains.
-  const vetoes = report.shipped.reasons.wide + report.shipped.reasons['not-admitted'] + report.shipped.reasons.unchartable;
+  const vetoes = report.shipped.reasons['not-admitted'] + report.shipped.reasons.unchartable;
   if (report.changed > vetoes + report.shipped.repaired) {
     throw new Error(
       `text2vis ship: ${String(report.changed)} rows differ from the decision and only ${String(vetoes)} were vetoed and ${String(report.shipped.repaired)} repaired`,

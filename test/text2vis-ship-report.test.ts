@@ -71,7 +71,7 @@ function counts(over: Partial<ShipCounts> = {}): ShipCounts {
     fromModel: 1,
     repaired: 0,
     fromProduct: 1,
-    reasons: { 'no-advice': 1, unavailable: 0, unlisted: 0, wide: 0, 'not-admitted': 0, unchartable: 0 },
+    reasons: { 'no-advice': 1, unavailable: 0, unlisted: 0, 'not-admitted': 0, unchartable: 0 },
     ...over,
   };
 }
@@ -136,12 +136,14 @@ describe('the shipped report', () => {
     assertShip(shipped);
     expect(shipped.population.scored).toBe(6);
     expect(shipped.decided.fromModel).toBe(5);
-    // The wide table is never asked about and the one-measure table cannot hold the bar, so the chart
-    // pass decides two fewer rows than the decision pass: a veto the policy never sees, which is why
-    // two readings come out of one pass.
-    expect(shipped.shipped.fromModel).toBe(3);
-    expect(shipped.shipped.reasons.wide).toBe(1);
+    // One row is vetoed: the one-measure table cannot hold the bar. The wide table is no longer skipped
+    // — the reshape holds a bar, so the model's answer is drawn — and this fixture is one of the rows
+    // that trade *loses*: it is labelled `Line` and the model answered `bar`. Five of the six labels are
+    // hit rather than six, which is the 6-in-144 half of the corpus's 20-gained / 6-lost measurement
+    // stated where a reader can see it.
+    expect(shipped.shipped.fromModel).toBe(4);
     expect(shipped.shipped.reasons['not-admitted']).toBe(1);
+    expect(shipped.shipped.hit).toBe(5);
     expect(shipped.divergence).toEqual([]);
   });
 
@@ -198,7 +200,7 @@ describe('the arithmetic a reader could not reproduce', () => {
 
   it('refuses a reason total that is not the table s own count', () => {
     expect(() =>
-      assertShip(report({ shipped: counts({ fromModel: 0, fromProduct: 2, reasons: { 'no-advice': 1, unavailable: 0, unlisted: 0, wide: 0, 'not-admitted': 0, unchartable: 0 } }) })),
+      assertShip(report({ shipped: counts({ fromModel: 0, fromProduct: 2, reasons: { 'no-advice': 1, unavailable: 0, unlisted: 0, 'not-admitted': 0, unchartable: 0 } }) })),
     ).toThrow(/counted 1 reasons over 2 table rows/);
   });
 
@@ -210,7 +212,7 @@ describe('the arithmetic a reader could not reproduce', () => {
             hit: 3,
             fromModel: 0,
             fromProduct: 2,
-            reasons: { 'no-advice': 2, unavailable: 0, unlisted: 0, wide: 0, 'not-admitted': 0, unchartable: 0 },
+            reasons: { 'no-advice': 2, unavailable: 0, unlisted: 0, 'not-admitted': 0, unchartable: 0 },
           }),
         }),
       ),
@@ -226,7 +228,7 @@ describe('the arithmetic a reader could not reproduce', () => {
     expect(() =>
       assertShip(
         report({
-          shipped: counts({ fromModel: 0, fromProduct: 2, reasons: { 'no-advice': 2, unavailable: 0, unlisted: 0, wide: 0, 'not-admitted': 0, unchartable: 0 } }),
+          shipped: counts({ fromModel: 0, fromProduct: 2, reasons: { 'no-advice': 2, unavailable: 0, unlisted: 0, 'not-admitted': 0, unchartable: 0 } }),
           changed: 2,
         }),
       ),
@@ -259,8 +261,8 @@ describe('the advisor over an artifact', () => {
 
 describe('the advisor the chart pass uses', () => {
   it('finds the answer by question, so a skipped row does not shift the rest', async () => {
-    // The chart pass never asks about a wide table, so a cursor would be off by the number of skips.
-    // Looking the row up by its question is the only reading that survives that.
+    // The chart pass asks again on the rows its first answer could not draw, so its call sequence is
+    // not the row sequence. Looking the row up by its question is the only reading that survives that.
     const ask = chartAdvisor(ROWS, CHOICES);
     expect(await ask((ROWS[2] as ProfileInput).prompt)).toBe('pie');
     expect(await ask((ROWS[5] as ProfileInput).prompt)).toBe('bar');
@@ -600,7 +602,8 @@ describe('the second answers, replayed', () => {
     const { refused, asks } = await repairAsks(ROWS, REFUSED);
     // Three rows are refused: two name `boxplot` on a table that holds four marks, and one names `bar`
     // on a gauge table that holds only `gauge`. The first two are asked; the third is not, because a
-    // question with one possible answer is not a question. The wide table is never offered at all.
+    // question with one possible answer is not a question. The wide table is not among them: its long
+    // form holds a bar, so the model's answer is drawn rather than refused.
     expect(refused).toBe(3);
     expect(asks.map((ask) => ask.row)).toEqual([0, 1]);
     for (const ask of asks) expect(ask.options).toHaveLength(4);
