@@ -61,6 +61,14 @@
     "request": {
      "promptVersion": 1
     }
+   },
+   "deepseek-reasoner|label": {
+    "scored": 1470,
+    "exact": 947,
+    "note": "Established by run 44732340778, and the only arm of the four that had no floor: the earlier attempt answered one row, so the reading existed without a number worth recording. On the same 1,470 rows and the same 12-option list, the thinking arm reads **947 exact (64.42%)** against the chat arm's 886 (60.27%) — +61 rows, +4.15pp, and the first strong-against-weak comparison on the scale a Text2Vis paper reports. 68 of its 947 hits are families no mark leads with, so the number is a property of the *label* task rather than of this product's reach. Cost: 1,470 calls, 366,526 prompt and 365,323 completion tokens, ¥3.58, no cache hits — the label scale for this arm had never been bought.",
+    "request": {
+     "promptVersion": 1
+    }
    }
   },
   "arbitration": {
@@ -152,19 +160,20 @@
     "reasoner-holds": 876
    },
    "shipped": {
-    "deepseek-chat": 807,
-    "deepseek-reasoner": 819,
-    "cue-led": 829
+    "deepseek-chat": 810,
+    "deepseek-reasoner": 821,
+    "cue-led": 831
    },
-   "note": "The six rules `arbitrate.ts` already prices, repriced between two arms on the same 1,470 rows, at Y0: the answers of run `44684484285` are on disk and this is a re-analysis of them. The two arms agree on 1,234 rows (788 of them right) and disagree on 236, of which the chat arm wins 73 and the reasoning one 87. `cue-led` reads **891**, which is +16 over the better single arm and +30 over the chat arm; the pairing against the chat arm is 74 gained / 44 lost (p = 0.0073), against the reasoning arm 29 / 13 (p = 0.0195, and 0.117 with a six-rule Bonferroni), and on the *shipped* charts 61 gained / 39 lost (p = 0.0352, 0.211 corrected). So the direction is the rule and the size is not an established effect: the vetoes redistribute far more rows than the rule changes. What the shipped column says is nonetheless the number a caller would receive -- 807 (chat), 819 (reasoner), **829** (routed) -- and 829 is 56.39% of the population against 54.90%. A one-call alternative was priced and is worse: the product against the reasoning arm, through the same rules, reads 766 (`cue-led`) against the reasoning arm's own 875, because the cue rules only pay when the two answers are of comparable quality. Run `44696562624` reproduced it in a clean environment on a commit that added the command: cue-led 891, shipped 828 / 818 / 807 (829 / 819 / 807 after the parser repairs of round 179), reasoner 875, chat 861 — and the two arms were replayed from the store for Y0 with all 2,940 answers reported as `unmetered`, which is the meter fix saying exactly what it knows: those entries were written before the store kept tokens, so the reading's own cost is unknown rather than free.",
+   "note": "The six rules `arbitrate.ts` already prices, repriced between two arms on the same 1,470 rows, at Y0: the answers of run `44684484285` are on disk and this is a re-analysis of them. The two arms agree on 1,234 rows (788 of them right) and disagree on 236, of which the chat arm wins 73 and the reasoning one 87. `cue-led` reads **891**, which is +16 over the better single arm and +30 over the chat arm; the pairing against the chat arm is 74 gained / 44 lost (p = 0.0073), against the reasoning arm 29 / 13 (p = 0.0195, and 0.117 with a six-rule Bonferroni), and on the *shipped* charts 61 gained / 39 lost (p = 0.0352, 0.211 corrected). So the direction is the rule and the size is not an established effect: the vetoes redistribute far more rows than the rule changes. What the shipped column says is nonetheless the number a caller would receive -- 807 (chat), 819 (reasoner), **829** (routed) -- and 829 is 56.39% of the population against 54.90%. A one-call alternative was priced and is worse: the product against the reasoning arm, through the same rules, reads 766 (`cue-led`) against the reasoning arm's own 875, because the cue rules only pay when the two answers are of comparable quality. Run `44696562624` reproduced it in a clean environment on a commit that added the command: cue-led 891, shipped 828 / 818 / 807 (829 / 819 / 807 after the parser repairs of round 179), reasoner 875, chat 861 — and the two arms were replayed from the store for Y0 with all 2,940 answers reported as `unmetered`, which is the meter fix saying exactly what it knows: those entries were written before the store kept tokens, so the reading's own cost is unknown rather than free. **v9.51: the shipped column moves 3, 2 and 2 rows, and one pairing crosses its threshold.** The candlestick's axis stopped being a calendar and three rows stopped being refused, which is three charts for the chat arm and two for each router that spends a call only where it must: 810 / 821 / 831 against 807 / 819 / 829. `cue-led` holds at 891 on the decisions, so the *rule* is unmoved and what moved is what a caller receives under it. The pairing against the chat arm reads 61 gained and 40 lost at p = 0.0460 (was 61 / 39, p = 0.0352) — still under 0.05 and still over it after a six-rule Bonferroni, so the direction holds and the size was never the claim. The three rows are the whole of the movement, and they are the same three the refusal bill priced at 'at most 3'.",
    "runs": [
     "44684484285",
-    "44696562624"
+    "44696562624",
+    "44732340778"
    ]
   },
   "prior": {
    "recordedAt": "2026-11-20",
-   "run": "44696562624",
+   "run": "44732340778",
    "instrument": "eval/text2vis/prior.ts",
    "scored": 1470,
    "rate": {
@@ -172,17 +181,17 @@
     "ratio": 7.72
    },
    "readings": {
-    "chat": 807,
-    "reasoner": 819,
-    "cue-gate": 816,
-    "table-agrees": 814,
-    "table-refused": 807
+    "chat": 810,
+    "reasoner": 821,
+    "cue-gate": 818,
+    "table-agrees": 816,
+    "table-refused": 810
    },
    "dual": {
     "decided": 891,
-    "shipped": 829
+    "shipped": 831
    },
-   "note": "Five priors and the two-call router, priced in the same unit on the same 1,470 rows, at Y0: the answers of run `44696562624` are on disk and this is a re-analysis of them. A prior decides which arm to call from what is free before the call -- the cue table's first mark, whether it fired at all, and the recommender's own mark -- so unlike `llm.duel` it prices a router a caller can actually deploy at one call per row. `cue-gate` is the one that reads best: spend the thinking call only on the 305 questions no cue reads, which ships **815** for 1,165 plain calls and 305 thinking ones -- 8 of the 21 charts the two-call router buys, for 27% of its bill. `table-agrees` ships 816 at 4.27x the plain price, `reasoner` ships 818 at 7.72x, and `table-refused` buys its 35 thinking calls and ships **nothing**: the recommender's refusal is not a signal that deliberation helps, and that prior is dominated. The number that decides is the marginal one -- yuan per *additional* chart over the default: cue-gate **Y0.109**, table-agrees Y0.228, the two-call router **Y0.230**, reasoner Y0.383 -- so the router that reads both answers buys its 21 charts at more than twice the unit price of the one-call prior's 8, and that ordering is r-free: cue-gate's marginal is 305(r-1) yuan / 8 against the router's 1470r yuan / 21, which is lower for every r >= 0. The ratio r itself is a parameter rather than a measurement, because the 2,940 answers on disk were written before the store kept meters; the default 7.72 is the one live reasoning call this project metered (Y0.00329 against a plain call's measured Y0.000426, the receipt being Y1.2521 for 2,940 calls). Every conclusion is stated as the ratio at which it would stop holding: cue-gate is the cheaper chart than the default only below x1.048, table-agrees below x1.023, reasoner below x1.014, and the two-call router below **x0.026** -- so at any price a provider has ever charged, buying both answers is the most expensive way to obtain a chart this corpus can measure. A thinking call is one prompt of the same length with a longer completion, so r is bounded below by 1: no reading here is sensitive to a ratio smaller than the one that would make deliberation free. **Re-read in round 179, at Y0, after two parser repairs** — `nan` read as a printed absence rather than as text, and a column every cell of which is an absence dropped from the profile — which moved the product’s own reading from 610 to 614 top-1 and 713 to 718 shortlist and these five routers by +1, +1, -2, 0 and +1: reasoner 819, cue-gate 816, table-agrees **814**, table-refused 807, both 829. One line went down, and it is stated rather than smoothed: `table-agrees` spends its thinking call where the cue lead and the recommender disagree, so a recommender that answers differently on nine rows asks for deliberation in two places it used to keep to itself. The ordering the table exists for is unmoved: `cue-gate` still buys its charts at under half the two-call router’s unit price, at every ratio."
+   "note": "Five priors and the two-call router, priced in the same unit on the same 1,470 rows, at Y0: the answers of run `44696562624` are on disk and this is a re-analysis of them. A prior decides which arm to call from what is free before the call -- the cue table's first mark, whether it fired at all, and the recommender's own mark -- so unlike `llm.duel` it prices a router a caller can actually deploy at one call per row. `cue-gate` is the one that reads best: spend the thinking call only on the 305 questions no cue reads, which ships **815** for 1,165 plain calls and 305 thinking ones -- 8 of the 21 charts the two-call router buys, for 27% of its bill. `table-agrees` ships 816 at 4.27x the plain price, `reasoner` ships 818 at 7.72x, and `table-refused` buys its 35 thinking calls and ships **nothing**: the recommender's refusal is not a signal that deliberation helps, and that prior is dominated. The number that decides is the marginal one -- yuan per *additional* chart over the default: cue-gate **Y0.109**, table-agrees Y0.228, the two-call router **Y0.230**, reasoner Y0.383 -- so the router that reads both answers buys its 21 charts at more than twice the unit price of the one-call prior's 8, and that ordering is r-free: cue-gate's marginal is 305(r-1) yuan / 8 against the router's 1470r yuan / 21, which is lower for every r >= 0. The ratio r itself is a parameter rather than a measurement, because the 2,940 answers on disk were written before the store kept meters; the default 7.72 is the one live reasoning call this project metered (Y0.00329 against a plain call's measured Y0.000426, the receipt being Y1.2521 for 2,940 calls). Every conclusion is stated as the ratio at which it would stop holding: cue-gate is the cheaper chart than the default only below x1.048, table-agrees below x1.023, reasoner below x1.014, and the two-call router below **x0.026** -- so at any price a provider has ever charged, buying both answers is the most expensive way to obtain a chart this corpus can measure. A thinking call is one prompt of the same length with a longer completion, so r is bounded below by 1: no reading here is sensitive to a ratio smaller than the one that would make deliberation free. **Re-read in round 179, at Y0, after two parser repairs** — `nan` read as a printed absence rather than as text, and a column every cell of which is an absence dropped from the profile — which moved the product’s own reading from 610 to 614 top-1 and 713 to 718 shortlist and these five routers by +1, +1, -2, 0 and +1: reasoner 819, cue-gate 816, table-agrees **814**, table-refused 807, both 829. One line went down, and it is stated rather than smoothed: `table-agrees` spends its thinking call where the cue lead and the recommender disagree, so a recommender that answers differently on nine rows asks for deliberation in two places it used to keep to itself. The ordering the table exists for is unmoved: `cue-gate` still buys its charts at under half the two-call router’s unit price, at every ratio. **Re-read in round 180 on run `44732340778`, at Y0, after the candlestick stopped needing a calendar**: chat 807 -> 810, reasoner 819 -> 821, cue-gate 816 -> 818, table-agrees 814 -> 816, table-refused 807 -> 810, both 829 -> 831. Every router gains, and the reason is the same three rows in each: the candlestick now answers a table whose periods are spelled `Day 1 … Day 7`, which is three charts for the default arm and two for each of the routers — the third row is one a router was already getting right by another route, so a router that adds a rule in front of a better arm gains less than the arm itself. The ordering is unmoved and one marginal moved a lot: `table-agrees` now buys 6 charts instead of 7 with the same thinking calls, so its price per *additional* chart rises Y0.228 -> Y0.342 while `cue-gate` holds at Y0.109 with 8. The claim the table exists for survives untouched — the one-call prior is still the cheaper chart by a factor of three, at every ratio."
   }
  }
 }
