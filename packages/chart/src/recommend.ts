@@ -939,7 +939,13 @@ export function histogramReading(
   columns?: readonly string[],
   cues?: readonly CueRule[],
 ): HistogramReading | undefined {
-  if (!readCues(question, cues).some((cue) => cue.kind === 'histogram')) return undefined;
+  const asked = readCues(question, cues);
+  // Gated on the word, and the version of this gate that also read `distribution` was measured and
+  // refused. On the corpus's 1,470 scored rows it buys 10 histogram rows and loses 26 — 13 bars and
+  // 12 pies the product already answered correctly — because this reading returns before the share
+  // reading and before every other one. `test/histogram.test.ts` pins the refusal with those numbers,
+  // so the next round that proposes the widening meets the measurement instead of the argument.
+  if (!asked.some((cue) => cue.kind === 'histogram')) return undefined;
   const melt = meltWide(rows, columns);
   const pooled = melt === undefined ? rows : melt.rows;
   const measures = melt === undefined ? pooledColumns(profileRows(rows, columns)) : [melt.value];

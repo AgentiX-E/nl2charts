@@ -1060,16 +1060,19 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
     // precisely the rows this round repaired.
     const typed = typedRows(set);
     const wide = meltWide(typed, set.columns);
-    // The two readings the product takes without ranking: a melt, and the pooled bins a histogram
-    // question is answered with. The row's own `fixedLead` is read off the *shipped* table, because
-    // the counterfactual and the calendar ablation below are about the product: on a row the product
-    // answered without ranking, there is no ordering for another ordering to beat.
+    // The two readings the product takes without ranking, in the order the product takes them: bins
+    // first, then a melt. This block had the order the other way round, and the identity below caught
+    // it — three rows are both a histogram question and a table wide in time, `toChartIR` bins them,
+    // and the sweep priced them as lines, so the control claimed 661 hits against the census's 664.
+    // The row's own `fixedLead` is read off the *shipped* table, because the counterfactual and the
+    // calendar ablation below are about the product: on a row the product answered without ranking,
+    // there is no ordering for another ordering to beat.
     const fixedLead =
-      wide !== undefined || histogramReading(row.prompt, typed, set.columns) !== undefined
-        ? wide !== undefined
+      histogramReading(row.prompt, typed, set.columns) !== undefined
+        ? familiesOfMark('bar', 'histogram')
+        : wide !== undefined
           ? familiesOfMark('line')
-          : familiesOfMark('bar', 'histogram')
-        : undefined;
+          : undefined;
     // Every candidate table, on the product path, against the same rows. The profiles are computed
     // once per row and handed to each variant, so what differs between the numbers is the cue table
     // and nothing else — a second `profilesOf` per variant would make the readings differ by the
@@ -1098,12 +1101,14 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
       const top = choice.recommendations[0];
       // A candidate's answer is priced with the candidate's own cue table — including the reading,
       // which is gated on a cue: the `no-histogram` ablation has to lose this row, or the sweep would
-      // credit every table with a widening only one of them carries.
+      // credit every table with a widening only one of them carries. The gate is asked per candidate
+      // and *before* the melt, which is the product's order: a row that is both a histogram question
+      // and a table wide in time is binned, whichever table answered it.
       const lead =
-        wide !== undefined
-          ? fixedLead
-          : histogramReading(row.prompt, typed, set.columns, candidate.cues) !== undefined
-            ? familiesOfMark('bar', 'histogram')
+        histogramReading(row.prompt, typed, set.columns, candidate.cues) !== undefined
+          ? familiesOfMark('bar', 'histogram')
+          : wide !== undefined
+            ? familiesOfMark('line')
             : top === undefined
               ? undefined
               : familiesOfMark(top.mark, familyCue(top.cues));

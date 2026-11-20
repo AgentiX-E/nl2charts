@@ -162,6 +162,30 @@ describe('histogramReading', () => {
     const clash = rows({ bin: ['a', 'b'], count: [1, 2] });
     expect(histogramReading(HISTOGRAM, clash)?.rows).toHaveLength(2);
   });
+
+  /**
+   * The widening this reading does **not** do, pinned with the price that refused it.
+   *
+   * 40 of the corpus's 90 histogram rows are written in the word `distribution` rather than
+   * `histogram`, and the obvious next move is to infer the picture from that word — gated on the
+   * table holding exactly one measure, which looks like the discriminator (box plots live in tables
+   * with two). Measured with `bench:text2vis:profile` on all 1,470 scored rows, it is a regression:
+   * **+10 top-1, −26** — 13 bars and 12 pies the product already answered correctly, because this
+   * reading returns before the share reading and before every other one, and a question about the
+   * distribution of percentages is a pie to the corpus.
+   *
+   * The instrument that said otherwise was mine: it counted `family in families`, which is the
+   * *shortlist* rule, while top-1 reads `families[0]`. The lesson is the one this repository keeps
+   * relearning — a widening has to be priced on the reading it ships, not on the one it can claim.
+   */
+  it('does not infer a histogram from the word distribution, even over a one-measure table', () => {
+    const inferred = 'Analyze the distribution of delivery times and identify any outliers';
+    expect(histogramReading(inferred, labelled)).toBeUndefined();
+    // And the answer it keeps is the box plot the distribution cue already gives, not a binned bar.
+    expect(toChartIR(inferred, labelled).mark).toBe('boxplot');
+    // The word itself still needs no second witness: the same table, asked in `histogram`, is pooled.
+    expect(pooled(histogramReading(HISTOGRAM, labelled))).toBe(5);
+  });
 });
 
 describe('toChartIR, on a question that asked for a histogram', () => {

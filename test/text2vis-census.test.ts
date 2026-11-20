@@ -363,6 +363,23 @@ describe('what became of one question', () => {
     });
   });
 
+  it('bins a table wide in time that was asked for a histogram, because the bins are taken first', () => {
+    // The product's order, pinned where the sweep had it backwards. Three corpus rows are both a
+    // histogram question and a table wide in time: `toChartIR` pools and bins them, and the sweep
+    // asked the melt first and priced them as lines, so the control claimed 661 hits against the
+    // census's 664. The identity that compares the two is what found it; this is the row it stands on.
+    const WIDE = table('Country, 2019, 2020, 2021', ['France, 10, 12, 14', 'Spain, 9, 11, 13']);
+    const ask = 'Plot a histogram of all the values and say whether the distribution is skewed';
+    // A hit, and only the bins path can produce it: a melt-first reading of this row is a line, and a
+    // line is neither the label nor the picture the question asked for.
+    expect(classify(input(ask, 'Histogram', WIDE))).toEqual({ expected: 'histogram', outcome: 'hit' });
+    const report = censusOf([input(ask, 'Histogram', WIDE)]);
+    expect(report.outcomes.hit).toBe(1);
+    // One number, two code paths: the control must reproduce the classifier's count on this row too,
+    // and it did not while the sweep asked the melt first.
+    expect(report.product[0]?.hit).toBe(report.outcomes.hit);
+  });
+
   it('keeps the profile reconciliation exact on a population that contains a reshape', () => {
     // The three outcomes above are the reason the identity is asserted on a mixed population and not
     // on a ranking-only one: a reshape is invisible to `scoreProfile`'s buckets except through the

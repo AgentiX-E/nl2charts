@@ -49,6 +49,31 @@ A `NL2C_E_LLM_REJECTED` carries the endpoint's own sentence in
 `llm refused the request with 400: Unsupported value: 'temperature' does not
 support 0 with this model` rather than `llm returned 400`.
 
+### Retries, and why they are spread
+
+A 429 or a 5xx is retried inside the provider, so a batch job does not report a
+busy endpoint as a low accuracy. The default is **no retry** (`retries: 1`):
+turn it on where a transient failure would otherwise cost you a case.
+
+```ts
+const provider = createHttpProvider({
+  baseUrl: '/api/llm',
+  model: 'your-model',
+  retries: 3,          // attempts for a 429 or a 5xx; 1 means no retry
+  retryDelayMs: 500,   // base for the exponential backoff
+  retryJitter: 0.5,    // default: each wait is drawn from [0.5d, d]
+});
+```
+
+The spread matters more than the backoff when you run several calls at once. A
+rate limit is a fact about the endpoint, so every caller in flight meets it in
+the same instant — and without a spread they also *retry* in the same instant,
+at the same doubled delay, and are refused by the limit that refused the first
+attempt. Six calls at concurrency six then read as "the provider is down" when
+the provider is only busy. `retryJitter: 0` restores the exact
+`d, 2d, 4d…` timing; a `Retry-After` header is never spread, because there the
+endpoint has stated its own window.
+
 ## Running on a model we did not benchmark
 
 Every reading in the benchmark table was taken on one backbone. If you point

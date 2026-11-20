@@ -7,6 +7,35 @@ cannot be argued with.
 ## Unreleased
 
 ### Fixed
+- **A histogram question over a table that is also wide in time was priced as a line by the census
+  sweep, and the identity that compares the two counts said so.** Three of the 1,470 scored rows are
+  both a histogram question and a wide table: `toChartIR` bins them before the melt, the sweep asked
+  the melt first, and the control candidate therefore claimed **661** hits against the classifier's
+  **664**. The identity had been reading 664 against the classifier since the histogram shipped and
+  nothing else in the repository reads both numbers, so every ablation delta was off by up to three —
+  the size of noise, which is how a broken instrument survives. Both `lead` and `fixedLead` now ask
+  the bins before the melt, and a census test pins the row the identity stood on.
+- **Transport retries were in lockstep, which is the one thing a rate limit punishes.** The wait was
+  computed from the attempt number alone, so six calls refused in the same instant waited the same
+  500 ms and arrived together, and the second attempt met the limit the first one did — a batch job
+  reads that as "the provider is down" when the provider is only busy. `retryJitter` (0.5 by default)
+  draws each wait from `[0.5d, d]`, so a retry never arrives earlier than the backoff promised, and
+  the draw comes from an injected source so tests state the delay they assert. `Retry-After` is not
+  spread: there the endpoint has stated its own window.
+
+### Changed
+- **An inferred histogram was measured and refused, and the refusal is now a test.** Reading
+  `distribution` as "draw this distribution", gated on the table holding exactly one measure, priced
+  at **+31 top-1** from an offline probe and at **−16** from the shipped instrument: +10 histogram
+  rows against −13 bars whose family order became `['histogram','bar']` and −12 pies the bins reading
+  pre-empts. The probe counted `family in families` — the shortlist rule — while top-1 reads
+  `families[0]`, and it assumed a reading that returns first does not outrank the share reading.
+  The gate stays on the word, and `test/histogram.test.ts` carries the arithmetic that refuses it.
+- **`eval/bill.ts` reaches its 95% branch floor.** An armless BIRD case, a line carrying reasoning
+  and cached tokens, a bill with no rows to name, and the `--json` output: 86.2% → 95.8%, and the
+  eval ledger now reads 109 of 109 files at or above 95% on all four dimensions.
+
+### Added
 - **The push channel built twin commits, and the branch on the remote held content without
   history.** A commit's name is the hash of its tree, its parents, its author line and its exact
   message, and the channel sent `parents: [<remote head>]` when a local commit's parent is the

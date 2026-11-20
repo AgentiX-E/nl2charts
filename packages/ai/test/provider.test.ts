@@ -277,8 +277,44 @@ describe('retrying a rate-limited call', () => {
   it('backs off exponentially between attempts', async () => {
     delays.length = 0;
     const { fetchImpl } = scripted([429, 503, 200]);
-    const provider = createHttpProvider({ baseUrl: 'https://example.test/v1', model: 'm', fetchImpl, retries: 3, retryDelayMs: 100, sleep });
+    // The spread is drawn last, so a fixed 1 divides the delay by two exactly and leaves the doubling
+    // as the only thing left to read.
+    const provider = createHttpProvider({ baseUrl: 'https://example.test/v1', model: 'm', fetchImpl, retries: 3, retryDelayMs: 100, sleep, random: () => 1 });
     await provider.complete({ messages: [{ role: 'user', content: 'q' }] });
+    expect(delays).toEqual([50, 100]);
+  });
+
+  it('spreads the wait across callers, so a batch does not retry in lockstep', async () => {
+    // The defect this exists for: six calls refused by one limit in the same instant, all waiting the
+    // same 100 ms, all refused again 100 ms later. Two callers drawing opposite ends of the spread
+    // must not ask for the same wait.
+    const waits = async (draw: () => number): Promise<number[]> => {
+      const seen: number[] = [];
+      const { fetchImpl } = scripted([429, 200]);
+      const provider = createHttpProvider({
+        baseUrl: 'https://example.test/v1',
+        model: 'm',
+        fetchImpl,
+        retries: 2,
+        retryDelayMs: 100,
+        sleep: async (ms) => {
+          seen.push(ms);
+        },
+        random: draw,
+      });
+      await provider.complete({ messages: [{ role: 'user', content: 'q' }] });
+      return seen;
+    };
+    expect(await waits(() => 0)).toEqual([100]);
+    expect(await waits(() => 1)).toEqual([50]);
+  });
+
+  it('keeps the wait inside the backoff it promised, and inside a zero-jitter budget exactly', async () => {
+    delays.length = 0;
+    const { fetchImpl } = scripted([429, 429, 200]);
+    const provider = createHttpProvider({ baseUrl: 'https://example.test/v1', model: 'm', fetchImpl, retries: 3, retryDelayMs: 100, sleep, retryJitter: 0 });
+    await provider.complete({ messages: [{ role: 'user', content: 'q' }] });
+    // No spread asked for is no spread given: a deployment that wants the old timing gets it.
     expect(delays).toEqual([100, 200]);
   });
 
@@ -343,6 +379,9 @@ describe('the edges of a retried call', () => {
       fetchImpl,
       retries: 2,
       retryDelayMs: 25,
+      // The subject here is the fallback from a header nobody can parse, so the spread is turned off:
+      // what this asserts is the delay the backoff computed, not the share of it a caller gives up.
+      retryJitter: 0,
       sleep: async (ms) => {
         delays.push(ms);
       },

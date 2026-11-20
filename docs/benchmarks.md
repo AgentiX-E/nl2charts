@@ -17606,3 +17606,141 @@ answered with a word the vocabulary already had.
 | `check-text2vis-baseline --ship` | `decided` 891, `shipped` 843, 130 changed against 136 table answers |
 | `pnpm gate:all` | EXIT 0 |
 | cost | **¥0** |
+
+## The widening that looked free cost sixteen rows, and the instrument was mine
+
+The last round closed with 50 of the corpus's 90 histogram rows recovered and 40 still unreachable.
+All 40 are written in the word `distribution` rather than `histogram`, and the obvious next move is to
+read that word as the same instruction. It is not obvious, but it looked *measurable*: an offline probe
+priced the widening at **+31 top-1** on 1,470 scored rows, and the price it named — 7 pies — looked like
+change.
+
+The shipped instrument said otherwise.
+
+| reading | before | word alone | gated on one measure |
+|---|---:|---:|---:|
+| `top1` | 664 | — | **648** |
+| `shortlist` | 744 | — | 778 |
+| `declined` | 27 | — | 23 |
+
+The gate was the one the probe said was the discriminator: a table with exactly one measure column has
+one distribution in it, and a table with two has two — which is why the box plots live on the other
+side of it (41 of the corpus's 47 box-plot hits are tables with two or more measures). It was the right
+*shape* of idea on the right *discriminator*, and it was still a regression. The row-level diff says
+where:
+
+| rows | what happened |
+|---:|---|
+| +10 | a histogram-labelled `distribution` question, answered `boxplot`, now answered with bins |
+| −13 | a bar-labelled `distribution` question the product already answered `bar` — the picture is the same bar, but the *first* family became `histogram` |
+| −12 | a pie the corpus labelled `distribution` and the product answered correctly, which the bins reading now pre-empts |
+| −1 | a box plot |
+
+### Two blind spots in my own probe, both of the same kind
+
+**It counted the shortlist and called it top-1.** `family in families` is the rule the *shortlist* uses;
+top-1 reads `families[0]`. The 13 bar rows were hits before the change and hits after it — the product
+answered `bar` both times — and the probe booked them as gains because the families now also contained
+`bar`. A widening that changes only the ordering of the family claim is a widening that changes the
+score, and the probe could not see it.
+
+**It assumed a rewrite that returns first would return second.** `histogramReading` runs before every
+other reading in `toChartIR`, by design: the rows it produces are the picture's, not the table's. The
+probe priced the 12 pie rows as if the share reading still had a say. It does not — a question about the
+distribution of percentages is a pie to the corpus and a histogram to this reading, and the reading
+wins because it is asked first.
+
+Neither blind spot is exotic. Both are the same mistake the repository keeps paying for: **a number has
+to be taken from the path that ships**, not from a re-implementation of the path that ships. The
+correct version of the probe is the one the gate already runs, and the answer it gave is *do not ship
+this*.
+
+The refusal is now a test, with the arithmetic in it:
+
+```ts
+it('does not infer a histogram from the word distribution, even over a one-measure table', () => {
+  expect(histogramReading('Analyze the distribution of delivery times and identify any outliers', labelled))
+    .toBeUndefined();
+  expect(toChartIR('Analyze the distribution of delivery times and identify any outliers', labelled).mark)
+    .toBe('boxplot');
+});
+```
+
+### The census caught a real bug on the way past
+
+Running the census after the reverted gate produced a sentence no reading had ever printed:
+
+```
+census report: the product sweep reads 661 hits for the shipped table and the census reads 664,
+so one of the two is not the product
+```
+
+Three rows are both a histogram question and a table wide in time. The product bins them — `toChartIR`
+takes the bins first, then the melt — and the *sweep* asked the melt first, so the control candidate
+claimed 661 against the classifier's 664. The identity that compares the two is the only reason this
+was visible at all; nothing else in the repository reads both numbers.
+
+The repair is an ordering, five lines up:
+
+```ts
+// before: the melt was asked first, so a row that is both a histogram and a wide table was a line
+const lead = wide !== undefined ? fixedLead : histogramReading(...) ? bins : ranked;
+// after: the product's order, which is bins, then melt, then the ranking
+const lead = histogramReading(row.prompt, typed, set.columns, candidate.cues) !== undefined
+  ? familiesOfMark('bar', 'histogram')
+  : wide !== undefined ? familiesOfMark('line') : ranked;
+```
+
+and a unit test pins the row the identity stood on: a histogram question over `Country, 2019, 2020,
+2021` is a hit, and the control must reproduce the classifier's count on it.
+
+The class of defect is worth naming: the census prices fourteen cue-table ablations *through* a second
+code path, so any disagreement between the two is either the sweep lying about a candidate or the
+classifier lying about the product. With three rows of the 1,470 lying, every delta in the ablation
+table was off by up to three — small enough to read as noise, which is exactly how a broken instrument
+survives.
+
+## A 429 is one endpoint's fact, and six callers retrying in lockstep repeat it
+
+The Zhipu key was refilled and the 429s were not a balance problem: a benchmark arm at concurrency 6
+refused a burst that the same key answers serially. The provider retried correctly — `429`, `500`,
+`502`, `503`, `504`, honouring `Retry-After`, reading the vendor's own body to tell a quota from a
+concurrency limit — with one property that a busy endpoint punishes:
+
+```ts
+// every caller computed the same delay from the same attempt number
+await sleep(retryDelayMs * 2 ** (attempt - 1));
+```
+
+Six calls refused in the same instant wait the same 500 ms and arrive together, and the second attempt
+meets the limit the first one did. The provider now draws a spread:
+
+```ts
+const backoff = (attempt: number): number =>
+  retryDelayMs * 2 ** (attempt - 1) * (1 - jitter * random());
+```
+
+`retryJitter` is 0.5 by default, so the wait is drawn from `[0.5d, d]` — never earlier than the backoff
+promised, never in lockstep — and it is drawn from an injected source, so the test can state the delay
+it asserts:
+
+| draw | wait at `retryDelayMs: 100` |
+|---|---|
+| `0` (the latest arrival) | 100 ms |
+| `1` (the earliest) | 50 ms |
+| `retryJitter: 0` | 100 ms, then 200 ms — the old timing, exactly |
+
+`Retry-After` is never spread. There the endpoint has stated its own window, and arriving early inside
+it is the same lockstep one level down.
+
+### Gates
+
+| item | result |
+|---|---|
+| `tsc --noEmit` | clean |
+| `vitest` with real PostgreSQL and MariaDB | 5,924 passed / 0 skipped (194 files) |
+| `packages/ai` | 85 cases, including the spread and the retry that keeps the old timing |
+| `eval/bill.ts` branch coverage | 86.2% → 95.8% — three cases: an armless BIRD row, a line with reasoning and cached tokens, a bill with no rows to name |
+| census identity | 664 = 664, after three rounds of 661 against 664 |
+| `packages/chart` coverage | 100 / 100 / 100 / 100 |
+| cost | **¥0** |

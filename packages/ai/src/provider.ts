@@ -296,6 +296,20 @@ export interface HttpProviderOptions {
   /** Base delay for exponential backoff, in milliseconds. Zero waits not at all. */
   readonly retryDelayMs?: number;
   /**
+   * The share of that delay a caller is allowed to give up, drawn per attempt. 0.5 by default.
+   *
+   * A 429 is a fact about the whole endpoint rather than about one call, so every caller in flight
+   * meets it in the same instant. With no spread they also *retry* in the same instant, at the same
+   * doubled delay, and the retry is refused by the limit that refused the first attempt — which is
+   * what a batch job sees as "the provider is down" when the provider is only busy. The spread is a
+   * fraction rather than an absolute because the delay doubles per attempt and the wait has to stay
+   * proportional to it. `Retry-After` is never spread: there the endpoint has stated its own window,
+   * and arriving early inside it is the same lockstep one level down.
+   */
+  readonly retryJitter?: number;
+  /** Injection point for the spread; defaults to `Math.random`. */
+  readonly random?: () => number;
+  /**
    * How many times a reply cut at the answer budget is asked again with a larger budget.
    *
    * A truncation is not an answer and not an outage: the endpoint answered, and the number this
@@ -531,6 +545,14 @@ export function createHttpProvider(options: HttpProviderOptions): LlmProvider {
   const timeoutMs = options.timeoutMs ?? 60_000;
   const retries = Math.max(1, options.retries ?? 1);
   const retryDelayMs = options.retryDelayMs ?? 500;
+  // A rate-limited endpoint is retried by every caller at once, and a delay computed from the
+  // attempt number alone is the same delay in all of them: six calls that hit a 429 together come
+  // back together, and the second attempt meets the limit the first one did. The spread is drawn
+  // from [0.5d, d] rather than [0, d] so that a retry never arrives earlier than the backoff
+  // promised, and it is drawn from an injected source so a test can state the delay it asserts.
+  const jitter = Math.min(1, Math.max(0, options.retryJitter ?? 0.5));
+  const random = options.random ?? Math.random;
+  const backoff = (attempt: number): number => retryDelayMs * 2 ** (attempt - 1) * (1 - jitter * random());
   /**
    * How many times a truncated reply may be asked again with a larger budget.
    *
@@ -664,7 +686,7 @@ export function createHttpProvider(options: HttpProviderOptions): LlmProvider {
             if (!RETRYABLE.has(response.status) || attempt === retries) break;
             // Backoff doubles per attempt; Retry-After wins when the endpoint sends one,
             // because only it knows when its own window reopens.
-            await sleep(retryAfterMs(response, retryDelayMs * 2 ** (attempt - 1)));
+            await sleep(retryAfterMs(response, backoff(attempt)));
             if (controller.signal.aborted) break;
           } catch (error) {
             // A body that is not JSON is an answer, not a failure to get one; retrying it
@@ -682,7 +704,7 @@ export function createHttpProvider(options: HttpProviderOptions): LlmProvider {
                 { endpoint, attempts },
               );
             }
-            await sleep(retryDelayMs * 2 ** (attempt - 1));
+            await sleep(backoff(attempt));
           }
           }
           // Whether the endpoint used the whole budget and had nothing left to say. Content is the
