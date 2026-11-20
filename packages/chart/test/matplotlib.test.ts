@@ -22,6 +22,8 @@ const codeOf = (run: () => unknown): string => {
   return 'did not throw';
 };
 
+/** One row carrying the five numbers a boxplot reads, so a tuple fixture needs no five columns. */
+const BOX = { region: 'north', min: 1, q1: 2, median: 3, q3: 4, max: 5 };
 const n = (field: string): FieldRef => ({ field, type: 'nominal' });
 const q = (field: string): FieldRef => ({ field, type: 'quantitative' });
 
@@ -145,6 +147,31 @@ describe('a chart IR compiled to matplotlib', () => {
     expect(code).toContain('plt.colorbar()');
   });
 
+  it('drops a heatmap cell whose measure is not a number, and says how many it dropped', () => {
+    // The same rule the other marks follow, one cell at a time: a cell that is not a finite number
+    // is a hole, and painting it as zero would claim a reading the query never returned. The count
+    // travels in the emitted comment because a shorter matrix is otherwise invisible.
+    const code = compileToMatplotlib(
+      ir('heatmap', { x: n('region'), y: n('quarter'), color: q('total') }, {
+        data: [
+          { region: 'north', quarter: 'q1', total: 1 },
+          { region: 'south', quarter: 'q2', total: Number.NaN },
+        ],
+      }),
+    );
+    expect(code).toContain('# 1 row dropped: the measure was not a finite number');
+    expect(code).toContain('("north", "q1"): 1');
+    expect(code).toContain('float("nan")');
+  });
+
+  it('draws a pie whose measure is on colour, which is where a pie may carry it', () => {
+    // `supportOf` admits a radial mark with its measure on `y` or on `color`, and a pie built from a
+    // heatmap's encoding is the second case. Reading only `y` here emitted `values = []`.
+    const code = compileToMatplotlib(ir('pie', { theta: n('region'), color: q('total') }));
+    expect(code).toContain('values =');
+    expect(code).toContain('10.5');
+  });
+
   it('draws a funnel with its first stage at the top, because the narrowing is the claim', () => {
     const code = compileToMatplotlib(ir('funnel', { theta: n('region'), y: q('total') }));
     expect(code).toContain('plt.barh(positions, values)');
@@ -167,6 +194,27 @@ describe('a chart IR compiled to matplotlib', () => {
     expect(code).toContain('"q3": row[3]');
     expect(code).toContain('"whishi": row[4]');
     expect(code).toContain('plt.gca().bxp(');
+  });
+
+  it('draws a boxplot with no axis at all, labelling its boxes by position', () => {
+    // A five-number table with no ordered column is a legal tuple IR — `toChartIR` produces exactly
+    // that shape, because the five columns *are* the distribution and there is no axis to read. The
+    // label is then the box's position, which is one-based in matplotlib's own vocabulary and stays
+    // in this order rather than being invented.
+    const code = compileToMatplotlib(
+      ir('boxplot', { y: [q('min'), q('q1'), q('median'), q('q3'), q('max')] }, { data: [BOX] }),
+    );
+    expect(code).toContain('labels = [0]');
+    expect(code).toContain('plt.gca().bxp(');
+  });
+
+  it('reads the axis the contract spells as a one-element list', () => {
+    // `x` is `FieldOrList` in the schema: both spellings are legal, and a compiler that read only
+    // one of them would drop the axis of every IR a caller built with the other.
+    const code = compileToMatplotlib(
+      ir('boxplot', { x: [n('region')], y: [q('min'), q('q1'), q('median'), q('q3'), q('max')] }, { data: [BOX, { ...BOX, region: 'south' }] }),
+    );
+    expect(code).toContain('labels = ["north", "south"]');
   });
 
   it('names the tuple axis while the five names fit, and leaves it unnamed when they do not', () => {
@@ -412,6 +460,9 @@ describe('the title a figure can hold', () => {
 
   it('collapses the runs of whitespace a question carries, so a line cannot begin with a space', () => {
     expect(wrappedTitle(`a${' '.repeat(TITLE_WIDTH)}b`)).toBe('a b');
+    // A question that arrives with a leading space splits into an empty first word, which is not a
+    // word: dropping it is what keeps the first line from starting with the space it came with.
+    expect(wrappedTitle(` ${'word '.repeat(20)}`)).not.toMatch(/^ /);
   });
 
   it('emits the wrapped title into the source, with the newline as a real one', () => {

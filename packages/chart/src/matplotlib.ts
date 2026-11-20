@@ -375,10 +375,11 @@ export function compileToMatplotlib(ir: ChartIR): string {
   // `compileToECharts` uses: re-checking here would add branches no IR can reach.
   const isPie = ir.mark === 'pie' || ir.mark === 'funnel';
   const labelRef = (isPie ? (ir.encoding.theta ?? first(ir.encoding.x)) : first(ir.encoding.x)) as FieldRef;
-  // One `??`, not two: `first(y) ?? (isPie ? color : undefined)` has a right-hand branch that no
-  // IR reaches for a non-pie mark (`supportOf` requires a measure) and one that `first(y)` already
-  // covers for a pie — a guard whose false side is unreachable is a line only coverage runs.
-  const measure = first(ir.encoding.y ?? (isPie ? ir.encoding.color : undefined));
+  // One `??`, not two: a pie may state its measure on `color`, every other mark must state it on
+  // `y`, so `y ?? color` is the same read without the branch that asked which mark this was — that
+  // branch's "not a pie" side is unreachable, because `supportOf` refuses a non-pie mark with no
+  // measure, and a guard whose false side no IR reaches is a line only coverage runs.
+  const measure = first(ir.encoding.y ?? ir.encoding.color);
   const body: string[] = [];
 
   if (ir.mark === 'heatmap') {
@@ -554,7 +555,11 @@ function heatmapSource(ir: ChartIR): string[] {
  * of the numbers is dropped and counted: half a box is not a box.
  */
 function tupleSource(ir: ChartIR, mark: 'boxplot' | 'candlestick'): string[] {
-  const columns = (Array.isArray(ir.encoding.y) ? ir.encoding.y : [ir.encoding.y]) as FieldRef[];
+  // `concat` rather than a conditional: the contract spells a channel either as one field or as a
+  // list of them, so `concat` reads both without a branch that only one spelling reaches. The cast
+  // records what `supportOf` proved — a tuple mark is refused unless its cells are there — and the
+  // absent case needs no fallback of its own.
+  const columns = ([] as readonly FieldRef[]).concat(ir.encoding.y as readonly FieldRef[]);
   const axis = Array.isArray(ir.encoding.x) ? ir.encoding.x[0] : ir.encoding.x;
   const lines: string[] = [];
   const labels: string[] = [];

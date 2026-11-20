@@ -73,6 +73,8 @@ function table(header: string, rows: readonly string[]): string {
 
 const QUARTERLY = table('Date, Revenue', ['2019-01-01, 10', '2019-04-01, 14', '2019-07-01, 18', '2019-10-01, 26']);
 const REGIONS = table('Region, Revenue', ['North, 40', 'South, 55', 'East, 31', 'West, 63']);
+/** The same shape one row short of a five-number summary: four observations is the floor. */
+const THREE_REGIONS = table('Region, Revenue', ['North, 40', 'South, 55', 'East, 31']);
 
 function row(prompt: string, label: string, tableData: string): ProfileInput {
   return { prompt, label, tableData };
@@ -409,10 +411,13 @@ describe('the ablation', () => {
       row('Compare revenue by region', 'Bar Chart', REGIONS),
       row('Show the distribution', 'Box Plot', REGIONS),
       row('What share does each region hold?', 'Pie Chart', REGIONS),
-      // Neither arm gets this one: the product draws a bar over a two-column timeline and the model
+      // Neither arm gets this one: the product folds the timeline into a boxplot and the model
       // answered a pie. The count exists so that a row nobody won is not filed as a row the other arm
       // lost.
-      row('Show the spread of revenue', 'Box Plot', QUARTERLY),
+      row('Show the spread of revenue', 'Histogram', QUARTERLY),
+      // And one only the model gets: three rows are below the floor a five-number summary needs, so
+      // the product answers a bar to a question the corpus drew as a boxplot.
+      row('Show the distribution of revenue', 'Box Plot', THREE_REGIONS),
     ];
     const choices = new Map([
       [rows[0] as ProfileInput, 'line'],
@@ -420,9 +425,10 @@ describe('the ablation', () => {
       [rows[2] as ProfileInput, 'boxplot'],
       [rows[3] as ProfileInput, 'scatter'],
       [rows[4] as ProfileInput, 'pie'],
+      [rows[5] as ProfileInput, 'boxplot'],
     ]);
     const pair = pairArms(rows, (input) => choices.get(input));
-    expect(pair.both + pair.ruleOnly + pair.modelOnly + pair.neither).toBe(5);
+    expect(pair.both + pair.ruleOnly + pair.modelOnly + pair.neither).toBe(6);
     // A row neither arm got right is its own count: folding it into `ruleOnly` would report the model as
     // worse than it was, and into `neither`'s opposite would report the product as better.
     expect(pair.neither).toBeGreaterThan(0);

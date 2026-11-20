@@ -5,6 +5,16 @@ export interface FieldProfile {
   readonly type: FieldType;
   readonly distinct: number;
   readonly nulls: number;
+  /**
+   * How many cells hold a finite number.
+   *
+   * Reported because it is the count that decides whether a column can be *summarised*: a five-number
+   * summary needs at least four numbers, and a cell that arrives as `NaN` — which a driver or a CSV
+   * does send — is not one. `nulls` cannot answer this (a `NaN` is present and is not a null) and
+   * neither can `distinct` (a column of ten `NaN`s has one distinct value). It is also the only way
+   * `min` and `max` can stay finite: they are computed over exactly these cells.
+   */
+  readonly numbers: number;
   readonly min?: number;
   readonly max?: number;
   readonly negative: boolean;
@@ -170,13 +180,18 @@ export function profileRows(rows: readonly Readonly<Record<string, unknown>>[], 
   return names.map((name) => {
     const values = rows.map((row) => row[name]);
     const type = inferType(values);
-    const numbers = values.filter((value): value is number => typeof value === 'number');
+    // Finite numbers only: `NaN` and `±Infinity` arrive from a result set that prints them, and a
+    // profile whose `min` is `NaN` is a profile nothing can be ordered by — the sort in `widest`
+    // compares them, the span is `NaN`, and every admission that reads a range reads a number that
+    // is not one.
+    const numbers = values.filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
     const present = values.filter((value) => value !== null && value !== undefined);
     const profile: FieldProfile = {
       name,
       type,
       distinct: new Set(present.map((value) => String(value))).size,
       nulls: values.length - present.length,
+      numbers: numbers.length,
       negative: numbers.some((value) => value < 0),
     };
     if (numbers.length > 0) {

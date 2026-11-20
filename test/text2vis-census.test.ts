@@ -940,11 +940,17 @@ describe('what the shipped typing is worth, measured by removing it', () => {
   });
 
   it('counts the rows the typing costs as well as the rows it wins', () => {
-    // A year column is also one of the numbers the table has: a boxplot needs five per row, and
-    // reading the year as an axis leaves four, so the mark the label asks for is refused where it
-    // used to be admitted. That is the −2 the corpus shows for boxplot, in one hand-built row, and
-    // the reason the price is published as a pair rather than as a gain.
-    const fiveNumbers = table('Year, A, B, C, D', ['2019, 1, 2, 3, 4', '2020, 2, 3, 4, 5', '2021, 3, 4, 5, 6', '2022, 4, 5, 6, 7', '2023, 5, 6, 7, 8']);
+    // A year column is also one of the numbers the table has: the five-column reading of a boxplot
+    // needs five per row, and reading the year as an axis leaves four, so the mark the label asks for
+    // is refused where it used to be admitted. That is the −2 the corpus shows for boxplot, in one
+    // hand-built row, and the reason the price is published as a pair rather than as a gain.
+    //
+    // Three rows, because a table with four or more would now take the *derived* reading instead —
+    // one box per measure — and the typing would then cost nothing on this shape. Three rows is the
+    // shape where the two readings are the only difference: three observations are below the floor a
+    // five-number summary needs, so the five-column reading is the only one available, and the year
+    // column is the one thing that decides whether it is available.
+    const fiveNumbers = table('Year, A, B, C, D', ['2019, 1, 2, 3, 4', '2020, 2, 3, 4, 5', '2021, 3, 4, 5, 6']);
     const report = censusOf([input('Show the numbers.', 'Box Plot', fiveNumbers)]);
     expect(report.outcomes.refused).toBe(1);
     expect(report.calendar).toMatchObject({ rows: 1, converted: 0, lost: 1, hit: 1 });

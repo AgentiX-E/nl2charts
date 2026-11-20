@@ -446,6 +446,17 @@ describe('turning a recommendation into a chart the compiler accepts', () => {
     expect(ir.data.map((row) => row.revenue)).toEqual([7, 12, 21, 30]);
   });
 
+  it('follows the end the question names first when it names both', () => {
+    // A sentence can carry both words — "the most, not the least" — and then the direction is the
+    // one the reader reaches first: the position in the sentence decides, not the order the two
+    // patterns happen to be listed in. This is the branch that reads the earlier of two matches,
+    // and the reason the loop compares indices instead of taking the first pattern that matches.
+    const both = toChartIR('Which products have the most revenue, not the least?', products);
+    expect(both.data.map((row) => row.revenue)).toEqual([30, 21, 12, 7]);
+    const reversed = toChartIR('Which products have the least revenue, not the most?', products);
+    expect(reversed.data.map((row) => row.revenue)).toEqual([7, 12, 21, 30]);
+  });
+
   it('leaves the rows alone when the question asked for no order', () => {
     // The rule fires on the sentence that asks for it. A bar of `Revenue by product` is the table
     // in the table's order, and sorting it would be the chart inventing a ranking nobody asked for
@@ -884,6 +895,18 @@ describe('a table that is wide in time, through the chart pipeline', () => {
 
   it('keeps the caller’s limit on the rows it carries', () => {
     expect(toChartIR('How has it changed?', wide, { limit: 3 }).data).toHaveLength(3);
+  });
+
+  it('carries the caller’s subtitle and theme through the wide path too', () => {
+    // The wide path builds its own IR rather than going through the one `toChartIR` finishes, so the
+    // two optional fields a caller passes are the ones it is easiest to drop: a subtitle that only
+    // arrives on the narrow path is a subtitle half the charts have.
+    const ir = toChartIR('How has the population changed?', wide, { subtitle: 'per country', theme: 'dark' });
+    expect(ir.subtitle).toBe('per country');
+    expect(ir.theme).toBe('dark');
+    // And the absent case stays absent rather than becoming the string `undefined`, which the
+    // contract would accept and a renderer would print.
+    expect(toChartIR('How has the population changed?', wide)).not.toHaveProperty('subtitle');
   });
 
   it('leaves a table that is not wide alone, down to the absent channel', () => {

@@ -324,6 +324,16 @@ export interface ShapeCounts {
   readonly counted: boolean;
 }
 
+/**
+ * The fewest observations a five-number summary is read from, and the number is a property of the
+ * summary: with `n` values interpolated, each quarter of the box is anchored by an observation of its
+ * own exactly when `n` is at least four. Below that the box's shape is the interpolation rule's, not
+ * the data's. The corpus prices the nearby floors on the 164 rows that named a boxplot their table
+ * was said not to hold — two moves 43, three 42, four 39, five 38 — so four is the largest floor that
+ * keeps a quarter per observation for four rows of reach.
+ */
+const MIN_OBSERVATIONS = 4;
+
 export interface ChartChoice {
   readonly question: string;
   /**
@@ -396,6 +406,14 @@ interface Shape {
   readonly sliceable: FieldProfile | undefined;
   /** True when `measures` holds the synthesised row count instead of a column of the result set. */
   readonly counted: boolean;
+  /**
+   * How many rows the table has, when the caller said.
+   *
+   * The one count a distribution can be read off, and the one a profile cannot hold: twelve countries
+   * and twelve thousand sales profile the same. `undefined` means "not stated", which is why the
+   * derived boxplot is refused for a caller that passed profiles alone rather than fabricated.
+   */
+  readonly observations: number | undefined;
 }
 
 interface Admission {
@@ -433,6 +451,43 @@ interface Admission {
    * stages is a ranking, and a ranking over stages is the funnel or the bar, not a trend.
    */
   readonly bonus?: { readonly reason: string; readonly when: (shape: Shape) => boolean };
+}
+
+/**
+ * How a boxplot reads this table, or `undefined` when it cannot.
+ *
+ * Two shapes carry a distribution: **`tuple`** states five numbers per row (`min, q1, median, q3,
+ * max`), which is what a pre-aggregated export looks like; **`derived`** states *observations*, one
+ * measure with one row each, and the five numbers are folded out of them, one box per measure.
+ *
+ * One function because three readers ask the same question — the admission, `encodingFor` and
+ * `toChartIR` — and three restatements of "does this table carry a distribution" would agree until
+ * one of them changed. It returns the measures too: the fold needs exactly the columns this called
+ * summarisable, and a five-number summary of two numbers is a line segment. A counted measure is
+ * refused outright, because it is materialised *after* the fold, one number per group.
+ */
+function boxplotReading(shape: Shape): { readonly layout: 'tuple' | 'derived'; readonly measures: readonly FieldProfile[] } | undefined {
+  if (shape.measures.length >= 5) return { layout: 'tuple', measures: shape.measures.slice(0, 5) };
+  if (shape.counted) return undefined;
+  if ((shape.observations ?? 0) < MIN_OBSERVATIONS) return undefined;
+  const measures = shape.measures.filter((profile) => profile.numbers >= MIN_OBSERVATIONS);
+  if (measures.length === 0) return undefined;
+  return { layout: 'derived', measures };
+}
+
+/**
+ * The sentence that says which condition a refused boxplot is missing, built from the same facts
+ * `boxplotReading` reads: "five numbers per row" was true of a table with one measure over ten rows,
+ * and the reader could not tell which half of the sentence their table failed.
+ */
+function boxplotRefusal(shape: Shape): string {
+  const fullest = shape.measures.reduce((most, profile) => Math.max(most, profile.numbers), 0);
+  const rows = shape.observations === undefined ? 'an unstated number of' : String(shape.observations);
+  // Three counts in one sentence rather than a sentence per case: the reader's table failed one of
+  // them, and naming all three says which without the writer having to guess. A counted measure
+  // needs no case of its own — it holds 0 numbers by construction, because the column it will fill
+  // is one value per group rather than one per row — so the same sentence is true of it.
+  return `a boxplot reads five numbers per row, or one measure over at least ${String(MIN_OBSERVATIONS)} rows; this result has ${String(shape.measures.length)} measures over ${rows} rows, the fullest holding ${String(fullest)} numbers`;
 }
 
 const ADMISSIONS: readonly Admission[] = [
@@ -489,10 +544,18 @@ const ADMISSIONS: readonly Admission[] = [
   },
   {
     mark: 'boxplot',
-    prior: 3,
+    // Two, like a bar. A table that states its distribution in *rows* is also a table a bar reads one
+    // row at a time and discards nothing to do it, so only a question that asks for a distribution
+    // argues for folding four rows into one box — and a question is what a cue is. A table that
+    // states it in *columns* is the opposite case: a bar there draws one of its five numbers and
+    // drops four, so that layout pays the bonus and outranks the bar unasked.
+    prior: 2,
     reason: 'profile:five-numbers-per-row',
-    admit: (shape) =>
-      shape.measures.length >= 5 ? null : `a boxplot reads five numbers per row and this result has ${String(shape.measures.length)}`,
+    bonus: {
+      reason: 'profile:five-number-columns',
+      when: (shape) => boxplotReading(shape)?.layout === 'tuple',
+    },
+    admit: (shape) => (boxplotReading(shape) === undefined ? boxplotRefusal(shape) : null),
   },
   {
     mark: 'candlestick',
@@ -554,16 +617,27 @@ const PREFERENCE: readonly RecommendableMark[] = RECOMMENDABLE_MARKS;
 /** The column `toChartIR` materialises a count into. */
 const COUNT_FIELD = 'count';
 
+/** The column a derived boxplot names its boxes by. */
+const LABEL_FIELD = 'measure';
+
 /**
- * A name no column of the result set holds: a query that counted something returns a column called
- * `count`, and folding onto that name would replace the numbers the chart is about.
+ * A name no column of the result set holds, nearest to the one asked for.
+ *
+ * A materialised column is only useful if it is the chart's: a query that counted something returns
+ * a column called `count`, and folding onto that name would replace the numbers the chart is about.
+ * The same is true of the label a derived boxplot writes — a table with its own `measure` column
+ * keeps it, and the summary names its boxes `measure_2`.
  */
-function countName(profiles: readonly FieldProfile[]): string {
+function freeName(profiles: readonly FieldProfile[], wanted: string): string {
   const taken = new Set(profiles.map((profile) => profile.name));
-  if (!taken.has(COUNT_FIELD)) return COUNT_FIELD;
+  if (!taken.has(wanted)) return wanted;
   let suffix = 2;
-  while (taken.has(`${COUNT_FIELD}_${String(suffix)}`)) suffix += 1;
-  return `${COUNT_FIELD}_${String(suffix)}`;
+  while (taken.has(`${wanted}_${String(suffix)}`)) suffix += 1;
+  return `${wanted}_${String(suffix)}`;
+}
+
+function countName(profiles: readonly FieldProfile[]): string {
+  return freeName(profiles, COUNT_FIELD);
 }
 
 /**
@@ -580,7 +654,9 @@ function countMeasure(
   if (!dims.some((profile) => profile.distinct >= 2 && profile.distinct < rows)) return undefined;
   // A count's range is unknown until the rows are folded, and the only reader of a measure's range is
   // `widest`, which has one candidate here. The bounds are the widest a count could be.
-  return { name: countName(profiles), type: 'quantitative', distinct: 1, nulls: 0, min: 1, max: rows, negative: false };
+  // `numbers: 0` is the fact that keeps a count out of a five-number summary: the column does not
+  // exist yet, and the values it will hold are one per group rather than one per row.
+  return { name: countName(profiles), type: 'quantitative', distinct: 1, nulls: 0, numbers: 0, min: 1, max: rows, negative: false };
 }
 
 function shapeOf(profiles: readonly FieldProfile[], options: Resolved): Shape {
@@ -595,10 +671,10 @@ function shapeOf(profiles: readonly FieldProfile[], options: Resolved): Shape {
   const sliceable = dims
     .filter((profile) => profile.distinct <= options.maxSlices && profile.distinct >= 2)
     .sort((left, right) => right.distinct - left.distinct || left.name.localeCompare(right.name))[0];
-  if (measures.length > 0) return { dims, ordered, measures, sliceable, counted: false };
+  if (measures.length > 0) return { dims, ordered, measures, sliceable, counted: false, observations: options.rows };
   const count = countMeasure(dims, real, options.rows);
-  if (count === undefined) return { dims, ordered, measures, sliceable, counted: false };
-  return { dims, ordered, measures: [count], sliceable, counted: true };
+  if (count === undefined) return { dims, ordered, measures, sliceable, counted: false, observations: options.rows };
+  return { dims, ordered, measures: [count], sliceable, counted: true, observations: options.rows };
 }
 
 /**
@@ -786,6 +862,19 @@ function clean(channels: Record<string, unknown>): Encoding {
   return Object.fromEntries(Object.entries(channels).filter(([, value]) => value !== undefined)) as unknown as Encoding;
 }
 
+/** The tuple a pre-aggregated table states: five (or four) columns of `y`, along its ordered axis. */
+function tupleEncoding(
+  mark: 'boxplot' | 'candlestick',
+  shape: Shape,
+  profiles: readonly FieldProfile[],
+): Encoding {
+  const axis = shape.ordered[0];
+  return clean({
+    ...(axis === undefined ? {} : { x: ref(axis) }),
+    y: tupleColumns(profiles, mark).map(ref),
+  });
+}
+
 /**
  * The encoding for a mark that was already admitted.
  *
@@ -810,13 +899,19 @@ function encodingFor(mark: RecommendableMark, shape: Shape, profiles: readonly F
     case 'heatmap':
       return clean({ x: ref(first), y: [ref(shape.dims[1] as FieldProfile)], color: measure(value) });
     case 'boxplot':
-    case 'candlestick': {
-      const axis = shape.ordered[0];
-      return clean({
-        ...(axis === undefined ? {} : { x: ref(axis) }),
-        y: tupleColumns(profiles, mark).map(ref),
-      });
-    }
+      // Two readings of one mark. A table that carries the five numbers states its boxes in columns;
+      // a table that carries observations states them in rows, and this branch folds them — the
+      // encoding names the five numbers the fold writes, plus a label column naming the measure each
+      // box summarises. Both are proven to exist by `boxplotReading`, which is the only function that
+      // decides a boxplot can be drawn.
+      return boxplotReading(shape)?.layout === 'derived'
+        ? clean({
+            x: { field: freeName(profiles, LABEL_FIELD), type: 'nominal' },
+            y: TUPLE_NAMES.boxplot.map((field) => ({ field, type: 'quantitative' as const })),
+          })
+        : tupleEncoding('boxplot', shape, profiles);
+    case 'candlestick':
+      return tupleEncoding('candlestick', shape, profiles);
     case 'radar':
       return clean({ theta: ref(first), y: [measure(value)] });
     case 'parallel':
@@ -839,6 +934,38 @@ function encodingFor(mark: RecommendableMark, shape: Shape, profiles: readonly F
   }
 }
 
+/**
+ * The five numbers of one sample, by the estimator R calls type 7 and numpy calls `linear`: the
+ * p-quantile sits at `(n - 1) * p`, interpolated between the order statistics around it. Named
+ * because the alternatives are not equivalent — nearest-rank reads the quartiles of `1..10` as 3 and
+ * 8 — and because it is what the reference code of the corpus we are measured against calls.
+ */
+function quantilesOf(sorted: readonly number[]): readonly [number, number, number, number, number] {
+  const at = (p: number): number => {
+    const position = (sorted.length - 1) * p;
+    const lower = Math.floor(position);
+    const upper = Math.ceil(position);
+    const from = sorted[lower] as number;
+    return from + ((sorted[upper] as number) - from) * (position - lower);
+  };
+  return [sorted[0] as number, at(0.25), at(0.5), at(0.75), sorted[sorted.length - 1] as number];
+}
+
+/**
+ * One row per measure: the five-number summary of that column over the result set's rows.
+ *
+ * One box per measure rather than one box in all. The corpus states why: `Characteristic, Male,
+ * Female` over fifteen countries is asked as "analyze the distribution of male percentages", and the
+ * measure with the widest range there is `Female` — a single box would silently summarise the column
+ * the question did not ask about, and no label-based score could see the substitution. A box per
+ * column draws both, labelled, and the reader can find the one they asked for.
+ *
+ * The measures arrive from `boxplotReading`, which has already established that each of them holds at
+ * least `MIN_OBSERVATIONS` finite numbers — so this is a fold and not a filter, and there is no
+ * branch here for a column too sparse to summarise. A cell that is not a finite number is left out of
+ * the sample: `NaN - NaN` is not a comparison, and one `NaN` in ten values would make every quartile
+ * `NaN`.
+ */
 /** Every field an encoding groups by: the axes, and any non-measure on colour. */
 function groupFieldsOf(encoding: Encoding): FieldRef[] {
   const out = new Map<string, FieldRef>();
@@ -1018,13 +1145,36 @@ export function toChartIR(
   const groupFields = groupFieldsOf(encoding);
   // The axis a slice or bar runs along, whichever channel carries it: a pie states its categories
   // in `theta`, and reading only `x` here left every pie in the table's order.
-  const axisChannel = encoding.x ?? encoding.theta;
-  const axis = Array.isArray(axisChannel) ? axisChannel[0] : axisChannel;
+  //
+  // One field by construction, so this reads the channel rather than un-picking a list: no branch of
+  // `encodingFor` puts an array on `x` or `theta` — the tuple marks put theirs on `y` — and the
+  // `Array.isArray` that used to stand here was a branch no input could reach, kept alive by a
+  // coverage number rather than by a caller.
+  const axis = (encoding.x ?? encoding.theta) as FieldRef | undefined;
   const measureName = shape.counted ? undefined : (widest(shape.measures) as FieldProfile).name;
   /** The order a ranking question owes its mark, or nothing when the question asked for none. */
   const ranking =
     axis?.type === 'nominal' && RANKED_MARKS.has(best.mark) ? rankingDirection(question) : undefined;
-  const data = shape.counted
+  // The one mark whose rows are not the result set's rows: a boxplot read off observations replaces
+  // them with five numbers per measure, so the fold happens here rather than in the ordering below.
+  // `boxplotReading` is the same function the admission and the encoding asked, so this branch cannot
+  // be entered for a table that carries its five numbers in columns, and the measures it summarises
+  // are the ones that function decided have enough numbers to summarise.
+  const reading = best.mark === 'boxplot' ? boxplotReading(shape) : undefined;
+  const label = freeName(profiles, LABEL_FIELD);
+  const boxes =
+    reading?.layout === 'derived'
+      ? reading.measures.map((measure) => {
+          const values = rows
+            .map((row) => row[measure.name])
+            .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+            .sort((left, right) => left - right);
+          const [min, q1, median, q3, max] = quantilesOf(values);
+          return { [label]: measure.name, min, q1, median, q3, max };
+        })
+      : undefined;
+  // Folding before the limit is what makes the limit a limit on the picture, not on the evidence.
+  const folded = shape.counted
     ? countsOf(
         rows,
         groupFields.map((field) => field.field),
@@ -1046,6 +1196,7 @@ export function toChartIR(
       )
         .slice(0, limit)
         .map((row) => ({ ...row }));
+  const data = boxes === undefined ? folded : boxes.slice(0, limit);
   const mark: ChartType = best.mark;
   const ir: ChartIR = {
     version: CONTRACT_VERSION,

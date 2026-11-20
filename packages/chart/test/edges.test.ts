@@ -78,6 +78,20 @@ describe('compilation edges', () => {
     expect(option.visualMap).toEqual({ min: 0, max: 1, calculable: false });
   });
 
+  it('colours a heatmap from size when the measure is spelled there', () => {
+    // The support rule admits `color ?? size`, so the compiler has to read the same pair: a heatmap
+    // whose measure arrives on `size` was a picture of `undefined` cells and a 0–1 scale.
+    const option = compileToECharts(
+      chart('heatmap', {
+        x: { field: 'a', type: 'nominal' },
+        y: { field: 'a', type: 'nominal' },
+        size: { field: 'b', type: 'quantitative' },
+      }, { data: [{ a: 'x', b: 4 }, { a: 'y', b: 9 }] }),
+    );
+    expect(option.visualMap).toEqual({ min: 4, max: 9, calculable: false });
+    expect(JSON.stringify(option.series)).toContain('"value"');
+  });
+
   it('refuses a graph whose endpoints are not encoded, rather than drawing an empty network', () => {
     // A graph with no source and no target is an empty canvas that reads as a
     // layout failure, so the contract refuses it and says which columns are gone.
