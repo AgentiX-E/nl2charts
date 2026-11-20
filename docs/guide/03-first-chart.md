@@ -202,8 +202,9 @@ Two properties make the answer auditable rather than persuasive:
   `score: 5` from the two facts printed next to it, which is not true of `0.83`.
 - **Every rejection is reported.** `refused` carries the sentence that explains
   what the result set lacks — `a boxplot reads five numbers per row and this
-  result has 1` — so a caller that prefers another mark knows what would have to
-  change, and a wrong choice has a trace instead of a mystery.
+  result has 1 measure over 12 rows, the fullest holding 12 numbers` — so a caller
+  that prefers another mark knows what would have to change, and a wrong choice has
+  a trace instead of a mystery.
 - **The data can outrank the list order, not the question.** A bar over months and
   a line over months carry the same numbers, and only the line states the interval
   between them, so when the axis is a time axis the line is paid a bonus of three —
@@ -244,6 +245,49 @@ const ir = toChartIR(question, rows, { columns: resultSet.columns });
 
 A column every cell of which is null is never chosen as an axis or a measure, whether or not you
 pass the order.
+
+### A distribution that lives in the rows
+
+A boxplot reads five numbers per row, which is the shape of a pre-aggregated export. Most
+result sets do not look like that: `SELECT year, revenue` returns one observation per row,
+and the distribution is the column rather than the table. That table is a boxplot too — the
+five numbers are folded out of the measure, one box per measure, and each box is labelled
+with the column it summarises:
+
+```ts
+import { toChartIR } from '@agentix-e/nl2charts-chart';
+
+const rows = [
+  { year: '2021', revenue: 10 }, { year: '2022', revenue: 20 },
+  { year: '2023', revenue: 30 }, { year: '2024', revenue: 40 },
+];
+toChartIR('show the distribution of revenue', rows, { mark: 'boxplot' });
+// data:    [{ measure: 'revenue', min: 10, q1: 17.5, median: 25, q3: 32.5, max: 40 }]
+// encoding: { x: { field: 'measure', type: 'nominal' },
+//             y: [{ field: 'min', type: 'quantitative' }, { field: 'q1', … }, …] }
+```
+
+Three facts about the fold are worth knowing before you rely on the numbers:
+
+- **The quartiles are interpolated**, at position `(n - 1) * p` between the two order
+  statistics around it — the estimator R calls type 7 and numpy calls `linear`. The
+  nearest-rank estimator would read the quartiles of `1..10` as 3 and 8 instead of 3.25 and
+  7.75, and the box would be a picture of a different distribution.
+- **Four observations is the floor**, and it is a property of the summary: at four, each
+  quarter of the box is anchored by an observation of its own. Below that the box's shape is
+  the interpolation rule's, not the data's, and the mark is refused.
+- **One box per measure, never one box for all of them.** A table of `Male` and `Female`
+  percentages asked as "the distribution of male percentages" draws both boxes, labelled; a
+  single box would silently summarise whichever column had the wider range, and no
+  label-based score could see the substitution. A cell that is not a finite number is left
+  out of the sample rather than poisoning it.
+
+The score follows the same logic as the reading. A boxplot folded out of rows is priced like
+a bar — the table it summarises is one a bar also reads, and the bar discards nothing to do
+it — so it wins where a question asks for a distribution and not otherwise: `Revenue by
+product` over four products stays a bar. A table that carries five numbers in *columns* is
+the other case, and there the boxplot outranks the bar unasked, because a bar would draw one
+of the five numbers and drop four.
 
 It throws `NL2C_E_NOT_SUPPORTED` for an empty result set, or for one no mark can
 encode, and names the columns it saw.
@@ -393,10 +437,12 @@ first answer was impossible, and none anywhere else.
 > option stays in the API and the code stays tested, because it answers a real question
 > correctly; it is simply not better than the rule table, and a feature that loses three
 > rows is not shipped on the grounds that it is elegant. The distribution of the 223
-> refusals is what closes the argument: 144 of them are `boxplot`, a mark this product can
-> only draw when the table already carries a five-number summary. The model was asking for
-> the right picture on rows where the product has no picture to offer, and a shorter list
-> cannot invent one.
+> refusals is what closes the argument: 144 of them were `boxplot`, a mark this product
+> could then draw only when the table already carried a five-number summary. That count was
+> the argument for fixing the *admission* rather than the question — the tables had the
+> distribution, spread across their rows — which is what the next section does. The
+> population of refusals is smaller now, and the verdict still stands for the rows that
+> remain: a shorter list cannot invent a picture the table has no shape for.
 
 Cost is bounded by the shape of the call: one request per question, `max_tokens`
 96 (absent for an endpoint that thinks aloud), `temperature` 0, and the same

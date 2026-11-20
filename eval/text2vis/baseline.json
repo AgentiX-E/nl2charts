@@ -60,15 +60,16 @@
       "recordedAt": "2026-11-19",
       "runs": [
         "44435717857",
-        "44551395709"
+        "44551395709",
+        "44661951720"
       ],
       "scored": 1470,
-      "product": 606,
+      "product": 610,
       "best": 863,
       "bestPolicy": "model-holds",
-      "ceiling": 994,
+      "ceiling": 974,
       "tolerance": 5,
-      "note": "Two full dispatches priced the same six policies on the same 1,470 rows: best 861 and 863, model alone 859 and 861, product 606 both times, ceiling 994 both times. The hybrid therefore wins by 2 rows in both — the sign is stable and the size is 0.14pp — which is why the floor records the best policy's reading rather than a margin over the model. The tolerance is the model floor's, for the model floor's reason: every cell here is a function of the two answer columns, and those move by a couple of rows per re-sample.",
+      "note": "Two full dispatches priced the same six policies on the same 1,470 rows: best 861 and 863, model alone 859 and 861, product 606 both times, ceiling 994 both times. The hybrid therefore wins by 2 rows in both — the sign is stable and the size is 0.14pp — which is why the floor records the best policy's reading rather than a margin over the model. The tolerance is the model floor's, for the model floor's reason: every cell here is a function of the two answer columns, and those move by a couple of rows per re-sample. **v9.46: product 606 -> 610, ceiling 994 -> 974.** The product's answers moved onto the model's, and the union is where that shows: the derived boxplot wins 26 rows the model also gets right, and gives back 22 rows the corpus drew as a bar - twenty of which leave the union, because neither answer is right on them any more. `best` and `bestPolicy` are unchanged: model-holds still reads 863, so the routing table's maximum did not move with the product under it. Both numbers are re-registered rather than accepted as drift, because `product` is compared for equality on purpose: a deterministic rule path that changes its answer is a change to the product, not a re-sample.",
       "why": "This is the only gate whose artifact is derived rather than bought: no model is asked anything. It is checked anyway, because a policy that routes every row to one answer reads exactly like a policy that works, and because the two identities it carries (the disagreement partitions the population; the ceiling is the union of the three cells) are the only things that make the six readings add up to something."
     },
     "ship": {
@@ -88,13 +89,13 @@
     "repair": {
       "recordedAt": "2026-11-20",
       "run": "44648039546",
-      "refused": 223,
-      "repairable": 200,
-      "hits": 36,
-      "tableHits": 39,
-      "costYuan": 0.058,
+      "refused": 87,
+      "repairable": 86,
+      "hits": 16,
+      "tableHits": 15,
+      "costYuan": 0.0136,
       "verdict": "rejected",
-      "note": "The second question, priced once. 223 rows name a mark their own table refuses; 200 of them have a table that holds more than one mark and were asked again over that shorter list; the second answer is right on 36 of the 200 and the table was right on 39 of the same rows, so shipping it reads 751 instead of 754. 200 calls, ¥0.058, no truncated reply, nothing unread.",
+      "note": "The second question, priced twice: once on the 223 rows the admissions refused (run 44648039546) and again on the 87 that are left after the derived boxplot was admitted (run 44661951720). The first reading is the one that made the admission the target rather than the prompt: 144 of the 223 refusals were `boxplot`, the model was naming the one mark that would have said what the question asked, and a shorter list cannot invent a picture. On the residual 87 the short list is a wash and slightly ahead - 16 right against the table's 15 on the same rows, 86 asked, 43 calls, Y0.0136 - which is inside the noise of a 15-row comparison and does not overturn the verdict.",
       "why": "The verdict is `rejected`, and the reason it is recorded here rather than deleted with the code is that the code still works: a shorter list is a real question and a model answers it. What the measurement says is that the answer is not better than the rule table on the rows where the model's first answer was impossible. The distribution of the 223 refusals explains it: 144 `boxplot` (\"a boxplot reads five numbers per row\" — the mark is drawable only when the table already carries a five-number summary), 36 `scatter` (\"needs two measures\"), 8 `heatmap`, and the rest one or two each. The model was not naming a mark at random; it was naming the one mark that would have said what the question asked, and no list without that mark can hold the answer. So the lever is a *drawable* mark — a boxplot computed from raw rows — not a better prompt, and this file is the receipt that the cheaper hypothesis was tried first."
     }
   }
