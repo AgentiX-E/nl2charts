@@ -18315,13 +18315,18 @@ it is no longer the only route.
 | `selectorRule.decided` | not registered | 554 | — |
 
 Two of three missed, and the reason is the one the pre-registration was least able to see: **the bar
-counted ties on the wrong pool.** The 16 was read off `41453395203`, whose 600 questions produced 593
-three-candidate pools, 6 one-candidate pools and **1** two-candidate pool. This run's pool is 589
-three-candidate, 8 two-candidate, 3 one-candidate — and a two-candidate pool that disagrees is a 1-1
-tie, which `majorityResult` reports and the replay's "three distinct results" bucket does not. The
-arm paid on 46 cases: **41 three-way ties and 5 two-way ties**, which is exactly the 46 cases whose
-pool returned all-distinct fingerprints. The gate did what it says; the number naming its price was a
-number about a different draw.
+counted ties on the wrong pool, and read the count off one bucket of it.** The 16 was read off
+`41453395203`, whose 600 questions produced 593 three-candidate pools, 6 one-candidate pools and **1**
+two-candidate pool — so on that pool every tie was a three-way tie by construction, and the two
+buckets could not disagree. This run's pool is 589 three-candidate, 8 two-candidate, 3 one-candidate,
+and the census reports `tied` **per bucket**: 39 in the three-result bucket and 5 in the two-result one,
+where a two-candidate pool that disagrees is a 1-1 tie. The arm paid on 46 cases — **41 three-way ties
+and 5 two-way ties** — which is exactly the 46 cases whose pool returned all-distinct fingerprints.
+
+The gate did what it says. The number naming its price was a constant about a different draw, and the
+tool that could have said so had already printed it: `census` counts `tied` in every bucket, and
+`vote-unless-tie` is priced from the same field. What the pre-registration needed was the census's
+**total**, not the bucket that had a story attached to it.
 
 ### The comparison it cannot make
 

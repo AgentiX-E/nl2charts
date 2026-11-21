@@ -34,10 +34,12 @@ cannot be argued with.
 - **The gate's price is a property of the pool, and the record now says which rule actually ran.**
   `select-cross-tie` was dispatched on `44889941650` against a protocol of ≥ 383/600, `calls.mean` ≤
   3.03 and `spend.asked` ≤ 0.05: it read **388/600** (held), **3.077** (missed) and **46/600** (missed).
-  The bar was derived from another pool — `41453395203` held 16 all-distinct pools and 1 two-candidate
-  pool, this one held 41 and 8, and a two-candidate pool that disagrees is a 1-1 tie `majorityResult`
-  reports and a "three distinct results" bucket does not — so the arm paid on 41 three-way ties and 5
-  two-way ties, exactly the 46 cases whose pool returned all-distinct fingerprints. The reading also
+  The bar was a constant from another pool — `41453395203` held 16 all-distinct pools and **1**
+  two-candidate pool, so every tie there was three-way by construction, while this run held 41
+  three-way and 8 two-candidate pools with 5 of the ties in the two-result bucket. The arm paid on 41
+  three-way ties and 5 two-way ties, exactly the 46 cases whose pool returned all-distinct
+  fingerprints, and `census` had been counting `tied` per bucket all along — the bar needed its total,
+  not the one bucket that had a story attached. The reading also
   caught the artifact contradicting its own rows: `selectorRule` published
   `{rule: 'shortest', decided: 554}` for an arm whose gate answered by `modal` on all 554.
   `selectorRuleOf` is now a pure function with a census (`rules`) beside the declaration, `spend`,
