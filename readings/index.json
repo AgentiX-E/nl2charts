@@ -3,93 +3,24 @@
  "readings": {
   "bird-dev": {
    "kind": "bench-readback",
-   "commit": "d9e026a77bb449e1236200eaf041672f27ab2e46",
+   "commit": "8fbccf399325dda2856e7730aac9b4efa1dbc5ee",
    "workflow": "bird-dev",
-   "runId": "44905985381",
+   "runId": "44914628907",
    "split": "dev",
    "dataset": "bird-dev",
-   "model": "deepseek-chat",
+   "model": null,
    "secondModel": "deepseek-reasoner",
-   "generatedAt": "2026-11-21T12:57:15.155Z",
+   "generatedAt": "2026-11-21T14:38:48.151Z",
    "corpus": {
     "digest": "db9e8a1aba23ddd9",
     "rows": 1534,
     "questions": 1534
    },
    "selection": {
-    "requested": 600,
-    "scored": 600
+    "requested": 1534,
+    "scored": 1532
    },
-   "arms": [
-    {
-     "arm": "select-cross",
-     "passed": 379,
-     "total": 600,
-     "accuracy": 0.6316666666666667,
-     "candidateRecall": 421,
-     "selectionLoss": 42,
-     "calls": 4,
-     "promptTokens": 3611,
-     "completionTokens": 565,
-     "strictPassed": 364,
-     "spend": {
-      "asked": 600,
-      "priced": 600
-     }
-    },
-    {
-     "arm": "select-cross-pooled-vote",
-     "passed": 387,
-     "total": 600,
-     "accuracy": 0.645,
-     "candidateRecall": 421,
-     "selectionLoss": 34,
-     "calls": 0,
-     "promptTokens": 0,
-     "completionTokens": 0,
-     "strictPassed": 372,
-     "poolRead": {
-      "shared": 600,
-      "unrecorded": 0,
-      "cases": 600
-     }
-    },
-    {
-     "arm": "select-cross-pooled-tie",
-     "passed": 389,
-     "total": 600,
-     "accuracy": 0.6483333333333333,
-     "candidateRecall": 421,
-     "selectionLoss": 32,
-     "calls": 0.075,
-     "promptTokens": 41,
-     "completionTokens": 0,
-     "strictPassed": 374,
-     "spend": {
-      "asked": 45,
-      "priced": 45
-     },
-     "selectorRule": {
-      "rule": "modal",
-      "decided": 555,
-      "eligible": 1578,
-      "emptyPool": 18,
-      "rules": {
-       "modal": 555
-      }
-     },
-     "poolRead": {
-      "shared": 600,
-      "unrecorded": 0,
-      "cases": 600
-     }
-    }
-   ],
-   "rves": {
-    "rves": 0.5666666666666667,
-    "repeats": 5,
-    "floor": 0.5875
-   }
+   "arms": []
   }
  }
 }
