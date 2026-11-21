@@ -129,6 +129,11 @@ describe('the protocol client against a noisy peer', () => {
       // has to check for them before doing arithmetic on a duration.
       expect(result.ms).toBe(0);
       expect(result.columns).toEqual([]);
+      // A peer that sends no `us` is reporting whole milliseconds, which is a coarser instrument
+      // than the metric needs. The decoder keeps the value it can read and says where it came
+      // from, so the timer can refuse to compute a ratio from it instead of publishing τ = 1.
+      expect(result.us).toBe(0);
+      expect(result.usFromMilliseconds).toBe(true);
     } finally {
       await peer.close();
     }
@@ -143,7 +148,14 @@ describe('the protocol client against a noisy peer', () => {
     const us = result.us ?? Number.NaN;
     expect(us).toBeGreaterThan(0);
     expect(us).toBeGreaterThanOrEqual(result.ms * 1000);
-    expect(us % 1).not.toBe(0);
+    // `ms` stays whole: a timeout budget is written in milliseconds, and a fractional one would
+    // make the deadline arithmetic depend on the clock's resolution.
+    expect(Number.isInteger(result.ms)).toBe(true);
+    // `us` carries one decimal place, not more and not fewer. The first version of this test
+    // asserted `us % 1 !== 0`, which reads as "the tenths digit is not zero" — true nine times in
+    // ten and false the tenth, i.e. a ten-percent flaky test that asserted the clock's own
+    // aliasing rather than the protocol's resolution. This is the same claim without the guess.
+    expect(Math.abs(us * 10 - Math.round(us * 10))).toBeLessThan(1e-6);
   });
 
   it('rejects a request made after close instead of writing to a dead pipe', async () => {

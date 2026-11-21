@@ -179,7 +179,13 @@ export function rvesOf(cases: readonly VesCase[]): VesReading {
 /** What the runner has to answer for one execution: the microseconds, and whether it ran. */
 export interface TimedRun {
   readonly ok: boolean;
-  readonly us: number;
+  /**
+   * Microseconds, or `undefined` when the runner cannot resolve finer than a millisecond.
+   *
+   * A coarse clock is a missing instrument, not a fast statement: two `ms` readings of 1 give
+   * τ = 1 and the reward table pays 1.25 for a question it never timed.
+   */
+  readonly us?: number;
 }
 
 export type StatementTimer = (db: string, sql: string) => Promise<TimedRun>;
@@ -237,7 +243,10 @@ async function meanTime(
   const samples: number[] = [];
   for (let attempt = 0; attempt < runs; attempt += 1) {
     const result = await timer(db, sql);
-    if (!result.ok) return undefined;
+    // A runner that cannot time finer than a millisecond answers `us: undefined`, and that is a
+    // missing reading rather than a fast one: returning the coarsened value would make τ = 1 for
+    // every sub-millisecond pair and pay the top band to each side.
+    if (!result.ok || result.us === undefined) return undefined;
     samples.push(result.us);
   }
   return cleanTimings(samples);
@@ -355,7 +364,13 @@ export async function openTimer(oracleScript: string, databaseRoot: string): Pro
   return {
     timer: async (db, sql) => {
       const result = await oracle.run(db, sql);
-      return { ok: result.ok, us: result.us ?? result.ms * 1000 };
+      // `oracle.py` sends `us` and a peer that predates the field sends whole milliseconds only.
+      // The second is not a timing this metric can use, so it is refused here rather than
+      // floored — the difference between "0 ms" and "0.4 ms" is the whole of τ.
+      return {
+        ok: result.ok,
+        us: result.usFromMilliseconds === true ? undefined : (result.us ?? result.ms * 1000),
+      };
     },
     close: () => oracle.close(),
   };

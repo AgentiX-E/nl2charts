@@ -63,6 +63,32 @@ cannot be argued with.
   condition — do not fire when the only axis is temporal, which is where 39 of the 98 losses live.
 
 ### Fixed
+- **The comparison table started at 73.2% and called it the top, while the field's top was 5.3pp
+  above it.** AskData's 78.49% dev EX lived only in the 600-question section, so the table sorted by
+  1,532-question dev EX began at SQLConductor and the paragraph under it read "10.9pp to the
+  leaderboard's top". Two claims were being made with one number: AskData trained nothing (GPT-4o,
+  eight or more calls, profiling + task-aligned linking + result-set vote), so 16.15pp to 78.49 is a
+  **method** gap, while 10.86pp to SQLConductor's 73.2 is what a fine-tuned Qwen3-8B policy buys.
+  The row is in the table now, the bullet states both gaps and which one is about method, and the
+  older "gap to published SOTA 9.2pp" line in the MAC-SQL section is corrected to 14.52pp.
+- **A test asserted the tenths digit of a microsecond reading, which is true nine times in ten.**
+  `expect(us % 1).not.toBe(0)` was meant to prove the stopwatch is not whole milliseconds, and it
+  failed on a full run the first time the clock landed on a round tenth — a ten-percent flaky test
+  asserting the clock's aliasing rather than the protocol. The invariant is now the one the protocol
+  guarantees: `us` is a tenth (`|us * 10 - round(us * 10)| < 1e-6`) and `ms` is a whole number.
+- **A peer that reported whole milliseconds was timed as if it had measured.** `oracle.py` sends
+  `us`, but the decoder's `us ?? ms * 1000` fallback turned a coarse clock into a number R-VES would
+  accept: every statement that fits inside a millisecond then reads the same on both sides, τ = 1,
+  and the reward table pays 1.25 to every system for a question it never timed. That is the defect
+  the `us` field was added to fix, reintroduced by the path kept for peers that predate it. The
+  decode now records `usFromMilliseconds`, the timer answers `us: undefined` when that flag is set,
+  and `measureVes` counts the case as `unmeasured` rather than as fastest. A real Python peer that
+  sends `ms` alone is the fixture.
+- **The coverage log printed a floor as if it were a reading, and a count as if it were a
+  percentage.** `pnpm bench:coverage` printed `bird-dev = 62.5` (the floor a rerun may not fall below)
+  next to documents that publish 62.34, and `text2vis top-1 = 664` next to a table that publishes
+  45.17%. Both are quotable lines, so both now carry the kind of number they printed — `(floor)`,
+  `(count)` — and the `bird-dev` line can no longer be copied into a report as the reading.
 - **`uncovered` was two gaps under one word, and the larger one was a missing cue rather than a
   missing mark.** Forty of the corpus's ninety histogram rows were published as `uncovered` — the
   outcome that means no mark leads with the family — while the product demonstrably draws them, with a

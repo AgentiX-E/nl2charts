@@ -3574,6 +3574,7 @@ of them with ours.
 
 | system | BIRD dev EX | model | trained | what it shares with us |
 | --- | --- | --- | --- | --- |
+| AskData | **78.49%** | GPT-4o | **no** | the split |
 | SQLConductor | **73.2%** | Qwen3-8B policy + Gemma4-31B actions | yes (SFT + GRPO) | the split |
 | CHASE-SQL | 73.0–73.01% | Gemini-1.5-Pro | selection agent fine-tuned | the split |
 | DeepEye-SQL | 70.6% | Qwen2.5-Coder-32B | yes | the split |
@@ -3595,15 +3596,20 @@ reading and every number in this table would otherwise be a cross-run difference
 differences used to be reported from this table — 11.3pp, 2.1–3.6pp, 5.5pp — and not one of them is
 a claim about the pipeline. The honest version of each is narrower:
 
-- **10.9pp to the leaderboard's top** (62.34 → 73.2) is a difference in model and training, not in
-  method. The top five rows run backbones this harness cannot call, and four of them were trained on
-  the task. A pipeline that is 11pp behind a trained Qwen3-8B policy has learned nothing about its
-  own prompts.
-- **2.1–3.6pp to the DeepSeek-family systems** (RSL-SQL 65.51, MSL-SQL 64.00) is the closest thing
-  here to a method comparison and still is not one: `deepseek-chat` today is not the `DeepSeek-v2`
-  RSL-SQL was built on, their candidate sets come from their own prompts, and both numbers were
-  produced by harnesses that execute and judge differently from this one. The gap is a lead, not a
-  measurement.
+- **16.15pp to the field's top** (62.34 → 78.49) is a gap to a system that trained nothing, and it is
+  the number this table exists to show. AskData profiles every column, summarises the profile in two
+  lengths, links schema by task alignment, draws three candidates and votes on result sets, over eight
+  or more calls with GPT-4o. The 10.86pp to SQLConductor (73.2) measures something else: a Qwen3-8B
+  policy with SFT and GRPO, i.e. what a trained backbone buys. Only the first comparison is about
+  method, and the table used to begin at 73.2 because AskData's row lived only in the 600-question
+  section below — a row 5.3pp above the next one cannot be dropped from a sorted table without
+  changing what "top" means. Three of the four rows under AskData run backbones this harness cannot
+  call, and three of them were trained on the task.
+- **3.17pp to RSL-SQL and 4.34pp to MSL-SQL** (65.51, 64.00) are the narrowest comparisons here, not
+  the closest in kind: RSL-SQL trained nothing, but `deepseek-chat` today is not the `DeepSeek-v2` it
+  was built on, its candidate set comes from its own prompts, and both numbers were produced by
+  harnesses that execute and judge differently from this one. Narrow is what makes the row a lead
+  worth chasing; it does not make it a measurement.
 - **5.5pp to a strong model's zero-shot baseline** measures the opposite of method: how much
   accuracy a bigger model buys, which is precisely the axis this project does not optimize for.
 
@@ -4158,7 +4164,8 @@ measurement, and it is the only competitor number in this document that is.
 | gap to a competitor we can run | **3.92pp** | from the shipped arm; 4.90pp from the four-call one |
 | SQLConductor, published | 73.2% | Qwen3-8B policy + Gemma4-31B, SFT + GRPO |
 | CHASE-SQL, published | 73.0% | Gemini-1.5-Pro, fine-tuned binary selector |
-| gap to published SOTA | **9.2pp** | 63.97 → 73.2; 5.3pp of it is model and training we do not have |
+| AskData, published | **78.49%** | GPT-4o, no training, 8+ calls: the field's top on dev EX as reported |
+| gap to published SOTA | **14.52pp** | 63.97 → 78.49; 4.55pp of it is the trained-systems step (73.2) and the rest is method |
 
 Two caveats, both of which the table needs. MAC-SQL's published dev number is not 67.89% — a pipeline
 scores what the harness around it scores, and the difference between their paper and this row is a
@@ -18008,6 +18015,15 @@ Four of nine carry a number, and two of those four are counts rather than accura
 are not a scandal; they are a to-do list with prices, which is the only kind of to-do list this
 document has ever been able to act on.
 
+Two things about the `number` column, both learned by watching it be misquoted. A printed line now
+carries the kind of number it printed — `= 62.5 (floor)`, `= 664 (count)` — because a floor is the
+minimum a rerun may land on and a count is not a percentage, and a line that printed either bare
+would be quoted as a reading it is not. And `BIRD dev` cites the floor (62.5), not the run: the
+published reading on that split is **62.34%** in run `41296610389`, and the floor sits 0.16pp *above*
+it because the floor was set from an earlier 63.0% reading of the same arm. The gate compares a rerun
+against `floor − tolerancePp` (4pp), so the 0.16pp is inside the band and does not flap; the number in
+this table is still the floor, and the reading is still 62.34%.
+
 **Why `R-VES` is instrumented rather than absent.** The metric is implemented and tested
 (`eval/bird/ves.ts`): the reward table, the `tau = time(gold) / time(predicted)` ratio, the
 median-absolute-deviation trim over repeated timings, and both normalisations the literature uses
@@ -18020,6 +18036,14 @@ the metric could exist at all, and it was found by writing the test rather than 
 > of its own stopwatch. The oracle now returns `us` from the same stopwatch, `ms` stays whole because
 > a timeout budget is written in whole milliseconds, and `timeRatio(0, 0)` is pinned to 1 by a test.
 
+**A peer that cannot resolve a millisecond is refused, not floored.** `us` is optional on the wire,
+and the decoder's fallback for a peer that omits it is `ms * 1000` — the coarse clock the field was
+added to replace. Applied silently, that fallback is the original defect wearing the fix's name: every
+statement that fits inside a millisecond reads the same on both sides, τ = 1, and the reward table
+pays its top band for a question nobody timed. The decode now records `usFromMilliseconds`, the timer
+answers `us: undefined` when that flag is set, `measureVes` counts the case as `unmeasured` rather than
+as fastest, and the fixture for it is a real Python peer that sends `ms` alone.
+
 ### The two normalisations, and which one the leaderboard numbers imply
 
 The leadership guide averages the reward over **all** questions (`100/N · Σ mᵢ·g(τᵢ)`), while one
@@ -18028,7 +18052,7 @@ leaderboard decides it: OpenSearch-SQL is filed at 72.28 EX and 69.36 R-VES, a r
 which is what averaging over all questions produces when a correct statement averages slightly under
 1.0 on the reward table. Dividing by the valid count would put R-VES *above* EX for any system whose
 correct answers are mostly at par, and no published row does that. `rvesOf` therefore reports `rves`
-(the leaderboard's normalisation) and `rvesByValid` beside it, so the choice is visible in the
+(the leaderboard's normalisation) and `rvesOfValid` beside it, so the choice is visible in the
 artifact rather than buried in an instrument.
 
 ### Where each of the five absent rows would have to go

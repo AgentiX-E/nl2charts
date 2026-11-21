@@ -21,17 +21,19 @@ export interface OracleResult {
   /** Wall clock of the statement, rounded down to a whole millisecond: the timeout unit. */
   readonly ms: number;
   /**
-   * The same clock at microsecond resolution. Optional because a peer that predates it answers
-   * with `ms` alone, and a required field would make every fixture in the suite write a number the
-   * decoder is supposed to derive.
-   * The same clock at microsecond resolution.
-   *
-   * An efficiency ratio needs this: most statements on BIRD finish inside a millisecond, so two
-   * `ms` readings of 0 describe a ratio of 0/0. `us` is the field R-VES is computed from, and it
-   * falls back to `ms * 1000` for a peer that predates it rather than reporting a zero time as a
-   * free statement.
+   * The same clock at microsecond resolution, and the reason an efficiency ratio can exist at all:
+   * most statements on BIRD finish inside a millisecond, so two `ms` readings of 0 describe a ratio
+   * of 0/0. Optional because a peer that predates it answers with `ms` alone.
    */
   readonly us?: number;
+  /**
+   * True when the peer sent no `us`, so the value in `us` above is `ms * 1000` rather than a clock.
+   *
+   * The two are not interchangeable: a millisecond-coarse reading makes τ = 1 for every pair that
+   * fits inside one millisecond, which pays the reward table's top band to every system equally.
+   * The field is recorded so a caller can refuse the ratio instead of publishing it.
+   */
+  readonly usFromMilliseconds?: boolean;
 }
 
 interface Pending {
@@ -71,6 +73,7 @@ export function createOracle(script: string, databaseRoot: string): Oracle {
       rows: payload.rows ?? [],
       ms: payload.ms ?? 0,
       us: payload.us ?? (payload.ms ?? 0) * 1000,
+      ...(payload.us === undefined ? { usFromMilliseconds: true } : {}),
       ...(payload.error === undefined ? {} : { error: payload.error }),
       // `oracle.py` names the failure and its code, and `run.ts` turns the name into a
       // repair hint. Both fields were declared here and dropped on the floor, so the hint

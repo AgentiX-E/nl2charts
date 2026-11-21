@@ -166,6 +166,41 @@ describe('the table it prints', () => {
     const lines = describeCoverage([row({ id: 'a' })], reader(TREE));
     expect(lines[0]).toContain('= —');
   });
+
+  it('says a floor is a floor, because 62.5 and 62.34 are different claims', () => {
+    // The log line is what a reader quotes into a document. `bird-dev` cites the floor a rerun may
+    // not fall below; a line that printed `62.5` bare would put a number in a report that no run
+    // produced, and the published reading on that split is 62.34.
+    const lines = describeCoverage([row({
+      id: 'f',
+      status: 'measured',
+      gap: '',
+      reading: { file: 'eval/baseline/bird.json', path: ['floors', 'dev', 'select-mixed'], kind: 'floor', unit: 'percent', note: '' },
+    })], reader(TREE));
+    expect(lines[0]).toContain('= 62.5 (floor)');
+  });
+
+  it('says a count is a count, so 664 is never read as 664 percent', () => {
+    const lines = describeCoverage([row({
+      id: 'c',
+      status: 'measured',
+      gap: '',
+      reading: { file: 'eval/text2vis/baseline.json', path: ['top1'], kind: 'run', unit: 'count', note: '' },
+    })], reader(TREE));
+    expect(lines[0]).toContain('= 664 (count)');
+  });
+
+  it('leaves an observed percentage unqualified', () => {
+    const lines = describeCoverage([row({
+      id: 'r',
+      status: 'measured',
+      gap: '',
+      reading: { file: 'eval/baseline/bird.json', path: ['floors', 'dev', 'select-mixed'], kind: 'run', unit: 'percent', note: '' },
+    })], reader(TREE));
+    expect(lines[0]).toContain('= 62.5');
+    expect(lines[0]).not.toContain('(floor)');
+    expect(lines[0]).not.toContain('(count)');
+  });
 });
 
 describe('the defaults the workflow relies on', () => {

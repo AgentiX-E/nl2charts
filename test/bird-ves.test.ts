@@ -352,9 +352,24 @@ describe('the tool', () => {
   });
 });
 
+/**
+ * A peer that speaks the protocol and reports whole milliseconds only.
+ *
+ * Every `oracle.py` before this round looked like this, and a harness that reads `ms * 1000` when
+ * `us` is absent treats the coarsening as a measurement rather than as a missing instrument.
+ */
+const COARSE_PEER = `
+import json, sys
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    request = json.loads(line)
+    print(json.dumps({"id": request["id"], "ok": True, "columns": [], "rows": [[1]], "ms": 1}), flush=True)
+`;
+
 describe('the real runner', () => {
-  it('times a statement through the same Python process the benchmark uses', async () => {
-    // No mock: a real SQLite file, a real interpreter, the protocol the evaluation speaks. The unit
+  it('times a statement through the same Python process the benchmark uses', async () => {    // No mock: a real SQLite file, a real interpreter, the protocol the evaluation speaks. The unit
     // being tested is the adapter's own arithmetic — `us` where the peer sent it, `ms * 1000` where
     // it did not — and a fake would decide that answer for us.
     const root = mkdtempSync(join(tmpdir(), 'nl2charts-ves-runner-'));
@@ -373,6 +388,37 @@ describe('the real runner', () => {
       await close();
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it('refuses to time a peer that reports whole milliseconds, rather than paying 1.25 to everyone', async () => {
+    // A peer that sends `ms` and no `us` cannot resolve this corpus: most BIRD statements finish
+    // inside a millisecond, both sides then read the same integer, τ = 1, and the reward table pays
+    // its top band to every system. `undefined` is the reading that says "not measurable"; the case
+    // is counted as unmeasured instead of being floored at a whole millisecond.
+    const root = mkdtempSync(join(tmpdir(), 'nl2charts-ves-coarse-'));
+    const script = join(root, 'coarse_oracle.py');
+    writeFileSync(script, COARSE_PEER);
+    const { timer, close } = await openTimer(script, root);
+    try {
+      const result = await timer('shop', 'select 1');
+      expect(result.ok).toBe(true);
+      expect(result.us).toBeUndefined();
+    } finally {
+      await close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('counts a statement whose clock cannot resolve it as unmeasured, not as fastest', async () => {
+    const reading = await measureVes(
+      [{ id: '1', db: 'shop', gold: 'select 1', predicted: 'select 1', correct: true }],
+      async () => ({ ok: true, us: undefined }),
+      1,
+    );
+    expect(reading.cases).toBe(1);
+    expect(reading.valid).toBe(0);
+    expect(reading.unmeasured).toBe(1);
+    expect(reading.rves).toBe(0);
   });
 
   it('sets the exit code only when the module is the entry point', async () => {

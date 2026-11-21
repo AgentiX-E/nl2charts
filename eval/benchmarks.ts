@@ -1,7 +1,7 @@
 /**
  * Which leaderboards this repository can put a number on, and which it cannot — as data a gate reads.
  *
- * Every claim of the form "we are 10.9pp behind the leader" rests on two facts that are usually
+ * Every claim of the form "we are 16.15pp behind the leader" rests on two facts that are usually
  * prose: the corpus was scored, and the metric the leaderboard ranks by was computed. Prose rots.
  * A number is copied into a document from a run three rounds old, the harness that produced it is
  * deleted, and the sentence survives the thing it described. This file is the other way round: each
@@ -123,7 +123,9 @@ export const BENCHMARKS: readonly Benchmark[] = [
       path: ['floors', 'dev', 'select-mixed'],
       kind: 'floor',
       unit: 'percent',
-      note: 'the floor; the published reading on this split is 62.34% in run 41296610389',
+      note: 'the floor; the published reading on this split is 62.34% in run 41296610389 — 16.15pp '
+        + 'behind the field top (AskData 78.49, training-free, GPT-4o, 8+ calls) and 10.86pp behind '
+        + 'the top trained system (SQLConductor 73.2), which are two different claims',
     },
     gap: '',
   },
@@ -288,13 +290,28 @@ export function checkCoverage(rows: readonly Benchmark[], read: Reader): string[
   return issues;
 }
 
+/**
+ * Which kind of number a line printed.
+ *
+ * A log line is what a reader quotes into a document, and the number on it means three different
+ * things: a `run` is an observation, a `floor` is the minimum a rerun may land on, a `census`/`count`
+ * is a tally. `bird-dev` cites the floor (62.5), while the published reading on that split is 62.34;
+ * printing either without the word that says which is which is how the two get confused.
+ */
+function qualifier(reading: Reading): string {
+  if (reading.kind === 'floor') return ' (floor)';
+  if (reading.kind === 'census' || reading.unit === 'count') return ' (count)';
+  return '';
+}
+
 /** The table, as the lines a workflow log prints and a document quotes. */
 export function describeCoverage(rows: readonly Benchmark[], read: Reader): string[] {
   const lines: string[] = [];
   for (const domain of ['text2sql', 'text2viz'] as const) {
     for (const row of rows.filter((entry) => entry.domain === domain)) {
-      const value = row.reading === undefined ? undefined : resolveReading(row.reading, read);
-      const shown = value === undefined ? '—' : `${value}`;
+      const reading = row.reading;
+      const value = reading === undefined ? undefined : resolveReading(reading, read);
+      const shown = reading === undefined || value === undefined ? '—' : `${value}${qualifier(reading)}`;
       lines.push(`COVERAGE ${domain} ${row.id}: ${row.status}, ${row.metrics.join('/')} = ${shown}`);
     }
   }
