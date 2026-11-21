@@ -7590,6 +7590,111 @@ export interface PooledCandidate {
   readonly source: string;
 }
 
+/**
+ * What an arm had already recorded when a guard refused to publish it.
+ *
+ * The rows and not the verdict: a guard fires *because* the arm's table must not be read as a
+ * score, and the rows are what the next dispatch needs in order to say why. Zero rows is a
+ * reading of its own — an arm refused before the first case is a different failure from one
+ * refused at case 300 — so an empty list is carried rather than dropped.
+ */
+export interface ArmPartial {
+  readonly name: string;
+  readonly runs: readonly CaseRun[];
+  /** The candidates this arm drew, in case a later dispatch wants to price the pool it refused. */
+  readonly pool: ReadonlyMap<string, readonly PooledCandidate[]>;
+}
+
+/**
+ * Attach a refused arm's rows to the error that refused it.
+ *
+ * Idempotent by design: two guards can refuse the same arm (the per-case breaker prints a
+ * verdict, the table guard reads it), and the attachment made where `runs` exists is the one
+ * that carries them. Rewriting it at an outer layer would replace 600 rows with the zero the
+ * outer layer can see.
+ */
+export function withArmPartial(error: unknown, partial: ArmPartial): Error {
+  const refused = error instanceof Error ? error : new Error(String(error));
+  if (partialOf(refused) !== undefined) return refused;
+  Object.defineProperty(refused, 'partial', { value: partial, enumerable: false, configurable: true });
+  return refused;
+}
+
+/** The rows a refusal carries, or nothing when the error was not a refused arm. */
+export function partialOf(error: unknown): ArmPartial | undefined {
+  if (typeof error !== 'object' || error === null) return undefined;
+  const carried = (error as { partial?: unknown }).partial;
+  if (typeof carried !== 'object' || carried === null) return undefined;
+  const { name, runs } = carried as ArmPartial;
+  if (typeof name !== 'string' || !Array.isArray(runs)) return undefined;
+  return carried as ArmPartial;
+}
+
+/**
+ * Write what a refused arm had, then rethrow the refusal unchanged.
+ *
+ * The order is the point. The guard's message is the finding and it must reach the workflow log
+ * exactly as the guard wrote it — so the error is rethrown, not wrapped in a summary, and the job
+ * fails. But the artifact is written *first*, because the rows it holds are the evidence for the
+ * message and the process is the only thing keeping them: on `44905985381` the throw took a
+ * twenty-four-minute table with it and the file on disk said `cases: 0`.
+ *
+ * `never` is the signature's second point. A caller cannot accidentally continue a run that a
+ * guard stopped, because this function does not return.
+ */
+export function saveRefusal(
+  settings: BirdSettings,
+  report: Record<string, unknown>,
+  outcomes: ReadonlyMap<string, readonly CaseRun[]>,
+  error: unknown,
+  questions: readonly BirdQuestion[],
+  log: (line: string) => void = console.log,
+): never {
+  const partial = partialOf(error);
+  // Not a refused arm: a scheduling error, an unknown arm, a pool that was never generated. Those
+  // have no rows to save, and inventing an artifact for them would suggest a run happened.
+  if (partial === undefined) throw error;
+  const saved = partialReport(report, outcomes, partial, questions, questions.length);
+  writeArtifact(settings, saved, log);
+  log(
+    `artifact: partial — ${partial.name} was refused after ${String(partial.runs.length)} of ` +
+      `${String(questions.length)} cases; the rows it had are in the file and no score is claimed`,
+  );
+  throw error;
+}
+
+/**
+ * The artifact a refused run leaves: every row the loop had, under a key that says it is partial.
+ *
+ * `arms` stays the list of arms that *finished* — a refused arm has no row, because its row is
+ * the accuracy the guard refused to compute — and the refused arm's cases are still in `cases`
+ * under its own label, which is what makes the file usable for the post-mortem. `total` is
+ * omitted when the caller does not know the denominator rather than guessed, because a share of
+ * a partial table is the one number this file must not imply.
+ */
+export function partialReport(
+  base: Record<string, unknown>,
+  outcomes: ReadonlyMap<string, readonly CaseRun[]>,
+  partial: ArmPartial,
+  questions: readonly BirdQuestion[] = [],
+  total?: number,
+): Record<string, unknown> {
+  const table = new Map(outcomes);
+  table.set(partial.name, partial.runs);
+  return {
+    ...base,
+    arms: base.arms ?? [],
+    cases: caseRows(table, questions),
+    partial: {
+      arm: partial.name,
+      cases: partial.runs.length,
+      armsDone: Array.isArray(base.arms) ? base.arms.length : 0,
+      ...(total === undefined ? {} : { total }),
+      reason: 'the run ended when this arm was refused',
+    },
+  };
+}
+
 /** What `runArm` needs from outside. */
 export interface ArmIo {
   readonly oracle: Oracle;
@@ -8950,34 +9055,44 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
   // computed from the provider's mood. The table guard below would say the same thing an hour
   // later; this says it at call forty.
   const stopped = breaker.verdict();
-  if (stopped !== null) throw new Error(stopped);
   const runs = results.filter((run): run is CaseRun => run !== undefined);
-  // Before any number is printed: an arm that never reached the database has no
-  // accuracy, and publishing 0% would hide the provider's message behind a score.
-  assertArmProducedResults(name, runs);
-  assertFailureRate(name, runs);
-  // `engine` refusals are deliberately *not* guarded in this block: a statement that will not run
-  // is the model's output quality, which is what the arm is measuring. The endpoint rule above is
-  // an infrastructure verdict and belongs in a guard; this one belongs in the report. A run whose
-  // every candidate the engine refused (a read-only database and a prompt that writes INSERTs) is
-  // a 0% reading, not a broken harness -- the first version of this split failed that case and the
-  // suite said so.
-  // ...and a bug in the runner is not a wrong answer: it fails the arm outright.
-  assertHarnessClean(name, runs);
-  // ...then every lever this arm declares, from the one table that says which levers exist. The
-  // chain that used to live here could be widened by adding an arm and forgetting a guard; a loop
-  // over `MECHANISMS` cannot, and `test/bird-mechanisms.test.ts` proves each row's guard still
-  // refuses a bank in which its mechanism never acted.
-  for (const mechanism of mechanismsOf(arm)) {
-    mechanism.guard({ armName: name, arm, runs, sampledFor: prepared.sampledFor });
+  try {
+    if (stopped !== null) throw new Error(stopped);
+    // Before any number is printed: an arm that never reached the database has no
+    // accuracy, and publishing 0% would hide the provider's message behind a score.
+    assertArmProducedResults(name, runs);
+    assertFailureRate(name, runs);
+    // `engine` refusals are deliberately *not* guarded in this block: a statement that will not run
+    // is the model's output quality, which is what the arm is measuring. The endpoint rule above is
+    // an infrastructure verdict and belongs in a guard; this one belongs in the report. A run whose
+    // every candidate the engine refused (a read-only database and a prompt that writes INSERTs) is
+    // a 0% reading, not a broken harness -- the first version of this split failed that case and the
+    // suite said so.
+    // ...and a bug in the runner is not a wrong answer: it fails the arm outright.
+    assertHarnessClean(name, runs);
+    // ...then every lever this arm declares, from the one table that says which levers exist. The
+    // chain that used to live here could be widened by adding an arm and forgetting a guard; a loop
+    // over `MECHANISMS` cannot, and `test/bird-mechanisms.test.ts` proves each row's guard still
+    // refuses a bank in which its mechanism never acted.
+    for (const mechanism of mechanismsOf(arm)) {
+      mechanism.guard({ armName: name, arm, runs, sampledFor: prepared.sampledFor });
+    }
+    return {
+      name,
+      runs,
+      row: armReportRow(prepared, arm, runs, name),
+      line: armSummaryLine(name, arm, runs),
+      pool: collected,
+    };
+  } catch (error) {
+    // The rows ride out on the refusal. A guard fires because the arm's table must not be read as
+    // a score, and until this line existed the throw also deleted the table: a six-hundred-case,
+    // twenty-four-minute dispatch (`44905985381`) ended with an artifact that said `cases: 0`.
+    // Publishing is still refused -- the job fails, the guard's message is unchanged -- but the
+    // evidence survives, which is the difference between a bug that costs a round and one that
+    // costs the round's data as well.
+    throw withArmPartial(error, { name, runs, pool: collected });
   }
-  return {
-    name,
-    runs,
-    row: armReportRow(prepared, arm, runs, name),
-    line: armSummaryLine(name, arm, runs),
-    pool: collected,
-  };
 }
 
 /**
@@ -9790,6 +9905,16 @@ export function writeArtifact(
  * the whole harness against a real dataset.
  */
 export function evaluateGate(report: Record<string, unknown>): string[] {
+  // A partial artifact is a post-mortem, not a reading, and the only verdict that applies to it is
+  // that it is partial. Checked before the rates are read: `gold` and `controls` describe the
+  // corpus, so they would pass, and every arm-level check would then be evaluating a table that
+  // stopped where the refusal happened. One problem, and it is the true one.
+  const partial = report.partial as { arm?: string; cases?: number } | undefined;
+  if (partial !== undefined) {
+    return [
+      `the artifact is partial: arm ${String(partial.arm)} was refused after ${String(partial.cases ?? 0)} cases, so no score in it can be read`,
+    ];
+  }
   const goldRate = (report.gold as { runnableRate: number }).runnableRate;
   const controls = report.controls as Controls;
   const arms = report.arms as { arm: string; accuracy: number }[];
@@ -9995,6 +10120,14 @@ export async function runBird(settings: BirdSettings, options: BirdRunOptions = 
         provider,
         ...(second === undefined ? {} : { second }),
         ...(poolFor === undefined ? {} : { poolFor }),
+      }).catch((error: unknown) => {
+        // A refused arm used to take the whole table with it. The guard is right to refuse — its
+        // message is the finding — but the rows it refused are the evidence for the message, and
+        // the artifact is the only place they can outlive the process: **the artifact is saved and
+        // the job still fails**, and `partial` is what stops the saved file from being read as a
+        // shorter run.
+        report.arms = armReports;
+        saveRefusal(settings, report, outcomes, error, prepared.cases, log);
       });
       // Keyed by the requested name, not the resolved one: an A/A duplicate resolves to
       // the same Arm, and keying by that overwrote the first run with the second, which

@@ -7,7 +7,7 @@
  * arm loop until this round, so the only way to ask "does the gate fire on a 97% gold rate"
  * was to find a dataset that produced one.
  */
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -50,6 +50,8 @@ import {
   mergePurposes,
   offeredCandidates,
   pairedComparisons,
+  partialOf,
+  partialReport,
   pairwiseFunnel,
   poolReadOf,
   reasoningFieldOf,
@@ -59,12 +61,14 @@ import {
   resolveSettings,
   reusePool,
   sampleBlockFunnel,
+  saveRefusal,
   secondModelRoles,
   selectorRuleOf,
   spendOf,
   thinkingShare,
+  withArmPartial,
 } from '../eval/bird/run.js';
-import type { Arm, CaseRun, PreparedRun } from '../eval/bird/run.js';
+import type { Arm, ArmPartial, CaseRun, PreparedRun } from '../eval/bird/run.js';
 
 describe('where a run points', () => {
   it('derives every path from the split, and lets the environment move each one', () => {
@@ -2356,5 +2360,170 @@ describe('what the artifact says about caching', () => {
     );
     expect(merged.generate).toEqual({ calls: 1, prompt: 900, completion: 594, chars: 3000, unbilled: 0, reasoning: 540 });
     expect(merged.select).toEqual({ calls: 1, prompt: 100, completion: 1, chars: 400, unbilled: 0 });
+  });
+});
+
+/**
+ * What a refused arm leaves behind.
+ *
+ * The failure this file guards is not a wrong number — it is no number. On `44905985381` the
+ * arm loop ran six hundred cases for twenty-four minutes, the last arm's guard refused to
+ * publish it, and the throw took the in-memory table with it: the artifact on disk said
+ * `cases: 0`, and the only record of the run was the log's per-case lines. Two answers were
+ * available and both are wrong: publish the arm as if it passed (a guard exists because that is
+ * false) or lose the rows (the guard's reason is then the only thing the round produced). The
+ * third is here — the rows are attached to the refusal, written, and the job still fails.
+ */
+describe('what a refused arm leaves behind', () => {
+  const run = (id: string, passed: boolean): CaseRun => ({
+    id,
+    passed,
+    predicted: 'select 1',
+    strict: false,
+    attempts: 1,
+    calls: 1,
+  });
+  const partialOfArm = (name: string, ids: readonly string[]): ArmPartial => ({
+    name,
+    runs: ids.map((id) => run(id, true)),
+    pool: new Map(),
+  });
+
+  it('carries the rows on the error and keeps the message a reader needs', () => {
+    // The message is what the workflow log shows, so it has to survive verbatim: a wrapper that
+    // rewrote it would hide which guard fired.
+    const partial = partialOfArm('select-cross', ['1', '2']);
+    const refused = withArmPartial(new Error('arm select-cross answered 0 of 600 cases'), partial);
+    expect(refused.message).toBe('arm select-cross answered 0 of 600 cases');
+    expect(partialOf(refused)).toBe(partial);
+  });
+
+  it('wraps a refusal that was not an Error, because a thrown string has no place to hang rows', () => {
+    const partial = partialOfArm('names', ['1']);
+    const refused = withArmPartial('the engine refused every case', partial);
+    expect(refused).toBeInstanceOf(Error);
+    expect(refused.message).toBe('the engine refused every case');
+    expect(partialOf(refused)?.name).toBe('names');
+  });
+
+  it('keeps zero rows rather than treating an empty arm as nothing to carry', () => {
+    // An arm refused at case zero is the one case where the count is the whole finding: the
+    // artifact has to be able to say "it stopped before the first row", which an absent partial
+    // would render as "the loop never reached this arm".
+    const partial = partialOfArm('select-cross-diverse-pooled-vote', []);
+    const refused = withArmPartial(new Error('no rows'), partial);
+    expect(partialOf(refused)?.runs).toEqual([]);
+  });
+
+  it('does not let an outer wrapper overwrite the rows an inner one attached', () => {
+    // Two layers can refuse the same arm — the per-case breaker prints a verdict, then the table
+    // guard reads it. The first attachment is the one made where `runs` existed.
+    const inner = partialOfArm('names', ['1', '2', '3']);
+    const outer = partialOfArm('names', []);
+    const refused = withArmPartial(withArmPartial(new Error('stopped'), inner), outer);
+    expect(partialOf(refused)?.runs).toHaveLength(3);
+  });
+
+  it('reads nothing off an error that carries no rows', () => {
+    expect(partialOf(new Error('an ordinary failure'))).toBeUndefined();
+    expect(partialOf('a string')).toBeUndefined();
+    expect(partialOf(undefined)).toBeUndefined();
+  });
+
+  it('writes the finished arms and the refused arm into one table, and says it is partial', () => {
+    const base = { run: '44905985381', arms: [{ arm: 'names' }, { arm: 'evidence' }], cases: [] };
+    const outcomes = new Map<string, readonly CaseRun[]>([
+      ['names', [run('1', true), run('2', false)]],
+      ['evidence', [run('1', true), run('2', true)]],
+    ]);
+    const report = partialReport(base, outcomes, partialOfArm('select-cross', ['1', '2', '3']), [
+      { question_id: 1, db_id: 'shop', difficulty: 'simple', question: 'q', evidence: '' },
+    ] as never);
+    expect((report.cases as unknown[]).length).toBe(7);
+    expect((report.cases as { arm: string }[]).map((row) => row.arm)).toEqual([
+      'names',
+      'names',
+      'evidence',
+      'evidence',
+      'select-cross',
+      'select-cross',
+      'select-cross',
+    ]);
+    expect(report.partial).toMatchObject({ arm: 'select-cross', cases: 3, armsDone: 2 });
+    expect(report.partial).not.toHaveProperty('total');
+  });
+
+  it('keeps what the report already knew, because a partial artifact is still evidence', () => {
+    const base = { fingerprint: { digest: 'abc' }, gold: { runnableRate: 1 }, arms: [], cases: [] };
+    const report = partialReport(base, new Map(), partialOfArm('names', ['1']));
+    expect(report.fingerprint).toEqual({ digest: 'abc' });
+    expect(report.gold).toEqual({ runnableRate: 1 });
+  });
+
+  it('takes the denominator from the caller when it knows it, and omits it when it does not', () => {
+    // A share of a partial table is a share of whatever the loop reached, so the writer has to be
+    // able to say "3 of 600" — and has to be able to stay silent rather than invent a 600.
+    const withTotal = partialReport({ arms: [], cases: [] }, new Map(), partialOfArm('names', ['1']), undefined, 600);
+    expect((withTotal.partial as { total?: number }).total).toBe(600);
+    const without = partialReport({ arms: [], cases: [] }, new Map(), partialOfArm('names', ['1']));
+    expect(without.partial).not.toHaveProperty('total');
+  });
+
+  it('refuses to grade a partial artifact instead of reading a score off half a table', () => {
+    // The dangerous reading is not "the run failed" — the job's exit code says that. It is a
+    // number: 3 of 3 cases correct is 100% of a table that was never collected.
+    const report = partialReport(
+      {
+        gold: { runnableRate: 1 },
+        controls: { selfConsistency: 1, negativeFalseMatches: 0 },
+        arms: [],
+        cases: [],
+      },
+      new Map(),
+      partialOfArm('names', ['1']),
+    );
+    const problems = evaluateGate(report);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain('partial');
+    expect(problems[0]).toContain('names');
+  });
+
+  it('writes the file before it rethrows, so the rows outlive the process', () => {
+    // The whole point, as a file on disk: the refusal reaches the caller unchanged and the table
+    // it refused is readable afterwards with no score attached to it.
+    const root = mkdtempSync(join(tmpdir(), 'bird-partial-'));
+    try {
+      const out = join(root, 'eval-out.json');
+      const settings = resolveSettings({ BIRD_OUT: out }, [], root);
+      const refused = withArmPartial(new Error('arm select-cross answered 0 of 600 cases'), partialOfArm('select-cross', ['1', '2']));
+      const lines: string[] = [];
+      expect(() =>
+        saveRefusal(settings, { arms: [{ arm: 'names' }] }, new Map(), refused, [], (line) => lines.push(line)),
+      ).toThrow('arm select-cross answered 0 of 600 cases');
+      const written = JSON.parse(readFileSync(out, 'utf8')) as Record<string, unknown>;
+      expect(written.partial).toMatchObject({ arm: 'select-cross', cases: 2, armsDone: 1, total: 0 });
+      expect((written.cases as { arm: string }[]).map((row) => row.arm)).toEqual(['select-cross', 'select-cross']);
+      // The line a reader of the workflow log sees, and the reason it says "no score": the file is
+      // there to be read, not to be cited.
+      expect(lines.join('\n')).toContain('artifact: partial — select-cross was refused after 2 of 0 cases');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('writes nothing when the failure was not a refused arm', () => {
+    // An unknown arm or an unscheduled pool has no rows. An artifact for it would claim a run that
+    // never started, and the next reader would have to tell that apart from an arm refused at case
+    // zero — which is a real reading with a real zero in it.
+    const root = mkdtempSync(join(tmpdir(), 'bird-partial-'));
+    try {
+      const out = join(root, 'eval-out.json');
+      const settings = resolveSettings({ BIRD_OUT: out }, [], root);
+      const scheduling = new Error('arm select-cross reuses the pool of select-decompose, which is not scheduled before it');
+      expect(() => saveRefusal(settings, { arms: [] }, new Map(), scheduling, [], () => undefined)).toThrow(scheduling);
+      expect(() => readFileSync(out, 'utf8')).toThrow();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
