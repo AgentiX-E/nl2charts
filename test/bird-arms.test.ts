@@ -1096,6 +1096,17 @@ describe('the decomposition lever', () => {
     expect(declaresDecomposition({})).toBe(false);
   });
 
+  it('does not read the pool of a pooled arm as a prompt it writes', () => {
+    // A pooled arm generates nothing: its `mixed` list names the candidates it re-reads. Counting a
+    // `decompose` there as a declaration made the guard fire on `select-cross-diverse-pooled-vote`
+    // after its 600 cases had run, and the throw discarded the whole four-arm artifact.
+    expect(declaresDecomposition({ mixed: DC_SOURCES, pool: 'select-dc' })).toBe(false);
+    expect(declaresDecomposition({ mixed: DC_SOURCES })).toBe(true);
+    // An explicit `decompose` field is still a declaration on any arm: it says this arm asks,
+    // whatever else it reads.
+    expect(declaresDecomposition({ decompose: true, mixed: DC_SOURCES, pool: 'select-dc' })).toBe(true);
+  });
+
   it('counts the cases that asked, not the cases that ran', () => {
     // A candidate that never arrived asked for nothing; folding those into the share
     // would blame the prompt for the endpoint.

@@ -5180,7 +5180,13 @@ export function assertMaskingFired(
 }
 
 /** True when this arm asks any of its candidates to decompose. */
-export function declaresDecomposition(arm: Pick<Arm, 'decompose' | 'mixed'>): boolean {
+export function declaresDecomposition(arm: Pick<Arm, 'decompose' | 'mixed' | 'pool'>): boolean {
+  // A pooled arm's `mixed` list names the pool it *reads*, not the prompts it writes: it generates
+  // nothing, so a `decompose` in that list is a claim about another arm's candidates. Reading it as
+  // a declaration made the guard fire on `select-cross-diverse-pooled-vote` after its 600 cases had
+  // run — "the prompt was never asked to decompose" was true and irrelevant, and the throw took the
+  // whole four-arm run with it. `pool` is the field that says which of the two meanings applies.
+  if (arm.pool !== undefined) return arm.decompose === true;
   return arm.decompose === true || (arm.mixed ?? []).some((source) => parseMixedSource(source).arm === 'decompose');
 }
 
