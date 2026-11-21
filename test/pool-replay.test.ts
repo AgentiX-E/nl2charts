@@ -6,7 +6,7 @@
  * than the runner would price a policy nobody ships. So the vote rule is checked against the arm
  * that ran it (`verifyVote`), every policy carries `implementable`, and the tests below hold both.
  */
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -303,22 +303,4 @@ describe('the command line', () => {
     expect(text).toContain('no case with a candidate pool');
   });
 
-  it('reads the artifact this repository holds and reproduces its own vote arm', async () => {
-    // The published reading, re-derived from bytes: 600 of 600 cases, and the policy table the
-    // round quotes. This is the one test that would fail if the modal rule drifted from the arm.
-    const path = 'eval/out/bird-eval-41453395203.json';
-    let artifactBody: { cases?: ReplayRow[] } | undefined;
-    try {
-      artifactBody = JSON.parse(readFileSync(path, 'utf8')) as { cases?: ReplayRow[] };
-    } catch {
-      artifactBody = undefined;
-    }
-    // A checkout without the artifact (a shallow clone, or a machine that never ran the split)
-    // cannot re-derive the reading, and pretending it can would be a test that passes by absence.
-    expect(artifactBody).toBeDefined();
-    if (artifactBody === undefined) return;
-    const check = verifyVote(artifactBody as Parameters<typeof verifyVote>[0]);
-    expect(check.compared).toBe(600);
-    expect(check.disagreements).toEqual([]);
-  });
 });

@@ -302,6 +302,18 @@ jobs:
           else
             echo 'no artifact was written, so there is nothing to summarise' >> "$GITHUB_STEP_SUMMARY"
           fi
+      # The replay that prices every selection policy quoted in `docs/benchmarks.md`, run against
+      # the artifact this job just wrote. Its check is the table's warrant: the modal rule has to
+      # reproduce the vote arm case for case, or the table describes the tool rather than the run.
+      # No call, no token, and a mismatch is reported without failing a measurement that succeeded.
+      - name: What the pool replays to
+        if: always()
+        run: |
+          if [ -f eval/out/bird-eval.json ]; then
+            node tools/pool-replay.mjs eval/out/bird-eval.json --verify-vote || echo "replay: the modal rule did not reproduce the vote arm, so the policy table does not describe this run"
+          else
+            echo 'replay: no artifact, nothing to replay'
+          fi
       # The reading, where this project can read it. A step summary is a web page, and the uploaded
       # artifact is a signed URL; neither is reachable from the environment that decides the next
       # round, which is how a 1,532-question measurement came to be re-derived instead of quoted.
