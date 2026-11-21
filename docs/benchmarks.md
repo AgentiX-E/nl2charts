@@ -18005,31 +18005,78 @@ reader can act on, and a missing row for a leaderboard the plan names.
 | Spider 1.0 dev | 1,034 questions, 20 databases | EM, EX | **absent** | — |
 | BIRD Mini-Dev | 498 questions, 11 databases | EX | measured | 56.0 (floor) |
 | BIRD dev | 1,532 scored questions | EX | measured | 62.5 (floor) |
-| BIRD dev | the same questions | R-VES | **instrumented** | — |
+| BIRD dev | the same questions | R-VES | **partial** | 56.56 over 600 of 1,532 questions |
 | Text2Vis | 1,470 scored rows | top-1 | measured | 664 |
 | Text2Vis | the same rows | render validity | measured | 1,418 figures |
 | nvBench 2.0 | 7,878 queries / 24,076 visualizations | F1@3, F1@5 | **absent** | — |
 | VisCodeBench | 2,672 samples (843 / 805 / 1,024) | seven, incl. displayed-data similarity | **absent** | — |
 
-Four of nine carry a number, and two of those four are counts rather than accuracies. The other five
-are not a scandal; they are a to-do list with prices, which is the only kind of to-do list this
-document has ever been able to act on.
+Four of nine carry a number over the denominator their leaderboard reports, and two of those four are
+counts rather than accuracies. A fifth — R-VES — carries a number over 600 of its leaderboard's 1,532
+questions, which is a real reading and not that row, so the table states the denominator rather than
+letting the reader assume one. The other four are not a scandal; they are a to-do list with prices,
+which is the only kind of to-do list this document has ever been able to act on.
 
 Two things about the `number` column, both learned by watching it be misquoted. A printed line now
-carries the kind of number it printed — `= 62.5 (floor)`, `= 664 (count)` — because a floor is the
-minimum a rerun may land on and a count is not a percentage, and a line that printed either bare
-would be quoted as a reading it is not. And `BIRD dev` cites the floor (62.5), not the run: the
+carries the kind of number it printed — `= 62.5 (floor)`, `= 664 (count)`, `= 56.56 (600 of 1532)` —
+because a floor is the minimum a rerun may land on, a count is not a percentage, and a rate over a
+subset is not a rate over the split. And `BIRD dev` cites the floor (62.5), not the run: the
 published reading on that split is **62.34%** in run `41296610389`, and the floor sits 0.16pp *above*
 it because the floor was set from an earlier 63.0% reading of the same arm. The gate compares a rerun
-against `floor − tolerancePp` (4pp), so the 0.16pp is inside the band and does not flap; the number in
-this table is still the floor, and the reading is still 62.34%.
+against `floor − tolerance`, where the tolerance is no longer one constant: 4pp was measured at
+n=239, and at 1,532 questions the same σ-multiple is **1.58pp**, so the 0.16pp is still inside the
+band and the number in this table is still the floor. What changed is that a dev run can no longer
+lose 3.9pp and pass.
 
-**Why `R-VES` is instrumented rather than absent.** The metric is implemented and tested
+**Why `R-VES` is partial rather than absent or measured.** The metric is implemented and tested
 (`eval/bird/ves.ts`): the reward table, the `tau = time(gold) / time(predicted)` ratio, the
 median-absolute-deviation trim over repeated timings, and both normalisations the literature uses
-(averaged over all questions, and over the valid ones). What is missing is a run: timing needs the
-dev databases fetched and every statement executed several times. One defect had to be fixed before
-the metric could exist at all, and it was found by writing the test rather than by writing the run:
+(averaged over all questions, and over the valid ones). The reading it now carries is
+**56.56%** — arm `select-cross`, the 600-question dev artifact at `eval/out/bird-eval-41453395203.json`
+(378 correct of 600, **63.0% EX**), five timings per statement, two full executions of the loop
+landing 0.04pp apart (56.58 and 56.54). It is `partial` because the leaderboard files OpenSearch-SQL
+at 69.36 over all 1,532 questions and 600 of them is a different claim; a rate is about a set of
+questions, and this repository has already published one subset reading beside a full-split reading
+as if they were ordered. The first number on a metric is worth recording precisely because it is
+wrong to compare, and the row says so in the same breath.
+
+**What the number says, which is not what was expected.** The gap between R-VES and EX here is
+6.4pp, and it is not an accuracy gap — it is the price of statements that are slower than their own
+gold query:
+
+| band | τ | reward | correct statements | reward paid |
+|---|---|---|---|---|
+| at least twice as fast | ≥ 2 | 1.25 | 16 | 20.0 |
+| at least as fast | 1–2 | 1.00 | 205 | 205.0 |
+| within a factor of two | 0.5–1 | 0.75 | 148 | 111.0 |
+| between a quarter and a half | 0.25–0.5 | 0.50 | 4 | 2.0 |
+| slower than a quarter | < 0.25 | 0.25 | 5 | 1.25 |
+
+The 148 statements in the third band alone cost 6.2pp — the whole gap — while the 16 fast ones pay
+back 0.7pp. If every correct statement ran at par with its gold query this reading would *be* EX.
+So the R-VES lever is statement shape rather than selection: the extra joins, `distinct`s and
+subqueries this harness ships that the gold does not have, which the join and conditions censuses
+price separately. That is a hypothesis with a measurement behind it, not a plan yet.
+
+The reading is reproducible from the artifact and the cached split, with no model call and no quota:
+
+```
+pnpm bench:bird:ves \
+  --artifact eval/out/bird-eval-41453395203.json \
+  --dataset  eval/.cache/bird/dev/dev_20240627/dev.json \
+  --arm      select-cross --repeats 5 \
+  --databases eval/.cache/bird/dev/dev_20240627/dev_databases
+```
+
+81 seconds for 6,000 executions. What it cannot do is produce the 1,532-question number: that needs a
+full-dev artifact, the only copies of which live inside GitHub Actions runs, and this project's
+sandbox cannot read them — `GET /actions/runs/{id}/logs` and `/actions/artifacts/{id}/zip` both answer
+`401` from the signed storage URL. A dispatched dev run therefore produces a number only a browser can
+see, which is a defect in the measurement loop rather than in the metric, and it is written down here
+instead of being worked around by quoting 600 questions as if they were 1,532.
+
+One defect had to be fixed before the metric could exist at all, and it was found by writing the
+test rather than by writing the run:
 
 > `oracle.py` reported whole milliseconds. Most statements on BIRD finish inside one, so both sides of
 > the ratio read `0` and the ratio was `0/0` — a metric that would have paid 1.25 for the resolution
@@ -18044,6 +18091,37 @@ pays its top band for a question nobody timed. The decode now records `usFromMil
 answers `us: undefined` when that flag is set, `measureVes` counts the case as `unmeasured` rather than
 as fastest, and the fixture for it is a real Python peer that sends `ms` alone.
 
+### The tolerance is per split, and one floor was guarding nothing
+
+`4pp` was the last coordinate of the gate read as a constant. It was measured at **n=239** (ADR-166)
+and then applied to every split, so a dev rerun was allowed to fall 4pp below a floor taken on 1,532
+questions — where the same σ-multiple is **1.58pp**. The direction of that error matters: a too-loose
+threshold does not annoy anyone, it silently passes a regression the split can resolve. The baseline
+now records `toleranceAtN: 239` beside `tolerancePp: 4`, and the gate re-expresses the constant at the
+split's own sample size:
+
+| split | questions | tolerance the split resolves |
+|---|---|---|
+| BIRD dev | 1,532 | **1.58pp** |
+| BIRD Mini-Dev | 496 | 2.78pp |
+| a 600-question subset of dev | 600 vs 1,532 | 2.10pp |
+
+The sample size used is the harmonic mean `2 / (1/n_floor + 1/n_run)` rather than either count alone,
+because the comparison is between two proportions — the floor's and the run's — and a run that scores
+fewer questions is a noisier side of it. The A/A check reads the same per-split number, which is the
+point: 5pp on 1,532 questions is a disagreement between two runs of one arm, and 5pp on 100 questions
+is what 100 questions do on their own. A baseline with no `toleranceAtN` still applies its constant,
+and the gate prints `uncalibrated` when it does, because the looser direction is the one that has to
+be visible.
+
+The same loop had a second gap: an **accuracy** floor on an arm the split does not run was skipped in
+silence, while the ceiling-floor loop three lines below refuses exactly that shape. It was live —
+`floors.dev` carried `select-prune` at 60.4 from the round the arm became on-demand, and every dev run
+since printed nothing about it. The row is deleted and the loop now refuses one, scoped to a split
+that declares its arm list: the list is the authority, and a floor outside it is a row to delete or an
+arm to declare. Two checks, one lesson — a threshold is a claim about a coordinate, and a claim about
+a coordinate that is not the current one is not a check.
+
 ### The two normalisations, and which one the leaderboard numbers imply
 
 The leadership guide averages the reward over **all** questions (`100/N · Σ mᵢ·g(τᵢ)`), while one
@@ -18055,7 +18133,14 @@ correct answers are mostly at par, and no published row does that. `rvesOf` ther
 (the leaderboard's normalisation) and `rvesOfValid` beside it, so the choice is visible in the
 artifact rather than buried in an instrument.
 
-### Where each of the five absent rows would have to go
+Our own ratio is **0.898** (56.56 / 63.0) against the 0.96 the leaderboard's two fields imply for
+OpenSearch-SQL. Read as a like-for-like comparison that would be a finding — this harness's correct
+statements are slower relative to their gold queries than theirs are — but it is not like-for-like:
+600 questions against 1,532, one arm against one system, and two different execution environments.
+What the ratio is good for is the direction: a system whose R-VES sits 4pp under its own EX is losing
+that on speed, and ours sits 6.4pp under. The table above says which band pays for it.
+
+### Where each of the four absent rows would have to go
 
 **WikiSQL** is nearly saturated (SeaD + execution-guided decoding 93.0% test EX, X-SQL + EG 91.8%,
 SQLova 89.6% against a crowd-worker baseline of 88.3%) and it is the benchmark this pipeline is least

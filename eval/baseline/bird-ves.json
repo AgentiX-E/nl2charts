@@ -1,0 +1,30 @@
+{
+  "note": "The first R-VES reading this repository has taken, and the reason it is a `partial` row rather than a leaderboard number. `eval/bird/ves.ts` implements the metric (tau = time(gold)/time(predicted), bands 1.25/1/0.75/0.5/0.25, 0 for a wrong answer), `eval/bird/oracle.py` reports the microsecond clock it needs, and both are tested; what was missing was a run. The run is over the 600-question dev artifact this repository already held — `eval/out/bird-eval-41453395203.json`, run 41453395203, arm `select-cross`, 378 correct of 600 (63.0%) — because the only full-dev artifact is inside a GitHub Actions run whose logs and artifacts this sandbox cannot retrieve (the signed URL answers 401). The number is therefore a coordinate on the metric and not the leaderboard row: the leaderboard files OpenSearch-SQL at 69.36 over all 1,532 questions, and a rate over 600 of them is a different claim. Two full executions of the timing loop landed 0.04pp apart (56.58 and 56.54), which is the timer's own reproducibility and not the metric's noise: the same artifact timed twice by the same machine is one draw of the scheduler, not two draws of a model. The finding is that this gap is a speed penalty on answers that are already right rather than an accuracy one. Of the 378 correct statements, 148 run slower than their gold query by a factor of at most two and earn 0.75, which alone costs 148 * 0.25 / 600 = 6.2pp of the 6.4pp that separates R-VES from EX; 16 statements earn the 1.25 band and pay back only 0.7pp. If every correct statement ran at par with its gold query this reading would be EX, so the lever is statement shape — the joins and subqueries this harness ships that the gold does not — and not the selector.",
+  "split": "dev",
+  "scored": 600,
+  "of": 1532,
+  "arm": "select-cross",
+  "ex": 63.0,
+  "repeats": 5,
+  "trim": "median absolute deviation, x3; fewer than three samples takes the fastest",
+  "normalization": "mean over all scored questions; `rvesOfValid` is the same reward divided by the 378 answers that were right",
+  "rves": 56.56,
+  "rvesOfValid": 89.78,
+  "runs": [56.58, 56.54],
+  "artifact": {
+    "path": "eval/out/bird-eval-41453395203.json",
+    "sha256": "db71c18474b34a3f14d05d85fee87d284a92bb64493f917a1d7b45912d8fff13",
+    "workflowRun": 41453395203
+  },
+  "corpus": {
+    "path": "eval/.cache/bird/dev/dev_20240627/dev.json",
+    "sha256": "630272f2b1c44d8cef2c3b246f623355cf0bbc1e832c81061df895530dfc2f06"
+  },
+  "bands": [
+    { "label": "at least twice as fast", "cases": 16 },
+    { "label": "at least as fast", "cases": 205 },
+    { "label": "within a factor of two", "cases": 148 },
+    { "label": "between a quarter and a half", "cases": 4 },
+    { "label": "slower than a quarter", "cases": 5 }
+  ]
+}

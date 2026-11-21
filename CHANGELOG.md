@@ -7,6 +7,17 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **BIRD dev R-VES has a number, and it is a `partial` row rather than a leaderboard entry.** The
+  metric was implemented last round; the reading is **56.56%** over the 600-question dev artifact this
+  repository already held (arm `select-cross`, 378 correct of 600, 63.0% EX), five timings per
+  statement, two full executions of the loop landing 0.04pp apart. It is not the leaderboard's number
+  and the row says so in the same field it states the number in: the leaderboard files OpenSearch-SQL
+  at 69.36 over all 1,532 questions, so `eval/benchmarks.ts` grew a fourth status, `partial`, which
+  refuses a reading without a denominator (`scored` of `of`), refuses a "subset" that is the whole
+  split, and prints `= 56.56 (600 of 1532)` on the log line a report quotes. The reading also says
+  something that was not expected: the 6.4pp between R-VES and EX is entirely the cost of correct
+  statements that run slower than their own gold query — 148 of the 378 land in the 0.5–1 band — so
+  the lever is statement shape, not selection.
 - **Nine leaderboards are now a table a gate reads, instead of a claim in prose.** "We cover Text2SQL
   and Text2Viz" was written as if running BIRD and Text2Vis meant standing on WikiSQL, Spider, nvBench
   2.0 and VisCodeBench too. `eval/benchmarks.ts` carries the nine rows with their corpus, their metric,
@@ -14,7 +25,7 @@ cannot be argued with.
   resolves every citation and fails on a `measured` row without a number, an `absent` row whose reason
   is shorter than a plan, a percentage that is really a count (1,418 rendered figures were "1,418
   percent" in the first draft), and a required leaderboard that has disappeared from the manifest. The
-  reading as it stands: four of nine carry a number, five are named absences with a price, and the
+  reading as it stands: four of nine carry a number over their leaderboard's denominator, four are named absences with a price, and the
   table is in `docs/benchmarks.md` next to the BIRD field table it belongs to.
 - **BIRD's R-VES is implemented, and the clock it needed was wrong.** The reward table
   (1.25 / 1 / 0.75 / 0.5 / 0.25 over `tau = time(gold) / time(predicted)`), the outlier trim over
@@ -63,6 +74,17 @@ cannot be argued with.
   condition — do not fire when the only axis is temporal, which is where 39 of the 98 losses live.
 
 ### Fixed
+- **The accuracy gate's tolerance was a constant from n=239 applied to every split, and one floor was
+  guarding an arm the split does not run.** `4pp` was measured on 239 questions and then used on
+  1,532, where the same σ-multiple is 1.58pp — so a dev arm could lose 3.9pp and pass a check whose
+  whole job is to notice. `eval/baseline/bird.json` now records `toleranceAtN: 239` and the gate
+  re-expresses the constant per split (`1.58pp` on dev, `2.78pp` on Mini-Dev, `2.10pp` on a
+  600-question subset), using the harmonic mean of the floor's sample and the run's, which is the
+  sample size of a comparison between two proportions; the A/A check reads the same number, so 5pp on
+  100 questions is no longer called a disagreement. In the same loop, an *accuracy* floor on an arm the
+  split does not run was skipped in silence while the ceiling loop refused that shape: `floors.dev`
+  still carried `select-prune` at 60.4 after the arm became on-demand. The row is gone, the loop
+  refuses one, and the fixture that proves it is in `--self-test`.
 - **The comparison table started at 73.2% and called it the top, while the field's top was 5.3pp
   above it.** AskData's 78.49% dev EX lived only in the 600-question section, so the table sorted by
   1,532-question dev EX began at SQLConductor and the paragraph under it read "10.9pp to the

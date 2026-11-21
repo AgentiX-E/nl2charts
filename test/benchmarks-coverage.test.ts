@@ -20,6 +20,7 @@ const reader = (files: Record<string, unknown>): Reader => (file) => {
 
 const TREE = {
   'eval/baseline/bird.json': { floors: { minidev: { select: 56 }, dev: { 'select-mixed': 62.5 } } },
+  'eval/baseline/bird-ves.json': { rves: 56.56, scored: 600, of: 1532 },
   'eval/text2vis/baseline.json': { top1: 664, render: { rendered: 1418 } },
 };
 
@@ -127,6 +128,65 @@ describe('the rules a row has to keep', () => {
     const issues = checkCoverage([row({ id: 'wikisql' })], reader(TREE));
     expect(issues.filter((issue) => issue.includes('required leaderboard is missing')))
       .toHaveLength(REQUIRED.length - 1);
+  });
+});
+
+describe('a reading over a narrower denominator', () => {
+  const narrowed = { scored: 600, of: 1532, why: 'the artifact in this repository covers 600 of the 1,532 questions, which is not the row' };
+  const cited = { file: 'eval/baseline/bird-ves.json', path: ['rves'], kind: 'run' as const, unit: 'percent' as const, note: '' };
+  const partial = (patch: Partial<Benchmark> = {}): Benchmark => row({ status: 'partial', reading: cited, narrowed, ...patch });
+  const only = (issues: readonly string[]): string => issues.filter((issue) => !issue.includes('required')).join('\n');
+
+  it('accepts a subset reading whose size and reason are both stated', () => {
+    expect(only(checkCoverage([partial()], reader(TREE)))).toBe('');
+  });
+
+  it('refuses a subset reading with no denominator', () => {
+    // The shape that put 63.67% on 600 questions beside 62.34% on 1,532 as though the two were
+    // ordered. A `partial` row without a size is that sentence with the evidence removed.
+    expect(only(checkCoverage([partial({ narrowed: undefined })], reader(TREE))))
+      .toContain('partial with no denominator');
+  });
+
+  it('refuses a denominator that is not one, and one that is the whole split', () => {
+    expect(only(checkCoverage([partial({ narrowed: { ...narrowed, scored: 0 } })], reader(TREE))))
+      .toContain('is not a denominator');
+    expect(only(checkCoverage([partial({ narrowed: { ...narrowed, scored: 1532 } })], reader(TREE))))
+      .toContain('which is what measured means');
+  });
+
+  it('refuses a subset with a reason too thin to act on', () => {
+    expect(only(checkCoverage([partial({ narrowed: { ...narrowed, why: 'subset' } })], reader(TREE))))
+      .toContain('no reason a reader can act on');
+  });
+
+  it('refuses a row that claims a full measurement and a narrower one at once', () => {
+    expect(only(checkCoverage([row({ status: 'measured', reading: cited, narrowed })], reader(TREE))))
+      .toContain('names a narrower denominator');
+    expect(only(checkCoverage([row({ status: 'instrumented', narrowed })], reader(TREE))))
+      .toContain('names a narrower denominator');
+  });
+
+  it('still refuses a subset reading that reads no number', () => {
+    const issues = checkCoverage([partial({ reading: { ...cited, path: ['nope'] } })], reader(TREE));
+    expect(only(issues)).toContain('reads no number');
+  });
+
+  it('prints the denominator on the line a report quotes', () => {
+    // "56.56% R-VES" and "56.56% R-VES over 600 of 1,532 questions" are different claims, and the
+    // log line is the one that gets copied.
+    const lines = describeCoverage([partial({ id: 'r' })], reader(TREE));
+    expect(lines[0]).toContain('= 56.56 (600 of 1532)');
+  });
+
+  it('keeps the shipped manifest honest about its own denominator', () => {
+    const narrow = BENCHMARKS.filter((benchmark) => benchmark.status === 'partial');
+    expect(narrow.length).toBeGreaterThan(0);
+    for (const benchmark of narrow) {
+      expect(benchmark.narrowed, `${benchmark.id} is partial without a denominator`).toBeDefined();
+      expect(benchmark.narrowed?.scored).toBeLessThan(benchmark.narrowed?.of ?? 0);
+      expect(benchmark.narrowed?.scored).toBeGreaterThan(0);
+    }
   });
 });
 

@@ -441,3 +441,47 @@ describe('the real runner', () => {
     expect(target.exitCode).toBe(0);
   });
 });
+
+describe('the reading this repository publishes', () => {
+  // `eval/baseline/bird-ves.json` is a claim, and a claim with arithmetic in it is a claim that can be
+  // checked. The bands are what the score is made of, so a reading whose bands do not add up to the
+  // number of valid answers is a reading someone copied wrongly — and the file is edited by hand,
+  // because it is a record of a run rather than an output of one.
+  const baseline = JSON.parse(readFileSync(resolve('eval/baseline/bird-ves.json'), 'utf8')) as {
+    rves: number;
+    rvesOfValid: number;
+    ex: number;
+    scored: number;
+    of: number;
+    runs: number[];
+    bands: { label: string; cases: number }[];
+    repeats: number;
+  };
+
+  it('accounts for every correct answer in one band and no other', () => {
+    const valid = Math.round((baseline.ex / 100) * baseline.scored);
+    expect(baseline.bands.reduce((sum, band) => sum + band.cases, 0)).toBe(valid);
+  });
+
+  it('derives its own score from the bands it reports', () => {
+    // The band counts are means over two full runs, so the derived reward is allowed to sit a
+    // twentieth of a point away from the published figure; anything larger means the bands and the
+    // score describe different runs.
+    const paid = baseline.bands.reduce((sum, row) => {
+      const band = RVES_BANDS.find((entry) => entry.label === row.label);
+      if (band === undefined) throw new Error(`unknown band ${row.label}`);
+      return sum + band.reward * row.cases;
+    }, 0);
+    const derived = (paid / baseline.scored) * 100;
+    expect(Math.abs(derived - baseline.rves)).toBeLessThan(0.1);
+  });
+
+  it('is a subset of the split, not the split', () => {
+    // The row is `partial` for exactly this reason: 600 of 1,532 is not the leaderboard's denominator.
+    expect(baseline.scored).toBeGreaterThan(0);
+    expect(baseline.scored).toBeLessThan(baseline.of);
+    expect(baseline.runs.length).toBeGreaterThan(1);
+    expect(Math.max(...baseline.runs) - Math.min(...baseline.runs)).toBeLessThan(0.5);
+    expect(baseline.repeats).toBeGreaterThanOrEqual(3);
+  });
+});

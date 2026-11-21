@@ -43,6 +43,42 @@ function armRequest(value, issues) {
 }
 
 /**
+ * The tolerance, in percentage points, that this split's sample size can resolve.
+ *
+ * A tolerance is a σ-multiple, and a σ-multiple only means something at a sample size. The
+ * constant in `eval/baseline/bird.json` was measured at n=239 (ADR-166) and then applied to every
+ * split, which is the same defect as a floor taken on Mini-Dev and enforced on dev — one coordinate
+ * of a claim being read as if it were the whole claim. At n=1,532 the same σ-multiple is 1.58pp, so
+ * on the split that decides adoption a 3.9pp regression cleared a 4pp threshold: a difference the
+ * split can resolve, passed by a number measured on a split that could not.
+ *
+ * The estimator is a comparison between two proportions — the floor's, and the run's — so its
+ * sample size is the harmonic mean `2 / (1/n_floor + 1/n_run)`, which equals either count when the
+ * two agree and shrinks to the smaller one when they do not. A baseline that does not say what
+ * sample its constant was measured over is applied as written and says so out loud, because the
+ * looser direction is the one that has to be visible.
+ *
+ * @returns {number|undefined} percentage points, or `undefined` when the baseline has no tolerance.
+ */
+export function toleranceFor(baseline, split, scored, floorCount, notes) {
+  const pp = baseline?.tolerancePp;
+  if (typeof pp !== 'number' || !Number.isFinite(pp)) return undefined;
+  const measuredAt = baseline?.toleranceAtN;
+  if (measuredAt === undefined) {
+    notes.push(`BIRD1: the ${pp}pp tolerance does not say which sample it was measured over, so it is applied to ${split} uncalibrated`);
+    return pp;
+  }
+  if (typeof measuredAt !== 'number' || !Number.isFinite(measuredAt) || measuredAt <= 0) {
+    notes.push(`BIRD1: toleranceAtN is ${JSON.stringify(measuredAt)}, which is not a sample size, so the tolerance is applied to ${split} uncalibrated`);
+    return pp;
+  }
+  const other = typeof floorCount === 'number' && floorCount > 0 ? floorCount : scored;
+  const joint = 2 / (1 / other + 1 / scored);
+  if (!Number.isFinite(joint) || joint <= 0) return pp;
+  return pp * Math.sqrt(measuredAt / joint);
+}
+
+/**
  * @returns {{issues: string[], notes: string[]}} issues fail the run, notes are
  * printed so a skipped check is visible rather than silent.
  */
@@ -254,6 +290,11 @@ export function compare(report, baseline) {
     issues.push(`BIRD1: scored ${scored} questions against a baseline of ${expectedScored}; the sample changed`);
   }
 
+  // What this split's sample size can resolve. Computed here rather than at the floor, because the
+  // A/A check is the same comparison — two draws of one arm on one split — and it was reading the
+  // same uncalibrated constant.
+  const tolerance = toleranceFor(baseline, split, scored, expectedScored, notes);
+
   // Which arms are expected is a property of the split, not of the project. The dev split
   // runs three arms because it is a comparison against a published leaderboard, and the
   // first dev run failed on "arm inline-definitions is missing" — a gate applying one
@@ -287,11 +328,11 @@ export function compare(report, baseline) {
       issues.push(`BIRD1: the report carries a row for ${name}, which its arm list does not declare`);
     }
   }
-  if (report.aa !== undefined && baseline.tolerancePp !== undefined) {
+  if (report.aa !== undefined && tolerance !== undefined) {
     // The A/A check applies to any split: it is about the harness, not the threshold.
     const delta = Math.abs(report.aa.delta) * 100;
-    if (delta > baseline.tolerancePp) {
-      issues.push(`BIRD1: the same arm twice differs by ${delta.toFixed(1)}pp, more than the ${String(baseline.tolerancePp)}pp the gate treats as noise`);
+    if (delta > tolerance) {
+      issues.push(`BIRD1: the same arm twice differs by ${delta.toFixed(1)}pp, more than the ${tolerance.toFixed(2)}pp ${split} can resolve as noise`);
     }
   }
 
@@ -694,7 +735,15 @@ export function compare(report, baseline) {
     return { issues, notes };
   }
 
-  const tolerance = baseline.tolerancePp;
+  // `tolerance` is this split's, computed above from the sample size the baseline's constant was
+  // measured over — see `toleranceFor`. Without one there is nothing to compare a floor against:
+  // `measured < floor - undefined` is `measured < NaN`, which is false for every arm, so a gate
+  // with no tolerance would pass everything and say nothing. The absence is a note, not an issue,
+  // because a baseline is allowed to be a measurement before it is a gate.
+  if (tolerance === undefined) {
+    notes.push(`BIRD1: ${split} records no tolerance, so its floors are recorded rather than enforced`);
+    return { issues, notes };
+  }
   // Which arms drew candidates from a second model, read from the report rather than from a
   // table in this file: the arm definitions live in `eval/bird/run.ts`, and a second copy
   // here would be a list to keep in step by hand.
@@ -705,6 +754,17 @@ export function compare(report, baseline) {
   );
   for (const [name, floor] of Object.entries(floors)) {
     const arm = byArm.get(name);
+    // An accuracy floor on an arm the split does not run is a floor nothing will notice — the same
+    // defect the ceiling-floor loop below already refuses, and it was live: `floors.dev` carried
+    // `select-prune` for as long as it took the arm to become an on-demand one, and every dev run
+    // since has printed nothing about it. The check is scoped to a split that declares its arm
+    // list, because that list is the authority the row is outside of; a baseline without one has
+    // nothing to be outside.
+    const declaredArms = baseline.armsBySplit?.[split];
+    if (Array.isArray(declaredArms) && !declaredArms.includes(name)) {
+      issues.push(`BIRD1: the floor for ${split}/${name} is on an arm this split does not run, so it is a floor nothing will notice`);
+      continue;
+    }
     if (arm === undefined) continue; // already reported as a missing expected arm
     // A floor on an arm that samples a second model is a claim about two models, and the
     // second one is the coordinate that was still missing: the dev floor for `select-cross`
@@ -723,7 +783,7 @@ export function compare(report, baseline) {
     }
     const measured = (arm.passed / arm.total) * 100;
     if (measured < floor - tolerance) {
-      issues.push(`BIRD1: ${name} at ${measured.toFixed(1)}% is below the ${floor}% floor less ${tolerance}pp`);
+      issues.push(`BIRD1: ${name} at ${measured.toFixed(1)}% is below the ${floor}% floor less the ${tolerance.toFixed(2)}pp ${split} can resolve as noise`);
     }
   }
   for (const name of expectedArms) {
@@ -792,7 +852,7 @@ export function compare(report, baseline) {
     }
     if (share < floor - tolerance) {
       issues.push(
-        `BIRD1: ${name} answers ${share.toFixed(1)}% of questions at best, below the ${String(floor)}% ceiling floor less ${String(tolerance)}pp; the score may be masking a candidate set that lost its headroom`,
+        `BIRD1: ${name} answers ${share.toFixed(1)}% of questions at best, below the ${String(floor)}% ceiling floor less the ${tolerance.toFixed(2)}pp ${split} can resolve as noise; the score may be masking a candidate set that lost its headroom`,
       );
     }
   }
@@ -876,7 +936,10 @@ function selfTest() {
   const baseline = {
     scored: 100,
     scoredBySplit: { minidev: 100, dev: 1532 },
+    // The base fixture is a calibrated baseline, because the repository's is: a constant with no
+    // sample size behind it is the state one fixture below exists to price.
     tolerancePp: 4,
+    toleranceAtN: 239,
     expectedArms: ['names', 'inline'],
     floors: { minidev: { names: 40, inline: 50 } },
     floorModel: { minidev: 'deepseek-chat' },
@@ -935,6 +998,67 @@ function selfTest() {
     armsBySplit: { dev: ['names', 'inline+evidence'] },
   });
   fail(devMissing, 1, 'BIRD1 does not enforce a split-specific arm list');
+
+  // A tolerance is a σ-multiple, and a σ-multiple belongs to a sample. The constant was measured at
+  // n=239 and then applied to 1,532 questions, where the same multiple is 1.58pp — so a 1.7pp
+  // regression on the split that decides adoption cleared a 4pp threshold.
+  const calibrated = {
+    scored: 100,
+    scoredBySplit: { minidev: 100, dev: 1532 },
+    tolerancePp: 4,
+    toleranceAtN: 239,
+    expectedArms: ['names'],
+    armsBySplit: { dev: ['names'] },
+    floors: { dev: { names: 60 } },
+    floorModel: { dev: 'deepseek-chat' },
+    deviationArms: [],
+  };
+  fail(
+    compare(report([arm('names', 893, 1532)], 1532, 'dev'), calibrated),
+    1,
+    'BIRD1 passes a 1.7pp regression on a split whose sample size can resolve it, by applying a constant measured at n=239',
+  );
+  fail(
+    compare(report([arm('names', 900, 1532)], 1532, 'dev'), calibrated),
+    0,
+    'BIRD1 fails a dev run that stays inside the noise 1,532 questions can resolve',
+  );
+  const legacyTolerance = compare(report([arm('names', 893, 1532)], 1532, 'dev'), { ...calibrated, toleranceAtN: undefined });
+  if (legacyTolerance.issues.length !== 0) {
+    issues.push('BIRD1 fails a run against a baseline that does not say what sample its tolerance was measured over');
+  }
+  if (!legacyTolerance.notes.some((note) => note.includes('uncalibrated'))) {
+    issues.push('BIRD1 applies an uncalibrated tolerance without saying that it is uncalibrated');
+  }
+  // An A/A pair is the same comparison, so it reads the same threshold — and the same threshold
+  // moves with the split: 5pp on 1,532 questions is a disagreement, while 5pp on 100 questions is
+  // inside what 100 questions can resolve. Reading one constant for both is how a stable harness
+  // gets called unstable on the big split and a moving one gets called stable on the small one.
+  const aaDev = compare(
+    { selection: { scored: 1532, split: 'dev' }, model: 'deepseek-chat', run, aa: { delta: 0.05 }, arms: [arm('names', 900, 1532)] },
+    calibrated,
+  );
+  if (!aaDev.issues.some((issue) => issue.includes('can resolve as noise'))) {
+    issues.push('BIRD1 calls a 5pp A/A delta on 1,532 questions noise');
+  }
+  const aaMini = compare(
+    { selection: { scored: 100, split: 'minidev' }, model: 'deepseek-chat', run, aa: { delta: 0.05 }, arms: [arm('names', 42), arm('inline', 51)] },
+    baseline,
+  );
+  if (aaMini.issues.length !== 0) issues.push('BIRD1 applies a dev tolerance to an A/A pair drawn on 100 questions');
+
+  // An accuracy floor on an arm the split does not run is a floor nothing will notice. The ceiling
+  // loop has refused this since it was written; the accuracy loop skipped it in silence, which is
+  // how `select-prune` stayed in `floors.dev` after the arm became on-demand.
+  fail(
+    compare(report([arm('names', 60), arm('inline', 60)], 100, 'minidev'), {
+      ...baseline,
+      armsBySplit: { minidev: ['names', 'inline'] },
+      floors: { minidev: { names: 40, inline: 40, 'select-prune': 55 } },
+    }),
+    1,
+    'BIRD1 says nothing about an accuracy floor on an arm the split does not run',
+  );
 
   // The sample-size check must be split-scoped too. It was not: every split was measured
   // against Mini-Dev's 500, so a dev run that scored 600 of 1,532 questions passed a check
@@ -1633,11 +1757,13 @@ function selfTest() {
   if (steadyCeiling.issues.length !== 0) {
     issues.push(`BIRD1 fails a sampling arm whose ceiling held (${steadyCeiling.issues.join('; ')})`);
   }
-  // 61% recall against a 65.9% floor is a 4.9pp loss with the score still above its floor:
-  // the case this check exists for.
-  const lostCeiling = compare(ceilingRun([sampling(61, 61)]), ceilingBaseline);
+  // 58% recall against a 65.9% floor is a 7.9pp loss with the score still above its floor: the case
+  // this check exists for. The size of the drop is chosen against the tolerance rather than picked:
+  // 100 questions resolve 6.18pp, so a 4.9pp drop is a difference this sample cannot tell from a
+  // draw — the fixture has to exceed the threshold it is meant to cross.
+  const lostCeiling = compare(ceilingRun([sampling(61, 58)]), ceilingBaseline);
   if (lostCeiling.issues.length !== 1 || !lostCeiling.issues[0].includes('ceiling')) {
-    issues.push('BIRD1 does not notice a candidate set that answers 4.9pp fewer questions while the score holds');
+    issues.push('BIRD1 does not notice a candidate set that answers 7.9pp fewer questions while the score holds');
   }
   const insideNoiseCeiling = compare(ceilingRun([sampling(61, 62.5)]), ceilingBaseline);
   if (insideNoiseCeiling.issues.length !== 0) {
@@ -1881,7 +2007,7 @@ if (process.argv[2] === '--record-fingerprint') {
   const issues = selfTest();
   for (const issue of issues) console.error(issue);
   if (issues.length > 0) process.exit(1);
-  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, a dev run measured against its own sample, two split fields that disagree, a dataset name that disagrees with the split, other split, other model, unfloored arm, empty lever, a funnel that does not add up, a split-specific arm list, an uncounted selector call, a majority vote that spends exactly its samples, a pooled arm that pays for its decision and for no candidates, one that leaves a decision unpriced, one that never says whether its selector was counted, one that redrew the pool it claims to share, a pooled majority vote that costs nothing and the same two counts on a generating arm, a reconcile funnel that an adopting arm and a handing-back arm both satisfy, one that never says which policy it was read under, one that adopted more replies than it received, an adopting arm that did not score what it ran and a novel-only arm that scored a restatement, a repair count without a loop, an unpriced arm, an unnamed model, floors from an unnamed model and a cross-model arm with no second model named, a judge swap with no judge named, an arm with harness errors, a candidate set that lost a third of itself to an endpoint, a failure corpus that stopped at a cap without saying so, an empty-result lever with no funnel or an impossible yield or nothing behind it, a decomposition arm whose prompt the model ignored, an unrecorded instrument, a samples arm with no values behind it, a truncated schema card, a prompt with no table in it, a declared arm subset, a declared arm whose row was dropped, an undeclared row, an empty declaration and a floor that a declaration does not weaken, a declared sample subset, a subset that cannot clear a floor, a sample that shrank undeclared, an impossible declaration and a row count above the request, a cross-arm floor with a matching second model, a swapped one and an unattributed one, and a ceiling that held, a ceiling that fell while the score held, a ceiling inside the noise threshold, a sampling arm with no ceiling at all, a ceiling whose two fields disagree, a ceiling floor on an arm the split does not run, a score that fell while the ceiling held, a ceiling with no floor yet, a corpus that was named, unnamed, replaced under pinned floors, present without a digest or read by a declared subset under a full-split pin, and a base model that matched the pin, answered as another one, or answered a run of another model, was never named, changed mid-run or was never pinned, and a base fingerprint that matched its pin, moved under the same name, was never read, answered nothing, came back unstable or arrived over another probe set, and a declared pair that was read, was never read, lost an arm it names, lost an arm the run skipped, spanned no question or arrived malformed, and a declared pair a subset run never asked for all behave');
+  console.log('BIRD floor self-test: pass, noise, regression, missing arm, shrunken sample, a dev run measured against its own sample, two split fields that disagree, a dataset name that disagrees with the split, other split, other model, unfloored arm, empty lever, a funnel that does not add up, a split-specific arm list, an uncounted selector call, a majority vote that spends exactly its samples, a pooled arm that pays for its decision and for no candidates, one that leaves a decision unpriced, one that never says whether its selector was counted, one that redrew the pool it claims to share, a pooled majority vote that costs nothing and the same two counts on a generating arm, a reconcile funnel that an adopting arm and a handing-back arm both satisfy, one that never says which policy it was read under, one that adopted more replies than it received, an adopting arm that did not score what it ran and a novel-only arm that scored a restatement, a repair count without a loop, an unpriced arm, an unnamed model, floors from an unnamed model and a cross-model arm with no second model named, a judge swap with no judge named, an arm with harness errors, a candidate set that lost a third of itself to an endpoint, a failure corpus that stopped at a cap without saying so, an empty-result lever with no funnel or an impossible yield or nothing behind it, a decomposition arm whose prompt the model ignored, an unrecorded instrument, a samples arm with no values behind it, a truncated schema card, a prompt with no table in it, a declared arm subset, a declared arm whose row was dropped, an undeclared row, an empty declaration and a floor that a declaration does not weaken, a declared sample subset, a subset that cannot clear a floor, a sample that shrank undeclared, an impossible declaration and a row count above the request, a cross-arm floor with a matching second model, a swapped one and an unattributed one, and a ceiling that held, a ceiling that fell while the score held, a ceiling inside the noise threshold, a sampling arm with no ceiling at all, a ceiling whose two fields disagree, a ceiling floor on an arm the split does not run, a score that fell while the ceiling held, a ceiling with no floor yet, a corpus that was named, unnamed, replaced under pinned floors, present without a digest or read by a declared subset under a full-split pin, and a base model that matched the pin, answered as another one, or answered a run of another model, was never named, changed mid-run or was never pinned, and a base fingerprint that matched its pin, moved under the same name, was never read, answered nothing, came back unstable or arrived over another probe set, and a declared pair that was read, was never read, lost an arm it names, lost an arm the run skipped, spanned no question or arrived malformed, a declared pair a subset run never asked for, a tolerance calibrated to the sample size of a split, one applied without a calibration, and an accuracy floor on an arm the split does not run all behave');
 } else {
   const reportPath = resolve(ROOT, 'eval/out/bird-eval.json');
   const baseline = JSON.parse(readFileSync(resolve(ROOT, 'eval/baseline/bird.json'), 'utf8'));

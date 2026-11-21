@@ -10,10 +10,15 @@
  * repository cannot resolve, and refuses a missing row for a leaderboard the plan names — so the
  * table in the documentation and the state of the code cannot drift apart without a red build.
  *
- * The three statuses are deliberately about *evidence*, not about effort:
+ * The four statuses are deliberately about *evidence*, not about effort:
  *
- *   - `measured` — a number exists in this repository, at the file and path cited. The gate resolves
- *     it and refuses the row if the value is not a finite number.
+ *   - `measured` — a number exists in this repository, at the file and path cited, over the
+ *     denominator the leaderboard reports. The gate resolves it and refuses the row if the value is
+ *     not a finite number.
+ *   - `partial` — a number exists, but over a narrower denominator than the leaderboard's. The row
+ *     must say which, because this repository has already published one reading taken on 600
+ *     questions beside a leaderboard number taken on 1,532 and called the difference a capability
+ *     gap. A subset reading is a real reading; it is not that row.
  *   - `instrumented` — the metric and the harness exist, but no dispatch has produced a number. That
  *     is a different absence from "we never built it", and a plan written from this table has to be
  *     able to tell them apart: one needs a run, the other needs a corpus.
@@ -28,7 +33,7 @@ import { readFileSync } from 'node:fs';
 import { isEntry } from './entry.js';
 
 export type Domain = 'text2sql' | 'text2viz';
-export type Status = 'measured' | 'instrumented' | 'absent';
+export type Status = 'measured' | 'partial' | 'instrumented' | 'absent';
 
 /** A number in this repository, and what kind of number it is. */
 export interface Reading {
@@ -56,8 +61,25 @@ export interface Benchmark {
   readonly metrics: readonly string[];
   readonly status: Status;
   readonly reading?: Reading;
-  /** Why there is no number, and what would produce one. Required unless `measured`. */
+  /** Present iff the reading covers fewer questions than the leaderboard's denominator. */
+  readonly narrowed?: Narrowed;
+  /** Why there is no number, and what would produce one. Required unless `measured`/`partial`. */
   readonly gap: string;
+}
+
+/**
+ * The denominator a reading was taken on, when it is not the leaderboard's.
+ *
+ * A rate is a claim about a set of questions, so a rate over 600 of 1,532 is a different claim and
+ * not a smaller version of the same one. This repository has already paid for that lesson: 63.67%
+ * on the 600-question subset sat in a report beside 62.34% on the full split as if the two were
+ * ordered, and a reader comparing them read a sampling difference as progress. The field exists so
+ * the sentence "56.56% R-VES" cannot be written without the number of questions it is about.
+ */
+export interface Narrowed {
+  readonly scored: number;
+  readonly of: number;
+  readonly why: string;
 }
 
 export const BENCHMARKS: readonly Benchmark[] = [
@@ -136,12 +158,23 @@ export const BENCHMARKS: readonly Benchmark[] = [
     source: 'https://bird-bench.github.io/',
     corpus: 'the same 1,532 questions, ranked by the reward-weighted efficiency score',
     metrics: ['R-VES'],
-    status: 'instrumented',
-    gap:
-      'The metric is implemented and tested (`eval/bird/ves.ts`, `pnpm bench:bird:ves`) and the oracle '
-      + 'now reports microsecond timings, but no dispatch has produced a number: a timed run needs the '
-      + 'dev databases fetched and every statement re-executed several times. It is instrumented rather '
-      + 'than absent because the only thing missing is a run, and a run has a price.',
+    status: 'partial',
+    reading: {
+      file: 'eval/baseline/bird-ves.json',
+      path: ['rves'],
+      kind: 'run',
+      unit: 'percent',
+      note: '600-question subset of dev, arm `select-cross`, five timings per statement trimmed by '
+        + 'median absolute deviation; the two runs behind it landed 0.04pp apart',
+    },
+    narrowed: {
+      scored: 600,
+      of: 1532,
+      why: 'the only artifact in this repository that holds a statement per question for a dev split '
+        + 'covers 600 of the 1,532 questions, and the leaderboard files OpenSearch-SQL at 69.36 over '
+        + 'all 1,532 — so this reading is a first coordinate on that metric, not that row',
+    },
+    gap: '',
   },
   {
     id: 'text2vis',
@@ -268,9 +301,9 @@ export function checkCoverage(rows: readonly Benchmark[], read: Reader): string[
     if (seen.has(row.id)) issues.push(`${row.id}: duplicate id`);
     seen.add(row.id);
     if (row.metrics.length === 0) issues.push(`${row.id}: names no metric`);
-    if (row.status === 'measured') {
+    if (row.status === 'measured' || row.status === 'partial') {
       if (row.reading === undefined) {
-        issues.push(`${row.id}: measured with no reading to check`);
+        issues.push(`${row.id}: ${row.status} with no reading to check`);
         continue;
       }
       const value = resolveReading(row.reading, read);
@@ -284,6 +317,23 @@ export function checkCoverage(rows: readonly Benchmark[], read: Reader): string[
     } else {
       if (row.reading !== undefined) issues.push(`${row.id}: ${row.status} but cites a reading`);
       if (row.gap.trim().length < 60) issues.push(`${row.id}: ${row.status} with no reason a reader can act on`);
+    }
+    // The denominator, in both directions. A full reading that also claims to be a subset is a row
+    // whose two sentences disagree; a subset reading that does not name its size is the shape that
+    // put 63.67% beside 62.34% as though they were ordered.
+    if (row.status === 'partial') {
+      const narrowed = row.narrowed;
+      if (narrowed === undefined) {
+        issues.push(`${row.id}: partial with no denominator, so a reader cannot tell what the number is about`);
+      } else if (!(narrowed.scored > 0) || !(narrowed.of > 0)) {
+        issues.push(`${row.id}: ${narrowed.scored} of ${narrowed.of} is not a denominator`);
+      } else if (narrowed.scored >= narrowed.of) {
+        issues.push(`${row.id}: ${narrowed.scored} of ${narrowed.of} is the whole split, which is what measured means`);
+      } else if (narrowed.why.trim().length < 40) {
+        issues.push(`${row.id}: narrowed to ${narrowed.scored} of ${narrowed.of} with no reason a reader can act on`);
+      }
+    } else if (row.narrowed !== undefined) {
+      issues.push(`${row.id}: ${row.status} but names a narrower denominator`);
     }
   }
   for (const id of REQUIRED) if (!seen.has(id)) issues.push(`${id}: required leaderboard is missing`);
@@ -311,7 +361,11 @@ export function describeCoverage(rows: readonly Benchmark[], read: Reader): stri
     for (const row of rows.filter((entry) => entry.domain === domain)) {
       const reading = row.reading;
       const value = reading === undefined ? undefined : resolveReading(reading, read);
-      const shown = reading === undefined || value === undefined ? '—' : `${value}${qualifier(reading)}`;
+      // A partial reading carries its denominator on the line, because the line is what gets quoted:
+      // "56.56% R-VES" and "56.56% R-VES over 600 of 1,532 questions" are different claims, and only
+      // the second one is true.
+      const denominator = row.narrowed === undefined ? '' : ` (${row.narrowed.scored} of ${row.narrowed.of})`;
+      const shown = reading === undefined || value === undefined ? '—' : `${value}${qualifier(reading)}${denominator}`;
       lines.push(`COVERAGE ${domain} ${row.id}: ${row.status}, ${row.metrics.join('/')} = ${shown}`);
     }
   }
@@ -329,7 +383,9 @@ export async function main(
   const issues = checkCoverage(BENCHMARKS, read);
   for (const issue of issues) log(`COVERAGE: ${issue}`);
   const measured = BENCHMARKS.filter((row) => row.status === 'measured').length;
-  log(`COVERAGE: ${measured} of ${BENCHMARKS.length} leaderboards carry a number; `
+  const partial = BENCHMARKS.filter((row) => row.status === 'partial').length;
+  log(`COVERAGE: ${measured} of ${BENCHMARKS.length} leaderboards carry a number over the leaderboard's `
+    + `own denominator, ${partial} more over a narrower one; `
     + `${REQUIRED.filter((id) => !BENCHMARKS.some((row) => row.id === id)).length} required rows missing`);
   return issues.length === 0 ? 0 : 1;
 }
