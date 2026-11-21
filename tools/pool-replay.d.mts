@@ -109,5 +109,47 @@ export function verifyRule(artifact: { readonly cases?: readonly ReplayRow[] }, 
 /** The file to read: the argument, or the artifact this repository holds. */
 export function artifactPath(positional?: string): string;
 
+/** One composition of the pool, priced in calls and questions. */
+export interface Composition {
+  readonly sources: readonly string[];
+  readonly calls: number;
+  readonly cases: number;
+  readonly vote: number;
+  readonly oracle: number;
+  readonly single: number;
+  readonly tied: number;
+}
+
+/** Every non-empty subset of the pool's distinct sources, or nothing when there are too many. */
+export function compositions(rows: readonly ReplayRow[], limit?: number): Composition[];
+
+/** The features a router could read with no model, no database and no answer key. */
+export function shapeFeatures(row: ReplayRow): Readonly<Record<string, number>>;
+
+/** The feature names `shapeFeatures` produces, in a stable order. */
+export const FEATURES: readonly string[];
+
+/** The area under one feature's ROC curve over the discordant pairs. */
+export function featureAuc(rows: readonly { readonly vote: boolean; readonly other: boolean; readonly features: Readonly<Record<string, number>> }[], name: string): number | undefined;
+
+/** The exact two-sided sign test on a paired comparison, capped at 1. */
+export function signTest(wins: number, losses: number): number;
+
+/** Two ways of answering one pool, compared where they disagree. */
+export interface TrustReading {
+  readonly voteArm: string;
+  readonly otherArm: string;
+  readonly cases: number;
+  readonly both: number;
+  readonly voteOnly: number;
+  readonly otherOnly: number;
+  readonly neither: number;
+  readonly p: number;
+  readonly features: readonly { readonly name: string; readonly auc: number }[];
+}
+
+/** The 2x2 of the vote against another arm on the same pool, with the features scored on it. */
+export function trustOf(artifact: { readonly cases?: readonly ReplayRow[] }, otherArm: string, voteArm?: string): TrustReading;
+
 /** Entry point; resolves to the process exit code. */
 export function main(argv: readonly string[]): Promise<number>;

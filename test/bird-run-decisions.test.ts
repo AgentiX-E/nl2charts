@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   ARMS,
+  QUESTION_TEXT_CAP,
   armReportRow,
   armSummaryLine,
   assertDemonstrationsFired,
@@ -31,6 +32,7 @@ import {
   assertSampleBlockFired,
   assertSelectorAnswered,
   assertTemperature,
+  askedField,
   cacheFieldOf,
   caseRows,
   columnEvidence,
@@ -1066,6 +1068,52 @@ describe('the per-case rows an artifact carries', () => {
     // An artifact written by a caller that did not have the questions keeps no gold, and a
     // missing gold is not an empty one.
     expect(caseRows(new Map<string, readonly CaseRun[]>([['a', [bare({ id: '1' })]]]))[0]).not.toHaveProperty('gold');
+  });
+
+  it('carries the question, because a router cannot be priced without one', () => {
+    // Two rounds of routing analysis could only read features of the pool: the artifact carried
+    // `id`, `sql` and `gold`, and never the question the row answers. `bench:bird:route` spent a
+    // dispatch pricing a question-side router over an artifact that could not hold the question,
+    // and the whole family — "does this question want rows or a number" — was untestable rather
+    // than merely untested. A missing field is a missing *possible* analysis.
+    const questions = [
+      {
+        question_id: 1,
+        db_id: 'financial',
+        question: 'How many accounts were opened after 2010?',
+        evidence: 'An account is opened once.',
+        SQL: 'select count(*) from account',
+        difficulty: 'simple' as const,
+      },
+    ];
+    const rows = caseRows(new Map<string, readonly CaseRun[]>([['a', [bare({ id: '1' })]]]), questions);
+    expect(rows[0]?.asked).toEqual({
+      db: 'financial',
+      difficulty: 'simple',
+      question: 'How many accounts were opened after 2010?',
+      evidence: 'An account is opened once.',
+    });
+    // A caller that had no questions keeps the old shape: an absent question is not an empty one,
+    // and writing `question: ''` would put "the question was blank" in the same column as "the
+    // artifact was written before this field existed".
+    expect(caseRows(new Map<string, readonly CaseRun[]>([['a', [bare({ id: '1' })]]]))[0]).not.toHaveProperty('asked');
+  });
+
+  it('cuts a long question and says that it did, rather than fitting a feature to half of it', () => {
+    const long = 'x'.repeat(QUESTION_TEXT_CAP + 40);
+    const field = askedField({
+      question_id: 2,
+      db_id: 'd',
+      question: long,
+      evidence: '',
+      SQL: 'select 1',
+      difficulty: 'moderate' as const,
+    });
+    expect(field.asked?.question).toHaveLength(QUESTION_TEXT_CAP);
+    expect(field.asked?.truncated).toBe(true);
+    // An empty evidence line is omitted: BIRD uses `''` for "there is no hint", and a reader
+    // summing evidence lengths should not have to know that.
+    expect(field.asked).not.toHaveProperty('evidence');
   });
 
   it('carries what the value block put on the card, so a stratum can be cut from the artifact', () => {

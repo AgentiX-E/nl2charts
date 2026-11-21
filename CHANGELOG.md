@@ -36,6 +36,36 @@ cannot be argued with.
   recovered.
 
 ### Added
+
+- **The bill for a candidate set, priced the way a policy is priced.** `pool-replay --compositions`
+  enumerates every non-empty subset of a pool's sources and reports, on the same rows, its `calls`,
+  its `vote`, its ceiling, the cases where it returned one result, and the cases where its top group
+  is tied. On `44905985381` that reads 371 for one call (`metadata+evidence`), 374 for the best pair,
+  **387 for the three-candidate pool**, against a ceiling of 421 — and 417 of 600 cases return one
+  distinct result across three candidates. The unexpected column is `tied`: the best pair ties on
+  **141** of 600 and the triple on **45**, because a two-member pool turns every disagreement into
+  one. That is why the second call raised the ceiling by 30 questions and the answer by 3: an even
+  pool is decided by arrival order on a quarter of the split.
+- **`asked`: the question, its evidence, its database and its difficulty, per case.** `caseRows`
+  joins them from the questions file the same way it joins `gold`, capped at 400 characters a field
+  with `truncated: true` when the cap fires. Three dispatches have now been spent on an analysis the
+  artifact could not hold — `rows`/`columns` for the shape rule, `chosen` for every policy
+  comparison, and the question for the entire router family — and a field that is not recorded is an
+  analysis that is not possible.
+- **`trustOf` / `pool-replay --trust <arm>`: two answers to one pool, as a 2x2 and a feature
+  ranking.** The vote against the selector is 362 both / 25 vote-only / **17 selector-only** / 196
+  neither, exact sign test p = 0.2800 — the reading that made the free vote ship, as four cells
+  instead of two rates. The features are scored on the 42 discordant pairs only, because that is the
+  population a router would act on: the best of the seven the pool carries reads AUC 0.646, under the
+  0.70 bar this repository set for spending a dispatch on a router.
+- **`select-cross-diverse` and `select-cross-diverse-pooled-vote`: the third slot spent on a
+  decomposition instead of on the value index.** `values` is byte-identical to `metadata+evidence` on
+  474 of 591 cases, so the third vote restates a vote already cast on almost three quarters of the
+  split and contributes 11 solely-correct cases. The arm is a swap at the same three generations and
+  four calls, keeping the pool odd — the parity the composition table says is what makes a majority
+  possible. Its bar is written in `docs/benchmarks.md` before the dispatch: coverage at least 421 of
+  600, the third slot solely right on at least 11, and the free vote at least 387.
+
 - **`--verify-wider`, and `verifyRule` underneath it: every policy that ran as an arm is checked
   against it.** The vote was the only rule compared to its own arm, and the rule nobody was checking
   is the one that had drifted. `verifyRule(artifact, arm, policy)` replays a policy over an arm's

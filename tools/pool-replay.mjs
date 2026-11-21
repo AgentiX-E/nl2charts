@@ -318,7 +318,190 @@ export function artifactPath(positional) {
   return positional ?? resolve(ROOT, 'eval/out/bird-eval.json');
 }
 
-function describe(file, arm, table, pool, checks) {
+/**
+ * What each composition of the pool buys, priced in calls and in questions.
+ *
+ * `pricePolicies` answers "which rule over the pool I have"; this answers "which pool should I
+ * have bought", and it is the question the bill asks. The three-candidate cross trio pays three
+ * generations, and on the 600-question artefact `44897147794` its third member restates the second
+ * on 474 of 591 cases — so before asking whether a fourth call is worth its tokens, the honest
+ * question is whether the third one is.
+ *
+ * Every non-empty subset of the distinct sources is priced on the same rows, so the columns are
+ * comparable: `calls` is the subset's size (a source generates once, which the runner enforces),
+ * `vote` is the modal result over that subset, `oracle` is the ceiling that subset reaches, and
+ * `single` counts the cases where its members returned one result — the share of the bill that
+ * bought agreement rather than information. `tied` is the reason a subset can be worse than one
+ * of its members: with an even count, a disagreement becomes a tie, and the vote settles a tie by
+ * generation order rather than by evidence.
+ *
+ * Subsets are enumerated only while the source count stays small. Above `limit` distinct sources
+ * the enumeration stops rather than printing a truncated table: a table that is missing rows is
+ * read as complete, which is the defect this repository keeps finding in its own instruments.
+ */
+export function compositions(rows, limit = 3) {
+  const sources = [];
+  for (const row of rows) {
+    for (const candidate of row.candidates ?? []) {
+      if (!sources.includes(candidate.source)) sources.push(candidate.source);
+    }
+  }
+  if (sources.length > limit) return [];
+  const priced = [];
+  for (let mask = 1; mask < 1 << sources.length; mask += 1) {
+    const picked = sources.filter((_, index) => ((mask >> index) & 1) === 1);
+    let cases = 0;
+    let vote = 0;
+    let oracle = 0;
+    let single = 0;
+    let tied = 0;
+    for (const row of rows) {
+      const members = (row.candidates ?? []).filter((candidate) => picked.includes(candidate.source));
+      if (members.length === 0) continue;
+      cases += 1;
+      const pool = decidingPool(members);
+      const modal = modalGroup(pool);
+      if (modal.members.some((candidate) => candidate.correct)) vote += 1;
+      if (members.some((candidate) => candidate.correct)) oracle += 1;
+      if (resultGroups(members).length === 1) single += 1;
+      if (modal.tied) tied += 1;
+    }
+    priced.push({ sources: picked, calls: picked.length, cases, vote, oracle, single, tied });
+  }
+  return priced.sort(
+    (left, right) => left.calls - right.calls || left.sources.join('+').localeCompare(right.sources.join('+')),
+  );
+}
+
+/**
+ * The features a router could read without a model, a database or the answer key.
+ *
+ * They are all facts about the pool the run already holds: how many distinct results it found, how
+ * large the modal group is, whether it is tied, how many members returned nothing, the shape the
+ * modal group returned, and the two SQL keywords whose presence changes what a result means
+ * (`DISTINCT` and an aggregate, which turn a row set into a number).
+ *
+ * Nothing here reads the question. That is not a design choice but a fact about the artifact: no
+ * case this repository has ever written carried the question, so a question-side router — the one
+ * `bench:bird:route` priced and the one the literature builds — could not be tested at all. The
+ * record now carries `asked`, and this list is what is available until an artifact written with it
+ * exists.
+ */
+export function shapeFeatures(row) {
+  const candidates = row.candidates ?? [];
+  const pool = decidingPool(candidates);
+  const modal = modalGroup(pool);
+  const representative = modal.members[0] ?? {};
+  const rowsOf = modal.members.map((candidate) => candidate.rows ?? 0);
+  const columnsOf = modal.members.map((candidate) => candidate.columns ?? 0);
+  const sql = typeof representative.sql === 'string' ? representative.sql : '';
+  return {
+    distinct: resultGroups(pool).length,
+    modalSize: modal.members.length,
+    tied: modal.tied ? 1 : 0,
+    emptyResults: candidates.filter((candidate) => (candidate.rows ?? 0) === 0).length,
+    modalRows: rowsOf.length === 0 ? 0 : Math.min(...rowsOf),
+    modalColumns: columnsOf.length === 0 ? 0 : Math.min(...columnsOf),
+    distinctKeyword: /\bdistinct\b/i.test(sql) ? 1 : 0,
+    aggregate: /\b(count|sum|avg|min|max)\s*\(/i.test(sql) ? 1 : 0,
+  };
+}
+
+/** Every feature name `shapeFeatures` produces, in a stable order. */
+export const FEATURES = /** @type {const} */ ([
+  'distinct',
+  'modalSize',
+  'tied',
+  'emptyResults',
+  'modalRows',
+  'modalColumns',
+  'distinctKeyword',
+  'aggregate',
+]);
+
+/** The area under the ROC curve of one feature, with ties counted as half a win. */
+export function featureAuc(rows, name) {
+  const positives = rows.filter((row) => row.other && !row.vote);
+  const negatives = rows.filter((row) => row.vote && !row.other);
+  if (positives.length === 0 || negatives.length === 0) return undefined;
+  let score = 0;
+  for (const positive of positives) {
+    for (const negative of negatives) {
+      const left = positive.features[name];
+      const right = negative.features[name];
+      score += left > right ? 1 : left === right ? 0.5 : 0;
+    }
+  }
+  return score / (positives.length * negatives.length);
+}
+
+/** The exact two-sided sign test on a paired comparison, capped at 1. */
+export function signTest(wins, losses) {
+  const n = wins + losses;
+  if (n === 0) return 1;
+  let tail = 0;
+  for (let k = 0; k <= Math.min(wins, losses); k += 1) {
+    let choose = 1;
+    for (let i = 1; i <= k; i += 1) choose = (choose * (n - i + 1)) / i;
+    tail += choose;
+  }
+  return Math.min(1, (2 * tail) / 2 ** n);
+}
+
+/**
+ * Two ways of answering the same pool, compared on the questions where they disagree.
+ *
+ * The four counts are the whole argument. `both` and `neither` are questions no router can move;
+ * `otherOnly` is the prize and `voteOnly` is its price, and a policy that fires everywhere pays
+ * `voteOnly` in full to collect `otherOnly` — which is exactly the arithmetic that made the
+ * selector lose to the free vote by eight questions on this pool.
+ *
+ * The features are scored **on the discordant pairs only**, because that is the population a
+ * router would act on: telling a pair apart on questions where both sides agree would be a
+ * classifier for a decision nobody makes. An AUC near 0.5 says the pool's own shape does not know
+ * which side is right, and that is a reading worth writing down rather than a number to tune: it
+ * is the difference between "no router has been built" and "no router can be built from this".
+ */
+export function trustOf(artifact, otherArm, voteArm = 'select-cross-pooled-vote') {
+  const byId = new Map();
+  for (const row of artifact.cases ?? []) {
+    if (!Array.isArray(row.candidates) || row.candidates.length === 0) continue;
+    if (!byId.has(row.id)) byId.set(row.id, {});
+    byId.get(row.id)[row.arm] = row;
+  }
+  const pairs = [];
+  for (const [id, arms] of byId) {
+    const voteRow = arms[voteArm];
+    const otherRow = arms[otherArm];
+    if (voteRow === undefined || otherRow === undefined) continue;
+    pairs.push({
+      id,
+      vote: voteRow.passed === true,
+      other: otherRow.passed === true,
+      features: shapeFeatures(voteRow),
+    });
+  }
+  const tally = { both: 0, voteOnly: 0, otherOnly: 0, neither: 0 };
+  for (const pair of pairs) {
+    if (pair.vote && pair.other) tally.both += 1;
+    else if (pair.vote) tally.voteOnly += 1;
+    else if (pair.other) tally.otherOnly += 1;
+    else tally.neither += 1;
+  }
+  const features = FEATURES.map((name) => ({ name, auc: featureAuc(pairs, name) }))
+    .filter((entry) => entry.auc !== undefined)
+    .sort((left, right) => Math.abs(right.auc - 0.5) - Math.abs(left.auc - 0.5));
+  return {
+    voteArm,
+    otherArm,
+    cases: pairs.length,
+    ...tally,
+    p: signTest(tally.otherOnly, tally.voteOnly),
+    features,
+  };
+}
+
+function describe(file, arm, table, pool, checks, extra = {}) {
   const cases = pool.reduce((sum, bucket) => sum + bucket.cases, 0);
   const lines = [];
   lines.push(`POOL REPLAY  ${file}`);
@@ -348,6 +531,30 @@ function describe(file, arm, table, pool, checks) {
     );
   }
   lines.push('  ~ = upper bound, needs the answer key and cannot ship');
+  if (extra.compositions !== undefined) {
+    lines.push('  pool composition: what each subset of the pool buys');
+    if (extra.compositions.length === 0) lines.push('    too many distinct sources to enumerate; no table is printed rather than a partial one');
+    for (const row of extra.compositions) {
+      lines.push(
+        `    ${String(row.calls)} call${row.calls === 1 ? ' ' : 's'}  ${row.sources.join('+').padEnd(46)}` +
+          ` vote ${String(row.vote).padStart(4)}/${row.cases}` +
+          `  ceiling ${String(row.oracle).padStart(4)}` +
+          `  one opinion ${String(row.single).padStart(4)}` +
+          `  tied ${String(row.tied).padStart(3)}`,
+      );
+    }
+  }
+  if (extra.trust !== undefined) {
+    const trust = extra.trust;
+    lines.push(
+      `  vote vs ${trust.voteArm} → ${trust.otherArm}: ${trust.cases} paired cases` +
+        `, both right ${trust.both}, vote only ${trust.voteOnly}, other only ${trust.otherOnly},` +
+        ` neither ${trust.neither} (sign test p = ${trust.p.toFixed(4)})`,
+    );
+    for (const feature of trust.features) {
+      lines.push(`    the pool's ${feature.name.padEnd(15)} AUC ${feature.auc.toFixed(3)}`);
+    }
+  }
   return lines;
 }
 
@@ -366,10 +573,16 @@ export const VERIFICATIONS = [
 export async function main(argv) {
   const args = argv.slice(2);
   const json = args.includes('--json');
+  const withCompositions = args.includes('--compositions');
+  const trustFlag = args.indexOf('--trust');
+  const trustArm = trustFlag === -1 ? undefined : args[trustFlag + 1];
   const checks = VERIFICATIONS.filter((entry) => args.includes(entry.flag));
   const armFlag = args.indexOf('--arm');
   const named = armFlag === -1 ? undefined : args[armFlag + 1];
-  const positional = args.filter((arg, index) => !arg.startsWith('--') && (index === 0 || !args[index - 1]?.startsWith('--arm')));
+  const positional = args.filter(
+    (arg, index) =>
+      !arg.startsWith('--') && (index === 0 || (args[index - 1] !== '--arm' && args[index - 1] !== '--trust')),
+  );
   const path = artifactPath(positional[0]);
   const artifact = JSON.parse(readFileSync(path, 'utf8'));
   const arm = named ?? widestArm(artifact);
@@ -381,10 +594,18 @@ export async function main(argv) {
   const table = pricePolicies(rows);
   const pool = census(rows);
   const verifications = checks.map(({ verifyArm, policy }) => verifyRule(artifact, verifyArm, policy));
+  const compositionsTable = withCompositions ? compositions(rows) : undefined;
+  const trust = trustArm === undefined ? undefined : trustOf(artifact, trustArm);
+  const extra = {
+    ...(compositionsTable === undefined ? {} : { compositions: compositionsTable }),
+    ...(trust === undefined ? {} : { trust }),
+  };
   if (json) {
-    process.stdout.write(`${JSON.stringify({ artifact: path, arm, table, pool, vote: verifications[0], verifications }, null, 1)}\n`);
+    process.stdout.write(
+      `${JSON.stringify({ artifact: path, arm, table, pool, vote: verifications[0], verifications, ...extra }, null, 1)}\n`,
+    );
   } else {
-    for (const line of describe(path, arm, table, pool, verifications)) process.stdout.write(`${line}\n`);
+    for (const line of describe(path, arm, table, pool, verifications, extra)) process.stdout.write(`${line}\n`);
   }
   const unverified = verifications.filter((check) => check.compared === 0);
   if (unverified.length > 0) {

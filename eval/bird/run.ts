@@ -988,6 +988,28 @@ export const DUO_SOURCES: readonly string[] = ['inline+evidence', 'metadata+evid
 export const CROSS_SOURCES: readonly string[] = ['inline+evidence@second', 'metadata+evidence', 'values'];
 
 /**
+ * The cross trio with its third slot given to a different *shape* instead of to a different *index*.
+ *
+ * `CROSS_SOURCES` pays one call for `values`, and on 474 of 591 cases with three candidates that
+ * statement's result set is byte-for-byte the one `metadata+evidence` returned: the value block is
+ * built from the literals a question names, and 60.9% of questions name none, so the third vote is
+ * a restatement. A pool of three calls that carries one opinion 70% of the time is the entire
+ * argument for asking what the third call should be.
+ *
+ * `decompose` is the only generator in the catalogue that writes a different *shape* of statement —
+ * sub-questions first, then one statement that answers all of them — and `select-dc` already
+ * priced it as a slot-earner at the same call count. This list is that finding moved onto the
+ * cross trio: same three calls, same selector, and the only thing that changes is what the third
+ * call is asked to do. The third slot becomes a *different reading of the question* rather than a
+ * second copy of a reading the model already had.
+ *
+ * The swap is priced on the incumbent's own metric. A candidate set's coverage is the cases where
+ * any member is right, and `values` is solely responsible for 11 of 600 of them; an arm that
+ * replaces it has to keep that number, or the third call was buying an index and not an opinion.
+ */
+export const DIVERSE_SOURCES: readonly string[] = ['inline+evidence@second', 'metadata+evidence', 'decompose'];
+
+/**
  * The same three prompt styles, with the authorships reversed: two from the second model and
  * one from the primary.
  *
@@ -1695,6 +1717,30 @@ export const ARMS: readonly Arm[] = [
   // no worse than the vote on the second, with the fire count published so a rule that stopped firing
   // cannot read as a rule that stopped helping.
   { name: 'select-cross-pooled-wider', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, selectRule: 'wider', mixed: CROSS_SOURCES, pool: 'select-cross' },
+  // The third call asked to answer a different question instead of the same one twice.
+  //
+  // `select-cross-pooled-dissent` bought a `decompose` candidate and got a clean negative: the
+  // ceiling rose 1,023 → 1,050 and the vote converted none of it. That arm charged 0.745 calls a
+  // case for the opinion and handed the pool a *fourth* member, which is a pool of even size —
+  // and a four-way split has no majority, so the vote's tie population grows exactly where the new
+  // opinion arrives. The mechanism it ruled out is "buy one more opinion, then vote". The question
+  // it did not ask is what the third *slot* should hold, and that one costs nothing to ask.
+  //
+  // On the 600-question pool `values` is byte-identical to `metadata+evidence` on 474 of 591 cases:
+  // the block is built from the literals a question names and 60.9% of questions name none, so the
+  // third vote restates a vote already cast. `decompose` is the one generator here that answers by
+  // a different method rather than different wording, and swapping it in keeps the pool odd — the
+  // majority structure that makes the vote work survives, and only what the third opinion is
+  // changes. Same three calls, same four with the selector, one lever.
+  //
+  // The bar is the incumbent's own metric, written in `docs/benchmarks.md` before the dispatch:
+  // coverage (cases where any member is right) must not fall below `select-cross`'s, the third
+  // slot must be solely right on at least the 11 cases `values` is, and the free vote must read
+  // at least the 387 the cross trio reads — a slot that costs the same and buys less is a slot
+  // that was never about information.
+  { name: 'select-cross-diverse', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: DIVERSE_SOURCES },
+  // The same pool adjudicated by the count: zero calls, and the baseline the swap is read against.
+  { name: 'select-cross-diverse-pooled-vote', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, mixed: DIVERSE_SOURCES, pool: 'select-cross-diverse' },
   // Buy a fourth opinion, but only where the three already agree.
   //
   // `bench:bird:diversity` read this pool off the published artifact: 1.28 distinct results per
@@ -2080,6 +2126,8 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'select-cross-pooled-tie': 'the same gate on a pool it did not draw: `select-cross-tie` read 388 against a parent that had drawn different candidates, so the gate\'s own contribution was not separable from the pool\'s; here the candidates are `select-cross`\'s, and the delta against `select-cross-pooled` is the gate while the delta against `select-cross-pooled-vote` is what the selector adds where the vote cannot decide — dispatch it after `select-cross` and with `select-cross-pooled-vote`, because one pool decided three ways is the whole comparison',
   'select-cross-pooled-wider': 'the same pool decided by the widest result instead of by the model: the modal group, except where it returned one row and a candidate outside it returned more rows in at least as many columns — 385 against the vote\'s 377 and the selector\'s 383 on the 600 questions the rule was found on, at zero calls, which is why it needs a dispatch rather than a second read of the same pool; free on top of `select-cross`, so it belongs in the same run as `select-cross-pooled-vote`',
   'select-cross-pooled-dissent': 'the same pool and the same selector with one decomposition bought only where the three agreed: 4 calls per case on the 74.5% of cases the diversity reading found unanimous and 3.0 on the rest, and it must be dispatched after `select-cross` because it reads that pool — the pair against `select-cross-pooled` is the whole lever, so run those two and no others',
+  'select-cross-diverse': 'the cross trio with its third call spent on a decomposition instead of on the value index: same three generations, same selector, same four calls a case, and the only change is what the third opinion is — `values` restates `metadata+evidence` on 474 of 591 cases, so this arm asks whether the third call was buying an opinion or a copy. Coverage and the free vote are both pre-registered in `docs/benchmarks.md`, because a swap that costs the same and buys less has to be visible as a loss rather than as noise',
+  'select-cross-diverse-pooled-vote': 'the same three-candidate pool decided by the count at zero calls: the baseline `select-cross-diverse` is read against, in the same artifact, so the swap is priced against its own run and not against last round\'s pool',
   'select-cross-pooled-dissent-pair': 'the same bought opinion, compared against the pool\'s answer on the cases where it disagrees instead of shown to the selector as a fourth candidate: one comparison call on 6.5% of cases, and it must be dispatched after `select-cross` because it reads that pool — the pair against `select-cross-pooled-dissent` is the whole lever, so run those two and no others',
   'select-cross-pooled-agree': 'the same pool with the agreement marks the selector was never given: 149 of 600 cases had more than one distinct result, and which of three candidates returned the same rows is the one fact two truncated previews cannot yield; one lever from `select-cross-pooled`, one call per case',
   'select-cross-pooled-reconcile': 'the same pool and the same one call, asked for a statement instead of an index: an index cannot name an answer none of the candidates contains, and on this pool the correct statement is in the set on 70.5% of cases while the arm scores 64% — the 6.5pp the decision misses is the population this arm exists to reach; the funnel counts how often the reply is a statement nobody wrote, because an arm that restates a candidate is a selector with a longer prompt',
@@ -2299,6 +2347,12 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   // non-zero delta here means the pooling is broken, and no judge-swap reading on this pool can be
   // trusted until it is fixed.
   ['select-cross', 'select-cross-pooled'],
+  // One lever: what the third call is asked to produce. `select-cross` spends it on the value
+  // index, which restates `metadata+evidence` on 474 of 591 cases; this arm spends it on a
+  // decomposition, which answers by a different method. Same count, same selector, same bill — so
+  // the delta is the third opinion and nothing else, and the pair is what makes "the third call
+  // was buying a copy" a measurement rather than a suspicion.
+  ['select-cross', 'select-cross-diverse'],
   // One lever: who judges, on a pool neither arm generated. This is the pair the two previous
   // judge-swap arms could not be, and the only one whose delta has no generation noise in it.
   // The same pair on the homogeneous pool, which is where the shape claim makes the opposite
@@ -9458,6 +9512,57 @@ export function pairedComparisons(outcomes: ReadonlyMap<string, readonly CaseRun
   return { ...(aa === undefined ? {} : { aa }), comparisons, ablations };
 }
 
+/**
+ * How much of a question's text the artifact keeps, per field.
+ *
+ * A cap is a truncation, and a truncation that does not say so is a lie, so the cap is
+ * published in the record (`asked.truncated`) rather than applied silently. 400 characters
+ * covers every Mini-Dev question bar the longest multi-clause ones, and on 600 cases with
+ * four arms it costs about 250 KB — the price of making every routing claim priceable
+ * offline instead of needing a corpus download that only CI has.
+ */
+export const QUESTION_TEXT_CAP = 400;
+
+/** The question a case was asked, as far as a router or a stratum needs it. */
+export interface AskedRecord {
+  readonly db: string;
+  readonly difficulty: string;
+  readonly question: string;
+  readonly evidence?: string;
+  /** True when either field was cut, so a reader does not fit a feature to half a question. */
+  readonly truncated?: boolean;
+}
+
+/**
+ * The question, its evidence line, its database and its difficulty, or nothing.
+ *
+ * The artifact has carried `id`, `sql` and `gold` since the first dispatch and the *question*
+ * since none of them — which is why two rounds of routing analysis could only use features of
+ * the pool. The prize `bench:bird:route` priced is a question-side judgement ("does this
+ * question want a set of rows or a number"), and no artifact this repository has ever produced
+ * could hold that judgement's input. A missing field is not a missing analysis: it is a
+ * missing *possible* analysis, and it cost a dispatch each time it turned out to matter.
+ *
+ * `undefined` in, nothing out: an artifact written by a caller that did not have the questions
+ * (the dry run, every unit test) keeps its old shape rather than carrying empty strings, and
+ * `db`/`difficulty` are omitted on that path rather than guessed.
+ */
+export function askedField(question: BirdQuestion | undefined): { readonly asked?: AskedRecord } {
+  if (question === undefined) return {};
+  const text = question.question.slice(0, QUESTION_TEXT_CAP);
+  const evidence = question.evidence.slice(0, QUESTION_TEXT_CAP);
+  const truncated = text.length < question.question.length || evidence.length < question.evidence.length;
+  return {
+    asked: {
+      db: question.db_id,
+      difficulty: question.difficulty,
+      question: text,
+      ...(evidence === '' ? {} : { evidence }),
+      ...(truncated ? { truncated: true } : {}),
+    },
+  };
+}
+
 /** Per-case outcomes, because a per-arm total cannot answer "on which questions did this lever work". */
 export function caseRows(
   outcomes: ReadonlyMap<string, readonly CaseRun[]>,
@@ -9467,6 +9572,7 @@ export function caseRows(
   // source is distinct on 35% of cases, or because a duplicated candidate is a frequency
   // signal on the other 65%. That is a stratum, and a stratum needs rows.
   const goldOf = new Map(questions.map((question) => [String(question.question_id), question.SQL]));
+  const askedOf = new Map(questions.map((question) => [String(question.question_id), question]));
   return [...outcomes.entries()].flatMap(([name, runs]) =>
     runs.map((run) => ({
       arm: name,
@@ -9563,6 +9669,10 @@ export function caseRows(
       // field is omitted rather than written as `''`.
       ...(run.predicted.trim() === '' ? {} : { sql: run.predicted }),
       ...(goldOf.get(String(run.id)) === undefined ? {} : { gold: goldOf.get(String(run.id)) as string }),
+      // The question the row is an answer to. Joined beside `gold` because it is the same
+      // join — the artifact records what ran, the questions file supplies what was asked —
+      // and because a router can only be priced against the pair.
+      ...askedField(askedOf.get(String(run.id))),
     })),
   );
 }

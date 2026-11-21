@@ -12,18 +12,24 @@ import { join, resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { ReplayCandidate, ReplayRow } from '../tools/pool-replay.d.mts';
 import {
+  FEATURES,
   POLICIES,
   VERIFICATIONS,
   artifactPath,
   casesOf,
   census,
   chosenMember,
+  compositions,
   decidingPool,
+  featureAuc,
   main,
   memberBySource,
   modalGroup,
   pricePolicies,
   resultGroups,
+  shapeFeatures,
+  signTest,
+  trustOf,
   verifyRule,
   verifyVote,
   widestArm,
@@ -621,4 +627,234 @@ describe('the command line', () => {
     expect(text).toContain('no case with a candidate pool');
   });
 
+});
+
+describe('what a pool composition buys', () => {
+  it('prices every subset of the sources, and states the calls each one costs', () => {
+    // Two prompts that disagree on both cases. One call reaches the answer on one of them, two
+    // calls reach it on both — and the pair's vote still answers one, because a one-all tie is
+    // settled by generation order and not by evidence. That combination is the reading: the
+    // ceiling doubles and the answer does not move.
+    const rows = [
+      row('1', [candidate('a', 'x', true), candidate('b', 'y', false)]),
+      row('2', [candidate('a', 'x', false), candidate('b', 'y', true)]),
+    ];
+    const table = compositions(rows);
+    expect(table.map((entry) => [entry.sources.join('+'), entry.calls])).toEqual([
+      ['a', 1],
+      ['b', 1],
+      ['a+b', 2],
+    ]);
+    const pair = table[2] as { vote: number; oracle: number; tied: number };
+    expect(pair.vote).toBe(1);
+    expect(pair.oracle).toBe(2);
+    expect(pair.tied).toBe(2);
+    expect(table[0]?.oracle).toBe(1);
+  });
+
+  it('counts the cases where the whole subset returned one result', () => {
+    // The third call's value is not only its information: on this pool it is the copy that makes
+    // two prompts agree. `single` is how a reader tells "three calls, one opinion" from "three
+    // calls, three opinions" without re-reading the candidates.
+    const rows = [row('1', [candidate('a', 'x', true), candidate('b', 'x', false)])];
+    const pair = compositions(rows).find((entry) => entry.calls === 2);
+    expect(pair).toMatchObject({ single: 1, oracle: 1, tied: 0, vote: 1 });
+  });
+
+  it('prices a subset on every case it can speak to, including the ones it half covers', () => {
+    // A source that did not run on a case is not a wrong answer on that case: the subset still
+    // holds one member and can still answer. Dropping those cases would make a subset look better
+    // than it is by shrinking its denominator, which is the flattering direction.
+    const rows = [
+      row('1', [candidate('a', 'x', true), candidate('b', 'y', false)]),
+      row('2', [candidate('a', 'x', true)]),
+    ];
+    const pair = compositions(rows).find((entry) => entry.calls === 2);
+    expect(pair).toMatchObject({ cases: 2, vote: 2, single: 1 });
+    const solo = compositions(rows).find((entry) => entry.sources[0] === 'a');
+    expect(solo?.cases).toBe(2);
+  });
+
+  it('stops rather than printing a table whose rows are missing', () => {
+    const rows = [
+      row('1', [
+        candidate('a', 'x', true),
+        candidate('b', 'y', false),
+        candidate('c', 'z', false),
+        candidate('d', 'w', false),
+      ]),
+    ];
+    expect(compositions(rows)).toEqual([]);
+    expect(compositions(rows, 4)).toHaveLength(15);
+  });
+});
+
+describe('the features a router would read', () => {
+  const shaped = (source: string, fingerprint: string, correct: boolean, rows_: number, columns: number, sql = 'SELECT 1') =>
+    candidate(source, fingerprint, correct, { rows: rows_, columns, sql });
+
+  it('reads the pool and not the answer: every feature is a fact about what ran', () => {
+    const features = shapeFeatures(
+      row('1', [shaped('a', 'x', true, 1, 1, 'SELECT DISTINCT count(*) FROM t'), shaped('b', 'y', false, 3, 2)]),
+    );
+    // The declared feature list is the one the router ranks: a name that `shapeFeatures` invents
+    // and `FEATURES` does not list would be computed and never scored, which reads as a feature
+    // that cannot separate rather than as one that was never asked.
+    expect(Object.keys(features).sort()).toEqual([...FEATURES].sort());
+    expect(features).toMatchObject({
+      distinct: 2,
+      modalSize: 1,
+      tied: 1,
+      emptyResults: 0,
+      modalRows: 1,
+      modalColumns: 1,
+      distinctKeyword: 1,
+      aggregate: 1,
+    });
+  });
+
+  it('ignores a candidate that returned nothing when it sizes the pool', () => {
+    // The vote ignores empty candidates, so a feature that counted them would be reading a
+    // population the policy never sees.
+    const features = shapeFeatures(
+      row('1', [shaped('a', 'x', true, 0, 0), shaped('b', 'y', false, 2, 3), shaped('c', 'y', false, 2, 3)]),
+    );
+    expect(features).toMatchObject({ distinct: 1, modalSize: 2, emptyResults: 1, modalRows: 2, modalColumns: 3 });
+  });
+
+  it('scores a feature over the cases the two answers disagree on, and nowhere else', () => {
+    const pairs = [
+      { vote: true, other: false, features: { shape: 1 } },
+      { vote: false, other: true, features: { shape: 9 } },
+      { vote: true, other: true, features: { shape: 100 } },
+    ];
+    expect(featureAuc(pairs, 'shape')).toBe(1);
+    expect(featureAuc(pairs.map((pair) => ({ ...pair, features: { shape: -pair.features.shape } })), 'shape')).toBe(0);
+  });
+
+  it('counts a tie as half a win, because a feature that cannot separate has said nothing', () => {
+    const pairs = [
+      { vote: true, other: false, features: { shape: 5 } },
+      { vote: false, other: true, features: { shape: 5 } },
+    ];
+    expect(featureAuc(pairs, 'shape')).toBe(0.5);
+  });
+
+  it('reports nothing rather than half a curve when no case disagrees', () => {
+    expect(featureAuc([{ vote: true, other: true, features: { shape: 1 } }], 'shape')).toBeUndefined();
+  });
+});
+
+describe('the sign test', () => {
+  it('is the exact two-sided binomial on the discordant pairs', () => {
+    expect(signTest(3, 1)).toBeCloseTo(0.625, 10);
+    expect(signTest(9, 0)).toBeCloseTo(2 / 512, 10);
+    expect(signTest(0, 0)).toBe(1);
+    expect(signTest(1, 1)).toBe(1);
+  });
+});
+
+describe('two ways of answering one pool', () => {
+  const arm = (id: string, name: string, passed: boolean, pool: readonly ReplayCandidate[]) => ({ id, arm: name, passed, candidates: pool });
+  const pool = (right: boolean) => [candidate('a', 'x', right), candidate('b', 'y', !right)];
+
+  it('puts every paired case in exactly one of four cells', () => {
+    const artifact = {
+      cases: [
+        arm('1', 'select-cross-pooled-vote', true, pool(true)),
+        arm('1', 'select-cross', true, pool(true)),
+        arm('2', 'select-cross-pooled-vote', true, pool(true)),
+        arm('2', 'select-cross', false, pool(true)),
+        arm('3', 'select-cross-pooled-vote', false, pool(true)),
+        arm('3', 'select-cross', true, pool(true)),
+        arm('4', 'select-cross-pooled-vote', false, pool(false)),
+        arm('4', 'select-cross', false, pool(false)),
+      ],
+    };
+    expect(trustOf(artifact, 'select-cross')).toMatchObject({
+      cases: 4,
+      both: 1,
+      voteOnly: 1,
+      otherOnly: 1,
+      neither: 1,
+      p: 1,
+    });
+  });
+
+  it('compares only the questions both arms scored', () => {
+    // An arm that dropped a case would otherwise be counted as a disagreement about a case it
+    // never held — the same defect `verifyRule` refuses one call up.
+    const artifact = {
+      cases: [
+        arm('1', 'select-cross-pooled-vote', true, pool(true)),
+        arm('1', 'select-cross', false, pool(true)),
+        arm('2', 'select-cross-pooled-vote', true, pool(true)),
+      ],
+    };
+    expect(trustOf(artifact, 'select-cross')).toMatchObject({ cases: 1, voteOnly: 1, otherOnly: 0, both: 0 });
+  });
+
+  it('ranks the features that could act on the disagreement, most separable first', () => {
+    const reading = trustOf(
+      {
+        cases: [
+          // Where the other arm is right, the pool found three results; where the vote is right,
+          // one. A router reading `distinct` would see the difference perfectly on this sample.
+          arm('1', 'select-cross-pooled-vote', false, [candidate('a', 'x', true), candidate('b', 'y', false), candidate('c', 'z', false)]),
+          arm('1', 'select-cross', true, [candidate('a', 'x', true), candidate('b', 'y', false), candidate('c', 'z', false)]),
+          arm('2', 'select-cross-pooled-vote', true, [candidate('a', 'x', true), candidate('b', 'x', false), candidate('c', 'x', false)]),
+          arm('2', 'select-cross', false, [candidate('a', 'x', true), candidate('b', 'x', false), candidate('c', 'x', false)]),
+        ],
+      },
+      'select-cross',
+    );
+    expect(reading.features[0]).toEqual({ name: 'distinct', auc: 1 });
+    expect(reading.features.every((entry) => entry.auc >= 0 && entry.auc <= 1)).toBe(true);
+  });
+});
+
+describe('the command line reading a composition and a pair', () => {
+  const capture = async (argv: readonly string[]) => {
+    const dir = mkdtempSync(join(tmpdir(), 'pool-replay-'));
+    const path = join(dir, 'artifact.json');
+    writeFileSync(
+      path,
+      JSON.stringify({
+        cases: [
+          { id: '1', arm: 'select-cross-pooled-vote', passed: true, candidates: [candidate('a', 'x', true), candidate('b', 'y', false)] },
+          { id: '1', arm: 'select-cross', passed: false, candidates: [candidate('a', 'x', true), candidate('b', 'y', false)] },
+        ],
+      }),
+    );
+    const out: string[] = [];
+    const stdout = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: string | Uint8Array) => {
+      out.push(String(chunk));
+      return true;
+    });
+    const code = await main(['node', 'pool-replay.mjs', path, ...argv]);
+    stdout.mockRestore();
+    rmSync(dir, { recursive: true, force: true });
+    return { code, text: out.join('') };
+  };
+
+  it('prints the composition table only when it is asked for', async () => {
+    expect((await capture([])).text).not.toContain('pool composition');
+    const withTable = await capture(['--compositions']);
+    expect(withTable.text).toContain('pool composition: what each subset of the pool buys');
+    expect(withTable.text).toContain('2 calls  a+b');
+  });
+
+  it('prints the 2x2 and the feature ranking when a second arm is named', async () => {
+    const { code, text } = await capture(['--trust', 'select-cross']);
+    expect(code).toBe(0);
+    expect(text).toContain('vote vs select-cross-pooled-vote → select-cross: 1 paired cases');
+    expect(text).toContain('vote only 1');
+  });
+
+  it('reads no artifact path from the value of --trust', async () => {
+    // The arm name is a value, not a file: a parser that treated it as positional would try to
+    // open a file called `select-cross` and the run would fail on the wrong thing.
+    const { code } = await capture(['--trust', 'select-cross', '--arm', 'select-cross']);
+    expect(code).toBe(0);
+  });
 });

@@ -18527,3 +18527,131 @@ a citation that no longer resolves, an absence with no reason, a percentage that
 rendered figures were called "1,418 percent" in the first draft), and a required leaderboard that has
 quietly disappeared from the manifest. `REQUIRED` is the list of nine; deleting a row fails the build
 rather than shrinking the table.
+
+## Three calls, one opinion, and the third call's real job
+
+Every selection reading in this file has been a reading *over* a fixed pool. `pool-replay` priced
+seven policies on one candidate set, the gate priced when to pay for an eighth opinion, and the shape
+rule priced what a result's width says — all of them holding the pool constant. The bill was never
+part of the question, and it should have been: on `44905985381`'s pool, 417 of 600 cases return
+**one** distinct result across three candidates. Three generations bought one opinion on 70% of the
+questions, and no policy over one opinion can be better than that opinion.
+
+`pool-replay --compositions` prices every non-empty subset of the pool's sources on the same rows.
+Same cases, same judge, same call accounting: a source generates once, so a subset's `calls` is its
+size, and the columns are comparable across rows.
+
+| calls | candidate set | vote | ceiling | one opinion | tied |
+|---:|---|---:|---:|---:|---:|
+| 1 | `inline+evidence@second` | 365 / 598 | 365 | 598 | 0 |
+| 1 | `metadata+evidence` | **371** / 595 | 371 | 595 | 0 |
+| 1 | `values` | 370 / 595 | 370 | 595 | 0 |
+| 2 | second + metadata | 368 / 600 | 410 | 445 | **141** |
+| 2 | second + values | 369 / 600 | 401 | 469 | 117 |
+| 2 | metadata + values | **374** / 599 | 401 | 482 | 105 |
+| 3 | all three | **387** / 600 | **421** | 417 | 45 |
+
+Two readings come out of it, and only one of them was expected.
+
+**The third call is worth 13 questions over the best pair and 16 over the best single.** It is not
+free — it is 50% more generation — but it is now a price rather than a habit: 371 for one call, 374
+for two, 387 for three, against a ceiling of 421. A product that wants 64.50% pays three calls; one
+that wants 61.83% pays one.
+
+**Parity, not information, is most of what the third call buys.** A two-candidate pool turns every
+disagreement into a tie, and the vote settles a tie by generation order — the defect this file
+already named when the tie gate was priced. The best pair ties on **141** of 600 cases; the triple
+ties on 45. That is why `metadata+values` (374) sits three questions above a single call (371) while
+its ceiling is thirty above it (401): the second call raised what the pool *could* answer by 30 and
+what the pool *did* answer by 3, because 141 questions became coin flips. An odd candidate count is
+not an aesthetic; a majority needs an odd number of members, and a pool without one is decided by
+arrival order on a quarter of the questions.
+
+### The router the pool cannot see
+
+The 34 questions where the vote is wrong and the pool holds the answer are the whole remaining prize;
+`vote` 387 against the pool's ceiling 421. Splitting them against the arm that pays for an opinion:
+
+| | selector right | selector wrong |
+|---|---:|---:|
+| **vote right** | 362 | 25 |
+| **vote wrong** | **17** | 196 |
+
+`trustOf` reports the four cells and the exact sign test: 17 up, 25 down, p = 0.2800. The selector is
+not significantly better than the count and it loses eight net — which is the reading that made the
+free vote ship, now expressed as a 2×2 rather than as two rates.
+
+The 196 in the bottom-right cell are questions no selection policy can reach: no member is correct.
+The 17 in the bottom-left are the only ones a router could win, and a router has to find them among
+42 disagreements without paying the 25. Every feature the pool itself carries was scored on those 42:
+
+| feature | AUC |
+|---|---:|
+| the modal answer uses `DISTINCT` | 0.646 |
+| the modal group is tied | 0.627 |
+| distinct results in the pool | 0.598 |
+| the modal answer aggregates | 0.594 |
+| columns in the modal answer | 0.546 |
+| empty results in the pool | 0.529 |
+| rows in the modal answer | 0.484 |
+| size of the modal group | 0.373 |
+
+The best of them reads 0.646, and 42 pairs cannot distinguish 0.646 from a coin (a 4,000-resample
+bootstrap over the 17 × 25 grid spans 0.518 to 0.774). The bar this repository set for spending a
+dispatch on a router is **AUC at least 0.70**; nothing here reaches it.
+
+**The reason is not that the features are weak, it is that the features are the wrong side.** A
+router that decides "this question wants rows, that one wants a number" reads the *question*, and no
+artifact this repository has ever written carried one: `cases[]` held `id`, `sql`, `gold` and the
+pool, and `bench:bird:route` priced a question-side family over an artifact that could not hold the
+question. That is why the answer above is a table of seven pool features and not the family the
+literature builds — not a decision to look only at the pool, but the only list that could be
+computed.
+
+### The record now carries the question
+
+`caseRows` writes `asked: { db, difficulty, question, evidence }` on every case, capped at 400
+characters a field with `truncated: true` when the cap fired. It is the same join as `gold` — the
+artifact records what ran, the questions file supplies what was asked — and it costs about 250 KB on
+a 600-question, four-arm run.
+
+The cap is a truncation and says so, because a reader who fits a feature to a cut question would be
+reading half a document as a whole one. `db` and `difficulty` travel with it for the same reason the
+question does: `bench:bird:route` groups its thresholds by database so a rule cannot memorise a
+corpus's corners, and until this round the grouping key was not in the artifact either.
+
+This is the third time a missing field cost a dispatch — `rows`/`columns` cost the shape rule a run,
+`chosen` cost every policy comparison one, and the question cost the router family its only testable
+form. The pattern is uniform: **a field that is not recorded is an analysis that is not possible**,
+and it reads in the report as an analysis that was not worth doing.
+
+### The dispatch it earns: what the third call should be
+
+If the third call is a copy on 70% of questions, the question is what it should be instead. On this
+pool `values` is byte-identical to `metadata+evidence` on **474 of 591** cases — the block is built
+from the literals a question names and 60.9% of questions name none — so the third vote restates a
+vote already cast on almost three quarters of the split. Its sole contribution is 11 cases: the
+ceiling without it is 410, with it 421.
+
+`select-cross-diverse` swaps that slot for `decompose`, the one generator here that answers by a
+different method rather than different wording. It is a **swap, not a purchase**: three generations,
+one selector, four calls, identical to `select-cross` except for what the third call is asked to do.
+It also keeps the pool odd, which is the property the pair table above says matters — the arm that
+bought a fourth candidate (`select-cross-pooled-dissent`) made the pool even, and its conversion fell
+to 89.62% on a ceiling that had risen 27 cases.
+
+Registered before the dispatch, on the incumbent's own metric:
+
+- **coverage** (cases where any member is right) **at least 421 of 600** — the ceiling `select-cross`
+  reaches with `values` in the third slot. A swap that costs the same and lowers the ceiling is a
+  loss, and it has to be visible as one.
+- **the third slot is solely right on at least 11 cases** — what `values` is solely right on
+  (421 − 410). This is the number the swap is actually about: an opinion, not an index.
+- **the free vote over the new pool at least 387 of 600**, from `select-cross-diverse-pooled-vote` in
+  the same run. A slot that raises coverage without raising the count is information the vote cannot
+  reach, and that is a different finding from a slot that carries no information at all.
+- **`--verify-vote` 600 of 600** on the new artifact, and `asked` present on 600 of 600 cases.
+
+If coverage rises and the vote does not, the third slot is information the decision cannot use and
+the next lever is the decision, not the generator. If coverage falls, the third call was buying the
+index and the diversity line closes here rather than paying for a fourth prompt.
