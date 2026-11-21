@@ -36,6 +36,16 @@ cannot be argued with.
   recovered.
 
 ### Added
+- **The third slot's information is not the constraint; the decision is.** `select-cross-diverse`
+  swapped the value index for a decomposition at the same three generations and four calls, and the
+  swap is a wash: coverage identical (432 of 600 both), the third slot solely right on **16 cases
+  either way**, and the free vote 386 against the control's 390 in the same run (21 up, 25 down,
+  p = 0.6587). The mechanism is the parity reading: `decompose` is as informative as `values` and
+  *more disagreeable* — 401 one-opinion cases against 409, ties 47 against 41 — so it moves eight
+  questions out of a majority and into a coin flip. The selectors in the same run say it from the
+  other side: 27 down / 16 up on the cross pool (p = 0.1263), **39 down / 20 up on the diverse pool**
+  (p = 0.0183). **The more informative the pool, the worse the judge.**
+
 
 - **The bill for a candidate set, priced the way a policy is priced.** `pool-replay --compositions`
   enumerates every non-empty subset of a pool's sources and reports, on the same rows, its `calls`,

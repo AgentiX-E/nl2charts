@@ -5713,7 +5713,7 @@ nothing); a pool of one is a pool.
 BIRD dev, execution accuracy, as reported by the systems themselves. The numbers are not
 comparable one-to-one — this repository scores a 600-question subset of dev with two hosted chat
 models, while every entry below scores the full split with models it trained — but a table with the
-caveat attached is still the only honest way to say where 63.67% sits.
+caveat attached is still the only honest way to say where 64.50% sits.
 
 | system | BIRD | what it adds over a prompt |
 | --- | --- | --- |
@@ -5726,9 +5726,15 @@ caveat attached is still the only honest way to say where 63.67% sits.
 | OmniSQL (2025) | 72.06% | 2.5M synthetic chain-of-thought samples |
 | Distillery (2024) | 71.83% | full schema in context, augmentation, selection, correction |
 | CHESS (2024) | 71.1% | four agents including a unit tester |
-| **this repository** | **63.67%** | prompt-only, un-fine-tuned hosted models, three prompts, one selector |
+| **this repository** | **64.50%** | prompt-only, un-fine-tuned hosted models, three prompts, no selector call at all |
 
-The gap is 7 to 15pp, and the decomposition that matters is not "which model" but **which parts of
+64.50% is `387 of 600` on `44905985381`: the modal result over the three candidates, which is the
+configuration this repository ships and the one that beat every paid rule on this pool — the selector
+over the same candidates reads 63.17%. A second draw of the same arm (`44917562527`) reads `390 of
+600`, 65.00%; the row quotes the lower of the two, because two readings of one policy are an interval
+and the flattering end of an interval is not a leaderboard entry.
+
+The gap is 7 to 14pp, and the decomposition that matters is not "which model" but **which parts of
 the pipeline are trained**. XiYan-SQL's own ablation prices three of them: removing the schema
 filter costs 1.24pp, dropping to a single generator costs 4.04pp, and replacing the selector with
 majority vote costs 3.13pp — 8.4pp of their 75.63% comes from structure this repository either has
@@ -18655,3 +18661,57 @@ Registered before the dispatch, on the incumbent's own metric:
 If coverage rises and the vote does not, the third slot is information the decision cannot use and
 the next lever is the decision, not the generator. If coverage falls, the third call was buying the
 index and the diversity line closes here rather than paying for a fourth prompt.
+
+### The reading (`44917562527`): the swap is neutral, and the reason is the decision
+
+Four arms on 600 questions, code `105abba2`, second model `deepseek-reasoner`:
+
+| arm | calls a case | correct | accuracy |
+|---|---:|---:|---:|
+| `select-cross` (selector) | 4 | 379 | 63.17% |
+| `select-cross-pooled-vote` | 0 | **390** | 65.00% |
+| `select-cross-diverse` (selector) | 4 | 371 | 61.83% |
+| `select-cross-diverse-pooled-vote` | 0 | **386** | 64.33% |
+
+Against the three pre-registered criteria:
+
+| criterion | bar | reading | verdict |
+|---|---|---|---|
+| coverage | ≥ 421 of 600 | **432** | pass (and equal to the incumbent's 432) |
+| the third slot solely right | ≥ 11 | **16** (`values` 16, `decompose` 16) | pass, exactly tied |
+| the free vote | ≥ 387 | **386** | fail by 1 |
+| `--verify-vote` / `asked` | 600 of 600 | 600 of 600 / 2,400 of 2,400 | pass |
+
+Read against its own run instead of against the other run's arm, the third criterion is not a
+one-question miss: the control moved too. `select-cross-pooled-vote` read **390** here and 387 on
+`44905985381` — the same arm on a re-drawn pool, which is the pool displacement this file has
+measured before at 1.3–3.3pp. So the honest pairing is 386 against 390 on the same 600 questions:
+**21 gains, 25 losses, p = 0.6587**. The swap is a wash.
+
+The mechanism is the parity reading, one level deeper. `decompose` is not a weaker opinion than
+`values` — it is exactly as informative, which the tied sole-correct count says in the sharpest form
+available (16 and 16) and the identical ceiling says again (432 both). What it is, is *more
+disagreeable*: the diverse pool returns **401** one-opinion cases against the incumbent's 409, and
+ties on **47** against 41. Every one of those conversions moves a question out of a majority and into
+a coin flip, and a three-way vote settles a coin flip by generation order. **More information the
+decision cannot use is strictly worse than less information it can.** The diverse pool's ceiling is
+the same and its answer is 4 lower; the 8 questions it gained in disagreement, it lost in ties.
+
+The selectors in the same run say the same thing from the other side. On the cross pool the selector
+is 27 down and 16 up against the count (p = 0.1263); on the diverse pool it is **39 down and 20 up**
+(p = 0.0183). Same judge, same prompt, same four calls — the only difference is that the second pool
+carries more disagreement, and the judge's deficit roughly doubles where the statements genuinely
+differ. **The more informative the pool, the worse the judge.** That is not a paradox: a judge handed
+three statements that are all different has to adjudicate, and this one adjudicates worse than the
+count it was supposed to beat.
+
+So the diversity line closes here, and it closes with a reason rather than with a null: the pool is
+not short of information, the decision is short of a way to use it. `decompose` stays in the
+catalogue as a source — it is the best single candidate in that pool (369 of 593, above the second
+model's 366) — but swapping it into the third slot buys nothing, and buying it as a fourth would
+make the pool even, which the composition table above prices as a loss.
+
+What that leaves, on this pool: 168 of 600 questions where **no candidate is right** — coverage, not
+decision — and 42 where the answer is in the pool and the count misses it. The first needs a
+generator or a retrieval this pipeline does not have; the second needs a judge that beats a count,
+and two selectors, a shape rule, a gate and a tie-break ordering have now all failed to be one.
