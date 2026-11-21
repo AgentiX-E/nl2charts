@@ -13394,9 +13394,10 @@ of the table made every histogram row's covering mark the bar that answered it, 
 a loss with `bar` on both sides: gap 0, decided on preference, by itself.
 
 The table now answers what a mark **is**; the row keeps the cue. A bar that answers a histogram row
-after the question named one is `substituted`; one that answers without it is `uncovered`, because no
-mark in this contract is a histogram until the question says the word. That, plus one row that was a
-genuine loss to a boxplot and is now also `uncovered`, is the whole 443 -> 399:
+after the question named one is `substituted`; one that answers without it is `uncued` — the word that
+did not exist when this paragraph was written, and the reason it read `uncovered` for three rounds.
+That — as it read then, with histogram rows counted into `uncovered` — plus one row that was a genuine
+loss to a boxplot, is the whole 443 -> 399:
 
 | bucket | before | after |
 |---|---:|---:|
@@ -17786,12 +17787,14 @@ tree nobody can check out.
 This is the second defect of the same family as the guard itself, and it is worth naming precisely:
 the guard was computed and never printed, and this table was printed and never re-taken. Both are
 readings that outlive the state they were taken in. The fix is not discipline — the sweep now writes
-`eval/out/text2vis-census.json`, `eval/text2vis/baseline.json` records the shipped total and the four
-rows a decision is read off, and `node tools/check-text2vis-baseline.mjs --census --require` refuses a
+`eval/out/text2vis-census.json`, `eval/text2vis/baseline.json` records the shipped total, the two gap
+counts and the four rows a decision is read off, and `node tools/check-text2vis-baseline.mjs --census --require` refuses a
 run whose totals or halves moved:
 
 ```
 TEXT2VIS CENSUS: the shipped table reads 664 of 1470, at its floor
+TEXT2VIS CENSUS: `uncued` reads 40
+TEXT2VIS CENSUS: `uncovered` reads 8
 TEXT2VIS CENSUS: `distribution-wide` reads 671 (3/4)
 TEXT2VIS CENSUS: `no-share` reads 665 (8/-7), fitted
 TEXT2VIS CENSUS: `no-ranking` reads 669 (8/-3), fitted
@@ -17856,4 +17859,53 @@ asserted by a unit test that classifies a histogram question over a pie-labelled
 | `ceiling` / `decided` / `shipped` | 1,020 / 891 / **843**, reproduced from the same artifact |
 | halved sweep | 34 tables, 2 fitted (`no-share`, `no-ranking`) |
 | `packages/chart` coverage | 100 / 100 / 100 / 100 |
+| cost | **¥0** |
+
+## Forty rows were a missing word, and the census called them a missing mark
+
+The histogram reading answers 50 of the corpus's 90 histogram rows, and the remaining 40 have been
+described in every plan since as "uncovered" — the outcome that means *no mark in this contract covers
+this family*. That sentence was wrong, and the census was the thing saying it.
+
+A probe over the 40 rows (`eval/text2vis/misses.mts Histogram`, ¥0) prints them with their outcome and their
+words. Every one of the 40 comes back `uncovered`, and one of them reads:
+
+> "Given the dataset of daily trading volumes in millions of shares, determine whether the distribution
+> is skewed … identify any outliers using both the Z-score method … and the interquartile range (IQR)
+> method."
+
+The product answers that row — with a bar, or with a boxplot — and the corpus calls it a histogram. The
+missing thing is the word *histogram*, which the question never says and which the cue table therefore
+never fires. That is a **trigger** gap, and `uncovered` is the outcome for a **capability** gap: violin
+is the only family no mark leads with whatever the question says.
+
+So the vocabulary gains one word. `cueReachOf(family)` asks `familiesOfMark` over every cue the shipped
+table can fire and returns the mark that would lead with the family, plus the cue that does it — the
+pair is `bar` + `histogram`, derived rather than named, so a second cue-conditional widening lands in
+the same place without a second edit. A row whose family is reachable that way but which never claimed
+it is `uncued`; a row whose family is reachable by nothing stays `uncovered`:
+
+| outcome | before | after | what it now means |
+|---|---:|---:|---|
+| `uncovered` | 48 | **8** | no mark leads with this family under any cue — violin, 8 of its 9 rows |
+| `uncued` | — | **40** | the family is drawable and this question never named it |
+| `hit` | 664 | 664 | unchanged: the split relabels, it does not re-rank |
+
+The number that changes is the one a plan is written from. "40 rows uncovered" reads as a capability to
+build; "40 rows uncued" reads as a cue to widen — and the widening that would close them (`distribution`
+as a histogram trigger) was measured three rounds ago at **−16** on the same instrument, because it
+steals thirteen bars and twelve pies whose questions also say "distribution". The two readings are the
+same 40 rows; only one of them tells you what to do next, and it is the one that names the gap correctly.
+
+Tests: the pair is pinned (`cueReachOf('histogram')` → `bar`/`histogram`, `cueReachOf('violin')` →
+nothing), the row is pinned (a one-measure histogram question with no cue is `uncued`, carrying the pair),
+and the identity that a reader would otherwise re-derive by hand is pinned too — `outranked + uncovered +
+uncued + declined === missed`, and `renderable === hit + substituted + refused + outranked + uncued +
+uncovered`.
+
+| gate | result |
+|---|---|
+| `tsc --noEmit` | clean |
+| `test/text2vis-census.test.ts` | 117 passed |
+| census | 664 hit, **uncued 40**, **uncovered 8**, identity 664 = 664 |
 | cost | **¥0** |

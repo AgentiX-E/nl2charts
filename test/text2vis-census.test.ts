@@ -29,6 +29,7 @@ import {
   censusOf,
   classify,
   coveringMarks,
+  cueReachOf,
   describeCensus,
   describeProduct,
   entryCensus,
@@ -161,13 +162,22 @@ describe('which marks could have answered a family', () => {
     expect(familiesOfMark('bar', 'histogram')).toEqual(['histogram', 'bar']);
   });
 
-  it('reads an uncovered family as uncovered when the answer never claimed it', () => {
+  it('reads a family the question never named as uncued, and says which cue would have widened it', () => {
     // A histogram label over a single measure, asked with no word that names the mark: the bar is the
-    // only thing the product can draw and it does not claim to be a histogram.
-    // `expectOutcome` narrows to a single-literal arm, and `uncovered` shares its arm with `hit` and
-    // `noProfile` (all three carry nothing but the family), so the outcome is read directly here.
+    // only thing the product can draw and it does not claim to be a histogram. The gap is a word, not
+    // a mark — `cueReachOf` says so, and the row carries the pair that would have closed it.
     const row = classify(input('Show the total revenue', 'Histogram', table('Revenue', ['12', '18', '31', '44'])));
-    expect(row).toEqual({ expected: 'histogram', outcome: 'uncovered' });
+    expect(row).toEqual({ expected: 'histogram', outcome: 'uncued', mark: 'bar', cue: 'histogram' });
+  });
+
+  it('keeps uncovered for the family no cue reaches, so the two gaps cannot be read as one', () => {
+    // The pair this distinction exists for: forty histogram rows are `uncued` (a bar, told the word),
+    // and violin is `uncovered` (no mark and no cue), and a reader who sums them is measuring a
+    // capability gap that does not exist.
+    expect(cueReachOf('histogram')).toEqual({ mark: 'bar', cue: 'histogram' });
+    expect(cueReachOf('violin')).toBeUndefined();
+    const row = classify(input(TREND, 'Violin Plot', QUARTERLY));
+    expect(row).toEqual({ expected: 'violin', outcome: 'uncovered' });
   });
 
   it('lists every mark the recommender can return, so a new mark cannot go uncounted', () => {
@@ -396,7 +406,7 @@ describe('what became of one question', () => {
     ];
     const report = censusOf(rows);
     const profile = scoreProfile(rows);
-    expect(report.outcomes).toEqual({ hit: 2, substituted: 2, reshaped: 1, binned: 0, refused: 1, outranked: 0, uncovered: 0, noProfile: 0 });
+    expect(report.outcomes).toEqual({ hit: 2, substituted: 2, reshaped: 1, binned: 0, refused: 1, outranked: 0, uncued: 0, uncovered: 0, noProfile: 0 });
     expect(report.outcomes.hit).toBe(profile.top1);
     expect(report.outcomes.hit + report.outcomes.substituted).toBe(profile.shortlist);
     expect(() => assertCensusReport(report)).not.toThrow();
@@ -678,7 +688,7 @@ describe('the census over a population', () => {
     expect(report.rows).toBe(9);
     expect(report.unmapped).toBe(1);
     expect(report.scored).toBe(8);
-    expect(report.outcomes).toEqual({ hit: 2, substituted: 0, reshaped: 0, binned: 0, refused: 2, outranked: 2, uncovered: 1, noProfile: 1 });
+    expect(report.outcomes).toEqual({ hit: 2, substituted: 0, reshaped: 0, binned: 0, refused: 2, outranked: 2, uncued: 0, uncovered: 1, noProfile: 1 });
     expect(() => assertCensusReport(report)).not.toThrow();
   });
 
@@ -691,7 +701,7 @@ describe('the census over a population', () => {
     const fallback = report.refusals.reduce((sum, entry) => sum + entry.withFallback, 0);
     const refusals = report.refusals.reduce((sum, entry) => sum + entry.n, 0);
     expect(report.outcomes.hit).toBe(profile.top1);
-    expect(report.outcomes.outranked + report.outcomes.uncovered + fallback).toBe(profile.missed);
+    expect(report.outcomes.outranked + report.outcomes.uncovered + report.outcomes.uncued + fallback).toBe(profile.missed);
     expect(profile.declined).toBe(report.outcomes.noProfile + refusals - fallback);
   });
 
@@ -1179,7 +1189,14 @@ describe('the families no mark can lead with', () => {
   it('reads zero when every label is one the contract can lead with', () => {
     const report = censusOf([input('Which region leads?', 'Bar Chart', table('Region, Revenue', ['North, 40', 'South, 55']))]);
     expect(report.unreachable.rows).toBe(0);
-    expect(report.renderable).toBe(report.outcomes.hit + report.outcomes.substituted + report.outcomes.refused + report.outcomes.outranked + report.outcomes.uncovered);
+    expect(report.renderable).toBe(
+      report.outcomes.hit +
+        report.outcomes.substituted +
+        report.outcomes.refused +
+        report.outcomes.outranked +
+        report.outcomes.uncued +
+        report.outcomes.uncovered,
+    );
     expect(describeCensus(report).join('\n')).not.toContain('renderable');
   });
 

@@ -29,6 +29,17 @@ cannot be argued with.
   its halves trade rows.
 
 ### Fixed
+- **`uncovered` was two gaps under one word, and the larger one was a missing cue rather than a
+  missing mark.** Forty of the corpus's ninety histogram rows were published as `uncovered` — the
+  outcome that means no mark leads with the family — while the product demonstrably draws them, with a
+  bar or a boxplot, and the corpus calls them histograms because the question names the *statistic*
+  ("determine whether the distribution is skewed…"). `cueReachOf` asks `familiesOfMark` over every cue
+  the shipped table can fire and returns the mark that would lead with the family and the cue that does
+  it (`bar` + `histogram`, derived rather than named); a row it reaches but which never claimed the
+  family is now `uncued`. The split is 48 uncovered → **8 uncovered + 40 uncued**; `hit` does not move,
+  because this relabels a diagnosis rather than re-ranking. It matters because the two words prescribe
+  different next steps: a missing mark is a capability to build, a missing cue is a widening — and the
+  widening that would close these forty was measured at −16 three rounds ago.
 - **A cue change is priced on the ceiling and the shipped path, not on the rule arm.** Widening the
   `distribution` cue to the statistics box plot questions are written in ("IQR", "outlier", "z-score",
   "standard deviation", "skew") reads **671** on the rule arm against 664 — 17 box plots won against

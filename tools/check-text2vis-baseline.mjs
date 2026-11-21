@@ -845,6 +845,14 @@ function selfTest() {
     const headless = censusReport();
     headless.product = headless.product.filter((row) => row.variant !== 'shipped');
     caseOf('a sweep with no shipped row is refused', compareCensus(headless, censusFloor, {}).issues, 1);
+    const gaps = { ...censusFloor, uncued: 3, uncovered: 1 };
+    const reported = censusReport();
+    reported.outcomes = { uncued: 3, uncovered: 1 };
+    caseOf('the two gaps under their own words are accepted when they match', compareCensus(reported, gaps, {}).issues, 0);
+    reported.outcomes = { uncued: 43, uncovered: 1 };
+    caseOf('a trigger gap that grew by forty rows is refused even with every candidate unchanged', compareCensus(reported, gaps, {}).issues, 1);
+    const words = censusReport();
+    caseOf('a report with no outcomes block is refused when the floor records one', compareCensus(words, gaps, {}).issues, 2);
   }
   const recordedArms = JSON.parse(readFileSync(resolve(ROOT, BASELINE), 'utf8'))?.llm?.arms;
   const scales = Object.keys(recordedArms ?? {});
@@ -1315,6 +1323,24 @@ export function compareCensus(report, floor, options = {}) {
     );
   } else {
     notes.push(`TEXT2VIS CENSUS: the shipped table reads ${String(shipped.hit)} of ${String(report.scored)}, at its floor`);
+  }
+  // The two gaps that are not candidates: a family no mark leads with, and a family the question never
+  // named. They are recorded because they are the numbers a plan is written from, and because the
+  // change that separated them moved one of them by forty rows without moving a single hit.
+  for (const name of ['uncued', 'uncovered']) {
+    if (typeof floor[name] !== 'number') continue;
+    const measured = report.outcomes?.[name];
+    if (typeof measured !== 'number') {
+      issues.push(`TEXT2VIS CENSUS: the report has no \`outcomes.${name}\` count, and the floor records ${String(floor[name])}`);
+      continue;
+    }
+    if (measured !== floor[name]) {
+      issues.push(
+        `TEXT2VIS CENSUS: \`${name}\` reads ${String(measured)}, the floor records ${String(floor[name])} — re-take it before quoting it`,
+      );
+    } else {
+      notes.push(`TEXT2VIS CENSUS: \`${name}\` reads ${String(measured)}`);
+    }
   }
   for (const [name, recorded] of Object.entries(floor.variants ?? {})) {
     const row = rows.get(name);

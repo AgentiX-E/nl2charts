@@ -36,6 +36,8 @@
   "instrument": "eval/text2vis/census.ts",
   "scored": 1470,
   "hit": 664,
+  "uncued": 40,
+  "uncovered": 8,
   "variants": {
    "distribution-wide": {
     "hit": 671,
@@ -66,7 +68,7 @@
     }
    }
   },
-  "note": "The sweep's floor, and the first one this repository has had for a derived reading. The shipped table reads 664 of 1,470, which is the number `top1` records above from a different instrument: the classifier and the sweep agree row for row, and the identity `assertCensusReport` holds is what makes the other thirty-three rows comparable to it. Four candidates are recorded rather than all thirty-four, because four are what a decision is read off: `distribution-wide` is the table the documentation backs, and `no-share` / `no-ranking` are the two the halves guard marks as fitted — the two a reader would otherwise quote as the top of the board. `no-histogram` prices the histogram cue's whole contribution, 50 rows, which is the number the next widening has to beat. **Why this floor exists at all**: both totals in a first draft of the round that introduced the halves were six rows off, because every row in the table is priced against the shipped table and the shipped table had moved when a widening was reverted; the draft kept the numbers from the tree before the revert, and nothing refused them. A derived reading with no floor is a table that can be quoted after the tree under it changed — the same defect as a gate that prints green without measuring."
+  "note": "The sweep's floor, and the first one this repository has had for a derived reading. The shipped table reads 664 of 1,470, which is the number `top1` records above from a different instrument: the classifier and the sweep agree row for row, and the identity `assertCensusReport` holds is what makes the other thirty-three rows comparable to it. Four candidates are recorded rather than all thirty-four, because four are what a decision is read off: `distribution-wide` is the table the documentation backs, and `no-share` / `no-ranking` are the two the halves guard marks as fitted — the two a reader would otherwise quote as the top of the board. `no-histogram` prices the histogram cue's whole contribution, 50 rows, which is the number the next widening has to beat. **Why this floor exists at all**: both totals in a first draft of the round that introduced the halves were six rows off, because every row in the table is priced against the shipped table and the shipped table had moved when a widening was reverted; the draft kept the numbers from the tree before the revert, and nothing refused them. A derived reading with no floor is a table that can be quoted after the tree under it changed — the same defect as a gate that prints green without measuring. **The two gaps are recorded beside the candidates** (`uncued` 40, `uncovered` 8), because they are the numbers a plan is written from: the same 40 rows read as `uncovered` for four rounds, which says a mark is missing, and the word that separates them — a trigger the question never fired — is what tells the next round whether to widen a cue or build a mark."
  },
  "llm": {
   "recordedAt": "2026-11-20",

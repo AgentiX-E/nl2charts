@@ -68,10 +68,40 @@ import { isMissingCell, numericCell, parseResultSet, profilesOf, typedRows, type
  * widest question of every row made 43 histogram rows read as `lost histogram to bar` with `bar` as
  * both the covering mark and the winner: a loss to itself, which no ranking can produce and no lever
  * can repair. With the widening left to the row, those rows are `substituted` when the cue fired and
- * `uncovered` when it did not — and `outranked` holds losses again.
+ * `uncued` when it did not — and `outranked` holds losses again.
+ *
+ * **`uncued` is the word for a family this row did not name.** Until it existed, a histogram question
+ * written as "is the distribution left-skewed" was filed as `uncovered`, which is the outcome for a
+ * family *no mark can lead with whatever the question says* (violin, and only violin). Forty of the
+ * corpus's ninety histogram rows are that kind of row: the product draws a bar or a boxplot over the
+ * same numbers, the corpus calls it a histogram, and the only thing missing is a word — not a mark.
+ * Reading those two gaps as one number is how a trigger gap gets planned as a capability gap, which is
+ * the mistake the previous four rounds' "remaining 40" line was making.
  */
 export function coveringMarks(family: ChartFamily): readonly RecommendableMark[] {
   return RECOMMENDABLE_MARKS.filter((mark) => familiesOfMark(mark).includes(family));
+}
+
+/** The cue kinds the shipped table can fire, in the order the table lists them. */
+const CUE_KINDS: readonly CueKind[] = [...new Set(CHART_CUES.map((rule) => rule.kind))];
+
+/**
+ * The mark that would *lead* with a family if the question had named it, and the cue that does it.
+ *
+ * One pair exists in this contract: a `histogram` cue makes the bar lead with `histogram`. The answer
+ * is derived by asking `familiesOfMark` rather than by naming the pair, so a second cue-conditional
+ * widening lands here without a second edit — and a family nothing widens (violin) still comes back
+ * empty, which is what keeps `uncovered` meaning "no mark can be this".
+ */
+export function cueReachOf(
+  family: ChartFamily,
+): { readonly mark: RecommendableMark; readonly cue: CueKind } | undefined {
+  for (const cue of CUE_KINDS) {
+    for (const mark of RECOMMENDABLE_MARKS) {
+      if (familiesOfMark(mark, cue)[0] === family) return { mark, cue };
+    }
+  }
+  return undefined;
 }
 
 /** How much of a prompt a sample keeps. Enough for a question, short enough for a log line. */
@@ -145,7 +175,16 @@ export function noProfileReason(text: string, set: ResultSet): TableDefect {
 }
 
 /** What became of one scored question. */
-export type CensusOutcome = 'hit' | 'substituted' | 'reshaped' | 'binned' | 'refused' | 'outranked' | 'uncovered' | 'noProfile';
+export type CensusOutcome =
+  | 'hit'
+  | 'substituted'
+  | 'reshaped'
+  | 'binned'
+  | 'refused'
+  | 'outranked'
+  | 'uncued'
+  | 'uncovered'
+  | 'noProfile';
 
 /**
  * One scored question, classified, with the facts the classification was made from.
@@ -157,6 +196,19 @@ export type CensusOutcome = 'hit' | 'substituted' | 'reshaped' | 'binned' | 'ref
  */
 export type CensusRow =
   | { readonly expected: ChartFamily; readonly outcome: 'hit' | 'uncovered' | 'noProfile' }
+  | {
+      readonly expected: ChartFamily;
+      /**
+       * The family this contract can draw, asked for with no word that names it. Not `uncovered`:
+       * `uncovered` is reserved for a family no mark leads with under any cue, and merging the two
+       * turns a missing word into a missing capability.
+       */
+      readonly outcome: 'uncued';
+      /** The mark that would have led with the family, had the question named it. */
+      readonly mark: RecommendableMark;
+      /** The cue that widens that mark onto this family. */
+      readonly cue: CueKind;
+    }
   | {
       readonly expected: ChartFamily;
       readonly outcome: 'substituted';
@@ -321,6 +373,7 @@ export interface FamilyCensus {
   readonly substituted: number;
   readonly refused: number;
   readonly outranked: number;
+  readonly uncued: number;
   readonly uncovered: number;
   readonly noProfile: number;
 }
@@ -555,7 +608,7 @@ interface UnreachableTally {
 
 /** Seven zeroes, one per outcome: a fresh object, because the tally mutates what it is given. */
 function emptyOutcome(): Record<CensusOutcome, number> {
-  return { hit: 0, substituted: 0, reshaped: 0, binned: 0, refused: 0, outranked: 0, uncovered: 0, noProfile: 0 };
+  return { hit: 0, substituted: 0, reshaped: 0, binned: 0, refused: 0, outranked: 0, uncued: 0, uncovered: 0, noProfile: 0 };
 }
 
 export interface CeilingCensus {
@@ -819,7 +872,16 @@ export function classify(row: ProfileInput): CensusRow {
   const lead = top === undefined ? undefined : familiesOfMark(top.mark, familyCue(top.cues));
   const covering = coveringMarks(expected);
   if (covering.length === 0 && (lead === undefined || !lead.includes(expected))) {
-    return { expected, outcome: 'uncovered' };
+    // Two different gaps live under this condition, and the word that names them has to be two words:
+    // a family this contract can draw but this question never named is a trigger gap (`uncued`), and a
+    // family no mark leads with under any cue is a capability gap (`uncovered`). Forty of the corpus's
+    // ninety histogram rows are the first kind — "is the distribution left-skewed" over a column of
+    // numbers, answered with a bar because nothing said the word histogram — and filing them as
+    // `uncovered` published them as a missing mark for four rounds.
+    const reach = cueReachOf(expected);
+    return reach === undefined
+      ? { expected, outcome: 'uncovered' }
+      : { expected, outcome: 'uncued', mark: reach.mark, cue: reach.cue };
   }
   if (top !== undefined && lead !== undefined && lead[0] === expected) {
     return { expected, outcome: 'hit' };
@@ -890,6 +952,7 @@ interface FamilyTally {
   binned: number;
   refused: number;
   outranked: number;
+  uncued: number;
   uncovered: number;
   noProfile: number;
 }
@@ -1064,6 +1127,7 @@ export function censusOf(rows: readonly ProfileInput[], options: { readonly vari
       binned: 0,
       refused: 0,
       outranked: 0,
+      uncued: 0,
       uncovered: 0,
       noProfile: 0,
     };
@@ -1657,7 +1721,7 @@ export function describeCensus(report: CensusReport): readonly string[] {
   const outcome = report.outcomes;
   const lines = [
     `text2vis census: ${String(report.scored)} scored of ${String(report.rows)} rows (${String(report.unmapped)} unmapped labels)`,
-    `  hit ${String(outcome.hit)} (${share(outcome.hit)}), substituted ${String(outcome.substituted)}, reshaped ${String(outcome.reshaped)}, binned ${String(outcome.binned)}, refused ${String(outcome.refused)} (${share(outcome.refused)}), outranked ${String(outcome.outranked)} (${share(outcome.outranked)}), uncovered ${String(outcome.uncovered)}, no profile ${String(outcome.noProfile)}`,
+    `  hit ${String(outcome.hit)} (${share(outcome.hit)}), substituted ${String(outcome.substituted)}, reshaped ${String(outcome.reshaped)}, binned ${String(outcome.binned)}, refused ${String(outcome.refused)} (${share(outcome.refused)}), outranked ${String(outcome.outranked)} (${share(outcome.outranked)}), uncued ${String(outcome.uncued)}, uncovered ${String(outcome.uncovered)}, no profile ${String(outcome.noProfile)}`,
     `  hit + substituted is the shortlist the profile file publishes: ${String(outcome.hit + outcome.substituted)} of ${String(report.scored)}`,
     `  time-formatted columns the profiler did not call temporal: ${String(report.timeLikeRows)} rows`,
     `  columns that are numbers only after their formatting is read: ${String(report.coercedRows)} rows`,
