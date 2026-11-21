@@ -3,14 +3,14 @@
  "readings": {
   "bird-dev": {
    "kind": "bench-readback",
-   "commit": "91e42638c81d04782b9e90594198de200941994f",
+   "commit": "b0049112c4c91dc2f7413f84d27d08945807bf3f",
    "workflow": "bird-dev",
-   "runId": "44889941650",
+   "runId": "44897147794",
    "split": "dev",
    "dataset": "bird-dev",
    "model": "deepseek-chat",
    "secondModel": "deepseek-reasoner",
-   "generatedAt": "2026-11-21T09:34:38.060Z",
+   "generatedAt": "2026-11-21T11:18:35.156Z",
    "corpus": {
     "digest": "db9e8a1aba23ddd9",
     "rows": 1534,
@@ -26,30 +26,95 @@
      "passed": 383,
      "total": 600,
      "accuracy": 0.6383333333333333,
-     "candidateRecall": 427,
-     "selectionLoss": 44,
+     "candidateRecall": 433,
+     "selectionLoss": 50,
      "calls": 4,
-     "promptTokens": 3607,
-     "completionTokens": 565,
-     "strictPassed": 368
+     "promptTokens": 3608,
+     "completionTokens": 538,
+     "strictPassed": 372,
+     "spend": {
+      "asked": 600,
+      "priced": 600
+     }
     },
     {
-     "arm": "select-cross-tie",
-     "passed": 388,
+     "arm": "select-cross-pooled-vote",
+     "passed": 383,
      "total": 600,
-     "accuracy": 0.6466666666666666,
-     "candidateRecall": 429,
-     "selectionLoss": 41,
-     "calls": 3.077,
-     "promptTokens": 3232,
-     "completionTokens": 564,
-     "strictPassed": 370
+     "accuracy": 0.6383333333333333,
+     "candidateRecall": 433,
+     "selectionLoss": 50,
+     "calls": 0,
+     "promptTokens": 0,
+     "completionTokens": 0,
+     "strictPassed": 362,
+     "poolRead": {
+      "shared": 600,
+      "unrecorded": 0,
+      "cases": 600
+     }
+    },
+    {
+     "arm": "select-cross-pooled-tie",
+     "passed": 396,
+     "total": 600,
+     "accuracy": 0.66,
+     "candidateRecall": 433,
+     "selectionLoss": 37,
+     "calls": 0.065,
+     "promptTokens": 33,
+     "completionTokens": 0,
+     "strictPassed": 376,
+     "spend": {
+      "asked": 39,
+      "priced": 39
+     },
+     "selectorRule": {
+      "rule": "modal",
+      "decided": 561,
+      "eligible": 1596,
+      "emptyPool": 16,
+      "rules": {
+       "modal": 561
+      }
+     },
+     "poolRead": {
+      "shared": 600,
+      "unrecorded": 0,
+      "cases": 600
+     }
+    },
+    {
+     "arm": "select-cross-pooled-wider",
+     "passed": 387,
+     "total": 600,
+     "accuracy": 0.645,
+     "candidateRecall": 433,
+     "selectionLoss": 46,
+     "calls": 0,
+     "promptTokens": 0,
+     "completionTokens": 0,
+     "strictPassed": 366,
+     "selectorRule": {
+      "rule": "wider",
+      "decided": 600,
+      "eligible": 1706,
+      "emptyPool": 16,
+      "rules": {
+       "wider": 600
+      }
+     },
+     "poolRead": {
+      "shared": 600,
+      "unrecorded": 0,
+      "cases": 600
+     }
     }
    ],
    "rves": {
-    "rves": 0.575,
+    "rves": 0.5725,
     "repeats": 5,
-    "floor": 0.5979166666666667
+    "floor": 0.6016666666666667
    }
   }
  }
