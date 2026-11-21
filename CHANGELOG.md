@@ -7,17 +7,27 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
-- **BIRD dev R-VES has a number, and it is a `partial` row rather than a leaderboard entry.** The
-  metric was implemented last round; the reading is **56.56%** over the 600-question dev artifact this
+- **BIRD dev R-VES has a number, a floor, and a correction to the story that number first told.** The
+  metric was implemented last round; the reading is **56.63%** over the 600-question dev artifact this
   repository already held (arm `select-cross`, 378 correct of 600, 63.0% EX), five timings per
-  statement, two full executions of the loop landing 0.04pp apart. It is not the leaderboard's number
+  statement, three full executions of the loop landing 0.07pp apart. It is not the leaderboard's number
   and the row says so in the same field it states the number in: the leaderboard files OpenSearch-SQL
   at 69.36 over all 1,532 questions, so `eval/benchmarks.ts` grew a fourth status, `partial`, which
   refuses a reading without a denominator (`scored` of `of`), refuses a "subset" that is the whole
-  split, and prints `= 56.56 (600 of 1532)` on the log line a report quotes. The reading also says
-  something that was not expected: the 6.4pp between R-VES and EX is entirely the cost of correct
-  statements that run slower than their own gold query — 148 of the 378 land in the 0.5–1 band — so
-  the lever is statement shape, not selection.
+  split, and prints `= 56.63 (600 of 1532)` on the log line a report quotes.
+- **The gap between R-VES and EX was not the statements, and the floor is what proved it.**
+  `eval/bird/ves.ts` grew `--self-check`: the same measurement a second time with every prediction
+  replaced by its gold statement, which reads **57.96%**. The reward table steps at τ = 1 — it pays a
+  quarter less for a ratio one percent under parity, and does not step up until τ = 2 — so a stopwatch
+  that resolves 544 µs (the corpus median) to about one percent hands a quarter of the reward away on
+  half the answers, and nothing pays it back. Of the 6.37pp between EX (63.0) and R-VES (56.63),
+  **5.04pp are the table and the clock** and **1.33pp are the statements**. The previous round explained
+  the whole gap with statement shape; two measurements refute that. A per-case cross-tabulation finds
+  131 of the 145 statements in the 0.75 band carry exactly the gold's number of joins (9 more, 2 fewer),
+  subqueries split 6 / 5, and the median τ of the cases that do carry an extra join is 0.86, inside the
+  floor's own spread. Three estimators — minimum, median and MAD-trimmed mean over the same ten samples
+  per statement — land within 1.5pp of each other, so the trim stays and the decomposition is not an
+  artefact of the summary.
 - **Nine leaderboards are now a table a gate reads, instead of a claim in prose.** "We cover Text2SQL
   and Text2Viz" was written as if running BIRD and Text2Vis meant standing on WikiSQL, Spider, nvBench
   2.0 and VisCodeBench too. `eval/benchmarks.ts` carries the nine rows with their corpus, their metric,

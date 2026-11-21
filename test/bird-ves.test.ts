@@ -7,6 +7,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import {
   RVES_BANDS,
   cleanTimings,
+  describeFloor,
   describeVes,
   main,
   measureVes,
@@ -15,6 +16,7 @@ import {
   parseVesArgs,
   rewardFor,
   rvesOf,
+  selfPaired,
   timeRatio,
   vesCandidates,
   type StatementTimer,
@@ -272,6 +274,12 @@ describe('the tool', () => {
     });
     expect(parseVesArgs(['--artifact', 'a', '--dataset', 'b', '--arm', 'c', '--repeats', '20', '--out', 'o'])
       .repeats).toBe(20);
+    // A stand-alone flag is not a value: `--self-check --artifact a` must not file `--artifact` as
+    // the flag's value and then lose the artifact.
+    expect(parseVesArgs(['--artifact', 'a', '--dataset', 'b', '--arm', 'c']).selfCheck).toBe(false);
+    expect(parseVesArgs(['--artifact', 'a', '--dataset', 'b', '--arm', 'c', '--self-check']).selfCheck).toBe(true);
+    expect(parseVesArgs(['--self-check', '--artifact', 'a', '--dataset', 'b', '--arm', 'c']))
+      .toMatchObject({ artifact: 'a', selfCheck: true });
   });
 
   it('refuses an invite it cannot act on', () => {
@@ -289,6 +297,62 @@ describe('the tool', () => {
     expect(lines.join('\n')).toContain('at least twice as fast: 1');
     const unmeasured = describeVes({ ...rvesOf([]), unmeasured: 2 }, 1);
     expect(unmeasured.join('\n')).toContain('2 correct statements could not be timed');
+  });
+
+  it('mirrors the statements a floor is measured on, and only those', () => {
+    const cases = [
+      { id: '1', db: 'shop', gold: 'G1', predicted: 'P1', correct: true },
+      { id: '2', db: 'shop', gold: 'G2', predicted: 'P2', correct: false },
+      { id: '3', db: 'shop', gold: 'G3', correct: true },
+      { id: '4', db: 'shop', gold: 'G4', predicted: 'P4', correct: true },
+    ];
+    const mirrored = selfPaired(cases);
+    expect(mirrored.map((entry) => entry.predicted)).toEqual(['G1', 'P2', undefined, 'G4']);
+    // A floor is a second reading of the same artifact, not an edit of it.
+    expect(cases[3]?.predicted).toBe('P4');
+  });
+
+  it("separates a statement's own speed from the reward table's step at a ratio of one", async () => {
+    // The clock answers the same number every time, so the only difference left in the case list is
+    // the one it carries: the prediction takes twice as long as the gold. The floor times the gold
+    // against itself and reads 100%, and the difference is exactly one band — which is the whole
+    // claim a floor makes, stated as arithmetic rather than as prose.
+    const timer: StatementTimer = async (_db, sql) => ({ ok: true, us: sql === 'P' ? 2000 : 1000 });
+    const candidates = [{ id: '1', db: 'shop', gold: 'G', predicted: 'P', correct: true }];
+    const reading = await measureVes(candidates, timer, 3);
+    const floor = await measureVes(selfPaired(candidates), timer, 3);
+    expect(reading.rves).toBeCloseTo(0.75, 12);
+    expect(floor.rves).toBe(1);
+    const lines = describeFloor(reading, floor);
+    expect(lines[0]).toContain('R-VES floor 100.00%');
+    expect(lines[1]).toContain('R-VES net -25.00pp');
+  });
+
+  it('prints the floor only when it was asked for, and writes it beside the reading', async () => {
+    const artifact = join(root, 'floor-artifact.json');
+    const dataset = join(root, 'floor-dataset.json');
+    const out = join(root, 'floor.json');
+    writeFileSync(artifact, JSON.stringify({
+      cases: [{ arm: 'a', id: 1, passed: true, winnerSource: 's', candidates: [{ source: 's', sql: 'P' }] }],
+    }));
+    writeFileSync(dataset, JSON.stringify([{ question_id: 1, db_id: 'shop', SQL: 'G' }]));
+    const silent: string[] = [];
+    await main(
+      ['--artifact', artifact, '--dataset', dataset, '--arm', 'a', '--repeats', '2'],
+      (line) => silent.push(line),
+      async () => ({ timer: async () => ({ ok: true, us: 1000 }), close: async () => {} }),
+    );
+    expect(silent.join('\n')).not.toContain('floor');
+    const asked: string[] = [];
+    await main(
+      ['--artifact', artifact, '--dataset', dataset, '--arm', 'a', '--repeats', '2', '--self-check', '--out', out],
+      (line) => asked.push(line),
+      async () => ({ timer: async () => ({ ok: true, us: 1000 }), close: async () => {} }),
+    );
+    expect(asked.join('\n')).toContain('R-VES floor 100.00%');
+    expect(asked.join('\n')).toContain('R-VES net 0.00pp');
+    const written = JSON.parse(readFileSync(out, 'utf8')) as { floor?: { rves: number } };
+    expect(written.floor?.rves).toBeCloseTo(1, 12);
   });
 
   it('writes the reading, and refuses an artifact with no case for the arm', async () => {
@@ -456,6 +520,7 @@ describe('the reading this repository publishes', () => {
     runs: number[];
     bands: { label: string; cases: number }[];
     repeats: number;
+    floor: { rves: number; net: number; bands: { label: string; cases: number }[] };
   };
 
   it('accounts for every correct answer in one band and no other', () => {
@@ -483,5 +548,34 @@ describe('the reading this repository publishes', () => {
     expect(baseline.runs.length).toBeGreaterThan(1);
     expect(Math.max(...baseline.runs) - Math.min(...baseline.runs)).toBeLessThan(0.5);
     expect(baseline.repeats).toBeGreaterThanOrEqual(3);
+  });
+
+  it('carries a floor whose arithmetic is its own', () => {
+    // The floor is a second reading of the same artifact, so it has to account for the same correct
+    // answers and derive its own score the same way. A floor with no 1.25 band is the shape the
+    // measurement predicts: a statement timed against itself cannot run twice as fast as itself,
+    // and the table pays nothing between a ratio of one and a ratio of two.
+    expect(baseline.floor.bands.reduce((sum, band) => sum + band.cases, 0))
+      .toBe(Math.round((baseline.ex / 100) * baseline.scored));
+    const paid = baseline.floor.bands.reduce((sum, row) => {
+      const band = RVES_BANDS.find((entry) => entry.label === row.label);
+      if (band === undefined) throw new Error(`unknown band ${row.label}`);
+      return sum + band.reward * row.cases;
+    }, 0);
+    expect(Math.abs((paid / baseline.scored) * 100 - baseline.floor.rves)).toBeLessThan(0.1);
+    expect(baseline.floor.bands.filter((row) => row.label === 'at least twice as fast')[0]?.cases).toBe(0);
+    // A statement that is not running twice as slow as itself cannot be filed there either.
+    const slow = baseline.floor.bands
+      .filter((row) => row.label === 'slower than a quarter' || row.label === 'between a quarter and a half')
+      .reduce((sum, row) => sum + row.cases, 0);
+    expect(slow).toBe(0);
+  });
+
+  it('states the net the floor implies, to the hundredth of a point', () => {
+    // `net` is the one number in this file that is a claim about the statements rather than about
+    // the table, and it is derived: a hand-edited copy that does not follow from the two readings
+    // is a copy that would survive review.
+    expect(baseline.floor.net).toBeCloseTo(baseline.rves - baseline.floor.rves, 2);
+    expect(baseline.floor.net).toBeLessThan(0);
   });
 });

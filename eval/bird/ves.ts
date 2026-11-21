@@ -233,6 +233,47 @@ export async function measureVes(
   return rvesOf(cases);
 }
 
+/**
+ * The same case list with every predicted statement replaced by its gold statement.
+ *
+ * This is the floor a reading has to be compared against, and it costs no new measurement code:
+ * a statement timed against itself traverses the same path — a block of gold timings, then a
+ * block of the other side's timings — that a real comparison traverses. Measured on the 600-
+ * question dev artifact, that one statement against itself reads 58.38% while the truth is 100%,
+ * because the reward table steps at τ = 1 and a stopwatch reading of the same statement twice is
+ * never exactly equal. The difference between a reading and this floor is the part of the gap
+ * that belongs to the statements rather than to the table's cliff.
+ *
+ * Wrong answers and cases whose prediction never came back are left alone: a floor is about the
+ * statements that were both right and timed, and a wrong answer earns nothing either way.
+ */
+export function selfPaired(candidates: readonly VesCandidate[]): VesCandidate[] {
+  return candidates.map((candidate) => (
+    candidate.correct && candidate.predicted !== undefined
+      ? { ...candidate, predicted: candidate.gold }
+      : candidate
+  ));
+}
+
+/**
+ * The floor's lines, and the difference the statements themselves are responsible for.
+ *
+ * The floor is printed as a percentage in its own right rather than only as a difference, because
+ * the number a reader has to judge is "how much of EX can this harness see at all", and on a corpus
+ * of sub-millisecond statements the answer is not all of it. `net` is in reward units, which are
+ * percentage points of R-VES: a net of -1.76 means the statements this harness ships are 1.76pp
+ * worth of reward slower than their gold, and the rest of the EX-to-R-VES gap is the table.
+ */
+export function describeFloor(reading: VesReading, floor: VesReading): string[] {
+  const net = reading.rves - floor.rves;
+  return [
+    `R-VES floor ${(floor.rves * 100).toFixed(2)}% — the same statements timed against themselves,`
+      + ` so none of this is the statements' speed`,
+    `R-VES net ${(net * 100).toFixed(2)}pp against the floor (negative means slower than gold,`
+      + ' and the part above the floor is the reward table\'s step at a ratio of 1)',
+  ];
+}
+
 /** One statement timed `runs` times, trimmed. `undefined` when it never executed. */
 async function meanTime(
   timer: StatementTimer,
@@ -323,7 +364,12 @@ export interface VesOptions {
   readonly databases: string;
   readonly oracle: string;
   readonly out?: string;
+  /** Measure the floor as well: the same statements timed against themselves. */
+  readonly selfCheck: boolean;
 }
+
+/** Flags that stand alone. A flag that took a value would have to be told apart from a path. */
+const FLAGS = new Set(['self-check']);
 
 /** Argument parsing, kept separate so the tool's behaviour can be tested without a process. */
 export function parseVesArgs(argv: readonly string[]): VesOptions {
@@ -331,9 +377,14 @@ export function parseVesArgs(argv: readonly string[]): VesOptions {
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index] ?? '';
     if (!token.startsWith('--')) continue;
+    const name = token.slice(2);
+    if (FLAGS.has(name)) {
+      values.set(name, 'true');
+      continue;
+    }
     const next = argv[index + 1];
     if (next === undefined || next.startsWith('--')) continue;
-    values.set(token.slice(2), next);
+    values.set(name, next);
     index += 1;
   }
   const required = (name: string): string => {
@@ -351,6 +402,7 @@ export function parseVesArgs(argv: readonly string[]): VesOptions {
     databases: values.get('databases') ?? 'eval/.cache/bird/dev_databases',
     oracle: values.get('oracle') ?? 'eval/bird/oracle.py',
     ...(values.get('out') === undefined ? {} : { out: String(values.get('out')) }),
+    selfCheck: values.get('self-check') === 'true',
   };
 }
 
@@ -393,7 +445,13 @@ export async function main(
   const { timer, close } = await open(options.oracle, options.databases);
   try {
     const reading = await measureVes(candidates, timer, options.repeats);
+    // The floor is a second pass over the same statements, so it doubles the execution cost and is
+    // asked for rather than assumed. A published reading carries one; a spot check need not.
+    const floor = options.selfCheck
+      ? await measureVes(selfPaired(candidates), timer, options.repeats)
+      : undefined;
     for (const line of describeVes(reading, options.repeats)) log(line);
+    for (const line of floor === undefined ? [] : describeFloor(reading, floor)) log(line);
     if (options.out !== undefined) {
       writeFileSync(options.out, `${JSON.stringify({
         instrument: 'eval/bird/ves.ts',
@@ -402,6 +460,7 @@ export async function main(
         repeats: options.repeats,
         normalization: 'mean over all scored questions; the valid-only mean is reported beside it',
         ...reading,
+        ...(floor === undefined ? {} : { floor }),
       }, null, 1)}\n`);
     }
     return 0;

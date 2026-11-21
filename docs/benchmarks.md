@@ -18005,7 +18005,7 @@ reader can act on, and a missing row for a leaderboard the plan names.
 | Spider 1.0 dev | 1,034 questions, 20 databases | EM, EX | **absent** | — |
 | BIRD Mini-Dev | 498 questions, 11 databases | EX | measured | 56.0 (floor) |
 | BIRD dev | 1,532 scored questions | EX | measured | 62.5 (floor) |
-| BIRD dev | the same questions | R-VES | **partial** | 56.56 over 600 of 1,532 questions |
+| BIRD dev | the same questions | R-VES | **partial** | 56.63 over 600 of 1,532 questions, floor 57.96 |
 | Text2Vis | 1,470 scored rows | top-1 | measured | 664 |
 | Text2Vis | the same rows | render validity | measured | 1,418 figures |
 | nvBench 2.0 | 7,878 queries / 24,076 visualizations | F1@3, F1@5 | **absent** | — |
@@ -18018,7 +18018,7 @@ letting the reader assume one. The other four are not a scandal; they are a to-d
 which is the only kind of to-do list this document has ever been able to act on.
 
 Two things about the `number` column, both learned by watching it be misquoted. A printed line now
-carries the kind of number it printed — `= 62.5 (floor)`, `= 664 (count)`, `= 56.56 (600 of 1532)` —
+carries the kind of number it printed — `= 62.5 (floor)`, `= 664 (count)`, `= 56.63 (600 of 1532)` —
 because a floor is the minimum a rerun may land on, a count is not a percentage, and a rate over a
 subset is not a rate over the split. And `BIRD dev` cites the floor (62.5), not the run: the
 published reading on that split is **62.34%** in run `41296610389`, and the floor sits 0.16pp *above*
@@ -18032,31 +18032,48 @@ lose 3.9pp and pass.
 (`eval/bird/ves.ts`): the reward table, the `tau = time(gold) / time(predicted)` ratio, the
 median-absolute-deviation trim over repeated timings, and both normalisations the literature uses
 (averaged over all questions, and over the valid ones). The reading it now carries is
-**56.56%** — arm `select-cross`, the 600-question dev artifact at `eval/out/bird-eval-41453395203.json`
-(378 correct of 600, **63.0% EX**), five timings per statement, two full executions of the loop
-landing 0.04pp apart (56.58 and 56.54). It is `partial` because the leaderboard files OpenSearch-SQL
-at 69.36 over all 1,532 questions and 600 of them is a different claim; a rate is about a set of
-questions, and this repository has already published one subset reading beside a full-split reading
-as if they were ordered. The first number on a metric is worth recording precisely because it is
-wrong to compare, and the row says so in the same breath.
+**56.63%** — arm `select-cross`, the 600-question dev artifact at `eval/out/bird-eval-41453395203.json`
+(378 correct of 600, **63.0% EX**), five timings per statement, three full executions of the loop
+landing 0.07pp apart (56.58, 56.54 and 56.63). It is `partial` because the leaderboard files
+OpenSearch-SQL at 69.36 over all 1,532 questions and 600 of them is a different claim; a rate is
+about a set of questions, and this repository has already published one subset reading beside a
+full-split reading as if they were ordered. The first number on a metric is worth recording
+precisely because it is wrong to compare, and the row says so in the same breath.
 
-**What the number says, which is not what was expected.** The gap between R-VES and EX here is
-6.4pp, and it is not an accuracy gap — it is the price of statements that are slower than their own
-gold query:
+**The reading has a floor, and the floor is most of the gap.** `--self-check` runs the same
+measurement a second time with every prediction replaced by its gold statement: same case list,
+same two-block shape, same trim, and the only difference removed is the one between the statements.
+It reads **57.96%**, with 121 of the 378 correct answers in the 0.75 band and **none** in the 1.25
+band:
 
-| band | τ | reward | correct statements | reward paid |
-|---|---|---|---|---|
-| at least twice as fast | ≥ 2 | 1.25 | 16 | 20.0 |
-| at least as fast | 1–2 | 1.00 | 205 | 205.0 |
-| within a factor of two | 0.5–1 | 0.75 | 148 | 111.0 |
-| between a quarter and a half | 0.25–0.5 | 0.50 | 4 | 2.0 |
-| slower than a quarter | < 0.25 | 0.25 | 5 | 1.25 |
+| τ band | reward | floor | reading |
+|---|---|---|---|
+| at least twice as fast | 1.25 | 0 | 15 |
+| at least as fast | 1.00 | 257 | 209 |
+| within a factor of two | 0.75 | 121 | 145 |
+| between a quarter and a half | 0.50 | 0 | 4 |
+| slower than a quarter | 0.25 | 0 | 5 |
+| **paid** | | **57.96** | **56.63** |
 
-The 148 statements in the third band alone cost 6.2pp — the whole gap — while the 16 fast ones pay
-back 0.7pp. If every correct statement ran at par with its gold query this reading would *be* EX.
-So the R-VES lever is statement shape rather than selection: the extra joins, `distinct`s and
-subqueries this harness ships that the gold does not have, which the join and conditions censuses
-price separately. That is a hypothesis with a measurement behind it, not a plan yet.
+The 5.04pp the floor costs is arithmetic — 121 × 0.25 / 600 — and it is the reward table's shape
+rather than the corpus's. The table steps at τ = 1, paying a quarter of the reward less for a ratio
+one percent under parity, and does not step *up* until τ = 2. A stopwatch that cannot resolve
+544 microseconds (the corpus median) to better than about one percent therefore lands a statement
+that is exactly at par in the lower band half the time, and the top band is too far away to hand
+the other half of those cases back. This is not a defect in this harness: the measurement anyone
+else's number came from has the same step, which is why the leaderboard's own top row shows 72.28
+EX against 69.36 R-VES — 2.92pp of the same tax, paid by a system whose statements are mostly at
+par.
+
+**What the previous round said about this gap, and why it was wrong.** The claim was that the 6.2pp
+was the joins and subqueries this harness ships that the gold does not. Two measurements refute it.
+A per-case cross-tabulation over the 145 statements in the 0.75 band finds **131 with exactly the
+gold's number of joins**, 9 with more and 2 fewer; subqueries split 6 / 5; aggregates 4 / 5;
+`distinct` 20 / 8; and the median τ of the cases that *do* carry an extra join is 0.86, which is
+inside the floor's own spread. And the floor itself puts 121 statements in that band with no
+statement difference at all. The arithmetic that made the story look proven — 148 × 0.25 / 600 =
+6.2pp — was a correct multiplication of a count that had another explanation. A metric with a step
+is a metric that needs an A/A run before any story about its gap, and this one now has one.
 
 The reading is reproducible from the artifact and the cached split, with no model call and no quota:
 
@@ -18065,15 +18082,34 @@ pnpm bench:bird:ves \
   --artifact eval/out/bird-eval-41453395203.json \
   --dataset  eval/.cache/bird/dev/dev_20240627/dev.json \
   --arm      select-cross --repeats 5 \
-  --databases eval/.cache/bird/dev/dev_20240627/dev_databases
+  --databases eval/.cache/bird/dev/dev_20240627/dev_databases \
+  --self-check
 ```
 
-81 seconds for 6,000 executions. What it cannot do is produce the 1,532-question number: that needs a
+105 seconds for 12,000 executions, half of them the floor. What it cannot do is produce the
+1,532-question number: that needs a
 full-dev artifact, the only copies of which live inside GitHub Actions runs, and this project's
 sandbox cannot read them — `GET /actions/runs/{id}/logs` and `/actions/artifacts/{id}/zip` both answer
 `401` from the signed storage URL. A dispatched dev run therefore produces a number only a browser can
 see, which is a defect in the measurement loop rather than in the metric, and it is written down here
 instead of being worked around by quoting 600 questions as if they were 1,532.
+
+**Three estimators were measured before the existing one was kept.** The trim is only one way to
+summarise five timings, and a reading that is a quarter of the reward away from parity depending on
+which summary is used would be a reading about the summary. One collection of ten samples per
+statement, split into two halves of five, gives all three on the same machine and the same corpus:
+
+| estimator | A/A floor | reading | A/A median spread |
+|---|---|---|---|
+| minimum of five | 57.54 | 55.50 | 1.010 |
+| median of five | 58.83 | 56.50 | 1.021 |
+| MAD-trimmed mean | 58.38 | 56.62 | 1.018 |
+
+The three land inside 1.5pp of each other and the ordering of the two columns does not change, so
+the trim stays: it is the one with an argument for why a loaded machine's right tail should be
+dropped rather than down-weighted, and it reads highest of the three on the column that is about
+statements. What the table does settle is that the gap is not an artefact of the estimator — every
+summary loses 1.8 to 2.3pp of reward to the statements and 4.4 to 5.3pp to the table.
 
 One defect had to be fixed before the metric could exist at all, and it was found by writing the
 test rather than by writing the run:
@@ -18133,12 +18169,14 @@ correct answers are mostly at par, and no published row does that. `rvesOf` ther
 (the leaderboard's normalisation) and `rvesOfValid` beside it, so the choice is visible in the
 artifact rather than buried in an instrument.
 
-Our own ratio is **0.898** (56.56 / 63.0) against the 0.96 the leaderboard's two fields imply for
+Our own ratio is **0.899** (56.63 / 63.0) against the 0.96 the leaderboard's two fields imply for
 OpenSearch-SQL. Read as a like-for-like comparison that would be a finding — this harness's correct
 statements are slower relative to their gold queries than theirs are — but it is not like-for-like:
 600 questions against 1,532, one arm against one system, and two different execution environments.
-What the ratio is good for is the direction: a system whose R-VES sits 4pp under its own EX is losing
-that on speed, and ours sits 6.4pp under. The table above says which band pays for it.
+What the ratio is good for is the direction, and the floor is what makes the direction readable: the
+6.37pp between EX and R-VES here decomposes into 5.04pp of table and noise and 1.33pp of statements,
+against 2.92pp for the leaderboard's top row. A system that sits 1.33pp under its own floor is a
+system whose speed is not the lever it is looking for; a system that sits 3pp under it is.
 
 ### Where each of the four absent rows would have to go
 
