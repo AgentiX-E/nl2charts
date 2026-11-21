@@ -18787,3 +18787,28 @@ says whether the schema join the model will choose is the right one.
 
 So the purchase cannot be aimed, and the next iteration does not buy a call. It changes what the
 call is for.
+
+### Pre-registered: what the next dispatch must show, and why a fourth vote is not it
+
+The 69 relational failures are the only stratum left that a call can reach. `decompose` is the best
+single candidate in this pool (369 of 593, above the second model's 366) and was diluted by the vote
+rather than beaten by it, so the next arm gives it a path of its own — its own repair turn, its own
+judgement — and compares that path with the three-vote pool as a paired reading on the same 600
+questions.
+
+| criterion | bar | why this number |
+|---|---:|---|
+| paired net gain | ≥ +8 of 600 with exact sign test p < 0.05 | the noise floor of a 600-case pair is 1.3–3.3pp; +8 is its lower edge |
+| on the 69 relational cases | ≥ +4 | the hypothesis is about the relational stratum, not about the average |
+| cost | ≤ 4.6 calls a case | today is 4.0; +0.6 is the budget for one extra turn on part of the corpus |
+| record | `asked` and `candidateRecall` on 600 of 600 | so the reading after this one costs nothing again |
+
+Two things are excluded by construction, and both were measured rather than assumed:
+
+- **A fourth vote is not a candidate.** Four candidates make the pool even, and §"Three calls, one
+  opinion" prices the even pool as a loss — the tie rate doubles and the vote settles ties by
+  generation order.
+- **Buying everywhere is priced and does not pay.** The diversity arm bought 3.6pp of ceiling for
+  2.8pp of answer on `44917562527`, and the router that would have aimed the purchase separates the
+  cases at AUC 0.632. There is no version of "one more call on every case" that this repository has
+  not already measured as neutral or worse.
