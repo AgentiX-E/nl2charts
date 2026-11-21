@@ -179,6 +179,26 @@ jobs:
         run: pnpm bench:bird:pair --declared eval/out/bird-eval.json
       - name: Accuracy floor
         run: pnpm gate:bird
+      # The second axis the leaderboard ranks by, and the floor it has to be read against.
+      #
+      # `--self-check` doubles the executions: it times every correct statement a second time with
+      # its own gold on the prediction side, which on the 600-question artifact reads 57.96% against
+      # an EX of 63.0 — 121 of the 378 correct answers land in the 0.75 band before any statement
+      # differs, because the reward table pays a quarter less for a ratio a percent under parity and
+      # nothing more until a ratio of two. Without that number beside the reading, the 6.4pp gap
+      # reads as "our statements are slow", which is what the round before this one published.
+      # Reading it costs execution time and no model call, and it runs before the summary so a
+      # failed run still shows both numbers.
+      - name: R-VES, and the floor the reward table imposes on every system
+        run: |
+          pnpm bench:bird:ves \
+            --artifact eval/out/bird-eval.json \
+            --dataset eval/.cache/bird/dev/dev_20240627/dev.json \
+            --arm "$(node tools/bird-arm.mjs eval/out/bird-eval.json)" \
+            --repeats 5 \
+            --databases eval/.cache/bird/dev/dev_20240627/dev_databases \
+            --self-check \
+            --out eval/out/bird-ves.json
       # Zero model calls, and the only reading in this workflow about the half of the score
       # that is not the selector. Printed before the summary so a failed run still shows it.
       - name: Where the candidate set had no answer
@@ -282,5 +302,6 @@ jobs:
             eval/out/bird-eval.json
             eval/out/bird-pairs.json
             eval/out/bird-summary.md
+            eval/out/bird-ves.json
           if-no-files-found: warn
           retention-days: 30
