@@ -17909,3 +17909,66 @@ uncovered`.
 | `test/text2vis-census.test.ts` | 117 passed |
 | census | 664 hit, **uncued 40**, **uncovered 8**, identity 664 = 664 |
 | cost | **¥0** |
+
+## The +7 that the ensemble refused, measured again on a branch so master never carried it
+
+`distribution-wide` — the `distribution` cue widened to the words boxplot questions are written in
+("IQR", "interquartile", "outlier", "z-score", "standard deviation", "skew") — has been the only
+candidate in the sweep to clear both the rule arm and the two halves: **671** against 664, halves
+`+3 / +4`. It was priced on the ensemble once, refused, and kept as a candidate. That reading has now
+been re-taken end to end, because a number nobody can re-run is a number a reader has to trust.
+
+The mechanics matter more than the arithmetic. The widening needs the shipped cue table changed, so a
+commit carrying it would have put a refused candidate on `master` for the length of a dispatch. Instead
+the tree was pushed to a throwaway branch (`probe/distribution-wide`, one commit over master, deleted
+after the reading) and `text2vis-llm` was dispatched against it. Same corpus, same answer store — 1,470
+cache hits, **¥0** — and the two arms that price the change:
+
+| reading | floor | widened | verdict |
+|---|---:|---:|---|
+| model arm `deepseek-chat\|mark` | 889 | 889 | unchanged: the answers are the same rows |
+| model arm `deepseek-reasoner\|mark` | 892 | 892 | unchanged |
+| **`ceiling`** (union of the two answers) | **1,020** | **1,014** | **−6, below the floor** |
+| product (rule path) | 664 | 671 | +7, and the reason the run is red |
+
+The gate refused it in the two places that matter, with the sentences it was built to say:
+
+```
+TEXT2VIS ARBITRATION: the ceiling fell to 1014 from the recorded 1020; the union is a property of
+  the two answers, not of a policy
+TEXT2VIS ARBITRATION: the product baseline reads 671 and the floor records 664; the rule path is
+  deterministic, so this is a change to the product and not a re-sample
+```
+
+**A ceiling is an upper bound on every policy**, so `shipped` cannot rise while it falls: the widened
+tree gives up six rows that *either* system used to get right, and buys seven that only the rule arm
+gets right — which is the same asymmetry the round that reverted it described, now with a receipt
+(run `44847630022`). The candidate stays a candidate, its note carries all three numbers, and the
+criterion it had to clear (ceiling ≥ 1,020 **and** shipped ≥ 843) is recorded next to it.
+
+The cost of the change is also on the record now: the widening is 152 bytes of regular expression, and
+`packages/chart` reads **41,078 B gzip against a 41,000 B budget** — a change that fails two gates
+before it fails a third.
+
+### What the ranking cue actually does, row by row
+
+`no-ranking` reads 669 against 664 and `+8 / −3`, so the guard calls it fitted and the total says
+nothing. A probe (`eval/text2vis/ranking-flips.mts no-ranking`) prints the rows that move:
+
+| direction | rows | what moved |
+|---|---:|---|
+| lost by removing the cue | 98 | every one of them a **bar** the corpus drew as pie (55), line (21), boxplot (18), candlestick (3) |
+| won by removing the cue | 76 | the corpus's own family back: pie (41), line (26), boxplot (6), scatter (2), candlestick (1) |
+
+So `ranking` is not a ranking reading at all: it is a **bar-for-superlatives default**. Every "which
+country had the highest…" question becomes a bar, which is right 98 times and wrong 76, and the net +22
+is why removing it looks like a gain until the halves disagree. The two obvious narrowings are already
+on the board and both lose: `share-ranked` (a share word plus a ranking word inside one clause) reads
+657, and moving `ranking` in front of `share` reads 664 exactly — no row changes.
+
+The row-level reading suggests the narrowing the sweep has not priced: 39 of the 98 losses are rows
+whose superlative is over **time** ("in which year did Italy experience the highest percentage
+increase"), answered `bar` where the corpus drew a line or a boxplot. A `ranking` that does not fire
+when the only axis is temporal would keep the 98 category superlatives and hand those 39 rows to the
+trend and distribution cues. That is a shape condition on a cue rather than a new pattern, it costs ¥0
+to price in the sweep, and it is the next candidate this table should carry.

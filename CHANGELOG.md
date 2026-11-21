@@ -28,6 +28,22 @@ cannot be argued with.
   ten self-test cases include the one the old table could never show: a total that stands still while
   its halves trade rows.
 
+### Changed
+- **The refused widening was re-measured on the ensemble, on a branch, so `master` never carried it.**
+  `distribution-wide` clears the rule arm (671 vs 664) and the halves (`+3 / +4`) and is the only
+  candidate that has managed both; it was priced on the ensemble once and refused. The reading was
+  re-taken end to end — a throwaway branch, a `text2vis-llm` dispatch, 1,470 cache hits, **¥0** — and
+  the ensemble refused it again with a receipt: model arms unchanged (889 / 892), `ceiling`
+  **1,020 → 1,014**, product 664 → 671. A ceiling bounds every policy, so `shipped` cannot rise while
+  it falls. The change also costs 152 bytes of regex and puts `packages/chart` at 41,078 B against a
+  41,000 B budget, so it fails three gates rather than one.
+- **`ranking` is a bar-for-superlatives default, and that is now measured row by row.** Removing it
+  reads 669 against 664 with halves `+8 / −3`; the probe `eval/text2vis/ranking-flips.mts` says the
+  total is 98 rows of correct bar given up (55 pie, 21 line, 18 boxplot, 3 candlestick) against 76 rows
+  recovered (41 pie, 26 line, 6 boxplot, 2 scatter, 1 candlestick). Both narrowings already priced lose
+  (`share-ranked` 657, `ranking` before `share` 664 with no row changed); the unpriced one is a shape
+  condition — do not fire when the only axis is temporal, which is where 39 of the 98 losses live.
+
 ### Fixed
 - **`uncovered` was two gaps under one word, and the larger one was a missing cue rather than a
   missing mark.** Forty of the corpus's ninety histogram rows were published as `uncovered` — the
