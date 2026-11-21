@@ -3,14 +3,14 @@
  "readings": {
   "bird-dev": {
    "kind": "bench-readback",
-   "commit": "b0049112c4c91dc2f7413f84d27d08945807bf3f",
+   "commit": "d9e026a77bb449e1236200eaf041672f27ab2e46",
    "workflow": "bird-dev",
-   "runId": "44897147794",
+   "runId": "44905985381",
    "split": "dev",
    "dataset": "bird-dev",
    "model": "deepseek-chat",
    "secondModel": "deepseek-reasoner",
-   "generatedAt": "2026-11-21T11:18:35.156Z",
+   "generatedAt": "2026-11-21T12:57:15.155Z",
    "corpus": {
     "digest": "db9e8a1aba23ddd9",
     "rows": 1534,
@@ -23,15 +23,15 @@
    "arms": [
     {
      "arm": "select-cross",
-     "passed": 383,
+     "passed": 379,
      "total": 600,
-     "accuracy": 0.6383333333333333,
-     "candidateRecall": 433,
-     "selectionLoss": 50,
+     "accuracy": 0.6316666666666667,
+     "candidateRecall": 421,
+     "selectionLoss": 42,
      "calls": 4,
-     "promptTokens": 3608,
-     "completionTokens": 538,
-     "strictPassed": 372,
+     "promptTokens": 3611,
+     "completionTokens": 565,
+     "strictPassed": 364,
      "spend": {
       "asked": 600,
       "priced": 600
@@ -39,15 +39,15 @@
     },
     {
      "arm": "select-cross-pooled-vote",
-     "passed": 383,
+     "passed": 387,
      "total": 600,
-     "accuracy": 0.6383333333333333,
-     "candidateRecall": 433,
-     "selectionLoss": 50,
+     "accuracy": 0.645,
+     "candidateRecall": 421,
+     "selectionLoss": 34,
      "calls": 0,
      "promptTokens": 0,
      "completionTokens": 0,
-     "strictPassed": 362,
+     "strictPassed": 372,
      "poolRead": {
       "shared": 600,
       "unrecorded": 0,
@@ -56,52 +56,26 @@
     },
     {
      "arm": "select-cross-pooled-tie",
-     "passed": 396,
+     "passed": 389,
      "total": 600,
-     "accuracy": 0.66,
-     "candidateRecall": 433,
-     "selectionLoss": 37,
-     "calls": 0.065,
-     "promptTokens": 33,
+     "accuracy": 0.6483333333333333,
+     "candidateRecall": 421,
+     "selectionLoss": 32,
+     "calls": 0.075,
+     "promptTokens": 41,
      "completionTokens": 0,
-     "strictPassed": 376,
+     "strictPassed": 374,
      "spend": {
-      "asked": 39,
-      "priced": 39
+      "asked": 45,
+      "priced": 45
      },
      "selectorRule": {
       "rule": "modal",
-      "decided": 561,
-      "eligible": 1596,
-      "emptyPool": 16,
+      "decided": 555,
+      "eligible": 1578,
+      "emptyPool": 18,
       "rules": {
-       "modal": 561
-      }
-     },
-     "poolRead": {
-      "shared": 600,
-      "unrecorded": 0,
-      "cases": 600
-     }
-    },
-    {
-     "arm": "select-cross-pooled-wider",
-     "passed": 387,
-     "total": 600,
-     "accuracy": 0.645,
-     "candidateRecall": 433,
-     "selectionLoss": 46,
-     "calls": 0,
-     "promptTokens": 0,
-     "completionTokens": 0,
-     "strictPassed": 366,
-     "selectorRule": {
-      "rule": "wider",
-      "decided": 600,
-      "eligible": 1706,
-      "emptyPool": 16,
-      "rules": {
-       "wider": 600
+       "modal": 555
       }
      },
      "poolRead": {
@@ -112,9 +86,9 @@
     }
    ],
    "rves": {
-    "rves": 0.5725,
+    "rves": 0.5666666666666667,
     "repeats": 5,
-    "floor": 0.6016666666666667
+    "floor": 0.5875
    }
   }
  }
