@@ -163,4 +163,46 @@ describe('the candidate record', () => {
     const [verdict] = candidateVerdicts([{ sql: 'SELECT 1', rows, source: 'a' }], expected);
     expect(verdict?.sqlClipped).toBeUndefined();
   });
+
+  it('records the shape the selector was shown, which is not the shape of the statement', () => {
+    const verdicts = candidateVerdicts(
+      [
+        { sql: 'SELECT a, b FROM t', rows: [[1, 2], [3, 4]], source: 'a' },
+        { sql: 'SELECT COUNT(*) FROM t', rows: [[2]], source: 'b' },
+        { sql: 'SELECT a FROM t WHERE 0', rows: [], source: 'c' },
+      ],
+      expected,
+    );
+    expect(verdicts.map((verdict) => [verdict.rows, verdict.columns])).toEqual([[2, 2], [1, 1], [0, 0]]);
+  });
+
+  it('marks the member that became the answer, and marks none when a repair wrote it', () => {
+    const candidates = [
+      { sql: 'SELECT 1', rows: [[1]], source: 'a' },
+      { sql: 'SELECT 2', rows: [[2]], source: 'b' },
+    ];
+    const marked = candidateVerdicts(candidates, expected, 'SELECT 2');
+    expect(marked.map((verdict) => verdict.chosen)).toEqual([false, true]);
+    // A retry or repair turn replaces the answer with a statement no candidate holds. That is a
+    // reading — the pool's answer was rewritten — and not a missing field, so no member is
+    // marked rather than the nearest one.
+    const rewritten = candidateVerdicts(candidates, expected, 'SELECT 3');
+    expect(rewritten.map((verdict) => verdict.chosen)).toEqual([false, false]);
+    // Absent is the same state, and the arm that never had a pool has nothing to mark.
+    expect(candidateVerdicts(candidates, expected).every((verdict) => !verdict.chosen)).toBe(true);
+  });
+
+  it('marks the first copy when the pool holds one statement twice', () => {
+    // Two sources that wrote the same text are one candidate the vote cannot distinguish, and
+    // the vote's own rule keeps the earliest. Marking both would count one decision as two.
+    const verdicts = candidateVerdicts(
+      [
+        { sql: 'SELECT 1', rows: [[1]], source: 'a' },
+        { sql: 'SELECT 1', rows: [[1]], source: 'b' },
+      ],
+      expected,
+      'SELECT 1',
+    );
+    expect(verdicts.map((verdict) => verdict.chosen)).toEqual([true, false]);
+  });
 });

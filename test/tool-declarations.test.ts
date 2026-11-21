@@ -28,7 +28,12 @@ const DIRECTORIES = ['tools', 'eval/bird'];
 
 /** The exported `const` and `function` names in a module or a declaration, in file order. */
 function exportedNames(source: string): string[] {
-  return [...source.matchAll(/^export (?:const|function) (\w+)/gm)].map((match) => match[1] as string);
+  // `async` is part of the declaration rather than a modifier this reader may ignore: a script
+  // that exports `export async function main` shipped a `main` the first version of this pattern
+  // did not see, so the check that exists to catch a declaration missing a name reported the
+  // *module* as the one that was ahead. Reading both spellings is the fix; the comparison is
+  // unchanged.
+  return [...source.matchAll(/^export (?:async )?(?:const|function) (\w+)/gm)].map((match) => match[1] as string);
 }
 
 /** Every `.d.mts` under the named directories, as repository-relative paths, sorted. */

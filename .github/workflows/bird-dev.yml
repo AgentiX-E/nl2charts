@@ -74,6 +74,15 @@ jobs:
     name: BIRD dev (1534 questions)
     runs-on: ubuntu-latest
     timeout-minutes: 240
+    # The uploaded artifact is served from a signed storage URL that answers 401 to anything that
+    # is not a browser session, so a dispatched run's reading used to exist only for whoever opened
+    # the Actions page. `tools/readback.mjs` writes the same reading to `readings/index.json` on the
+    # `readback` branch through the contents API — one entry per workflow, read back through
+    # `api.github.com`, which is the one host the measurement loop can reach. `contents: write` is
+    # the permission that needs, and it is the same one the job already needs to push anything.
+    permissions:
+      contents: write
+      issues: write
     # One slot for every heavyweight run, shared with `ci.yml`'s Mini-Dev job and with
     # `bird-model.yml`. They draw from the same provider quota and write to the same
     # artifact path, and this workflow used to declare no group at all — so a dispatched
@@ -292,6 +301,24 @@ jobs:
             node tools/bird-summary.mjs >> "$GITHUB_STEP_SUMMARY"
           else
             echo 'no artifact was written, so there is nothing to summarise' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      # The reading, where this project can read it. A step summary is a web page, and the uploaded
+      # artifact is a signed URL; neither is reachable from the environment that decides the next
+      # round, which is how a 1,532-question measurement came to be re-derived instead of quoted.
+      #
+      # The step is `if: always()` for the same reason the summary is: a run that failed late still
+      # measured the arms it finished, and a reading with a failed coordinate is worth more than no
+      # reading. It cannot fail the job — a comment that does not post is a lost readback, not a
+      # failed measurement — so the exit code is reported and swallowed, out loud.
+      - name: Publish readback
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -f eval/out/bird-eval.json ]; then
+            node tools/readback.mjs --publish || echo "readback: the reading did not reach the issue; the artifact is still uploaded"
+          else
+            echo 'readback: no artifact, nothing to publish'
           fi
       - name: Upload dev evaluation
         if: always()

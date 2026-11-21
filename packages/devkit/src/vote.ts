@@ -15,10 +15,20 @@ export interface Majority<T> {
   readonly agreement: number;
   /** How many distinct answers were produced. */
   readonly groups: number;
+  /**
+   * True when the winner's group is tied with another group of the same size.
+   *
+   * The winner is still defined — the earliest candidate breaks the tie — but the *decision* was
+   * not made by the vote, it was made by the arrival order. A caller that spends a call only where
+   * the vote cannot decide needs this bit, and reading it off `agreement * groups === 1` is the
+   * same statement written in a way a reader has to verify: on three candidates that is 1/3 × 3.
+   * It is reported here because this function is the only place that knows the group sizes.
+   */
+  readonly tied: boolean;
 }
 
 export function majorityResult<T>(items: readonly T[], equals: (left: T, right: T) => boolean): Majority<T> {
-  if (items.length === 0) return { winner: undefined, agreement: 0, groups: 0 };
+  if (items.length === 0) return { winner: undefined, agreement: 0, groups: 0, tied: false };
   const groups: T[][] = [];
   for (const item of items) {
     const group = groups.find((candidate) => equals(candidate[0] as T, item));
@@ -26,8 +36,14 @@ export function majorityResult<T>(items: readonly T[], equals: (left: T, right: 
     else group.push(item);
   }
   // Largest group wins; the earliest candidate breaks a tie, because candidates
-  // arrive in generation order and the first is the least perturbed sample.
+  // arrive in generation order and the first is the least perturbed sample. The tie is recorded as
+  // it is discovered rather than counted afterwards: one pass, and the flag cannot disagree with
+  // the winner it describes.
   let best = groups[0] as T[];
-  for (const group of groups) if (group.length > best.length) best = group;
-  return { winner: best[0], agreement: best.length / items.length, groups: groups.length };
+  let tied = false;
+  for (const group of groups) {
+    if (group.length > best.length) best = group;
+    else if (group !== best && group.length === best.length) tied = true;
+  }
+  return { winner: best[0], agreement: best.length / items.length, groups: groups.length, tied };
 }

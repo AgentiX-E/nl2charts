@@ -7,6 +7,33 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **The selector's only net contribution is the 16 questions the vote cannot settle, and it now costs
+  16 calls instead of 600.** `tools/pool-replay.mjs` prices selection policies offline from an
+  artifact's own record, and its first line is a check rather than a table: the replayed modal rule
+  reproduces the `select-cross-pooled-vote` arm on **600 of 600** cases, and the tool exits non-zero
+  when that stops being true. On the 600-question dev pool the three cross-model candidates returned
+  one result on 447 questions (the pool holds the answer 326 times), two on 137 (80), and three on
+  **16** — where `majorityResult` has no majority and falls back to arrival order. Replayed over the
+  split: `chosen` 378 (63.00%), `vote` 380 (63.33%), **`vote-unless-tie` 383 (63.83%)**, and the
+  unshippable oracle over both 396 (66.00%). So the selector is worse than the vote wherever the vote
+  can decide, better only where it cannot, and the policy that combines them is the only one above
+  both of its parents. `select-cross-tie` (`gate: 'tie'`) is that policy as an arm: same candidates,
+  same prompt, one selection call on a tie.
+- **The readback channel, which was the actual blocker for three rounds.** `GET
+  /actions/runs/{id}/logs` and `/actions/artifacts/{id}/zip` both answer `401` from a signed storage
+  URL, so a dispatched 1,532-question reading existed only for whoever had a browser — a defect in the
+  measurement loop, not in the metric. `tools/readback.mjs` writes the reading to
+  `readings/index.json` on a `readback` branch through the contents API (one entry per workflow) and
+  reads it back through `api.github.com`. The channel is exercised end to end in this round: the
+  five-arm artifact was published as `bird-dev` and read back identically, and `bird-dev.yml` now
+  publishes in an `if: always()` step that reports a failed post without failing the measurement.
+- **Two fields the artifact was not recording, and the dispatch each one cost.** `cases[].candidates[]`
+  gains `rows`, `columns` (what the selector is *shown*, and what a shape rule needs) and `chosen`
+  (which member became the answer — `winnerSource` names a source, not a member). A repair turn that
+  replaces the answer with a statement no candidate holds now marks **no** member, which is a reading
+  rather than a gap.
+
+### Added
 - **BIRD dev R-VES has a number, a floor, and a correction to the story that number first told.** The
   metric was implemented last round; the reading is **56.63%** over the 600-question dev artifact this
   repository already held (arm `select-cross`, 378 correct of 600, 63.0% EX), five timings per

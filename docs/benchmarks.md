@@ -18178,6 +18178,102 @@ What the ratio is good for is the direction, and the floor is what makes the dir
 against 2.92pp for the leaderboard's top row. A system that sits 1.33pp under its own floor is a
 system whose speed is not the lever it is looking for; a system that sits 3pp under it is.
 
+## The selector's only net contribution is the 16 questions the vote cannot settle
+
+Five selector arms were dispatched over the same 600-question dev pool (`41453395203`) and the
+question they were dispatched to answer — which one should ship — was answered by reading their
+scores: `select-cross` 378, `select-cross-pooled` 377, `pooled-vote` 380, `pooled-agree` 374,
+`pooled-reconcile` 359. Five numbers inside a 2.3pp band, no pair separated by more than the
+split's own noise, and the one policy that costs nothing (`pooled-vote`, zero calls a case) sitting
+second. `tools/pool-replay.mjs` prices the same question offline from the artifact's own record:
+
+```
+node tools/pool-replay.mjs eval/out/bird-eval-41453395203.json --arm select-cross --verify-vote
+```
+
+Its first line is the check that makes the rest a measurement: **the replayed modal rule reproduces
+`select-cross-pooled-vote` on 600 of 600 cases**. A policy table computed by a rule that cannot
+reproduce the arm it models is a table about the tool, and the tool exits non-zero when that line
+changes.
+
+### What the pool looks like, by how many distinct results it returned
+
+| distinct results | cases | pool holds the answer | modal group holds it | of which tied |
+|---|---|---|---|---|
+| 1 | 447 | 326 | 326 | 0 |
+| 2 | 137 | 80 | 52 | 0 |
+| 3 | 16 | 9 | 2 | 16 |
+
+Three facts follow, and the third one is the finding. On the 447 questions whose three candidates
+returned the same rows, there is nothing for a selector to decide and 121 of them are wrong — the
+three prompts wrote one wrong statement between them, so the loss is **generation diversity**, not
+selection. On the 137 two-result questions the modal group holds the answer 52 times against a pool
+that holds it 80, which is where a decision has something to win. And on the 16 questions where all
+three differ, the vote has **no majority at all**: `majorityResult` returns the earliest group, and
+that is arrival order being reported as agreement.
+
+### The policies, and which of them can ship
+
+| policy | correct | accuracy | shippable |
+|---|---|---|---|
+| `chosen` (what the arm answered) | 378 | 63.00% | yes — one selector call a case |
+| `vote` (modal result group) | 380 | 63.33% | yes — no call at all |
+| **`vote-unless-tie`** | **383** | **63.83%** | **yes — one call on 16 of 600 cases** |
+| `vote-preferred-shape` | 380 | 63.33% | yes — no call |
+| `oracle{chosen,vote}` | 396 | 66.00% | no — reads the answer key |
+
+`vote-unless-tie` is worth 5 cases over the selector and 3 over the vote, and it is the only policy
+here that is better than both of its parents. The mechanism is not a hybrid: the selector was
+**worse** than the vote on every pool that could be decided (`chosen` 378 against `vote` 380) and it
+was the only thing that could decide the 16 where the vote could not. So the call is not priced per
+question any more, it is priced per *undecidable* question — 16 selection calls instead of 600, and
+the 584 it does not make returned nothing a majority could not have returned.
+
+That is what `select-cross-tie` measures (`gate: 'tie'`): the same three cross-model candidates, the
+same selector, the same prompt, and the call made only when `majorityResult` reports a tie. Its
+protocol is written here before the dispatch, in the form this file uses: the accuracy bar is **at
+least 383 of 600** (the replay's own number, which is what the arm exists to reproduce), `calls.mean`
+**at or below 3.03** (three generations plus 16 of 600 selections), and `spend.asked` **at or below
+0.05 of the cases**. A dispatch that lands below 383 is a statement about the replay's transfer, not
+about the vote's arithmetic, and the rows above are then a derivation rather than a reading.
+
+### Two fields the artifact was not recording, and the dispatch each one cost
+
+Replaying a policy needs the information the policy would have had. The record carried each
+candidate's statement, its verdict and a fingerprint of its result, and was missing three things:
+
+- `rows` and `columns`, which are what the selector is *shown* (`buildSelectionPrompt` renders
+  `result: N rows, M columns`). A rule of the form "prefer the group whose shape matches the
+  question" could not be priced from an artifact that recorded neither, which is why
+  `vote-preferred-shape` above is only as good as its two parents in this table: the columns it
+  reads are there now, and the 600 questions that would price it were scored before they were.
+- `chosen`, which says which member became the answer. `winnerSource` names a *source*, and a pool
+  whose three candidates come from three sources can be replayed through it only because they happen
+  to be distinct; a repair turn can also replace the answer with a statement no candidate holds, and
+  then **no** member is marked — a reading, not a gap.
+
+All three are in `cases[].candidates[]` from this round on, and the nine tests in
+`test/bird-candidate-failures.test.ts` hold them, including the case where the pool holds one
+statement twice and only the earliest copy is marked.
+
+### The measurement loop, which was the actual blocker
+
+None of the above needed a dispatch, and that is the point: the artifact already held the pool. What
+did need one — and what had been failing for three rounds — is reading a dispatched run's result.
+`GET /actions/runs/{id}/logs` and `/actions/artifacts/{id}/zip` both answer `401` from a signed
+storage URL, so a 1,532-question reading existed only for whoever had a browser.
+
+`tools/readback.mjs` writes the reading to `readings/index.json` on a `readback` branch through the
+contents API, one entry per workflow, and reads it back through `api.github.com` — the one host this
+environment can reach. The channel is exercised end to end in this round: the five-arm artifact above
+was published as `bird-dev` and read back identically, and the workflow that produces the next dev
+reading publishes it in an `if: always()` step that cannot fail the job.
+
+```
+node tools/readback.mjs --publish --out eval/out/bird-eval.json
+node tools/readback.mjs --read --slug bird-dev
+```
+
 ### Where each of the four absent rows would have to go
 
 **WikiSQL** is nearly saturated (SeaD + execution-guided decoding 93.0% test EX, X-SQL + EG 91.8%,

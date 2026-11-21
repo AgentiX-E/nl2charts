@@ -199,8 +199,17 @@ export interface Arm {
    * selector, the `shortest` rule and the `modal` rule all score **70.57%** — the same number to
    * the case. The fourth call is not wrong there, it is unspendable. On the 129 that disagree the
    * three choosers separate (44.2% / 35.7% / 26.4%), which is where a call can buy something.
+   *
+   * `'tie'` is the sharper version of that gate, and it comes from replaying the 600-question dev
+   * artifact offline (`tools/pool-replay.mjs`, verified against the vote arm on all 600 cases).
+   * On the cross pool the three candidates returned one result on 447 questions and won 326 of
+   * them, two on 137 and the modal group held 52, and all three differed on 16 — where the vote
+   * cannot decide at all and settles it by generation order. The selector beat the vote on exactly
+   * those 16 (383 against 380 over the split) and was worse on the pools that agreed, so the call
+   * is worth buying *only* where the vote is tied. That is 16 calls on 600 questions instead of
+   * 600, and it is the arm `select-cross-tie` exists to measure rather than derive.
    */
-  readonly gate?: 'results';
+  readonly gate?: 'results' | 'tie';
   /** Who picks when the gate did not spend. Defaults to `shortest`, the rule this pool prefers. */
   readonly gateRule?: SelectionRule;
   /**
@@ -1610,6 +1619,23 @@ export const ARMS: readonly Arm[] = [
   // readings compared arms that drew their own pools, so the 2.58pp they imply is not yet a
   // measurement. Here it is one: same candidates, same rows, only the decision differs.
   { name: 'select-cross-pooled-vote', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, mixed: CROSS_SOURCES, pool: 'select-cross' },
+  // The selector, called only where the vote cannot decide.
+  //
+  // `tools/pool-replay.mjs` read the 600-question dev artifact offline and found the two policies
+  // complementary in exactly one place: on the 447 questions whose three candidates returned one
+  // result the vote is right 326 times and there is nothing to ask about, on the 137 that returned
+  // two the modal group is right 52, and on the 16 where all three differed the vote has no majority
+  // at all — it settles them by generation order. Replayed over the whole split, `chosen` reads 378,
+  // `vote` 380 and `vote-unless-tie` **383**: the selector's only net contribution on this pool is
+  // the questions the vote cannot settle, and it costs 16 calls instead of 600.
+  //
+  // The gate is therefore not a cost optimisation with an accuracy hypothesis attached; it is the
+  // same number the selector reaches on the subset where it was ever able to act, at 2.7% of the
+  // price. The arm exists to turn that replay into a measurement, because a replay that reproduces
+  // the vote arm on 600 of 600 cases is still a statement about a policy the runner has to be shown
+  // to implement: `gate: 'tie'` is that implementation, and its reading is what the table in
+  // `docs/benchmarks.md` will quote.
+  { name: 'select-cross-tie', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: CROSS_SOURCES, gate: 'tie' },
   // Buy a fourth opinion, but only where the three already agree.
   //
   // `bench:bird:diversity` read this pool off the published artifact: 1.28 distinct results per
@@ -1990,6 +2016,7 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'select-cross-pooled': 'the cross set read from `select-cross`\'s own pool instead of generating one: one call per case instead of four, and the pair must read exactly 0.0pp — it is the instrument that says whether two arms on this harness can be compared at all, so run it in the same dispatch as `select-cross` and before any pooled comparison',
   'select-cross-pooled-judge-reasoning': 'the reasoning model judging the chat model\'s candidates, in the format it can answer: needs the second model and a second key, one call per case, and is measured against `select-cross-pooled` on the same pool — the only judge-swap delta with no generation noise in it',
   'select-cross-pooled-vote': 'the same pool decided by the modal result instead of by a model: zero calls per case, and the only reading of "is the selector worth its call" whose candidates are shared — the archived artifacts say the count wins 53 disputed cases to 22 (p = 4.5e-4), and this arm is what turns that into a measurement instead of a re-reading',
+  'select-cross-tie': 'the cross pool with the selector called only on the questions the vote cannot settle: offline replay over 600 dev questions puts it at 383 against the vote\'s 380 and the selector\'s 378 for 16 selection calls instead of 600, and a dispatch is what turns that replay into a reading — it needs the second model, so it is not in a routine chain',
   'select-cross-pooled-dissent': 'the same pool and the same selector with one decomposition bought only where the three agreed: 4 calls per case on the 74.5% of cases the diversity reading found unanimous and 3.0 on the rest, and it must be dispatched after `select-cross` because it reads that pool — the pair against `select-cross-pooled` is the whole lever, so run those two and no others',
   'select-cross-pooled-dissent-pair': 'the same bought opinion, compared against the pool\'s answer on the cases where it disagrees instead of shown to the selector as a fourth candidate: one comparison call on 6.5% of cases, and it must be dispatched after `select-cross` because it reads that pool — the pair against `select-cross-pooled-dissent` is the whole lever, so run those two and no others',
   'select-cross-pooled-agree': 'the same pool with the agreement marks the selector was never given: 149 of 600 cases had more than one distinct result, and which of three candidates returned the same rows is the one fact two truncated previews cannot yield; one lever from `select-cross-pooled`, one call per case',
@@ -5694,12 +5721,36 @@ export function agreementMarks(results: readonly (readonly (readonly unknown[])[
  * statement and the fingerprint recorded, those rules replay offline for nothing, and the
  * fingerprint is `resultKey` hashed rather than a second definition of equality, so "same
  * fingerprint" is the official judge's `match` and not a claim about text.
+ *
+ * Three fields were missing from that record, and their absence cost a dispatch each time it
+ * mattered. `rows` and `columns` are the two numbers the selector is *shown*, so a rule of the
+ * form "prefer the group whose shape matches the question" could not be priced from an artifact
+ * that recorded neither. `chosen` says which member became the answer, which is the one fact a
+ * policy comparison needs and the one the artifact withheld: `winnerSource` names a *source*,
+ * and a pool whose three candidates come from three sources can be replayed through it only
+ * because they happen to be distinct. A repair turn can also replace the answer with a statement
+ * no candidate holds — then no member is marked, and that is a reading rather than a gap.
  */
 export function candidateVerdicts(
   candidates: readonly { readonly sql: string; readonly rows: readonly (readonly unknown[])[]; readonly source: string }[],
   expected: readonly (readonly unknown[])[],
-): readonly { readonly source: string; readonly correct: boolean; readonly sql: string; readonly fingerprint: string; readonly sqlClipped?: boolean }[] {
-  return candidates.map((candidate) => {
+  chosenSql?: string,
+): readonly {
+  readonly source: string;
+  readonly correct: boolean;
+  readonly sql: string;
+  readonly rows: number;
+  readonly columns: number;
+  readonly chosen: boolean;
+  readonly fingerprint: string;
+  readonly sqlClipped?: boolean;
+}[] {
+  // The first member whose statement is the answer, because a pool may hold one statement twice:
+  // marking both would count one decision as two, and the later copy is the one the vote's
+  // earliest-wins rule never picks.
+  let chosenIndex = -1;
+  if (chosenSql !== undefined) chosenIndex = candidates.findIndex((candidate) => candidate.sql === chosenSql);
+  return candidates.map((candidate, index) => {
     const clipped = candidate.sql.length > CANDIDATE_SQL_CAP;
     return {
       source: candidate.source,
@@ -5709,6 +5760,11 @@ export function candidateVerdicts(
       // recorded rather than silent, because a clipped statement cannot be re-executed and a
       // reader who assumed it could would get an engine error they would blame on the harness.
       sql: clipped ? candidate.sql.slice(0, CANDIDATE_SQL_CAP) : candidate.sql,
+      // The shape the selector reads, recorded so a rule about shape can be replayed: `rows` is
+      // what an aggregate returns and `columns` is what a "how many" question must not have.
+      rows: candidate.rows.length,
+      columns: candidate.rows[0]?.length ?? 0,
+      chosen: index === chosenIndex,
       ...(clipped ? { sqlClipped: true } : {}),
       fingerprint: resultFingerprint(candidate.rows),
     };
@@ -8148,6 +8204,18 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
           // arm's `spend.asked` is the number of questions that had something to ask about.
           selectedByRule = decideByRule(arm.gateRule ?? 'shortest', ordered);
           winner = ordered[selectedByRule.index] as typeof winner;
+        } else if (arm.gate === 'tie' && !majority.tied) {
+          // The pool disagreed but one group holds more members than any other, so the vote decided
+          // and the call has nothing left to add. The rule is `modal` rather than the parent's
+          // `shortest`, because on this population the modal group *is* the vote's answer: choosing
+          // any other member would be a different policy wearing the gate's name, and the offline
+          // replay is a statement about the vote and not about a length heuristic.
+          //
+          // A tie is the only case the call can win, and it is not a rare shape on a three-candidate
+          // pool where all three prompts differ: they are exactly the questions the pool's own vote
+          // cannot settle, which is the definition of something to ask about.
+          selectedByRule = decideByRule('modal', ordered);
+          winner = ordered[selectedByRule.index] as typeof winner;
         } else if (arm.select === true && arm.selectRule !== undefined) {
           // The choice the fourth call was buying. Every input is already in hand — the executed
           // rows and the statement text — so this branch spends nothing and cannot fail: there is
@@ -8429,7 +8497,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
         // selector's, and on this arm the fourth slot is not one it was shown.
         const judgedSet =
           arm.dissentVerify === 'pairwise' && dissentCandidate !== undefined ? [...ordered, dissentCandidate] : ordered;
-        const verdicts = candidateVerdicts(judgedSet, expected.rows);
+        const verdicts = candidateVerdicts(judgedSet, expected.rows, winner.sql);
         return {
           id: String(question.question_id),
           passed: reason === 'match',

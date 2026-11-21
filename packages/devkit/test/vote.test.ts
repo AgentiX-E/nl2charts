@@ -31,12 +31,24 @@ describe('majority result', () => {
   });
 
   it('treats an empty input as no winner rather than an error', () => {
-    expect(majorityResult([], () => true)).toEqual({ winner: undefined, agreement: 0, groups: 0 });
+    expect(majorityResult([], () => true)).toEqual({ winner: undefined, agreement: 0, groups: 0, tied: false });
   });
 
   it('uses the caller equality, not identity', () => {
     const result = majorityResult([{ rows: [1, 2] }, { rows: [1, 2] }, { rows: [3] }], (left, right) => left.rows[0] === right.rows[0]);
     expect(result.winner).toEqual({ rows: [1, 2] });
     expect(result.groups).toBe(2);
+  });
+
+  it('says when the vote did not decide, which is the only case a call can buy anything', () => {
+    // Three distinct answers: the winner is the first candidate because of arrival order, and a
+    // policy that reads `winner` cannot tell that from a majority of three.
+    expect(majorityResult(['a', 'b', 'c'], (left, right) => left === right).tied).toBe(true);
+    // Two answers with two votes each: the tie is real, and the winner is again the earliest.
+    expect(majorityResult(['b', 'a', 'a', 'b'], (left, right) => left === right).tied).toBe(true);
+    // A majority is not a tie even though other groups exist, and unanimity is not one either.
+    expect(majorityResult(['a', 'b', 'a'], (left, right) => left === right).tied).toBe(false);
+    expect(majorityResult(['a', 'a', 'a'], (left, right) => left === right).tied).toBe(false);
+    expect(majorityResult(['a'], (left, right) => left === right).tied).toBe(false);
   });
 });
