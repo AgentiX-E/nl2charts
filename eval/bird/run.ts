@@ -4241,6 +4241,31 @@ export function poolReadOf(
  * failure), and the record has to say how many candidates were eligible, since a set of three
  * where two returned nothing is a decision between one statement and itself.
  */
+/**
+ * Whether a gate pays for the adjudication, and by which rule it answers when it does not.
+ *
+ * The condition is two lines and the decision is not: `results` holds when the pool agreed, `tie`
+ * holds when the vote cannot decide, and the rule that answers differs between them for a reason
+ * that is a measurement rather than a preference. On the agreed pool every member is worth the same,
+ * so the shipped gate spends nothing on a `shortest` pick; on the decided-but-not-unanimous pool the
+ * vote's own answer is the modal group, and choosing any other member there would be a different
+ * policy wearing the gate's name.
+ *
+ * It is a function rather than a condition inside `runCase` because that function is three thousand
+ * lines and no test reaches it: a rule that only exists inside an unexecuted branch is a rule the
+ * coverage ledger reports as absent, which is how this was found. Here it has four cases and four
+ * tests.
+ */
+export function gateDecision(
+  gate: 'results' | 'tie' | undefined,
+  majority: { readonly groups: number; readonly tied: boolean },
+  gateRule?: SelectionRule,
+): { readonly held: false } | { readonly held: true; readonly rule: SelectionRule } {
+  if (gate === 'results' && majority.groups === 1) return { held: true, rule: gateRule ?? 'shortest' };
+  if (gate === 'tie' && !majority.tied) return { held: true, rule: 'modal' };
+  return { held: false };
+}
+
 export function decideByRule(
   rule: SelectionRule,
   candidates: readonly { readonly sql: string; readonly rows: readonly (readonly unknown[])[] }[],
@@ -8193,28 +8218,17 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
         // per-candidate record below is written from, because a verdict is only attributable if
         // it is filed under the slot the judge actually saw.
         const ordered = arm.shuffle === true ? shuffleByCase(considered, question.question_id) : considered;
-        if (arm.gate === 'results' && majority.groups === 1) {
-          // The pool agreed, so the adjudication has nothing to decide and the call is not cheap,
-          // it is unspendable: every member returned the same rows under the judge's own equality,
-          // so every member is worth exactly what the model would have picked. The choice is made
-          // by a rule that costs nothing, and `selectedByRule` records it, which is what keeps the
-          // row readable as "the gate fired" rather than as "the selector answered cheaply".
+        const gated = gateDecision(arm.gate, majority, arm.gateRule);
+        if (gated.held) {
+          // The call would buy nothing here: either the pool agreed, in which case every member is
+          // worth exactly what the model would have picked, or the vote already decided and the
+          // modal group *is* its answer. Either way the choice is made by a rule that costs nothing,
+          // and `selectedByRule` records it, which is what keeps the row readable as "the gate fired"
+          // rather than as "the selector answered cheaply".
           //
           // `spendOf` is the instrument: it counts the cases that reached a selector, so a gated
           // arm's `spend.asked` is the number of questions that had something to ask about.
-          selectedByRule = decideByRule(arm.gateRule ?? 'shortest', ordered);
-          winner = ordered[selectedByRule.index] as typeof winner;
-        } else if (arm.gate === 'tie' && !majority.tied) {
-          // The pool disagreed but one group holds more members than any other, so the vote decided
-          // and the call has nothing left to add. The rule is `modal` rather than the parent's
-          // `shortest`, because on this population the modal group *is* the vote's answer: choosing
-          // any other member would be a different policy wearing the gate's name, and the offline
-          // replay is a statement about the vote and not about a length heuristic.
-          //
-          // A tie is the only case the call can win, and it is not a rare shape on a three-candidate
-          // pool where all three prompts differ: they are exactly the questions the pool's own vote
-          // cannot settle, which is the definition of something to ask about.
-          selectedByRule = decideByRule('modal', ordered);
+          selectedByRule = decideByRule(gated.rule, ordered);
           winner = ordered[selectedByRule.index] as typeof winner;
         } else if (arm.select === true && arm.selectRule !== undefined) {
           // The choice the fourth call was buying. Every input is already in hand — the executed

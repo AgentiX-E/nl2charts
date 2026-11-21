@@ -15,50 +15,51 @@ import {
   ARMS,
   armReportRow,
   armSummaryLine,
-  assertPoolShared,
-  assertSelectorAnswered,
-  reusePool,
-  poolReadOf,
-  spendOf,
-  assertReconcileFired,
-  assertPairwiseFired,
-  pairwiseFunnel,
   assertDemonstrationsFired,
-  assertMaskingFired,
-  assertMaskingRule,
-  assertTemperature,
-  assertReportComplete,
-  assertResultGate,
-  assertEvidence,
-  columnEvidence,
-  assertRuleSelection,
   assertDissentFired,
   assertDissentRule,
-  assertSampleBlockFired,
+  assertEvidence,
   assertFieldBlockFired,
-  fieldBlockFunnel,
+  assertMaskingFired,
+  assertMaskingRule,
+  assertPairwiseFired,
+  assertPoolShared,
+  assertReconcileFired,
+  assertReportComplete,
+  assertResultGate,
+  assertRuleSelection,
+  assertSampleBlockFired,
+  assertSelectorAnswered,
+  assertTemperature,
   cacheFieldOf,
-  reasoningFieldOf,
-  meanReported,
-  thinkingShare,
-  mergePurposes,
-  demonstrationsFunnel,
-  dissentFunnel,
-  reconcileFunnel,
-  sampleBlockFunnel,
   caseRows,
+  columnEvidence,
   databasesFromManifest,
   databasesFromQuestions,
+  decideByRule,
+  demonstrationsFunnel,
+  dissentFunnel,
   evaluateGate,
+  fieldBlockFunnel,
+  gateDecision,
+  layoutForSplit,
   meanCalls,
+  meanReported,
+  mergePurposes,
   offeredCandidates,
   pairedComparisons,
-  decideByRule,
-  layoutForSplit,
-  resolveLayout,
+  pairwiseFunnel,
+  poolReadOf,
+  reasoningFieldOf,
+  reconcileFunnel,
   resolveArm,
+  resolveLayout,
   resolveSettings,
+  reusePool,
+  sampleBlockFunnel,
   secondModelRoles,
+  spendOf,
+  thinkingShare,
 } from '../eval/bird/run.js';
 import type { Arm, CaseRun, PreparedRun } from '../eval/bird/run.js';
 
@@ -1955,6 +1956,43 @@ describe('a gate in front of the adjudication', () => {
       expect(arm.dissent, arm.name).toBeUndefined();
       expect(arm.vote ?? 1, arm.name).toBeGreaterThanOrEqual(2);
     }
+  });
+});
+
+describe('which gate pays for the call', () => {
+  // The condition is two lines and the decision is the whole cost argument. This block is the only
+  // place any of the four cases is executed: `runCase` is three thousand lines and no test reaches
+  // the branch, which is how the `tie` gate arrived at 95.92% of branches and a red ratchet.
+  it('spends nothing when the pool agreed, and answers by the shipped rule', () => {
+    expect(gateDecision('results', { groups: 1, tied: false })).toEqual({ held: true, rule: 'shortest' });
+    // An arm that names its own rule gets it: the gate is a decision about *whether* to spend, not
+    // about which free rule the arm was measured with.
+    expect(gateDecision('results', { groups: 1, tied: false }, 'modal')).toEqual({ held: true, rule: 'modal' });
+  });
+
+  it('pays when the pool disagreed, because then there is something to adjudicate', () => {
+    expect(gateDecision('results', { groups: 2, tied: false })).toEqual({ held: false });
+    // Unanimity is not the same as a decided vote: two groups of two is a tie, and the `results`
+    // gate still pays there because the pool did not agree.
+    expect(gateDecision('results', { groups: 2, tied: true })).toEqual({ held: false });
+  });
+
+  it('spends nothing when the vote decided, and answers by the vote', () => {
+    // Two distinct results, two votes to one: the modal group is the vote's own answer, so any other
+    // rule here would be a different policy wearing the gate's name.
+    expect(gateDecision('tie', { groups: 2, tied: false })).toEqual({ held: true, rule: 'modal' });
+    expect(gateDecision('tie', { groups: 1, tied: false })).toEqual({ held: true, rule: 'modal' });
+  });
+
+  it('pays exactly where the vote cannot decide', () => {
+    // Three candidates, three results: `majorityResult` returns the earliest and calls it a winner.
+    expect(gateDecision('tie', { groups: 3, tied: true })).toEqual({ held: false });
+    expect(gateDecision('tie', { groups: 2, tied: true })).toEqual({ held: false });
+  });
+
+  it('is an arm with no gate, so nothing is held back', () => {
+    expect(gateDecision(undefined, { groups: 1, tied: false })).toEqual({ held: false });
+    expect(gateDecision(undefined, { groups: 3, tied: true })).toEqual({ held: false });
   });
 });
 
