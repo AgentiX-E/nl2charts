@@ -7,6 +7,35 @@ cannot be argued with.
 ## Unreleased
 
 ### Fixed
+- **A refused arm no longer takes the table with it.** `runArm`'s guards throw because the arm's
+  table must not be read as a score, and the throw also deleted the table: on `44905985381` a
+  twenty-four-minute, six-hundred-case dispatch ended with an artifact that said `cases: 0`, and the
+  rows survived only in the log. The rows now ride out on the refusal — `withArmPartial` attaches
+  them, `partialOf` reads them, and `runBird` calls `saveRefusal`, which writes the artifact **and
+  then rethrows**, so the file is saved and the job still fails. The artifact carries a `partial`
+  key naming the arm, its case count and the count of arms that finished, and `evaluateGate` returns
+  exactly one problem for it instead of grading half a table: `3 of 3 cases correct` is 100% of a
+  table that was never collected. `saveRefusal` returns `never`, so no caller can continue a run a
+  guard stopped.
+
+### Added
+- **The 168 are relational, and value retrieval is worth 14 questions.** `bench:bird:gap` on
+  `44917562527` splits the no-answer set into 121 `values` and 47 `column-count`, and
+  `bench:bird:values` splits the 121 into 120 classified cases: `filter-wide` 28, `predicate` 21,
+  `tables` 20, `filter-narrow` 18, **`literal-missing` 14**, `aggregate` 11, `projection` 5,
+  `grain` 2, `literal-case` 1. The offline value-retrieval pass the plan carried can therefore win
+  **at most 14 of 600 (2.3pp)** — under the noise floor of a 600-case A/A pair — while 69 of the 121
+  are relational (wrong join, wrong key, wrong operator) and need a generator, not a retrieval.
+- **`bench:bird:coverage-route`: the purchase cannot be aimed.** A fourth call on every case is
+  priced and does not pay, so the remaining hope was to buy it only where the pool is empty. Reading
+  `asked` and `candidateRecall` from the artifact and nothing else, the best of nineteen question
+  features separates the 168 from the rest at **AUC 0.632** (`chars`), earning **+1.00pp** out of a
+  leave-one-database-out fold and firing on **3.7%** of the corpus; the diverse-pool arm reads 0.618
+  and +0.67pp. The criterion was registered before the run at AUC ≥ 0.70, ≥ 3pp and ≤ 80% bought.
+  The cause is arithmetic rather than modelling: BIRD's median question is 79 characters and only
+  3.3% reach the 150 the fold chose, so a length feature has no resolution. **Two routers, seven
+  pool features and nineteen question features, best AUC 0.646 and 0.632: the features are absent,
+  not weak.**
 - **The vote counted statements that returned nothing.** `modal` filters empty candidates through
   `eligibleIndices` and the vote called `majorityResult` on the raw list, so two statements that
   returned nothing outvoted the one that answered. On `44897147794` that is **8 questions** and on

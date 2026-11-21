@@ -18715,3 +18715,75 @@ What that leaves, on this pool: 168 of 600 questions where **no candidate is rig
 decision — and 42 where the answer is in the pool and the count misses it. The first needs a
 generator or a retrieval this pipeline does not have; the second needs a judge that beats a count,
 and two selectors, a shape rule, a gate and a tie-break ordering have now all failed to be one.
+
+### The 168 have a shape, and it is not the shape the next purchase was aimed at
+
+The reading above leaves two numbers, and the two candidate levers were aimed at them:
+
+- **coverage** — 168 of 600 questions where no candidate in the pool is right;
+- **decision** — 42 where one is and the count does not take it.
+
+Before spending a call on either, this round asked what the 168 *are*. Two instruments, both
+reading the artifact `44917562527` already wrote, both costing nothing:
+
+| instrument | question | result |
+|---|---|---|
+| `bench:bird:gap` | what shape is the failure | 121 `values` (72.0%), 47 `column-count` (28.0%), 0 `engine-refused` |
+| `bench:bird:values` | of the `values`, which fix does it ask for | 120 of 121 classified |
+
+The second table is the one that decides the next iteration, so it is worth printing in full:
+
+| bucket | cases | share of 121 | what it asks for |
+|---|---:|---:|---|
+| `filter-wide` | 28 | 23.1% | a join multiplied the rows, or a predicate is too weak |
+| `predicate` | 21 | 17.4% | the filter names the wrong column or the wrong comparison |
+| `tables` | 20 | 16.5% | the statement reads a different relation |
+| `filter-narrow` | 18 | 14.9% | the predicate matched nothing |
+| `literal-missing` | **14** | **11.6%** | a value the gold compares against is not in the column |
+| `aggregate` | 11 | 9.1% | the wrong level of aggregation |
+| `projection` | 5 | 4.1% | the wrong columns |
+| `grain` | 2 | 1.7% | grouped by the wrong thing |
+| `literal-case` | 1 | 0.8% | one stored value differs only in case |
+| `unclassified` | 1 | 0.8% | — |
+
+**Value retrieval is worth 2.3pp at most.** Fourteen of six hundred cases name a value the column
+does not hold, and `literal-case` adds one more. The plan carried an offline embedding pass for
+value retrieval as a parallel item; the census says it can win fourteen questions, which is less
+than the noise floor of a 600-question A/A pair. It stays in the catalogue as a repair and stops
+being a route to coverage.
+
+**Sixty-nine of the 121 are relational**: `filter-wide` (28), `predicate` (21) and `tables` (20) all
+describe a statement built on the wrong relation or the wrong key. That is a generator problem in
+the precise sense — more candidates from the same prompt will not reach it, because the prompt
+already contains the schema and the evidence and the model still joined the wrong table. It is also
+the bucket a decomposition arm is designed for, which is why the next dispatch aims there.
+
+### Can the purchase be aimed? No — the question does not say which cases need it
+
+A fourth call on every case is priced and does not pay (the diversity line above). The remaining
+hope was to buy it only where the pool is empty: 168 cases at one call each is 28% of the corpus for
+the 28% that need it. That is a routing question, and `bench:bird:route` had already answered its
+shape for cards — one feature, one threshold, leave-one-database-out. `bench:bird:coverage-route`
+asks the same question of the 168, reading `asked` and `candidateRecall` from the artifact and
+nothing else, so it can be re-run on any future artifact for free.
+
+| arm | best feature | AUC | held-out vs majority | gain | share it would buy |
+|---|---|---:|---:|---:|---:|
+| `select-cross` | `chars` | **0.632** | 73.00% vs 72.00% | +1.00pp | 3.7% |
+| `select-cross-diverse-pooled-vote` | `chars` | **0.618** | 72.67% vs 72.00% | +0.67pp | 3.7% |
+
+The criterion was written before the run: **AUC ≥ 0.70, ≥ 3pp out of fold, buying at most 80%**.
+Two independent arms, two readings, both far below it. And the failure is worse than the AUC
+suggests: the fitted rule fires on 3.7% of the corpus, because BIRD's questions are short — the
+median is **79 characters**, the 90th percentile is 122, and only 3.3% of questions reach the 150
+the fold chose — so a length feature has almost no resolution, and every per-database fold lands on
+the same cut at the top of its range. The longest questions are the ones with
+literal-heavy evidence, and those are exactly the ones the model *can* answer.
+
+That is the second time this repository has measured a question-side router and found nothing
+(0.646 on seven pool features, 0.632 here on nineteen question features), and the two readings agree
+on the cause: **the features are not weak, they are absent.** Nothing in the text of a BIRD question
+says whether the schema join the model will choose is the right one.
+
+So the purchase cannot be aimed, and the next iteration does not buy a call. It changes what the
+call is for.

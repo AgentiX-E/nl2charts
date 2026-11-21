@@ -38,7 +38,7 @@
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 98.27
+      "branches": 98.76
     },
     "eval/bill.ts": {
       "lines": 100,
@@ -129,6 +129,12 @@
       "statements": 100,
       "functions": 100,
       "branches": 100
+    },
+    "eval/bird/coverage-route.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 97.74
     },
     "eval/bird/data.ts": {
       "lines": 100,
@@ -269,10 +275,10 @@
       "branches": 100
     },
     "eval/bird/oracle.ts": {
-      "lines": 98.18,
-      "statements": 98.18,
+      "lines": 98.21,
+      "statements": 98.21,
       "functions": 100,
-      "branches": 96.55
+      "branches": 96.87
     },
     "eval/bird/pair.ts": {
       "lines": 100,
@@ -362,7 +368,7 @@
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 97.17
+      "branches": 97.19
     },
     "eval/bird/row-samples.ts": {
       "lines": 100,
@@ -461,10 +467,10 @@
       "branches": 97.95
     },
     "eval/bird/ves.ts": {
-      "lines": 99.1,
-      "statements": 99.1,
+      "lines": 99.2,
+      "statements": 99.2,
       "functions": 100,
-      "branches": 96.69
+      "branches": 97.87
     },
     "eval/bird/width.ts": {
       "lines": 99.33,
