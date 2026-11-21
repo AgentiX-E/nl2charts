@@ -442,8 +442,8 @@ describe('choosing without a call', () => {
     { sql: 'SELECT c FROM t WHERE x = 1 AND y = 2', rows: [] },
   ];
 
-  it('offers exactly the three rules the readings were taken with', () => {
-    expect(SELECTION_RULES).toEqual(['first', 'shortest', 'modal']);
+  it('offers exactly the four rules the readings were taken with', () => {
+    expect(SELECTION_RULES).toEqual(['first', 'shortest', 'modal', 'wider']);
   });
 
   it('first is the order the prompts were asked in', () => {
@@ -547,6 +547,91 @@ describe('choosing without a call', () => {
     for (const rule of SELECTION_RULES) {
       expect(chooseCandidateByRule(rule, executed).decided).toBe(true);
     }
+  });
+
+  /**
+   * `wider`: the modal result, unless the consensus answered a listing with one row.
+   *
+   * The rule is `modal` plus one guard, so every case below is either "the guard stayed shut" or
+   * "the guard fired and by how much". The reading it comes from is a single pool of 600 questions
+   * (`44889941650`), which is why the tests fix the *width* of the guard rather than any corpus
+   * number: what a library test can decide is whether a rule means one thing.
+   */
+  describe('wider', () => {
+    it('prefers the wider result when the consensus answered with one row', () => {
+      const set = [
+        { sql: 'SELECT COUNT(*) FROM t', rows: [[7]] },
+        { sql: 'SELECT a FROM t', rows: [[1], [2], [3]] },
+        { sql: 'SELECT COUNT(*) FROM t', rows: [[7]] },
+      ];
+      expect(chooseCandidateByRule('wider', set).index).toBe(1);
+      // The same pool under `modal` is the reading the guard exists to move: the count wins 2:1.
+      expect(chooseCandidateByRule('modal', set).index).toBe(0);
+    });
+
+    it('leaves a multi-row consensus alone, however many rows the minority returned', () => {
+      const set = [
+        { sql: 'SELECT a FROM t', rows: [[1], [2]] },
+        { sql: 'SELECT a, b FROM t', rows: [[1, 2], [2, 3], [3, 4], [4, 5]] },
+        { sql: 'SELECT a FROM t', rows: [[1], [2]] },
+      ];
+      expect(chooseCandidateByRule('wider', set).index).toBe(0);
+    });
+
+    it('asks for a strict gain in rows, not a difference in shape alone', () => {
+      const equalRows = [
+        { sql: 'SELECT COUNT(*) FROM t', rows: [[7]] },
+        { sql: 'SELECT MAX(a) FROM t', rows: [[9]] },
+      ];
+      // Both one row: there is no wider result to prefer, so the earliest candidate answers.
+      expect(chooseCandidateByRule('wider', equalRows).index).toBe(0);
+    });
+
+    it('takes the widest of several minorities, and the earliest of two equally wide', () => {
+      const set = [
+        { sql: 'SELECT COUNT(*) FROM t', rows: [[7]] },
+        { sql: 'SELECT a FROM t', rows: [[1], [2]] },
+        { sql: 'SELECT b FROM t', rows: [[1], [2], [3]] },
+      ];
+      expect(chooseCandidateByRule('wider', set).index).toBe(2);
+      const equallyWide = [
+        { sql: 'SELECT COUNT(*) FROM t', rows: [[7]] },
+        { sql: 'SELECT b FROM t', rows: [[4], [5]] },
+        { sql: 'SELECT a FROM t', rows: [[1], [2]] },
+      ];
+      expect(chooseCandidateByRule('wider', equallyWide).index).toBe(1);
+    });
+
+    it('never prefers a candidate that returned nothing', () => {
+      const set = [
+        { sql: 'SELECT COUNT(*) FROM t', rows: [[7]] },
+        { sql: 'SELECT a FROM t WHERE 0', rows: [] },
+        { sql: 'SELECT COUNT(*) FROM t', rows: [[7]] },
+      ];
+      expect(chooseCandidateByRule('wider', set).index).toBe(0);
+      // Every candidate empty is the corpus whose answer is empty: one group, no width to compare,
+      // and the earliest member answers rather than an exception.
+      const allEmpty = [
+        { sql: 'SELECT a FROM t WHERE 0', rows: [] },
+        { sql: 'SELECT b FROM t WHERE 0', rows: [] },
+      ];
+      expect(chooseCandidateByRule('wider', allEmpty).index).toBe(0);
+    });
+
+    it('a minority narrower than the consensus is not a wider answer', () => {
+      const set = [
+        { sql: 'SELECT a, b FROM t', rows: [[1, 2]] },
+        { sql: 'SELECT a, b FROM t', rows: [[1, 2]] },
+        { sql: 'SELECT c FROM t', rows: [[1], [2], [3]] },
+      ];
+      // One-row consensus of two columns against three rows of one: wider by rows, narrower by
+      // columns, and a projection that dropped the second column is not a fuller answer.
+      expect(chooseCandidateByRule('wider', set).index).toBe(0);
+    });
+
+    it('a single candidate is the answer, guard or no guard', () => {
+      expect(chooseCandidateByRule('wider', [{ sql: 'SELECT COUNT(*) FROM t', rows: [[7]] }]).index).toBe(0);
+    });
   });
 
   it('one candidate is the answer under every rule, and none is a refusal', () => {

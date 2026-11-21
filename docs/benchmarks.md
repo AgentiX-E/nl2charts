@@ -8810,7 +8810,7 @@ if a future run draws the same candidates and ranks them the same way.
 
 So the delivery is not another selector. It is the derivation turned into a measurement.
 
-- `Strategy.selector` became one name — `'none' | 'first' | 'shortest' | 'modal' | 'model'` —
+- `Strategy.selector` became one name — `'none' | 'first' | 'shortest' | 'modal' | 'wider' | 'model'` —
   instead of a boolean plus a rule, because the pair allowed the state "a selector that is also a
   rule", which no executor can honour.
 - `aimed-3` is three calls with `shortest`; `aimed-4` keeps the fourth call and the model. The
@@ -18273,6 +18273,107 @@ reading publishes it in an `if: always()` step that cannot fail the job.
 node tools/readback.mjs --publish --out eval/out/bird-eval.json
 node tools/readback.mjs --read --slug bird-dev
 ```
+
+### The 401 was not the artifact, and one header was the whole of it
+
+The paragraph above was wrong about the cause, and the next round proved it in the only way that
+counts: by reading two artifacts the previous three rounds had described as unreadable.
+
+`/actions/artifacts/{id}/zip` answers `302` to a storage URL that carries its own signature. Both
+`urllib` and `fetch` forward the caller's `Authorization` header across that redirect, and the storage
+service refuses a token it did not issue. The signature was valid; the request failed because of a
+header the client added on its own. Strip it **on a cross-origin redirect only** and the same URL
+answers `200` with the same bytes the Actions page downloads. `tools/fetch-artifact.mjs` is that two
+lines plus a zip reader (Node's `unzipSync` is a gzip reader and answers "incorrect header check" to a
+real archive), and `test/fetch-artifact.test.ts` holds it against a second HTTP server that refuses
+exactly what the storage service refuses:
+
+```
+GITHUB_REPOSITORY=AgentiX-E/nl2charts GH_TOKEN=... node tools/fetch-artifact.mjs 44889941650 --out /tmp/run
+fetch-artifact: bird-eval.json 3550061 B -> /tmp/run/bird-eval.json
+```
+
+The lesson is not the header. It is that "the artifact is unreadable" was a **hypothesis about
+somebody else's server** that three rounds of work were built on — the readback channel, its tests,
+its workflow step — when the failure was reproducible in four lines with the response in hand. The
+readback channel stays, because a reading that survives the artifact's 90-day expiry is worth having;
+it is no longer the only route.
+
+## The gate is exact, its price is not, and the bar was derived from another pool
+
+`select-cross-tie` was dispatched on `44889941650` with the protocol written above: accuracy at least
+383 of 600, `calls.mean` at or below 3.03, `spend.asked` at or below 0.05.
+
+| reading | bar | what the dispatch returned | verdict |
+|---|---|---|---|
+| accuracy | ≥ 383/600 | **388/600 (64.67%)** | held, +5 |
+| `calls.mean` | ≤ 3.03 | **3.077** | missed, +0.047 |
+| `spend.asked` | ≤ 0.05 (30 cases) | **46/600 (7.67%)** | missed, +2.67pp |
+| `selectorRule.decided` | not registered | 554 | — |
+
+Two of three missed, and the reason is the one the pre-registration was least able to see: **the bar
+counted ties on the wrong pool.** The 16 was read off `41453395203`, whose 600 questions produced 593
+three-candidate pools, 6 one-candidate pools and **1** two-candidate pool. This run's pool is 589
+three-candidate, 8 two-candidate, 3 one-candidate — and a two-candidate pool that disagrees is a 1-1
+tie, which `majorityResult` reports and the replay's "three distinct results" bucket does not. The
+arm paid on 46 cases: **41 three-way ties and 5 two-way ties**, which is exactly the 46 cases whose
+pool returned all-distinct fingerprints. The gate did what it says; the number naming its price was a
+number about a different draw.
+
+### The comparison it cannot make
+
+`select-cross` scored 383 and `select-cross-tie` 388 in the same run, which reads like +5 for the
+gate. It is not, because the two arms drew their own candidates: `candidateRecall` is **427 against
+429**. A gate changes which candidate is chosen, never which candidates exist, so the pool difference
+is a confound and the +5 is a pool difference and a gate difference added together. The mechanism is
+separated from the pool only by reading one pool three ways, which is what the next two arms do.
+
+### What the artifact recorded about its own decision, and what it got wrong
+
+`spend.asked` 46 against `calls.mean` 3.077 is the arithmetic of the same fact (600 × 3 + 46 = 1,846
+calls), and it is the first reading where the two agree without my having to derive one from the
+other — because this round the published record carries the funnel instead of only the mean:
+
+- `spend` now travels through `tools/readback.mjs`. The pre-registration named it and the first
+  publication dropped it, so the criterion had to be checked by hand from the artifact.
+- `selectorRule.rules` is new, and it exists because the record **contradicted its own rows**: the
+  artifact for this run says `{"rule": "shortest", "decided": 554}` for an arm that declares no
+  `selectRule` and whose gate answered by `modal` on all 554 cases. The declaration was published as
+  if it were the behaviour. `selectorRuleOf` is now a pure function with five tests, `rule` stays the
+  declaration, and `rules` is the census of what the rows name.
+
+## The free rule the pool admits, which the shipping set did not have
+
+Replaying the same 600 cases against the rules that read nothing but the pool turned up one that is
+not in `SELECTION_RULES`'s shipping set: **take the modal group, except where it returned a single
+row and a candidate outside it returned more rows in at least as many columns.**
+
+| policy | correct | accuracy | calls a case |
+|---|---|---|---|
+| `vote` (modal result group) | 377 | 62.83% | 0 |
+| `chosen` (the selector's answer) | 383 | 63.83% | 1 |
+| `vote-unless-tie` (the gate above) | 383 | 63.83% | 0.077 |
+| **`wider`** | **385** | **64.17%** | **0** |
+
+It fired on 19 questions, was right on 10, and the vote was right on 2 of those 19 — so the shape of
+a result carries information no text-level rule has. The mechanism is specific: a single-row
+consensus is what an aggregate answer looks like, and on these 19 questions the answer was a set of
+rows that the aggregation had thrown away. It is shipped as `'wider'` in `@agentix-e/nl2charts-ai`.
+One pool of 600 is a hypothesis, and the pool it was found on is the pool that would confirm it, so
+it is registered here before the dispatch that tests it:
+
+- **`select-cross-pooled-wider`**, on `select-cross`'s recorded pool, at zero calls: accuracy **at
+  least 385 of 600**, strictly above `select-cross-pooled-vote` in the same run, and
+  `selectorRule.rules.wider` **at least 15** — a rule that stopped firing is a rule that cannot have
+  helped, and the census is what separates that from a rule that fired and lost.
+- **`select-cross-pooled-tie`**, the same gate on the same pool: accuracy **within 1.0pp** of
+  `select-cross-pooled` (the selector on that pool) and **at or above** `select-cross-pooled-vote`,
+  with `spend.asked` at or below 0.10 — the 7.67% this run measured, not the 2.7% the replay
+  promised, because the price of a gate is a property of the pool and has to be read off one.
+
+Both are pooled, so the delta from `vote` is the rule, the delta from `pooled` is the gate, and the
+delta from `pooled-vote` is what a call adds where the vote cannot decide — three questions, one
+pool, one dispatch, and 0 + 0 + 46 calls against the selector's 600.
 
 ### Where each of the four absent rows would have to go
 

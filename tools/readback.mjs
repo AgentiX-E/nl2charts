@@ -63,6 +63,16 @@ export function digest(artifact, ves, meta = {}) {
     ...(arm.calls === undefined ? {} : { calls: arm.calls.mean }),
     ...(arm.tokens === undefined ? {} : { promptTokens: arm.tokens.prompt, completionTokens: arm.tokens.completion }),
     ...(arm.strictPassed === undefined ? {} : { strictPassed: arm.strictPassed }),
+    // The funnel, which is the half a pre-registration actually names. A gate's bar is written as
+    // "`calls.mean` at or below X and `spend.asked` at or below Y", and the first reading this tool
+    // published carried the mean and dropped `asked` — so the dispatch could not be checked against
+    // the criterion it was dispatched for, and the check had to be done by hand from the artifact.
+    // `selectorRule` travels with it because a free decision is only a decision if the rule ran:
+    // the same reading published `{rule: 'shortest'}` for an arm whose gate answered by `modal`.
+    ...(arm.spend === undefined ? {} : { spend: { asked: arm.spend.asked, priced: arm.spend.priced } }),
+    ...(arm.selectorRule === undefined ? {} : { selectorRule: arm.selectorRule }),
+    ...(arm.poolRead === undefined ? {} : { poolRead: arm.poolRead }),
+    ...(arm.pairwise === undefined ? {} : { pairwise: arm.pairwise }),
   }));
   return {
     kind: 'bench-readback',
@@ -101,13 +111,14 @@ export function bodyOf(reading) {
   );
   lines.push(`### ${where.join(' · ')}`);
   lines.push('');
-  lines.push('| arm | passed | accuracy | pool | loss | calls | prompt | completion |');
-  lines.push('|---|---|---|---|---|---|---|---|');
+  lines.push('| arm | passed | accuracy | pool | loss | paid | calls | prompt | completion |');
+  lines.push('|---|---|---|---|---|---|---|---|---|');
   for (const arm of reading.arms) {
     lines.push(
       `| \`${arm.arm}\` | ${arm.passed}/${arm.total} | ${(arm.accuracy * 100).toFixed(2)}% | ` +
         `${arm.candidateRecall === undefined ? '—' : String(arm.candidateRecall)} | ` +
         `${arm.selectionLoss === undefined ? '—' : String(arm.selectionLoss)} | ` +
+        `${arm.spend === undefined ? '—' : `${String(arm.spend.asked)}/${String(arm.total)}`} | ` +
         `${arm.calls === undefined ? '—' : arm.calls.toFixed(2)} | ` +
         `${arm.promptTokens === undefined ? '—' : String(arm.promptTokens)} | ` +
         `${arm.completionTokens === undefined ? '—' : String(arm.completionTokens)} |`,

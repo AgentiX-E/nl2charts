@@ -345,7 +345,7 @@ comparison in this repository where a free rule wins by more than the split reso
 ```ts
 import { chooseCandidateByRule } from '@agentix-e/nl2charts-ai';
 
-// `first` | `shortest` | `modal` — no provider, no call, never undecided.
+// `first` | `shortest` | `modal` | `wider` — no provider, no call, never undecided.
 const { sql, index } = chooseCandidateByRule('shortest', candidates);
 ```
 
@@ -354,19 +354,30 @@ const { sql, index } = chooseCandidateByRule('shortest', candidates);
 - **`shortest`** is the rule every reader believes they are using. Leading and trailing
   whitespace is ignored, and a blank statement ranks last: an empty string is shorter
   than every real statement, and a candidate that wrote nothing is not the minimal answer.
-- **`modal`** keeps the result set most candidates returned, and it is the only rule that
+- **`modal`** keeps the result set most candidates returned, and it is the first rule here that
   reads the rows rather than the text. Two different statements that produced one table
   are one opinion, which is what makes the rule stronger than it looks — and also what
   makes it fragile on a corpus where every candidate is wrong in the same way.
+- **`wider`** is `modal` with one guard: where the modal group answered with a single row and a
+  candidate outside it returned more rows in at least as many columns, the wider candidate wins.
+  It is the only rule that reads the *shape* of a result, and its evidence is one pool: on 600 dev
+  questions it scored **64.17%** against `modal`'s 62.83% and the selector's 63.83%, at zero calls,
+  by firing on 19 questions and being right on 10 of them — a single-row consensus is what an
+  aggregate answer looks like, and on those 19 the question wanted rows. One pool is a hypothesis,
+  which is why the rule ships as a choice with an arm attached (`select-cross-pooled-wider`) rather
+  than as a default.
 
-**All three skip a candidate that returned no rows**, and that is worth more than the choice
+**All four skip a candidate that returned no rows**, and that is worth more than the choice
 of rule. 586 empty results across four arms were all wrong: a result with no rows equals
 another empty result and nothing else, so an empty candidate can only be right when the true
 answer is empty. If every candidate is empty the rules fall back to the whole set, so a
-question whose answer really is empty is unaffected. Nothing else about a result is used —
-reading the shape out of the question ("how many" ⇒ one number) was tested against 146
-rejected candidates and agreed with the truth 61% of the time, which is worse than not
-looking.
+question whose answer really is empty is unaffected. Apart from `wider`'s one guard, nothing
+about a result's shape is used — and the shape that guard reads is not the shape this file
+rejected earlier: reading the shape **out of the question** ("how many" ⇒ one number) was tested
+against 146 rejected candidates and agreed with the truth 61% of the time, which is worse than
+not looking. `wider` compares the shapes **of two executed results against each other**, which is
+a fact about the pool rather than a guess about the question, and it stays silent unless the
+consensus is a single row.
 
 Two things the table above does not say. The difference between the selector and the
 shortest statement is **0.85pp on the 1,532-question split and 3.17pp on the strong 600** —

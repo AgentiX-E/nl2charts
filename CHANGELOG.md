@@ -7,6 +7,51 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **`'wider'`: the first selection rule that reads the shape of a result instead of its text or its
+  agreement.** Replaying the 600-question dev artifact `44889941650` against every free rule the pool
+  admits turned up one the shipping set did not have: take the modal group, **except** where it
+  returned a single row and a candidate outside it returned more rows in at least as many columns.
+  It reads **385** where `chosen` reads 383 and `vote` 377, at zero calls against the selector's 600;
+  it fired on 19 questions, was right on 10, and the vote was right on 2 of those 19. The mechanism is
+  specific rather than fitted: a single-row consensus is what an aggregate answer looks like, and on
+  those 19 the question wanted rows. `chooseCandidateByRule` routes it through `widerIndex`, the
+  override is refused when the modal group already returned more than one row, and it is refused when
+  the wider candidate is narrower in columns — a projection that dropped a column is not a fuller
+  answer. One pool is a hypothesis, so it ships as a choice a caller can measure and
+  `select-cross-pooled-wider` is the arm that holds it to the bar written in `docs/benchmarks.md`
+  before the dispatch (≥ 385/600, strictly above `select-cross-pooled-vote`, and
+  `selectorRule.rules.wider` ≥ 15).
+- **`tools/fetch-artifact.mjs`, and the 401 that was a header rather than a wall.** The previous
+  round built a readback branch because `/actions/artifacts/{id}/zip` answered `401`. It does not: the
+  endpoint answers `302` to a signed storage URL, `urllib` and `fetch` forward the caller's
+  `Authorization` header across that redirect, and the storage service refuses a token it did not
+  issue — a valid signature failing because of a header the client added on its own. Dropping it on a
+  cross-origin redirect returns `200` and the same bytes the Actions page downloads, which this round
+  used to read two artifacts end to end. The tool carries the redirect fix plus a zip reader written
+  against the format (Node's `unzipSync` is a gzip reader and answers "incorrect header check" to a
+  real archive), refuses an entry name that would write outside the output directory, and is held by
+  seventeen tests against a real HTTP server that refuses exactly what the storage host refuses.
+- **The gate's price is a property of the pool, and the record now says which rule actually ran.**
+  `select-cross-tie` was dispatched on `44889941650` against a protocol of ≥ 383/600, `calls.mean` ≤
+  3.03 and `spend.asked` ≤ 0.05: it read **388/600** (held), **3.077** (missed) and **46/600** (missed).
+  The bar was derived from another pool — `41453395203` held 16 all-distinct pools and 1 two-candidate
+  pool, this one held 41 and 8, and a two-candidate pool that disagrees is a 1-1 tie `majorityResult`
+  reports and a "three distinct results" bucket does not — so the arm paid on 41 three-way ties and 5
+  two-way ties, exactly the 46 cases whose pool returned all-distinct fingerprints. The reading also
+  caught the artifact contradicting its own rows: `selectorRule` published
+  `{rule: 'shortest', decided: 554}` for an arm whose gate answered by `modal` on all 554.
+  `selectorRuleOf` is now a pure function with a census (`rules`) beside the declaration, `spend`,
+  `selectorRule`, `poolRead` and `pairwise` travel through `tools/readback.mjs` — the first
+  publication dropped `spend`, which is the field the pre-registration named — and the reading table
+  grew the `paid` column those bars are written in.
+- **`select-cross-pooled-tie` and `select-cross-pooled-wider`, because the last comparison could not
+  be attributed.** `select-cross` scored 383 and `select-cross-tie` 388 in one run, but the arms drew
+  their own candidates (`candidateRecall` 427 against 429), so the +5 is a pool difference and a gate
+  difference added together. Both new arms read `select-cross`'s recorded pool, so the delta from
+  `select-cross-pooled-vote` is the rule and the delta from `select-cross-pooled` is the gate: three
+  policies decided on one pool, 0 + 0 + 46 calls against the selector's 600.
+
+### Added
 - **The selector's only net contribution is the 16 questions the vote cannot settle, and it now costs
   16 calls instead of 600.** `tools/pool-replay.mjs` prices selection policies offline from an
   artifact's own record, and its first line is a check rather than a table: the replayed modal rule

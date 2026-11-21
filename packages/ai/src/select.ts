@@ -435,14 +435,25 @@ export async function chooseCandidatePairwise(
  *   result is wrong on 24.1% of the four-candidate questions — but it is the same evidence the
  *   marked selector prompt states, counted instead of read.
  *
+ * - `wider` — the modal result, except where the modal group returned a single row and a candidate
+ *   outside it returned more rows in at least as many columns. The consensus in that shape is the
+ *   aggregate answer to a question that asked for rows, and the minority holds the detail the
+ *   aggregate lost. It is the only rule here that reads the *shape* of a result rather than its
+ *   text or its agreement, and the reason it exists is a reading: on the 600-question dev artifact
+ *   `44889941650`, a pool of three disagreed about shape on 19 questions where the modal group was
+ *   one row, the wider minority was right on 10 of them, and the modal group was right on 2 —
+ *   `vote` 377, `chosen` 383, `wider` 385, at zero calls against the selector's 600. One reading on
+ *   one pool is a hypothesis rather than a fact; the rule ships as a choice a caller can measure,
+ *   not as a default, and `select-cross-pooled-wider` is the arm that holds it to the same bar.
+ *
  * Ties go to the earliest candidate under every rule, which is what makes `first` the limit of the
  * other two on a set they cannot separate. Unlike the selector, none of these rules can report
  * "did not decide": a total function of the candidates always has an answer, and `decided` is
  * therefore always true — which is exactly the difference in cost that this API exists to expose.
  */
-export type SelectionRule = 'first' | 'shortest' | 'modal';
+export type SelectionRule = 'first' | 'shortest' | 'modal' | 'wider';
 
-export const SELECTION_RULES: readonly SelectionRule[] = ['first', 'shortest', 'modal'];
+export const SELECTION_RULES: readonly SelectionRule[] = ['first', 'shortest', 'modal', 'wider'];
 
 /**
  * The key two rows are compared with, by the rule the benchmark's judge uses.
@@ -544,6 +555,58 @@ function modalIndex(keys: readonly string[], eligible: readonly number[]): numbe
 }
 
 /**
+ * The modal result, unless the modal group answered a question that wanted rows with one row.
+ *
+ * Two facts make this a rule rather than a preference. The first is that a single-row result is
+ * what an aggregate question looks like, and a pool can agree on an aggregate when the question
+ * asked for a listing — `SELECT COUNT(*)` beside `SELECT ...` returns one row against many, and the
+ * count is not a smaller answer to the same question, it is an answer to a different one. The second
+ * is that the disagreement is invisible to every other rule here: the statements can be nearly
+ * identical in length, `first` reads arrival order, `modal` counts agreement, and none of them can
+ * see that the loser of the vote returned four hundred rows the winner did not.
+ *
+ * The override is deliberately narrow. It only speaks when the modal group is a *single* row (so
+ * an answer that is legitimately one row is never second-guessed by a wider majority), it requires
+ * the wider candidate to be at least as wide in columns (so a longer dump of the wrong projection
+ * does not win), and it takes the widest such candidate, earliest on a tie. Everything else returns
+ * the modal member, so the rule is `modal` with one guard rather than a third opinion.
+ */
+function widerIndex(executed: readonly ExecutedCandidate[], eligible: readonly number[]): number {
+  const order: string[] = [];
+  const members = new Map<string, number[]>();
+  for (const index of eligible) {
+    const key = rowsKey((executed[index] as ExecutedCandidate).rows);
+    const group = members.get(key);
+    if (group === undefined) {
+      members.set(key, [index]);
+      order.push(key);
+    } else group.push(index);
+  }
+  let bestKey = order[0] as string;
+  for (const key of order) {
+    if ((members.get(key) as number[]).length > (members.get(bestKey) as number[]).length) bestKey = key;
+  }
+  const modal = members.get(bestKey) as number[];
+  const modalFirst = executed[modal[0] as number] as ExecutedCandidate;
+  const modalRows = modalFirst.rows.length;
+  if (modalRows > 1) return modal[0] as number;
+  const modalColumns = (modalFirst.rows[0] as readonly unknown[] | undefined)?.length ?? 0;
+  let best = modal[0] as number;
+  let bestRows = modalRows;
+  for (const index of eligible) {
+    if (modal.includes(index)) continue;
+    const candidate = executed[index] as ExecutedCandidate;
+    const columns = (candidate.rows[0] as readonly unknown[] | undefined)?.length ?? 0;
+    if (columns < modalColumns) continue;
+    if (candidate.rows.length > bestRows) {
+      bestRows = candidate.rows.length;
+      best = index;
+    }
+  }
+  return best;
+}
+
+/**
  * Pick the candidate a named rule would keep, without a model call.
  *
  * The counterpart of `chooseCandidate`: the same question, the same answer shape, one fewer
@@ -569,7 +632,9 @@ export function chooseCandidateByRule(
             executed.map((candidate) => rowsKey(candidate.rows)),
             eligible,
           )
-        : (eligible[0] as number);
+        : rule === 'wider'
+          ? widerIndex(executed, eligible)
+          : (eligible[0] as number);
   return { index, decided: true, sql: (executed[index] as ExecutedCandidate).sql };
 }
 

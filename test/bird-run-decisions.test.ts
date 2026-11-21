@@ -58,6 +58,7 @@ import {
   reusePool,
   sampleBlockFunnel,
   secondModelRoles,
+  selectorRuleOf,
   spendOf,
   thinkingShare,
 } from '../eval/bird/run.js';
@@ -1993,6 +1994,56 @@ describe('which gate pays for the call', () => {
   it('is an arm with no gate, so nothing is held back', () => {
     expect(gateDecision(undefined, { groups: 1, tied: false })).toEqual({ held: false });
     expect(gateDecision(undefined, { groups: 3, tied: true })).toEqual({ held: false });
+  });
+});
+
+/**
+ * What the free decision's funnel says, and which rule it names.
+ *
+ * The reading `44889941650` published `{rule: 'shortest', decided: 554}` for `select-cross-tie`, an
+ * arm that declares no `selectRule` and whose gate answered by `modal` on every one of those 554
+ * cases. The declaration was reported as if it were the behaviour, so an auditor reading the
+ * artifact found a rule the arm had never applied. The census is the half that cannot lie.
+ */
+describe('the funnel of a decision that costs nothing', () => {
+  const byRule = (rule: 'modal' | 'shortest' | 'first' | 'wider', eligible = 3, emptyPool = false) => ({
+    selectedByRule: { rule, index: 0, eligible, emptyPool },
+  });
+
+  it('says nothing about an arm that makes no free decision', () => {
+    expect(selectorRuleOf({}, [byRule('modal')] as never)).toBeUndefined();
+  });
+
+  it('names the rule the arm declared, and counts the rules its rows name', () => {
+    const runs = [byRule('wider'), byRule('wider'), byRule('modal', 2)];
+    expect(selectorRuleOf({ selectRule: 'wider' }, runs as never)).toEqual({
+      rule: 'wider',
+      decided: 3,
+      eligible: 8,
+      emptyPool: 0,
+      rules: { wider: 2, modal: 1 },
+    });
+  });
+
+  it('reports a tie gate as modal, which is the rule it applies when it holds', () => {
+    // The gate config is irrelevant to a tie gate's rule — it holds by answering with the modal
+    // group — and reporting the declared fallback there is what produced the wrong record.
+    expect(selectorRuleOf({ gate: 'tie', gateRule: 'shortest' }, [byRule('modal')] as never)?.rule).toBe('modal');
+  });
+
+  it('keeps the fallback a results gate was configured with', () => {
+    expect(selectorRuleOf({ gate: 'results', gateRule: 'first' }, [byRule('first')] as never)?.rule).toBe('first');
+    expect(selectorRuleOf({ gate: 'results' }, [byRule('shortest')] as never)?.rule).toBe('shortest');
+  });
+
+  it('counts nothing rather than inventing a decision when no case reached the rule', () => {
+    expect(selectorRuleOf({ selectRule: 'modal' }, [{ calls: 1 }, { calls: 2 }] as never)).toEqual({
+      rule: 'modal',
+      decided: 0,
+      eligible: 0,
+      emptyPool: 0,
+      rules: {},
+    });
   });
 });
 

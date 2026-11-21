@@ -4087,7 +4087,13 @@ describe('the free selector', () => {
       readonly calls: { readonly mean: number };
       readonly selector?: string;
       readonly spend?: { readonly asked: number; readonly priced: number };
-      readonly selectorRule?: { readonly rule: string; readonly decided: number; readonly eligible: number; readonly emptyPool: number };
+      readonly selectorRule?: {
+        readonly rule: string;
+        readonly decided: number;
+        readonly eligible: number;
+        readonly emptyPool: number;
+        readonly rules?: Readonly<Record<string, number>>;
+      };
     }[];
     const parent = rows.find((row) => row.arm === 'select-mixed');
     const child = rows.find((row) => row.arm === 'select-mixed-rule');
@@ -4102,7 +4108,16 @@ describe('the free selector', () => {
     expect(child?.spend).toBeUndefined();
     expect(parent?.spend).toEqual({ asked: QUESTIONS.length, priced: QUESTIONS.length });
     // Three candidates a case, all of them executed: the funnel is the proof the rule had a set.
-    expect(child?.selectorRule).toEqual({ rule: 'shortest', decided: QUESTIONS.length, eligible: QUESTIONS.length * 3, emptyPool: 0 });
+    // `rules` is the census of what the rule actually was, beside the declaration: the two agree
+    // here because a rule arm applies the rule it declares, and the field exists for the arms where
+    // they do not.
+    expect(child?.selectorRule).toEqual({
+      rule: 'shortest',
+      decided: QUESTIONS.length,
+      eligible: QUESTIONS.length * 3,
+      emptyPool: 0,
+      rules: { shortest: QUESTIONS.length },
+    });
 
     // Both answers are right and they are not the same statement, so the score cannot separate the
     // selectors here — which is the point of reading the case record instead.
@@ -4175,7 +4190,13 @@ describe('the gate in front of the adjudication', () => {
       readonly total: number;
       readonly calls: { readonly mean: number };
       readonly spend?: { readonly asked: number; readonly priced: number };
-      readonly selectorRule?: { readonly rule: string; readonly decided: number; readonly eligible: number; readonly emptyPool: number };
+      readonly selectorRule?: {
+        readonly rule: string;
+        readonly decided: number;
+        readonly eligible: number;
+        readonly emptyPool: number;
+        readonly rules?: Readonly<Record<string, number>>;
+      };
     }[];
     const parent = rows.find((row) => row.arm === 'select-mixed');
     const gated = rows.find((row) => row.arm === 'select-mixed-gated');
@@ -4186,7 +4207,13 @@ describe('the gate in front of the adjudication', () => {
     // gate decided all of them by rule.
     expect(parent?.spend).toEqual({ asked: QUESTIONS.length, priced: QUESTIONS.length });
     expect(gated?.spend).toEqual({ asked: 0, priced: 0 });
-    expect(gated?.selectorRule).toEqual({ rule: 'shortest', decided: QUESTIONS.length, eligible: QUESTIONS.length * 3, emptyPool: 0 });
+    expect(gated?.selectorRule).toEqual({
+      rule: 'shortest',
+      decided: QUESTIONS.length,
+      eligible: QUESTIONS.length * 3,
+      emptyPool: 0,
+      rules: { shortest: QUESTIONS.length },
+    });
     // The invariance: a unanimous pool is scored by its result, so removing the choice cannot move
     // the score. If this ever fails, the gate is choosing between results rather than within one.
     expect(gated?.passed).toBe(parent?.passed);

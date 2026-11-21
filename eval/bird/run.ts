@@ -1636,6 +1636,39 @@ export const ARMS: readonly Arm[] = [
   // to implement: `gate: 'tie'` is that implementation, and its reading is what the table in
   // `docs/benchmarks.md` will quote.
   { name: 'select-cross-tie', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: CROSS_SOURCES, gate: 'tie' },
+  // The same policy, on a pool it did not draw.
+  //
+  // `select-cross-tie` ran on `44889941650` and read **388 of 600** against `select-cross`'s 383 —
+  // but the two arms drew their own candidates (`candidateRecall` 429 against 427), so the +5 is a
+  // pool difference and a gate difference added together. The gate itself was exact: it paid on 46
+  // cases and the arm's own 46 tied pools were exactly those 46. What the reading cannot say is
+  // whether the gate is worth a call, because the selector it is compared against answered a
+  // different set of questions.
+  //
+  // Here the pool is `select-cross`'s, executed again and read, so the delta against
+  // `select-cross-pooled` is the gate and nothing else — and the delta against
+  // `select-cross-pooled-vote` is what the selector adds where the vote cannot decide, at the
+  // gate's price. Three policies, one pool, one dispatch. The replay already prices all three
+  // (`chosen` 383, `vote` 377, `vote-unless-tie` 383 on the recorded pool); this is the arm that
+  // turns the third number into a reading, which is the only thing it is missing.
+  { name: 'select-cross-pooled-tie', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: CROSS_SOURCES, pool: 'select-cross', gate: 'tie' },
+  // The same pool, decided by the widest result instead of by the model — and the finding that put
+  // it here.
+  //
+  // `44889941650`'s 600 cases were replayed offline against every free rule the pool admits, and one
+  // of them is not in `SELECTION_RULES`'s shipping set yet: take the modal group, *except* where it
+  // returned a single row and a candidate outside it returned more rows in at least as many columns.
+  // That policy scored **385** where `chosen` scored 383 and `vote` 377, at zero calls. It fired on
+  // 19 questions, was right on 10 of them, and the vote was right on 2 — a single-row consensus is
+  // what an aggregate answer looks like, and on these 19 the question wanted rows.
+  //
+  // One pool of 600 is a hypothesis, not a reading, and the pool it was found on is the pool that
+  // would confirm it. The arm is pooled because that is what makes it free: zero calls, the parent's
+  // candidates re-executed, and the delta from `select-cross-pooled-vote` is the guard and nothing
+  // else. `docs/benchmarks.md` states the bar before the dispatch: at least 385 on the first 600 and
+  // no worse than the vote on the second, with the fire count published so a rule that stopped firing
+  // cannot read as a rule that stopped helping.
+  { name: 'select-cross-pooled-wider', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, selectRule: 'wider', mixed: CROSS_SOURCES, pool: 'select-cross' },
   // Buy a fourth opinion, but only where the three already agree.
   //
   // `bench:bird:diversity` read this pool off the published artifact: 1.28 distinct results per
@@ -2017,6 +2050,8 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'select-cross-pooled-judge-reasoning': 'the reasoning model judging the chat model\'s candidates, in the format it can answer: needs the second model and a second key, one call per case, and is measured against `select-cross-pooled` on the same pool — the only judge-swap delta with no generation noise in it',
   'select-cross-pooled-vote': 'the same pool decided by the modal result instead of by a model: zero calls per case, and the only reading of "is the selector worth its call" whose candidates are shared — the archived artifacts say the count wins 53 disputed cases to 22 (p = 4.5e-4), and this arm is what turns that into a measurement instead of a re-reading',
   'select-cross-tie': 'the cross pool with the selector called only on the questions the vote cannot settle: offline replay over 600 dev questions puts it at 383 against the vote\'s 380 and the selector\'s 378 for 16 selection calls instead of 600, and a dispatch is what turns that replay into a reading — it needs the second model, so it is not in a routine chain',
+  'select-cross-pooled-tie': 'the same gate on a pool it did not draw: `select-cross-tie` read 388 against a parent that had drawn different candidates, so the gate\'s own contribution was not separable from the pool\'s; here the candidates are `select-cross`\'s, and the delta against `select-cross-pooled` is the gate while the delta against `select-cross-pooled-vote` is what the selector adds where the vote cannot decide — dispatch it after `select-cross` and with `select-cross-pooled-vote`, because one pool decided three ways is the whole comparison',
+  'select-cross-pooled-wider': 'the same pool decided by the widest result instead of by the model: the modal group, except where it returned one row and a candidate outside it returned more rows in at least as many columns — 385 against the vote\'s 377 and the selector\'s 383 on the 600 questions the rule was found on, at zero calls, which is why it needs a dispatch rather than a second read of the same pool; free on top of `select-cross`, so it belongs in the same run as `select-cross-pooled-vote`',
   'select-cross-pooled-dissent': 'the same pool and the same selector with one decomposition bought only where the three agreed: 4 calls per case on the 74.5% of cases the diversity reading found unanimous and 3.0 on the rest, and it must be dispatched after `select-cross` because it reads that pool — the pair against `select-cross-pooled` is the whole lever, so run those two and no others',
   'select-cross-pooled-dissent-pair': 'the same bought opinion, compared against the pool\'s answer on the cases where it disagrees instead of shown to the selector as a fourth candidate: one comparison call on 6.5% of cases, and it must be dispatched after `select-cross` because it reads that pool — the pair against `select-cross-pooled-dissent` is the whole lever, so run those two and no others',
   'select-cross-pooled-agree': 'the same pool with the agreement marks the selector was never given: 149 of 600 cases had more than one distinct result, and which of three candidates returned the same rows is the one fact two truncated previews cannot yield; one lever from `select-cross-pooled`, one call per case',
@@ -2962,6 +2997,17 @@ export interface ArmReportRow {
     readonly decided: number;
     readonly eligible: number;
     readonly emptyPool: number;
+    /**
+     * How many cases each rule actually answered, when the arm can answer by more than one.
+     *
+     * `rule` is the arm's *declared* rule, and on a gated arm it is not the rule that ran: a
+     * `gate: 'tie'` arm declares no `selectRule`, falls back to `shortest` in the declaration, and
+     * answers by `modal` on every case its gate holds. The reading `44889941650` published
+     * `{rule: 'shortest', decided: 554}` for an arm that never applied `shortest` once — a record
+     * that contradicts its own rows, which is worse than a missing field because it reads as
+     * evidence. Counting the rules the rows name is the version that cannot disagree with them.
+     */
+    readonly rules?: Readonly<Partial<Record<SelectionRule, number>>>;
   };
   /**
    * What the reconcile turn did across the arm's cases, on the arm that asks for a statement.
@@ -4383,6 +4429,38 @@ export function assertEvidence(arm: Pick<Arm, 'name' | 'select' | 'selectRule' |
 export function spendOf(runs: readonly CaseRun[]): ArmReportRow['spend'] {
   const decided = runs.filter((run) => run.selectedByModel !== undefined);
   return { asked: decided.length, priced: decided.filter((run) => run.calls >= 1).length };
+}
+
+/**
+ * The free decision's funnel, including which rule actually answered.
+ *
+ * Extracted for the same reason `gateDecision` was: the arm-report object is not reachable from a
+ * test, so a funnel computed inline is a funnel only a dispatched run can check — and a dispatched
+ * run is exactly where `44889941650` published `{rule: 'shortest', decided: 554}` for an arm whose
+ * gate answered by `modal` 554 times. The declaration was read as a description of the behaviour.
+ *
+ * `rule` stays the declared rule, because a reading that names no rule at all is harder to compare
+ * with the arm that declared one; `rules` carries the census, which is the half that cannot lie.
+ * A `tie` gate declares nothing and falls back to `modal`, which is the rule it applies when it
+ * holds — the `results` gate keeps its configurable fallback.
+ */
+export function selectorRuleOf(
+  arm: { readonly selectRule?: SelectionRule; readonly gate?: 'results' | 'tie'; readonly gateRule?: SelectionRule },
+  runs: readonly CaseRun[],
+): ArmReportRow['selectorRule'] {
+  if (arm.selectRule === undefined && arm.gate === undefined) return undefined;
+  const rules: Partial<Record<SelectionRule, number>> = {};
+  for (const run of runs) {
+    const rule = run.selectedByRule?.rule;
+    if (rule !== undefined) rules[rule] = (rules[rule] ?? 0) + 1;
+  }
+  return {
+    rule: arm.selectRule ?? (arm.gate === 'tie' ? 'modal' : (arm.gateRule ?? 'shortest')),
+    decided: runs.filter((run) => run.selectedByRule !== undefined).length,
+    eligible: runs.reduce((total, run) => total + (run.selectedByRule?.eligible ?? 0), 0),
+    emptyPool: runs.filter((run) => run.selectedByRule?.emptyPool === true).length,
+    rules,
+  };
 }
 
 /**
@@ -9149,16 +9227,10 @@ export function armReportRow(prepared: PreparedRun, arm: Arm, runs: readonly Cas
           // A gated arm makes a free decision too, on the cases its gate stopped: the rule it
           // names there is the one the gate fell back to, and publishing the same funnel for it
           // keeps "the gate fired" countable instead of leaving it to be inferred from a call mean.
-          ...(arm.selectRule === undefined && arm.gate === undefined
-            ? {}
-            : {
-                selectorRule: {
-                  rule: arm.selectRule ?? arm.gateRule ?? 'shortest',
-                  decided: runs.filter((run) => run.selectedByRule !== undefined).length,
-                  eligible: runs.reduce((total, run) => total + (run.selectedByRule?.eligible ?? 0), 0),
-                  emptyPool: runs.filter((run) => run.selectedByRule?.emptyPool === true).length,
-                },
-              }),
+          ...(() => {
+            const rule = selectorRuleOf(arm, runs);
+            return rule === undefined ? {} : { selectorRule: rule };
+          })(),
         }),
     promptChars: {
       mean: Math.round(promptSizes.reduce((total, size) => total + size, 0) / Math.max(1, promptSizes.length)),

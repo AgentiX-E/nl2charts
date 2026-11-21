@@ -89,7 +89,19 @@ const ARTIFACT = {
   corpus: { dev: 'db9e8a1aba23ddd9' },
   selection: { requested: 600, scored: 600 },
   arms: [
-    { arm: 'select-cross', passed: 378, total: 600, accuracy: 0.63, candidateRecall: 415, selectionLoss: 37, calls: { mean: 4 }, tokens: { prompt: 2508, completion: 589 }, strictPassed: 370 },
+    {
+      arm: 'select-cross',
+      passed: 378,
+      total: 600,
+      accuracy: 0.63,
+      candidateRecall: 415,
+      selectionLoss: 37,
+      calls: { mean: 4 },
+      tokens: { prompt: 2508, completion: 589 },
+      strictPassed: 370,
+      spend: { asked: 600, priced: 600 },
+      selectorRule: { rule: 'modal', decided: 554, eligible: 1570, emptyPool: 16, rules: { modal: 554 } },
+    },
     { arm: 'names', passed: 100, total: 600, accuracy: 1 / 6 },
   ],
 };
@@ -120,6 +132,8 @@ describe('the reading a comment carries', () => {
       promptTokens: 2508,
       completionTokens: 589,
       strictPassed: 370,
+      spend: { asked: 600, priced: 600 },
+      selectorRule: { rule: 'modal', decided: 554, eligible: 1570, emptyPool: 16, rules: { modal: 554 } },
     });
     // An arm without a pool has no pool fields rather than zeros: zero is a measurement, absent
     // is the absence of one, and a report that printed 0 would be inventing a ceiling.
@@ -152,9 +166,9 @@ describe('the reading a comment carries', () => {
   it('renders one table row per arm, a null-safe R-VES line, and a JSON block that parses back', () => {
     const body = bodyOf(digest(ARTIFACT, VES, { commit: 'abcdef1234' }));
     expect(body).toContain('### dev · deepseek-chat · abcdef12');
-    expect(body).toContain('| `select-cross` | 378/600 | 63.00% | 415 | 37 | 4.00 | 2508 | 589 |');
+    expect(body).toContain('| `select-cross` | 378/600 | 63.00% | 415 | 37 | 600/600 | 4.00 | 2508 | 589 |');
     // An arm with no pool, no calls and no tokens prints an em dash per column rather than 0.
-    expect(body).toContain('| `names` | 100/600 | 16.67% | — | — | — | — | — |');
+    expect(body).toContain('| `names` | 100/600 | 16.67% | — | — | — | — | — | — |');
     expect(body).toContain('R-VES **56.63** over 600 of 1532 questions · floor 57.96 · net -1.33pp');
     expect(parseBody(body)).toEqual(digest(ARTIFACT, VES, { commit: 'abcdef1234' }));
   });
