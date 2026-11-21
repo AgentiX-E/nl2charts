@@ -18194,7 +18194,10 @@ node tools/pool-replay.mjs eval/out/bird-eval-41453395203.json --arm select-cros
 Its first line is the check that makes the rest a measurement: **the replayed modal rule reproduces
 `select-cross-pooled-vote` on 600 of 600 cases**. A policy table computed by a rule that cannot
 reproduce the arm it models is a table about the tool, and the tool exits non-zero when that line
-changes.
+changes. It also exits **3** when the artifact holds no such arm at all: pointed at `44889941650`,
+whose two arms are `select-cross` and `select-cross-tie`, the first version of this check printed
+"0 of 0 agree" and exited 0 — a green check that compared nothing, which is the failure mode this
+repository refuses everywhere else.
 
 ### What the pool looks like, by how many distinct results it returned
 

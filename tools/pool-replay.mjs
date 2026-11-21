@@ -223,6 +223,11 @@ export function census(rows) {
  *
  * The pool is keyed by question id, and only questions both arms scored are compared: a vote arm
  * that dropped a case would otherwise be counted as a disagreement about a case it never held.
+ *
+ * A run with no vote arm compares **zero** cases and reports "0 of 0 agree", which is the shape of a
+ * green check that checked nothing — the first artifact this tool was pointed at after that arm was
+ * added to the dispatch list (`44889941650`, two arms) produced exactly that line. The caller has to
+ * treat an empty comparison as a refusal rather than as agreement, and `main` exits 3 for it.
  */
 export function verifyVote(artifact, voteArm = 'select-cross-pooled-vote') {
   const byId = new Map();
@@ -253,8 +258,10 @@ function describe(artifactPath, arm, table, pool, vote) {
   lines.push(`  arm ${arm}  ·  ${table[0]?.scored ?? 0} cases with a pool  ·  ${pool.length} distinct-result buckets`);
   if (vote !== undefined) {
     lines.push(
-      `  vote replay vs ${vote.arm}: ${vote.agreements} of ${vote.compared} agree` +
-        (vote.disagreements.length === 0 ? '' : ` — ${vote.disagreements.length} DISAGREE`),
+      vote.compared === 0
+        ? `  vote replay vs ${vote.arm}: not in this artifact, so nothing was verified`
+        : `  vote replay vs ${vote.arm}: ${vote.agreements} of ${vote.compared} agree` +
+            (vote.disagreements.length === 0 ? '' : ` — ${vote.disagreements.length} DISAGREE`),
     );
   }
   for (const bucket of pool) {
@@ -299,6 +306,13 @@ export async function main(argv) {
     process.stdout.write(`${JSON.stringify({ artifact: path, arm, table, pool, vote }, null, 1)}\n`);
   } else {
     for (const line of describe(path, arm, table, pool, vote)) process.stdout.write(`${line}\n`);
+  }
+  if (vote !== undefined && vote.compared === 0) {
+    process.stderr.write(
+      `POOL REPLAY: --verify-vote was asked for and ${vote.arm} is not in ${path}, so nothing was verified; ` +
+        'the table above is unpriced rather than checked\n',
+    );
+    return 3;
   }
   if (vote !== undefined && vote.disagreements.length > 0) {
     process.stderr.write(

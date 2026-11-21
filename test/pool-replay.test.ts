@@ -288,6 +288,38 @@ describe('the command line', () => {
     expect(err.join('')).toContain('does not reproduce');
   });
 
+  it('refuses to call a comparison it could not make a check that passed', async () => {
+    // The artifact of `44889941650` holds two arms and neither of them is the vote arm, so
+    // `--verify-vote` compared zero cases and printed "0 of 0 agree" — a green check that checked
+    // nothing, which is the failure mode this repository has refused everywhere else. A run that
+    // asked to verify and had nothing to verify is a refusal, not a pass.
+    const noVoteArm = {
+      cases: [
+        { id: '1', arm: 'select-cross', passed: true, winnerSource: 'a', candidates: [candidate('a', 'x', true), candidate('b', 'y', false)] },
+        { id: '2', arm: 'select-cross-tie', passed: false, candidates: [candidate('a', 'x', false), candidate('b', 'y', true)] },
+      ],
+    };
+    const { dir, path } = write(noVoteArm);
+    const out: string[] = [];
+    const err: string[] = [];
+    const stdout = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: string | Uint8Array) => {
+      out.push(String(chunk));
+      return true;
+    });
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation((chunk: string | Uint8Array) => {
+      err.push(String(chunk));
+      return true;
+    });
+    const code = await main(['node', 'pool-replay.mjs', path, '--verify-vote']);
+    stdout.mockRestore();
+    stderr.mockRestore();
+    rmSync(dir, { recursive: true, force: true });
+    expect(code).toBe(3);
+    expect(out.join('')).toContain('not in this artifact, so nothing was verified');
+    expect(err.join('')).toContain('nothing was verified');
+    expect(err.join('')).not.toContain('does not reproduce');
+  });
+
   it('refuses an artifact with no pool at all, instead of printing an empty table', async () => {
     const { dir, path } = write({ cases: [{ id: '1', arm: 'names', passed: false }] });
     const err: string[] = [];
