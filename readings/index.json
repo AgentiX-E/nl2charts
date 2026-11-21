@@ -3,15 +3,19 @@
  "readings": {
   "bird-dev": {
    "kind": "bench-readback",
-   "commit": "80bc05ce",
-   "workflow": "bird dev",
-   "runId": "local",
+   "commit": "91e42638c81d04782b9e90594198de200941994f",
+   "workflow": "bird-dev",
+   "runId": "44889941650",
    "split": "dev",
    "dataset": "bird-dev",
    "model": "deepseek-chat",
    "secondModel": "deepseek-reasoner",
-   "generatedAt": "2026-11-02T13:33:52.770Z",
-   "corpus": null,
+   "generatedAt": "2026-11-21T09:34:38.060Z",
+   "corpus": {
+    "digest": "db9e8a1aba23ddd9",
+    "rows": 1534,
+    "questions": 1534
+   },
    "selection": {
     "requested": 600,
     "scored": 600
@@ -19,65 +23,34 @@
    "arms": [
     {
      "arm": "select-cross",
-     "passed": 378,
+     "passed": 383,
      "total": 600,
-     "accuracy": 0.63,
-     "candidateRecall": 415,
-     "selectionLoss": 37,
+     "accuracy": 0.6383333333333333,
+     "candidateRecall": 427,
+     "selectionLoss": 44,
      "calls": 4,
-     "promptTokens": 2508,
-     "completionTokens": 589,
-     "strictPassed": 359
+     "promptTokens": 3607,
+     "completionTokens": 565,
+     "strictPassed": 368
     },
     {
-     "arm": "select-cross-pooled",
-     "passed": 377,
+     "arm": "select-cross-tie",
+     "passed": 388,
      "total": 600,
-     "accuracy": 0.6283333333333333,
-     "candidateRecall": 415,
-     "selectionLoss": 38,
-     "calls": 1,
-     "promptTokens": 419,
-     "completionTokens": 1,
-     "strictPassed": 359
-    },
-    {
-     "arm": "select-cross-pooled-vote",
-     "passed": 380,
-     "total": 600,
-     "accuracy": 0.6333333333333333,
-     "candidateRecall": 415,
-     "selectionLoss": 35,
-     "calls": 0,
-     "promptTokens": 0,
-     "completionTokens": 0,
-     "strictPassed": 355
-    },
-    {
-     "arm": "select-cross-pooled-agree",
-     "passed": 374,
-     "total": 600,
-     "accuracy": 0.6233333333333333,
-     "candidateRecall": 415,
+     "accuracy": 0.6466666666666666,
+     "candidateRecall": 429,
      "selectionLoss": 41,
-     "calls": 1,
-     "promptTokens": 491,
-     "completionTokens": 1,
-     "strictPassed": 357
-    },
-    {
-     "arm": "select-cross-pooled-reconcile",
-     "passed": 359,
-     "total": 600,
-     "accuracy": 0.5983333333333334,
-     "candidateRecall": 415,
-     "selectionLoss": 58,
-     "calls": 1,
-     "promptTokens": 399,
-     "completionTokens": 81,
-     "strictPassed": 344
+     "calls": 3.077,
+     "promptTokens": 3232,
+     "completionTokens": 564,
+     "strictPassed": 370
     }
-   ]
+   ],
+   "rves": {
+    "rves": 0.575,
+    "repeats": 5,
+    "floor": 0.5979166666666667
+   }
   }
  }
 }
