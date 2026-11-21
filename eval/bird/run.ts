@@ -7681,14 +7681,17 @@ export function partialReport(
 ): Record<string, unknown> {
   const table = new Map(outcomes);
   table.set(partial.name, partial.runs);
+  // One expression for the finished rows, so the count and the list cannot disagree: two
+  // independent readings of `base.arms` is how `armsDone` came to say 0 beside two rows.
+  const done = Array.isArray(base.arms) ? base.arms : [];
   return {
     ...base,
-    arms: base.arms ?? [],
+    arms: done,
     cases: caseRows(table, questions),
     partial: {
       arm: partial.name,
       cases: partial.runs.length,
-      armsDone: Array.isArray(base.arms) ? base.arms.length : 0,
+      armsDone: done.length,
       ...(total === undefined ? {} : { total }),
       reason: 'the run ended when this arm was refused',
     },

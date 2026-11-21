@@ -2428,6 +2428,27 @@ describe('what a refused arm leaves behind', () => {
     expect(partialOf(new Error('an ordinary failure'))).toBeUndefined();
     expect(partialOf('a string')).toBeUndefined();
     expect(partialOf(undefined)).toBeUndefined();
+    // A property called `partial` that is not one: an error from another library, or a JSON body
+    // that happened to carry the key. Reading it would hand `runBird` a nameless arm.
+    expect(partialOf({ partial: { name: 7, runs: [] } })).toBeUndefined();
+    expect(partialOf({ partial: { name: 'names', runs: 'none' } })).toBeUndefined();
+    expect(partialOf({ partial: null })).toBeUndefined();
+  });
+
+  it('writes an artifact with an empty arm list when the report carried none', () => {
+    // The first arm can be the one refused, and then nothing has finished: the file still has to be
+    // well formed, with `armsDone: 0` and the refused arm's rows under their own label.
+    const report = partialReport({}, new Map(), partialOfArm('names', ['1', '2']));
+    expect(report.arms).toEqual([]);
+    expect(report.partial).toMatchObject({ arm: 'names', cases: 2, armsDone: 0 });
+  });
+
+  it('does not count a report whose arms key is not a list', () => {
+    // A hand-written or half-written report: `arms` as an object would make `.length` undefined and
+    // print `armsDone: undefined`, which reads as a missing measurement rather than a broken file.
+    const report = partialReport({ arms: { arm: 'names' } }, new Map(), partialOfArm('names', []));
+    expect(report.arms).toEqual([]);
+    expect((report.partial as { armsDone: number }).armsDone).toBe(0);
   });
 
   it('writes the finished arms and the refused arm into one table, and says it is partial', () => {
@@ -2486,6 +2507,15 @@ describe('what a refused arm leaves behind', () => {
     expect(problems).toHaveLength(1);
     expect(problems[0]).toContain('partial');
     expect(problems[0]).toContain('names');
+  });
+
+  it('names zero cases for a partial file that did not record how many', () => {
+    // An older artifact, or one written by a caller that built the key itself: the sentence has to
+    // stay readable rather than print `undefined`.
+    const problems = evaluateGate({ partial: { arm: 'select-cross' } });
+    expect(problems).toEqual([
+      'the artifact is partial: arm select-cross was refused after 0 cases, so no score in it can be read',
+    ]);
   });
 
   it('writes the file before it rethrows, so the rows outlive the process', () => {
