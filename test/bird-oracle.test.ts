@@ -134,6 +134,18 @@ describe('the protocol client against a noisy peer', () => {
     }
   });
 
+  it('reports microseconds, because a millisecond clock cannot compute a ratio', async () => {
+    // Most BIRD statements finish inside a millisecond, so `ms` reads 0 on both sides of an
+    // efficiency comparison and the ratio is 0/0. `us` is the same stopwatch at microsecond
+    // resolution; R-VES is computed from it, and `ms` stays whole because a timeout budget is
+    // written in whole milliseconds.
+    const result = await oracle.run('shop', 'select count(*) from items');
+    const us = result.us ?? Number.NaN;
+    expect(us).toBeGreaterThan(0);
+    expect(us).toBeGreaterThanOrEqual(result.ms * 1000);
+    expect(us % 1).not.toBe(0);
+  });
+
   it('rejects a request made after close instead of writing to a dead pipe', async () => {
     const peer = createOracle(resolve('eval/bird/oracle.py'), root);
     await peer.close();

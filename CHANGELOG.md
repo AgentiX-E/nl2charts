@@ -7,6 +7,24 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **Nine leaderboards are now a table a gate reads, instead of a claim in prose.** "We cover Text2SQL
+  and Text2Viz" was written as if running BIRD and Text2Vis meant standing on WikiSQL, Spider, nvBench
+  2.0 and VisCodeBench too. `eval/benchmarks.ts` carries the nine rows with their corpus, their metric,
+  and either a citation a machine resolves or the reason there is no number; `pnpm bench:coverage`
+  resolves every citation and fails on a `measured` row without a number, an `absent` row whose reason
+  is shorter than a plan, a percentage that is really a count (1,418 rendered figures were "1,418
+  percent" in the first draft), and a required leaderboard that has disappeared from the manifest. The
+  reading as it stands: four of nine carry a number, five are named absences with a price, and the
+  table is in `docs/benchmarks.md` next to the BIRD field table it belongs to.
+- **BIRD's R-VES is implemented, and the clock it needed was wrong.** The reward table
+  (1.25 / 1 / 0.75 / 0.5 / 0.25 over `tau = time(gold) / time(predicted)`), the outlier trim over
+  repeated timings, both normalisations the literature uses, and a resolver that follows `winnerSource`
+  to the statement the arm actually returned. Writing the first test found the defect: `oracle.py`
+  reported whole milliseconds, most BIRD statements finish inside one, so both sides of the ratio read
+  `0` and the metric would have paid its top band for the resolution of its own stopwatch. The oracle
+  now reports `us` from the same stopwatch (`ms` stays whole, because a timeout budget is written in
+  whole milliseconds), `timeRatio(0, 0)` is pinned to 1, and `pnpm bench:bird:ves` writes a reading.
+  No number has been dispatched yet — that is a run, not a build, and the ledger says so.
 - **The census prints the two halves of every candidate, and names the ones that are fitted.** The
   split has been in the report since the sweep learned to price cue tables — two disjoint halves of
   the scored population, fixed before the reading, so a candidate chosen for winning cannot also be

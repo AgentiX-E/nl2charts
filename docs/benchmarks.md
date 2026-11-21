@@ -6,11 +6,18 @@ The harness runs 20 questions over a deterministic fixture (200 orders, 60
 customers, DuckDB, no randomness). It compares result sets, not SQL strings.
 
 ```bash
-pnpm bench          # execution accuracy with controls
-pnpm bench:linking  # schema-linking recall@3 ablation
-pnpm bench:ablate   # paired question-normalization ablation
-pnpm bench:bird     # external benchmark, see below
+pnpm bench            # execution accuracy with controls
+pnpm bench:linking    # schema-linking recall@3 ablation
+pnpm bench:ablate     # paired question-normalization ablation
+pnpm bench:bird       # external benchmark, see below
+pnpm bench:coverage   # which leaderboards this repository can put a number on
+pnpm bench:bird:ves   # BIRD's R-VES, which needs timings rather than only verdicts
 ```
+
+Which leaderboards that adds up to is not a paragraph: nine rows live in `eval/benchmarks.ts`, each
+with the corpus, the metric it is ranked by, and either a citation a machine resolves or a reason
+there is no number. `pnpm bench:coverage` prints them and refuses a row that claims a reading the
+repository cannot resolve. See *Which leaderboards this repository is on* at the end of this file.
 
 All artifacts land in `eval/out/` and are uploaded by the CI `benchmark` job.
 
@@ -17972,3 +17979,93 @@ increase"), answered `bar` where the corpus drew a line or a boxplot. A `ranking
 when the only axis is temporal would keep the 98 category superlatives and hand those 39 rows to the
 trend and distribution cues. That is a shape condition on a cue rather than a new pattern, it costs ¥0
 to price in the sweep, and it is the next candidate this table should carry.
+
+## Which leaderboards this repository is on, and which it is not
+
+A number without its leaderboard is a number nobody can place. This repository has published
+readings on two corpora and has been asked, every round, where it stands on five more. The honest
+answer is a table with two kinds of row, and until this round that table existed only as paragraphs
+spread across this file — which is how "we run BIRD and Text2Vis" and "we cover Text2SQL and Text2Viz"
+came to be written as if they were the same sentence.
+
+`eval/benchmarks.ts` holds the table as data. `pnpm bench:coverage` resolves every citation and
+refuses: a `measured` row whose number the repository cannot find, an `absent` row with no reason a
+reader can act on, and a missing row for a leaderboard the plan names.
+
+| leaderboard | corpus | metrics | status | number |
+|---|---|---|---|---|
+| WikiSQL (test) | 80,654 question/table pairs, single-table | EX | **absent** | — |
+| Spider 1.0 dev | 1,034 questions, 20 databases | EM, EX | **absent** | — |
+| BIRD Mini-Dev | 498 questions, 11 databases | EX | measured | 56.0 (floor) |
+| BIRD dev | 1,532 scored questions | EX | measured | 62.5 (floor) |
+| BIRD dev | the same questions | R-VES | **instrumented** | — |
+| Text2Vis | 1,470 scored rows | top-1 | measured | 664 |
+| Text2Vis | the same rows | render validity | measured | 1,418 figures |
+| nvBench 2.0 | 7,878 queries / 24,076 visualizations | F1@3, F1@5 | **absent** | — |
+| VisCodeBench | 2,672 samples (843 / 805 / 1,024) | seven, incl. displayed-data similarity | **absent** | — |
+
+Four of nine carry a number, and two of those four are counts rather than accuracies. The other five
+are not a scandal; they are a to-do list with prices, which is the only kind of to-do list this
+document has ever been able to act on.
+
+**Why `R-VES` is instrumented rather than absent.** The metric is implemented and tested
+(`eval/bird/ves.ts`): the reward table, the `tau = time(gold) / time(predicted)` ratio, the
+median-absolute-deviation trim over repeated timings, and both normalisations the literature uses
+(averaged over all questions, and over the valid ones). What is missing is a run: timing needs the
+dev databases fetched and every statement executed several times. One defect had to be fixed before
+the metric could exist at all, and it was found by writing the test rather than by writing the run:
+
+> `oracle.py` reported whole milliseconds. Most statements on BIRD finish inside one, so both sides of
+> the ratio read `0` and the ratio was `0/0` — a metric that would have paid 1.25 for the resolution
+> of its own stopwatch. The oracle now returns `us` from the same stopwatch, `ms` stays whole because
+> a timeout budget is written in whole milliseconds, and `timeRatio(0, 0)` is pinned to 1 by a test.
+
+### The two normalisations, and which one the leaderboard numbers imply
+
+The leadership guide averages the reward over **all** questions (`100/N · Σ mᵢ·g(τᵢ)`), while one
+paper's appendix says `N` is "the number of queries that passed EX". Both cannot be right, and the
+leaderboard decides it: OpenSearch-SQL is filed at 72.28 EX and 69.36 R-VES, a ratio of **0.96**,
+which is what averaging over all questions produces when a correct statement averages slightly under
+1.0 on the reward table. Dividing by the valid count would put R-VES *above* EX for any system whose
+correct answers are mostly at par, and no published row does that. `rvesOf` therefore reports `rves`
+(the leaderboard's normalisation) and `rvesByValid` beside it, so the choice is visible in the
+artifact rather than buried in an instrument.
+
+### Where each of the five absent rows would have to go
+
+**WikiSQL** is nearly saturated (SeaD + execution-guided decoding 93.0% test EX, X-SQL + EG 91.8%,
+SQLova 89.6% against a crowd-worker baseline of 88.3%) and it is the benchmark this pipeline is least
+shaped for: every question is single-table and single-condition, so the schema card, the join graph
+and the linker — the three mechanisms this repository has priced — have nothing to do. A number here
+would measure a capability the product does not sell.
+
+**Spider 1.0** is the opposite problem: it needs EM as well as EX, and this repository has only the
+execution judge. `arms[].exactMatchRate` is a normalised string match over generated statements, not
+Spider's component-wise clause match, so quoting it as Spider EM would be the coordinate error this
+file spends thousands of lines refusing. The dev leaderboard runs 82.8% EX (DIN-SQL and DAIL-SQL with
+GPT-4) to 93.52% EX (MA-SToR-SQL V5, as its authors report it), with dev EM in the 58–77% band
+(LGESQL + ELECTRA 58.4, RESDSQL-3B + NatSQL 63.1, DAIL-SQL + GPT-4 66.5, Graphix-T5-3B + PICARD 77.1).
+
+**nvBench 2.0** is the only absent row that is a *method* gap rather than a corpus gap. One query maps
+to a set of valid visualizations, so the reading is F1 over that set; the mark vocabulary is Vega-Lite
+specifications rather than this repository's eleven-mark contract. Step-NL2VIS (trained on the
+benchmark) reads 81.50 F1@3 against GPT-4o prompting 22.54pp lower; a system that answers one chart
+per question — which is what this product does — cannot be scored on a metric that asks for a set.
+
+**VisCodeBench** ships through a leaderboard precisely so the corpus stays out of training data, so it
+cannot be vendored the way BIRD and Text2Vis are. Its contract is also different: the system writes
+Python into a marked region of a notebook and the reading intercepts the plotting calls. Best
+displayed-data similarity is 0.81 (0.69 on the hardest subset) with latency 39–78s per request.
+
+**Text2Vis** is the one corpus where this repository is ahead of the evidence rather than behind it:
+no external system publishes an accuracy on its 1,470 scored rows, so the table above carries four of
+the nine rows and none of the comparisons. That is a fact about the field, not about the product, and
+it is the reason the Text2Viz section of this file quotes its own arms rather than a leaderboard.
+
+### The rows are checked, and the checker is an argument
+
+The gate has four rules, and each exists because a table like this has failed in that way somewhere:
+a citation that no longer resolves, an absence with no reason, a percentage that is a count (1,418
+rendered figures were called "1,418 percent" in the first draft), and a required leaderboard that has
+quietly disappeared from the manifest. `REQUIRED` is the list of nine; deleting a row fails the build
+rather than shrinking the table.

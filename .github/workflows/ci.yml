@@ -195,6 +195,12 @@ jobs:
         # generated from the discordant counts instead, so a cell and the pooled line under it
         # cannot disagree, and a document that loses its block is red rather than unchecked.
         run: pnpm gate:readings
+      - name: Leaderboard coverage is what the code can produce
+        # A table of "where we stand on BIRD / Spider / WikiSQL / Text2Vis / nvBench / VisCodeBench"
+        # is a claim about coverage, and until this step existed nothing refused a row that cited a
+        # number the repository cannot resolve. `bench:coverage` resolves every citation, refuses a
+        # measured row without one, and refuses a missing row for a leaderboard the plan names.
+        run: pnpm bench:coverage
       - name: Upload coverage
         if: always()
         uses: actions/upload-artifact@v5

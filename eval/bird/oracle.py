@@ -12,8 +12,14 @@ the judging.
 Protocol: one JSON object per line on stdin, one per line on stdout.
 
   request : {"id": "...", "db": "superhero", "sql": "SELECT ..."}
-  response: {"id": "...", "ok": true, "columns": [...], "rows": [[...]], "ms": 3}
-            {"id": "...", "ok": false, "error": "no such table: x", "ms": 1}
+  response: {"id": "...", "ok": true, "columns": [...], "rows": [[...]], "ms": 3, "us": 3141.6}
+            {"id": "...", "ok": false, "error": "no such table: x", "ms": 1, "us": 812.4}
+
+`ms` is rounded down to a whole millisecond because that is what a timeout budget needs. It is
+also useless to an efficiency metric: most statements on this corpus finish inside one millisecond,
+so `ms` reads 0 for both sides of a comparison and the ratio 0/0 is not a number. `us` carries the
+same clock at microsecond resolution, so R-VES can be computed from the one place that already
+measures execution.
 
 Rows are arrays so that column order and duplicate rows survive. Bytes are
 returned as {"$b64": "..."}; SQLite cannot return a dict cell, so the marker
@@ -88,6 +94,7 @@ class Oracle:
                 "columns": columns,
                 "rows": [[wrap(cell) for cell in row] for row in raw],
                 "ms": int((time.monotonic() - started) * 1000),
+                "us": round((time.monotonic() - started) * 1e6, 1),
             }
         except Exception as error:  # noqa: BLE001 - every failure is data here
             # SQLite names the failure (SQLITE_ERROR, SQLITE_MISUSE, SQLITE_RANGE …)
@@ -100,6 +107,7 @@ class Oracle:
                 "errorName": getattr(error, "sqlite_errorname", None),
                 "errorCode": getattr(error, "sqlite_errorcode", None),
                 "ms": int((time.monotonic() - started) * 1000),
+                "us": round((time.monotonic() - started) * 1e6, 1),
             }
 
 

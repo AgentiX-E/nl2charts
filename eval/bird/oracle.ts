@@ -18,7 +18,20 @@ export interface OracleResult {
   /** SQLite's own error name (`SQLITE_ERROR`, `SQLITE_MISUSE`, …), when it reported one. */
   readonly errorName?: string;
   readonly errorCode?: number;
+  /** Wall clock of the statement, rounded down to a whole millisecond: the timeout unit. */
   readonly ms: number;
+  /**
+   * The same clock at microsecond resolution. Optional because a peer that predates it answers
+   * with `ms` alone, and a required field would make every fixture in the suite write a number the
+   * decoder is supposed to derive.
+   * The same clock at microsecond resolution.
+   *
+   * An efficiency ratio needs this: most statements on BIRD finish inside a millisecond, so two
+   * `ms` readings of 0 describe a ratio of 0/0. `us` is the field R-VES is computed from, and it
+   * falls back to `ms * 1000` for a peer that predates it rather than reporting a zero time as a
+   * free statement.
+   */
+  readonly us?: number;
 }
 
 interface Pending {
@@ -57,6 +70,7 @@ export function createOracle(script: string, databaseRoot: string): Oracle {
       columns: payload.columns ?? [],
       rows: payload.rows ?? [],
       ms: payload.ms ?? 0,
+      us: payload.us ?? (payload.ms ?? 0) * 1000,
       ...(payload.error === undefined ? {} : { error: payload.error }),
       // `oracle.py` names the failure and its code, and `run.ts` turns the name into a
       // repair hint. Both fields were declared here and dropped on the floor, so the hint

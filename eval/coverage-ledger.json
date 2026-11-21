@@ -2,12 +2,12 @@
   "note": "Per-file eval coverage. Enforced by tools/check-eval-coverage.mjs: a number may rise freely and may only fall with an explicit, reviewed edit. `target` is the standard every file must reach before eval/ joins the main gate.",
   "target": 95,
   "tolerancePp": 0.2,
-  "measuredAt": "2026-11-20",
+  "measuredAt": "2026-11-21",
   "totals": {
-    "lines": 99.62,
-    "statements": 99.62,
+    "lines": 99.63,
+    "statements": 99.63,
     "functions": 100,
-    "branches": 98.34
+    "branches": 98.36
   },
   "files": {
     "eval/ablate.ts": {
@@ -34,11 +34,17 @@
       "functions": 100,
       "branches": 98.82
     },
+    "eval/benchmarks.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 98.27
+    },
     "eval/bill.ts": {
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 86.15
+      "branches": 95.83
     },
     "eval/bird/adapt.ts": {
       "lines": 98.87,
@@ -263,10 +269,10 @@
       "branches": 100
     },
     "eval/bird/oracle.ts": {
-      "lines": 98.14,
-      "statements": 98.14,
+      "lines": 98.18,
+      "statements": 98.18,
       "functions": 100,
-      "branches": 96.42
+      "branches": 96.55
     },
     "eval/bird/pair.ts": {
       "lines": 100,
@@ -454,6 +460,12 @@
       "functions": 100,
       "branches": 97.95
     },
+    "eval/bird/ves.ts": {
+      "lines": 99.1,
+      "statements": 99.1,
+      "functions": 100,
+      "branches": 96.69
+    },
     "eval/bird/width.ts": {
       "lines": 99.33,
       "statements": 99.33,
@@ -590,7 +602,7 @@
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 98.98
+      "branches": 99.07
     },
     "eval/text2vis/content-store.ts": {
       "lines": 100,
@@ -620,7 +632,7 @@
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 96.71
+      "branches": 96.73
     },
     "eval/text2vis/prior.ts": {
       "lines": 100,
@@ -632,7 +644,7 @@
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 99.44
+      "branches": 99.45
     },
     "eval/text2vis/render.ts": {
       "lines": 100,
