@@ -14,8 +14,19 @@ cannot be argued with.
   it: the calendar ablation next door showed its halves and the thirty-four-table sweep showed only
   the total, so every `+7` arrived as a `+7`. Each line now carries the halves as a delta against the
   control and the word `fitted` when they disagree in sign, and the report refuses a `fitted` flag its
-  own arithmetic contradicts. First readback on the 1,470 scored rows: `no-share` is `+8 / −8`, and
-  `no-ranking` — the highest number on the board at 677, six above the shipped table — is `+10 / −4`.
+  own arithmetic contradicts. First readback on the 1,470 scored rows: `no-share` is `665` on
+  `+8 / −7`, and `no-ranking` — the highest number on the board at `669`, five above the shipped
+  table — is `+8 / −3`. Both are fitted, which is what the guard was built to say about them.
+- **The sweep has a floor, and it is the first derived reading here to have one.** Every row in the
+  thirty-four-table sweep is priced *against the shipped table*, so a change to the shipped table
+  moves all thirty-three candidate totals at once and a number quoted from last round describes a tree
+  that no longer exists. That is not a hazard in theory: the first draft of the paragraph above carried
+  `671` and `677`, taken while a widening was applied to the shipped table, and a re-run on the tree
+  the draft described prints `665` and `669`. `eval/text2vis/baseline.json` now records the shipped
+  total and the four rows a decision is read off (`distribution-wide`, `no-share`, `no-ranking`,
+  `no-histogram`), `tools/check-text2vis-baseline.mjs --census --require` compares them, and the gate's
+  ten self-test cases include the one the old table could never show: a total that stands still while
+  its halves trade rows.
 
 ### Fixed
 - **A cue change is priced on the ceiling and the shipped path, not on the rule arm.** Widening the

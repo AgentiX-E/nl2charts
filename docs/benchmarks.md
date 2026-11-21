@@ -17738,10 +17738,11 @@ it is the same lockstep one level down.
 | item | result |
 |---|---|
 | `tsc --noEmit` | clean |
-| `vitest` with real PostgreSQL and MariaDB | 5,924 passed / 0 skipped (194 files) |
+| `vitest` with real PostgreSQL and MariaDB | 5,928 passed / 0 skipped (194 files) |
 | `packages/ai` | 85 cases, including the spread and the retry that keeps the old timing |
 | `eval/bill.ts` branch coverage | 86.2% → 95.8% — three cases: an armless BIRD row, a line with reasoning and cached tokens, a bill with no rows to name |
 | census identity | 664 = 664, after three rounds of 661 against 664 |
+| census sweep floor | 4 rows recorded; 10 self-test cases, `--census --require` exit 0 |
 | `packages/chart` coverage | 100 / 100 / 100 / 100 |
 | cost | **¥0** |
 
@@ -17763,13 +17764,45 @@ disagree in sign:
 |---|---:|---|---|---|
 | `distribution-wide` | 671 | boxplot +17, bar −6, line −2, scatter −2 | **+3 / +4** | consistent |
 | `progress-bar-first` | 665 | bar +1 | 0 / +1 | consistent |
-| `no-share` | 671 | bar +59, line +14, boxplot +5, pie −79 | **+8 / −8** | fitted |
-| `no-ranking` | 677 | pie +39, line +25, boxplot +8, bar −68 | **+10 / −4** | fitted |
+| `no-share` | 665 | bar +59, line +16, boxplot +4, funnel +1, pie −79 | **+8 / −7** | fitted |
+| `no-ranking` | 669 | pie +39, line +25, boxplot +6, scatter +1, candlestick +1, bar −67 | **+8 / −3** | fitted |
 
-`no-ranking` is the reason to print it. Removing the ranking stage reads **677**, six rows *above* the
-shipped table and the highest number on the board — and it is `+10 / −4`: ten rows won on one half of
-the corpus and four lost on the other. A reader shown the total has to be told that; a reader shown the
+`no-ranking` is the reason to print it. Removing the ranking stage reads **669**, five rows *above* the
+shipped table and the highest number on the board — and it is `+8 / −3`: eight rows won on one half of
+the corpus and three lost on the other. A reader shown the total has to be told that; a reader shown the
 halves has been told it.
+
+### The first reading of this table did not reproduce, and the reason is the table's shape
+
+The two fitted rows above were first written down as `671` and `677`, with halves `+8 / −8` and
+`+10 / −4`, in a draft taken while `distribution-wide` was applied to the shipped table. The widening was
+then reverted on the ensemble's evidence, and the draft kept its numbers: a re-run of the same instrument
+on the tree the draft describes prints **665** and **669** on halves `+8 / −7` and `+8 / −3`, and the
+family columns move with them (`no-share` gains a funnel row, `no-ranking` a scatter and a candlestick
+row). Every number in the table is priced *against the shipped table*, so reverting one candidate moves
+thirty-three totals at once, and a total quoted from the tree before the revert is a sentence about a
+tree nobody can check out.
+
+This is the second defect of the same family as the guard itself, and it is worth naming precisely:
+the guard was computed and never printed, and this table was printed and never re-taken. Both are
+readings that outlive the state they were taken in. The fix is not discipline — the sweep now writes
+`eval/out/text2vis-census.json`, `eval/text2vis/baseline.json` records the shipped total and the four
+rows a decision is read off, and `node tools/check-text2vis-baseline.mjs --census --require` refuses a
+run whose totals or halves moved:
+
+```
+TEXT2VIS CENSUS: the shipped table reads 664 of 1470, at its floor
+TEXT2VIS CENSUS: `distribution-wide` reads 671 (3/4)
+TEXT2VIS CENSUS: `no-share` reads 665 (8/-7), fitted
+TEXT2VIS CENSUS: `no-ranking` reads 669 (8/-3), fitted
+TEXT2VIS CENSUS: `no-histogram` reads 614 (-27/-23)
+```
+
+A move is refused with both numbers and the instruction, because the correct response to a moved row is
+to re-take it on purpose and raise the floor in the commit that earns it — the same rule the profile and
+the render halves already live under. The gate has ten self-test cases, and the one that matters is the
+one that is easiest to miss: a total that stands still while its halves trade rows. That is a change the
+old table could not have shown at all.
 
 ### The +7 that survived the guard and died on the ensemble
 

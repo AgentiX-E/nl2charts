@@ -31,6 +31,43 @@
   "note": "The sixth full reading, run 44150185171 on 27defec5 with glm-4.5v, and the first taken after the melt: 1,418 figures rendered, 1,416 judged, 1,418 calls, two rows the provider's content policy would not look at (rows 1006 and 1007, refused at the prompt with `400 系统检测到输入或生成内容可能包含不安全或敏感内容` — a fact about the question, not about the figure, and counted rather than scored). chart_correctness 3.05 -> 3.44 and readability 6.05 -> 6.49, so the floor moves to 3.44/6.49: both dimensions rose on a population that is the same 1,418 rows the render floor names. **The +0.39 is not read off two means.** The two denominators differ by four figures and 140 rows changed mark, so the reading was taken as a paired difference over the 1,411 rows both readings graded (`pnpm bench:text2vis:ablate --before <fifth> --after <sixth>`): the 140 rows the melt re-drew moved correctness 1.78 -> 5.91 (+4.13 ± 0.93) and readability 4.61 -> 9.19 (+4.59 ± 0.51), while every control group held its mean — bar 644 rows -0.08 ± 0.09, line 308 rows +0.02 ± 0.15, pie 225 rows +0.11 ± 0.17, scatter 64 rows -0.08 ± 0.21, boxplot 14 rows +0.07 ± 0.38, heatmap 9 rows -0.44 ± 0.66, funnel 6 rows +0.83 ± 1.85. Seven control intervals include zero, which is the claim that matters: the instrument did not drift, so the group that moved is the change. 140 x 4.13 / 1,411 = 0.41 of the 0.39 observed. Per mark: bar 645/645 at 3.06/6.69, line 452/452 at 4.36/6.34, pie 225/227 at 2.91/6.61, scatter 64/64 at 2.72/6.53, boxplot 14/14 at 3.07/2.50, heatmap 9/9 at 0.67/2.22, funnel 6/6 at 6.00/7.50, candlestick 1/1 at 10.00/9.00. Heatmap is now the worst bucket on both axes and is the next round's target. **The think A/B arm is void, not negative.** Run 44155803661 asked for `think=off` over the same 1,418 figures and graded 244 of them before the account ran out: rows 248 onwards returned `429 余额不足或无可用资源包,请充值。` 1,174 times, in 35 minutes, and the log printed `chart_correctness 2.58` over those 244 rows as though it were a reading. That run cost one lesson and two fixes: `judgeJobsWith` stops after eight calls in a row without a reply and reports where it stopped (`aborted`), and `gradingExitCode` is red on a stopped run whatever share of the corpus it lost. No number about thinking is registered, because none was measured."
  },
  "renderNote": "The pixel half, recorded in the round the renderer was built: 1,286 of the 1,470 scored rows reach a PNG (87.48%), 17 are refused because a gauge states a value against a scale this contract does not carry, and 167 are the rows the recommender declines. The floor is the pair (rendered >= 1,286, failed == 0) rather than an accuracy reading: a chart that raised in Python came from this repository own emitter. Still (rendered == 1,286, failed == 0) after the column-order fix, which changed which column each figure is drawn against without changing how many figures exist: 389 of 1,464 tables were being read in JavaScript property order, five of them against an entirely empty year column. 1,418 (v9.29): four tables that had no shape reach a PNG through the melt, and 111 are re-marked without changing the count of figures -- so the floor moves by the four that are new, not by the 111 that changed.",
+ "census": {
+  "recordedAt": "2026-11-21",
+  "instrument": "eval/text2vis/census.ts",
+  "scored": 1470,
+  "hit": 664,
+  "variants": {
+   "distribution-wide": {
+    "hit": 671,
+    "halves": {
+     "a": 3,
+     "b": 4
+    }
+   },
+   "no-share": {
+    "hit": 665,
+    "halves": {
+     "a": 8,
+     "b": -7
+    }
+   },
+   "no-ranking": {
+    "hit": 669,
+    "halves": {
+     "a": 8,
+     "b": -3
+    }
+   },
+   "no-histogram": {
+    "hit": 614,
+    "halves": {
+     "a": -27,
+     "b": -23
+    }
+   }
+  },
+  "note": "The sweep's floor, and the first one this repository has had for a derived reading. The shipped table reads 664 of 1,470, which is the number `top1` records above from a different instrument: the classifier and the sweep agree row for row, and the identity `assertCensusReport` holds is what makes the other thirty-three rows comparable to it. Four candidates are recorded rather than all thirty-four, because four are what a decision is read off: `distribution-wide` is the table the documentation backs, and `no-share` / `no-ranking` are the two the halves guard marks as fitted — the two a reader would otherwise quote as the top of the board. `no-histogram` prices the histogram cue's whole contribution, 50 rows, which is the number the next widening has to beat. **Why this floor exists at all**: both totals in a first draft of the round that introduced the halves were six rows off, because every row in the table is priced against the shipped table and the shipped table had moved when a widening was reverted; the draft kept the numbers from the tree before the revert, and nothing refused them. A derived reading with no floor is a table that can be quoted after the tree under it changed — the same defect as a gate that prints green without measuring."
+ },
  "llm": {
   "recordedAt": "2026-11-20",
   "run": "44684484285",

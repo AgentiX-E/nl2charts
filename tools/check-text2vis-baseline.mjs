@@ -31,6 +31,7 @@
  *   node tools/check-text2vis-baseline.mjs --require        # CI: a missing report is a failure
  *   node tools/check-text2vis-baseline.mjs --llm --require   # the model arm's dispatch
  *   node tools/check-text2vis-baseline.mjs --arbitration --require  # the six policies, priced on those answers
+ *   node tools/check-text2vis-baseline.mjs --census --require        # the sweep's thirty-four tables, against the shipped one
  *   node tools/check-text2vis-baseline.mjs --self-test
  */
 import { existsSync, readFileSync } from 'node:fs';
@@ -44,6 +45,7 @@ const JUDGE_REPORT = 'eval/out/text2vis-judge.json';
 const LLM_REPORT = 'eval/out/text2vis-llm.json';
 const ARBITRATION_REPORT = 'eval/out/text2vis-arbitrate.json';
 const SHIP_REPORT = 'eval/out/text2vis-ship.json';
+const CENSUS_REPORT = 'eval/out/text2vis-census.json';
 
 /**
  * Compare one reading against the floor.
@@ -803,6 +805,47 @@ function selfTest() {
     const inside = compareShip(shipReport(), { ...shipFloor, repaired: 2, tolerance: 5 }, {});
     caseOf('a repair count inside the band is a note', inside.issues, 0);
   }
+  // The sweep. A small floor and a small report, so that each case fails only for the reason it is for:
+  // the shipped total, a named candidate, a dropped candidate, and halves that traded rows under a
+  // total that did not move — the last one being the state the guard exists to make visible.
+  const censusFloor = {
+    scored: 8,
+    hit: 6,
+    variants: {
+      'distribution-wide': { hit: 7, halves: { a: 1, b: 0 } },
+      'no-ranking': { hit: 9, halves: { a: 2, b: -1 } },
+    },
+  };
+  const censusReport = () => ({
+    scored: 8,
+    product: [
+      { variant: 'shipped', hit: 6, halves: { a: 0, b: 0 }, fitted: false },
+      { variant: 'distribution-wide', hit: 7, halves: { a: 1, b: 0 }, fitted: false },
+      { variant: 'no-ranking', hit: 9, halves: { a: 2, b: -1 }, fitted: true },
+    ],
+  });
+  {
+    caseOf('a sweep that reproduces its floor is accepted', compareCensus(censusReport(), censusFloor, { require: true }).issues, 0);
+    caseOf('a missing sweep is refused when it is required', compareCensus(undefined, censusFloor, { require: true }).issues, 1);
+    caseOf('a missing sweep is a note when it is not', compareCensus(undefined, censusFloor, {}).issues, 0);
+    const moved = censusReport();
+    moved.product[0].hit = 5;
+    caseOf('a shipped table one row off its floor is refused, with no tolerance', compareCensus(moved, censusFloor, {}).issues, 1);
+    const dropped = censusReport();
+    dropped.product = dropped.product.filter((row) => row.variant !== 'no-ranking');
+    caseOf('a table the floor records and the sweep dropped is refused', compareCensus(dropped, censusFloor, {}).issues, 1);
+    const traded = censusReport();
+    traded.product[2].halves = { a: 0, b: -2 };
+    caseOf('a total that stands still while its halves move is refused', compareCensus(traded, censusFloor, {}).issues, 1);
+    const elsewhere = censusReport();
+    elsewhere.scored = 9;
+    caseOf('a sweep over another row set is refused', compareCensus(elsewhere, censusFloor, {}).issues, 1);
+    caseOf('a first sweep registers the floor instead of failing against it', compareCensus(censusReport(), {}, {}).issues, 0);
+    caseOf('a report with no product table is refused', compareCensus({ scored: 8 }, censusFloor, {}).issues, 1);
+    const headless = censusReport();
+    headless.product = headless.product.filter((row) => row.variant !== 'shipped');
+    caseOf('a sweep with no shipped row is refused', compareCensus(headless, censusFloor, {}).issues, 1);
+  }
   const recordedArms = JSON.parse(readFileSync(resolve(ROOT, BASELINE), 'utf8'))?.llm?.arms;
   const scales = Object.keys(recordedArms ?? {});
   const bothScales = scales.some((key) => key.endsWith('|mark')) && scales.some((key) => key.endsWith('|label'));
@@ -1215,6 +1258,92 @@ export function compareShip(report, floor, options = {}) {
   return { issues, notes };
 }
 
+/**
+ * The sweep's floor: the thirty-four candidate cue tables priced on the product path.
+ *
+ * The sweep is a *derived* reading — same corpus, same code, one cue table changed at a time — so it
+ * has no sampling to absorb and no tolerance is offered. What it does have is a shape that made a
+ * silent drift possible: every row is priced against the shipped table, so a change to the shipped
+ * table moves all thirty-four rows at once, and a reader comparing a total against last round's total
+ * is comparing two trees. That is not hypothetical. A draft of this round's documentation carried
+ * `no-share` at 671 and `no-ranking` at 677; re-running the instrument on the tree the draft described
+ * printed 665 and 669, because the numbers beside a widening had been taken while the widening was
+ * applied and were never re-taken after it was reverted. The gate is the fix: the rows a reader quotes
+ * are recorded here, compared for equality, and a move is refused until someone re-takes it on purpose.
+ *
+ * Four rows are recorded rather than all thirty-four. The shipped total is the denominator's row; the
+ * other three are the ones a decision is read off — the one candidate the table currently backs
+ * (`distribution-wide`), and the two the halves guard marks as fitted, which are exactly the two a
+ * reader would otherwise quote as the top of the board.
+ */
+export function compareCensus(report, floor, options = {}) {
+  const issues = [];
+  const notes = [];
+  if (report === undefined) {
+    const message = `TEXT2VIS CENSUS: no sweep at ${CENSUS_REPORT} — \`pnpm bench:text2vis:census --artifact ${CENSUS_REPORT}\` writes it`;
+    if (options.require === true) issues.push(message);
+    else notes.push(`${message} (not required here)`);
+    return { issues, notes };
+  }
+  if (typeof floor.scored !== 'number') {
+    notes.push('TEXT2VIS CENSUS: no floor is registered yet — this run establishes it');
+    return { issues, notes };
+  }
+  if (typeof report.scored !== 'number' || !Array.isArray(report.product)) {
+    issues.push(
+      'TEXT2VIS CENSUS: the report carries no `scored` count and no `product` table, so the sweep cannot be compared',
+    );
+    return { issues, notes };
+  }
+  if (report.scored !== floor.scored) {
+    issues.push(
+      `TEXT2VIS CENSUS: ${String(report.scored)} scored rows, the floor was recorded over ${String(floor.scored)}; ` +
+        'a sweep over a different row set is a different question, so no hit count is compared until the corpus is explained',
+    );
+    return { issues, notes };
+  }
+  const rows = new Map(report.product.map((variant) => [variant.variant, variant]));
+  const shipped = rows.get('shipped');
+  if (shipped === undefined || typeof shipped.hit !== 'number') {
+    issues.push('TEXT2VIS CENSUS: the sweep has no `shipped` row, so there is nothing for the other thirty-three to be priced against');
+    return { issues, notes };
+  }
+  if (shipped.hit !== floor.hit) {
+    issues.push(
+      `TEXT2VIS CENSUS: the shipped table reads ${String(shipped.hit)} of ${String(report.scored)}, the floor records ${String(floor.hit)}; ` +
+        'the sweep has no sampling, so this is a change to the cue table or to the classifier and not a re-sample',
+    );
+  } else {
+    notes.push(`TEXT2VIS CENSUS: the shipped table reads ${String(shipped.hit)} of ${String(report.scored)}, at its floor`);
+  }
+  for (const [name, recorded] of Object.entries(floor.variants ?? {})) {
+    const row = rows.get(name);
+    if (row === undefined) {
+      issues.push(
+        `TEXT2VIS CENSUS: the floor records \`${name}\` and the sweep does not price it; a table that is dropped stops measuring its lever`,
+      );
+      continue;
+    }
+    const halves = `${String(row.halves?.a)}/${String(row.halves?.b)}`;
+    const recordedHalves = `${String(recorded.halves?.a)}/${String(recorded.halves?.b)}`;
+    if (row.hit !== recorded.hit) {
+      issues.push(
+        `TEXT2VIS CENSUS: \`${name}\` reads ${String(row.hit)}, the floor records ${String(recorded.hit)} — re-take the row before quoting it`,
+      );
+      continue;
+    }
+    if (halves !== recordedHalves) {
+      issues.push(
+        `TEXT2VIS CENSUS: \`${name}\` reads ${String(row.hit)} on both sides but its halves moved ${recordedHalves} -> ${halves}; ` +
+          'the total can stand still while the two halves trade rows, which is the one thing the guard exists to show',
+      );
+      continue;
+    }
+    notes.push(`TEXT2VIS CENSUS: \`${name}\` reads ${String(row.hit)} (${halves})${row.fitted === true ? ', fitted' : ''}`);
+  }
+  return { issues, notes };
+}
+
 function main(argv) {
   if (argv.includes('--self-test')) return selfTest();  const require = argv.includes('--require');
   // A separate switch, because the two readings are produced by different runs: `--require` is the
@@ -1238,7 +1367,10 @@ function main(argv) {
   // arbitration has one: it is produced by a step of its own, and a dispatch that skipped it must be
   // told so rather than read the absence as agreement.
   const ship = argv.includes('--ship');
-  const known = new Set(['--require', '--require-judge', '--iteration', '--self-test', '--expect-instrument', '--llm', '--arbitration', '--ship']);
+  // The derived sweep, whose artifact is written by the census step: a dispatch that skipped it must be
+  // told so rather than read the absence as agreement.
+  const census = argv.includes('--census');
+  const known = new Set(['--require', '--require-judge', '--iteration', '--self-test', '--expect-instrument', '--llm', '--arbitration', '--ship', '--census']);
   // The value after `--expect-instrument` is a model name and not a flag, so it is skipped rather than
   // reported as an unknown argument.
   const flags = [];
@@ -1253,7 +1385,7 @@ function main(argv) {
   if (unknown.length > 0) {
     console.error(
       `unknown argument ${unknown.join(' ')}: this gate reads ${REPORT} against ${BASELINE}, takes --require, ` +
-        '--require-judge, --iteration, --expect-instrument <model>, --llm, --arbitration, --ship and --self-test',
+        '--require-judge, --iteration, --expect-instrument <model>, --llm, --arbitration, --ship, --census and --self-test',
     );
     return 2;
   }
@@ -1287,6 +1419,14 @@ function main(argv) {
     for (const note of shipNotes) console.log(note);
     for (const issue of shipIssues) console.error(issue);
     return shipIssues.length === 0 ? 0 : 1;
+  }
+  if (census) {
+    const path = resolve(ROOT, CENSUS_REPORT);
+    const report = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : undefined;
+    const { issues: censusIssues, notes: censusNotes } = compareCensus(report, baseline.census ?? {}, { require });
+    for (const note of censusNotes) console.log(note);
+    for (const issue of censusIssues) console.error(issue);
+    return censusIssues.length === 0 ? 0 : 1;
   }
   // Before the report, before the corpus, before a call: the one question about a dispatch that can
   // be answered from a file. A floor reading on another instrument costs a full reading and then

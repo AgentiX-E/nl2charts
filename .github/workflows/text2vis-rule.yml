@@ -102,6 +102,16 @@ jobs:
       - name: Classify why the recommender missed
         run: pnpm bench:text2vis:census --artifact eval/out/text2vis-census.json
 
+      # The sweep's floor, which is the one reading in this job whose rows are *priced against each
+      # other*: every candidate table is compared with the shipped one, so a change to the shipped
+      # table moves all thirty-four rows and a total quoted from last round describes a tree that no
+      # longer exists. That is how this round's own documentation arrived six rows off — the numbers
+      # beside a widening were taken while the widening was applied and never re-taken after it was
+      # reverted. Four rows are recorded in the baseline; a move is refused here until it is re-taken
+      # on purpose, and the four are printed either way so the log carries the numbers a reader quotes.
+      - name: Hold the sweep to its floor
+        run: node tools/check-text2vis-baseline.mjs --census --require
+
       # The artifact carries the report the log printed, so a later reader can recompute the shares
       # from the counters rather than from a sentence.
       - name: Upload the reading
