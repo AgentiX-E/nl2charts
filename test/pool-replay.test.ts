@@ -20,6 +20,7 @@ import {
   census,
   chosenMember,
   compositions,
+  consumeOf,
   decidingPool,
   featureAuc,
   main,
@@ -856,5 +857,63 @@ describe('the command line reading a composition and a pair', () => {
     // open a file called `select-cross` and the run would fail on the wrong thing.
     const { code } = await capture(['--trust', 'select-cross', '--arm', 'select-cross']);
     expect(code).toBe(0);
+  });
+});
+
+describe('consuming one source alone', () => {
+  it('counts what the source scored, what the vote scored, and who was right on a disagreement', () => {
+    // Three cases: one where decompose is right and the vote is wrong (a win), one the other way
+    // (a loss), and one where they agree. The vote is the modal group over the deciding pool.
+    const rows = [
+      row('1', [candidate('a', 'x', false), candidate('b', 'x', false), candidate('decompose', 'y', true)]),
+      row('2', [candidate('a', 'x', true), candidate('b', 'x', true), candidate('decompose', 'y', false)]),
+      row('3', [candidate('a', 'x', true), candidate('b', 'x', true), candidate('decompose', 'x', true)]),
+    ];
+    const reading = consumeOf(rows, 'decompose');
+    expect(reading.cases).toBe(3);
+    expect(reading.single).toBe(2);
+    expect(reading.vote).toBe(2);
+    // The third case is agreement, not a disagreement: there is nothing to adjudicate.
+    expect(reading.disagreements).toBe(2);
+    expect(reading.wins).toBe(1);
+    expect(reading.losses).toBe(1);
+  });
+
+  it('counts the cases that hold no such candidate, rather than dividing by them', () => {
+    const rows = [
+      row('1', [candidate('a', 'x', true)]),
+      row('2', [candidate('decompose', 'y', true)]),
+    ];
+    const reading = consumeOf(rows, 'decompose');
+    expect(reading.cases).toBe(1);
+    expect(reading.missing).toBe(1);
+    expect(reading.single).toBe(1);
+  });
+
+  it('sets the ceiling at the vote plus its wins, which is what a perfect judge would reach', () => {
+    // Both cases carry the source: the vote is read on the same rows the source is available on, so
+    // a case without a `decompose` candidate is outside both columns rather than a free point for
+    // the vote. The second row is a case the count already answers and the source agrees with.
+    const rows = [
+      row('1', [candidate('a', 'x', false), candidate('b', 'x', false), candidate('decompose', 'y', true)]),
+      row('2', [candidate('a', 'x', true), candidate('b', 'x', true), candidate('decompose', 'x', true)]),
+    ];
+    const reading = consumeOf(rows, 'decompose');
+    expect(reading.vote).toBe(1);
+    expect(reading.wins).toBe(1);
+    expect(reading.ceiling).toBe(2);
+  });
+
+  it('leaves the ceiling at the vote when the source loses every disagreement', () => {
+    // The reading this repository was looking for and did not find: a source that is outvoted
+    // correctly cannot be recovered by comparing it, so its ceiling is the count's own score.
+    const rows = [
+      row('1', [candidate('a', 'x', true), candidate('a2', 'x', true), candidate('decompose', 'y', false)]),
+      row('2', [candidate('a', 'x', true), candidate('a2', 'x', true), candidate('decompose', 'y', false)]),
+    ];
+    const reading = consumeOf(rows, 'decompose');
+    expect(reading.losses).toBe(2);
+    expect(reading.wins).toBe(0);
+    expect(reading.ceiling).toBe(reading.vote);
   });
 });

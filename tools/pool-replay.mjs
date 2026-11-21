@@ -319,6 +319,58 @@ export function artifactPath(positional) {
 }
 
 /**
+ * What one source buys when it is consumed alone, and what a judge over the pair could reach.
+ *
+ * `--compositions` prices the *subsets* a pool could have been; this prices the *members*. The
+ * question is the one the plan asked first: a source that looks diluted by a vote might be worth
+ * more on its own, and the only way to know is to read what its own candidate scored and what it
+ * does on the cases where it disagrees with the count.
+ *
+ * `wins` and `losses` are the whole reading. A source that wins more disagreements than it loses
+ * is one a judge should listen to, and `ceiling` — the vote plus its wins — is what a perfect
+ * judge over that pair would reach. When `wins < losses` the dilution story is over: the source is
+ * not being outvoted, it is being outvoted correctly, and no comparison call can recover it.
+ */
+export function consumeOf(rows, source) {
+  const out = {
+    source,
+    cases: 0,
+    missing: 0,
+    single: 0,
+    vote: 0,
+    disagreements: 0,
+    wins: 0,
+    losses: 0,
+    both: 0,
+    neither: 0,
+    ceiling: 0,
+  };
+  for (const row of rows) {
+    const member = (row.candidates ?? []).find((candidate) => candidate.source === source);
+    if (member === undefined) {
+      out.missing += 1;
+      continue;
+    }
+    out.cases += 1;
+    const modal = modalGroup(decidingPool(row.candidates ?? []));
+    const voteRight = modal.members.length > 0 && modal.members.some((entry) => entry.correct === true);
+    const aloneRight = member.correct === true;
+    if (aloneRight) out.single += 1;
+    if (voteRight) out.vote += 1;
+    // Agreement is most of the corpus and is not a disagreement: a source that restates the pool's
+    // answer has nothing to adjudicate, and counting it would make every pool look contested.
+    if (modal.members.some((entry) => entry.fingerprint === member.fingerprint)) continue;
+    out.disagreements += 1;
+    if (aloneRight && !voteRight) out.wins += 1;
+    else if (!aloneRight && voteRight) out.losses += 1;
+    else if (aloneRight && voteRight) out.both += 1;
+    else out.neither += 1;
+  }
+  out.ceiling = out.vote + out.wins;
+  return out;
+}
+
+/**
  * What each composition of the pool buys, priced in calls and in questions.
  *
  * `pricePolicies` answers "which rule over the pool I have"; this answers "which pool should I
@@ -544,6 +596,15 @@ function describe(file, arm, table, pool, checks, extra = {}) {
       );
     }
   }
+  if (extra.consume !== undefined) {
+    const one = extra.consume;
+    lines.push(
+      `  consuming ${one.source} alone: ${one.single}/${one.cases} (${((one.single / Math.max(one.cases, 1)) * 100).toFixed(2)}%)` +
+        ` against the vote's ${one.vote}; on ${one.disagreements} disagreements it wins ${one.wins}, loses ${one.losses},` +
+        ` both ${one.both}, neither ${one.neither} — a perfect judge over the pair reaches ${one.ceiling}`,
+    );
+    if (one.missing > 0) lines.push(`    ${one.missing} cases hold no ${one.source} candidate and are not in the denominator`);
+  }
   if (extra.trust !== undefined) {
     const trust = extra.trust;
     lines.push(
@@ -576,12 +637,15 @@ export async function main(argv) {
   const withCompositions = args.includes('--compositions');
   const trustFlag = args.indexOf('--trust');
   const trustArm = trustFlag === -1 ? undefined : args[trustFlag + 1];
+  const consumeFlag = args.indexOf('--consume');
+  const consumeSource = consumeFlag === -1 ? undefined : args[consumeFlag + 1];
   const checks = VERIFICATIONS.filter((entry) => args.includes(entry.flag));
   const armFlag = args.indexOf('--arm');
   const named = armFlag === -1 ? undefined : args[armFlag + 1];
   const positional = args.filter(
     (arg, index) =>
-      !arg.startsWith('--') && (index === 0 || (args[index - 1] !== '--arm' && args[index - 1] !== '--trust')),
+      !arg.startsWith('--') &&
+      (index === 0 || (args[index - 1] !== '--arm' && args[index - 1] !== '--trust' && args[index - 1] !== '--consume')),
   );
   const path = artifactPath(positional[0]);
   const artifact = JSON.parse(readFileSync(path, 'utf8'));
@@ -596,9 +660,11 @@ export async function main(argv) {
   const verifications = checks.map(({ verifyArm, policy }) => verifyRule(artifact, verifyArm, policy));
   const compositionsTable = withCompositions ? compositions(rows) : undefined;
   const trust = trustArm === undefined ? undefined : trustOf(artifact, trustArm);
+  const consume = consumeSource === undefined ? undefined : consumeOf(rows, consumeSource);
   const extra = {
     ...(compositionsTable === undefined ? {} : { compositions: compositionsTable }),
     ...(trust === undefined ? {} : { trust }),
+    ...(consume === undefined ? {} : { consume }),
   };
   if (json) {
     process.stdout.write(

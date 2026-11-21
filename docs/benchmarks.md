@@ -18812,3 +18812,101 @@ Two things are excluded by construction, and both were measured rather than assu
   2.8pp of answer on `44917562527`, and the router that would have aimed the purchase separates the
   cases at AUC 0.632. There is no version of "one more call on every case" that this repository has
   not already measured as neutral or worse.
+
+### The last purchasable lever cannot be aimed, and the best source cannot be consumed alone
+
+Two hypotheses were left standing after the 168 were priced, and both were written into the plan as
+the next two dispatches: buy the audit only where a condition is missing (`AH.2`), and stop diluting
+`decompose` by voting it against two prompts (`AH.2`'s "single consumption"). Neither was dispatched,
+because both can be priced against an artifact that already exists, and one of them prices to a loss.
+
+**Hypothesis one: the condition audit can be aimed.** The population is real — `bench:bird:conditions`
+reads 128 of 600 cases whose statement names no column of a gold condition (21.3%) — and the audit
+that fires on every case has already lost (1,507 of 1,532 fired, 30 named a condition, 43 rewrote,
+and the arm scored below its parent for twice the calls). So `bench:bird:condition-gate` prices six
+gates over what exists *before* the call: the question, the statement the arm already wrote, and the
+schema. The label it is scored against is `missingConditions(gold, sql)`, which no gate can read —
+the inputs the tool hands a gate do not carry it, and a test pins that.
+
+| gate | fires | hit | precision | recall | worst database | calls/case |
+|---|---:|---:|---:|---:|---:|---:|
+| `no-where` | 24 | 6 | 25.0% | 4.7% | 0.0% | 0.04 |
+| `cue` | 125 | 37 | 29.6% | 28.9% | 0.0% | 0.21 |
+| `named` | 398 | 87 | 21.9% | 68.0% | 7.7% | 0.66 |
+| `cue-and-named` | 83 | 23 | 27.7% | 18.0% | 0.0% | 0.14 |
+| `no-where-or-cue` | 146 | 42 | 28.8% | 32.8% | 0.0% | 0.24 |
+| `no-where-or-named` | 410 | 89 | 21.7% | 69.5% | 7.7% | 0.68 |
+
+The bars were registered before the run: **precision ≥ 0.50, recall ≥ 0.40, fires on ≤ 25%**. No gate
+clears all three, and the shape of the failure is the sharp one: **every gate's precision is within
+eight points of the 21.3% base rate**. `cue`, the best of them, is 29.6% — a lift of 1.39× on a
+budget of 0.21 calls a case, and it reaches a quarter of the population. A gate whose precision is a
+few points above the base rate is not a gate; it is the base rate with a smaller bill.
+
+The reason is in the second line of the report, and it is the finding worth keeping:
+
+> **Of the 128 cases whose statement dropped a condition, only 37 (28.9%) state a comparison word.**
+
+The other 91 imply the filter through domain language the question never spells as a comparison —
+"high schools", "female students", "the same county" — and 79 of the 83 `cue-and-named` fires are
+questions whose cue word belongs to a clause the statement already wrote. A lexical gate cannot
+reach a filter that is carried by the evidence note's semantics rather than by its words, and the
+evidence note is exactly what the generator already has.
+
+**Hypothesis two: `decompose` is diluted by the vote.** `--compositions` priced the subsets and put
+`decompose` at 369 of 593 — the second-best single member — so the story was that a vote against two
+prompts of the same model buries the one generator that answers by a different method. `--consume
+decompose` reads the members instead of the subsets:
+
+| reading | value |
+|---|---|
+| `decompose` consumed alone | **369/593 = 62.23%** |
+| the vote on the same 593 | **381** |
+| disagreements with the modal group | 95 |
+| — `decompose` right, vote wrong | **16** |
+| — vote right, `decompose` wrong | **28** |
+| — both right / neither | 0 / 51 |
+| a perfect judge over the pair | **397** (+16 over the vote) |
+
+16 wins against 28 losses. The dilution story is falsified in the direction that matters: it is not
+being outvoted, it is being **outvoted correctly**. The ceiling a judge could reach is +16 of 600
+(2.7pp), the judge would cost 0.158 calls a case, and this repository has now failed to move a
+decision with a judge four times — the selector, the shape rule, the tie gate and the agreement
+marks. A 2.7pp ceiling behind a mechanism with a measured negative track record is not a dispatch.
+
+### What is left, now that every cheap thing has been priced
+
+The measurement that keeps surviving is the one about *where* the missing statements are, and this
+round adds a third instrument agreeing with it. On the same 600 cases:
+
+| lever | price it was given | reading |
+|---|---|---|
+| a fourth candidate on every case | +0.745 calls | ceiling +3.6pp, answer −2.8pp (`44917562527`) |
+| a fourth candidate only where the pool is empty | routing, AUC ≥ 0.70 required | **AUC 0.632 / 0.618**, buys 3.7% |
+| an audit on every case | +1.00 calls | named 30 of 1,507, scored below its parent |
+| an audit only where a condition is missing | gate, precision ≥ 0.50 required | **precision 21.9–29.6%**, base rate 21.3% |
+| `decompose` consumed alone | 0 extra calls, 1 candidate instead of 3 | 369 against the vote's 381; 16 wins / 28 losses |
+| a plan before the statement | 0 extra calls | **−7.2pp** (63/27, p = 0.0002), measured earlier |
+
+Nothing in that table is about instructions or calls. Every row is a *shape* of generation, and every
+one of them is neutral or negative. That leaves two things that are not shapes: **what the prompt
+knows** and **what writes it** — and both have a reading here too. The synthesized definition block
+carries the profile (`packages/ai/src/definitions.ts` renders observed values, ranges and distinct
+counts into it), it costs one call per database rather than per question, and it measured a tie with
+`inline` (18 vs 17). The reasoning model is in the pool as `@second` and reads **366** against the
+chat model's 371.
+
+Which is what MAC-SQL's 4.90pp on dev (p = 3.4 × 10⁻⁶, 1,532 questions, one endpoint) has been
+saying since it was measured: **the gap is their template and their examples, not their architecture.**
+Their card rule, applied here, loses 3.43pp to its parent (261 against 278, p = 0.0241); their `decompose`-everywhere is already a source here;
+their refiner fires on 6.7% of dev. What has never been run beside ours is their *prompt* — the
+templates in `macsql_agents.py`, pinned at `31a9df5`, with our card and our endpoint.
+
+That is the next dispatch, and the bar is registered here before it exists:
+
+| criterion | bar | why this number |
+|---|---:|---|
+| one-candidate accuracy | ≥ `inline+evidence`'s 371 + 12 (2.0pp), paired exact McNemar p < 0.05 | 2.0pp is the lower edge of a 600-case pair's resolution, and the template would be adopted as a *source*, not as an arm — it has to beat the prompt it would replace |
+| calls a case | 1.00 | a template copies at zero marginal cost; a template that needs a second call is a pipeline, and pipelines have been losing here |
+| the three-candidate pool | ≥ 387 with the template in the third slot | the pool is the product; a source that wins alone and loses in the pool is a source that restates what the others say |
+| record | `asked` on 600 of 600, `candidateRecall` on every case | so the reading after it costs nothing again |

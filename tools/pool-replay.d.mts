@@ -121,6 +121,30 @@ export interface Composition {
 }
 
 /** Every non-empty subset of the pool's distinct sources, or nothing when there are too many. */
+/**
+ * What one source buys on its own, and what a perfect judge over it and the count would reach.
+ *
+ * `cases` counts only the rows that hold a member from `source`, and `vote` is read on those rows
+ * rather than on the whole split — a case the source never answered is outside both columns, not a
+ * free point for the count.
+ */
+export interface Consumption {
+  readonly source: string;
+  readonly cases: number;
+  readonly missing: number;
+  readonly single: number;
+  readonly vote: number;
+  readonly disagreements: number;
+  readonly wins: number;
+  readonly losses: number;
+  readonly both: number;
+  readonly neither: number;
+  /** `vote + wins`: the score a perfect judge over the pair would reach. */
+  readonly ceiling: number;
+}
+
+export function consumeOf(rows: readonly ReplayRow[], source: string): Consumption;
+
 export function compositions(rows: readonly ReplayRow[], limit?: number): Composition[];
 
 /** The features a router could read with no model, no database and no answer key. */

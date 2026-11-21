@@ -68,6 +68,7 @@
     "bench:bird:diagnose": "tsx eval/bird/diagnose-corpus.ts",
     "bench:bird:channel": "tsx eval/bird/channel.ts",
     "bench:bird:gap": "tsx eval/bird/gap.ts",
+    "bench:bird:condition-gate": "tsx eval/bird/condition-gate.ts",
     "bench:bird:gap:values": "tsx eval/bird/values-gap.ts",
     "bench:bird:width": "tsx eval/bird/width.ts",
     "bench:bird:conditions": "tsx eval/bird/conditions.ts",

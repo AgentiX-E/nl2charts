@@ -7,6 +7,29 @@ cannot be argued with.
 ## Unreleased
 
 ### Fixed
+- **`--consume` prices the members of a pool, not only the subsets.** `--compositions` answered
+  "which pool should I have bought"; the plan's next hypothesis was about one member, so
+  `consumeOf(rows, source)` reads what that source scored alone and what it does where it
+  disagrees with the modal group: `wins`, `losses` and the ceiling a perfect judge over the pair
+  would reach (`vote + wins`). The vote is read on the rows that hold the source, so a case without
+  one is outside both columns rather than a free point for the count.
+
+### Added
+- **`bench:bird:condition-gate`: the audit cannot be aimed, and the reason is in the question.**
+  Six gates over what exists before the call (question, statement, schema) were scored against
+  `missingConditions` — a label no gate's inputs carry. Bars registered first: precision ≥ 0.50,
+  recall ≥ 0.40, fires on ≤ 25%. No gate clears: precision runs 21.7–29.6% against a base rate of
+  21.3% (128 of 600), and the best gate's lift is 1.39× for 0.21 calls a case. **Of the 128 cases
+  whose statement dropped a condition, only 37 (28.9%) state a comparison word** — the other 91
+  imply it through domain language, which is why no lexical gate reaches them.
+- **`--consume decompose` falsifies the dilution story.** `decompose` alone reads 369 of 593
+  (62.23%) against the vote's 381 on the same rows; on the 95 disagreements it wins 16 and loses
+  28, with the ceiling for a perfect judge at 397. It is not being outvoted — it is being outvoted
+  correctly, and a 2.7pp ceiling behind four failed decision mechanisms is not a dispatch.
+- **The next dispatch is registered: MAC-SQL's template as a source.** Their card rule loses 3.43pp
+  here, their decomposition is already a source, their refiner fires on 6.7% of dev — what has never
+  been run beside ours is their prompt. The bar is written in `docs/benchmarks.md`: one candidate,
+  1.00 calls a case, ≥ 371 + 12 paired (p < 0.05), and ≥ 387 with it in the third slot.
 - **A refused arm no longer takes the table with it.** `runArm`'s guards throw because the arm's
   table must not be read as a score, and the throw also deleted the table: on `44905985381` a
   twenty-four-minute, six-hundred-case dispatch ended with an artifact that said `cases: 0`, and the

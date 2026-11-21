@@ -112,11 +112,17 @@
       "functions": 100,
       "branches": 100
     },
+    "eval/bird/condition-gate.ts": {
+      "lines": 99.31,
+      "statements": 99.31,
+      "functions": 100,
+      "branches": 96.29
+    },
     "eval/bird/conditions.ts": {
       "lines": 99.39,
       "statements": 99.39,
       "functions": 100,
-      "branches": 97.56
+      "branches": 98.18
     },
     "eval/bird/consensus.ts": {
       "lines": 100,
