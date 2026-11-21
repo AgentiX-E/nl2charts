@@ -18444,6 +18444,51 @@ vote, with the bar written before it runs:
 The 15 cases between 391 and 406 are what a per-question router would have to find, and the question
 it answers is no longer "when does shape beat size" — that one is settled, and the answer is never.
 
+### The bar was 400, the arm read 389, and the free rule it was bought for read 391
+
+`44905985381` ran the three arms on the corrected code, 600 dev questions, `deepseek-chat` with
+`deepseek-reasoner` as the second source. It is the first artifact this repository has produced whose
+vote check passes on its own terms: **`vote` replay 600 of 600 agree**, which was the third bar and the
+one that says the repair reached the pool rather than the replay.
+
+| arm | correct | accuracy | calls a case | bought |
+|---|---|---|---|---|
+| `select-cross` (the selector) | 379 | 63.17% | 4 | — |
+| `select-cross-pooled-vote` | 387 | 64.50% | 0 | — |
+| `select-cross-pooled-tie` | **389** | 64.83% | 0.075 | 45/600 |
+
+**The preregistered bar failed: 389 against 400, eleven short.** The prediction it tested was arithmetic
+— the corrected vote answers 391 of the questions the gate does not buy, the gate bought 39 and added 13,
+and the two sets were disjoint — and the arithmetic was wrong in its middle term. Over this pool the
+vote answers 387, not 391, and the gate adds **2**, not 13:
+
+| policy | correct | calls |
+|---|---|---|
+| `vote` | 387 | 0 |
+| `wider` | 388 | 0 |
+| `vote-unless-tie` (free: the recorded choice on a tie) | **391** | 0 |
+| `vote` + the gate's paid answer on ties | 389 | 45 |
+| `oracle{chosen,vote}` | 404 | — |
+
+Paired against the vote: **3 wins, 1 loss, p = 0.625**. Two questions on 45 calls is not a purchase, it
+is a coin landing the way it was already pointing, and the arm is strictly worse than the free rule that
+reuses the answer the run had already paid for — 391 for zero calls against 389 for 45.
+
+The mechanism is visible in the 45 bought cases: the paid call was correct on **10** of them, and the
+recorded selector answer was correct on **12**. Buying a third opinion where two groups tie bought a
+*worse* opinion than the one on file, which is the one reading that would have stopped the arm from being
+dispatched if the earlier pool had shown it. It did not, because the earlier pool's tie set was itself
+polluted: the bug put empty statements into groups, empty groups into ties, and the gate's +13 was
+measured on 46 questions of which some were ties only because two statements had answered nothing.
+
+**What ships is the free rule.** `vote` at 387 with zero calls beats the four-call selector at 379 by 8,
+and the gate cannot buy the remaining gap: the 17 cases between 387 and 404 are questions where the pool
+holds the answer and the vote's group does not, which is a routing problem and not a spending one. Two
+levers were priced this round and both were refused on their own numbers — the shape rule (−4 on one pool,
++1 on this one, net nothing) and the tie gate (−2 against a free policy that already held the answer).
+`select-cross-pooled-tie` stays in `ON_DEMAND_ARMS` as the arm that holds the refutation, and `gate: 'tie'`
+stays configurable because a config with no arm is observable and a deleted enum is not.
+
 ### Where each of the four absent rows would have to go
 
 **WikiSQL** is nearly saturated (SeaD + execution-guided decoding 93.0% test EX, X-SQL + EG 91.8%,

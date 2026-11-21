@@ -371,6 +371,14 @@ const { sql, index } = chooseCandidateByRule('shortest', candidates);
   members of one group can differ in physical row count, and the rule reads the fewest any member
   returned. Reading that off the first member instead made the rule depend on arrival order.
 
+**The gate that buys a second opinion on a tie is refused too, and it is worth knowing why** — it is the
+one lever in this file that a reader would expect to pay for. Over 600 dev questions with the vote
+corrected, `$0`-cost `vote` reads 387, the 45-call tie gate reads 389 (3 wins, 1 loss, p = 0.625), and the
+free rule that reuses the selector's recorded answer on a tie reads **391**. On the very questions the
+gate buys, the paid answer was right 10 times and the recorded answer 12. A second opinion is worth
+buying when the second opinion is better than the one you have; here it was not, and the pool already
+held the answer.
+
 **All four skip a candidate that returned no rows**, and that is worth more than the choice
 of rule. 586 empty results across four arms were all wrong: a result with no rows equals
 another empty result and nothing else, so an empty candidate can only be right when the true

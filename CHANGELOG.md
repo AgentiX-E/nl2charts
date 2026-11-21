@@ -185,6 +185,16 @@ cannot be argued with.
   its halves trade rows.
 
 ### Changed
+- **The tie gate is refused on its own numbers: 389 against a bar of 400, and 2 short of a free policy
+  that costs nothing.** `44905985381` ran `select-cross`, `select-cross-pooled-vote` and
+  `select-cross-pooled-tie` on the corrected code over 600 dev questions: **379 / 387 / 389**. The vote
+  replay agrees **600 of 600**, which is the bar that says the repair reached the pool. Paired against
+  the vote the gate is 3 wins and 1 loss (p = 0.625) for 45 paid calls — and the free rule that reuses
+  the selector's recorded choice on a tie reads **391**, two above the arm that pays. On exactly the 45
+  bought questions the paid answer was correct **10** times and the recorded answer **12**: the gate
+  bought a worse opinion than the one already on file. The arithmetic that predicted 404
+  (`vote` 391 + gate 13, disjoint sets) was wrong in its middle term because the 13 came from a tie set
+  the empty-result bug had polluted. What ships is the free vote, eight above the four-call selector.
 - **The refused widening was re-measured on the ensemble, on a branch, so `master` never carried it.**
   `distribution-wide` clears the rule arm (671 vs 664) and the halves (`+3 / +4`) and is the only
   candidate that has managed both; it was priced on the ensemble once and refused. The reading was
