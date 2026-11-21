@@ -663,6 +663,64 @@ describe('a full run', () => {
   });
 });
 
+/**
+ * The vote must not be won by a result that answered nothing.
+ *
+ * `offeredCandidates` drops the empty result when an arm declares an empty-retry turn, and every
+ * other arm kept them — so on `44897147794` two statements returning nothing outvoted one that
+ * answered on 9 questions, and the vote arm scored the empty result while the `modal` *rule*, which
+ * reads `eligibleIndices`, scored the one that answered. That gap is exactly the size of the
+ * advantage the shape rule and the tie gate appeared to have over the vote, which is why the fix
+ * belongs before any of those numbers are quoted.
+ *
+ * The scenario: the two primary prompts answer with a statement that returns no rows, and the
+ * `values` source — the third candidate of `select-mixed` — answers with the gold. The pool is
+ * therefore [empty, empty, correct] and the majority of members is empty.
+ */
+describe('a vote over a pool where nothing was answered', () => {
+  it('answers with the candidate that returned rows, not with the majority that returned none', async () => {
+    // Two of the three cross sources return a statement that returns no rows; the second model
+    // answers the question. The pool is [correct, empty, empty] and the majority of *members* is
+    // empty — which is what the vote used to score.
+    const second = await startEndpoint({ reply: (request) => replyFor(request, { first: correct }) });
+    try {
+      const result = await run({
+        plan: { first: empty },
+        env: {
+          BIRD_ARMS: 'vote-cross',
+          BIRD_SECOND_MODEL: 'second-model',
+          BIRD_SECOND_BASE_URL: second.url,
+          BIRD_SECOND_API_KEY: 'second-key',
+        },
+      });
+      expect(result.code).toBe(0);
+      const arms = result.report.arms as { arm: string; passed: number; total: number; vote?: number; agreement?: number }[];
+      const [vote] = arms;
+      expect(vote?.passed).toBe(QUESTIONS.length);
+      expect(vote?.total).toBe(QUESTIONS.length);
+      // Three candidates went into the vote; the two empty ones were removed before the count, so
+      // the decision is unanimous rather than 2:1 for a result that answered nothing.
+      expect(vote?.vote).toBe(3);
+      expect(vote?.agreement).toBe(1);
+      const cases = result.report.cases as {
+        id: string;
+        passed: boolean;
+        winnerSource?: string;
+        candidates?: { source: string; correct: boolean }[];
+      }[];
+      for (const row of cases) {
+        expect(row.winnerSource).toBe('inline+evidence@second');
+        expect(row.passed).toBe(true);
+        // The record still carries all three verdicts: the empty ones are excluded from the
+        // decision, not from the artifact.
+        expect(row.candidates?.map((verdict) => verdict.correct)).toEqual([true, false, false]);
+      }
+    } finally {
+      await second.close();
+    }
+  });
+});
+
 describe('a sampling arm', () => {
   it('records which candidate held the answer, one verdict per candidate', async () => {
     // One source of the mixed set (the one that carries the question's literal values) is

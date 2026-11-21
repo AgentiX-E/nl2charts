@@ -43,6 +43,22 @@ export function resultGroups(candidates) {
 }
 
 /**
+ * The pool a vote is taken over: the same candidates minus the ones that returned nothing.
+ *
+ * The runner drops the empty result before counting (`offeredCandidates(considered, true)` in
+ * `runCase`), for the reason that comment gives — no question in either BIRD split has an empty
+ * gold — and this tool has to drop it too or it prices a policy nobody runs. The gap was not
+ * cosmetic: on `44897147794` two statements that returned nothing outvoted one that answered on 9
+ * questions, and on `44889941650` on 13 (9 of them won by the non-empty candidate), which is the
+ * size of the advantage the shape rule and the tie gate appeared to hold over the vote. Calling
+ * empty is a failure, and a failure is not an opinion to count.
+ */
+export function decidingPool(candidates) {
+  const answered = candidates.filter((candidate) => (candidate.rows ?? 0) > 0);
+  return answered.length === 0 ? candidates : answered;
+}
+
+/**
  * The modal group: largest first, earliest on a tie.
  *
  * `majorityResult` in `@agentix-e/nl2charts-devkit` is the shipped rule and this is its
@@ -98,10 +114,35 @@ export const POLICIES = [
   {
     name: 'vote',
     implementable: true,
-    note: 'modal result group: largest, earliest on a tie, no model call',
+    note: 'modal result group over the candidates that returned rows: largest, earliest on a tie, no call',
     decide: (row) => {
-      const modal = modalGroup(row.candidates);
+      const modal = modalGroup(decidingPool(row.candidates));
       return modal.members.length === 0 ? undefined : modal.members.some((member) => member.correct);
+    },
+  },
+  {
+    name: 'wider',
+    implementable: true,
+    note: 'the vote, except where the modal group is one row and a wider candidate stands outside it',
+    decide: (row) => {
+      const pool = decidingPool(row.candidates);
+      const modal = modalGroup(pool);
+      if (modal.members.length === 0) return undefined;
+      // The group's row count is the fewest any member returned, not the first member's: a
+      // fingerprint collapses duplicate tuples, so members of one group can differ in physical row
+      // count while holding the same distinct rows. Reading the first member made the shipped rule
+      // order-dependent, and on `44897147794` it skipped the wider candidate on 3 of 600 cases for
+      // that reason alone — at no gain, since the corrected rule scores the same 387.
+      const modalRows = Math.min(...modal.members.map((candidate) => candidate.rows ?? 0));
+      if (modalRows > 1) return modal.members.some((candidate) => candidate.correct);
+      const modalColumns = Math.min(...modal.members.map((candidate) => candidate.columns ?? 0));
+      const outside = pool.filter((candidate) => !modal.members.includes(candidate) && (candidate.columns ?? 0) >= modalColumns);
+      const widest = outside.reduce(
+        (best, candidate) => (best === undefined || (candidate.rows ?? 0) > (best.rows ?? 0) ? candidate : best),
+        undefined,
+      );
+      if (widest !== undefined && (widest.rows ?? 0) > modalRows) return widest.correct;
+      return modal.members.some((candidate) => candidate.correct);
     },
   },
   {
@@ -109,7 +150,7 @@ export const POLICIES = [
     implementable: true,
     note: 'the vote, except where two groups tie and the selector already decided',
     decide: (row) => {
-      const modal = modalGroup(row.candidates);
+      const modal = modalGroup(decidingPool(row.candidates));
       if (modal.members.length === 0) return undefined;
       if (modal.tied) {
         const member = chosenMember(row.candidates) ?? memberBySource(row.candidates, row.winnerSource);
@@ -123,7 +164,7 @@ export const POLICIES = [
     implementable: true,
     note: 'the vote, except where the modal group is one row and the selector returned more',
     decide: (row) => {
-      const modal = modalGroup(row.candidates);
+      const modal = modalGroup(decidingPool(row.candidates));
       if (modal.members.length === 0) return undefined;
       const member = chosenMember(row.candidates) ?? memberBySource(row.candidates, row.winnerSource);
       const modalRows = Math.max(...modal.members.map((candidate) => candidate.rows ?? 0));
@@ -139,7 +180,7 @@ export const POLICIES = [
     implementable: false,
     note: 'upper bound: either policy right counts, which needs the answer key',
     decide: (row) => {
-      const modal = modalGroup(row.candidates);
+      const modal = modalGroup(decidingPool(row.candidates));
       const member = chosenMember(row.candidates) ?? memberBySource(row.candidates, row.winnerSource);
       const byVote = modal.members.length > 0 && modal.members.some((candidate) => candidate.correct);
       const byChoice = member !== undefined && member.correct;
@@ -206,7 +247,7 @@ export function pricePolicies(rows) {
 export function census(rows) {
   const buckets = new Map();
   for (const row of rows) {
-    const modal = modalGroup(row.candidates);
+    const modal = modalGroup(decidingPool(row.candidates));
     const key = modal.groups;
     const bucket = buckets.get(key) ?? { groups: key, cases: 0, recall: 0, modalCorrect: 0, tied: 0 };
     bucket.cases += 1;
@@ -219,17 +260,26 @@ export function census(rows) {
 }
 
 /**
- * Whether the replayed vote reproduces the arm that ran it.
+ * Whether a replayed policy reproduces the arm that ran it.
  *
- * The pool is keyed by question id, and only questions both arms scored are compared: a vote arm
- * that dropped a case would otherwise be counted as a disagreement about a case it never held.
+ * The pool is keyed by question id, and only questions the arm scored are compared: an arm that
+ * dropped a case would otherwise be counted as a disagreement about a case it never held.
  *
- * A run with no vote arm compares **zero** cases and reports "0 of 0 agree", which is the shape of a
- * green check that checked nothing — the first artifact this tool was pointed at after that arm was
- * added to the dispatch list (`44889941650`, two arms) produced exactly that line. The caller has to
- * treat an empty comparison as a refusal rather than as agreement, and `main` exits 3 for it.
+ * A run with no such arm compares **zero** cases and reports "0 of 0 agree", which is the shape of a
+ * green check that checked nothing — the first artifact this tool was pointed at after the vote arm
+ * was added to the dispatch list (`44889941650`, two arms) produced exactly that line. The caller has
+ * to treat an empty comparison as a refusal rather than as agreement, and `main` exits 3 for it.
+ *
+ * This is generic because the vote is not the only policy that runs as an arm. `wider` does too, and
+ * its replay disagreed with its arm on 1 of the 600 cases of `44897147794` — one case, on a policy
+ * that had been read as a +4 over the vote. The cause was worth the generalization: a fingerprint
+ * collapses duplicate tuples, so the members of one group can differ in physical row count, and the
+ * shipped rule was reading that count off whichever member arrived first. A check per policy turns
+ * "the replay prices what ships" from a claim into a measurement.
  */
-export function verifyVote(artifact, voteArm = 'select-cross-pooled-vote') {
+export function verifyRule(artifact, arm, policy) {
+  const entry = POLICIES.find((candidate) => candidate.name === policy);
+  if (entry === undefined) throw new Error(`no policy named ${policy}`);
   const byId = new Map();
   for (const row of artifact.cases ?? []) {
     if (!Array.isArray(row.candidates) || row.candidates.length === 0) continue;
@@ -238,30 +288,47 @@ export function verifyVote(artifact, voteArm = 'select-cross-pooled-vote') {
   }
   const compared = [];
   for (const [id, arms] of byId) {
-    const voteRow = arms[voteArm];
-    if (voteRow === undefined) continue;
-    const replayed = modalGroup(voteRow.candidates).members.some((candidate) => candidate.correct);
-    compared.push({ id, recorded: voteRow.passed === true, replayed });
+    const target = arms[arm];
+    if (target === undefined) continue;
+    compared.push({ id, recorded: target.passed === true, replayed: entry.decide(target) === true });
   }
   const disagreements = compared.filter((entry) => entry.recorded !== entry.replayed);
   return {
-    arm: voteArm,
+    arm,
+    policy,
     compared: compared.length,
     agreements: compared.length - disagreements.length,
     disagreements,
   };
 }
 
-function describe(artifactPath, arm, table, pool, vote) {
+/** The vote arm's own check, in the shape the command line has always printed. */
+export function verifyVote(artifact, voteArm = 'select-cross-pooled-vote') {
+  return verifyRule(artifact, voteArm, 'vote');
+}
+
+/**
+ * Which file to read: the one on the command line, or the artifact this repository holds.
+ *
+ * Exported because the second half of that sentence is a path into a directory that only exists
+ * after a benchmark has run, so the default is worth asserting here rather than discovering by
+ * pointing the tool at a machine that has never run one.
+ */
+export function artifactPath(positional) {
+  return positional ?? resolve(ROOT, 'eval/out/bird-eval.json');
+}
+
+function describe(file, arm, table, pool, checks) {
+  const cases = pool.reduce((sum, bucket) => sum + bucket.cases, 0);
   const lines = [];
-  lines.push(`POOL REPLAY  ${artifactPath}`);
-  lines.push(`  arm ${arm}  ·  ${table[0]?.scored ?? 0} cases with a pool  ·  ${pool.length} distinct-result buckets`);
-  if (vote !== undefined) {
+  lines.push(`POOL REPLAY  ${file}`);
+  lines.push(`  arm ${arm}  ·  ${cases} cases with a pool  ·  ${pool.length} distinct-result buckets`);
+  for (const check of checks) {
     lines.push(
-      vote.compared === 0
-        ? `  vote replay vs ${vote.arm}: not in this artifact, so nothing was verified`
-        : `  vote replay vs ${vote.arm}: ${vote.agreements} of ${vote.compared} agree` +
-            (vote.disagreements.length === 0 ? '' : ` — ${vote.disagreements.length} DISAGREE`),
+      check.compared === 0
+        ? `  ${check.policy} replay vs ${check.arm}: not in this artifact, so nothing was verified`
+        : `  ${check.policy} replay vs ${check.arm}: ${check.agreements} of ${check.compared} agree` +
+            (check.disagreements.length === 0 ? '' : ` — ${check.disagreements.length} DISAGREE`),
     );
   }
   for (const bucket of pool) {
@@ -284,14 +351,26 @@ function describe(artifactPath, arm, table, pool, vote) {
   return lines;
 }
 
+/**
+ * The arms this tool can check itself against, one flag each.
+ *
+ * A policy earns a row here by having run as an arm: the check compares the rule over an arm's own
+ * recorded pool against the verdict that arm wrote down, which is the only evidence that offline
+ * pricing and shipping behaviour are the same rule.
+ */
+export const VERIFICATIONS = [
+  { flag: '--verify-vote', verifyArm: 'select-cross-pooled-vote', policy: 'vote' },
+  { flag: '--verify-wider', verifyArm: 'select-cross-pooled-wider', policy: 'wider' },
+];
+
 export async function main(argv) {
   const args = argv.slice(2);
   const json = args.includes('--json');
-  const verify = args.includes('--verify-vote');
+  const checks = VERIFICATIONS.filter((entry) => args.includes(entry.flag));
   const armFlag = args.indexOf('--arm');
   const named = armFlag === -1 ? undefined : args[armFlag + 1];
   const positional = args.filter((arg, index) => !arg.startsWith('--') && (index === 0 || !args[index - 1]?.startsWith('--arm')));
-  const path = positional[0] ?? resolve(ROOT, 'eval/out/bird-eval.json');
+  const path = artifactPath(positional[0]);
   const artifact = JSON.parse(readFileSync(path, 'utf8'));
   const arm = named ?? widestArm(artifact);
   if (arm === undefined) {
@@ -301,22 +380,25 @@ export async function main(argv) {
   const rows = casesOf(artifact, arm);
   const table = pricePolicies(rows);
   const pool = census(rows);
-  const vote = verify ? verifyVote(artifact) : undefined;
+  const verifications = checks.map(({ verifyArm, policy }) => verifyRule(artifact, verifyArm, policy));
   if (json) {
-    process.stdout.write(`${JSON.stringify({ artifact: path, arm, table, pool, vote }, null, 1)}\n`);
+    process.stdout.write(`${JSON.stringify({ artifact: path, arm, table, pool, vote: verifications[0], verifications }, null, 1)}\n`);
   } else {
-    for (const line of describe(path, arm, table, pool, vote)) process.stdout.write(`${line}\n`);
+    for (const line of describe(path, arm, table, pool, verifications)) process.stdout.write(`${line}\n`);
   }
-  if (vote !== undefined && vote.compared === 0) {
+  const unverified = verifications.filter((check) => check.compared === 0);
+  if (unverified.length > 0) {
+    const flags = checks.filter((_, index) => unverified.includes(verifications[index])).map((entry) => entry.flag);
     process.stderr.write(
-      `POOL REPLAY: --verify-vote was asked for and ${vote.arm} is not in ${path}, so nothing was verified; ` +
+      `POOL REPLAY: ${flags.join(' and ')} was asked for and ${unverified.map((check) => check.arm).join(', ')} is not in ${path}, so nothing was verified; ` +
         'the table above is unpriced rather than checked\n',
     );
     return 3;
   }
-  if (vote !== undefined && vote.disagreements.length > 0) {
+  const disagreed = verifications.filter((check) => check.disagreements.length > 0);
+  if (disagreed.length > 0) {
     process.stderr.write(
-      `POOL REPLAY: the modal rule does not reproduce ${vote.arm} on ${vote.disagreements.length} of ${vote.compared} cases; ` +
+      `POOL REPLAY: ${disagreed.map((check) => `the ${check.policy} rule does not reproduce ${check.arm} on ${check.disagreements.length} of ${check.compared} cases`).join('; ')}; ` +
         'every row above is a statement about this tool rather than about the policies\n',
     );
     return 1;

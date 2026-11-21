@@ -8,19 +8,23 @@
  */
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { ReplayCandidate, ReplayRow } from '../tools/pool-replay.d.mts';
 import {
   POLICIES,
+  VERIFICATIONS,
+  artifactPath,
   casesOf,
   census,
   chosenMember,
+  decidingPool,
   main,
   memberBySource,
   modalGroup,
   pricePolicies,
   resultGroups,
+  verifyRule,
   verifyVote,
   widestArm,
 } from '../tools/pool-replay.mjs';
@@ -45,6 +49,18 @@ const row = (id: string, candidates: readonly ReplayCandidate[], extra: Record<s
   ...extra,
 });
 
+/**
+ * One case through one policy: `true` answered correctly, `false` answered wrongly, `undefined`
+ * had no member to name. Reading it back out of the priced table rather than out of `POLICIES`
+ * keeps every assertion below a statement about the number a reader sees.
+ */
+const outcome = (policy: string, pool: readonly ReplayCandidate[], extra: Record<string, unknown> = {}) => {
+  const entry = pricePolicies([row('1', pool, extra)]).find((candidate) => candidate.policy === policy);
+  if (entry === undefined) throw new Error(`no policy named ${policy}`);
+  if (entry.undecided === 1) return undefined;
+  return entry.passed === 1;
+};
+
 describe('the modal group, as the vote arm computes it', () => {
   it('groups by fingerprint, keeps the largest group, and reports how many results there were', () => {
     const modal = modalGroup([candidate('a', 'x', false), candidate('b', 'y', true), candidate('c', 'y', true)]);
@@ -67,6 +83,72 @@ describe('the modal group, as the vote arm computes it', () => {
   it('treats a pool of nothing as no groups rather than as an error', () => {
     expect(modalGroup([])).toEqual({ members: [], groups: 0, tied: false });
     expect(resultGroups([])).toEqual([]);
+  });
+});
+
+describe('the pool a vote is taken over', () => {
+  it('drops a candidate that returned nothing, because calling empty is a failure and not an opinion', () => {
+    const pool = [candidate('a', 'x', false, { rows: 0 }), candidate('b', 'x', false, { rows: 0 }), candidate('c', 'y', true, { rows: 3 })];
+    expect(decidingPool(pool).map((member) => member.source)).toEqual(['c']);
+    // Two statements that returned nothing do not outvote the one that answered. This is the bug
+    // the runner carried: `modal` filtered empty results through `eligibleIndices` and the vote did
+    // not, so on `44897147794` the two empty statements won 9 questions and on `44889941650` 13.
+    expect(outcome('vote', pool)).toBe(true);
+  });
+
+  it('keeps the whole pool when nothing answered, because there is no vote left to take', () => {
+    const pool = [candidate('a', 'x', true, { rows: 0 }), candidate('b', 'y', false, { rows: 0 })];
+    expect(decidingPool(pool)).toHaveLength(2);
+    expect(outcome('vote', pool)).toBe(true);
+  });
+});
+
+describe('the wider rule', () => {
+  const shaped = (source: string, fingerprint: string, correct: boolean, rows: number, columns: number, extra = {}) =>
+    candidate(source, fingerprint, correct, { rows, columns, ...extra });
+
+  it('lets a wider candidate outside a one-row consensus take the answer', () => {
+    const pool = [shaped('a', 'x', false, 1, 4, { chosen: true }), shaped('c', 'x', false, 1, 4), shaped('b', 'y', true, 6, 4)];
+    expect(outcome('vote', pool)).toBe(false);
+    expect(outcome('wider', pool)).toBe(true);
+  });
+
+  it('leaves a consensus of more than one row alone, however wide the outsider is', () => {
+    const pool = [shaped('a', 'x', false, 4, 4), shaped('c', 'x', false, 4, 4), shaped('b', 'y', true, 9, 4)];
+    expect(outcome('wider', pool)).toBe(false);
+  });
+
+  it('does not trade one row for another, so a tie still goes to the earliest group', () => {
+    const pool = [shaped('a', 'x', false, 1, 4), shaped('b', 'y', true, 1, 4)];
+    expect(outcome('vote', pool)).toBe(false);
+    expect(outcome('wider', pool)).toBe(false);
+  });
+
+  it('does not call a candidate wider when it returned fewer columns than the consensus', () => {
+    // More rows from a narrower projection is a different answer, not a more complete one.
+    const pool = [shaped('a', 'x', false, 1, 6), shaped('b', 'y', true, 9, 3)];
+    expect(outcome('wider', pool)).toBe(false);
+  });
+
+  it('never weighs a candidate that returned nothing', () => {
+    const pool = [shaped('a', 'x', false, 1, 2), shaped('b', 'y', true, 0, 9)];
+    expect(outcome('wider', pool)).toBe(false);
+  });
+
+  it('has nothing to weigh when the whole pool is one consensus', () => {
+    expect(outcome('wider', [shaped('a', 'x', true, 1, 4)])).toBe(true);
+    expect(outcome('wider', [shaped('a', 'x', false, 1, 4)])).toBe(false);
+    expect(outcome('wider', [])).toBeUndefined();
+  });
+
+  it('reads a group by the rows it holds, not by the first member that arrived', () => {
+    // A fingerprint collapses duplicate tuples, so one group can hold a member that returned the
+    // same row three times. The group is a one-row answer either way, and the rule looks outside it
+    // for the wider candidate — which is what the third candidate is.
+    const pool = [shaped('a', 'x', false, 3, 2), shaped('b', 'x', false, 1, 2), shaped('c', 'y', true, 4, 2)];
+    expect(outcome('wider', pool)).toBe(true);
+    // Swapping the two consensus members changes nothing: a group's shape is a fact about the group.
+    expect(outcome('wider', [shaped('b', 'x', false, 1, 2), shaped('a', 'x', false, 3, 2), shaped('c', 'y', true, 4, 2)])).toBe(true);
   });
 });
 
@@ -116,6 +198,10 @@ describe('the pricing table', () => {
     // policy above 2 here — that gap is the whole argument for buying the call on a tie only.
     expect(byName.chosen?.passed).toBe(1); // case 3 only: the selector lost 1 and 2
     expect(byName.vote?.passed).toBe(2); // case 2 by majority, case 3 by the earliest group
+    // Every candidate here returned exactly one row, so no one is wider than the consensus and the
+    // shape rule degenerates into the vote — which is the point of pricing it as its own row: on
+    // this fixture it must show no difference, and the block above shows the difference it can.
+    expect(byName.wider?.passed).toBe(2);
     expect(byName['vote-unless-tie']?.passed).toBe(2); // the same two, by the right reason each
     expect(byName['oracle{chosen,vote}']?.passed).toBe(2);
     for (const entry of table) expect(entry.undecided).toBe(0);
@@ -124,6 +210,9 @@ describe('the pricing table', () => {
   it('marks the oracle as unshippable and the rest as implementable', () => {
     const table = pricePolicies(rows);
     expect(table.filter((entry) => !entry.implementable).map((entry) => entry.policy)).toEqual(['oracle{chosen,vote}']);
+    // The list is pinned rather than counted: a policy added here changes what the published table
+    // says, and that edit should have to touch this line.
+    expect(table.map((entry) => entry.policy)).toEqual(['chosen', 'vote', 'wider', 'vote-unless-tie', 'vote-preferred-shape', 'oracle{chosen,vote}']);
     // Every policy is either implementable or explicitly an upper bound: a row that is neither is
     // a policy nobody can act on and no reader can discount.
     expect(table.every((entry) => typeof entry.implementable === 'boolean')).toBe(true);
@@ -137,6 +226,65 @@ describe('the pricing table', () => {
 
   it('reads an empty set as a rate of zero rather than as a division by zero', () => {
     expect(pricePolicies([])[0]).toMatchObject({ passed: 0, scored: 0, accuracy: 0 });
+  });
+});
+
+describe('the shape rule that reads the recorded choice', () => {
+  const shaped = (source: string, fingerprint: string, correct: boolean, rows: number, columns: number, extra = {}) =>
+    candidate(source, fingerprint, correct, { rows, columns, ...extra });
+
+  it('takes the selector when it returned more rows than a one-row consensus, at no narrower a width', () => {
+    const pool = [shaped('a', 'x', true, 1, 4), shaped('b', 'x', true, 1, 4), shaped('c', 'y', false, 5, 4, { chosen: true })];
+    // The vote holds the consensus alone; this rule follows the recorded choice and is wrong here,
+    // which is the price of it and the reason it is priced apart from the vote rather than folded in.
+    expect(outcome('vote', pool)).toBe(true);
+    expect(outcome('vote-preferred-shape', pool)).toBe(false);
+  });
+
+  it('takes the selector when it is right, which is the case that pays for the rule', () => {
+    const pool = [shaped('a', 'x', false, 1, 4), shaped('c', 'y', true, 5, 4, { chosen: true })];
+    expect(outcome('vote-preferred-shape', pool)).toBe(true);
+  });
+
+  it('leaves the consensus alone when the selector is narrower than it', () => {
+    const pool = [shaped('a', 'x', false, 1, 6), shaped('c', 'y', true, 5, 3, { chosen: true })];
+    expect(outcome('vote-preferred-shape', pool)).toBe(false);
+  });
+
+  it('leaves a consensus of more than one row alone, however much the selector returned', () => {
+    const pool = [shaped('a', 'x', false, 3, 4), shaped('b', 'x', false, 3, 4), shaped('c', 'y', true, 9, 4, { chosen: true })];
+    expect(outcome('vote-preferred-shape', pool)).toBe(false);
+  });
+
+  it('leaves the consensus alone when the selector did not return more than it', () => {
+    const pool = [shaped('a', 'x', false, 1, 4), shaped('c', 'y', true, 1, 4, { chosen: true })];
+    expect(outcome('vote-preferred-shape', pool)).toBe(false);
+  });
+
+  it('falls back to the vote when nothing was recorded, and reads the source when it names one member', () => {
+    const unnamed = [shaped('a', 'x', true, 1, 4), shaped('c', 'y', false, 5, 4)];
+    expect(outcome('vote-preferred-shape', unnamed)).toBe(true);
+    const named = [shaped('a', 'x', false, 1, 4), shaped('c', 'y', true, 5, 4)];
+    expect(outcome('vote-preferred-shape', named, { winnerSource: 'c' })).toBe(true);
+    // A source that names two members names no member, so the fallback stays the vote.
+    const ambiguous = [shaped('a', 'x', false, 1, 4), shaped('c', 'y', true, 5, 4), shaped('c', 'z', true, 6, 4)];
+    expect(outcome('vote-preferred-shape', ambiguous, { winnerSource: 'c' })).toBe(false);
+  });
+});
+
+describe('a pool written before the shape was recorded', () => {
+  // `rows` and `columns` arrived with the shape rule; an artifact written before that has neither,
+  // and every rule that reads them has to read a missing one as zero rather than as a crash or,
+  // worse, as `NaN` — which compares false against every threshold and would silently make the
+  // rule return the consensus forever.
+  it('reads a missing row and column count as zero, and a missing verdict count as not chosen', () => {
+    const shapeless = (source: string, fingerprint: string, correct: boolean) => ({ fingerprint, source, correct });
+    const pool = [shapeless('a', 'x', false), shapeless('b', 'y', true)];
+    expect(decidingPool(pool)).toHaveLength(2); // nothing is known to be empty, so nothing is dropped
+    expect(outcome('vote', pool)).toBe(false); // 1:1, so the earliest group answers
+    expect(outcome('wider', pool)).toBe(false); // an unknown width is not a wider one
+    expect(outcome('vote-preferred-shape', pool)).toBe(false); // and no member is recorded
+    expect(outcome('chosen', pool)).toBeUndefined();
   });
 });
 
@@ -154,6 +302,11 @@ describe('the pool census', () => {
       // agreement — which is exactly what the `tied` column is for.
       { groups: 2, cases: 2, recall: 2, modalCorrect: 2, tied: 2 },
     ]);
+  });
+
+  it('buckets on the pool that answered, so two empty statements are not a second distinct result', () => {
+    const buckets = census([row('1', [candidate('a', 'x', false, { rows: 0 }), candidate('b', 'y', true, { rows: 1 })])]);
+    expect(buckets).toEqual([{ groups: 1, cases: 1, recall: 1, modalCorrect: 1, tied: 0 }]);
   });
 });
 
@@ -182,11 +335,61 @@ describe('the vote replay check', () => {
     expect(check.disagreements).toEqual([{ id: '1', recorded: false, replayed: true }]);
   });
 
+  it('flags the cases an artifact recorded before the empty result was dropped, rather than agreeing with the bug', () => {
+    // `44897147794` and `44889941650` were written by the arm that let two empty statements
+    // outvote the one that answered. Replaying them now disagrees on exactly those cases, and a
+    // check that agreed with them would be a check that certified the bug.
+    const check = verifyVote({
+      cases: [
+        {
+          id: '1',
+          arm: 'select-cross-pooled-vote',
+          passed: false,
+          candidates: [candidate('a', 'x', false, { rows: 0 }), candidate('b', 'x', false, { rows: 0 }), candidate('c', 'y', true, { rows: 2 })],
+        },
+      ],
+    });
+    expect(check.disagreements).toEqual([{ id: '1', recorded: false, replayed: true }]);
+  });
+
+  it('checks any policy that ran as an arm, not just the vote', () => {
+    // The `wider` rule reproduces its own arm on all 600 cases of `44897147794` once the group's
+    // row count is read off the group rather than off its first member; the vote arm in the same
+    // artifact disagrees on 8, which are exactly the cases the empty-result bug touched.
+    const artifact = {
+      cases: [
+        {
+          id: '1',
+          arm: 'select-cross-pooled-wider',
+          passed: true,
+          candidates: [candidate('a', 'x', false, { rows: 1, columns: 2 }), candidate('b', 'y', true, { rows: 4, columns: 2 })],
+        },
+        {
+          id: '2',
+          arm: 'select-cross-pooled-wider',
+          passed: true,
+          candidates: [candidate('a', 'x', true, { rows: 1, columns: 2 }), candidate('b', 'y', false, { rows: 4, columns: 2 })],
+        },
+      ],
+    };
+    expect(verifyRule(artifact, 'select-cross-pooled-wider', 'wider')).toMatchObject({ compared: 2, agreements: 1 });
+    expect(verifyRule(artifact, 'select-cross-pooled-wider', 'wider').disagreements).toEqual([{ id: '2', recorded: true, replayed: false }]);
+  });
+
+  it('refuses a policy name it does not price, rather than reporting agreement with nothing', () => {
+    expect(() => verifyRule({ cases: [] }, 'select-cross-pooled-wider', 'wide')).toThrow('no policy named wide');
+  });
+
   it('compares nothing when the artifact holds no vote arm, rather than reporting agreement', () => {
     expect(verifyVote({ cases: [{ id: '1', arm: 'select-cross', passed: true, candidates: [candidate('a', 'x', true)] }] })).toMatchObject({
       compared: 0,
       agreements: 0,
     });
+  });
+
+  it('skips a row with no pool and an artifact with no cases at all', () => {
+    expect(verifyVote({ cases: [{ id: '1', arm: 'select-cross-pooled-vote', passed: true }] })).toMatchObject({ compared: 0 });
+    expect(verifyVote({})).toMatchObject({ compared: 0, agreements: 0 });
   });
 });
 
@@ -258,6 +461,89 @@ describe('the command line', () => {
     const parsed = JSON.parse(out.join(''));
     expect(parsed.arm).toBe('select-cross');
     expect(parsed.table.map((entry: { policy: string }) => entry.policy)).toContain('oracle{chosen,vote}');
+  });
+
+  it('exits clean and says how many cases it compared when the replay agrees', async () => {
+    // The green path of the check, which no other test walks: without it the only exercised
+    // outcome of `--verify-vote` is a refusal, and a check that can only refuse is not a check.
+    const agreeing = {
+      cases: [
+        { id: '1', arm: 'select-cross-pooled-vote', passed: true, candidates: [candidate('a', 'x', true), candidate('b', 'y', false)] },
+        { id: '2', arm: 'select-cross-pooled-vote', passed: false, candidates: [candidate('a', 'x', false), candidate('b', 'y', false)] },
+      ],
+    };
+    const { dir, path } = write(agreeing);
+    const out: string[] = [];
+    const stdout = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: string | Uint8Array) => {
+      out.push(String(chunk));
+      return true;
+    });
+    const code = await main(['node', 'pool-replay.mjs', path, '--verify-vote']);
+    stdout.mockRestore();
+    rmSync(dir, { recursive: true, force: true });
+    expect(code).toBe(0);
+    expect(out.join('')).toContain('vote replay vs select-cross-pooled-vote: 2 of 2 agree');
+  });
+
+  it('checks the shape rule against its own arm when asked for that instead', async () => {
+    const artifact = {
+      cases: [
+        {
+          id: '1',
+          arm: 'select-cross-pooled-wider',
+          passed: true,
+          candidates: [candidate('a', 'x', false, { rows: 1, columns: 2 }), candidate('b', 'y', true, { rows: 5, columns: 2 })],
+        },
+      ],
+    };
+    const { dir, path } = write(artifact);
+    const out: string[] = [];
+    const stdout = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: string | Uint8Array) => {
+      out.push(String(chunk));
+      return true;
+    });
+    const code = await main(['node', 'pool-replay.mjs', path, '--verify-wider']);
+    stdout.mockRestore();
+    rmSync(dir, { recursive: true, force: true });
+    expect(code).toBe(0);
+    expect(out.join('')).toContain('wider replay vs select-cross-pooled-wider: 1 of 1 agree');
+  });
+
+  it('refuses when the arm it was asked to check is not in the artifact', async () => {
+    const { dir, path } = write(artifact);
+    const out: string[] = [];
+    const err: string[] = [];
+    const stdout = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: string | Uint8Array) => {
+      out.push(String(chunk));
+      return true;
+    });
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation((chunk: string | Uint8Array) => {
+      err.push(String(chunk));
+      return true;
+    });
+    const code = await main(['node', 'pool-replay.mjs', path, '--verify-wider']);
+    stdout.mockRestore();
+    stderr.mockRestore();
+    rmSync(dir, { recursive: true, force: true });
+    expect(code).toBe(3);
+    expect(out.join('')).toContain('wider replay vs select-cross-pooled-wider: not in this artifact');
+    expect(err.join('')).toContain('--verify-wider');
+  });
+
+  it('reads the artifact this repository holds when the command line names no file', () => {
+    expect(artifactPath('/tmp/x.json')).toBe('/tmp/x.json');
+    expect(artifactPath(undefined)).toBe(join(resolve('.'), 'eval/out/bird-eval.json'));
+  });
+
+  it('names only policies it prices, so a flag cannot outlive the rule it checks', () => {
+    const names = POLICIES.map((policy) => policy.name);
+    expect(VERIFICATIONS.length).toBeGreaterThan(0);
+    for (const entry of VERIFICATIONS) {
+      expect(names).toContain(entry.policy);
+      expect(entry.flag.startsWith('--verify-')).toBe(true);
+      expect(entry.verifyArm).toMatch(/^select-cross-pooled-/);
+    }
+    expect(VERIFICATIONS.map((entry) => entry.policy)).toEqual(['vote', 'wider']);
   });
 
   it('fails the run when the replay does not reproduce the vote arm', async () => {

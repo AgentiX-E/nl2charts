@@ -6,21 +6,64 @@ cannot be argued with.
 
 ## Unreleased
 
+### Fixed
+- **The vote counted statements that returned nothing.** `modal` filters empty candidates through
+  `eligibleIndices` and the vote called `majorityResult` on the raw list, so two statements that
+  returned nothing outvoted the one that answered. On `44897147794` that is **8 questions** and on
+  `44889941650` **13** (9 of them won by the non-empty candidate), and it is the whole of the
+  advantage the shape rule and the tie gate appeared to hold over the vote. `offeredCandidates(
+  considered, true).offered` is now the vote's input pool in `runCase`, and `tools/pool-replay.mjs`
+  drops the same candidates through `decidingPool` so that offline pricing and shipping behaviour are
+  one rule. Corrected on the same 600 cases: `vote` **391**, `wider` **387**, `vote-unless-tie`
+  **395**, `oracle` 406, against the selector's 383.
+- **`wider` read the modal group's shape off its first member.** A fingerprint is `resultKey` hashed,
+  and `resultKey` collapses duplicate tuples, so two members of one group hold the same distinct rows
+  while differing in physical row count — a join fans one row out to six. `widerIndex` took
+  `modalFirst.rows.length`, which made the rule depend on arrival order: 21 of the 600 modal groups on
+  this pool have members that disagree this way and on 3 of them the fanned-out copy arrived first,
+  so the rule skipped the wider candidate it exists to find. The group's row count is now the **fewest**
+  any member returned — which is also its distinct-row count, since every member holds the distinct
+  set with multiplicity at least one — and `tools/pool-replay.mjs` reads it the same way. The score
+  does not move (387 before and after); the replay now reproduces `select-cross-pooled-wider` on
+  **600 of 600**, where it disagreed on 1 before (`1066`).
+- **`select-cross-pooled-wider-tie` withdrawn before it ran, and the bar it carried replaced.** It was
+  registered at ≥ 390/600 against a vote of 377 and a shape rule of 385; over the pool that answered,
+  the vote reads 391 and the shape rule 387, and the composition of the two reads 391 against
+  `vote-unless-tie`'s 395. The shape rule was never ahead. `docs/benchmarks.md` now registers the arm
+  that is left — `select-cross-pooled-tie` re-run on the corrected vote — at ≥ 400/600, with the
+  arithmetic that makes the bar falsifiable: the corrected vote answers 391 of the questions the gate
+  does not buy, the gate bought 39 and added 13, and none of those 39 is one of the 8 the repair
+  recovered.
+
 ### Added
+- **`--verify-wider`, and `verifyRule` underneath it: every policy that ran as an arm is checked
+  against it.** The vote was the only rule compared to its own arm, and the rule nobody was checking
+  is the one that had drifted. `verifyRule(artifact, arm, policy)` replays a policy over an arm's
+  recorded pool and compares it case by case; `verifyVote` is now its default, `--verify-wider` is the
+  second flag, and `VERIFICATIONS` is the table a new flag has to be added to. On `44897147794`:
+  `wider` 600 of 600 agree, `vote` 592 of 600 — the 8 are the repair, and a check that agreed with
+  them would be a check that certified the bug.
+- **`tools/pool-replay.mjs` prices what shipped, in the shape the reader sees.** `decidingPool`,
+  `artifactPath`, the `wider` policy row and a `wider` block of seven tests, a per-policy check for
+  membership in `POLICIES`, and a fixture for a pool written before the shape was recorded — `rows`,
+  `columns` and `chosen` all read as zero-or-absent rather than as `NaN`. The tool's own four numbers
+  are **99.49 / 96.64 / 100 / 99.49** over 47 tests; the residue is the module-level entry guard,
+  which no in-process test can enter.
 - **`'wider'`: the first selection rule that reads the shape of a result instead of its text or its
   agreement.** Replaying the 600-question dev artifact `44889941650` against every free rule the pool
   admits turned up one the shipping set did not have: take the modal group, **except** where it
   returned a single row and a candidate outside it returned more rows in at least as many columns.
-  It reads **385** where `chosen` reads 383 and `vote` 377, at zero calls against the selector's 600;
-  it fired on 19 questions, was right on 10, and the vote was right on 2 of those 19. The mechanism is
+  It reads 385 where `chosen` reads 383 — and 387 where the corrected vote reads 391, which is why it
+  ships as a choice and not as a default; it fired on 19 questions, was right on 10, and the vote was
+  right on 2 of those 19. The mechanism is
   specific rather than fitted: a single-row consensus is what an aggregate answer looks like, and on
   those 19 the question wanted rows. `chooseCandidateByRule` routes it through `widerIndex`, the
   override is refused when the modal group already returned more than one row, and it is refused when
   the wider candidate is narrower in columns — a projection that dropped a column is not a fuller
-  answer. One pool is a hypothesis, so it ships as a choice a caller can measure and
-  `select-cross-pooled-wider` is the arm that holds it to the bar written in `docs/benchmarks.md`
-  before the dispatch (≥ 385/600, strictly above `select-cross-pooled-vote`, and
-  `selectorRule.rules.wider` ≥ 15).
+  answer. One pool is a hypothesis, so `select-cross-pooled-wider` is the arm that holds it to a bar
+  written in `docs/benchmarks.md` before the dispatch (≥ 385/600, strictly above
+  `select-cross-pooled-vote`, and `selectorRule.rules.wider` ≥ 15); it ran 387 and the bar is
+  withdrawn with the comparison that produced it.
 - **`tools/fetch-artifact.mjs`, and the 401 that was a header rather than a wall.** The previous
   round built a readback branch because `/actions/artifacts/{id}/zip` answered `401`. It does not: the
   endpoint answers `302` to a signed storage URL, `urllib` and `fetch` forward the caller's

@@ -208,9 +208,21 @@ export interface Arm {
    * those 16 (383 against 380 over the split) and was worse on the pools that agreed, so the call
    * is worth buying *only* where the vote is tied. That is 16 calls on 600 questions instead of
    * 600, and it is the arm `select-cross-tie` exists to measure rather than derive.
+   *
+   * The 16 is what that pool held. `44889941650`, drawing its own candidates, held 46 — 41
+   * three-way ties and 5 two-way ties, and the census prints `tied` per bucket, so the number a
+   * gate's price rests on is that field's total on the pool it will run on.
    */
   readonly gate?: 'results' | 'tie';
-  /** Who picks when the gate did not spend. Defaults to `shortest`, the rule this pool prefers. */
+  /**
+   * Who picks when the gate did not spend.
+   *
+   * Defaults to `shortest` on a `results` gate and to `modal` on a `tie` gate, which are the two
+   * rules the readings named. On a tie gate this field is also how two measured levers compose:
+   * naming `wider` makes the free shape guard answer the 554 questions the vote can settle and
+   * leaves the model the 46 it cannot, which is 390 of 600 on the pool `44889941650` recorded —
+   * against `wider` alone at 385, the selector at 383 and the vote at 377, for 0.077 calls a case.
+   */
   readonly gateRule?: SelectionRule;
   /**
    * Show the judge the columns of the tables its candidates read.
@@ -1652,6 +1664,20 @@ export const ARMS: readonly Arm[] = [
   // (`chosen` 383, `vote` 377, `vote-unless-tie` 383 on the recorded pool); this is the arm that
   // turns the third number into a reading, which is the only thing it is missing.
   { name: 'select-cross-pooled-tie', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: CROSS_SOURCES, pool: 'select-cross', gate: 'tie' },
+  // The same gate, with the free rule that reads shape answering where it holds.
+  //
+  // Offline on `44889941650`'s pool, priced in one table: `vote` 377, `chosen` 383, `wider` 385, and
+  // **390** for "`wider` everywhere except the ties, where the model decides". Thirty-nine cases of
+  // three-way tie and five of two-way tie are where the selector is paid; the other 554 are answered
+  // by a rule, so the arm costs 0.077 calls a case against `select-cross-pooled`'s 1.0 — and it is a
+  // composition of two levers that have each been measured rather than a third policy: the gate from
+  // `select-cross-pooled-tie`, the rule from `select-cross-pooled-wider`, and this arm is what
+  // happens when the second answers where the first holds.
+  //
+  // The upper bound over the same three sources is 406 (67.67%), so 390 leaves 16 cases on the table
+  // — that is the headroom a per-question router would need to find, and it is not a rule this file
+  // can write from the pool alone.
+  { name: 'select-cross-pooled-wider-tie', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, mixed: CROSS_SOURCES, pool: 'select-cross', gate: 'tie', gateRule: 'wider' },
   // The same pool, decided by the widest result instead of by the model — and the finding that put
   // it here.
   //
@@ -2050,6 +2076,7 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'select-cross-pooled-judge-reasoning': 'the reasoning model judging the chat model\'s candidates, in the format it can answer: needs the second model and a second key, one call per case, and is measured against `select-cross-pooled` on the same pool — the only judge-swap delta with no generation noise in it',
   'select-cross-pooled-vote': 'the same pool decided by the modal result instead of by a model: zero calls per case, and the only reading of "is the selector worth its call" whose candidates are shared — the archived artifacts say the count wins 53 disputed cases to 22 (p = 4.5e-4), and this arm is what turns that into a measurement instead of a re-reading',
   'select-cross-tie': 'the cross pool with the selector called only on the questions the vote cannot settle: offline replay over 600 dev questions puts it at 383 against the vote\'s 380 and the selector\'s 378 for 16 selection calls instead of 600, and a dispatch is what turns that replay into a reading — it needs the second model, so it is not in a routine chain',
+  'select-cross-pooled-wider-tie': 'the same gate with `wider` answering where it holds: the shape guard and the vote answer 554 of 600 questions for nothing and the selector is paid on the 46 the vote cannot settle — 390 against the vote\'s 377, the selector\'s 383 and `wider`\'s 385 on the pool this was priced on, at 0.077 calls a case; dispatch it with `select-cross` and `select-cross-pooled-vote`, because one pool decided four ways is the whole comparison',
   'select-cross-pooled-tie': 'the same gate on a pool it did not draw: `select-cross-tie` read 388 against a parent that had drawn different candidates, so the gate\'s own contribution was not separable from the pool\'s; here the candidates are `select-cross`\'s, and the delta against `select-cross-pooled` is the gate while the delta against `select-cross-pooled-vote` is what the selector adds where the vote cannot decide — dispatch it after `select-cross` and with `select-cross-pooled-vote`, because one pool decided three ways is the whole comparison',
   'select-cross-pooled-wider': 'the same pool decided by the widest result instead of by the model: the modal group, except where it returned one row and a candidate outside it returned more rows in at least as many columns — 385 against the vote\'s 377 and the selector\'s 383 on the 600 questions the rule was found on, at zero calls, which is why it needs a dispatch rather than a second read of the same pool; free on top of `select-cross`, so it belongs in the same run as `select-cross-pooled-vote`',
   'select-cross-pooled-dissent': 'the same pool and the same selector with one decomposition bought only where the three agreed: 4 calls per case on the 74.5% of cases the diversity reading found unanimous and 3.0 on the rest, and it must be dispatched after `select-cross` because it reads that pool — the pair against `select-cross-pooled` is the whole lever, so run those two and no others',
@@ -4294,8 +4321,14 @@ export function poolReadOf(
  * holds when the vote cannot decide, and the rule that answers differs between them for a reason
  * that is a measurement rather than a preference. On the agreed pool every member is worth the same,
  * so the shipped gate spends nothing on a `shortest` pick; on the decided-but-not-unanimous pool the
- * vote's own answer is the modal group, and choosing any other member there would be a different
- * policy wearing the gate's name.
+ * vote's own answer is the modal group, and by default that is what answers there too.
+ *
+ * `gateRule` names the other rule, and on a `tie` gate it is the whole point of the composition.
+ * `44889941650` priced the two free signals separately and together: `vote` 377, `chosen` 383,
+ * `wider` 385, and "`wider`, except on the ties where the model decides" **390** — the shape guard
+ * and the vote answer 554 cases for nothing, and the selector is paid on the 46 the vote cannot
+ * settle. That is not a different gate; it is the same gate with a rule that reads shape, which is
+ * why the rule is configurable here instead of hardcoded to `modal`.
  *
  * It is a function rather than a condition inside `runCase` because that function is three thousand
  * lines and no test reaches it: a rule that only exists inside an unexecuted branch is a rule the
@@ -4308,7 +4341,7 @@ export function gateDecision(
   gateRule?: SelectionRule,
 ): { readonly held: false } | { readonly held: true; readonly rule: SelectionRule } {
   if (gate === 'results' && majority.groups === 1) return { held: true, rule: gateRule ?? 'shortest' };
-  if (gate === 'tie' && !majority.tied) return { held: true, rule: 'modal' };
+  if (gate === 'tie' && !majority.tied) return { held: true, rule: gateRule ?? 'modal' };
   return { held: false };
 }
 
@@ -4455,7 +4488,7 @@ export function selectorRuleOf(
     if (rule !== undefined) rules[rule] = (rules[rule] ?? 0) + 1;
   }
   return {
-    rule: arm.selectRule ?? (arm.gate === 'tie' ? 'modal' : (arm.gateRule ?? 'shortest')),
+    rule: arm.selectRule ?? arm.gateRule ?? (arm.gate === 'tie' ? 'modal' : 'shortest'),
     decided: runs.filter((run) => run.selectedByRule !== undefined).length,
     eligible: runs.reduce((total, run) => total + (run.selectedByRule?.eligible ?? 0), 0),
     emptyPool: runs.filter((run) => run.selectedByRule?.emptyPool === true).length,
@@ -8278,7 +8311,17 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
         // record carries it — but the prompt the selector reads is its parent's, byte for byte.
         const considered: typeof candidates =
           dissentCandidate === undefined || arm.dissentVerify === 'pairwise' ? choosable : [...choosable, dissentCandidate];
-        const majority = majorityResult(considered, sameResult);
+        // The vote reads a pool with the empty result removed, and the rule that did it is not an
+        // opinion: no question in either BIRD split has an empty gold, so a candidate that returned
+        // nothing is wrong by construction. Without this the *majority* can be empty — two
+        // statements that returned nothing outvote one that answered — and the vote arm then scores
+        // the empty result while the modal rule, which reads `eligibleIndices`, does not. On
+        // `44897147794` that is 9 cases (8 of them won by the non-empty candidate) and on
+        // `44889941650` 13 (9 won), which is exactly the size of the advantage the shape rule and
+        // the tie gate appeared to have over the vote: both of them drop empties, and the policy
+        // they were compared against did not. The prompt is untouched — the selector still reads
+        // every candidate it was given — so this changes the decision and not the information.
+        const majority = majorityResult(offeredCandidates(considered, true).offered, sameResult);
         let winner = majority.winner as { sql: string; rows: readonly (readonly unknown[])[]; source: string };
         let selectedByModel: boolean | undefined;
         let selectedByRule: CaseRun['selectedByRule'];

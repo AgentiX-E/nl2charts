@@ -16,13 +16,14 @@ export interface ReplayCandidate {
   readonly fingerprint: string;
 }
 
-/** One case row, as far as a policy reads it. */
+/** One case row, as far as a policy reads it. `candidates` is optional because a row written by an
+ * arm that recorded no pool is a row this tool has to skip rather than assume away. */
 export interface ReplayRow {
   readonly id?: string;
   readonly arm?: string;
   readonly passed?: boolean;
   readonly winnerSource?: string;
-  readonly candidates: readonly ReplayCandidate[];
+  readonly candidates?: readonly ReplayCandidate[];
 }
 
 /** A policy: a name, whether it can ship, and a total function over a case. */
@@ -56,10 +57,14 @@ export interface CensusBucket {
 /** Whether the replayed modal rule reproduces the arm that ran it. */
 export interface VoteCheck {
   readonly arm: string;
+  readonly policy: string;
   readonly compared: number;
   readonly agreements: number;
   readonly disagreements: readonly { readonly id?: string; readonly recorded: boolean; readonly replayed: boolean }[];
 }
+
+/** Which arms this tool can check itself against, and the policy each one models. */
+export const VERIFICATIONS: readonly { readonly flag: string; readonly verifyArm: string; readonly policy: string }[];
 
 /** Candidates grouped by the judge's equality, earliest member first. */
 export function resultGroups(candidates: readonly ReplayCandidate[]): ReplayCandidate[][];
@@ -70,6 +75,9 @@ export function modalGroup(candidates: readonly ReplayCandidate[]): {
   readonly groups: number;
   readonly tied: boolean;
 };
+
+/** The pool a vote is taken over: the same candidates minus the ones that returned nothing. */
+export function decidingPool(candidates: readonly ReplayCandidate[]): readonly ReplayCandidate[];
 
 /** The member the arm answered with, when the record says so. */
 export function chosenMember(candidates: readonly ReplayCandidate[]): ReplayCandidate | undefined;
@@ -94,6 +102,12 @@ export function census(rows: readonly ReplayRow[]): CensusBucket[];
 
 /** The vote replay check. */
 export function verifyVote(artifact: { readonly cases?: readonly ReplayRow[] }, voteArm?: string): VoteCheck;
+
+/** One policy replayed against the arm that ran it. */
+export function verifyRule(artifact: { readonly cases?: readonly ReplayRow[] }, arm: string, policy: string): VoteCheck;
+
+/** The file to read: the argument, or the artifact this repository holds. */
+export function artifactPath(positional?: string): string;
 
 /** Entry point; resolves to the process exit code. */
 export function main(argv: readonly string[]): Promise<number>;

@@ -602,6 +602,27 @@ describe('choosing without a call', () => {
       expect(chooseCandidateByRule('wider', equallyWide).index).toBe(1);
     });
 
+    it('reads a group by the rows it holds, not by how many times its first member repeated one', () => {
+      // One group, two members, one distinct row: a join fan-out returned `7` three times where the
+      // other member returned it once. The group is a one-row answer either way, and the rule is
+      // written to look for a wider candidate outside it — which is what the third candidate is.
+      const fannedOut = { sql: 'SELECT COUNT(*) FROM t', rows: [[7], [7], [7]] };
+      const thin = { sql: 'SELECT COUNT(*) FROM t', rows: [[7]] };
+      const wider = { sql: 'SELECT name FROM t', rows: [[1], [2], [3], [4]] };
+      expect(chooseCandidateByRule('wider', [fannedOut, thin, wider]).index).toBe(2);
+      // The same pool with the two consensus members swapped answers the same: the group's shape is
+      // a fact about the group, so no rule may read it off whichever member arrived first.
+      expect(chooseCandidateByRule('wider', [thin, fannedOut, wider]).index).toBe(2);
+    });
+
+    it('leaves a consensus of genuinely several rows alone even when one member fanned them out', () => {
+      const doubled = { sql: 'SELECT a FROM t', rows: [[1], [2], [1], [2]] };
+      const plain = { sql: 'SELECT a FROM t', rows: [[1], [2]] };
+      const outsider = { sql: 'SELECT a, b FROM t', rows: [[1, 2], [2, 3], [3, 4], [4, 5], [5, 6]] };
+      expect(chooseCandidateByRule('wider', [doubled, plain, outsider]).index).toBe(0);
+      expect(chooseCandidateByRule('wider', [plain, doubled, outsider]).index).toBe(0);
+    });
+
     it('never prefers a candidate that returned nothing', () => {
       const set = [
         { sql: 'SELECT COUNT(*) FROM t', rows: [[7]] },

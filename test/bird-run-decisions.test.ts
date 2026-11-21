@@ -2025,10 +2025,27 @@ describe('the funnel of a decision that costs nothing', () => {
     });
   });
 
-  it('reports a tie gate as modal, which is the rule it applies when it holds', () => {
-    // The gate config is irrelevant to a tie gate's rule — it holds by answering with the modal
-    // group — and reporting the declared fallback there is what produced the wrong record.
-    expect(selectorRuleOf({ gate: 'tie', gateRule: 'shortest' }, [byRule('modal')] as never)?.rule).toBe('modal');
+  it('reports a tie gate as modal unless it was given a rule of its own', () => {
+    // A tie gate holds by answering the pooled question itself, and `modal` is that answer. It is
+    // only a default: `gateRule` names the rule that answers where the gate holds, which is how the
+    // shape guard is composed with the gate (`select-cross-pooled-wider-tie`).
+    expect(selectorRuleOf({ gate: 'tie' }, [byRule('modal')] as never)?.rule).toBe('modal');
+    expect(selectorRuleOf({ gate: 'tie', gateRule: 'wider' }, [byRule('wider')] as never)?.rule).toBe('wider');
+    // And the census is still the half that cannot lie: a declared `wider` whose rows say `modal`
+    // reports both, rather than reporting the declaration twice.
+    expect(selectorRuleOf({ gate: 'tie', gateRule: 'wider' }, [byRule('modal'), byRule('wider')] as never)).toMatchObject({
+      rule: 'wider',
+      rules: { modal: 1, wider: 1 },
+    });
+  });
+
+  it('lets a tie gate answer by a rule that reads shape, which is the composition it was built for', () => {
+    expect(gateDecision('tie', { groups: 2, tied: false }, 'wider')).toEqual({ held: true, rule: 'wider' });
+    // The default is still the vote's own answer: a tie gate with no rule named must not silently
+    // become a different policy.
+    expect(gateDecision('tie', { groups: 2, tied: false })).toEqual({ held: true, rule: 'modal' });
+    // A tie is still a tie: the rule only answers where the vote could.
+    expect(gateDecision('tie', { groups: 3, tied: true }, 'wider')).toEqual({ held: false });
   });
 
   it('keeps the fallback a results gate was configured with', () => {

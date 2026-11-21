@@ -570,6 +570,9 @@ function modalIndex(keys: readonly string[], eligible: readonly number[]): numbe
  * the wider candidate to be at least as wide in columns (so a longer dump of the wrong projection
  * does not win), and it takes the widest such candidate, earliest on a tie. Everything else returns
  * the modal member, so the rule is `modal` with one guard rather than a third opinion.
+ *
+ * "A single row" is a statement about the group's distinct rows, not about how many times a member
+ * repeated one: see the row-count comment below.
  */
 function widerIndex(executed: readonly ExecutedCandidate[], eligible: readonly number[]): number {
   const order: string[] = [];
@@ -588,7 +591,19 @@ function widerIndex(executed: readonly ExecutedCandidate[], eligible: readonly n
   }
   const modal = members.get(bestKey) as number[];
   const modalFirst = executed[modal[0] as number] as ExecutedCandidate;
-  const modalRows = modalFirst.rows.length;
+  /**
+   * How many rows the consensus is worth: the *fewest* any member returned.
+   *
+   * `rowsKey` collapses duplicate tuples, so two members of one group hold the same distinct rows
+   * while differing in physical row count — a join fan-out returns the same six rows once and six
+   * times. The thinnest member therefore holds the distinct set exactly once, which makes the
+   * minimum the group's row count, and makes the first member's count an artifact of arrival
+   * order. On `44897147794` 21 of 600 modal groups had members that disagreed this way, and 3 of
+   * them read as multi-row only because the fanned-out copy arrived first — the rule then skipped
+   * the wider candidate it exists to find. Reading the group's shape off its first member also
+   * made the rule order-dependent, which no rule over a set may be.
+   */
+  const modalRows = Math.min(...modal.map((index) => (executed[index] as ExecutedCandidate).rows.length));
   if (modalRows > 1) return modal[0] as number;
   const modalColumns = (modalFirst.rows[0] as readonly unknown[] | undefined)?.length ?? 0;
   let best = modal[0] as number;

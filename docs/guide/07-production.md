@@ -361,17 +361,26 @@ const { sql, index } = chooseCandidateByRule('shortest', candidates);
 - **`wider`** is `modal` with one guard: where the modal group answered with a single row and a
   candidate outside it returned more rows in at least as many columns, the wider candidate wins.
   It is the only rule that reads the *shape* of a result, and its evidence is one pool: on 600 dev
-  questions it scored **64.17%** against `modal`'s 62.83% and the selector's 63.83%, at zero calls,
-  by firing on 19 questions and being right on 10 of them — a single-row consensus is what an
-  aggregate answer looks like, and on those 19 the question wanted rows. One pool is a hypothesis,
-  which is why the rule ships as a choice with an arm attached (`select-cross-pooled-wider`) rather
-  than as a default.
+  questions it fired on 19 and was right on 10 of them — a single-row consensus is what an
+  aggregate answer looks like, and on those 19 the question wanted rows. What it is **not** is
+  ahead of `modal`: over the same pool, 387 against 391. The +2 that was read off this rule when it
+  landed (64.17% against 62.83%) came from a vote that was counting statements which returned
+  nothing, so the rule ships as a choice with an arm attached (`select-cross-pooled-wider`) and not
+  as a default, and the arm that would have combined it with the gate was withdrawn.
+  "A single row" means the group's **distinct** rows: a fingerprint collapses duplicate tuples, so
+  members of one group can differ in physical row count, and the rule reads the fewest any member
+  returned. Reading that off the first member instead made the rule depend on arrival order.
 
 **All four skip a candidate that returned no rows**, and that is worth more than the choice
 of rule. 586 empty results across four arms were all wrong: a result with no rows equals
 another empty result and nothing else, so an empty candidate can only be right when the true
 answer is empty. If every candidate is empty the rules fall back to the whole set, so a
-question whose answer really is empty is unaffected. Apart from `wider`'s one guard, nothing
+question whose answer really is empty is unaffected. **The vote is a fifth implementation of the
+same idea and it did not skip them until the correction recorded in `benchmarks.md`** — the rules
+above filtered empty candidates through `eligibleIndices`, and `majorityResult` was called on the
+raw candidate list, so two statements that returned nothing outvoted one that answered: 8 of the
+600 questions in the pool that priced `wider`, and 13 in the one before it. A rule that skips empty
+results and a vote that counts them are not the same policy, and the arm published the second one. Apart from `wider`'s one guard, nothing
 about a result's shape is used — and the shape that guard reads is not the shape this file
 rejected earlier: reading the shape **out of the question** ("how many" ⇒ one number) was tested
 against 146 rejected candidates and agreed with the truth 61% of the time, which is worse than

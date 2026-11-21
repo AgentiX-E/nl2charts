@@ -18367,21 +18367,82 @@ It fired on 19 questions, was right on 10, and the vote was right on 2 of those 
 a result carries information no text-level rule has. The mechanism is specific: a single-row
 consensus is what an aggregate answer looks like, and on these 19 questions the answer was a set of
 rows that the aggregation had thrown away. It is shipped as `'wider'` in `@agentix-e/nl2charts-ai`.
-One pool of 600 is a hypothesis, and the pool it was found on is the pool that would confirm it, so
-it is registered here before the dispatch that tests it:
 
-- **`select-cross-pooled-wider`**, on `select-cross`'s recorded pool, at zero calls: accuracy **at
-  least 385 of 600**, strictly above `select-cross-pooled-vote` in the same run, and
-  `selectorRule.rules.wider` **at least 15** — a rule that stopped firing is a rule that cannot have
-  helped, and the census is what separates that from a rule that fired and lost.
-- **`select-cross-pooled-tie`**, the same gate on the same pool: accuracy **within 1.0pp** of
-  `select-cross-pooled` (the selector on that pool) and **at or above** `select-cross-pooled-vote`,
-  with `spend.asked` at or below 0.10 — the 7.67% this run measured, not the 2.7% the replay
-  promised, because the price of a gate is a property of the pool and has to be read off one.
+**The four numbers in that table are wrong, and the correction is the next section.** The vote they
+are measured against was counting statements that returned nothing; over the pool that answered, the
+same rule scores 387 against a vote of 391. The mechanism above still holds on those 19 questions —
+what does not hold is the comparison, and a rule is not worth shipping on an absolute count.
+`select-cross-pooled-wider` ran before the correction and is kept as the arm that priced it, its
+preregistration is withdrawn, and `select-cross-pooled-wider-tie` was withdrawn before it ran.
 
-Both are pooled, so the delta from `vote` is the rule, the delta from `pooled` is the gate, and the
-delta from `pooled-vote` is what a call adds where the vote cannot decide — three questions, one
-pool, one dispatch, and 0 + 0 + 46 calls against the selector's 600.
+Both arms are pooled, so the delta from `vote` is the rule, the delta from `pooled` is the gate, and
+the delta from `pooled-vote` is what a call adds where the vote cannot decide — three questions, one
+pool, one dispatch, and 0 + 0 + 46 calls against the selector's 600. What that sentence assumed, and
+what the next two sections take apart, is that the arm they are differenced against answered the pool
+it was given.
+
+### The free signal the pool admitted was not free, and the rule it was paying for
+
+The two preregistrations above were written against a vote that counted empty statements. That is the
+kind of premise a preregistration cannot check and a replay can, so the replay was extended and the
+bars were re-derived; both changed.
+
+**The vote was taken over the wrong pool.** `modal` filters empty results through `eligibleIndices`;
+the vote called `majorityResult` on the raw `considered` list, so two statements that returned nothing
+outvoted the one that answered. On this artifact that is 8 questions — `--verify-vote` names them
+(`95`, `119`, `577`, `678`, `803`, `1075`, `1314`, `1464`) — and calling empty is a failure, not an
+opinion to count. `vote` over the answered candidates:
+
+| policy | correct | accuracy | calls a case |
+|---|---|---|---|
+| `chosen` (the selector) | 383 | 63.83% | 1 |
+| `vote` | 391 | 65.17% | 0 |
+| `wider` | 387 | 64.50% | 0 |
+| **`vote`, except on ties where the selector decides** | **395** | **65.83%** | **0** |
+| `wider`, except on ties where the selector decides | 391 | 65.17% | 0 |
+| `oracle{chosen,vote}` | 406 | 67.67% | — |
+
+**`wider` is 4 short of the vote it was supposed to improve.** The +4 that motivated the shape rule
+was the bug: `wider` was priced at 385 against a vote of 377, and once the vote stops counting empty
+statements the comparison reads 387 against 391. The second pool says the same thing (386 vote, 385
+wider), so this is not one sample — the shape rule was never ahead, and the only lever that survived
+the correction is the gate. `select-cross-pooled-wider-tie` is **withdrawn** before it ran; `wider`
+stays in the table as a priced row and out of the shipping list.
+
+**A second defect, found by checking the rule against the arm.** `--verify-wider` compares the
+replayed shape rule with `select-cross-pooled-wider` case by case, and it disagreed on 1 of 600
+(`1066`). The cause was not the replay: `rowsKey` collapses duplicate tuples, so two members of one
+group can hold the same distinct rows while differing in physical row count — a join fan-out returns
+`7` once and six times — and `widerIndex` read the group's shape off its **first** member. 21 of the
+600 modal groups have members that disagree this way, and on 3 of them the first member was the
+fanned-out one, so the rule skipped the wider candidate it exists to find. A rule over a set may not
+depend on arrival order. The group's row count is now the **fewest** any member returned, which is
+also its distinct-row count: every member holds the distinct set with multiplicity at least one, so
+the thinnest member holds it exactly once. Corrected, the replay reproduces its arm on 600 of 600 and
+the score does not move (387 before, 387 after) — an order-independent rule that scores the same is
+strictly better than one whose score was luck.
+
+`verifyRule` is now generic for the reason this case gives: the vote was the only policy checked
+against its own arm, and the one it was not checking is the one that had drifted.
+
+**The arm to dispatch is the gate, not the shape.** `select-cross-pooled-tie` re-run on the corrected
+vote, with the bar written before it runs:
+
+- accuracy **at least 400 of 600**. The floor is arithmetic from two numbers this artifact already
+  holds: the corrected vote answers 391 of the cases the gate does not buy, and the gate bought 39
+  questions on which it added 13 — and **none of those 39 is one of the 8 the repair recovered**, so
+  the two gains are disjoint and compose. 396 was that same arm reading a vote that under-reported
+  itself by 8; a run that lands at 396 again means the repair did not reach the pool.
+- `spend.asked` **at or below 0.10**: 39 of 600 is 6.50%, and a tie gate's bill is a property of the
+  pool, so the bar is written from this census rather than from the 2.7% another pool implied.
+- `--verify-vote` must report **600 of 600 agree** on the new artifact. The artifact these numbers
+  come from reports 592 of 600, which is correct: it was recorded by the arm before the repair, and a
+  check that agreed with it would be a check that certified the bug.
+- `selectorRule.rules` must show `modal` on every case the gate held and no rule on the bought ones —
+  the split this artifact shows as `{modal: 561}` and 39 unruled.
+
+The 15 cases between 391 and 406 are what a per-question router would have to find, and the question
+it answers is no longer "when does shape beat size" — that one is settled, and the answer is never.
 
 ### Where each of the four absent rows would have to go
 
