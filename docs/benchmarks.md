@@ -19366,3 +19366,74 @@ joins, prompt gap, repair, one-candidate, pool replay, summary, readback. The on
 was `diversity`, and it refused for its own reason: 40 cases with candidates is under the 100 it
 needs, and "a share of 40 is a share of the draw". So `card.ts` is the one instrument that reads a
 prompt's internal structure; every other reads the statements and the questions.
+
+## The prompt the product sends is the prompt the experiment priced
+
+The adoption reading above decided that the shipped SQL prompt is `macsql-prompt`: the MAC-SQL
+skeleton on this repository's card, with the dataset's evidence and no column hint, one call a case.
+That decision was recorded in this document and in the plan — and then it had nowhere to live. The
+combination existed in exactly one place, the arm table in `eval/bird/run.ts`, which is a
+benchmark's declaration; the product's SQL path built its prompt by hand, two fields at a time
+(`prompt: { dialect, evidence }`), from whatever the caller passed.
+
+**An experiment and a product that agree today and are maintained apart are one edit from
+disagreeing, and the edit is always harmless on its own.** Nothing would have gone red: the arm
+keeps scoring, the tool keeps answering, and only the product's accuracy moves — which is precisely
+the "no division between the best combination and what ships" requirement this round exists to
+close.
+
+### One object, in the package
+
+`packages/ai/src/recipe.ts` states the combination as a value: `SHIPPED_SQL` — template,
+descriptions on, foreign keys off, samples off, evidence from the caller, no hint, SQLite — beside
+`ASSEMBLED_SQL`, the skeleton that can state any dialect, which is what the tool sent until this
+round. `resolvePrompt(recipe, payload)` returns the `PromptOptions`; `resolveShipment(payload)`
+chooses between them and returns the `linking` flag too, because the hint lives in the user message
+rather than in the prompt object.
+
+Three behaviours are worth stating because each one could have gone the other way:
+
+- **The dialect is canonicalised, not passed through.** Every runner under `packages/node` reports
+  `sqlite`; the template says `SQLite` in its instruction and in both worked examples. A prompt that
+  said `sqlite` would be written in a dialect no documentation names, so the recipe's own spelling
+  wins — and a comparison handed the same capital on both sides would never have exercised it.
+- **A dialect the recipe cannot state falls back, and the fallback is named.** A PostgreSQL caller
+  gets the assembled skeleton with `fellBackFrom: 'shipped-sql'`, because a prompt whose instruction
+  says SQLite and whose examples are SQLite cannot be sent to PostgreSQL. It is a fallback rather
+  than a throw so the product keeps answering; it is *reported* so that a reader comparing two
+  deployments does not explain a prompt change by the model.
+- **The tool's payload now names the recipe.** `ask_question` returns `promptRecipe`, and
+  `promptFallback` when one was used. A prompt in a payload is a prompt a run can be attributed to.
+
+### The instrument: zero calls, byte comparison
+
+`pnpm bench:bird:recipe` builds both prompts per case — the arm's through `promptFor`, the
+product's through `resolveShipment` — and compares the two messages `buildAskMessages` produces.
+Nothing is re-implemented: an option that renders to the same text is the same prompt, and the text
+is what the model reads.
+
+```
+pnpm bench:bird:recipe                       # the arm the recipe names
+BIRD_SPLIT=dev pnpm bench:bird:recipe        # the whole dev split
+pnpm bench:bird:recipe --arm inline+evidence # the control: an arm that is not the shipped prompt
+```
+
+The readings, all with zero model calls:
+
+| split | cases | identical | first difference |
+| --- | --- | --- | --- |
+| Mini-Dev | 500 | 500 | — |
+| dev | 1,534 | 1,534 | — |
+| dev, control (`inline+evidence`) | 1,534 | 0 | `system` at offset 0 |
+
+The control is the part that makes the first two rows a measurement rather than a tautology: an arm
+that is not the shipped prompt differs on every case, at the first character, which is what "the
+recipe is the arm" would look like if it were false. The instrument also refuses, rather than
+reports, three ways of measuring the wrong thing — a template arm compared against the assembled
+fallback, a bare invocation when the recipe names no arm, and a `--arm` that is not in the table.
+
+One case is deliberately not what a reader expects: **the card carries its notes on every case**,
+which is what the run does (`buildSchema(..., { withNotes: true })` once per database, with
+`descriptions` deciding whether they are printed). An instrument that stripped the notes for an arm
+whose `notes` flag is off would compare a card neither side sends — the defect `card.ts` spent two
+rounds on — and would have passed while both prompts were wrong in the same way.

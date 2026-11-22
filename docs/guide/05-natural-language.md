@@ -311,6 +311,47 @@ Three things follow from "the template is the whole prompt":
 - `samples`, `descriptions` and `foreignKeys` still apply — they describe the card,
   which the template renders in its own layout.
 
+### What ships, as one object
+
+A `template` plus an `evidence` plus a card setting is a *combination*, and a
+combination a caller assembles by hand is a combination nobody measured. So the
+one this project ships is a value in the package:
+
+```ts
+import { resolveShipment } from '@agentix-e/nl2charts-ai';
+
+const shipped = resolveShipment({ dialect, evidence });
+const pipeline = createPipeline({ provider, prompt: shipped.options, linking: shipped.linking });
+```
+
+`resolveShipment` returns three things: the `PromptOptions` to pass, the `linking`
+flag the recipe pins (the hint lives in the user message, so it is not part of the
+prompt object), and the name of the recipe that answered. `shipped.recipe` is
+`'shipped-sql'` — the MAC-SQL skeleton on this project's card with the dataset's
+evidence — when the dialect is SQLite, and `'assembled'` otherwise, with
+`shipped.fellBackFrom === 'shipped-sql'` so a caller can tell a prompt change from
+a dialect change.
+
+Why that combination: on 1,532 BIRD dev questions it answered 1,010 (65.93%)
+against the assembled prompt's 980 (63.97%) — paired 119:89, +1.96pp, exact
+McNemar p = 0.0441 — at 40% of the cache-miss tokens and the same single call. The
+template is a fixed prefix a provider caches, so what is billed is the card, and
+the card is smaller than the assembled prompt's. See
+[benchmarks](../benchmarks.md).
+
+Two consequences worth knowing before you override it:
+
+- The dialect is **canonicalised**, not passed through: a runner reporting `sqlite`
+  gets a prompt that says `SQLite`, because a prompt whose instruction and examples
+  are SQLite in one case and the caller's spelling in another is a prompt written
+  in a dialect no documentation names.
+- A dialect the recipe cannot state **falls back rather than throws**. The template
+  names SQLite in its instruction and both worked examples, so a PostgreSQL caller
+  gets the assembled skeleton — the one that can state any dialect — and the
+  fallback is reported, not silent. Ask for a specific recipe with
+  `resolvePrompt(findSqlRecipe('shipped-sql'), …)` if you would rather have the
+  refusal.
+
 ## The pipeline, including repair
 
 ```ts

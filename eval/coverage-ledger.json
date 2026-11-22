@@ -2,7 +2,7 @@
   "note": "Per-file eval coverage. Enforced by tools/check-eval-coverage.mjs: a number may rise freely and may only fall with an explicit, reviewed edit. `target` is the standard every file must reach before eval/ joins the main gate.",
   "target": 95,
   "tolerancePp": 0.2,
-  "measuredAt": "2026-11-21",
+  "measuredAt": "2026-11-22",
   "totals": {
     "lines": 99.63,
     "statements": 99.63,
@@ -113,10 +113,10 @@
       "branches": 100
     },
     "eval/bird/condition-gate.ts": {
-      "lines": 99.31,
-      "statements": 99.31,
+      "lines": 100,
+      "statements": 100,
       "functions": 100,
-      "branches": 96.29
+      "branches": 98.27
     },
     "eval/bird/conditions.ts": {
       "lines": 99.39,
@@ -346,6 +346,12 @@
       "functions": 100,
       "branches": 98.98
     },
+    "eval/bird/recipe.ts": {
+      "lines": 98.7,
+      "statements": 98.7,
+      "functions": 100,
+      "branches": 98.03
+    },
     "eval/bird/repair.ts": {
       "lines": 99.12,
       "statements": 99.12,
@@ -386,7 +392,7 @@
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 98.89
+      "branches": 99.18
     },
     "eval/bird/run.ts": {
       "lines": 99.48,

@@ -14,6 +14,8 @@ export { buildAskMessages, buildSqlPrompt, choosePromptProfile, createPipeline, 
 export type { StatementReaderOptions } from './pipeline.js';
 export { assertTemplateCarries, MACSQL_CONSTRAINTS, renderMacSqlBirdPrompt, renderMacSqlCard, renderMacSqlForeignKeys, TEMPLATE_CONFLICTS } from './template.js';
 export type { MacSqlPromptInput, PromptTemplate } from './template.js';
+export { ASSEMBLED_SQL, findSqlRecipe, resolvePrompt, resolveShipment, SHIPPED_SQL, SQL_RECIPES } from './recipe.js';
+export type { RecipePayload, ResolvedPrompt, SqlRecipe, SqlRecipeName } from './recipe.js';
 export { buildInterpretationPrompt, parseInterpretation } from './interpret.js';
 export {
   buildChartChoicePrompt,

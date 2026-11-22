@@ -86,7 +86,33 @@ cannot be argued with.
   one is outside both columns rather than a free point for the count.
 
 ### Added
-- **`bench:bird:rules` prices every free chooser, and the answer is that the field is closed.** The
+- **The shipped prompt is one object in the package, and an instrument proves the product sends it.**
+  The adoption reading decided that the shipped SQL prompt is `macsql-prompt` — MAC-SQL's skeleton on
+  this project's card, the dataset's evidence, no column hint, one call — and that decision had
+  nowhere to live: the combination existed only in the arm table, which is a benchmark's
+  declaration, while `packages/mcp` assembled its own prompt by hand (`prompt: { dialect, evidence }`).
+  A product and an experiment that agree today and are maintained apart are one edit from
+  disagreeing. `packages/ai/src/recipe.ts` states it as a value — `SHIPPED_SQL` (template,
+  descriptions on, foreign keys off, samples off, evidence from the caller, no hint, SQLite) beside
+  `ASSEMBLED_SQL`, the skeleton that can state any dialect — and `resolvePrompt(recipe, payload)`
+  returns the `PromptOptions` while `resolveShipment(payload)` chooses between them and returns the
+  `linking` flag too, because the hint lives in the user message rather than in the prompt object. A
+  dialect the template cannot state falls back to the assembled skeleton **and names the fallback**
+  (`fellBackFrom`), so a reader comparing two deployments cannot explain a prompt change by the
+  model; a dialect the caller spelled the way a runner does (`sqlite`) is canonicalised to the way
+  the prompt spells it (`SQLite`), because a prompt written in `sqlite` is written in a dialect no
+  documentation names. `ask_question` now returns `promptRecipe` and, when one was used,
+  `promptFallback` — a prompt in a payload is a prompt a run can be attributed to.
+- **`bench:bird:recipe`: the same prompt, built two ways, compared byte for byte, at zero calls.**
+  The arm's side goes through `promptFor`, the product's through `resolveShipment`, and the
+  comparison is on the two messages `buildAskMessages` produces rather than on the options — an
+  option that renders to the same text is the same prompt, and the text is what the model reads.
+  **dev: 1,534 of 1,534 identical. Mini-Dev: 500 of 500.** The control is what makes those rows a
+  measurement rather than a tautology: `--arm inline+evidence` differs on all 1,534 cases at offset
+  0, which is what the claim would look like if it were false. The instrument refuses three ways of
+  measuring the wrong thing — a template arm compared against the assembled fallback, a bare
+  invocation when the recipe names no arm, and an `--arm` that is not in the table.
+, and the answer is that the field is closed.** The
   template pool's third condition was registered as "recover `selectionLoss` from 42 to at most 28,
   i.e. 409 of 600 selected", which assumes a zero-call chooser can reach it. The pool's artifact
   records each candidate's source, statement, row count, column count, result fingerprint and

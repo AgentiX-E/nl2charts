@@ -1,4 +1,4 @@
-import { createPipeline } from '@agentix-e/nl2charts-ai';
+import { createPipeline, resolveShipment } from '@agentix-e/nl2charts-ai';
 import type { LlmProvider, SchemaColumn, SchemaTable } from '@agentix-e/nl2charts-ai';
 import type { Runner } from '@agentix-e/nl2charts-core';
 import { isNl2ChartsError } from '@agentix-e/nl2charts-spec';
@@ -201,6 +201,18 @@ export async function askQuestion(
   const rows = Math.min(preview ?? cap, cap);
   const dialect = typeof args.dialect === 'string' ? args.dialect : (context.ask.dialect ?? context.runner.capabilities.dialect);
   const evidence = typeof args.evidence === 'string' ? args.evidence : undefined;
+  /**
+   * The prompt, taken from the package rather than assembled here.
+   *
+   * This line used to be `prompt: { dialect, evidence }`, which is a *combination* nobody had
+   * measured: on BIRD dev the shipped combination answers 1,010 of 1,532 (65.93%) and this one
+   * 980 (63.97%), at 40% of the cache-miss tokens. A product that builds its prompt field by
+   * field cannot be the same prompt as an arm in an experiment, and the difference is invisible
+   * from both sides — which is why the recipe now lives in `packages/ai` and the tool reads it.
+   * A dialect the recipe cannot state (anything but SQLite) falls back to the assembled
+   * skeleton, and the payload says so rather than quietly shipping a different prompt.
+   */
+  const shipped = resolveShipment({ dialect, ...(evidence === undefined ? {} : { evidence }) });
 
   try {
     const pipeline = createPipeline({
@@ -208,7 +220,10 @@ export async function askQuestion(
       ...(context.ask.topK === undefined ? {} : { topK: context.ask.topK }),
       ...(context.ask.maxRepairs === undefined ? {} : { maxRepairs: context.ask.maxRepairs }),
       ...(context.ask.linkEvidence === undefined ? {} : { linkEvidence: context.ask.linkEvidence }),
-      prompt: { dialect, ...(evidence === undefined ? {} : { evidence }) },
+      prompt: shipped.options,
+      // Part of the recipe, not of the call: the hint lives in the user message, so a pipeline
+      // that turned it on would send a prompt the arm that chose this recipe never sent.
+      linking: shipped.linking,
       // The repair loop needs the engine's verdict, and the verdict is the only thing
       // that separates "the statement is wrong" from "the statement is unreadable".
       // One row is enough to distinguish empty from non-empty and costs a second run of
@@ -233,6 +248,11 @@ export async function askQuestion(
       failures: asked.failures,
       diagnoses: asked.diagnoses,
       linked: asked.linked,
+      // Which prompt answered. A caller comparing two deployments on accuracy needs the prompt in
+      // the payload rather than in a log line, and a dialect that forced the fallback is a second
+      // explanation of one delta — so it is named rather than left to be inferred from the dialect.
+      promptRecipe: shipped.recipe,
+      ...(shipped.fellBackFrom === undefined ? {} : { promptFallback: shipped.fellBackFrom }),
       ...(asked.capStripped === undefined ? {} : { capStripped: asked.capStripped }),
       ...(asked.emptyRetry === undefined ? {} : { emptyRetry: asked.emptyRetry }),
     };

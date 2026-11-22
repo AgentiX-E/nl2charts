@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createRunner } from '@agentix-e/nl2charts-core';
 import type { Engine, Runner } from '@agentix-e/nl2charts-core';
+import { buildAskMessages, resolvePrompt, SHIPPED_SQL } from '@agentix-e/nl2charts-ai';
 import type { LlmProvider, LlmRequest, LlmResponse } from '@agentix-e/nl2charts-ai';
 import { Nl2ChartsError } from '@agentix-e/nl2charts-spec';
 import { createDuckDbEngine } from '@agentix-e/nl2charts-node';
@@ -165,6 +166,49 @@ describe('asking a question', () => {
     const provider = scripted(['SELECT word FROM greetings ORDER BY id']);
     await askQuestion({ runner, ask: { provider } }, { question: 'list the greetings', schema });
     expect(provider.requests[0]?.messages[0]?.content ?? '').toContain(runner.capabilities.dialect);
+  });
+
+  it('sends the prompt the benchmark priced, and says which one it sent', async () => {
+    /**
+     * The whole point of the recipe: the product's prompt is the arm's prompt, not a prompt built
+     * here field by field. The comparison is against `resolvePrompt(SHIPPED_SQL, …)` rendered by
+     * the same builder, and it is on the *messages* rather than on the options — an option that
+     * renders to the same text is the same prompt, and the text is what the model reads.
+     *
+     * The dialect is the runner's spelling (`sqlite`) because that is what a deployment passes.
+     */
+    await seed();
+    const provider = scripted(['SELECT word FROM greetings ORDER BY id']);
+    const payload = (await askQuestion(
+      { runner, ask: { provider } },
+      { question: 'list the greetings', schema, dialect: 'sqlite', evidence: 'A greeting is a word said on arrival.' },
+    )) as Record<string, unknown>;
+    expect(payload.promptRecipe).toBe('shipped-sql');
+    expect(payload.promptFallback).toBeUndefined();
+    const shipped = buildAskMessages({
+      question: 'list the greetings',
+      schema: asSchema(schema) as never,
+      prompt: resolvePrompt(SHIPPED_SQL, { dialect: 'sqlite', evidence: 'A greeting is a word said on arrival.' }),
+      linking: SHIPPED_SQL.linking,
+    });
+    expect(provider.requests[0]?.messages).toEqual(shipped.messages);
+    // And the skeleton is the template's, not the assembled one's: this is what the equality above
+    // would still hold if a future edit changed both sides the same way.
+    expect(provider.requests[0]?.messages[0]?.content).toContain('【Constraints】');
+    expect(provider.requests[0]?.messages[1]?.content).toBe('Use the schema above.\nlist the greetings');
+  });
+
+  it('names the recipe it fell back to when the dialect is not the one the template states', async () => {
+    // The runner here is DuckDB, and no shipped prompt but the assembled one can state that. What
+    // must not happen is a silent substitution: the payload says which prompt answered and which
+    // one it left, so an accuracy comparison between two deployments can see the change.
+    await seed();
+    const payload = (await askQuestion(
+      { runner, ask: { provider: scripted(['SELECT word FROM greetings ORDER BY id']) } },
+      { question: 'list the greetings', schema },
+    )) as Record<string, unknown>;
+    expect(payload.promptRecipe).toBe('assembled');
+    expect(payload.promptFallback).toBe('shipped-sql');
   });
 
   it('reports a provider failure as a tool error, not a crash', async () => {
