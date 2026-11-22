@@ -19437,3 +19437,31 @@ which is what the run does (`buildSchema(..., { withNotes: true })` once per dat
 `descriptions` deciding whether they are printed). An instrument that stripped the notes for an arm
 whose `notes` flag is off would compare a card neither side sends — the defect `card.ts` spent two
 rounds on — and would have passed while both prompts were wrong in the same way.
+
+## The paid selector on a closed pool: the criterion, registered before the dispatch
+
+The free family is closed on the template pool — twenty zero-call strategies, best 401 of 600, pool
+ceiling 437 — and the reason is countable rather than mysterious: 485 of those 600 questions have
+every candidate shaped the same, so a rule that reads shape has no input on four cases in five. The
+next lever therefore has to read the statements, and reading them costs a call.
+
+**Arm:** `select-mixed-template`, which is `select-mixed-rule-template` with one field changed — the
+free rule out, the model in. Same three candidates, same prompts, same judge, same temperature, so
+the pair prices the call and nothing else.
+
+**Criterion, written here first:**
+
+| field | value |
+| --- | --- |
+| split | dev, first 600 questions (`BIRD_LIMIT=600`), the same case set the free replay was measured on |
+| bar | **at least 405 of 600 selected** — the midpoint between the free family's ceiling (401) and the 409 an earlier round registered |
+| calls | **declared: four a case** (three to generate, one to choose), read from the artifact rather than assumed |
+| decision | ≥405: adopt the paid selector on this pool and re-price the product's call budget. 401–404: the ceiling of this path is where it is, and the next lever is the pool's **width**, not another selector. ≤401: a call that reads the three statements is worth nothing here, and the pool work stops until a candidate source differs in *knowledge* rather than in wording |
+
+The middle branch is the one worth registering in advance: a reading of 402 would be a *successful*
+experiment and a negative result at the same time, and without the sentence above it would be read
+as a failure and re-run with another prompt.
+
+The run also carries `select-mixed-rule-template` and `macsql-prompt`, so the free ceiling and the
+single source are measured on the same case set in the same hour rather than inherited from an
+earlier artifact.
