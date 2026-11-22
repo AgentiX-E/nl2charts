@@ -218,12 +218,21 @@ function stop(text: string): string {
 
 export function renderMacSqlCard(
   schema: readonly SchemaTable[],
-  options: { readonly descriptions?: boolean; readonly samples?: boolean } = {},
+  options: { readonly descriptions?: boolean; readonly samples?: boolean; readonly limit?: number } = {},
 ): string {
   const withDescriptions = options.descriptions !== false;
+  // The same budget the assembled prompt gives its card, counted the only way this format can
+  // count it: one line per column. It was not honoured at first, and the omission is the reason
+  // the first clean reading of the template was confounded — the arm sent 12,668 characters of
+  // prompt against the parent's 2,604, because `schemaLines: 40` reached `buildSqlPrompt` and the
+  // template rendered every column of every table. A template is not exempt from a card budget,
+  // and an option a caller sets and nothing reads is the defect this module's own guard exists for.
+  const limit = options.limit ?? 40;
+  let written = 0;
   const blocks: string[] = [];
   for (const table of schema) {
-    const lines = table.columns.map((column) => {
+    if (written >= limit) break;
+    const lines = table.columns.slice(0, Math.max(0, limit - written)).map((column) => {
       const parts: string[] = [];
       if (withDescriptions && column.comment !== undefined && column.comment.trim().length > 0) parts.push(column.comment.trim());
       if (options.samples === true && column.samples !== undefined && column.samples.length > 0) {
@@ -237,6 +246,8 @@ export function renderMacSqlCard(
       const body = [`${column.name},`, stop(column.type), ...parts.map(stop)].join(' ');
       return `  (${body})`;
     });
+    if (lines.length === 0) break;
+    written += lines.length;
     blocks.push([`# Table: ${table.table}`, '[', lines.join(',\n'), ']'].join('\n'));
   }
   return blocks.join('\n');
@@ -263,6 +274,8 @@ export interface MacSqlPromptInput {
   readonly evidence?: string;
   readonly descriptions?: boolean;
   readonly samples?: boolean;
+  /** Column lines the card may spend; the assembled prompt's `schemaLines` means the same thing. */
+  readonly schemaLines?: number;
 }
 
 /**
@@ -295,6 +308,7 @@ export function renderMacSqlBirdPrompt(input: MacSqlPromptInput): string {
     renderMacSqlCard(input.schema, {
       ...(input.descriptions === undefined ? {} : { descriptions: input.descriptions }),
       ...(input.samples === undefined ? {} : { samples: input.samples }),
+      ...(input.schemaLines === undefined ? {} : { limit: input.schemaLines }),
     }),
     '【Foreign keys】',
     renderMacSqlForeignKeys(input.schema),

@@ -278,6 +278,39 @@ What it buys, on 1,534 BIRD dev questions with no model calls: the hint covers
 when it also reads the evidence. The evidence is not a paraphrase of the
 question — read alone it covers 48.1%, more than the question does.
 
+### Sending a whole prompt that is not ours
+
+Every other option on this page adds a block or a rule to the prompt this package
+assembles. `template` replaces the assembly:
+
+```ts
+const pipeline = createPipeline({
+  provider,
+  prompt: { template: 'macsql-bird', evidence: 'Units are stored in qty.' },
+});
+```
+
+`'macsql-bird'` is the BIRD prompt published with MAC-SQL: a five-rule constraint
+list, two worked examples, and an output shape where the model writes one
+statement per sub-question and the last one is the answer. It is here because the
+difference between this package's prompt and another system's has to be
+measurable as one object — a sentence added to a list cannot price a skeleton. The
+text is re-authored rather than copied (their repository carries no licence file),
+the card keeps the column type, and the value examples are not compiled; all three
+differences are listed in [benchmarks](../benchmarks.md).
+
+Three things follow from "the template is the whole prompt":
+
+- A block it has no slot for **throws** rather than being dropped. `definitions`,
+  `demonstrations`, `values`, `rowSamples`, `plan`, `interpretation`, `decompose`,
+  `reasoning`, `notes` and a non-SQLite `dialect` are each refused by name, so a
+  caller cannot believe a lever is on when nothing reads it.
+- The reply is read from its **last** fenced block, not its first: a template whose
+  format is a sequence puts the answer last. `readStatement` decides that from the
+  prompt, so a caller that continues the conversation does not have to remember.
+- `samples`, `descriptions` and `foreignKeys` still apply — they describe the card,
+  which the template renders in its own layout.
+
 ## The pipeline, including repair
 
 ```ts

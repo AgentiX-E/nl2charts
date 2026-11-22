@@ -438,6 +438,7 @@ export function buildSqlPrompt(
       ...(resolved.evidence === undefined ? {} : { evidence: resolved.evidence }),
       ...(resolved.descriptions === undefined ? {} : { descriptions: resolved.descriptions }),
       ...(resolved.samples === undefined ? {} : { samples: resolved.samples }),
+      ...(resolved.schemaLines === undefined ? {} : { schemaLines: resolved.schemaLines }),
     });
   }
   const rules = [

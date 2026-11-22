@@ -7,6 +7,14 @@ cannot be argued with.
 ## Unreleased
 
 ### Fixed
+- **The template ignored the card budget, and the reading it produced is confounded.** `schemaLines`
+  reached `buildSqlPrompt` and `renderMacSqlCard` rendered every column of every table, so
+  `macsql-prompt` sent **12,668** prompt characters against the parent's **2,604** — the same defect
+  class as an option a caller believes is on, one function from the guard that exists to refuse it.
+  The card now honours `limit` (default 40), counted one line per column and continued across tables;
+  three tests pin the budget, the zero case and the path through both entry points. The dispatch
+  before the fix read **400/600 against 380** (+20 cases, 61:41, p = 0.0594; +21 against the no-hint
+  arm, 56:35, p = 0.0355) on a prompt four times the size, and is recorded as a confounded reading.
 - **A whole arm failing inside the harness was published as an accuracy.** `macsql-prompt`'s first
   dispatch (`44974188185`) threw inside `promptFor` on all 600 cases — `assertTemplateCarries` read
   `decompose: false`, which `buildAskMessages` sets on every call, as a block it could not carry — and

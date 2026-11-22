@@ -52,6 +52,35 @@ describe('MAC-SQL’s card, rendered from our schema', () => {
     expect(renderMacSqlCard(schema)).toContain('(blank, TEXT.)');
   });
 
+  it('spends the column budget the assembled prompt spends, across tables', () => {
+    // The omission that made the first clean reading confounded: `schemaLines: 40` reached
+    // `buildSqlPrompt` and the template rendered all 12,668 characters of card the schema held, so
+    // the arm measured a template *and* a card four times the size of its parent's.
+    const wide = [
+      { table: 'a', columns: Array.from({ length: 30 }, (_, i) => ({ name: `a${i}`, type: 'TEXT' })) },
+      { table: 'b', columns: Array.from({ length: 30 }, (_, i) => ({ name: `b${i}`, type: 'TEXT' })) },
+    ];
+    const card = renderMacSqlCard(wide, { limit: 40 });
+    const lines = card.split('\n').filter((line) => line.trim().startsWith('('));
+    expect(lines).toHaveLength(40);
+    // ...continued into the second table rather than restarting the budget per table.
+    expect(lines[39]).toContain('(b9,');
+    expect(card).not.toContain('(b10,');
+  });
+
+  it('renders no table at all when the budget is zero', () => {
+    expect(renderMacSqlCard(schema, { limit: 0 })).toBe('');
+  });
+
+  it('carries the budget through the prompt and through the builder', () => {
+    const wide = [{ table: 'a', columns: Array.from({ length: 60 }, (_, i) => ({ name: `a${i}`, type: 'TEXT' })) }];
+    const prompt = renderMacSqlBirdPrompt({ question: 'q', schema: wide, schemaLines: 40 });
+    // The worked examples carry their own columns, including `(account_id,`, so the count is on
+    // this table's own names rather than on the bracket.
+    expect(prompt.split('\n').filter((line) => /^\s+\(a\d+,/.test(line))).toHaveLength(40);
+    expect(buildSqlPrompt('q', wide, { template: 'macsql-bird', schemaLines: 40 })).toBe(prompt);
+  });
+
   it('renders every join hint once, and says None when the schema declares none', () => {
     expect(renderMacSqlForeignKeys(schema)).toBe('orders.customer_id = customers.customer_id');
     expect(renderMacSqlForeignKeys([{ table: 't', columns: [] }])).toBe('None');

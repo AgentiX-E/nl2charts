@@ -18907,7 +18907,7 @@ That is the next dispatch, and the bar is registered here before it exists:
 
 | criterion | bar | why this number |
 |---|---:|---|
-| one-candidate accuracy | ≥ `inline+evidence`'s 371 + 12 (2.0pp), paired exact McNemar p < 0.05 | 2.0pp is the lower edge of a 600-case pair's resolution, and the template would be adopted as a *source*, not as an arm — it has to beat the prompt it would replace |
+| one-candidate accuracy | ≥ 12 cases over `inline+evidence` **in the same run** (2.0pp), paired exact McNemar p < 0.05 | 2.0pp is the lower edge of a 600-case pair's resolution, and the template would be adopted as a *source*, not as an arm — it has to beat the prompt it would replace. The row first read "`inline+evidence`'s 371 + 12"; 371 is `metadata+evidence` on 595 questions, so the anchor was a mis-attribution before it was ever compared against — the correction is in the section below |
 | calls a case | 1.00 | a template copies at zero marginal cost; a template that needs a second call is a pipeline, and pipelines have been losing here |
 | the three-candidate pool | ≥ 387 with the template in the third slot | the pool is the product; a source that wins alone and loses in the pool is a source that restates what the others say |
 | record | `asked` on 600 of 600, `candidateRecall` on every case | so the reading after it costs nothing again |
@@ -19011,17 +19011,62 @@ Two defects, and both are the kind this repository writes down:
    harness failure and prints the first error, which in this case was one sentence long and named
    the fix.
 
-The parent's reading is the other half of the story. The bar was registered as an **absolute**
-number — `371 + 12` — and `inline+evidence` read **384** on the same 600 questions with the same
-pinned weights (`170d0beaa768594b`, unchanged before and after the run). A 2.2pp move on an
-unchanged prompt at temperature zero is a draw, not a capability, and it is exactly why a paired
-comparison exists: an absolute bar on a paired experiment goes stale as soon as the parent moves, and
-the drift here is larger than the effect the bar was set to detect. The criterion is therefore
-restated before the next run as a **paired difference**: the template must win **12 or more of the
-600 cases** against `inline+evidence` in the same run, exact McNemar p < 0.05. The 371 anchor stays in
-this document as what it was — a reading of a parent that moves.
+The bar's anchor was wrong twice over, and both errors are worth recording because they are the two
+ways a pre-registered threshold goes bad.
+
+**The number belonged to another arm.** The row said "`inline+evidence`'s 371"; 371 is
+`metadata+evidence` on 595 questions, and `inline+evidence` has never had a 600-case reading in this
+document — its readings are 60.5–61.3% on the 1,532-question split. The anchor was mis-attributed at
+registration, before any run could compare against it.
+
+**The parent moves, and here it moved more than the bar.** `inline+evidence` read **384 of 600** on
+the same questions with the same pinned weights (`170d0beaa768594b`, unchanged before and after the
+run). A 2.2pp move on an unchanged prompt at temperature zero is a draw, not a capability, and it is
+larger than the 2.0pp the bar was set to detect. An absolute bar on a paired experiment therefore
+measures the parent's draw as much as the candidate's, which is why the criterion is restated before
+the next run as a **paired difference**: the template must win **12 or more of the 600 cases** against
+`inline+evidence` in the same run, exact McNemar p < 0.05. No absolute number survives in the
+criterion; 371 stays in this document as a reading of a different arm.
 
 The same run also prices the hint, which no arm had ever measured: **384 against 378**, +6 cases at
-1.00 calls each. The `Likely columns` line is worth about 1pp on this split, inside the split's own
-resolution — so the hint stays, and its 30%-precise list is neither the reason the prompt works nor
-the reason it loses.
+1.00 calls each. The second run reads **380 against 379** — one case the other way. Two runs, +6 and
+−1: the `Likely columns` line is worth nothing measurable on this split, and the honest statement is
+that its 30%-precise list is neither the reason the prompt works nor the reason it loses.
+
+### The second dispatch (`44976101168`): +20 cases, and a card four times the size
+
+| arm | reading | calls | prompt chars | prompt tokens | cached | completion |
+|---|---|---:|---:|---:|---:|---:|
+| `inline+evidence` | 380/600 = 63.33% | 1.00 | 2,604 | 685 | 494 | 48 |
+| `inline+evidence-nolink` | 379/600 = 63.17% | 1.00 | 2,604 | 653 | 460 | 46 |
+| `macsql-prompt` | **400/600 = 66.67%** | 1.00 | **12,668** | 3,705 | 3,315 | 136 |
+
+Paired, exact McNemar on the same 600 questions:
+
+| pair | wins / losses | delta | p |
+|---|---|---:|---:|
+| `macsql-prompt` vs `inline+evidence` | **61 / 41** | **+3.33pp** | **0.0594** |
+| `macsql-prompt` vs `inline+evidence-nolink` | **56 / 35** | **+3.50pp** | **0.0355** |
+| `inline+evidence-nolink` vs `inline+evidence` | 20 / 19 | −0.17pp | 1.00 |
+
+Every count bar was cleared — 20 cases over the parent against a registered 12 — and one of the two
+p-values was not: **0.0594** against the shipped prompt, 0.0355 against the arm without the hint. On
+the registered criterion as written ("≥12 cases **and** p < 0.05 against `inline+evidence`") the
+template passes the count and misses the significance, by about a fifth of a standard error.
+
+**And the reading is confounded, by the size column.** The template's prompt is **12,668 characters
+against the parent's 2,604**. The fixed text is 5,360 of them; the rest is the card, and the card is
+four times the parent's because `renderMacSqlCard` rendered every column of every table: `schemaLines`
+reached `buildSqlPrompt` and the template ignored it. That is the same defect class this round's own
+guard was built for — an option a caller sets and nothing reads — committed one function away from
+the guard. So the +3.33pp is a reading of *the template and a card four times the size*, and the
+direction of the confound matters: `select-prune` already showed a smaller card is not automatically
+a better one (−1.50pp, p = 0.035), but nothing here says a card four times larger is free.
+
+The fix is `renderMacSqlCard(…, { limit })` with `schemaLines` honoured, counted in the only unit
+this format has (one line per column) and continued across tables rather than restarted per table.
+Three tests pin it: 60 columns at limit 40 renders exactly 40 lines with the 40th in the second
+table, a limit of 0 renders no table, and the budget reaches the prompt through both
+`renderMacSqlBirdPrompt` and `buildSqlPrompt`. The third dispatch runs the same three arms with the
+budget honoured, and the criterion stays the one registered before the first run: **12 cases over
+`inline+evidence` in the same run, exact McNemar p < 0.05**.
