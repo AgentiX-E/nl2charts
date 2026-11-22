@@ -12,8 +12,9 @@ export { linkSchema, renderName, renderSchemaCard, tokenizeQuestion } from './li
 export type { LinkedColumn, Recaller, SchemaCardOptions, SchemaColumn, SchemaTable } from './linking.js';
 export { buildAskMessages, buildSqlPrompt, choosePromptProfile, createPipeline, extractSql, readStatement } from './pipeline.js';
 export type { StatementReaderOptions } from './pipeline.js';
-export { assertTemplateCarries, MACSQL_CONSTRAINTS, renderMacSqlBirdPrompt, renderMacSqlCard, renderMacSqlForeignKeys, TEMPLATE_CONFLICTS } from './template.js';
-export type { MacSqlPromptInput, PromptTemplate } from './template.js';
+export { assertTemplateCarries, MACSQL_CONSTRAINTS, PROMPT_TEMPLATES, renderMacSqlBirdPrompt, renderMacSqlCard, renderMacSqlForeignKeys, TEMPLATE_CONFLICTS, TEMPLATE_SHAPES } from './template.js';
+export type { MacSqlPromptInput, PromptTemplate, SyntheticExample } from './template.js';
+export { buildExamplePrompt, parseExamples } from './examples.js';
 export { ASSEMBLED_SQL, findSqlRecipe, resolvePrompt, resolveShipment, SHIPPED_SQL, SQL_RECIPES } from './recipe.js';
 export type { RecipePayload, ResolvedPrompt, SqlRecipe, SqlRecipeName } from './recipe.js';
 export { buildInterpretationPrompt, parseInterpretation } from './interpret.js';

@@ -169,8 +169,15 @@ jobs:
       # The preflight now checks both targets and says which one refused.
       - name: Provider preflight (every endpoint this run will call)
         run: pnpm eval:preflight
+      # The pre-flight checks the dataset and the gold, not the dispatch's arm list — and it cannot
+      # take the arm list, because an arm whose prompt carries a block the model writes (the online
+      # synthetic examples) has nothing to preview until the run starts, and `promptFor` refuses to
+      # render a template whose block is missing. Three representative arms keep the check honest:
+      # one assembled prompt, one that reads the dataset hint, one that spends four calls.
       - name: Gold queries and controls without a model
         run: pnpm bench:bird:dry
+        env:
+          BIRD_ARMS: 'names,inline+evidence,select'
       # The name does not count: this dispatch runs three arms and the step said "Four-arm", which is
       # the defect `ci.yml` wrote down after its own step name went stale ("a step name that counts is
       # a step name that lies after the next retirement"). The arm list is the input, so the honest

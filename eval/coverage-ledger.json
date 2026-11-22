@@ -184,6 +184,12 @@
       "functions": 100,
       "branches": 99
     },
+    "eval/bird/examples.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 100
+    },
     "eval/bird/failure-shape.ts": {
       "lines": 100,
       "statements": 100,

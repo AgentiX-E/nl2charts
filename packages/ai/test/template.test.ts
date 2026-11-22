@@ -5,6 +5,7 @@ import {
   renderMacSqlBirdPrompt,
   renderMacSqlCard,
   renderMacSqlForeignKeys,
+  PROMPT_TEMPLATES,
   TEMPLATE_CONFLICTS,
 } from '../src/template.js';
 import { buildAskMessages, buildSqlPrompt, extractSql, readStatement } from '../src/pipeline.js';
@@ -199,5 +200,79 @@ describe('reading a reply by the prompt that produced it', () => {
   it('exposes the same last-block rule through extractSql', () => {
     expect(extractSql(twoStatements, { last: true })).toBe('SELECT count(*) FROM orders');
     expect(extractSql(twoStatements)).toBe('SELECT id FROM orders');
+  });
+});
+
+describe('the procedures the template can carry', () => {
+  const example = { question: 'How many orders are there?', sql: 'SELECT COUNT(*) FROM orders' };
+
+  it('renders the shipped prompt byte-identically when no template is named', () => {
+    // The recipe layer asserts this against the hand-declared arm, and this asserts it against
+    // the renderer's own default: a fourth template added later must not move the third argument
+    // of the one that ships.
+    expect(renderMacSqlBirdPrompt({ question: 'q', schema })).toBe(renderMacSqlBirdPrompt({ question: 'q', schema, template: 'macsql-bird' }));
+    expect(PROMPT_TEMPLATES).toContain('macsql-bird');
+  });
+
+  it('swaps the procedure for a plan, and nothing else', () => {
+    const decomposed = renderMacSqlBirdPrompt({ question: 'q', schema });
+    const planned = renderMacSqlBirdPrompt({ question: 'q', schema, template: 'macsql-bird-qp' });
+    expect(planned).toContain('Work by query planning, in three steps');
+    expect(planned).toContain('Plan in three steps — the tables, then the operations, then the output columns — and then write the SQL:');
+    expect(planned).not.toContain('Work by decomposition');
+    // Everything either side of the one sentence pair is the same prompt, which is what makes the
+    // pair one lever: the card, the constraints, both worked examples and the evidence block.
+    expect(planned).toContain('【Constraints】');
+    expect(planned).toContain(MACSQL_CONSTRAINTS[0]);
+    expect(planned).toContain('(order_id, BIGINT. the id of the order.)');
+    expect(planned).toContain('orders.customer_id = customers.customer_id');
+    expect(planned).not.toContain('【Examples for this database】');
+    expect(planned.length).toBeGreaterThan(decomposed.length);
+  });
+
+  it('reads a plan-then-statement reply as its last statement', () => {
+    // The plan is prose, so the only fence in the reply is the answer; the reader every caller
+    // uses must return it rather than the first line of the plan.
+    const reply = ['Tables: orders.', 'Operations: count.', 'Columns: one count.', '', '```sql', 'SELECT COUNT(*) FROM orders', '```'].join('\n');
+    expect(readStatement(reply, { template: 'macsql-bird-qp' }).sql).toBe('SELECT COUNT(*) FROM orders');
+  });
+
+  it('refuses to render the examples template without examples', () => {
+    expect(() => renderMacSqlBirdPrompt({ question: 'q', schema, template: 'macsql-bird-os' })).toThrow(/carries examples written for the database, and received none/);
+  });
+
+  it('refuses examples on the templates that have no slot for them', () => {
+    expect(() => renderMacSqlBirdPrompt({ question: 'q', schema, template: 'macsql-bird', examples: [example] })).toThrow(/no slot for examples/);
+    expect(() => assertTemplateCarries({ template: 'macsql-bird-qp', examples: [example] })).toThrow(/has no slot for examples/);
+  });
+
+  it('allows examples on the one template that wants them', () => {
+    expect(() => assertTemplateCarries({ template: 'macsql-bird-os', examples: [example] })).not.toThrow();
+    // An empty list is not a block, exactly as an empty string is not one.
+    expect(() => assertTemplateCarries({ template: 'macsql-bird', examples: [] })).not.toThrow();
+  });
+
+  it('puts the database examples after the two carried ones and before the schema', () => {
+    const prompt = renderMacSqlBirdPrompt({ question: 'q', schema, template: 'macsql-bird-os', examples: [example] });
+    const second = prompt.indexOf('Question Solved.');
+    const block = prompt.indexOf('【Examples for this database】');
+    const card = prompt.indexOf('【Database schema】', block);
+    expect(second).toBeGreaterThan(0);
+    expect(block).toBeGreaterThan(second);
+    expect(card).toBeGreaterThan(block);
+    expect(prompt).toContain('【Question】\nHow many orders are there?');
+    expect(prompt).toContain('Sub question 1:\nHow many orders are there?');
+    expect(prompt).toContain('```sql\nSELECT COUNT(*) FROM orders\n```');
+    expect(prompt).toContain('The examples above were written for this database.');
+  });
+
+  it('carries the examples through the prompt builder, which is where a dropped block hides', () => {
+    // The block is only worth an arm if `buildSqlPrompt` forwards it: `values` was read by this
+    // harness and never passed down once, and the arm then read as its parent with a longer
+    // instruction. This asserts the forwarding rather than the renderer.
+    const withBlock = buildSqlPrompt('q', schema, { template: 'macsql-bird-os', examples: [example] });
+    expect(withBlock).toContain('SELECT COUNT(*) FROM orders');
+    expect(() => buildSqlPrompt('q', schema, { template: 'macsql-bird-os' })).toThrow(/received none/);
+    expect(() => buildSqlPrompt('q', schema, { template: 'macsql-bird', examples: [example] })).toThrow(/no slot for examples/);
   });
 });

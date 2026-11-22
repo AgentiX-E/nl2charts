@@ -47,7 +47,77 @@
 import type { SchemaTable } from './linking.js';
 
 /** The templates a caller can ask for instead of the assembled prompt. */
-export type PromptTemplate = 'macsql-bird';
+export type PromptTemplate = 'macsql-bird' | 'macsql-bird-qp' | 'macsql-bird-os';
+
+/** A question and the statement that answers it, written for one database. */
+export interface SyntheticExample {
+  readonly question: string;
+  readonly sql: string;
+}
+
+/**
+ * What a template is, in the three places templates differ.
+ *
+ * Two of them are one sentence each — the instruction that names the procedure, and the line
+ * that asks for the reply — and the third is where the worked examples come from. Keeping the
+ * three in a table rather than in three renderers is what makes a new template one row: a
+ * renderer per template is a second place for the card, the evidence block and the separator
+ * lines to drift, and the first `macsql-prompt` dispatch paid for exactly that drift once
+ * already (`schemaLines` reached the builder and the template rendered every column).
+ */
+interface TemplateShape {
+  /** The opening instruction, before the constraint list. */
+  readonly opening: readonly string[];
+  /** The line the reply is written in answer to. */
+  readonly closing: string;
+  /** `corpus` carries this repository's two worked examples; `database` also needs the caller's. */
+  readonly examples: 'corpus' | 'database';
+}
+
+const OPENING = 'Given a 【Database schema】 description, a 【Evidence】 note and a 【Question】, write SQLite SQL that answers the question, and understand the database and the evidence before you write it.';
+
+/**
+ * The three procedures, and the one line that changes between them.
+ *
+ * `macsql-bird` ships a decomposition: MAC-SQL's own output shape, and the reason the reader
+ * takes the last statement rather than the first. `macsql-bird-qp` swaps that sentence for
+ * CHASE-SQL's query plan — tables, then operations, then output columns — which is a different
+ * *order of work* over the same skeleton, so the pair prices a procedure rather than a prompt.
+ * `macsql-bird-os` keeps the decomposition and adds examples written for the database.
+ *
+ * The plan arm is not the same object as the `plan` lever on the assembled prompt (−7.2pp
+ * there). That one carried a plan written in an earlier call, which is an anchor the generator
+ * then obeys; this one asks for the plan inside the same reply, where it is working notes and
+ * costs no call — which is what CHASE-SQL's Algorithm 1 does.
+ */
+export const TEMPLATE_SHAPES: Readonly<Record<PromptTemplate, TemplateShape>> = {
+  'macsql-bird': {
+    opening: [
+      OPENING,
+      'Work by decomposition: split the question into the sub-questions it is built from and write the statement that answers each, then write the statement that answers the question itself. The last statement is the answer.',
+    ],
+    closing: 'Decompose the question into sub questions, considering 【Constraints】, and generate the SQL after thinking step by step:',
+    examples: 'corpus',
+  },
+  'macsql-bird-qp': {
+    opening: [
+      OPENING,
+      'Work by query planning, in three steps, before you write the statement: first name the tables the question needs, then name the operations it asks for (filter, join, aggregate, order), then name the columns the answer returns. One line per step, each name taken from the schema. Then write the statement the plan describes; the statement is the answer.',
+    ],
+    closing: 'Plan in three steps — the tables, then the operations, then the output columns — and then write the SQL:',
+    examples: 'corpus',
+  },
+  'macsql-bird-os': {
+    opening: [
+      OPENING,
+      'Work by decomposition: split the question into the sub-questions it is built from and write the statement that answers each, then write the statement that answers the question itself. The last statement is the answer.',
+    ],
+    closing: 'The examples above were written for this database. Decompose the question into sub questions, considering 【Constraints】, and generate the SQL after thinking step by step:',
+    examples: 'database',
+  },
+};
+
+export const PROMPT_TEMPLATES: readonly PromptTemplate[] = ['macsql-bird', 'macsql-bird-qp', 'macsql-bird-os'];
 
 /**
  * The constraints MAC-SQL's BIRD template states, in this project's voice.
@@ -276,6 +346,40 @@ export interface MacSqlPromptInput {
   readonly samples?: boolean;
   /** Column lines the card may spend; the assembled prompt's `schemaLines` means the same thing. */
   readonly schemaLines?: number;
+  /** Which of `PROMPT_TEMPLATES` to render; absent is `macsql-bird`, the shipped one. */
+  readonly template?: PromptTemplate;
+  /**
+   * Examples written for this database, for the one template that wants them.
+   *
+   * Required there and refused everywhere else: `macsql-bird-os` renders a block whose content
+   * is per database, so a caller that supplies none is asking for a prompt the renderer cannot
+   * write, and a caller that supplies them to the other two is asking for a block with no slot.
+   */
+  readonly examples?: readonly SyntheticExample[];
+}
+
+/** One generated pair, in the shape the two carried examples are written in. */
+function renderDatabaseExamples(examples: readonly SyntheticExample[]): string {
+  return [
+    '【Examples for this database】',
+    ...examples.flatMap((example) => [
+      '',
+      '【Question】',
+      example.question,
+      '【Evidence】',
+      'None',
+      '',
+      // One sub-question and its statement, which is the shape the closing line asks the model
+      // for: a block of bare statements would teach a reply shape the prompt then contradicts.
+      'Sub question 1:',
+      example.question,
+      '',
+      'SQL',
+      '```sql',
+      example.sql,
+      '```',
+    ]),
+  ].join('\n');
 }
 
 /**
@@ -287,21 +391,32 @@ export interface MacSqlPromptInput {
  * nothing on the way out checks for it. Concatenation cannot leave a placeholder behind.
  */
 export function renderMacSqlBirdPrompt(input: MacSqlPromptInput): string {
+  const template = input.template ?? 'macsql-bird';
+  const shape = TEMPLATE_SHAPES[template];
+  const given = input.examples ?? [];
+  // The renderer refuses both directions itself rather than trusting the caller to have asked
+  // `assertTemplateCarries` first: this function is exported, and a template that renders an
+  // empty examples block is a prompt that says "the examples above" about nothing.
+  if (shape.examples === 'database' && given.length === 0) {
+    throw new Error(
+      `prompt template '${template}' carries examples written for the database, and received none; ` +
+        'write them before the prompt is built or use the assembled prompt',
+    );
+  }
+  if (shape.examples === 'corpus' && given.length > 0) {
+    throw new Error(`prompt template '${template}' has no slot for examples written for the database; drop them or use 'macsql-bird-os'`);
+  }
+  const worked = shape.examples === 'database' ? [EXAMPLE_ONE, EXAMPLE_TWO, renderDatabaseExamples(given)] : [EXAMPLE_ONE, EXAMPLE_TWO];
   return [
-    'Given a 【Database schema】 description, a 【Evidence】 note and a 【Question】, write SQLite SQL that answers the question, and understand the database and the evidence before you write it.',
-    'Work by decomposition: split the question into the sub-questions it is built from and write the statement that answers each, then write the statement that answers the question itself. The last statement is the answer.',
+    ...shape.opening,
     '',
     '【Constraints】',
     ...MACSQL_CONSTRAINTS.map((rule) => `- ${rule}`),
     '',
-    '==========',
-    '',
-    EXAMPLE_ONE,
-    '',
-    '==========',
-    '',
-    EXAMPLE_TWO,
-    '',
+    // The separators are regenerated rather than written around the two blocks by hand, because
+    // the third block makes the hand-written version wrong in a way that reads as a rendering
+    // bug: the examples would run together with no line between them.
+    ...worked.flatMap((block) => ['==========', '', block, '']),
     '==========',
     '',
     '【Database schema】',
@@ -317,7 +432,7 @@ export function renderMacSqlBirdPrompt(input: MacSqlPromptInput): string {
     '【Evidence】',
     input.evidence !== undefined && input.evidence.trim().length > 0 ? input.evidence.trim() : 'None',
     '',
-    'Decompose the question into sub questions, considering 【Constraints】, and generate the SQL after thinking step by step:',
+    shape.closing,
   ].join('\n');
 }
 
@@ -354,6 +469,7 @@ export function assertTemplateCarries(options: {
   readonly reasoning?: 'sql-like';
   readonly notes?: readonly string[];
   readonly dialect?: string;
+  readonly examples?: readonly SyntheticExample[];
 }): void {
   const conflicts: string[] = [];
   for (const key of TEMPLATE_CONFLICTS) {
@@ -376,6 +492,14 @@ export function assertTemplateCarries(options: {
   // The template states its dialect in the instruction and in the examples, so a caller asking for
   // another one is asking for a prompt that contradicts itself. `SQLite` is what both examples are.
   if (options.dialect !== undefined && options.dialect !== 'SQLite') conflicts.push('dialect');
+  // Examples are the one block a template can carry, and exactly one of them carries it. This is
+  // checked here as well as in the renderer because the harness asks this function at arm
+  // declaration, before any synthesis has run: an arm that names `macsql-bird` and intends to
+  // attach per-database examples has to fail at the declaration rather than at the first call.
+  const examples = options.examples ?? [];
+  if (examples.length > 0 && TEMPLATE_SHAPES[options.template].examples !== 'database') {
+    conflicts.push('examples');
+  }
   if (conflicts.length > 0) {
     throw new Error(
       `prompt template '${options.template}' is the whole prompt and has no slot for ${conflicts.join(', ')}; ` +

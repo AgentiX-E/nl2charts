@@ -2150,3 +2150,36 @@ describe('the grounding funnel', () => {
     expect(() => assertGroundingFired('inline+evidence+ground', runs as never)).not.toThrow();
   });
 });
+
+describe('the two procedure arms and the block one of them carries', () => {
+  const arm = (name: string) => ARMS.find((entry) => entry.name === name) as Arm;
+  const examples = [{ question: 'How many orders are there?', sql: 'SELECT COUNT(*) FROM orders' }];
+
+  it('declares the query-plan procedure on the template that ships, and no other change', () => {
+    const planned = promptFor(arm('macsql-bird-qp'), question, {});
+    const shipped = promptFor(arm('macsql-prompt'), question, {});
+    expect(planned.template).toBe('macsql-bird-qp');
+    expect(shipped.template).toBe('macsql-bird');
+    // The one lever: every other field is identical, so the pair prices the procedure.
+    expect({ ...planned, template: shipped.template }).toEqual(shipped);
+  });
+
+  it('carries the examples into the prompt the arm actually sends', () => {
+    // `values` was read by this harness and never passed down once, and the arm then read as its
+    // parent with a longer instruction. This asserts the forwarding rather than the field.
+    const options = promptFor(arm('macsql-bird-os'), question, { examples });
+    expect(options.examples).toEqual(examples);
+    const prompt = buildSqlPrompt(question.question, [], options);
+    expect(prompt).toContain('【Examples for this database】');
+    expect(prompt).toContain('SELECT COUNT(*) FROM orders');
+  });
+
+  it('does not attach examples to an arm whose template has no slot for them', () => {
+    expect(promptFor(arm('macsql-prompt'), question, { examples }).examples).toBeUndefined();
+  });
+
+  it('refuses to build the examples prompt when the block never arrived', () => {
+    const options = promptFor(arm('macsql-bird-os'), question, {});
+    expect(() => buildSqlPrompt(question.question, [], options)).toThrow(/received none/);
+  });
+});

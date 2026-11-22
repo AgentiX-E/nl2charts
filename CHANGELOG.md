@@ -6,7 +6,31 @@ cannot be argued with.
 
 ## Unreleased
 
+### Added
+- **Two procedures, dispatched against the one that ships.** `macsql-bird-qp` swaps the template's
+  decomposition sentence pair for CHASE-SQL's query plan inside the same reply — tables, then
+  operations, then output columns — and `macsql-bird-os` adds three question-SQL pairs written for
+  *this* database to the two the template carries. `packages/ai/src/template.ts` now describes a
+  template as one row in `TEMPLATE_SHAPES` (opening, closing, where its examples come from) so the
+  third template is a row rather than a second renderer, and `packages/ai/src/examples.ts` owns the
+  prompt that writes the pairs and the parser that reads the reply — the harness adds only the
+  cache, because a customer runs both. Both arms are registered in `docs/benchmarks.md` before the
+  dispatch at **≥ 68.0%** (single source 65.93 + 2.1pp) with `plan` capped at +40% prompt tokens
+  and one generation call a case. The third arm the previous round registered — a selector shown
+  five result rows — was struck instead of built: `toCandidate` has put three rows into every
+  selection prompt this repository has sent, and `select-mixed-gated` (59.48%) and
+  `-gated-evidence` (60.89%) already price the short circuit and the schema block.
+- **`BIRD_EXAMPLE_COUNT` and a per-database examples cache.** Three pairs, not CHASE-SQL's seven,
+  and the number is a budget: the block is paid for on every question and the parent is already
+  3,700 prompt tokens, so seven pairs would make the arm's gain indistinguishable from a longer
+  prompt. The cache lives under the run's root rather than the module's path.
 ### Fixed
+- **The examples cache was keyed on a directory the run did not own.** Its first version defaulted
+  to `eval/.cache/bird/examples`, so an end-to-end test's fixture database wrote a block that the
+  next test (and the next run) read under the same name: `synthesizeExamples` now takes `cacheDir`
+  as a required field and `BirdLayout.examplesCache` supplies it, the same way definitions and
+  profile blocks already do. Found by the test that asserts one synthesis call per database
+  reading zero — the assertion that was supposed to prove the wiring instead proved the cache.
 - **A card instrument cannot cut a card out of another skeleton.** The dev dispatch read its two
   arms and then died at the step after the paired readings with `card: the prompt has no "\nQuestion: "
   heading`. `costOf` splits on `buildSqlPrompt`'s marks — the system turn must end with the question,

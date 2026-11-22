@@ -18,7 +18,7 @@ import type { ReplyShape } from './format.js';
 import { linkSchema, renderSchemaCard } from './linking.js';
 import type { LinkedColumn, Recaller, SchemaCardOptions, SchemaTable } from './linking.js';
 import { assertTemplateCarries, renderMacSqlBirdPrompt } from './template.js';
-import type { PromptTemplate } from './template.js';
+import type { PromptTemplate, SyntheticExample } from './template.js';
 
 export interface PromptOptions extends SchemaCardOptions {
   /** Dialect the statement must be written in, e.g. 'SQLite'. */
@@ -101,6 +101,15 @@ export interface PromptOptions extends SchemaCardOptions {
    * repository has paid for twice.
    */
   readonly template?: PromptTemplate;
+  /**
+   * Examples written for this database, for the one template that renders them.
+   *
+   * A separate field from `demonstrations`, which is retrieved from the corpus: these are
+   * generated from the schema the question is asked against, so they carry values and joins of
+   * *this* database rather than of a neighbour's. The distinction is the whole finding behind
+   * CHASE-SQL's online synthetic generator, and it is why the two are priced as different arms.
+   */
+  readonly examples?: readonly SyntheticExample[];
 }
 
 export interface PromptProfile extends SchemaCardOptions {
@@ -435,10 +444,12 @@ export function buildSqlPrompt(
     return renderMacSqlBirdPrompt({
       question,
       schema,
+      template: resolved.template,
       ...(resolved.evidence === undefined ? {} : { evidence: resolved.evidence }),
       ...(resolved.descriptions === undefined ? {} : { descriptions: resolved.descriptions }),
       ...(resolved.samples === undefined ? {} : { samples: resolved.samples }),
       ...(resolved.schemaLines === undefined ? {} : { schemaLines: resolved.schemaLines }),
+      ...(resolved.examples === undefined ? {} : { examples: resolved.examples }),
     });
   }
   const rules = [

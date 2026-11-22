@@ -81,6 +81,15 @@ interface Plan {
   readonly whenValues?: string;
   readonly definitions?: string;
   /**
+   * The reply to the example generator, when a scenario runs the online synthetic arm.
+   *
+   * Its prompt names tables and never a question, so it reaches the endpoint as the one request
+   * no other branch claims — which is why the default below is a pair rather than a statement:
+   * a block that parsed to nothing would throw inside the synthesis, and the run under test is
+   * the one that has to prove the block reaches the prompt.
+   */
+  readonly examples?: (prompt: string) => string;
+  /**
    * The answer to a column-choice prompt, keyed on the question it asks about.
    *
    * Absent means an empty reply, which is the arm's own fallback case: nothing resolved, so the
@@ -253,6 +262,11 @@ function replyFor(
   if (prompt.includes('Instead of a statement, reply with one JSON object')) {
     const asked = Object.keys(golds).find((entry) => prompt.includes(entry)) ?? '';
     return send(plan.intent?.(asked) ?? '{"from":"items","select":[{"expr":"count(*)"}]}');
+  }
+  // The example generator. Read before the question lookup because its prompt carries the schema
+  // card and no question at all, so falling through would answer it with a definition block.
+  if (prompt.includes('practice questions for the database below')) {
+    return send(plan.examples?.(prompt) ?? 'Question: How many items are there?\n```sql\nselect count(*) from items\n```');
   }
   const question = Object.keys(golds).find((entry) => prompt.includes(entry));
   if (question === undefined) return send(plan.definitions ?? DEFINITIONS);
@@ -4874,5 +4888,46 @@ describe('the arm that links by generating', () => {
     // the demonstration is the number of tables in the prompt below.
     expect(linkedRow?.passed).toBe(parentRow?.passed);
     expect(linkedRow?.total).toBe(parentRow?.total);
+  });
+});
+
+describe('the two procedure arms, end to end', () => {
+  // One scenario, two arms: they share every request except their own opening sentence, so a run
+  // that carries both is also the cheapest check that the two templates do not collapse into one.
+  it('writes one example block per database, sends it in the prompt, and plans in the other arm', async () => {
+    const result = await run({
+      plan: { examples: () => 'Question: How many items are there?\n```sql\nselect count(*) from items\n```' },
+      env: { BIRD_ARMS: 'macsql-bird-os,macsql-bird-qp' },
+    });
+    expect(result.code).toBe(0);
+
+    // The generator is asked once for the database, not once per question: six questions, one
+    // call. That ratio is the reason the block is affordable at all.
+    const generated = result.requests.filter((request) => request.prompt.includes('practice questions for the database below'));
+    // eslint-disable-next-line no-console
+
+    expect(generated).toHaveLength(1);
+
+    const controls = result.report.controls as { databaseExamples: number; databaseExampleCount: number };
+    expect(controls.databaseExamples).toBe(1);
+    expect(controls.databaseExampleCount).toBe(1);
+
+    // Read from the requests the endpoint actually received rather than from the artifact's
+    // preview: the preview exists in a dry run only, and a dry run cannot write this block. Every
+    // generation call for the os arm carries it; none of the plan arm's does.
+    const generation = result.requests.filter((request) => request.prompt.includes('【Question】'));
+    const withBlock = generation.filter((request) => request.prompt.includes('【Examples for this database】'));
+    const withPlan = generation.filter((request) => request.prompt.includes('Work by query planning, in three steps'));
+    expect(withBlock.length).toBeGreaterThan(0);
+    expect(withPlan.length).toBeGreaterThan(0);
+    expect(withBlock.some((request) => request.prompt.includes('Work by query planning, in three steps'))).toBe(false);
+    expect(withPlan.some((request) => request.prompt.includes('【Examples for this database】'))).toBe(false);
+    // Both keep the two carried examples, so the card and the constraints are not what moved.
+    for (const request of [...withBlock, ...withPlan]) {
+      expect(request.prompt).toContain('【Constraints】');
+      expect(request.prompt).toContain('Question Solved.');
+    }
+    expect(withBlock[0]?.prompt).toContain('select count(*) from items');
+    expect(withBlock[0]?.prompt).toContain('The examples above were written for this database.');
   });
 });

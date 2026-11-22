@@ -22,7 +22,7 @@ import { createHash } from 'node:crypto';
 import { basename, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHttpProvider } from '@agentix-e/nl2charts-ai';
-import type { LlmProvider, PromptOptions, SchemaTable } from '@agentix-e/nl2charts-ai';
+import type { LlmProvider, PromptOptions, PromptTemplate, SchemaTable, SyntheticExample } from '@agentix-e/nl2charts-ai';
 import { applySelection, attachDefinitions, buildAskMessages, buildReconcilePrompt, buildSelectionPrompt, chooseCandidateByRule, chooseCandidatePairwise, buildSqlPrompt, choosePromptProfile, createPipeline, emptyRetryMessages, formatProfile, readStatement, renderDefinitions, renderEvidence, renderSchemaCard, resultGroups, withCallCounter, assertTemplateCarries } from '@agentix-e/nl2charts-ai';
 import { capabilitiesOf } from '@agentix-e/nl2charts-ai';
 import type { FormatProfile, ModelCapabilities, PurposeUsage, ReplyShape, SelectionRule, ValueGap } from '@agentix-e/nl2charts-ai';
@@ -57,7 +57,7 @@ import { fingerprintLine, probeBase } from './fingerprint.js';
 import type { BaseFingerprint } from './fingerprint.js';
 import type { Oracle, OracleResult } from './oracle.js';
 import { profileDatabase } from './profile.js';
-import { BIRD_SCHEMA_LINES } from './prompt-shape.js';
+import { BIRD_EXAMPLE_COUNT, BIRD_SCHEMA_LINES } from './prompt-shape.js';
 import { attachSamples, narrowSamples, sampleValuesOf } from './samples.js';
 import { blockColumns } from './block-columns.js';
 import type { BlockRule } from './block-columns.js';
@@ -68,6 +68,7 @@ import { MASKED_PREAMBLE, maskStatement } from './mask.js';
 import { deserializeIndex, findValues, indexCells, renderValues, serializeIndex } from './values.js';
 import type { ValueIndex } from './values.js';
 import { synthesizeRecord } from './synthesize.js';
+import { synthesizeExamples } from './examples.js';
 
 export interface Arm {
   readonly name: string;
@@ -414,7 +415,7 @@ export interface Arm {
    * the combination rather than dropping the block, so an arm cannot name a mechanism it does not
    * send.
    */
-  readonly template?: 'macsql-bird';
+  readonly template?: PromptTemplate;
   /**
    * Render each neighbour with the steps its statement encodes.
    *
@@ -1234,6 +1235,32 @@ export const ARMS: readonly Arm[] = [
   // `promptFor` forces them for a template arm — so the only field that differs from that parent is
   // this one.
   { name: 'macsql-prompt', notes: false, evidence: 'dataset', repairs: 0, linking: false, template: 'macsql-bird' },
+  // The same template with a different procedure inside it. `macsql-bird` opens by telling the
+  // model to decompose; this one tells it to plan — name the tables, then the operations, then the
+  // output columns — and to write the statement the plan describes. One sentence pair moves, so the
+  // pair prices a *procedure* rather than a prompt, which is the distinction CHASE-SQL's ablation
+  // turns on: their query-plan path reads 65.51% alone and costs 0.65pp when removed from a pool,
+  // a large term on its own and a small one inside an ensemble.
+  //
+  // It is deliberately not the `plan` lever, which lost 7.2pp (63/27, p = 0.0002): that one carried
+  // a plan written in an earlier call, so the generator obeyed an anchor it had not written. Here
+  // the plan is working notes inside the same reply, which is what their Algorithm 1 does and what
+  // makes it free. Pre-registered criterion is in `docs/benchmarks.md` before the dispatch.
+  { name: 'macsql-bird-qp', notes: false, evidence: 'dataset', repairs: 0, linking: false, template: 'macsql-bird-qp' },
+  // CHASE-SQL's online synthetic generator: the model writes k question-SQL pairs for *this*
+  // database, once per database and cached, and the prompt carries them as worked examples.
+  //
+  // This is the mechanism the repository named for itself three rounds before writing it. When
+  // retrieved examples measured +0.91pp against a +4.0pp bar, the falsifier registered in
+  // `docs/benchmarks.md` said the next attempt must *synthesise* the examples with the model rather
+  // than retrieve them — and nothing was dispatched. Their reading for it is the strongest
+  // single-path figure in the paper: 68.02% against a 57.75% baseline, +10.27pp, ahead of both of
+  // their CoT paths (+7.76 and +8.02), which the shipped template already carries a version of.
+  //
+  // Cost is per database, not per question: 11 databases on dev, one call each, against 1,534
+  // questions — the whole block costs 11 calls for the split, and the prompt pays for it on every
+  // question (+k examples, measured against the parent's 3.7k prompt tokens).
+  { name: 'macsql-bird-os', notes: false, evidence: 'dataset', repairs: 0, linking: false, template: 'macsql-bird-os' },
   // The hint built from the question *and* the evidence line. RSL-SQL's bidirectional linking
   // unions the columns its preliminary statement named, the columns the dataset's hint named and
   // an LLM's list; the middle one is a text scan, and this repository already puts that hint in
@@ -2124,6 +2151,8 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   // rather than chained: its prompt carries two worked examples, so a push would pay for them on
   // every commit to answer a question that one reading closes either way.
   'macsql-prompt': "MAC-SQL's BIRD prompt sent instead of ours, on our card and our evidence: the criterion is registered in `docs/benchmarks.md` before the run — at least +12 of 600 cases against `inline+evidence` with exact McNemar p < 0.05, 1.00 calls a case, and at least 387 in the three-candidate pool — and it is dispatched beside `inline+evidence-nolink` because their template has no slot for our column hint, so the mechanism reading is the pair of them and the adoption reading is `inline+evidence`",
+  'macsql-bird-qp': 'the query-plan procedure inside the template that ships: one sentence pair differs from `macsql-prompt`, so it prices a procedure at 1.00 calls a case — registered before the dispatch as >= 68.0% (single source 65.93 + 2.1pp) with the plan costing at most +40% prompt tokens, and readable on dev 1,532 because the MDE there is 2.30pp; it is dispatched rather than chained because a template that carries two worked examples is a prompt a push should not pay for on every commit',
+  'macsql-bird-os': 'examples written for the database by the model, once per database and cached: the mechanism this repository registered for itself when retrieved examples failed (+0.91pp against a +4.0pp bar, p = 0.2684) and then never dispatched, and CHASE-SQL\'s strongest single path at +10.27pp; registered before the dispatch as >= 68.0% against the same single source, with the block counted in prompt tokens, and dispatched because it needs 11 synthesis calls plus the split',
   'inline+evidence+link-evidence': 'the hint built from the question and the dataset hint together, which is the middle source of RSL-SQL\'s bidirectional linking (its `extract_from_hint` scans the evidence for column names and unions the result): offline the same twelve slots move from 39.3% to 55.2% column recall at 29.8% → 31.4% precision, so this arm prices what that recall is worth at the answer rather than at the hint',
   'inline+evidence+rows': 'three stored rows per table on the same prompt: the one input RSL-SQL\'s `Instruction.py` names five times and this repository has never sent — a column sample shows a value\'s domain, a row sample shows which values occur together, and only the second can say that `status = \'Banned\'` belongs with `currency = \'EUR\'`; priced before it was built at 1,058 characters a question at the mean and 483 at the median on dev, with the prediction registered in `docs/benchmarks.md` (gain concentrates on questions whose gold literal `values` never found, or the schema layer closes entirely),',
   'select-prune': 'the card cut to the join closure: measured −1.4pp, and the loss is the ceiling rather than the selector (1,008 → 980 reachable cases), so it is priced; run it when the card changes',
@@ -5675,6 +5704,8 @@ export interface BirdLayout {
   readonly profileCache: string;
   /** Where `value-examples.ts` caches its per-database block. */
   readonly exampleCache: string;
+  /** Where the online synthetic generator caches one block per database. */
+  readonly examplesCache: string;
   readonly definitionsCache: string;
   readonly definitionsFile: string;
   readonly oracleScript: string;
@@ -5720,6 +5751,11 @@ export function resolveLayout(env: Readonly<Record<string, string | undefined>>,
     // database alike, and a single directory let a test's `shop` be served to whatever read
     // `shop` next. Written into the dataset, the cache is also fetched and evicted with it.
     exampleCache: join(data, '.value-examples'),
+    // Under the run's root, not under the module's: a fixture and the corpus can name a database
+    // alike, and the first version of this cache lived in the repository and served a test's `shop`
+    // block to the next run — which is how the end-to-end test that asserts one synthesis call
+    // found zero.
+    examplesCache: join(root, 'eval/.cache/bird/examples'),
     definitionsCache: join(root, 'eval/.cache/bird/definitions'),
     // Definitions are an *input* to the definition-dependent arms, so they are pinned in
     // the repository rather than regenerated: two runs with identical prompts produced
@@ -6177,6 +6213,8 @@ export interface PromptBlocks {
   readonly values?: string;
   /** A few stored rows per table, in the tables the question names. */
   readonly rows?: string;
+  /** Question-SQL pairs written for this database, for the one template that renders them. */
+  readonly examples?: readonly SyntheticExample[];
 }
 
 /**
@@ -6292,7 +6330,7 @@ export function narrowFields(
 }
 
 export function promptFor(arm: Arm, question: BirdQuestion, blocks: PromptBlocks = {}): PromptOptions {
-  const { synthesized, definitions, retrieved, demonstrations, values, rows } = blocks;
+  const { synthesized, definitions, retrieved, demonstrations, values, rows, examples } = blocks;
   const profile = arm.profile === 'adaptive' ? choosePromptProfile(question.question) : undefined;
   const evidence =
     arm.evidence === 'dataset'
@@ -6341,6 +6379,7 @@ export function promptFor(arm: Arm, question: BirdQuestion, blocks: PromptBlocks
     ...(arm.decompose === true ? { decompose: true } : {}),
     ...(arm.reasoning === 'sql-like' ? { reasoning: 'sql-like' as const } : {}),
     ...(arm.template === undefined ? {} : { template: arm.template }),
+    ...(arm.template !== 'macsql-bird-os' || examples === undefined || examples.length === 0 ? {} : { examples }),
   };
   // The same refusal the prompt builder makes, one layer earlier: an arm that asks for a whole
   // template and a block the template has no slot for is a declaration whose name claims a
@@ -6425,6 +6464,9 @@ export interface Controls {
   retrievalCorpus: number;
   retrievedBlocks: number;
   demonstrationBlocks: number;
+  /** Databases whose prompt carried examples written for them, and how many pairs that is. */
+  databaseExamples: number;
+  databaseExampleCount: number;
   /**
    * Questions whose neighbours arrived with the steps their statements encode.
    *
@@ -7327,6 +7369,34 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
   };
 
   /**
+   * Examples written for each database, for the one template that sends them.
+   *
+   * Outside the per-question loop on purpose: the block is a property of the database, so 11
+   * calls cover the whole dev split where a per-question generator would spend 1,534. The cache
+   * is keyed on the prompt and the model, so a run that reuses a block reports it and a run that
+   * rewrites it does not — which is the difference between "the arm moved" and "the input moved".
+   */
+  const examplesByDb = new Map<string, readonly SyntheticExample[]>();
+  const examplesProvenance: Record<string, { written: number; asked: number; cached: boolean }> = {};
+  const needsExamples = inEffect.some((arm) => arm.template === 'macsql-bird-os');
+  if (!settings.dryRun && needsExamples) {
+    for (const [db, schema] of schemas) {
+      const outcome = await synthesizeExamples({
+        db,
+        schema,
+        provider,
+        model: settings.model,
+        count: BIRD_EXAMPLE_COUNT,
+        cacheDir: layout.examplesCache,
+        ...(settings.definitionsForce ? { force: true } : {}),
+      });
+      examplesByDb.set(db, outcome.examples);
+      examplesProvenance[db] = { written: outcome.written, asked: outcome.asked, cached: outcome.cached };
+    }
+  }
+  const examplesFor = (db: string): readonly SyntheticExample[] | undefined => examplesByDb.get(db);
+
+  /**
    * What this arm's prompt may use. One builder for every call site, so the prompt
    * that is measured and the prompt that is sent cannot disagree.
    */
@@ -7345,6 +7415,7 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
         }),
     ...(valuesFor(question) === undefined ? {} : { values: valuesFor(question) }),
     ...(rowsFor(arm, question) === undefined ? {} : { rows: rowsFor(arm, question) }),
+    ...(examplesFor(question.db_id) === undefined ? {} : { examples: examplesFor(question.db_id) }),
   });
 
   const controls: Controls = {
@@ -7354,6 +7425,11 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
     retrievalCorpus: retrievalIndex === undefined ? 0 : retrievalIndex.rows.length,
     retrievedBlocks: retrievedByQuestion.size,
     demonstrationBlocks: demonstrationsByQuestion.size,
+    // Databases that carried examples written for them, and how many pairs that is. An arm whose
+    // template asks for them and receives none throws at render, so this is a report line rather
+    // than the guard — but it is the line that says the arm ran its lever instead of its parent.
+    databaseExamples: examplesByDb.size,
+    databaseExampleCount: [...examplesByDb.values()].reduce((total, block) => total + block.length, 0),
     // The step block is a different text over the same neighbours, so its count is what tells a
     // reader that the arm ran the lever rather than the parent under a new name.
     stepDemonstrationBlocks: [...demonstrationsByQuestion.values()].filter((block) => block.steps.length > 0).length,

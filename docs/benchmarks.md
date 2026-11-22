@@ -19662,3 +19662,105 @@ rebuild gives it, at no additional call.
 If C1 and C2 both land under 66%, the three procedures are worth nothing on this corpus and the
 remaining levers are the backbone and the product side — that falsifier is registered here, before
 the dispatch, for the same reason the last one was.
+
+## Three procedures, and the premise this round found already false
+
+The section above ends with a dispatch and a falsifier. Writing the three arms turned up two
+things about our own harness that change what the dispatch is for, and one of them cancels an arm.
+
+### The selector has always been shown its candidates' results
+
+Last round's third arm was going to ask whether a selector shown five result rows picks better
+than one shown none. It is not a question: `toCandidate(executed, previewRows = 3, maxChars = 300)`
+has put three rows of every candidate's result into every selection prompt this repository has
+ever sent, and the equal-result short circuit that arm also proposed is `gate: 'results'`, which
+two arms already carry:
+
+| arm | accuracy | calls | conversion |
+| --- | --- | --- | --- |
+| `select-mixed-gated` (short circuits equal results) | 59.48% | 3.30 | 90.21% |
+| `select-mixed-gated-evidence` (and shows the columns they read) | 60.89% | 3.31 | 91.79% |
+
+So the paid selector's 1-token reply was not a model that had never seen the results — it was a
+model that saw them and still answered a position. That is a stronger statement than the one last
+round wrote, and it costs nothing: the arm is struck before it was dispatched, and the ¥5 and the
+1,800 selection calls stay unspent. **A registered criterion whose premise is false has to be
+struck, not adjusted.** The rule that follows from it is in the checklist at the foot of this
+section.
+
+### Of the paper's three paths, one is already in the product
+
+CHASE-SQL's ablation prices three procedures, and their abstract calls them the reason a prompt
+alone does not get there: query plan (+7.76pp alone), divide and conquer (+8.02), online synthetic
+examples (+10.27). The template this repository ships opens with
+
+> Work by decomposition: split the question into the sub-questions it is built from and write the
+> statement that answers each, then write the statement that answers the question itself.
+
+which is their divide-and-conquer path in our own voice, and it is why the reader takes the *last*
+statement rather than the first. Reading `65.93%` as "a prompt" rather than "a prompt with a
+procedure" was the mistake the last round made when it compared our number to their 57.75%
+baseline: our baseline is not procedure-free. The honest comparison is procedure against
+procedure, which leaves two of their three untested here: the plan, and the synthetic examples.
+
+### The two arms this round dispatches
+
+| # | arm | what differs from `macsql-prompt` | criterion, registered before the dispatch | calls |
+| --- | --- | --- | --- | --- |
+| C1 | `macsql-bird-os` | three question-SQL pairs written for *this* database are added to the two carried examples | **≥ 68.0%** (single source 65.93 + 2.1pp) and the block counted in prompt tokens | 1.00 + 11 synthesis calls for the split |
+| C2 | `macsql-bird-qp` | the opening sentence pair asks for a plan — tables, operations, output columns — instead of a decomposition | **≥ 68.0%** and the plan costing at most **+40%** prompt tokens | 1.00 |
+
+Both run beside `macsql-prompt` in the same dispatch, because a 2.1pp criterion on 1,532
+questions needs the paired control: dev's MDE is 2.30pp, and a run-to-run A/A on this split has
+moved an unchanged arm by more than the effect being sought.
+
+C1 is the mechanism this document named for itself three rounds ago and never ran:
+
+> if the gain is < +1.0pp, retrieval-based knowledge is closed as a lever on this pipeline and the
+> next mechanism must **synthesise** the examples with the model rather than retrieve them —
+> CHASE-SQL's generator, not its retriever.
+
+Retrieval measured +0.91pp against a +4.0pp bar (p = 0.2684), so the falsifier fired, and the
+round after it went to the candidate ceiling instead. Their +10.27pp is the largest single-path
+figure in their paper, and the block costs 11 calls for the whole split rather than 1,534: it is
+per database, cached on the prompt and the model, exactly as this repository's synthesized
+definitions are.
+
+Three, not their seven, and the criterion says why: the block is paid for on every question and
+the parent is already 3,700 prompt tokens because of its two carried examples. Three pairs add
+about 450 tokens (+12%); seven would add a thousand and make the arm's gain indistinguishable from
+"the prompt got longer", which is the confound `samples-wide` already charged +74.9% of prompt for.
+If C1 meets its bar at three, the count is the next lever rather than this arm dispatched again.
+
+### C2 is not the `plan` lever that lost 7.2pp
+
+`plan` carried a query plan written in an *earlier call*, which the generator then obeyed: 50.4%
+against 57.6% for its parent, 63:27, p = 0.0002 — anchoring, not planning. C2 asks for the plan
+inside the same reply, where it is working notes and costs no call, which is what their Algorithm 1
+does. The pair is therefore one sentence pair in one prompt, not a second call, and the reading
+separates "a plan written elsewhere" (measured harmful) from "a plan written here" (never measured).
+
+### Cost, declared before the run
+
+1,532 questions × 3 arms = 4,596 generation calls, plus 11 synthesis calls, at the price table in
+`eval/price.ts` with a warm prefix cache: **≈ ¥6**. The paired table is read with
+`bench:bird:pair`, and the two readings that decide the round are the paired deltas to
+`macsql-prompt`, not the absolute accuracies.
+
+### The falsifier
+
+If both arms land under 66.0% — inside or below the parent's own A/A spread — then no procedure
+this repository can write by hand beats the one it ships, and the remaining levers are the backbone
+and the product side. That is registered here, before the dispatch, for the same reason the last
+one was: an arm that runs without a prediction acquires a verdict it did not earn.
+
+### The checklist increment
+
+- **A criterion's premise is part of the criterion.** "Show the selector its results" was struck
+  in ten minutes by reading `toCandidate`'s signature. The cheap version of this check is reading
+  the function a lever would change; the expensive version is dispatching it.
+- **A template is a procedure, not a skeleton.** Counting our 65.93% against a competitor's
+  57.75% baseline compares a prompt that decomposes with one that does not, and credits the
+  difference to the skeleton.
+- **A generated block is priced per database, not per question.** Eleven calls for a split of
+  1,534 is what makes an example generator affordable where a retriever's index was not.

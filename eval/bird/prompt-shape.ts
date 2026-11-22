@@ -14,6 +14,18 @@
 export const BIRD_SCHEMA_LINES = 400;
 
 /**
+ * How many examples the online synthetic arm asks for per database.
+ *
+ * Three rather than CHASE-SQL's seven, and the difference is a budget the reading has to state:
+ * the block is paid for on every question, and the parent prompt is already 3.7k tokens because
+ * of its two carried examples. Three database examples add roughly 450 tokens (+12%); seven would
+ * add a thousand and make the arm's gain indistinguishable from "the prompt got longer", which is
+ * the confound the `samples-wide` lever already charged +74.9% of prompt for. If the criterion is
+ * met at three, the count is the next lever rather than the same arm dispatched again.
+ */
+export const BIRD_EXAMPLE_COUNT = 3;
+
+/**
  * The card options the arms share.
  *
  * `foreignKeys: true` is both what the arms send and the worst case for truncation —
