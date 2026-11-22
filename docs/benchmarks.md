@@ -19359,3 +19359,10 @@ is to detect the arm's declared skeleton once, before the loop, and say so: the 
 that no card can be cut out of this prompt, names the template, and exits zero. In a 1,532-question
 loop a throw on question 47 reports a broken harness; "this arm sends another skeleton" reports the
 truth, and the two read differently a year later.
+
+A 40-question re-dispatch (`44994859181`) then confirmed the repair and settled a question the fix
+raised: **nine diagnostic steps ran over a template arm and all nine passed** — card, values gap,
+joins, prompt gap, repair, one-candidate, pool replay, summary, readback. The only step that refused
+was `diversity`, and it refused for its own reason: 40 cases with candidates is under the 100 it
+needs, and "a share of 40 is a share of the draw". So `card.ts` is the one instrument that reads a
+prompt's internal structure; every other reads the statements and the questions.
