@@ -15,6 +15,7 @@ import {
   readCases,
   reportLines,
   resolveRulesSettings,
+  setExitCode,
   verdict,
 } from '../eval/bird/rules.js';
 import type { ArmReading, RulesArtifact, RulesSettings } from '../eval/bird/rules.js';
@@ -720,5 +721,83 @@ describe('the correction counts what was compared', () => {
   it('takes the number of comparisons as an argument, so nothing has to read a global', () => {
     expect(correctedThreshold(20)).toBeCloseTo(0.0025, 10);
     expect(correctedThreshold(1)).toBeCloseTo(0.05, 10);
+  });
+});
+
+describe('the branches a rule family leaves dark', () => {
+  it('has no arrangement to read on an empty set, and says so instead of indexing nothing', () => {
+    const arrangement = readArtifact({ cases: [{ arm: 'a', candidates: [] }] })[0] as ArmReading;
+    // Every column scores the empty question as a miss; what this test holds is that the
+    // arrangement family answers `-1` rather than reading `undefined` out of an empty list.
+    for (const score of arrangement.scores) expect(score.unavailable).toBe(1);
+  });
+
+  it('falls back to the arrival order when no named source produced a statement', () => {
+    // The arrangement names the sources the artifact reported, so the only member it cannot name
+    // is one whose `source` field is not a string: `readCandidate` reads that as the empty name and
+    // the family filters empty names out. Both named sources returned nothing, so the arrangement
+    // has to fall back to "whoever answered" rather than naming a source that is not there.
+    const nothing = f([]);
+    const reading = readArtifact({
+      cases: [
+        {
+          arm: 'a',
+          candidates: [
+            { source: 'a', correct: false, sql: 'SELECT 1', fingerprint: nothing, rows: 0, columns: 0 },
+            { source: 'b', correct: false, sql: 'SELECT 2', fingerprint: nothing, rows: 0, columns: 0 },
+            { source: 7, correct: true, sql: 'SELECT 3', fingerprint: f([[1]]), rows: 1, columns: 1 },
+          ],
+        },
+      ],
+    })[0] as ArmReading;
+    const arrangements = reading.scores.filter((score) => score.family === 'source-order');
+    expect(arrangements).toHaveLength(2);
+    for (const score of arrangements) expect(score.correct).toBe(1);
+  });
+
+  it('groups a candidate the artifact did not fingerprint on its own, rather than with every other', () => {
+    // Two candidates with no fingerprint are two candidates nobody can say agree, so they must not
+    // form a majority of two against a third that did return a result.
+    const unfingerprinted: readonly Recorded[] = [
+      { source: 'a', correct: false, sql: 'SELECT 1', rows: 1, columns: 1 },
+      { source: 'b', correct: true, sql: 'SELECT 2', rows: 2, columns: 1 },
+      { source: 'c', correct: false, sql: 'SELECT 3', rows: 3, columns: 1 },
+    ];
+    // The widest group is whichever has most members; with no fingerprints at all each is its own
+    // group of one, and the earliest one is the modal group — a single row, so the shape override
+    // finds the widest candidate instead.
+    expect(pickOf('wider', unfingerprinted)).toBe(2);
+  });
+
+  it('prefers a later group when it is strictly larger', () => {
+    const set: readonly Recorded[] = [
+      fromRows('a', false, 'SELECT 1', [[1]]),
+      fromRows('b', false, 'SELECT 2', [[2]]),
+      fromRows('c', false, 'SELECT 3', [[2]]),
+      fromRows('d', true, 'SELECT 4 FROM t', [
+        [1],
+        [2],
+      ]),
+    ];
+    // `b` and `c` agree, so the modal group is the later one; it holds one row, and `d` is wider.
+    expect(pickOf('wider', set)).toBe(3);
+  });
+
+  it('skips a statement there is no text for when a length tie-break has to rank', () => {
+    const set: readonly Recorded[] = [
+      fromRows('a', false, 'SELECT 1', [[1]]),
+      { source: 'b', correct: true, rows: 1, columns: 1, fingerprint: f([[1]]) },
+    ];
+    // No arrangement can rank a statement nobody kept, and the eligible slot with text wins.
+    expect(pickOf('wider-then-shortest', set)).toBe(0);
+  });
+
+  it('hands the process the exit code the harness returned, and nothing when it did not run', () => {
+    const sink: { exitCode?: number | string | null } = {};
+    setExitCode(2, sink);
+    expect(sink.exitCode).toBe(2);
+    const untouched: { exitCode?: number | string | null } = { exitCode: 0 };
+    setExitCode(undefined, untouched);
+    expect(untouched.exitCode).toBe(0);
   });
 });

@@ -19218,3 +19218,89 @@ conditions are met and the ceiling moves, so the prompt has earned its place in 
 ninth lever, and the first prompt that leaves a mark inside the pool. But the pool's score does not
 move beyond the control's own spread, and the money is 32% higher; buying that before a chooser
 exists is buying a hypothesis. Ceiling is a hypothesis; the product is the selected statement.
+
+### The free-rule space is closed on this pool, and the bar it was given is not reachable
+
+The tenth shape's third condition left one question and one bar: recover `selectionLoss` from 42 to
+at most 28, i.e. 409 of 600 selected. That bar carries an assumption — that some chooser which
+spends no call can reach it — and the assumption had never been tested, because testing it by
+dispatch costs a run per rule.
+
+It does not have to. The pool's artifact records, per case, each candidate's source, statement,
+row count, column count, a fingerprint of its result and the judge's verdict, which is everything
+`chooseCandidateByRule` reads except the rows themselves. `bench:bird:rules` replayed twenty
+strategies over `44985557283` for nothing:
+
+| strategy | kept | share | vs `shortest` (won:lost) | p |
+|---|---:|---:|---|---:|
+| `shortest` (shipped) | 395 | 65.83% | — | — |
+| **`first:macsql>metadata>inline`** | **401** | **66.83%** | 30 : 24 | 0.4966 |
+| `chars-no-alias` | 400 | 66.67% | 9 : 4 | 0.2668 |
+| `first:macsql>inline>metadata` | 400 | 66.67% | 29 : 24 | 0.5831 |
+| `nonspace` | 398 | 66.33% | 3 : 0 | 0.2500 |
+| `modal-then-shortest` | 396 | 66.00% | 15 : 14 | 1.0000 |
+| `modal` | 392 | 65.33% | — | — |
+| `wider` | 391 | 65.17% | 16 : 20 | 0.6177 |
+| `first` (recorded order) | 380 | 63.33% | 11 : 26 | 0.0201 |
+
+The candidate set held an answer on 437. The family's ceiling is **401**. Twenty comparisons put
+the Bonferroni bound at p < 0.0025 and no member clears it — nor the uncorrected 0.05, where the
+best is 0.2668.
+
+**And the reason is countable rather than mysterious.** Of the 36 cases the best strategy loses,
+**24 have candidates whose result shapes are identical** (row count and column count equal for
+every member), and **18 of those are three `1r1c` results** — one row, one column, three different
+numbers. That is not an accident of those 36: **485 of the pool's 600 questions (80.8%) have every
+candidate shaped the same**, which is why the one rule that reads shape (`wider`) has no input on
+four questions in five and reads 391 here.
+
+So the registered bar stays exactly as written and the reading is that **no zero-call chooser in
+the catalogue can meet it.** A criterion no member of a family can satisfy is not a failed
+criterion; it is a criterion that prices the next mechanism, and its price is now stated: **eight
+cases above 401**.
+
+### Two things the harness could not express, and one defect that adding them exposed
+
+`wider` was in the library and not in the variant list, so the rule that motivated the pool had
+never been priced against it. It is a port, and the port is held to the library by an invariant
+rather than by a comment: on the same rows and the same arrangements, this file and
+`chooseCandidateByRule('wider', …)` must keep the same candidate. A second implementation of
+"wider" is a second opinion about which candidate is wider.
+
+The other is the pool's *arrangement*. `first` reads arrival order and nothing else, so an ordering
+of the sources is a lever that costs nothing and had never been priced — and the shipped trio names
+`inline+evidence` first while the template was the source that answered most often. Every ordering
+of the sources an arm recorded is now generated per arm (six for three sources, twenty-four for
+four, and no more: an arrangement is a preference among prompts, and a nine-source pool offers no
+preference a reader could act on). One of the six reproduces the recorded order and is kept rather
+than filtered, because it is the control that says the family costs nothing when it says nothing.
+
+Adding them broke the correction, and the reader that caught it was the harness's own sentence. It
+compared every lead against `0.05 / 14` — the static list's unshipped count — while printing that a
+lead had to clear the bound "for 20 variants". Six arrangements were walking through a door the
+correction had shut. `correctedThreshold` now takes the number of comparisons and `verdict` and the
+per-arm line both take it from `reading.against.length`; a test holds ten wins and no losses to
+p = 0.00195, **past the bound for twenty and short of the one for fourteen**.
+
+### What the pool is worth before a chooser exists (`44985557283`, 600 questions)
+
+| configuration | kept | calls a case | prompt tokens | cached | CNY a case |
+|---|---:|---:|---:|---:|---:|
+| template alone (replayed inside the pool's own artifact) | **400 (66.67%)** | 1.00 | 3,694 | 3,480 | 0.00167 |
+| template pool + `shortest` | 395 (65.83%) | 3.00 | 6,176 | 5,608 | 0.00316 |
+| shipped pool (`inline+meta+values`) | 388 (64.67%) | 3.00 | 3,164 | 2,587 | 0.00240 |
+
+| pair | wins / losses | delta | p |
+|---|---|---:|---:|
+| template alone vs template pool | 29 / 24 | +0.83pp | 0.5831 |
+| template alone vs shipped pool | 45 / 33 | +2.00pp | 0.2127 |
+
+The pool and the single source are **indistinguishable**, and the pool costs 47% more and spends
+two more calls. Against the shipped pool the single source's +2.00pp sits at p = 0.21, inside the
+2.5pp this split resolves — so it is not "a better pool", it is **a cheaper configuration that is
+at least as good**, which is what a price table has to be read for.
+
+**Verdict: the shipped configuration is the template alone.** The pool is postponed, not rejected:
+its ceiling (437) really is higher, but nobody can cash it before a chooser that reads SQL exists,
+and the two extra calls are on the bill every time. **Ceiling is a hypothesis; the product is the
+selected statement.**

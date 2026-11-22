@@ -243,11 +243,17 @@ function wider(candidates: readonly Recorded[]): number {
  */
 function firstBy(order: readonly string[]): (candidates: readonly Recorded[]) => number {
   return (candidates) => {
+    // An empty set has no arrangement to read, and the caller already scores it as a miss; the
+    // guard is here so that "no candidate" is a decision this function makes rather than a
+    // `undefined` it lets escape into an index.
+    if (candidates.length === 0) return -1;
     const eligible = eligibleIndices(candidates);
     for (const source of order) {
       for (const index of eligible) if (candidates[index]?.source === source) return index;
     }
-    return (eligible[0] as number) ?? -1;
+    // None of the named sources produced a statement: the arrival order is the only preference
+    // left, and naming a source that is not there must not turn into naming nothing.
+    return eligible[0] as number;
   };
 }
 
@@ -476,8 +482,12 @@ export const VARIANTS: readonly RuleVariant[] = [
     pick: (candidates) => {
       const chosen = wider(candidates);
       if (chosen < 0) return chosen;
-      const group = majority(candidates, 1).filter((index) => candidates[index]?.fingerprint === candidates[chosen]?.fingerprint);
-      return group.length === 0 ? chosen : smallest(candidates, group, chars);
+      // The chosen candidate is a member of its own group, so the subset is never empty and the
+      // tie-break always has something to rank. A `?? chosen` here would be a branch no input
+      // could reach, which is the shape this repository has removed more than once.
+      const marker = candidates[chosen]?.fingerprint;
+      const group = eligibleIndices(candidates).filter((index) => candidates[index]?.fingerprint === marker);
+      return smallest(candidates, group, chars);
     },
   },
 ];
@@ -570,7 +580,7 @@ export function readArtifact(artifact: RulesArtifact): readonly ArmReading[] {
       sources.length < 2 || sources.length > 4
         ? []
         : orderings(sources).map((order) => ({
-            name: `first:${order.map((source) => source.split('+')[0] ?? source).join('>')}`,
+            name: `first:${order.map((source) => (source.includes('+') ? source.slice(0, source.indexOf('+')) : source)).join('>')}`,
             family: 'source-order' as const,
             shipped: false,
             why: 'the same candidates offered in a named order: an arrangement is the whole of what `first` reads, and it costs nothing',
@@ -751,5 +761,15 @@ export function dispatch(
   }
 }
 
-const exit = dispatch(process.argv[1], import.meta.url, process.argv.slice(2), process.cwd());
-if (exit !== undefined) process.exitCode = exit;
+/**
+ * Give the process the exit code the harness returned, when it ran at all.
+ *
+ * A function rather than an inline assignment because `process.argv[1]` is never this module
+ * inside a test process: an inline `if` there leaves one branch permanently dark, and a guard
+ * nobody has executed is a guard nobody has read.
+ */
+export function setExitCode(code: number | undefined, sink: { exitCode?: number | string | null }): void {
+  if (code !== undefined) sink.exitCode = code;
+}
+
+setExitCode(dispatch(process.argv[1], import.meta.url, process.argv.slice(2), process.cwd()), process);

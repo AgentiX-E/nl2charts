@@ -7,6 +7,19 @@ cannot be argued with.
 ## Unreleased
 
 ### Fixed
+- **The correction counted one number and printed another.** Adding the source-ordering family took
+  each arm from 14 comparisons to 20, and `correctedThreshold()` still divided 0.05 by the static
+  list's 14 — while the harness's own sentence said a lead had to clear the bound "for 20
+  variants". Six arrangements were walking through a door the correction had shut. The bound now
+  takes the number of comparisons as an argument, `verdict` and the per-arm report line both read
+  it from `reading.against.length`, and a test holds ten wins and no losses to p = 0.00195 — past
+  the bound for twenty, short of the one for fourteen. The defect was found by reading the output
+  it corrupted: the sentence and the threshold disagreed on the same line.
+- **Four branches no input could reach, removed rather than covered.** `firstBy`'s `?? -1`, the
+  `?? chosen` in `wider-then-shortest` (the chosen candidate is a member of its own group), the
+  `?? source` after a `split('+')[0]` that always returns an element, and the entry guard's inline
+  assignment — the last one is now `setExitCode`, so both of its halves are executed by a test.
+  The eval coverage ratchet caught the first three as uncovered lines, which is what it is for.
 - **The template ignored the card budget.** `schemaLines` reached `buildSqlPrompt` and
   `renderMacSqlCard` rendered every column of every table. The card now honours `limit` (default 40),
   counted one line per column and continued across tables, with three tests on the budget, the zero
@@ -55,6 +68,37 @@ cannot be argued with.
   one is outside both columns rather than a free point for the count.
 
 ### Added
+- **`bench:bird:rules` prices every free chooser, and the answer is that the field is closed.** The
+  template pool's third condition was registered as "recover `selectionLoss` from 42 to at most 28,
+  i.e. 409 of 600 selected", which assumes a zero-call chooser can reach it. The pool's artifact
+  records each candidate's source, statement, row count, column count, result fingerprint and
+  verdict — everything `chooseCandidateByRule` reads except the rows — so twenty strategies were
+  replayed over `44985557283` for nothing. `shortest` 395, **`first:macsql>metadata>inline` 401**,
+  `chars-no-alias` 400, `nonspace` 398, `modal` 392, `wider` 391, `first` 380. The set held an
+  answer on 437; the family's ceiling is 401; the bound for twenty comparisons is 0.0025 and no
+  member clears it, nor the uncorrected 0.05 (best 0.2668). The reason is countable: 24 of the 36
+  cases the best strategy loses have every candidate shaped identically (18 of them three `1r1c`
+  results), and 485 of the pool's 600 questions — 80.8% — have every candidate shaped the same,
+  which is why the one shape-reading rule has no input on four questions in five. **The bar stays
+  as written and the reading is that it is not reachable**; its price is now stated as eight cases
+  above 401.
+- **`wider` in the variant list, held to the library by an invariant.** The rule that motivated the
+  pool had never been priced against it, because it was in `packages/ai` and not in the harness. It
+  is a port, and a test replays both on the same rows for every arrangement of a set: a second
+  implementation of "wider" is a second opinion about which candidate is wider. On the template pool
+  it reads 391 (−4 against `shortest`); on the older `select-mixed` pool it read 385 (+8). Two
+  pools, opposite directions: the signal it reads is specific to how a pool disagrees, which is why
+  it is a priced variant and not a default.
+- **The pool's arrangement, generated per arm.** `first` reads arrival order and nothing else, so an
+  ordering of the sources is a lever that costs nothing and had never been priced — the shipped trio
+  names `inline+evidence` first while the template was the source that answered most often. Every
+  ordering of the sources an arm recorded is now a column (six for three sources, twenty-four for
+  four), and one of them reproduces the recorded order so that the family has a control. It is also
+  an arm, `select-mixed-first-template`, because a preference read off the artifact that scores it
+  is a hypothesis until a run separates it from the pool with the template third.
+- **`select-mixed-first-template`: the same three candidates with the template first.** One field's
+  worth of difference from `select-mixed-rule-template` (`selectRule: 'first'` over
+  `TEMPLATE_FIRST_SOURCES`), and the arm that turns the arrangement from a replay into a reading.
 - **`select-mixed-rule-template`: the template in the pool's third slot, which is the third
   registered condition.** One slot swapped — `values` out, `macsql-prompt` in, same draw count, same
   free rule, same judge — and three tests hold the claims that make it one slot: the draw count and
