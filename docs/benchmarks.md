@@ -3576,7 +3576,7 @@ of them with ours.
 | --- | --- | --- | --- | --- | --- |
 | AskData | **78.49%** | 83.40% | GPT-4o | **no** | the split |
 | SQLConductor | — | 73.2% | Qwen3-8B policy + Gemma4-31B actions | yes (SFT + GRPO) | the split |
-| CHASE-SQL | **74.9%** | 76.02% | Gemini-1.5-Pro | selection agent fine-tuned | the split |
+| CHASE-SQL | **74.9%** | 76.02% | Gemini-1.5-Pro | selection agent fine-tuned | the split; the paper itself reports dev **73.01** / test **73.0** |
 | XiYan-SQL | **73.34%** | 75.63% | QwenCoder-32B ensemble + ICL | partly (generators, selector) | the split |
 | DeepEye-SQL | 74.49% | 78.42% | Qwen2.5-Coder-32B | yes | the split |
 | Alpha-SQL | 69.7% | 70.26% | Qwen2.5-Coder-32B | yes | the split |
@@ -6740,8 +6740,9 @@ produced last round (27 against 38/38/37).
 **So the route closes, and the gap moves above the ceiling.** Three selector shapes — four-way,
 pairwise, adopt-everything — converted **≈0** across two hundred disagreement cases while each of
 them raised the ceiling by **+22 to +27**. The pool's own ceiling on this run is **1,056 / 1,532 =
-68.93%**, and CHASE-SQL's **end-to-end** number is **76.02%**: *a perfect selector over this candidate
-set lands 7.1pp below the competitor.* The selection side has +1.31pp of headroom left; the gap is
+68.93%**, and CHASE-SQL's **end-to-end** number is **73.01%** on the same split — 76.02 is its *test* score, and
+reading that as dev put this gap at 7.1pp for several rounds: *a perfect selector over this candidate
+set lands 4.08pp below the competitor.* The selection side has +1.31pp of headroom left; the gap is
 7.1pp before selection starts. `I-77` and the candidate side close negative, and the next lever has to
 raise the ceiling — with the ceiling as its criterion (**≥ +4pp**), not the score.
 
@@ -6751,8 +6752,8 @@ Three readings have now closed the candidate side: the fourth opinion raised the
 cases and converted none of them (`I-77`), the pairwise comparison overturned zero of the twenty
 cases where overturning would have paid, and three prompts carried **1.12** distinct results a case
 against **1.15** for three samples of one prompt (`I-74`). The pool's own ceiling on the last dev run
-is **68.93%** and CHASE-SQL's *end-to-end* number is **76.02%**, so a perfect selector over this
-candidate set lands 7.1pp below the competitor. **The next lever has to raise the ceiling**, and its
+is **68.93%** and CHASE-SQL's *end-to-end* number is **73.01%** on the same split, so a perfect selector over this
+candidate set lands 4.08pp below the competitor. **The next lever has to raise the ceiling**, and its
 criterion has to be the ceiling.
 
 The mechanism is the one component of CHASE-SQL's pipeline this repository has never stacked:
@@ -6957,8 +6958,8 @@ artifact does not keep the block. That is a design question, not a defect, and i
 **The next lever.** Three readings in the same direction — +0.91pp, −0.72pp, both inside the drift —
 close the demonstrations block, and every other information lever has already read null (`notes` −0.8,
 `definitions`, `samples`, `values`, `audit` +1.01). The gap is in the **candidate ceiling**: the pool
-reaches **68.93%**, `select-mixed` converts **90.4%** of it, and CHASE-SQL's end-to-end is **76.02%**
-— **7.1pp of the 13.7pp is above what any selector could reach**. So the next dispatch is not a new
+reaches **68.93%**, `select-mixed` converts **90.4%** of it, and CHASE-SQL's end-to-end is **73.01%** on that split
+— **4.08pp of the 10.67pp is above what any selector could reach**. So the next dispatch is not a new
 mechanism but a registered ceiling that was never run: `inline+evidence+samples-gold`, whose criteria
 ①②③ are written above, aimed at this run's census of **183 cases** (filter-wide 92, literal-missing
 83, literal-case 8). If the oracle cannot reach +1.5pp, the `samples` family closes on criterion ①.
@@ -7100,7 +7101,7 @@ same four calls, the third slot given to `inline+evidence+samples` instead of to
 Criterion ② is the one that matters and the one a score cannot express. A candidate set is only worth
 what its union covers; if the sampled card is right on cases the other two are also right on, the
 score can still rise through selection while the ceiling — the thing that stands between this
-repository's 68.93% and CHASE-SQL's 76.02% — does not move at all. `bench:bird:pool` reads that
+repository's 68.93% and CHASE-SQL's 73.01% — does not move at all. `bench:bird:pool` reads that
 directly, with no call spent, from the same artifact.
 
 ## The third slot's first dispatch returned a defect instead of a reading
@@ -7230,7 +7231,7 @@ and now as a **candidate source** (32 sole-correct against a 36 threshold). Noth
 is worth another dispatch.
 
 **What is left is the ceiling, and both arms say so.** `recall@3` is 67.17% and 67.75%: the pool
-itself is what stands between 62–63% and CHASE-SQL's 76.02%, and a third source worth 32 sole-correct
+itself is what stands between 62–63% and CHASE-SQL's 73.01%, and a third source worth 32 sole-correct
 cases moved it by 0.58pp. A source that could move it by 2pp would have to be right on ~150 cases the
 other two miss. That is the number the next lever has to be designed against, and it is why the IR
 candidate is the only item in P1 that can change the ceiling rather than redistribute it.
@@ -7240,7 +7241,7 @@ candidate is the only item in P1 that can change the ceiling rather than redistr
 The last three rounds closed the third slot twice and the selector four times. What is left is a
 number with a ceiling on it: `select-mixed` answers **62.53%** and reaches **67.17%** (`recall@3`,
 1,029 of 1,532), `select-samples` reaches 67.75%; the best published system on this split is at
-76.02%. Nine tenths of the selection side is spent (93.4% conversion), so the only lever that can
+74.9% dev. Nine tenths of the selection side is spent (93.4% conversion), so the only lever that can
 still move the score is a candidate nobody wrote — and a fourth candidate raises the ceiling without
 touching the conversion.
 
@@ -19528,3 +19529,136 @@ cases it would need are the ones where all three prompts wrote the same wrong st
 
 `select-mixed-template` stays in the arm table as an on-demand ablation reference, not as a
 candidate: it is the measurement that closes the line, and re-running it would only re-buy it.
+
+## The selector line was closed one measurement too early, and the paper that closed it says so
+
+The section above ends by closing the selector on this page. Reading CHASE-SQL's own ablations the
+same day — the question that prompted it was "should we copy this system, and can a runner prove its
+score with our model" — turns up the figure that section needed and did not have.
+
+**Their off-the-shelf selector scores 58.01% on the binary task the selector exists for. Their
+fine-tuned one scores 71.01%.** 387 of 600 is where 58.01% lives. What closed last round was
+*zero-shot selection*; the thirteen points between those two numbers is the part of the selection
+side this repository has never measured, and it is not reachable by rewriting a prompt.
+
+### Three repositories carry the name, and one of them starts
+
+| repository | files | what it is | can a runner start it |
+| --- | --- | --- | --- |
+| `google-research/google-research` | — | no path matches `chase_sql` | the submission itself is not published |
+| `VineetV2/chase-sql` `3bbf845` | 23 (17 `.py`) | four stages over BIRD dev, SQLite execution, 21 candidates | **yes** — `src/llm.py` already branches to an OpenAI-compatible client, LSH is `datasketch`, execution is `sqlite3`, so no GPU and no torch on the inference path |
+| `kungfuai/chase-sql` `4e63f18` (13★) | 23 (15 `.py`) | `src/database.py` is a mock e-commerce database | **no** — it never loads BIRD, so a score from it would be a score about the toy |
+| `harkrish1/open-chase-sql` `84ef039` (GPL-3.0) | 104 (7 `.py`) | keyword extraction plus a vector store | **no** — no candidate generator and no selector |
+
+So the answer to "run their code on a runner with our model" is **yes for one repository**, and the
+adapter is small: `_call_openai` needs a `base_url`, and `datasketch`, `sqlglot` and `editdistance`
+install without torch. `eval/competitors/intake.json` now carries the eighth row for it, with
+`status: partial` and `license: none declared` — the same status MAC-SQL already runs under, which
+means clone and run locally, never redistribute.
+
+### What it would take to run, and what the number would mean
+
+The paper reports no per-question call count, so the number has to be counted out of the code. Per
+question, that rebuild makes:
+
+| stage | calls | where it comes from |
+| --- | --- | --- |
+| value retrieval | 1 | one keyword-extraction call, then MinHash LSH and a cross-encoder rerank on CPU |
+| DC-CoT | 7 | `generate_dc`, `num_candidates_per_strategy` |
+| QP-CoT | 7 | `generate_qp`, same count |
+| online synthetic | **9** | two example-generation calls (`Rf` and `Rt`, once per question) plus seven answers |
+| query fixer | up to 3 per failing candidate | `fix_all_candidates(..., beta=3)`; at a 30% failure rate that is ≈7 |
+| selection | **2 × pairs whose results differ** | `tournament_select` compares every unordered pair, both orderings |
+
+The last row is the one that decides the bill, because it is **quadratic in the candidate count**:
+21 candidates are 210 unordered pairs before the equal-result short circuit, and the paper's own
+figure 2(d) says the pool stops paying after about 20. At the 70% short-circuit rate this
+repository's pools show, that is ≈126 selector calls a question — **≈157 calls in total, not the
+61 a "21 + fixer + a few comparisons" estimate gives**. Priced off `eval/price.ts` at
+`deepseek-flash` rates with a warm prefix cache: **≈¥0.17 a question, ≈¥102 for 600 and ≈¥261 for
+the full dev split**.
+
+Two consequences follow from the shape rather than the price. A pool of **three** candidates is
+three unordered pairs, so the whole selection stage costs 3 calls instead of 126 — a factor of 42
+bought by cutting the pool from 21 to 3, which is exactly the trade their figure 2(d) says is cheap.
+And a selector that reads five result rows per candidate is affordable at three candidates and is
+not at twenty-one.
+
+It would not buy the score. Three places separate the rebuild from the submission:
+
+| | the paper | the rebuild | what it does to attribution |
+| --- | --- | --- | --- |
+| selector input | `θ_p(schema_union, question, hint, SQL A, SQL B)`; execution results are used **only** to short-circuit equal pairs (Algorithm 3) | five result rows per candidate go **into** the prompt | an addition the paper never prices |
+| selector strength | fine-tuned Gemini-1.5-Flash, **71.01%** binary accuracy | default is the zero-shot one (**58.01–63.98%**) | 7–13 points of selection quality missing |
+| DC / QP few-shot | human-annotated examples with written reasoning chains, appendix figures 16 and 18 | two toy examples hardcoded over an `employees`/`departments` schema | the guidance those two paths are made of is absent |
+
+A run of that repository therefore measures *the skeleton with toy examples and a zero-shot selector
+on DeepSeek*. Its own README says `>73.01%` under "Dev EX Target" — a target, not a reading. Calling
+that number "CHASE-SQL" is the mistake `status: partial` is written to prevent.
+
+### The ablation is the part worth having, and it prices the three levers this repository never tried
+
+Every figure below is the paper's, on BIRD dev, Gemini-1.5-Pro, and each corresponds to something
+that can be run here as one arm.
+
+| what it isolates | their reading | what this repository reads | verdict |
+| --- | --- | --- | --- |
+| baseline, no CoT | 57.75% | `macsql-prompt` 65.93% | different harness, so the level differs; only deltas transfer |
+| **QP-CoT alone** (three-step execution order) | **65.51%** (+7.76) | never run | ← untested |
+| **DC-CoT alone** (decompose, solve, combine) | **65.77%** (+8.02) | `decompose` **−3.7pp** | tested as *always* decompose, not as one candidate |
+| **online synthetic examples alone** | **68.02%** (+10.27) | never run | ← untested, and their strongest single path |
+| 21 candidates, oracle | 82.79% | `recall@3` 72.7% on 600 | same shape: a wide gap over end to end |
+| 21 candidates, self-consistency | 68.84% | `select-mixed-template` 387 of 600 | same verdict |
+| 21 candidates, **fine-tuned selector** | **73.01%** | zero-shot selector 387 (58% band) | the gap the closing above skipped |
+| removing LSH value retrieval | −2.92pp | `literal-missing` headroom 2.3pp | the two agree |
+| removing the query fixer | −3.78pp | `repairs` family already priced | consistent |
+| removing QP / OS / DC from the pool | −0.65 / −0.85 / −1.24 | — | see the arithmetic below |
+
+**The ablation's three generator terms sum to 2.74pp while the pool is worth 4.99pp over the best
+single path** (73.01 − 68.02). The difference, 2.25pp, is a pool containing an answer rather than
+each path being individually necessary — which is the same conclusion `I-77` reached here from the
+other direction: a fourth opinion raised the ceiling by 22–27 cases and converted none.
+
+**Their error census and ours agree on the residual.** They put **10.4%** of cases in "a correct
+candidate existed and the selector did not choose it"; this repository's `recall@3` 72.7% against
+64.7% is **8.0%**. Two harnesses, two prompt families, two models, the same order of magnitude: the
+residual is a property of the corpus, not a defect in either implementation.
+
+### What the two-sided reading changes
+
+1. **The falsifier written three rounds ago was never executed.** When retrieval-based examples
+   failed here (`metadata+evidence+icl` +0.91pp against a +4.0pp bar, p = 0.2684), the registered
+   falsifier said: *"if the gain is < +1.0pp, retrieval-based knowledge is closed as a lever on this
+   pipeline and the next mechanism must **synthesise** the examples with the model rather than
+   retrieve them — CHASE-SQL's generator, not its retriever."* That sentence is on this page. The
+   online synthetic generator was never dispatched; the round went to the candidate ceiling instead.
+   Their +10.27pp is the strongest single-path figure in the paper, and it is the one mechanism the
+   falsifier named by hand.
+2. **"Knowledge rather than wording" was the wrong axis for this system.** DC-CoT and QP-CoT use
+   *hand-annotated* examples, not retrieved ones — their prompt does not carry more facts about the
+   database, it carries a different *procedure*. The axis that separates their three paths is not
+   knowledge against wording; it is **three procedures against three samples of one procedure**.
+   `select-mixed` draws three samples of one prompt, which is why it reads 1.12 distinct result sets
+   a case against 1.15, and why the chooser had nothing to decide.
+3. **The selector deserves one more arm, and it is the cheap one.** The paper's selector sees the
+   schema union of the two candidates and nothing about their results; the rebuild hands it five
+   result rows. That is the only lever in this table that costs **no extra call** — it changes what
+   an existing call is shown. Criterion: on the same three-candidate set, `≥ single source (65.93%)`
+   and **no more than 1.00 selector call a case**, with the equal-result short circuit counted.
+
+### The dispatch these three readings justify
+
+| # | arm | criterion, registered before the dispatch | questions | CNY |
+| --- | --- | --- | --- | --- |
+| C1 | `template+os` — generate k question-SQL pairs for *this* database, then answer | **≥ 68.0% (single source +2.1pp)**, matching their +10.27 over a 57.75 baseline | 1,532 | ≈8 |
+| C2 | `template+qp` — three-step execution order, one call | **≥ 68.0%**, and the plan step must not cost more than +40% prompt tokens | 1,532 | ≈4 |
+| C3 | `select-mixed+results` — same three candidates, selector shown five result rows, equal-result pairs short-circuited | **≥ 65.93%** and **≤ 1.00 selector call a case** | 600 | ≈5 |
+
+C1 is the one the falsifier asked for. C2 is the one the paper prices as cheap and positive (+7.76
+on a single path, −0.65 when removed from the pool — a small term in a pool and a large one alone).
+C3 is the one that repairs last round's closure: it is the same selector shape, shown the input the
+rebuild gives it, at no additional call.
+
+If C1 and C2 both land under 66%, the three procedures are worth nothing on this corpus and the
+remaining levers are the backbone and the product side — that falsifier is registered here, before
+the dispatch, for the same reason the last one was.

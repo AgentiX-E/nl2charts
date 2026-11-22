@@ -116,5 +116,35 @@
    "schema selector pruning the card before generation"
   ],
   "note": "BIRD **dev** 1,534 questions, 70.53%, backbone DeepSeek-V3 (`deepseek-chat`) at temperature 0 for the judger and the direct path, 0.1 for the decomposer. The backbone is the argument this entry exists for: the same API name this repository calls, so 'it scores higher because its model is stronger' is not available as an explanation for these 4.6pp. Its own ablation (770-question subset, full pipeline 69.48) prices four of the five components: always decompose -10.65pp, no decomposition -1.43pp, no topology refinement -0.78pp, no schema selector -1.82pp (tokens x6.3). The component it never ablates is the rag examples, which is the only one that adds knowledge rather than procedure. No artifact of any kind is published, and the leaderboard's model-availability column is empty, so this is a rebuild with the paper as its only checklist. A row named GenaSQL on the 2026-10-29 leaderboard snapshot carries exactly 70.53 dev / 72.28 test; whether it is the same submission under a team name is unverified and is not assumed here."
+ },
+ {
+  "system": "CHASE-SQL",
+  "status": "partial",
+  "repo": "VineetV2/chase-sql",
+  "commit": "3bbf845cb3b0ad1de1719a4229cbdfcbf5ab075f",
+  "license": "none declared",
+  "evidence": "https://github.com/VineetV2/chase-sql",
+  "checkedAt": "2026-11-22",
+  "released": [
+   "value retrieval: keyword extraction, MinHash LSH over database cells, cross-encoder rerank",
+   "candidate generation: DC-CoT, QP-CoT and online synthetic examples, seven each",
+   "query fixer: self-repair loop, beta=3",
+   "pairwise tournament over the 21 candidates, both orderings per pair",
+   "fine-tuning scripts for Gemma-2-9B, Qwen2.5-Coder and Gemini-1.5-Flash"
+  ],
+  "withheld": [
+   "the fine-tuned Gemini-1.5-Flash selector (71.01% binary accuracy) as a weight file",
+   "the paper's own few-shot blocks for DC-CoT and QP-CoT (printed as appendix figures, not code)"
+  ],
+  "mechanisms": [
+   "divide-and-conquer CoT: decompose into sub-questions with pseudo-SQL, write SQL per sub-question, combine",
+   "query-plan CoT: name tables, name filter/join/aggregate operations, then name the output columns",
+   "online synthetic examples: generate question-SQL pairs for this database before answering",
+   "schema union of the two candidates in a pairwise comparison, not the full schema",
+   "execution-result equality as a short circuit that skips the selector call",
+   "binary pairwise selection over an absolute ranking, both orderings, to cancel order bias",
+   "LSH value retrieval to put exact database literals in the hint"
+  ],
+  "note": "Read on 2026-11-22. Google published no code: `google-research/google-research` has no path matching chase_sql, and the three repositories that carry the name are rebuilds, not the submission. This entry names the most complete rebuild (23 files, four stages, runs BIRD dev end to end) and records that it is a rebuild in three places. (1) Selector input. The paper's Algorithm 3 passes (schema union, question, hint, SQL A, SQL B) and uses execution-result equality only as a short circuit; the rebuild puts five result rows per candidate into the prompt. That is an addition, not a reproduction, and the paper never prices it. (2) Selector strength. The paper's selector is a fine-tuned Gemini-1.5-Flash at 71.01% binary accuracy against 58.01% for off-the-shelf Gemini-1.5-Pro; the rebuild's default is the zero-shot one, and its own README targets `>73.01%` rather than reporting a reading, so no run of it can be attributed to the published number. (3) Few-shot blocks. The paper's DC-CoT and QP-CoT prompts carry human-annotated examples with written reasoning chains (appendix figures 16 and 18); the rebuild hardcodes two toy examples over an employees/departments schema. The paper's ablation, which is what this entry is really for: from a 57.75 baseline, QP alone 65.51, DC alone 65.77, online synthetic alone 68.02, 21 candidates at an 82.79 oracle, self-consistency 68.84, the fine-tuned selector 73.01. Removing LSH costs 2.92, the fixer 3.78, QP 0.65, OS 0.85, DC 1.24. Those three generator terms sum to 2.74 while the pool is worth 4.99 over the best single path, so most of a multi-path pool's value is that it contains an answer, not that each path is unique. Their error census puts 10.4% of cases in 'a correct candidate existed and was not selected' against this repository's 8.0% (recall@3 72.7 minus 64.7), two harnesses agreeing that the residual is a property of the corpus. The paper reports no per-question call count; the rebuild's config implies 21 generation calls, up to 3 fixer calls and one selector call per distinct-result pair, which is the figure a dispatch has to measure rather than assume."
  }
 ]
