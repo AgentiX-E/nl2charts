@@ -3,53 +3,63 @@
  "readings": {
   "bird-dev": {
    "kind": "bench-readback",
-   "commit": "cab92f10d3baf83c3129b4dcec734abf546cfdcc",
+   "commit": "561be223148563e462922feb1aaaedd75819ed32",
    "workflow": "bird-dev",
-   "runId": "44978468988",
+   "runId": "44981690629",
    "split": "dev",
    "dataset": "bird-dev",
    "model": "deepseek-chat",
    "secondModel": null,
-   "generatedAt": "2026-11-22T03:02:53.833Z",
+   "generatedAt": "2026-11-22T03:47:44.140Z",
    "corpus": {
     "digest": "db9e8a1aba23ddd9",
     "rows": 1534,
     "questions": 1534
    },
    "selection": {
-    "requested": 600,
-    "scored": 600
+    "requested": 1534,
+    "scored": 1532
    },
    "arms": [
     {
      "arm": "inline+evidence",
-     "passed": 386,
-     "total": 600,
-     "accuracy": 0.6433333333333333,
+     "passed": 947,
+     "total": 1532,
+     "accuracy": 0.6181462140992167,
      "calls": 1,
-     "promptTokens": 685,
-     "completionTokens": 47,
-     "strictPassed": 363
+     "promptTokens": 676,
+     "completionTokens": 49,
+     "strictPassed": 876
     },
     {
      "arm": "inline+evidence-nolink",
-     "passed": 381,
-     "total": 600,
-     "accuracy": 0.635,
+     "passed": 931,
+     "total": 1532,
+     "accuracy": 0.6077023498694517,
      "calls": 1,
-     "promptTokens": 653,
-     "completionTokens": 47,
-     "strictPassed": 354
+     "promptTokens": 646,
+     "completionTokens": 49,
+     "strictPassed": 864
     },
     {
      "arm": "macsql-prompt",
-     "passed": 401,
-     "total": 600,
-     "accuracy": 0.6683333333333333,
+     "passed": 1004,
+     "total": 1532,
+     "accuracy": 0.6553524804177546,
      "calls": 1,
-     "promptTokens": 3705,
-     "completionTokens": 129,
-     "strictPassed": 372
+     "promptTokens": 3694,
+     "completionTokens": 138,
+     "strictPassed": 914
+    },
+    {
+     "arm": "inline+evidence#2",
+     "passed": 930,
+     "total": 1532,
+     "accuracy": 0.6070496083550914,
+     "calls": 1,
+     "promptTokens": 676,
+     "completionTokens": 49,
+     "strictPassed": 862
     }
    ],
    "rves": {
