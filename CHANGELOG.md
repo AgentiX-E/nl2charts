@@ -7,6 +7,24 @@ cannot be argued with.
 ## Unreleased
 
 ### Fixed
+- **A card instrument cannot cut a card out of another skeleton.** The dev dispatch read its two
+  arms and then died at the step after the paired readings with `card: the prompt has no "\nQuestion: "
+  heading`. `costOf` splits on `buildSqlPrompt`'s marks — the system turn must end with the question,
+  and the card is everything between `Schema:` and the first context heading — while the template
+  writes `【…】` blocks and puts the question in the middle, followed by evidence and the
+  decomposition instruction. The step now detects the arm's declared skeleton once, before the loop,
+  reports that no card can be cut out of this prompt, names the template, and exits zero. In a
+  1,532-question loop a throw on question 47 reports a broken harness; "this arm sends another
+  skeleton" reports the truth. **The second cost of a skeleton-level lever is that the instrument
+  which prices it also changes object.**
+- **The shipped configuration is the template alone, and the dispatch that settled it read 1,010 of
+  1,532 against the pool's 980.** Paired **119:89 = +1.96pp, p = 0.0441, 95% CI [+0.12, +3.80]**,
+  at one call a case against three, with prompt totals within 1.6% of each other (4,609 against
+  4,683, 97% of the template's served from cache) and the money following the uncached column: 134
+  missed prompt tokens against 587, ¥0.0011 a case against ¥0.0028. By the multiple the previous
+  round wrote down this is **1.76×** the A/A's own 17-question spread — direction settled, size not
+  — so the decision rests on the price: a configuration at least as good, at 40% of the bill and a
+  third of the calls, is a decision rather than a bet.
 - **The correction counted one number and printed another.** Adding the source-ordering family took
   each arm from 14 comparisons to 20, and `correctedThreshold()` still divided 0.05 by the static
   list's 14 — while the harness's own sentence said a lead had to clear the bound "for 20

@@ -19304,3 +19304,58 @@ at least as good**, which is what a price table has to be read for.
 its ceiling (437) really is higher, but nobody can cash it before a chooser that reads SQL exists,
 and the two extra calls are on the bill every time. **Ceiling is a hypothesis; the product is the
 selected statement.**
+
+### The dev dispatch settles it: the single source, at 40% of the money (`44991167518`)
+
+The pool was postponed on a 600-question reading that could not separate it from the template alone
+(+0.83pp, p = 0.58). One dispatch answers it on the split the leaderboard reports, with both arms
+in the same run so the pair is a delta rather than two rates:
+
+| arm | reading | strict match | calls a case | prompt tokens (hit / miss) | completion | CNY a case |
+|---|---|---:|---:|---|---:|---:|
+| `macsql-prompt` | **1,010/1,532 = 65.93%** | 60.18% | 1.00 | 4,609 (4,475 / 134) | 82 | 0.0011 |
+| `select-mixed-rule` | 980/1,532 = 63.97% | 59.33% | 3.00 | 4,683 (4,096 / 587) | 179 | 0.0028 |
+
+Paired: **119 won / 89 lost = +1.96pp, exact McNemar p = 0.0441, 95% CI [+0.12, +3.80]**, interval
+excluding zero.
+
+By the discipline the last round wrote down, that p-value has to be stated as a multiple: 30 cases
+over the A/A's own 17-question spread is **1.76×**. That is weaker than the 3.35× the template
+scored against the shipped prompt, so **the direction is settled and the size is not**. Difficulty
+splits the same way it did in the pool's earlier reading rather than the single candidate's — simple
+67:45 (p = 0.0467), moderate 37:37 (p = 1.0), challenging 15:7 (p = 0.1338) — which is also the
+reason the two mechanisms can stack: they move different bands.
+
+**The price is what decides it.** The prompt totals are almost identical (4,609 against 4,683)
+because the template is a fixed prefix and 97% of it is served from the provider's cache; the money
+follows the uncached column, 134 tokens against 587. So the single source costs **40%** of the pool
+and a third of its calls, for a case more accuracy.
+
+**Verdict: the shipped configuration is the template alone.** Not because 1.76× is a strong effect —
+because a configuration that is at least as good, at 40% of the bill and a third of the calls, is a
+decision rather than a bet.
+
+Two readings that belong beside this one. The previous dispatch read the same arm at 1,004; this one
+reads 1,010 (+6), which is the A/A spread, so the number is a second sample of one mechanism rather
+than a new one. And `served` is `deepseek-flash` in both rows: `deepseek-chat` is now served by
+Flash and billed at Flash prices, which is why the price table carries both names at the same
+figures.
+
+### And the dispatch died on the step after its reading, which is its own finding
+
+```
+Error: card: the prompt has no "\nQuestion: " heading
+```
+
+`costOf` splits a prompt on `buildSqlPrompt`'s marks — it requires the system turn to end with the
+question and reads the card as everything between `Schema:` and the first context heading. The
+template names its blocks in `【…】` and puts the question in the middle, followed by evidence and
+the decomposition instruction, so there is neither a heading to find nor an end to check.
+
+**That is the second cost of a skeleton-level lever: not only does the prompt change skeleton, the
+instrument that prices it changes object.** The fix is not a second grammar in `costOf` — that
+would make it the intersection of two grammars and require a third change for a third template. It
+is to detect the arm's declared skeleton once, before the loop, and say so: the step now reports
+that no card can be cut out of this prompt, names the template, and exits zero. In a 1,532-question
+loop a throw on question 47 reports a broken harness; "this arm sends another skeleton" reports the
+truth, and the two read differently a year later.
