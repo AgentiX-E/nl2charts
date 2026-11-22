@@ -19764,3 +19764,84 @@ one was: an arm that runs without a prediction acquires a verdict it did not ear
   difference to the skeleton.
 - **A generated block is priced per database, not per question.** Eleven calls for a split of
   1,534 is what makes an example generator affordable where a retriever's index was not.
+
+## The reading: three procedures, one call a case, and a criterion that did not hold
+
+Dispatch `45021178365`, dev 1,532 questions, one arm serving as the paired baseline, all three at
+1.00 calls a case, same endpoint, same hour.
+
+| arm | answered | accuracy | prompt | cached | uncached | completion | CNY |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `macsql-prompt` (shipped) | 997 | 65.08% | 3,694 | 3,511 | 183 | 136 | 2.44 |
+| `macsql-bird-qp` (plan) | 1,001 | 65.34% | 3,725 | 3,403 | 322 | 105 | 2.48 |
+| `macsql-bird-os` (database examples) | **1,007** | **65.73%** | 3,907 | 3,610 | 297 | 146 | 2.92 |
+
+Paired within the run (exact McNemar):
+
+| pair | only left | only right | p |
+| --- | --- | --- | --- |
+| shipped → plan | 70 | 74 | 0.8027 |
+| shipped → database examples | 56 | 66 | 0.4153 |
+
+**Neither arm reaches 68.0%, and the falsifier registered before the dispatch fires: on this corpus
+no hand-written procedure beats the one that ships.** The database examples are the better of the
+two by 10 cases — the only arm whose sign is positive in both the absolute count and the paired
+table — and 10 cases at p = 0.42 is noise. The plan is 4 cases up at p = 0.80, which is what "the
+same prompt with one sentence pair changed" looks like when the sentence pair does not matter.
+
+### What this reading actually prices, and it is not "+10.27pp"
+
+CHASE-SQL's ablation puts online synthetic examples at 68.02% against a **57.75% baseline**, +10.27,
+the largest single-path figure in that paper. This run adds the same mechanism to a prompt that
+already carries **(a)** a decomposition procedure and **(b)** two worked examples with value
+examples, and the marginal value is **+0.65pp, n.s.** Both statements are true and they are about
+different questions: their number is what an example generator is worth *instead of nothing*, and
+this one is what it is worth *on top of a prompt that already decomposes and already shows two
+examples*. A product that ships a prompt is always asking the second question.
+
+The block cost 213 prompt tokens a case of which 99 were uncached (3,907 against 3,694): the two
+carried examples had already warmed the prefix, so three more pairs 33 in total, one synthesis call
+per database, 11 for the split — added 5.8% to the prompt and ¥0.48 to the whole split. Cheap. It
+just did not buy anything.
+
+### The A/A is larger than either effect, which is why the baseline was in the run
+
+The shipped prompt answered **1,010** of 1,532 in the round that adopted it and **997** here. Same
+config, same endpoint, same scorer: **−13 cases, −0.85pp**. Against that stored baseline the plan
+arm would read −0.59pp and the examples arm −0.20pp − *both losses* − while against the paired
+baseline in the same hour they read +0.26 and +0.65. The two stories differ only in their
+denominator, and the paired one is the only one that holds the hour fixed.
+
+This is the third time this repository has written the same sentence, and the first time it has
+cost nothing to obey: an arm read against a stored baseline inherits that baseline's noise, and on
+dev that noise (13–30 cases) is bigger than any procedure this corpus has shown.
+
+### What the falsifier leaves
+
+Registered before the dispatch: *if both arms land under 66.0%, no procedure this repository can
+write by hand beats the one it ships, and the remaining levers are the backbone and the product
+side.* Both did. Three consequences, and the third is the uncomfortable one:
+
+1. **The procedure line is closed** — not the "copy CHASE-SQL" line. Their pipeline's other parts
+   are untouched by this reading and priced elsewhere: value retrieval (−2.92pp when removed), the
+   query fixer (−3.78pp), pairwise selection (already measured here at +0.8pp), and the fine-tuned
+   selector, which is the one component no prompt can reach.
+2. **The remaining prompt-side levers are now the ones already known to be small**: the card, the
+   hint, the values block, repairs — each priced, each inside its own MDE or negative.
+3. **Backbone is the untested variable, and it is a different experiment.** Every reading in this
+   document is `deepseek-chat`. A stronger base may lift all three arms together, which would say
+   nothing about procedures; it may also lift them unequally, which would say a great deal. That
+   comparison needs both arms re-measured on the same second base, in one run, with the timeout
+   ceiling declared — the `S1-b` dispatch established that 94 of 1,532 cases can be forfeited to a
+   timeout on a slower base while the score line says nothing about it.
+
+### The checklist increment
+
+- **A procedure's marginal value is not its standalone value.** +10.27 against nothing and +0.65
+  against a prompt that already has a procedure and two examples are the same mechanism measured at
+  two points on its own curve, and a product ships at the second point.
+- **Three pairs per database cost 11 calls for the split.** The generator was the cheap part; it
+  was the +0.65pp that was expensive, in the only currency that matters here.
+- **A paired baseline is not a formality when the A/A is 13 cases.** This run's headline would have
+  been "both new procedures lost" had the baseline been quoted from the last dispatch instead of
+  measured in this one.
