@@ -17,6 +17,8 @@ import { replyShape } from './format.js';
 import type { ReplyShape } from './format.js';
 import { linkSchema, renderSchemaCard } from './linking.js';
 import type { LinkedColumn, Recaller, SchemaCardOptions, SchemaTable } from './linking.js';
+import { assertTemplateCarries, renderMacSqlBirdPrompt } from './template.js';
+import type { PromptTemplate } from './template.js';
 
 export interface PromptOptions extends SchemaCardOptions {
   /** Dialect the statement must be written in, e.g. 'SQLite'. */
@@ -85,6 +87,20 @@ export interface PromptOptions extends SchemaCardOptions {
   readonly schemaLines?: number;
   /** Extra rule lines for a question shape, appended after the base rules. */
   readonly notes?: readonly string[];
+  /**
+   * Replace the assembled prompt with a whole one.
+   *
+   * Not a lever: every other field in this interface adds a block or a rule to a skeleton this
+   * module owns, and this field *is* the skeleton. It exists because the difference between this
+   * project's prompt and a competitor's has to be measurable as one object rather than as a
+   * sentence added to a list — see `template.ts` for why the first such object is MAC-SQL's BIRD
+   * prompt and what is reproduced from it.
+   *
+   * Asking for a template and a block the template has no slot for throws rather than ignoring
+   * the block: an option a caller believes is on and that nothing reads is the failure this
+   * repository has paid for twice.
+   */
+  readonly template?: PromptTemplate;
 }
 
 export interface PromptProfile extends SchemaCardOptions {
@@ -352,13 +368,57 @@ export interface AskResult {
   readonly truncated?: boolean;
 }
 
-const SQL_FENCE = /```(?:sql)?\s*([\s\S]*?)```/i;
+const SQL_FENCE = /```(?:sql)?\s*([\s\S]*?)```/gi;
 
-export function extractSql(text: string): string {
-  const fenced = SQL_FENCE.exec(text);
-  const candidate = (fenced?.[1] ?? text).trim();
+/**
+ * The statement in a reply, read from the first fence unless the prompt asked for a shape whose
+ * answer is the last one.
+ *
+ * The default is the first fence because that is what a one-statement prompt produces, and a
+ * reader that went looking for the end of a reply would return the model's afterthought on the
+ * replies that carry one. `last` exists for the two prompts whose *format* is a sequence — the
+ * decomposition and the whole-prompt templates — where the first fence is a sub-question that
+ * runs, returns rows and answers something else. `readStatement` is the function callers should
+ * use: it takes the prompt rather than a flag, so a reader cannot disagree with the prompt that
+ * produced the reply.
+ */
+export function extractSql(text: string, options: { readonly last?: boolean } = {}): string {
+  const blocks = [...text.matchAll(SQL_FENCE)].map((match) => (match[1] ?? '').trim()).filter((block) => block.length > 0);
+  const candidate = blocks.length === 0 ? text.trim() : options.last === true ? (blocks[blocks.length - 1] as string) : (blocks[0] as string);
   const withoutPrefix = candidate.replace(/^sql:\s*/i, '');
   return withoutPrefix.trim();
+}
+
+/** What a caller knows about the prompt that produced a reply. */
+export interface StatementReaderOptions {
+  /** The prompt asked for sub-statements before the answer. */
+  readonly decompose?: boolean;
+  /** The prompt is a whole template whose answer is its last statement. */
+  readonly template?: PromptTemplate;
+  /** The prompt asked for one fence, but models fence each step anyway. */
+  readonly last?: boolean;
+}
+
+/**
+ * Read the statement a prompt asked for, by the prompt rather than by the caller's memory.
+ *
+ * Written after a reader and its own comment disagreed: `eval/bird/run.ts`'s reconcile turn called
+ * `extractSql` under a comment that said it took the last fenced statement, and the function it
+ * called took the first. The reply the reconcile prompt asks for is a line per result group
+ * followed by the statement, and a model that fences each group's statement — several do — had its
+ * correction read off group one, which is a candidate's own statement: the turn then looks like a
+ * restatement and the funnel counts it as one. A caller that passes the prompt it sent cannot make
+ * that mistake, and there is one place where "which block" is decided.
+ *
+ * `steps` is reported only for a decomposition, because that is the only prompt that asks for
+ * them: a template's `Sub question:` lines are its own format, and counting nothing there is a
+ * reading about this project's marker, not about the reply.
+ */
+export function readStatement(text: string, options: StatementReaderOptions = {}): { sql: string; steps: number } {
+  const last = options.last === true || options.decompose === true || options.template !== undefined;
+  if (!last) return { sql: extractSql(text), steps: 0 };
+  const parsed = parseDecomposed(text);
+  return { sql: parsed.sql, steps: options.decompose === true ? parsed.steps : 0 };
 }
 
 export function buildSqlPrompt(
@@ -367,6 +427,19 @@ export function buildSqlPrompt(
   options: boolean | PromptOptions = false,
 ): string {
   const resolved: PromptOptions = typeof options === 'boolean' ? { samples: options } : options;
+  if (resolved.template !== undefined) {
+    // Before anything is assembled: a template is the whole prompt, so a block it cannot carry
+    // must stop the call rather than be dropped. `assertTemplateCarries` is the same rule the
+    // harness applies to an arm, which is how the product and the measurement stay one thing.
+    assertTemplateCarries({ ...resolved, template: resolved.template });
+    return renderMacSqlBirdPrompt({
+      question,
+      schema,
+      ...(resolved.evidence === undefined ? {} : { evidence: resolved.evidence }),
+      ...(resolved.descriptions === undefined ? {} : { descriptions: resolved.descriptions }),
+      ...(resolved.samples === undefined ? {} : { samples: resolved.samples }),
+    });
+  }
   const rules = [
     'You translate questions into one read-only SQL statement.',
     // The plain rule says "one statement", which contradicts a reply that also carries
@@ -608,9 +681,15 @@ export function createPipeline(options: PipelineOptions): {
       let firstShape: ReplyShape | undefined;
       // One reader for every reply, including repairs and the empty-result turn: a
       // statement written under the decomposition prompt is read from its last block each
-      // time, so a repair cannot silently fall back to reading step one.
+      // time, so a repair cannot silently fall back to reading step one. The reader is chosen by
+      // the prompt that produced the reply, because that is the only place the answer's position
+      // is decided: a template whose format is sub-question-after-sub-question puts the answer
+      // last for the same reason a decomposition does.
       const readReply = (text: string): { sql: string; steps: number } =>
-        options.decompose === true ? parseDecomposed(text) : { sql: extractSql(text), steps: 0 };
+        readStatement(text, {
+          ...(options.decompose === true ? { decompose: true } : {}),
+          ...(options.prompt?.template === undefined ? {} : { template: options.prompt.template }),
+        });
       for (;;) {
         attempts += 1;
         const response = await options.provider.complete({

@@ -7,6 +7,15 @@ cannot be argued with.
 ## Unreleased
 
 ### Fixed
+- **The reconcile turn read the first fenced statement under a comment that said it read the last.**
+  `extractSql` takes the first block; `parseDecomposed` takes the last; the reconcile prompt asks for
+  a line per result group and then the statement, and a model that fences each group's statement had
+  its correction read off group one — a candidate's own statement, which the funnel then counts as a
+  restatement. `readStatement(text, { template, decompose, last })` now decides which block is the
+  answer from the prompt that asked for it, and every harness caller passes the prompt it sent. The
+  reconcile readings taken before this round are a floor for the mechanism, not an estimate of it.
+  `extractSql` keeps its first-block default and gained a `last` option: the default is correct for
+  the fifteen one-statement arms, and changing it would re-read every published artifact.
 - **`--consume` prices the members of a pool, not only the subsets.** `--compositions` answered
   "which pool should I have bought"; the plan's next hypothesis was about one member, so
   `consumeOf(rows, source)` reads what that source scored alone and what it does where it
@@ -15,6 +24,21 @@ cannot be argued with.
   one is outside both columns rather than a free point for the count.
 
 ### Added
+- **A prompt is not a lever: `PromptOptions.template`, and MAC-SQL's BIRD prompt as the first one.**
+  Every arm in `eval/bird/run.ts` adds a rule to `buildSqlPrompt`'s skeleton, so none of them can
+  price the skeleton — and the gap that has survived every other explanation is 4.90pp on the same
+  endpoint with the competitor's parts individually priced at a loss here. `packages/ai/src/template.ts`
+  renders their prompt on our card: five constraints, two worked examples, and a sub-question-then-SQL
+  shape whose answer is the last fence. The text is re-authored (their repo has no licence file) and
+  three differences are deliberate and listed in `docs/benchmarks.md`: the card keeps the column type,
+  the value examples are not compiled, and no selector prunes the card. `assertTemplateCarries` refuses
+  a template combined with a block it has no slot for — at the arm declaration and at the builder — so
+  an arm cannot name a mechanism it does not send. Bundle price: ai 77,000 → 83,000 B gzip, recorded in
+  `budgets.json` and conditional on the reading.
+- **`macsql-prompt` is dispatched beside `inline+evidence-nolink` and `inline+evidence`.** One field
+  from the no-hint arm (a test pins it, including the field that cannot reach the prompt), so the run
+  answers two questions at once: their prompt against ours as shipped, and against ours without the
+  hint their template has no slot for.
 - **`bench:bird:condition-gate`: the audit cannot be aimed, and the reason is in the question.**
   Six gates over what exists before the call (question, statement, schema) were scored against
   `missingConditions` — a label no gate's inputs carry. Bars registered first: precision ≥ 0.50,

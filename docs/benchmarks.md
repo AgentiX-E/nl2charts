@@ -18900,7 +18900,8 @@ Which is what MAC-SQL's 4.90pp on dev (p = 3.4 × 10⁻⁶, 1,532 questions, one
 saying since it was measured: **the gap is their template and their examples, not their architecture.**
 Their card rule, applied here, loses 3.43pp to its parent (261 against 278, p = 0.0241); their `decompose`-everywhere is already a source here;
 their refiner fires on 6.7% of dev. What has never been run beside ours is their *prompt* — the
-templates in `macsql_agents.py`, pinned at `31a9df5`, with our card and our endpoint.
+`decompose_template_bird` template in `core/const.py` (`agents.py` only formats it), pinned at
+`31a9df5`, with our card and our endpoint.
 
 That is the next dispatch, and the bar is registered here before it exists:
 
@@ -18910,3 +18911,73 @@ That is the next dispatch, and the bar is registered here before it exists:
 | calls a case | 1.00 | a template copies at zero marginal cost; a template that needs a second call is a pipeline, and pipelines have been losing here |
 | the three-candidate pool | ≥ 387 with the template in the third slot | the pool is the product; a source that wins alone and loses in the pool is a source that restates what the others say |
 | record | `asked` on 600 of 600, `candidateRecall` on every case | so the reading after it costs nothing again |
+
+## The ninth shape is not a shape: the prompt itself, re-authored, and the reader it broke
+
+Every arm on this page is a lever on one skeleton — `buildSqlPrompt`'s rules, card, blocks and
+`Question:` line — so the fifteen of them can price a rule and none of them can price the skeleton.
+That is the gap the last section named and this round built the instrument for: `PromptOptions.template`.
+
+### What the instrument sends
+
+`packages/ai/src/template.ts` renders MAC-SQL's BIRD prompt on our card and our evidence. Three
+things separate it from every other arm: a five-rule constraint list stated before the schema, two
+worked examples (a BIRD question over `frpm`/`satscores` and a Spider question over
+`account`/`client`/`district`, each answered as a sequence of sub-questions), and an output shape
+where the model writes `Sub question <n>:` lines with one fenced statement each and the answer is
+the **last** fence.
+
+Three differences from what they run are deliberate, and each is a thing this project would not
+ship — so an arm that carried them would be measuring a self-inflicted wound rather than their
+prompt:
+
+| difference | why |
+|---|---|
+| the card keeps the column **type** | their list format is `(name, description. Value examples: …)` and states no type; a prompt that hides it would lose to a card this project already sends |
+| the **value examples are not compiled** | profiling every column is `samples-wide` here, measured at +2.02pp for +74.9% of the prompt — a separate lever, so it stays off inside the template |
+| **no selector** | their pipeline prunes the card with a model call before this prompt; that rule is `card.ts` here and it lost 3.43pp, so the template runs on the full card |
+
+The text is ours, the information is theirs: MAC-SQL carries no licence file, so nothing is copied
+verbatim — the constraints are restated in this project's voice, the two examples are public corpus
+data, and the section markers are kept because the examples and the input block have to share one
+format for the examples to teach anything. What that costs is resolution: if the arm loses, its
+reading cannot separate their **wording** from their **information**, and that limit is recorded
+here rather than discovered later.
+
+### The declaration refuses to be two changes
+
+A template is the whole prompt, so `definitions`, `demonstrations`, `values`, `rowSamples`, `plan`,
+`interpretation`, `decompose`, `reasoning` and `notes` have no slot in it — and a non-SQLite
+`dialect` contradicts both its instruction and its examples. `assertTemplateCarries` throws on each
+rather than dropping it, at the arm declaration *and* at the prompt builder, because an option a
+caller believes is on and nothing reads is the defect this repository has paid for twice
+(`emptyRetry` wired to a hook that never fired, `values` read by the harness and never passed down).
+
+The arm is therefore `macsql-prompt`, one field from `inline+evidence-nolink` — a test pins that,
+including the one field that cannot reach the prompt (`definitions: 'inline'`, which is how its
+parent gets the dataset's descriptions onto its card; `promptFor` gives a template arm the same
+descriptions through its own switch and the template refuses the block). The third arm in the
+dispatch is `inline+evidence`, so the run reads two questions at once: what their prompt is worth
+against ours as shipped, and what it is worth against ours with the hint removed.
+
+### The reader the template exposed, and the arm it had already been costing
+
+Their output shape is a sequence, so the answer is the last fence — and the harness had two readers
+that disagreed about that. `parseDecomposed` takes the last block; `extractSql` takes the first, and
+`eval/bird/run.ts`'s reconcile turn called `extractSql` **under a comment that said it took the
+last**. The reply that prompt asks for is one line per result group followed by the statement, and a
+model that fences each group's statement — several do — had its correction read off group one, which
+is a candidate's own statement: the turn then looks like a restatement, the funnel counts it as one,
+and the adoption policy hands back the vote's decision. That is not a hypothetical: `reconcile` is
+the mechanism that is *supposed* to be worth its call, and the reading it was judged on could only
+see the corrections a model wrote in the first fence.
+
+The fix is one function, not two call sites: `readStatement(text, { template, decompose, last })`
+decides which block is the answer from the prompt that asked for it, and every caller in the harness
+now passes the prompt it sent. `extractSql` keeps its first-block default and gained a `last` option,
+because the default is correct for the fifteen one-statement arms and changing it would re-read every
+artifact this project has published.
+
+Two consequences are recorded rather than repaired. The reconcile arms measured before this round
+were read with the wrong block, so their readings are a **floor** for the mechanism, not an estimate
+of it; and the empty-result rewrite now follows the source arm's template for the same reason.

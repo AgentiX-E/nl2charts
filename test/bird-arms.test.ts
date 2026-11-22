@@ -72,7 +72,7 @@ import type { BirdQuestion } from '../eval/bird/data.js';
  * delta cannot be attributed to anything else. A future edit that adds a second
  * change to a pair turns this red before it turns the benchmark unreadable.
  */
-const LEVERS = ['notes', 'evidence', 'repairs', 'linking', 'askdata', 'linkEvidence', 'profile', 'definitions', 'focus', 'interpret', 'vote', 'demonstrations', 'select', 'values', 'plan', 'planBy', 'repairFeedback', 'shapeGuard', 'mixed', 'pool', 'pairwise', 'sourcesVisible', 'judge', 'judgeFormat', 'emptyRetry', 'audit', 'decompose', 'samples', 'canonical', 'shuffle', 'prune', 'columnSelect', 'agreement', 'sourceLinking', 'sourceRepairs', 'sourceSamples', 'reconcile', 'reconcileAdopt', 'sampleColumns', 'cardColumns', 'dissent', 'dissentVerify', 'masked', 'intent', 'selectRule', 'projection', 'ground', 'cotDemonstrations', 'reasoning', 'rowSamples', 'temperature', 'gate', 'gateRule', 'selectorEvidence'] as const;
+const LEVERS = ['notes', 'evidence', 'repairs', 'linking', 'askdata', 'linkEvidence', 'profile', 'definitions', 'focus', 'interpret', 'vote', 'demonstrations', 'select', 'values', 'plan', 'planBy', 'repairFeedback', 'shapeGuard', 'mixed', 'pool', 'pairwise', 'sourcesVisible', 'judge', 'judgeFormat', 'emptyRetry', 'audit', 'decompose', 'samples', 'canonical', 'shuffle', 'prune', 'columnSelect', 'agreement', 'sourceLinking', 'sourceRepairs', 'sourceSamples', 'reconcile', 'reconcileAdopt', 'sampleColumns', 'cardColumns', 'dissent', 'dissentVerify', 'masked', 'intent', 'selectRule', 'projection', 'ground', 'cotDemonstrations', 'reasoning', 'rowSamples', 'temperature', 'gate', 'gateRule', 'selectorEvidence', 'template'] as const;
 
 function changedLevers(left: Arm, right: Arm): string[] {
   const levers = LEVERS.filter((lever) => left[lever] !== right[lever]);
@@ -601,6 +601,56 @@ describe('the chain that actually runs', () => {
     for (const [split, arms] of Object.entries((baseline as { armsBySplit?: Record<string, string[]> }).armsBySplit ?? {})) {
       for (const name of arms) expect(catalogue, `${split}/${name}`).toContain(name);
     }
+  });
+});
+
+describe('a prompt that is not ours', () => {
+  // The first arm whose lever is the whole prompt rather than one block of it. Its reading is the
+  // gap no other explanation has survived — MAC-SQL's 4.90pp on the same endpoint, with the parts
+  // of it this repository had already priced losing money — so what it must not do is smuggle a
+  // second change into the comparison.
+  const templateArm = ARMS.find((arm) => arm.name === 'macsql-prompt') as Arm;
+  const noHint = ARMS.find((arm) => arm.name === 'inline+evidence-nolink') as Arm;
+
+  const card = [
+    { table: 'orders', columns: [{ name: 'id', type: 'INTEGER', comment: 'the order id.' }, { name: 'status', type: 'TEXT' }] },
+  ];
+
+  it('differs from the arm it is read against by the template, and by one field that cannot reach it', () => {
+    // The hint has no slot in their template, so the parent is the no-hint arm rather than
+    // `inline+evidence`: the pair measures the skeleton, and the distance to the shipped prompt is
+    // measured by the third arm in the same dispatch.
+    //
+    // The second field is `definitions: 'inline'`, which is how the parent gets the dataset's
+    // descriptions onto its card. A template arm is *refused* that block — the template has no
+    // slot for it — and gets the same descriptions from `promptFor`'s own switch, so the field is
+    // inert rather than a second change in front of the model. The test below reads both prompts
+    // to keep that claim from being an assumption.
+    expect(changedLevers(noHint, templateArm)).toEqual(['definitions', 'template']);
+  });
+
+  it('sends their prompt instead of ours, with our card and our evidence', () => {
+    const prompt = promptFor(templateArm, question, {});
+    expect(prompt.template).toBe('macsql-bird');
+    const text = buildSqlPrompt(question.question, card, prompt);
+    // The inert field, read rather than assumed: no semantics block, and the descriptions are on
+    // the column line where the template puts them.
+    expect(prompt.definitions).toBeUndefined();
+    expect(text).not.toContain('Semantics:');
+    expect(text).toContain('(id, INTEGER. the order id.)');
+    expect(text).toContain('【Constraints】');
+    expect(text).toContain('【Database schema】');
+    expect(text).toContain(question.question);
+    expect(text).not.toContain('You translate questions into one read-only SQL statement.');
+    // ...and the card still carries the dataset's descriptions, which is what `notes: false` on a
+    // template arm must not silently remove.
+    expect(prompt.descriptions).toBe(true);
+  });
+
+  it('refuses a declaration that names a block the template has no slot for', () => {
+    const contradictory: Arm = { ...templateArm, definitions: 'inline' };
+    expect(() => promptFor(contradictory, question, { definitions: '- orders: one row per order.' })).toThrow(/no slot for definitions/);
+    expect(() => promptFor({ ...templateArm, decompose: true }, question, {})).toThrow(/no slot for decompose/);
   });
 });
 

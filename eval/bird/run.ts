@@ -23,7 +23,7 @@ import { basename, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHttpProvider } from '@agentix-e/nl2charts-ai';
 import type { LlmProvider, PromptOptions, SchemaTable } from '@agentix-e/nl2charts-ai';
-import { applySelection, attachDefinitions, buildAskMessages, buildReconcilePrompt, buildSelectionPrompt, chooseCandidateByRule, chooseCandidatePairwise, buildSqlPrompt, choosePromptProfile, createPipeline, emptyRetryMessages, extractSql, formatProfile, renderDefinitions, renderEvidence, renderSchemaCard, resultGroups, withCallCounter } from '@agentix-e/nl2charts-ai';
+import { applySelection, attachDefinitions, buildAskMessages, buildReconcilePrompt, buildSelectionPrompt, chooseCandidateByRule, chooseCandidatePairwise, buildSqlPrompt, choosePromptProfile, createPipeline, emptyRetryMessages, formatProfile, readStatement, renderDefinitions, renderEvidence, renderSchemaCard, resultGroups, withCallCounter, assertTemplateCarries } from '@agentix-e/nl2charts-ai';
 import { capabilitiesOf } from '@agentix-e/nl2charts-ai';
 import type { FormatProfile, ModelCapabilities, PurposeUsage, ReplyShape, SelectionRule, ValueGap } from '@agentix-e/nl2charts-ai';
 // The retry turn writes a statement outside the pipeline, so it goes through the same
@@ -398,6 +398,23 @@ export interface Arm {
    * composes them, so the composition is visible and the call count does not change.
    */
   readonly decompose?: boolean;
+  /**
+   * Send a whole prompt that is not this project's, rather than a lever on it.
+   *
+   * Every arm above adds a block or a rule to `buildSqlPrompt`'s skeleton, so none of them can
+   * price the skeleton. This one replaces it: `template.ts` renders MAC-SQL's BIRD prompt — five
+   * constraints, two worked examples, and an output shape of one statement per sub-question with
+   * the answer last — on our card and our evidence. The reading it exists for is the gap that has
+   * survived every other explanation: on the same endpoint and the same 1,532 dev questions that
+   * prompt scored 4.90pp above this project's (p = 3.4 × 10⁻⁶) while its card rule, applied here,
+   * lost 3.43pp and its decomposition is already a source.
+   *
+   * One lever, and the arm list says so: it carries no definitions block, no demonstrations, no
+   * values and no notes, because the template has no slot for them. `assertTemplateCarries` refuses
+   * the combination rather than dropping the block, so an arm cannot name a mechanism it does not
+   * send.
+   */
+  readonly template?: 'macsql-bird';
   /**
    * Render each neighbour with the steps its statement encodes.
    *
@@ -1173,6 +1190,16 @@ export const ARMS: readonly Arm[] = [
   // list that is wrong more often than it is right. This arm asks whether the prompt is better
   // or worse without it, and it is the cheapest experiment in the file: one flag, no new code.
   { name: 'inline+evidence-nolink', notes: false, evidence: 'dataset', repairs: 0, linking: false, definitions: 'inline' },
+  // MAC-SQL's BIRD prompt, sent instead of ours. Not a lever, a skeleton: five constraints, two
+  // worked examples, and an output shape of one statement per sub-question with the answer last —
+  // see the field's note and `packages/ai/src/template.ts` for what is reproduced and what is not.
+  //
+  // `linking: false` is what makes the pair readable: our "Likely columns" hint has no slot in
+  // their template, so the arm that carries the comparison without it is `inline+evidence-nolink`,
+  // and the two are dispatched together for exactly that reason. The card keeps its descriptions —
+  // `promptFor` forces them for a template arm — so the only field that differs from that parent is
+  // this one.
+  { name: 'macsql-prompt', notes: false, evidence: 'dataset', repairs: 0, linking: false, template: 'macsql-bird' },
   // The hint built from the question *and* the evidence line. RSL-SQL's bidirectional linking
   // unions the columns its preliminary statement named, the columns the dataset's hint named and
   // an LLM's list; the middle one is a text scan, and this repository already puts that hint in
@@ -2021,6 +2048,10 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   vote: 'majority over the same three candidates: the selector control, measured 17:17 against `select` (p = 1) — running it every push re-derives a tie at 2,092 tokens',
   'inline+evidence+ground': 'the one rewrite the data proves, applied before the statement runs: priced offline on the parent arm\'s own artifact at 22 fires, 14 wins, 0 losses (+0.91pp, p = 0.0001) with the pairs disjoint from every other rule — run it when the domain reader or the prompt changes, and move it into the chain once the dispatch reproduces the offline count',
   'inline+evidence-nolink': 'the same prompt with the column hint removed: every arm in this file sets `linking: true`, so what the hint is worth has never been measured, and on 500 Mini-Dev questions it names 7.4 columns of which 29.8% are columns the gold statement uses — this is the only arm that can say whether a 30%-precise hint beats no hint, and it costs one flag',
+  // The first arm that is a prompt rather than a lever on one, and the reason it is dispatched
+  // rather than chained: its prompt carries two worked examples, so a push would pay for them on
+  // every commit to answer a question that one reading closes either way.
+  'macsql-prompt': "MAC-SQL's BIRD prompt sent instead of ours, on our card and our evidence: the criterion is registered in `docs/benchmarks.md` before the run — at least +12 of 600 cases against `inline+evidence` with exact McNemar p < 0.05, 1.00 calls a case, and at least 387 in the three-candidate pool — and it is dispatched beside `inline+evidence-nolink` because their template has no slot for our column hint, so the mechanism reading is the pair of them and the adoption reading is `inline+evidence`",
   'inline+evidence+link-evidence': 'the hint built from the question and the dataset hint together, which is the middle source of RSL-SQL\'s bidirectional linking (its `extract_from_hint` scans the evidence for column names and unions the result): offline the same twelve slots move from 39.3% to 55.2% column recall at 29.8% → 31.4% precision, so this arm prices what that recall is worth at the answer rather than at the hint',
   'inline+evidence+rows': 'three stored rows per table on the same prompt: the one input RSL-SQL\'s `Instruction.py` names five times and this repository has never sent — a column sample shows a value\'s domain, a row sample shows which values occur together, and only the second can say that `status = \'Banned\'` belongs with `currency = \'EUR\'`; priced before it was built at 1,058 characters a question at the mean and 483 at the median on dev, with the prediction registered in `docs/benchmarks.md` (gain concentrates on questions whose gold literal `values` never found, or the schema layer closes entirely),',
   'select-prune': 'the card cut to the join closure: measured −1.4pp, and the loss is the ceiling rather than the selector (1,008 → 980 reachable cases), so it is priced; run it when the card changes',
@@ -6178,13 +6209,22 @@ export function promptFor(arm: Arm, question: BirdQuestion, blocks: PromptBlocks
   // reason — a rule that replaced the profile's notes would be a different lever from the one its
   // name claims.
   const notes = [...(profile?.notes ?? []), ...(arm.intent === 'query' ? [INTENT_RULE] : []), ...(arm.projection === 'asked' ? [PROJECTION_RULE] : [])];
-  return {
+  const prompt: PromptOptions = {
     dialect: 'SQLite',
     // The inline arm is a placement experiment: the same sentences, attached to
     // the column line the metadata block uses. Descriptions on is part of that
     // placement, not a second lever.
+    // A template arm always carries the descriptions its card holds: `template.ts` renders them on
+    // the column line in its own format, and a template card with no prose would be `(col, TYPE.)`
+    // — a card this project would never ship, sent to price a prompt rather than a card. Forcing it
+    // here rather than in the arm keeps `macsql-prompt` one field from `inline+evidence-nolink`,
+    // which is the pair that prices the template and nothing else.
     descriptions:
-      arm.definitions === 'inline' || arm.definitions === 'dataset-subset' ? true : (profile?.descriptions ?? arm.notes),
+      arm.template !== undefined
+        ? true
+        : arm.definitions === 'inline' || arm.definitions === 'dataset-subset'
+          ? true
+          : (profile?.descriptions ?? arm.notes),
     foreignKeys: profile?.foreignKeys ?? arm.notes,
     samples: arm.samples !== undefined,
     schemaLines: BIRD_SCHEMA_LINES,
@@ -6201,7 +6241,14 @@ export function promptFor(arm: Arm, question: BirdQuestion, blocks: PromptBlocks
     // count a mixed arm is checked against, both read this object.
     ...(arm.decompose === true ? { decompose: true } : {}),
     ...(arm.reasoning === 'sql-like' ? { reasoning: 'sql-like' as const } : {}),
+    ...(arm.template === undefined ? {} : { template: arm.template }),
   };
+  // The same refusal the prompt builder makes, one layer earlier: an arm that asks for a whole
+  // template and a block the template has no slot for is a declaration whose name claims a
+  // mechanism it would not send. Checked on the object that is returned, so the two layers cannot
+  // be looking at different prompts.
+  if (arm.template !== undefined) assertTemplateCarries({ ...prompt, template: arm.template });
+  return prompt;
 }
 
 /**
@@ -8592,8 +8639,10 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
                   { role: 'user', content: question.question },
                 ],
                 // The same temperature the selector uses. The instruction asks for a line per group
-                // before the statement, and a chat model that ignores that and answers with the
-                // block alone is read correctly: `extractSql` takes the last fenced statement.
+                // before the statement, and `readStatement` with `last` reads the final fence — the
+                // comment here used to say `extractSql` took the last statement, which it does not:
+                // it takes the first, and on a reply that fences each group's statement the
+                // correction was read off group one and counted as a restatement of it.
                 temperature: 0,
                 purpose: 'reconcile',
               });
@@ -8603,7 +8652,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
               // that disagreed.
               selectionFailed = escapeKind(error);
             }
-            const written = reply === undefined ? '' : extractSql(reply.text);
+            const written = reply === undefined ? '' : readStatement(reply.text, { last: true }).sql;
             // A restatement is a reply that says what a candidate already said, compared on the
             // statement as the engine reads it: whitespace is not authorship.
             const novel = written.length > 0 && !readable.some((candidate) => candidate.sql.trim() === written.trim());
@@ -8747,10 +8796,11 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
             const winnerSpec = arm.mixed === undefined ? { arm: arm.name, provider: 'primary' as const } : parseMixedSource(winner.source);
             const sourceArm = arm.mixed === undefined ? arm : (resolveArm(winnerSpec.arm) as Arm);
             const retryProvider = winnerSpec.provider === 'second' && secondCounter !== undefined ? secondCounter.provider : counter.provider;
+            const retryOptions = promptFor(sourceArm, question, prepared.blocksFor(sourceArm, question));
             const retryPrompt = buildAskMessages({
               question: question.question,
               schema,
-              prompt: promptFor(sourceArm, question, prepared.blocksFor(sourceArm, question)),
+              prompt: retryOptions,
               linking: arm.sourceLinking?.[winner.source] ?? sourceArm.linking,
             });
             // The same bare call as the selector's, one line later: a rewrite that never arrived
@@ -8769,7 +8819,16 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
             } catch (error) {
               retryFailed = escapeKind(error);
             }
-            const candidate = reply === undefined ? '' : extractSql(reply.text);
+            // The reader follows the prompt the retry was sent, for the reason `readStatement`
+            // exists: a source arm whose format puts its answer last (a decomposition, a whole
+            // template) would otherwise have its rewrite read off statement one.
+            const candidate =
+              reply === undefined
+                ? ''
+                : readStatement(reply.text, {
+                    ...(retryOptions.decompose === true ? { decompose: true } : {}),
+                    ...(retryOptions.template === undefined ? {} : { template: retryOptions.template }),
+                  }).sql;
             if (inspectSql(candidate).ok) {
               const executed = await oracle.run(question.db_id, candidate);
               // A replacement that returns rows is adopted; one that also returns nothing

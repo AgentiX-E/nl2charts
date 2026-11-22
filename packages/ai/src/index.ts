@@ -10,7 +10,10 @@ export { createReplayProvider, recordProvider, transcriptOf } from './replay.js'
 export type { RecordedCall, ReplayFixture } from './replay.js';
 export { linkSchema, renderName, renderSchemaCard, tokenizeQuestion } from './linking.js';
 export type { LinkedColumn, Recaller, SchemaCardOptions, SchemaColumn, SchemaTable } from './linking.js';
-export { buildAskMessages, buildSqlPrompt, choosePromptProfile, createPipeline, extractSql } from './pipeline.js';
+export { buildAskMessages, buildSqlPrompt, choosePromptProfile, createPipeline, extractSql, readStatement } from './pipeline.js';
+export type { StatementReaderOptions } from './pipeline.js';
+export { assertTemplateCarries, MACSQL_CONSTRAINTS, renderMacSqlBirdPrompt, renderMacSqlCard, renderMacSqlForeignKeys, TEMPLATE_CONFLICTS } from './template.js';
+export type { MacSqlPromptInput, PromptTemplate } from './template.js';
 export { buildInterpretationPrompt, parseInterpretation } from './interpret.js';
 export {
   buildChartChoicePrompt,
