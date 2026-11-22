@@ -19942,3 +19942,61 @@ forfeit is visible as a forfeit rather than as a base being slower, `budget_ms` 
 so the partial a dead clock buys is written down, and `resume_run` as the backstop the workflow
 already carries. That run is `45031664031`; its reading belongs to the next round, and what this
 round established is that it is dispatchable, priced (zero), and time-boxed.
+
+### The free base refused at concurrency 2 as well, and the cheap path closed in forty seconds
+
+`45031664031` was the crossover itself, dispatched on the reading above — free base, concurrency 2,
+the primary leg's 120-second ceiling, no A/A. It did not reach the paid step either:
+
+```
+preflight[primary]: 12 calls to glm-4.7-flash — 6 answered, median 3338 ms, worst 4326 ms,
+deadline 120000 ms, 2 at a time; 6 failed (first: answered 429: 您的账户已达到速率限制)
+```
+
+Six of twelve refused **at two concurrent**, with a different sentence than the concurrency-4 probe
+(that one said the model was busy; this one says the account is). So this account's free tier cannot
+carry a 3,064-call run today at any concurrency the workflow would accept, and the reading cost
+nothing but forty seconds twice.
+
+Two things follow, and the second is the one to keep.
+
+**The cheap path is closed by quota, not by design.** A free base plus a full split was the only
+configuration that made the crossover cost nothing; it is unavailable, so the crossover costs money
+and the number has to be said out loud rather than discovered in a bill.
+
+**A preflight that fails twice with different sentences is worth more than one that passes.** The
+first refusal pointed at concurrency (lower it); the second, at the same model on lower concurrency,
+pointed at the account (raise the limit). Neither is a statement about SQL ability, and a run
+dispatched through either would have produced a score that was a measurement of the queue. The
+instrument spent eighty seconds to prevent three hours of that.
+
+### Probe C, and what it says about the whole plan rather than about the base
+
+The third dispatch was the crossover's own parameters on 48 questions — `glm-4.6`, concurrency 4, the
+primary leg's 120-second ceiling — to check that four calls in flight is safe before spending the
+split on it. It was refused as well: `3 of 12 calls failed … answered 429: 您的账户已达到速率限制`,
+median 3.7 s, worst 4.8 s.
+
+Three refusals in a row, from the same account, on two models and two concurrencies, is a fact about
+the account seen while it was carrying four dispatched runs in twenty minutes. It may be transient
+and it is not a fact about SQL. What it does settle is the arithmetic, and the arithmetic is the part
+that has to be written down before the next dispatch rather than after it.
+
+| quantity | measured | source |
+| --- | --- | --- |
+| throughput at concurrency 2 | **3.56 cases a minute** | 144 cases in 2,430 s (`45026167444`) |
+| implied per-call latency | **≈ 34 s** | two in flight at 3.56 cases a minute |
+| full split, two arms, concurrency 2 | **14.4 h** | 3,064 cases at 3.56 a minute |
+| full split, two arms, concurrency 4 | **≈ 7.2 h** | if throughput doubles, which the 429s say it will not |
+| job cap | **5 h** | `bird-model.yml` |
+
+So the full-split crossover does not fit one job cap at any concurrency this account currently
+accepts, and the paired design has to be paid for in a different currency: **768 questions at
+concurrency 4 is 216 minutes and one dispatch**, with a difference-of-differences floor around 4.6pp
+instead of the full split's 3.3pp. That is the experiment to buy next, and it is written here with
+its arithmetic so that the next round cannot quietly re-derive a different one.
+
+The preflight has now caught three dispatches that would each have spent hours measuring a queue, at
+a total cost of about two minutes. That is the whole argument for running it before the step that
+spends money, and it is worth stating in the same breath as the fact that this round bought **no
+crossover reading at all**.
