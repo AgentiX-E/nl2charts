@@ -5625,7 +5625,13 @@ export function assertUniqueArmLabels(labels: readonly string[]): void {  const 
 export function parseArms(requested: string | undefined, aa: string | undefined, defaults: readonly string[]): string[] {
   const names = (requested ?? defaults.join(',')).split(',').map((name) => name.trim()).filter(Boolean);
   const trimmed = aa?.trim() ?? '';
-  return trimmed === '' ? names : [...names, `${trimmed}#2`];
+  // `none` is the word for "no control", and it exists because an empty value cannot mean that
+  // from a dispatch: a workflow input with a non-empty default receives its default when the
+  // command line passes a blank, so `-f aa=''` and `-f aa=' '` both selected the control the
+  // caller was trying not to run. The sentinel is read here, in the one place every caller
+  // shares, rather than in each workflow's expression — a rule that lives in a YAML is the
+  // defect this repository has now recorded twice (rounds 202 and 203).
+  return trimmed === '' || trimmed.toLowerCase() === 'none' ? names : [...names, `${trimmed}#2`];
 }
 
 /**

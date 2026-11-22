@@ -66,9 +66,13 @@ on:
         required: false
         default: ''
       aa:
-        description: Arm to run twice as an A/A control (blank = none)
+        # `none` rather than a blank, because a workflow input with a non-empty default cannot be
+        # unset from the command line: a blank is read as "not supplied" and this default is what
+        # the run gets. Three dispatches asked for no control and ran one, and the third was
+        # failed by the regression gate for a trailing arm nobody requested (45035350473).
+        description: Arm to run twice as an A/A control (`none` = no control)
         required: false
-        default: 'inline+evidence'
+        default: 'none'
       resume_run:
         # A run that outgrew its clock writes the cases it finished beside its artifact and names
         # the path in its own failure message. Passing that run id here spends the remaining cases

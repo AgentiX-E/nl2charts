@@ -813,6 +813,17 @@ describe('A/A pairs', () => {
     expect(parseArms(undefined, '  ', DEFAULT_ARMS)).toEqual([...DEFAULT_ARMS]);
   });
 
+  it('reads `none` as the word for no control, because a dispatch cannot send an empty one', () => {
+    // A workflow input with a non-empty default cannot be *unset* from the CLI: the dispatcher
+    // passes a blank, GitHub Actions treats a blank as "not supplied", and the input's default
+    // is what the run receives. `bird-model.yml` defaulted `aa` to `inline+evidence`, so three
+    // dispatches that asked for no control all ran one — the third of them was failed by the
+    // regression gate for a trailing arm nobody had requested (run 45035350473). The sentinel
+    // lives here rather than in the workflow's expression so that every caller inherits it.
+    expect(parseArms('names,vote', 'none', DEFAULT_ARMS)).toEqual(['names', 'vote']);
+    expect(parseArms('names', ' NONE ', DEFAULT_ARMS)).toEqual(['names']);
+  });
+
   it('respects an explicit arm list', () => {
     expect(parseArms('names, vote', 'names', DEFAULT_ARMS)).toEqual(['names', 'vote', 'names#2']);
   });
