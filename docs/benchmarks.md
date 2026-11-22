@@ -3572,21 +3572,33 @@ exact question set, the model, the harness that renders the prompt, the executor
 statement, and the judge that compares result sets. The published numbers below share at most one
 of them with ours.
 
-| system | BIRD dev EX | model | trained | what it shares with us |
-| --- | --- | --- | --- | --- |
-| AskData | **78.49%** | GPT-4o | **no** | the split |
-| SQLConductor | **73.2%** | Qwen3-8B policy + Gemma4-31B actions | yes (SFT + GRPO) | the split |
-| CHASE-SQL | 73.0–73.01% | Gemini-1.5-Pro | selection agent fine-tuned | the split |
-| DeepEye-SQL | 70.6% | Qwen2.5-Coder-32B | yes | the split |
-| Alpha-SQL | 69.7% | Qwen2.5-Coder-32B | yes | the split |
-| OpenSearch-SQL | 69.3% | GPT-4o | multi-agent, no fine-tune | the split |
-| RSL-SQL | 65.51% | DeepSeek-v2 | no | the split, and a sibling model |
-| MSL-SQL | 64.00% | DeepSeek-V2.5 | partial | the split, and a sibling model |
-| **this harness, `select-mixed`** | **62.34%** | deepseek-chat | no | — |
-| **this harness, `metadata+evidence`** | 61.16% | deepseek-chat | no | — |
-| **this harness, `inline+evidence`** | 61.10% | deepseek-chat | no | — |
-| **this harness, `select`** | 60.97% | deepseek-chat | no | — |
-| this harness, `names` | 41.91% | deepseek-chat | no | — |
+| system | dev EX | test EX | model | trained | what it shares with us |
+| --- | --- | --- | --- | --- | --- |
+| AskData | **78.49%** | 83.40% | GPT-4o | **no** | the split |
+| SQLConductor | — | 73.2% | Qwen3-8B policy + Gemma4-31B actions | yes (SFT + GRPO) | the split |
+| CHASE-SQL | **74.9%** | 76.02% | Gemini-1.5-Pro | selection agent fine-tuned | the split |
+| XiYan-SQL | **73.34%** | 75.63% | QwenCoder-32B ensemble + ICL | partly (generators, selector) | the split |
+| DeepEye-SQL | 74.49% | 78.42% | Qwen2.5-Coder-32B | yes | the split |
+| Alpha-SQL | 69.7% | 70.26% | Qwen2.5-Coder-32B | yes | the split |
+| OpenSearch-SQL | 69.3% | 72.28% | GPT-4o | multi-agent, no fine-tune | the split |
+| MSL-SQL | 66.82% | 64.00% | DeepSeek-V2.5 | partial | the split, and a sibling model |
+| RSL-SQL | 63.56% | 65.51% | DeepSeek-v2 | no | the split, and a sibling model |
+| **this harness, `select-mixed`** | **62.34%** | — | deepseek-chat | no | — |
+| **this harness, `metadata+evidence`** | 61.16% | — | deepseek-chat | no | — |
+| **this harness, `inline+evidence`** | 61.10% | — | deepseek-chat | no | — |
+| **this harness, `select`** | 60.97% | — | deepseek-chat | no | — |
+| this harness, `names` | 41.91% | — | deepseek-chat | no | — |
+
+**Three rows in this table used to carry a test number under a `dev` heading.** XiYan-SQL was listed
+at 75.63 (its **test** score; dev is 73.34), RSL-SQL at 65.51 (test; dev 63.56) and MSL-SQL at 64.00
+(test; dev **66.82**, i.e. above this harness rather than below it). The numbers now come from the
+leaderboard's own two columns as of its 2026-10-29 snapshot, because a table whose heading names one
+split and whose rows carry another is the coordinate error this section exists to refuse. Two
+consequences are worth stating: the gap to XiYan is **7.41pp** on dev (73.34), not 9.7pp to its test
+number; and MSL-SQL, previously read as the narrowest comparison below us, is **0.89pp above** us.
+The best fully training-free systems on this snapshot are DecoSearch at 70.53 dev and OpenSearch-SQL
+at 69.3, i.e. 4.60pp and 3.37pp above this harness. Rows without a dev column (`—`) are systems whose dev score the
+snapshot does not carry; they are kept for their test number and are not compared to ours.
 
 Read the last column first. It is empty for every row but ours, and that is the finding. Our five
 rows now come from one run (the section above), which is what makes them comparable to each other:
@@ -4162,8 +4174,8 @@ measurement, and it is the only competitor number in this document that is.
 | us, `select-mixed-rule`, dev (shipped) | **63.97%** | 980/1,532, three calls |
 | MAC-SQL, same everything | **67.89%** | 1,040/1,532 — their pipeline, our harness |
 | gap to a competitor we can run | **3.92pp** | from the shipped arm; 4.90pp from the four-call one |
-| SQLConductor, published | 73.2% | Qwen3-8B policy + Gemma4-31B, SFT + GRPO |
-| CHASE-SQL, published | 73.0% | Gemini-1.5-Pro, fine-tuned binary selector |
+| SQLConductor, published | 73.2% **test** | Qwen3-8B policy + Gemma4-31B, SFT + GRPO; the snapshot carries no dev column |
+| CHASE-SQL, published | 74.9% dev / 76.02% test | Gemini-1.5-Pro, fine-tuned binary selector |
 | AskData, published | **78.49%** | GPT-4o, no training, 8+ calls: the field's top on dev EX as reported |
 | gap to published SOTA | **14.52pp** | 63.97 → 78.49; 4.55pp of it is the trained-systems step (73.2) and the rest is method |
 
@@ -5710,12 +5722,15 @@ nothing); a pool of one is a pool.
 
 #### Where this sits against the field, and what the gap is made of
 
-BIRD dev, execution accuracy, as reported by the systems themselves. The numbers are not
-comparable one-to-one — this repository scores a 600-question subset of dev with two hosted chat
-models, while every entry below scores the full split with models it trained — but a table with the
-caveat attached is still the only honest way to say where 64.50% sits.
+BIRD execution accuracy, as reported by the systems themselves. The column below is each system's
+**test** score unless its row says `dev`; that is what the leaderboard displays first and what the
+papers lead with, and mixing the two columns is how this document once reported three numbers against
+the wrong split (see *Three rows used to carry a test number under a `dev` heading*). The numbers are
+not comparable one-to-one — this repository scores a 600-question subset of one split with two hosted
+chat models, while every entry below scores a full split with models it trained or was handed — but a
+table with the caveat attached is still the only honest way to say where 64.50% sits.
 
-| system | BIRD | what it adds over a prompt |
+| system | BIRD EX (test unless the row says dev) | what it adds over a prompt |
 | --- | --- | --- |
 | AskData (2025) | 78.49% dev | GPT-4o with profiling metadata, task-aligned schema linking and a result-set vote; **no training** |
 | CHASE-SQL (2024) | 76.02% | divide-and-conquer decomposition, plan-based CoT, fine-tuned binary selector |
@@ -7882,8 +7897,8 @@ Three things follow, and they are not the same thing:
 | system | dev | note |
 |---|---|---|
 | AskData | **78.49%** | profiling metadata + schema linking + result-set vote, 8+ calls |
-| CHASE-SQL | 76.02% | multi-candidate + selection agent |
-| XiYan-SQL | 75.63% | schema linking + ICL |
+| CHASE-SQL | 74.9% | multi-candidate + selection agent (76.02 is its test score) |
+| XiYan-SQL | 73.34% | M-Schema + ICL examples + fine-tuned selector (75.63 is its test score) |
 | DecoSearch | 70.53% | training-free |
 | **this repository** | **63.71%** | strong pool + free rule, 3 calls |
 | its ceiling | 68.86% | strong pool, no selection loss |

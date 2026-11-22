@@ -74,5 +74,47 @@
    "result-set-majority-vote-with-three-hand-written-corrections"
   ],
   "note": "No release exists, re-checked on 2026-11-16 three ways: the arXiv page carries no artifact or code link in its abstract, body or appendix and names sqlglot, datasketch, kshingle and FAISS only as dependencies; a repository search for the name returns 161 items that are unrelated commercial products; and the single repository whose description names the method is a stub with one directory and no README. What the paper does carry is enough to write code, and that is now the case: `eval/bird/askdata.ts` rebuilds section 3 -- the shingle index over up to 10,000 distinct values per field, the five schema variants with the union of the fields their statements read, and step 2.d with `MaxRetry` as a parameter because the paper does not state its value -- and `askdata-shape` is the arm that carries it, one lever from `select-mixed-rule` at eight calls a case against three. Four of the five mechanisms were already priced here (profile summary +3.6pp, three candidates, vote which lost 2.74pp to `shortest`, corrections bounded at 0.4pp); the open one was the linker, whose own ablation puts it at +1.8pp against +6.2pp for perfect linking. One community rebuild of the four-stage pipeline reports 95.6% mean column recall and 90.5% F1 in linking but 61.8% BIRD accuracy against the paper's 76.14-78.49 dev, which is what a rebuild of the published part buys when the unpublished part is the prompt text and the eight retrieved examples. No number from the arm may be filed under this row: a rebuild's first reading is a number with no denominator."
+ },
+ {
+  "system": "XiYan-SQL",
+  "status": "partial",
+  "repo": "XGenerationLab/XiYan-SQL",
+  "commit": "603dedac706d57ece47bc30d02f90744a537b6a0",
+  "license": "Apache-2.0",
+  "evidence": "https://github.com/XGenerationLab/XiYan-SQL",
+  "checkedAt": "2026-11-22",
+  "released": [
+   "M-Schema renderer (XGenerationLab/M-Schema, 755751451be841f7a54f8b08c0a1f818b041a1c0, two python files)",
+   "XiYanSQL-QwenCoder weights 3B/7B/14B/32B"
+  ],
+  "withheld": [
+   "multi-generator ensemble driver",
+   "refiner runtime",
+   "fine-tuned selection model runtime",
+   "NER-based ICL example selector"
+  ],
+  "mechanisms": [
+   "m-schema semi-structured card with types primary keys and example values",
+   "icl examples chosen by named-entity overlap rather than by embedding distance",
+   "refiner that repairs logic or syntax per candidate",
+   "fine-tuned selection model instead of self-consistency",
+   "schema filter before generation"
+  ],
+  "note": "Read on 2026-11-22: the repository holds seven files, of which five are images, a licence and two READMEs. There is no pipeline code, and the README's own timeline still lists the complete code as unreleased, so the only runnable artifacts are M-Schema and the weights. A 32B generator and a fine-tuned selector need a GPU, which a GitHub runner does not have, so `partial` is not modesty here: the half that carries the score cannot start on the machine this repository dispatches to. Its ablation is the useful part and it is already printed in `benchmarks.md`: one generator costs 4.04pp, majority vote instead of the selector costs 3.13pp, no schema filter costs 1.24pp. Two numbers of theirs were mislabelled in this document until this round: 75.63 is the **test** score, dev is **73.34**; the gap to it is 7.41pp, not 9.7."
+ },
+ {
+  "system": "DecoSearch",
+  "status": "paper-only",
+  "paper": "arXiv:2606.17821",
+  "evidence": "https://arxiv.org/abs/2606.17821",
+  "checkedAt": "2026-11-22",
+  "mechanisms": [
+   "complexity-aware routing by one llm judger call per question",
+   "dag decomposition into atomic sub-questions each answered by its own generation",
+   "rag over semantically similar training examples grounding the decomposer",
+   "topology refiner that rebuilds the plan when execution fails",
+   "schema selector pruning the card before generation"
+  ],
+  "note": "BIRD **dev** 1,534 questions, 70.53%, backbone DeepSeek-V3 (`deepseek-chat`) at temperature 0 for the judger and the direct path, 0.1 for the decomposer. The backbone is the argument this entry exists for: the same API name this repository calls, so 'it scores higher because its model is stronger' is not available as an explanation for these 4.6pp. Its own ablation (770-question subset, full pipeline 69.48) prices four of the five components: always decompose -10.65pp, no decomposition -1.43pp, no topology refinement -0.78pp, no schema selector -1.82pp (tokens x6.3). The component it never ablates is the rag examples, which is the only one that adds knowledge rather than procedure. No artifact of any kind is published, and the leaderboard's model-availability column is empty, so this is a rebuild with the paper as its only checklist. A row named GenaSQL on the 2026-10-29 leaderboard snapshot carries exactly 70.53 dev / 72.28 test; whether it is the same submission under a team name is unverified and is not assumed here."
  }
 ]
