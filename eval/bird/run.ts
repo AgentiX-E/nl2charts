@@ -24,7 +24,7 @@ import { pathToFileURL } from 'node:url';
 import { createHttpProvider } from '@agentix-e/nl2charts-ai';
 import type { LlmProvider, PromptOptions, PromptTemplate, SchemaTable, SyntheticExample } from '@agentix-e/nl2charts-ai';
 import { applySelection, attachDefinitions, buildAskMessages, buildReconcilePrompt, buildSelectionPrompt, chooseCandidateByRule, chooseCandidatePairwise, buildSqlPrompt, choosePromptProfile, createPipeline, emptyRetryMessages, formatProfile, readStatement, renderDefinitions, renderEvidence, renderSchemaCard, resultGroups, withCallCounter, assertTemplateCarries } from '@agentix-e/nl2charts-ai';
-import { capabilitiesOf } from '@agentix-e/nl2charts-ai';
+import { capabilitiesOf, TEMPLATE_SHAPES } from '@agentix-e/nl2charts-ai';
 import type { FormatProfile, ModelCapabilities, PurposeUsage, ReplyShape, SelectionRule, ValueGap } from '@agentix-e/nl2charts-ai';
 // The retry turn writes a statement outside the pipeline, so it goes through the same
 // guard the pipeline applies. Skipping it here would let the one arm that retries be the
@@ -7749,6 +7749,21 @@ export function baseReport(prepared: PreparedRun, provenance: Provenance = {}): 
 }
 
 /**
+ * Whether an arm's prompt carries a block that only a model can write.
+ *
+ * Read off `TEMPLATE_SHAPES` rather than off the arm's name, for the reason the template table
+ * exists: the day a second template carries examples written for the database, this predicate is
+ * already right about it, and a name comparison would have to be found and edited.
+ *
+ * The sources of a mixed arm are checked too, because `promptTextFor` renders the widest candidate
+ * and a candidate is an arm.
+ */
+export function needsModelWrittenExamples(arm: Arm): boolean {
+  const arms = arm.mixed === undefined ? [arm] : arm.mixed.map((source) => resolveSource(arm, source).arm);
+  return arms.some((one) => one.template !== undefined && TEMPLATE_SHAPES[one.template].examples === 'database');
+}
+
+/**
  * The dry-run body: what each arm would send, without sending it.
  *
  * The preview shows the arms this run was told to score, not the head of the chain.
@@ -7756,12 +7771,23 @@ export function baseReport(prepared: PreparedRun, provenance: Provenance = {}): 
  * of a new lever put two unrelated prompts in the artifact and the lever stayed
  * unverified — and the second field was named `definitionsPrompt` after whichever arm
  * happened to sit at that index, which nothing read either.
+ *
+ * An arm whose prompt cannot exist without a model is listed with `unavailable` and no prompt,
+ * rather than rendered without its block or allowed to throw. Both alternatives were tried and
+ * both are worse: rendering it without the block puts a prompt in the artifact that no dispatch
+ * ever sends, and throwing — which is what `promptFor` correctly does — took the whole dry run
+ * down after its gold execution had already been paid for, so a dispatch that named such an arm
+ * got no controls, no artifact and no reading. The run says what it could not show instead.
  */
 export function previewPrompts(prepared: PreparedRun, report: Record<string, unknown>): void {
   const preview = prepared.settings.arms.map((name) => resolveArm(name)).filter((arm): arm is Arm => arm !== undefined);
   report.prompts = prepared.cases.slice(0, 3).map((question) => ({
     id: question.question_id,
     arms: preview.map((arm) => {
+      if (needsModelWrittenExamples(arm)) {
+        // `null` rather than `0`: a zero-length prompt is a prompt, and this arm has none.
+        return { arm: arm.name, chars: null, prompt: null, unavailable: 'needs-a-model' };
+      }
       // The same renderer the report's size column uses, for the reason that column exists: a
       // preview that renders the arm's own card on a mixed arm shows a prompt nobody sends.
       const rendered = prepared.promptTextFor(arm, question);
@@ -10125,11 +10151,17 @@ export function writeArtifact(
   log(`artifact: ${settings.layout.out}`);
   if (settings.dryRun) {
     const controls = report.controls as Controls;
+    // The arms the preview could not show, read back off the preview so the log and the artifact
+    // cannot disagree. Empty in the ordinary case, which is why it is a suffix rather than a line.
+    const unprompted = (report.prompts as { arms: { arm: string; unavailable?: string }[] }[])[0]?.arms
+      .filter((arm) => arm.unavailable !== undefined)
+      .map((arm) => arm.arm) ?? [];
     log(
       `dry run: gold runnable ${String((report.gold as { runnable: number }).runnable)}/${String((report.gold as { executed: number }).executed)}; ` +
         `corpus ${(report.corpus as { digest: string }).digest}; ` +
         `self-consistency ${(controls.selfConsistency * 100).toFixed(1)}%; negative false matches ${String(controls.negativeFalseMatches)}; ` +
-        `schema columns checked ${String(controls.schemaChecked)}, missing ${String(controls.schemaMissingTotal)}`,
+        `schema columns checked ${String(controls.schemaChecked)}, missing ${String(controls.schemaMissingTotal)}` +
+        (unprompted.length === 0 ? '' : `; not previewed (needs a model): ${unprompted.join(', ')}`),
     );
   }
 }

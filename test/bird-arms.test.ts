@@ -61,6 +61,7 @@ import {
   readPinnedDefinitions,
   repairAccounting,
   resolveArm,
+  needsModelWrittenExamples,
   winnerSources,
 } from '../eval/bird/run.js';
 import type { Arm } from '../eval/bird/run.js';
@@ -2181,5 +2182,17 @@ describe('the two procedure arms and the block one of them carries', () => {
   it('refuses to build the examples prompt when the block never arrived', () => {
     const options = promptFor(arm('macsql-bird-os'), question, {});
     expect(() => buildSqlPrompt(question.question, [], options)).toThrow(/received none/);
+  });
+
+  it('names the arm the preview cannot show, including through a mixed source', () => {
+    // The dry run asks this before it renders, so the answer has to be "yes" for exactly the arms
+    // whose block a model writes — and for a mixed arm one of whose candidates is such an arm,
+    // because `promptTextFor` renders the widest candidate and a candidate is an arm.
+    expect(needsModelWrittenExamples(arm('macsql-bird-os'))).toBe(true);
+    expect(needsModelWrittenExamples(arm('macsql-bird-qp'))).toBe(false);
+    expect(needsModelWrittenExamples(arm('macsql-prompt'))).toBe(false);
+    // No mixed arm carries it today, which is why this is built rather than looked up: the day one
+    // does, the preview must not be the thing that discovers it by throwing.
+    expect(needsModelWrittenExamples({ ...arm('select-mixed'), mixed: ['macsql-bird-os'] })).toBe(true);
   });
 });

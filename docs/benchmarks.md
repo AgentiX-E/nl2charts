@@ -19845,3 +19845,40 @@ side.* Both did. Three consequences, and the third is the uncomfortable one:
 - **A paired baseline is not a formality when the A/A is 13 cases.** This run's headline would have
   been "both new procedures lost" had the baseline been quoted from the last dispatch instead of
   measured in this one.
+
+## The experiment after this one could not have run, and the reason was a preview
+
+The reading above closes the procedure line, and what it leaves is a backbone: the same two arms,
+re-measured on a second base in one run, with the timeout ceiling declared. That experiment needs no
+new arm — `bird-model.yml` already takes a model, a key, a split, an arm list and a ceiling — so the
+cheap thing to do was to dispatch it and read it.
+
+It would have died in the step before the one that spends money, and not for a reason about the
+model. `bench:bird:dry` renders a preview of every arm the run names, and `macsql-bird-os` refuses
+to render without its examples block — correctly, since the template says "the examples above" and
+there are none. The refusal is right; the *caller* was wrong, and the cost of that asymmetry is the
+whole dry step: the throw lands after the gold execution has been paid for and before the artifact
+is written, so the run that named this arm got **no controls, no artifact and no reading**.
+
+The previous round had already met this and patched it at the caller — `bird-dev.yml`'s dry step
+was given a hard-coded three-arm list that happened to exclude the arm. That fix made one workflow
+the only place that knew the rule, and `bird-model.yml` has the same step with no such list: the
+only workflow that can run a second base was therefore the one workflow that could not dispatch the
+arm the backbone experiment exists to compare. **A workaround in one caller is a bug report about
+the callee**, and this is the second time in two rounds that a fact held in a workflow rather than
+in the code has cost a dispatch.
+
+The fix is a field rather than a comment: `previewPrompts` lists an arm whose prompt cannot exist
+without a model as `unavailable: 'needs-a-model'` with a null prompt, names it in the dry-run line,
+and renders the rest. It reads the condition off `TEMPLATE_SHAPES` — where the template table
+already says which templates carry examples written for the database — rather than off the arm's
+name, and it checks the sources of a mixed arm because the preview renders the widest candidate and
+a candidate is an arm. Rendering the arm without its block was the alternative and is worse: it puts
+a prompt in the artifact that no dispatch ever sends, which is the drift this harness exists to
+measure.
+
+Two consequences worth writing down. **A preview is an instrument with a caller contract**: it may
+say "I cannot show you this", and it may not decide the run's fate on an input it was told to
+describe. And **the ceiling of a dispatch is not only the model's patience** — a step that runs
+before the paid one can end a run for a reason that has nothing to do with what the run was going to
+measure, which is why the backbone comparison is dispatched with a smoke limit before the split.

@@ -414,6 +414,45 @@ describe('a dry run', () => {
       result.printed.some((line) => line.startsWith(`dry run: gold runnable ${QUESTIONS.length}/${QUESTIONS.length}`)),
     ).toBe(true);
   });
+
+  it('names an arm whose prompt cannot exist without a model, instead of aborting the run', async () => {
+    // `macsql-bird-os` renders a block of examples written for the database, and in a dry run no
+    // model has written them: `promptFor` refuses, correctly, because a template that carries the
+    // block and receives none is a prompt nobody sends. The refusal is right and the *caller* was
+    // wrong — the preview asked for a prompt that this run could not build, and one arm it cannot
+    // show took the whole dry run down with it: no gold controls, no artifact, no reading, and the
+    // failure arrived at `previewPrompts` after the gold execution had already been paid for.
+    //
+    // The preview's own docstring already said the honest option is to say so; it said it for an
+    // arm whose card is cut by a model call, and not for an arm whose whole block is. This is the
+    // second instance of the same rule, which is why it is a field rather than a comment.
+    const result = await run({
+      plan: { first: correct },
+      argv: ['--dry-run'],
+      env: { BIRD_ARMS: 'inline+evidence,macsql-bird-os' },
+    });
+    expect(result.code).toBe(0);
+    expect(result.report.model).toBeNull();
+    const prompts = result.report.prompts as {
+      arms: { arm: string; chars: number | null; prompt: string | null; unavailable?: string }[];
+    }[];
+    const arms = prompts[0]?.arms ?? [];
+    // Both arms are listed, in the order the run was given them: a preview that silently dropped
+    // the one it could not render would be the drift this field exists to prevent.
+    expect(arms.map((entry) => entry.arm)).toEqual(['inline+evidence', 'macsql-bird-os']);
+    expect(arms[0]?.chars).toBeGreaterThan(0);
+    const skipped = arms[1];
+    expect(skipped?.unavailable).toBe('needs-a-model');
+    expect(skipped?.chars).toBeNull();
+    expect(skipped?.prompt).toBeNull();
+    // And the controls still ran, which is what the abort cost: they are the reason the step exists.
+    const controls = result.report.controls as { schemaChecked: number };
+    expect(controls.schemaChecked).toBe(6);
+    // Named on the console as well as in the artifact. A dispatch's log is what an operator reads
+    // while the run is going, and an arm that quietly did not appear in the preview is the
+    // "instrument that ran and said nothing" the artifact writer exists to prevent.
+    expect(result.printed.some((line) => line.includes('not previewed (needs a model): macsql-bird-os'))).toBe(true);
+  });
 });
 
 /**

@@ -25,6 +25,19 @@ cannot be argued with.
   3,700 prompt tokens, so seven pairs would make the arm's gain indistinguishable from a longer
   prompt. The cache lives under the run's root rather than the module's path.
 ### Fixed
+- **A dry run could be aborted by an arm that only a model can render.** `previewPrompts` asked
+  `promptTextFor` for every arm the run named, and `macsql-bird-os` — whose template carries
+  examples written for the database — legitimately refuses to render without its block. The
+  refusal is right and the caller was wrong: one arm the preview could not show took the whole dry
+  run down **after** the gold execution had been paid for, so a dispatch that named it produced no
+  controls, no artifact and no reading. `needsModelWrittenExamples` reads the answer off
+  `TEMPLATE_SHAPES` (so a second template with a database block is covered without an edit, and a
+  mixed arm is covered through its sources), the preview lists such an arm with
+  `unavailable: 'needs-a-model'` and a null prompt instead of rendering a prompt nobody sends, and
+  the dry-run line names it. The previous round had patched the symptom in `bird-dev.yml` by
+  hard-coding three previewable arms; that override is gone, because it made one workflow the only
+  place that knew the rule and left `bird-model.yml` — same step, no override — unable to dispatch
+  the arm at all. **A caller-level workaround is a bug report about the callee.**
 - **The examples cache was keyed on a directory the run did not own.** Its first version defaulted
   to `eval/.cache/bird/examples`, so an end-to-end test's fixture database wrote a block that the
   next test (and the next run) read under the same name: `synthesizeExamples` now takes `cacheDir`
