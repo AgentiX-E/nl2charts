@@ -19882,3 +19882,63 @@ say "I cannot show you this", and it may not decide the run's fate on an input i
 describe. And **the ceiling of a dispatch is not only the model's patience** — a step that runs
 before the paid one can end a run for a reason that has nothing to do with what the run was going to
 measure, which is why the backbone comparison is dispatched with a smoke limit before the split.
+
+## Two probes for the second base, and what each one cost before it answered
+
+The procedure line closed at 65.08 / 65.34 / 65.73 and left one untested variable: every reading in
+this document is `deepseek-chat`. A backbone comparison is two arms on a second base, in one run,
+with the ceiling declared — and `bird-model.yml` takes all four of those as inputs, so the first
+thing to buy was not the comparison but the knowledge that a dispatch is possible at all.
+
+### Probe A — `glm-4.6`, 48 dev questions, two arms, ceiling 300 s, concurrency 2 (`45026167444`)
+
+| arm | answered | accuracy | prompt | completion | thinking share | calls |
+| --- | --- | --- | --- | --- | --- | --- |
+| `macsql-prompt` | 31/48 | **64.58%** (50.4–76.6) | 3,505 | 1,752 | 89.7% | 1.00 |
+| `macsql-bird-os` | 25/48 | **52.08%** (38.3–65.5) | 3,755 | 2,046 | 92.5% | 1.00 |
+| `inline+evidence#2` | 29/48 | 60.42% (46.3–73.0) | 626 | 1,415 | 97.1% | 1.00 |
+
+Zero `llm` failures, zero truncated replies, one execution error and one shape rejection on the
+examples arm, 48 of 48 cases answered on every arm, and the examples block synthesized 11 databases
+and 33 pairs on this base exactly as it does on the primary one. In accuracy terms 48 questions
+decide nothing: the three Wilson intervals overlap almost completely, and the six-case gap that
+looks like "the examples hurt here" is the same size as the six-case gap that looked like "the
+examples help" there.
+
+What the probe did buy is a **constant**: the evaluate step ran 13:15:15 → 13:55:45 for 144 cases,
+which is **17 s a case at concurrency 2**. Two arms across 1,532 questions is 3,064 calls, so the
+full comparison is **14.4 hours** — three job caps, on a workflow whose cap is 300 minutes. The
+registered plan for this experiment said **4–6 hours and ≈¥20–30**, and both numbers were wrong by
+the same factor, because the estimate was written from the primary base's latency without measuring
+the second base's. A twenty-line probe priced the experiment; the experiment itself would have
+timed out twice and reported nothing.
+
+Two smaller facts, both worth keeping. The probe ran a third arm (`inline+evidence#2`) that the
+dispatch did not ask for: passing `aa=''` through this CLI does not mean "no control", it means
+"use the input's default", and the default is an A/A arm. **An empty string is not an instruction.**
+And `glm-4.6` is not on the provider's current price page — the flagship table lists 4.7 and 5.x —
+so a bill for this base cannot be computed from `eval/price.ts`, which has a row for `glm-4.6v` and
+none for the text model. The cross-base experiment is currently **unpriceable**, and that is a
+defect in the plan rather than in the run.
+
+### Probe B — `glm-4.7-flash`, 48 dev questions, two arms, ceiling 120 s, concurrency 4 (`45031096699`)
+
+The current free text model would have made the whole comparison cost nothing and take an hour, so
+it went next. It did not reach the paid step: the preflight, which exists for exactly this, answered
+in forty seconds with
+
+```
+preflight[primary]: 12 calls to glm-4.7-flash — 4 answered, median 8027 ms, worst 23820 ms,
+deadline 120000 ms, 4 at a time; 8 failed (first: answered 429: 该模型当前访问量过大)
+```
+
+and refused to run, naming the three ways out: lower the concurrency, raise the account limit, or
+dispatch the model to another provider. Eight of twelve refused **at the run's own concurrency** is
+not a slow endpoint, it is a quota, and a run dispatched through it would have measured the queue.
+
+So the crossover's design is decided by two probes and neither had to be trusted: **the free base,
+at the concurrency the preflight accepted (2), with the primary leg's 120-second ceiling** so that a
+forfeit is visible as a forfeit rather than as a base being slower, `budget_ms` at 100 minutes an arm
+so the partial a dead clock buys is written down, and `resume_run` as the backstop the workflow
+already carries. That run is `45031664031`; its reading belongs to the next round, and what this
+round established is that it is dispatchable, priced (zero), and time-boxed.
