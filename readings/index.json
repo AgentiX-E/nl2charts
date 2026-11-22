@@ -3,52 +3,52 @@
  "readings": {
   "bird-dev": {
    "kind": "bench-readback",
-   "commit": "45fb751691c34871909d4db0b7db56711d70894b",
+   "commit": "665703507d2629dad8db63978d9304dc8b3fef27",
    "workflow": "bird-dev",
-   "runId": "44991167518",
+   "runId": "44994859181",
    "split": "dev",
    "dataset": "bird-dev",
    "model": "deepseek-chat",
    "secondModel": null,
-   "generatedAt": "2026-11-22T05:57:05.047Z",
+   "generatedAt": "2026-11-22T06:45:55.529Z",
    "corpus": {
     "digest": "db9e8a1aba23ddd9",
     "rows": 1534,
     "questions": 1534
    },
    "selection": {
-    "requested": 1534,
-    "scored": 1532
+    "requested": 40,
+    "scored": 40
    },
    "arms": [
     {
      "arm": "macsql-prompt",
-     "passed": 1010,
-     "total": 1532,
-     "accuracy": 0.6592689295039165,
+     "passed": 22,
+     "total": 40,
+     "accuracy": 0.55,
      "calls": 1,
-     "promptTokens": 3694,
-     "completionTokens": 134,
-     "strictPassed": 922
+     "promptTokens": 3636,
+     "completionTokens": 130,
+     "strictPassed": 20
     },
     {
      "arm": "select-mixed-rule",
-     "passed": 980,
-     "total": 1532,
-     "accuracy": 0.639686684073107,
-     "candidateRecall": 1041,
-     "selectionLoss": 61,
+     "passed": 22,
+     "total": 40,
+     "accuracy": 0.55,
+     "candidateRecall": 26,
+     "selectionLoss": 4,
      "calls": 3,
-     "promptTokens": 3137,
-     "completionTokens": 147,
-     "strictPassed": 909,
+     "promptTokens": 3061,
+     "completionTokens": 129,
+     "strictPassed": 22,
      "selectorRule": {
       "rule": "shortest",
-      "decided": 1525,
-      "eligible": 4279,
-      "emptyPool": 47,
+      "decided": 40,
+      "eligible": 115,
+      "emptyPool": 1,
       "rules": {
-       "shortest": 1525
+       "shortest": 40
       }
      }
     }
