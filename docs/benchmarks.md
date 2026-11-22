@@ -18981,3 +18981,47 @@ artifact this project has published.
 Two consequences are recorded rather than repaired. The reconcile arms measured before this round
 were read with the wrong block, so their readings are a **floor** for the mechanism, not an estimate
 of it; and the empty-result rewrite now follows the source arm's template for the same reason.
+
+### The first dispatch (`44974188185`): 0/600 in zero seconds, and the two things it caught
+
+| arm | reading | calls a case |
+|---|---|---|
+| `inline+evidence` | **384/600 = 64.0%** | 1.00 |
+| `inline+evidence-nolink` | 378/600 = 63.0% | 1.00 |
+| `macsql-prompt` | **0/600 in 0.0 s a case** | **0.00** |
+
+The template arm spent no calls. That is the signature of a prompt that never reached the model, and
+the cause was in this round's own guard: `buildAskMessages` sets `decompose` on **every** call
+(`input.decompose === true || input.prompt?.decompose === true`), so a template prompt arrives
+carrying `decompose: false` — and `assertTemplateCarries` read `false` as "a block is set". Every
+case threw inside `promptFor` before the first call; the table recorded 600 rows of `0.0%`.
+
+Two defects, and both are the kind this repository writes down:
+
+1. **The test went through the wrong door.** `buildSqlPrompt(…, { template })` was covered; the
+   message builder, which is the path the harness takes, was not. The guard's unit test called the
+   function directly and its `decompose` was `undefined` there — the only value that passes. The
+   fix treats a boolean lever set to `false` as off, and the test now goes through
+   `buildAskMessages`, with a second test that a real `decompose: true` is still refused.
+2. **A whole arm failing inside the harness was published as an accuracy.** `assertArmProducedResults`
+   refused two states: every case refused by the provider (`llm`) and every case cut at the budget
+   (`truncated`). Every case failing in *our* code matched neither, so 600 zero-second rows went
+   through the funnel and the refusal came from `assertReportComplete`, two layers away, naming the
+   symptom (`its row carries no format profile`). The guard now refuses a table whose every row is a
+   harness failure and prints the first error, which in this case was one sentence long and named
+   the fix.
+
+The parent's reading is the other half of the story. The bar was registered as an **absolute**
+number — `371 + 12` — and `inline+evidence` read **384** on the same 600 questions with the same
+pinned weights (`170d0beaa768594b`, unchanged before and after the run). A 2.2pp move on an
+unchanged prompt at temperature zero is a draw, not a capability, and it is exactly why a paired
+comparison exists: an absolute bar on a paired experiment goes stale as soon as the parent moves, and
+the drift here is larger than the effect the bar was set to detect. The criterion is therefore
+restated before the next run as a **paired difference**: the template must win **12 or more of the
+600 cases** against `inline+evidence` in the same run, exact McNemar p < 0.05. The 371 anchor stays in
+this document as what it was — a reading of a parent that moves.
+
+The same run also prices the hint, which no arm had ever measured: **384 against 378**, +6 cases at
+1.00 calls each. The `Likely columns` line is worth about 1pp on this split, inside the split's own
+resolution — so the hint stays, and its 30%-precise list is neither the reason the prompt works nor
+the reason it loses.

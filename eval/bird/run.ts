@@ -3459,22 +3459,34 @@ export function escapeKind(error: unknown): 'llm' | 'truncated' | 'harness' {
 
 export function assertArmProducedResults(armName: string, runs: readonly { errorKind?: string; error?: string }[]): void {
   if (runs.length === 0) return;
+  const firstError = (): string => runs.find((run) => run.error !== undefined)?.error ?? 'no error text';
   const allFailed = runs.every((run) => run.errorKind === 'llm');
   if (allFailed) {
-    const first = runs.find((run) => run.error !== undefined)?.error ?? 'no error text';
     throw new Error(
       `arm ${armName}: every case failed before reaching the database — the model provider refused all ${String(runs.length)} calls ` +
-        `(first error: ${first}). This is not an accuracy of zero; it is a run that did not happen.`,
+        `(first error: ${firstError()}). This is not an accuracy of zero; it is a run that did not happen.`,
+    );
+  }
+  // A defect in this repository rather than in the endpoint, and the one case that was published as
+  // an accuracy: `macsql-prompt`'s first dispatch threw inside `promptFor` on all 600 cases — a
+  // boolean lever read as a conflict — and every row said zero seconds and no answer. Neither guard
+  // above fired (the errors were `harness`, not `llm`), so the run graded itself as 0.0% and the
+  // refusal came two layers away, from a missing format profile, naming the symptom. An arm whose
+  // every case failed inside the harness spent no calls and measured no prompt; the first error is
+  // the whole reading, so it is printed.
+  if (runs.every((run) => run.errorKind === 'harness')) {
+    throw new Error(
+      `arm ${armName}: every case failed inside the harness before a statement reached the engine ` +
+        `(first error: ${firstError()}). This is not an accuracy of zero; it is a defect in the arm's own path.`,
     );
   }
   // The same verdict for the other way a run produces no answer at all, with the other repair:
   // an arm cut at the budget on every case did not measure the model either, and reporting it as
   // "0%" would send its reader at the prompt.
   if (!runs.every((run) => run.errorKind === 'truncated')) return;
-  const first = runs.find((run) => run.error !== undefined)?.error ?? 'no error text';
   throw new Error(
     `arm ${armName}: every case was cut at the answer budget and no case reached the database ` +
-      `(first error: ${first}). This is not an accuracy of zero; it is a budget the endpoint spent thinking.`,
+      `(first error: ${firstError()}). This is not an accuracy of zero; it is a budget the endpoint spent thinking.`,
   );
 }
 

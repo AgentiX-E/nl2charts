@@ -348,6 +348,14 @@ export function assertTemplateCarries(options: {
     // An empty block is not a block: the enumerator above omits a block whose text is empty, so a
     // caller that passes `''` is asking for nothing rather than for something the template drops.
     if (value === '') continue;
+    // A boolean lever set to `false` is a lever that is off, and `buildAskMessages` sets
+    // `decompose` on every call (`input.decompose === true || input.prompt?.decompose === true`),
+    // so a template prompt arriving through the message builder carries `decompose: false` whether
+    // or not anyone asked for a decomposition. Reading that as a conflict made every case of the
+    // first `macsql-prompt` dispatch fail inside the harness: 600 rows at 0.0%, no call spent, and
+    // a guard two layers away reporting a missing format profile. The test that would have caught
+    // it goes through `buildAskMessages`, not `buildSqlPrompt`, and exists now.
+    if (value === false) continue;
     if (Array.isArray(value) && value.length === 0) continue;
     conflicts.push(key);
   }

@@ -7,7 +7,7 @@ import {
   renderMacSqlForeignKeys,
   TEMPLATE_CONFLICTS,
 } from '../src/template.js';
-import { buildSqlPrompt, extractSql, readStatement } from '../src/pipeline.js';
+import { buildAskMessages, buildSqlPrompt, extractSql, readStatement } from '../src/pipeline.js';
 import type { SchemaTable } from '../src/linking.js';
 
 const schema: SchemaTable[] = [
@@ -118,6 +118,26 @@ describe('buildSqlPrompt dispatches on the template', () => {
       options[key] = key === 'notes' ? ['rule'] : key === 'decompose' || key === 'reasoning' ? (key === 'reasoning' ? 'sql-like' : true) : 'block';
       expect(() => assertTemplateCarries(options as unknown as Parameters<typeof assertTemplateCarries>[0])).toThrow(new RegExp(key));
     }
+  });
+});
+
+describe('the path the harness actually takes', () => {
+  // The test above this one went through `buildSqlPrompt` and passed while every case of the first
+  // `macsql-prompt` dispatch failed inside the harness: `buildAskMessages` sets `decompose` on every
+  // call, so the prompt arrived carrying `decompose: false` and the conflict check read "off" as
+  // "asked for". Six hundred rows at 0.0% and no call spent, reported two layers away as a missing
+  // format profile. A prompt feature is only tested where the harness reaches it.
+  it('sends the template through the message builder, where `decompose: false` is set for everyone', () => {
+    const built = buildAskMessages({ question: 'How many orders?', schema, prompt: { template: 'macsql-bird' }, linking: false });
+    expect(built.messages[0].content).toContain('【Constraints】');
+    expect(built.messages[0].content).not.toContain('You translate questions into one read-only SQL statement.');
+    // The user turn is the harness's own and does not carry the question twice: the template's
+    // last line already asks for it.
+    expect(built.messages[1].content).toContain('How many orders?');
+  });
+
+  it('still refuses a decomposition on a template, which is the conflict that matters', () => {
+    expect(() => buildAskMessages({ question: 'q', schema, prompt: { template: 'macsql-bird' }, decompose: true })).toThrow(/no slot for decompose/);
   });
 });
 

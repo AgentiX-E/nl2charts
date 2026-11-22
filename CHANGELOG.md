@@ -7,6 +7,15 @@ cannot be argued with.
 ## Unreleased
 
 ### Fixed
+- **A whole arm failing inside the harness was published as an accuracy.** `macsql-prompt`'s first
+  dispatch (`44974188185`) threw inside `promptFor` on all 600 cases — `assertTemplateCarries` read
+  `decompose: false`, which `buildAskMessages` sets on every call, as a block it could not carry — and
+  the table recorded 600 zero-second rows at 0.0%. `assertArmProducedResults` refused an all-`llm` and
+  an all-`truncated` table and neither matched, so the refusal came from `assertReportComplete` naming
+  the symptom (`its row carries no format profile`). It now refuses a table whose every row is a
+  harness failure and prints the first error. The template guard treats a boolean lever set to `false`
+  as off, and its test goes through `buildAskMessages` — the door the harness uses — with a second
+  test that a real `decompose: true` is still refused.
 - **The reconcile turn read the first fenced statement under a comment that said it read the last.**
   `extractSql` takes the first block; `parseDecomposed` takes the last; the reconcile prompt asks for
   a line per result group and then the statement, and a model that fences each group's statement had

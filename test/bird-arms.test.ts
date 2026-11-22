@@ -660,6 +660,18 @@ describe('A/A pairs', () => {
     // a wrong answer: 0% is then a number that hides an outage.
     expect(() => assertArmProducedResults('names', [{ errorKind: 'llm', error: 'llm returned 402' }])).toThrow(/run that did not happen/);
     expect(() => assertArmProducedResults('names', [{ errorKind: 'llm' }, { errorKind: 'execution' }])).not.toThrow();
+  });
+
+  it('refuses a table where every case failed inside the harness, and prints the error that caused it', () => {
+    // The failure this exists for: `macsql-prompt`'s first dispatch threw inside `promptFor` on all
+    // 600 cases, spent no call, and published 0.0% — neither the outage guard nor the truncation
+    // guard fired, and the refusal came from a format-profile check two layers away naming the
+    // symptom. A harness defect on every case is not an accuracy and the sentence has to say so.
+    expect(() => assertArmProducedResults('macsql-prompt', [{ errorKind: 'harness', error: 'no slot for decompose' }])).toThrow(/no slot for decompose/);
+    expect(() => assertArmProducedResults('macsql-prompt', [{ errorKind: 'harness' }])).toThrow(/defect in the arm's own path/);
+    // One case that reached the database is a reading, however bad: the guard is about runs that
+    // measured nothing, not about runs that measured badly.
+    expect(() => assertArmProducedResults('names', [{ errorKind: 'harness' }, { errorKind: 'execution' }])).not.toThrow();
     expect(() => assertArmProducedResults('names', [{}])).not.toThrow();
     expect(() => assertArmProducedResults('names', [])).not.toThrow();
   });
