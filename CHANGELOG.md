@@ -7,6 +7,23 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **The gate that decides whether a better prompt is worth its price.** `packages/ai/src/shipment.ts`
+  is the missing owner of a transfer that had none: `recipe.ts` says which prompt ships and the arm
+  table says which prompt won, and nothing compared a gain against the bill it is paid on — so the
+  accuracy table's best cell (66.45% at 9.7× the cache-miss tokens per case, +1.37pp at p = 0.112)
+  was one edit away from the product, and the edit would have been made by whatever rule the next
+  person wrote. The gate takes an experiment as counts and a price, re-derives the effect the counts
+  imply and the price ratio, and applies three declared numbers — `alpha` 0.05, a **1.0pp** floor
+  (what 1,532 paired cases resolve at 80% power) and a **tariff of 5 points per 1× extra cost**,
+  which turns two columns into one comparison. `eval/bird/shipment.json` stores counts and prices and
+  **no statistic**: `p` comes from `mcnemarExact` and the interval from `pairedResolution`, the two
+  producers every other reading already uses. `eval/bird/ship.ts` folds the chain and fails the build
+  unless the recipe it ends on is `SHIPPED_SQL.name`, so a priced experiment cannot reach the product
+  without a commit and a recipe cannot be changed without one. `pnpm gate:shipment` runs it and its
+  self-test (four tampered ledgers, each of which must be refused). The two readings this was built
+  on go through it in `docs/benchmarks.md`: the prompt that ships is accepted at 0.23× the tokens,
+  and the thinking-mode cell is refused twice — unresolved at p = 0.112, and 43.5 points short of
+  what 9.7× demands.
 - **Two procedures, dispatched against the one that ships.** `macsql-bird-qp` swaps the template's
   decomposition sentence pair for CHASE-SQL's query plan inside the same reply — tables, then
   operations, then output columns — and `macsql-bird-os` adds three question-SQL pairs written for

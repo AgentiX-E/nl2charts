@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "decisions": [
+    {
+      "run": "44991167518",
+      "dataset": "bird-dev",
+      "incumbent": { "arm": "assembled", "correct": 980, "total": 1532, "tokensPerCase": 587 },
+      "challenger": { "arm": "macsql-prompt", "correct": 1010, "total": 1532, "tokensPerCase": 134 },
+      "paired": { "onlyChallenger": 119, "onlyIncumbent": 89 },
+      "note": "MAC-SQL's skeleton, this project's card, no column hint, against the assembled skeleton with the hint on"
+    }
+  ]
+}

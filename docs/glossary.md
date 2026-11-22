@@ -775,3 +775,26 @@ subqueries, window functions and anything not beginning with `SELECT`, because a
 decomposition is worse than none — it teaches the model a false plan in the position it trusts most.
 `Joins` is where an equality between two column references goes whether it was written in `ON` or in
 `WHERE`, which is the distinction models most often collapse.
+
+**Recipe** — The prompt the product sends, named as one value: which skeleton, whether descriptions,
+foreign keys or samples are printed, whether a column hint goes in front of the card, which dialects
+the skeleton can state, and the reading that put the combination there. `resolveShipment` chooses one
+by dialect; `SHIPPED_SQL` is the one the project scored highest per unit of cost. A recipe a caller
+assembles by hand is a combination nobody measured, which is why the fields exist as an object rather
+than as arguments at each call site.
+
+**Shipment gate** — The rule that promotes a recipe, in `packages/ai/src/shipment.ts`. It reads an
+experiment as counts and a price, re-derives the effect and the price ratio, and applies three
+declared numbers (`alpha`, `minDeltaPp`, `tokenTariff`). Its verdict is not advice: CI requires the
+recipe the ledger folds to be the recipe the product ships, so a priced experiment cannot be applied
+by hand and a recipe cannot be changed without one.
+
+**Tariff (of a shipment)** — The points of accuracy a candidate must buy per 1× extra cost, five by
+default. It is the exchange rate between the two columns of an accuracy table, and writing it as a
+number is the point: "is +1.37pp worth 9.7× the tokens" is unanswerable as an argument and arithmetic
+as a rule — 8.7× extra demands 43.5 points, which is why the thinking-mode cell is refused twice.
+
+**Ledger (shipment)** — `eval/bird/shipment.json`: the chain of decisions about which prompt ships,
+each recorded as two arms' counts and prices plus the cases they disagreed on. Deliberately holds no
+p-value, no interval and no verdict — all three are functions of the counts, and a stored statistic is
+a second source of truth.

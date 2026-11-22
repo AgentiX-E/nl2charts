@@ -167,12 +167,13 @@ Every push runs the same gates locally and in CI:
 | Coverage | ≥95% statements, branches, functions and lines **per package** |
 | Layering | 8 packages, no forbidden dependency edge, `devkit` never a production dependency |
 | Platform | `core`'s browser graph contains no `node:`, driver or `ai` import; declarations leak no driver types (PLT1–PLT7, with 7 mutation tests) |
-| API surface | An export that disappears fails the build (430 symbols snapshotted) |
+| API surface | An export that disappears fails the build (552 symbols snapshotted) |
 | Gate parity | `gate:all` runs every check command the quality job runs, expanded through the scripts |
 | Budgets | gzip size ceilings per package |
 | Benchmark | Oracle must score 100%, empty predictor 0%, or the run fails |
 | Documented commands | Every `pnpm <script>` in this README or under `docs/` is a script in `package.json` |
 | Published tables | The paired-reading tables in [benchmarks.md](docs/benchmarks.md) are derived from `eval/baseline/readings.json`, never typed |
+| Promoted prompts | A recipe reaches the product only through `bench:bird:ship`: significant, at least 1pp better, and `5 × extra cost` points better at the token price it is billed on. `gate:shipment` fails when the ledger's fold and `SHIPPED_SQL` disagree, and when its four tampered ledgers are accepted |
 | What a reading costs | Every judge artifact carries `bill: {yuan, savedYuan}` and `cached`, priced from a table that names its source and the day it was read; `pnpm bench:bill <artifact>` prints it |
 
 ## Documentation
@@ -192,6 +193,7 @@ Every push runs the same gates locally and in CI:
 - [Changelog](CHANGELOG.md)
 - [Production checklist](docs/guide/07-production.md)
 - [Architecture](docs/architecture.md)
+- [Decisions](docs/adr/0002-priced-promotion.md) — why a promoted prompt is a priced decision, and what the tariff replaced
 - [Glossary](docs/glossary.md)
 - [Benchmarks and ablations](docs/benchmarks.md)
 - [What a reading costs](docs/cost.md) — the ledger, the store that makes a second reading nearly free, and the rules that keep a bill from arriving as a surprise

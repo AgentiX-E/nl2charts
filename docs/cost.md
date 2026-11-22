@@ -234,6 +234,13 @@ out is one call.
    the instrument that took it (`judge.grader`), including the mode, and `--iteration` is how a
    reading says that its means are a delta rather than a candidate.
 
+7. **A cheaper prompt needs no argument; a dearer one needs five points.** The promotion rule is a
+   gate rather than a table reading (`docs/adr/0002-priced-promotion.md`): a candidate ships when it
+   is significant, gains at least a point, and buys `5 × extra cost` points. The prompt that ships
+   today is 0.23× the assembled skeleton's cache-miss tokens and was accepted without an argument;
+   the thinking-mode cell is 9.7× and would need 43.5 points against the 1.37 it offers. Cost stopped
+   being a column a reader was expected to weigh and became the denominator of the rule.
+
 ## What this does not fix
 
 `ci.yml` still runs `benchmark and ablation` on every push. It is free — no key is in its

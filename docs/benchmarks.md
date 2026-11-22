@@ -20156,3 +20156,124 @@ p = 0.11 — a price that no product decision should accept on this evidence.
 `servedModels: {"deepseek-flash": 1530}` for 1,532 cases: two answers carry no serving name, which
 is the same fact as its `llmFailureShare: 0.001`. The examples arm reports 1,532 of 1,532. Neither
 number is adjusted; the row says what the endpoint said.
+
+## A gain is not a decision: the gate that prices one, and what it refuses
+
+The round above ended with a number that no product decision should accept — 66.45% at 9.7× the
+tokens per case for +1.37pp at p = 0.11 — and the sentence was written by a person. That is the
+defect. `recipe.ts` says which prompt ships; the arm table says which prompt won; and until this
+round **nothing compared the second against the bill that pays for it**. The best cell of the
+accuracy table was one edit away from the product, and the edit would have been made by whatever
+rule the next person wrote, reading whichever column they were looking at.
+
+So the transfer stops being a person. `packages/ai/src/shipment.ts` is a gate that reads a record of
+one experiment and answers one question — *is this gain worth this price* — and
+`eval/bird/ship.ts` folds the chain of such records and fails the build unless the recipe it ends on
+is the recipe the product ships.
+
+### What the ledger stores, and what it refuses to store
+
+`eval/bird/shipment.json` carries counts and a price, per arm, per decision:
+
+```json
+{ "run": "44991167518", "dataset": "bird-dev",
+  "incumbent":  { "arm": "assembled",     "correct": 980,  "total": 1532, "tokensPerCase": 587 },
+  "challenger": { "arm": "macsql-prompt", "correct": 1010, "total": 1532, "tokensPerCase": 134 },
+  "paired": { "onlyChallenger": 119, "onlyIncumbent": 89 } }
+```
+
+No `p`. No interval. No verdict. All three are functions of those six numbers, and a stored statistic
+is a second source of truth — the first thing to survive a count being corrected. `bench:bird:ship`
+derives `p` with `mcnemarExact` and the interval with `pairedResolution`, the two producers every
+other reading in this repository already goes through, and hands the gate one object per decision.
+
+The two conversions that derivation makes are worth stating, because both are silently wrong when
+they are wrong: the interval is converted to **percentage points** (the gate's unit) and to the
+**challenger's sign** (`pairedResolution` calls its first argument "only first"). On the shipped
+record the result is p = 0.0441 and CI [0.11, 3.80]pp — the bootstrap interval this document quoted
+for the same pair was [0.12, 3.80], so the two agree to a hundredth of a point and disagree about
+nothing.
+
+### The policy is three numbers, and the third one is the whole argument
+
+| field | value | why that value |
+| --- | --- | --- |
+| `alpha` | 0.05 | the significance the paired design is held to, declared so a 0.06 reading cannot be called "nearly significant" by anyone who did not open the file |
+| `minDeltaPp` | 1.0 | 1,532 paired cases resolve about a point at 80% power; a smaller effect is not small, it is unmeasured at this sample size |
+| `tokenTariff` | 5.0 | points required per **1× extra cost**, which turns two columns into one comparison |
+
+The tariff is the exchange rate: a prompt at twice the price must be five points better, at three
+times ten, at 9.7× forty-three and a half. Ten days ago that question was answered in prose, twice,
+in two directions. It is now a multiplication.
+
+| cost ratio | 1.0× | 1.2× | 1.5× | 2× | 4× | 9.7× |
+| --- | --- | --- | --- | --- | --- | --- |
+| gain the policy demands | 1.00pp | 1.00pp | 2.50pp | 5.00pp | 15.0pp | **43.5pp** |
+
+### The two readings this gate was built on, through the gate
+
+```
+$ pnpm bench:bird:ship
+44991167518  macsql-prompt         +1.96pp  p=0.0441  cost=0.23x  needs=1.00pp  ship
+recipe: shipped-sql (moved)
+```
+
+The decision the project made by hand in §"The prompt the product sends is the prompt the experiment
+priced" is the decision the gate reproduces, from counts, without being told what to conclude. Put
+the second-base reading in front of it instead — the same prompt, thinking on, same 1,532 questions —
+and it refuses twice:
+
+| decision | effect | p | cost | demanded | verdict |
+| --- | --- | --- | --- | --- | --- |
+| `assembled` → `macsql-prompt` | +1.96pp | 0.0441 | 0.23× | 1.00pp | **ship** |
+| `assembled` → `macsql-prompt`, thinking | +1.37pp | 0.1124 | 9.7× | 43.5pp | refuse (`not-significant`, `too-expensive`) |
+
+The second row is the one that matters, because it is the row a single-column rule gets wrong. With
+the tariff set to zero the refusal still stands — an unresolved effect does not become resolved
+because it is free — and with the significance bar moved as well, the same candidate is accepted at
+forty-three times the price for one and a third points. That is the shape of the transfer this round
+closed, and it is now a test rather than a paragraph.
+
+### What the gate refuses that has nothing to do with price
+
+Two of the five refusal codes are about the *declaration*, and they exist because the paired design
+has an arithmetic identity that a copied number breaks silently: every case where the challenger is
+right and the incumbent is wrong is a case the challenger gained, so
+`correct_challenger - correct_incumbent` **must** equal `onlyChallenger - onlyIncumbent`. A record
+whose halves came from different runs is plausible in every field and wrong in one relation, and the
+gate says which:
+
+```
+FAILED 44991167518: the discordant counts imply 30 more correct answers, the arm totals 29
+```
+
+The other one is the chain. A ledger is a history, so each decision's incumbent must be the recipe
+the previous one left in place; a step whose incumbent is not what the product shipped measured a
+prompt the product does not send, and folding it would move the product on evidence about something
+else. The fold starts on the assembled skeleton, because that is what the product sent before the
+first decision, and an *empty* ledger therefore folds to `assembled` — which is not what the product
+ships, so "no decisions" is red rather than silent.
+
+### The identity CI holds
+
+`pnpm gate:shipment` runs the ledger and then runs the gate's own self-test, which produces four
+tampered ledgers — a miscopied count, a skipped chain step, an arm nobody ships, an empty file — and
+requires each to be refused. A check that has never been observed to fail is a check whose failure
+path nobody has read. The identity itself is one comparison: the recipe the fold ends on must be
+`SHIPPED_SQL.name`. A new priced experiment therefore cannot reach the product without a commit to
+the ledger, and a commit to the ledger cannot leave the product behind. There is no runtime switch
+and no state in which the product sends one prompt while the experiment believes it sends another.
+
+### What this does not do
+
+It does not re-open a settled question. The fold only moves forward, so a later measurement that
+prefers an older prompt is refused on effect and price rather than oscillating the product between
+two prompts — a decision already paid for is a decision, not a draft.
+
+It does not price Text2Viz. `eval/text2vis/arbitrate.ts` chooses among marks at a *fixed* price per
+question, which is one question with two answers and no second column; a tariff there would be a
+column that cannot vary. When a chart decision acquires a price it can be priced with this one.
+
+**Cost of the gate: ¥0.** It reads committed counts, makes no calls, and takes about forty
+milliseconds, which is why it can run on every dispatch instead of in a report somebody remembers to
+write.

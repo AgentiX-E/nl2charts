@@ -424,6 +424,12 @@
       "functions": 100,
       "branches": 100
     },
+    "eval/bird/ship.ts": {
+      "lines": 98.27,
+      "statements": 98.27,
+      "functions": 100,
+      "branches": 97.14
+    },
     "eval/bird/sql-shape.ts": {
       "lines": 100,
       "statements": 100,

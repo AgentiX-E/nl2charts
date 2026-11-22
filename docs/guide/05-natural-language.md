@@ -393,6 +393,33 @@ Two consequences worth knowing before you override it:
   `resolvePrompt(findSqlRecipe('shipped-sql'), …)` if you would rather have the
   refusal.
 
+### What it costs to change what ships
+
+A recipe that ships is a decision, and the decision has a price. This project pays it per question,
+forever, so the rule that promotes a recipe is not "the arm with the highest accuracy" — that rule
+adopts 66.45% at nine times the tokens for a gain the design cannot resolve. The promotion rule is a
+gate, and the gate is code:
+
+```
+$ pnpm bench:bird:ship
+44991167518  macsql-prompt         +1.96pp  p=0.0441  cost=0.23x  needs=1.00pp  ship
+recipe: shipped-sql (moved)
+```
+
+Three numbers decide it, and they are in `DEFAULT_SHIPMENT_POLICY` rather than in a discussion:
+`alpha` 0.05, a floor of **1.0pp** (about what 1,532 paired questions resolve at 80% power), and a
+tariff of **5 points per 1× extra cost** — so a prompt at twice the price must be five points better
+and one at nine times the price must be forty. A candidate also has to survive its own arithmetic:
+the paired counts must add up to the difference between the arms, and the interval must contain the
+effect the counts state.
+
+If you are extending the prompt, the useful consequence is the cheapest one: **a prompt that is both
+better and smaller ships without an argument**, which is what `macsql-prompt` is (0.23× the
+cache-miss tokens of the assembled skeleton). A prompt that buys a point by doubling the bill needs
+five. And a prompt that is better by less than a point is not rejected for being small — it is
+rejected because at this sample size it has not been measured, which is a different sentence and the
+one the gate prints.
+
 ## The pipeline, including repair
 
 ```ts
