@@ -3,114 +3,114 @@
   "note": "Regenerate with UPDATE_VISUAL=1; review the diff before committing.",
   "marks": {
     "bar": {
-      "shape": "1f80eec5",
-      "geometry": 22,
-      "bytes": 6160
+      "shape": "cca85aa1",
+      "geometry": 33,
+      "bytes": 9279
     },
     "line": {
-      "shape": "668c7f50",
-      "geometry": 38,
-      "bytes": 9988
+      "shape": "40853dc2",
+      "geometry": 39,
+      "bytes": 10458
     },
     "pie": {
-      "shape": "0b4b9de9",
+      "shape": "9f19a24d",
       "geometry": 10,
-      "bytes": 3043
+      "bytes": 3052
     },
     "scatter": {
-      "shape": "53bb78f2",
-      "geometry": 27,
-      "bytes": 7577
+      "shape": "c3ca76be",
+      "geometry": 28,
+      "bytes": 7900
     },
     "effectScatter": {
-      "shape": "d16dee59",
-      "geometry": 39,
-      "bytes": 12588
+      "shape": "55dca019",
+      "geometry": 40,
+      "bytes": 12923
     },
     "radar": {
-      "shape": "821c8d75",
+      "shape": "c524f9bb",
       "geometry": 10,
-      "bytes": 2589
+      "bytes": 2618
     },
     "tree": {
       "shape": "6c09b487",
       "geometry": 3,
-      "bytes": 1147
+      "bytes": 1160
     },
     "treemap": {
-      "shape": "a904717b",
+      "shape": "5f541276",
       "geometry": 12,
-      "bytes": 3516
+      "bytes": 3460
     },
     "sunburst": {
-      "shape": "f2e3590c",
+      "shape": "186fbb04",
       "geometry": 6,
-      "bytes": 2385
+      "bytes": 2551
     },
     "boxplot": {
-      "shape": "3ddb1c95",
-      "geometry": 14,
-      "bytes": 3784
+      "shape": "c33e68c6",
+      "geometry": 11,
+      "bytes": 3576
     },
     "candlestick": {
-      "shape": "3f357a47",
-      "geometry": 11,
-      "bytes": 3169
+      "shape": "528b15f6",
+      "geometry": 12,
+      "bytes": 3519
     },
     "heatmap": {
-      "shape": "472dba19",
-      "geometry": 20,
-      "bytes": 16843
+      "shape": "0e1ee439",
+      "geometry": 12,
+      "bytes": 16057
     },
     "map": {
-      "shape": "77992f64",
+      "shape": "7f1d25f2",
       "geometry": 3,
-      "bytes": 929
+      "bytes": 950
     },
     "parallel": {
       "shape": "ecf7472e",
       "geometry": 26,
-      "bytes": 6898
+      "bytes": 6911
     },
     "lines": {
-      "shape": "9ea5c971",
+      "shape": "16aa4a31",
       "geometry": 7,
-      "bytes": 1973
+      "bytes": 1996
     },
     "graph": {
-      "shape": "63d57038",
+      "shape": "bf226cc6",
       "geometry": 12,
-      "bytes": 2755
+      "bytes": 2780
     },
     "sankey": {
-      "shape": "9811020b",
+      "shape": "1b972142",
       "geometry": 12,
-      "bytes": 4730
+      "bytes": 4739
     },
     "funnel": {
-      "shape": "39efae59",
+      "shape": "ddc5143d",
       "geometry": 10,
-      "bytes": 3108
+      "bytes": 3164
     },
     "gauge": {
-      "shape": "606c3892",
+      "shape": "2bcdd9c4",
       "geometry": 82,
-      "bytes": 13555
+      "bytes": 13568
     },
     "pictorialBar": {
-      "shape": "bec1b33a",
-      "geometry": 31,
-      "bytes": 8543
+      "shape": "05a38356",
+      "geometry": 32,
+      "bytes": 8882
     },
     "themeRiver": {
-      "shape": "f1e4154f",
-      "geometry": 20,
-      "bytes": 6628
+      "shape": "d478c027",
+      "geometry": 21,
+      "bytes": 6915
     },
     "custom": {
       "shape": "f83227c9",
       "geometry": 2,
-      "bytes": 676
+      "bytes": 689
     }
   }
 }

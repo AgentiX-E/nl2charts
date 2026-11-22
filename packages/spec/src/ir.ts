@@ -96,7 +96,7 @@ export const ChartIRSchema = z
      */
     map: z.string().min(1).optional(),
     encoding: EncodingSchema,
-    data: z.array(z.record(z.unknown())).max(50_000),
+    data: z.array(z.record(z.string(), z.unknown())).max(50_000),
     title: z.string().optional(),
     subtitle: z.string().optional(),
     /** Alt text is mandatory for a11y at emit time; optional only while drafting. */
@@ -146,6 +146,6 @@ export function parseChartIR(input: unknown): ChartIR {
   return ChartIRSchema.parse(input);
 }
 
-export function safeParseChartIR(input: unknown): z.SafeParseReturnType<unknown, ChartIR> {
+export function safeParseChartIR(input: unknown): z.ZodSafeParseResult<ChartIR> {
   return ChartIRSchema.safeParse(input);
 }

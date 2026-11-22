@@ -114,26 +114,31 @@
     "bench:bird:ves": "tsx eval/bird/ves.ts"
   },
   "devDependencies": {
+    "@agentix-e/nl2charts-ai": "workspace:*",
+    "@agentix-e/nl2charts-chart": "workspace:*",
+    "@agentix-e/nl2charts-core": "workspace:*",
+    "@agentix-e/nl2charts-devkit": "workspace:*",
+    "@agentix-e/nl2charts-mcp": "workspace:*",
+    "@agentix-e/nl2charts-node": "workspace:*",
+    "@agentix-e/nl2charts-spec": "workspace:*",
+    "@agentix-e/nl2charts-studio": "workspace:*",
+    "@duckdb/node-api": "1.5.6-r.1",
     "@types/node": "^22.10.2",
     "@vitest/coverage-v8": "^3.0.5",
+    "ajv": "^8.17.1",
+    "echarts": "^6.1.0",
     "esbuild": "^0.24.2",
     "tsup": "^8.3.5",
     "tsx": "^4.19.2",
     "turbo": "^2.10.7",
     "typescript": "^5.7.3",
     "vite-tsconfig-paths": "^5.1.4",
-    "vitest": "^3.0.5",
-    "ajv": "^8.17.1",
-    "echarts": "^5.6.0",
-    "@agentix-e/nl2charts-spec": "workspace:*",
-    "@agentix-e/nl2charts-core": "workspace:*",
-    "@agentix-e/nl2charts-ai": "workspace:*",
-    "@agentix-e/nl2charts-node": "workspace:*",
-    "@agentix-e/nl2charts-chart": "workspace:*",
-    "@agentix-e/nl2charts-mcp": "workspace:*",
-    "@agentix-e/nl2charts-studio": "workspace:*",
-    "@agentix-e/nl2charts-devkit": "workspace:*",
-    "@duckdb/node-api": "1.5.6-r.1"
+    "vitest": "^3.0.5"
   },
-  "type": "module"
+  "type": "module",
+  "pnpm": {
+    "overrides": {
+      "echarts": "^6.1.0"
+    }
+  }
 }

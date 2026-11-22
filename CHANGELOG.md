@@ -24,6 +24,27 @@ cannot be argued with.
   and the number is a budget: the block is paid for on every question and the parent is already
   3,700 prompt tokens, so seven pairs would make the arm's gain indistinguishable from a longer
   prompt. The cache lives under the run's root rather than the module's path.
+### Security
+- **Four advisories closed by three dependency upgrades, and one of them was a lie in a published schema.**
+  `mysql2` 3.11.5 → 3.24.6 (GHSA-3f6p-5ww8-9rcr: auth-plugin downgrade leaks a plaintext credential, high;
+  GHSA-rgwj-5xj2-c3m3: unbounded zlib inflate, moderate), `zod` 3.25 → 4.6.7 (GHSA-mrhx-c7xc-m3w5:
+  memory exhaustion while validating an oversized constrained collection, high), and `echarts` 5.6 → 6.1.0
+  (GHSA-fgmj-fm8m-jvvx: XSS, moderate) pinned through a single `pnpm.overrides` entry because the peer
+  range in `packages/chart` had left a second 5.6.0 copy installed. `pnpm audit --prod` now reports none.
+  The zod migration changed two call sites (`z.record` takes a key schema, `SafeParseReturnType` is
+  `ZodSafeParseResult`) and removed `zod-to-json-schema`: it reads v3 node types and cannot describe a v4
+  schema, so `chartIrJsonSchema` uses zod's own `toJSONSchema`.
+- **The JSON Schema declared a draft it has never emitted.** `chartIrJsonSchema` wrote
+  `$schema: .../draft/2020-12/schema` into an object whose spread was immediately overwritten by the
+  generator's own declaration, so every published schema was draft-07 while the source said 2020-12 — and
+  the test that compiles it with a default `Ajv` passed for exactly that reason. The declaration now comes
+  from the generator, so it cannot disagree with the keywords again; `$id`, which is what consumers resolve,
+  is unchanged.
+- **The visual baseline moved with echarts 6.1, and the diff was read before it was committed.** Every mark
+  renders; heatmap's twenty drawn elements become twelve because its cells arrive as paths rather than
+  rectangles (nine cells, nine paths), and boxplot's fourteen become eleven for the same reason. The
+  empty-drawing assertion and the per-mark geometry counts still hold.
+
 ### Fixed
 - **"No A/A control" now has a word.** A workflow input with a non-empty default cannot be unset
   from the command line: the dispatcher passes a blank, Actions reads a blank as "not supplied",
