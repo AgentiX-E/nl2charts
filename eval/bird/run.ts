@@ -932,6 +932,26 @@ export const MIXED_SOURCES: readonly string[] = ['inline+evidence', 'metadata+ev
 export const TEMPLATE_SOURCES: readonly string[] = ['inline+evidence', 'metadata+evidence', 'macsql-prompt'];
 
 /**
+ * The same three candidates with the template first, which is the whole of what `first` reads.
+ *
+ * This list exists because of a reading rather than a design. The template pool's own artifact
+ * (`44985557283`, 600 questions) was replayed offline through every free rule — `first`,
+ * `shortest`, `modal`, `wider` — and every source ordering of them. The best free strategy was
+ * **401** cases (`first` with the template ahead), `shortest` the shipped rule read 395, and the
+ * candidate set held an answer on 437. So on that artifact the free rules top out 36 cases below
+ * their own ceiling, and the single highest-scoring thing one can do with the pool is to take the
+ * template's statement every time it returned rows: 400 cases, zero calls, at the price of one
+ * source rather than three.
+ *
+ * That is not an argument for the ordering — an ordering is a preference about which source to
+ * trust, and a preference read off the same artifact that scores it is a hypothesis. It is the
+ * arm that makes the hypothesis testable: the pool with the template first, dispatched beside the
+ * pool with it third and beside the template alone, all in one run. If the ordering is real the
+ * three readings separate; if it is not, this arm reads what `select-mixed-rule-template` reads.
+ */
+export const TEMPLATE_FIRST_SOURCES: readonly string[] = ['macsql-prompt', 'metadata+evidence', 'inline+evidence'];
+
+/**
  * The shipped trio plus the one candidate whose statement is rendered rather than written.
  *
  * `values` was kept in the third slot on the third slot's own verdict (round 44: swapping it for
@@ -1462,6 +1482,7 @@ export const ARMS: readonly Arm[] = [
   // 646 for the source it replaces, so this arm's bill is the pool's bill plus 3,048 tokens a case.
   // That is why the reading has to be the pool's own bar and not the delta against 387 alone.
   { name: 'select-mixed-rule-template', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, selectRule: 'shortest', mixed: TEMPLATE_SOURCES },
+  { name: 'select-mixed-first-template', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, selectRule: 'first', mixed: TEMPLATE_FIRST_SOURCES },
   // The leader's linker, on this repository's shipped candidate set and free rule.
   //
   // `AskData` is the top BIRD row this repository compares itself to (78.49% dev, 83.40% test) and
@@ -2117,6 +2138,7 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'select-mixed-rule': "the parent's own candidates chosen by `shortest` instead of by the model: three calls instead of four, and the offline device already priced the rule at 63.64% against the selector's 62.79% on 1,532 dev questions (63.71% against 61.42% on the strong pool, +2.29pp, p = 0.0030) — this arm is the derivation becoming a measurement, and its artifact is what `bench:bird:consensus` must reproduce exactly",
   'select-mixed-rule-rows': "the shipped arm plus a fourth candidate drawn from three stored rows per table: the pool read apart offline says the missing statements are `values` failures (71.3% of the 168 questions whose pool held no correct candidate) and that seven filter sites in ten aim at a column that has never held the value, which is a fact about rows rather than about columns — the arm that asks whether a fourth candidate differing in knowledge converts under a rule instead of under a selector",
   'select-mixed-rule-template': "the shipped pool with their prompt in the third slot instead of the value index: the third condition of the template's pre-registration, written before the arm existed and dispatched only after the single-candidate reading cleared its own bar (1,004 of 1,532 against 947, +3.72pp, 134:77, p = 0.0001, one call a case). The bar stays what it was — at least 387 of 600, the pool is the product — and the bill is not one lever: 3,694 prompt tokens a case on one of the three candidates against 646 for the slot it replaces",
+  'select-mixed-first-template': "the same three candidates with the template first, which is the only thing `first` reads: the template pool's artifact (`44985557283`) was replayed through every free rule and every source ordering, the best of them read 401 of 600, and taking the template's statement whenever it returned rows read 400 — so the pool's free ceiling is 36 cases under its own 437, and the question this arm asks is whether the ordering that repairs one case of it is a preference or an artefact of the artifact that named it. Read beside `select-mixed-rule-template` and `macsql-prompt` on the same run; the ordering is a hypothesis until three readings separate",
   'select-mixed-rule-narrow': "the shipping arm with the narrowed value block on all three candidate cards: the block cleared its single-prompt bar at +1.50pp for +9.17% tokens (`43591209696`), and this arm is the one that says whether it survives being paid once per candidate on a pool that already holds three chances to be right — one field (`sourceSamples`), same sources, same chooser, three calls",
   'askdata-shape': "the leader's five-variant alignment linker on this repository's own pool: it is the only arm that can price the 8.2pp between this split's hint-carrying full-schema 63.0% and the 71.2% the paper reports for the same cell, and it costs eight calls a case — five to decide what to show, one rewrite per variant whose statement leaves a literal in a field that cannot hold it, and three candidates. Dispatched once, against `select-mixed-rule` on the same 496 questions, against a criterion registered in `docs/benchmarks.md` before the run: at or above +4.0pp the pipeline explains the gap, +1.5 to +4.0pp the linker is worth copying and the rest is the model, below +1.5pp the gap belongs to the author's model and demonstrations and the next lever is a stronger model rather than a longer pipeline. The five-call cost is why it is not in the chain: a lever that triples the bill of every push has to earn its place with one reading, not with a weekly one",
   'select-mixed-rule-intent': 'the same fourth call spent on a candidate rendered from a query intent: same pool size, same free rule, same price as `select-mixed-rule-rows`, so the two arms together say which kind of difference a fourth candidate has to be — and the delta against `select-mixed-rule` is the conversion test `select-intent` could not give, because that arm read four candidates with the paid selector and lost 3.50pp doing it',

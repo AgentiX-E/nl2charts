@@ -86,6 +86,16 @@ export interface Recorded {
   readonly correct: boolean;
   readonly sql?: string;
   readonly fingerprint?: string;
+  /**
+   * How many rows the candidate returned, and how wide one row is.
+   *
+   * Carried for the one rule that reads the *shape* of a result rather than its text or its
+   * agreement (`wider`). Optional because an artifact written before the fields were kept does
+   * not have them — and a rule that needs them has to report "no input" there rather than assume
+   * a shape, which is why `wider` treats a missing count as unavailable instead of as zero.
+   */
+  readonly rows?: number;
+  readonly columns?: number;
 }
 
 /** One question as one arm ran it: the set, and what the arm did with it. */

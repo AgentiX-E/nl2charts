@@ -175,6 +175,95 @@ function majority(candidates: readonly Recorded[], atLeast: number): readonly nu
   return group.length === 0 ? eligible(candidates) : group;
 }
 
+/**
+ * The modal result, unless the modal group answered a listing with one row.
+ *
+ * A port of `widerIndex` in `packages/ai/src/select.ts`, and the one variant here that cannot be
+ * read from text or agreement alone: it needs how many rows each candidate returned and how wide
+ * one row is. Both are recorded per candidate, which is why this rule could be priced at all — and
+ * a candidate whose record predates the fields is `-1` (no input) rather than a guessed shape.
+ *
+ * The two facts it turns on are stated once, here, because the arm and the library have to mean
+ * the same thing by them: a single-row result is what an aggregate looks like while the question
+ * asked for rows, and none of `first`, `shortest` or `modal` can see that the loser of the vote
+ * returned four hundred rows the winner did not. "A single row" is about the group's *distinct*
+ * rows, so the thinnest member decides it — `fingerprint` collapses duplicate tuples, and a
+ * fanned-out join returns the same six rows once and six times.
+ */
+function wider(candidates: readonly Recorded[]): number {
+  const eligible = eligibleIndices(candidates);
+  if (eligible.length === 0) return -1;
+  if (eligible.some((index) => candidates[index]?.rows === undefined || candidates[index]?.columns === undefined)) return -1;
+  const order: string[] = [];
+  const members = new Map<string, number[]>();
+  for (const index of eligible) {
+    // Unknown is its own group rather than a shared one: two candidates whose result the artifact
+    // did not fingerprint are two candidates nobody can say agree. `-1` is returned above whenever
+    // any of them lacks the shape, so this only guards the fingerprint.
+    const key = candidates[index]?.fingerprint ?? `unknown:${String(index)}`;
+    const group = members.get(key);
+    if (group === undefined) {
+      members.set(key, [index]);
+      order.push(key);
+    } else group.push(index);
+  }
+  let bestKey = order[0] as string;
+  for (const key of order) {
+    if ((members.get(key) as number[]).length > (members.get(bestKey) as number[]).length) bestKey = key;
+  }
+  const modal = members.get(bestKey) as number[];
+  const modalRows = Math.min(...modal.map((index) => candidates[index]?.rows as number));
+  if (modalRows > 1) return modal[0] as number;
+  const modalColumns = candidates[modal[0] as number]?.columns as number;
+  let best = modal[0] as number;
+  let bestRows = modalRows;
+  for (const index of eligible) {
+    if (modal.includes(index)) continue;
+    const candidate = candidates[index] as Recorded;
+    if ((candidate.columns as number) < modalColumns) continue;
+    if ((candidate.rows as number) > bestRows) {
+      bestRows = candidate.rows as number;
+      best = index;
+    }
+  }
+  return best;
+}
+
+/**
+ * `first` with the sources offered in a named order.
+ *
+ * An ordering is the whole of what `first` reads, so a pool's *arrangement* is a lever that costs
+ * nothing and had never been priced: the shipped trio names `inline+evidence` first, and the
+ * template's pool names it first too, while the template was the source that answered most often.
+ * Six arrangements of three sources is a reading, not a search — and one of the six reproduces the
+ * shipped `first` exactly, which is the check that the arrangement costs nothing but a preference.
+ *
+ * A source the case did not produce is skipped rather than blocking: a pool is three prompts and a
+ * question may come back with two statements, so the order is a preference over what exists.
+ */
+function firstBy(order: readonly string[]): (candidates: readonly Recorded[]) => number {
+  return (candidates) => {
+    const eligible = eligibleIndices(candidates);
+    for (const source of order) {
+      for (const index of eligible) if (candidates[index]?.source === source) return index;
+    }
+    return (eligible[0] as number) ?? -1;
+  };
+}
+
+/** Every ordering of the given items, so a preference cannot be read off one arrangement. */
+export function orderings(items: readonly string[]): readonly (readonly string[])[] {
+  if (items.length === 0) return [[]];
+  const head = items[0] as string;
+  const out: (readonly string[])[] = [];
+  for (const tail of orderings(items.slice(1))) {
+    for (let position = 0; position <= tail.length; position += 1) {
+      out.push([...tail.slice(0, position), head, ...tail.slice(position)]);
+    }
+  }
+  return out;
+}
+
 const chars = (text: string): number => text.length;
 const nonspace = (text: string): number => text.replace(/\s+/g, '').length;
 const tokenCount = (text: string): number => tokens(text).length;
@@ -194,7 +283,7 @@ function clauseCount(text: string): number {
 }
 
 /** Which hypothesis a variant belongs to. Printed as a column so a reader reads families, not names. */
-export type VariantFamily = 'agreement' | 'length' | 'structure';
+export type VariantFamily = 'agreement' | 'length' | 'structure' | 'source-order';
 
 /**
  * One rule that can be read off an artifact, and whether the pipeline ships it.
@@ -372,6 +461,25 @@ export const VARIANTS: readonly RuleVariant[] = [
       return best;
     },
   },
+  {
+    name: 'wider',
+    family: 'structure',
+    shipped: false,
+    why: 'the modal group unless it answered a listing with one row — the only rule that reads how many rows a result holds',
+    pick: (candidates) => wider(candidates),
+  },
+  {
+    name: 'wider-then-shortest',
+    family: 'structure',
+    shipped: false,
+    why: 'the same shape override with a length tie-break inside the group it chose, so the axis is isolated from the tie',
+    pick: (candidates) => {
+      const chosen = wider(candidates);
+      if (chosen < 0) return chosen;
+      const group = majority(candidates, 1).filter((index) => candidates[index]?.fingerprint === candidates[chosen]?.fingerprint);
+      return group.length === 0 ? chosen : smallest(candidates, group, chars);
+    },
+  },
 ];
 
 /** What one variant scored on one arm. */
@@ -414,12 +522,17 @@ export interface RulesCase {
 
 /** Read a candidate record, refusing nothing: an artifact field is `unknown` until it is read. */
 function readCandidate(raw: unknown): Recorded {
-  const record = (raw ?? {}) as { source?: unknown; correct?: unknown; sql?: unknown; fingerprint?: unknown };
+  const record = (raw ?? {}) as { source?: unknown; correct?: unknown; sql?: unknown; fingerprint?: unknown; rows?: unknown; columns?: unknown };
+  const count = (value: unknown): number | undefined => (typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined);
+  const rows = count(record.rows);
+  const columns = count(record.columns);
   return {
     source: typeof record.source === 'string' ? record.source : '',
     correct: record.correct === true,
     ...(typeof record.sql === 'string' ? { sql: record.sql } : {}),
     ...(typeof record.fingerprint === 'string' ? { fingerprint: record.fingerprint } : {}),
+    ...(rows === undefined ? {} : { rows }),
+    ...(columns === undefined ? {} : { columns }),
   };
 }
 
@@ -443,7 +556,27 @@ export function readArtifact(artifact: RulesArtifact): readonly ArmReading[] {
     const rows = cases.filter((row) => row.arm === arm);
     const outcomes = new Map<string, boolean[]>();
     const scores: VariantScore[] = [];
-    for (const variant of VARIANTS) {
+    /**
+     * The pool's arrangement, generated from the sources this arm actually recorded.
+     *
+     * A three-source pool has six orderings and a four-source pool has twenty-four; beyond that
+     * the list stops, because an arrangement is a preference among prompts and a pool of nine
+     * offers no preference that a reader could act on. The one ordering that reproduces the
+     * recorded order is kept rather than filtered out: it is the control that says the family
+     * costs nothing when it says nothing.
+     */
+    const sources = [...new Set(rows.flatMap((row) => row.candidates.map((candidate) => candidate.source)).filter((source) => source.length > 0))].sort();
+    const arrangements: RuleVariant[] =
+      sources.length < 2 || sources.length > 4
+        ? []
+        : orderings(sources).map((order) => ({
+            name: `first:${order.map((source) => source.split('+')[0] ?? source).join('>')}`,
+            family: 'source-order' as const,
+            shipped: false,
+            why: 'the same candidates offered in a named order: an arrangement is the whole of what `first` reads, and it costs nothing',
+            pick: firstBy(order),
+          }));
+    for (const variant of [...VARIANTS, ...arrangements]) {
       const answers: boolean[] = [];
       let unavailable = 0;
       for (const row of rows) {
@@ -468,7 +601,7 @@ export function readArtifact(artifact: RulesArtifact): readonly ArmReading[] {
       });
     }
     const reference = outcomes.get('shortest') as boolean[];
-    const against = VARIANTS.filter((variant) => !variant.shipped).map((variant) => ({
+    const against = [...VARIANTS, ...arrangements].filter((variant) => !variant.shipped).map((variant) => ({
       name: variant.name,
       ...pair(outcomes.get(variant.name) as boolean[], reference),
     }));
@@ -505,8 +638,8 @@ export function resolveRulesSettings(argv: readonly string[]): RulesSettings {
 }
 
 /** The Bonferroni bound for the unshipped family: what a lead has to clear to be a finding. */
-export function correctedThreshold(): number {
-  return 0.05 / VARIANTS.filter((variant) => !variant.shipped).length;
+export function correctedThreshold(comparisons: number = VARIANTS.filter((variant) => !variant.shipped).length): number {
+  return 0.05 / comparisons;
 }
 
 /** A score as a share of the arm's questions, with the count and the no-input count beside it. */
@@ -529,7 +662,12 @@ export function verdict(reading: ArmReading): string {
   if (leaders.length === 0) {
     return `no variant beats shortest on ${reading.arm}: the rule space is closed on this artifact, and the next lever is not a rule`;
   }
-  const bound = correctedThreshold();
+  // The comparisons this arm actually made, not the size of the static list: a pool also admits
+  // every ordering of its sources, so an arm with a three-source pool made twenty comparisons
+  // where a rule-only arm made fourteen, and testing both at 0.05/14 would let the orderings in
+  // through a door the correction had already shut. The count in the sentence and the bound it is
+  // compared against now come from the same number.
+  const bound = correctedThreshold(reading.against.length);
   const named = leaders
     .map((entry) => `${entry.name} (won ${String(entry.wins)} / lost ${String(entry.losses)}, p=${entry.p.toFixed(4)})`)
     .join(', ');
@@ -546,12 +684,16 @@ export function reportLines(readings: readonly ArmReading[], settings: RulesSett
   const unshipped = VARIANTS.length - VARIANTS.filter((variant) => variant.shipped).length;
   const lines = [
     `free-rule space on ${String(questions)} questions per arm${where}`,
-    `${String(VARIANTS.length)} variants (${String(VARIANTS.length - unshipped)} shipped, ${String(unshipped)} unshipped); a lead has to clear p < ${correctedThreshold().toFixed(4)}`,
+    `${String(VARIANTS.length)} variants (${String(VARIANTS.length - unshipped)} shipped, ${String(unshipped)} unshipped), plus one ordering per pool arrangement; ` +
+      `each arm's bound is 0.05 over the comparisons it made, printed beside its score`,
   ];
   for (const reading of readings) {
     const shipped = reading.scores.find((score) => score.name === 'shortest') as VariantScore;
     lines.push('');
-    lines.push(`  ${reading.arm}: the shipped rule answers ${scoreCell(shipped, reading.cases)} of ${String(reading.cases)}`);
+    lines.push(
+      `  ${reading.arm}: the shipped rule answers ${scoreCell(shipped, reading.cases)} of ${String(reading.cases)}; ` +
+        `${String(reading.against.length)} comparisons, bound p < ${correctedThreshold(reading.against.length).toFixed(4)}`,
+    );
     lines.push('  family     variant                 score');
     for (const score of reading.scores) {
       const mark = score.shipped ? '*' : ' ';

@@ -9,6 +9,7 @@ import {
   VARIANTS,
   correctedThreshold,
   dispatch,
+  orderings,
   main,
   readArtifact,
   readCases,
@@ -17,9 +18,18 @@ import {
   verdict,
 } from '../eval/bird/rules.js';
 import type { ArmReading, RulesArtifact, RulesSettings } from '../eval/bird/rules.js';
+import { chooseCandidateByRule } from '@agentix-e/nl2charts-ai';
 import type { Recorded } from '../eval/bird/consensus.js';
 
 const EMPTY = resultFingerprint([]);
+
+/**
+ * How many orderings a pool of the fixture's three sources admits.
+ *
+ * Computed rather than written as six: the number is the size of a family this file's own code
+ * generates, and a literal here would be a second opinion about it that could silently disagree.
+ */
+const ARRANGEMENTS = orderings(['a', 'b', 'c']).length;
 const f = (rows: readonly (readonly unknown[])[]): string => resultFingerprint(rows);
 
 /** One candidate, written out rather than compressed: a rule bank is read far more often than written. */
@@ -29,6 +39,24 @@ function cand(source: string, correct: boolean, sql: string | undefined, fingerp
     correct,
     ...(sql === undefined ? {} : { sql }),
     ...(fingerprint === undefined ? {} : { fingerprint }),
+  };
+}
+
+/**
+ * A candidate carrying its result's shape, built from rows rather than from counts.
+ *
+ * `wider` is the one rule that reads how many rows a candidate returned and how wide one row is,
+ * so the fixture has to produce both fields *and* the fingerprint the runner would have written —
+ * otherwise a test of the rule would be a test of three numbers that nobody computed.
+ */
+function fromRows(source: string, correct: boolean, sql: string, rows: readonly (readonly unknown[])[]): Recorded {
+  return {
+    source,
+    correct,
+    sql,
+    fingerprint: f(rows),
+    rows: rows.length,
+    columns: (rows[0] as readonly unknown[] | undefined)?.length ?? 0,
   };
 }
 
@@ -291,7 +319,7 @@ describe('one artifact, every arm', () => {
     // Two correct of three: the empty question is a miss rather than an exclusion.
     const shortest = first.scores.find((score) => score.name === 'shortest');
     expect(shortest).toMatchObject({ correct: 0, unavailable: 1 });
-    expect(first.scores).toHaveLength(VARIANTS.length);
+    expect(first.scores).toHaveLength(VARIANTS.length + ARRANGEMENTS);
   });
 
   it('counts a question with no candidates as a miss in every column, never as an exclusion', () => {
@@ -305,7 +333,11 @@ describe('one artifact, every arm', () => {
   it('pairs each unshipped variant against the shipped rule on the same questions', () => {
     const readings = readArtifact(artifact);
     const against = (readings[0] as ArmReading).against;
-    expect(against.map((entry) => entry.name)).toEqual(VARIANTS.filter((variant) => !variant.shipped).map((v) => v.name));
+    const declared = VARIANTS.filter((variant) => !variant.shipped).map((variant) => variant.name);
+    expect(against.map((entry) => entry.name)).toEqual(expect.arrayContaining(declared));
+    // Plus one ordering per arrangement of the pool's sources, which is the family this file
+    // generates per arm rather than declaring once.
+    expect(against).toHaveLength(declared.length + ARRANGEMENTS);
     for (const entry of against) {
       expect(entry.wins + entry.losses + entry.both).toBeLessThanOrEqual(3);
     }
@@ -365,7 +397,7 @@ describe('the verdict', () => {
   });
 
   it('names the bound it applied, so a reader can check the arithmetic', () => {
-    expect(correctedThreshold()).toBeCloseTo(0.05 / 12, 10);
+    expect(correctedThreshold()).toBeCloseTo(0.05 / VARIANTS.filter((variant) => !variant.shipped).length, 10);
   });
 });
 
@@ -374,9 +406,9 @@ describe('the report', () => {
     const artifact: RulesArtifact = { split: 'dev', model: 'deepseek-chat', cases: armOf(2, 2).map((row) => ({ ...row })) };
     const lines = reportLines(readArtifact(artifact), settings(), artifact);
     expect(lines[0]).toBe('free-rule space on 4 questions per arm (dev, deepseek-chat)');
-    expect(lines[1]).toContain('15 variants (3 shipped, 12 unshipped)');
-    const rows = lines.filter((line) => line.startsWith('  *') || /^ {3}(agreement|length|structure)/.test(line));
-    expect(rows).toHaveLength(VARIANTS.length);
+    expect(lines[1]).toContain(`${String(VARIANTS.length)} variants (3 shipped, ${String(VARIANTS.length - 3)} unshipped)`);
+    const rows = lines.filter((line) => /^ {2,3}\*?(agreement|length|structure|source-order)\s/.test(line));
+    expect(rows).toHaveLength(VARIANTS.length + ARRANGEMENTS);
     expect(lines.join('\n')).toContain('  *length     shortest');
   });
 
@@ -462,7 +494,7 @@ describe('running it', () => {
     main(['--artifact', scratch({ split: 'dev', cases: armOf(1, 1) }), '--json'], process.cwd(), (line) => lines.push(line));
     const parsed = JSON.parse(lines.join('\n')) as { split: string; arms: { arm: string; scores: unknown[] }[] };
     expect(parsed.split).toBe('dev');
-    expect(parsed.arms[0]?.scores).toHaveLength(VARIANTS.length);
+    expect(parsed.arms[0]?.scores).toHaveLength(VARIANTS.length + ARRANGEMENTS);
   });
 
   it('refuses an artifact with no case it can attribute, instead of printing an empty table', () => {
@@ -538,5 +570,155 @@ describe('the artifact is the only thing read', () => {
   it('reads a fingerprint as the judge wrote it, not as a second definition of a result', () => {
     expect(f([[1]])).toBe(resultFingerprint([[1]]));
     expect(resultKey([[1]] as never)).not.toBe(f([[1]]));
+  });
+});
+
+describe('the shape rule', () => {
+  /**
+   * The set `wider` exists for: two candidates agree on a one-row aggregate and the third
+   * returned the listing the question asked for. No text rule can see the difference.
+   */
+  const AGGREGATE_BESIDE_LISTING: readonly Recorded[] = [
+    fromRows('a', false, 'SELECT COUNT(*)', [[42]]),
+    fromRows('b', false, 'SELECT COUNT(*) FROM t', [[42]]),
+    fromRows('c', true, 'SELECT x FROM t', [
+      [1],
+      [2],
+      [3],
+    ]),
+  ];
+
+  it('leaves the modal group alone when it already answered with more than one row', () => {
+    const listing: readonly Recorded[] = [
+      fromRows('a', false, 'SELECT y FROM t', [
+        [1],
+        [2],
+      ]),
+      fromRows('b', true, 'SELECT x FROM t', [
+        [1],
+        [2],
+        [3],
+      ]),
+    ];
+    // Nothing agrees, so the "modal" group is the earliest one; it holds two rows, which is a
+    // listing rather than an aggregate, and the rule has no second opinion to offer.
+    expect(pickOf('wider', listing)).toBe(0);
+  });
+
+  it('takes the wider candidate when the consensus answered a listing with one row', () => {
+    expect(pickOf('wider', AGGREGATE_BESIDE_LISTING)).toBe(2);
+  });
+
+  it('refuses a narrower candidate even when it returned more rows', () => {
+    // The only difference in play is the column count: the override requires the wider candidate
+    // to be at least as wide, so a one-column dump never wins over a two-column consensus.
+    const set: readonly Recorded[] = [
+      fromRows('a', false, 'SELECT k, v FROM t', [[1, 1]]),
+      fromRows('b', false, 'SELECT k, v FROM t', [[1, 1]]),
+      fromRows('c', true, 'SELECT k FROM t', [
+        [1],
+        [2],
+      ]),
+    ];
+    expect(pickOf('wider', set)).toBe(0);
+  });
+
+  it('reports no input when a candidate carries no shape, rather than guessing one', () => {
+    const shapeless: readonly Recorded[] = [cand('a', false, 'SELECT 1', f([[1]])), cand('b', true, 'SELECT 2', f([[2]]))];
+    expect(pickOf('wider', shapeless)).toBe(-1);
+  });
+
+  it('picks the same candidate the library does on every arrangement of a set', () => {
+    // The invariant that keeps this file from becoming a second opinion: `wider` here and
+    // `chooseCandidateByRule('wider', …)` in the package have to agree, on the same rows, for
+    // every order the set can arrive in.
+    const executed = AGGREGATE_BESIDE_LISTING.map((entry) => ({ sql: entry.sql ?? '', rows: [[1], [2], [3]] as unknown[][] }));
+    const rebuilt: readonly Recorded[] = AGGREGATE_BESIDE_LISTING.map((entry, index) => ({
+      ...entry,
+      rows: (executed[index] as { rows: unknown[][] }).rows.length,
+      columns: ((executed[index] as { rows: unknown[][] }).rows[0] as unknown[]).length,
+      fingerprint: f((executed[index] as { rows: unknown[][] }).rows),
+    }));
+    const chosen = chooseCandidateByRule('wider', executed).index;
+    expect(pickOf('wider', rebuilt)).toBe(chosen);
+  });
+
+  it('breaks a tie inside the shape group by length, and only there', () => {
+    const set: readonly Recorded[] = [
+      fromRows('a', false, 'SELECT COUNT(*) FROM a_long_table_name', [[42]]),
+      fromRows('b', false, 'SELECT COUNT(*)', [[42]]),
+      fromRows('c', true, 'SELECT x, y FROM t', [
+        [1, 1],
+        [2, 2],
+      ]),
+    ];
+    // `wider` sees the two-row candidate and takes it; the tie-break version has a group of one.
+    expect(pickOf('wider', set)).toBe(2);
+    expect(pickOf('wider-then-shortest', set)).toBe(2);
+  });
+});
+
+describe('the arrangement family', () => {
+  it('generates every ordering and no more', () => {
+    expect(orderings([])).toEqual([[]]);
+    expect(orderings(['a'])).toEqual([['a']]);
+    expect(orderings(['a', 'b'])).toHaveLength(2);
+    const three = orderings(['a', 'b', 'c']);
+    expect(three).toHaveLength(6);
+    expect(new Set(three.map((order) => order.join('>'))).size).toBe(6);
+    for (const order of three) expect([...order].sort()).toEqual(['a', 'b', 'c']);
+  });
+
+  it('offers the named source first, and the two arrangements of a pair disagree', () => {
+    // The fixture is one right statement and one wrong one, so an arrangement's score is the
+    // answer to "which source did it offer first" — the only thing `first` reads.
+    const pair: RulesArtifact = {
+      split: 'dev',
+      cases: [
+        {
+          arm: 'a',
+          candidates: [fromRows('a', true, 'SELECT 1', [[1]]), fromRows('b', false, 'SELECT 2', [[2]])],
+        },
+      ],
+    };
+    const scores = (readArtifact(pair)[0] as ArmReading).scores.filter((score) => score.family === 'source-order');
+    expect(scores).toHaveLength(2);
+    // One offers `a`, the other offers `b`; the recorded order is one of the two.
+    expect(scores.map((score) => score.correct).sort()).toEqual([0, 1]);
+    const named = scores.map((score) => score.name).sort();
+    expect(named).toEqual(['first:a>b', 'first:b>a']);
+  });
+
+  it('prices one ordering per arrangement, and one of them reproduces the recorded order', () => {
+    const readings = readArtifact({ cases: armOf(1, 1) });
+    const arrangements = (readings[0] as ArmReading).scores.filter((score) => score.family === 'source-order');
+    expect(arrangements).toHaveLength(ARRANGEMENTS);
+    // The arm runs `first` over the recorded order, and one of the arrangements names that order:
+    // the two columns have to read the same score, which is what says an arrangement costs
+    // nothing when it says nothing.
+    const plain = (readings[0] as ArmReading).scores.find((score) => score.name === 'first');
+    expect(arrangements.some((score) => score.correct === plain?.correct)).toBe(true);
+  });
+});
+
+describe('the correction counts what was compared', () => {
+  it('bounds an arm by the comparisons it made, including the arrangements', () => {
+    // The defect this test exists for: the static list has 14 unshipped variants, an arm with a
+    // three-source pool makes 20 comparisons, and a bound computed from the list alone would let
+    // six arrangements through a door the correction had already shut. Both the count in the
+    // sentence and the number it is compared against now come from the same place.
+    // Ten wins and no losses is p = 0.00195: past the corrected bound for twenty comparisons and
+    // short of the one for fourteen, which is the whole point of counting the arrangements.
+    const reading = readArtifact({ cases: armOf(10, 0) })[0] as ArmReading;
+    const comparisons = reading.against.length;
+    expect(comparisons).toBe(VARIANTS.filter((variant) => !variant.shipped).length + ARRANGEMENTS);
+    expect(verdict(reading)).toContain(`p < ${correctedThreshold(comparisons).toFixed(4)}`);
+    expect(verdict(reading)).toContain(`for ${String(comparisons)}`);
+    expect(verdict(reading)).toContain('a dispatch is owed');
+  });
+
+  it('takes the number of comparisons as an argument, so nothing has to read a global', () => {
+    expect(correctedThreshold(20)).toBeCloseTo(0.0025, 10);
+    expect(correctedThreshold(1)).toBeCloseTo(0.05, 10);
   });
 });
