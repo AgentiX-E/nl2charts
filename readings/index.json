@@ -3,53 +3,69 @@
  "readings": {
   "bird-dev": {
    "kind": "bench-readback",
-   "commit": "665703507d2629dad8db63978d9304dc8b3fef27",
+   "commit": "0fa3e91d9240796d2f2f3e33c55ba84c97f35ec4",
    "workflow": "bird-dev",
-   "runId": "44994859181",
+   "runId": "45003945244",
    "split": "dev",
    "dataset": "bird-dev",
    "model": "deepseek-chat",
    "secondModel": null,
-   "generatedAt": "2026-11-22T06:45:55.529Z",
+   "generatedAt": "2026-11-22T08:45:37.440Z",
    "corpus": {
     "digest": "db9e8a1aba23ddd9",
     "rows": 1534,
     "questions": 1534
    },
    "selection": {
-    "requested": 40,
-    "scored": 40
+    "requested": 600,
+    "scored": 600
    },
    "arms": [
     {
      "arm": "macsql-prompt",
-     "passed": 22,
-     "total": 40,
-     "accuracy": 0.55,
+     "passed": 389,
+     "total": 600,
+     "accuracy": 0.6483333333333333,
      "calls": 1,
-     "promptTokens": 3636,
-     "completionTokens": 130,
-     "strictPassed": 20
+     "promptTokens": 3705,
+     "completionTokens": 128,
+     "strictPassed": 358
     },
     {
-     "arm": "select-mixed-rule",
-     "passed": 22,
-     "total": 40,
-     "accuracy": 0.55,
-     "candidateRecall": 26,
-     "selectionLoss": 4,
+     "arm": "select-mixed-rule-template",
+     "passed": 388,
+     "total": 600,
+     "accuracy": 0.6466666666666666,
+     "candidateRecall": 436,
+     "selectionLoss": 48,
      "calls": 3,
-     "promptTokens": 3061,
-     "completionTokens": 129,
-     "strictPassed": 22,
+     "promptTokens": 6176,
+     "completionTokens": 229,
+     "strictPassed": 360,
      "selectorRule": {
       "rule": "shortest",
-      "decided": 40,
-      "eligible": 115,
-      "emptyPool": 1,
+      "decided": 599,
+      "eligible": 1706,
+      "emptyPool": 16,
       "rules": {
-       "shortest": 40
+       "shortest": 599
       }
+     }
+    },
+    {
+     "arm": "select-mixed-template",
+     "passed": 387,
+     "total": 600,
+     "accuracy": 0.645,
+     "candidateRecall": 445,
+     "selectionLoss": 58,
+     "calls": 4,
+     "promptTokens": 6603,
+     "completionTokens": 226,
+     "strictPassed": 371,
+     "spend": {
+      "asked": 600,
+      "priced": 600
      }
     }
    ],
