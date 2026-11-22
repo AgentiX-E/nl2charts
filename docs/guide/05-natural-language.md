@@ -311,6 +311,47 @@ Three things follow from "the template is the whole prompt":
 - `samples`, `descriptions` and `foreignKeys` still apply — they describe the card,
   which the template renders in its own layout.
 
+### Three templates, three procedures
+
+A template is not only a layout. The one that ships opens by telling the model
+*how to work* — split the question into the sub-questions it is built from, write
+the statement that answers each, and let the last one be the answer — and that
+sentence is the difference between 65.93% and a bare skeleton. Two more templates
+carry the two other procedures a text-to-SQL system can ask for, so the choice can
+be measured rather than argued about:
+
+| template | the procedure it states | what it is for |
+| --- | --- | --- |
+| `macsql-bird` | decompose, then answer | the one this package ships |
+| `macsql-bird-qp` | plan first: the tables, then the operations, then the output columns | a plan written *inside* the reply, which costs no extra call — not the `plan` option, which carries a plan written in an earlier call and lost 7.2pp |
+| `macsql-bird-os` | decompose, with examples written for this database | needs `examples`; see below |
+
+`macsql-bird-os` is the one template whose prompt is not fixed text: it carries
+question-SQL pairs **written for the database in front of it**, and the caller has
+to supply them:
+
+```ts
+import { buildExamplePrompt, parseExamples } from '@agentix-e/nl2charts-ai';
+
+// One call per database, not per question. Cache the reply; it is keyed on the
+// prompt and the model.
+const reply = await provider.complete({
+  messages: [{ role: 'user', content: buildExamplePrompt(schema, 3) }],
+  temperature: 0,
+});
+const examples = parseExamples(reply.text, 3);
+
+const pipeline = createPipeline({ provider, prompt: { template: 'macsql-bird-os', examples } });
+```
+
+Both directions are refused, because a block that is silently dropped and a
+template that renders a heading over nothing are the same defect seen from either
+side: `macsql-bird-os` without `examples` throws, and `examples` handed to either
+of the other two throws. The generated pairs are parsed by the package rather than
+by your code, and a pair whose statement is not a read, repeats an earlier one, or
+was cut off mid-fence is dropped — a truncated statement in the prompt teaches a
+syntax error.
+
 ### What ships, as one object
 
 A `template` plus an `evidence` plus a card setting is a *combination*, and a

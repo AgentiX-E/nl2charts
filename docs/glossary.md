@@ -29,6 +29,18 @@ JSON Schema.
 **Consumer** — Code that imports a package. Consumers must use symbol imports,
 not `import * as`, to keep tree-shaking effective.
 
+**Database examples (online synthetic examples)** — Question-SQL pairs *written by
+the model for the database in front of it*, once per database and cached, then
+carried in the prompt as worked examples. Distinct from retrieved examples, which
+come from a corpus of other databases: a generated pair names values and joins
+this schema actually has. `macsql-bird-os` is the one template that carries them.
+
+**Procedure** — The *order of work* a prompt states before it asks for a statement:
+decompose then answer, or plan (tables, operations, output columns) then answer.
+A template prices a procedure; a rule added to a list prices a sentence. The
+distinction matters because two prompts can have the same skeleton and differ by
+more than any rule the skeleton can carry.
+
 **Contract code** — A stable `NL2C_E_*` error code. Consumers branch on codes,
 never on message text.
 
