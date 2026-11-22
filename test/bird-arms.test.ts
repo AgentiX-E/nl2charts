@@ -602,6 +602,28 @@ describe('the chain that actually runs', () => {
       for (const name of arms) expect(catalogue, `${split}/${name}`).toContain(name);
     }
   });
+
+  it('keeps every declared pair pointed at two arms that exist', () => {
+    // `pairs.json` is read by `bench:bird:pair --declared` on every dispatch, and an arm name it
+    // does not recognise does not fail: the pair prints as "not scored in this run", which is the
+    // same line a pair of on-demand arms prints when the dispatch did not ask for them. So a
+    // typo here is invisible for exactly as long as it takes someone to trust the silence — the
+    // defect this repository has paid for with `floors.dev`'s retired arm and with `armsBySplit`.
+    const pairs = JSON.parse(readFileSync(resolve(process.cwd(), 'eval/baseline/pairs.json'), 'utf8')) as Record<
+      string,
+      unknown
+    >;
+    const catalogue = ARMS.map((arm) => arm.name);
+    for (const [split, entry] of Object.entries(pairs)) {
+      if (split === 'note') continue;
+      expect(Array.isArray(entry), split).toBe(true);
+      for (const pair of entry as string[][]) {
+        expect(pair.length, `${split} ${pair.join(',')}`).toBe(2);
+        expect(pair[0], `${split} ${pair.join(' vs ')} pairs an arm with itself`).not.toBe(pair[1]);
+        for (const name of pair) expect(catalogue, `${split} ${pair.join(' vs ')}`).toContain(name);
+      }
+    }
+  });
 });
 
 describe('a prompt that is not ours', () => {

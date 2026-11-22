@@ -2260,6 +2260,14 @@ export const COMPARISONS: readonly (readonly [string, string, string])[] = [
   // cases where it disagrees instead of added to the list it reads. One comparison call on 6.5% of
   // the split, against the four-candidate prompt that was read and not used.
   ['select-cross-pooled-dissent', 'select-cross-pooled-dissent-pair', 'the same bought opinion verified one-pair-at-a-time instead of offered in a longer list: 0.065 comparison calls a case against the conversion the longer prompt lost'],
+  // The whole prompt as the lever, which is why these two are comparisons rather than one-lever
+  // pairs: the arm declares `definitions` that the template has no slot for, so a lever-diff reads
+  // two fields — `definitions` and `template` — and one of them provably cannot reach the model
+  // (the guard refuses it, and the test beside this pair reads both prompts to show the block is
+  // absent from the template's). Writing it as a pair would claim an attribution the object does
+  // not support; writing it here says what the reading is: *their prompt against ours*.
+  ['inline+evidence-nolink', 'macsql-prompt', "MAC-SQL's BIRD prompt sent instead of our own with the same inputs and no column hint: the skeleton priced, and the only pair in this file where the second declared field is inert by construction"],
+  ['inline+evidence', 'macsql-prompt', "their prompt against the shipped one, which is the pair adoption is decided on and the one that carries our hint — two things by construction, so a win here says their prompt beats ours without saying which half did it"],
 ];
 
 export const PAIRS: readonly (readonly [string, string])[] = [
