@@ -19054,19 +19054,47 @@ p-values was not: **0.0594** against the shipped prompt, 0.0355 against the arm 
 the registered criterion as written ("≥12 cases **and** p < 0.05 against `inline+evidence`") the
 template passes the count and misses the significance, by about a fifth of a standard error.
 
-**And the reading is confounded, by the size column.** The template's prompt is **12,668 characters
-against the parent's 2,604**. The fixed text is 5,360 of them; the rest is the card, and the card is
-four times the parent's because `renderMacSqlCard` rendered every column of every table: `schemaLines`
-reached `buildSqlPrompt` and the template ignored it. That is the same defect class this round's own
-guard was built for — an option a caller sets and nothing reads — committed one function away from
-the guard. So the +3.33pp is a reading of *the template and a card four times the size*, and the
-direction of the confound matters: `select-prune` already showed a smaller card is not automatically
-a better one (−1.50pp, p = 0.035), but nothing here says a card four times larger is free.
+**And the price column is theirs too.** The template's prompt is **12,668 characters against the
+parent's 2,604** — 4.9×, and it is not a truncation artefact: `BIRD_SCHEMA_LINES` is 400, both arms
+render every column of every table, and the difference is the layout (`# Table: x` + one bracketed
+line per column against one compact line per table). That layout is part of the template — a card the
+examples are written in has to be the card the question arrives on — so the reading is *their prompt
+and their card against ours*, which is the object the pre-registration named. It is also why the
+arm's first reading was briefly believed to be confounded: `schemaLines` reached `buildSqlPrompt` and
+`renderMacSqlCard` ignored it, which is the same defect class as an option a caller sets and nothing
+reads. That was fixed (`limit`, one line per column, continued across tables; three tests), and the
+fix changed nothing on this arm because the budget it was given is 400 — the honest version of the
+story is that the defect was real and inert here, and the 4.9× is the template's own price rather
+than an accident.
 
-The fix is `renderMacSqlCard(…, { limit })` with `schemaLines` honoured, counted in the only unit
-this format has (one line per column) and continued across tables rather than restarted per table.
-Three tests pin it: 60 columns at limit 40 renders exactly 40 lines with the 40th in the second
-table, a limit of 0 renders no table, and the budget reaches the prompt through both
-`renderMacSqlBirdPrompt` and `buildSqlPrompt`. The third dispatch runs the same three arms with the
-budget honoured, and the criterion stays the one registered before the first run: **12 cases over
-`inline+evidence` in the same run, exact McNemar p < 0.05**.
+### The third dispatch (`44978468988`): the same three arms, a clean reading
+
+| arm | reading | calls | prompt chars | tokens | cached | completion |
+|---|---|---:|---:|---:|---:|---:|
+| `inline+evidence` | **386**/600 = 64.33% | 1.00 | 2,604 | 685 | 494 | 47 |
+| `inline+evidence-nolink` | 381/600 = 63.50% | 1.00 | 2,604 | 653 | 460 | 47 |
+| `macsql-prompt` | **401**/600 = 66.83% | 1.00 | 12,668 | 3,705 | 3,522 | 129 |
+
+| pair | wins / losses | delta | p |
+|---|---|---:|---:|
+| `macsql-prompt` vs `inline+evidence` | **50 / 35** | **+2.50pp** | **0.1284** |
+| `macsql-prompt` vs `inline+evidence-nolink` | **50 / 30** | **+3.33pp** | **0.0330** |
+| `inline+evidence-nolink` vs `inline+evidence` | 20 / 25 | −0.83pp | 0.5515 |
+
+The count bar is cleared again (+15 against a registered 12) and the significance bar against the
+shipped prompt is missed again, further out (0.1284 against 0.0594 in the previous run). Against the
+arm that carries the same inputs and no hint, the template is **+3.33pp at p = 0.0330 for the second
+time in two runs** (0.0355 before). Three runs now exist for the parent on identical prompts and
+identical weights: **384, 380, 386** — a 6-case spread, which is the resolution everything here has
+to be read against.
+
+So the reading is: **the template is better than our prompt by about three points, and that is the
+same size as what our own hint is worth** — the hint reads +6, −1 and −5 cases across the three
+runs, which is noise. The template is not adopted on this evidence: the criterion registered before
+the first dispatch required p < 0.05 against the shipped prompt, and two runs at n = 600 have not
+delivered it. What the next dispatch has to buy is sample, not another mechanism: the discordance is
+85 of 600 (14.2%), and at that rate separating 2.5pp at 80% power takes **1,775 questions** — more
+than the dev split's 1,534, which resolves **2.69pp** at the same power and 14.2% discordance. The
+full split is therefore the biggest single purchase available, it is the only one that could move
+this from *a reading* to *a verdict*, and it buys 2.7pp of resolution for a 2.5pp effect — which is
+the honest statement of how thin this is.

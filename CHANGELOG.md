@@ -7,14 +7,20 @@ cannot be argued with.
 ## Unreleased
 
 ### Fixed
-- **The template ignored the card budget, and the reading it produced is confounded.** `schemaLines`
-  reached `buildSqlPrompt` and `renderMacSqlCard` rendered every column of every table, so
-  `macsql-prompt` sent **12,668** prompt characters against the parent's **2,604** — the same defect
-  class as an option a caller believes is on, one function from the guard that exists to refuse it.
-  The card now honours `limit` (default 40), counted one line per column and continued across tables;
-  three tests pin the budget, the zero case and the path through both entry points. The dispatch
-  before the fix read **400/600 against 380** (+20 cases, 61:41, p = 0.0594; +21 against the no-hint
-  arm, 56:35, p = 0.0355) on a prompt four times the size, and is recorded as a confounded reading.
+- **The template ignored the card budget.** `schemaLines` reached `buildSqlPrompt` and
+  `renderMacSqlCard` rendered every column of every table. The card now honours `limit` (default 40),
+  counted one line per column and continued across tables, with three tests on the budget, the zero
+  case and both entry points. The defect was real and **inert on this arm**: the budget the harness
+  passes is 400, so the fix changed no prompt. What the arm actually sends is 12,668 characters
+  against the parent's 2,604 — 4.9× — and that is the template's own card layout (`# Table: x` plus
+  one bracketed line per column), not a truncation artefact.
+- **The template reads 401/600 against the prompt's 386, and the criterion is not met.** Two runs at
+  n = 600: +20 (61:41, p = 0.0594) then +15 (50:35, p = 0.1284) against `inline+evidence`; +21 and +20
+  against the arm without our hint (p = 0.0355, 0.0330). The registered bar wanted 12 cases **and**
+  p < 0.05 against the shipped prompt, so the template is not adopted on this evidence: the effect is
+  about the size of what the hint is worth (+6, −1, −5 cases across three runs) and n = 600 cannot
+  separate either. 14.2% discordance needs 1,775 questions for 2.5pp at 80% power; the dev split's
+  1,534 resolves 2.69pp, which is the next purchase.
 - **A whole arm failing inside the harness was published as an accuracy.** `macsql-prompt`'s first
   dispatch (`44974188185`) threw inside `promptFor` on all 600 cases — `assertTemplateCarries` read
   `decompose: false`, which `buildAskMessages` sets on every call, as a block it could not carry — and
