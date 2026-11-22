@@ -606,6 +606,26 @@ describe('the gate', () => {
     ).toEqual(['metadata trails names by more than 5pp, which is a regression not a result']);
   });
 
+  it('does not read an A/A control as an improvement that regressed', () => {
+    // The gate compares the first arm of the table with the last, which encodes an assumption:
+    // that the table is a chain from a baseline to a finish. A control breaks that assumption by
+    // construction — it is the baseline run again, so it can legitimately score five points below
+    // the first arm and mean nothing by it. `45035350473` was failed for exactly this: the run
+    // asked for two parallel arms and no control, the workflow's non-empty `aa` default supplied
+    // one anyway, and the gate reported "inline+evidence#2 trails macsql-prompt by more than 5pp"
+    // about an arm the dispatch had never requested.
+    expect(
+      evaluateGate({
+        ...report(),
+        arms: [
+          { arm: 'macsql-prompt', accuracy: 0.5833 },
+          { arm: 'macsql-bird-os', accuracy: 0.625 },
+          { arm: 'inline+evidence#2', accuracy: 0.5 },
+        ],
+      }),
+    ).toEqual([]);
+  });
+
   it('does not call a judge swap that loses ground a regression', () => {
     // The arm exists to price the judge, so a large negative delta is the answer rather than
     // a defect: `40828283888` read 54.7% against 60.7% and the gate refused to publish the

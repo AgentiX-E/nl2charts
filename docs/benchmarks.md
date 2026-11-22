@@ -20000,3 +20000,107 @@ The preflight has now caught three dispatches that would each have spent hours m
 a total cost of about two minutes. That is the whole argument for running it before the step that
 spends money, and it is worth stating in the same breath as the fact that this round bought **no
 crossover reading at all**.
+
+## The second base was the primary one, and the first two dispatches were refused by a door we built
+
+The instruction that closed the procedure line was to re-measure its two arms on a second base.
+The reasoning behind "a stronger base" was wrong twice over, and the correction is worth stating
+before the numbers, because it changes what the numbers are for.
+
+**First: "stronger" was never the requirement.** The experiment asks whether the *difference*
+between two prompts survives a change of base — 997 against 1,007 on the primary one, +10
+questions at p = 0.42. A wider base pushes both numbers up and compresses the gap against the
+ceiling; it makes this particular question harder to answer, not easier. **The requirement is a
+different base whose apparatus is comparable, not a bigger one.**
+
+**Second: "stronger" is a word this document already retired.** The correction above
+`S1` established that `deepseek-chat` and `deepseek-reasoner` are two decoding modes of one base
+model, and that `deepseek-v4-pro` is the only genuinely wider deployment available without
+changing vendors. That experiment has been run: at one ceiling, 1,532 questions, `deepseek-v4-pro`
+beats `deepseek-flash` by **+3.13pp** (paired 826/66/114/526, exact McNemar **p = 0.0004**). So
+"does more width help" has a reading. What has no reading is whether the *procedure gap* is a
+property of the base.
+
+**And the second base turned out to be the primary one.** `eval/bird/fingerprint.ts` records that
+on 2026-11-08 two Mini-Dev runs asked for `deepseek-chat` and all 6,448 answers came back named
+`deepseek-flash`. So `deepseek-flash` is not a cross-vendor substitute for the primary base — it
+**is** the primary deployment, with thinking on:
+
+| dispatched as | served as | mode |
+| --- | --- | --- |
+| `deepseek-chat` (every published reading) | `deepseek-flash` = V4.1-Flash-1017 | non-thinking |
+| `deepseek-flash` | the same deployment | thinking |
+
+That makes the experiment cheaper and sharper than the cross-vendor one it replaces: same key,
+same endpoint, same retry path, one variable (the decoding mode), and a price row that exists
+(`2 / 8 / 0.04` 元 per million). It also means the claim it tests is narrower than "a second base"
+and must be written that way: **does the procedure gap hold across the two modes of one model.**
+
+### Three dispatches, two refusals, and neither was the model
+
+`45035350473` failed on a door of our own making. `bird-model.yml` defaulted `aa` to
+`inline+evidence`; a workflow input with a non-empty default cannot be unset from the command line
+(a blank is read as "not supplied"), so `-f aa=' '` selected the control nobody asked for. On 24
+questions the regression gate compared `macsql-prompt` against that trailing arm, saw a gap larger
+than 5pp — which on 24 questions is 1.2 questions — and failed the run as "a regression not a
+result". **The gate named an arm the run had not requested as a regression of a run it had not
+measured.**
+
+`45036663557` failed because the fix existed only in the working tree: `parseArms` had learned the
+word `none`, the workflow had been repointed, and the dispatch ran `master`, which had neither.
+The endpoint answered twelve of twelve calls in 1.2 seconds and then the harness threw
+`unknown arm none#2`. **A dispatch can only test code that has been pushed** — the same shape of
+error as the preview bug of the previous round, and the third time in three rounds that a fact
+lived in a place the run could not read.
+
+`45037820992` is the reading. 24 dev questions, both arms, concurrency 8, the primary leg's 120 s
+ceiling, `aa=none`:
+
+| arm | passed | accuracy | Wilson | prompt | cached | completion | reasoning | calls | llm | truncated |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `macsql-prompt` | 14/24 | 58.33% | 38.8–75.5 | 3,798 | 3,616 | 1,569 | 1,500 | 1.00 | 0 | 0 |
+| `macsql-bird-os` | 15/24 | 62.50% | 42.7–78.8 | 4,033 | 2,491 | 1,637 | 1,583 | 1.00 | 0 | 0 |
+
+`servedModels: {"deepseek-flash": 24}`; `thinking.share` 95.6%; the examples block synthesized 11
+databases and 33 pairs exactly as it does on the non-thinking leg; zero failures and zero truncated
+replies on either arm. Preflight passed 12 of 12 in **1,010 ms median, 1,194 ms on the second
+attempt** at concurrency 8, against `glm-4.6`'s 8,027 ms median with three refusals in a row — the
+same instrument, one dispatch apart.
+
+Twenty-four questions decide nothing about accuracy — a one-question gap between two overlapping
+intervals is not a finding, and this document has already published a six-question gap that later
+reversed. What the trio of dispatches bought is that the **crossover is dispatchable, priced, and
+ceiling-matched**, which is what the earlier probes could not establish.
+
+### What the full crossover costs, from the tokens rather than from an estimate
+
+Thinking mode moves the invoice by a factor of six, and the tokens say so rather than a guess:
+completion goes from 136 tokens a case on the non-thinking leg to **1,569**, of which 1,500 is
+reasoning. At the price row above, over 1,532 questions and two arms:
+
+| leg | prompt (miss / hit) | completion | cost |
+| --- | --- | --- | --- |
+| `macsql-prompt` | 182 × 1,532 at 2, and 3,616 × 1,532 at 0.04 | 1,569 × 1,532 at 8 | ≈ ¥20.0 |
+| `macsql-bird-os` | 1,542 × 1,532 at 2, and 2,491 × 1,532 at 0.04 | 1,637 × 1,532 at 8 | ≈ ¥24.9 |
+
+So **≈ ¥45**, against ≈ ¥7.8 for the three-arm non-thinking round, and against the cross-vendor
+plan that could not be priced at all. The three dispatches above cost ≈ ¥3.5 between them, which
+is the price of learning that the experiment is possible rather than assuming it.
+
+### Registered before the reading arrives
+
+The full run is `45040430602` — both arms, dev 1,532, concurrency 8, 120 s, `aa=none`,
+`budget_ms` 100 minutes an arm, `capabilities {"family":"reasoning","maxOutputTokens":16384,
+"thinkingSwitch":false}` (the vendor does not accept an explicit `thinking` field; the mode is what
+the model name selects). The criterion is the one the procedure round registered, restated for this
+base:
+
+1. **The gap is the measurement.** Paired per-question comparison of the two arms; the question is
+   whether +10 questions (66:56 at p = 0.42 on the primary leg) is reproduced, absent, or reversed.
+2. **Equal gap ⇒ the procedure line stays closed**, and the remaining levers are the selector and
+   the backbone. That is a finding about the task, not about this repository.
+3. **Different gap (paired p < 0.05, or a reversal) ⇒ procedure and base interact**, and the line
+   reopens with a mechanism to explain rather than a prompt to add.
+4. **If `timeouts` is non-zero, judge the apparatus first.** `S1-b` forfeited 94 of 1,532 cases to
+   a ceiling and reported it as a model result; that mistake is not going to be repeated on the
+   same instrument.

@@ -10241,7 +10241,12 @@ export function evaluateGate(report: Record<string, unknown>): string[] {
     // share, the candidate survival, an arm that produced no results), so the exemption
     // cannot hide a broken endpoint.
     const swapped = resolveArm(first.arm)?.judge !== resolveArm(last.arm)?.judge;
-    if (!swapped) problems.push(`${last.arm} trails ${first.arm} by more than 5pp, which is a regression not a result`);
+    // A control is the baseline run a second time. The comparison above assumes the table is a
+    // chain from a baseline to a finish, and a control breaks that assumption by construction:
+    // it can sit five points below the first arm and mean nothing, because the points it is
+    // short by are the harness's own noise, which is the number it exists to report.
+    const control = last.arm.endsWith('#2');
+    if (!swapped && !control) problems.push(`${last.arm} trails ${first.arm} by more than 5pp, which is a regression not a result`);
   }
   return problems;
 }

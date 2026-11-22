@@ -25,6 +25,15 @@ cannot be argued with.
   3,700 prompt tokens, so seven pairs would make the arm's gain indistinguishable from a longer
   prompt. The cache lives under the run's root rather than the module's path.
 ### Fixed
+- **"No A/A control" now has a word.** A workflow input with a non-empty default cannot be unset
+  from the command line: the dispatcher passes a blank, Actions reads a blank as "not supplied",
+  and the input's default is what the run receives. `bird-model.yml` defaulted `aa` to
+  `inline+evidence`, so three dispatches that asked for no control all ran one, and the third was
+  failed by the regression gate for a trailing arm nobody had requested (`45035350473`:
+  `inline+evidence#2 trails macsql-prompt by more than 5pp` — 1.2 questions on 24 cases).
+  `parseArms` now reads `none` (trimmed, case-insensitive) as the word for no control and
+  `bird-model.yml` defaults to it; the sentinel lives in the one function every caller shares
+  rather than in each workflow's expression.
 - **A dry run could be aborted by an arm that only a model can render.** `previewPrompts` asked
   `promptTextFor` for every arm the run named, and `macsql-bird-os` — whose template carries
   examples written for the database — legitimately refuses to render without its block. The
