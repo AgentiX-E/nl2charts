@@ -14,13 +14,21 @@ cannot be argued with.
   passes is 400, so the fix changed no prompt. What the arm actually sends is 12,668 characters
   against the parent's 2,604 — 4.9× — and that is the template's own card layout (`# Table: x` plus
   one bracketed line per column), not a truncation artefact.
-- **The template reads 401/600 against the prompt's 386, and the criterion is not met.** Two runs at
-  n = 600: +20 (61:41, p = 0.0594) then +15 (50:35, p = 0.1284) against `inline+evidence`; +21 and +20
-  against the arm without our hint (p = 0.0355, 0.0330). The registered bar wanted 12 cases **and**
-  p < 0.05 against the shipped prompt, so the template is not adopted on this evidence: the effect is
-  about the size of what the hint is worth (+6, −1, −5 cases across three runs) and n = 600 cannot
-  separate either. 14.2% discordance needs 1,775 questions for 2.5pp at 80% power; the dev split's
-  1,534 resolves 2.69pp, which is the next purchase.
+- **The template reads 1,004/1,532 against the prompt's 947, and the criterion is met — while the
+  control meets it too.** The registered bar wanted 12 cases and p < 0.05 against `inline+evidence` in
+  one run: +57 cases, paired 134:77, p = 0.0001, 95% CI [+1.87, +5.57], at 1.00 calls a case. The
+  A/A copy in the same dispatch carries the same prompt, weights and 676-token request, differs from
+  its original by 1.11pp, and reads p = 0.0137 with a confidence interval excluding zero — so on
+  1,532 questions **p < 0.05 is satisfied by a re-run of nothing**, and the sentence that cites the
+  criterion has to print the control and the ratio (57/17 = 3.35). The three 600-question dispatches
+  that preceded this one read 386 / 381 / 401; restricted to those same ids inside the dev artifact
+  the subset is 2.02pp easier for the same arm and compresses the effect from +3.72pp to +1.50pp,
+  which is why "criterion not met" was the wrong sentence about a real mechanism.
+- **A declared pair has to name two arms that exist.** `bench:bird:pair --declared` prints an arm it
+  cannot find as "not scored this run" — the same line a pair of on-demand arms prints when the
+  dispatch did not ask for them — so a misspelt name is invisible for as long as it takes someone to
+  trust the silence. A test walks every split in `pairs.json` and refuses a pair whose arms are not
+  both in the catalogue, or that pairs an arm with itself.
 - **A whole arm failing inside the harness was published as an accuracy.** `macsql-prompt`'s first
   dispatch (`44974188185`) threw inside `promptFor` on all 600 cases — `assertTemplateCarries` read
   `decompose: false`, which `buildAskMessages` sets on every call, as a block it could not carry — and
@@ -47,6 +55,22 @@ cannot be argued with.
   one is outside both columns rather than a free point for the count.
 
 ### Added
+- **`select-mixed-rule-template`: the template in the pool's third slot, which is the third
+  registered condition.** One slot swapped — `values` out, `macsql-prompt` in, same draw count, same
+  free rule, same judge — and three tests hold the claims that make it one slot: the draw count and
+  rule are the shipped arm's, exactly one source differs, the template source keeps `linking: false`
+  with no override (a hint its prompt has nowhere to put is the declared-but-unread defect this round
+  exists to refuse), and the three prompts are distinct, read from `buildSqlPrompt`. 600 questions
+  beside the shipped arm and an A/A: selected 395 against 388 (28:21, p = 0.39), **ceiling 437
+  against 415 (31:9, p = 0.0007)**, conversion 93.5% → 90.4%. The bar is cleared literally (395 ≥
+  387) and the score difference is inside the control's spread, so the template is adopted as a
+  candidate source and **not** into the shipped configuration: it buys ceiling, and `shortest` spends
+  15 of the 22 new cases. The next lever is a chooser, with its criterion registered in
+  `docs/benchmarks.md` — recover `selectionLoss` from 42 to at most 28.
+- **The A/A control on the dev split, which is what turned a p-value into a measurement.** One extra
+  arm, a 1.2% bill, and the only instrument that can say how much a re-run moves: `resolves 1.2pp` at
+  1,532 questions. Every criterion in this repository that is written as a p-value now has to be read
+  beside it.
 - **A prompt is not a lever: `PromptOptions.template`, and MAC-SQL's BIRD prompt as the first one.**
   Every arm in `eval/bird/run.ts` adds a rule to `buildSqlPrompt`'s skeleton, so none of them can
   price the skeleton — and the gap that has survived every other explanation is 4.90pp on the same

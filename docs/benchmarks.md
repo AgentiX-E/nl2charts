@@ -19098,3 +19098,123 @@ than the dev split's 1,534, which resolves **2.69pp** at the same power and 14.2
 full split is therefore the biggest single purchase available, it is the only one that could move
 this from *a reading* to *a verdict*, and it buys 2.7pp of resolution for a 2.5pp effect — which is
 the honest statement of how thin this is.
+
+### The dev dispatch (`44981690629`): the bar is cleared, and so is the control's
+
+The tenth shape was registered with three conditions, and the first two are decidable on the split
+the leaderboard reports. 1,532 of 1,534 questions (gold refused on 518 and 701), one call a case,
+same endpoint, same weights (`170d0beaa768594b` before and after):
+
+| arm | reading | strict match | prompt chars | tokens | cached | completion |
+|---|---|---:|---:|---:|---:|---:|
+| `inline+evidence` | 947/1,532 = **61.81%** | 876 | 2,781 | 676 | 484 | 49 |
+| `inline+evidence-nolink` | 931/1,532 = 60.77% | 864 | 2,672 | 646 | 448 | 49 |
+| `macsql-prompt` | **1,004/1,532 = 65.54%** | 914 | 12,728 | 3,694 | 3,480 | 138 |
+| `inline+evidence#2` (A/A) | 930/1,532 = 60.70% | 862 | 2,781 | 676 | 484 | 49 |
+
+| pair | wins / losses | delta | 95% CI (Newcombe, paired) | exact McNemar p |
+|---|---|---:|---|---:|
+| template vs `inline+evidence` | **134 / 77** | **+3.72pp** | **[+1.87, +5.57]** | **0.0001** |
+| template vs `inline+evidence-nolink` | 147 / 74 | +4.77pp | [+2.88, +6.65] | 1.0e-6 |
+| `nolink` vs `inline+evidence` | 47 / 63 | −1.04pp | [−2.38, +0.30] | 0.1523 |
+| **`inline+evidence` vs its `#2`** | **13 / 30** | **−1.11pp** | **[−1.95, −0.27]** | **0.0137** |
+
+The registered criteria — at least 12 cases over `inline+evidence` in one run with exact McNemar
+p < 0.05, and 1.00 calls a case — are **met**: +57 cases at p = 0.0001, one call. The strict string
+match moves the same way (+38), so this is not an artefact of the execution judge's tolerance.
+
+**The last row is the finding, and it is about the criterion rather than the template.** The A/A
+copy carries the same prompt, the same weights and the same 676-token request — the artifact's
+`tokens` lines for the two are identical down to the 484 cached — and the two draws differ by
+1.11pp with a confidence interval that excludes zero. The harness printed it itself:
+
+```
+A/A inline+evidence: -1.1pp (30/13, p=0.014, 95% CI [-1.9, -0.3]pp, resolves 1.2pp) — the harness's own noise
+```
+
+So on 1,532 questions **a criterion of p < 0.05 is satisfied by a re-run of nothing.** This is the
+third time a criterion here has needed a coordinate it did not carry: `4pp` was measured at n = 239
+and applied to 1,532 (v6.71), the absolute anchor 371 belonged to `metadata+evidence` (§ the ninth
+shape), and now the p-value itself belongs to a spread. The disposition is not to tighten the bar —
+it stays exactly as registered — but to require the control beside it: any sentence that cites this
+criterion has to print the A/A line and state the ratio. Here it is **57 / 17 = 3.35**.
+
+### The same 600 questions are not a smaller dev, and they understate the effect
+
+The three earlier dispatches ran 600 questions and read 386 / 381 / 401. Restricted to those same
+600 ids inside the dev artifact:
+
+| question set | `inline+evidence` | `nolink` | `macsql-prompt` | template vs parent |
+|---|---:|---:|---:|---:|
+| all 1,532 | 947 (61.81%) | 931 | 1,004 (65.54%) | 134:77 = **+3.72pp** |
+| the 600 ids | 383 (63.83%) | 374 | 392 (65.33%) | 50:41 = **+1.50pp** |
+| the other 932 | 564 (60.52%) | 557 | 612 (65.67%) | 84:36 = **+5.15pp** |
+
+Three facts, and the third is the expensive one. The subset is **2.02pp easier** for the same arm,
+even though its difficulty mix is the split's (363/181/56 against 925/463/144 — 60.4/30.2/9.4%
+both). Two runs on the same ids differ by 0.5–1.5pp, which is the n = 600 re-run spread that had
+only ever been inferred from 384/380/386. And the subset **compresses the effect from +3.72pp to
++1.50pp** — so the previous round's "criterion not met" was not merely noisy, it was biased in the
+direction that rejects a real mechanism.
+
+The mechanism's shape is visible in the corpus's own difficulty bands (paired, same run):
+
+| difficulty | questions | `inline+evidence` | `macsql-prompt` | wins / losses | delta | p |
+|---|---:|---:|---:|---|---:|---:|
+| simple | 925 | 67.2% | 70.9% | 75 / 41 | +3.68pp | 0.0020 |
+| moderate | 463 | 54.2% | 56.4% | 41 / 31 | +2.16pp | 0.2888 |
+| challenging | 144 | 51.4% | **60.4%** | **18 / 5** | **+9.03pp** | 0.0106 |
+
+13 of the 57 cases are in the 144 hardest questions, which is why an easier subset reads a smaller
+effect. The prediction this licenses: on a corpus aimed at hard questions the template's relative
+value is larger, not smaller.
+
+### The pool (`44985557283`): the ceiling moves and the rule spends it
+
+The third registered condition is the pool, with the template in the third slot — `values` out,
+`macsql-prompt` in, same draw count, same free rule, same judge (`select-mixed-rule-template`, one
+field's worth of sources). 600 questions, run beside the shipped arm and an A/A of it:
+
+| arm | selected | ceiling | conversion | prompt tokens | cached | completion |
+|---|---:|---:|---:|---:|---:|---:|
+| `select-mixed-rule` | 388 (64.67%) | 415 (69.17%) | 93.5% | 3,164 | 2,587 | 143 |
+| `select-mixed-rule-template` | **395 (65.83%)** | **437 (72.83%)** | **90.4%** | 6,176 | 5,608 | 225 |
+| `select-mixed-rule#2` | 380 (63.33%) | 413 (68.83%) | 92.0% | 3,164 | 2,587 | 141 |
+
+| pair | wins / losses | delta | p |
+|---|---|---:|---:|
+| selected | 28 / 21 | +1.17pp | 0.3916 |
+| **ceiling** | **31 / 9** | **+3.67pp** | **0.0007** |
+| baseline vs its `#2` | 19 / 27 | −1.33pp | 0.3020 |
+
+The bar is cleared literally — 395 against 387, with the baseline reading 388 in the same run, so
+this is not a collapsed control. And the score difference is inside the A/A's own spread (+7 against
+8), while the ceiling difference is not (31:9, p = 0.0007). `shortest` spends 15 of the 22 new cases:
+`selectionLoss` goes 27 → 42 and conversion 93.5% → 90.4%.
+
+**So the template buys ceiling, not score**, which is the same shape the deep pools already showed —
+except the pool's width did not change and its *source* did. The next lever is therefore a chooser,
+not another prompt, and its criterion is registered here: recover `selectionLoss` from 42 to at most
+28, i.e. `437 × 0.935 = 409` selected.
+
+**And the price is not the token ratio.** 1.95× tokens, **1.32× money**: the template is a fixed
+prefix, 90.8% of it served from the provider's cache, and the 568 tokens that missed cost almost
+exactly what the baseline's 577 did. A large fixed prompt is cheap at the margin; what is expensive
+is the part that changes with the question. Any price table that multiplies tokens is wrong in the
+direction that rejects this kind of mechanism.
+
+### Where the ninth shape lands
+
+| condition (registered before the first dispatch) | bar | reading | verdict |
+|---|---|---|---|
+| one-candidate accuracy | ≥ 12 cases, p < 0.05 | +57, 134:77, p = 0.0001 | **met** |
+| calls a case | 1.00 | 1.00 | **met** |
+| three-candidate pool | ≥ 387 | **395** | **met** |
+| ceiling (not registered, read anyway) | — | 415 → 437, 31:9, p = 0.0007 | significant |
+| pool score (not registered) | — | +7, 28:21, p = 0.39 | inside the control |
+
+Adopted as a **candidate source**; not adopted into the shipped configuration. All three registered
+conditions are met and the ceiling moves, so the prompt has earned its place in the catalogue — the
+ninth lever, and the first prompt that leaves a mark inside the pool. But the pool's score does not
+move beyond the control's own spread, and the money is 32% higher; buying that before a chooser
+exists is buying a hypothesis. Ceiling is a hypothesis; the product is the selected statement.
