@@ -3,69 +3,92 @@
  "readings": {
   "bird-dev": {
    "kind": "bench-readback",
-   "commit": "561be223148563e462922feb1aaaedd75819ed32",
+   "commit": "a2224dda64d27074555a0d7f886200c813cbee2c",
    "workflow": "bird-dev",
-   "runId": "44981690629",
+   "runId": "44985557283",
    "split": "dev",
    "dataset": "bird-dev",
    "model": "deepseek-chat",
    "secondModel": null,
-   "generatedAt": "2026-11-22T03:47:44.140Z",
+   "generatedAt": "2026-11-22T04:37:13.854Z",
    "corpus": {
     "digest": "db9e8a1aba23ddd9",
     "rows": 1534,
     "questions": 1534
    },
    "selection": {
-    "requested": 1534,
-    "scored": 1532
+    "requested": 600,
+    "scored": 600
    },
    "arms": [
     {
-     "arm": "inline+evidence",
-     "passed": 947,
-     "total": 1532,
-     "accuracy": 0.6181462140992167,
-     "calls": 1,
-     "promptTokens": 676,
-     "completionTokens": 49,
-     "strictPassed": 876
+     "arm": "select-mixed-rule",
+     "passed": 388,
+     "total": 600,
+     "accuracy": 0.6466666666666666,
+     "candidateRecall": 415,
+     "selectionLoss": 27,
+     "calls": 3,
+     "promptTokens": 3164,
+     "completionTokens": 143,
+     "strictPassed": 366,
+     "selectorRule": {
+      "rule": "shortest",
+      "decided": 600,
+      "eligible": 1702,
+      "emptyPool": 18,
+      "rules": {
+       "shortest": 600
+      }
+     }
     },
     {
-     "arm": "inline+evidence-nolink",
-     "passed": 931,
-     "total": 1532,
-     "accuracy": 0.6077023498694517,
-     "calls": 1,
-     "promptTokens": 646,
-     "completionTokens": 49,
-     "strictPassed": 864
+     "arm": "select-mixed-rule-template",
+     "passed": 395,
+     "total": 600,
+     "accuracy": 0.6583333333333333,
+     "candidateRecall": 437,
+     "selectionLoss": 42,
+     "calls": 3,
+     "promptTokens": 6176,
+     "completionTokens": 225,
+     "strictPassed": 367,
+     "selectorRule": {
+      "rule": "shortest",
+      "decided": 600,
+      "eligible": 1704,
+      "emptyPool": 17,
+      "rules": {
+       "shortest": 600
+      }
+     }
     },
     {
-     "arm": "macsql-prompt",
-     "passed": 1004,
-     "total": 1532,
-     "accuracy": 0.6553524804177546,
-     "calls": 1,
-     "promptTokens": 3694,
-     "completionTokens": 138,
-     "strictPassed": 914
-    },
-    {
-     "arm": "inline+evidence#2",
-     "passed": 930,
-     "total": 1532,
-     "accuracy": 0.6070496083550914,
-     "calls": 1,
-     "promptTokens": 676,
-     "completionTokens": 49,
-     "strictPassed": 862
+     "arm": "select-mixed-rule#2",
+     "passed": 380,
+     "total": 600,
+     "accuracy": 0.6333333333333333,
+     "candidateRecall": 413,
+     "selectionLoss": 33,
+     "calls": 3,
+     "promptTokens": 3164,
+     "completionTokens": 141,
+     "strictPassed": 355,
+     "selectorRule": {
+      "rule": "shortest",
+      "decided": 600,
+      "eligible": 1702,
+      "emptyPool": 18,
+      "rules": {
+       "shortest": 600
+      }
+     }
     }
    ],
    "rves": {
-    "rves": 0,
+    "rves": 0.5904166666666667,
     "repeats": 5,
-    "floor": 0
+    "floor": 0.6066666666666667
    }
   }
  }
