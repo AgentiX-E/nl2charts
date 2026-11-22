@@ -3,70 +3,53 @@
  "readings": {
   "bird-dev": {
    "kind": "bench-readback",
-   "commit": "0fa3e91d9240796d2f2f3e33c55ba84c97f35ec4",
+   "commit": "feeb61dd24ba49291d11e6cf7ea32f95f7112119",
    "workflow": "bird-dev",
-   "runId": "45003945244",
+   "runId": "45021178365",
    "split": "dev",
    "dataset": "bird-dev",
    "model": "deepseek-chat",
    "secondModel": null,
-   "generatedAt": "2026-11-22T08:45:37.440Z",
+   "generatedAt": "2026-11-22T12:22:02.505Z",
    "corpus": {
     "digest": "db9e8a1aba23ddd9",
     "rows": 1534,
     "questions": 1534
    },
    "selection": {
-    "requested": 600,
-    "scored": 600
+    "requested": 1534,
+    "scored": 1532
    },
    "arms": [
     {
      "arm": "macsql-prompt",
-     "passed": 389,
-     "total": 600,
-     "accuracy": 0.6483333333333333,
+     "passed": 997,
+     "total": 1532,
+     "accuracy": 0.6507832898172323,
      "calls": 1,
-     "promptTokens": 3705,
-     "completionTokens": 128,
-     "strictPassed": 358
+     "promptTokens": 3694,
+     "completionTokens": 136,
+     "strictPassed": 908
     },
     {
-     "arm": "select-mixed-rule-template",
-     "passed": 388,
-     "total": 600,
-     "accuracy": 0.6466666666666666,
-     "candidateRecall": 436,
-     "selectionLoss": 48,
-     "calls": 3,
-     "promptTokens": 6176,
-     "completionTokens": 229,
-     "strictPassed": 360,
-     "selectorRule": {
-      "rule": "shortest",
-      "decided": 599,
-      "eligible": 1706,
-      "emptyPool": 16,
-      "rules": {
-       "shortest": 599
-      }
-     }
+     "arm": "macsql-bird-qp",
+     "passed": 1001,
+     "total": 1532,
+     "accuracy": 0.6533942558746736,
+     "calls": 1,
+     "promptTokens": 3725,
+     "completionTokens": 105,
+     "strictPassed": 919
     },
     {
-     "arm": "select-mixed-template",
-     "passed": 387,
-     "total": 600,
-     "accuracy": 0.645,
-     "candidateRecall": 445,
-     "selectionLoss": 58,
-     "calls": 4,
-     "promptTokens": 6603,
-     "completionTokens": 226,
-     "strictPassed": 371,
-     "spend": {
-      "asked": 600,
-      "priced": 600
-     }
+     "arm": "macsql-bird-os",
+     "passed": 1007,
+     "total": 1532,
+     "accuracy": 0.6573107049608355,
+     "calls": 1,
+     "promptTokens": 3907,
+     "completionTokens": 146,
+     "strictPassed": 920
     }
    ],
    "rves": {
