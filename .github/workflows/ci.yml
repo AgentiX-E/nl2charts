@@ -314,6 +314,12 @@ jobs:
       # cheapest possible audit of the thing every paid call depends on.
       - name: Every gold identifier is in the prompt
         run: pnpm bench:bird:recall
+      # The prompt the product sends must be the prompt the experiment priced, and until this step
+      # existed nothing ran the check that says so: the recipe lives in `packages/ai` and the arm in
+      # `eval/bird/run.ts`, so the two can drift apart while both keep working. Zero calls — it
+      # renders both prompts and compares the two messages the pipeline sends.
+      - name: The product sends the prompt the experiment priced
+        run: pnpm bench:bird:recipe
       - name: DuckDB portability census
         run: pnpm bench:bird:port
 
