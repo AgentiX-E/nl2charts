@@ -790,6 +790,31 @@ describe('a measurement over a real split', () => {
     expect(first?.candidate).toBe('all');
   });
 
+  it('says a skeleton-level lever has no card to cut, instead of failing on the case it reached', async () => {
+    // `macsql-prompt` sends the template's skeleton: its blocks are `【…】` headings and its
+    // question sits in the middle, followed by evidence and the decomposition instruction. The
+    // card instrument splits on `buildSqlPrompt`'s marks and requires the system turn to end with
+    // the question, so there is nothing to cut — and the reading has to say that about the arm
+    // rather than die on whichever question the loop happened to reach first.
+    const outcome = await runCard(
+      settingsFor(
+        dataset(),
+        reportBody(
+          [1],
+          { arms: [{ arm: 'macsql-prompt', calls: { mean: 1 }, promptChars: { mean: 17_475 }, tokens: { prompt: 4_609, completion: 82, unbilled: 0 } }] },
+          'macsql-prompt',
+        ),
+        'macsql-prompt',
+      ),
+    );
+    expect(outcome.rows).toEqual([]);
+    expect(outcome.drops.unrenderable).toBe(1);
+    const skeleton = outcome.problems.filter((problem) => problem.includes('no card can be cut out of it'));
+    expect(skeleton).toHaveLength(1);
+    expect(skeleton[0]).toContain('macsql-prompt');
+    expect(skeleton[0]).toContain('macsql-bird');
+  });
+
   it('reads a report that carries no controls block at all', async () => {
     // An artifact from before the block existed, or one written by a dry run: the definitions are
     // then empty rather than missing, and an inline arm's cases are dropped for the reason the

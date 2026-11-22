@@ -1069,10 +1069,35 @@ export async function runCard(settings: CardSettings): Promise<CardOutcome> {
     return loaded;
   };
   const seen = new Set<string>();
+  // Declared here rather than beside the array it feeds, because the skeleton guard below is the
+  // one branch that reports before any case is read: its message is about the arm, not about a row.
+  const earlyProblems: string[] = [];
   if (arm === undefined) {
     drops.unknownArm = cases.length;
   } else if (!renderableArm(arm)) {
     drops.unrenderable = cases.length;
+  } else if (arm.template !== undefined) {
+    /**
+     * A skeleton-level lever cannot be decomposed here, and saying so is the measurement.
+     *
+     * `costOf` splits a prompt on `buildSqlPrompt`'s own marks: it requires the system turn to
+     * end with the question, and it reads the card as everything between `Schema:` and the first
+     * context block. The template names its blocks in a different markup and puts the question in
+     * the middle, after which come evidence and the decomposition instruction — so there is no
+     * heading to find and no end to check. That is what a skeleton-level lever *is*: the tool that
+     * prices a card is a tool about one skeleton.
+     *
+     * Detected once, from the arm's declaration, rather than discovered as a throw on whichever
+     * case the loop reached first. A step that dies on question 47 of 1,532 reports a broken
+     * harness; a step that says "this arm sends another skeleton, so the card is not decomposable
+     * here" reports the truth, and the two read differently in a log a month later.
+     */
+    drops.unrenderable = cases.length;
+    earlyProblems.push(
+      `card: arm ${arm.name} sends the \`${arm.template}\` skeleton, whose blocks are not \`buildSqlPrompt\`'s, ` +
+        'so no card can be cut out of it — pass --arm naming a skeleton arm to price a card, and read this ' +
+        "arm's token total from its own artifact row",
+    );
   } else {
     // One block per database, read once: a card arm carries the same block on every question of
     // one database, and reading the same file 498 times would make the instrument's cost the
@@ -1179,6 +1204,7 @@ export async function runCard(settings: CardSettings): Promise<CardOutcome> {
       ? undefined
       : { cases: rank.cases, before: rank.before / rank.cases, after: rank.after / rank.cases, improved: rank.improved, worse: rank.worse };
   const problems = [
+    ...earlyProblems,
     ...cardProblems({
       tally,
       definitionGap: drops.definitionGap,
